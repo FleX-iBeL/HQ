@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HQ</title>
+<!-- H27: the top strip of the Mac app: the watchdog dog, the overall light, the tabs (Status, Call) and
+     the button that turns everything on. The app (HQ.swift) fills it with hq.update(...) every few seconds;
+     the buttons talk back through webkit.messageHandlers.hq. The colours are the status page's own. -->
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f6f7f9; --card: #ffffff; --tint: #f9fafb; --ink: #1b1f24; --soft: #57606a; --rule: #d5d9df;
+    --blue: #0b5fbf; --green: #1a7f37; --yellow: #b39a00; --amber: #bf8700; --red: #b42318; --grey: #6b7785;
+    --fur: #c98a4b; --fur-dark: #8f5a2b; --nose: #2b2118;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page: #16181c; --card: #1f2227; --tint: #262a30; --ink: #e8eaed; --soft: #a4abb5; --rule: #3a3f47;
+      --blue: #6aa9f0; --green: #56b870; --yellow: #e6cc45; --amber: #d9a520; --red: #f0766a; --grey: #8a94a0;
+      --fur: #d39a5e; --fur-dark: #9b6635; --nose: #120d09;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--page); color: var(--ink);
+    font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    -webkit-user-select: none; user-select: none; overflow: hidden; }
+  .bar { display: flex; align-items: center; gap: 14px; height: 88px; padding: 0 16px 0 78px;
+    border-bottom: 1px solid var(--rule); -webkit-app-region: drag; }
+  .dog { width: 92px; height: 72px; flex: none; cursor: pointer; -webkit-app-region: no-drag; }
+  .who { flex: 1; min-width: 0; }
+  .who b { font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .who .head { color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .who .said { color: var(--soft); font-size: 12px; margin-top: 2px; min-height: 16px; }
+  .light { width: 11px; height: 11px; border-radius: 50%; background: var(--grey); display: inline-block; }
+  .light.ok { background: var(--green); }
+  .light.running { background: repeating-linear-gradient(135deg, var(--green) 0 3px, color-mix(in srgb, var(--green) 55%, transparent) 3px 6px); }
+  .light.waiting, .light.warm { background: var(--yellow); }
+  .light.down { background: var(--red); }
+  .tabs { display: flex; gap: 4px; background: var(--tint); border: 1px solid var(--rule); border-radius: 9px; padding: 3px;
+    -webkit-app-region: no-drag; }
+  .tabs button, .fix { font: inherit; border: 0; border-radius: 6px; padding: 6px 14px; background: transparent; color: var(--ink); cursor: pointer; }
+  .tabs button[aria-pressed="true"] { background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.15); font-weight: 600; }
+  .fix { background: var(--blue); color: #fff; font-weight: 600; -webkit-app-region: no-drag; }
+  .fix[disabled] { opacity: .45; cursor: default; }
+  .panel { display: none; padding: 8px 16px 12px 78px; border-bottom: 1px solid var(--rule); background: var(--card); }
+  body.open .panel { display: block; }
+  .row { display: grid; grid-template-columns: 14px 160px 1fr; gap: 8px; align-items: center; padding: 3px 0; }
+  .row .text { color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .panel .note { color: var(--soft); font-size: 12px; margin-top: 6px; }
+
+  /* The dog. Claude's choice: a small drawn dog, its mood follows the light. */
+  .dog .tail { transform-origin: 22px 40px; }
+  .dog .head-g { transform-origin: 66px 32px; }
+  .dog .ear { transform-origin: 70px 20px; }
+  .dog .leg { transform-box: fill-box; transform-origin: top center; }
+  .dog .zz, .dog .woof, .dog .lines, .dog .eye-shut, .dog .mouth-open { opacity: 0; }
+  .dog .whole { transform-origin: 46px 60px; }
+  @keyframes wag { from { transform: rotate(-28deg); } to { transform: rotate(22deg); } }
+  @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  @keyframes sniff { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(9deg) translateY(2px); } }
+  @keyframes jump { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-7px); } }
+  @keyframes pop { 0%, 100% { opacity: 0; transform: scale(.7); } 30%, 70% { opacity: 1; transform: scale(1); } }
+  @keyframes breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.02, 1.04); } }
+  @keyframes float { 0% { opacity: 0; transform: translate(0, 4px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translate(6px, -10px); } }
+  @keyframes run { from { transform: rotate(-30deg); } to { transform: rotate(30deg); } }
+  @keyframes dash { from { opacity: .9; transform: translateX(0); } to { opacity: 0; transform: translateX(-8px); } }
+
+  .dog.happy .tail { animation: wag .28s ease-in-out infinite alternate; }
+  .dog.happy .whole { animation: bounce 1.2s ease-in-out infinite; }
+  .dog.alert .tail { animation: wag 1.1s ease-in-out infinite alternate; }
+  .dog.alert .head-g { animation: sniff 1.4s ease-in-out infinite; }
+  .dog.alert .ear { transform: rotate(-18deg); }
+  .dog.bark .whole { animation: jump .6s ease-in-out infinite; }
+  .dog.bark .mouth-open { opacity: 1; }
+  .dog.bark .woof { animation: pop .6s ease-in-out infinite; transform-origin: 82px 10px; }
+  .dog.bark .ear { transform: rotate(-30deg); }
+  .dog.bark .tail { transform: rotate(-35deg); }
+  .dog.run .whole { animation: bounce .25s ease-in-out infinite; }
+  .dog.run .leg.a { animation: run .25s ease-in-out infinite alternate; }
+  .dog.run .leg.b { animation: run .25s ease-in-out infinite alternate-reverse; }
+  .dog.run .lines { opacity: 1; animation: dash .4s linear infinite; }
+  .dog.run .tail { transform: rotate(-40deg); }
+  .dog.sleep .whole { animation: breathe 3s ease-in-out infinite; }
+  .dog.sleep .eye-open { opacity: 0; }
+  .dog.sleep .eye-shut { opacity: 1; }
+  .dog.sleep .ear { transform: rotate(14deg); }
+  .dog.sleep .zz { animation: float 2.4s ease-in infinite; }
+  .dog.sleep .zz.two { animation-delay: 1.2s; }
+  @media (prefers-reduced-motion: reduce) { .dog * { animation: none !important; } }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <svg class="dog sleep" id="dog" viewBox="0 0 100 76" role="img" aria-label="The watchdog">
+      <title id="dogtitle">The watchdog</title>
+      <g class="lines" stroke="var(--soft)" stroke-width="2" stroke-linecap="round">
+        <path d="M2 40h8M0 48h10M4 56h8" />
+      </g>
+      <g class="whole">
+        <g class="tail"><path d="M22 40 C12 34 10 24 14 18" fill="none" stroke="var(--fur-dark)" stroke-width="5" stroke-linecap="round" /></g>
+        <rect class="leg b" x="27" y="50" width="6" height="16" rx="3" fill="var(--fur-dark)" />
+        <rect class="leg a" x="53" y="50" width="6" height="16" rx="3" fill="var(--fur-dark)" />
+        <ellipse cx="42" cy="46" rx="22" ry="12" fill="var(--fur)" />
+        <rect class="leg a" x="33" y="50" width="6" height="17" rx="3" fill="var(--fur)" />
+        <rect class="leg b" x="59" y="50" width="6" height="17" rx="3" fill="var(--fur)" />
+        <g class="head-g">
+          <path d="M58 40 C56 32 60 26 66 32" fill="var(--fur)" />
+          <circle cx="68" cy="30" r="12" fill="var(--fur)" />
+          <ellipse cx="80" cy="34" rx="8" ry="6" fill="var(--fur)" />
+          <circle cx="87" cy="32" r="2.6" fill="var(--nose)" />
+          <path class="mouth-open" d="M78 38 Q83 44 88 37 Z" fill="var(--nose)" />
+          <circle class="eye-open" cx="72" cy="27" r="2" fill="var(--nose)" />
+          <path class="eye-shut" d="M69.5 27.5 q2.5 2 5 0" fill="none" stroke="var(--nose)" stroke-width="1.6" stroke-linecap="round" />
+          <path class="ear" d="M64 20 C58 22 56 32 60 36 C64 32 68 26 70 20 Z" fill="var(--fur-dark)" />
+          <path d="M57 41 h20" stroke="var(--blue)" stroke-width="3" stroke-linecap="round" />
+        </g>
+      </g>
+      <g class="woof"><rect x="70" y="0" width="28" height="13" rx="6" fill="var(--red)" />
+        <text x="84" y="9.5" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">Woof!</text></g>
+      <text class="zz" x="82" y="16" font-size="9" font-weight="700" fill="var(--soft)">z</text>
+      <text class="zz two" x="88" y="10" font-size="7" font-weight="700" fill="var(--soft)">z</text>
+    </svg>
+    <div class="who">
+      <b>HQ <i class="light" id="light"></i></b>
+      <div class="head" id="head">Looking…</div>
+      <div class="said" id="said"></div>
+    </div>
+    <div class="tabs" role="tablist">
+      <button id="tab-status" aria-pressed="true" data-tab="status">Status</button>
+      <button id="tab-call" aria-pressed="false" data-tab="call">Call</button>
+    </div>
+    <button class="fix" id="fix" disabled title="Turns on what's off: the status page, the helper, the watchdog, the call line">Turn everything on</button>
+  </div>
+  <div class="panel" id="panel">
+    <div id="rows"></div>
+    <div class="note">The routines keep running in the background when this app is closed. The button only turns on what's off; it never stops or restarts what runs.</div>
+  </div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const send = (m) => { try { webkit.messageHandlers.hq.postMessage(m); } catch { console.log('hq', JSON.stringify(m)); } };
+  const WORDS = { happy: 'All good: tail going', alert: 'Keeping an eye on something', bark: 'Something is off', run: 'Turning things on…', sleep: 'Asleep: the status page doesn’t answer' };
+  let fixing = false;
+  let last = null;
+  const hq = window.hq = {
+    state: () => ({ mood: $('dog').getAttribute('class').replace('dog ', ''), light: $('light').className.replace('light ', ''), head: $('head').textContent, tab: document.querySelector('.tabs [aria-pressed="true"]').dataset.tab, open: document.body.classList.contains('open'), fix: !$('fix').disabled }),
+    update(h) {
+      last = h;
+      const mood = fixing ? 'run' : h.mood;
+      $('dog').setAttribute('class', `dog ${mood}`);
+      $('dogtitle').textContent = `The watchdog: ${WORDS[mood]}`;
+      $('light').className = `light ${h.light}`;
+      $('head').textContent = h.headline;
+      $('fix').disabled = fixing || !(h.off && h.off.length);
+      const rows = $('rows');
+      rows.replaceChildren(...(h.routines || []).map((r) => {
+        const d = document.createElement('div');
+        d.className = 'row';
+        d.innerHTML = `<i class="light ${r.state === 'off' ? '' : r.state === 'low' ? 'warm' : r.state}"></i><span></span><span class="text"></span>`;
+        d.children[1].textContent = r.name;
+        d.children[2].textContent = r.text;
+        return d;
+      }));
+      if (document.body.classList.contains('open')) send({ do: 'height', px: document.body.scrollHeight });
+    },
+    fixing(on, said) {
+      fixing = on;
+      if (said !== undefined) $('said').textContent = said;
+      if (last) hq.update(last);
+    },
+    tab(t) {
+      for (const b of document.querySelectorAll('.tabs button')) b.setAttribute('aria-pressed', String(b.dataset.tab === t));
+    },
+  };
+  for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => { hq.tab(b.dataset.tab); send({ do: 'tab', tab: b.dataset.tab }); });
+  $('fix').addEventListener('click', () => { hq.fixing(true, 'Turning on what’s off…'); send({ do: 'fix' }); });
+  $('dog').addEventListener('click', () => {
+    document.body.classList.toggle('open');
+    send({ do: 'height', px: document.body.classList.contains('open') ? document.body.scrollHeight : 89 });
+  });
+  send({ do: 'ready' });
+</script>
+</body>
+</html>

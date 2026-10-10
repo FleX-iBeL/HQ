@@ -95,6 +95,10 @@ node status/server.mjs
 
 http://localhost:4748, this computer only. It reads `workspace/Jarvis VA/roadmap.md` every few seconds; that file is the only place the status is written. On the phone: `status/phone.sh` puts it on `:8444` in the tailnet, with its own home-screen icon.
 
+### 6b. The Mac app (optional)
+
+`desktop/build.sh --install` builds **HQ.app** with `swiftc` (the Command Line Tools are enough) and puts it in `~/Applications`. One window: the watchdog dog on top (its mood follows the status page's light; click it for every routine), the status page or the call page below, and **Turn everything on**, which starts the status page, the helper, the watchdog and the call line when they're off and never stops anything. The routines keep running when the app is closed. The first time, macOS asks once for Documents access and, on the first call, for the microphone. Check: `~/Applications/HQ.app/Contents/MacOS/HQ --check`.
+
 ### 7. The routine, the start at login and the watchdog (Mac)
 
 These keep HQ running without anyone watching. All three ask macOS for permission once.
@@ -143,6 +147,7 @@ Then the real test: a call from the phone or the browser, a question about today
 | Lid closed, keep working | `pmset disablesleep`, allowed once through `sudoers` | `powercfg` (lid close action), set once as administrator |
 | Temperature, battery, laptop stats | IOKit, `pmset`, `vm_stat` (`routine/*.py`, `*.m`) | WMI or `psutil` |
 | Paths and shells | zsh scripts, Homebrew paths | PowerShell, the Windows paths |
+| The desktop app | `desktop/HQ.swift` (Swift, WebKit), built by `desktop/build.sh` | A WebView2 window around the same strip (`desktop/shell.html`) and `desktop/hq_control.py`, or just the browser |
 
 What works the same everywhere: the call page, the voice (Kokoro), Claude Code, the connectors, Tailscale, the status page (Node), the queue and the workspace. Keep the Mac files as they are and add the Windows ones next to them, so one HQ works on both, and update this table with what you built.
 

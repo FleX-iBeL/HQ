@@ -430,6 +430,26 @@ class Installer:
             raise Fail("the watchdog didn't load", "Log: ~/Library/Application Support/JarvisVA/watchdog.out")
         return "every 5 minutes and at login"
 
+    def desktop(self):
+        if "desktop" in self.skip:
+            raise Skip("left out (--skip desktop): the status page and calls still work in the browser")
+        if FAKE:
+            return "simulated (test)"
+        if not which("swiftc"):
+            raise Fail("swiftc isn't there (the Command Line Tools)", "xcode-select --install, then run the installer again.")
+        sh(["/bin/zsh", os.path.join(HQ, "desktop", "build.sh"), "--install"], timeout=600)
+        return "~/Applications/HQ.app (macOS asks Documents access and the microphone once, the first time)"
+
+    def t_desktop(self):
+        if "desktop" in self.skip:
+            raise Skip("left out")
+        if FAKE:
+            return "simulated (test)"
+        app = os.path.expanduser("~/Applications/HQ.app/Contents/MacOS/HQ")
+        if not os.path.exists(app) or sh([app, "--check"], check=False).returncode != 0:
+            raise Fail("HQ.app isn't there or doesn't find its files", "desktop/build.sh --install")
+        return "finds its files"
+
     def lidsleep(self):
         if "lidsleep" in self.skip:
             raise Skip("left out (--skip lidsleep): a call can't flip the lid-closed sleep")
@@ -600,6 +620,7 @@ class Installer:
             S("lidsleep", "Lid closed, keep working (optional)", "setup", self.lidsleep, asks=True, optional=True),
             S("status_page", "The status page", "setup", self.status_page),
             S("call_line", "The call line", "setup", self.call_line),
+            S("desktop", "The Mac app: status, calling and the watchdog dog in one (optional)", "setup", self.desktop, optional=True),
             S("tailscale", "Calling from the phone: Tailscale (optional)", "setup", self.tailscale, optional=True),
             S("connectors", "Mail and calendar: the Gmail and Google Calendar connectors", "setup", self.connectors),
         ]
@@ -613,6 +634,7 @@ class Installer:
             S("lidsleep", "The lid switch works without a password", "test", self.t_lidsleep, optional=True),
             S("status_page", "The status page answers", "test", self.t_status),
             S("call_line", "The call line answers", "test", self.t_call),
+            S("desktop", "The Mac app finds its files", "test", self.t_desktop, optional=True),
             S("flows", "The quick happy flows pass", "test", self.t_flows),
         ]
         return test if self.args.test_only else setup + test

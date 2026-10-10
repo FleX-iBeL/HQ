@@ -61,6 +61,10 @@ Every five minutes, separate from everything else, it checks the helper is alive
 
 One page, live, on the computer and on the phone: what's being built right now and its step, the job queue, the roadmap, your Claude usage against its stop lines, every routine's state with a graph over the last hours, the incident log, and the laptop itself (temperature, battery, CPU, memory, disk, network). It reads only your roadmap file, so whatever writes the roadmap (a call, a job) shows up within seconds.
 
+### The Mac app
+
+HQ.app puts it in one window: the watchdog on top, drawn as a small dog whose mood follows the status page's light (wagging when all is well, sniffing when something waits, barking when something stopped, asleep when the status page itself is down, running while it turns things on), and below it the status page or the call page, the same pages as in the browser and on the phone. **Turn everything on** starts what's off; it never stops what runs. The routines keep running in the background when the app is closed.
+
 ### The happy flows
 
 HQ's tests: over forty checks of the main things that must work when all goes well (the call starts, the greeting plays, a question gets an answer, cutting in stops the voice, the transcript is saved, the queue works, the status page reads the roadmap, the template stays blank...). They run before and after every change, on their own port, without touching the live call.
@@ -77,9 +81,7 @@ Everything runs on your own Claude plan (Pro or Max), through Claude Code; no AP
 
 HQ is still being built. The order isn't fixed and can change:
 
-- **0.1 (now):** the call (Quick, Deep, Free), the workspace and its template, the status page, the hourly mail check, the job queue, the watchdog, the usage check, the happy flows, and an installer with a live checklist page, so you can see exactly where an install broke.
-- **The scheduler:** plan work for a day and time ahead; it runs by itself when the job list is empty, and you can look back at what was done.
-- **A Mac desktop app:** the status page, calling and the watchdog in one app, with an animated watchdog dog.
+- **0.1 (now):** the call (Quick, Deep, Free), the workspace and its template, the status page, the hourly mail check, the job queue, the watchdog, the usage check, the happy flows, and an installer with a live checklist page, so you can see exactly where an install broke. Since then: the scheduler and the Mac desktop app.
 - **A phone version** that looks and works like the desktop app.
 - **Agents:** different assistants with their own names, faces, personalities and specialities (think Pepper, Donna, Moneypenny), each with what it needs to know loaded: one for life coaching, one for work, more later. The first two replace Quick and Deep. That's why it's called HQ: it's where they all work, like building a small company inside the app.
 - **0.2:** HQ again on GitHub, once those bigger builds are done.
@@ -88,4 +90,4 @@ Further out, ideas rather than plans: the status page reachable when the laptop 
 
 ## In one paragraph
 
-HQ is a personal assistant you call and talk to, running on your own Mac, built on Claude Code and your own Claude plan. It knows your notes and your goals, reads your mail and calendar, writes down what you agree, and can do work by itself from a job list while you're away, with a live status page on your phone. Your own files stay in your own workspace and never go into HQ's repo. It's still in development: version 0.1, Mac-first, Gmail and Google Calendar first, with a desktop app, a phone app and named agents coming next.
+HQ is a personal assistant you call and talk to, running on your own Mac, built on Claude Code and your own Claude plan. It knows your notes and your goals, reads your mail and calendar, writes down what you agree, and can do work by itself from a job list while you're away, with a live status page on your phone. Your own files stay in your own workspace and never go into HQ's repo. It's still in development: version 0.1, Mac-first, Gmail and Google Calendar first, with a Mac desktop app, and a phone app and named agents coming next.

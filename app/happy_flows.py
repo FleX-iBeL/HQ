@@ -98,6 +98,12 @@ Run them before and after every update; they print a short pass/fail table at th
      blank and saying put your own things here; nothing of his in it; the Quick load, the open loops,
      the status block and the queue read it; it's in HQ's repo, workspace isn't; Free is explained
      plainly on the call page; Heart is the default of all the voices
+  46 the Mac desktop app (H27), no Claude: the watchdog part judges made-up routine lines like the
+     status page's light (green, running, waiting, a stopped helper, a hot laptop, the status page
+     down) and gives the dog its mood; turning things on only starts what's off and never stops
+     anything; the strip (headless browser) shows each mood, the light, the tabs and the button only
+     when something is off; the app builds, checks its files, and its real window, never shown, loads
+     the strip and the status page
 
 Safe to run while the live phone line is up: the flows use their own server on port 7871
 (JARVIS_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
@@ -3233,6 +3239,127 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
              "the call rules don't say how to plan work")
         return "plans by day and time; waits while a job runs, waits or the routine is off; then becomes one job, past the line kept; looking back, move, cancel; page, routine line, call rules"
 
+    async def flow46(self) -> str:
+        """H27: the Mac desktop app. No Claude turns. The watchdog part on made-up routine lines, its turning-on
+        plan with everything faked off, the strip in a headless browser, then the real app built and its window
+        (never shown) loaded once with --selftest."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("hq_control_t", ROOT / "desktop/hq_control.py")
+        hc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hc)
+        now = time.time()
+
+        def line(state="ok", text="fine", every=60, ago=10):
+            return {"state": state, "text": text, "every": every, "at": now - ago, "last": now - ago}
+
+        def lines(**over):
+            base = {k: line() for k in ["helper", "mail", "jobs", "schedule", "usage", "phone", "call", "temp", "battery"]}
+            base["watchdog"] = line(every=300, ago=60)
+            base.update(over)
+            return {"now": now, "routines": base}
+
+        cases = [
+            ("all fine", lines(), "ok", "happy", []),
+            ("a job running", lines(jobs=line("running", "1 running")), "running", "happy", []),
+            ("waiting on purpose", lines(jobs=line("waiting", "waiting for the usage line")), "waiting", "alert", []),
+            ("the helper stopped", lines(helper=line(ago=600)), "down", "bark", ["helper"]),
+            ("the call line down", lines(call=line("down", "Down: nothing answers")), "down", "bark", ["call"]),
+            ("the laptop hot", lines(temp=line("down", "Hot: 95°C on the chip")), "down", "bark", []),
+            ("the watchdog missing", {"now": now, "routines": {k: v for k, v in lines()["routines"].items() if k != "watchdog"}}, "down", "bark", ["watchdog"]),
+        ]
+        for name, data, light, mood, off in cases:
+            j = hc.judge(data)
+            need((j["light"], j["mood"], j["off"]) == (light, mood, off), f"{name}: got {j['light']}, {j['mood']}, {j['off']}")
+        need(hc.judge(lines(temp=line("down", "Hot: 95°C")))["headline"] == "The laptop is hot", "a hot laptop isn't the headline")
+        down = hc.judge(None)
+        need((down["mood"], down["light"]) == ("sleep", "down") and down["off"] == ["status"], f"status page down: {down}")
+        need([r["key"] for r in hc.judge(lines())["routines"]] == [k for k, _ in hc.ROUTINES], "the routines aren't in the status page's order")
+        # The real routines right now: the same JSON the app reads.
+        live = json.loads(run(["/usr/bin/python3", str(ROOT / "desktop/hq_control.py"), "health"]).stdout)
+        need({"light", "mood", "headline", "routines", "off"} <= set(live), f"health misses fields: {sorted(live)}")
+        # Turning on: with everything faked off, it starts each of the four; nothing it runs stops anything.
+        orig = (hc.listening, hc.helper_pids, hc.watchdog_loaded, hc.os.path.isdir, hc.os.path.exists)
+        try:
+            hc.listening = lambda port: False
+            hc.helper_pids = lambda: []
+            hc.watchdog_loaded = lambda label: False
+            hc.os.path.isdir = lambda p: True
+            hc.os.path.exists = lambda p: True
+            todo = hc.plan(None)
+            hc.listening = lambda port: True
+            hc.helper_pids = lambda: [1]
+            hc.watchdog_loaded = lambda label: True
+            nothing = hc.plan(lines())
+        finally:
+            hc.listening, hc.helper_pids, hc.watchdog_loaded, hc.os.path.isdir, hc.os.path.exists = orig
+        need([k for k, _, _ in todo] == ["phone", "helper", "watchdog", "call"], f"the turning-on plan is wrong: {todo}")
+        need(nothing == [], f"something is turned on while everything runs: {nothing}")
+        cmds = " ".join(" ".join(c) for _, _, c in todo)
+        need(not re.search(r"\b(kill|pkill|stop|unload|bootout|terminate)\b", cmds), f"turning on would stop something: {cmds}")
+        need("--quiet" in cmds and "start.sh" in cmds and "open -g" in cmds, f"turning on isn't the usual start: {cmds}")
+        src = (ROOT / "desktop/hq_control.py").read_text() + (ROOT / "desktop/HQ.swift").read_text()
+        need(not re.search(r"pkill|killall|os\.kill|\.terminate\(\)", src), "the app or its watchdog part can stop processes")
+        dry = json.loads(run(["/usr/bin/python3", str(ROOT / "desktop/hq_control.py"), "fix", "--dry"]).stdout)
+        need(all(f.get("ok") is None for f in dry["fixed"]), "fix --dry did something")
+        # The strip in a headless browser: each mood, the light, the tabs, the button only when something is off.
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found to run the strip in")
+        page = (ROOT / "desktop/shell.html").read_text()
+        harness = r"""<script>
+(() => {
+  const out = [], one = (h) => { hq.update(h); const s = hq.state(); return `${s.mood}/${s.light}/${s.fix}`; };
+  out.push('happy:' + one({ light: 'ok', mood: 'happy', headline: 'All working', off: [], routines: [] }));
+  out.push('alert:' + one({ light: 'waiting', mood: 'alert', headline: 'All working', off: [], routines: [] }));
+  out.push('bark:' + one({ light: 'down', mood: 'bark', headline: 'Not working: Call line', off: ['call'], routines: [{ name: 'Call line', state: 'down', text: 'Down' }] }));
+  out.push('sleep:' + one({ light: 'down', mood: 'sleep', headline: 'The status page does not answer', off: ['status'], routines: [] }));
+  document.getElementById('fix').click();
+  out.push('fixing:' + hq.state().mood + '/' + hq.state().fix);
+  hq.fixing(false, 'Started the call line');
+  out.push('after:' + hq.state().mood + '/' + document.getElementById('said').textContent);
+  document.getElementById('tab-call').click();
+  out.push('tab:' + hq.state().tab);
+  document.getElementById('dog').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  out.push('panel:' + hq.state().open + '/' + document.querySelectorAll('#rows .row').length);
+  out.push('anim:' + ['happy', 'alert', 'bark', 'run', 'sleep'].map((m) => { document.getElementById('dog').setAttribute('class', 'dog ' + m);
+    return [...document.querySelectorAll('#dog *')].some((e) => getComputedStyle(e).animationName !== 'none') ? 1 : 0; }).join(''));
+  const pre = document.createElement('pre'); pre.id = 'h27'; pre.textContent = 'H27RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
+})();
+</script>"""
+        f = self.tmp / "h27-shell.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h27-profile'}",
+                                          "--virtual-time-budget=3000", "--dump-dom", f.as_uri()], timeout=60)
+        m = re.search(r'<pre id="h27">H27RESULT (.*?) END</pre>', r.stdout)
+        need(m, f"the strip test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        res = dict(part.split(":", 1) for part in m.group(1).split(" | "))
+        say(f"   {m.group(1)}")
+        need(res["happy"] == "happy/ok/false" and res["alert"] == "alert/waiting/false", f"the calm moods are wrong: {res}")
+        need(res["bark"] == "bark/down/true" and res["sleep"] == "sleep/down/true", f"the alarm moods are wrong: {res}")
+        need(res["fixing"] == "run/false" and res["after"] == "sleep/Started the call line", f"turning on doesn't show: {res}")
+        need(res["tab"] == "call" and res["panel"] == "true/0", f"the tabs or the dog's panel don't work: {res}")
+        need(res["anim"] == "11111", f"not every mood moves: {res['anim']}")
+        # The real app: built with swiftc, its own files found, its window (never shown) loads the strip and the status page.
+        b = await asyncio.to_thread(run, [str(ROOT / "desktop/build.sh")], timeout=300)
+        need(b.returncode == 0, f"the app didn't build: {(b.stderr or b.stdout)[-400:]}")
+        app = ROOT / "scratch/desktop/HQ.app"
+        plist = (app / "Contents/Info.plist").read_text()
+        need("NSMicrophoneUsageDescription" in plist and f"<string>{ROOT}</string>" in plist, "the app's Info.plist misses the microphone or HQ's folder")
+        need((app / "Contents/Resources/HQ.icns").exists(), "the app has no dog icon")
+        chk = json.loads(run([str(app / "Contents/MacOS/HQ"), "--check"]).stdout)
+        need(chk["shell"] and chk["control"] and chk["hq"] == str(ROOT), f"the app doesn't find its files: {chk}")
+        st = await asyncio.to_thread(run, [str(app / "Contents/MacOS/HQ"), "--selftest"], timeout=60)
+        need(st.returncode == 0 and st.stdout.strip().startswith("{"), f"the app's window didn't load: {(st.stdout + st.stderr)[-300:]}")
+        got = json.loads(st.stdout.strip().splitlines()[-1])
+        need(got["strip"]["mood"] in ("happy", "alert", "bark", "sleep") and got["strip"]["head"] not in ("", "Looking…"),
+             f"the app's strip got no reading: {got['strip']}")
+        if live["mood"] != "sleep":
+            need(got["status_loaded"] and "Jarvis VA" in got["status_title"][0], f"the app didn't load the status page: {got}")
+        swift = (ROOT / "desktop/HQ.swift").read_text()
+        need('origin.host == "127.0.0.1"' in swift and "applicationShouldTerminateAfterLastWindowClosed" in swift,
+             "the microphone isn't limited to this MacBook, or closing doesn't quit")
+        return f"seven made-up states judged like the status page; turning on starts only what's off, stops nothing; the strip's five moods move; the app builds and its window read: {got['strip']['head']}"
+
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
     2: ("The greeting plays first, on Quick and Deep", True, "flow2"),
@@ -3279,6 +3406,7 @@ FLOWS = {
     43: ("The installer: fresh, kept workspace, a failure, the live checklist", False, "flow43"),
     44: ("Nothing personal in HQ: its files and its git history", False, "flow44"),
     45: ("The scheduler: planned work, after the job list, looking back", False, "flow45"),
+    46: ("The Mac desktop app: the watchdog dog, status and call in one", False, "flow46"),
 }
 
 
