@@ -1,0 +1,1346 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jarvis VA · status</title>
+    <!-- H13: its own app on the phone's home screen -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Status" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <style>
+      /* A plain status page, as any website has one: light, one column, ordinary type. */
+      :root {
+        color-scheme: light dark;
+        --page: #f6f7f9;
+        --card: #ffffff;
+        --tint: #f9fafb;
+        --ink: #1b1f24;
+        --soft: #57606a;
+        --rule: #d5d9df;
+        --track: #e4e7ec;
+        --blue: #0b5fbf;
+        --green: #1a7f37;
+        --amber: #bf8700;
+        --yellow: #b39a00;
+        --amber-ink: #8a5a00;
+        --red: #b42318;
+        --grey: #6b7785;
+        /* H33: running is a good thing, not a warning: green with stripes, "working, and busy right now". */
+        --running: repeating-linear-gradient(135deg, var(--green) 0 4px, color-mix(in srgb, var(--green) 55%, var(--card)) 4px 8px);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --page: #16181c;
+          --card: #1f2227;
+          --tint: #262a30;
+          --ink: #e8eaed;
+          --soft: #a4abb5;
+          --rule: #3a3f47;
+          --track: #3a3f47;
+          --blue: #6aa9f0;
+          --green: #56b870;
+          --amber: #d9a520;
+          --yellow: #e6cc45;
+          --amber-ink: #e0b040;
+          --red: #f0766a;
+          --grey: #8a94a0;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 0 24px 72px;
+        background: var(--page);
+        color: var(--ink);
+        font: 17px/1.5 -apple-system, "Helvetica Neue", "Segoe UI", sans-serif;
+      }
+      main { max-width: 760px; margin: 0 auto; display: grid; gap: 40px; }
+      main > * { min-width: 0; }
+      section { display: grid; gap: 12px; }
+      h2 { margin: 0; font-size: 22px; line-height: 1.3; }
+      .soft { color: var(--soft); font-size: 15px; }
+      .head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 24px; }
+      .top { padding-top: 28px; }
+      .top .name { display: flex; align-items: baseline; gap: 12px; }
+      .top strong { font-size: 24px; }
+      .top .name span { color: var(--soft); }
+
+      /* The state: one band across the page. */
+      .now { gap: 20px; }
+      .banner { padding: 24px 28px; border-radius: 8px; background: var(--band); color: #ffffff; display: grid; gap: 6px; }
+      .banner h1 { margin: 0; font-size: 32px; line-height: 1.2; }
+      .banner p { margin: 0; font-size: 20px; line-height: 1.4; }
+      .BUILDING { --band: #8a5a00; }
+      .TESTING { --band: #0f6e66; }
+      .RELEASING { --band: #6639ba; }
+      .WAITING { --band: #0b5fbf; }
+      .DONE { --band: #1a7f37; }
+      .STOPPED, .PROBLEM { --band: #b42318; }
+      .notes { margin: 0; padding: 0 4px; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px 16px; }
+      .notes dt { color: var(--soft); }
+      .notes dd { margin: 0; }
+      .problems { margin: 0; padding: 16px 20px; border: 1px solid var(--red); border-radius: 8px; background: var(--card); }
+      .problems p { margin: 0 0 6px; font-weight: 600; }
+      .problems li { margin-left: 20px; }
+
+      .card { background: var(--card); border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+      .card > * + * { border-top: 1px solid var(--rule); }
+      .bar { height: 8px; border-radius: 4px; background: var(--track); position: relative; }
+      .bar div { height: 100%; border-radius: 4px; background: var(--blue); }
+      .bar s { position: absolute; top: -5px; width: 2px; height: 18px; background: var(--ink); text-decoration: none; }
+      /* The stop line's own number, shown while the mouse is on the line (a wider band to aim at). */
+      .bar s::before { content: ''; position: absolute; left: -7px; right: -7px; top: -4px; bottom: -4px; }
+      .bar s::after { content: attr(data-pct); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); padding: 2px 7px; border-radius: 4px; background: var(--ink); color: var(--card); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.12s; }
+      .bar s:hover::after { opacity: 1; }
+
+      /* Usage: one row per limit. */
+      .usage.stale .card { opacity: 0.55; }
+      .meter { display: grid; grid-template-columns: 190px minmax(0, 1fr) 56px 170px; align-items: center; gap: 16px; padding: 16px 20px; }
+      .meter .what { font-weight: 600; }
+      .meter .when small { display: block; }
+      .meter .what small { display: block; font-weight: 400; font-size: 14px; color: var(--soft); }
+      .meter .pct { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .meter.context { background: var(--tint); }
+      .meter.kept { background: var(--tint); }
+      .meter.kept > :not(.note) { opacity: 0.5; }
+      .meter.kept .bar div { background: var(--grey); }
+      .meter .note { grid-column: 1 / -1; margin: 0; font-size: 14px; }
+      .meter.context .bar div { background: var(--grey); }
+      .meter.near .bar div { background: var(--amber); }
+      .meter.over .bar div { background: var(--red); }
+      .meter.over .pct { color: var(--red); }
+      .alarm { margin: 0; padding: 0 4px; color: var(--red); font-weight: 600; }
+      .usage > .soft, .plain { margin: 0; padding: 0 4px; }
+      .card > .plain { padding: 16px 20px; }
+
+      /* Steps of the phase being worked on. */
+      .row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 20px; }
+      .row.doing > span:first-child { font-weight: 600; }
+      .mark { display: flex; align-items: center; gap: 8px; flex: none; font-size: 15px; font-weight: 600; color: var(--soft); }
+      .mark i, .substeps i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--grey); flex: none; }
+      .done .mark { color: var(--green); }
+      .doing .mark { color: var(--amber-ink); }
+      .ask .mark { color: var(--blue); }
+      .done i { background: var(--green); border-color: var(--green); }
+      .doing i { background: var(--amber); border-color: var(--amber); }
+      .ask i { border-color: var(--blue); }
+
+      /* The log: time on the left, what happened on the right. */
+      .log { margin: 0; padding: 0 4px; list-style: none; }
+      .log li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px; padding: 10px 0; }
+      .log li + li { border-top: 1px solid var(--rule); }
+      .log time { font-variant-numeric: tabular-nums; color: var(--soft); }
+      .log li:first-child time { color: var(--ink); font-weight: 600; }
+
+      /* The roadmap: a phase per row, opening to its steps. */
+      summary { list-style: none; cursor: pointer; }
+      summary::-webkit-details-marker { display: none; }
+      summary:hover { background: var(--tint); }
+      summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+      .phase { display: grid; grid-template-columns: 16px 28px minmax(0, 1fr) 120px 110px; align-items: center; gap: 12px; padding: 14px 20px; }
+      .phase svg { transition: transform 0.15s; }
+      details[open] > summary svg { transform: rotate(90deg); }
+      details[open] > summary .title, .phase.now .title { font-weight: 600; }
+      .phase .id { font-weight: 700; }
+      .phase .bar { height: 6px; }
+      .phase .bar div { background: var(--green); }
+      .phase .count { text-align: right; font-size: 15px; color: var(--soft); font-variant-numeric: tabular-nums; }
+      .detail { padding: 4px 20px 20px 76px; display: grid; gap: 18px; }
+      .detail > .soft { margin: 0; }
+      .substeps { margin: 0; padding: 0; list-style: none; display: grid; gap: 18px; }
+      .substeps li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 12px; }
+      .substeps i { margin-top: 8px; }
+      .substeps p { margin: 0; }
+      .substeps strong { font-weight: 600; }
+      .prose { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid var(--rule); }
+      .prose > * { min-width: 0; }
+      .prose p, .prose ul { margin: 0; }
+      .prose ul { padding-left: 22px; display: grid; gap: 6px; }
+      .prose b { font-weight: 600; }
+      .prose code, .soft code { font: 0.9em ui-monospace, Menlo, monospace; }
+      .prose .scroll { overflow-x: auto; }
+      .prose table { border-collapse: collapse; font-size: 15px; }
+      .prose th, .prose td { text-align: left; vertical-align: top; padding: 8px 16px 8px 0; border-bottom: 1px solid var(--rule); }
+      .prose th { color: var(--soft); font-weight: 600; }
+
+      /* H14: a section that folds open and closed with an arrow. */
+      .fold > summary { padding: 4px; border-radius: 6px; }
+      .fold > summary + * { margin-top: 12px; }
+      .fold-title { display: flex; align-items: center; gap: 8px; }
+      .fold-title svg { transition: transform 0.15s; flex: none; }
+      .fold.sub > summary h3 { margin: 0; font-size: 17px; line-height: 1.3; }
+      .fold.sub > summary + * { margin-top: 8px; }
+      .parts { display: grid; gap: 14px; }
+      .detail .fold.sub > summary h3 { font-size: 15px; }
+      .job { cursor: pointer; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+      .job.all { display: block; }
+
+      /* H19: every routine, its state, when it last ran and runs next. */
+      .routine { display: grid; grid-template-columns: 14px 170px minmax(0, 1fr) 150px; align-items: baseline; gap: 12px; padding: 12px 20px; }
+      .routine i { width: 10px; height: 10px; border-radius: 50%; background: var(--grey); align-self: center; }
+      .routine.ok i { background: var(--green); }
+      .routine.running i { background: var(--running); }
+      .routine.down i { background: var(--red); }
+      /* H30: waiting on purpose, with why: yellow, not red. */
+      .routine.waiting i { background: var(--yellow); }
+      /* H35: the laptop is warm: yellow; hot is red, as down. */
+      .routine.warm i { background: var(--yellow); }
+      /* H37: the battery getting low: yellow; low on battery is red, as down. */
+      .routine.low i { background: var(--yellow); }
+      .routine.down { background: color-mix(in srgb, var(--red) 8%, var(--card)); }
+      .routine .name { font-weight: 600; }
+      .routine .when { text-align: right; font-size: 14px; }
+      .routine .when small { display: block; }
+      /* H21: one light for all routines, on the heading, so it shows when folded closed. */
+      .light { width: 14px; height: 14px; border-radius: 50%; flex: none; background: var(--green); }
+      .light.running { background: var(--running); }
+      .light.down { background: var(--red); }
+      .light.waiting { background: var(--yellow); }
+      .light.warm { background: var(--yellow); }
+      .light.low { background: var(--yellow); }
+      /* H23: when each routine was up, running or down. One lane per routine. */
+      .uptime { padding: 16px 20px; display: grid; gap: 12px; }
+      .uptime .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+      .uptime .controls .gap { flex: 1; }
+      .chip { font: inherit; font-size: 14px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--card); color: var(--ink); cursor: pointer; }
+      .chip:not(.range)[aria-pressed="false"] { color: var(--soft); background: var(--tint); text-decoration: line-through; }
+      .chip.range[aria-pressed="true"] { border-color: var(--ink); font-weight: 600; }
+      .lanes { display: grid; gap: 6px; }
+      .lane { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; align-items: center; }
+      .lane .who { font-size: 14px; color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .strip { position: relative; height: 16px; border-radius: 4px; background: var(--track); overflow: hidden; }
+      .strip b { position: absolute; top: 0; bottom: 0; border-right: 1px solid var(--card); cursor: pointer; }
+      .strip b.ok { background: var(--green); }
+      .strip b.running { background: var(--running); }
+      /* H33: a job's bar in the band colours of the status page itself (.BUILDING … .STOPPED above set --band). */
+      .strip b.job { background: var(--band); }
+      .lane .who.jobs-toggle { display: flex; align-items: center; gap: 4px; font: inherit; font-size: 14px; color: var(--ink); font-weight: 600; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+      .lane .who.jobs-toggle svg { transition: transform 0.15s; flex: none; }
+      .lane .who.jobs-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+      .lane.sub .who { padding-left: 20px; font-size: 13px; }
+      .key b { color: var(--ink); font-weight: 600; margin-right: 2px; }
+      .key i.job { background: var(--band); }
+      .strip b.down { background: var(--red); }
+      .strip b.waiting { background: var(--yellow); }
+      .strip b.warm { background: var(--yellow); }
+      .strip b.low { background: var(--yellow); }
+      .strip b.off { background: var(--grey); }
+      .strip b:hover, .strip b.picked { outline: 2px solid var(--ink); outline-offset: -2px; }
+      .axis { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; font-size: 13px; color: var(--soft); }
+      .axis div { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+      .key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--soft); }
+      .key span { display: inline-flex; align-items: center; gap: 6px; }
+      .key i { width: 12px; height: 12px; border-radius: 3px; background: var(--track); }
+      .key i.ok { background: var(--green); } .key i.running { background: var(--running); } .key i.down { background: var(--red); } .key i.off { background: var(--grey); } .key i.waiting { background: var(--yellow); }
+      .picked-line { margin: 0; font-size: 14px; min-height: 1.4em; }
+      /* H35: the laptop's temperature: a bar with the three ranges, the reading, and a graph over time. */
+      .temp { padding: 16px 20px; display: grid; gap: 12px; }
+      .temp .now-row { display: grid; grid-template-columns: 170px minmax(0, 1fr) 64px; gap: 16px; align-items: center; }
+      .temp .now-row .what small { display: block; color: var(--soft); font-size: 14px; }
+      .temp .deg { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+      .temp.hot .deg { color: var(--red); }
+      .tbar { position: relative; height: 16px; border-radius: 4px; overflow: visible;
+        background: linear-gradient(90deg, color-mix(in srgb, var(--green) 30%, var(--track)) 0 var(--w), color-mix(in srgb, var(--yellow) 35%, var(--track)) var(--w) var(--h), color-mix(in srgb, var(--red) 30%, var(--track)) var(--h) 100%); }
+      .tbar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px 0 0 4px; }
+      .tbar .fill.normal { background: var(--green); } .tbar .fill.warm { background: var(--yellow); } .tbar .fill.hot { background: var(--red); }
+      .tbar s { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); opacity: 0.35; }
+      .tgraph { position: relative; height: 72px; border-radius: 4px; background: var(--track); overflow: hidden; }
+      .tgraph b { position: absolute; bottom: 0; cursor: pointer; }
+      .tgraph b.normal { background: var(--green); } .tgraph b.warm { background: var(--yellow); } .tgraph b.hot { background: var(--red); }
+      .tgraph b:hover, .tgraph b.picked { outline: 2px solid var(--ink); outline-offset: -2px; }
+      .tgraph s { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--ink); opacity: 0.35; }
+      .temp .axis { grid-template-columns: minmax(0, 1fr); }
+      .key i.normal { background: var(--green); } .key i.warm { background: var(--yellow); } .key i.hot { background: var(--red); }
+      /* H37: the battery, next to the temperature in the same style: low red, getting low yellow, fine green. */
+      .temp .now-row + .now-row { padding-top: 4px; }
+      .temp.lowbat .pct { color: var(--red); }
+      .tbar.bat { background: linear-gradient(90deg, color-mix(in srgb, var(--red) 30%, var(--track)) 0 var(--w), color-mix(in srgb, var(--yellow) 35%, var(--track)) var(--w) var(--h), color-mix(in srgb, var(--green) 30%, var(--track)) var(--h) 100%); }
+      .tbar .fill.fine, .tgraph b.fine { background: var(--green); } .tbar .fill.getting-low, .tgraph b.getting-low { background: var(--yellow); } .tbar .fill.low, .tgraph b.low { background: var(--red); }
+      .tgraph b.plugged { opacity: 0.55; }
+      .key i.fine { background: var(--green); } .key i.getting-low { background: var(--yellow); } .key i.low { background: var(--red); } .key i.plugged { background: var(--green); opacity: 0.55; }
+      .graph-name { margin: 4px 0 0; font-size: 14px; font-weight: 600; }
+      .top .name .batpill { font-size: 14px; font-weight: 600; padding: 2px 10px; border-radius: 999px; white-space: nowrap; align-self: center;
+        background: color-mix(in srgb, var(--green) 14%, var(--card)); color: var(--green); }
+      .top .name .batpill.getting-low { background: color-mix(in srgb, var(--yellow) 22%, var(--card)); color: var(--ink); }
+      .top .name .batpill.low { background: var(--red); color: #fff; }
+      .top .name .batpill.old { background: var(--track); color: var(--soft); }
+      /* H45: lid-closed sleep, one plain line under the battery; yellow-ish when on, since it drains the battery. */
+      .lidsleep { margin: 6px 0 0; font-size: 14px; }
+      .lidsleep.on b { color: var(--ink); } .lidsleep.on { background: color-mix(in srgb, var(--yellow) 14%, var(--card)); border-radius: 4px; padding: 2px 6px; display: inline-block; }
+      /* H44: more laptop stats, folded in under Laptop. No alarm colours: just blue, to look at. */
+      .stats { padding: 14px 20px; display: grid; gap: 10px; }
+      .stat { display: grid; gap: 4px; }
+      .stat .head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+      .stat .head b { font-weight: 600; }
+      .stat .head span { font-variant-numeric: tabular-nums; text-align: right; }
+      .sgraph { position: relative; height: 40px; border-radius: 4px; background: var(--track); overflow: hidden; }
+      .sgraph.two { height: 52px; }
+      .sgraph.two::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--rule); }
+      .sgraph b { position: absolute; bottom: 0; background: var(--blue); cursor: pointer; }
+      .sgraph b.down { bottom: auto; top: 50%; background: color-mix(in srgb, var(--blue) 50%, var(--card)); }
+      .sgraph.two b.up { bottom: 50%; }
+      .sgraph b:hover, .sgraph b.picked { outline: 2px solid var(--ink); outline-offset: -2px; }
+      .stats .axis { grid-template-columns: minmax(0, 1fr); }
+      /* H30: the incident log under Routines. */
+      .incidents { padding: 14px 20px; display: grid; gap: 10px; }
+      .incident { border-left: 3px solid var(--green); padding: 2px 0 2px 12px; }
+      .incident.open { border-left-color: var(--red); }
+      .incident .what { font-weight: 600; }
+      .incident ul { margin: 4px 0 0; padding-left: 18px; }
+      /* H42: a failed run's own last lines, as it said them. */
+      .incident .said { margin: 4px 0 0; }
+      .incident .said summary { cursor: pointer; }
+      .incident pre, .routine .said pre { margin: 4px 0 0; padding: 6px 8px; border-radius: 6px; background: var(--soft-bg, rgba(127,127,127,.12));
+        font-size: 11px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; max-height: 9em; overflow: auto; }
+      footer { padding-top: 20px; border-top: 1px solid var(--rule); }
+      @media (prefers-reduced-motion: reduce) { .phase svg, .fold-title svg { transition: none; } }
+      @media (max-width: 700px) {
+        /* H14: smaller text and spacing on the phone. */
+        body { padding: 0 16px 40px; font-size: 15px; }
+        main { gap: 24px; }
+        section { gap: 8px; }
+        h2 { font-size: 18px; }
+        .fold.sub > summary h3 { font-size: 15px; }
+        .parts { gap: 10px; }
+        .soft, .mark, .phase .count, .prose table { font-size: 13px; }
+        .top { padding-top: 16px; }
+        .top strong { font-size: 19px; }
+        .now { gap: 12px; }
+        .banner { padding: 14px 16px; gap: 2px; }
+        .banner h1 { font-size: 22px; }
+        .banner p { font-size: 15px; }
+        .row { padding: 10px 14px; gap: 10px; }
+        .meter { padding: 10px 14px; }
+        .meter .what small, .meter .note { font-size: 12px; }
+        .log li { grid-template-columns: 48px minmax(0, 1fr); gap: 10px; padding: 6px 0; }
+        .phase { padding: 10px 14px; gap: 8px; }
+        .detail { gap: 12px; }
+        .substeps { gap: 12px; }
+        .notes { grid-template-columns: minmax(0, 1fr); gap: 0; }
+        .notes dd { margin-bottom: 10px; }
+        .meter { grid-template-columns: minmax(0, 1fr) 56px; gap: 8px 16px; }
+        .meter .bar { grid-column: 1 / -1; grid-row: 2; }
+        .meter .when { grid-column: 1 / -1; }
+        .phase { grid-template-columns: 16px 28px minmax(0, 1fr) auto; }
+        .phase .bar { display: none; }
+        .detail { padding: 4px 14px 14px 14px; }
+        .routine { grid-template-columns: 14px minmax(0, 1fr) auto; padding: 10px 14px; gap: 4px 10px; }
+        .routine .text { grid-column: 2 / -1; grid-row: 2; }
+        .uptime { padding: 12px 14px; }
+        .lane, .axis { grid-template-columns: 76px minmax(0, 1fr); gap: 8px; }
+        .lane .who { font-size: 12px; }
+        .temp { padding: 12px 14px; }
+        .temp .now-row { grid-template-columns: minmax(0, 1fr) 56px; gap: 8px 16px; }
+        .temp .now-row .tbar { grid-column: 1 / -1; grid-row: 2; }
+        /* H17: everything three quarters of the size, as if zoomed out to 75%. */
+        body { zoom: 0.75; }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app"><p>Reading the roadmap…</p></main>
+    <script type="module">
+      import { parseRoadmap } from './parse.mjs';
+      import { stopLine, usageVerdict } from './usage.mjs';
+
+      const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped' };
+      const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision' };
+      const app = document.getElementById('app');
+      const el = (tag, cls, text) => {
+        const n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (text !== undefined) n.textContent = text;
+        return n;
+      };
+      let last = '';
+      // Which phases are folded open: kept while the page redraws itself.
+      const opened = new Set();
+      let openedCurrent = '';
+      // H14/H15/H16: every part folds open and closed with its arrow; the choice is remembered on this device.
+      const shownJobs = new Set();
+      const folds = new Map();
+      function isOpen(key, start) {
+        if (!folds.has(key)) {
+          let saved = null;
+          try { saved = localStorage.getItem(`fold:${key}`); } catch {}
+          folds.set(key, saved === null ? start : saved === 'yes');
+        }
+        return folds.get(key);
+      }
+
+      /** Bold, code and links as they are written in the roadmap; nothing else is interpreted. */
+      function inline(parent, text) {
+        for (const part of text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/)) {
+          if (!part) continue;
+          if (part.startsWith('**')) parent.append(el('b', '', part.slice(2, -2)));
+          else if (part.startsWith('`')) parent.append(el('code', '', part.slice(1, -1)));
+          else if (part.startsWith('[')) parent.append(document.createTextNode(part.slice(1, part.indexOf(']('))));
+          else parent.append(document.createTextNode(part.replace(/\*/g, '')));
+        }
+        return parent;
+      }
+
+      /** The text under a phase's table: paragraphs, lists and small tables. */
+      function prose(lines) {
+        const box = el('div', 'prose');
+        let list = null;
+        let table = null;
+        for (const raw of lines) {
+          const line = raw.trim();
+          const item = /^[-*]\s+(.*)$/.exec(line);
+          if (!item) list = null;
+          if (!line.startsWith('|')) table = null;
+          if (!line || /^-{3,}$/.test(line)) continue;
+          if (item) {
+            if (!list) {
+              list = el('ul');
+              box.append(list);
+            }
+            list.append(inline(el('li'), item[1]));
+          } else if (line.startsWith('|')) {
+            const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+            if (cells.every((c) => /^:?-+:?$/.test(c))) continue;
+            const first = !table;
+            if (!table) {
+              table = el('table');
+              // A wide table scrolls inside its own box, not the page.
+              const scroll = el('div', 'scroll');
+              scroll.append(table);
+              box.append(scroll);
+            }
+            const tr = el('tr');
+            for (const c of cells) tr.append(inline(el(first ? 'th' : 'td'), c));
+            table.append(tr);
+          } else box.append(inline(el('p'), line.replace(/^#+\s*/, '')));
+        }
+        return box;
+      }
+
+      const ago = (ms) => {
+        const min = Math.round(ms / 60000);
+        if (min < 1) return 'just now';
+        if (min < 60) return `${min} min ago`;
+        const h = Math.floor(min / 60);
+        return h < 24 ? `${h} h ${min % 60} min ago` : `${Math.floor(h / 24)} days ago`;
+      };
+      const until = (iso) => {
+        const min = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
+        if (!(min > 0)) return 'Resets now';
+        const h = Math.floor(min / 60);
+        if (h >= 24) return `Resets in ${Math.floor(h / 24)} d ${h % 24} h`;
+        return h > 0 ? `Resets in ${h} h ${min % 60} min` : `Resets in ${min} min`;
+      };
+
+      const clock = (iso) => {
+        const d = new Date(iso);
+        const day = d.toDateString() === new Date().toDateString() ? '' : `${d.toLocaleDateString('en-GB', { weekday: 'short' })} `;
+        return `${day}${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+      };
+
+      function bar(percent, limit) {
+        const box = el('div', 'bar');
+        const fill = el('div');
+        fill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+        box.append(fill);
+        if (limit !== null) {
+          const line = el('s');
+          line.style.left = `${limit}%`;
+          // Where the line stands now, as a number and a % sign only (a weekly line moves up).
+          line.dataset.pct = `${Math.round(limit * 10) / 10}%`;
+          box.append(line);
+        }
+        return box;
+      }
+
+      /** limit: where the stop line stands for this row now; next: when it moves up (weekly limits). */
+      /** resets: for the 5-hour limit, the moment it resets, shown under "Resets in …" (BACKLOG 36). */
+      function meter(label, sub, percent, when, limit, cls = '', next = null, resets = null) {
+        const over = limit !== null && percent >= limit;
+        const near = limit !== null && !over && percent >= limit - 10;
+        const row = el('div', `meter ${cls}${over ? ' over' : near ? ' near' : ''}`);
+        const what = el('div', 'what', label);
+        if (sub) what.append(el('small', '', sub));
+        const times = el('span', 'soft when', when);
+        if (next) times.append(el('small', '', `Stop line ${limit}%, up at ${clock(next)}`));
+        if (resets) times.append(el('small', '', `Resets at ${clock(resets)}`));
+        row.append(what, bar(percent, limit), el('span', 'pct', `${percent}%`), times);
+        return row;
+      }
+
+      /** F7: the three plan limits that always show, in this order, even without a number. */
+      const ALWAYS = [
+        { label: '5-hour limit', test: /5-hour/i },
+        { label: 'Weekly · all models', test: /weekly.*all/i },
+        { label: 'Weekly · Fable', test: /fable/i },
+      ];
+
+      /** The last usage reading a session saved. The page cannot take one itself. */
+      function drawUsage(u, limit, weekly = null) {
+        const age = u ? Date.now() - new Date(u.checkedAt).getTime() : 0;
+        const verdict = usageVerdict(u, limit, new Date(), weekly);
+        // An old reading is shown dimmed: usage may have moved on since.
+        const box = el('section', `usage${u && age > 20 * 60000 ? ' stale' : ''}`);
+        const head = el('div', 'head');
+        head.append(
+          el('h2', '', 'Usage'),
+          el('span', 'soft', u ? `Read ${ago(age)}${u.by ? ` by ${u.by}` : ''}` : 'No reading yet'),
+        );
+        box.append(head);
+        if (u && !u.readable) box.append(el('p', 'alarm', 'The last attempt to read the usage failed. Work stops until it can be read. The numbers below are the last known ones.'));
+        const card = el('div', 'card');
+        // The context window first: it belongs to one session and never stops the work.
+        if (u?.context) {
+          const k = (n) => `${Math.round(n / 1000).toLocaleString('en')}k`;
+          card.append(meter('Context window', 'This session only', u.context.percent, `${k(u.context.tokens)} of ${k(u.context.window)}`, null, 'context'));
+        }
+        const limits = Array.isArray(u?.limits) ? u.limits : [];
+        // F7: all three always show; the known ones in the order above, anything else after them.
+        const rows = ALWAYS.map((a) => ({ a, l: limits.find((l) => a.test.test(l.label)) ?? null }));
+        for (const l of limits) if (!rows.some((r) => r.l === l)) rows.push({ a: null, l });
+        for (const { a, l } of rows) {
+          // Never read at all: an empty bar, greyed out.
+          if (!l) {
+            const row = meter(a.label.replace(' · ', ', '), 'No reading yet', 0, '', null, 'kept');
+            row.append(el('p', 'soft note', 'No session has read this limit yet. A normal chat’s reading fills it in.'));
+            card.append(row);
+            continue;
+          }
+          // F6/F7: a number that isn't fresh (the running job can't read it, or the reading failed):
+          // the last known number, greyed out; after its week has reset, zero, greyed out.
+          if (l.kept || !u.readable) {
+            const reset = l.resetsAt && new Date(l.resetsAt).getTime() <= Date.now();
+            const keptAt = l.keptAt ?? u.checkedAt;
+            const keptBy = l.keptBy ?? u.by;
+            const sub = reset ? `Reset at ${clock(l.resetsAt)}; no fresh reading since` : `Last known, read ${ago(Date.now() - new Date(keptAt).getTime())}${keptBy ? ` by ${keptBy}` : ''}`;
+            const row = meter(l.label.replace(' · ', ', '), sub, reset ? 0 : l.percent, l.resetsAt && !reset ? until(l.resetsAt) : '', null, 'kept');
+            const what = l.label.replace(/^weekly\s*·\s*/i, '');
+            row.append(el('p', 'soft note', !u.readable ? 'Not accurate: the last reading failed. A fresh reading updates it.' : reset ? 'Not accurate: its week has reset, and the running job can’t read it. A normal chat’s reading updates it.' : `Not accurate: the running job can’t read ${what}. A normal chat’s reading updates it.`));
+            card.append(row);
+            continue;
+          }
+          const at = stopLine(l, limit, new Date(), weekly);
+          const fiveHour = /5-hour/i.test(l.label) && l.resetsAt ? new Date(l.resetsAt) : null;
+          card.append(meter(l.label.replace(' · ', ', '), u.plan && l === limits[0] ? `${u.plan} plan` : '', l.percent, l.resetsAt ? until(l.resetsAt) : '', at ? at.line : null, '', at ? at.next : null, fiveHour));
+        }
+        box.append(card);
+        if (u?.readable && verdict.stop) box.append(el('p', 'alarm', `Stop line reached. ${verdict.reason}`));
+        box.append(
+          el(
+            'p',
+            'soft',
+            limit === null
+              ? 'Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are. They are not live: older than 20 minutes, the whole box is greyed out. A greyed-out bar is an old number.'
+              : weekly !== null
+                ? `The dark mark is the stop line: work stops when a plan limit reaches it. ${limit}% for the 5-hour limit, ${weekly}% for the weekly limits. Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.`
+                : `The dark mark is the stop line: work stops when a plan limit reaches it. For the 5-hour limit it stays at ${limit}%. For the weekly limits it starts at 20%, moves up four times a day once the week's own share passes that, reaching 100% at the end of the week. Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.`,
+          ),
+        );
+        return box;
+      }
+
+      function chevron() {
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        for (const [k, v] of Object.entries({ width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(k, v);
+        const path = document.createElementNS(ns, 'path');
+        path.setAttribute('d', 'M6 3l5 5-5 5');
+        svg.append(path);
+        return svg;
+      }
+
+      /** A part that folds open and closed with an arrow. start: open or folded the first time. */
+      function foldPart(key, start, title, counts, sub = false) {
+        const fold = el('details', `fold${sub ? ' sub' : ''}`);
+        fold.open = isOpen(key, start);
+        fold.addEventListener('toggle', () => {
+          folds.set(key, fold.open);
+          try { localStorage.setItem(`fold:${key}`, fold.open ? 'yes' : 'no'); } catch {}
+        });
+        const summary = el('summary', 'head');
+        const t = el('span', 'fold-title');
+        t.append(chevron(), el(sub ? 'h3' : 'h2', '', title));
+        summary.append(t);
+        if (counts) summary.append(el('span', 'soft', counts));
+        fold.append(summary);
+        return fold;
+      }
+
+      /** H19/H20: each routine, its state, what it last did, when it runs next. A line that is
+          overdue turns red: that routine has stopped writing, so it has stopped. */
+      const ROUTINES = [
+        ['helper', 'Routine helper', 'Runs everything below, every minute'],
+        ['watchdog', 'Watchdog', 'Checks the helper every 5 minutes, apart from it'],
+        ['mail', 'Mail check', 'Every hour'],
+        ['jobs', 'Jobs from calls', 'One at a time'],
+        ['usage', 'Usage check', 'Every minute, free'],
+        ['phone', 'Status page', 'Also on the phone'],
+        ['call', 'Call line', 'For calls from the phone'],
+        ['temp', 'Laptop temperature', 'Every minute, free, no password'],
+        ['battery', 'Laptop battery', 'Every minute, free'],
+      ];
+      function drawRoutines(r) {
+        const box = el('section');
+        const now = r?.now ?? Date.now() / 1000;
+        const all = r?.routines ?? {};
+        const helper = all.helper;
+        const helperLate = !helper || now - helper.at > 180;
+        let bad = 0;
+        let busy = 0;
+        let waiting = 0;
+        let warm = 0;
+        let hot = false;  // H35: a hot laptop is red, but it's not a routine that stopped working
+        let lowBat = false;  // H37: low battery on battery is red too, but it's not a routine that stopped working
+        const card = el('div', 'card');
+        for (const [key, name, about] of ROUTINES) {
+          const x = all[key];
+          let state = x?.state ?? 'off';
+          let text = x?.text ?? 'No line yet';
+          const late = x && now - x.at > (x.every ?? 60) * 2 + 60;
+          if (!x) state = key === 'watchdog' ? 'down' : state;
+          if (key === 'watchdog' && !x) text = 'Not installed or not running';
+          else if (late) {
+            state = 'down';
+            text = key === 'helper' || key === 'watchdog'
+              ? `Stopped: last seen ${ago((now - x.at) * 1000)}`
+              : helperLate ? `Not checked since the helper stopped (${ago((now - x.at) * 1000)})` : `Overdue: last seen ${ago((now - x.at) * 1000)}`;
+          }
+          if (state === 'down') bad++;
+          if (state === 'running') busy++;
+          if (state === 'waiting') waiting++;
+          if (key === 'temp' && state === 'warm') warm++;
+          if (key === 'temp' && state === 'down' && x && !late && /^Hot/.test(text)) { hot = true; bad--; }
+          if (key === 'battery' && state === 'low') warm++;
+          if (key === 'battery' && state === 'down' && x && !late && /^Low battery/.test(text)) { lowBat = true; bad--; }
+          const row = el('div', `routine ${state === 'fixed' ? 'ok' : state}`);
+          const what = el('span', 'name', name);
+          const when = el('span', 'soft when');
+          if (x?.last) when.append(el('small', '', `Last ${clock(new Date(x.last * 1000))}`));
+          if (x?.next && state !== 'down' && state !== 'off' && !(state === 'waiting' && x.next < now)) when.append(el('small', '', `Next ${clock(new Date(x.next * 1000))}`));
+          row.title = about + (state === 'down' && x?.detail?.length ? `\n\nWhat it said last:\n${x.detail.join('\n')}` : '');  // H42
+          row.append(el('i'), what, el('span', 'text', text), when);
+          card.append(row);
+        }
+        const counts = (bad ? `${bad} not working` : busy || waiting ? `All working${busy ? ` · ${busy} running now` : ''}${waiting ? ` · ${waiting} waiting` : ''}` : 'All working')
+          + (hot ? ' · laptop hot' : (all.temp?.state === 'warm' && warm) ? ' · laptop warm' : '');
+        const batWord = lowBat ? `Low battery, ${all.battery?.text?.match(/(\d+)%/)?.[1] ?? '?'}%` : '';
+        const head = [hot ? 'Laptop hot' : '', batWord].filter(Boolean).join(' · ');
+        const fold = foldPart('routines', true, 'Routines', head ? `${head} · ${counts.replace(' · laptop hot', '')}` : counts + (all.battery?.state === 'low' ? ' · battery getting low' : ''));
+        if (bad || hot || lowBat) fold.querySelector('summary .soft').style.color = 'var(--red)';
+        // H21: red if any is red (H35: also a hot laptop), else yellow if any is waiting (H30) or the laptop is warm, else green.
+        const light = el('i', `light${bad || hot || lowBat ? ' down' : busy ? ' running' : waiting ? ' waiting' : warm ? ' warm' : ''}`);
+        light.title = lowBat ? 'The battery is low and the laptop is not on the charger' : hot ? 'The laptop is hot or slowing itself down' : bad ? 'Something is not working' : busy ? 'A routine is running now' : waiting ? 'A routine is waiting on purpose' : warm ? 'The laptop is warm' : 'Everything is working';
+        fold.querySelector('summary .fold-title').append(light);
+        fold.append(card);
+        fold.append(drawUptime());
+        fold.append(drawIncidents(r?.incidents ?? [], now));
+        box.append(fold);
+        return box;
+      }
+
+      /** H23: the graph under the routine lines. Which routines show and which time span are remembered
+          on this device. A tap or hover on a piece says what it was, from when to when. */
+      const STATE_WORD = { ok: 'Working', running: 'Running (busy, all good)', waiting: 'Waiting', warm: 'Warm (laptop)', low: 'Getting low (battery)', down: 'Not working', off: 'Off', none: 'No data' };
+
+      /** H30: the incident log. 10 October 2026: "it should also log somewhere in monitoring when
+          services went disconnected and what it did to fix it." Newest first; a red edge is still down. */
+      function drawIncidents(list, now) {
+        const names = Object.fromEntries(ROUTINES.map(([k, n]) => [k, n]));
+        const open = list.filter((i) => !i.back).length;
+        const fold = foldPart('incidents', open > 0, 'Incidents', list.length ? `${open ? `${open} still down · ` : ''}last ${Math.min(list.length, 30)}` : 'None so far', true);
+        const box = el('div', 'incidents');
+        if (!list.length) box.append(el('p', 'soft', 'Nothing has gone down since the log started. When a routine goes down, it shows here: when, why, what was done, and when it was back.'));
+        for (const i of list) {
+          const row = el('div', `incident${i.back ? '' : ' open'}`);
+          const mins = Math.max(1, Math.round(((i.back ?? now) - i.down) / 60));
+          const long = mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`;
+          row.append(el('div', 'what', `${names[i.key] ?? i.key} · ${clock(new Date(i.down * 1000))} to ${i.back ? clock(new Date(i.back * 1000)) : 'now, still down'} (${long})`));
+          row.append(el('div', 'soft', `Why: ${i.why || 'not known'}`));
+          if (i.detail?.length) {
+            // H42: what the run itself said last, so the reason can be read, not only "failed".
+            const said = el('details', 'said soft');
+            said.append(el('summary', '', 'What it said last'), el('pre', '', i.detail.join('\n')));
+            if (i.run) said.title = `Its whole output: Jarvis VA/${i.run}`;
+            row.append(said);
+          }
+          if (i.fixes?.length) {
+            const ul = el('ul');
+            for (const f of i.fixes) ul.append(el('li', 'soft', `${clock(new Date(f.at * 1000))} ${f.what}`));
+            row.append(ul);
+          }
+          box.append(row);
+        }
+        fold.append(box);
+        return fold;
+      }
+      let uptimeData = null;
+      let picked = null;
+      const pref = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } };
+      const setPref = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+      const hidden = new Set();
+      let span = pref('uptime:hours', 6);
+      let jobsData = null;
+      let jobsOpen = pref('uptime:jobs', false);
+      let roadmapNow = null;
+      async function loadUptime() {
+        try {
+          uptimeData = await fetch(`./routines-history.json?h=${span}&t=${Date.now()}`, { cache: 'no-store' }).then((r) => r.json());
+        } catch { uptimeData = null; }
+        try {
+          jobsData = await fetch(`./jobs-history.json?h=${span}&t=${Date.now()}`, { cache: 'no-store' }).then((r) => r.json());
+        } catch { jobsData = null; }
+      }
+
+      /** H33: the jobs in the graph, in the development colours. 10 October 2026: "At the top above
+          Routine Helper ... Jobs ... You can open it, you can drop down, and then you see the different jobs, and
+          you see their color and their status of their builds", "It must use the same colors", "its own legend". */
+      const JOB_STATES = ['BUILDING', 'TESTING', 'RELEASING', 'WAITING', 'DONE', 'STOPPED'];
+      const JOB_WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped' };
+      function jobName(n) {
+        const text = roadmapNow?.queue?.jobs?.find((j) => j.n === n)?.text ?? jobsData?.texts?.[n] ?? '';
+        const id = /\b([A-L]\d{1,2})\b/.exec(text)?.[1];
+        const step = id && roadmapNow?.phases?.flatMap((p) => p.steps).find((st) => st.name.startsWith(`${id} `));
+        const short = step ? step.name : text.replace(/^(Build|Fix)\s+/, '').split(/[.:,(]/)[0];
+        return `Job ${n}${short ? ` · ${short.length > 48 ? `${short.slice(0, 46)}…` : short}` : ''}`;
+      }
+      function jobBars(strip, segs, from, now, line, label) {
+        for (const g of segs) {
+          const a = Math.max(g.start, from);
+          const z = Math.min(g.end, now);
+          if (z <= a) continue;
+          const b = el('b', `job ${g.st}`);
+          b.style.left = `${((a - from) / (now - from)) * 100}%`;
+          b.style.width = `${Math.max(0.3, ((z - a) / (now - from)) * 100)}%`;
+          const mins = Math.max(1, Math.round((g.end - g.start) / 60));
+          const text = `${label ?? jobName(g.n)} · ${JOB_WORD[g.st] ?? g.st} · ${clock(new Date(g.start * 1000))} to ${g.end >= now - 90 ? 'now' : clock(new Date(g.end * 1000))} (${mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`})${g.filled ? ' · filled in from the saved roadmap versions' : ''}`;
+          b.title = text;
+          const show = () => { picked = text; line.textContent = text; };
+          b.addEventListener('pointerenter', show);
+          b.addEventListener('click', show);
+          strip.append(b);
+        }
+      }
+      function drawJobLanes(lanes, from, now, line) {
+        const segs = jobsData?.segments ?? [];
+        const lane = el('div', 'lane jobs');
+        const toggle = el('button', 'who jobs-toggle');
+        toggle.type = 'button';
+        toggle.setAttribute('aria-expanded', jobsOpen ? 'true' : 'false');
+        toggle.append(chevron(), document.createTextNode('Jobs'));
+        toggle.addEventListener('click', () => { jobsOpen = !jobsOpen; setPref('uptime:jobs', jobsOpen); redraw(); });
+        const strip = el('div', 'strip');
+        // Folded: whichever job was running, in its colours (one job runs at a time).
+        jobBars(strip, segs, from, now, line);
+        lane.append(toggle, strip);
+        lanes.append(lane);
+        if (!jobsOpen) return;
+        const ns = [...new Set(segs.map((g) => g.n))].sort((a, b) => a - b);
+        if (!ns.length) lanes.append(el('p', 'soft', 'No job ran in this time span.'));
+        for (const n of ns) {
+          const sub = el('div', 'lane sub');
+          const who = el('span', 'who', jobName(n));
+          who.title = jobName(n);
+          const st = el('div', 'strip');
+          jobBars(st, segs.filter((g) => g.n === n), from, now, line);
+          sub.append(who, st);
+          lanes.append(sub);
+        }
+      }
+      function drawUptime() {
+        const box = el('div', 'uptime');
+        const controls = el('div', 'controls');
+        // 10 October 2026, his words: "they don't need to be clickable. That's fine. This is even better." All routines always show.
+        controls.append(el('span', 'gap'));
+        for (const h of [1, 6, 24]) {
+          const b = el('button', 'chip range', `${h} h`);
+          b.setAttribute('aria-pressed', span === h ? 'true' : 'false');
+          b.addEventListener('click', async () => { span = h; setPref('uptime:hours', h); picked = null; await loadUptime(); redraw(); });
+          controls.append(b);
+        }
+        box.append(controls);
+        const now = uptimeData?.now ?? Date.now() / 1000;
+        const from = now - span * 3600;
+        const samples = uptimeData?.samples ?? [];
+        const lanes = el('div', 'lanes');
+        const line = el('p', 'picked-line soft', picked ?? 'Hover or tap a piece of a bar to see what it was.');
+        drawJobLanes(lanes, from, now, line);
+        for (const [key, name] of ROUTINES) {
+          const lane = el('div', 'lane');
+          lane.append(el('span', 'who', name));
+          const strip = el('div', 'strip');
+          // Runs of the same state; a gap of more than 3 minutes between samples is no data.
+          let run = null;
+          const runs = [];
+          for (const smp of samples) {
+            const st = smp.s?.[key] ?? 'none';
+            const gapped = run && smp.t - run.end > 180;
+            if (!run || run.st !== st || gapped) {
+              if (run) runs.push(run);
+              run = { st, start: smp.t, end: smp.t + 60 };
+            } else run.end = smp.t + 60;
+          }
+          if (run) runs.push(run);
+          for (const r of runs) {
+            if (r.st === 'none') continue;
+            const a = Math.max(r.start, from);
+            const z = Math.min(r.end, now);
+            if (z <= a) continue;
+            const b = el('b', r.st);
+            b.style.left = `${((a - from) / (now - from)) * 100}%`;
+            b.style.width = `${Math.max(0.3, ((z - a) / (now - from)) * 100)}%`;
+            const mins = Math.max(1, Math.round((r.end - r.start) / 60));
+            const text = `${name} · ${key === 'battery' && r.st === 'down' ? 'Low, on battery' : key === 'temp' && r.st === 'down' ? 'Hot, or not read' : STATE_WORD[r.st] ?? r.st} · ${clock(new Date(r.start * 1000))} to ${r.end >= now - 90 ? 'now' : clock(new Date(r.end * 1000))} (${mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`})`;
+            const show = () => { picked = text; line.textContent = text; };
+            b.addEventListener('pointerenter', show);
+            b.addEventListener('click', show);
+            strip.append(b);
+          }
+          lane.append(strip);
+          lanes.append(lane);
+        }
+        box.append(lanes);
+        const axis = el('div', 'axis');
+        const ticks = el('div');
+        for (const f of [0, 0.5, 1]) ticks.append(el('span', '', f === 1 ? 'now' : clock(new Date((from + f * (now - from)) * 1000))));
+        axis.append(el('span'), ticks);
+        box.append(axis);
+        // H33: the jobs have their own legend, in the development colours, apart from the routines' one.
+        const jobKey = el('div', 'key jobs-key');
+        jobKey.append(el('b', '', 'Jobs:'));
+        for (const st of JOB_STATES) {
+          const k = el('span');
+          k.append(el('i', `job ${st}`), document.createTextNode(JOB_WORD[st]));
+          jobKey.append(k);
+        }
+        const key = el('div', 'key');
+        key.append(el('b', '', 'Routines:'));
+        for (const st of ['ok', 'running', 'waiting', 'warm', 'low', 'down', 'none']) {
+          const k = el('span');
+          k.append(el('i', st), document.createTextNode(STATE_WORD[st]));
+          key.append(k);
+        }
+        box.append(jobKey, key, line);
+        const first = samples[0]?.t;
+        if (!first || first > from + 120) box.append(el('p', 'soft', first ? `Written down since ${clock(new Date(first * 1000))}; the status server notes every routine once a minute and keeps a day.` : 'Nothing written down yet; the status server notes every routine once a minute.'));
+        return box;
+      }
+      /** H35: the laptop's temperature. 10 October 2026, with the lid closed and the laptop in his bag
+          while jobs build: "I was thinking maybe we can build a routine and it also checks it continuously and it
+          shows a little graph. Or... In the status bars, we put ranges and colors on it." Ranges for this MacBook
+          Air M2 (no fan; it slows itself down around 100 degrees): normal under 70, warm 70 to 89, hot from 90,
+          and hot whenever macOS says it's slowing the laptop down. */
+      const T_MIN = 30, T_MAX = 110;
+      const tPos = (c) => Math.min(100, Math.max(0, ((c - T_MIN) / (T_MAX - T_MIN)) * 100));
+      const LVL_WORD = { normal: 'Normal', warm: 'Warm', hot: 'Hot' };
+      let tempData = null;
+      let tSpan = pref('temp:hours', 1);
+      let tPicked = null;
+      let bPicked = null;
+      let batData = null;
+      let statsData = null;
+      let sPicked = null;
+      async function loadTemp() {
+        try {
+          tempData = await fetch(`./temperature-history.json?h=${tSpan}&t=${Date.now()}`, { cache: 'no-store' }).then((r) => r.json());
+        } catch { tempData = null; }
+        // H37: the battery over the same time span.
+        try {
+          batData = await fetch(`./battery-history.json?h=${tSpan}&t=${Date.now()}`, { cache: 'no-store' }).then((r) => r.json());
+        } catch { batData = null; }
+        // H44: the other stats over the same time span.
+        try {
+          statsData = await fetch(`./stats-history.json?h=${tSpan}&t=${Date.now()}`, { cache: 'no-store' }).then((r) => r.json());
+        } catch { statsData = null; }
+      }
+      function drawTemperature(r) {
+        const t = r?.temperature;
+        const now = r?.now ?? Date.now() / 1000;
+        const ranges = t?.ranges ?? { warm: 70, hot: 90 };
+        const old = !t || now - t.t > 180;
+        const lvl = t ? t.lvl : null;
+        // H37: the battery, next to the temperature: low (red) under 20% on battery, getting low (yellow)
+        // 20 to 39% on battery, fine from 40% or whenever it's on the charger.
+        const bt = r?.battery;
+        const bOld = !bt || now - bt.t > 180;
+        const blvl = bt ? bt.lvl : null;
+        const bAlarm = bt && !bOld && blvl === 'low';
+        const bWord = !bt ? 'battery: no reading yet' : `battery ${bt.pct}%, ${bt.charging ? 'charging' : bt.plugged ? 'on the charger' : 'on battery'}${bOld ? ` (read ${ago((now - bt.t) * 1000)})` : ''}`;
+        const word = (!t ? 'No reading yet' : `${LVL_WORD[lvl]} · ${Math.round(t.cpu)}°C${old ? ` · read ${ago((now - t.t) * 1000)}` : ''}`) + ` · ${bWord}`;
+        const box = el('section', 'laptop');
+        const fold = foldPart('laptop', true, 'Laptop', word);
+        if ((lvl === 'hot' && !old) || bAlarm) fold.querySelector('summary .soft').style.color = 'var(--red)';
+        const light = el('i', `light${!t || old || bAlarm ? ' down' : lvl === 'hot' ? ' down' : lvl === 'warm' || (!bOld && blvl === 'getting-low') ? ' warm' : ''}`);
+        light.title = !t ? 'No temperature reading' : old ? 'The temperature reading is old' : bAlarm ? 'The battery is low and the laptop is not on the charger' : lvl === 'hot' ? 'The laptop is hot or slowing itself down' : lvl === 'warm' ? 'The laptop is warm' : (!bOld && blvl === 'getting-low') ? 'The battery is getting low' : 'The laptop is at a normal temperature';
+        fold.querySelector('summary .fold-title').append(light);
+        const card = el('div', `card temp${lvl === 'hot' ? ' hot' : ''}${bAlarm ? ' lowbat' : ''}`);
+        const row = el('div', 'now-row');
+        const what = el('div', 'what', 'Chip temperature');
+        if (t) what.append(el('small', '', t.heat));
+        const tb = el('div', 'tbar');
+        tb.style.setProperty('--w', `${tPos(ranges.warm)}%`);
+        tb.style.setProperty('--h', `${tPos(ranges.hot)}%`);
+        if (t) {
+          const fill = el('div', `fill ${lvl}`);
+          fill.style.width = `${tPos(t.cpu)}%`;
+          if (old) fill.style.opacity = '0.4';
+          tb.append(fill);
+        }
+        for (const c of [ranges.warm, ranges.hot]) { const m = el('s'); m.style.left = `${tPos(c)}%`; tb.append(m); }
+        tb.title = `Normal under ${ranges.warm}°C · warm ${ranges.warm} to ${ranges.hot - 1}°C · hot from ${ranges.hot}°C, or when macOS slows the laptop down`;
+        row.append(what, tb, el('span', 'deg', t ? `${Math.round(t.cpu)}°C` : '–'));
+        card.append(row);
+        if (t) card.append(el('p', 'soft', `Hottest part of the chip ${Math.round(t.cpu)}°C, average ${Math.round(t.avg)}°C${t.bat != null ? ` · battery ${Math.round(t.bat)}°C` : ''} · read ${clock(new Date(t.t * 1000))}`));
+        // H37: the battery row, in the same style as the temperature row.
+        const brange = bt?.ranges ?? { low: 20, getting_low: 40 };
+        const brow = el('div', 'now-row battery');
+        const bwhat = el('div', 'what', 'Battery');
+        bwhat.append(el('small', '', bt ? `${bt.words}${bOld ? ` · read ${ago((now - bt.t) * 1000)}` : ''}` : 'No reading yet'));
+        const bb = el('div', 'tbar bat');
+        bb.style.setProperty('--w', `${brange.low}%`);
+        bb.style.setProperty('--h', `${brange.getting_low}%`);
+        if (bt) {
+          const fill = el('div', `fill ${blvl}`);
+          fill.style.width = `${bt.pct}%`;
+          if (bOld) fill.style.opacity = '0.4';
+          bb.append(fill);
+        }
+        for (const c of [brange.low, brange.getting_low]) { const m = el('s'); m.style.left = `${c}%`; bb.append(m); }
+        bb.title = `On battery: low under ${brange.low}% · getting low ${brange.low} to ${brange.getting_low - 1}% · fine from ${brange.getting_low}%. On the charger it's always fine.`;
+        brow.append(bwhat, bb, el('span', 'deg pct', bt ? `${bt.pct}%` : '–'));
+        card.append(brow);
+        // H45: lid-closed sleep, on or off, flipped from a call ("keep working with the lid closed" / "back to normal").
+        const ls = r?.lidsleep;
+        const lrow = el('p', `lidsleep${ls?.on ? ' on' : ''}`);
+        lrow.append(el('b', '', 'Lid closed: '), document.createTextNode(!ls ? 'no reading yet'
+          : ls.on ? 'keeps working (sleep off)' : 'sleeps, as normal'));
+        if (ls && (now - ls.t) > 300) lrow.append(document.createTextNode(` · read ${ago((now - ls.t) * 1000)}`));
+        if (ls && !ls.setup) lrow.append(el('small', 'soft', ' · a call can flip it after the one-time setup on the roadmap'));
+        lrow.title = 'Keep working with the lid closed (pmset disablesleep). Ask on a call to flip it.';
+        card.append(lrow);
+        // The graph: one column a minute (several minutes in one column on the longer spans, the hottest shows).
+        const controls = el('div', 'controls');
+        controls.style.display = 'flex'; controls.style.gap = '6px'; controls.style.justifyContent = 'flex-end';
+        for (const h of [1, 6, 24]) {
+          const b = el('button', 'chip range', `${h} h`);
+          b.setAttribute('aria-pressed', tSpan === h ? 'true' : 'false');
+          b.addEventListener('click', async () => { tSpan = h; setPref('temp:hours', h); tPicked = null; bPicked = null; await loadTemp(); redraw(); });
+          controls.append(b);
+        }
+        card.append(controls);
+        const tnow = tempData?.now ?? now;
+        const from = tnow - tSpan * 3600;
+        const graph = el('div', 'tgraph');
+        const line = el('p', 'picked-line soft', tPicked ?? 'Hover or tap a column to see the time and the degrees.');
+        const step = Math.max(60, Math.ceil((tSpan * 3600) / 240 / 60) * 60);
+        const buckets = new Map();
+        for (const x of tempData?.samples ?? []) {
+          const k = Math.floor((x.t - from) / step);
+          const was = buckets.get(k);
+          if (!was || x.cpu > was.cpu || (x.lvl === 'hot' && was.lvl !== 'hot')) buckets.set(k, x);
+        }
+        for (const [k, x] of buckets) {
+          const b = el('b', x.lvl);
+          b.style.left = `${((k * step) / (tnow - from)) * 100}%`;
+          b.style.width = `${Math.max(0.3, (step / (tnow - from)) * 100)}%`;
+          b.style.height = `${Math.max(4, tPos(x.cpu))}%`;
+          const text = `${clock(new Date(x.t * 1000))} · ${Math.round(x.cpu)}°C · ${LVL_WORD[x.lvl]}${x.slow ? ' · slowing itself down' : ''}${step > 60 ? ` (hottest of ${step / 60} min)` : ''}`;
+          b.title = text;
+          const show = () => { tPicked = text; line.textContent = text; };
+          b.addEventListener('pointerenter', show);
+          b.addEventListener('click', show);
+          graph.append(b);
+        }
+        for (const c of [ranges.warm, ranges.hot]) { const m = el('s'); m.style.bottom = `${tPos(c)}%`; graph.append(m); }
+        card.append(graph);
+        const axis = el('div', 'axis');
+        const ticks = el('div');
+        for (const f of [0, 0.5, 1]) ticks.append(el('span', '', f === 1 ? 'now' : clock(new Date((from + f * (tnow - from)) * 1000))));
+        axis.append(ticks);
+        card.append(axis);
+        const key = el('div', 'key');
+        for (const [cls, label] of [['normal', `Normal, under ${ranges.warm}°C`], ['warm', `Warm, ${ranges.warm} to ${ranges.hot - 1}°C`], ['hot', `Hot, ${ranges.hot}°C and up, or slowing down`]]) {
+          const k = el('span');
+          k.append(el('i', cls), document.createTextNode(label));
+          key.append(k);
+        }
+        card.append(key, line);
+        if (!(tempData?.samples ?? []).length) card.append(el('p', 'soft', 'Nothing written down yet; the routine reads the temperature once a minute and keeps a day.'));
+        // H37: the battery over the same time span: one column a minute (the lowest shows when several minutes
+        // share a column), coloured by range; lighter while on the charger.
+        card.append(el('p', 'graph-name', 'Battery over time'));
+        const bgraph = el('div', 'tgraph battery');
+        const bline = el('p', 'picked-line soft', bPicked ?? 'Hover or tap a column to see the time and the battery.');
+        const bnow = batData?.now ?? now;
+        const bfrom = bnow - tSpan * 3600;
+        const bbuckets = new Map();
+        for (const x of batData?.samples ?? []) {
+          const k = Math.floor((x.t - bfrom) / step);
+          const was = bbuckets.get(k);
+          if (!was || x.pct < was.pct) bbuckets.set(k, x);
+        }
+        for (const [k, x] of bbuckets) {
+          const b = el('b', `${x.lvl}${x.plugged ? ' plugged' : ''}`);
+          b.style.left = `${((k * step) / (bnow - bfrom)) * 100}%`;
+          b.style.width = `${Math.max(0.3, (step / (bnow - bfrom)) * 100)}%`;
+          b.style.height = `${Math.max(4, x.pct)}%`;
+          const text = `${clock(new Date(x.t * 1000))} · ${x.pct}% · ${x.charging ? 'charging' : x.plugged ? 'on the charger' : 'on battery'}${step > 60 ? ` (lowest of ${step / 60} min)` : ''}`;
+          b.title = text;
+          const show = () => { bPicked = text; bline.textContent = text; };
+          b.addEventListener('pointerenter', show);
+          b.addEventListener('click', show);
+          bgraph.append(b);
+        }
+        for (const c of [brange.low, brange.getting_low]) { const m = el('s'); m.style.bottom = `${c}%`; bgraph.append(m); }
+        card.append(bgraph);
+        const baxis = el('div', 'axis');
+        const bticks = el('div');
+        for (const f of [0, 0.5, 1]) bticks.append(el('span', '', f === 1 ? 'now' : clock(new Date((bfrom + f * (bnow - bfrom)) * 1000))));
+        baxis.append(bticks);
+        card.append(baxis);
+        const bkey = el('div', 'key bkey');
+        for (const [cls, label] of [['fine', `Fine, ${brange.getting_low}% and up`], ['getting-low', `Getting low, ${brange.low} to ${brange.getting_low - 1}%`], ['low', `Low, under ${brange.low}%`], ['plugged', 'Lighter: on the charger (never an alarm)']]) {
+          const k = el('span');
+          k.append(el('i', cls), document.createTextNode(label));
+          bkey.append(k);
+        }
+        card.append(bkey, bline);
+        if (!(batData?.samples ?? []).length) card.append(el('p', 'soft', 'Nothing written down yet; the routine reads the battery once a minute and keeps a day.'));
+        fold.append(card);
+        fold.append(drawStats(r?.stats, now));
+        box.append(fold);
+        return box;
+      }
+      /** H44: more laptop stats, in their own fold at the bottom of the Laptop section, folded closed at the
+          start. 10 October 2026: "Just the things you see in the activity monitor. And network too.
+          So CPU, memory. Disk and network and then just the totals of it" and "it's not that important. But
+          it's just fun to have there." No alarms, no colours on any light. */
+      const bytes = (b, perS = false) => {
+        if (b == null) return '–';
+        const k = perS ? 1000 : 1024;
+        for (const [u, f] of [['GB', k ** 3], ['MB', k ** 2], ['KB', k]]) {
+          if (b >= f) { const v = b / f; return `${v < 100 ? v.toFixed(1) : Math.round(v)} ${u}${perS ? '/s' : ''}`; }
+        }
+        return `${Math.round(b)} B${perS ? '/s' : ''}`;
+      };
+      const pct = (v) => (v == null ? '–' : `${Math.round(v)}%`);
+      function drawStats(x, now) {
+        const old = !x || now - x.t > 180;
+        const head = !x ? 'No reading yet' : `CPU ${pct(x.cpu)} · GPU ${pct(x.gpu)} · memory ${bytes(x.mem_used)}${old ? ` · read ${ago((now - x.t) * 1000)}` : ''}`;
+        const fold = foldPart('laptop-stats', false, 'More stats: CPU, GPU, memory, disk, network', head, true);
+        const card = el('div', 'card stats');
+        const controls = el('div', 'controls');
+        controls.style.display = 'flex'; controls.style.gap = '6px'; controls.style.justifyContent = 'flex-end';
+        for (const h of [1, 6, 24]) {
+          const b = el('button', 'chip range', `${h} h`);
+          b.setAttribute('aria-pressed', tSpan === h ? 'true' : 'false');
+          b.addEventListener('click', async () => { tSpan = h; setPref('temp:hours', h); tPicked = null; bPicked = null; sPicked = null; await loadTemp(); redraw(); });
+          controls.append(b);
+        }
+        card.append(controls);
+        const samples = statsData?.samples ?? [];
+        const snow = statsData?.now ?? now;
+        const from = snow - tSpan * 3600;
+        const step = Math.max(60, Math.ceil((tSpan * 3600) / 240 / 60) * 60);
+        const line = el('p', 'picked-line soft', sPicked ?? 'Hover or tap a column to see the time and the numbers.');
+        // One column per minute (on the longer spans several minutes share a column: their average).
+        const columns = (get) => {
+          const sums = new Map();
+          for (const s of samples) {
+            const v = get(s);
+            if (v == null) continue;
+            const k = Math.floor((s.t - from) / step);
+            const was = sums.get(k) ?? { n: 0, v: 0, t: s.t };
+            sums.set(k, { n: was.n + 1, v: was.v + v, t: s.t });
+          }
+          return [...sums].map(([k, a]) => [k, a.v / a.n, a.t]);
+        };
+        const column = (graph, k, h, cls, text) => {
+          const b = el('b', cls);
+          b.style.left = `${((k * step) / (snow - from)) * 100}%`;
+          b.style.width = `${Math.max(0.3, (step / (snow - from)) * 100)}%`;
+          b.style.height = `${h}%`;
+          b.title = text;
+          const show = () => { sPicked = text; line.textContent = text; };
+          b.addEventListener('pointerenter', show);
+          b.addEventListener('click', show);
+          graph.append(b);
+        };
+        const avg = step > 60 ? ` (average of ${step / 60} min)` : '';
+        // A percentage from 0 to 100.
+        const percentRow = (cls, name, nowText, get, unit) => {
+          const row = el('div', `stat ${cls}`);
+          const h = el('div', 'head');
+          h.append(el('b', '', name), el('span', '', nowText));
+          const g = el('div', 'sgraph');
+          for (const [k, v, t] of columns(get)) column(g, k, Math.max(3, Math.min(100, v)), '', `${clock(new Date(t * 1000))} · ${name} ${unit(v)}${avg}`);
+          row.append(h, g);
+          return row;
+        };
+        // Two speeds, one up from the middle and one down, scaled to the highest in the span.
+        const twoRow = (cls, name, nowText, getUp, getDown, upWord, downWord) => {
+          const row = el('div', `stat ${cls}`);
+          const up = columns(getUp), down = columns(getDown);
+          const max = Math.max(1, ...up.map((c) => c[1]), ...down.map((c) => c[1]));
+          const h = el('div', 'head');
+          h.append(el('b', '', name), el('span', '', nowText));
+          const g = el('div', 'sgraph two');
+          for (const [k, v, t] of up) column(g, k, Math.max(1, (v / max) * 50), 'up', `${clock(new Date(t * 1000))} · ${name} ${bytes(v, true)} ${upWord}${avg}`);
+          for (const [k, v, t] of down) column(g, k, Math.max(1, (v / max) * 50), 'down', `${clock(new Date(t * 1000))} · ${name} ${bytes(v, true)} ${downWord}${avg}`);
+          row.append(h, g, el('p', 'soft', `Top half ${upWord}, bottom half ${downWord} · highest ${bytes(max, true)}`));
+          return row;
+        };
+        const x0 = x ?? {};
+        card.append(percentRow('cpu', 'CPU', `${pct(x0.cpu)}${x0.cpu_user != null ? ` · user ${pct(x0.cpu_user)}, system ${pct(x0.cpu_system)}` : ''}`, (s) => s.cpu, pct));
+        card.append(percentRow('gpu', 'GPU', pct(x0.gpu), (s) => s.gpu, pct));
+        const memNow = x0.mem_used != null ? `${bytes(x0.mem_used)} of ${bytes(x0.mem_total)} · pressure ${pct(x0.mem_pressure)}${x0.mem_level ? `, ${x0.mem_level}` : ''}${x0.swap ? ` · swap ${bytes(x0.swap)}` : ''}` : '–';
+        card.append(percentRow('mem', 'Memory', memNow, (s) => (s.mem_used != null && s.mem_total ? (100 * s.mem_used) / s.mem_total : null),
+          (v) => `${Math.round(v)}% used`));
+        card.append(twoRow('disk', 'Disk', `${bytes(x0.disk_read, true)} read · ${bytes(x0.disk_write, true)} written`, (s) => s.disk_read, (s) => s.disk_write, 'read', 'written'));
+        card.append(twoRow('net', 'Network', `${bytes(x0.net_in, true)} in · ${bytes(x0.net_out, true)} out`, (s) => s.net_in, (s) => s.net_out, 'in', 'out'));
+        const axis = el('div', 'axis');
+        const ticks = el('div');
+        for (const f of [0, 0.5, 1]) ticks.append(el('span', '', f === 1 ? 'now' : clock(new Date((from + f * (snow - from)) * 1000))));
+        axis.append(ticks);
+        card.append(axis, line);
+        card.append(el('p', 'soft', x ? `Averages over the last minute, like Activity Monitor's totals · read ${clock(new Date(x.t * 1000))}` : 'Nothing written down yet; the routine reads these once a minute and keeps a day.'));
+        fold.append(card);
+        return fold;
+      }
+      let lastDraw = null;
+      function redraw() { if (lastDraw) { last = ''; tick(); } }
+
+      function draw(s, readAt, usage, routines) {
+        lastDraw = true;
+        roadmapNow = s;
+        app.replaceChildren();
+
+        const top = el('header', 'head top');
+        const name = el('div', 'name');
+        name.append(el('strong', '', 'Jarvis VA'), el('span', '', 'Build status'));
+        // H37: the battery in the top line, so it shows without scrolling or opening anything.
+        const bt = routines?.battery;
+        if (bt) {
+          const bOld = (routines.now ?? Date.now() / 1000) - bt.t > 180;
+          const pill = el('span', `batpill ${bOld ? 'old' : bt.lvl}`, `Battery ${bt.pct}%${bt.charging ? ' · charging' : bt.plugged ? ' · on the charger' : ''}${bOld ? ' · old reading' : ''}`);
+          pill.title = bt.words ?? '';
+          name.append(pill);
+        }
+        top.append(name, el('span', 'soft', `Last read ${readAt} · refreshes every 3 seconds`));
+        app.append(top);
+
+        const now = el('section', 'now');
+        const banner = el('div', `banner ${s.state ?? 'PROBLEM'}`);
+        banner.append(el('h1', '', s.state ? WORD[s.state] : 'Cannot read the status'));
+        if (s.headline) {
+          // "Now: t5 · …" reads better in the band as a sentence of its own.
+          const line = s.headline.replace(/^(Now|Next):\s*/, '');
+          banner.append(el('p', '', line.charAt(0).toUpperCase() + line.slice(1)));
+        }
+        now.append(banner);
+        if (s.problems.length) {
+          const ul = el('ul', 'problems');
+          ul.append(el('p', '', 'The status block at the top of the roadmap is not in the expected shape:'));
+          for (const p of s.problems) ul.append(el('li', '', p));
+          now.append(ul);
+        }
+        if (s.notes.length) {
+          const notes = el('dl', 'notes');
+          for (const n of s.notes) notes.append(el('dt', '', n.label), el('dd', '', n.text.charAt(0).toUpperCase() + n.text.slice(1)));
+          now.append(notes);
+        }
+        app.append(now);
+
+        app.append(drawRoutines(routines));
+        app.append(drawTemperature(routines));
+        app.append(drawUsage(usage, s.usageLimit, s.weeklyLimit));
+
+        if (s.current) {
+          const box = el('section');
+          const phase = s.phases.find((p) => p.id === s.current.phase);
+          box.append(el('h2', '', `Current phase: ${s.current.phase}${phase ? ` · ${phase.title}` : ''}`));
+          const card = el('div', 'card');
+          for (const st of s.current.steps) {
+            const row = el('div', `row ${st.status}`);
+            const mark = el('span', 'mark');
+            mark.append(el('i'), document.createTextNode(STEP_WORD[st.status]));
+            row.append(el('span', '', st.name), mark);
+            card.append(row);
+          }
+          box.append(card);
+          app.append(box);
+        }
+
+        // Phase L: what the routine runs and what waits, in the order it will run.
+        // H16: split into running, waiting and finished, each with its own arrow; finished starts folded.
+        const q = s.queue;
+        if (q && (q.jobs.length || !q.on)) {
+          const box = el('section');
+          const group = (j) => (/^(running|stop asked)/.test(j.state) ? 'running' : /^(ready|held)/.test(j.state) ? 'waiting' : 'finished');
+          const of = (g) => q.jobs.filter((j) => group(j) === g);
+          const counts = q.on ? `${of('running').length} running · ${of('waiting').length} waiting · the routine looks every minute` : 'The routine is off';
+          const fold = foldPart('jobs', true, 'Jobs from calls', counts);
+          const parts = el('div', 'parts');
+          for (const [g, title, st, start] of [['running', 'Running', 'doing', true], ['waiting', 'Waiting', 'todo', true], ['finished', 'Finished', 'done', false]]) {
+            // H39: waiting jobs keep their place in line (the order they will run), not their number.
+            const jobs = g === 'waiting' ? of(g).sort((a, b) => (a.place ?? 0) - (b.place ?? 0)) : of(g).sort((a, b) => (g === 'finished' ? b.n - a.n : a.n - b.n));
+            const part = foldPart(`jobs-${g}`, start, title, `${jobs.length}`, true);
+            const card = el('div', 'card');
+            for (const j of jobs) {
+              const row = el('div', `row ${st}`);
+              const mark = el('span', 'mark');
+              mark.append(el('i'), document.createTextNode(j.state.charAt(0).toUpperCase() + j.state.slice(1)));
+              // H14: a long job text shows three lines; a tap shows all of it.
+              const text = el('span', `job${shownJobs.has(j.n) ? ' all' : ''}`, `${j.place ? `${j.place}. ` : ''}Job ${j.n} · ${j.text}`);
+              text.addEventListener('click', () => {
+                text.classList.toggle('all');
+                if (text.classList.contains('all')) shownJobs.add(j.n);
+                else shownJobs.delete(j.n);
+              });
+              row.append(text, mark);
+              card.append(row);
+            }
+            if (!jobs.length) card.append(el('div', 'row soft', g === 'finished' ? 'None kept.' : `Nothing ${g}.`));
+            part.append(card);
+            parts.append(part);
+          }
+          fold.append(parts);
+          box.append(fold);
+          app.append(box);
+        }
+
+        // H15: Recent activity folds open and closed, like the job list.
+        if (s.log.length) {
+          const box = el('section');
+          const fold = foldPart('log', true, 'Recent activity', `${s.log.length} latest`);
+          const ul = el('ul', 'log');
+          for (const entry of s.log) {
+            const li = el('li');
+            li.append(el('time', '', entry.time), el('span', '', entry.text));
+            ul.append(li);
+          }
+          fold.append(ul);
+          box.append(fold);
+          app.append(box);
+        }
+
+        // H16: the roadmap split into what's not finished and what is, each with its own arrow;
+        // finished starts folded. Inside a phase, its finished steps fold away the same way.
+        if (s.phases.length) {
+          const box = el('section');
+          box.append(el('h2', '', 'Roadmap'));
+          // The phase being worked on starts open; the rest open on a click.
+          if (s.current && s.current.phase !== openedCurrent) {
+            openedCurrent = s.current.phase;
+            opened.add(openedCurrent);
+          }
+          const complete = (p) => p.steps.length > 0 && p.steps.every((x) => x.status === 'done');
+          const stepItem = (st) => {
+            const li = el('li', st.status);
+            const text = el('div');
+            text.append(el('strong', '', `${st.name} · ${STEP_WORD[st.status]}`));
+            const what = st.details.find((d) => /what/i.test(d.label)) ?? st.details[0];
+            if (what) text.append(inline(el('p'), what.text));
+            const rest = st.details.filter((d) => d !== what);
+            if (rest.length) text.append(inline(el('p', 'soft'), rest.map((d) => `${d.label}: ${d.text}`).join(' · ')));
+            li.append(el('i'), text);
+            return li;
+          };
+          const phaseRow = (p) => {
+            const done = p.steps.filter((x) => x.status === 'done').length;
+            const fold = el('details');
+            fold.open = opened.has(p.id);
+            fold.addEventListener('toggle', () => {
+              if (fold.open) opened.add(p.id);
+              else opened.delete(p.id);
+            });
+            const summary = el('summary');
+            const row = el('div', `phase${s.current && s.current.phase === p.id ? ' now' : ''}`);
+            const progress = el('div', 'bar');
+            const fill = el('div');
+            fill.style.width = `${p.steps.length ? (done / p.steps.length) * 100 : 0}%`;
+            progress.append(fill);
+            row.append(chevron(), el('span', 'id', p.id), el('span', 'title', p.title), progress, el('span', 'count', `${done} of ${p.steps.length} done`));
+            summary.append(row);
+            const detail = el('div', 'detail');
+            if (p.target) detail.append(el('p', 'soft', `Becomes ${p.target}`));
+            const open = p.steps.filter((x) => x.status !== 'done');
+            const finished = p.steps.filter((x) => x.status === 'done');
+            if (open.length) {
+              const steps = el('ul', 'substeps');
+              for (const st of open) steps.append(stepItem(st));
+              detail.append(steps);
+            }
+            if (finished.length && open.length) {
+              const part = foldPart(`steps-done-${p.id}`, false, 'Finished steps', `${finished.length}`, true);
+              const steps = el('ul', 'substeps');
+              for (const st of finished) steps.append(stepItem(st));
+              part.append(steps);
+              detail.append(part);
+            } else if (finished.length) {
+              const steps = el('ul', 'substeps');
+              for (const st of finished) steps.append(stepItem(st));
+              detail.append(steps);
+            }
+            if (p.body.length) detail.append(prose(p.body));
+            fold.append(summary, detail);
+            return fold;
+          };
+          for (const [key, title, list, start] of [
+            ['roadmap-open', 'Not finished', s.phases.filter((p) => !complete(p)), true],
+            ['roadmap-done', 'Finished', s.phases.filter(complete), false],
+          ]) {
+            const part = foldPart(key, start, title, `${list.length} ${list.length === 1 ? 'phase' : 'phases'} · click a phase to read its steps`, true);
+            const card = el('div', 'card');
+            for (const p of list) card.append(phaseRow(p));
+            if (!list.length) card.append(el('div', 'row soft', 'None.'));
+            part.append(card);
+            box.append(part);
+          }
+          app.append(box);
+        }
+
+        const foot = el('footer', 'head soft');
+        foot.append(el('span', '', s.updated), el('span', '', 'Read from the Jarvis VA roadmap'));
+        app.append(foot);
+        document.title = `${s.state ? WORD[s.state] : 'Status'} · Jarvis VA`;
+      }
+
+      async function tick() {
+        try {
+          const res = await fetch(`./roadmap.md?t=${Date.now()}`, { cache: 'no-store' });
+          if (!res.ok) throw new Error(String(res.status));
+          const text = await res.text();
+          // An older status server has no usage to give: the page then shows the roadmap alone.
+          const usageText = await fetch(`./usage.json?t=${Date.now()}`, { cache: 'no-store' })
+            .then((r) => (r.ok ? r.text() : 'null'))
+            .catch(() => 'null');
+          const routinesText = await fetch(`./routines.json?t=${Date.now()}`, { cache: 'no-store' })
+            .then((r) => (r.ok ? r.text() : 'null'))
+            .catch(() => 'null');
+          // Also once a minute, so "read 4 min ago" and "resets in" stay true.
+          let routines = null;
+          try { routines = JSON.parse(routinesText); } catch { routines = null; }
+          const lines = routines ? JSON.stringify([routines.routines, routines.incidents, routines.temperature, routines.battery, routines.stats, routines.lidsleep]) : '';
+          const key = `${text}\n${usageText}\n${lines}\n${Math.floor(Date.now() / 60000)}`;
+          // H23: the graph's history, once a minute (and when the time span or a routine is switched).
+          if (key !== last) { await loadUptime(); await loadTemp(); }
+          if (key !== last) {
+            last = key;
+            let usage = null;
+            try { usage = JSON.parse(usageText); } catch { usage = null; }
+            const y = window.scrollY;
+            draw(parseRoadmap(text), new Date().toLocaleTimeString('en-GB'), usage, routines);
+            window.scrollTo(0, y);
+          }
+        } catch {
+          last = '';
+          app.replaceChildren(el('p', '', 'The status server is not answering. Start it with: node "Jarvis VA/status/server.mjs"'));
+        }
+      }
+      tick();
+      setInterval(tick, 3000);
+    </script>
+  </body>
+</html>

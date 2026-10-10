@@ -1,0 +1,419 @@
+"""Pipecat's view of the brain: an LLM service that answers with the Claude session.
+
+It behaves like Pipecat's own LLM services (see pipecat/services/anthropic/llm.py in
+1.12.0): on each LLMContextFrame from the user aggregator it pushes
+LLMFullResponseStartFrame, then LLMTextFrames as the reply streams in, then
+LLMFullResponseEndFrame. The TTS service turns the text into speech sentence by sentence,
+so the voice starts at the first full sentence.
+
+Interruptions: when the user starts talking, the user aggregator sends an InterruptionFrame.
+Pipecat cancels this service's running task (the one in _process_context); the brain's
+ask() generator is closed in the `finally`, which interrupts the reply in the CLI and drops
+the rest of it (a running tool call too). The TTS and the output drop the audio they
+still had, fillers included.
+
+Memory lives in the Claude session, not in Pipecat's context: each turn sends only the
+new words from the user, with short notes from the call system in square brackets when
+needed (he cut in; he answered a yes/no question).
+
+A3 adds, all optional (the A2 test runs without them):
+- fillers (fillers.py): one per wait, when Claude is quiet for a while;
+- the yes/no answer to a permission question (policy.py);
+- the transcript (transcript.py).
+"""
+from __future__ import annotations
+
+import asyncio
+import re
+import time
+
+from loguru import logger
+
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    CancelFrame,
+    EndFrame,
+    Frame,
+    InterruptionFrame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    StartFrame,
+)
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.llm_service import LLMService
+from pipecat.services.settings import LLMSettings
+
+import config
+from brain import ClaudeBrain, ToolStarted
+
+
+class ClaudeSessionLLMService(LLMService):
+    def __init__(
+        self,
+        brain: ClaudeBrain,
+        *,
+        stop_brain_on_end: bool = True,
+        fillers=None,  # fillers.FillerPlayer
+        policy=None,  # policy.Policy
+        transcript=None,  # transcript.CallTranscript
+        **kwargs,
+    ):
+        super().__init__(
+            settings=LLMSettings(
+                model=brain.model,
+                system_instruction=None,  # lives in the Claude session
+                temperature=None,
+                max_tokens=None,
+                top_p=None,
+                top_k=None,
+                frequency_penalty=None,
+                presence_penalty=None,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+            ),
+            **kwargs,
+        )
+        self.brain = brain
+        self.fillers = fillers
+        self.policy = policy
+        self.transcript = transcript
+        self._stop_brain_on_end = stop_brain_on_end
+        self._bot_speaking = False
+        self._replying = False
+        self._cut_off = False
+        self._cut_reply = ""  # the reply text that was running when he cut in
+        self._worked_on = False  # he cut in while Claude was still working (a tool, thinking)
+        self._last_sent_block = ""  # the trailing user words already sent to Claude
+        self._typed: list[str] = []  # H18: messages he typed on the call page, not yet answered
+        self._cancel_asked = False  # H31: he tapped Cancel; the interruption that follows isn't a cut-in
+        self._cancel_note = ""  # H31: told to Claude with the next turn
+        self.on_cancellable = None  # H31: told True/False when Cancel may be tapped (the call page)
+        self._cancellable = False
+        self._late_cancel: str | None = None  # H38: the Cancel button's line, waiting to go in as his turn
+        # For tests and logs: what happened in each turn.
+        self.turns: list[dict] = []
+
+    def mark_typed(self, text: str) -> None:
+        """H18: the next turn that holds this text was typed, not spoken."""
+        self._typed.append(text)
+
+    # -- H31: cancel what he just said, before she answers ------------------
+
+    @property
+    def cancellable(self) -> bool:
+        """A turn is running and Claude hasn't said a word of the reply yet."""
+        return bool(self._replying and self.turns and not self.turns[-1]["reply"].strip()
+                    and not self.turns[-1].get("cancelled"))
+
+    def _tell_cancellable(self, on: bool) -> None:
+        if on == self._cancellable:
+            return
+        self._cancellable = on
+        if self.on_cancellable:
+            try:
+                self.on_cancellable(on)
+            except Exception:
+                pass
+
+    def request_cancel(self) -> bool:
+        """H31: drop the running turn before she answers. The caller then sends an interruption,
+        which stops the reply in the CLI; she says nothing. The transcript marks his line as
+        cancelled, and Claude is told with the next turn (the CLI already has the words)."""
+        if not self.cancellable:
+            return False
+        turn = self.turns[-1]
+        turn["cancelled"] = True
+        self._cancel_asked = True
+        self._tell_cancellable(False)
+        words = " ".join(turn["words"].split())
+        self._cancel_note = (
+            f'[Call system: {config.USER} cancelled what he said ("{words[:300]}") before you answered. '
+            "Don't answer it or act on it. Anything you had started for it was stopped.]"
+        )
+        if self.transcript:
+            self.transcript.cancel_last()
+        logger.info("The user cancelled their turn before Jarvis answered")
+        return True
+
+    # -- H38: Cancel tapped after she started answering ----------------------
+
+    CANCEL_LINE = "Cancel last message"
+
+    def late_cancel_target(self) -> dict | None:
+        """The turn a late Cancel takes back: his last turn, if it wasn't cancelled already and
+        wasn't itself a Cancel-button line. None when there is nothing to take back."""
+        if not self.turns:
+            return None
+        turn = self.turns[-1]
+        if turn.get("cancelled") or turn.get("button"):
+            return None
+        return turn
+
+    def request_late_cancel(self) -> str | None:
+        """H38: mark his last turn as taken back. Returns the line to send as his next turn (the
+        caller sends it, typed, which also stops her if she's still talking), or None."""
+        turn = self.late_cancel_target()
+        if turn is None:
+            return None
+        turn["cancelled"] = True
+        words = " ".join(turn["words"].split())
+        self._late_cancel = self.CANCEL_LINE
+        self._cancel_note = (
+            f'[Call system: {config.USER} tapped the Cancel button on the call page after you had started answering. '
+            f'He takes back what he said before ("{words[:300]}"). Stop: don\'t answer it any further and '
+            "don't act on it. Anything you had started for it was stopped. Reply with only a very short okay, "
+            "a few words at the most.]"
+        )
+        if self.transcript:
+            self.transcript.cancel_last()
+        logger.info("The user cancelled their last turn after Jarvis had started answering (Cancel button)")
+        return self.CANCEL_LINE
+
+    # -- lifecycle -----------------------------------------------------------
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        await self.brain.start()  # usually already open (bot.py starts it early)
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        if self._stop_brain_on_end:
+            await self.brain.stop()
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        if self._stop_brain_on_end:
+            await self.brain.stop()
+
+    # -- frames --------------------------------------------------------------
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, InterruptionFrame):
+            logger.debug(f"Interruption reached the Claude service (replying={self._replying}, cancel_asked={self._cancel_asked})")
+        if isinstance(frame, InterruptionFrame) and self._cancel_asked:
+            pass  # H31: his Cancel, not a cut-in: nothing to tell Claude about what he heard
+        elif isinstance(frame, InterruptionFrame) and self._replying and self.turns:
+            # Checked before super(), which cancels the running reply.
+            self._cut_off = True
+            self._cut_reply = self.turns[-1]["reply"]
+            self._worked_on = bool(self.turns[-1]["tools"]) or not self._cut_reply
+        elif isinstance(frame, InterruptionFrame) and self._bot_speaking:
+            self._cut_off = True  # the reply was written, but he talked over its audio
+            self._cut_reply = self.turns[-1]["reply"] if self.turns else ""
+            self._worked_on = False
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, LLMContextFrame):
+            await self._process_context(frame.context)
+            return
+
+        if isinstance(frame, InterruptionFrame):
+            # In case a reply is still being drained or was mid-flight outside our task.
+            self.brain.cancel_turn()
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+
+        await self.push_frame(frame, direction)
+
+    async def _process_context(self, context: LLMContext):
+        words, notes, cut_in = self._new_user_text(context)
+        if not words:
+            logger.debug("No new words from the user in this turn; not answering")
+            return
+        button = bool(self._late_cancel) and self._late_cancel in words
+        if button:
+            self._late_cancel = None
+        typed = any(t in words for t in self._typed)
+        if typed:
+            self._typed.clear()
+        if button:
+            typed = False  # the Cancel button's own line, marked as such instead
+        elif typed:
+            notes.append(f"[{config.USER} typed this in the chat on the call page instead of saying it. "
+                         "Answer out loud as usual.]")
+        if self._cancel_note:
+            notes.insert(0, self._cancel_note)
+            self._cancel_note = ""
+        if self.transcript:
+            self.transcript.user(words, cut_in=cut_in, typed=typed, button=button)
+        if self.policy and self.policy.has_pending():
+            yes, questions = self.policy.answer(words)
+            asked = " ".join(questions)
+            if yes:
+                notes.append(
+                    f"[Call system: {config.USER} said yes to your question ({asked}). Approved once: "
+                    "make exactly the same call again now.]"
+                )
+            else:
+                notes.append(
+                    f"[Call system: {config.USER} did not give a clear yes to your question ({asked}), "
+                    "so it is not approved and must not be done. Don't retry it unless he asks again; "
+                    "just respond to what he said.]"
+                )
+            if self.transcript:
+                self.transcript.note((f"{config.USER} said yes to: " if yes else "not approved: ") + asked)
+        text = "\n".join(notes + [words])
+
+        turn = {
+            "sent": text, "words": words, "reply": "", "first_text_s": None, "interrupted": False,
+            "tools": [], "fillers": [], "t0": time.perf_counter(), "button": button,
+        }
+        self.turns.append(turn)
+        t0 = turn["t0"]
+        self._replying = True
+        self._cancel_asked = False
+        if not button:
+            self._tell_cancellable(True)  # H38: the Cancel button's own line isn't offered for cancelling
+        reply = self.brain.ask(text)
+        watch = self.create_task(self._watch_for_fillers(turn), "filler-watch") if self.fillers else None
+        open_text = False  # text pushed since the last response start (for flushing at a tool)
+        try:
+            await self.push_frame(LLMFullResponseStartFrame())
+            await self.start_processing_metrics()
+            await self.start_ttfb_metrics()
+            async for piece in reply:
+                if isinstance(piece, ToolStarted):
+                    turn["tools"].append((time.perf_counter() - t0, piece.name))
+                    turn["tool_pending"] = True
+                    turn["tool_kind"] = config.tool_kind(piece.name)
+                    if open_text:
+                        # Say what came before the tool now, instead of holding the last
+                        # sentence until the tool is done (the voice waits for more text
+                        # to be sure a sentence ended).
+                        await self.push_frame(LLMFullResponseEndFrame())
+                        await self.push_frame(LLMFullResponseStartFrame())
+                        open_text = False
+                    continue
+                if turn["first_text_s"] is None:
+                    turn["first_text_s"] = time.perf_counter() - t0
+                    await self.stop_ttfb_metrics()
+                if piece.strip():
+                    self._tell_cancellable(False)  # H31: she has started answering
+                if turn["reply"] and not turn["reply"][-1].isspace() and piece and not piece[0].isspace() and turn.get("tool_pending") is not None:
+                    piece = " " + piece  # a new message after a tool: keep the words apart
+                turn["reply"] += piece
+                turn["tool_pending"] = None
+                turn["last_text"] = time.perf_counter()
+                if piece.strip():
+                    open_text = True
+                await self._push_llm_text(piece)
+        except asyncio.CancelledError:
+            turn["interrupted"] = True
+            if not turn.get("cancelled"):
+                logger.info("The user cut in: stopping Claude's reply")
+            raise
+        except Exception as e:
+            await self.push_error(error_msg=f"Claude session error: {e}", exception=e)
+        finally:
+            self._replying = False
+            self._tell_cancellable(False)
+            if turn.get("cancelled"):
+                self._cancel_asked = False
+            if watch:
+                await self.cancel_task(watch)
+            if not turn["interrupted"]:
+                self._last_sent_block = ""  # answered: the next words are all new
+            # Closing the generator interrupts the CLI if the reply wasn't finished.
+            await reply.aclose()
+            if self.policy:
+                self.policy.end_of_turn()
+            if self.transcript and not (turn.get("cancelled") and not turn["reply"].strip()):
+                self.transcript.jarvis(turn["reply"], cut_off=turn["interrupted"])
+            await self.stop_processing_metrics()
+            await self.push_frame(LLMFullResponseEndFrame())
+
+    async def _watch_for_fillers(self, turn: dict):
+        """At most one filler per wait: while Claude is quiet after the user's turn, and
+        while a tool runs after Jarvis went quiet. Ends with the reply."""
+        armed = True
+        t0 = turn["t0"]
+        last_text_seen = None
+        while True:
+            await asyncio.sleep(0.05)
+            now = time.perf_counter()
+            if turn.get("last_text") != last_text_seen:
+                last_text_seen = turn.get("last_text")
+                armed = True  # Jarvis said something: the next wait may get a filler
+            if not armed:
+                continue
+            kind = None
+            if turn["first_text_s"] is None and not turn["tools"]:
+                if now - t0 >= config.FILLER_AFTER_SECS:
+                    kind = "wait"
+            elif turn.get("tool_pending"):
+                since = turn.get("last_text") or t0
+                if self.fillers.silent_for(since) >= config.TOOL_FILLER_SILENCE_SECS:
+                    kind = turn.get("tool_kind") or "tool"
+                elif turn["first_text_s"] is None and now - t0 >= config.FILLER_AFTER_SECS:
+                    kind = turn.get("tool_kind") or "wait"  # straight to a tool, nothing said yet
+            if kind:
+                said = await self.fillers.say(kind)
+                if said:
+                    turn["fillers"].append((time.perf_counter() - t0, said))
+                    armed = False
+
+    def _new_user_text(self, context: LLMContext) -> tuple[str, list[str], bool]:
+        """The user's words since the last reply; call-system notes if he cut that reply
+        off; and whether he did."""
+        messages = context.get_messages()
+        user_parts: list[str] = []
+        last_assistant = None
+        for msg in reversed(messages):
+            if not isinstance(msg, dict):
+                break
+            role = msg.get("role")
+            if role == "user":
+                user_parts.insert(0, _content_text(msg.get("content")))
+            else:
+                if role == "assistant":
+                    last_assistant = _content_text(msg.get("content"))
+                break
+        text = " ".join(p.strip() for p in user_parts if p and p.strip())
+        # If the previous reply was cut off before Claude said anything, the aggregator
+        # keeps those words and adds the new ones; Claude already has the first part.
+        block = text
+        if self._last_sent_block and text.startswith(self._last_sent_block):
+            text = text[len(self._last_sent_block):].strip()
+        self._last_sent_block = block
+        notes: list[str] = []
+        cut_in = False
+        if text and self._cut_off:
+            cut_in = True
+            heard = (last_assistant or "").strip()
+            # Pipecat's context only has what was spoken; make sure it's from this reply.
+            if heard and self._cut_reply and _norm(heard)[:40] not in _norm(self._cut_reply):
+                heard = ""
+            if heard:
+                notes.append(f'[{config.USER} cut in while you were talking. He heard you say: "{heard}"]')
+            elif self._worked_on:
+                notes.append(
+                    f"[{config.USER} spoke while you were still working on your last reply, so it was stopped. "
+                    "Anything you had started may not have finished.]"
+                )
+            else:
+                notes.append(f"[{config.USER} cut in before he heard any of your reply.]")
+        if text:
+            self._cut_off = False
+            self._cut_reply = ""
+            self._worked_on = False
+        return text, notes, cut_in
+
+
+def _norm(s: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9 ]", "", s.lower()).split())
+
+
+def _content_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return ""

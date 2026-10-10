@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jarvis</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Jarvis">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#12161e">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+  :root { --bg:#f4f6f8; --fg:#12161e; --muted:#5b6574; --accent:#0f9d8a; --stop:#d9392b; --ring:rgba(15,157,138,.25); --wait:#e5a800; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12161e; --fg:#eef1f5; --muted:#8c97a8; --accent:#2dd4bf; --stop:#ef5a4c; --ring:rgba(45,212,191,.25); --wait:#facc15; }
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  /* H9: iOS enlarges text when the phone turns sideways and doesn't always shrink it back. */
+  html { -webkit-text-size-adjust:100%; text-size-adjust:100%; }
+  html,body { height:100%; margin:0; }
+  body { background:var(--bg); color:var(--fg); font:17px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+         display:flex; flex-direction:column; align-items:center; justify-content:center; gap:28px;
+         padding:env(safe-area-inset-top) 16px env(safe-area-inset-bottom); text-align:center; user-select:none; -webkit-user-select:none; }
+  h1 { margin:0; font-size:34px; font-weight:650; letter-spacing:.5px; }
+  #status { color:var(--muted); min-height:1.4em; max-width:22em; }
+  #btn { width:min(62vw,240px); height:min(62vw,240px); border-radius:50%; border:0; background:var(--accent); color:#04120f;
+         font:650 26px/1 -apple-system,sans-serif; box-shadow:0 0 0 0 var(--ring); cursor:pointer; flex-shrink:0; }
+  #btn.live { background:var(--stop); color:#fff; animation:pulse 2s infinite; }
+  #btn.busy { opacity:.6; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 var(--ring)} 70%{box-shadow:0 0 0 28px transparent} 100%{box-shadow:0 0 0 0 transparent} }
+  #modes { display:flex; border:2px solid var(--muted); border-radius:999px; padding:3px; gap:3px; }
+  #modes.hide { visibility:hidden; }
+  #modes button { border:0; border-radius:999px; padding:10px 22px; background:transparent; color:var(--fg); font:600 17px/1 -apple-system,sans-serif; cursor:pointer; }
+  #modes button.on { background:var(--fg); color:var(--bg); }
+  #modehint { color:var(--muted); font-size:14px; margin-top:-18px; min-height:1.2em; }
+  #mute { display:none; min-width:150px; padding:14px 22px; border-radius:999px; border:2px solid var(--muted); background:transparent; color:var(--fg);
+          font:600 18px/1 -apple-system,sans-serif; cursor:pointer; }
+  #mute.show { display:inline-block; }
+  #mute.on { background:var(--fg); color:var(--bg); border-color:var(--fg); }
+  /* H5: held down = push to talk. No long-press menu or text selection on the phone. */
+  #mute { touch-action:none; -webkit-touch-callout:none; }
+  #mute.talk { background:var(--accent); color:#04120f; border-color:var(--accent); }
+  /* H11: let go, and the button stays yellow until the last words are text. */
+  #mute.transcribing { background:var(--wait); color:#1a1300; border-color:var(--wait); }
+  /* H31: Cancel, while Jarvis thinks about what he just said and before she answers. Its place is kept
+     during a call, so the buttons don't jump when it shows. */
+  #cancel { display:none; min-width:150px; padding:12px 22px; border-radius:999px; border:2px solid var(--stop); background:transparent;
+            color:var(--stop); font:600 17px/1 -apple-system,sans-serif; cursor:pointer; margin-top:-14px; }
+  #cancel.live { display:inline-block; visibility:hidden; }
+  #cancel.live.show { visibility:visible; }
+  #chatlog .me.cancelled { opacity:.55; text-decoration:line-through; }
+  #chatlog .me.cancelled::after { content:" · cancelled"; text-decoration:none; display:inline-block; margin-left:4px; font-size:13px; }
+  /* H9: the start screen stays calm. Free, the voice, the waiting lines and the thinking sound
+     sit in a Settings sheet that slides up from the bottom. */
+  #setbtn { font:600 15px/1 -apple-system,sans-serif; color:var(--muted); background:transparent; border:0; padding:10px 14px; cursor:pointer; margin-top:-14px; }
+  #setbtn.hide { display:none; }
+  #setbtn svg { width:16px; height:16px; vertical-align:-3px; margin-right:6px; }
+  #freetag { display:none; font:700 13px/1 -apple-system,sans-serif; letter-spacing:.4px; color:#04120f; background:var(--accent); border-radius:999px; padding:5px 10px; margin-top:-18px; }
+  #freetag.show { display:inline-block; }
+  #shade { position:fixed; inset:0; z-index:29; background:rgba(0,0,0,.35); display:none; }
+  #shade.open { display:block; }
+  #settings { position:fixed; left:0; right:0; bottom:0; z-index:30; background:var(--bg); border-radius:18px 18px 0 0;
+              box-shadow:0 -8px 24px rgba(0,0,0,.25); padding:18px 16px calc(18px + env(safe-area-inset-bottom));
+              display:none; flex-direction:column; gap:6px; text-align:left; max-width:520px; margin:0 auto; }
+  #settings.open { display:flex; }
+  #settings h2 { margin:0 0 6px; font-size:17px; font-weight:650; text-align:center; }
+  #settings .row { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px 2px; border-bottom:1px solid var(--ring); }
+  #settings .row:last-of-type { border-bottom:0; }
+  #settings .row span { font:600 16px/1.25 -apple-system,sans-serif; }
+  #settings .row small { display:block; font-weight:400; font-size:13px; color:var(--muted); margin-top:2px; }
+  .sw { flex-shrink:0; min-width:64px; padding:9px 14px; border-radius:999px; border:2px solid var(--muted); background:transparent;
+        color:var(--fg); font:600 15px/1 -apple-system,sans-serif; cursor:pointer; }
+  .sw.on { background:var(--accent); color:#04120f; border-color:var(--accent); }
+  #voice { flex-shrink:0; font:600 15px/1 -apple-system,sans-serif; color:var(--fg); background:transparent; border:2px solid var(--muted); border-radius:999px; padding:8px 12px; }
+  #setdone { margin-top:8px; padding:14px; border-radius:999px; border:0; background:var(--fg); color:var(--bg); font:600 17px/1 -apple-system,sans-serif; cursor:pointer; }
+  /* H3: what Jarvis is doing. Hidden outside a call. */
+  #orbwrap { display:none; flex-direction:column; align-items:center; gap:10px; margin:-8px 0; }
+  #orbwrap.show { display:flex; }
+  #orb { width:56px; height:56px; border-radius:50%; border:4px solid var(--accent); background:transparent; transition:background .25s, border-color .25s; }
+  #orblabel { font:600 17px/1.2 -apple-system,sans-serif; color:var(--fg); min-height:1.2em; }
+  #orb.listening { background:var(--accent); opacity:.85; }
+  #orb.hearing { background:var(--accent); animation:hear .5s ease-in-out infinite alternate; }
+  #orb.thinking { border-color:var(--ring); border-top-color:var(--accent); animation:spin .9s linear infinite; }
+  #orb.speaking { background:var(--accent); animation:talk 1s ease-in-out infinite; }
+  /* H11/H12: yellow while Jarvis waits: for the last words to be text, or in case he goes on. */
+  #orb.waiting, #orb.transcribing { background:var(--wait); border-color:var(--wait); animation:hear .8s ease-in-out infinite alternate; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @keyframes talk { 0%,100%{ transform:scale(.85); } 50%{ transform:scale(1.2); } }
+  @keyframes hear { from{ transform:scale(.95); } to{ transform:scale(1.08); } }
+  @media (prefers-reduced-motion: reduce) { #orb.thinking, #orb.speaking, #orb.hearing, #orb.waiting, #orb.transcribing { animation-duration:3s; } }
+  #err { color:var(--stop); max-width:22em; min-height:1.4em; font-size:15px; }
+  /* H6: the chat log. A round bubble button bottom right; tap to open the log, tap again to close. */
+  /* H13: the chat bubble sits a little higher; the status button is below it. */
+  /* H34: both are always there, from the moment the app opens: before, during and after a call. */
+  #chatbtn { position:fixed; right:16px; bottom:calc(84px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
+             border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
+             cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  #chatbtn svg { width:26px; height:26px; }
+  #chatbtn .badge { position:absolute; top:-3px; right:-3px; min-width:20px; height:20px; padding:0 5px; border-radius:999px;
+                    background:var(--accent); color:#04120f; font:700 12px/20px -apple-system,sans-serif; display:none; }
+  #chatbtn .badge.show { display:block; }
+  #chat { position:fixed; left:0; right:0; bottom:0; height:70vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
+          border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column;
+          padding:14px 16px calc(84px + env(safe-area-inset-bottom)); text-align:left; user-select:text; -webkit-user-select:text; }
+  #chat.open { display:flex; }
+  /* H13: the status page inside the app. The button bottom right, always there; tap to open, tap again
+     to close. Read only: the page itself, as on its own phone address. One sheet at a time. */
+  #statbtn { position:fixed; right:16px; bottom:calc(16px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
+             border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
+             cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  #statbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
+  #statbtn svg { width:26px; height:26px; }
+  /* H40: her voice on or off, whatever the phone's volume. Bottom left, always there, like the two
+     buttons on the right; red with a struck-through speaker while her voice is off. */
+  #voicebtn { position:fixed; left:16px; bottom:calc(16px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
+              border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
+              cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  #voicebtn svg { width:26px; height:26px; }
+  #voicebtn .off { display:none; }
+  #voicebtn[aria-pressed="true"] { background:var(--stop); color:#fff; }
+  #voicebtn[aria-pressed="true"] .on { display:none; }
+  #voicebtn[aria-pressed="true"] .off { display:inline; }
+  #statsheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
+               border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column;
+               padding:14px 16px calc(84px + env(safe-area-inset-bottom)); text-align:left; }
+  #statsheet.open { display:flex; }
+  #statsheet h2 { margin:0 0 10px; font-size:15px; font-weight:600; color:var(--muted); text-align:center; }
+  #stathead { position:relative; }
+  #statclose { position:absolute; right:-6px; top:-8px; border:0; background:transparent; color:var(--fg); font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
+  #statframe { flex:1; width:100%; border:0; border-radius:10px; background:#fff; }
+  #chat h2 { margin:0 0 10px; font-size:15px; font-weight:600; color:var(--muted); text-align:center; }
+  /* H10: the chat can always be closed from inside it, not only with the bubble. */
+  #chathead { position:relative; }
+  #chatclose { position:absolute; right:-6px; top:-8px; border:0; background:transparent; color:var(--fg); font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
+  #chatlog { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; display:flex; flex-direction:column; gap:8px; }
+  #chatlog .msg { max-width:82%; padding:9px 13px; border-radius:16px; font-size:16px; line-height:1.35; overflow-wrap:anywhere; }
+  #chatlog .me { align-self:flex-end; background:var(--accent); color:#04120f; border-bottom-right-radius:5px; }
+  #chatlog .jarvis { align-self:flex-start; background:var(--ring); color:var(--fg); border-bottom-left-radius:5px; }
+  #chatlog .filler { align-self:flex-start; color:var(--muted); font-style:italic; font-size:14px; padding:2px 13px; }
+  #chatlog .empty { color:var(--muted); text-align:center; margin:auto; }
+  /* H18: type to Jarvis during a call, when he can't talk. Only shown while on a call. */
+  /* H41: a text field that grows with what he types, up to about six lines, then scrolls inside;
+     Send stays at the bottom next to it. */
+  #typeform { display:none; gap:8px; margin-top:10px; align-items:flex-end; }
+  #typeform.show { display:flex; }
+  #typein { flex:1; min-width:0; font:16px/1.3 -apple-system,sans-serif; color:var(--fg); background:transparent;
+            border:2px solid var(--muted); border-radius:22px; padding:10px 14px; resize:none; overflow-y:hidden;
+            height:46px; max-height:150px; box-sizing:border-box; display:block; }
+  #typein:focus { outline:none; border-color:var(--accent); }
+  #typesend { flex-shrink:0; border:0; border-radius:999px; padding:0 18px; height:46px; background:var(--accent); color:#04120f;
+              font:600 16px/1 -apple-system,sans-serif; cursor:pointer; }
+  #typesend:disabled { opacity:.45; cursor:default; }
+  /* H8: with the chat open during a call, the log sits at the top and the controls stay below it:
+     what Jarvis is doing, the talk button, Hang up. */
+  body.chatting { justify-content:flex-end; gap:14px; padding-bottom:calc(16px + env(safe-area-inset-bottom)); }
+  body.chatting h1, body.chatting #modes, body.chatting #modehint, body.chatting #setbtn,
+  body.chatting #freetag { display:none; }
+  body.chatting #chat, body.chatting #statsheet { top:0; height:auto; bottom:calc(250px + env(safe-area-inset-bottom));
+                        border-top:0; border-bottom:1px solid var(--muted); border-radius:0 0 18px 18px;
+                        padding:calc(14px + env(safe-area-inset-top)) 16px 12px; box-shadow:0 8px 24px rgba(0,0,0,.2); }
+  body.chatting #orbwrap { order:1; flex-direction:row; gap:12px; margin:0; }
+  body.chatting #orb { width:36px; height:36px; border-width:3px; }
+  body.chatting #status { order:2; font-size:14px; min-height:0; }
+  body.chatting #mute { order:3; min-width:200px; padding:18px 26px; }
+  body.chatting #cancel { order:3; margin-top:0; }
+  body.chatting #btn { order:4; width:auto; height:auto; padding:12px 28px; border-radius:999px; font-size:17px; animation:none; }
+  body.chatting #err { order:5; min-height:0; }
+  body.chatting #err:empty { display:none; }
+  /* H24: Hang up asks first, so a mis-tap doesn't end the call. Above every sheet. */
+  /* H38: Cancel asks too, in the same style, when more than three seconds passed since his turn. */
+  #hangshade, #cxshade { position:fixed; inset:0; z-index:39; background:rgba(0,0,0,.45); display:none; }
+  #hangshade.open, #cxshade.open { display:block; }
+  #hangask, #cxask { position:fixed; left:16px; right:16px; top:50%; transform:translateY(-50%); z-index:40; max-width:340px; margin:0 auto;
+             background:var(--bg); border-radius:18px; box-shadow:0 12px 32px rgba(0,0,0,.35); padding:22px 18px 18px;
+             display:none; flex-direction:column; gap:6px; }
+  #hangask.open, #cxask.open { display:flex; }
+  #hangask h2, #cxask h2 { margin:0; font-size:20px; font-weight:650; }
+  #hangask p, #cxask p { margin:0 0 12px; color:var(--muted); font-size:15px; }
+  #hangask .btns, #cxask .btns { display:flex; gap:10px; }
+  #hangask button, #cxask button { flex:1; padding:14px 10px; border-radius:999px; font:600 16px/1 -apple-system,sans-serif; cursor:pointer; }
+  #hangno, #cxno { border:2px solid var(--muted); background:transparent; color:var(--fg); }
+  #hangyes, #cxyes { border:0; background:var(--stop); color:#fff; }
+</style>
+</head>
+<body>
+<h1>Jarvis</h1>
+<div id="modes" role="group" aria-label="Kind of call">
+  <button type="button" data-mode="quick">Quick</button>
+  <button type="button" data-mode="deep">Deep</button>
+</div>
+<div id="modehint"></div>
+<div id="freetag">FREE</div>
+<button id="btn" type="button">Call</button>
+<button id="mute" type="button">Mute</button>
+<button id="cancel" type="button" aria-label="Cancel what I just said">Cancel</button>
+<div id="orbwrap" aria-live="polite"><div id="orb" class="listening"></div><div id="orblabel"></div></div>
+<div id="status">Tap to call</div>
+<button id="setbtn" type="button" aria-expanded="false" aria-controls="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
+<div id="err"></div>
+<div id="shade"></div>
+<div id="settings" role="dialog" aria-label="Settings">
+  <h2>Settings</h2>
+  <div class="row"><span>Free<small>Plain Claude, for testing and showing others: no connectors (no mail, no calendar), none of your files, no notes, nothing saved. Only the web</small></span><button id="free" class="sw" type="button" aria-pressed="false">Off</button></div>
+  <div class="row"><span>Voice</span><select id="voice" aria-label="Voice">
+    <option value="af_heart">Heart</option>
+    <option value="af_bella">Bella</option>
+    <option value="am_michael">Michael</option>
+    <option value="bf_isabella">Isabella (British)</option>
+    <option value="bf_emma">Emma (British)</option>
+    <option value="am_adam">Adam</option>
+    <option value="am_eric">Eric</option>
+    <option value="bm_george">George (British)</option>
+    <option value="bm_fable">Fable (British)</option>
+  </select></div>
+  <div class="row"><span>Waiting lines<small>"Gotcha", "Let me take a look" while she works</small></span><button id="lines" class="sw" type="button" aria-pressed="false">Off</button></div>
+  <div class="row"><span>Thinking sound<small>A soft tick while Jarvis thinks</small></span><button id="sound" class="sw" type="button" aria-pressed="true">On</button></div>
+  <button id="setdone" type="button">Done</button>
+</div>
+<div id="chat" role="dialog" aria-label="Chat log"><div id="chathead"><h2 id="chattitle">What was said</h2><button id="chatclose" type="button">Close</button></div><div id="chatlog"></div>
+  <form id="typeform" autocomplete="off"><textarea id="typein" rows="1" enterkeyhint="send" placeholder="Type to Jarvis" aria-label="Type to Jarvis" maxlength="2000"></textarea><button id="typesend" type="submit" disabled>Send</button></form></div>
+<button id="chatbtn" type="button" aria-label="Chat log" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"/></svg>
+  <span class="badge"></span>
+</button>
+<div id="statsheet" role="dialog" aria-label="Status"><div id="stathead"><h2>Status</h2><button id="statclose" type="button">Close</button></div><iframe id="statframe" title="Jarvis VA status" src="about:blank"></iframe></div>
+<button id="statbtn" type="button" aria-label="Status page" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h10M5 17h6"/></svg>
+</button>
+<button id="voicebtn" type="button" aria-label="Mute Jarvis's voice" aria-pressed="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path class="on" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="off" d="M16 9l6 6M22 9l-6 6"/></svg>
+</button>
+<div id="hangshade"></div>
+<div id="hangask" role="alertdialog" aria-modal="true" aria-labelledby="hangq" aria-describedby="hangd">
+  <h2 id="hangq">Are you sure?</h2><p id="hangd">This ends the call.</p>
+  <div class="btns"><button id="hangno" type="button">Stay on</button><button id="hangyes" type="button">Hang up</button></div>
+</div>
+<div id="cxshade"></div>
+<div id="cxask" role="alertdialog" aria-modal="true" aria-labelledby="cxq" aria-describedby="cxd">
+  <h2 id="cxq">Are you sure you want to cancel?</h2><p id="cxd">What you just said is taken back.</p>
+  <div class="btns"><button id="cxno" type="button">Keep</button><button id="cxyes" type="button">Cancel</button></div>
+</div>
+<audio id="remote" autoplay playsinline></audio>
+<script>
+"use strict";
+const btn = document.getElementById("btn");
+const statusEl = document.getElementById("status");
+const errEl = document.getElementById("err");
+const audioEl = document.getElementById("remote");
+const muteBtn = document.getElementById("mute");
+const modesEl = document.getElementById("modes");
+const modeHint = document.getElementById("modehint");
+// Quick = Sonnet (calendar, list, quick questions). Deep = Opus (sparring, planning, the big picture).
+// Free (H7, H8) is a switch on top of either: a plain Claude with the internet, to show other people:
+// none of his files, no calendar or mail, nothing saved.
+const HINTS = { quick: "Sonnet: calendar, your list, quick questions", deep: "Opus: sparring and bigger planning, a bit slower" };
+// M2: Free said plainly, for showing others (HQ 0.1): no connectors, no files, no notes, only the web.
+const FREE_HINTS = { quick: "Free on Sonnet: plain Claude, no connectors, no files, no notes, only the web. Nothing saved",
+                     deep: "Free on Opus: plain Claude, no connectors, no files, no notes, only the web. Nothing saved" };
+const MODE_NAME = { quick: "Quick", deep: "Deep" };
+function callName() { return MODE_NAME[mode] + (free ? " · Free" : ""); }
+const linesBtn = document.getElementById("lines");
+// H1: the waiting lines ("Gotcha", "Let me take a look") while she works. Off by default; the page remembers the last choice.
+let waitingLines = false;
+try { waitingLines = localStorage.getItem("jarvis-lines") === "on"; } catch (e) {}
+function showLines() {
+  linesBtn.textContent = waitingLines ? "On" : "Off";
+  linesBtn.classList.toggle("on", waitingLines);
+  linesBtn.setAttribute("aria-pressed", String(waitingLines));
+}
+linesBtn.addEventListener("click", () => {
+  if (state !== "idle") return;
+  waitingLines = !waitingLines; try { localStorage.setItem("jarvis-lines", waitingLines ? "on" : "off"); } catch (e) {}
+  showLines();
+});
+const voiceEl = document.getElementById("voice");
+try { const v = localStorage.getItem("jarvis-voice"); if (v && voiceEl.querySelector(`option[value="${v}"]`)) voiceEl.value = v; } catch (e) {}
+voiceEl.addEventListener("change", () => { try { localStorage.setItem("jarvis-voice", voiceEl.value); } catch (e) {} });
+let mode = "quick", free = false;
+try {
+  const m = localStorage.getItem("jarvis-mode");
+  if (m === "deep") mode = m;
+  free = localStorage.getItem("jarvis-free") === "on" || m === "free";  // "free" was a mode before H8
+  if (m === "free") { localStorage.setItem("jarvis-mode", "quick"); localStorage.setItem("jarvis-free", "on"); }
+} catch (e) {}
+const freeBtn = document.getElementById("free"), freeTag = document.getElementById("freetag");
+function showMode() {
+  modesEl.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
+  modeHint.textContent = state === "idle" ? (free ? FREE_HINTS : HINTS)[mode] : "";
+  freeBtn.textContent = free ? "On" : "Off";
+  freeTag.classList.toggle("show", free && state === "idle");
+  freeBtn.classList.toggle("on", free);
+  freeBtn.setAttribute("aria-pressed", String(free));
+}
+freeBtn.addEventListener("click", () => {
+  if (state !== "idle") return;
+  free = !free; try { localStorage.setItem("jarvis-free", free ? "on" : "off"); } catch (e) {}
+  showMode();
+});
+modesEl.addEventListener("click", ev => {
+  const b = ev.target.closest("button"); if (!b || state !== "idle") return;
+  mode = b.dataset.mode; try { localStorage.setItem("jarvis-mode", mode); } catch (e) {}
+  showMode();
+});
+// H9: the Settings sheet (Free, voice, waiting lines, thinking sound), only before a call.
+const setBtn = document.getElementById("setbtn"), setEl = document.getElementById("settings"), shade = document.getElementById("shade");
+function showSettings(open) {
+  setEl.classList.toggle("open", open); shade.classList.toggle("open", open);
+  setBtn.setAttribute("aria-expanded", String(open));
+}
+setBtn.addEventListener("click", () => { if (state === "idle") showSettings(true); });
+document.getElementById("setdone").addEventListener("click", () => showSettings(false));
+shade.addEventListener("click", () => showSettings(false));
+let pc = null, dc = null, stream = null, pingTimer = null, wakeLock = null, state = "idle", muted = false;
+let transcribingBtn = false, transcribingTimer = null;  // H11
+
+// H3: the server tells us what Jarvis is doing: listening (your turn), hearing, thinking, speaking.
+const orbEl = document.getElementById("orb"), orbWrap = document.getElementById("orbwrap"), orbLabel = document.getElementById("orblabel");
+const ORB_TEXT = { listening: "Your turn", hearing: "Listening…", thinking: "Thinking…", speaking: "Speaking",
+                   waiting: "Listening…", transcribing: "Transcribing…" };
+function showOrb(js) {
+  if (!ORB_TEXT[js]) js = "listening";
+  // H11: the yellow talk button goes back to normal once Jarvis has his words.
+  if (transcribingBtn && (js === "thinking" || js === "speaking" || js === "listening")) setTranscribing(false);
+  orbEl.className = js;
+  cancelFollowsOrb(js);  // H38
+  orbLabel.textContent = muted ? "Muted" : (js === "speaking" && voiceOff) ? "Speaking · voice off" : ORB_TEXT[js];  // H40
+  thinkingSound(js === "thinking");
+}
+
+// H4: a soft tick while Jarvis is thinking, so he can hear it without looking. On by default;
+// the page remembers the last choice. The audio is made here in the page (Web Audio), started
+// on the Call tap, because the phone only allows sound after a tap.
+const soundBtn = document.getElementById("sound");
+let soundOn = true, audioCtx = null, tickTimer = null;
+try { soundOn = localStorage.getItem("jarvis-sound") !== "off"; } catch (e) {}
+function showSound() {
+  soundBtn.textContent = soundOn ? "On" : "Off";
+  soundBtn.classList.toggle("on", soundOn);
+  soundBtn.setAttribute("aria-pressed", String(soundOn));
+}
+soundBtn.addEventListener("click", () => {
+  if (state !== "idle") return;
+  soundOn = !soundOn; try { localStorage.setItem("jarvis-sound", soundOn ? "on" : "off"); } catch (e) {}
+  showSound();
+});
+function startAudio() {
+  // H24: also made when the thinking sound is off, for the click on older iPhones.
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  } catch (e) { audioCtx = null; }
+}
+function tick() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime, osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+  osc.type = "sine"; osc.frequency.setValueAtTime(1100, t); osc.frequency.exponentialRampToValueAtTime(700, t + 0.06);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.08, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+  osc.connect(g).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.1);
+}
+function thinkingSound(on) {
+  if (on && soundOn && audioCtx && state === "live") {
+    if (!tickTimer) { tick(); tickTimer = setInterval(tick, 900); }
+  } else if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+}
+function onServerMessage(ev) {
+  try {
+    const m = JSON.parse(ev.data);
+    if (m && m.type === "jarvis-state") showOrb(m.state);
+    else if (m && m.type === "jarvis-chat") addChat(m.who, m.text);
+    else if (m && m.type === "jarvis-cancellable") showCancel(m.on === true);
+    else if (m && m.type === "jarvis-cancelled") markCancelled();
+  } catch (e) {}
+}
+
+// H31: Cancel. The server says when what he just said can still be taken back (her turn has started,
+// she hasn't said a word of the answer yet). A tap then drops it: she doesn't answer, the thinking
+// circle and tick stop at once, and his line in the chat is struck through once the server confirms.
+// H38: the button no longer goes when she starts answering. It stays until his next turn starts (he
+// holds the talk button, starts talking, or sends a typed line), or 20 seconds after she's done
+// (Claude's choice). A later tap makes her stop, and the server sends "Cancel last message" as his
+// turn, marked as from the button. More than three seconds after his turn went out, a tap asks first.
+const cancelBtn = document.getElementById("cancel");
+const CANCEL_ASK_MS = 3000, CANCEL_LINGER_MS = 20000;
+let cancellable = false;          // the server says: she hasn't started answering yet (H31)
+let cancelShown = false, cancelSince = 0, cancelLinger = null;
+function paintCancel() {
+  cancelBtn.className = state === "live" ? (cancelShown ? "live show" : "live") : "";
+}
+function showCancel(on) {
+  cancellable = on && state === "live";
+  if (cancellable) { cancelShown = true; cancelSince = Date.now(); clearTimeout(cancelLinger); cancelLinger = null; }
+  if (state !== "live") hideCancel(); else paintCancel();
+}
+function hideCancel() {
+  cancelShown = false; cancellable = false;
+  clearTimeout(cancelLinger); cancelLinger = null;
+  askCancel(false);
+  paintCancel();
+}
+// H38: what Jarvis does decides how long the button stays: his next turn hides it, and once she's
+// back to "your turn" it goes after 20 seconds (cleared again if she carries on).
+function cancelFollowsOrb(js) {
+  if (!cancelShown) return;
+  if (js === "hearing" || js === "transcribing") { hideCancel(); return; }
+  if (js === "listening" && !cancellable) {
+    if (!cancelLinger) cancelLinger = setTimeout(hideCancel, CANCEL_LINGER_MS);
+  } else if (cancelLinger) { clearTimeout(cancelLinger); cancelLinger = null; }
+}
+function sendCancel() {
+  if (!cancelShown || !dc || dc.readyState !== "open") return;
+  try { dc.send(JSON.stringify({ type: "cancel" })); } catch (e) { return; }
+  const early = cancellable;
+  hideCancel();
+  if (early) showOrb("listening");
+}
+cancelBtn.addEventListener("click", () => {
+  if (!cancelShown) return;
+  if (Date.now() - cancelSince > CANCEL_ASK_MS) askCancel(true);
+  else sendCancel();
+});
+// The question, like Hang up's (H24): Keep (or a tap beside it) closes it; the call goes on while it
+// asks. Its Cancel ignores taps for half a second after it opens, so a double tap can't confirm it.
+const cxAsk = document.getElementById("cxask"), cxShade = document.getElementById("cxshade");
+let cxAskedAt = 0;
+function askCancel(open) {
+  cxAsk.classList.toggle("open", open); cxShade.classList.toggle("open", open);
+  if (open) { cxAskedAt = Date.now(); document.getElementById("cxno").focus(); }
+}
+document.getElementById("cxyes").addEventListener("click", () => {
+  if (Date.now() - cxAskedAt < 500) return;
+  askCancel(false); if (state === "live") sendCancel();
+});
+document.getElementById("cxno").addEventListener("click", () => askCancel(false));
+cxShade.addEventListener("click", () => askCancel(false));
+function markCancelled() {
+  const mine = chatLog.querySelectorAll(".msg.me");
+  if (mine.length) mine[mine.length - 1].classList.add("cancelled");
+}
+
+// H6: the chat log. Every line the server sends (what he said, what Jarvis said, her short
+// waiting lines) is shown as a bubble. Kept on screen until the next call starts; never stored.
+const chatBtn = document.getElementById("chatbtn"), chatEl = document.getElementById("chat"),
+      chatLog = document.getElementById("chatlog"), badge = chatBtn.querySelector(".badge");
+let unread = 0;
+function chatOpen() { return chatEl.classList.contains("open"); }
+function showLayout() { document.body.classList.toggle("chatting", (chatOpen() || statOpen()) && state === "live"); }
+function showBadge() { badge.textContent = unread > 9 ? "9+" : String(unread); badge.classList.toggle("show", unread > 0 && !chatOpen()); }
+function clearChat() {
+  chatLog.innerHTML = '<div class="empty">Nothing said yet</div>';
+  chatTitle.textContent = "What was said";
+  unread = 0; showBadge();
+}
+
+// H34: before any call in this app session, the chat shows the last call's conversation, read
+// from the saved transcripts (read only). Once a call starts, the chat is that call's, as before.
+const chatTitle = document.getElementById("chattitle");
+let calledHere = false, lastCallName = null;
+async function loadLastCall() {
+  if (calledHere || state !== "idle") return;
+  let data = null;
+  try { const r = await fetch("api/last-call", { cache: "no-store" }); if (r.ok) data = await r.json(); } catch (e) {}
+  if (calledHere || state !== "idle" || !data) return;
+  const lines = Array.isArray(data.lines) ? data.lines : [];
+  if (data.name && data.name === lastCallName && chatLog.querySelector(".msg")) return;  // already showing it
+  lastCallName = data.name || null;
+  if (!lines.length) {
+    chatLog.innerHTML = '<div class="empty">No calls yet</div>';
+    chatTitle.textContent = "What was said";
+    return;
+  }
+  chatLog.innerHTML = "";
+  chatTitle.textContent = "Last call · " + data.started;
+  for (const l of lines) {
+    addChat(l.who, l.text, true);
+    if (l.cancelled) markCancelled();
+  }
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+function addChat(who, text, old) {
+  if (!text) return;
+  const empty = chatLog.querySelector(".empty"); if (empty) empty.remove();
+  const atEnd = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+  const div = document.createElement("div");
+  // M5: the user's own lines are anything that isn't Jarvis or a filler ("user", or the older name servers before M5 sent).
+  const mine = who !== "jarvis" && who !== "filler";
+  div.className = "msg " + (mine ? "me" : who);
+  div.textContent = text;
+  chatLog.appendChild(div);
+  if (atEnd || mine) chatLog.scrollTop = chatLog.scrollHeight;
+  if (!chatOpen() && who !== "filler" && !old) { unread++; showBadge(); }
+}
+function showChat(open) {
+  if (open) showStatus(false);  // H13: one sheet at a time
+  if (open) loadLastCall();     // H34: before a call, fresh each time it opens
+  chatEl.classList.toggle("open", open);
+  chatBtn.setAttribute("aria-expanded", String(open));
+  if (open) { unread = 0; chatLog.scrollTop = chatLog.scrollHeight; }
+  showBadge(); showLayout();
+}
+chatBtn.addEventListener("click", () => showChat(!chatOpen()));
+
+// H18: typing to Jarvis during a call. The text goes to the server like something he said;
+// she answers out loud as usual, and both lines come back into the log from the server.
+const typeForm = document.getElementById("typeform"), typeIn = document.getElementById("typein"),
+      typeSend = document.getElementById("typesend");
+function canType() { return state === "live" && dc && dc.readyState === "open"; }
+function showTyping() {
+  typeForm.classList.toggle("show", state === "live");
+  typeSend.disabled = !(canType() && typeIn.value.trim());
+}
+// H41: the box grows downward line by line as he types, so all of it stays readable, up to its
+// max-height (about six lines); after that it scrolls inside. On a phone (a touch screen) Enter is a new
+// line and Send sends; on the computer Enter sends and Shift+Enter is a new line, as before.
+const TYPE_MAX = 150;
+const onPhone = () => matchMedia("(pointer: coarse)").matches;
+function fitTyping() {
+  typeIn.style.height = "auto";
+  const h = Math.min(Math.max(typeIn.scrollHeight + 4, 46), TYPE_MAX);  // + the 2px border on both sides
+  typeIn.style.height = h + "px";
+  typeIn.style.overflowY = typeIn.scrollHeight + 4 > TYPE_MAX ? "auto" : "hidden";
+}
+typeIn.setAttribute("enterkeyhint", onPhone() ? "enter" : "send");
+typeIn.addEventListener("input", () => { fitTyping(); showTyping(); });
+typeIn.addEventListener("keydown", ev => {
+  if (ev.key !== "Enter" || ev.shiftKey || ev.isComposing || onPhone()) return;
+  ev.preventDefault();
+  typeForm.requestSubmit();
+});
+typeForm.addEventListener("submit", ev => {
+  ev.preventDefault();
+  const text = typeIn.value.trim();
+  if (!text || !canType()) return;
+  try { dc.send(JSON.stringify({ type: "typed", text })); } catch (e) { errEl.textContent = "Couldn't send that. Try again."; return; }
+  typeIn.value = ""; fitTyping(); showTyping();
+  hideCancel();  // H38: a new turn of his
+});
+document.getElementById("chatclose").addEventListener("click", () => showChat(false));
+
+// H13: the status page inside the app, read only. On the phone it is the status page's own Tailscale
+// address (port 8444), on this MacBook localhost:4748; it runs apart from the call line, so it keeps
+// showing while the line restarts. Loaded only while open, so it doesn't poll in the background.
+const statBtn = document.getElementById("statbtn"), statEl = document.getElementById("statsheet"),
+      statFrame = document.getElementById("statframe");
+function statusUrl() {
+  const h = location.hostname;
+  return h.endsWith(".ts.net") ? `https://${h}:8444/` : `http://${h === "127.0.0.1" ? "127.0.0.1" : "localhost"}:4748/`;
+}
+function statOpen() { return statEl.classList.contains("open"); }
+function showStatus(open) {
+  if (open && chatOpen()) { chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showBadge(); }
+  statEl.classList.toggle("open", open);
+  statBtn.setAttribute("aria-expanded", String(open));
+  const want = open ? statusUrl() : "about:blank";
+  if (statFrame.getAttribute("src") !== want) statFrame.setAttribute("src", want);
+  showLayout();
+}
+statBtn.addEventListener("click", () => showStatus(!statOpen()));
+document.getElementById("statclose").addEventListener("click", () => showStatus(false));
+
+// H40: her voice off. On the iPhone a page can't set the volume, and starting a call switches the phone
+// to its call sound, which has its own, louder volume; so this silences her completely instead: the
+// audio element is muted and her incoming track switched off. Her greeting, answers and waiting lines
+// are all in that one track; they still come into the chat as text. The page's own sounds (the
+// thinking tick, the click, the low talk sound) don't go through it, so they stay. Works before and
+// during a call; the page remembers the choice on this device.
+const voiceBtn = document.getElementById("voicebtn");
+let voiceOff = false;
+try { voiceOff = localStorage.getItem("jarvis-voice-off") === "on"; } catch (e) {}
+function applyVoice() {
+  audioEl.muted = voiceOff;
+  const s = audioEl.srcObject;
+  if (s && s.getAudioTracks) s.getAudioTracks().forEach(t => { t.enabled = !voiceOff; });
+  voiceBtn.setAttribute("aria-pressed", String(voiceOff));
+  voiceBtn.setAttribute("aria-label", voiceOff ? "Unmute Jarvis's voice" : "Mute Jarvis's voice");
+}
+voiceBtn.addEventListener("click", () => {
+  voiceOff = !voiceOff; try { localStorage.setItem("jarvis-voice-off", voiceOff ? "on" : "off"); } catch (e) {}
+  applyVoice();
+  if (state === "live") setMuted(muted);
+});
+function onCallText() { return "On the call · " + callName() + (voiceOff ? " · voice off" : ""); }
+
+function setState(s, text) {
+  state = s;
+  orbWrap.classList.toggle("show", s === "live");
+  if (s === "live") showOrb("listening");
+  statusEl.textContent = text || "";
+  btn.className = s === "live" ? "live" : (s === "connecting" ? "busy" : "");
+  btn.textContent = s === "idle" ? "Call" : (s === "connecting" ? "…" : "Hang up");
+  muteBtn.className = s === "live" ? (holding ? "show talk" : muted ? "show on" : "show") : "";  // F10
+  if (s === "live") paintCancel(); else hideCancel();
+  modesEl.classList.toggle("hide", s !== "idle");
+  setBtn.classList.toggle("hide", s !== "idle");
+  if (s !== "idle") showSettings(false);
+  if (s !== "live") thinkingSound(false);
+  // H34: the bubble is always there; before a call it opens the last call, after one this call.
+  if (s !== "live") typeIn.blur();
+  showTyping();
+  showLayout();
+  showMode();
+}
+
+// Mute: the mic sends silence, so Jarvis can finish what it's doing without being cut off.
+// talking: the button is held down (push to talk, H5).
+// F10: while the button is held it stays Talking…, whoever calls this. Before, the 8-second
+// Transcribing timer from the last let-go could fire during the next hold and turn it grey.
+function setMuted(m, talking) {
+  muted = m;
+  if (talking === undefined) talking = holding && state === "live";
+  if (talking) { transcribingBtn = false; clearTimeout(transcribingTimer); transcribingTimer = null; }
+  if (stream && !(talkGate && !m)) stream.getAudioTracks().forEach(t => { t.enabled = !m; });  // H32: the mic stays shut while the talk sound plays
+  muteBtn.textContent = talking ? "Talking…" : transcribingBtn ? "Transcribing…" : (m ? "Unmute" : "Mute");
+  showOrb(orbEl.className);
+  muteBtn.className = state === "live" ? (talking ? "show talk" : transcribingBtn ? "show transcribing" : (m ? "show on" : "show")) : "";
+  if (state === "live") statusEl.textContent = talking ? "Let go when you're done"
+    : transcribingBtn ? "Turning your last words into text…"
+    : m ? "Muted · hold the button to talk" : onCallText();
+}
+
+// H11: after letting go, the button turns yellow and says Transcribing until the server has
+// all his words (it moves on to thinking), then back to normal. Never longer than 8 seconds.
+function setTranscribing(on) {
+  clearTimeout(transcribingTimer); transcribingTimer = null;
+  transcribingBtn = on && state === "live" && !holding;  // F10: never while the button is held
+  if (transcribingBtn) transcribingTimer = setTimeout(() => setTranscribing(false), 8000);
+  setMuted(muted);
+}
+
+// H5: one button. A short tap mutes or unmutes, as before. Held down, it's push to talk:
+// the mic is open while it's held, and muted again on letting go, so Jarvis answers then.
+// H9: while it's held, the server is told, so it never takes the turn, however long the pause.
+// The mic opens the moment the finger touches, so the first word isn't lost. Only lifting the
+// finger ends a hold: the phone cancelling the touch (a small slide, a long-press gesture) doesn't.
+const HOLD_MS = 350;
+let holdTimer = null, holding = false, wasMuted = false, pressId = null;
+function sendPtt(held) { try { if (dc && dc.readyState === "open") dc.send(JSON.stringify({ type: "ptt", held })); } catch (e) {} }
+function micOpen(on) { if (stream) stream.getAudioTracks().forEach(t => { t.enabled = on; }); }
+// H24: a short buzz the moment the hold turns into talking, so he knows without lifting his finger.
+// Android has navigator.vibrate. Safari on the iPhone doesn't; since iOS 18, flipping a "switch"
+// checkbox gives a haptic tick, so the page flips a hidden one. An iPhone before iOS 18 can't buzz
+// from a web page at all, so it gets a soft click instead (his words: "the sound is also good").
+function oldIos() { const m = navigator.userAgent.match(/(?:iPhone|iPad|iPod).* OS (\d+)_/); return !!m && +m[1] < 18; }
+function click() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime, osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+  osc.type = "sine"; osc.frequency.setValueAtTime(1500, t);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+  osc.connect(g).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.05);
+}
+// H32: and a short low sound, in the style of the thinking tick but a lot lower, so he hears that
+// talking started without looking. Played whatever the thinking-sound switch says (Claude's choice:
+// that switch is for the thinking tick). Triangle rather than sine, so a phone speaker still carries
+// it. The mic sends silence while it sounds, so it can't be heard as his own words.
+const TALK_SOUND_MS = 180;
+let talkGate = null;
+function talkSound() {
+  if (!audioCtx) return false;
+  if (audioCtx.state === "suspended") { try { audioCtx.resume(); } catch (e) {} }
+  const t = audioCtx.currentTime, osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+  osc.type = "triangle"; osc.frequency.setValueAtTime(330, t); osc.frequency.exponentialRampToValueAtTime(210, t + 0.11);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.22, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+  osc.connect(g).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.15);
+  micOpen(false);
+  clearTimeout(talkGate);
+  talkGate = setTimeout(() => { talkGate = null; if (holding && !muted) micOpen(true); }, TALK_SOUND_MS);
+  return true;
+}
+function buzz() {
+  try { if (navigator.vibrate && navigator.vibrate(25)) return "vibrate"; } catch (e) {}
+  if (oldIos()) { try { click(); } catch (e) {} return "click"; }
+  try {
+    const label = document.createElement("label"), input = document.createElement("input");
+    label.setAttribute("aria-hidden", "true"); label.style.display = "none";
+    input.type = "checkbox"; input.setAttribute("switch", "");
+    label.appendChild(input); document.head.appendChild(label);
+    label.click(); label.remove();
+    return "switch";
+  } catch (e) { return ""; }
+}
+muteBtn.addEventListener("pointerdown", ev => {
+  if (state !== "live" || pressId !== null) return;
+  ev.preventDefault();
+  pressId = ev.pointerId;
+  try { muteBtn.setPointerCapture(ev.pointerId); } catch (e) {}
+  wasMuted = muted; holding = false;
+  startAudio();  // H32: inside the touch, so the phone lets the talk sound play
+  micOpen(true);
+  holdTimer = setTimeout(() => { holdTimer = null; holding = true; hideCancel(); buzz(); setMuted(false, true); talkSound(); sendPtt(true); }, HOLD_MS);
+});
+function letGo(ev) {
+  if (pressId === null) return;
+  if (ev && ev.pointerId !== undefined && ev.pointerId !== pressId) return;
+  pressId = null;
+  clearTimeout(talkGate); talkGate = null;
+  const tap = holdTimer !== null;
+  clearTimeout(holdTimer); holdTimer = null;
+  if (state !== "live") { holding = false; return; }
+  if (holding) { holding = false; muted = true; setTranscribing(true); sendPtt(false); }
+  else if (tap) setMuted(!wasMuted);
+}
+document.addEventListener("pointerup", letGo);
+document.addEventListener("touchend", ev => { if (ev.touches.length === 0) letGo(); });
+document.addEventListener("touchcancel", ev => { if (ev.touches.length === 0) letGo(); });
+window.addEventListener("blur", () => letGo());
+muteBtn.addEventListener("contextmenu", ev => ev.preventDefault());
+// A keyboard press (no pointer) still toggles.
+muteBtn.addEventListener("click", ev => { if (ev.detail === 0 && state === "live") setMuted(!muted); });
+
+// Wait until the browser has listed its network addresses (no outside STUN/TURN servers
+// are used, so this is instant and the audio stays inside the tailnet or the house).
+function gathered(pc) {
+  return new Promise(res => {
+    if (pc.iceGatheringState === "complete") return res();
+    const done = () => { if (pc.iceGatheringState === "complete") { pc.removeEventListener("icegatheringstatechange", done); res(); } };
+    pc.addEventListener("icegatheringstatechange", done);
+    setTimeout(res, 3000);
+  });
+}
+
+async function call() {
+  errEl.textContent = "";
+  startAudio();  // inside the tap, before anything waits
+  calledHere = true;  // H34: from now on the chat is this session's call, not the saved one
+  clearChat(); chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showLayout();
+  setState("connecting", "Connecting…");
+  try {
+    if (!window.isSecureContext || !navigator.mediaDevices) throw new Error("Open this page through the https address.");
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    pc = new RTCPeerConnection({ iceServers: [] });
+    stream.getAudioTracks().forEach(t => pc.addTrack(t, stream));
+    dc = pc.createDataChannel("chat", { ordered: true });
+    dc.onmessage = onServerMessage;
+    dc.onopen = () => { showTyping(); pingTimer = setInterval(() => { try { dc.send("ping: " + Date.now()); } catch (e) {} }, 1000); };
+    pc.ontrack = ev => { audioEl.srcObject = ev.streams[0] || new MediaStream([ev.track]); applyVoice(); audioEl.play().catch(() => {}); };  // H40
+    pc.onconnectionstatechange = () => {
+      if (pc && pc.connectionState === "connected") { setState("live", muted ? "Muted: Jarvis can't hear you" : onCallText()); }
+      if (pc && (pc.connectionState === "failed" || pc.connectionState === "closed") && state !== "idle") { cleanup("Call ended"); }
+    };
+    await pc.setLocalDescription(await pc.createOffer());
+    await gathered(pc);
+    const r = await fetch("api/offer", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, free, voice: voiceEl.value, waiting_lines: waitingLines } }) });
+    if (!r.ok) throw new Error("The call server said " + r.status);
+    const answer = await r.json();
+    await pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });
+    try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+  } catch (e) {
+    errEl.textContent = (e && e.name === "NotAllowedError") ? "The microphone is blocked. Allow it for this page in Settings, then try again." : String(e.message || e);
+    cleanup("Tap to call");
+  }
+}
+
+// Hang up: tell the server first (so the after-call work starts at once), then close.
+function hangup() {
+  try { if (dc && dc.readyState === "open") dc.send(JSON.stringify({ type: "hangup" })); } catch (e) {}
+  setTimeout(() => cleanup("Call ended. Tap to call again."), 250);
+}
+
+// H24: tapping Hang up asks "Are you sure?" first; the call goes on while it asks.
+// Stay on (or a tap beside it) closes the question; only Hang up ends the call. Its Hang up sits
+// where the big button was, so for half a second after it opens it ignores taps (a double tap).
+const hangAsk = document.getElementById("hangask"), hangShade = document.getElementById("hangshade");
+let hangAskedAt = 0;
+function askHangup(open) {
+  hangAsk.classList.toggle("open", open); hangShade.classList.toggle("open", open);
+  if (open) { hangAskedAt = Date.now(); document.getElementById("hangno").focus(); }
+}
+document.getElementById("hangyes").addEventListener("click", () => {
+  if (Date.now() - hangAskedAt < 500) return;
+  askHangup(false); if (state === "live") hangup();
+});
+document.getElementById("hangno").addEventListener("click", () => askHangup(false));
+hangShade.addEventListener("click", () => askHangup(false));
+
+function cleanup(text) {
+  askHangup(false);
+  clearInterval(pingTimer); pingTimer = null;
+  try { if (dc) dc.close(); } catch (e) {}
+  try { if (pc) { pc.onconnectionstatechange = null; pc.close(); } } catch (e) {}
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  try { if (wakeLock) wakeLock.release(); } catch (e) {}
+  pc = dc = stream = wakeLock = null; audioEl.srcObject = null;
+  showChat(false);  // H10: hanging up closes the chat; the log stays, the bubble opens it again
+  muted = false; holding = false; pressId = null; clearTimeout(holdTimer); holdTimer = null; muteBtn.textContent = "Mute";
+  transcribingBtn = false; clearTimeout(transcribingTimer); transcribingTimer = null;
+  hideCancel();
+  setState("idle", text);
+}
+
+btn.addEventListener("click", () => { if (state === "idle") call(); else if (state === "live") askHangup(true); });
+clearChat(); showMode(); showLines(); showSound(); applyVoice(); loadLastCall();
+// Closing the page or locking away from it also counts as hanging up.
+window.addEventListener("pagehide", ev => { if (ev.persisted) return; try { if (dc && dc.readyState === "open") dc.send(JSON.stringify({ type: "hangup" })); } catch (e) {} });
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState === "visible" && state === "idle") loadLastCall();  // H34: a call may have ended elsewhere
+  if (document.visibilityState === "visible" && state === "live") { try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {} }
+});
+</script>
+</body>
+</html>

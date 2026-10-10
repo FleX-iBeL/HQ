@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.hq.jarvis-va</string>
+  <!-- H2 and phase L: open the Jarvis Routine helper app when the user logs in. The helper starts the
+       call line (start.sh) and looks at the queue every minute. A plain script can't: macOS blocks a
+       LaunchAgent from reading the Documents folder, and the helper is an app the user allowed once.
+       The paths are written for /Users/you/HQ; the installer puts this HQ's path in.
+       The 20 second wait gives Wi-Fi and Tailscale time to come up for the phone line. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-c</string>
+    <string>sleep 20; exec /usr/bin/open -a "$HOME/Applications/Jarvis Routine.app"</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- open returns at once; don't let launchd kill what it started. -->
+  <key>AbandonProcessGroup</key>
+  <true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/you/HQ/scratch/launchagent.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/you/HQ/scratch/launchagent.log</string>
+</dict>
+</plist>

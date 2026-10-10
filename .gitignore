@@ -1,0 +1,13 @@
+# HQ is the app, the same for everyone. Nothing of the user's own goes in this repo.
+# The user's own files: one folder (it can be a link to a folder elsewhere). Never uploaded.
+/workspace
+/workspace/
+
+# Runtime, per machine: logs, state, the status page's readings, the Python environment, the models
+/scratch/
+/.status/
+/.venv/
+/models/
+__pycache__/
+.DS_Store
+/samples/_check.wav

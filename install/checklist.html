@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HQ · install</title>
+    <style>
+      /* M4: the installer's live checklist, in the status page's colours. Served by the installer on
+         :4749 while it runs, and by the status page at /install afterwards. Reads install.json every second. */
+      :root {
+        color-scheme: light dark;
+        --page: #f6f7f9; --card: #ffffff; --tint: #f9fafb; --ink: #1b1f24; --soft: #57606a; --rule: #d5d9df;
+        --blue: #0b5fbf; --green: #1a7f37; --amber-ink: #8a5a00; --red: #b42318; --grey: #6b7785; --teal: #0f6e66;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --page: #16181c; --card: #1f2227; --tint: #262a30; --ink: #e8eaed; --soft: #a4abb5; --rule: #3a3f47;
+          --blue: #6aa9f0; --green: #56b870; --amber-ink: #e0b040; --red: #f0766a; --grey: #8a94a0; --teal: #4fc1b6;
+        }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 0 16px 64px; background: var(--page); color: var(--ink);
+             font: 17px/1.5 -apple-system, "Helvetica Neue", "Segoe UI", sans-serif; }
+      main { max-width: 760px; margin: 0 auto; display: grid; gap: 28px; }
+      header { padding-top: 32px; }
+      h1 { margin: 0; font-size: 26px; }
+      .band { margin-top: 12px; padding: 12px 16px; border-radius: 10px; color: #fff; font-weight: 600; }
+      .band.running { background: var(--teal); }
+      .band.passed { background: var(--green); }
+      .band.failed { background: var(--red); }
+      .band.none { background: var(--grey); }
+      .meta { color: var(--soft); font-size: 14px; margin-top: 8px; overflow-wrap: anywhere; }
+      .note { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; }
+      h2 { margin: 0 0 8px; font-size: 18px; }
+      ol { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--rule); border-radius: 10px; }
+      li { display: grid; grid-template-columns: 28px 1fr auto; gap: 4px 10px; padding: 12px 14px; border-top: 1px solid var(--rule); }
+      li:first-child { border-top: 0; }
+      .mark { font-weight: 700; text-align: center; }
+      .title { font-weight: 600; }
+      .time { color: var(--soft); font-size: 13px; white-space: nowrap; }
+      .detail { grid-column: 2 / 4; color: var(--soft); font-size: 15px; overflow-wrap: anywhere; }
+      .fix { grid-column: 2 / 4; font-size: 15px; background: var(--tint); border-left: 3px solid var(--red); padding: 6px 10px; overflow-wrap: anywhere; }
+      .tag { font-size: 12px; color: var(--soft); border: 1px solid var(--rule); border-radius: 6px; padding: 0 6px; margin-left: 6px; font-weight: 400; }
+      .ok .mark { color: var(--green); }
+      .warn .mark { color: var(--amber-ink); }
+      .fail .mark { color: var(--red); }
+      .fail { background: color-mix(in srgb, var(--red) 8%, var(--card)); }
+      .running .mark { color: var(--teal); animation: pulse 1s infinite alternate; }
+      .running { background: color-mix(in srgb, var(--teal) 8%, var(--card)); }
+      .todo, .skipped, .notrun { color: var(--soft); }
+      @keyframes pulse { from { opacity: 1; } to { opacity: .3; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>HQ · install</h1>
+        <div id="band" class="band none">Waiting for the installer…</div>
+        <div id="meta" class="meta"></div>
+      </header>
+      <div id="headsup" class="note" hidden></div>
+      <section><h2>1 · Setup</h2><ol id="setup"></ol></section>
+      <section><h2>2 · Test: nothing may ask any more</h2><ol id="test"></ol></section>
+    </main>
+    <script>
+      const MARK = { ok: '✓', warn: '!', fail: '✗', running: '●', todo: '○', skipped: '–', 'not run': '○' };
+      const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+      const src = '/install.json';
+      function draw(d) {
+        const band = document.getElementById('band');
+        if (!d) { band.className = 'band none'; band.textContent = 'No install run yet.'; return; }
+        const fail = d.steps.find((s) => s.state === 'fail');
+        const now = d.steps.find((s) => s.state === 'running');
+        band.className = 'band ' + d.result;
+        band.textContent = d.result === 'passed' ? 'All done: set up, and the test passed without asking for anything.'
+          : d.result === 'failed' ? `Stopped at: ${fail ? fail.title : 'a step'}. Below: why, and what to do.`
+          : now ? `Now: ${now.title}${now.asks ? ' · macOS or your password may ask now: allow it' : ''}` : 'Running…';
+        document.getElementById('meta').textContent =
+          `Run ${d.run}${d.finished ? ' · finished ' + d.finished.slice(11) : ''} · ${d.mode === 'test' ? 'test only' : 'setup and test'}`
+          + `${d.fake ? ' · simulated (happy flow)' : ''} · ${d.machine} · HQ: ${d.hq}`;
+        const hu = document.getElementById('headsup');
+        hu.hidden = d.mode === 'test'; hu.textContent = d.heads_up;
+        for (const phase of ['setup', 'test']) {
+          const list = d.steps.filter((s) => s.phase === phase);
+          document.getElementById(phase).parentElement.hidden = !list.length;
+          document.getElementById(phase).innerHTML = list.map((s) => `
+            <li class="${s.state.replace(' ', '')}" data-id="${esc(s.id)}" data-state="${esc(s.state)}">
+              <span class="mark">${MARK[s.state] ?? '?'}</span>
+              <span class="title">${esc(s.title)}${s.asks ? '<span class="tag">asks once</span>' : ''}</span>
+              <span class="time">${esc(s.ended || s.started || '')}</span>
+              ${s.detail ? `<span class="detail">${esc(s.detail)}</span>` : ''}
+              ${s.fix ? `<span class="fix">To fix: ${esc(s.fix)}</span>` : ''}
+            </li>`).join('');
+        }
+      }
+      async function tick() {
+        try { draw(await (await fetch(src, { cache: 'no-store' })).json()); } catch {}
+      }
+      tick(); setInterval(tick, 1000);
+    </script>
+  </body>
+</html>
