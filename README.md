@@ -81,11 +81,11 @@ app/start.sh                     # with Tailscale: the phone line too
 JARVIS_NO_PHONE=1 app/start.sh   # without Tailscale: this computer only
 ```
 
-Then open http://127.0.0.1:7860 in the browser, allow the microphone, pick Pepper, and say hello. Log: `scratch/server.log`. Stop: `app/stop.sh`.
+Then open http://127.0.0.1:7860 in the browser, allow the microphone, pick Donna, and say hello. Log: `scratch/server.log`. Stop: `app/stop.sh`.
 
 On the phone (Tailscale on, on both): the address `start.sh` prints, `https://<this-mac>.<tailnet>.ts.net:8443`, in Safari, then Share → Add to Home Screen.
 
-Who to call (since 0.2, the agents): **Pepper** (Sonnet, the basics loaded, fast; was Quick) and **Donna** (Opus, everything loaded, for planning and thinking; was Deep). Their headshots are placeholders until the user puts pictures in `workspace/Jarvis VA/agents/` (`pepper.jpg`, `donna.jpg`); agents can be changed or added there in `agents.json` (see `app/agents.py`). On top of any agent, **Free**: plain Claude with no connectors, none of their files, no notes and nothing saved, only the web. Free is for testing and showing HQ to others.
+Who to call (since 0.2, the agents): **Donna** (Sonnet, the basics loaded, fast; was Quick) and **Pepper** (Opus, everything loaded, for planning and thinking; was Deep). Their headshots are placeholders until the user puts pictures in `workspace/Jarvis VA/agents/` (`pepper.jpg`, `donna.jpg`); agents can be changed or added there in `agents.json` (see `app/agents.py`). On top of any agent, **Free**: plain Claude with no connectors, none of their files, no notes and nothing saved, only the web. Free is for testing and showing HQ to others.
 
 ### 6. The status page
 
