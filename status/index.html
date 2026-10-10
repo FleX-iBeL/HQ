@@ -575,6 +575,7 @@
         ['watchdog', 'Watchdog', 'Checks the helper every 5 minutes, apart from it'],
         ['mail', 'Mail check', 'Every hour'],
         ['jobs', 'Jobs from calls', 'One at a time'],
+        ['schedule', 'Scheduler', 'Planned work; only when no job runs or waits'],
         ['usage', 'Usage check', 'Every minute, free'],
         ['phone', 'Status page', 'Also on the phone'],
         ['call', 'Call line', 'For calls from the phone'],
@@ -1202,6 +1203,47 @@
               card.append(row);
             }
             if (!jobs.length) card.append(el('div', 'row soft', g === 'finished' ? 'None kept.' : `Nothing ${g}.`));
+            part.append(card);
+            parts.append(part);
+          }
+          fold.append(parts);
+          box.append(fold);
+          app.append(box);
+        }
+
+        // H43: the scheduler. Planned work with its day and time, soonest first; what became of the
+        // earlier ones folds away under Looking back. The job list always goes first.
+        const sc = s.schedule;
+        if (sc) {
+          const box = el('section');
+          const stamp = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          const nowStamp = stamp(new Date());
+          const isWaiting = (i) => /^waiting/.test(i.state);
+          const coming = sc.items.filter(isWaiting).sort((a, b) => a.at.localeCompare(b.at) || a.n - b.n);
+          const back = sc.items.filter((i) => !isWaiting(i)).sort((a, b) => b.n - a.n);
+          const due = coming.filter((i) => i.at <= nowStamp).length;
+          const day = (at) => {
+            const [d, t] = at.split(' ');
+            const x = new Date(`${d}T${t}:00`);
+            return `${x.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} ${t}`;
+          };
+          const fold = foldPart('schedule', true, 'Scheduled', `${coming.length} planned${due ? ` · ${due} due, after the job list` : ''} · the job list goes first`);
+          const parts = el('div', 'parts');
+          for (const [key, title, list, st, start] of [['coming', 'Planned', coming, 'todo', true], ['back', 'Looking back', back, 'done', false]]) {
+            const part = foldPart(`schedule-${key}`, start, title, `${list.length}`, true);
+            const card = el('div', 'card');
+            for (const i of list) {
+              const isDue = key === 'coming' && i.at <= nowStamp;
+              const word = isDue ? 'Due, after the job list' : key === 'coming' ? 'Planned' : i.state.charAt(0).toUpperCase() + i.state.slice(1);
+              const row = el('div', `row ${isDue ? 'doing' : /cancelled|stopped|ended/.test(i.state) ? 'soft' : st}`);
+              const mark = el('span', 'mark');
+              mark.append(el('i'), document.createTextNode(word.replace(/, past the line$/, '')));
+              const text = el('span', 'job', `${day(i.at)} · Item ${i.n} · ${i.text}`);
+              text.addEventListener('click', () => text.classList.toggle('all'));
+              row.append(text, mark);
+              card.append(row);
+            }
+            if (!list.length) card.append(el('div', 'row soft', key === 'coming' ? 'Nothing planned.' : 'Nothing yet.'));
             part.append(card);
             parts.append(part);
           }

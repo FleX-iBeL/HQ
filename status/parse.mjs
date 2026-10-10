@@ -144,6 +144,17 @@ export function parseRoadmap(markdown) {
     for (const j of queue.jobs) if (/^(ready|held)/.test(j.state)) j.place = ++place;
   }
 
+  // H43: the schedule, work planned ahead for a day and time, under "## The schedule" (kept by routine/schedule.py).
+  const sStart = lines.findIndex((l) => l.trim() === '## The schedule');
+  const schedule = sStart >= 0 ? { items: [] } : null;
+  if (sStart >= 0) {
+    for (const line of lines.slice(sStart + 1)) {
+      if (/^#{1,2} /.test(line)) break;
+      const m = /^- Item (\d+) · (.+?) · at (\S+ \S+) · added (\S+ \S+) · (.*)$/.exec(line);
+      if (m) schedule.items.push({ n: Number(m[1]), state: m[2], at: m[3], added: m[4], text: plain(m[5]) });
+    }
+  }
+
   const limit = /\*\*Usage limit:\s*(\d{1,3})\s*%/.exec(markdown);
   // Jarvis VA: a flat stop line for the weekly limits, instead of spreading them over the week.
   const weekly = /\*\*Weekly limit:\s*(\d{1,3})\s*%/.exec(markdown);
@@ -160,6 +171,7 @@ export function parseRoadmap(markdown) {
     updated: updated ? plain(updated) : '',
     phases,
     queue,
+    schedule,
     problems,
   };
 }

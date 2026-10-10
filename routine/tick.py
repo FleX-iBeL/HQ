@@ -13,6 +13,8 @@ so waiting costs no usage. What it does, in order:
 - The routine is off: nothing more.
 - No job running and one is waiting: take the one highest on the list (H39), check the last saved usage against the stop lines (L4; skipped
   for a job marked past the line: only the weekly line then, F13), then start it in a Terminal window as a normal chat with let's go (L5).
+- Nothing running and nothing waiting: the scheduler (H43) may turn an item whose time has come into a job,
+  which then starts the same way. The job list always goes first.
 
 Before all that, every minute: the status page on the phone (H13) is kept up, on its own address and
 independent of the call line (status/phone.sh does nothing when it already runs). So it starts at login too.
@@ -617,9 +619,40 @@ def jobs_line(q):
     routines.beat("jobs", state=state, text=text, every=60)
 
 
+def schedule_promote():
+    """H43: the scheduler. Turns a due item into a job when the queue is empty; returns what it did."""
+    r = subprocess.run([PY, os.path.join(HERE, "schedule.py"), "promote"], capture_output=True, text=True)
+    out = r.stdout.strip()
+    if r.returncode:
+        log(f"schedule: {(r.stderr or out).strip()[:200]}")
+        return ""
+    if out.startswith("item "):
+        log(f"schedule: {out}")
+        status("BUILDING", f"Scheduled {out.split(' became ')[0]} starts as {out.split(' became ')[1]}",
+               f"scheduled {out}, now that the job list is empty")
+        return out
+    return ""
+
+
+def schedule_line():
+    """H43: the scheduler's own routine line: what's next, or what's due and why it waits."""
+    r = subprocess.run([PY, os.path.join(HERE, "schedule.py"), "status"], capture_output=True, text=True)
+    try:
+        d = json.loads(r.stdout)
+    except ValueError:
+        routines.beat("schedule", state="down", text=(r.stderr or r.stdout).strip()[:120] or "Couldn't read the schedule",
+                      last=time.time(), every=60)
+        return
+    routines.beat("schedule", state=d["state"], text=d["text"], last=time.time(), next=d.get("next"), every=60)
+
+
 def tick():
     q = json.loads(jobs("next"))
     jobs_line(q)
+    try:
+        schedule_line()
+    except Exception as e:
+        log(f"schedule line: {e!r}")
     try:
         mail(q)  # H30: on its own, also while a job runs
     except Exception as e:
@@ -678,7 +711,15 @@ def tick():
     if line is None:
         line = (q["ready"] or []) + (q["held"] or [])
     if not line:
-        return
+        # H43: the job list goes first; only now, with nothing running or waiting, may a scheduled item
+        # whose time has come become a job (at the bottom of the queue), and it starts right away.
+        did = schedule_promote()
+        if not did:
+            return
+        q = json.loads(jobs("next"))
+        line = q.get("waiting") or []
+        if not line:
+            return
     job = line[0]
     # F13: a job let past the line only skips the 5-hour line; the weekly line always counts, so a
     # past-the-line job held at the weekly line waits here quietly instead of being started every minute.

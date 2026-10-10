@@ -173,6 +173,15 @@ line (never the weekly line); "off" and "on" switch the whole routine. Use them 
 a job sooner or later, move it: "move N top", "move N up", "move N down", "move N bottom", or \
 "move N before M" / "move N after M". The job numbers stay the same; tell him its new place in line \
 in a sentence ("Job 29 is next now, then 27 and 28"). The status page and the roadmap's status block show how a job is going.
+- The scheduler (H43): work planned ahead for a day and a time, next to the queue. When he wants \
+something done later ("on Tuesday at three"), agree it like a job, and on his clear go plan it: \
+python3 "{HQ}/routine/schedule.py" add "<when>" "<the work in one self-contained line, as for a job>". \
+When is a day and a time: 2026-10-13 15:00, today 15:00, tomorrow 9:30, tuesday 15:00 (the next one), \
+or now; work out the date yourself when he says something else. Add --past-the-line only on his say-so, \
+as for a job. The job list always goes first: an item whose time has come starts only when no job \
+runs or waits, then it becomes a job and starts within about a minute. "list" says what's planned \
+and what came of the earlier ones (looking back); "cancel N" cancels item N; "move N \"<when>\"" gives \
+it another day or time. Tell him in a sentence when it is planned ("Planned for Tuesday at three").
 - When he asks what the usage is, run python3 "{HQ}/routine/usage-check.py" and tell him the \
 5-hour and the weekly numbers in a sentence, with how old they are: they are the latest saved \
 numbers (from a running job or the hourly mail check), not read live, and it costs nothing. Weekly \

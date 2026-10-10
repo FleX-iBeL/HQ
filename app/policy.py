@@ -221,6 +221,13 @@ class Policy:
             if sub in ("add", "list", "stop", "overrule", "move", "on", "off"):
                 return Decision(ALLOW, "the queue for the computer")
             return Decision(DENY, "that part of the queue is only for the computer itself")
+        # H43: the scheduler. Adding, listing, moving and cancelling planned items only writes the schedule on
+        # the roadmap, like the queue; promote and status are the routine's own.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "schedule.py"):
+            sub = args[1] if len(args) > 1 else ""
+            if sub in ("add", "list", "cancel", "move"):
+                return Decision(ALLOW, "the schedule for the computer")
+            return Decision(DENY, "that part of the schedule is only for the computer itself")
         # L9/L10: the usage check. Reads the latest saved usage and shows it on the status page, nothing else.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usage-check.py"):
             if len(args) == 1:

@@ -58,7 +58,7 @@ async function routines() {
 
 // H23: every minute the state of each routine is written down, also when the helper is gone (its lines then
 // go overdue, which counts as down), so the page can draw when each was up, running or down. A day is kept.
-const KEYS = ['helper', 'watchdog', 'mail', 'jobs', 'usage', 'phone', 'call', 'temp', 'battery'];
+const KEYS = ['helper', 'watchdog', 'mail', 'jobs', 'schedule', 'usage', 'phone', 'call', 'temp', 'battery'];
 const HISTORY = join(root, '.status/routines-history.jsonl');
 const DAY = 24 * 3600;
 function effective(r) {

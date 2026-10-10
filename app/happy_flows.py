@@ -3144,6 +3144,95 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         need(not history, f"HQ's git history has something personal in it: {history[:6]}")
         return f"{len(privacy.files())} files and the history checked against {len(private)} private words and the general checks; nothing found"
 
+    async def flow45(self) -> str:
+        """H43: the scheduler. No Claude turns and no job is started: the schedule script on a copy of the
+        roadmap (planning, the job list first, an item becoming a job, looking back, cancel and move), the
+        routine asking it only when nothing runs or waits, the status page, and what a call may do."""
+        import subprocess as sp
+        from policy import Policy, ALLOW, DENY
+        jv = ROOT
+        rm = self.tmp / "roadmap-H43.md"
+        rm.write_text(ROADMAP.read_text())
+        env = {**os.environ, "JARVIS_ROADMAP": str(rm)}
+        def run(script, *a, ok=True):
+            r = sp.run(["python3", str(jv / "routine" / script), *a], capture_output=True, text=True, env=env)
+            need((r.returncode == 0) == ok, f"{script} {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
+            return r.stdout + r.stderr
+        sched = lambda *a, ok=True: run("schedule.py", *a, ok=ok)
+        jobs = lambda *a, ok=True: run("jobs.py", *a, ok=ok)
+        q = lambda: json.loads(jobs("next"))
+        # Only the test's own jobs: finish whatever the copy has waiting or running.
+        for j in q()["waiting"] + q()["running"]:
+            jobs("mark", str(j["n"]), "done 00:00")
+        later = sched("add", "tuesday 15:00", "flow 45 later")
+        need("Tuesday" in later and "planned" in later, f"a weekday isn't understood: {later}")
+        now = sched("add", "now", "flow 45 now", "--past-the-line")
+        n_later, n_now = int(later.split()[1]), int(now.split()[1])
+        sched("add", "2020-01-01 10:00", "too late", ok=False)
+        sched("add", "friday 25:00", "no such time", ok=False)
+        sched("add", "someday", "no day", ok=False)
+        # The job list goes first: with a job waiting, a due item stays put.
+        blocker = int(jobs("add", "flow 45 blocker").split()[1])
+        need("Nothing to start" in sched("promote"), "a due item started while a job was waiting")
+        st = json.loads(sched("status"))
+        need(st["state"] == "ok" and f"Item {n_now} is due" in st["text"] and "job list goes first" in st["text"],
+             f"the routine line doesn't say the due item waits for the job list: {st}")
+        jobs("mark", str(blocker), "running since 00:01")
+        need("Nothing to start" in sched("promote"), "a due item started while a job was running")
+        jobs("done", str(blocker))
+        # Switched off: nothing starts either.
+        jobs("off")
+        need("Nothing to start" in sched("promote"), "a due item started while the routine was off")
+        jobs("on")
+        # Empty and on: the due item becomes a job at the bottom of the queue, past the line as planned.
+        did = sched("promote")
+        need(f"item {n_now} became job" in did, f"the due item didn't become a job: {did}")
+        job = q()["waiting"]
+        need(len(job) == 1 and job[0]["past"] and f"Scheduled item {n_now}" in job[0]["text"] and "flow 45 now" in job[0]["text"],
+             f"the job made from the item is wrong: {job}")
+        jn = job[0]["n"]
+        need("Nothing to start" in sched("promote"), "the same item started twice")
+        # Looking back: the item takes over how its job finished.
+        jobs("done", str(jn))
+        sched("promote")
+        lst = sched("list")
+        need(f"job {jn} done" in lst and "Looking back" in lst, f"looking back doesn't say how it went: {lst}")
+        # The later one: moved, then cancelled; a finished one can't be.
+        need("Sunday" in sched("move", str(n_later), "sunday 10:00") or "Sunday" in sched("list"), "move didn't take")
+        sched("cancel", str(n_now), ok=False)
+        sched("cancel", str(n_later))
+        need("Nothing planned." in sched("list"), "a cancelled item is still planned")
+        need("add \"WHEN\"" in sched("--help") or 'add "WHEN"' in sched("--help"), "--help doesn't say how to plan")
+        # The queue keeps working with the schedule under it, and the schedule survives the queue's writes.
+        text = rm.read_text()
+        need(text.count("## The schedule") == 1 and text.count("## The queue") == 1
+             and text.index("## The queue") < text.index("## The schedule"), "the schedule isn't right under the queue")
+        # The routine asks the scheduler only when nothing runs or waits.
+        tick = (jv / "routine/tick.py").read_text()
+        i_line, i_prom = tick.index("if not line:\n        # H43"), tick.index("did = schedule_promote()")
+        need(i_line < i_prom < tick.index("job = line[0]"), "the routine asks the scheduler before the job list")
+        need("schedule_line()" in tick, "the scheduler has no routine line")
+        # The status page reads it and shows it, with its own routine line.
+        js = f"""import {{ parseRoadmap }} from {json.dumps(str(jv / 'status/parse.mjs'))};
+import {{ readFileSync }} from 'node:fs';
+const r = parseRoadmap(readFileSync({json.dumps(str(rm))}, 'utf8'));
+console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((i) => [i.n, i.state])}}));"""
+        d = json.loads(sp.run(["node", "--input-type=module", "-e", js], capture_output=True, text=True).stdout)
+        need(not d["problems"] and [n_later, f"cancelled"] in [[n, s.split()[0]] for n, s in d["items"]], f"the status page reads the schedule wrong: {d}")
+        page = (jv / "status/index.html").read_text()
+        need("foldPart('schedule'" in page and "Looking back" in page and "['schedule', 'Scheduler'" in page,
+             "the status page doesn't show the schedule")
+        need("'schedule'" in (jv / "status/server.mjs").read_text(), "the routines graph doesn't keep the scheduler")
+        # A call may plan, list, move and cancel; promoting is the routine's own.
+        pol = Policy(config.FOLDER)
+        s_ = f'python3 "{ROOT}/routine/schedule.py"'
+        for sub in ('add "tuesday 15:00" "x"', "list", "cancel 3", 'move 3 "tomorrow 9:30"'):
+            need(pol.decide("Bash", {"command": f"{s_} {sub}"}).verdict == ALLOW, f"a call can't {sub.split()[0]}")
+        need(pol.decide("Bash", {"command": f"{s_} promote"}).verdict == DENY, "a call may promote an item")
+        need("schedule.py" in config.VOICE_RULES and "job list always goes first" in config.VOICE_RULES,
+             "the call rules don't say how to plan work")
+        return "plans by day and time; waits while a job runs, waits or the routine is off; then becomes one job, past the line kept; looking back, move, cancel; page, routine line, call rules"
+
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
     2: ("The greeting plays first, on Quick and Deep", True, "flow2"),
@@ -3189,6 +3278,7 @@ FLOWS = {
     42: ("The explanations: the readme and the big picture, nothing of his", False, "flow42"),
     43: ("The installer: fresh, kept workspace, a failure, the live checklist", False, "flow43"),
     44: ("Nothing personal in HQ: its files and its git history", False, "flow44"),
+    45: ("The scheduler: planned work, after the job list, looking back", False, "flow45"),
 }
 
 
