@@ -1,19 +1,68 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <rect x="64" y="64" width="896" height="896" rx="200" fill="#1f2227"/>
-  <g transform="translate(140 230) scale(7.4)">
-    <path d="M22 40 C12 34 10 24 14 18" fill="none" stroke="#9b6635" stroke-width="5" stroke-linecap="round"/>
-    <rect x="27" y="50" width="6" height="16" rx="3" fill="#9b6635"/>
-    <rect x="53" y="50" width="6" height="16" rx="3" fill="#9b6635"/>
-    <ellipse cx="42" cy="46" rx="22" ry="12" fill="#d39a5e"/>
-    <rect x="33" y="50" width="6" height="17" rx="3" fill="#d39a5e"/>
-    <rect x="59" y="50" width="6" height="17" rx="3" fill="#d39a5e"/>
-    <path d="M58 40 C56 32 60 26 66 32" fill="#d39a5e"/>
-    <circle cx="68" cy="30" r="12" fill="#d39a5e"/>
-    <ellipse cx="80" cy="34" rx="8" ry="6" fill="#d39a5e"/>
-    <circle cx="87" cy="32" r="2.6" fill="#120d09"/>
-    <circle cx="72" cy="27" r="2" fill="#120d09"/>
-    <path d="M64 20 C58 22 56 32 60 36 C64 32 68 26 70 20 Z" fill="#9b6635"/>
-    <path d="M57 41 h20" stroke="#6aa9f0" stroke-width="3" stroke-linecap="round"/>
+  <!-- H48 (11 October 2026): HQ's icon, the house on the cliff (his inspiration: Tony Stark's mansion), drawn flat
+       in the same style as the watchdog dog: simple round-cornered shapes, flat fills, no outlines. Claude's drawing. -->
+  <defs>
+    <clipPath id="tile"><rect x="64" y="64" width="896" height="896" rx="200"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <!-- sky -->
+    <rect x="64" y="64" width="896" height="896" fill="#8fc6ef"/>
+    <rect x="64" y="64" width="896" height="300" fill="#a9d4f4"/>
+    <!-- trees behind the house -->
+    <g fill="#2f6b3a">
+      <circle cx="150" cy="420" r="110"/>
+      <circle cx="290" cy="360" r="120"/>
+      <circle cx="450" cy="390" r="110"/>
+      <circle cx="610" cy="350" r="125"/>
+      <circle cx="770" cy="390" r="115"/>
+      <circle cx="905" cy="430" r="110"/>
+    </g>
+    <g fill="#3f8a4a">
+      <circle cx="220" cy="460" r="90"/>
+      <circle cx="530" cy="450" r="95"/>
+      <circle cx="840" cy="470" r="90"/>
+    </g>
+    <!-- the hill behind and under the house -->
+    <path d="M64 540 C300 520 700 530 960 560 L960 960 L64 960 Z" fill="#4f8f38"/>
+    <!-- the stairs down the hill on the left -->
+    <path d="M96 560 L300 700" stroke="#f4f4f1" stroke-width="16" stroke-linecap="round"/>
+    <!-- left wing -->
+    <rect x="150" y="440" width="270" height="20" rx="6" fill="#f4f4f1"/>
+    <rect x="165" y="460" width="240" height="120" rx="6" fill="#bfe6f2"/>
+    <rect x="165" y="460" width="240" height="14" fill="#e6e6e1"/>
+    <rect x="270" y="474" width="8" height="106" fill="#e6e6e1"/>
+    <!-- middle: the long glass volume -->
+    <rect x="340" y="500" width="400" height="16" rx="5" fill="#f4f4f1"/>
+    <rect x="350" y="516" width="380" height="96" rx="4" fill="#cdeef7"/>
+    <rect x="450" y="516" width="8" height="96" fill="#e6e6e1"/>
+    <rect x="590" y="516" width="8" height="96" fill="#e6e6e1"/>
+    <rect x="390" y="612" width="350" height="70" rx="4" fill="#f4f4f1"/>
+    <rect x="410" y="626" width="140" height="44" rx="3" fill="#bfe6f2"/>
+    <!-- the bronze column -->
+    <rect x="410" y="500" width="34" height="140" rx="4" fill="#b48a5a"/>
+    <!-- right wing, stepping down -->
+    <rect x="720" y="560" width="200" height="18" rx="5" fill="#f4f4f1"/>
+    <rect x="730" y="578" width="180" height="70" rx="4" fill="#cdeef7"/>
+    <rect x="720" y="648" width="200" height="16" rx="4" fill="#f4f4f1"/>
+    <rect x="730" y="664" width="180" height="60" rx="4" fill="#bfe6f2"/>
+    <rect x="810" y="578" width="8" height="146" fill="#e6e6e1"/>
+    <!-- the dark stone base wall -->
+    <rect x="540" y="682" width="300" height="46" rx="4" fill="#2b2f33"/>
+    <rect x="300" y="672" width="250" height="20" rx="4" fill="#3a3f45"/>
+    <!-- the hill -->
+    <path d="M64 600 L300 690 C420 700 560 720 700 728 C820 736 900 760 960 780 L960 960 L64 960 Z" fill="#5b9a3c"/>
+    <path d="M64 700 C220 730 360 770 520 800 C700 830 860 840 960 860 L960 960 L64 960 Z" fill="#4b8834"/>
+    <!-- shrubs and flowers -->
+    <g fill="#3d7a2c">
+      <circle cx="180" cy="760" r="70"/>
+      <circle cx="420" cy="820" r="80"/>
+      <circle cx="700" cy="860" r="85"/>
+      <circle cx="920" cy="880" r="70"/>
+    </g>
+    <g fill="#d9b23a">
+      <circle cx="290" cy="740" r="14"/>
+      <circle cx="560" cy="770" r="12"/>
+      <circle cx="820" cy="800" r="13"/>
+    </g>
   </g>
-  <circle cx="800" cy="250" r="56" fill="#56b870"/>
 </svg>
