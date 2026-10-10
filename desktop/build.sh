@@ -15,9 +15,14 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O -target arm64-apple-macos13 -framework Cocoa -framework WebKit \
   -o "$APP/Contents/MacOS/HQ" "$HQ/desktop/HQ.swift"
 
-# The icon: the watchdog dog, from icon.svg (Quick Look renders it; without it the app has the plain icon).
+# The icon: HQ's house (H48), from icon.svg (Quick Look renders it; without it the app has the plain icon).
 ICON=""
-if qlmanage -t -s 1024 -o "$OUT" "$HQ/desktop/icon.svg" >/dev/null 2>&1 && [[ -f "$OUT/icon.svg.png" ]]; then
+# H48: drawn with svg2png (macOS reads SVG itself), so the corners stay transparent; qlmanage only as a fallback
+# (it gives a white square around the icon in the Dock).
+rm -f "$OUT/icon.svg.png"
+if swiftc -O -o "$OUT/svg2png" "$HQ/desktop/svg2png.swift" >/dev/null 2>&1 && "$OUT/svg2png" "$HQ/desktop/icon.svg" "$OUT/icon.svg.png" 1024; then :
+else qlmanage -t -s 1024 -o "$OUT" "$HQ/desktop/icon.svg" >/dev/null 2>&1; fi
+if [[ -f "$OUT/icon.svg.png" ]]; then
   SET="$OUT/HQ.iconset"; rm -rf "$SET"; mkdir -p "$SET"
   for s in 16 32 128 256 512; do
     sips -z $s $s "$OUT/icon.svg.png" --out "$SET/icon_${s}x${s}.png" >/dev/null
