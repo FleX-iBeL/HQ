@@ -729,15 +729,18 @@ function buzz() {
     return "switch";
   } catch (e) { return ""; }
 }
-muteBtn.addEventListener("pointerdown", ev => {
-  if (state !== "live" || pressId !== null) return;
-  ev.preventDefault();
-  pressId = ev.pointerId;
-  try { muteBtn.setPointerCapture(ev.pointerId); } catch (e) {}
+function pressStart(id) {
+  pressId = id;
   wasMuted = muted; holding = false;
   startAudio();  // H32: inside the touch, so the phone lets the talk sound play
   micOpen(true);
   holdTimer = setTimeout(() => { holdTimer = null; holding = true; hideCancel(); buzz(); setMuted(false, true); talkSound(); sendPtt(true); }, HOLD_MS);
+}
+muteBtn.addEventListener("pointerdown", ev => {
+  if (state !== "live" || pressId !== null) return;
+  ev.preventDefault();
+  try { muteBtn.setPointerCapture(ev.pointerId); } catch (e) {}
+  pressStart(ev.pointerId);
 });
 function letGo(ev) {
   if (pressId === null) return;
@@ -757,6 +760,33 @@ window.addEventListener("blur", () => letGo());
 muteBtn.addEventListener("contextmenu", ev => ev.preventDefault());
 // A keyboard press (no pointer) still toggles.
 muteBtn.addEventListener("click", ev => { if (ev.detail === 0 && state === "live") setMuted(!muted); });
+// H49 (11 October 2026, call at 00:40): "if you're on the desktop app, if you press space, then it will switch
+// to mute or not. And if we keep it pressed, then it will be push to talk. And then when we release it, it will
+// release and send a message." The space bar is the talk button: a short press mutes or unmutes, held down it's
+// push to talk, letting go sends. Only inside the app (?app) and only on a call; never while typing in the
+// chat's text box (or any field), and not inside an open question (Hang up, Cancel, Settings), where space
+// still presses their buttons. Key repeats are ignored; the window losing focus lets go, like a finger.
+const SPACE = "space";
+function spaceIsOurs(ev) {
+  if (ev.code !== "Space" || ev.metaKey || ev.ctrlKey || ev.altKey) return false;
+  const t = ev.target;
+  if (t && t.closest && t.closest("textarea, input, select, [contenteditable], #hangask, #cxask, #settings")) return false;
+  return true;
+}
+if (document.body.classList.contains("inapp")) {
+  muteBtn.title = "Space: tap to mute, hold to talk";
+  window.addEventListener("keydown", ev => {
+    if (!spaceIsOurs(ev) || state !== "live") return;
+    ev.preventDefault(); ev.stopPropagation();  // no page scroll, and no click on a focused button
+    if (ev.repeat || pressId !== null) return;
+    pressStart(SPACE);
+  }, true);
+  window.addEventListener("keyup", ev => {
+    if (ev.code !== "Space" || pressId !== SPACE) return;
+    ev.preventDefault(); ev.stopPropagation();
+    letGo({ pointerId: SPACE });
+  }, true);
+}
 
 // Wait until the browser has listed its network addresses (no outside STUN/TURN servers
 // are used, so this is instant and the audio stays inside the tailnet or the house).

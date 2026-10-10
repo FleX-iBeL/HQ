@@ -117,6 +117,9 @@ Run them before and after every update; they print a short pass/fail table at th
   51 H51, no Claude: a call's session saves the usage it gets back (the rate limit event) to the same file and
      shape as the mail check, marked as from a call; it never reaches a turn; a broken one doesn't stop the
      call; the usage check puts it on the status page as "from a call"; a Free call's brain does the same
+  52 H49, no Claude: in the desktop app (?app) the space bar is the talk button: a short press mutes and
+     unmutes, held down it's push to talk, letting go sends; not before a call, not while typing in the text
+     box, not inside the Hang up question; in the browser and on the phone space does nothing
 
 Safe to run while the live phone line is up: the flows use their own server on port 7871
 (JARVIS_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
@@ -3684,6 +3687,71 @@ setTimeout(() => {
             shutil.rmtree(tmp, ignore_errors=True)
         return "saved from the call's session as from a call, same shape and code as the mail check; never in a turn; a broken one skipped; Free too"
 
+    async def flow52(self) -> str:
+        """H49: the space bar in the desktop app. No Claude turns: the real call page in a headless browser, with a
+        fake live call. Inside the app (?app) a short press mutes and unmutes, a hold is push to talk (green, key
+        repeats ignored) and letting go sends (yellow, muted); not before a call, not while typing in the text box,
+        not inside the Hang up question. Outside the app (the browser, the phone) space does nothing."""
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const key = (type, el, repeat) => (el || document.body).dispatchEvent(new KeyboardEvent(type, { code: "Space", key: " ", repeat: !!repeat, bubbles: true, cancelable: true }));
+  const server = st => onServerMessage({ data: JSON.stringify({ type: "jarvis-state", state: st }) });  // as on a real call
+  const look = () => (muted ? "muted" : "open") + "/" + (muteBtn.classList.contains("talk") ? "talk" : muteBtn.classList.contains("transcribing") ? "yellow" : "-");
+  key("keydown"); await wait(50); key("keyup"); await wait(50);
+  out.push("before:" + look() + "/" + pressId);
+  setState("live", "On the call");
+  key("keydown"); await wait(80); key("keyup"); await wait(50);
+  out.push("tap1:" + look());
+  key("keydown"); await wait(80); key("keyup"); await wait(50);
+  out.push("tap2:" + look());
+  key("keydown");
+  for (let i = 0; i < 8; i++) { await wait(120); key("keydown", null, true); if (i === 4) server("hearing"); }
+  out.push("hold:" + look() + "/" + muteBtn.textContent);
+  key("keyup"); await wait(80);
+  out.push("release:" + look());
+  setMuted(false); setTranscribing(false);
+  const t = document.getElementById("typein");
+  t.focus(); const free = key("keydown", t); await wait(500); key("keyup", t); await wait(50);
+  out.push("typing:" + look() + "/" + (free ? "typed" : "BLOCKED"));
+  const hb = document.querySelector("#hangask button");
+  const freeQ = key("keydown", hb); await wait(80); key("keyup", hb); await wait(50);
+  out.push("question:" + look() + "/" + (freeQ ? "button" : "BLOCKED"));
+  out.push("title:" + (muteBtn.title ? "yes" : "no"));
+  const pre = document.createElement("pre"); pre.id = "h49"; pre.textContent = "H49RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f = self.tmp / "h49.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1))
+        got = {}
+        for where, q in (("app", "?app=1"), ("browser", "")):
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--autoplay-policy=no-user-gesture-required",
+                                              f"--user-data-dir={self.tmp / ('h49-' + where)}", "--virtual-time-budget=20000", "--dump-dom", f.as_uri() + q], timeout=90)
+            m = re.search(r'<pre id="h49">H49RESULT (.*?) END</pre>', r.stdout)
+            need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
+            say(f"   {where}: {m.group(1)}")
+            got[where] = dict(part.split(":", 1) for part in m.group(1).split(" | "))
+        a, b = got["app"], got["browser"]
+        need(a["before"] == "open/-/null", f"space did something before a call: {a}")
+        need(a["tap1"] == "muted/-" and a["tap2"] == "open/-", f"a short press doesn't mute and unmute: {a}")
+        need(a["hold"] == "open/talk/Talking…", f"holding space isn't push to talk: {a}")
+        need(a["release"] == "muted/yellow", f"letting go of space doesn't send (yellow, muted): {a}")
+        need(a["typing"] == "open/-/typed", f"space while typing in the text box was taken: {a}")
+        need(a["question"] == "open/-/button", f"space inside the Hang up question was taken: {a}")
+        need(a["title"] == "yes", f"the talk button doesn't say what space does in the app: {a}")
+        need(b["tap1"] == "open/-" and b["hold"].startswith("open/-") and b["release"] == "open/-" and b["title"] == "no",
+             f"space does something outside the app: {b}")
+        src = (ROOT / "desktop/HQ.swift").read_text()
+        need("makeFirstResponder(call)" in src, "the app doesn't give the call page the keys")
+        return "in the app: tap mutes and unmutes, hold talks (repeats ignored), letting go sends; not before a call, not while typing, not in a question; outside the app nothing"
+
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
     2: ("The greeting plays first, on Quick and Deep", True, "flow2"),
@@ -3736,6 +3804,7 @@ FLOWS = {
     49: ("An agent knows who she is: Pepper says her name", True, "flow49"),
     50: ("H46: Donna left, Pepper right, a voice each, no waiting lines, no status button in the app", False, "flow50"),
     51: ("H51: a call saves the usage it gets back, for the status page", False, "flow51"),
+    52: ("H49: the space bar in the desktop app: tap mutes, hold talks, letting go sends", False, "flow52"),
 }
 
 

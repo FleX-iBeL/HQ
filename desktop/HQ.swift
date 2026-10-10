@@ -97,6 +97,7 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         } else {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+            window.makeFirstResponder(call)  // H49: the space bar reaches the call page from the start
         }
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.poll() }
     }
@@ -205,6 +206,8 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
 
     func webView(_ v: WKWebView, didFinish nav: WKNavigation!) {
         if v === status && v.url?.port == 4748 { statusLoaded = true }
+        // H49: the space bar talks on the call page (app/web/index.html), so it gets the keys once it's loaded.
+        if v === call && tab == "call" && !selftest { window.makeFirstResponder(call) }
     }
 
     func fix() {
