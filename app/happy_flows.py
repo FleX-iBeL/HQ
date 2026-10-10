@@ -109,7 +109,7 @@ Run them before and after every update; they print a short pass/fail table at th
      reading is the Mac app's; Turn everything on only answers the HQ page (and only says what it would
      do here); at phone width the strip shows the dog and the status page below, the call page only
      loads when Call is opened, on 127.0.0.1:7860 here and the call line's address on the phone
-  48 the agents (H29): Donna (Deep, Sonnet) and Pepper (Quick, Opus) replace Quick and Deep, with headshots
+  48 the agents (H29): Donna (Quick, Sonnet) and Pepper (Deep, Opus) replace Quick and Deep, with headshots
   49 an agent knows who she is: Pepper says her name (one Claude turn)
   50 H46, no Claude: Donna left and Pepper right, Voice Donna Paulsen and Voice Pepper Potts in Settings
      (each her own, sent with the call), no waiting lines (the server turns them off too), and inside the
@@ -508,7 +508,7 @@ class Run:
     async def flow2(self) -> str:
         await self.ensure_server()
         out = []
-        import agents  # H46: each load on its agent's model (Pepper, Quick, on Opus; Donna, Deep, on Sonnet)
+        import agents  # H46: each load on its agent's model (Donna, Quick, on Sonnet; Pepper, Deep, on Opus)
         for mode in ("quick", "deep"):
             a = agents.find(config.FOLDER, None, mode)
             model = config.MODEL_ALIASES.get(a["model"], a["model"])
@@ -3489,7 +3489,7 @@ window.addEventListener('load', () => setTimeout(() => {
         every = agents.load(config.FOLDER)
         ids = [a["id"] for a in every]
         need(ids[:2] == ["donna", "pepper"], f"Donna and Pepper aren't the first two agents (H46: Donna left): {ids}")
-        need(agents.find(config.FOLDER, None, "quick")["id"] == "pepper" and agents.find(config.FOLDER, None, "deep")["id"] == "donna",
+        need(agents.find(config.FOLDER, None, "quick")["id"] == "donna" and agents.find(config.FOLDER, None, "deep")["id"] == "pepper",
              "a call with only Quick or Deep doesn't get Pepper or Donna")
         need(agents.find(config.FOLDER, "nobody", None)["id"] == "donna", "an unknown agent doesn't fall back to the first one")
         need(all(a["personality"] and a["speciality"] for a in every[:2]), "an agent has no personality or speciality")
@@ -3515,10 +3515,10 @@ window.addEventListener('load', () => setTimeout(() => {
         p_ = agents.find(config.FOLDER, "pepper"); d_ = agents.find(config.FOLDER, "donna")
         q = make_brain(config.MODEL_ALIASES[p_["model"]], pol, load=p_["load"], persona=agents.persona(p_, config.USER))._options
         d = make_brain(config.MODEL_ALIASES[d_["model"]], pol, load=d_["load"], persona=agents.persona(d_, config.USER))._options
-        need("You are Pepper" in q.system_prompt["append"] and "This is a Quick call" in q.system_prompt["append"]
-             and q.model == config.MODEL_ALIASES["opus"], "Pepper's session isn't Quick's load on Opus with her personality (H46)")
-        need("You are Donna" in d.system_prompt["append"] and "This is a Quick call" not in d.system_prompt["append"]
-             and d.model == config.MODEL_ALIASES["sonnet"], "Donna's session isn't Deep's load on Sonnet with her personality (H46)")
+        need("You are Pepper" in q.system_prompt["append"] and "This is a Quick call" not in q.system_prompt["append"]
+             and q.model == config.MODEL_ALIASES["opus"], "Pepper's session isn't Deep's load on Opus with her personality (H46)")
+        need("You are Donna" in d.system_prompt["append"] and "This is a Quick call" in d.system_prompt["append"]
+             and d.model == config.MODEL_ALIASES["sonnet"], "Donna's session isn't Quick's load on Sonnet with her personality (H46)")
         need(d.system_prompt["append"].index("# This chat is a live voice call") < d.system_prompt["append"].index("You are Donna"),
              "her personality doesn't come after the call rules")
         need("Pepper" in config.WHISPER_PROMPT and "Donna" in config.WHISPER_PROMPT, "speech recognition doesn't know the agents' names")
@@ -3543,7 +3543,7 @@ window.addEventListener('load', () => setTimeout(() => {
         need("agent Donna · brain" in t.path.read_text(), "the transcript doesn't say which agent")
         src = (ROOT / "app/call.py").read_text() + (ROOT / "app/bot.py").read_text()
         need("agents.find(config.FOLDER, agent, self.load)" in src and 'agent=agent["id"]' in src, "the call doesn't take the agent the page sent")
-        return f"Donna (Deep, Sonnet) left and Pepper (Quick, Opus) right; a workspace's own agents and headshots; {len(listed)} on the page with their pictures"
+        return f"Donna (Quick, Sonnet) left and Pepper (Deep, Opus) right; a workspace's own agents and headshots; {len(listed)} on the page with their pictures"
 
     # 49
     async def flow49(self) -> str:

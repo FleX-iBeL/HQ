@@ -192,8 +192,8 @@
 <body>
 <h1>Jarvis</h1>
 <div id="modes" role="group" aria-label="Kind of call">
-  <button type="button" data-mode="deep" data-agent="donna"><img src="/agents/donna/picture" alt=""><span>Donna</span></button>
-  <button type="button" data-mode="quick" data-agent="pepper"><img src="/agents/pepper/picture" alt=""><span>Pepper</span></button>
+  <button type="button" data-mode="quick" data-agent="donna"><img src="/agents/donna/picture" alt=""><span>Donna</span></button>
+  <button type="button" data-mode="deep" data-agent="pepper"><img src="/agents/pepper/picture" alt=""><span>Pepper</span></button>
 </div>
 <div id="modehint"></div>
 <div id="freetag">FREE</div>
@@ -263,8 +263,8 @@ const modeHint = document.getElementById("modehint");
 // (Opus). The list comes from the server (/api/agents); these two are what shows until it answers.
 // H46: Donna (Sonnet) on the left, Pepper (Opus) on the right, each with her own voice.
 let AGENTS = {
-  donna: { id: "donna", name: "Donna", full_name: "Donna Paulsen", voice: "af_heart", load: "deep", model: "sonnet", speciality: "Sparring, planning and the bigger picture" },
-  pepper: { id: "pepper", name: "Pepper", full_name: "Pepper Potts", voice: "af_heart", load: "quick", model: "opus", speciality: "Your agenda, your list, mail and quick orders" },
+  donna: { id: "donna", name: "Donna", full_name: "Donna Paulsen", voice: "af_heart", load: "quick", model: "sonnet", speciality: "Your agenda, your list, mail and quick orders" },
+  pepper: { id: "pepper", name: "Pepper", full_name: "Pepper Potts", voice: "af_heart", load: "deep", model: "opus", speciality: "Sparring, planning and the bigger picture" },
 };
 if (new URLSearchParams(location.search).has("app")) document.body.classList.add("inapp");
 const MODEL_NAME = { sonnet: "Sonnet", opus: "Opus", haiku: "Haiku" };
@@ -295,10 +295,10 @@ function showVoices() {
     row.append(label, sel); voicesEl.append(row);
   }
 }
-let mode = "deep", free = false, agent = "donna";
+let mode = "quick", free = false, agent = "donna";
 try {
   const m = localStorage.getItem("jarvis-mode");
-  if (m === "deep") { mode = m; agent = "donna"; }  // before H29 the page remembered Quick or Deep
+  if (m === "deep") { mode = m; agent = "pepper"; }  // before H29 the page remembered Quick or Deep
   const a = localStorage.getItem("jarvis-agent");
   if (a && AGENTS[a]) { agent = a; mode = AGENTS[a].load; }
   free = localStorage.getItem("jarvis-free") === "on" || m === "free";  // "free" was a mode before H8
