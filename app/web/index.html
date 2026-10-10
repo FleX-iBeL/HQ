@@ -68,6 +68,8 @@
               box-shadow:0 -8px 24px rgba(0,0,0,.25); padding:18px 16px calc(18px + env(safe-area-inset-bottom));
               display:none; flex-direction:column; gap:6px; text-align:left; max-width:520px; margin:0 auto; }
   #settings.open { display:flex; }
+  /* H46: inside the Mac app (?app) the app has its own Status tab, so the status button and sheet go. */
+  body.inapp #statbtn, body.inapp #statsheet { display:none !important; }
   #settings h2 { margin:0 0 6px; font-size:17px; font-weight:650; text-align:center; }
   #settings .row { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px 2px; border-bottom:1px solid var(--ring); }
   #settings .row:last-of-type { border-bottom:0; }
@@ -76,7 +78,7 @@
   .sw { flex-shrink:0; min-width:64px; padding:9px 14px; border-radius:999px; border:2px solid var(--muted); background:transparent;
         color:var(--fg); font:600 15px/1 -apple-system,sans-serif; cursor:pointer; }
   .sw.on { background:var(--accent); color:#04120f; border-color:var(--accent); }
-  #voice { flex-shrink:0; font:600 15px/1 -apple-system,sans-serif; color:var(--fg); background:transparent; border:2px solid var(--muted); border-radius:999px; padding:8px 12px; }
+  #settings select { flex-shrink:0; font:600 15px/1 -apple-system,sans-serif; color:var(--fg); background:transparent; border:2px solid var(--muted); border-radius:999px; padding:8px 12px; }
   #setdone { margin-top:8px; padding:14px; border-radius:999px; border:0; background:var(--fg); color:var(--bg); font:600 17px/1 -apple-system,sans-serif; cursor:pointer; }
   /* H3: what Jarvis is doing. Hidden outside a call. */
   #orbwrap { display:none; flex-direction:column; align-items:center; gap:10px; margin:-8px 0; }
@@ -190,8 +192,8 @@
 <body>
 <h1>Jarvis</h1>
 <div id="modes" role="group" aria-label="Kind of call">
-  <button type="button" data-mode="quick" data-agent="pepper"><img src="/agents/pepper/picture" alt=""><span>Pepper</span></button>
   <button type="button" data-mode="deep" data-agent="donna"><img src="/agents/donna/picture" alt=""><span>Donna</span></button>
+  <button type="button" data-mode="quick" data-agent="pepper"><img src="/agents/pepper/picture" alt=""><span>Pepper</span></button>
 </div>
 <div id="modehint"></div>
 <div id="freetag">FREE</div>
@@ -206,7 +208,8 @@
 <div id="settings" role="dialog" aria-label="Settings">
   <h2>Settings</h2>
   <div class="row"><span>Free<small>Plain Claude, for testing and showing others: no connectors (no mail, no calendar), none of your files, no notes, nothing saved. Only the web</small></span><button id="free" class="sw" type="button" aria-pressed="false">Off</button></div>
-  <div class="row"><span>Voice</span><select id="voice" aria-label="Voice">
+  <div id="voices"></div>
+  <template id="voiceopts">
     <option value="af_heart">Heart</option>
     <option value="af_bella">Bella</option>
     <option value="am_michael">Michael</option>
@@ -216,8 +219,7 @@
     <option value="am_eric">Eric</option>
     <option value="bm_george">George (British)</option>
     <option value="bm_fable">Fable (British)</option>
-  </select></div>
-  <div class="row"><span>Waiting lines<small>"Gotcha", "Let me take a look" while she works</small></span><button id="lines" class="sw" type="button" aria-pressed="false">Off</button></div>
+  </template>
   <div class="row"><span>Thinking sound<small>A soft tick while Jarvis thinks</small></span><button id="sound" class="sw" type="button" aria-pressed="true">On</button></div>
   <button id="setdone" type="button">Done</button>
 </div>
@@ -259,10 +261,12 @@ const modeHint = document.getElementById("modehint");
 // none of his files, no calendar or mail, nothing saved.
 // H29: the agents replace the Quick and Deep buttons: Pepper loads like Quick (Sonnet), Donna like Deep
 // (Opus). The list comes from the server (/api/agents); these two are what shows until it answers.
+// H46: Donna (Sonnet) on the left, Pepper (Opus) on the right, each with her own voice.
 let AGENTS = {
-  pepper: { id: "pepper", name: "Pepper", load: "quick", model: "sonnet", speciality: "Your agenda, your list, mail and quick orders" },
-  donna: { id: "donna", name: "Donna", load: "deep", model: "opus", speciality: "Sparring, planning and the bigger picture" },
+  donna: { id: "donna", name: "Donna", full_name: "Donna Paulsen", voice: "af_heart", load: "deep", model: "sonnet", speciality: "Sparring, planning and the bigger picture" },
+  pepper: { id: "pepper", name: "Pepper", full_name: "Pepper Potts", voice: "af_heart", load: "quick", model: "opus", speciality: "Your agenda, your list, mail and quick orders" },
 };
+if (new URLSearchParams(location.search).has("app")) document.body.classList.add("inapp");
 const MODEL_NAME = { sonnet: "Sonnet", opus: "Opus", haiku: "Haiku" };
 function modelName(a) { return MODEL_NAME[a.model] || a.model; }
 // M2: Free said plainly, for showing others (HQ 0.1): no connectors, no files, no notes, only the web.
@@ -271,24 +275,27 @@ function hintFor(a) {
               : `${modelName(a)}: ${a.speciality}`;
 }
 function callName() { return (AGENTS[agent] || {name: "Jarvis"}).name + (free ? " · Free" : ""); }
-const linesBtn = document.getElementById("lines");
-// H1: the waiting lines ("Gotcha", "Let me take a look") while she works. Off by default; the page remembers the last choice.
-let waitingLines = false;
-try { waitingLines = localStorage.getItem("jarvis-lines") === "on"; } catch (e) {}
-function showLines() {
-  linesBtn.textContent = waitingLines ? "On" : "Off";
-  linesBtn.classList.toggle("on", waitingLines);
-  linesBtn.setAttribute("aria-pressed", String(waitingLines));
+// H46: a voice for each agent, in Settings ("Voice Pepper Potts", "Voice Donna Paulsen"). Each is remembered
+// on this device; the first time, the one voice chosen before H46, else her default.
+const voicesEl = document.getElementById("voices"), voiceOpts = document.getElementById("voiceopts");
+function voiceFor(id) {
+  const a = AGENTS[id] || {};
+  let v = null;
+  try { v = localStorage.getItem("jarvis-voice-" + id) || localStorage.getItem("jarvis-voice"); } catch (e) {}
+  return v && voiceOpts.content.querySelector(`option[value="${v}"]`) ? v : (a.voice || "af_heart");
 }
-linesBtn.addEventListener("click", () => {
-  if (state !== "idle") return;
-  waitingLines = !waitingLines; try { localStorage.setItem("jarvis-lines", waitingLines ? "on" : "off"); } catch (e) {}
-  showLines();
-});
-const voiceEl = document.getElementById("voice");
-try { const v = localStorage.getItem("jarvis-voice"); if (v && voiceEl.querySelector(`option[value="${v}"]`)) voiceEl.value = v; } catch (e) {}
-voiceEl.addEventListener("change", () => { try { localStorage.setItem("jarvis-voice", voiceEl.value); } catch (e) {} });
-let mode = "quick", free = false, agent = "pepper";
+function showVoices() {
+  voicesEl.textContent = "";
+  for (const a of Object.values(AGENTS)) {
+    const row = document.createElement("div"); row.className = "row";
+    const label = document.createElement("span"); label.textContent = "Voice " + (a.full_name || a.name);
+    const sel = document.createElement("select"); sel.dataset.agent = a.id; sel.setAttribute("aria-label", label.textContent);
+    sel.append(voiceOpts.content.cloneNode(true)); sel.value = voiceFor(a.id);
+    sel.addEventListener("change", () => { try { localStorage.setItem("jarvis-voice-" + a.id, sel.value); } catch (e) {} });
+    row.append(label, sel); voicesEl.append(row);
+  }
+}
+let mode = "deep", free = false, agent = "donna";
 try {
   const m = localStorage.getItem("jarvis-mode");
   if (m === "deep") { mode = m; agent = "donna"; }  // before H29 the page remembered Quick or Deep
@@ -331,7 +338,7 @@ function showAgents(list) {
   }
   if (!AGENTS[agent]) agent = list[0].id;
   mode = AGENTS[agent].load;
-  showMode();
+  showMode(); showVoices();
 }
 fetch("/api/agents", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => j && showAgents(j.agents)).catch(() => {});
 // H9: the Settings sheet (Free, voice, waiting lines, thinking sound), only before a call.
@@ -772,7 +779,7 @@ async function call() {
     await pc.setLocalDescription(await pc.createOffer());
     await gathered(pc);
     const r = await fetch("api/offer", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, agent, free, voice: voiceEl.value, waiting_lines: waitingLines } }) });
+      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, agent, free, voice: voiceFor(agent) } }) });
     if (!r.ok) throw new Error("The call server said " + r.status);
     const answer = await r.json();
     await pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });
@@ -821,7 +828,7 @@ function cleanup(text) {
 }
 
 btn.addEventListener("click", () => { if (state === "idle") call(); else if (state === "live") askHangup(true); });
-clearChat(); showMode(); showLines(); showSound(); applyVoice(); loadLastCall();
+clearChat(); showMode(); showVoices(); showSound(); applyVoice(); loadLastCall();
 // Closing the page or locking away from it also counts as hanging up.
 window.addEventListener("pagehide", ev => { if (ev.persisted) return; try { if (dc && dc.readyState === "open") dc.send(JSON.stringify({ type: "hangup" })); } catch (e) {} });
 document.addEventListener("visibilitychange", async () => {

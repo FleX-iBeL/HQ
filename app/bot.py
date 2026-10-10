@@ -8,6 +8,8 @@ closed, the same session writes things down, commits and pushes.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import json
 import os
 import sys
 from pathlib import Path
@@ -30,28 +32,89 @@ from call_state import CallState
 from pipeline import PushToTalk, build_pipeline, cancel_turn, late_cancel, type_to_jarvis
 
 
+# H46: True while the call line answers an offer from a page on this MacBook itself (see CallerHere).
+_caller_here = contextvars.ContextVar("caller_here", default=False)
+_all_addresses = None  # aioice's own list of this MacBook's addresses, before the tailnet filter
+
+
 def keep_audio_in_the_tailnet() -> None:
     """The MacBook only offers its Tailscale addresses (100.x and fd7a:...) as places to send
     the call's audio to, not its Wi-Fi or public IPv6 addresses. With no outside STUN/TURN
     servers either, the audio can only travel through Tailscale. If the MacBook has no
     Tailscale address (Tailscale off), all addresses are offered, so the call still works
-    at the desk. JARVIS_TAILNET_ONLY=0 turns this off."""
+    at the desk. JARVIS_TAILNET_ONLY=0 turns this off.
+
+    H46 (11 October 2026): the HQ app on this MacBook (WebKit) never offers a Tailscale address,
+    only Wi-Fi, so its calls timed out. When the caller offers one of this MacBook's own addresses,
+    the caller is this MacBook, and the audio never leaves it: then all addresses are offered.
+    A phone can't offer the MacBook's own address, so its calls stay Tailscale only."""
     import ipaddress
 
     import aioice.ice as ice
 
     if os.environ.get("JARVIS_TAILNET_ONLY", "1") == "0":
         return
-    original = ice.get_host_addresses
+    global _all_addresses
+    original = _all_addresses = ice.get_host_addresses
     cgnat = ipaddress.ip_network("100.64.0.0/10")
     ula = ipaddress.ip_network("fd7a:115c:a1e0::/48")
 
     def tailnet_only(use_ipv4: bool, use_ipv6: bool) -> list[str]:
         everything = original(use_ipv4, use_ipv6)
+        if _caller_here.get():
+            return everything
         tail = [a for a in everything if (ipaddress.ip_address(a) in cgnat or ipaddress.ip_address(a) in ula)]
         return tail or everything
 
     ice.get_host_addresses = tailnet_only
+
+
+def own_addresses() -> set[str]:
+    import aioice.ice as ice
+    return set((_all_addresses or ice.get_host_addresses)(True, True))
+
+
+def offer_from_this_mac(body: bytes) -> bool:
+    """H46: does this offer (the call page's JSON with its SDP) come from a page on this MacBook?
+    Yes when one of its candidates is one of this MacBook's own addresses."""
+    try:
+        sdp = json.loads(body or b"{}").get("sdp", "")
+    except (ValueError, AttributeError):
+        return False
+    theirs = {ln.split()[4] for ln in str(sdp).splitlines() if ln.startswith("a=candidate") and len(ln.split()) > 4}
+    return bool(theirs & own_addresses())
+
+
+class CallerHere:
+    """H46: reads a call's offer before the call line answers it, and marks it when it comes from this
+    MacBook (offer_from_this_mac), so keep_audio_in_the_tailnet offers this MacBook's own addresses too."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or scope.get("method") != "POST" or scope.get("path") != "/api/offer":
+            return await self.app(scope, receive, send)
+        chunks, more = [], True
+        while more:
+            m = await receive()
+            chunks.append(m.get("body", b""))
+            more = m.get("more_body", False)
+        body = b"".join(chunks)
+        given = False
+
+        async def replay():
+            nonlocal given
+            if not given:
+                given = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return await receive()
+
+        token = _caller_here.set(offer_from_this_mac(body))
+        try:
+            await self.app(scope, replay, send)
+        finally:
+            _caller_here.reset(token)
 
 
 # H7: while a free call is on, what was said stays out of the server log. Pipecat's voice
@@ -189,8 +252,11 @@ async def bot(runner_args: RunnerArguments):
     agent = agents.find(config.FOLDER, str(body.get("agent", "")) or None, mode if mode in ("quick", "deep") else None)
     model = config.MODEL_ALIASES.get(agent["model"], agent["model"])
     mode = agent["load"]
-    voice = str(body.get("voice", ""))  # one of config.VOICES, else the default (Call checks)
-    waiting_lines = body.get("waiting_lines") is True  # H1: off unless the page switch is on
+    # H46: each agent has her own voice (Settings on the call page); the page sends hers, else her default.
+    voice = str(body.get("voice", "")) or agent.get("voice", "")  # one of config.VOICES, else the default (Call checks)
+    # H46 (11 October 2026), in the user's words: "i want the waiting lines to be gone from the settings as we
+    # dont want to use these lines anymore." So they're always off, whatever an older page sends.
+    waiting_lines = False
     # B1: Quick loads only part of his folder, Deep everything.
     load = mode if mode in ("quick", "deep") else "quick"
     await run_call(transport, runner_args.handle_sigint, runner_args.webrtc_connection,
@@ -206,6 +272,7 @@ if __name__ == "__main__":
     from fastapi.responses import FileResponse, Response
 
     keep_audio_in_the_tailnet()
+    app.add_middleware(CallerHere)  # H46
 
     WEB = Path(__file__).resolve().parent / "web"
     _NO_CACHE = {"Cache-Control": "no-cache"}

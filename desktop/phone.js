@@ -13,7 +13,7 @@
   const EVERY = 5000;
   const callURL = () => (location.port === '8444'
     ? `https://${location.hostname}:8443/`
-    : 'http://127.0.0.1:7860/');
+    : 'http://127.0.0.1:7860/') + '?app=1';  // H46: it has the Status tab, so the call page leaves out its own
   let frames = null;
   let timer = null;
 

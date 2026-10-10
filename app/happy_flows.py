@@ -109,6 +109,11 @@ Run them before and after every update; they print a short pass/fail table at th
      reading is the Mac app's; Turn everything on only answers the HQ page (and only says what it would
      do here); at phone width the strip shows the dog and the status page below, the call page only
      loads when Call is opened, on 127.0.0.1:7860 here and the call line's address on the phone
+  48 the agents (H29): Donna (Deep, Sonnet) and Pepper (Quick, Opus) replace Quick and Deep, with headshots
+  49 an agent knows who she is: Pepper says her name (one Claude turn)
+  50 H46, no Claude: Donna left and Pepper right, Voice Donna Paulsen and Voice Pepper Potts in Settings
+     (each her own, sent with the call), no waiting lines (the server turns them off too), and inside the
+     app (?app) no status button on the call page
 
 Safe to run while the live phone line is up: the flows use their own server on port 7871
 (JARVIS_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
@@ -503,7 +508,10 @@ class Run:
     async def flow2(self) -> str:
         await self.ensure_server()
         out = []
-        for mode, model in [("quick", config.MODEL_ALIASES["sonnet"]), ("deep", config.MODEL_ALIASES["opus"])]:
+        import agents  # H46: each load on its agent's model (Pepper, Quick, on Opus; Donna, Deep, on Sonnet)
+        for mode in ("quick", "deep"):
+            a = agents.find(config.FOLDER, None, mode)
+            model = config.MODEL_ALIASES.get(a["model"], a["model"])
             s = await self.greeting_call(mode, model)
             out.append(f"{mode} {s:.1f} s")
             self.turns += 1  # the call's warm-up turn
@@ -3324,6 +3332,8 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
   out.push('after:' + hq.state().mood + '/' + document.getElementById('said').textContent);
   document.getElementById('tab-call').click();
   out.push('tab:' + hq.state().tab);
+  out.push('calldog:' + getComputedStyle(document.getElementById('dog')).display + '/' + getComputedStyle(document.getElementById('fix')).display);
+  document.getElementById('tab-status').click();
   document.getElementById('dog').dispatchEvent(new MouseEvent('click', { bubbles: true }));
   out.push('panel:' + hq.state().open + '/' + document.querySelectorAll('#rows .row').length);
   out.push('anim:' + ['happy', 'alert', 'bark', 'run', 'sleep'].map((m) => { document.getElementById('dog').setAttribute('class', 'dog ' + m);
@@ -3343,6 +3353,7 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
         need(res["bark"] == "bark/down/true" and res["sleep"] == "sleep/down/true", f"the alarm moods are wrong: {res}")
         need(res["fixing"] == "run/false" and res["after"] == "sleep/Started the call line", f"turning on doesn't show: {res}")
         need(res["tab"] == "call" and res["panel"] == "true/0", f"the tabs or the dog's panel don't work: {res}")
+        need(res["calldog"] == "none/none", f"the dog or Turn everything on still show on Call (H46): {res}")
         need(res["anim"] == "11111", f"not every mood moves: {res['anim']}")
         # The real app: built with swiftc, its own files found, its window (never shown) loads the strip and the status page.
         b = await asyncio.to_thread(run, [str(ROOT / "desktop/build.sh")], timeout=300)
@@ -3361,6 +3372,8 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
         if live["mood"] != "sleep":
             need(got["status_loaded"] and "Jarvis VA" in got["status_title"][0], f"the app didn't load the status page: {got}")
         swift = (ROOT / "desktop/HQ.swift").read_text()
+        need('var tab = "call"' in swift and "_setICECandidateFilteringEnabled:" in swift and "7860/?app=1" in swift,
+             "the app doesn't open on Call, or its call page still hides the address (H46)")
         need('origin.host == "127.0.0.1"' in swift and "applicationShouldTerminateAfterLastWindowClosed" in swift,
              "the microphone isn't limited to this MacBook, or closing doesn't quit")
         return f"seven made-up states judged like the status page; turning on starts only what's off, stops nothing; the strip's five moods move; the app builds and its window read: {got['strip']['head']}"
@@ -3452,7 +3465,7 @@ window.addEventListener('load', () => setTimeout(() => {
             need(res["status"] == "//true", f"the status page isn't under the strip: {res}")
             need(not res["head"].startswith("The Mac"), f"the strip got no reading: {res}")
             need(res["callBefore"] == "none", f"the call page loaded before Call was opened: {res}")
-            need(res["call"] == "http://127.0.0.1:7860//true/true/call", f"Call doesn't open the call page: {res}")
+            need(res["call"] == "http://127.0.0.1:7860/?app=1/true/true/call", f"Call doesn't open the call page: {res}")
             need(res["back"] == "true/true", f"Status doesn't come back: {res}")
             need(res["fits"] == "true/true/true/true", f"the strip doesn't fit a phone: {res}")
             return f"/hq is the Mac app's strip with the phone's look, icon and manifest; the dog reads {h['mood']}; Turn everything on only from the page; at phone width: status below, Call loads only when opened"
@@ -3475,10 +3488,10 @@ window.addEventListener('load', () => setTimeout(() => {
         # The defaults, and a page from before H29 still gets the right agent.
         every = agents.load(config.FOLDER)
         ids = [a["id"] for a in every]
-        need(ids[:2] == ["pepper", "donna"], f"Pepper and Donna aren't the first two agents: {ids}")
+        need(ids[:2] == ["donna", "pepper"], f"Donna and Pepper aren't the first two agents (H46: Donna left): {ids}")
         need(agents.find(config.FOLDER, None, "quick")["id"] == "pepper" and agents.find(config.FOLDER, None, "deep")["id"] == "donna",
              "a call with only Quick or Deep doesn't get Pepper or Donna")
-        need(agents.find(config.FOLDER, "nobody", None)["id"] == "pepper", "an unknown agent doesn't fall back to the first one")
+        need(agents.find(config.FOLDER, "nobody", None)["id"] == "donna", "an unknown agent doesn't fall back to the first one")
         need(all(a["personality"] and a["speciality"] for a in every[:2]), "an agent has no personality or speciality")
         # A workspace's own agents: a change, a new one, a hidden one, a headshot; bad entries ignored.
         ws = self.tmp / "agents-ws"
@@ -3490,12 +3503,12 @@ window.addEventListener('load', () => setTimeout(() => {
             {"id": "../x", "name": "Bad", "load": "quick"}, {"id": "noload", "name": "No load"}, "junk"]))
         (ws / "Jarvis VA" / "agents" / "coach.png").write_bytes(b"\x89PNG\r\n\x1a\n")
         mine = agents.load(ws)
-        need([a["id"] for a in mine] == ["pepper", "donna", "coach"], f"the workspace's agents aren't read right: {[a['id'] for a in mine]}")
+        need([a["id"] for a in mine] == ["donna", "pepper", "coach"], f"the workspace's agents aren't read right: {[a['id'] for a in mine]}")
         need([a["id"] for a in agents.visible(ws)] == ["donna", "coach"], "a hidden agent still shows")
-        need(mine[1]["personality"] == "Test personality." and mine[1]["name"] == "Donna", "a workspace change isn't applied")
+        need(mine[0]["personality"] == "Test personality." and mine[0]["name"] == "Donna", "a workspace change isn't applied")
         need(agents.picture(ws, "coach") and not agents.picture(ws, "donna") and not agents.picture(ws, "../coach"),
              "headshots aren't found in the workspace only")
-        svg = agents.picture_svg(mine[1])
+        svg = agents.picture_svg(mine[0])
         need(svg.startswith("<svg") and ">D</text>" in svg, "the placeholder headshot isn't drawn")
         # The sessions: her personality after the call rules, on her model and load.
         pol = Policy(config.FOLDER, dry_run=True)
@@ -3503,9 +3516,9 @@ window.addEventListener('load', () => setTimeout(() => {
         q = make_brain(config.MODEL_ALIASES[p_["model"]], pol, load=p_["load"], persona=agents.persona(p_, config.USER))._options
         d = make_brain(config.MODEL_ALIASES[d_["model"]], pol, load=d_["load"], persona=agents.persona(d_, config.USER))._options
         need("You are Pepper" in q.system_prompt["append"] and "This is a Quick call" in q.system_prompt["append"]
-             and q.model == config.MODEL_ALIASES["sonnet"], "Pepper's session isn't Quick's load on Sonnet with her personality")
+             and q.model == config.MODEL_ALIASES["opus"], "Pepper's session isn't Quick's load on Opus with her personality (H46)")
         need("You are Donna" in d.system_prompt["append"] and "This is a Quick call" not in d.system_prompt["append"]
-             and d.model == config.MODEL_ALIASES["opus"], "Donna's session isn't Deep's load on Opus with her personality")
+             and d.model == config.MODEL_ALIASES["sonnet"], "Donna's session isn't Deep's load on Sonnet with her personality (H46)")
         need(d.system_prompt["append"].index("# This chat is a live voice call") < d.system_prompt["append"].index("You are Donna"),
              "her personality doesn't come after the call rules")
         need("Pepper" in config.WHISPER_PROMPT and "Donna" in config.WHISPER_PROMPT, "speech recognition doesn't know the agents' names")
@@ -3513,7 +3526,7 @@ window.addEventListener('load', () => setTimeout(() => {
         await self.ensure_server()
         code, body, ctype = http_get("/api/agents")
         listed = json.loads(body or b"{}").get("agents", [])
-        need(code == 200 and [a["id"] for a in listed][:2] == ["pepper", "donna"], f"/api/agents is wrong: {code} {body[:120]!r}")
+        need(code == 200 and [a["id"] for a in listed][:2] == ["donna", "pepper"], f"/api/agents is wrong: {code} {body[:120]!r}")
         need(all("personality" not in a and a["picture"] == f"/agents/{a['id']}/picture" for a in listed), "/api/agents gives too much or no picture")
         for a in listed:
             code, body, ctype = http_get(a["picture"])
@@ -3530,7 +3543,7 @@ window.addEventListener('load', () => setTimeout(() => {
         need("agent Donna · brain" in t.path.read_text(), "the transcript doesn't say which agent")
         src = (ROOT / "app/call.py").read_text() + (ROOT / "app/bot.py").read_text()
         need("agents.find(config.FOLDER, agent, self.load)" in src and 'agent=agent["id"]' in src, "the call doesn't take the agent the page sent")
-        return f"Pepper (Quick, Sonnet) and Donna (Deep, Opus); a workspace's own agents and headshots; {len(listed)} on the page with their pictures"
+        return f"Donna (Deep, Sonnet) left and Pepper (Quick, Opus) right; a workspace's own agents and headshots; {len(listed)} on the page with their pictures"
 
     # 49
     async def flow49(self) -> str:
@@ -3553,6 +3566,57 @@ window.addEventListener('load', () => setTimeout(() => {
         self.turns += 1
         need("pepper" in out.lower(), f"she didn't say she's Pepper: {out!r}")
         return f"asked her name, she said {out.strip()[:40]!r}"
+
+    # 50
+    async def flow50(self) -> str:
+        """H46: the call page's own changes. No Claude turns. Donna left, Pepper right; a voice each in Settings
+        ("Voice Donna Paulsen", "Voice Pepper Potts"), remembered per agent and sent with the call; no waiting
+        lines; inside the app (?app) no status button. The server always turns the waiting lines off."""
+        await self.ensure_server()
+        code, body, _ = http_get("/")
+        page = body.decode()
+        need(code == 200 and 'id="lines"' not in page and "waitingLines" not in page and "waiting_lines" not in page,
+             "the waiting lines are still on the call page")
+        need(page.index('data-agent="donna"') < page.index('data-agent="pepper"'), "Pepper is still left of Donna")
+        src = (ROOT / "app/bot.py").read_text()
+        need("waiting_lines = False" in src, "the server still lets a page turn the waiting lines on")
+        # The app's calls (WebKit offers only Wi-Fi addresses): the call line answers this MacBook on its own
+        # addresses too, a phone still only on Tailscale, and a hidden address (name.local) counts as not here.
+        import bot
+        mine = sorted(a for a in bot.own_addresses() if ":" not in a and not a.startswith("100."))
+        need(mine, "this MacBook has no Wi-Fi address to test with")
+        offer = lambda addr: json.dumps({"sdp": f"v=0\r\na=candidate:1 1 udp 2113937151 {addr} 50000 typ host generation 0\r\n"}).encode()
+        need(bot.offer_from_this_mac(offer(mine[0])), "a call from this MacBook isn't recognised")
+        need(not bot.offer_from_this_mac(offer("203.0.113.5")) and not bot.offer_from_this_mac(offer("1a2b.local"))
+             and not bot.offer_from_this_mac(b"junk"), "a call from elsewhere counts as this MacBook")
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        harness = r"""<script>
+setTimeout(() => {
+  const out = [];
+  out.push('order:' + [...document.querySelectorAll('#modes button')].map(b => b.dataset.agent).join(','));
+  out.push('voices:' + [...document.querySelectorAll('#voices .row span')].map(s => s.textContent).join(','));
+  const sel = document.querySelector('#voices select[data-agent="pepper"]');
+  sel.value = 'bf_emma'; sel.dispatchEvent(new Event('change'));
+  out.push('sent:' + voiceFor('pepper') + '/' + voiceFor('donna'));
+  out.push('inapp:' + getComputedStyle(document.getElementById('statbtn')).display);
+  const pre = document.createElement('pre'); pre.id = 'h46'; pre.textContent = 'H46RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
+}, 1500);
+</script>"""
+        f = self.tmp / "h46.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h46-profile'}",
+                                          "--disable-web-security", "--virtual-time-budget=5000", "--dump-dom", f.as_uri() + "?app=1"], timeout=60)
+        m = re.search(r'<pre id="h46">H46RESULT (.*?) END</pre>', r.stdout)
+        need(m, f"the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        res = dict(part.split(":", 1) for part in m.group(1).split(" | "))
+        say(f"   {m.group(1)}")
+        need(res["order"].startswith("donna,pepper"), f"the agents aren't Donna then Pepper: {res}")
+        need(res["voices"].startswith("Voice Donna Paulsen,Voice Pepper Potts"), f"Settings doesn't have a voice for each: {res}")
+        need(res["sent"] == "bf_emma/af_heart", f"Pepper's voice isn't her own: {res}")
+        need(res["inapp"] == "none", f"the status button still shows inside the app: {res}")
+        return "Donna left, Pepper right; Voice Donna Paulsen and Voice Pepper Potts, each her own; no waiting lines; no status button inside the app"
 
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
@@ -3604,6 +3668,7 @@ FLOWS = {
     47: ("The phone version of the Mac app: the same strip, status and call", False, "flow47"),
     48: ("The agents: Pepper and Donna replace Quick and Deep, with headshots", False, "flow48"),
     49: ("An agent knows who she is: Pepper says her name", True, "flow49"),
+    50: ("H46: Donna left, Pepper right, a voice each, no waiting lines, no status button in the app", False, "flow50"),
 }
 
 

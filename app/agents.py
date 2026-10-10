@@ -30,26 +30,18 @@ PICTURE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png
 
 # [Claude's choice, 10 October 2026: Pepper takes Quick and Donna takes Deep; Moneypenny waits for a
 # later agent. The personalities and colours are Claude's too, the user's to change.]
+# H46 (11 October 2026), in the user's words: "i want Donna to be Sonnet and Pepper to be Opus, and have them
+# switched so Donna is left and Pepper is right. the colors can stay i like Purple for Donna and the red for
+# Pepper." Only the models and the order changed; the loads, personalities and specialities stayed (Claude's
+# reading). Each has her own voice in the call page's Settings ("Voice Pepper Potts", "Voice Donna Paulsen").
 DEFAULTS: list[dict] = [
-    {
-        "id": "pepper",
-        "name": "Pepper",
-        "load": "quick",
-        "model": "sonnet",
-        "colour": "#c2410c",
-        "speciality": "Your agenda, your list, mail and quick orders",
-        "personality": (
-            "Calm, quick and organised, with a dry sense of humour. She runs the day-to-day: the "
-            "agenda, the to-do list, the inbox and small orders. Short answers, straight to the "
-            "point, and she gets it done before you've finished asking. She doesn't spar or coach; "
-            "for the big picture she says Donna is the one to call."
-        ),
-    },
     {
         "id": "donna",
         "name": "Donna",
         "load": "deep",
-        "model": "opus",
+        "model": "sonnet",
+        "full_name": "Donna Paulsen",
+        "voice": "af_heart",
         "colour": "#6d28d9",
         "speciality": "Sparring, planning and the bigger picture",
         "personality": (
@@ -59,9 +51,25 @@ DEFAULTS: list[dict] = [
             "takes a moment longer to think, and it shows."
         ),
     },
+    {
+        "id": "pepper",
+        "name": "Pepper",
+        "load": "quick",
+        "model": "opus",
+        "full_name": "Pepper Potts",
+        "voice": "af_heart",
+        "colour": "#c2410c",
+        "speciality": "Your agenda, your list, mail and quick orders",
+        "personality": (
+            "Calm, quick and organised, with a dry sense of humour. She runs the day-to-day: the "
+            "agenda, the to-do list, the inbox and small orders. Short answers, straight to the "
+            "point, and she gets it done before you've finished asking. She doesn't spar or coach; "
+            "for the big picture she says Donna is the one to call."
+        ),
+    },
 ]
 
-_KEYS = ("name", "load", "model", "colour", "speciality", "personality", "hidden")
+_KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", "personality", "hidden")
 
 
 def agents_dir(folder: Path) -> Path:
@@ -82,6 +90,8 @@ def _clean(a: dict) -> dict | None:
         "load": load,
         "model": str(a.get("model") or ("opus" if load == "deep" else "sonnet")),
         "colour": a.get("colour") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(a.get("colour", ""))) else "#475569",
+        "full_name": str(a.get("full_name") or name).strip()[:60],
+        "voice": a.get("voice") if re.fullmatch(r"[a-z]{2}_[a-z]{2,20}", str(a.get("voice", ""))) else "af_heart",
         "speciality": str(a.get("speciality", "")).strip()[:120],
         "personality": str(a.get("personality", "")).strip()[:2000],
         "hidden": a.get("hidden") is True,
@@ -172,6 +182,7 @@ def persona(agent: dict, user: str = "the user") -> str:
 
 def public(agent: dict) -> dict:
     """What the call page gets: no personality text, just what it shows and sends."""
-    return {"id": agent["id"], "name": agent["name"], "load": agent["load"], "model": agent["model"],
+    return {"id": agent["id"], "name": agent["name"], "full_name": agent.get("full_name") or agent["name"],
+            "voice": agent.get("voice", "af_heart"), "load": agent["load"], "model": agent["model"],
             "speciality": agent["speciality"], "colour": agent["colour"],
             "picture": f"/agents/{agent['id']}/picture"}

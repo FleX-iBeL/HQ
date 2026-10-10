@@ -48,6 +48,10 @@
   .row { display: grid; grid-template-columns: 14px 160px 1fr; gap: 8px; align-items: center; padding: 3px 0; }
   .row .text { color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .panel .note { color: var(--soft); font-size: 12px; margin-top: 6px; }
+  /* H46 (11 October 2026), in the user's words: "the dog only on the status page." On Call the strip keeps
+     only the tabs, in the middle; the dog, the light and Turn everything on are back on Status. */
+  body.call .dog, body.call .who, body.call .fix, body.call .panel { display: none !important; }
+  body.call .bar { justify-content: center; }
 
   /* The dog. Claude's choice: a small drawn dog, its mood follows the light. */
   .dog .tail { transform-origin: 22px 40px; }
@@ -170,11 +174,14 @@
     },
     tab(t) {
       for (const b of document.querySelectorAll('.tabs button')) b.setAttribute('aria-pressed', String(b.dataset.tab === t));
+      document.body.classList.toggle('call', t === 'call');
+      if (t === 'call' && document.body.classList.contains('open')) { document.body.classList.remove('open'); send({ do: 'height', px: 89 }); }
     },
   };
   for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => { hq.tab(b.dataset.tab); send({ do: 'tab', tab: b.dataset.tab }); });
   $('fix').addEventListener('click', () => { hq.fixing(true, 'Turning on what’s off…'); send({ do: 'fix' }); });
   $('dog').addEventListener('click', () => {
+    if (document.body.classList.contains('call')) return;
     document.body.classList.toggle('open');
     send({ do: 'height', px: document.body.classList.contains('open') ? document.body.scrollHeight : 89 });
   });

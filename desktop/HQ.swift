@@ -13,7 +13,8 @@ import WebKit
 
 let SHELL_HEIGHT: CGFloat = 89
 let STATUS_URL = URL(string: "http://127.0.0.1:4748/")!
-let CALL_URL = URL(string: "http://127.0.0.1:7860/")!
+// H46: ?app tells the call page it's inside the app, which has its own Status tab, so it leaves out its status button.
+let CALL_URL = URL(string: "http://127.0.0.1:7860/?app=1")!
 
 func hqFolder() -> String {
     if let env = ProcessInfo.processInfo.environment["HQ_HOME"], !env.isEmpty { return env }
@@ -32,7 +33,8 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
     var statusFailed = false
     var callLoaded = false
     var busy = false
-    var tab = "status"
+    // H46 (11 October 2026), in the user's words: "i want the call one to be always the main default."
+    var tab = "call"
     let hq = hqFolder()
     // `HQ --selftest`: the real window, never shown; once the strip has its first reading it prints what the
     // strip shows and whether the status page loaded, then quits (happy flow 46).
@@ -60,8 +62,8 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         shell = WKWebView(frame: .zero, configuration: shellConf)
         shell.setValue(false, forKey: "drawsBackground")
         status = page()
-        call = page()
-        call.isHidden = true
+        call = page(call: true)
+        status.isHidden = true
         for v in [status!, call!, shell!] {
             v.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(v)
@@ -85,6 +87,8 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         let shellFile = URL(fileURLWithPath: hq + "/desktop/shell.html")
         shell.loadFileURL(shellFile, allowingReadAccessTo: shellFile.deletingLastPathComponent())
         status.load(URLRequest(url: STATUS_URL))
+        callLoaded = true  // the microphone is only asked for when a call starts, not when the page loads
+        call.load(URLRequest(url: CALL_URL))
 
         if selftest {
             DispatchQueue.main.asyncAfter(deadline: .now() + 40) { print("{\"selftest\": \"timed out\"}"); exit(1) }
@@ -95,14 +99,26 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.poll() }
     }
 
-    func page() -> WKWebView {
+    func page(call: Bool = false) -> WKWebView {
         let conf = WKWebViewConfiguration()
         conf.mediaTypesRequiringUserActionForPlayback = []  // her voice plays without an extra click
+        if call { showRealAddress(conf.preferences) }
         let v = WKWebView(frame: .zero, configuration: conf)
         v.navigationDelegate = self
         v.uiDelegate = self
         v.allowsBackForwardNavigationGestures = false
         return v
+    }
+
+    // H46: calls from the app never connected. Inside an app, WebKit hides this MacBook's network address from
+    // the call (a made-up name.local instead), and the call line can't look that name up, so the connection timed
+    // out after a few seconds. This switch (WebKit's own, not public) lets the call page show the real address, as
+    // Safari does once the microphone is allowed. Only for the call page, which only talks to this MacBook.
+    func showRealAddress(_ prefs: WKPreferences) {
+        let sel = Selector(("_setICECandidateFilteringEnabled:"))
+        guard prefs.responds(to: sel) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+        unsafeBitCast(prefs.method(for: sel), to: Setter.self)(prefs, sel, false)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
@@ -208,6 +224,7 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         switch what {
         case "ready":
             shellReady = true
+            shell.evaluateJavaScript("hq.tab('\(tab)')", completionHandler: nil)
             poll()
         case "tab":
             show(m["tab"] as? String ?? "status")
@@ -227,7 +244,7 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         let words = v === call ? "The call line doesn't answer yet." : "The status page doesn't answer yet."
         v.loadHTMLString("""
             <html><body style="font:15px -apple-system;color:#888;display:flex;align-items:center;justify-content:center;height:90vh;background:transparent">
-            <div style="text-align:center"><p>\(words)</p><p>The dog above can turn it on: Turn everything on.</p></div></body></html>
+            <div style="text-align:center"><p>\(words)</p><p>On Status, the dog can turn it on: Turn everything on.</p></div></body></html>
             """, baseURL: nil)
         if v === status { statusFailed = true } else { callLoaded = false }
     }
