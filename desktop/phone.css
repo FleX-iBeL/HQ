@@ -15,3 +15,5 @@ body { display: flex; flex-direction: column; height: 100dvh; padding-top: env(s
 main#frames { flex: 1; min-height: 0; position: relative; padding-bottom: env(safe-area-inset-bottom); }
 main#frames iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--page); }
 main#frames iframe[hidden] { display: none; }
+/* H52: on the phone only the call page, full screen; its own buttons (status bottom right) do the rest. */
+html.phone .bar, html.phone .panel { display: none !important; }

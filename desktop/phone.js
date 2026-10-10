@@ -11,9 +11,13 @@
 // file as the Mac app, so both always look the same; the call page loads only when Call is opened.]
 (() => {
   const EVERY = 5000;
-  const callURL = () => (location.port === '8444'
-    ? `https://${location.hostname}:8443/`
-    : 'http://127.0.0.1:7860/') + '?app=1';  // H46: it has the Status tab, so the call page leaves out its own
+  // H52 (11 October 2026), in his words: "for mobile i do want to have the button on the bottom right for status
+  // page, just not on the desktop version. remove the top part on the mobile version". So on the phone (its
+  // tailnet address) the strip goes and the call page fills the screen with its own status button; here on
+  // the MacBook it stays as the Mac app has it (?app: the Status tab instead of the button).
+  const PHONE = location.port === '8444';
+  if (PHONE) document.documentElement.classList.add('phone');
+  const callURL = () => (PHONE ? `https://${location.hostname}:8443/` : 'http://127.0.0.1:7860/?app=1');
   let frames = null;
   let timer = null;
 
@@ -45,7 +49,7 @@
       call: mk('frame-call', '', 'microphone; autoplay; clipboard-write'),
     };
     document.body.append(main);
-    tab(localStorage.getItem('hq-tab') === 'call' ? 'call' : 'status');
+    tab(PHONE || localStorage.getItem('hq-tab') === 'call' ? 'call' : 'status');
   }
   function tab(t) {
     if (!frames) return;
