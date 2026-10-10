@@ -33,7 +33,44 @@ const FILES = {
   // M4: the installer's live checklist, also after the installer has ended
   '/install': ['install/checklist.html', 'text/html; charset=utf-8'],
   '/install.json': ['scratch/install/checklist.json', 'application/json; charset=utf-8'],
+  // H28: the phone version of the Mac app, at /hq (see hqPage below)
+  '/hq/phone.js': ['desktop/phone.js', 'text/javascript; charset=utf-8'],
+  '/hq/phone.css': ['desktop/phone.css', 'text/css; charset=utf-8'],
+  '/hq.webmanifest': ['desktop/hq.webmanifest', 'application/manifest+json'],
+  '/hq-icon-180.png': ['status/icons/hq-180.png', 'image/png'],
+  '/hq-icon-192.png': ['status/icons/hq-192.png', 'image/png'],
+  '/hq-icon-512.png': ['status/icons/hq-512.png', 'image/png'],
 };
+
+// H28: the phone version of the Mac app (H27). The Mac app's own strip (desktop/shell.html), unchanged, with
+// the phone's script and look added, so the phone and the Mac always look the same. Its own home-screen icon.
+const PHONE_HEAD = `
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="HQ">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="/hq.webmanifest">
+<link rel="apple-touch-icon" href="/hq-icon-180.png">
+<link rel="stylesheet" href="/hq/phone.css">
+<script src="/hq/phone.js"></script>
+`;
+async function hqPage() {
+  const shell = await readFile(join(root, 'desktop/shell.html'), 'utf8');
+  return shell
+    .replace(/<meta name="viewport"[^>]*>\n?/, '')
+    .replace('</head>', PHONE_HEAD + '</head>')
+    .replace('<body>', '<body class="phone">');
+}
+// H28: the same judgement the Mac app shows (desktop/hq_control.py), and its Turn everything on, which only
+// starts what's off and never stops anything. The button needs the x-hq header, so a page from elsewhere
+// can't press it (a plain form can't send that header).
+function hqControl(args) {
+  return new Promise((resolve) => {
+    execFile('/usr/bin/python3', [join(root, 'desktop/hq_control.py'), ...args], { timeout: 60000 }, (err, out) => {
+      try { resolve(JSON.parse(String(out).trim().split('\n').pop())); } catch { resolve(null); }
+    });
+  });
+}
 
 // H19/H20: every routine's own line, plus the watchdog's, which lives outside the Documents folder.
 async function routines() {
@@ -165,6 +202,29 @@ async function temperatureHistory(hours, file = '.status/temperature-history.jso
 }
 
 const server = createServer(async (req, res) => {
+  const path0 = (req.url ?? '/').split('?')[0];
+  if (path0 === '/hq' || path0 === '/hq/') {
+    try {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(await hqPage());
+    } catch {
+      res.writeHead(500).end('Cannot read desktop/shell.html');
+    }
+    return;
+  }
+  if (path0 === '/hq.json') {
+    const h = await hqControl(['health']);
+    res.writeHead(h ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(h));
+    return;
+  }
+  if (path0 === '/hq/fix') {
+    if (req.method !== 'POST' || req.headers['x-hq'] !== 'fix') {
+      res.writeHead(403).end('Only the HQ page can turn things on');
+      return;
+    }
+    const out = await hqControl(['fix'].concat(process.env.HQ_FIX_DRY ? ['--dry'] : []));
+    res.writeHead(out ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(out));
+    return;
+  }
   if ((req.url ?? '/').split('?')[0] === '/temperature-history.json') {
     const hours = Number(new URL(req.url, 'http://x').searchParams.get('h') ?? 24) || 24;
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ now: Date.now() / 1000, samples: await temperatureHistory(hours) }));

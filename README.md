@@ -99,6 +99,8 @@ http://localhost:4748, this computer only. It reads `workspace/Jarvis VA/roadmap
 
 `desktop/build.sh --install` builds **HQ.app** with `swiftc` (the Command Line Tools are enough) and puts it in `~/Applications`. One window: the watchdog dog on top (its mood follows the status page's light; click it for every routine), the status page or the call page below, and **Turn everything on**, which starts the status page, the helper, the watchdog and the call line when they're off and never stops anything. The routines keep running when the app is closed. The first time, macOS asks once for Documents access and, on the first call, for the microphone. Check: `~/Applications/HQ.app/Contents/MacOS/HQ --check`.
 
+The same on the phone, nothing to build: the status page's phone address with `/hq` behind it (`https://<your-mac>.<tailnet>.ts.net:8444/hq`), in Safari Share, Add to Home Screen. It's the same strip, served by the status server with `desktop/phone.js` and `desktop/phone.css`; the call page below it is the call line's own address. Turn everything on works from there too; it only starts what's off.
+
 ### 7. The routine, the start at login and the watchdog (Mac)
 
 These keep HQ running without anyone watching. All three ask macOS for permission once.

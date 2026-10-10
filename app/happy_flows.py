@@ -104,6 +104,11 @@ Run them before and after every update; they print a short pass/fail table at th
      anything; the strip (headless browser) shows each mood, the light, the tabs and the button only
      when something is off; the app builds, checks its files, and its real window, never shown, loads
      the strip and the status page
+  47 the phone version of the Mac app (H28), no Claude: the status server (its own test port) serves the
+     Mac app's own strip at /hq with the phone's script and look, its icon and manifest; the dog's
+     reading is the Mac app's; Turn everything on only answers the HQ page (and only says what it would
+     do here); at phone width the strip shows the dog and the status page below, the call page only
+     loads when Call is opened, on 127.0.0.1:7860 here and the call line's address on the phone
 
 Safe to run while the live phone line is up: the flows use their own server on port 7871
 (JARVIS_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
@@ -3360,6 +3365,105 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
              "the microphone isn't limited to this MacBook, or closing doesn't quit")
         return f"seven made-up states judged like the status page; turning on starts only what's off, stops nothing; the strip's five moods move; the app builds and its window read: {got['strip']['head']}"
 
+    async def flow47(self) -> str:
+        """H28: the phone version of the Mac app. No Claude turns. Its own status server on a test port, with
+        Turn everything on set to say only what it would do."""
+        import urllib.request, urllib.error
+        port = 4797
+        env = {**os.environ, "JARVIS_STATUS_PORT": str(port), "HQ_FIX_DRY": "1"}
+        log = open(self.tmp / "h28-server.log", "w")
+        srv = subprocess.Popen(["node", str(ROOT / "status/server.mjs"), "--quiet"], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+        base = f"http://127.0.0.1:{port}"
+
+        def get(path, method="GET", headers=None):
+            req = urllib.request.Request(base + path, method=method, headers=headers or {})
+            try:
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    return r.status, r.headers.get("content-type", ""), r.read()
+            except urllib.error.HTTPError as e:
+                return e.code, "", e.read()
+        try:
+            for _ in range(50):
+                try:
+                    get("/hq.webmanifest")
+                    break
+                except Exception:
+                    await asyncio.sleep(0.2)
+            st, ct, body = await asyncio.to_thread(get, "/hq")
+            page = body.decode()
+            shell = (ROOT / "desktop/shell.html").read_text()
+            need(st == 200 and "text/html" in ct, f"/hq didn't answer: {st}")
+            need('id="dog"' in page and 'id="fix"' in page and 'id="tab-call"' in page, "/hq isn't the Mac app's strip")
+            need('/hq/phone.js' in page and '/hq/phone.css' in page and 'apple-touch-icon' in page and '/hq.webmanifest' in page,
+                 "/hq misses the phone's script, look, icon or manifest")
+            need(page.count('name="viewport"') == 1 and "viewport-fit=cover" in page, "the phone page's viewport is wrong")
+            need("webkit.messageHandlers.hq" in shell and "phone.js" not in shell, "the Mac app's strip was changed for the phone")
+            for path, kind in [("/hq/phone.js", "javascript"), ("/hq/phone.css", "css"), ("/hq.webmanifest", "manifest"),
+                               ("/hq-icon-180.png", "image/png"), ("/hq-icon-192.png", "image/png"), ("/hq-icon-512.png", "image/png")]:
+                st, ct, body = await asyncio.to_thread(get, path)
+                need(st == 200 and kind in ct and body, f"{path} didn't come: {st} {ct}")
+            man = json.loads((await asyncio.to_thread(get, "/hq.webmanifest"))[2])
+            need(man["start_url"] == "/hq" and man["name"] == "HQ" and man["display"] == "standalone", f"the manifest is wrong: {man}")
+            # The dog's reading: the same JSON the Mac app reads.
+            st, _, body = await asyncio.to_thread(get, "/hq.json")
+            h = json.loads(body)
+            need(st == 200 and {"light", "mood", "headline", "routines", "off"} <= set(h), f"/hq.json isn't the Mac app's reading: {st} {h}")
+            # Turn everything on: only from the HQ page (a header no plain form can send); here it only says what it would do.
+            need((await asyncio.to_thread(get, "/hq/fix", "POST"))[0] == 403, "/hq/fix answers a POST without the HQ header")
+            need((await asyncio.to_thread(get, "/hq/fix", "GET", {"x-hq": "fix"}))[0] == 403, "/hq/fix answers a GET")
+            st, _, body = await asyncio.to_thread(get, "/hq/fix", "POST", {"x-hq": "fix"})
+            out = json.loads(body)
+            need(st == 200 and all(f.get("ok") is None for f in out["fixed"]), f"/hq/fix did something in the test: {out}")
+            js = (ROOT / "desktop/phone.js").read_text()
+            need(":8443/" in js and "127.0.0.1:7860" in js and "location.port === '8444'" in js, "the call page's address isn't the call line's")
+            need('microphone' in js, "the call frame may not use the microphone")
+            need(not re.search(r"pkill|killall|process\.kill", js + (ROOT / "status/server.mjs").read_text()), "the phone version can stop processes")
+            # At phone width in a headless browser: the strip, the status page below, Call loads the call page only when opened.
+            cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+            chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            need(Path(chrome).exists(), "no headless browser found")
+            harness = r"""<script>
+window.addEventListener('load', () => setTimeout(() => {
+  const out = [], f = window.hqPhone.frames();
+  const callBefore = f.call.getAttribute('src') || 'none';
+  out.push('status:' + f.status.getAttribute('src') + '/' + !f.status.hidden);
+  out.push('callBefore:' + callBefore);
+  out.push('head:' + document.getElementById('head').textContent);
+  out.push('mood:' + hq.state().mood);
+  document.getElementById('tab-call').click();
+  out.push('call:' + f.call.getAttribute('src') + '/' + !f.call.hidden + '/' + f.status.hidden + '/' + hq.state().tab);
+  document.getElementById('tab-status').click();
+  out.push('back:' + !f.status.hidden + '/' + f.call.hidden);
+  const bar = document.querySelector('.bar').getBoundingClientRect(), dog = document.getElementById('dog').getBoundingClientRect();
+  const main = document.getElementById('frames').getBoundingClientRect();
+  out.push('fits:' + (bar.width <= innerWidth) + '/' + (dog.left < 40) + '/' + (main.height > 300) + '/' + (document.documentElement.scrollWidth <= innerWidth));
+  const pre = document.createElement('pre'); pre.id = 'h28'; pre.textContent = 'H28RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
+}, 1500));
+</script>"""
+            # A copy of the page with the test harness, pointed at the test server (its <base>); web security is off
+            # in this throwaway browser only, so the copy may read the test server's /hq.json.
+            (self.tmp / "h28.html").write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{base}/">', 1))
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h28-profile'}",
+                                              "--disable-web-security", "--window-size=390,844", "--virtual-time-budget=6000", "--dump-dom", (self.tmp / "h28.html").as_uri()], timeout=60)
+            m = re.search(r'<pre id="h28">H28RESULT (.*?) END</pre>', r.stdout)
+            need(m, f"the phone page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in m.group(1).split(" | "))
+            say(f"   {m.group(1)}")
+            need(res["status"] == "//true", f"the status page isn't under the strip: {res}")
+            need(not res["head"].startswith("The Mac"), f"the strip got no reading: {res}")
+            need(res["callBefore"] == "none", f"the call page loaded before Call was opened: {res}")
+            need(res["call"] == "http://127.0.0.1:7860//true/true/call", f"Call doesn't open the call page: {res}")
+            need(res["back"] == "true/true", f"Status doesn't come back: {res}")
+            need(res["fits"] == "true/true/true/true", f"the strip doesn't fit a phone: {res}")
+            return f"/hq is the Mac app's strip with the phone's look, icon and manifest; the dog reads {h['mood']}; Turn everything on only from the page; at phone width: status below, Call loads only when opened"
+        finally:
+            srv.terminate()
+            try:
+                srv.wait(timeout=10)
+            except Exception:
+                pass
+            log.close()
+
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
     2: ("The greeting plays first, on Quick and Deep", True, "flow2"),
@@ -3407,6 +3511,7 @@ FLOWS = {
     44: ("Nothing personal in HQ: its files and its git history", False, "flow44"),
     45: ("The scheduler: planned work, after the job list, looking back", False, "flow45"),
     46: ("The Mac desktop app: the watchdog dog, status and call in one", False, "flow46"),
+    47: ("The phone version of the Mac app: the same strip, status and call", False, "flow47"),
 }
 
 
