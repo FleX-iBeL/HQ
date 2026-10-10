@@ -7,6 +7,7 @@ showcase the latest data that it has."
 Where the numbers come from, both free, both written to usage-live.json:
 - A job's Terminal window: its status line (statusline.py) after every reply.
 - The hourly mail check: its own run brings the plan limits back with it (stream-usage.py).
+- A call: its Claude session brings them back too (app/brain.py, H51), the same way (usagelive.py).
 
 What it does: when usage-live.json is newer than what the status page shows, it saves it there
 (through save-usage.mjs --statusline --any, so Weekly Fable stays from a normal chat, greyed, as in
@@ -26,7 +27,7 @@ RUN = os.path.join(JV, "scratch", "routine")
 LIVE = os.path.join(RUN, "usage-live.json")
 SAVED = os.path.join(JV, ".status", "usage.json")
 NODE = "/opt/homebrew/bin/node"
-SOURCES = {"mail check": "the hourly mail check", "": "a job's status line"}
+SOURCES = {"mail check": "the hourly mail check", "call": "a call", "": "a job's status line"}
 
 
 def log(msg):

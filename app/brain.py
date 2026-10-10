@@ -38,6 +38,7 @@ from claude_agent_sdk import (
     HookMatcher,
     PermissionResultAllow,
     PermissionResultDeny,
+    RateLimitEvent,
     ResultMessage,
     StreamEvent,
     SystemMessage,
@@ -47,6 +48,11 @@ from claude_agent_sdk import (
 
 import config as _config
 import policy as _policy
+
+import sys as _sys
+
+_sys.path.insert(0, str(_config.ROOT / "routine"))
+import usagelive  # H51: the usage a call gets back is saved the same way as the mail check's
 
 # Never let the CLI bill an API key: the call runs on the Max login. And never let it
 # talk to a Claude desktop host it happens to be started from (its variables point the
@@ -201,6 +207,7 @@ class ClaudeBrain:
         self.last_turn: TurnStats | None = None
         self.session_id: str | None = None
         self.init_info: dict | None = None  # the session's init message: tools, connectors, skills
+        self.rate_limit_events = 0  # H51: how many usage readings this call's session brought back
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -242,12 +249,27 @@ class ClaudeBrain:
         assert self._client
         try:
             async for msg in self._client.receive_messages():
+                if isinstance(msg, RateLimitEvent):
+                    self._save_usage(msg)  # only the numbers; it's not part of any turn
+                    continue
                 await self._queue.put(msg)
         except asyncio.CancelledError:
             raise
         except Exception as e:
             logger.error(f"Claude stream ended: {e}")
             await self._queue.put(e)
+
+    def _save_usage(self, msg: RateLimitEvent) -> None:
+        """H51: the plan usage that comes back with the call's own session, saved for the usage
+        check (usage-live.json), so the status page gets fresh numbers from every call, for free.
+        Also on a Free call: the same login, so the same numbers, and nothing else of the call."""
+        self.rate_limit_events += 1
+        try:
+            out = usagelive.save((msg.rate_limit_info.raw or {}).get("unifiedWindows"), "call")
+            if out:
+                logger.info(f"Usage saved from the call's session: {usagelive.summary(out)}")
+        except Exception as e:  # never let the usage get in the way of the call
+            logger.warning(f"Usage from the call's session not saved: {e!r}")
 
     # -- turns ---------------------------------------------------------------
 

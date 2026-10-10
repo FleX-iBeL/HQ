@@ -114,6 +114,9 @@ Run them before and after every update; they print a short pass/fail table at th
   50 H46, no Claude: Donna left and Pepper right, Voice Donna Paulsen and Voice Pepper Potts in Settings
      (each her own, sent with the call), no waiting lines (the server turns them off too), and inside the
      app (?app) no status button on the call page
+  51 H51, no Claude: a call's session saves the usage it gets back (the rate limit event) to the same file and
+     shape as the mail check, marked as from a call; it never reaches a turn; a broken one doesn't stop the
+     call; the usage check puts it on the status page as "from a call"; a Free call's brain does the same
 
 Safe to run while the live phone line is up: the flows use their own server on port 7871
 (JARVIS_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
@@ -1325,7 +1328,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         jv = ROOT
         tmp = Path(tempfile.mkdtemp(prefix="usage-", dir=config.SCRATCH))
         try:
-            for f in ("routine/usage-check.py", "routine/stream-usage.py", "status/save-usage.mjs",
+            for f in ("routine/usage-check.py", "routine/stream-usage.py", "routine/usagelive.py", "status/save-usage.mjs",
                       "status/parse.mjs", "status/usage.mjs", "status/paths.mjs", "roadmap.md"):
                 dst = site_roadmap(tmp) if f == "roadmap.md" else tmp / f
                 dst.parent.mkdir(parents=True, exist_ok=True)
@@ -3620,6 +3623,67 @@ setTimeout(() => {
         need(res["inapp"] == "none", f"the status button still shows inside the app: {res}")
         return "Donna left, Pepper right; Voice Donna Paulsen and Voice Pepper Potts, each her own; no waiting lines; no status button inside the app"
 
+    async def flow51(self) -> str:
+        """H51: the usage a call gets back. A made-up session feeds the brain's reader a rate limit
+        event, then a turn; usage-live.json is redirected to a scratch copy, never the real one."""
+        from claude_agent_sdk import RateLimitEvent, RateLimitInfo, ResultMessage, StreamEvent
+        from pipeline import make_brain
+        import brain as brain_
+        import usagelive
+        tmp = Path(tempfile.mkdtemp(prefix="h51-", dir=config.SCRATCH))
+        real = usagelive.LIVE
+        usagelive.LIVE = str(tmp / "usage-live.json")
+        try:
+            reset = int(time.time()) + 3600
+            ev = lambda raw: RateLimitEvent(rate_limit_info=RateLimitInfo(status="allowed", raw=raw), uuid="u", session_id="s")
+            good = ev({"status": "allowed", "unifiedWindows": {"five_hour": {"utilization": 0.23, "resetsAt": reset},
+                                                               "seven_day": {"utilization": 0.61, "resetsAt": reset * 1000}}})
+
+            class FakeClient:
+                async def receive_messages(self):
+                    yield ev({"status": "allowed", "unifiedWindows": "broken"})  # a broken one: skipped, no crash
+                    yield good
+                    yield StreamEvent(uuid="x", session_id="s", event={"type": "content_block_delta",
+                                      "delta": {"type": "text_delta", "text": "Hi."}}, parent_tool_use_id=None)
+                    yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+                                        num_turns=1, session_id="s")
+                    await asyncio.sleep(3600)
+
+                async def query(self, text):
+                    pass
+
+            # A Free call's brain and a normal call's brain are the same class: both save.
+            free = make_brain(config.MODEL_ALIASES["sonnet"], None, cwd=config.FREE_DIR, free=True)
+            need(isinstance(free, brain_.ClaudeBrain), "a Free call doesn't use the call's brain")
+            b = brain_.ClaudeBrain(model="haiku", system_prompt="", cwd=tmp / "cwd")
+            b._client = FakeClient()
+            b._reader = asyncio.create_task(b._read_forever())
+            got = [p async for p in b.ask("hello")]
+            b._reader.cancel()
+            need(got == ["Hi."], f"the turn didn't get just its answer: {got}")
+            need(b.rate_limit_events == 2, f"the brain counted {b.rate_limit_events} usage readings, not 2")
+            live = json.loads(Path(usagelive.LIVE).read_text())
+            need(live.get("by") == "call", f"not marked as from a call: {live}")
+            need(live["rate_limits"] == {"five_hour": {"used_percentage": 23.0, "resets_at": reset},
+                                         "seven_day": {"used_percentage": 61.0, "resets_at": reset}},
+                 f"not the mail check's shape: {live['rate_limits']}")
+            need(set(live) == {"savedAt", "rate_limits", "by"}, f"more than the numbers was saved: {sorted(live)}")
+            # The mail check's stream writes the same shape through the same code.
+            stream = json.dumps({"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": good.rate_limit_info.raw["unifiedWindows"]}})
+            r = subprocess.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {str(ROOT / 'routine')!r}); import usagelive; "
+                                f"usagelive.LIVE = {str(tmp / 'mail.json')!r}; sys.argv=['x']; "
+                                f"exec(open({str(ROOT / 'routine/stream-usage.py')!r}).read())"],
+                               input=stream + "\n", capture_output=True, text=True, timeout=30)
+            mail = json.loads((tmp / "mail.json").read_text())
+            need(mail["rate_limits"] == live["rate_limits"] and mail["by"] == "mail check", f"the mail check saves it differently: {r.stdout}{r.stderr}")
+            # The usage check names the call as the source.
+            src = (ROOT / "routine/usage-check.py").read_text()
+            need('"call": "a call"' in src, "the usage check doesn't name a call as the source")
+        finally:
+            usagelive.LIVE = real
+            shutil.rmtree(tmp, ignore_errors=True)
+        return "saved from the call's session as from a call, same shape and code as the mail check; never in a turn; a broken one skipped; Free too"
+
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
     2: ("The greeting plays first, on Quick and Deep", True, "flow2"),
@@ -3671,6 +3735,7 @@ FLOWS = {
     48: ("The agents: Pepper and Donna replace Quick and Deep, with headshots", False, "flow48"),
     49: ("An agent knows who she is: Pepper says her name", True, "flow49"),
     50: ("H46: Donna left, Pepper right, a voice each, no waiting lines, no status button in the app", False, "flow50"),
+    51: ("H51: a call saves the usage it gets back, for the status page", False, "flow51"),
 }
 
 
