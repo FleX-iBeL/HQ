@@ -52,6 +52,14 @@
      only the tabs, in the middle; the dog, the light and Turn everything on are back on Status. */
   body.call .dog, body.call .who, body.call .fix, body.call .panel { display: none !important; }
   body.call .bar { justify-content: center; }
+  /* H47 (11 October 2026), in the user's words: "a plus and minus button to make the status page bigger or
+     smaller. and also the shortcut 'cmd'+ '+' and 'cmd'+ '-' to do the same". Only on Status. */
+  .zoom { display: flex; align-items: center; gap: 2px; background: var(--tint); border: 1px solid var(--rule); border-radius: 9px;
+    padding: 3px; -webkit-app-region: no-drag; }
+  .zoom button { font: 600 15px/1 inherit; width: 30px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer; }
+  .zoom button:hover { background: var(--card); }
+  .zoom span { min-width: 40px; text-align: center; color: var(--soft); font-size: 12px; cursor: pointer; }
+  body.call .zoom { display: none; }
 
   /* The dog. Claude's choice: a small drawn dog, its mood follows the light. */
   .dog .tail { transform-origin: 22px 40px; }
@@ -134,6 +142,11 @@
       <button id="tab-call" aria-pressed="true" data-tab="call">Call</button>
       <button id="tab-status" aria-pressed="false" data-tab="status">Status</button>
     </div>
+    <div class="zoom" role="group" aria-label="Status page size">
+      <button id="zoom-out" type="button" aria-label="Smaller (Cmd -)" title="Smaller (⌘−)">−</button>
+      <span id="zoom-level" title="Back to 100% (⌘0)">100%</span>
+      <button id="zoom-in" type="button" aria-label="Bigger (Cmd +)" title="Bigger (⌘+)">+</button>
+    </div>
     <button class="fix" id="fix" disabled title="Turns on what's off: the status page, the helper, the watchdog, the call line">Turn everything on</button>
   </div>
   <div class="panel" id="panel">
@@ -172,6 +185,7 @@
       if (said !== undefined) $('said').textContent = said;
       if (last) hq.update(last);
     },
+    zoom(pct) { $('zoom-level').textContent = `${pct}%`; },
     tab(t) {
       for (const b of document.querySelectorAll('.tabs button')) b.setAttribute('aria-pressed', String(b.dataset.tab === t));
       document.body.classList.toggle('call', t === 'call');
@@ -179,6 +193,9 @@
     },
   };
   for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => { hq.tab(b.dataset.tab); send({ do: 'tab', tab: b.dataset.tab }); });
+  $('zoom-in').addEventListener('click', () => send({ do: 'zoom', by: 1 }));
+  $('zoom-out').addEventListener('click', () => send({ do: 'zoom', by: -1 }));
+  $('zoom-level').addEventListener('click', () => send({ do: 'zoom', by: 0 }));
   $('fix').addEventListener('click', () => { hq.fixing(true, 'Turning on what’s off…'); send({ do: 'fix' }); });
   $('dog').addEventListener('click', () => {
     if (document.body.classList.contains('call')) return;

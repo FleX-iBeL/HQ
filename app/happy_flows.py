@@ -3372,6 +3372,8 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
         if live["mood"] != "sleep":
             need(got["status_loaded"] and "Jarvis VA" in got["status_title"][0], f"the app didn't load the status page: {got}")
         swift = (ROOT / "desktop/HQ.swift").read_text()
+        need("status.pageZoom = next" in swift and 'item("Smaller", #selector(zoomOut), "-"' in swift and 'id="zoom-in"' in page,
+             "the status page can't be made bigger or smaller (H47)")
         need('var tab = "call"' in swift and "_setICECandidateFilteringEnabled:" in swift and "7860/?app=1" in swift,
              "the app doesn't open on Call, or its call page still hides the address (H46)")
         need('origin.host == "127.0.0.1"' in swift and "applicationShouldTerminateAfterLastWindowClosed" in swift,

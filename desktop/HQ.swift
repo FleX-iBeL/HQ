@@ -62,6 +62,8 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         shell = WKWebView(frame: .zero, configuration: shellConf)
         shell.setValue(false, forKey: "drawsBackground")
         status = page()
+        let saved = UserDefaults.standard.double(forKey: "statusZoom")
+        if saved >= 0.5 && saved <= 2.0 { status.pageZoom = CGFloat(saved) }
         call = page(call: true)
         status.isHidden = true
         for v in [status!, call!, shell!] {
@@ -120,6 +122,25 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
         unsafeBitCast(prefs.method(for: sel), to: Setter.self)(prefs, sel, false)
     }
+
+    // H47: the status page bigger or smaller, with + and − on the strip and Cmd +, Cmd − and Cmd 0. In steps
+    // like Safari's; remembered for next time. Only the status page, not the call (Claude's choice).
+    let ZOOMS: [CGFloat] = [0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
+    func zoom(_ by: Int) {
+        let now = status.pageZoom
+        var next: CGFloat = 1.0
+        if by > 0 { next = ZOOMS.first { $0 > now + 0.001 } ?? ZOOMS.last! }
+        if by < 0 { next = ZOOMS.last { $0 < now - 0.001 } ?? ZOOMS.first! }
+        status.pageZoom = next
+        UserDefaults.standard.set(Double(next), forKey: "statusZoom")
+        showZoom()
+    }
+    func showZoom() {
+        shell.evaluateJavaScript("hq.zoom(\(Int((status.pageZoom * 100).rounded())))", completionHandler: nil)
+    }
+    @objc func zoomIn() { zoom(1) }
+    @objc func zoomOut() { zoom(-1) }
+    @objc func zoomReset() { zoom(0) }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
 
@@ -225,11 +246,14 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         case "ready":
             shellReady = true
             shell.evaluateJavaScript("hq.tab('\(tab)')", completionHandler: nil)
+            showZoom()
             poll()
         case "tab":
             show(m["tab"] as? String ?? "status")
         case "fix":
             fix()
+        case "zoom":
+            zoom((m["by"] as? NSNumber)?.intValue ?? 0)
         case "height":
             let px = CGFloat((m["px"] as? NSNumber)?.doubleValue ?? Double(SHELL_HEIGHT))
             shellHeight.constant = max(SHELL_HEIGHT, min(px, 480))
@@ -307,12 +331,19 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
             i.target = target
             return i
         }
+        func hidden(_ i: NSMenuItem) -> NSMenuItem {  // Cmd = as well as Cmd + (no Shift needed), not shown twice
+            i.isHidden = true
+            i.allowsKeyEquivalentWhenHidden = true
+            return i
+        }
         sub("HQ", [item("Hide HQ", #selector(NSApplication.hide(_:)), "h"), .separator(),
                    item("Quit HQ", #selector(NSApplication.terminate(_:)), "q")])
         sub("Edit", [item("Undo", Selector(("undo:")), "z"), item("Redo", Selector(("redo:")), "Z"), .separator(),
                      item("Cut", #selector(NSText.cut(_:)), "x"), item("Copy", #selector(NSText.copy(_:)), "c"),
                      item("Paste", #selector(NSText.paste(_:)), "v"), item("Select All", #selector(NSText.selectAll(_:)), "a")])
         sub("View", [item("Status", #selector(showStatus), "1", self), item("Call", #selector(showCall), "2", self), .separator(),
+                     item("Bigger", #selector(zoomIn), "+", self), hidden(item("Bigger", #selector(zoomIn), "=", self)),
+                     item("Smaller", #selector(zoomOut), "-", self), item("Actual Size", #selector(zoomReset), "0", self), .separator(),
                      item("Reload", #selector(reloadPage), "r", self), item("Turn everything on", #selector(fixAll), "t", self)])
         sub("Window", [item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
                        item("Close", #selector(NSWindow.performClose(_:)), "w")])
