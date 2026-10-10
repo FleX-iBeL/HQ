@@ -296,12 +296,13 @@ def tool_kind(name: str) -> str:
         return "read"
     return "tool"
 
-# Hearing. A short word list helps Whisper with names: Jarvis, the user's name, and their own
-# "Names to hear" from me.md (M5).
+# Hearing. A short word list helps Whisper with names: Jarvis, the agents (H29), the user's name,
+# and their own "Names to hear" from me.md (M5).
+import agents as _agents  # noqa: E402
 WHISPER_MODEL = os.environ.get("JARVIS_WHISPER", "mlx-community/whisper-large-v3-turbo")
 WHISPER_PROMPT = os.environ.get(
     "JARVIS_WHISPER_PROMPT",
-    ", ".join(w for w in ["Jarvis", ME["name"], ME["hear"].rstrip(".")] if w) + ".",
+    ", ".join(w for w in ["Jarvis", *_agents.names(FOLDER), ME["name"], ME["hear"].rstrip(".")] if w) + ".",
 )
 
 # Ears. How long a silence must be before the turn may end. Pipecat's default is 0.2 s,

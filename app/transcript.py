@@ -35,7 +35,7 @@ def now() -> datetime:
 
 class CallTranscript:
     def __init__(self, folder: Path | None = None, *, model: str = "", started: datetime | None = None,
-                 keep: bool = True):
+                 keep: bool = True, agent: str = ""):
         self.started = started or now()
         self.on_line: Callable[[str, str], None] | None = None  # H6: (who, text) for the call page
         self.path: Path | None = None
@@ -55,7 +55,8 @@ class CallTranscript:
             f"# Call {self.started.strftime('%-d %B %Y, %H:%M')}\n\n"
             "> **Private.** Only for this workspace. A Jarvis VA call, "
             "written down as it happened.\n\n"
-            f"Started {self.started.strftime('%H:%M:%S')} · brain {model or config.MODEL}\n\n"
+            f"Started {self.started.strftime('%H:%M:%S')} · " + (f"agent {agent} · " if agent else "")
+            + f"brain {model or config.MODEL}\n\n"
         )
 
     @property

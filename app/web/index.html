@@ -32,7 +32,10 @@
   @keyframes pulse { 0%{box-shadow:0 0 0 0 var(--ring)} 70%{box-shadow:0 0 0 28px transparent} 100%{box-shadow:0 0 0 0 transparent} }
   #modes { display:flex; border:2px solid var(--muted); border-radius:999px; padding:3px; gap:3px; }
   #modes.hide { visibility:hidden; }
-  #modes button { border:0; border-radius:999px; padding:10px 22px; background:transparent; color:var(--fg); font:600 17px/1 -apple-system,sans-serif; cursor:pointer; }
+  #modes button { border:0; border-radius:999px; padding:5px 18px 5px 5px; background:transparent; color:var(--fg); font:600 17px/1 -apple-system,sans-serif; cursor:pointer;
+                  display:inline-flex; align-items:center; gap:8px; }
+  /* H29: each agent's headshot (or its placeholder) next to her name */
+  #modes button img { width:32px; height:32px; border-radius:50%; object-fit:cover; flex-shrink:0; background:var(--muted); }
   #modes button.on { background:var(--fg); color:var(--bg); }
   #modehint { color:var(--muted); font-size:14px; margin-top:-18px; min-height:1.2em; }
   #mute { display:none; min-width:150px; padding:14px 22px; border-radius:999px; border:2px solid var(--muted); background:transparent; color:var(--fg);
@@ -187,8 +190,8 @@
 <body>
 <h1>Jarvis</h1>
 <div id="modes" role="group" aria-label="Kind of call">
-  <button type="button" data-mode="quick">Quick</button>
-  <button type="button" data-mode="deep">Deep</button>
+  <button type="button" data-mode="quick" data-agent="pepper"><img src="/agents/pepper/picture" alt=""><span>Pepper</span></button>
+  <button type="button" data-mode="deep" data-agent="donna"><img src="/agents/donna/picture" alt=""><span>Donna</span></button>
 </div>
 <div id="modehint"></div>
 <div id="freetag">FREE</div>
@@ -254,12 +257,20 @@ const modeHint = document.getElementById("modehint");
 // Quick = Sonnet (calendar, list, quick questions). Deep = Opus (sparring, planning, the big picture).
 // Free (H7, H8) is a switch on top of either: a plain Claude with the internet, to show other people:
 // none of his files, no calendar or mail, nothing saved.
-const HINTS = { quick: "Sonnet: calendar, your list, quick questions", deep: "Opus: sparring and bigger planning, a bit slower" };
+// H29: the agents replace the Quick and Deep buttons: Pepper loads like Quick (Sonnet), Donna like Deep
+// (Opus). The list comes from the server (/api/agents); these two are what shows until it answers.
+let AGENTS = {
+  pepper: { id: "pepper", name: "Pepper", load: "quick", model: "sonnet", speciality: "Your agenda, your list, mail and quick orders" },
+  donna: { id: "donna", name: "Donna", load: "deep", model: "opus", speciality: "Sparring, planning and the bigger picture" },
+};
+const MODEL_NAME = { sonnet: "Sonnet", opus: "Opus", haiku: "Haiku" };
+function modelName(a) { return MODEL_NAME[a.model] || a.model; }
 // M2: Free said plainly, for showing others (HQ 0.1): no connectors, no files, no notes, only the web.
-const FREE_HINTS = { quick: "Free on Sonnet: plain Claude, no connectors, no files, no notes, only the web. Nothing saved",
-                     deep: "Free on Opus: plain Claude, no connectors, no files, no notes, only the web. Nothing saved" };
-const MODE_NAME = { quick: "Quick", deep: "Deep" };
-function callName() { return MODE_NAME[mode] + (free ? " · Free" : ""); }
+function hintFor(a) {
+  return free ? `Free on ${modelName(a)}: plain Claude, no connectors, no files, no notes, only the web. Nothing saved`
+              : `${modelName(a)}: ${a.speciality}`;
+}
+function callName() { return (AGENTS[agent] || {name: "Jarvis"}).name + (free ? " · Free" : ""); }
 const linesBtn = document.getElementById("lines");
 // H1: the waiting lines ("Gotcha", "Let me take a look") while she works. Off by default; the page remembers the last choice.
 let waitingLines = false;
@@ -277,17 +288,19 @@ linesBtn.addEventListener("click", () => {
 const voiceEl = document.getElementById("voice");
 try { const v = localStorage.getItem("jarvis-voice"); if (v && voiceEl.querySelector(`option[value="${v}"]`)) voiceEl.value = v; } catch (e) {}
 voiceEl.addEventListener("change", () => { try { localStorage.setItem("jarvis-voice", voiceEl.value); } catch (e) {} });
-let mode = "quick", free = false;
+let mode = "quick", free = false, agent = "pepper";
 try {
   const m = localStorage.getItem("jarvis-mode");
-  if (m === "deep") mode = m;
+  if (m === "deep") { mode = m; agent = "donna"; }  // before H29 the page remembered Quick or Deep
+  const a = localStorage.getItem("jarvis-agent");
+  if (a && AGENTS[a]) { agent = a; mode = AGENTS[a].load; }
   free = localStorage.getItem("jarvis-free") === "on" || m === "free";  // "free" was a mode before H8
   if (m === "free") { localStorage.setItem("jarvis-mode", "quick"); localStorage.setItem("jarvis-free", "on"); }
 } catch (e) {}
 const freeBtn = document.getElementById("free"), freeTag = document.getElementById("freetag");
 function showMode() {
-  modesEl.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
-  modeHint.textContent = state === "idle" ? (free ? FREE_HINTS : HINTS)[mode] : "";
+  modesEl.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.agent === agent));
+  modeHint.textContent = state === "idle" && AGENTS[agent] ? hintFor(AGENTS[agent]) : "";
   freeBtn.textContent = free ? "On" : "Off";
   freeTag.classList.toggle("show", free && state === "idle");
   freeBtn.classList.toggle("on", free);
@@ -300,9 +313,27 @@ freeBtn.addEventListener("click", () => {
 });
 modesEl.addEventListener("click", ev => {
   const b = ev.target.closest("button"); if (!b || state !== "idle") return;
-  mode = b.dataset.mode; try { localStorage.setItem("jarvis-mode", mode); } catch (e) {}
+  agent = b.dataset.agent; mode = b.dataset.mode;
+  try { localStorage.setItem("jarvis-agent", agent); localStorage.setItem("jarvis-mode", mode); } catch (e) {}
   showMode();
 });
+// H29: the agents as this workspace has them (names, specialities, headshots), from the server.
+function showAgents(list) {
+  if (!Array.isArray(list) || !list.length) return;
+  AGENTS = {}; modesEl.textContent = "";
+  for (const a of list) {
+    AGENTS[a.id] = a;
+    const b = document.createElement("button");
+    b.type = "button"; b.dataset.mode = a.load; b.dataset.agent = a.id;
+    const img = document.createElement("img"); img.src = a.picture; img.alt = "";
+    const name = document.createElement("span"); name.textContent = a.name;
+    b.append(img, name); modesEl.append(b);
+  }
+  if (!AGENTS[agent]) agent = list[0].id;
+  mode = AGENTS[agent].load;
+  showMode();
+}
+fetch("/api/agents", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => j && showAgents(j.agents)).catch(() => {});
 // H9: the Settings sheet (Free, voice, waiting lines, thinking sound), only before a call.
 const setBtn = document.getElementById("setbtn"), setEl = document.getElementById("settings"), shade = document.getElementById("shade");
 function showSettings(open) {
@@ -741,7 +772,7 @@ async function call() {
     await pc.setLocalDescription(await pc.createOffer());
     await gathered(pc);
     const r = await fetch("api/offer", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, free, voice: voiceEl.value, waiting_lines: waitingLines } }) });
+      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, agent, free, voice: voiceEl.value, waiting_lines: waitingLines } }) });
     if (!r.ok) throw new Error("The call server said " + r.status);
     const answer = await r.json();
     await pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });

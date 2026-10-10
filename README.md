@@ -2,7 +2,7 @@
 
 HQ is a personal headquarters you run on your own computer: a live voice call with Claude from your phone or laptop, where you can interrupt each other and Claude can actually do things (read and update your notes, check your mail and calendar, plan your week); a job queue that the computer works through by itself; a watchdog that keeps it all running; and a status page that shows what's happening, live.
 
-**HQ is still in development.** This is version 0.1. What it is, how it works, and what's coming next is in [ABOUT.md](ABOUT.md).
+**HQ is still in development.** This is version 0.2. What it is, how it works, and what's coming next is in [ABOUT.md](ABOUT.md).
 
 Get it: `git clone https://github.com/FleX-iBeL/HQ.git`, then follow the first install below.
 
@@ -81,11 +81,11 @@ app/start.sh                     # with Tailscale: the phone line too
 JARVIS_NO_PHONE=1 app/start.sh   # without Tailscale: this computer only
 ```
 
-Then open http://127.0.0.1:7860 in the browser, allow the microphone, pick Quick, and say hello. Log: `scratch/server.log`. Stop: `app/stop.sh`.
+Then open http://127.0.0.1:7860 in the browser, allow the microphone, pick Pepper, and say hello. Log: `scratch/server.log`. Stop: `app/stop.sh`.
 
 On the phone (Tailscale on, on both): the address `start.sh` prints, `https://<this-mac>.<tailnet>.ts.net:8443`, in Safari, then Share → Add to Home Screen.
 
-Three ways to call: **Quick** (Sonnet, the basics loaded, fast), **Deep** (Opus, everything loaded, for planning and thinking), and **Free**: plain Claude with no connectors, none of their files, no notes and nothing saved, only the web. Free is for testing and showing HQ to others.
+Who to call (since 0.2, the agents): **Pepper** (Sonnet, the basics loaded, fast; was Quick) and **Donna** (Opus, everything loaded, for planning and thinking; was Deep). Their headshots are placeholders until the user puts pictures in `workspace/Jarvis VA/agents/` (`pepper.jpg`, `donna.jpg`); agents can be changed or added there in `agents.json` (see `app/agents.py`). On top of any agent, **Free**: plain Claude with no connectors, none of their files, no notes and nothing saved, only the web. Free is for testing and showing HQ to others.
 
 ### 6. The status page
 

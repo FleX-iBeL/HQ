@@ -166,18 +166,19 @@ def warm_up_tts(tts: KokoroTTSService) -> float:
 
 
 def make_brain(model: str | None = None, policy: Policy | None = None, cwd=None,
-               free: bool = False, load: str = "deep") -> ClaudeBrain:
+               free: bool = False, load: str = "deep", persona: str = "") -> ClaudeBrain:
     """With a policy: the full Claude of the user's workspace (A3). Without one, or
     with JARVIS_PLAIN=1: the plain Claude of A2, working in cwd (default: scratch).
     free=True (H7, H8): the plain Claude plus web search and fetching pages, nothing else.
-    load (B1): "deep" loads the folder like a chat; "quick" only the lighter part (quick_context.py)."""
+    load (B1): "deep" loads the folder like a chat; "quick" only the lighter part (quick_context.py).
+    persona (H29): the agent's own text (agents.persona), added after the call rules."""
     model = model or config.MODEL
     options = None
     if policy is not None and not config.PLAIN:
         options = call_session_options(
             model=model,
             folder=config.FOLDER,
-            voice_rules=config.VOICE_RULES,
+            voice_rules=config.VOICE_RULES + persona,
             policy=policy,
             cli_path=config.CLAUDE_CLI,
             effort=config.effort_for(model),
@@ -185,7 +186,7 @@ def make_brain(model: str | None = None, policy: Policy | None = None, cwd=None,
         )
     return ClaudeBrain(
         model=model,
-        system_prompt=config.SYSTEM_PROMPT + (config.FREE_RULES if free else ""),
+        system_prompt=config.SYSTEM_PROMPT + (config.FREE_RULES if free else "") + persona,
         cwd=cwd or config.SCRATCH,
         cli_path=config.CLAUDE_CLI,
         effort=config.effort_for(model),

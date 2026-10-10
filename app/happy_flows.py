@@ -3464,6 +3464,96 @@ window.addEventListener('load', () => setTimeout(() => {
                 pass
             log.close()
 
+    # 48
+    async def flow48(self) -> str:
+        """H29: the agents. Pepper (Quick's load, Sonnet) and Donna (Deep's load, Opus) replace the Quick and
+        Deep buttons; a workspace can change or add agents and give them headshots. No Claude turns."""
+        import agents
+        from pipeline import make_brain
+        from policy import Policy
+
+        # The defaults, and a page from before H29 still gets the right agent.
+        every = agents.load(config.FOLDER)
+        ids = [a["id"] for a in every]
+        need(ids[:2] == ["pepper", "donna"], f"Pepper and Donna aren't the first two agents: {ids}")
+        need(agents.find(config.FOLDER, None, "quick")["id"] == "pepper" and agents.find(config.FOLDER, None, "deep")["id"] == "donna",
+             "a call with only Quick or Deep doesn't get Pepper or Donna")
+        need(agents.find(config.FOLDER, "nobody", None)["id"] == "pepper", "an unknown agent doesn't fall back to the first one")
+        need(all(a["personality"] and a["speciality"] for a in every[:2]), "an agent has no personality or speciality")
+        # A workspace's own agents: a change, a new one, a hidden one, a headshot; bad entries ignored.
+        ws = self.tmp / "agents-ws"
+        (ws / "Jarvis VA" / "agents").mkdir(parents=True)
+        (ws / "Jarvis VA" / "agents" / "agents.json").write_text(json.dumps([
+            {"id": "donna", "personality": "Test personality.", "model": "evil; rm"},
+            {"id": "coach", "name": "Coach", "load": "deep", "speciality": "Life coaching"},
+            {"id": "pepper", "hidden": True},
+            {"id": "../x", "name": "Bad", "load": "quick"}, {"id": "noload", "name": "No load"}, "junk"]))
+        (ws / "Jarvis VA" / "agents" / "coach.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        mine = agents.load(ws)
+        need([a["id"] for a in mine] == ["pepper", "donna", "coach"], f"the workspace's agents aren't read right: {[a['id'] for a in mine]}")
+        need([a["id"] for a in agents.visible(ws)] == ["donna", "coach"], "a hidden agent still shows")
+        need(mine[1]["personality"] == "Test personality." and mine[1]["name"] == "Donna", "a workspace change isn't applied")
+        need(agents.picture(ws, "coach") and not agents.picture(ws, "donna") and not agents.picture(ws, "../coach"),
+             "headshots aren't found in the workspace only")
+        svg = agents.picture_svg(mine[1])
+        need(svg.startswith("<svg") and ">D</text>" in svg, "the placeholder headshot isn't drawn")
+        # The sessions: her personality after the call rules, on her model and load.
+        pol = Policy(config.FOLDER, dry_run=True)
+        p_ = agents.find(config.FOLDER, "pepper"); d_ = agents.find(config.FOLDER, "donna")
+        q = make_brain(config.MODEL_ALIASES[p_["model"]], pol, load=p_["load"], persona=agents.persona(p_, config.USER))._options
+        d = make_brain(config.MODEL_ALIASES[d_["model"]], pol, load=d_["load"], persona=agents.persona(d_, config.USER))._options
+        need("You are Pepper" in q.system_prompt["append"] and "This is a Quick call" in q.system_prompt["append"]
+             and q.model == config.MODEL_ALIASES["sonnet"], "Pepper's session isn't Quick's load on Sonnet with her personality")
+        need("You are Donna" in d.system_prompt["append"] and "This is a Quick call" not in d.system_prompt["append"]
+             and d.model == config.MODEL_ALIASES["opus"], "Donna's session isn't Deep's load on Opus with her personality")
+        need(d.system_prompt["append"].index("# This chat is a live voice call") < d.system_prompt["append"].index("You are Donna"),
+             "her personality doesn't come after the call rules")
+        need("Pepper" in config.WHISPER_PROMPT and "Donna" in config.WHISPER_PROMPT, "speech recognition doesn't know the agents' names")
+        # The test server: the list for the page (no personality text), the headshots, the page itself.
+        await self.ensure_server()
+        code, body, ctype = http_get("/api/agents")
+        listed = json.loads(body or b"{}").get("agents", [])
+        need(code == 200 and [a["id"] for a in listed][:2] == ["pepper", "donna"], f"/api/agents is wrong: {code} {body[:120]!r}")
+        need(all("personality" not in a and a["picture"] == f"/agents/{a['id']}/picture" for a in listed), "/api/agents gives too much or no picture")
+        for a in listed:
+            code, body, ctype = http_get(a["picture"])
+            need(code == 200 and ctype.startswith("image/") and body, f"{a['name']}'s headshot doesn't load: {code} {ctype}")
+        need(http_get("/agents/nobody/picture")[0] == 404, "an unknown agent's picture doesn't say not found")
+        code, body, _ = http_get("/")
+        page = body.decode()
+        need('data-agent="pepper"' in page and 'data-agent="donna"' in page and "/api/agents" in page and "request_data: { mode, agent," in page,
+             "the call page doesn't show the agents or doesn't send which one")
+        need(">Quick<" not in page and ">Deep<" not in page, "the Quick and Deep buttons are still there")
+        # The transcript names her.
+        from transcript import CallTranscript
+        t = CallTranscript(self.tmp / "calls48", model=config.MODEL_ALIASES["opus"], agent="Donna")
+        need("agent Donna · brain" in t.path.read_text(), "the transcript doesn't say which agent")
+        src = (ROOT / "app/call.py").read_text() + (ROOT / "app/bot.py").read_text()
+        need("agents.find(config.FOLDER, agent, self.load)" in src and 'agent=agent["id"]' in src, "the call doesn't take the agent the page sent")
+        return f"Pepper (Quick, Sonnet) and Donna (Deep, Opus); a workspace's own agents and headshots; {len(listed)} on the page with their pictures"
+
+    # 49
+    async def flow49(self) -> str:
+        """H29: she knows who she is. One Claude turn on a plain session with Pepper's personality."""
+        import agents
+        from pipeline import make_brain
+
+        p_ = agents.find(config.FOLDER, "pepper")
+        folder = self.tmp / "agent49"
+        folder.mkdir()
+        b = make_brain(config.MODEL_ALIASES[p_["model"]], None, cwd=folder, free=True, persona=agents.persona(p_, config.USER))
+        await b.start()
+        try:
+            out = ""
+            async for part in b.ask("Quick test: what's your name? Just the name."):
+                if isinstance(part, str):
+                    out += part
+        finally:
+            await b.stop()
+        self.turns += 1
+        need("pepper" in out.lower(), f"she didn't say she's Pepper: {out!r}")
+        return f"asked her name, she said {out.strip()[:40]!r}"
+
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
     2: ("The greeting plays first, on Quick and Deep", True, "flow2"),
@@ -3512,6 +3602,8 @@ FLOWS = {
     45: ("The scheduler: planned work, after the job list, looking back", False, "flow45"),
     46: ("The Mac desktop app: the watchdog dog, status and call in one", False, "flow46"),
     47: ("The phone version of the Mac app: the same strip, status and call", False, "flow47"),
+    48: ("The agents: Pepper and Donna replace Quick and Deep, with headshots", False, "flow48"),
+    49: ("An agent knows who she is: Pepper says her name", True, "flow49"),
 }
 
 

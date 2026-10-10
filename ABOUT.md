@@ -29,10 +29,15 @@ You open the call page (in the browser, or as an icon on your phone's home scree
 
 On the call page: hold to talk (or talk freely), a chat that shows what you both said, a text box to type instead of talking, a Cancel button when you said something you didn't mean, a mute switch for her voice, and the status page one tap away.
 
-**Three ways to call:**
+**Who you call: the agents.** Since 0.2 you pick an agent, each with her own name, face, personality and speciality:
 
-- **Quick:** Sonnet, with the basics loaded (your rules, your to-do list, the mail list, the last notes). Fast. For taking orders and quick checks.
-- **Deep:** Opus, with everything loaded, your vision too. For planning, sparring, thinking things through.
+- **Pepper:** Sonnet, with the basics loaded (your rules, your to-do list, the mail list, the last notes). Calm, quick, organised. For your agenda, your list, mail and quick orders. (This was Quick.)
+- **Donna:** Opus, with everything loaded, your vision too. Warm, sharp, sees the whole picture. For planning, sparring, thinking things through. (This was Deep.)
+
+The call line itself is still called Jarvis. Each agent's headshot is a drawn placeholder until you put a picture in your workspace (`Jarvis VA/agents/pepper.jpg`, `donna.jpg`; pictures stay in your workspace, never in HQ). You can change an agent or add your own in `Jarvis VA/agents/agents.json` (see `app/agents.py`): a name, a personality, a speciality, a model, and how much of your workspace she loads (`quick` or `deep`).
+
+**And Free on top of any agent:**
+
 - **Free:** plain Claude. No connectors, none of your files, no notes, nothing saved, only the web. For testing, and for showing HQ to other people without showing your life.
 
 After a call, the transcript is saved and the call's notes go into your log, in your own words, then committed (Free calls are never saved).
@@ -83,9 +88,9 @@ Everything runs on your own Claude plan (Pro or Max), through Claude Code; no AP
 
 HQ is still being built. The order isn't fixed and can change:
 
-- **0.1 (now):** the call (Quick, Deep, Free), the workspace and its template, the status page, the hourly mail check, the job queue, the watchdog, the usage check, the happy flows, and an installer with a live checklist page, so you can see exactly where an install broke. Since then: the scheduler, the Mac desktop app, and the phone version that looks like it.
-- **Agents:** different assistants with their own names, faces, personalities and specialities (think Pepper, Donna, Moneypenny), each with what it needs to know loaded: one for life coaching, one for work, more later. The first two replace Quick and Deep. That's why it's called HQ: it's where they all work, like building a small company inside the app.
-- **0.2:** HQ again on GitHub, once those bigger builds are done.
+- **0.1:** the call (Quick, Deep, Free), the workspace and its template, the status page, the hourly mail check, the job queue, the watchdog, the usage check, the happy flows, and an installer with a live checklist page, so you can see exactly where an install broke. Since then: the scheduler, the Mac desktop app, and the phone version that looks like it.
+- **0.2 (now):** the agents. Pepper and Donna replace Quick and Deep, each with her own name, face, personality and speciality. That's why it's called HQ: it's where they all work, like building a small company inside the app.
+- **More agents:** one for creative work, one for life coaching (maybe Moneypenny), each with what it needs to know loaded.
 
 Further out, ideas rather than plans: the status page reachable when the laptop is offline, and a simple backup assistant on a server for when the laptop is closed.
 

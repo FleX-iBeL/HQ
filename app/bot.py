@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import brain  # noqa: F401  (clears the API key variables before anything else runs)
+import agents
 import config
 from loguru import logger
 
@@ -76,14 +77,14 @@ def _filter_the_log() -> None:
 
 async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connection=None,
                    model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
-                   free: bool = False, load: str | None = None) -> None:
+                   free: bool = False, load: str | None = None, agent: str | None = None) -> None:
     global _free_calls
     _filter_the_log()
     if free:
         _free_calls += 1
     try:
         await _run_call(transport, handle_sigint, connection, model=model, voice=voice,
-                        waiting_lines=waiting_lines, free=free, load=load)
+                        waiting_lines=waiting_lines, free=free, load=load, agent=agent)
     finally:
         if free:
             _free_calls -= 1
@@ -91,9 +92,9 @@ async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connect
 
 async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connection=None,
                     model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
-                    free: bool = False, load: str | None = None) -> None:
-    call = Call(model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load)
-    logger.info(f"Call started on {call.model}, voice {call.voice}, {'free' if free else call.load + ' load'}; "
+                    free: bool = False, load: str | None = None, agent: str | None = None) -> None:
+    call = Call(model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent)
+    logger.info(f"Call started on {call.model} with {call.agent['name']}, voice {call.voice}, {'free' if free else call.load + ' load'}; "
                 + ("free mode, nothing kept" if free else f"transcript: {call.transcript.path.name}"))
 
     # Warm everything up in the background while the browser finishes connecting: open and
@@ -183,13 +184,17 @@ async def bot(runner_args: RunnerArguments):
     body = runner_args.body if isinstance(runner_args.body, dict) else {}
     mode = str(body.get("mode", "quick"))
     free = body.get("free") is True or mode == "free"
-    model = config.CALL_MODES.get(mode, config.CALL_MODES["quick"])
+    # H29: the page sends the agent (Pepper, Donna, ...); her model and load win over the mode.
+    # A page from before H29 sends only the mode: the agent with that load.
+    agent = agents.find(config.FOLDER, str(body.get("agent", "")) or None, mode if mode in ("quick", "deep") else None)
+    model = config.MODEL_ALIASES.get(agent["model"], agent["model"])
+    mode = agent["load"]
     voice = str(body.get("voice", ""))  # one of config.VOICES, else the default (Call checks)
     waiting_lines = body.get("waiting_lines") is True  # H1: off unless the page switch is on
     # B1: Quick loads only part of his folder, Deep everything.
     load = mode if mode in ("quick", "deep") else "quick"
     await run_call(transport, runner_args.handle_sigint, runner_args.webrtc_connection,
-                   model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load)
+                   model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent["id"])
 
 
 if __name__ == "__main__":
@@ -218,6 +223,24 @@ if __name__ == "__main__":
     # transcripts in calls/; nothing is written. Free calls are never saved, so never shown.
     from fastapi.responses import JSONResponse
     import transcript as _transcript
+
+    # H29: the agents for the call page (no personality text), and each one's headshot: the
+    # workspace's picture when there is one, else a drawn placeholder.
+    import agents as _agents
+
+    @app.get("/api/agents", include_in_schema=False)
+    async def agent_list():
+        return JSONResponse({"agents": [_agents.public(a) for a in _agents.visible(config.FOLDER)]}, headers=_NO_CACHE)
+
+    @app.get("/agents/{agent_id}/picture", include_in_schema=False)
+    async def agent_picture(agent_id: str):
+        every = {a["id"]: a for a in _agents.load(config.FOLDER)}
+        if agent_id not in every:
+            return Response(status_code=404)
+        pic = _agents.picture(config.FOLDER, agent_id)
+        if pic:
+            return FileResponse(pic, media_type=_agents.PICTURE_TYPES[pic.suffix.lower()], headers=_NO_CACHE)
+        return Response(_agents.picture_svg(every[agent_id]), media_type="image/svg+xml", headers=_NO_CACHE)
 
     @app.get("/api/last-call", include_in_schema=False)
     async def last_call():

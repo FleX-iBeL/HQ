@@ -27,6 +27,7 @@ from pathlib import Path
 from loguru import logger
 
 import config
+import agents
 import open_loops
 from claude_llm import ClaudeSessionLLMService
 from fillers import FillerPlayer
@@ -38,23 +39,28 @@ from transcript import CallTranscript, now
 class Call:
     def __init__(self, *, model: str | None = None, voice: str | None = None, calls_dir: Path | None = None,
                  wrap_up: str = config.WRAP_UP, test_mode: bool = False, waiting_lines: bool = True,
-                 free: bool = False, load: str | None = None, loops: "open_loops.OpenLoops | None" = None):
+                 free: bool = False, load: str | None = None, loops: "open_loops.OpenLoops | None" = None,
+                 agent: str | None = None):
         self._loops = loops
         self.model = config.MODEL_ALIASES.get(model or "", model or config.MODEL)
         self.free = free
         # B1: Quick loads only part of his folder, Deep everything. Without a mode from the page,
         # the model decides: Opus is Deep, the rest Quick.
         self.load = load if load in ("quick", "deep") else ("deep" if self.model == config.MODEL_ALIASES["opus"] else "quick")
+        # H29: the agent on this call (Pepper for Quick, Donna for Deep by default); her personality
+        # goes after the call rules. Without one asked for, the agent with this call's load.
+        self.agent = agents.find(config.FOLDER, agent, self.load)
+        persona = agents.persona(self.agent, config.USER)
         self.wrap_up_mode = "off" if free else wrap_up  # "on", "dry" or "off"
-        self.transcript = CallTranscript(calls_dir, model=self.model, keep=not free)
+        self.transcript = CallTranscript(calls_dir, model=self.model, keep=not free, agent=self.agent["name"])
         if free:
             config.FREE_DIR.mkdir(parents=True, exist_ok=True)
             self.policy = None
-            self.brain = make_brain(self.model, None, cwd=config.FREE_DIR, free=True)
+            self.brain = make_brain(self.model, None, cwd=config.FREE_DIR, free=True, persona=persona)
         else:
             # In tests, nothing may change: no file edits, no git, even during the call.
             self.policy = Policy(config.FOLDER, dry_run=test_mode, listener=self._on_decision)
-            self.brain = make_brain(self.model, self.policy, load=self.load)
+            self.brain = make_brain(self.model, self.policy, load=self.load, persona=persona)
         self.stt = make_stt(quiet=free)
         self.voice = voice if voice in config.VOICES else config.VOICE
         self.tts = make_tts(self.voice)
