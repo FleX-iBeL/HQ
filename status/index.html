@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Jarvis VA · status</title>
+    <title>HQ · status</title>
     <!-- H13: its own app on the phone's home screen -->
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
@@ -1119,7 +1119,7 @@
 
         const top = el('header', 'head top');
         const name = el('div', 'name');
-        name.append(el('strong', '', 'Jarvis VA'), el('span', '', 'Build status'));
+        name.append(el('strong', '', 'HQ'), el('span', '', 'Build status'));  // H49: the app's name, not Jarvis
         // H37: the battery in the top line, so it shows without scrolling or opening anything.
         const bt = routines?.battery;
         if (bt) {
@@ -1344,9 +1344,9 @@
         }
 
         const foot = el('footer', 'head soft');
-        foot.append(el('span', '', s.updated), el('span', '', 'Read from the Jarvis VA roadmap'));
+        foot.append(el('span', '', s.updated), el('span', '', 'Read from the roadmap'));
         app.append(foot);
-        document.title = `${s.state ? WORD[s.state] : 'Status'} · Jarvis VA`;
+        document.title = `${s.state ? WORD[s.state] : 'Status'} · HQ`;
       }
 
       async function tick() {
@@ -1378,7 +1378,7 @@
           }
         } catch {
           last = '';
-          app.replaceChildren(el('p', '', 'The status server is not answering. Start it with: node "Jarvis VA/status/server.mjs"'));
+          app.replaceChildren(el('p', '', 'The status server is not answering. Start it with: node status/server.mjs (in HQ)'));
         }
       }
       tick();

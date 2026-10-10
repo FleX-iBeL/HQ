@@ -475,7 +475,7 @@ class Run:
         need(f"127.0.0.1:{TEST_PORT}" in who, "the server listens on more than this MacBook")
         code, body, _ = http_get("/")
         page = body.decode("utf8", "replace")
-        need(code == 200 and "<title>Jarvis</title>" in page, f"the call page did not load ({code})")
+        need(code == 200 and "<title>HQ</title>" in page, f"the call page did not load ({code})")
         need('data-mode="quick"' in page and 'data-mode="deep"' in page, "the Quick and Deep buttons are missing")
         need('id="btn"' in page and 'id="mute"' in page, "the call button or the mute button is missing")
         need('id="orb"' in page and 'id="sound"' in page and "pointerdown" in page,
@@ -3370,7 +3370,7 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
         need(got["strip"]["mood"] in ("happy", "alert", "bark", "sleep") and got["strip"]["head"] not in ("", "Looking…"),
              f"the app's strip got no reading: {got['strip']}")
         if live["mood"] != "sleep":
-            need(got["status_loaded"] and "Jarvis VA" in got["status_title"][0], f"the app didn't load the status page: {got}")
+            need(got["status_loaded"] and "HQ" in got["status_title"][0], f"the app didn't load the status page: {got}")
         swift = (ROOT / "desktop/HQ.swift").read_text()
         need("status.pageZoom = next" in swift and 'item("Smaller", #selector(zoomOut), "-"' in swift and 'id="zoom-in"' in page,
              "the status page can't be made bigger or smaller (H47)")
