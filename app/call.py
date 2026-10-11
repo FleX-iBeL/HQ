@@ -15,6 +15,10 @@ and fetching pages as its only tools. The chat log on the page (H6) still works.
 
 B1: a Quick call loads only part of his folder (quick_context.py); Deep loads it all.
 
+H60: continues=<a saved call's name> starts the call where that one left off: the warm-up message
+carries what was said on it (transcript.continue_from), the greeting says so, and the new transcript
+notes which call it continues. Never on Free (nothing of his goes in), and Free calls are never saved.
+
 J2: the warm-up message carries the very important open items from his mail list
 (open_loops.py), so the first reply names them, on Quick and on Deep. Tests pass their own.
 """
@@ -33,6 +37,7 @@ from claude_llm import ClaudeSessionLLMService
 from fillers import FillerPlayer
 from pipeline import make_brain, make_stt, make_tts, warm_up_tts
 from policy import SESSION_TOOLS, Policy
+import transcript
 from transcript import CallTranscript, now
 
 
@@ -40,7 +45,7 @@ class Call:
     def __init__(self, *, model: str | None = None, voice: str | None = None, calls_dir: Path | None = None,
                  wrap_up: str = config.WRAP_UP, test_mode: bool = False, waiting_lines: bool = True,
                  free: bool = False, load: str | None = None, loops: "open_loops.OpenLoops | None" = None,
-                 agent: str | None = None):
+                 agent: str | None = None, continues: str | None = None):
         self._loops = loops
         self.model = config.MODEL_ALIASES.get(model or "", model or config.MODEL)
         self.free = free
@@ -52,7 +57,10 @@ class Call:
         self.agent = agents.find(config.FOLDER, agent, self.load)
         persona = agents.persona(self.agent, config.USER)
         self.wrap_up_mode = "off" if free else wrap_up  # "on", "dry" or "off"
-        self.transcript = CallTranscript(calls_dir, model=self.model, keep=not free, agent=self.agent["name"])
+        # H60: the earlier call this one continues (read before this call's own transcript exists)
+        self.continued = None if free or not continues else transcript.continue_from(continues, calls_dir)
+        self.transcript = CallTranscript(calls_dir, model=self.model, keep=not free, agent=self.agent["name"],
+                                         continues=self.continued)
         if free:
             config.FREE_DIR.mkdir(parents=True, exist_ok=True)
             self.policy = None
@@ -65,7 +73,8 @@ class Call:
         self.voice = voice if voice in config.VOICES else config.VOICE
         self.tts = make_tts(self.voice)
         self.fillers = FillerPlayer(self.tts._kokoro, voice=self.voice, on_play=self.transcript.filler,
-                                    waiting_lines=waiting_lines)
+                                    waiting_lines=waiting_lines,
+                                    greetings=config.CONTINUE_GREETINGS if self.continued else None)
         self.llm = ClaudeSessionLLMService(
             self.brain, stop_brain_on_end=False, fillers=self.fillers,
             policy=self.policy, transcript=self.transcript,
@@ -74,6 +83,18 @@ class Call:
         self.open_loops_note = ""
         self.wrap_up_reply: str | None = None
         self._finished = False
+
+    def _continue_note(self) -> str:
+        """H60: what the new call's Claude gets about the call it continues."""
+        c = self.continued
+        who = f" with {c['agent']}" if c.get("agent") else ""
+        return (
+            f"This call continues the earlier call of {c['started']}{who}. The call system greets "
+            f"{config.USER} with \"let's continue from where we left off\", so pick up from there: "
+            "know what was said and where it ended, without reading it back unless asked. "
+            "What was said on that call, oldest first (\"You\" is you):\n"
+            f"<earlier-call>\n{c['text']}\n</earlier-call>\n"
+        )
 
     def _on_decision(self, tool, summary, decision):
         if tool in SESSION_TOOLS and tool != "Skill":
@@ -94,6 +115,7 @@ class Call:
             text = (
                 f"[Call system: {config.USER} is calling you now on HQ, the voice call. It is {stamp}. "
                 + (f"{note}\n" if note else "")
+                + (self._continue_note() if self.continued else "")
                 + "Don't do anything yet and use no tools. Reply with only the word: ready]"
             )
             async for _ in self.brain.ask(text):

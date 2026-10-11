@@ -171,6 +171,16 @@
   #histlog .me { align-self:flex-end; background:var(--accent); color:#04120f; border-bottom-right-radius:5px; }
   #histlog .hq { align-self:flex-start; background:var(--ring); color:var(--fg); border-bottom-left-radius:5px; }
   #histlog .filler { align-self:flex-start; color:var(--muted); font-style:italic; font-size:14px; padding:2px 13px; }
+  /* H60: Continue, at the foot of an opened call, only when not on a call (Claude's choice: the one main action of
+     that view, at the bottom where the thumb is, after reading; left clear for the round buttons). */
+  #histfoot { display:none; flex-direction:column; align-items:stretch; gap:6px; padding:12px 0 0 72px; }
+  #histsheet.reading.cancontinue #histfoot { display:flex; }
+  #histcont { border:0; border-radius:14px; background:var(--accent); color:#04120f; font:600 17px/1 -apple-system,sans-serif;
+              padding:15px 16px; cursor:pointer; }
+  #histcont:disabled { opacity:.45; cursor:default; }
+  #histcontnote { color:var(--muted); font-size:13px; text-align:center; min-height:0; }
+  #histcontnote:empty { display:none; }
+  #chatlog .divider { align-self:center; color:var(--muted); font-size:13px; padding:4px 0; }
   #statsheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
                border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column;
                padding:14px 16px calc(84px + env(safe-area-inset-bottom)); text-align:left; }
@@ -281,7 +291,7 @@
 <button id="statbtn" type="button" aria-label="Status page" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h10M5 17h6"/></svg>
 </button>
-<div id="histsheet" role="dialog" aria-label="Past calls"><div id="histhead"><button id="histback" type="button">‹ Calls</button><h2 id="histtitle">Past calls</h2><button id="histclose" type="button">Close</button></div><div id="histlist"></div><div id="histlog"></div></div>
+<div id="histsheet" role="dialog" aria-label="Past calls"><div id="histhead"><button id="histback" type="button">‹ Calls</button><h2 id="histtitle">Past calls</h2><button id="histclose" type="button">Close</button></div><div id="histlist"></div><div id="histlog"></div><div id="histfoot"><button id="histcont" type="button">Continue this call</button><small id="histcontnote"></small></div></div>
 <button id="histbtn" type="button" aria-label="Past calls" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
 </button>
@@ -679,7 +689,7 @@ async function histGet(url) {
 }
 async function loadHistory() {
   const ask = ++histAsk;
-  histEl.classList.remove("reading"); histTitle.textContent = "Past calls";
+  histEl.classList.remove("reading"); histTitle.textContent = "Past calls"; histShown = null; showHistFoot();
   if (!histList.querySelector("button")) histNote(histList, "Loading…");
   const data = await histGet("api/calls");
   if (ask !== histAsk || !histOpen()) return;
@@ -722,7 +732,33 @@ async function readCall(name) {
   }
   if (!histLog.querySelector(".msg")) histNote(histLog, "Nothing said");
   histLog.scrollTop = 0;
+  histShown = data.lines.some(l => l.text && l.who !== "filler") ? data : null;  // H60: what Continue picks up
+  showHistFoot();
 }
+// H60: Continue an earlier call. Only when not on a call; never as Free (nothing of the user's goes into a Free
+// call, and Free calls are never saved). It starts a call with that call's agent (else the one picked), the new
+// call gets what was said on it, she greets with "let's continue from where we left off", and the chat starts
+// with the earlier lines.
+let histShown = null, continueFrom = null;
+const histCont = document.getElementById("histcont"), histContNote = document.getElementById("histcontnote");
+function agentNamed(name) { return Object.values(AGENTS).find(a => a.name === name); }
+function showHistFoot() {
+  const can = !!histShown && state === "idle";
+  histEl.classList.toggle("cancontinue", can);
+  if (!can) return;
+  histCont.disabled = free;
+  const a = agentNamed(histShown.agent) || AGENTS[agent] || {};
+  histCont.textContent = "Continue this call" + (a.name ? " with " + a.name : "");
+  histContNote.textContent = free ? "Free is on. Turn it off in Settings to continue a call." : "";
+}
+histCont.addEventListener("click", () => {
+  if (!histShown || state !== "idle" || free) return;
+  const a = agentNamed(histShown.agent);
+  if (a) { agent = a.id; mode = a.load; showMode(); }
+  continueFrom = histShown;
+  showHistory(false);
+  call();
+});
 function showHistory(open) {
   if (open === histOpen()) { if (open) loadHistory(); return; }
   if (open) {
@@ -763,7 +799,8 @@ voiceBtn.addEventListener("click", () => {
   if (state === "live") setMuted(muted);
   thinkingSound(orbEl.className === "thinking");  // F14: the tick stops or comes back at once
 });
-function onCallText() { return "On the call · " + callName() + (voiceOff ? " · voice off" : ""); }
+function onCallText() { return "On the call · " + callName() + (contLabel ? " · " + contLabel : "") + (voiceOff ? " · voice off" : ""); }
+let contLabel = "";  // H60: "continuing 11 October, 12:42" while a continued call is on
 
 function setState(s, text) {
   state = s;
@@ -784,6 +821,7 @@ function setState(s, text) {
   showTyping();
   showLayout();
   showMode();
+  showHistFoot();  // H60: Continue only when not on a call
 }
 
 // Mute: the mic sends silence, so HQ can finish what it's doing without being cut off.
@@ -938,6 +976,14 @@ async function call() {
   startAudio();  // inside the tap, before anything waits
   calledHere = true;  // H34: from now on the chat is this session's call, not the saved one
   clearChat(); chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showLayout();
+  // H60: a continued call starts with the earlier call's lines in the chat, then a line where this one begins.
+  const cont = continueFrom; continueFrom = null; contLabel = "";
+  if (cont && !free) {
+    contLabel = "continuing " + cont.started;
+    chatTitle.textContent = "Continuing · " + cont.started;
+    for (const l of cont.lines) { if (l.who === "filler") continue; addChat(l.who, l.text, true); if (l.cancelled) markCancelled(); }
+    const d = document.createElement("div"); d.className = "divider"; d.textContent = "Continued now"; chatLog.appendChild(d);
+  }
   setState("connecting", "Connecting…");
   try {
     if (!window.isSecureContext || !navigator.mediaDevices) throw new Error("Open this page through the https address.");
@@ -955,7 +1001,7 @@ async function call() {
     await pc.setLocalDescription(await pc.createOffer());
     await gathered(pc);
     const r = await fetch("api/offer", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, agent, free, voice: voiceFor(agent) } }) });
+      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, agent, free, voice: voiceFor(agent), ...(cont && !free ? { continue: cont.name } : {}) } }) });
     if (!r.ok) throw new Error("The call server said " + r.status);
     const answer = await r.json();
     await pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });
@@ -990,6 +1036,7 @@ hangShade.addEventListener("click", () => askHangup(false));
 
 function cleanup(text) {
   askHangup(false);
+  contLabel = "";  // H60
   clearInterval(pingTimer); pingTimer = null;
   try { if (dc) dc.close(); } catch (e) {}
   try { if (pc) { pc.onconnectionstatechange = null; pc.close(); } } catch (e) {}

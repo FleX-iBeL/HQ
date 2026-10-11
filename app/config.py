@@ -278,6 +278,15 @@ GREETINGS = {k: [g.replace("{n}", f", {_N}" if _N else "").replace("{s}", f" {_N
              for k, v in _GREETINGS.items()}
 
 
+# H60 (11 October 2026), in the user's words: "instead of saying something like 'hey <name> what's up' you say
+# something like 'Hey <name>, let's continue from where we left off'". The greeting when a call continues an earlier one.
+_CONTINUE_GREETINGS = ["Hey{s}, let's continue from where we left off.", "Hey{s}, let's pick up where we left off.",
+                       "Hi{s}, let's continue where we left off."]
+CONTINUE_GREETINGS = [g.replace("{s}", f" {_N}" if _N else "") for g in _CONTINUE_GREETINGS]
+# H60: how much of the earlier call goes in, at most (characters, the newest kept; Claude's choice).
+CONTINUE_MAX_CHARS = 12000
+
+
 def greetings_now() -> list[str]:
     import datetime
     h = datetime.datetime.now().hour

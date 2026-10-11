@@ -142,7 +142,8 @@ def _filter_the_log() -> None:
 
 async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connection=None,
                    model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
-                   free: bool = False, load: str | None = None, agent: str | None = None) -> None:
+                   free: bool = False, load: str | None = None, agent: str | None = None,
+                   continues: str | None = None) -> None:
     global _free_calls, _calls_on
     _filter_the_log()
     if free:
@@ -150,7 +151,7 @@ async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connect
     _calls_on += 1
     try:
         await _run_call(transport, handle_sigint, connection, model=model, voice=voice,
-                        waiting_lines=waiting_lines, free=free, load=load, agent=agent)
+                        waiting_lines=waiting_lines, free=free, load=load, agent=agent, continues=continues)
     finally:
         _calls_on -= 1
         if free:
@@ -159,10 +160,13 @@ async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connect
 
 async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connection=None,
                     model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
-                    free: bool = False, load: str | None = None, agent: str | None = None) -> None:
-    call = Call(model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent)
+                    free: bool = False, load: str | None = None, agent: str | None = None,
+                    continues: str | None = None) -> None:
+    call = Call(model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent,
+                continues=continues)
     logger.info(f"Call started on {call.model} with {call.agent['name']}, voice {call.voice}, {'free' if free else call.load + ' load'}; "
-                + ("free mode, nothing kept" if free else f"transcript: {call.transcript.path.name}"))
+                + ("free mode, nothing kept" if free else f"transcript: {call.transcript.path.name}")
+                + (f"; continues {call.continued['name']}" if call.continued else ""))
 
     # Warm everything up in the background while the browser finishes connecting: open and
     # prime the Claude session, load Whisper, run Kokoro once. The pipeline starts right away.
@@ -263,8 +267,11 @@ async def bot(runner_args: RunnerArguments):
     waiting_lines = False
     # B1: Quick loads only part of his folder, Deep everything.
     load = mode if mode in ("quick", "deep") else "quick"
+    # H60: Continue in Past calls sends the earlier call's name; never on Free (Call checks it's a saved call).
+    continues = str(body.get("continue") or "") or None
     await run_call(transport, runner_args.handle_sigint, runner_args.webrtc_connection,
-                   model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent["id"])
+                   model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent["id"],
+                   continues=None if free else continues)
 
 
 if __name__ == "__main__":

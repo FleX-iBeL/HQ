@@ -35,7 +35,7 @@ def now() -> datetime:
 
 class CallTranscript:
     def __init__(self, folder: Path | None = None, *, model: str = "", started: datetime | None = None,
-                 keep: bool = True, agent: str = ""):
+                 keep: bool = True, agent: str = "", continues: dict | None = None):
         self.started = started or now()
         self.on_line: Callable[[str, str], None] | None = None  # H6: (who, text) for the call page
         self.path: Path | None = None
@@ -57,6 +57,8 @@ class CallTranscript:
             "written down as it happened.\n\n"
             f"Started {self.started.strftime('%H:%M:%S')} · " + (f"agent {agent} · " if agent else "")
             + f"brain {model or config.MODEL}\n\n"
+            # H60: a call that continues an earlier one says which, so it can be found back
+            + (f"Continues the call of {continues['started']} ({continues['name']})\n\n" if continues else "")
         )
 
     @property
@@ -165,6 +167,7 @@ def read_lines(path: Path) -> list[dict]:
 
 _NAME = re.compile(r"^\d{4}-\d\d-\d\d-\d{4}(?:-\d+)?$")
 _AGENT = re.compile(r"^Started [\d:]+ · agent ([^·]+?) · ", re.M)
+_CONTINUES = re.compile(r"^Continues the call of .+ \((\d{4}-\d\d-\d\d-\d{4}(?:-\d+)?)\)$", re.M)
 
 
 def _calls(folder: Path) -> list[Path]:
@@ -183,11 +186,13 @@ def _about(path: Path, lines: list[dict]) -> dict:
     day, hhmm = _sort_key(path)[0].rsplit("-", 1)
     started = datetime.strptime(day + hhmm, "%Y-%m-%d%H%M")
     try:
-        m = _AGENT.search(path.read_text(encoding="utf8")[:600])
+        head = path.read_text(encoding="utf8")[:800]
     except OSError:
-        m = None
+        head = ""
+    m, c = _AGENT.search(head), _CONTINUES.search(head)
     return {"name": path.stem, "started": started.strftime("%-d %B, %H:%M"), "date": started.strftime("%Y-%m-%d"),
-            "time": started.strftime("%H:%M"), "agent": m.group(1).strip() if m else ""}
+            "time": started.strftime("%H:%M"), "agent": m.group(1).strip() if m else "",
+            "continues": c.group(1) if c else ""}
 
 
 def last_call(folder: Path | None = None) -> dict | None:
@@ -227,6 +232,32 @@ def read_call(name: str, folder: Path | None = None) -> dict | None:
     except OSError:
         return None
     return {**_about(path, lines), "lines": lines}
+
+
+def continue_from(name: str, folder: Path | None = None, max_chars: int | None = None) -> dict | None:
+    """H60: an earlier saved call, to continue on a new call: when it was, its agent, and what was said
+    as a block of text for the new call's Claude (his lines and hers as read_lines gives them, her waiting
+    lines and cancelled lines left out). A long call is trimmed from the start, so the newest is kept.
+    None when it isn't a saved call or nothing was said on it."""
+    data = read_call(name, folder)
+    if not data:
+        return None
+    limit = config.CONTINUE_MAX_CHARS if max_chars is None else max_chars
+    said = [ln for ln in data["lines"] if ln["who"] != "filler" and not ln.get("cancelled")]
+    if not said:
+        return None
+    rows = [f"{ln['at']} {config.USER_LABEL if ln['who'] == 'user' else 'You'}: {ln['text']}" for ln in said]
+    kept, size = [], 0
+    for row in reversed(rows):
+        if kept and size + len(row) + 1 > limit:
+            break
+        kept.insert(0, row)
+        size += len(row) + 1
+    text = "\n".join(kept)
+    if len(kept) < len(rows):
+        text = f"(the first {len(rows) - len(kept)} lines left out, the call was long)\n" + text
+    return {**{k: data[k] for k in ("name", "started", "date", "time", "agent")}, "text": text,
+            "lines": len(said), "trimmed": len(rows) - len(kept)}
 
 
 def _one_line(text: str) -> str:

@@ -48,12 +48,14 @@ TAIL_SILENCE_SECS = 0.45  # lets the output notice the filler ended (it waits 0.
 
 
 class FillerPlayer(FrameProcessor):
-    def __init__(self, kokoro, *, voice: str = config.VOICE, on_play=None, waiting_lines: bool = True):
+    def __init__(self, kokoro, *, voice: str = config.VOICE, on_play=None, waiting_lines: bool = True,
+                 greetings: list[str] | None = None):
         super().__init__(name="FillerPlayer")
         self.waiting_lines = waiting_lines  # H1: off = only the greeting, no lines while she works
+        # H60: a call that continues an earlier one has its own greetings (config.CONTINUE_GREETINGS)
         self._kokoro = kokoro
         self._voice = voice
-        self._texts = {"greeting": config.greetings_now(), "wait": list(config.FILLERS), **{k: list(v) for k, v in config.TOOL_FILLERS.items()}}
+        self._texts = {"greeting": list(greetings or config.greetings_now()), "wait": list(config.FILLERS), **{k: list(v) for k, v in config.TOOL_FILLERS.items()}}
         self._rotation = {k: 0 for k in self._texts}  # (not _next: FrameProcessor uses that name)
         self._last: str | None = None
         self._audio: dict[str, bytes] = {}

@@ -125,6 +125,10 @@ Run them before and after every update; they print a short pass/fail table at th
      server serves both read only; on the call page (headless browser) the button sits right above the voice
      button, before, during and after a call, in the browser and in the app; the list opens, a tap shows that
      call (no tools, cancelled struck through), Back returns, Close closes; one sheet at a time
+  58 H60, one Claude turn: continue an earlier call. What the new call gets of the earlier one (his and her
+     lines, trimmed from the start), the continue greeting with the name from me.md, never on Free; on the
+     call page Continue at the foot of an opened call, only when not on a call and not as Free, the offer it
+     sends and the chat it starts with; a real continued call greets so, and its transcript says which call
 
 Safe to run while the live phone line is up: the flows use their own server on port 7871
 (HQ_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
@@ -3862,6 +3866,175 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
             need(all(part.endswith(":ok") for part in res.split(" | ")), f"the past-calls button or sheet isn't right ({where}): {res}")
         return ("every saved call newest first with date, time and agent, one call read by name only, served read only; "
                 "the button above the voice button before, during and after a call, in the browser and the app; list, call, Back, Close")
+    async def flow58(self) -> str:
+        """H60: continue an earlier call. The transcript code (what goes in, trimmed from the start, refused
+        names), the call (greeting, warm-up note, never on Free), the call page in a headless browser (the
+        Continue button, only when not on a call, not as Free, the offer it sends, the chat it starts with),
+        and one real call to the test server that continues a made-up call: one Claude turn (its warm-up)."""
+        import transcript
+        import brain as _brain  # noqa: F401  (clears API key variables first)
+        from call import Call
+        calls = self.server.calls
+        calls.mkdir(parents=True, exist_ok=True)
+        head = "# Call\n\n> **Private.**\n\nStarted 22:00:00 · agent Pepper · brain test\n\n"
+        name = "2099-12-29-2200"
+        (calls / f"{name}.md").write_text(head + (
+            "- 22:00:01 *filler: Hi there!*\n"
+            "- 22:00:02 *call: connected; connectors: none*\n"
+            f"- 22:00:05 **{config.USER_LABEL}:** Let's plan the dentist. *(typed)*\n"
+            "- 22:00:06 `Read challenges.md` · done (reading in the folder)\n"
+            "- 22:00:09 **HQ:** Tuesday at ten works.\n"
+            f"- 22:00:12 **{config.USER_LABEL}:** Never mind that. *(cancelled)*\n"
+            f"- 22:00:15 **{config.USER_LABEL}:** And the shoes after.\n\nEnded 22:00:20\n"))
+        (calls / "2099-12-29-2210.md").write_text(head + "- 22:10:01 *filler: Hi!*\n")
+        c = transcript.continue_from(name, calls)
+        need(c and c["agent"] == "Pepper" and c["lines"] == 3 and c["trimmed"] == 0
+             and "Let's plan the dentist." in c["text"] and "You: Tuesday at ten works." in c["text"]
+             and "Never mind" not in c["text"] and "challenges.md" not in c["text"] and "Hi there" not in c["text"],
+             f"the earlier call isn't given as his and her lines only: {c}")
+        short = transcript.continue_from(name, calls, max_chars=40)
+        need(short and short["trimmed"] >= 1 and short["text"].endswith("And the shoes after.") and "left out" in short["text"],
+             f"a long call isn't trimmed from the start: {short}")
+        for bad in ("2099-12-29-2210", "../roadmap", "", "2099-12-29-2200.md", "2099-12-01-0000"):
+            need(transcript.continue_from(bad, calls) is None, f"{bad!r} could be continued")
+        # The call: her greeting, what its Claude is told, the transcript's line; never on Free.
+        cc = Call(model="sonnet", calls_dir=calls, wrap_up="dry", test_mode=True, continues=name)
+        need(cc.fillers._texts["greeting"] == config.CONTINUE_GREETINGS, f"the greeting isn't the continue one: {cc.fillers._texts['greeting']}")
+        note = cc._continue_note()
+        need("continue from where we left off" in note and "Tuesday at ten works." in note and "Pepper" in note,
+             f"the warm-up note doesn't carry the earlier call: {note[:200]}")
+        cc.transcript.path.unlink(missing_ok=True)
+        for g in config.CONTINUE_GREETINGS:
+            need(not config.ME["name"] or config.ME["name"] in g, f"the name from me.md isn't in the greeting: {g}")
+        cf = Call(model="sonnet", free=True, continues=name)
+        need(cf.continued is None and cf.fillers._texts["greeting"] == config.greetings_now() and cf.transcript.path is None,
+             "a Free call continued an earlier call")
+        t = transcript.CallTranscript(self.tmp / "h60-calls", model="test", agent="Pepper", continues=c)
+        t.user("Test.")
+        need(transcript.read_call(t.path.stem, t.path.parent)["continues"] == name, "the new transcript doesn't say which call it continues")
+        need(transcript.read_call(name, calls)["continues"] == "", "a call that continues nothing says it does")
+
+        # The call page: the Continue button.
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        one = transcript.read_call(name, calls)
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const shown = el => getComputedStyle(el).display !== "none" && el.getBoundingClientRect().width > 0;
+  const foot = document.getElementById("histfoot"), cont = document.getElementById("histcont");
+  showAgents([{ id: "donna", name: "Donna", load: "quick", model: "sonnet", picture: "", speciality: "x" },
+              { id: "pepper", name: "Pepper", load: "deep", model: "opus", picture: "", speciality: "y" }]);
+  agent = "donna"; mode = "quick"; showMode();
+  await wait(200);
+  histBtn.click(); await wait(400);
+  out.push("list:" + (histOpen() && !shown(foot) ? "ok" : "WRONG"));
+  histList.querySelector("button").click(); await wait(400);
+  out.push("foot:" + (shown(foot) && !cont.disabled && cont.textContent === "Continue this call with Pepper"
+    && cont.getBoundingClientRect().left >= histBtn.getBoundingClientRect().right ? "ok" : "WRONG " + cont.textContent));
+  document.getElementById("histback").click(); await wait(300);
+  out.push("back:" + (!shown(foot) ? "ok" : "WRONG"));
+  histList.querySelector("button").click(); await wait(300);
+  free = true; showMode(); showHistFoot();
+  out.push("free:" + (cont.disabled && document.getElementById("histcontnote").textContent.includes("Free") ? "ok" : "WRONG"));
+  cont.click(); await wait(200);
+  out.push("freenocall:" + (state === "idle" && !OFFERS.length ? "ok" : "WRONG"));
+  free = false; showMode(); showHistFoot();
+  setState("live", "On the call");
+  out.push("live:" + (!shown(foot) ? "ok" : "WRONG"));
+  setState("idle", "Tap to call");
+  out.push("idle:" + (shown(foot) ? "ok" : "WRONG"));
+  cont.click();
+  for (let i = 0; i < 60 && !OFFERS.length; i++) await wait(100);
+  await wait(300);
+  const rd = OFFERS.length ? OFFERS[0].request_data : {};
+  out.push("offer:" + (rd.continue === "__NAME__" && rd.agent === "pepper" && rd.mode === "deep" && rd.free === false ? "ok" : "WRONG " + JSON.stringify(rd)));
+  const msgs = chatLog.querySelectorAll(".msg");
+  out.push("chat:" + (!histOpen() && msgs.length === 4 && chatLog.querySelector(".divider") && chatLog.querySelectorAll(".msg.me.cancelled").length === 1
+    && chatTitle.textContent.startsWith("Continuing") ? "ok" : "WRONG " + msgs.length + " " + chatTitle.textContent));
+  continueFrom = null; histShown = null;
+  const pre = document.createElement("pre"); pre.id = "h60"; pre.textContent = "H60RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+""".replace("__NAME__", name)
+        stub = ("<script>const OFFERS = []; const CALLS = " + json.dumps({"calls": transcript.list_calls(calls)[:1]}) + ", ONE = " + json.dumps(one) + """;
+window.fetch = async (url, opts) => {
+  if (String(url) === "api/offer") { OFFERS.push(JSON.parse(opts.body)); return { ok: false, status: 599, json: async () => ({}) }; }
+  return { ok: true, json: async () => (String(url).startsWith("api/calls/") ? ONE : String(url) === "api/calls" ? CALLS : { lines: [] }) };
+};
+try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: async () => new MediaStream() } }); } catch (e) {}</script>""")
+        f = self.tmp / "h60.html"
+        f.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
+        for where, q in (("phone", ""), ("app", "?app=1")):
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--window-size=390,844",
+                                              f"--user-data-dir={self.tmp / ('h60-' + where)}", "--virtual-time-budget=30000", "--dump-dom", f.as_uri() + q], timeout=120)
+            m = re.search(r'<pre id="h60">H60RESULT (.*?) END</pre>', r.stdout)
+            need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
+            res = m.group(1)
+            say(f"   {where}: {res}")
+            need(all(part.endswith(":ok") for part in res.split(" | ")), f"the Continue button isn't right ({where}): {res}")
+
+        # One real call that continues the made-up one: the continue greeting, and the transcript says so.
+        import fractions  # noqa: F401
+        import aiohttp
+        import numpy as np
+        from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
+        from test_a4 import FakeMic
+        await self.ensure_server()
+        offset = self.server.log_size()
+        before = set(calls.glob("*.md"))
+        pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+        pc.addTrack(FakeMic(np.zeros(0, np.int16)))
+        dc = pc.createDataChannel("chat", ordered=True)
+        chats: list[tuple[str, str]] = []
+
+        @dc.on("message")
+        def on_message(msg):
+            try:
+                m = json.loads(msg)
+            except (TypeError, ValueError):
+                return
+            if isinstance(m, dict) and m.get("type") == "hq-chat":
+                chats.append((m.get("who"), m.get("text")))
+        new_head = ""
+        try:
+            await pc.setLocalDescription(await pc.createOffer())
+            async with aiohttp.ClientSession() as sess:
+                async with sess.post(TEST_URL + "/api/offer", json={"sdp": pc.localDescription.sdp, "type": "offer",
+                                     "request_data": {"mode": "quick", "agent": "donna", "continue": name}}) as r:
+                    need(r.status == 200, f"the offer was refused ({r.status})")
+                    answer = await r.json()
+            await pc.setRemoteDescription(RTCSessionDescription(answer["sdp"], answer["type"]))
+            t0 = time.perf_counter()
+            while not any(w == "filler" for w, _ in chats) and time.perf_counter() - t0 < 30:
+                await asyncio.sleep(0.2)
+            new = [p for p in calls.glob("*.md") if p not in before]
+            new_head = new[0].read_text()[:800] if new else ""
+            await asyncio.sleep(4)
+            dc.send(json.dumps({"type": "hangup"}))
+            await asyncio.sleep(0.5)
+        finally:
+            await pc.close()
+        log = ""
+        for _ in range(60):
+            log = self.server.log_since(offset)
+            if "Nobody said anything" in log:
+                break
+            await asyncio.sleep(0.5)
+        self.turns += 1
+        greet = [t for w, t in chats if w == "filler"]
+        need(greet and greet[0] in config.CONTINUE_GREETINGS, f"the greeting wasn't the continue one: {greet}")
+        need(f"continues {name}" in log, "the server log doesn't say the call continues the earlier one")
+        need(f"({name})" in new_head and "Continues the call of" in new_head, f"the new transcript doesn't say which call it continues: {new_head[:300]!r}")
+        say(f"   greeting {greet[0]!r}")
+        return ("the earlier call's lines (no tools, waiting lines or cancelled), trimmed from the start; the continue greeting "
+                "with the name from me.md; never on Free; Continue at the foot of an opened call, not on a call, not as Free; "
+                "the offer and the chat; a real continued call greets so and its transcript says which call")
+
     async def flow54(self) -> str:
         """H61: estimated time to completion for the jobs. No Claude turns and no job is started: the queue
         script and the estimator on a copy of the roadmap (its estimates in their own files next to it),
@@ -4273,6 +4446,7 @@ FLOWS = {
     55: ("F14: her voice off also silences the thinking tick, the talk sound and the click", False, "flow55"),
     56: ("H59: an update to a fake newer version: backup, local/ kept, note for Claude, waits for a call", False, "flow56"),
     57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),
+    58: ("H60: continue an earlier call: Continue in Past calls, the greeting, the earlier call as context", True, "flow58"),
 }
 
 

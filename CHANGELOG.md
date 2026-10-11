@@ -9,6 +9,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - The version number, small and grey, on the call page, the status page and in the Mac app; a tap shows this changelog. When there's nothing newer, it says you're on the latest version.
 - local/: one place for your own builds (for example the Windows parts). Never uploaded, never touched by an update, and HQ looks there first.
 - Every past call: a button above the voice button opens the list of saved calls, and each one read only.
+- Continue an earlier call: open it in Past calls and tap Continue. The new call knows what was said, and she greets you with "let's continue from where we left off".
 - How long the jobs should take: an estimate per job and for the whole list, learning from how long jobs really took.
 - The space bar in the Mac app: a tap mutes, holding it is push to talk, letting go sends.
 - Pushing HQ goes through its own key, and only after the privacy check.
