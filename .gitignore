@@ -11,3 +11,8 @@
 __pycache__/
 .DS_Store
 /samples/_check.wav
+
+# H59: the user's own builds (their own parts, e.g. on Windows): never in this repo, never touched by an update
+/local/
+# H59: the notes an update leaves for the user's Claude
+/updates/

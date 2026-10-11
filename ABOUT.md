@@ -72,13 +72,17 @@ HQ.app puts it in one window: the watchdog on top, drawn as a small dog whose mo
 
 On the phone it looks the same: the status page's address with `/hq` behind it, added to the home screen, gives the same dog, the same light, Status and Call, and Turn everything on.
 
+### Versions and updates
+
+HQ knows its version and looks a few times a day whether a newer one is out. When there is one, a small bar shows what's new with an **Update** button; one tap saves anything you changed on a backup branch, moves HQ to the new version, restarts what needs it, and leaves your Claude a note on what changed. Your workspace and your own builds in `local/` are never touched, and nothing of yours is ever sent anywhere. The small grey version number (on the call page, the status page and in the Mac app) opens the changelog: what was added and changed in each version. Fixes get a patch number (0.2.1), bigger features the next minor (0.3).
+
 ### The happy flows
 
 HQ's tests: over forty checks of the main things that must work when all goes well (the call starts, the greeting plays, a question gets an answer, cutting in stops the voice, the transcript is saved, the queue works, the status page reads the roadmap, the template stays blank...). They run before and after every change, on their own port, without touching the live call.
 
 ## What it runs on
 
-**HQ 0.1 is built for Claude on a Mac with an Apple chip.** The start at login, the routine, the watchdog, the Terminal windows, the lid-closed switch, the laptop readings and the speech recognition (MLX) are Mac-only. On Windows, Claude builds those parts itself; the readme has a table of what to build with what.
+**HQ 0.1 is built for Claude on a Mac with an Apple chip.** The start at login, the routine, the watchdog, the Terminal windows, the lid-closed switch, the laptop readings and the speech recognition (MLX) are Mac-only. On Windows, Claude builds those parts itself, only in the `local/` folder, which updates never touch; the readme has a table of what to build with what, and the names HQ looks for there.
 
 **Mail is built for Gmail and the calendar for Google Calendar**, through the Claude connectors. With another provider, Claude first researches whether it has a connector or an MCP server, and otherwise builds an alternative (IMAP, CalDAV, an `.ics` link).
 

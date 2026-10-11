@@ -40,6 +40,8 @@ const FILES = {
   '/hq-icon-180.png': ['status/icons/hq-180.png', 'image/png'],
   '/hq-icon-192.png': ['status/icons/hq-192.png', 'image/png'],
   '/hq-icon-512.png': ['status/icons/hq-512.png', 'image/png'],
+  // H59: the version, a newer one and the changelog (the same file the call page loads)
+  '/update-ui.js': ['status/update-ui.js', 'text/javascript; charset=utf-8'],
 };
 
 // H28: the phone version of the Mac app (H27). The Mac app's own strip (desktop/shell.html), unchanged, with
@@ -82,6 +84,22 @@ function estimates() {
       let data = null;
       try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
       est = { at: Date.now(), data };
+      resolve(data);
+    });
+  });
+}
+
+// H59: the version, a newer one, the update and the changelog, from routine/update.py (the call server answers the
+// same addresses). A look on GitHub is started in the background by update.py itself, a few times a day. Starting
+// or checking needs the x-hq header, so a page from elsewhere can't press it.
+let upd = { at: 0, data: null };
+function updateTool(args, cacheMs = 0) {
+  if (cacheMs && args[0] === 'status' && Date.now() - upd.at < cacheMs && upd.data) return Promise.resolve(upd.data);
+  return new Promise((resolve) => {
+    execFile('/usr/bin/python3', [join(root, 'routine/update.py'), ...args], { timeout: 120000 }, (err, out) => {
+      let data = null;
+      try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
+      if (args[0] === 'status' || args[0] === 'start' || args[0] === 'check') upd = { at: Date.now(), data: args[0] === 'check' ? null : data };
       resolve(data);
     });
   });
@@ -225,6 +243,21 @@ const server = createServer(async (req, res) => {
     } catch {
       res.writeHead(500).end('Cannot read desktop/shell.html');
     }
+    return;
+  }
+  if (path0 === '/api/update' || path0 === '/api/changelog') {
+    const out = await updateTool([path0 === '/api/update' ? 'status' : 'changelog'], 4000);
+    res.writeHead(out ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(out));
+    return;
+  }
+  if (path0 === '/api/update/start' || path0 === '/api/update/check') {
+    if (req.method !== 'POST' || req.headers['x-hq'] !== 'update') {
+      res.writeHead(403).end('Only the HQ page can start an update');
+      return;
+    }
+    let out = await updateTool(path0.endsWith('start') ? ['start'] : ['check', '--force']);
+    if (path0.endsWith('check')) out = await updateTool(['status']);
+    res.writeHead(out ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(out));
     return;
   }
   if (path0 === '/hq.json') {

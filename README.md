@@ -151,7 +151,7 @@ Then the real test: a call from the phone or the browser, a question about today
 | Paths and shells | zsh scripts, Homebrew paths | PowerShell, the Windows paths |
 | The desktop app | `desktop/HQ.swift` (Swift, WebKit), built by `desktop/build.sh` | A WebView2 window around the same strip (`desktop/shell.html`) and `desktop/hq_control.py`, or just the browser |
 
-What works the same everywhere: the call page, the voice (Kokoro), Claude Code, the connectors, Tailscale, the status page (Node), the queue and the workspace. Keep the Mac files as they are and add the Windows ones next to them, so one HQ works on both, and update this table with what you built.
+What works the same everywhere: the call page, the voice (Kokoro), Claude Code, the connectors, Tailscale, the status page (Node), the queue and the workspace. Keep the Mac files as they are and build the Windows ones **only in `local/`** (see *Your own parts* below), so an update never erases them; HQ looks there first.
 
 ---
 
@@ -167,4 +167,40 @@ It looks through HQ's files and its whole git history for the person's name and 
 
 ## Updating HQ
 
-`git pull` in this folder. It never touches `workspace/`. After an update, run the happy flows; restart the call line (`app/stop.sh`, then `app/start.sh`) if anything in `app/` changed.
+**The easy way:** when a newer version is out, the call page, the status page and the Mac app show a small bar with what's new and an **Update** button. HQ looks for one on this repo a few times a day (read only, no login; when the computer is offline it just tries again later). When there's nothing newer, the small grey version number says you're on the latest version. Tap the version number any time to see the changelog: what was added and changed in each version, newest first.
+
+What **Update** does (`routine/update.py`, which you can also run yourself: `python3 routine/update.py start`):
+
+1. It waits while a call is on or a job runs, and says so; it starts by itself when they've ended.
+2. Anything changed in HQ's own files (and any commits of your own) is saved first on a backup branch, `hq-backup/<date>-before-<version>-changes` (or `-commits`). Nothing is ever sent anywhere. To get the changes back: `git stash apply <that branch>`.
+3. It fetches that version from this repo and moves HQ to it. `workspace/`, `local/`, `scratch/` and `.status/` are never touched.
+4. It restarts what needs it: the call line (if it ran), the status page (if its server changed), the Mac app (if it changed and is installed: reopen it afterwards), the watchdog (if it changed), and the Python packages if the requirements changed.
+5. It leaves a note for Claude in `updates/<version>.md`: what's new, what was kept, what it restarted, and what to check or rebuild. **Claude: when there's a note in `updates/` that isn't in `updates/done/`, read it, do what it says, tell the person in a sentence or two, then move it into `updates/done/`.**
+
+On a computer that isn't a Mac, tapping Update first explains that their own parts are kept safe and that Claude gets instructions to patch things up locally afterwards.
+
+By hand still works: `git pull` (or `git checkout v0.3`), then restart the call line (`app/stop.sh`, `app/start.sh`) and run the happy flows.
+
+### Your own parts: local/
+
+Whatever Claude builds for this one computer (the Windows parts above, or anything else of the person's own) goes **only in `local/`**, at the top of HQ. That folder is ignored by HQ's repo: it is never uploaded, and an update never touches it. Where HQ has a part that differs per computer, it looks in `local/` first, by name, with any of the endings `.sh`, `.py`, `.ps1`, `.cmd`, `.bat` (or none):
+
+| Name in local/ | Stands in for | Called with |
+|---|---|---|
+| `open-window` | the Terminal window a job or the mail check runs in (`routine/tick.py`) | the path of the script to run |
+| `start-call-line` | `app/start.sh`, when the call line is off ("Turn everything on") | nothing |
+| `restart-call-line` | `app/stop.sh` then `app/start.sh`, after an update | nothing |
+| `start-status-page` | `node status/server.mjs --quiet` | nothing |
+| `restart-status-page` | restarting the status page after an update | nothing |
+| `start-helper` | opening the helper app that runs the routine every minute | nothing |
+| `start-at-login` | the installer's helper app and its LaunchAgent | nothing |
+| `start-watchdog` | loading or waking the watchdog's LaunchAgent | nothing |
+| `install-watchdog` | `routine/install-watchdog.sh` (installer and updates) | nothing |
+
+Something with no name here (the speech recognition, the laptop readings): change HQ's file as little as possible, and keep a copy of the change in `local/` with a line on what it is, so it can be put back after an update (the update saves the change on a backup branch too, and its note says so).
+
+### Versions
+
+Versions are git tags on this repo: `v0.2`, `v0.2.1`, `v0.3`. **Fixes get a patch number (0.2.1); bigger features the next minor (0.3).** HQ reads its own version from the newest tag in its history (`git describe`), else from the `VERSION` file.
+
+Releasing one (the maintainer): in `CHANGELOG.md`, rename **Coming next** to the version and date (`## 0.3 · 12 October 2026`), put the same number in `VERSION`, commit, tag it with a short message (`git tag -a v0.3 -m "HQ 0.3"`), and push with `python3 routine/push.py`, which runs the privacy check first. Everyone's HQ sees it within a few hours.

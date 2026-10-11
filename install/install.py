@@ -68,6 +68,17 @@ def _label(path: str, pattern: str) -> str:
 _plists = [f for f in (os.listdir(os.path.join(HQ, "app")) if os.path.isdir(os.path.join(HQ, "app")) else [])
            if f.endswith(".plist")]
 HELPER_AGENT = _plists[0][:-len(".plist")] if _plists else ""
+
+
+def _own_part(name):
+    """H59: the user's own version of a platform part in local/ (see routine/hqpaths.py), or None."""
+    sys.path.insert(0, os.path.join(HQ, "routine"))
+    try:
+        import hqpaths
+        return hqpaths.part_cmd(name)
+    except Exception:
+        return None
+
 WATCHDOG_AGENT = _label(os.path.join(HQ, "routine", "install-watchdog.sh"), r"<key>Label</key><string>([^<]+)</string>")
 # The HQ path the repo's helper files were written with (whatever home folder it was), replaced by
 # this HQ's path when installing.
@@ -351,6 +362,10 @@ class Installer:
             raise Skip("left out (--skip helper): no routine, no start at login")
         if FAKE:
             return "simulated (test)"
+        own = _own_part("start-at-login")
+        if own:  # H59: the user's own start at login, in local/ (for example on Windows)
+            sh(own)
+            return "your own start at login (local/)"
         os.makedirs(os.path.join(HQ, "scratch", "routine"), exist_ok=True)
         # The helper and its LaunchAgent with this HQ's path.
         src = with_this_hq(open(os.path.join(HQ, "routine", "routine.applescript")).read())
@@ -426,6 +441,10 @@ class Installer:
             raise Skip("left out with the helper")
         if FAKE:
             return "simulated (test)"
+        own = _own_part("install-watchdog")
+        if own:  # H59: the user's own watchdog, in local/
+            sh(own)
+            return "your own watchdog (local/)"
         sh(["/bin/zsh", os.path.join(HQ, "routine", "install-watchdog.sh")])
         if not agent_loaded(WATCHDOG_AGENT):
             raise Fail("the watchdog didn't load", "Log: ~/Library/Application Support/HQ/watchdog.out")

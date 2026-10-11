@@ -82,6 +82,12 @@
       timer = setInterval(health, EVERY);
     } else if (m.do === 'tab') tab(m.tab);
     else if (m.do === 'fix') fix();
+    else if (m.do === 'update' || m.do === 'changelog') {
+      // H59: as in the Mac app: the status page's own sheet, Update or the changelog.
+      tab('status');
+      const w = frames && frames.status.contentWindow;
+      try { if (w && w.hqUpdate) (m.do === 'update' ? w.hqUpdate.ask() : w.hqUpdate.open()); } catch {}
+    }
     // 'height' is the Mac window's business; on the phone the panel simply pushes the pages down.
   }
   // The strip talks through webkit.messageHandlers.hq, as in the Mac app.

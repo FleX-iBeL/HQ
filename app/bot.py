@@ -122,6 +122,8 @@ class CallerHere:
 # ("Transcription: [...]"); those lines are dropped as long as a free call runs. Pipecat sets
 # up the log itself when the server starts, so the filter goes in at the first call.
 _free_calls = 0
+# H59: how many calls are on, their after-call work included, so an update never starts during one (/api/busy).
+_calls_on = 0
 _log_filter_on = False
 _SAID = ("Generating TTS [", "Transcription: [")
 
@@ -141,14 +143,16 @@ def _filter_the_log() -> None:
 async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connection=None,
                    model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
                    free: bool = False, load: str | None = None, agent: str | None = None) -> None:
-    global _free_calls
+    global _free_calls, _calls_on
     _filter_the_log()
     if free:
         _free_calls += 1
+    _calls_on += 1
     try:
         await _run_call(transport, handle_sigint, connection, model=model, voice=voice,
                         waiting_lines=waiting_lines, free=free, load=load, agent=agent)
     finally:
+        _calls_on -= 1
         if free:
             _free_calls -= 1
 
@@ -322,6 +326,48 @@ if __name__ == "__main__":
     async def call_one(name: str):
         data = _transcript.read_call(name)
         return JSONResponse(data, headers=_NO_CACHE) if data else JSONResponse({"error": "no such call"}, status_code=404, headers=_NO_CACHE)
+
+    # H59: is a call on (for the update, which waits until it ends); the version, a newer one, the update and
+    # the changelog, from routine/update.py, at the same addresses as the status page; and the shared page part.
+    import subprocess as _sp
+    from fastapi import Request
+
+    _UPDATE = Path(__file__).resolve().parent.parent / "routine" / "update.py"
+    _STATUS_JS = Path(__file__).resolve().parent.parent / "status" / "update-ui.js"
+
+    def _update(*args: str):
+        r = _sp.run([sys.executable, str(_UPDATE), *args], capture_output=True, text=True, timeout=120)
+        try:
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        except Exception:
+            return None
+
+    @app.get("/api/busy", include_in_schema=False)
+    async def busy():
+        return JSONResponse({"calls": _calls_on}, headers=_NO_CACHE)
+
+    @app.get("/update-ui.js", include_in_schema=False)
+    async def update_ui():
+        return FileResponse(_STATUS_JS, media_type="text/javascript", headers=_NO_CACHE)
+
+    @app.get("/api/update", include_in_schema=False)
+    async def update_status():
+        out = await asyncio.to_thread(_update, "status")
+        return JSONResponse(out, status_code=200 if out else 500, headers=_NO_CACHE)
+
+    @app.get("/api/changelog", include_in_schema=False)
+    async def update_changelog():
+        out = await asyncio.to_thread(_update, "changelog")
+        return JSONResponse(out, status_code=200 if out else 500, headers=_NO_CACHE)
+
+    @app.post("/api/update/{what}", include_in_schema=False)
+    async def update_do(what: str, request: Request):
+        if what not in ("start", "check") or request.headers.get("x-hq") != "update":
+            return JSONResponse({"error": "Only the HQ page can start an update"}, status_code=403)
+        if what == "check":
+            await asyncio.to_thread(_update, "check", "--force")
+        out = await asyncio.to_thread(_update, "start" if what == "start" else "status")
+        return JSONResponse(out, status_code=200 if out else 500, headers=_NO_CACHE)
 
     for _icon in ("apple-touch-icon.png", "icon-192.png", "icon-512.png"):
         def _make(name):

@@ -255,6 +255,10 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
             show(m["tab"] as? String ?? "status")
         case "fix":
             fix()
+        case "update", "changelog":
+            // H59: the status page shows the changelog, and on Update starts it (or asks first, off a Mac).
+            show("status")
+            status.evaluateJavaScript(what == "update" ? "window.hqUpdate && hqUpdate.ask()" : "window.hqUpdate && hqUpdate.open()", completionHandler: nil)
         case "zoom":
             zoom((m["by"] as? NSNumber)?.intValue ?? 0)
         case "height":

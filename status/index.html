@@ -346,7 +346,14 @@
     </style>
   </head>
   <body>
+    <!-- H59: the small grey version (a tap shows the changelog) and, when there is one, the new version's bar -->
+    <div id="hqu-top" style="max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 6px;">
+      <div id="hqu-line" style="display: flex; justify-content: flex-end; min-height: 22px;"></div>
+      <div id="hqu-banner"></div>
+    </div>
     <main id="app"><p>Reading the roadmap…</p></main>
+    <script src="./update-ui.js"></script>
+    <script>HQUpdate.mount({ line: document.getElementById('hqu-line'), banner: document.getElementById('hqu-banner') });</script>
     <script type="module">
       import { parseRoadmap } from './parse.mjs';
       import { stopLine, usageVerdict } from './usage.mjs';

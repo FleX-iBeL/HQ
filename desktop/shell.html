@@ -100,6 +100,12 @@
   .dog.sleep .zz { animation: float 2.4s ease-in infinite; }
   .dog.sleep .zz.two { animation-delay: 1.2s; }
   @media (prefers-reduced-motion: reduce) { .dog * { animation: none !important; } }
+  /* H59: the small grey version next to HQ (a click shows the changelog), and a pill when a new one is out. */
+  .ver { font: 400 11px/1.2 inherit; color: var(--grey); background: none; border: 0; padding: 0 2px; cursor: pointer; -webkit-app-region: no-drag; }
+  .ver:hover { text-decoration: underline; }
+  .newver { display: none; font: 600 11px/1 inherit; color: #fff; background: var(--blue); border: 0; border-radius: 999px; padding: 4px 9px;
+    cursor: pointer; -webkit-app-region: no-drag; }
+  .newver.show { display: inline-block; }
 </style>
 </head>
 <body>
@@ -134,7 +140,8 @@
       <text class="zz two" x="88" y="10" font-size="7" font-weight="700" fill="var(--soft)">z</text>
     </svg>
     <div class="who">
-      <b>HQ <i class="light" id="light"></i></b>
+      <b>HQ <i class="light" id="light"></i> <button class="ver" id="ver" type="button" title="What changed in each version"></button>
+        <button class="newver" id="newver" type="button" title="A new version of HQ: update"></button></b>
       <div class="head" id="head">Looking…</div>
       <div class="said" id="said"></div>
     </div>
@@ -169,6 +176,11 @@
       $('light').className = `light ${h.light}`;
       $('head').textContent = h.headline;
       $('fix').disabled = fixing || !(h.off && h.off.length);
+      // H59: the version from update.py (through hq_control.py health)
+      const u = h.update || {};
+      $('ver').textContent = u.version ? `v${u.version}` + (u.updating ? ' · updating…' : u.available ? '' : u.latest && !u.offline ? ' · the latest version' : '') : '';
+      $('newver').textContent = u.available ? `v${u.latest} is out · Update` : '';
+      $('newver').classList.toggle('show', !!u.available && !u.updating);
       const rows = $('rows');
       rows.replaceChildren(...(h.routines || []).map((r) => {
         const d = document.createElement('div');
@@ -196,6 +208,8 @@
   $('zoom-in').addEventListener('click', () => send({ do: 'zoom', by: 1 }));
   $('zoom-out').addEventListener('click', () => send({ do: 'zoom', by: -1 }));
   $('zoom-level').addEventListener('click', () => send({ do: 'zoom', by: 0 }));
+  $('ver').addEventListener('click', () => send({ do: 'changelog' }));
+  $('newver').addEventListener('click', () => send({ do: 'update' }));
   $('fix').addEventListener('click', () => { hq.fixing(true, 'Turning on what’s off…'); send({ do: 'fix' }); });
   $('dog').addEventListener('click', () => {
     if (document.body.classList.contains('call')) return;

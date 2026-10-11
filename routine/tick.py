@@ -124,6 +124,13 @@ def clear(*paths):
             pass
 
 
+def open_window(cmd: str) -> None:
+    """Opens a job's or the mail check's window to run the script `cmd`: on a Mac a Terminal window, in the
+    background; a user's own part local/open-window (H59) gets the script's path instead, on any computer."""
+    own = hqpaths.part_cmd("open-window", cmd)
+    subprocess.run(own or ["/usr/bin/open", "-g", "-a", "Terminal", cmd], check=True)
+
+
 # L7: a Terminal window closes itself once its chat has ended. The window's own script runs the chat
 # (not exec), then asks Terminal to close the window on its tty. That request comes from inside
 # Terminal, so macOS asks no permission. Shared by the jobs and the mail check.
@@ -215,7 +222,7 @@ JT=$(tty)
         pass
     jobs("mark", str(n), "running since " + time.strftime("%H:%M"))
     json.dump({"n": n, "pid": None, "started": time.time()}, open(STATE, "w"))
-    subprocess.run(["/usr/bin/open", "-g", "-a", "Terminal", cmd], check=True)
+    open_window(cmd)
     status("BUILDING", f"Job {n} · started by the routine in a Terminal window",
            f"job {n} started by the routine: {job['text'][:90]}")
     log(f"started job {n}")
@@ -439,7 +446,7 @@ echo $$ > {json.dumps(MAIL_PID)}
         json.dump({**r, "started": time.time()}, open(MAIL_RETRY, "w"))
     open(MAIL_LAST, "w").write(str(int(time.time())))
     json.dump({"pid": None, "started": time.time()}, open(MAIL_STATE, "w"))
-    subprocess.run(["/usr/bin/open", "-g", "-a", "Terminal", cmd], check=True)
+    open_window(cmd)
     log("started the mail check")
     routines.beat("mail", state="running", text="Started", last=time.time(), next=mail_next(time.time()), every=60)
 

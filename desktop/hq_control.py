@@ -177,6 +177,10 @@ def plan(data):
         todo.append(("watchdog", "Woke the watchdog up", ["/bin/launchctl", "kickstart", f"gui/{os.getuid()}/{label}"]))
     if not listening(CALL_PORT):
         todo.append(("call", "Started the call line", [os.path.join(HQ, "app", "start.sh")]))
+    # H59: a user's own part in local/ goes first (start-status-page, start-helper, start-watchdog, start-call-line).
+    own = {"phone": "start-status-page", "helper": "start-helper", "watchdog": "start-watchdog", "call": "start-call-line"}
+    if hqpaths:
+        todo = [(k, w, hqpaths.part_cmd(own[k]) or c) for k, w, c in todo]
     return todo
 
 
@@ -187,7 +191,7 @@ def fix(data, dry=False):
             done.append({"key": key, "what": what, "ok": None})
             continue
         try:
-            if cmd[0] == "node" or cmd[0].endswith("start.sh"):
+            if cmd[0] == "node" or cmd[0].endswith("start.sh") or (hqpaths and hqpaths.LOCAL in " ".join(cmd)):
                 # Detached, so it keeps running when the app quits.
                 subprocess.Popen(cmd, cwd=HQ, env={**os.environ, "PATH": PATH}, stdin=subprocess.DEVNULL,
                                  stdout=open(os.path.join(HQ, "scratch", f"desktop-{key}.log"), "a"),
@@ -213,6 +217,14 @@ def main(argv):
         return 0
     out = judge(data)
     out["at"] = time.time()
+    # H59: the version and a newer one, for the strip (a look on GitHub is started in the background when due).
+    try:
+        import update
+        u = update.status()
+        out["update"] = {"version": u["version"], "latest": u["latest"], "available": u["available"],
+                         "offline": u["offline"], "updating": u["run"].get("state") in ("waiting", "updating")}
+    except Exception:
+        out["update"] = {}
     print(json.dumps(out))
     return 0
 

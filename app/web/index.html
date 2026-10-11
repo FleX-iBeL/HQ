@@ -28,6 +28,7 @@
          min-height:100%; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:28px;
          padding:calc(16px + env(safe-area-inset-top)) 16px calc(88px + env(safe-area-inset-bottom)); text-align:center; user-select:none; -webkit-user-select:none; }
   body::before, body::after { content:""; flex:1 1 0; margin:-14px 0; }
+  #hqu-call-banner:not(:has(.hqu-bar.show)) { display:none; }  /* H59: no gap when there's no new version */
   @media (max-height: 760px) {
     body { gap:18px; }
     h1 { font-size:28px; }
@@ -234,6 +235,9 @@
 </style>
 </head>
 <body>
+<!-- H59: the small grey version in the corner (a tap shows the changelog), and a bar when a new version is out -->
+<div id="hqu-call-line" style="position:fixed; top:calc(4px + env(safe-area-inset-top)); right:8px; z-index:5"></div>
+<div id="hqu-call-banner" style="width:100%; max-width:560px"></div>
 <h1>HQ</h1>
 <div id="modes" role="group" aria-label="Kind of call">
   <button type="button" data-mode="quick" data-agent="donna"><img src="/agents/donna/picture" alt=""><span>Donna</span></button>
@@ -295,6 +299,7 @@
   <div class="btns"><button id="cxno" type="button">Keep</button><button id="cxyes" type="button">Cancel</button></div>
 </div>
 <audio id="remote" autoplay playsinline></audio>
+<script src="update-ui.js"></script>
 <script>
 "use strict";
 // H54: the settings this device saved under the old name (voice, agent, Free, sound, voice off) carry over once.
@@ -762,6 +767,7 @@ function onCallText() { return "On the call · " + callName() + (voiceOff ? " ·
 
 function setState(s, text) {
   state = s;
+  if (window.hqUpdate) hqUpdate.render();  // H59: the new-version bar hides during a call
   orbWrap.classList.toggle("show", s === "live");
   if (s === "live") showOrb("listening");
   statusEl.textContent = text || "";
@@ -1005,6 +1011,11 @@ document.addEventListener("visibilitychange", async () => {
   if (document.visibilityState === "visible" && state === "idle") loadLastCall();  // H34: a call may have ended elsewhere
   if (document.visibilityState === "visible" && state === "live") { try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {} }
 });
+</script>
+<script>
+// H59: the version and a new one; the bar stays away while a call is on (the update waits for the call to end).
+if (window.HQUpdate) HQUpdate.mount({ line: document.getElementById("hqu-call-line"), banner: document.getElementById("hqu-call-banner"),
+  busy: () => typeof state !== "undefined" && state !== "idle" });
 </script>
 </body>
 </html>

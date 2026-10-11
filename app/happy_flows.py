@@ -4018,6 +4018,202 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
         need(all(part.endswith(":ok") for part in res.split(" | ")), f"the voice button doesn't silence the page's sounds right: {res}")
         return "voice off silences the tick, the talk sound and the click; back on, the tick follows the switch; the switch never changes"
 
+    # 56
+    async def flow56(self) -> str:
+        """H59: an update to a fake newer version, without the network: a made-up HQ repo in a folder as the
+        public repo (tags v0.2, then v0.3 and v0.3.1), a copy of it as the user's HQ. The check sees v0.3 and
+        what's new; offline is quiet; Update saves the user's changes on a backup branch, moves to v0.3, leaves
+        local/ and the workspace as they were, and writes the note for their Claude (as on a computer that isn't a
+        Mac); with a call on, the next update waits and starts by itself when the call ends. Restarts nothing."""
+        import subprocess as sp
+        import http.server, socketserver, threading
+        base = self.tmp / "h59"
+        up, me = base / "upstream", base / "mine"
+        if base.exists():
+            shutil.rmtree(base)
+        (up / "routine").mkdir(parents=True)
+        for f in ("routine/update.py", "routine/hqpaths.py", ".gitignore"):
+            shutil.copy(ROOT / f, up / f)
+        (up / "README.md").write_text("A made-up HQ, for flow 56.\n")
+        log = lambda body: "# Changelog\n\n" + body + "## 0.2 · 1 January 2026\n\n### New\n- The first version.\n"
+        (up / "CHANGELOG.md").write_text(log(""))
+        genv = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid", "GIT_TERMINAL_PROMPT": "0"}
+        def g(where, *a):
+            r = sp.run(["git", "-C", str(where), *a], capture_output=True, text=True, env=genv)
+            need(r.returncode == 0, f"git {' '.join(a)}: {r.stderr.strip()}")
+            return r.stdout.strip()
+        g(up, "init", "-q", "-b", "main"); g(up, "add", "-A"); g(up, "commit", "-qm", "0.2"); g(up, "tag", "-a", "v0.2", "-m", "HQ 0.2")
+        g(base, "clone", "-q", str(up), str(me))
+        # The user's own things: a part in local/, a workspace file, a change to HQ's own file, a new file.
+        (me / "local").mkdir()
+        (me / "local/open-window.ps1").write_text("# my own Windows part, flow 56\n")
+        (me / "workspace").mkdir()
+        (me / "workspace/me.md").write_text("# mine\n")
+        with open(me / "README.md", "a") as f:
+            f.write("my own line, flow 56\n")
+        (me / "mine.txt").write_text("my own file, flow 56\n")
+        # The newer version on the "public repo".
+        (up / "app").mkdir()
+        (up / "app/hello.txt").write_text("new in 0.3\n")
+        (up / "CHANGELOG.md").write_text(log("## 0.3 · 2 January 2026\n\n### New\n- Flow fifty-six's new thing.\n\n### Fixed\n- A fix in 0.3.\n\n"))
+        g(up, "add", "-A"); g(up, "commit", "-qm", "0.3"); g(up, "tag", "-a", "v0.3", "-m", "HQ 0.3")
+        rm = self.tmp / "roadmap-H59.md"
+        rm.write_text("# test\n\n## The queue\n\n**Routine:** on\n")
+        busy = {"calls": 0}
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                b = json.dumps(busy).encode()
+                self.send_response(200); self.send_header("content-type", "application/json"); self.end_headers(); self.wfile.write(b)
+            def log_message(self, *a):
+                pass
+        srv = socketserver.TCPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        env = {**os.environ, "HQ_UPDATE_URL": str(up), "HQ_PLATFORM": "win32", "HQ_UPDATE_RESTART": "0",
+               "HQ_ROADMAP": str(rm), "HQ_CALL_URL": f"http://127.0.0.1:{srv.server_address[1]}"}
+        env.pop("HQ_LOCAL", None)
+        def upd(*a, e=env):
+            r = sp.run(["python3", str(me / "routine/update.py"), *a], capture_output=True, text=True, env=e, timeout=120)
+            need(r.returncode == 0, f"update.py {' '.join(a)}: {r.stderr.strip()[-300:]}")
+            return json.loads(r.stdout.strip().splitlines()[-1]) if a[0] != "run" else None
+        def wait_run(until, secs=60):
+            end = time.time() + secs
+            while time.time() < end:
+                s = upd("status")
+                if until(s["run"]):
+                    return s
+                time.sleep(0.5)
+            need(False, f"the update didn't get there in time: {upd('status')['run']}")
+        try:
+            v = json.loads(sp.run(["python3", str(me / "routine/update.py"), "version"], capture_output=True, text=True, env=env).stdout)
+            need(v["version"] == "0.2", f"it doesn't know its own version: {v}")
+            # Offline: quiet, nothing breaks.
+            off = upd("check", "--force", e={**env, "HQ_UPDATE_URL": str(base / "nowhere")})
+            need(off["offline"] and not off["available"], f"offline isn't quiet: {off}")
+            c = upd("check", "--force")
+            need(c["available"] and c["latest"] == "0.3" and not c["offline"], f"the check doesn't see v0.3: {c}")
+            s = upd("status")
+            items = [i for sec in s["new"] for grp in sec["groups"] for i in grp["items"]]
+            need(s["available"] and not s["mac"] and "Flow fifty-six's new thing." in items, f"what's new isn't there: {s}")
+            need(not (me / "app/hello.txt").exists(), "the check changed HQ before Update was tapped")
+            # Update.
+            upd("start")
+            s = wait_run(lambda r: r.get("state") in ("done", "failed"))
+            need(s["run"]["state"] == "done", f"the update didn't go through: {s['run']}")
+            need(g(me, "describe", "--tags") == "v0.3" and (me / "app/hello.txt").exists(), "HQ isn't on v0.3 after the update")
+            need((me / "local/open-window.ps1").read_text() == "# my own Windows part, flow 56\n", "the own part in local/ didn't survive")
+            need((me / "workspace/me.md").read_text() == "# mine\n", "the workspace didn't survive")
+            br = s["run"]["saved"]["changes"]["branch"]
+            need(br.startswith("hq-backup/") and "my own line, flow 56" in g(me, "show", f"{br}:README.md")
+                 and "my own file" in g(me, "show", f"{br}^3:mine.txt"), f"the user's changes aren't on the backup branch: {br}")
+            need(g(me, "remote", "get-url", "origin") == str(up) and not g(me, "branch", "-r", "--contains", br),
+                 "the backup went somewhere")
+            note = (me / s["run"]["notes"]).read_text()
+            need("Flow fifty-six's new thing." in note and br in note and "isn't a Mac" in note and "local/" in note,
+                 f"the note for their Claude is missing something: {note[:400]}")
+            s = upd("status")
+            need(s["version"] == "0.3" and not s["available"] and s["latest"] == "0.3", f"after the update it isn't the latest: {s}")
+            need("updating" not in s["run"]["state"], "the update still says it's running")
+            # A call on: the next update waits, says so, and starts by itself when the call ends.
+            (up / "app/hello.txt").write_text("new in 0.3.1\n")
+            g(up, "commit", "-qam", "0.3.1"); g(up, "tag", "-a", "v0.3.1", "-m", "HQ 0.3.1")
+            need(upd("check", "--force")["available"], "the check doesn't see v0.3.1")
+            busy["calls"] = 1
+            upd("start")
+            s = wait_run(lambda r: "call to end" in (r.get("step") or ""), 30)
+            need(g(me, "describe", "--tags") == "v0.3", "the update went ahead during a call")
+            busy["calls"] = 0
+            s = wait_run(lambda r: r.get("state") in ("done", "failed"), 60)
+            need(s["run"]["state"] == "done" and g(me, "describe", "--tags") == "v0.3.1", f"it didn't update once the call ended: {s['run']}")
+            need((me / "local/open-window.ps1").exists(), "local/ didn't survive the second update")
+        finally:
+            srv.shutdown()
+        return ("sees v0.3 and what's new; offline quiet; Update saves changes on a backup branch, moves to v0.3, "
+                "local/ and workspace kept, note for their Claude (not a Mac); waits for a call to end, then updates")
+
+    # 57
+    async def flow57(self) -> str:
+        """H59 on the pages: the small grey version, the new-version bar, the changelog, the warning off a Mac,
+        nothing during a call, and 'the latest version' when there's nothing newer. update-ui.js in a headless
+        browser with made-up answers (no network, no update); then that the status page, the call page, the Mac
+        app's strip and the phone version carry it, and the live status server answers."""
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found")
+        js = (ROOT / "status/update-ui.js").read_text()
+        harness = r"""<!doctype html><html><head><meta charset="utf-8"></head><body>
+<div id="line"></div><div id="banner"></div>
+<script>
+const NEW = {version:"0.2", tag:"v0.2", ahead:0, latest:"0.3", available:true, new_tag:"v0.3", checked:1, offline:false, mac:false,
+  new:[{title:"0.3 · 2 January 2026", version:"0.3", coming:false, groups:[{name:"New", items:["Flow fifty-seven's thing"]}]}], run:{state:"idle"}};
+const LOG = {version:"0.2", ahead:0, versions:[{title:"0.2 · 1 January 2026", version:"0.2", coming:false, current:true, groups:[{name:"New", items:["The first version"]}]}]};
+let ST = NEW, posted = [], onCall = false;
+window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
+  const body = p.includes("changelog") ? LOG : ST; return { ok: true, json: async () => JSON.parse(JSON.stringify(body)) }; };
+</script>
+<script>__JS__</script>
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const check = (n, ok, why) => out.push(n + ":" + (ok ? "ok" : "WRONG " + why));
+  HQUpdate.mount({ line: document.getElementById("line"), banner: document.getElementById("banner"), busy: () => onCall });
+  await wait(100);
+  const ver = document.getElementById("hqu-ver"), bar = document.getElementById("hqu-bar"), sheet = document.getElementById("hqu-sheet");
+  check("grey-version", ver.textContent.startsWith("v0.2") && getComputedStyle(ver).fontSize === "12px", ver.textContent);
+  check("bar", bar.classList.contains("show") && bar.textContent.includes("v0.3 is out") && bar.textContent.includes("Flow fifty-seven") && bar.textContent.includes("Update"), bar.textContent);
+  onCall = true; hqUpdate.render();
+  check("no-bar-on-call", !bar.classList.contains("show"), bar.className);
+  onCall = false; hqUpdate.render();
+  [...bar.querySelectorAll("button")].find(b => b.textContent === "Update").click(); await wait(50);
+  check("warning-off-mac", sheet.classList.contains("open") && sheet.textContent.includes("isn’t a Mac") && sheet.textContent.includes("instructions")
+        && posted.length === 0, sheet.textContent.slice(0, 80) + "/" + posted.length);
+  [...sheet.querySelectorAll("button")].find(b => b.textContent === "Cancel").click(); await wait(50);
+  check("cancel", !sheet.classList.contains("open") && posted.length === 0, posted.length);
+  [...bar.querySelectorAll("button")].find(b => b.textContent === "Update").click(); await wait(50);
+  [...sheet.querySelectorAll("button")].find(b => b.textContent === "Update").click(); await wait(50);
+  check("update-starts", posted.length === 1 && posted[0].includes("api/update/start"), posted.join(","));
+  ST = { ...NEW, mac: true }; posted = []; await hqUpdate.poll(); await wait(50);
+  [...bar.querySelectorAll("button")].find(b => b.textContent === "Update").click(); await wait(50);
+  check("mac-no-warning", posted.length === 1 && !sheet.classList.contains("open"), posted.length);
+  ST = { ...NEW, available:false, latest:"0.2", new:[], new_tag:null, mac:true }; await hqUpdate.poll(); await wait(50);
+  check("latest", ver.textContent.includes("the latest version") && !bar.classList.contains("show"), ver.textContent);
+  ver.click(); await wait(100);
+  check("changelog", sheet.classList.contains("open") && sheet.textContent.includes("running the latest version, v0.2") && sheet.textContent.includes("The first version")
+        && sheet.textContent.includes("you’re here"), sheet.textContent.slice(0, 160));
+  const pre = document.createElement("pre"); pre.id = "r"; pre.textContent = "H59RESULT " + out.join(" | ") + " END"; document.body.appendChild(pre);
+})();
+</script></body></html>"""
+        f = self.tmp / "h59.html"
+        f.write_text(harness.replace("__JS__", js.replace("</script", "<\\/script")))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h59-profile'}",
+                                          "--virtual-time-budget=10000", "--dump-dom", f.as_uri()], timeout=90)
+        m = re.search(r'<pre id="r">H59RESULT (.*?) END</pre>', r.stdout)
+        need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        say(f"   {m.group(1)}")
+        need(all(p.endswith(":ok") for p in m.group(1).split(" | ")), f"the version bar doesn't behave: {m.group(1)}")
+        # The pages carry it.
+        status_page = (ROOT / "status/index.html").read_text()
+        call_page = (APP / "web/index.html").read_text()
+        need("update-ui.js" in status_page and "HQUpdate.mount" in status_page, "the status page doesn't show the version")
+        need("update-ui.js" in call_page and "HQUpdate.mount" in call_page and "state !== \"idle\"" in call_page, "the call page doesn't show the version, or not quiet on a call")
+        shell = (ROOT / "desktop/shell.html").read_text()
+        need('id="ver"' in shell and 'id="newver"' in shell and "changelog" in (ROOT / "desktop/HQ.swift").read_text()
+             and "changelog" in (ROOT / "desktop/phone.js").read_text(), "the Mac app's strip or the phone version doesn't show the version")
+        bot = (APP / "bot.py").read_text()
+        need("/api/busy" in bot and "/api/update" in bot and "/update-ui.js" in bot, "the call server doesn't answer the version")
+        need("/local/" in (ROOT / ".gitignore").read_text(), "local/ isn't ignored by HQ's repo")
+        need((ROOT / "CHANGELOG.md").exists() and "## 0.1" in (ROOT / "CHANGELOG.md").read_text() and "## 0.2" in (ROOT / "CHANGELOG.md").read_text(),
+             "there's no changelog with 0.1 and 0.2")
+        need("0.2.1" in (ROOT / "README.md").read_text() and "local/" in (ROOT / "ABOUT.md").read_text(), "the readme or the big picture doesn't say it")
+        code, body, _ = await asyncio.to_thread(http_get, "/api/update", "http://127.0.0.1:4748")
+        live = json.loads(body) if code == 200 else {}
+        need(live.get("version") and "available" in live, f"the live status server doesn't answer the version: {code}")
+        code, body, _ = await asyncio.to_thread(http_get, "/api/changelog", "http://127.0.0.1:4748")
+        need(code == 200 and json.loads(body).get("versions"), f"the live status server doesn't serve the changelog: {code}")
+        code, _, _ = await asyncio.to_thread(http_get, "/api/update/start", "http://127.0.0.1:4748")
+        need(code == 403, f"an update can be started without the page's header: {code}")
+        return "grey version, bar, quiet on a call, warning off a Mac with Cancel, no warning on a Mac, latest version, changelog; all pages carry it"
+
 
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
@@ -4075,6 +4271,8 @@ FLOWS = {
     53: ("H57: a button for every past call: the list, one call read only", False, "flow53"),
     54: ("H61: estimated time to completion for each job and the whole list, learning from real times", False, "flow54"),
     55: ("F14: her voice off also silences the thinking tick, the talk sound and the click", False, "flow55"),
+    56: ("H59: an update to a fake newer version: backup, local/ kept, note for Claude, waits for a call", False, "flow56"),
+    57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),
 }
 
 
