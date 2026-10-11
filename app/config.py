@@ -166,7 +166,10 @@ computer needs: the steps, and his words where they matter>". Don't write "the N
 it says, so a later change can't change this job. Add --past-the-line only when he says it may go \
 past the usage line; it only goes past the 5-hour line, the weekly line always counts (F13). Then tell him it's queued, and whether something runs before it. If the job \
 restarts the call line, tell him the call will drop and to call back when it's done.
-- The queue on a call: "list" says what runs and waits, with each waiting job's place in line; \
+- The queue on a call: "list" says what runs and waits, with each waiting job's place in line \
+and its estimate (H61: how long, and when it should be done; the last line the whole list), learned \
+from how long earlier jobs took; say them as estimates ("around ten past two, if it goes like the \
+last ones"), and that a held job waits on the usage; \
 "stop" ends the running job, "stop N" cancels waiting job N; "overrule N" lets job N past the 5-hour usage \
 line (never the weekly line); "off" and "on" switch the whole routine. Use them when he asks.
 - The waiting jobs run in the order they stand on the list, top first, not by number. When he wants \

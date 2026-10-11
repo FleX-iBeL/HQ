@@ -3862,6 +3862,106 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
             need(all(part.endswith(":ok") for part in res.split(" | ")), f"the past-calls button or sheet isn't right ({where}): {res}")
         return ("every saved call newest first with date, time and agent, one call read by name only, served read only; "
                 "the button above the voice button before, during and after a call, in the browser and the app; list, call, Back, Close")
+    async def flow54(self) -> str:
+        """H61: estimated time to completion for the jobs. No Claude turns and no job is started: the queue
+        script and the estimator on a copy of the roadmap (its estimates in their own files next to it),
+        made-up past jobs, a held job, a finished job teaching the next estimate, and the live status page."""
+        import subprocess as sp
+        from policy import Policy, ALLOW
+        jv = ROOT
+        rm = self.tmp / "roadmap-H61.md"
+        rm.write_text(ROADMAP.read_text())
+        est_dir = self.tmp / "roadmap-H61-estimates"
+        env = {**os.environ, "HQ_ROADMAP": str(rm)}
+        env.pop("HQ_ESTIMATES", None)
+        env.pop("HQ_ROUTINES_HISTORY", None)
+        def jobs(*a, ok=True):
+            r = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
+            need((r.returncode == 0) == ok, f"jobs.py {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
+            return r.stdout + r.stderr
+        def est(*a):
+            r = sp.run(["python3", str(jv / "routine/estimate.py"), *a], capture_output=True, text=True, env=env)
+            need(r.returncode == 0, f"estimate.py {' '.join(a)}: {r.stderr.strip()}")
+            return r.stdout
+        real = (jv / ".status/job-estimates-history.jsonl")
+        before = real.read_text() if real.exists() else None
+        # The kinds, from the words a call writes in a job.
+        for text, kind in (("Transcribe the four videos on the VPS", "transcribe"),
+                           ("Build H1. This is a big change, so run the whole happy flow set at the end", "big"),
+                           ("Build H2, not the whole set. Restart the call line as the very last step", "call"),
+                           ("Build H3, not the whole set. Don't restart the call line.", "build"),
+                           ("Measure the token cost of one run", "other")):
+            need(est("kind", text).strip() == kind, f"{text!r} isn't seen as {kind}")
+        # Made-up past jobs: calls took 10 to 16 minutes, builds 5 to 7.
+        est_dir.mkdir(parents=True, exist_ok=True)
+        hist = [{"n": 900 + i, "kind": k, "est": None, "actual": a, "done": 1, "how": "seed"}
+                for i, (k, a) in enumerate([("call", 10), ("build", 5), ("call", 12), ("build", 6), ("call", 14), ("build", 7), ("call", 16)])]
+        (est_dir / "job-estimates-history.jsonl").write_text("".join(json.dumps(h) + "\n" for h in hist))
+        for j in json.loads(jobs("next"))["waiting"] + json.loads(jobs("next"))["running"]:
+            jobs("mark", str(j["n"]), "cancelled 12:00")
+        a_out = jobs("add", "Build H2, flow 54. Restart the call line as the very last step")
+        a = int(a_out.split()[1])
+        b = int(jobs("add", "Build H3, flow 54. Don't restart the call line.").split()[1])
+        need("Estimate: about 14 min" in a_out, f"a new job doesn't get its estimate from the calls before it: {a_out}")
+        state = json.loads((est_dir / "job-estimates.json").read_text())
+        need(state[str(a)]["est"] == 14 and state[str(a)]["kind"] == "call" and state[str(b)]["est"] == 6,
+             f"the estimates set when added are wrong: {state}")
+        p = json.loads(est("plan"))
+        need(p["jobs"][str(a)]["eta"] and p["jobs"][str(b)]["eta"] - p["jobs"][str(a)]["eta"] == (6 + 1) * 60,
+             f"the second job's done-around doesn't count the one before it: {p['jobs']}")
+        need(p["total"]["jobs"] == 2 and p["total"]["minutes"] == 14 + 1 + 6 and p["total"]["eta"] == p["jobs"][str(b)]["eta"],
+             f"the total for the whole list is wrong: {p['total']}")
+        lst = jobs("list")
+        need("Estimate: about 14 min, done around" in lst and "All 2 jobs: about 21 min, all done around" in lst and "(estimate)" in lst,
+             f"list doesn't say the estimates: {lst}")
+        need("No estimate has been checked" in lst, f"list doesn't say how close the estimates have been: {lst}")
+        # A held job, and everything after it, waits on the usage.
+        jobs("held", str(a))
+        p = json.loads(est("plan"))
+        need(p["jobs"][str(a)]["waits"] == "usage" and not p["jobs"][str(a)]["eta"] and not p["jobs"][str(b)]["eta"]
+             and p["total"]["waits"] == "usage", f"a held job doesn't wait on the usage: {p['jobs']} {p['total']}")
+        need("waits on the usage" in jobs("list"), "list doesn't say a held job waits on the usage")
+        # It runs, and finishes: its estimate next to how long it really took, and the next estimate learns.
+        jobs("mark", str(a), "running since " + time.strftime("%H:%M", time.localtime(time.time() - 30 * 60)))
+        st = json.loads((est_dir / "job-estimates.json").read_text())[str(a)]
+        need(st.get("started"), f"starting doesn't note when: {st}")
+        st["started"] = int(time.time()) - 30 * 60
+        s2 = json.loads((est_dir / "job-estimates.json").read_text()); s2[str(a)] = st
+        (est_dir / "job-estimates.json").write_text(json.dumps(s2))
+        p = json.loads(est("plan"))
+        need(p["jobs"][str(a)]["over"] and p["jobs"][str(a)]["so_far"] == 30, f"a job running longer than estimated isn't said: {p['jobs'][str(a)]}")
+        done = jobs("done", str(a))
+        need("Took 30 min; the estimate was 14 min" in done, f"done doesn't write the real time next to the estimate: {done}")
+        last = json.loads((est_dir / "job-estimates-history.jsonl").read_text().splitlines()[-1])
+        need(last["n"] == a and last["est"] == 14 and last["actual"] == 30 and last["kind"] == "call", f"the history line is wrong: {last}")
+        p = json.loads(est("plan"))
+        need(p["accuracy"]["count"] == 1 and p["accuracy"]["avg_off"] == 16 and p["accuracy"]["longer"] == 1,
+             f"how close the estimates have been is wrong: {p['accuracy']}")
+        c_out = jobs("add", "Build H4, flow 54. Restart the call line as the very last step")
+        need("Estimate: about 16 min" in c_out, f"the next estimate didn't learn from the real time: {c_out}")
+        need(real.exists() == (before is not None) and (before is None or real.read_text() == before),
+             "the test touched the real estimates history")
+        # The status page: the server serves the plan, the page shows it in words.
+        srv = (jv / "status/server.mjs").read_text()
+        page = (jv / "status/index.html").read_text()
+        need("routine/estimate.py" in srv and "estimate };" in srv, "the status server doesn't serve the estimates")
+        need("function etaWords" in page and "etaTotal(E)" in page and "etaAccuracy(E.accuracy)" in page and "(estimate)" in page,
+             "the status page doesn't show the estimates")
+        code, body, _ = await asyncio.to_thread(http_get, "/routines.json", "http://127.0.0.1:4748")
+        live = json.loads(body) if code == 200 else {}
+        need("estimate" in live and "accuracy" in (live["estimate"] or {}), f"the live status server has no estimates: {code}")
+        q = json.loads(sp.run(["python3", str(jv / "routine/jobs.py"), "next"], capture_output=True, text=True).stdout)
+        if q["running"] or q["waiting"]:
+            chrome = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))[-1]
+            r = await asyncio.to_thread(run, [str(chrome), "--headless", "--disable-gpu", "--no-first-run", "--window-size=900,3000",
+                                              f"--user-data-dir={self.tmp / 'h61'}", "--virtual-time-budget=8000", "--dump-dom", "http://127.0.0.1:4748/"], timeout=120)
+            need("(estimate)" in r.stdout and "Estimates" in r.stdout, "the live status page doesn't show the estimates on the job list")
+        # A call may read the list, and the call rules say the estimates are estimates.
+        pol = Policy(config.FOLDER)
+        need(pol.decide("Bash", {"command": f'python3 "{ROOT}/routine/jobs.py" list'}).verdict == ALLOW, "a call can't read the list")
+        need("H61" in config.VOICE_RULES and "estimate" in config.VOICE_RULES, "the call rules don't say the list has estimates")
+        return ("kinds from the job's words; estimate set when added; per job and total with done-around; held waits on the usage; "
+                "done writes estimate next to real time and the next estimate learns; page and list show them")
 
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
@@ -3917,6 +4017,7 @@ FLOWS = {
     51: ("H51: a call saves the usage it gets back, for the status page", False, "flow51"),
     52: ("H49: the space bar in the desktop app: tap mutes, hold talks, letting go sends", False, "flow52"),
     53: ("H57: a button for every past call: the list, one call read only", False, "flow53"),
+    54: ("H61: estimated time to completion for each job and the whole list, learning from real times", False, "flow54"),
 }
 
 

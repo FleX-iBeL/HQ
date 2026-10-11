@@ -177,6 +177,11 @@
       .detail .fold.sub > summary h3 { font-size: 15px; }
       .job { cursor: pointer; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
       .job.all { display: block; }
+      /* H61: each job's estimate, under its text, and how close the estimates have been. */
+      .jobtext { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+      .eta { font-size: 13px; color: var(--soft); }
+      .eta.over { color: var(--amber-ink); }
+      .row.eta-sum { display: block; font-size: 13px; }
 
       /* H19: every routine, its state, when it last ran and runs next. */
       .routine { display: grid; grid-template-columns: 14px 170px minmax(0, 1fr) 150px; align-items: baseline; gap: 12px; padding: 12px 20px; }
@@ -549,6 +554,32 @@
         path.setAttribute('d', 'M6 3l5 5-5 5');
         svg.append(path);
         return svg;
+      }
+
+      /** H61: the estimates in words, the same as routine/estimate.py says them to a call. */
+      const etaDur = (m) => { m = Math.round(m); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${String(m % 60).padStart(2, '0')}` : ''}`; };
+      const etaTime = (t) => new Date(t * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      function etaWords(E, n) {
+        const e = E?.jobs?.[n];
+        if (!e) return '';
+        if (e.finished) return e.est ? `Estimated ${etaDur(e.est)}, took ${etaDur(e.actual)}` : `Took ${etaDur(e.actual)}`;
+        let s = 'left' in e
+          ? (e.over ? `Estimated ${etaDur(e.est)}, running ${etaDur(e.so_far)}: taking longer than estimated` : `About ${etaDur(e.left)} left of ${etaDur(e.est)}`)
+          : `About ${etaDur(e.est)}`;
+        if (e.eta) s += ` · done around ${etaTime(e.eta)}`;
+        else if (e.waits === 'usage') s += ' · when it\'s done waits on the usage';
+        else if (e.waits === 'off') s += ' · the routine is off';
+        return `${s} (estimate)`;
+      }
+      function etaTotal(E) {
+        const t = E?.total;
+        if (!t) return '';
+        if (t.eta) return `all done around ${etaTime(t.eta)} (estimate, about ${etaDur(t.minutes)})`;
+        return `about ${etaDur(t.minutes)} (estimate; ${t.waits === 'usage' ? 'waits on the usage' : 'the routine is off'})`;
+      }
+      function etaAccuracy(a) {
+        if (!a?.count) return 'Estimates: none checked against a finished job yet. Each job that finishes teaches the next estimates.';
+        return `Estimates lately: off by ${a.avg_off} min on average over the last ${a.count} job${a.count === 1 ? '' : 's'}; ${a.within} close, ${a.longer} took longer. Each job that finishes teaches the next ones.`;
       }
 
       /** A part that folds open and closed with an arrow. start: open or folded the first time. */
@@ -1180,7 +1211,10 @@
           const box = el('section');
           const group = (j) => (/^(running|stop asked)/.test(j.state) ? 'running' : /^(ready|held)/.test(j.state) ? 'waiting' : 'finished');
           const of = (g) => q.jobs.filter((j) => group(j) === g);
-          const counts = q.on ? `${of('running').length} running · ${of('waiting').length} waiting · the routine looks every minute` : 'The routine is off';
+          // H61: the estimates, learned from how long earlier jobs really took (routine/estimate.py).
+          const E = routines?.estimate ?? null;
+          const total = etaTotal(E);
+          const counts = q.on ? `${of('running').length} running · ${of('waiting').length} waiting${total ? ` · ${total}` : ' · the routine looks every minute'}` : 'The routine is off';
           const fold = foldPart('jobs', true, 'Jobs from calls', counts);
           const parts = el('div', 'parts');
           for (const [g, title, st, start] of [['running', 'Running', 'doing', true], ['waiting', 'Waiting', 'todo', true], ['finished', 'Finished', 'done', false]]) {
@@ -1199,13 +1233,20 @@
                 if (text.classList.contains('all')) shownJobs.add(j.n);
                 else shownJobs.delete(j.n);
               });
-              row.append(text, mark);
+              const left = el('div', 'jobtext');
+              left.append(text);
+              const w = etaWords(E, j.n);
+              if (w) left.append(el('span', `eta${E.jobs[j.n].over ? ' over' : ''}`, w));
+              row.append(left, mark);
               card.append(row);
             }
             if (!jobs.length) card.append(el('div', 'row soft', g === 'finished' ? 'None kept.' : `Nothing ${g}.`));
+            if (g === 'finished' && E) card.append(el('div', 'row soft eta-sum', etaAccuracy(E.accuracy)));
             part.append(card);
             parts.append(part);
           }
+          // H61: how close the estimates have been lately, always in view under the job list.
+          if (E) parts.append(el('p', 'soft eta', etaAccuracy(E.accuracy)));
           fold.append(parts);
           box.append(fold);
           app.append(box);
@@ -1364,7 +1405,7 @@
           // Also once a minute, so "read 4 min ago" and "resets in" stay true.
           let routines = null;
           try { routines = JSON.parse(routinesText); } catch { routines = null; }
-          const lines = routines ? JSON.stringify([routines.routines, routines.incidents, routines.temperature, routines.battery, routines.stats, routines.lidsleep]) : '';
+          const lines = routines ? JSON.stringify([routines.routines, routines.incidents, routines.temperature, routines.battery, routines.stats, routines.lidsleep, routines.estimate]) : '';
           const key = `${text}\n${usageText}\n${lines}\n${Math.floor(Date.now() / 60000)}`;
           // H23: the graph's history, once a minute (and when the time span or a routine is switched).
           if (key !== last) { await loadUptime(); await loadTemp(); }

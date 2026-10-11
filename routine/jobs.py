@@ -14,7 +14,7 @@ a new job goes at the bottom, and "move" changes its place. The job numbers neve
 
 usage (from the workspace):
   python3 "routine/jobs.py" add "TEXT" [--past-the-line]   a call's let's go: the job is ready
-  python3 "routine/jobs.py" list                           the queue, as on the roadmap
+  python3 "routine/jobs.py" list                           the queue, as on the roadmap, with each job's estimate (H61)
   python3 "routine/jobs.py" stop [N]                       stop the running job (or cancel ready job N)
   python3 "routine/jobs.py" overrule N                     job N may go past the 5-hour line (the weekly line still counts)
   python3 "routine/jobs.py" move N top|up|down|bottom      move waiting job N in the line (H39)
@@ -141,6 +141,33 @@ def show_all(jobs):
     return "\n".join(show(j, places.get(j["n"])) for j in jobs) or "No jobs yet."
 
 
+def estimate(fn, *a):
+    """H61: the estimates (routine/estimate.py). Never in the way of the queue itself: a failure is only said."""
+    try:
+        import estimate as est
+        return getattr(est, fn)(*a)
+    except Exception as e:
+        print(f"(The estimate couldn't be written: {e})", file=sys.stderr)
+        return None
+
+
+def with_estimates(jobs):
+    """H61: the list as on the roadmap, each job with its estimate, then the total and how close they've been."""
+    places = {j["n"]: i + 1 for i, j in enumerate(line_up(jobs))}
+    try:
+        import estimate as est
+        p = est.plan()
+    except Exception:
+        return show_all(jobs)
+    lines = []
+    for j in jobs:
+        w = est.words(j["n"], p)
+        lines.append(show(j, places.get(j["n"])) + (f"\n    Estimate: {w}" if w else ""))
+    lines.append(est.total_words(p))
+    lines.append(est.accuracy_words(p["accuracy"]))
+    return "\n".join(lines) if jobs else "No jobs yet."
+
+
 def move(jobs, n, where, other=None):
     """H39: move waiting job n within the line; the rest of the list keeps its order."""
     line = line_up(jobs)
@@ -183,7 +210,7 @@ def main(argv):
         text, jobs, on = read()
         if cmd == "list":
             print(f"Routine: {'on' if on else 'off'}")
-            print(show_all(jobs))
+            print(with_estimates(jobs))
             return
         if cmd == "next":
             ready = [j for j in jobs if j["state"] == "ready"]
@@ -202,6 +229,7 @@ def main(argv):
                  "text": one_line(" ".join(words)).replace("·", "-")}
             jobs.append(j)
             write(text, jobs, on)
+            e = estimate("on_add", n, j["text"])
             waiting = [x for x in line_up(jobs) if x["n"] != n]
             busy = any(x["state"].startswith(("running", "stop asked")) for x in jobs)
             if not on:
@@ -210,6 +238,8 @@ def main(argv):
                 after = f" It waits its turn: {int(busy)} running, {len(waiting)} waiting before it."
             else:
                 after = " The routine starts it within about a minute."
+            if e:
+                after += f" Estimate: about {e['est']} min."
             print(f"Job {n} is ready.{after}")
             return
         if cmd in ("mail-on", "mail-off"):
@@ -260,15 +290,24 @@ def main(argv):
             return
         if cmd in ("done", "held"):
             j = find(jobs, int(args[0]))
+            was = j["state"]
             j["state"] = f"done {now}" if cmd == "done" else "held: usage over the line"
             write(text, jobs, on)
             print(show(j))
+            if cmd == "done" and not was.startswith("done"):
+                # H61: its estimate next to how long it really took, so the next estimates learn.
+                m = re.match(r"running since (\d\d:\d\d)", was)
+                r = estimate("on_done", j["n"], j["text"], m.group(1) if m else None)
+                if r:
+                    print(f"Took {r['actual']} min" + (f"; the estimate was {r['est']} min." if r.get("est") else "."))
             return
         if cmd == "mark":
             j = find(jobs, int(args[0]))
             j["state"] = " ".join(args[1:]).replace("·", "-")
             write(text, jobs, on)
             print(show(j))
+            if j["state"].startswith("running since"):
+                estimate("on_start", j["n"], j["text"])  # H61: when it started
             return
     sys.exit(f"Unknown command {cmd!r}. See --help.")
 

@@ -72,6 +72,21 @@ function hqControl(args) {
   });
 }
 
+// H61: how long the jobs should take, from routine/estimate.py (learned from how long earlier jobs took).
+// Asked at most every 20 seconds; the page polls every 3.
+let est = { at: 0, data: null };
+function estimates() {
+  if (Date.now() - est.at < 20000) return Promise.resolve(est.data);
+  return new Promise((resolve) => {
+    execFile('/usr/bin/python3', [join(root, 'routine/estimate.py'), 'plan'], { timeout: 20000 }, (err, out) => {
+      let data = null;
+      try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
+      est = { at: Date.now(), data };
+      resolve(data);
+    });
+  });
+}
+
 // H19/H20: every routine's own line, plus the watchdog's, which lives outside the Documents folder.
 async function routines() {
   const read = async (path) => {
@@ -90,7 +105,8 @@ async function routines() {
   const stats = await read(join(root, '.status/stats.json'));
   // H45: whether the laptop keeps working with the lid closed (routine/lidsleep.py, every minute).
   const lidsleep = await read(join(root, '.status/lidsleep.json'));
-  return { now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep };
+  const estimate = await estimates();
+  return { now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate };
 }
 
 // H23: every minute the state of each routine is written down, also when the helper is gone (its lines then
