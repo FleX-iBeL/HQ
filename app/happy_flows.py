@@ -2472,6 +2472,103 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         need("move N before M" in config.VOICE_RULES, "the call rules don't say how to move a job")
         return "top, up, down, bottom, before and after keep the line right; held keeps its place; routine takes the top; page numbers them; call may move"
 
+    async def flow59(self) -> str:
+        """H62: after a crash the job carries on. No Claude turns, no job started, nothing written outside
+        the test: a made-up crash on a copy of the roadmap (a boot time after the job's start, a fake panic
+        report), with the incident log and the status block caught in the test."""
+        import subprocess as sp, importlib
+        from policy import Policy, DENY
+        jv = ROOT
+        sys.path.insert(0, str(jv / "routine"))
+        crash = importlib.import_module("crash")
+        rm = self.tmp / "roadmap-H62.md"
+        rm.write_text(ROADMAP.read_text())
+        env = {**os.environ, "HQ_ROADMAP": str(rm)}
+        def jobs(*a, ok=True):
+            r = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
+            need((r.returncode == 0) == ok, f"jobs.py {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
+            return r.stdout + r.stderr
+        def waiting():
+            return {j["n"]: j for j in json.loads(jobs("next"))["waiting"]}
+        def line():
+            return [j["n"] for j in json.loads(jobs("next"))["waiting"]]
+        def state(n):
+            for l in rm.read_text().splitlines():
+                if l.startswith(f"- Job {n} · "):
+                    return l.split(" · ")[1]
+            return None
+        # Only the test's jobs in the copy: the copy's own waiting ones cancelled, its running one stopped.
+        for n in line():
+            jobs("stop", str(n))
+        for j in json.loads(jobs("next"))["running"]:
+            jobs("mark", str(j["n"]), "stopped 00:00")
+        a, b, c = (int(jobs("add", f"flow 59 job {x}").split()[1]) for x in "abc")
+        an_hour_ago = time.time() - 3600
+        jobs("mark", str(a), "running since " + time.strftime("%H:%M", time.localtime(an_hour_ago)))
+        job = json.loads(jobs("next"))["running"][0]
+        s = {"n": a, "pid": 999999, "started": an_hour_ago}
+        caught = {"inc": [], "status": [], "log": []}
+        class Inc:
+            @staticmethod
+            def past(key, since, until, why, fixes):
+                caught["inc"].append((key, why, [w for _, w in fixes]))
+        st = lambda state_, step, logline: caught["status"].append((state_, step, logline))
+        lg = lambda m: caught["log"].append(m)
+        panics = self.tmp / "panics"
+        panics.mkdir(exist_ok=True)
+        # Not a crash: the Mac was already up before the job started (a closed window, say).
+        need(not crash.recover(job, s, jobs, Inc, st, lg, boot=an_hour_ago - 600, panic_dir=str(panics)),
+             "a job whose chat closed without a restart was taken for a crash")
+        need(state(a).startswith("running") and not caught["inc"], "a job that wasn't a crash was changed")
+        # A crash: the Mac started again after the job's start, and macOS wrote a panic report.
+        (panics / "panic-full-test.panic").write_text("test")
+        boot = an_hour_ago + 900
+        need(crash.recover(job, s, jobs, Inc, st, lg, boot=boot, panic_dir=str(panics)), "a crash wasn't seen")
+        d = max(waiting())
+        need(line() == [d, b, c], f"the rerun isn't first in line, or the line changed: {line()}")
+        need(state(a).startswith("ended") and f"by a crash; requeued as job {d}" in state(a), f"the crashed job says: {state(a)}")
+        rerun = waiting()[d]["text"]
+        need(rerun.startswith(f"Rerun of job {a},") and "pick up from there instead of starting over" in rerun
+             and rerun.endswith("Then the job as it was: flow 59 job a") and "panic report" in rerun,
+             f"the rerun's text: {rerun}")
+        need(caught["inc"] and caught["inc"][-1][0] == "jobs" and "crash" in caught["inc"][-1][1]
+             and f"job {d}" in caught["inc"][-1][2][0] and "top of the line" in caught["inc"][-1][2][0],
+             f"the incident doesn't say it was a crash and was queued again: {caught['inc']}")
+        need(caught["status"][-1][0] == "STOPPED" and "crash" in caught["status"][-1][1] and f"job {d}" in caught["status"][-1][1],
+             f"the status block doesn't say so: {caught['status']}")
+        lst = jobs("list")
+        need(f"Job {a} · ended" in lst and "by a crash" in lst and f"Job {d} · ready · number 1 in line · Rerun of job {a}" in lst,
+             f"jobs.py list doesn't say so (a call reads it): {lst}")
+        # A second crash in the same job: not queued again; the rest of the line goes on.
+        jobs("mark", str(d), "running since " + time.strftime("%H:%M", time.localtime(boot + 60)))
+        job2 = json.loads(jobs("next"))["running"][0]
+        need(crash.recover(job2, {"n": d, "pid": 1, "started": boot + 60}, jobs, Inc, st, lg, boot=boot + 1200,
+                           panic_dir=str(panics)), "the second crash wasn't seen")
+        need(line() == [b, c] and "by a crash, again; not run again by itself" in state(d) and state(d + 1) is None,
+             f"a second crash was queued again, or the line is wrong: {line()} {state(d)} {state(d + 1)}")
+        need("already crashed once" in caught["inc"][-1][2][0] and "not run again" in caught["status"][-1][1],
+             f"the second crash doesn't say it isn't run again: {caught['inc'][-1]} {caught['status'][-1]}")
+        # Lost track of the job (no job.json): its "running since" still tells when it started.
+        need(crash.went_down({"n": 1, "state": "running since " + time.strftime("%H:%M", time.localtime(an_hour_ago))},
+                             None, boot=boot) == boot, "without job.json the start time isn't read from the queue")
+        # The routine checks for a crash first; a pid from before a restart counts as gone.
+        tick = (jv / "routine/tick.py").read_text()
+        need("crash.went_down(job, s)" in tick and "crash.recover(job, s, jobs, incidents, status, log" in tick
+             and tick.index("crash.recover(") < tick.index('"ended " + time.strftime'),
+             "the routine doesn't check for a crash first")
+        # The status page reads the copy fine: the crashed jobs finished, the line numbered.
+        js = f"""import {{ parseRoadmap }} from {json.dumps(str(jv / 'status/parse.mjs'))};
+import {{ readFileSync }} from 'node:fs';
+const r = parseRoadmap(readFileSync({json.dumps(str(rm))}, 'utf8'));
+console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) => j.place).map((j) => [j.n, j.place])}}));"""
+        pd = json.loads(sp.run(["node", "--input-type=module", "-e", js], capture_output=True, text=True).stdout)
+        need(not pd["problems"] and pd["w"] == [[b, 1], [c, 2]], f"the status page reads it wrong: {pd}")
+        # Only the routine marks a crash; a call can't.
+        pol = Policy(config.FOLDER)
+        need(pol.decide("Bash", {"command": f'python3 "{ROOT}/routine/jobs.py" crashed 28 test'}).verdict == DENY,
+             "a call may mark a job as crashed")
+        return "a crash (boot after the job's start, panic report) queues it again first in line with a pick-up note; incident and status say so; once only; not a crash left alone"
+
     async def flow32(self) -> str:
         """H38: the Cancel button stays, and a late tap sends "Cancel last message". First the real call
         page in a headless browser, with a fake live call whose data channel only records what is sent;
@@ -4447,6 +4544,7 @@ FLOWS = {
     56: ("H59: an update to a fake newer version: backup, local/ kept, note for Claude, waits for a call", False, "flow56"),
     57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),
     58: ("H60: continue an earlier call: Continue in Past calls, the greeting, the earlier call as context", True, "flow58"),
+    59: ("H62: after a crash the job runs again, first in line, picking up where it left off", False, "flow59"),
 }
 
 

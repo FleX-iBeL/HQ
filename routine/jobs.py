@@ -23,7 +23,8 @@ usage (from the workspace):
   python3 "routine/jobs.py" held N                         the job's own chat, when the usage says STOP
   python3 "routine/jobs.py" off | on                       jobs from calls off or on
   python3 "routine/jobs.py" mail-off | mail-on             the hourly mail check off or on (L8)
-Used by the routine itself: next, mark N STATE.
+Used by the routine itself: next, mark N STATE, crashed N "HOW" (H62: job N ended by a crash; its rerun
+goes to the top of the line, once only).
 """
 import fcntl, json, os, re, sys, time
 from contextlib import contextmanager
@@ -300,6 +301,31 @@ def main(argv):
                 r = estimate("on_done", j["n"], j["text"], m.group(1) if m else None)
                 if r:
                     print(f"Took {r['actual']} min" + (f"; the estimate was {r['est']} min." if r.get("est") else "."))
+            return
+        if cmd == "crashed":
+            # H62: the Mac went down while job N ran. It ends by a crash and runs again from the top of the
+            # line, with a note to pick up from what it left; once only (a rerun that crashes isn't queued again).
+            j = find(jobs, int(args[0]))
+            how = one_line(" ".join(args[1:])).replace("·", "-") or "the Mac went down"
+            import crash
+            if crash.is_rerun(j["text"]):
+                j["state"] = f"ended {now} by a crash, again; not run again by itself"
+                write(text, jobs, on)
+                print(f"Job {j['n']} ended by a crash again ({how}); it was already a rerun, so it isn't queued again.")
+                return
+            n = max(x["n"] for x in jobs) + 1
+            j["state"] = f"ended {now} by a crash; requeued as job {n}"
+            new = {"n": n, "state": "ready", "past": j["past"], "agreed": time.strftime("%Y-%m-%d %H:%M"),
+                   "text": (f"Rerun of job {j['n']}, which ended at {now} without a done mark because {how} (H62, "
+                            "queued again by the routine). First look at what the first run left in HQ (git status, "
+                            "the roadmap's row for it, the status page) and pick up from there instead of starting "
+                            "over; nothing of it was committed unless git says so. Then the job as it was: "
+                            + j["text"])}
+            jobs.append(new)
+            jobs = move(jobs, n, "top")
+            write(text, jobs, on)
+            estimate("on_add", n, new["text"])
+            print(f"Job {j['n']} ended by a crash; requeued as job {n}, number 1 in line.")
             return
         if cmd == "mark":
             j = find(jobs, int(args[0]))

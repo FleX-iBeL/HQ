@@ -7,6 +7,9 @@ so waiting costs no usage. What it does, in order:
   sleeping MacBook) is started as soon as the helper looks again, and a failed run is tried again.
 - A job is running: if a call asked to stop it, end it (L4); if its chat has gone, note that. Otherwise wait (L6);
   and if it has gone quiet, type continue into its own window, and show it as stuck if it stays quiet (H36).
+- A job's chat is gone without a done mark and the Mac started again after the job had started: it was a crash
+  (H62, routine/crash.py). The job runs again, with a note to pick up where it left off, first in line, so no
+  other job starts before it; once only.
 - A job has just been marked done (or held): end its chat, so its window closes by itself (L7).
 - The hourly mail check is due (L8, its own on/off switch): start it, hidden, in a Terminal window that
   closes itself when it's done. Its own run brings the usage back, which is saved (L10).
@@ -37,6 +40,7 @@ import routines  # H19: every routine writes its own line for the status page
 import incidents  # H30: what went down, why, what was done, when it was back
 import quiet  # H36: a job that has gone quiet gets continue typed into its own window
 import failures  # H42: why a run failed, in plain words, and how many times in a row (the watchdog reads it)
+import crash  # H62: a job stopped by a crash runs again from the top of the line
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
@@ -680,7 +684,15 @@ def tick():
             status("STOPPED", f"Job {n} stopped from a call", f"job {n} stopped, as asked on a call")
             log(f"stopped job {n}")
             return
-        if not alive(pid) and time.time() - s.get("started", 0) > 90:
+        # H62: a pid from before a restart may belong to something else now, so after a restart the
+        # chat counts as gone whatever that pid is.
+        down = crash.went_down(job, s)
+        if (down or not alive(pid)) and time.time() - s.get("started", 0) > 90:
+            # H62: the Mac went down while it ran: the job runs again from the top of the line.
+            if down and crash.recover(job, s, jobs, incidents, status, log, boot=down):
+                clear()
+                quiet.clear_request()
+                return
             jobs("mark", str(n), "ended " + time.strftime("%H:%M") + " without a done mark")
             clear()
             incidents.past("jobs", time.time(), time.time(), f"Job {n}'s chat closed before it said it was done",

@@ -13,6 +13,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - How long the jobs should take: an estimate per job and for the whole list, learning from how long jobs really took.
 - The space bar in the Mac app: a tap mutes, holding it is push to talk, letting go sends.
 - Pushing HQ goes through its own key, and only after the privacy check.
+- After a crash, the job carries on: when the Mac went down while a job ran, HQ puts that job back first in line, with a note to pick up from what it had already done, and says it was a crash. Once only, so a job that keeps crashing can't loop.
 
 ### Changed
 - The old project name is gone: everything is called HQ.
