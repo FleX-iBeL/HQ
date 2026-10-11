@@ -120,6 +120,11 @@ Run them before and after every update; they print a short pass/fail table at th
   52 H49, no Claude: in the desktop app (?app) the space bar is the talk button: a short press mutes and
      unmutes, held down it's push to talk, letting go sends; not before a call, not while typing in the text
      box, not inside the Hang up question; in the browser and on the phone space does nothing
+  53 H57, no Claude: every past call. The transcript code lists the saved calls newest first with date, time
+     and agent (calls without anything said left out), reads one by name and refuses any other name; the call
+     server serves both read only; on the call page (headless browser) the button sits right above the voice
+     button, before, during and after a call, in the browser and in the app; the list opens, a tap shows that
+     call (no tools, cancelled struck through), Back returns, Close closes; one sheet at a time
 
 Safe to run while the live phone line is up: the flows use their own server on port 7871
 (HQ_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
@@ -3757,6 +3762,107 @@ setTimeout(() => {
         need("makeFirstResponder(call)" in src, "the app doesn't give the call page the keys")
         return "in the app: tap mutes and unmutes, hold talks (repeats ignored), letting go sends; not before a call, not while typing, not in a question; outside the app nothing"
 
+    async def flow53(self) -> str:
+        """H57: a button for every past call. No Claude turns: made-up transcripts in the test server's own calls
+        folder, the server's /api/calls read only, and the real call page in a headless browser."""
+        import transcript
+        calls = self.server.calls
+        calls.mkdir(parents=True, exist_ok=True)
+        head = lambda agent: "# Call\n\n> **Private.**\n\nStarted 10:00:00 · " + (f"agent {agent} · " if agent else "") + "brain test\n\n"
+        (calls / "2099-12-30-0900.md").write_text(head("") + f"- 09:00:05 **{config.USER_LABEL}:** An old one.\n- 09:00:07 **Jarvis:** Old answer.\n")
+        (calls / "2099-12-31-2300.md").write_text(head("Donna") + (
+            "- 23:00:01 *filler: Hi there!*\n"
+            "- 23:00:02 *call: connected; connectors: none*\n"
+            f"- 23:00:05 **{config.USER_LABEL}:** What's on tomorrow? *(typed)*\n"
+            "- 23:00:06 `Read challenges.md` · done (reading in the folder)\n"
+            "- 23:00:09 **HQ:** Only the dentist at ten.\n"
+            f"- 23:00:12 **{config.USER_LABEL}:** Shoes. *(cut in)* *(cancelled)*\n\nEnded 23:00:20\n"))
+        (calls / "2099-12-31-2300-2.md").write_text(head("Pepper") + f"- 23:00:40 **{config.USER_LABEL}:** Second in the same minute.\n")
+        (calls / "2099-12-31-2310.md").write_text(head("Pepper") + "- 23:10:01 *filler: Hi!*\n- 23:10:02 *call: The caller hung up*\n")
+        got = transcript.list_calls(calls)
+        names = [c["name"] for c in got]
+        need(names[:3] == ["2099-12-31-2300-2", "2099-12-31-2300", "2099-12-30-0900"] and "2099-12-31-2310" not in names,
+             f"the list isn't newest first, or kept a call where nothing was said: {names}")
+        need(got[1]["agent"] == "Donna" and got[1]["time"] == "23:00" and got[1]["date"] == "2099-12-31" and got[1]["said"] == 3
+             and got[2]["agent"] == "", f"date, time, agent or lines are wrong: {got[:3]}")
+        one = transcript.read_call("2099-12-31-2300", calls)
+        need(one and [l["who"] for l in one["lines"]] == ["filler", "user", "hq", "user"] and one["lines"][3]["cancelled"],
+             f"one call isn't read as the chat shows it: {one}")
+        for bad in ("../roadmap", "2099-12-31-2300.md", "", "x", "2099-12-31-2300/../../me"):
+            need(transcript.read_call(bad, calls) is None, f"a name that isn't a saved call's was read: {bad!r}")
+        await self.ensure_server()
+        before = sorted(p.name for p in calls.iterdir())
+        code, body, ctype = http_get("/api/calls")
+        need(code == 200 and "json" in ctype, f"/api/calls did not answer ({code}, {ctype})")
+        listed = json.loads(body)["calls"]
+        need([c["name"] for c in listed][:3] == names[:3], f"/api/calls gave {str(listed)[:200]}")
+        code, body, _ = http_get("/api/calls/2099-12-31-2300")
+        need(code == 200 and len(json.loads(body)["lines"]) == 4, f"/api/calls/<name> gave {code} {body[:200]!r}")
+        code, _, _ = http_get("/api/calls/..%2Froadmap")
+        need(code == 404, f"a name that isn't a saved call's didn't get a 404 ({code})")
+        need(sorted(p.name for p in calls.iterdir()) == before, "asking for the calls changed the calls folder")
+        one_json = json.dumps(one)
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const shown = el => getComputedStyle(el).display !== "none" && el.getBoundingClientRect().width > 0;
+  const voice = document.getElementById("voicebtn");
+  const placed = () => { const h = histBtn.getBoundingClientRect(), v = voice.getBoundingClientRect();
+    return shown(histBtn) && Math.abs(h.left - v.left) < 2 && h.bottom <= v.top && v.top - h.bottom < 20; };
+  await wait(300);
+  out.push("start:" + (placed() ? "ok" : "WRONG"));
+  histBtn.click(); await wait(400);
+  const rows = histList.querySelectorAll("button");
+  out.push("list:" + (histOpen() && rows.length === 3 && rows[1].textContent.includes("23:00") && rows[1].textContent.includes("Donna")
+    && histList.querySelector(".day") ? "ok" : "WRONG " + rows.length + " " + histList.textContent.slice(0, 80)));
+  rows[1].click(); await wait(400);
+  const msgs = histLog.querySelectorAll(".msg");
+  out.push("call:" + (histEl.classList.contains("reading") && shown(histLog) && !shown(histList) && msgs.length === 4
+    && histLog.querySelectorAll(".msg.me.cancelled").length === 1 && histTitle.textContent.startsWith("Donna · ")
+    && !histLog.textContent.includes("challenges.md") && !histLog.textContent.includes("connected") ? "ok" : "WRONG " + msgs.length + " " + histTitle.textContent));
+  document.getElementById("histback").click(); await wait(400);
+  out.push("back:" + (!histEl.classList.contains("reading") && shown(histList) && histList.querySelectorAll("button").length === 3 ? "ok" : "WRONG"));
+  chatBtn.click(); await wait(300);
+  out.push("onesheet:" + (chatOpen() && !histOpen() ? "ok" : "WRONG"));
+  histBtn.click(); await wait(300);
+  out.push("onesheet2:" + (histOpen() && !chatOpen() ? "ok" : "WRONG"));
+  document.getElementById("histclose").click(); await wait(200);
+  out.push("close:" + (!histOpen() && histBtn.getAttribute("aria-expanded") === "false" ? "ok" : "WRONG"));
+  calledHere = true; setState("live", "On the call");
+  out.push("live:" + (shown(histBtn) && shown(chatBtn) ? "ok" : "MISSING"));
+  histBtn.click(); await wait(300);
+  out.push("livesheet:" + (histOpen() && document.body.classList.contains("chatting") ? "ok" : "WRONG"));
+  showHistory(false);
+  cleanup("Call ended");
+  out.push("after:" + (placed() ? "ok" : "MISSING"));
+  stubEmpty = true; histBtn.click(); await wait(300);
+  out.push("empty:" + (histList.querySelector(".empty") && histList.querySelector(".empty").textContent === "No calls yet" ? "ok" : "WRONG"));
+  const pre = document.createElement("pre"); pre.id = "h57"; pre.textContent = "H57RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        stub = ("<script>var stubEmpty = false; const CALLS = " + json.dumps({"calls": listed[:3]}) + ", ONE = " + one_json + """;
+window.fetch = async (url) => ({ ok: true, json: async () => (String(url).startsWith("api/calls/") ? ONE
+  : String(url) === "api/calls" ? (stubEmpty ? { calls: [] } : CALLS) : { lines: [] }) });</script>""")
+        f = self.tmp / "h57.html"
+        f.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
+        for where, q in (("phone", ""), ("app", "?app=1")):
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--window-size=390,844",
+                                              f"--user-data-dir={self.tmp / ('h57-' + where)}", "--virtual-time-budget=20000", "--dump-dom", f.as_uri() + q], timeout=120)
+            m = re.search(r'<pre id="h57">H57RESULT (.*?) END</pre>', r.stdout)
+            need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
+            res = m.group(1)
+            say(f"   {where}: {res}")
+            need(all(part.endswith(":ok") for part in res.split(" | ")), f"the past-calls button or sheet isn't right ({where}): {res}")
+        return ("every saved call newest first with date, time and agent, one call read by name only, served read only; "
+                "the button above the voice button before, during and after a call, in the browser and the app; list, call, Back, Close")
+
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
     2: ("The greeting plays first, on Quick and Deep", True, "flow2"),
@@ -3810,6 +3916,7 @@ FLOWS = {
     50: ("H46: Donna left, Pepper right, a voice each, no waiting lines, no status button in the app", False, "flow50"),
     51: ("H51: a call saves the usage it gets back, for the status page", False, "flow51"),
     52: ("H49: the space bar in the desktop app: tap mutes, hold talks, letting go sends", False, "flow52"),
+    53: ("H57: a button for every past call: the list, one call read only", False, "flow53"),
 }
 
 

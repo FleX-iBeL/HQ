@@ -313,6 +313,16 @@ if __name__ == "__main__":
     async def last_call():
         return JSONResponse(_transcript.last_call() or {"lines": []}, headers=_NO_CACHE)
 
+    # H57: every saved call, newest first, and one call by its name; read only, nothing is written.
+    @app.get("/api/calls", include_in_schema=False)
+    async def call_list():
+        return JSONResponse({"calls": _transcript.list_calls()}, headers=_NO_CACHE)
+
+    @app.get("/api/calls/{name}", include_in_schema=False)
+    async def call_one(name: str):
+        data = _transcript.read_call(name)
+        return JSONResponse(data, headers=_NO_CACHE) if data else JSONResponse({"error": "no such call"}, status_code=404, headers=_NO_CACHE)
+
     for _icon in ("apple-touch-icon.png", "icon-192.png", "icon-512.png"):
         def _make(name):
             async def icon():

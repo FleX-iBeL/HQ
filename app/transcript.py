@@ -163,24 +163,70 @@ def read_lines(path: Path) -> list[dict]:
     return [line for line in out if line["text"]]
 
 
+_NAME = re.compile(r"^\d{4}-\d\d-\d\d-\d{4}(?:-\d+)?$")
+_AGENT = re.compile(r"^Started [\d:]+ · agent ([^·]+?) · ", re.M)
+
+
+def _calls(folder: Path) -> list[Path]:
+    """The saved calls, newest first."""
+    try:
+        return sorted((p for p in folder.glob("*.md") if _sort_key(p)[0]), key=_sort_key, reverse=True)
+    except OSError:
+        return []
+
+
+def _said(lines: list[dict]) -> bool:
+    return any(line["who"] != "filler" for line in lines)
+
+
+def _about(path: Path, lines: list[dict]) -> dict:
+    day, hhmm = _sort_key(path)[0].rsplit("-", 1)
+    started = datetime.strptime(day + hhmm, "%Y-%m-%d%H%M")
+    try:
+        m = _AGENT.search(path.read_text(encoding="utf8")[:600])
+    except OSError:
+        m = None
+    return {"name": path.stem, "started": started.strftime("%-d %B, %H:%M"), "date": started.strftime("%Y-%m-%d"),
+            "time": started.strftime("%H:%M"), "agent": m.group(1).strip() if m else ""}
+
+
 def last_call(folder: Path | None = None) -> dict | None:
     """H34: the most recent saved call where something was said, read only. None if there is none."""
-    folder = folder or config.CALLS
-    try:
-        paths = sorted((p for p in folder.glob("*.md") if _sort_key(p)[0]), key=_sort_key, reverse=True)
-    except OSError:
-        return None
-    for path in paths:
+    for path in _calls(folder or config.CALLS):
         try:
             lines = read_lines(path)
         except OSError:
             continue
-        if any(line["who"] != "filler" for line in lines):
-            day, hhmm = _sort_key(path)[0].rsplit("-", 1)
-            started = datetime.strptime(day + hhmm, "%Y-%m-%d%H%M")
-            return {"name": path.stem, "started": started.strftime("%-d %B, %H:%M"),
-                    "date": started.strftime("%Y-%m-%d"), "lines": lines}
+        if _said(lines):
+            return {**_about(path, lines), "lines": lines}
     return None
+
+
+def list_calls(folder: Path | None = None) -> list[dict]:
+    """H57: every saved call where something was said, newest first, read only: when, which agent
+    (older calls had none), and how many lines he and she said. Free calls are never saved, so never here."""
+    out = []
+    for path in _calls(folder or config.CALLS):
+        try:
+            lines = read_lines(path)
+        except OSError:
+            continue
+        if _said(lines):
+            out.append({**_about(path, lines), "said": sum(1 for line in lines if line["who"] != "filler")})
+    return out
+
+
+def read_call(name: str, folder: Path | None = None) -> dict | None:
+    """H57: one saved call by its name (as list_calls gives it), read only, the way the chat shows it.
+    None for a name that isn't a saved call's, so nothing outside the calls folder can be asked for."""
+    if not _NAME.match(name or ""):
+        return None
+    path = (folder or config.CALLS) / f"{name}.md"
+    try:
+        lines = read_lines(path)
+    except OSError:
+        return None
+    return {**_about(path, lines), "lines": lines}
 
 
 def _one_line(text: str) -> str:

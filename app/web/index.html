@@ -63,8 +63,8 @@
             color:var(--stop); font:600 17px/1 -apple-system,sans-serif; cursor:pointer; margin-top:-14px; }
   #cancel.live { display:inline-block; visibility:hidden; }
   #cancel.live.show { visibility:visible; }
-  #chatlog .me.cancelled { opacity:.55; text-decoration:line-through; }
-  #chatlog .me.cancelled::after { content:" · cancelled"; text-decoration:none; display:inline-block; margin-left:4px; font-size:13px; }
+  #chatlog .me.cancelled, #histlog .me.cancelled { opacity:.55; text-decoration:line-through; }
+  #chatlog .me.cancelled::after, #histlog .me.cancelled::after { content:" · cancelled"; text-decoration:none; display:inline-block; margin-left:4px; font-size:13px; }
   /* H9: the start screen stays calm. Free, the voice, the waiting lines and the thinking sound
      sit in a Settings sheet that slides up from the bottom. */
   #setbtn { font:600 15px/1 -apple-system,sans-serif; color:var(--muted); background:transparent; border:0; padding:10px 14px; cursor:pointer; margin-top:-14px; }
@@ -137,6 +137,39 @@
   #voicebtn[aria-pressed="true"] { background:var(--stop); color:#fff; }
   #voicebtn[aria-pressed="true"] .on { display:none; }
   #voicebtn[aria-pressed="true"] .off { display:inline; }
+  /* H57: every past call. Right above her voice button, bottom left, always there (the same place in
+     the desktop app); a list, newest first, and a tap opens that call read only, as the chat shows it. */
+  #histbtn { position:fixed; left:16px; bottom:calc(84px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
+             border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
+             cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  #histbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
+  #histbtn svg { width:26px; height:26px; }
+  #histsheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
+               border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column;
+               padding:14px 16px calc(84px + env(safe-area-inset-bottom)); text-align:left; user-select:text; -webkit-user-select:text; }
+  #histsheet.open { display:flex; }
+  #histhead { position:relative; }
+  #histsheet h2 { margin:0 0 10px; font-size:15px; font-weight:600; color:var(--muted); text-align:center; padding:0 64px; }
+  #histclose, #histback { position:absolute; top:-8px; border:0; background:transparent; color:var(--fg); font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
+  #histclose { right:-6px; }
+  #histback { left:-6px; display:none; }
+  #histsheet.reading #histback { display:block; }
+  #histlist, #histlog { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  #histlist { display:flex; flex-direction:column; }
+  #histlog { display:none; flex-direction:column; gap:8px; }
+  #histsheet.reading #histlist { display:none; }
+  #histsheet.reading #histlog { display:flex; }
+  #histlist button { display:flex; justify-content:space-between; align-items:baseline; gap:10px; width:100%; text-align:left; border:0;
+                     border-bottom:1px solid var(--ring); background:transparent; color:var(--fg); padding:13px 4px; cursor:pointer;
+                     font:16px/1.3 -apple-system,sans-serif; }
+  #histlist .when { font-weight:600; }
+  #histlist .who { color:var(--muted); font-size:14px; white-space:nowrap; }
+  #histlist .day { color:var(--muted); font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; padding:14px 4px 4px; }
+  #histlist .empty, #histlog .empty { color:var(--muted); text-align:center; margin:auto; }
+  #histlog .msg { max-width:82%; padding:9px 13px; border-radius:16px; font-size:16px; line-height:1.35; overflow-wrap:anywhere; }
+  #histlog .me { align-self:flex-end; background:var(--accent); color:#04120f; border-bottom-right-radius:5px; }
+  #histlog .hq { align-self:flex-start; background:var(--ring); color:var(--fg); border-bottom-left-radius:5px; }
+  #histlog .filler { align-self:flex-start; color:var(--muted); font-style:italic; font-size:14px; padding:2px 13px; }
   #statsheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
                border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column;
                padding:14px 16px calc(84px + env(safe-area-inset-bottom)); text-align:left; }
@@ -173,7 +206,7 @@
   body.chatting::after { display:none; }
   body.chatting h1, body.chatting #modes, body.chatting #modehint, body.chatting #setbtn,
   body.chatting #freetag { display:none; }
-  body.chatting #chat, body.chatting #statsheet { top:0; height:auto; bottom:calc(318px + env(safe-area-inset-bottom));
+  body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet { top:0; height:auto; bottom:calc(318px + env(safe-area-inset-bottom));
                         border-top:0; border-bottom:1px solid var(--muted); border-radius:0 0 18px 18px;
                         padding:calc(14px + env(safe-area-inset-top)) 16px 12px; box-shadow:0 8px 24px rgba(0,0,0,.2); }
   body.chatting #orbwrap { order:1; flex-direction:row; gap:12px; margin:0; }
@@ -243,6 +276,10 @@
 <div id="statsheet" role="dialog" aria-label="Status"><div id="stathead"><h2>Status</h2><button id="statclose" type="button">Close</button></div><iframe id="statframe" title="Status" src="about:blank"></iframe></div>
 <button id="statbtn" type="button" aria-label="Status page" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h10M5 17h6"/></svg>
+</button>
+<div id="histsheet" role="dialog" aria-label="Past calls"><div id="histhead"><button id="histback" type="button">‹ Calls</button><h2 id="histtitle">Past calls</h2><button id="histclose" type="button">Close</button></div><div id="histlist"></div><div id="histlog"></div></div>
+<button id="histbtn" type="button" aria-label="Past calls" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
 </button>
 <button id="voicebtn" type="button" aria-label="Mute her voice" aria-pressed="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path class="on" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="off" d="M16 9l6 6M22 9l-6 6"/></svg>
@@ -503,7 +540,7 @@ const chatBtn = document.getElementById("chatbtn"), chatEl = document.getElement
       chatLog = document.getElementById("chatlog"), badge = chatBtn.querySelector(".badge");
 let unread = 0;
 function chatOpen() { return chatEl.classList.contains("open"); }
-function showLayout() { document.body.classList.toggle("chatting", (chatOpen() || statOpen()) && state === "live"); }
+function showLayout() { document.body.classList.toggle("chatting", (chatOpen() || statOpen() || histOpen()) && state === "live"); }
 function showBadge() { badge.textContent = unread > 9 ? "9+" : String(unread); badge.classList.toggle("show", unread > 0 && !chatOpen()); }
 function clearChat() {
   chatLog.innerHTML = '<div class="empty">Nothing said yet</div>';
@@ -551,6 +588,7 @@ function addChat(who, text, old) {
 }
 function showChat(open) {
   if (open) showStatus(false);  // H13: one sheet at a time
+  if (open) showHistory(false); // H57
   if (open) loadLastCall();     // H34: before a call, fresh each time it opens
   chatEl.classList.toggle("open", open);
   chatBtn.setAttribute("aria-expanded", String(open));
@@ -608,6 +646,7 @@ function statusUrl() {
 function statOpen() { return statEl.classList.contains("open"); }
 function showStatus(open) {
   if (open && chatOpen()) { chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showBadge(); }
+  if (open) showHistory(false);  // H57: one sheet at a time
   statEl.classList.toggle("open", open);
   statBtn.setAttribute("aria-expanded", String(open));
   const want = open ? statusUrl() : "about:blank";
@@ -616,6 +655,81 @@ function showStatus(open) {
 }
 statBtn.addEventListener("click", () => showStatus(!statOpen()));
 document.getElementById("statclose").addEventListener("click", () => showStatus(false));
+
+// H57: every past call, read only, from the saved transcripts (the call server's /api/calls). The list is
+// fetched fresh each time it opens, newest first; a tap opens that call as the chat shows it (his lines,
+// hers, her waiting lines, cancelled ones struck through; no tools, no call notes). The chat bubble stays
+// for the current call. Free calls are never saved, so never listed.
+const histBtn = document.getElementById("histbtn"), histEl = document.getElementById("histsheet"),
+      histList = document.getElementById("histlist"), histLog = document.getElementById("histlog"),
+      histTitle = document.getElementById("histtitle");
+let histAsk = 0;
+function histOpen() { return histEl.classList.contains("open"); }
+function histNote(el, text) { el.innerHTML = ""; const d = document.createElement("div"); d.className = "empty"; d.textContent = text; el.appendChild(d); }
+async function histGet(url) {
+  try { const r = await fetch(url, { cache: "no-store" }); if (r.ok) return await r.json(); } catch (e) {}
+  return null;
+}
+async function loadHistory() {
+  const ask = ++histAsk;
+  histEl.classList.remove("reading"); histTitle.textContent = "Past calls";
+  if (!histList.querySelector("button")) histNote(histList, "Loading…");
+  const data = await histGet("api/calls");
+  if (ask !== histAsk || !histOpen()) return;
+  const calls = data && Array.isArray(data.calls) ? data.calls : null;
+  if (!calls) { histNote(histList, "Couldn't load the calls. Try again."); return; }
+  if (!calls.length) { histNote(histList, "No calls yet"); return; }
+  histList.innerHTML = "";
+  const today = new Date(), iso = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  const yday = new Date(today); yday.setDate(today.getDate() - 1);
+  let day = null;
+  for (const c of calls) {
+    if (c.date !== day) {
+      day = c.date;
+      const h = document.createElement("div"); h.className = "day";
+      h.textContent = c.date === iso(today) ? "Today" : c.date === iso(yday) ? "Yesterday" : c.started.split(",")[0];
+      histList.appendChild(h);
+    }
+    const b = document.createElement("button"); b.type = "button"; b.dataset.name = c.name;
+    const w = document.createElement("span"); w.className = "when"; w.textContent = c.time;
+    const a = document.createElement("span"); a.className = "who"; a.textContent = (c.agent ? c.agent + " · " : "") + c.said + (c.said === 1 ? " line" : " lines");
+    b.append(w, a);
+    b.addEventListener("click", () => readCall(c.name));
+    histList.appendChild(b);
+  }
+}
+async function readCall(name) {
+  const ask = ++histAsk;
+  histEl.classList.add("reading"); histNote(histLog, "Loading…");
+  const data = await histGet("api/calls/" + encodeURIComponent(name));
+  if (ask !== histAsk || !histOpen()) return;
+  if (!data || !Array.isArray(data.lines)) { histNote(histLog, "Couldn't load this call."); return; }
+  histTitle.textContent = (data.agent ? data.agent + " · " : "") + data.started;
+  histLog.innerHTML = "";
+  for (const l of data.lines) {
+    if (!l.text) continue;
+    const div = document.createElement("div");
+    div.className = "msg " + (l.who === "hq" || l.who === "filler" ? l.who : "me") + (l.cancelled ? " cancelled" : "");
+    div.textContent = l.text;
+    histLog.appendChild(div);
+  }
+  if (!histLog.querySelector(".msg")) histNote(histLog, "Nothing said");
+  histLog.scrollTop = 0;
+}
+function showHistory(open) {
+  if (open === histOpen()) { if (open) loadHistory(); return; }
+  if (open) {
+    if (chatOpen()) { chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showBadge(); }
+    if (statOpen()) showStatus(false);
+  }
+  histEl.classList.toggle("open", open);
+  histBtn.setAttribute("aria-expanded", String(open));
+  if (open) loadHistory(); else histAsk++;
+  showLayout();
+}
+histBtn.addEventListener("click", () => showHistory(!histOpen()));
+document.getElementById("histclose").addEventListener("click", () => showHistory(false));
+document.getElementById("histback").addEventListener("click", () => loadHistory());
 
 // H40: her voice off. On the iPhone a page can't set the volume, and starting a call switches the phone
 // to its call sound, which has its own, louder volume; so this silences her completely instead: the
