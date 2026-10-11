@@ -2676,7 +2676,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
             body = page.split(fn, 1)[1].split("\n}\n", 1)[0]
             need("audioEl" not in body and "audioCtx.destination" in body, f"{fn} goes through her voice now")
         need('setAttribute("switch", "")' in page and "CANCEL_ASK_MS = 3000" in page, "the H24 tick or the H31/H38 Cancel changed")
-        return "her voice off before and during a call (element muted, track off); chat still gets her lines; talk button, low sound, Cancel unchanged; remembered on the next load"
+        return "her voice off before and during a call (element muted, track off); chat still gets her lines; talk button and Cancel unchanged (the low sound is silent since F14); remembered on the next load"
 
     # 36
     async def flow36(self) -> str:
@@ -3963,6 +3963,62 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
         return ("kinds from the job's words; estimate set when added; per job and total with done-around; held waits on the usage; "
                 "done writes estimate next to real time and the next estimate learns; page and list show them")
 
+    # 55
+    async def flow55(self) -> str:
+        """F14: the voice-off button (H40) also silences the page's own sounds: the thinking tick,
+        the low talk sound (H32) and the click (H24). Turned back on, the tick comes back only if the
+        thinking-sound switch is on. The switch itself is never changed. No Claude turns: the real
+        call page in a headless browser, on a fake live call."""
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const check = (name, ok, why) => out.push(name + ":" + (ok ? "ok" : "WRONG " + why));
+  const server = st => onServerMessage({ data: JSON.stringify({ type: "hq-state", state: st }) });
+  try { localStorage.setItem("hq-sound", "on"); localStorage.setItem("hq-voice-off", "off"); } catch (e) {}
+  soundOn = true; showSound(); voiceOff = false; applyVoice();
+  startAudio();
+  let oscs = 0; const co = audioCtx.createOscillator.bind(audioCtx); audioCtx.createOscillator = () => { oscs++; return co(); };
+  setState("live", "On the call");
+  server("thinking"); await wait(50);
+  check("tick-on", tickTimer !== null, String(tickTimer));
+  voiceBtn.click(); await wait(50);
+  check("voice-off-tick", voiceOff && tickTimer === null, voiceOff + "/" + tickTimer);
+  check("switch-kept", soundOn && soundBtn.getAttribute("aria-pressed") === "true" && localStorage.getItem("hq-sound") === "on",
+        soundOn + "/" + localStorage.getItem("hq-sound"));
+  server("listening"); server("thinking"); await wait(50);
+  check("still-silent", tickTimer === null, String(tickTimer));
+  oscs = 0; const r = talkSound(); click();
+  check("talk-click-silent", r === false && oscs === 0, r + "/" + oscs);
+  voiceBtn.click(); await wait(50);
+  check("voice-on-tick", !voiceOff && tickTimer !== null, voiceOff + "/" + tickTimer);
+  oscs = 0; const r2 = talkSound();
+  check("talk-back", r2 === true && oscs === 1, r2 + "/" + oscs);
+  // the thinking-sound switch off: voice off and on again, and the tick stays off
+  soundOn = false; thinkingSound(true); voiceBtn.click(); await wait(50); voiceBtn.click(); await wait(50);
+  check("switch-off-stays", !voiceOff && tickTimer === null && !soundOn, voiceOff + "/" + tickTimer + "/" + soundOn);
+  server("listening");
+  const pre = document.createElement("pre"); pre.id = "f14"; pre.textContent = "F14RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f = self.tmp / "f14.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--autoplay-policy=no-user-gesture-required",
+                                          f"--user-data-dir={self.tmp / 'f14-profile'}", "--virtual-time-budget=20000", "--dump-dom", f.as_uri()], timeout=90)
+        m = re.search(r'<pre id="f14">F14RESULT (.*?) END</pre>', r.stdout)
+        need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        res = m.group(1)
+        say(f"   {res}")
+        need(all(part.endswith(":ok") for part in res.split(" | ")), f"the voice button doesn't silence the page's sounds right: {res}")
+        return "voice off silences the tick, the talk sound and the click; back on, the tick follows the switch; the switch never changes"
+
+
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
     2: ("The greeting plays first, on Quick and Deep", True, "flow2"),
@@ -4018,6 +4074,7 @@ FLOWS = {
     52: ("H49: the space bar in the desktop app: tap mutes, hold talks, letting go sends", False, "flow52"),
     53: ("H57: a button for every past call: the list, one call read only", False, "flow53"),
     54: ("H61: estimated time to completion for each job and the whole list, learning from real times", False, "flow54"),
+    55: ("F14: her voice off also silences the thinking tick, the talk sound and the click", False, "flow55"),
 }
 
 

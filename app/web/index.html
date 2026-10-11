@@ -454,8 +454,10 @@ function tick() {
   g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.08, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
   osc.connect(g).connect(audioCtx.destination); osc.start(t); osc.stop(t + 0.1);
 }
+// F14: with her voice off (H40) the tick stays silent too, whatever the switch says; with her voice
+// back on, it follows the switch again. The switch itself is never changed by the voice button.
 function thinkingSound(on) {
-  if (on && soundOn && audioCtx && state === "live") {
+  if (on && soundOn && !voiceOff && audioCtx && state === "live") {
     if (!tickTimer) { tick(); tickTimer = setInterval(tick, 900); }
   } else if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
 }
@@ -735,8 +737,11 @@ document.getElementById("histback").addEventListener("click", () => loadHistory(
 // to its call sound, which has its own, louder volume; so this silences her completely instead: the
 // audio element is muted and her incoming track switched off. Her greeting, answers and waiting lines
 // are all in that one track; they still come into the chat as text. The page's own sounds (the
-// thinking tick, the click, the low talk sound) don't go through it, so they stay. Works before and
-// during a call; the page remembers the choice on this device.
+// thinking tick, the click, the low talk sound) don't go through it; since F14 (11 October 2026, his
+// words: "if we toggle the speaker icon on to muting, it also mutes the thinking sound") they are
+// silenced with it, so with her voice off the call makes no sound at all. Turned back on, the tick
+// follows the thinking-sound switch again. Works before and during a call; the page remembers the
+// choice on this device.
 const voiceBtn = document.getElementById("voicebtn");
 let voiceOff = false;
 try { voiceOff = localStorage.getItem("hq-voice-off") === "on"; } catch (e) {}
@@ -751,6 +756,7 @@ voiceBtn.addEventListener("click", () => {
   voiceOff = !voiceOff; try { localStorage.setItem("hq-voice-off", voiceOff ? "on" : "off"); } catch (e) {}
   applyVoice();
   if (state === "live") setMuted(muted);
+  thinkingSound(orbEl.className === "thinking");  // F14: the tick stops or comes back at once
 });
 function onCallText() { return "On the call · " + callName() + (voiceOff ? " · voice off" : ""); }
 
@@ -815,7 +821,7 @@ function micOpen(on) { if (stream) stream.getAudioTracks().forEach(t => { t.enab
 // from a web page at all, so it gets a soft click instead (his words: "the sound is also good").
 function oldIos() { const m = navigator.userAgent.match(/(?:iPhone|iPad|iPod).* OS (\d+)_/); return !!m && +m[1] < 18; }
 function click() {
-  if (!audioCtx) return;
+  if (!audioCtx || voiceOff) return;  // F14: silent with her voice off
   const t = audioCtx.currentTime, osc = audioCtx.createOscillator(), g = audioCtx.createGain();
   osc.type = "sine"; osc.frequency.setValueAtTime(1500, t);
   g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
@@ -823,12 +829,12 @@ function click() {
 }
 // H32: and a short low sound, in the style of the thinking tick but a lot lower, so he hears that
 // talking started without looking. Played whatever the thinking-sound switch says (Claude's choice:
-// that switch is for the thinking tick). Triangle rather than sine, so a phone speaker still carries
+// that switch is for the thinking tick); silent with her voice off (F14). Triangle rather than sine, so a phone speaker still carries
 // it. The mic sends silence while it sounds, so it can't be heard as his own words.
 const TALK_SOUND_MS = 180;
 let talkGate = null;
 function talkSound() {
-  if (!audioCtx) return false;
+  if (!audioCtx || voiceOff) return false;  // F14: silent with her voice off
   if (audioCtx.state === "suspended") { try { audioCtx.resume(); } catch (e) {} }
   const t = audioCtx.currentTime, osc = audioCtx.createOscillator(), g = audioCtx.createGain();
   osc.type = "triangle"; osc.frequency.setValueAtTime(330, t); osc.frequency.exponentialRampToValueAtTime(210, t + 0.11);
