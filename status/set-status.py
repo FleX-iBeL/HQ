@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rewrite the status block at the top of Jarvis VA/roadmap.md. Copied from an earlier project's status page (8 October 2026).
+"""Rewrite the status block at the top of HQ/roadmap.md. Copied from an earlier project's status page (8 October 2026).
 usage: set-status.py STATE "STEP" "JUST" "NEXT" "TABLE_ROW" "LOGLINE" ["UPDATED_NOTE"]
 STATE: BUILDING|TESTING|RELEASING|WAITING|DONE|STOPPED. TABLE_ROW like "Phase A|A1 ✅|A2 🔨|A3 ⬜".
 Keeps the newest eight log lines."""

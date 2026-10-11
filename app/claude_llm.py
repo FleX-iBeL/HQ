@@ -136,7 +136,7 @@ class ClaudeSessionLLMService(LLMService):
         )
         if self.transcript:
             self.transcript.cancel_last()
-        logger.info("The user cancelled their turn before Jarvis answered")
+        logger.info("The user cancelled their turn before HQ answered")
         return True
 
     # -- H38: Cancel tapped after she started answering ----------------------
@@ -170,7 +170,7 @@ class ClaudeSessionLLMService(LLMService):
         )
         if self.transcript:
             self.transcript.cancel_last()
-        logger.info("The user cancelled their last turn after Jarvis had started answering (Cancel button)")
+        logger.info("The user cancelled their last turn after HQ had started answering (Cancel button)")
         return self.CANCEL_LINE
 
     # -- lifecycle -----------------------------------------------------------
@@ -324,13 +324,13 @@ class ClaudeSessionLLMService(LLMService):
             if self.policy:
                 self.policy.end_of_turn()
             if self.transcript and not (turn.get("cancelled") and not turn["reply"].strip()):
-                self.transcript.jarvis(turn["reply"], cut_off=turn["interrupted"])
+                self.transcript.reply(turn["reply"], cut_off=turn["interrupted"])
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
 
     async def _watch_for_fillers(self, turn: dict):
         """At most one filler per wait: while Claude is quiet after the user's turn, and
-        while a tool runs after Jarvis went quiet. Ends with the reply."""
+        while a tool runs after HQ went quiet. Ends with the reply."""
         armed = True
         t0 = turn["t0"]
         last_text_seen = None
@@ -339,7 +339,7 @@ class ClaudeSessionLLMService(LLMService):
             now = time.perf_counter()
             if turn.get("last_text") != last_text_seen:
                 last_text_seen = turn.get("last_text")
-                armed = True  # Jarvis said something: the next wait may get a filler
+                armed = True  # HQ said something: the next wait may get a filler
             if not armed:
                 continue
             kind = None

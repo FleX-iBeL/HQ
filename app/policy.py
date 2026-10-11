@@ -1,4 +1,4 @@
-"""What Jarvis may do on a call without asking, what it must ask for, and what never.
+"""What HQ may do on a call without asking, what it must ask for, and what never.
 
 One place, readable top to bottom. Every tool call of the call's Claude session goes
 through decide(); the brain wires it in twice:
@@ -10,7 +10,7 @@ through decide(); the brain wires it in twice:
 
 The three answers:
   ALLOW  go ahead.
-  ASK    Jarvis asks the user out loud ("Can I …? Say yes or no."). The call is refused
+  ASK    HQ asks the user out loud ("Can I …? Say yes or no."). The call is refused
          for now; the next thing they say decides. A clear yes approves exactly that
          call once (same tool, same input), and Claude makes it again.
   DENY   never, not even with a yes.
@@ -37,7 +37,7 @@ ALLOW, ASK, DENY = "allow", "ask", "deny"
 class Decision:
     verdict: str  # ALLOW, ASK or DENY
     why: str  # one short line, for the log and the transcript
-    question: str = ""  # for ASK: what Jarvis asks, in plain words
+    question: str = ""  # for ASK: what HQ asks, in plain words
 
 
 # -- the lists -------------------------------------------------------------------
@@ -341,7 +341,7 @@ _HARMLESS = re.compile(r"\b(no problem|no worries|why not|not a problem)\b")
 
 def is_clear_yes(words: str) -> bool:
     w = re.sub(r"[^a-z' ]", " ", words.lower())
-    w = re.sub(r"^\s*(jarvis|um+|uh+|hmm+|well)\s+", "", " ".join(w.split()))
+    w = re.sub(r"^\s*(hq|um+|uh+|hmm+|well)\s+", "", " ".join(w.split()))
     return bool(_YES.match(w)) and not _NOT.search(_HARMLESS.sub(" ", w))
 
 

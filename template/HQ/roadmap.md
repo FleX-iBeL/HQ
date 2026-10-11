@@ -3,7 +3,7 @@
 ## Now: a fresh HQ · nothing on the roadmap yet
 
 **Just finished:** HQ installed
-**Next:** Fill in me.md (your name, what's important, what HQ should manage), or tell Jarvis on a call
+**Next:** Fill in me.md (your name, what's important, what HQ should manage), or tell HQ on a call
 
 | Phase A | A1 ⬜ |
 |---|---|
@@ -34,4 +34,4 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started · ❓ needs a decision 
 
 | | Step | What you get | Model |
 |---|---|---|---|
-| ⬜ | A1 Your first step | [Tell Jarvis on a call, or in a chat, what you want first.] | |
+| ⬜ | A1 Your first step | [Tell HQ on a call, or in a chat, what you want first.] | |

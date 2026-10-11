@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """H20: the watchdog. Runs every 5 minutes, on the five-minute marks (H22), started by macOS itself (a LaunchAgent), apart from the
-Jarvis Routine helper, so it keeps going when the helper stops. 10 October 2026: "and maybe a
+HQ Routine helper, so it keeps going when the helper stops. 10 October 2026: "and maybe a
 watchdog that pings every 5 minutes".
 
 - The helper isn't running: start it (it then also starts the call line if that's down).
@@ -14,13 +14,15 @@ watchdog that pings every 5 minutes".
   up on it (its retries used) and the internet is there, it asks the helper for one more try (retry-<key>).
   When it works again, that's noted too.
 
-It runs from ~/Library/Application Support/JarvisVA (installed there by install-watchdog.sh) and never
+It runs from ~/Library/Application Support/HQ (installed there by install-watchdog.sh) and never
 touches the Documents folder, so macOS asks no permission. Its log: watchdog.log next to it.
 """
 import json, os, socket, subprocess, time
 
-SUPPORT = os.path.expanduser("~/Library/Application Support/JarvisVA")
-APP = os.path.expanduser("~/Applications/Jarvis Routine.app")
+SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
+# The helper app; until it is rebuilt under its new name (H54, 11 October 2026), the old one still runs.
+APPS = [os.path.expanduser("~/Applications/HQ Routine.app"), os.path.expanduser("~/Applications/Jarvis Routine.app")]
+APP = next((a for a in APPS if os.path.isdir(a)), APPS[0])
 EVERY = 300
 STUCK = 360
 KEEPS_FAILING = 2  # H42: failures in a row before the watchdog calls it "keeps failing"
@@ -34,7 +36,7 @@ def pids():
     out = []
     for line in r.stdout.splitlines():
         pid, _, comm = line.strip().partition(" ")
-        if comm.strip().endswith("Jarvis Routine.app/Contents/MacOS/applet"):
+        if comm.strip().endswith(tuple(os.path.basename(a) + "/Contents/MacOS/applet" for a in APPS)):
             out.append(int(pid))
     return out
 

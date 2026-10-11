@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""H35: the laptop's temperature, every minute, run by the Jarvis Routine helper (tick.py). No Claude,
+"""H35: the laptop's temperature, every minute, run by the HQ Routine helper (tick.py). No Claude,
 no usage, no password. 10 October 2026, with the lid closed and the MacBook in his bag while
 jobs build: "I was thinking maybe we can build a routine and it also checks it continuously and it shows
 a little graph. Or... In the status bars, we put ranges and colors on it."
@@ -12,12 +12,12 @@ a little graph. Or... In the status bars, we put ranges and colors on it."
   chip): normal under 70, warm 70 to 89, hot from 90. Slowing down (macOS heat state serious or
   critical, a warning level, a speed limit) counts as hot whatever the degrees.
 
-Writes Jarvis VA/.status/temperature.json (the latest reading), appends one line a minute to
+Writes .status/temperature.json (the latest reading), appends one line a minute to
 .status/temperature-history.jsonl (a day kept), writes its routine line ("temp": ok, warm, or down when
 hot) and opens an incident while it's hot.
 
-    python3 "Jarvis VA/routine/temperature.py"          one reading, written and printed
-    python3 "Jarvis VA/routine/temperature.py" --dry    one reading, printed only
+    python3 "routine/temperature.py"          one reading, written and printed
+    python3 "routine/temperature.py" --dry    one reading, printed only
 """
 import json, os, re, subprocess, sys, tempfile, time
 

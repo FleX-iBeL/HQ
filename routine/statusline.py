@@ -10,7 +10,7 @@ run = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scratch", 
 out = os.path.join(run, "usage-live.json")
 # H36: a sign of life for routine/quiet.py: the status line runs after every reply and tool step.
 try:
-    act = os.environ.get("JARVIS_ACTIVITY") or os.path.join(run, "job-activity.json")
+    act = os.environ.get("HQ_ACTIVITY") or os.path.join(run, "job-activity.json")
     with open(act + ".tmp", "w") as f:
         json.dump({"at": time.time(), "session": data.get("session_id"), "transcript": data.get("transcript_path")}, f)
     os.replace(act + ".tmp", act)
@@ -26,4 +26,4 @@ if r:
 five = (r.get("five_hour") or {}).get("used_percentage")
 week = (r.get("seven_day") or {}).get("used_percentage")
 bits = [f"5-hour {five:.0f}%" if five is not None else "", f"week {week:.0f}%" if week is not None else ""]
-print("Jarvis job · " + (" · ".join(b for b in bits if b) or "usage not known yet"))
+print("HQ job · " + (" · ".join(b for b in bits if b) or "usage not known yet"))

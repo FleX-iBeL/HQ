@@ -1,5 +1,5 @@
 // H27: HQ, the Mac desktop app. 10 October 2026 (call at 14:33): "a Mac desktop version of the status page and
-// the Jarvis ... Sort of like how the website is, but also calling this included in it. We also have the statuses
+// the [call] ... Sort of like how the website is, but also calling this included in it. We also have the statuses
 // and everything in there. ... And this app can also reboot that, right? So the main watchdog thing in here."
 // And: "a picture of a dog with an animation for the Watchdog service."
 //

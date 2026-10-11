@@ -12,10 +12,10 @@ agents (creative strategy, life coach) are one more entry each, with their own l
 
 Where they come from:
 - HQ ships the defaults below, the same for everyone.
-- A workspace may change or add agents in `Jarvis VA/agents/agents.json`: a list of objects with
+- A workspace may change or add agents in `HQ/agents/agents.json`: a list of objects with
   the same keys; an entry with a known id changes only the keys it gives, a new id adds an agent
   (it needs at least a name and a load). `"hidden": true` leaves an agent out of the call page.
-- The headshot: `Jarvis VA/agents/<id>.jpg` (or .jpeg, .png, .webp) in the workspace. Pictures stay in
+- The headshot: `HQ/agents/<id>.jpg` (or .jpeg, .png, .webp) in the workspace. Pictures stay in
   the workspace, never in HQ. Without one, the call page shows a drawn placeholder (picture_svg).
 """
 from __future__ import annotations
@@ -74,7 +74,7 @@ _KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", 
 
 
 def agents_dir(folder: Path) -> Path:
-    return folder / "Jarvis VA" / "agents"
+    return folder / "HQ" / "agents"
 
 
 def _clean(a: dict) -> dict | None:
@@ -169,11 +169,11 @@ def picture_svg(agent: dict) -> str:
 
 
 def persona(agent: dict, user: str = "the user") -> str:
-    """Added to the call rules: who she is on this call. The line is still called Jarvis."""
+    """Added to the call rules: who she is on this call."""
     return (
         f"\n# Who you are on this call: {agent['name']}\n\n"
         f"{user} picked {agent['name']} for this call. You are {agent['name']}, one of the agents in "
-        f"{user}'s HQ (the call line itself is still called Jarvis). Where this differs from \"Who you "
+        f"{user}'s HQ. Where this differs from \"Who you "
         f"are on the call\" above, this wins. If asked your name, it's {agent['name']}.\n"
         f"Your personality: {agent['personality']}\n"
         f"What you're for: {agent['speciality']}.\n"

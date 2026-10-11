@@ -10,12 +10,12 @@ needs root, so it runs `sudo -n` on exactly one of the two commands below, which
 the setup, sudo -n fails at once instead of asking, and this says how to do the setup.
 
 Every minute the helper (tick.py) runs it without options, so the status page also shows a change made by
-hand. It writes Jarvis VA/.status/lidsleep.json.
+hand. It writes .status/lidsleep.json.
 
-    python3 "Jarvis VA/routine/lidsleep.py"        which it is now (written and printed)
-    python3 "Jarvis VA/routine/lidsleep.py" on     keep working with the lid closed
-    python3 "Jarvis VA/routine/lidsleep.py" off    back to normal: it sleeps when the lid closes
-    python3 "Jarvis VA/routine/lidsleep.py" --dry  which it is now, printed only
+    python3 "routine/lidsleep.py"        which it is now (written and printed)
+    python3 "routine/lidsleep.py" on     keep working with the lid closed
+    python3 "routine/lidsleep.py" off    back to normal: it sleeps when the lid closes
+    python3 "routine/lidsleep.py" --dry  which it is now, printed only
 """
 import json, os, re, subprocess, sys, tempfile, time
 
@@ -24,7 +24,9 @@ JV = os.path.normpath(os.path.join(HERE, ".."))
 NOW_FILE = os.path.join(JV, ".status", "lidsleep.json")
 PMSET = "/usr/bin/pmset"
 SUDO = "/usr/bin/sudo"
-SUDOERS = "/etc/sudoers.d/jarvis-lidsleep"  # put there by the one-time setup
+SUDOERS = "/etc/sudoers.d/hq-lidsleep"  # put there by the one-time setup
+# Its name before H54 (11 October 2026), set up before then, works the same until it is renamed.
+SUDOERS_OLD = "/etc/sudoers.d/jarvis-lidsleep"
 SETUP_LINE = f'sudo sh "{os.path.join(HERE, "install-lidsleep.sh")}"'
 COMMAND = {"on": [PMSET, "-a", "disablesleep", "1"], "off": [PMSET, "-a", "disablesleep", "0"]}
 
@@ -37,7 +39,7 @@ def read():
 
 
 def set_up():
-    return os.path.exists(SUDOERS)
+    return os.path.exists(SUDOERS) or os.path.exists(SUDOERS_OLD)
 
 
 def words(on):

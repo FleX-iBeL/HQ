@@ -5,7 +5,7 @@ first say let me check, or something?"
 The FillerPlayer sits right after the voice (Kokoro), just before the audio goes out. At
 call start it records every filler once with Kokoro, so a filler plays instantly. The
 Claude step (claude_llm.py) decides when a filler is due and calls say(); the player
-plays it only when Jarvis isn't already talking, and rotates through the list.
+plays it only when HQ isn't already talking, and rotates through the list.
 
 Fillers are not Claude's words: they don't go into the Claude session or into Pipecat's
 context, and the transcript marks them as filler. When the user cuts in, the output drops
@@ -64,7 +64,7 @@ class FillerPlayer(FrameProcessor):
         self._sample_rate_hint: int | None = None
         self.on_play = on_play  # called with the filler text when one plays (transcript)
         self.bot_speaking = False
-        self.last_bot_stop = 0.0  # perf_counter time Jarvis last went quiet
+        self.last_bot_stop = 0.0  # perf_counter time HQ last went quiet
         self.played: list[tuple[float, str]] = []  # for tests
         self._filler_until = 0.0  # a filler just sent counts as talking until it has played
 
@@ -150,7 +150,7 @@ class FillerPlayer(FrameProcessor):
         return await self.say("greeting")
 
     def silent_for(self, since: float) -> float:
-        """Seconds Jarvis has been quiet, counting from `since` at the earliest."""
+        """Seconds HQ has been quiet, counting from `since` at the earliest."""
         now = time.perf_counter()
         if self.talking:
             return 0.0
@@ -162,7 +162,7 @@ class FillerPlayer(FrameProcessor):
 
     async def say(self, kind: str = "wait") -> str | None:
         """Play the next filler of this kind right now. Returns its text, or None if it
-        didn't play (Jarvis is talking, or the fillers aren't recorded yet)."""
+        didn't play (HQ is talking, or the fillers aren't recorded yet)."""
         if kind != "greeting" and not self.waiting_lines:
             return None
         ready = self._greet_ready if kind == "greeting" else self._ready

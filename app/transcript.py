@@ -1,14 +1,14 @@
 """The call transcript: one Markdown file per call, written line by line as the call goes.
 
 Each line is appended and flushed straight away, so a crash loses at most the reply that
-was still being spoken. File name: Jarvis VA/calls/YYYY-MM-DD-HHMM.md, in this Mac's time zone, at the
+was still being spoken. File name: HQ/calls/YYYY-MM-DD-HHMM.md, in this Mac's time zone, at the
 time of the call start (a second call in the same minute gets -2, -3, ...).
 
 What goes in:
-  **<Name>** what they said (the name from me.md, else Me) (as Whisper heard it)        · (cut in) when he talked over Jarvis
+  **<Name>** what they said (the name from me.md, else Me) (as Whisper heard it)        · (cut in) when he talked over HQ
                                                          · (typed) when he typed it on the call page (H18)
                                                          · (cancelled) when he tapped Cancel before she answered (H31)
-  **Jarvis** what Claude said                            · (cut off) when he stopped it
+  **HQ** what Claude said (before H54: **Jarvis**)          · (cut off) when he stopped it
   *filler* what the call system said while Claude worked (not Claude's words; Claude never sees them)
   `tool` one short line per tool call, with the decision (done / asked / refused)
   *call* call system notes (permission answers, connect, hang-up, after-call work)
@@ -53,7 +53,7 @@ class CallTranscript:
         self.path = path
         self._write(
             f"# Call {self.started.strftime('%-d %B %Y, %H:%M')}\n\n"
-            "> **Private.** Only for this workspace. A Jarvis VA call, "
+            "> **Private.** Only for this workspace. A HQ call, "
             "written down as it happened.\n\n"
             f"Started {self.started.strftime('%H:%M:%S')} · " + (f"agent {agent} · " if agent else "")
             + f"brain {model or config.MODEL}\n\n"
@@ -102,15 +102,15 @@ class CallTranscript:
         except OSError:
             pass
 
-    def jarvis(self, words: str, *, cut_off: bool = False) -> None:
+    def reply(self, words: str, *, cut_off: bool = False) -> None:
         words = _one_line(words)
         if not words and not cut_off:
             return
-        self._tell("jarvis", (words or "…") + (" (cut off)" if cut_off else ""))
+        self._tell("hq", (words or "…") + (" (cut off)" if cut_off else ""))
         if cut_off:
-            self._line(f"**Jarvis:** {words or '…'} *(cut off)*")
+            self._line(f"**HQ:** {words or '…'} *(cut off)*")
         else:
-            self._line(f"**Jarvis:** {words}")
+            self._line(f"**HQ:** {words}")
 
     def filler(self, words: str) -> None:
         self._tell("filler", _one_line(words))
@@ -127,6 +127,8 @@ class CallTranscript:
         self._write(f"\nEnded {now().strftime('%H:%M:%S')}\n")
 
 
+# Her lines: **HQ:** since H54 (11 October 2026); saved calls from before still say the old name.
+_HERS = ("**HQ:** ", "**Jarvis:** ")
 _LINE = re.compile(r"^- (\d\d:\d\d):\d\d (.*)$")
 _MARK = re.compile(r"\s*\*\((typed|cut in|cut off|cancelled|Cancel button)\)\*\s*$")
 
@@ -139,7 +141,7 @@ def _sort_key(path: Path) -> tuple[str, int]:
 
 def read_lines(path: Path) -> list[dict]:
     """H34: what was said on a saved call, the way the chat on the call page shows it:
-    his lines, Jarvis's lines and her waiting lines. Tool lines and call notes are left out."""
+    his lines, her lines and her waiting lines. Tool lines and call notes are left out."""
     out = []
     for raw in path.read_text(encoding="utf8").splitlines():
         m = _LINE.match(raw)
@@ -153,9 +155,9 @@ def read_lines(path: Path) -> list[dict]:
         if rest.startswith(f"**{config.USER_LABEL}:** "):
             text = rest[len(config.USER_LABEL) + 5:].strip() + (" (Cancel button)" if "Cancel button" in marks else "")
             out.append({"who": "user", "text": text, "at": hhmm, "cancelled": "cancelled" in marks})
-        elif rest.startswith("**Jarvis:** "):
-            text = rest[12:].strip() + (" (cut off)" if "cut off" in marks else "")
-            out.append({"who": "jarvis", "text": text, "at": hhmm})
+        elif rest.startswith(_HERS):
+            text = rest.split(":** ", 1)[1].strip() + (" (cut off)" if "cut off" in marks else "")
+            out.append({"who": "hq", "text": text, "at": hhmm})
         elif rest.startswith("*filler: ") and rest.endswith("*"):
             out.append({"who": "filler", "text": rest[9:-1].strip(), "at": hhmm})
     return [line for line in out if line["text"]]

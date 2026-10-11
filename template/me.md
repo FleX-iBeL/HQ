@@ -6,7 +6,7 @@ Put your own things here. Write it in your own words, as much or as little as yo
 
 **Name:** 
 
-[The name HQ calls you by, on calls and in chats. Until it's filled in, Jarvis asks.]
+[The name HQ calls you by, on calls and in chats. Until it's filled in, HQ asks.]
 
 **Names to hear:** 
 
@@ -34,7 +34,7 @@ Put your own things here. Write it in your own words, as much or as little as yo
 
 ## On calls
 
-[Anything Jarvis should know when it talks to you: your language, how you like times said, what you listen with.]
+[Anything HQ should know when it talks to you: your language, how you like times said, what you listen with.]
 
 ## How I work
 

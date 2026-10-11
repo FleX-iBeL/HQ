@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One look at the queue (phase L, L2). Run every minute by the Jarvis Routine helper app; no Claude,
+"""One look at the queue (phase L, L2). Run every minute by the HQ Routine helper app; no Claude,
 so waiting costs no usage. What it does, in order:
 
 - The hourly mail check (L8) runs on its own, also while a job runs (H30, 10 October 2026); their commits
@@ -177,9 +177,9 @@ def start(job):
     n = job["n"]
     os.makedirs(RUN, exist_ok=True)
     prompt = (
-        f"let's go. This is job {n} from the queue on the Jarvis VA roadmap, started by the routine "
+        f"let's go. This is job {n} from the queue on the HQ roadmap, started by the routine "
         f"(phase L) in a Terminal window. The job, as agreed on the call: {job['text']}\n\n"
-        "Follow the Jarvis VA build notes, the section \"Jobs started by the routine\". "
+        "Follow the HQ build notes, the section \"Jobs started by the routine\". "
         + ("The user said on the call that this job may go past the 5-hour usage line; the weekly line still "
            "counts (F13): read the usage with --weekly-only, and on STOP hold as usual." if job["past"] else "")
     )
@@ -192,13 +192,13 @@ def start(job):
     open(pfile, "w").write(prompt)
     cmd = os.path.join(RUN, f"job-{n}.command")
     open(cmd, "w").write(f"""#!/bin/zsh
-# Job {n}, started by the Jarvis VA routine (phase L).
+# Job {n}, started by the HQ routine (phase L).
 cd {json.dumps(FOLDER)} || exit 1
 # 9 October 2026: the windows shouldn't take over the screen. Opened in the background,
 # and the window minimizes itself to the Dock right away (it may show for a moment first).
 printf '\\e[2t'
-printf '\\e]0;Jarvis job {n}\\a'
-echo "Jarvis VA · job {n}, started by the routine at $(date +%H:%M)."
+printf '\\e]0;HQ job {n}\\a'
+echo "HQ · job {n}, started by the routine at $(date +%H:%M)."
 echo "This is a normal chat: watch it, and type in between whenever you like. The window closes by itself once the job is done."
 echo
 echo $$ > {json.dumps(PIDFILE)}
@@ -206,7 +206,7 @@ echo $$ > {json.dumps(PIDFILE)}
 JT=$(tty)
 /usr/bin/python3 {json.dumps(os.path.join(HERE, 'nudge.py'))} {n} "$JT" $$ </dev/null >/dev/null 2>&1 &!
 {CLAUDE} --no-chrome --permission-mode auto --settings {json.dumps(settings)} \\
-  -n "Jarvis job {n}" "$(cat {json.dumps(pfile)})"
+  -n "HQ job {n}" "$(cat {json.dumps(pfile)})"
 """ + CLOSE_WINDOW)
     os.chmod(cmd, 0o755)
     try:
@@ -415,12 +415,12 @@ def start_mail():
     instructions = os.path.join(RUN, "mail-check.md")
     open(instructions, "w").write(open(os.path.join(HERE, "mail-check.md")).read().replace("{WORKSPACE}", FOLDER))
     open(cmd, "w").write(f"""#!/bin/zsh
-# The hourly mail check, started by the Jarvis VA routine (phase L, L8). Hidden: opened in the
+# The hourly mail check, started by the HQ routine (phase L, L8). Hidden: opened in the
 # background, minimized to the Dock, and the window closes itself when it's done (L7).
 cd {json.dumps(FOLDER)} || exit 1
 printf '\\e[2t'
-printf '\\e]0;Jarvis mail check\\a'
-echo "Jarvis VA · the hourly mail check, started by the routine at $(date +%H:%M). It closes by itself."
+printf '\\e]0;HQ mail check\\a'
+echo "HQ · the hourly mail check, started by the routine at $(date +%H:%M). It closes by itself."
 echo
 echo $$ > {json.dumps(MAIL_PID)}
 {{ echo "--- $(date '+%Y-%m-%d %H:%M:%S')"
@@ -592,7 +592,7 @@ def watchdog_check():
     inc = incidents.down("watchdog", f"No check from the watchdog since {clock(at)}" if at else "The watchdog has never checked in")
     tried = [f["at"] for f in (inc or {}).get("fixes", [])]
     if not tried or now - max(tried) > 600:
-        r = subprocess.run(["/bin/launchctl", "kickstart", f"gui/{os.getuid()}/{hqpaths.agent_label('jarvis-watchdog')}"],
+        r = subprocess.run(["/bin/launchctl", "kickstart", f"gui/{os.getuid()}/{hqpaths.agent_label('watchdog')}"],
                            capture_output=True, text=True)
         incidents.fix("watchdog", "Asked macOS to run it again" if r.returncode == 0
                       else f"Couldn't start it ({(r.stderr or r.stdout).strip()[:80]}); run routine/install-watchdog.sh")

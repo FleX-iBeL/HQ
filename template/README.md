@@ -16,8 +16,8 @@ Every file here starts blank and says what goes in it. **Put your own things her
 | `coaching/log.md` | What happened in each conversation, your words, open commitments | always |
 | `inbox.md` | New mail the hourly mail check found, waiting for your yes | always |
 | `reviews/` | Weekly reviews, one file per week | when needed |
-| `Jarvis VA/roadmap.md` | The status block, the job queue, and the roadmap of what HQ builds next for you | the status page and calls |
-| `Jarvis VA/calls/` | Full transcripts of your calls, one file per call (not Free calls) | when needed |
+| `HQ/roadmap.md` | The status block, the job queue, and the roadmap of what HQ builds next for you | the status page and calls |
+| `HQ/calls/` | Full transcripts of your calls, one file per call (not Free calls) | when needed |
 | `.claude/` | The no-sending rule for email, the rules hook, the coaching skill, the mail check's commit | always |
 
 Subfolders: add your own whenever you start something new (a project, a course, a plan), and give it a line in `where-things-go.md`.

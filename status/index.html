@@ -663,7 +663,7 @@
             // H42: what the run itself said last, so the reason can be read, not only "failed".
             const said = el('details', 'said soft');
             said.append(el('summary', '', 'What it said last'), el('pre', '', i.detail.join('\n')));
-            if (i.run) said.title = `Its whole output: Jarvis VA/${i.run}`;
+            if (i.run) said.title = `Its whole output: ${i.run}`;
             row.append(said);
           }
           if (i.fixes?.length) {
@@ -1119,7 +1119,7 @@
 
         const top = el('header', 'head top');
         const name = el('div', 'name');
-        name.append(el('strong', '', 'HQ'), el('span', '', 'Build status'));  // H49: the app's name, not Jarvis
+        name.append(el('strong', '', 'HQ'), el('span', '', 'Build status'));  // H49: the app's name
         // H37: the battery in the top line, so it shows without scrolling or opening anything.
         const bt = routines?.battery;
         if (bt) {

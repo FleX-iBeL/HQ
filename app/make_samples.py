@@ -8,7 +8,7 @@ from kokoro_onnx import Kokoro
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "samples"
 OUT.mkdir(exist_ok=True)
-TEXT = "Hey there, it's Jarvis. On it, one second. Done, it's on your list. Anything else?"
+TEXT = "Hey there. On it, one second. Done, it's on your list. Anything else?"
 VOICES = ["af_heart", "af_bella", "am_michael", "bf_isabella", "bf_emma",
           "am_adam", "bm_george", "bm_fable", "am_eric"]
 

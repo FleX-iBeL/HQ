@@ -57,7 +57,7 @@
   #mute.talk { background:var(--accent); color:#04120f; border-color:var(--accent); }
   /* H11: let go, and the button stays yellow until the last words are text. */
   #mute.transcribing { background:var(--wait); color:#1a1300; border-color:var(--wait); }
-  /* H31: Cancel, while Jarvis thinks about what he just said and before she answers. Its place is kept
+  /* H31: Cancel, while HQ thinks about what he just said and before she answers. Its place is kept
      during a call, so the buttons don't jump when it shows. */
   #cancel { display:none; min-width:150px; padding:12px 22px; border-radius:999px; border:2px solid var(--stop); background:transparent;
             color:var(--stop); font:600 17px/1 -apple-system,sans-serif; cursor:pointer; margin-top:-14px; }
@@ -90,7 +90,7 @@
   .sw.on { background:var(--accent); color:#04120f; border-color:var(--accent); }
   #settings select { flex-shrink:0; font:600 15px/1 -apple-system,sans-serif; color:var(--fg); background:transparent; border:2px solid var(--muted); border-radius:999px; padding:8px 12px; }
   #setdone { margin-top:8px; padding:14px; border-radius:999px; border:0; background:var(--fg); color:var(--bg); font:600 17px/1 -apple-system,sans-serif; cursor:pointer; }
-  /* H3: what Jarvis is doing. Hidden outside a call. */
+  /* H3: what HQ is doing. Hidden outside a call. */
   #orbwrap { display:none; flex-direction:column; align-items:center; gap:10px; margin:-8px 0; }
   #orbwrap.show { display:flex; }
   #orb { width:56px; height:56px; border-radius:50%; border:4px solid var(--accent); background:transparent; transition:background .25s, border-color .25s; }
@@ -99,7 +99,7 @@
   #orb.hearing { background:var(--accent); animation:hear .5s ease-in-out infinite alternate; }
   #orb.thinking { border-color:var(--ring); border-top-color:var(--accent); animation:spin .9s linear infinite; }
   #orb.speaking { background:var(--accent); animation:talk 1s ease-in-out infinite; }
-  /* H11/H12: yellow while Jarvis waits: for the last words to be text, or in case he goes on. */
+  /* H11/H12: yellow while HQ waits: for the last words to be text, or in case he goes on. */
   #orb.waiting, #orb.transcribing { background:var(--wait); border-color:var(--wait); animation:hear .8s ease-in-out infinite alternate; }
   @keyframes spin { to { transform:rotate(360deg); } }
   @keyframes talk { 0%,100%{ transform:scale(.85); } 50%{ transform:scale(1.2); } }
@@ -152,10 +152,10 @@
   #chatlog { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; display:flex; flex-direction:column; gap:8px; }
   #chatlog .msg { max-width:82%; padding:9px 13px; border-radius:16px; font-size:16px; line-height:1.35; overflow-wrap:anywhere; }
   #chatlog .me { align-self:flex-end; background:var(--accent); color:#04120f; border-bottom-right-radius:5px; }
-  #chatlog .jarvis { align-self:flex-start; background:var(--ring); color:var(--fg); border-bottom-left-radius:5px; }
+  #chatlog .hq { align-self:flex-start; background:var(--ring); color:var(--fg); border-bottom-left-radius:5px; }
   #chatlog .filler { align-self:flex-start; color:var(--muted); font-style:italic; font-size:14px; padding:2px 13px; }
   #chatlog .empty { color:var(--muted); text-align:center; margin:auto; }
-  /* H18: type to Jarvis during a call, when he can't talk. Only shown while on a call. */
+  /* H18: type to HQ during a call, when he can't talk. Only shown while on a call. */
   /* H41: a text field that grows with what he types, up to about six lines, then scrolls inside;
      Send stays at the bottom next to it. */
   #typeform { display:none; gap:8px; margin-top:10px; align-items:flex-end; }
@@ -168,7 +168,7 @@
               font:600 16px/1 -apple-system,sans-serif; cursor:pointer; }
   #typesend:disabled { opacity:.45; cursor:default; }
   /* H8: with the chat open during a call, the log sits at the top and the controls stay below it:
-     what Jarvis is doing, the talk button, Hang up. */
+     what HQ is doing, the talk button, Hang up. */
   body.chatting { justify-content:flex-end; gap:14px; padding-bottom:calc(16px + env(safe-area-inset-bottom)); min-height:100%; }
   body.chatting::after { display:none; }
   body.chatting h1, body.chatting #modes, body.chatting #modehint, body.chatting #setbtn,
@@ -260,6 +260,14 @@
 <audio id="remote" autoplay playsinline></audio>
 <script>
 "use strict";
+// H54: the settings this device saved under the old name (voice, agent, Free, sound, voice off) carry over once.
+try {
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith("jarvis-") && localStorage.getItem("hq-" + k.slice(7)) === null)
+      localStorage.setItem("hq-" + k.slice(7), localStorage.getItem(k));
+  }
+} catch (e) {}
 const btn = document.getElementById("btn");
 const statusEl = document.getElementById("status");
 const errEl = document.getElementById("err");
@@ -292,7 +300,7 @@ const voicesEl = document.getElementById("voices"), voiceOpts = document.getElem
 function voiceFor(id) {
   const a = AGENTS[id] || {};
   let v = null;
-  try { v = localStorage.getItem("jarvis-voice-" + id) || localStorage.getItem("jarvis-voice"); } catch (e) {}
+  try { v = localStorage.getItem("hq-voice-" + id) || localStorage.getItem("hq-voice"); } catch (e) {}
   return v && voiceOpts.content.querySelector(`option[value="${v}"]`) ? v : (a.voice || "af_heart");
 }
 function showVoices() {
@@ -302,18 +310,18 @@ function showVoices() {
     const label = document.createElement("span"); label.textContent = "Voice " + (a.full_name || a.name);
     const sel = document.createElement("select"); sel.dataset.agent = a.id; sel.setAttribute("aria-label", label.textContent);
     sel.append(voiceOpts.content.cloneNode(true)); sel.value = voiceFor(a.id);
-    sel.addEventListener("change", () => { try { localStorage.setItem("jarvis-voice-" + a.id, sel.value); } catch (e) {} });
+    sel.addEventListener("change", () => { try { localStorage.setItem("hq-voice-" + a.id, sel.value); } catch (e) {} });
     row.append(label, sel); voicesEl.append(row);
   }
 }
 let mode = "quick", free = false, agent = "donna";
 try {
-  const m = localStorage.getItem("jarvis-mode");
+  const m = localStorage.getItem("hq-mode");
   if (m === "deep") { mode = m; agent = "pepper"; }  // before H29 the page remembered Quick or Deep
-  const a = localStorage.getItem("jarvis-agent");
+  const a = localStorage.getItem("hq-agent");
   if (a && AGENTS[a]) { agent = a; mode = AGENTS[a].load; }
-  free = localStorage.getItem("jarvis-free") === "on" || m === "free";  // "free" was a mode before H8
-  if (m === "free") { localStorage.setItem("jarvis-mode", "quick"); localStorage.setItem("jarvis-free", "on"); }
+  free = localStorage.getItem("hq-free") === "on" || m === "free";  // "free" was a mode before H8
+  if (m === "free") { localStorage.setItem("hq-mode", "quick"); localStorage.setItem("hq-free", "on"); }
 } catch (e) {}
 const freeBtn = document.getElementById("free"), freeTag = document.getElementById("freetag");
 function showMode() {
@@ -327,13 +335,13 @@ function showMode() {
 }
 freeBtn.addEventListener("click", () => {
   if (state !== "idle") return;
-  free = !free; try { localStorage.setItem("jarvis-free", free ? "on" : "off"); } catch (e) {}
+  free = !free; try { localStorage.setItem("hq-free", free ? "on" : "off"); } catch (e) {}
   showMode();
 });
 modesEl.addEventListener("click", ev => {
   const b = ev.target.closest("button"); if (!b || state !== "idle") return;
   agent = b.dataset.agent; mode = b.dataset.mode;
-  try { localStorage.setItem("jarvis-agent", agent); localStorage.setItem("jarvis-mode", mode); } catch (e) {}
+  try { localStorage.setItem("hq-agent", agent); localStorage.setItem("hq-mode", mode); } catch (e) {}
   showMode();
 });
 // H29: the agents as this workspace has them (names, specialities, headshots), from the server.
@@ -365,13 +373,13 @@ shade.addEventListener("click", () => showSettings(false));
 let pc = null, dc = null, stream = null, pingTimer = null, wakeLock = null, state = "idle", muted = false;
 let transcribingBtn = false, transcribingTimer = null;  // H11
 
-// H3: the server tells us what Jarvis is doing: listening (your turn), hearing, thinking, speaking.
+// H3: the server tells us what HQ is doing: listening (your turn), hearing, thinking, speaking.
 const orbEl = document.getElementById("orb"), orbWrap = document.getElementById("orbwrap"), orbLabel = document.getElementById("orblabel");
 const ORB_TEXT = { listening: "Your turn", hearing: "Listening…", thinking: "Thinking…", speaking: "Speaking",
                    waiting: "Listening…", transcribing: "Transcribing…" };
 function showOrb(js) {
   if (!ORB_TEXT[js]) js = "listening";
-  // H11: the yellow talk button goes back to normal once Jarvis has his words.
+  // H11: the yellow talk button goes back to normal once HQ has his words.
   if (transcribingBtn && (js === "thinking" || js === "speaking" || js === "listening")) setTranscribing(false);
   orbEl.className = js;
   cancelFollowsOrb(js);  // H38
@@ -379,12 +387,12 @@ function showOrb(js) {
   thinkingSound(js === "thinking");
 }
 
-// H4: a soft tick while Jarvis is thinking, so he can hear it without looking. On by default;
+// H4: a soft tick while HQ is thinking, so he can hear it without looking. On by default;
 // the page remembers the last choice. The audio is made here in the page (Web Audio), started
 // on the Call tap, because the phone only allows sound after a tap.
 const soundBtn = document.getElementById("sound");
 let soundOn = true, audioCtx = null, tickTimer = null;
-try { soundOn = localStorage.getItem("jarvis-sound") !== "off"; } catch (e) {}
+try { soundOn = localStorage.getItem("hq-sound") !== "off"; } catch (e) {}
 function showSound() {
   soundBtn.textContent = soundOn ? "On" : "Off";
   soundBtn.classList.toggle("on", soundOn);
@@ -392,7 +400,7 @@ function showSound() {
 }
 soundBtn.addEventListener("click", () => {
   if (state !== "idle") return;
-  soundOn = !soundOn; try { localStorage.setItem("jarvis-sound", soundOn ? "on" : "off"); } catch (e) {}
+  soundOn = !soundOn; try { localStorage.setItem("hq-sound", soundOn ? "on" : "off"); } catch (e) {}
   showSound();
 });
 function startAudio() {
@@ -417,10 +425,10 @@ function thinkingSound(on) {
 function onServerMessage(ev) {
   try {
     const m = JSON.parse(ev.data);
-    if (m && m.type === "jarvis-state") showOrb(m.state);
-    else if (m && m.type === "jarvis-chat") addChat(m.who, m.text);
-    else if (m && m.type === "jarvis-cancellable") showCancel(m.on === true);
-    else if (m && m.type === "jarvis-cancelled") markCancelled();
+    if (m && m.type === "hq-state") showOrb(m.state);
+    else if (m && m.type === "hq-chat") addChat(m.who, m.text);
+    else if (m && m.type === "hq-cancellable") showCancel(m.on === true);
+    else if (m && m.type === "hq-cancelled") markCancelled();
   } catch (e) {}
 }
 
@@ -449,7 +457,7 @@ function hideCancel() {
   askCancel(false);
   paintCancel();
 }
-// H38: what Jarvis does decides how long the button stays: his next turn hides it, and once she's
+// H38: what HQ does decides how long the button stays: his next turn hides it, and once she's
 // back to "your turn" it goes after 20 seconds (cleared again if she carries on).
 function cancelFollowsOrb(js) {
   if (!cancelShown) return;
@@ -489,7 +497,7 @@ function markCancelled() {
   if (mine.length) mine[mine.length - 1].classList.add("cancelled");
 }
 
-// H6: the chat log. Every line the server sends (what he said, what Jarvis said, her short
+// H6: the chat log. Every line the server sends (what he said, what HQ said, her short
 // waiting lines) is shown as a bubble. Kept on screen until the next call starts; never stored.
 const chatBtn = document.getElementById("chatbtn"), chatEl = document.getElementById("chat"),
       chatLog = document.getElementById("chatlog"), badge = chatBtn.querySelector(".badge");
@@ -533,8 +541,8 @@ function addChat(who, text, old) {
   const empty = chatLog.querySelector(".empty"); if (empty) empty.remove();
   const atEnd = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
   const div = document.createElement("div");
-  // M5: the user's own lines are anything that isn't Jarvis or a filler ("user", or the older name servers before M5 sent).
-  const mine = who !== "jarvis" && who !== "filler";
+  // M5: the user's own lines are anything that isn't HQ or a filler ("user", or the older name servers before M5 sent).
+  const mine = who !== "hq" && who !== "filler";
   div.className = "msg " + (mine ? "me" : who);
   div.textContent = text;
   chatLog.appendChild(div);
@@ -551,7 +559,7 @@ function showChat(open) {
 }
 chatBtn.addEventListener("click", () => showChat(!chatOpen()));
 
-// H18: typing to Jarvis during a call. The text goes to the server like something he said;
+// H18: typing to HQ during a call. The text goes to the server like something he said;
 // she answers out loud as usual, and both lines come back into the log from the server.
 const typeForm = document.getElementById("typeform"), typeIn = document.getElementById("typein"),
       typeSend = document.getElementById("typesend");
@@ -617,7 +625,7 @@ document.getElementById("statclose").addEventListener("click", () => showStatus(
 // during a call; the page remembers the choice on this device.
 const voiceBtn = document.getElementById("voicebtn");
 let voiceOff = false;
-try { voiceOff = localStorage.getItem("jarvis-voice-off") === "on"; } catch (e) {}
+try { voiceOff = localStorage.getItem("hq-voice-off") === "on"; } catch (e) {}
 function applyVoice() {
   audioEl.muted = voiceOff;
   const s = audioEl.srcObject;
@@ -626,7 +634,7 @@ function applyVoice() {
   voiceBtn.setAttribute("aria-label", voiceOff ? "Unmute her voice" : "Mute her voice");
 }
 voiceBtn.addEventListener("click", () => {
-  voiceOff = !voiceOff; try { localStorage.setItem("jarvis-voice-off", voiceOff ? "on" : "off"); } catch (e) {}
+  voiceOff = !voiceOff; try { localStorage.setItem("hq-voice-off", voiceOff ? "on" : "off"); } catch (e) {}
   applyVoice();
   if (state === "live") setMuted(muted);
 });
@@ -652,7 +660,7 @@ function setState(s, text) {
   showMode();
 }
 
-// Mute: the mic sends silence, so Jarvis can finish what it's doing without being cut off.
+// Mute: the mic sends silence, so HQ can finish what it's doing without being cut off.
 // talking: the button is held down (push to talk, H5).
 // F10: while the button is held it stays Talking…, whoever calls this. Before, the 8-second
 // Transcribing timer from the last let-go could fire during the next hold and turn it grey.
@@ -679,7 +687,7 @@ function setTranscribing(on) {
 }
 
 // H5: one button. A short tap mutes or unmutes, as before. Held down, it's push to talk:
-// the mic is open while it's held, and muted again on letting go, so Jarvis answers then.
+// the mic is open while it's held, and muted again on letting go, so HQ answers then.
 // H9: while it's held, the server is told, so it never takes the turn, however long the pause.
 // The mic opens the moment the finger touches, so the first word isn't lost. Only lifting the
 // finger ends a hold: the phone cancelling the touch (a small slide, a long-press gesture) doesn't.

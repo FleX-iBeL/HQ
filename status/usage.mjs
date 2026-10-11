@@ -1,7 +1,7 @@
 /**
  * The usage reading for the status page. A web page cannot ask Claude how much of the plan is
  * used; a session can (the usage tool). So a session saves what the tool said with
- * `node "Jarvis VA/status/save-usage.mjs"`, and the page shows that reading and how old it is.
+ * `node "status/save-usage.mjs"`, and the page shows that reading and how old it is.
  */
 
 /**

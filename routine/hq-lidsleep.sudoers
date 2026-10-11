@@ -1,5 +1,5 @@
-# H45 (Jarvis VA): lets the user flip "keep working with the lid closed" without a password.
+# H45 (HQ): lets the user flip "keep working with the lid closed" without a password.
 # Only these two exact commands, nothing else. Installed once by install-lidsleep.sh, with YOUR_USER
 # replaced by the user who ran it, into
-# /etc/sudoers.d/jarvis-lidsleep. To undo: sudo rm /etc/sudoers.d/jarvis-lidsleep
+# /etc/sudoers.d/hq-lidsleep. To undo: sudo rm /etc/sudoers.d/hq-lidsleep
 YOUR_USER ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0

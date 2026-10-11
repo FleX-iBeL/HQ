@@ -66,7 +66,7 @@ class DropSegmentDone(FrameProcessor):
             await self.push_frame(frame, direction)
 
 
-class JarvisWhisperSTT(WhisperSTTServiceMLX):
+class HQWhisperSTT(WhisperSTTServiceMLX):
     """Pipecat's MLX Whisper, plus a word list (initial prompt) and a warm-up.
 
     The run_stt body follows WhisperSTTServiceMLX.run_stt in pipecat 1.12.0; the changes are
@@ -126,8 +126,8 @@ class JarvisWhisperSTT(WhisperSTTServiceMLX):
             await self.push_frame(SegmentDoneFrame())
 
 
-def make_stt(quiet: bool = False) -> JarvisWhisperSTT:
-    return JarvisWhisperSTT(
+def make_stt(quiet: bool = False) -> HQWhisperSTT:
+    return HQWhisperSTT(
         initial_prompt=config.WHISPER_PROMPT,
         quiet=quiet,
         ttfs_p99_latency=config.WHISPER_P99_SECS,
@@ -168,7 +168,7 @@ def warm_up_tts(tts: KokoroTTSService) -> float:
 def make_brain(model: str | None = None, policy: Policy | None = None, cwd=None,
                free: bool = False, load: str = "deep", persona: str = "") -> ClaudeBrain:
     """With a policy: the full Claude of the user's workspace (A3). Without one, or
-    with JARVIS_PLAIN=1: the plain Claude of A2, working in cwd (default: scratch).
+    with HQ_PLAIN=1: the plain Claude of A2, working in cwd (default: scratch).
     free=True (H7, H8): the plain Claude plus web search and fetching pages, nothing else.
     load (B1): "deep" loads the folder like a chat; "quick" only the lighter part (quick_context.py).
     persona (H29): the agent's own text (agents.persona), added after the call rules."""
@@ -403,10 +403,10 @@ class HoldableTurnStopStrategy(TurnAnalyzerUserTurnStopStrategy):
 TYPED_MAX_CHARS = 2000  # H18: a typed message longer than this is cut
 
 
-async def type_to_jarvis(worker, llm: ClaudeSessionLLMService, call_state, text: str) -> bool:
+async def type_to_agent(worker, llm: ClaudeSessionLLMService, call_state, text: str) -> bool:
     """H18: The user typed a message in the chat on the call page instead of saying it. It goes
     into the turn like spoken words (an LLMMessagesAppendFrame through the user aggregator), so
-    Jarvis answers it out loud as usual and both lines reach the chat log. If she was thinking
+    HQ answers it out loud as usual and both lines reach the chat log. If she was thinking
     or speaking, she is cut off first, as if he had talked over her. Returns False for an
     empty message."""
     from pipecat.frames.frames import InterruptionWorkerFrame, LLMMessagesAppendFrame
@@ -453,7 +453,7 @@ async def late_cancel(worker, llm: ClaudeSessionLLMService, call_state, on_cance
         return False
     if on_cancelled is not None:
         on_cancelled()
-    return await type_to_jarvis(worker, llm, call_state, line)
+    return await type_to_agent(worker, llm, call_state, line)
 
 
 def build_pipeline(
@@ -484,7 +484,7 @@ def build_pipeline(
             user_turn_strategies=UserTurnStrategies(
                 stop=[HoldableTurnStopStrategy(ptt, turn_analyzer=LocalSmartTurnAnalyzerV3())]
             ),
-            # A turn with no words (a cough while Jarvis talks) gets no reply.
+            # A turn with no words (a cough while HQ talks) gets no reply.
             empty_user_turn=None,
         ),
     )

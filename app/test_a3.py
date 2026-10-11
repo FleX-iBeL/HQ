@@ -44,10 +44,10 @@ from call import Call
 from pipeline import build_pipeline
 from test_turn import SR, AudioFeeder, Tap, fmt, wait_for
 
-Q_CALENDAR = "Hey Jarvis, what's on my calendar tomorrow?"
-Q_PERMISSION = "Jarvis, please put a new event in my calendar tomorrow at noon, called test call."
+Q_CALENDAR = "Hey there, what's on my calendar tomorrow?"
+Q_PERMISSION = "Please put a new event in my calendar tomorrow at noon, called test call."
 A_NO = "No, don't."
-Q_TOOL_LONG = "Jarvis, can you search my email for the latest message from my bank?"
+Q_TOOL_LONG = "Can you search my email for the latest message from my bank?"
 CUT_IN = "Wait, stop for a second."
 
 
@@ -59,9 +59,9 @@ def git_status() -> str:
 
 async def main(args) -> bool:
     only = set(args.only.split(",")) if args.only else {"a", "b", "c", "d"}
-    print(f"== Jarvis VA A3 test · brain {config.MODEL_ALIASES.get(args.model, args.model)} · parts {sorted(only)}")
+    print(f"== HQ A3 test · brain {config.MODEL_ALIASES.get(args.model, args.model)} · parts {sorted(only)}")
     status_before = git_status()
-    calls_dir = Path(tempfile.mkdtemp(prefix="jarvis-a3-"))
+    calls_dir = Path(tempfile.mkdtemp(prefix="hq-a3-"))
 
     kokoro = Kokoro(str(config.KOKORO_MODEL), str(config.KOKORO_VOICES))
 
@@ -120,7 +120,7 @@ async def main(args) -> bool:
             "heard": " ".join(v for _, v in after_stt.all("transcript", end - 30)),
         }
         print(f"   Claude got: {turn['sent']!r}")
-        print(f"   Jarvis said: {turn['reply'].strip()!r}")
+        print(f"   She said: {turn['reply'].strip()!r}")
         print(f"   tools: {[n for _, n in turn['tools']]} | fillers: {r['filler_text']}")
         print(f"   after he stopped: filler {fmt(r['filler'])} s | first real words (text) {fmt(r['first_text'])} s"
               f" | first real audio {fmt(r['first_audio'])} s | Claude's own first text {fmt(turn['first_text_s'])} s from sending")
@@ -188,7 +188,7 @@ async def main(args) -> bool:
     status_after = git_status()
     if "d" in only:
         results["d"] = (
-            f"**{config.USER_LABEL}:**" in text and "**Jarvis:**" in text and "Ended" in text
+            f"**{config.USER_LABEL}:**" in text and "**HQ:**" in text and "Ended" in text
             and ("filler" in text or "a" not in only)
             and status_after == status_before
         )

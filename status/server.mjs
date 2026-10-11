@@ -1,9 +1,9 @@
-// The Jarvis VA status page: http://localhost:4748 shows the status block of Jarvis VA/roadmap.md, always fresh.
+// The HQ status page: http://localhost:4748 shows the status block of HQ/roadmap.md, always fresh.
 // Copied from an earlier project's status page (8 October 2026). It serves the page, its two helpers, the roadmap as it is on disk,
-// and the last usage reading a session saved with save-usage.mjs (Jarvis VA/.status/usage.json).
+// and the last usage reading a session saved with save-usage.mjs (.status/usage.json).
 // A web page cannot ask Claude for the usage itself; only a session can, so a session writes it down.
-//   node "Jarvis VA/status/server.mjs"            start it and open it in the browser
-//   node "Jarvis VA/status/server.mjs" --quiet    start it without opening a window
+//   node "status/server.mjs"            start it and open it in the browser
+//   node "status/server.mjs" --quiet    start it without opening a window
 // Starting it a second time does nothing: the page that is already open keeps working.
 // It only listens on this MacBook (127.0.0.1), never on the network. The phone reaches it through
 // Tailscale serve (tailnet only), set up by status/phone.sh (H13).
@@ -17,7 +17,7 @@ import { parseRoadmap } from './parse.mjs';
 import { ROADMAP } from './paths.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const port = Number(process.env.JARVIS_STATUS_PORT ?? 4748);
+const port = Number(process.env.HQ_STATUS_PORT ?? 4748);
 const FILES = {
   '/': ['status/index.html', 'text/html; charset=utf-8'],
   '/index.html': ['status/index.html', 'text/html; charset=utf-8'],
@@ -78,7 +78,7 @@ async function routines() {
     try { return JSON.parse(await readFile(path, 'utf8')); } catch { return null; }
   };
   const data = (await read(join(root, '.status/routines.json'))) ?? {};
-  const dog = await read(join(homedir(), 'Library/Application Support/JarvisVA/watchdog.json'));
+  const dog = await read(join(homedir(), 'Library/Application Support/HQ/watchdog.json'));
   if (dog) data.watchdog = dog;
   // H30: the incident log (what went down, why, what was done, when it was back), newest first.
   const inc = (await read(join(root, '.status/incidents.json')))?.incidents ?? [];
@@ -274,7 +274,7 @@ const server = createServer(async (req, res) => {
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.log(`Jarvis VA status is already running: http://localhost:${port}`);
+    console.log(`HQ status is already running: http://localhost:${port}`);
     process.exit(0);
   }
   throw err;
@@ -284,7 +284,7 @@ server.listen(port, '127.0.0.1', () => {
   sample();
   setInterval(sample, 60000);
   const url = `http://localhost:${port}`;
-  console.log(`Jarvis VA status: ${url}`);
+  console.log(`HQ status: ${url}`);
   // Opens in the default browser. Only on a fresh start, so no second tab appears.
   if (!process.argv.includes('--quiet')) execFile('open', [url]);
 });

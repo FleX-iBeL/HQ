@@ -1,4 +1,4 @@
-# Jarvis VA, installed 8 Oct 2026 with Python 3.12. Top-level: pipecat-ai[kokoro,mlx-whisper,webrtc,runner], kokoro-onnx, soundfile, mlx-whisper.
+# HQ, installed 8 Oct 2026 with Python 3.12. Top-level: pipecat-ai[kokoro,mlx-whisper,webrtc,runner], kokoro-onnx, soundfile, mlx-whisper.
 # A2 (8 Oct 2026): claude-agent-sdk, the brain on the Max login (drives /opt/homebrew/bin/claude).
 # faster-whisper (+ tokenizers, ctranslate2, av) is installed because Pipecat's whisper module imports it even for the MLX class; install it as: uv pip install --only-binary :all: tokenizers faster-whisper==1.2.1
 agent-detector==2.0.0

@@ -13,16 +13,16 @@ The waiting jobs (ready or held) run in the order they stand on the list, top fi
 a new job goes at the bottom, and "move" changes its place. The job numbers never change.
 
 usage (from the workspace):
-  python3 "Jarvis VA/routine/jobs.py" add "TEXT" [--past-the-line]   a call's let's go: the job is ready
-  python3 "Jarvis VA/routine/jobs.py" list                           the queue, as on the roadmap
-  python3 "Jarvis VA/routine/jobs.py" stop [N]                       stop the running job (or cancel ready job N)
-  python3 "Jarvis VA/routine/jobs.py" overrule N                     job N may go past the 5-hour line (the weekly line still counts)
-  python3 "Jarvis VA/routine/jobs.py" move N top|up|down|bottom      move waiting job N in the line (H39)
-  python3 "Jarvis VA/routine/jobs.py" move N before|after M          put waiting job N just before or after job M
-  python3 "Jarvis VA/routine/jobs.py" done N                         the job's own chat, when it's finished
-  python3 "Jarvis VA/routine/jobs.py" held N                         the job's own chat, when the usage says STOP
-  python3 "Jarvis VA/routine/jobs.py" off | on                       jobs from calls off or on
-  python3 "Jarvis VA/routine/jobs.py" mail-off | mail-on             the hourly mail check off or on (L8)
+  python3 "routine/jobs.py" add "TEXT" [--past-the-line]   a call's let's go: the job is ready
+  python3 "routine/jobs.py" list                           the queue, as on the roadmap
+  python3 "routine/jobs.py" stop [N]                       stop the running job (or cancel ready job N)
+  python3 "routine/jobs.py" overrule N                     job N may go past the 5-hour line (the weekly line still counts)
+  python3 "routine/jobs.py" move N top|up|down|bottom      move waiting job N in the line (H39)
+  python3 "routine/jobs.py" move N before|after M          put waiting job N just before or after job M
+  python3 "routine/jobs.py" done N                         the job's own chat, when it's finished
+  python3 "routine/jobs.py" held N                         the job's own chat, when the usage says STOP
+  python3 "routine/jobs.py" off | on                       jobs from calls off or on
+  python3 "routine/jobs.py" mail-off | mail-on             the hourly mail check off or on (L8)
 Used by the routine itself: next, mark N STATE.
 """
 import fcntl, json, os, re, sys, time

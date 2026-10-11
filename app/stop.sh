@@ -1,14 +1,14 @@
 #!/bin/zsh
-# Jarvis VA: stop the call server and close the phone line (Tailscale serve on port 8443).
+# HQ: stop the call server and close the phone line (Tailscale serve on port 8443).
 # If a call is still running, hang up first: the after-call work (writing down, commit, push)
 # gets up to a minute to finish before the server is stopped.
 cd "$(dirname "$0")/.." || exit 1
-PORT="${JARVIS_PORT:-7860}"
+PORT="${HQ_PORT:-7860}"
 TS=/usr/local/bin/tailscale
-PIDFILE="${JARVIS_PID_FILE:-$PWD/scratch/server.pid}"
-# JARVIS_NO_PHONE=1 (tests, on another port): the Tailscale phone line is left alone.
+PIDFILE="${HQ_PID_FILE:-$PWD/scratch/server.pid}"
+# HQ_NO_PHONE=1 (tests, on another port): the Tailscale phone line is left alone.
 
-[[ -z "$JARVIS_NO_PHONE" ]] && "$TS" serve --https=8443 off >/dev/null 2>&1 && echo "Phone line off."
+[[ -z "$HQ_NO_PHONE" ]] && "$TS" serve --https=8443 off >/dev/null 2>&1 && echo "Phone line off."
 PIDS=$(lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null)
 # lsof can come back empty without the server being gone (9 October 03:10: "stopped", and the old
 # version kept answering). The pid file knows it too; only a process that really is the bot counts.
@@ -24,7 +24,7 @@ running() {
   return 1
 }
 if [[ -z "$PIDS" ]]; then
-  echo "Jarvis was not running."
+  echo "HQ was not running."
 else
   kill -INT $=PIDS   # a polite stop: lets a call's after-call work finish
   for i in {1..60}; do
@@ -32,9 +32,9 @@ else
     running || break
   done
   if running; then
-    kill -TERM $=PIDS; sleep 2; echo "Jarvis stopped (forced)."
+    kill -TERM $=PIDS; sleep 2; echo "HQ stopped (forced)."
   else
-    echo "Jarvis stopped."
+    echo "HQ stopped."
   fi
 fi
 rm -f "$PIDFILE"

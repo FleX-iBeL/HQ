@@ -50,9 +50,9 @@ PAGE = os.path.join(HQ, "install", "checklist.html")
 PAGE_PORT = int(os.environ.get("HQ_INSTALL_PORT", "4749"))
 FAKE = os.environ.get("HQ_INSTALL_FAKE") == "1"
 FORCE_FAIL = os.environ.get("HQ_INSTALL_FAIL", "")
-SUPPORT = os.path.expanduser("~/Library/Application Support/JarvisVA")
+SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
 HEARTBEAT = os.path.join(SUPPORT, "heartbeat")
-HELPER_APP = os.path.expanduser("~/Applications/Jarvis Routine.app")
+HELPER_APP = os.path.expanduser("~/Applications/HQ Routine.app")
 AGENTS = os.path.expanduser("~/Library/LaunchAgents")
 
 
@@ -363,7 +363,8 @@ class Installer:
         # One start at login only: one installed under another id before (an older HQ) is taken out.
         suffix = "." + HELPER_AGENT.split(".")[-1] + ".plist"
         for old in os.listdir(AGENTS):
-            if old.endswith(suffix) and old != HELPER_AGENT + ".plist":
+            # (Also the id from before H54, 11 October 2026: .jarvis-va.)
+            if (old.endswith(suffix) or old.endswith(".jarvis-va.plist")) and old != HELPER_AGENT + ".plist":
                 subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{old[:-len('.plist')]}"], capture_output=True)
                 os.remove(os.path.join(AGENTS, old))
         open(dest, "w").write(plist)
@@ -371,11 +372,11 @@ class Installer:
         sh(["launchctl", "bootstrap", f"gui/{os.getuid()}", dest])
         before = os.path.getmtime(HEARTBEAT) if os.path.exists(HEARTBEAT) else 0
         sh(["/usr/bin/open", "-a", HELPER_APP])
-        say("macOS asks whether Jarvis Routine may reach your files (Documents): click Allow. Waiting up to 3 minutes.")
+        say("macOS asks whether HQ Routine may reach your files (Documents): click Allow. Waiting up to 3 minutes.")
         if not wait_for(lambda: os.path.exists(HEARTBEAT) and os.path.getmtime(HEARTBEAT) > before, 180, 2):
             raise Fail("the helper started but didn't run its routine within 3 minutes",
                        "Most likely the Documents question wasn't answered: System Settings → Privacy & Security → "
-                       "Files and Folders → Jarvis Routine → Documents on. Log: scratch/routine/routine.log")
+                       "Files and Folders → HQ Routine → Documents on. Log: scratch/routine/routine.log")
         return "built, starts at login, runs every minute (Documents allowed)"
 
     def terminal(self):
@@ -427,7 +428,7 @@ class Installer:
             return "simulated (test)"
         sh(["/bin/zsh", os.path.join(HQ, "routine", "install-watchdog.sh")])
         if not agent_loaded(WATCHDOG_AGENT):
-            raise Fail("the watchdog didn't load", "Log: ~/Library/Application Support/JarvisVA/watchdog.out")
+            raise Fail("the watchdog didn't load", "Log: ~/Library/Application Support/HQ/watchdog.out")
         return "every 5 minutes and at login"
 
     def desktop(self):
@@ -486,7 +487,7 @@ class Installer:
         if FAKE:
             return "simulated (test)"
         if not http_ok("http://127.0.0.1:7860/"):
-            env = {} if (which("tailscale") and "tailscale" not in self.skip) else {"JARVIS_NO_PHONE": "1"}
+            env = {} if (which("tailscale") and "tailscale" not in self.skip) else {"HQ_NO_PHONE": "1"}
             sh(["/bin/zsh", os.path.join(HQ, "app", "start.sh")], env=env, timeout=60)
         if not wait_for(lambda: http_ok("http://127.0.0.1:7860/"), 90, 2):
             raise Fail("the call line didn't answer on port 7860", "Log: scratch/server.log")
@@ -515,7 +516,7 @@ class Installer:
     def t_workspace(self):
         if not os.path.isdir(os.path.realpath(WORKSPACE)):
             raise Fail("there's no workspace", "Run the installer without --test-only.")
-        need = ["CLAUDE.md", os.path.join("Jarvis VA", "roadmap.md")]
+        need = ["CLAUDE.md", os.path.join("HQ", "roadmap.md")]
         missing = [n for n in need if not os.path.exists(os.path.join(WORKSPACE, n))]
         if missing:
             raise Fail("the workspace misses " + ", ".join(missing), "Compare it with HQ's template folder.")
@@ -548,7 +549,7 @@ class Installer:
             raise Fail("the start at login isn't loaded", "Run the installer without --test-only.")
         if not wait_for(lambda: (heartbeat_age() or 999) < 150, 130, 5):
             raise Fail("the helper hasn't run its routine in the last few minutes",
-                       "Privacy & Security → Files and Folders → Jarvis Routine → Documents on; log: scratch/routine/routine.log")
+                       "Privacy & Security → Files and Folders → HQ Routine → Documents on; log: scratch/routine/routine.log")
         return "loaded at login, ran its routine %d seconds ago" % (heartbeat_age() or 0)
 
     def t_terminal(self):

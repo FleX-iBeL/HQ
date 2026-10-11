@@ -11,7 +11,7 @@ So it is as fine-grained as the commits: a state that came and went between two 
 
 Writes .status/jobs-backfill.json: {"made": t, "segments": [{"n", "st", "start", "end"}], "texts": {n: the job}}. The status
 server only uses it for the time before its own minute-by-minute record starts.
-    python3 "Jarvis VA/status/backfill-jobs.py"
+    python3 "status/backfill-jobs.py"
 """
 import datetime as dt
 import json
@@ -44,14 +44,18 @@ def at(day: dt.date, hhmm: str, not_before: float | None = None) -> float:
 
 def main() -> None:
     versions = []  # (commit time, text), oldest first
-    for line in reversed(git("log", "--format=%H %ct", "--", "Jarvis VA/roadmap.md").split("\n")):
+    # The roadmap's folder had another name before H54 (11 October 2026); its saved versions are there.
+    paths = ("HQ/roadmap.md", "Jarvis VA/roadmap.md")
+    for line in reversed(git("log", "--format=%H %ct", "--", *paths).split("\n")):
         if not line.strip():
             continue
         h, ct = line.split()
-        try:
-            versions.append((int(ct), git("show", f"{h}:Jarvis VA/roadmap.md")))
-        except subprocess.CalledProcessError:
-            pass
+        for path in paths:
+            try:
+                versions.append((int(ct), git("show", f"{h}:{path}")))
+                break
+            except subprocess.CalledProcessError:
+                pass
     now_text = Path(hqpaths.ROADMAP).read_text()
     versions.append((int(dt.datetime.now().timestamp()), now_text))
 

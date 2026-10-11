@@ -1,8 +1,8 @@
 // Saves a usage reading for the status page, and says whether the work may go on.
 // Copied from an earlier project's status page (8 October 2026).
-//   node "Jarvis VA/status/save-usage.mjs" <<'JSON'    (then the usage tool's output as JSON, then JSON)
-//   node "Jarvis VA/status/save-usage.mjs" --by "Opus 5.5 · A2" <<'JSON' …
-// Writes Jarvis VA/.status/usage.json (not in version history). The stop line is the
+//   node "status/save-usage.mjs" <<'JSON'    (then the usage tool's output as JSON, then JSON)
+//   node "status/save-usage.mjs" --by "Opus 5.5 · A2" <<'JSON' …
+// Writes .status/usage.json (not in version history). The stop line is the
 // "**Usage limit: N%**" in the roadmap; for the weekly limits it is earned over the week (stopLine in usage.mjs).
 // Ends with code 0 when work may go on, 2 when it has to stop.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -14,11 +14,11 @@ import { stopLine, usageReading, usageVerdict } from './usage.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const flag = process.argv.indexOf('--by');
-const by = flag >= 0 ? (process.argv[flag + 1] ?? '') : 'Jarvis VA session';
+const by = flag >= 0 ? (process.argv[flag + 1] ?? '') : 'HQ session';
 
 // Phase L: a job the routine started in a Terminal window has no usage tool. Its status line
 // (routine/statusline.py) saves what Claude Code knows of the plan limits; --statusline reads that.
-//   node "Jarvis VA/status/save-usage.mjs" --statusline --by "Opus 5.5 · job 3"
+//   node "status/save-usage.mjs" --statusline --by "Opus 5.5 · job 3"
 // --gate: the routine's check before it starts a job, on the last saved reading (nothing is
 // written; a window whose reset has passed counts as empty).
 // F13: --weekly-only (with --gate or --statusline) for a job let past the line: it only goes past

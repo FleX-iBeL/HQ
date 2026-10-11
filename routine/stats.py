@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""H44: the totals Activity Monitor shows, every minute, run by the Jarvis Routine helper (tick.py). No
+"""H44: the totals Activity Monitor shows, every minute, run by the HQ Routine helper (tick.py). No
 Claude, no usage, no password. 10 October 2026 (call at 19:46): "maybe we also want a good CPU.
 Or GPU. Or both, and memory there. And maybe read-write. Just the things you see in the activity monitor.
 And network too. So CPU, memory. Disk and network and then just the totals of it" and "it's not that
@@ -16,11 +16,11 @@ important. But it's just fun to have there."
   plus the swap used.
 - No alarms and no colours on any light: it's just there to look at. No routine line either.
 
-Writes Jarvis VA/.status/stats.json (the latest reading) and appends one line a minute to
+Writes .status/stats.json (the latest reading) and appends one line a minute to
 .status/stats-history.jsonl (a day kept).
 
-    python3 "Jarvis VA/routine/stats.py"          one reading, written and printed
-    python3 "Jarvis VA/routine/stats.py" --dry    one reading (over about two seconds), printed only
+    python3 "routine/stats.py"          one reading, written and printed
+    python3 "routine/stats.py" --dry    one reading (over about two seconds), printed only
 """
 import json, os, re, subprocess, sys, tempfile, time
 

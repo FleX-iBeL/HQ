@@ -37,7 +37,7 @@ Run them before and after every update; they print a short pass/fail table at th
      mail check, and opens it hidden in a window that closes itself; it runs from an empty folder
   21 the usage check reads the real usage: one tiny Haiku run from the empty folder saves the
      5-hour and weekly numbers for the status page, Weekly Fable kept from a normal chat
-  22 typing to Jarvis during a call (H18): the call page has a text box in the chat while on a call
+  22 typing to HQ during a call (H18): the call page has a text box in the chat while on a call
      and sends what he types; on the call it goes in as his turn (marked typed in the transcript,
      and Claude is told), she answers out loud, and both lines reach the chat log
   23 the call page (H24): a short buzz the moment holding the talk button turns into talking
@@ -122,7 +122,7 @@ Run them before and after every update; they print a short pass/fail table at th
      box, not inside the Hang up question; in the browser and on the phone space does nothing
 
 Safe to run while the live phone line is up: the flows use their own server on port 7871
-(JARVIS_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
+(HQ_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
 changes, no git, no calendar writes, never email) and a scratch folder that is deleted
 at the end. Flows 2-7 use Claude turns on the Max plan: about ten for a full run (one
 Opus turn, for the Deep greeting). Flow 11 uses four more (reading a web page, the free call's warm-up and its answer).
@@ -159,19 +159,19 @@ ROADMAP = config.DATA / "roadmap.md"
 
 def site_roadmap(site: Path) -> Path:
     """A test copy of HQ (site/status, site/routine, ...) finds its roadmap where HQ does: in its workspace."""
-    p = site / "workspace" / "Jarvis VA" / "roadmap.md"
+    p = site / "workspace" / "HQ" / "roadmap.md"
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
-TEST_PORT = int(os.environ.get("JARVIS_TEST_PORT", "7871"))
+TEST_PORT = int(os.environ.get("HQ_TEST_PORT", "7871"))
 TEST_URL = f"http://127.0.0.1:{TEST_PORT}"
 GREETING_WITHIN_SECS = 15.0  # from "connected" to the first sound
 FIRST_AUDIO_WITHIN_SECS = 15.0  # a plain question: the user stops talking -> first sound (seen: 4 to 7 s)
 
-Q_PLAIN = "Hey Jarvis, what's a good way to start a quiet morning? Keep it short."
-Q_CALENDAR = "Hey Jarvis, what's on my calendar tomorrow?"
+Q_PLAIN = "Hey there, what's a good way to start a quiet morning? Keep it short."
+Q_CALENDAR = "Hey there, what's on my calendar tomorrow?"
 A_NO = "No, don't."
-Q_HELLO = "Hey Jarvis, say hello to me in four words."
-Q_FREE = "Hey Jarvis, what is the capital of France? Answer in one short sentence."
+Q_HELLO = "Hey there, say hello to me in four words."
+Q_FREE = "Hey there, what is the capital of France? Answer in one short sentence."
 Q_TYPED = "I can't talk right now. What is the capital of Italy? Answer in one short sentence."
 Q_CANCEL = "What is the capital of France? Answer in one short sentence."  # H31: cancelled, never answered
 Q_AFTER_CANCEL = "What is two plus two? Answer in one short sentence."
@@ -276,7 +276,7 @@ def git_state() -> tuple[str, str]:
 
 class Server:
     """Our own call server on another port. Never the live one: the port is checked, Tailscale
-    serve is switched off for these scripts (JARVIS_NO_PHONE), and log and pid file are apart."""
+    serve is switched off for these scripts (HQ_NO_PHONE), and log and pid file are apart."""
 
     def __init__(self, tmp: Path):
         assert TEST_PORT != config.PORT, "the test server must not use the live port"
@@ -286,8 +286,8 @@ class Server:
         self.calls = tmp / "calls-server"
         self.env = {
             **os.environ,
-            "JARVIS_PORT": str(TEST_PORT), "JARVIS_NO_PHONE": "1", "JARVIS_WRAP_UP": "dry",
-            "JARVIS_CALLS": str(self.calls), "JARVIS_LOG": str(self.log), "JARVIS_PID_FILE": str(self.pidfile),
+            "HQ_PORT": str(TEST_PORT), "HQ_NO_PHONE": "1", "HQ_WRAP_UP": "dry",
+            "HQ_CALLS": str(self.calls), "HQ_LOG": str(self.log), "HQ_PID_FILE": str(self.pidfile),
         }
 
     @property
@@ -408,7 +408,7 @@ class Live:
             "heard": " ".join(v for _, v in self.after_stt.all("transcript", end - 30)),
             "reply": " ".join(t["reply"].strip() for t in llm.turns[n:]).strip(),
         }
-        say(f"   Jarvis said: {r['reply']!r}")
+        say(f"   She said: {r['reply']!r}")
         say(f"   tools {[n_ for _, n_ in turn['tools']]} | fillers {r['filler_text']} | after he stopped: filler "
             f"{fmt(r['filler']).strip()} s, first words {fmt(r['first_text']).strip()} s, first sound {fmt(r['first_audio']).strip()} s")
         return r
@@ -486,7 +486,7 @@ class Run:
         need('id="btn"' in page and 'id="mute"' in page, "the call button or the mute button is missing")
         need('id="orb"' in page and 'id="sound"' in page and "pointerdown" in page,
              "the thinking animation, the thinking sound switch or push to talk is missing (H3-H5)")
-        need('id="chatbtn"' in page and 'id="chatlog"' in page and "jarvis-chat" in page,
+        need('id="chatbtn"' in page and 'id="chatlog"' in page and "hq-chat" in page,
              "the chat bubble and its log are missing (H6)")
         need('id="free"' in page and 'data-mode="free"' not in page and "free, voice" in page,
              "Free is not a switch on top of Quick and Deep (H8)")
@@ -547,9 +547,9 @@ class Run:
                 m = json.loads(msg)
             except (TypeError, ValueError):
                 return
-            if isinstance(m, dict) and m.get("type") == "jarvis-state":
+            if isinstance(m, dict) and m.get("type") == "hq-state":
                 states.append(m.get("state"))
-            elif isinstance(m, dict) and m.get("type") == "jarvis-chat":
+            elif isinstance(m, dict) and m.get("type") == "hq-chat":
                 chats.append((m.get("who"), m.get("text")))
 
         @pc.on("track")
@@ -671,7 +671,7 @@ class Run:
         await asyncio.sleep(0.5)
         heard = norm(" ".join(t["words"] for t in llm.turns[n:]))
         reply = norm(" ".join(t["reply"] for t in llm.turns[n:]))
-        say(f"   turns {len(llm.turns) - n}, heard {heard!r}, Jarvis said {reply!r}")
+        say(f"   turns {len(llm.turns) - n}, heard {heard!r}, she said {reply!r}")
         need(len(llm.turns) - n == 1, f"the held turn was split in {len(llm.turns) - n}")
         need("france" in heard and "germany" in heard, f"not both halves in one turn: {heard!r}")
         need("paris" in reply and "berlin" in reply, f"the answer missed a half: {reply!r}")
@@ -711,7 +711,7 @@ class Run:
         await wait_for(lambda: len(llm.turns) > n, 20, "her turn after letting go")
         heard, reply, turns = await self._wait_reply(live, n, time.perf_counter() - 30)
         seen = [st for ts, st in live.call_state.history if ts >= t_go]
-        say(f"   turns {turns}, heard {heard!r}, Jarvis said {reply!r}; page told: {seen}")
+        say(f"   turns {turns}, heard {heard!r}, she said {reply!r}; page told: {seen}")
         need(turns == 1, f"letting go split the turn in {turns}: the last words came in late")
         need("japan" in heard and "spain" in heard, f"the last words were lost: {heard!r}")
         need("tokyo" in reply and "madrid" in reply, f"the answer missed a half: {reply!r}")
@@ -736,7 +736,7 @@ class Run:
         await wait_for(lambda: len(llm.turns) > n, 30, "her turn")
         heard, reply, turns = await self._wait_reply(live, n, time.perf_counter() - 30)
         seen = [st for ts, st in live.call_state.history if ts >= t0]
-        say(f"   turns {turns}, heard {heard!r}, Jarvis said {reply!r}; page told: {seen}")
+        say(f"   turns {turns}, heard {heard!r}, she said {reply!r}; page told: {seen}")
         need(turns == 1, f"a {pause:.1f} s pause split the sentence in {turns} turns")
         need("austria" in heard and "portugal" in heard, f"not both halves in one turn: {heard!r}")
         need("vienna" in reply and "lisbon" in reply, f"the answer missed a half: {reply!r}")
@@ -770,7 +770,7 @@ class Run:
         start = len(live.call.policy.log)
         # A day with no doubt about which one is meant ("tomorrow" at four in the morning is ambiguous).
         day = (datetime.now() + timedelta(days=2)).strftime("%A")
-        r1 = await live.ask(f"Jarvis, please put a new event in my calendar on {day} at noon, called test call.",
+        r1 = await live.ask(f"Please put a new event in my calendar on {day} at noon, called test call.",
                             "needs a yes")
         asked = [(t, d.verdict) for t, _, d in live.call.policy.log[start:] if d.verdict == "ask"]
         say(f"   asked about: {asked} | pending: {[q for _, _, q in live.call.policy.pending]}")
@@ -819,7 +819,7 @@ class Run:
         text = path.read_text() if path.exists() else ""
         say(f"transcript {path.name}: {len(text.splitlines())} lines; after-call work (dry) said: {call.wrap_up_reply!r}")
         need(path.exists(), "no transcript was saved")
-        need(f"**{config.USER_LABEL}:**" in text and "**Jarvis:**" in text and "Ended" in text, "the transcript misses his words, hers or the end")
+        need(f"**{config.USER_LABEL}:**" in text and "**HQ:**" in text and "Ended" in text, "the transcript misses his words, hers or the end")
         need(call.wrap_up_reply and call.wrap_up_reply.strip(), "the after-call work said nothing")
         after = git_state()
         if after != live.git_before:
@@ -1011,7 +1011,7 @@ console.log(JSON.stringify({{
                 m = json.loads(msg)
             except (TypeError, ValueError):
                 return
-            if isinstance(m, dict) and m.get("type") == "jarvis-chat":
+            if isinstance(m, dict) and m.get("type") == "hq-chat":
                 chats.append((m.get("who"), m.get("text")))
 
         @pc.on("track")
@@ -1042,7 +1042,7 @@ console.log(JSON.stringify({{
             await pc.setRemoteDescription(RTCSessionDescription(answer["sdp"], answer["type"]))
             t0 = time.perf_counter()
             # A pause in the question can split it in two turns; wait for an answer that wasn't cut off.
-            while not any(w == "jarvis" and not t.endswith("(cut off)") for w, t in chats) and time.perf_counter() - t0 < 60:
+            while not any(w == "hq" and not t.endswith("(cut off)") for w, t in chats) and time.perf_counter() - t0 < 60:
                 await asyncio.sleep(0.2)
             await asyncio.sleep(1)
             dc.send(json.dumps({"type": "hangup"}))
@@ -1060,7 +1060,7 @@ console.log(JSON.stringify({{
         say(f"   the page got: {chats}")
         need("free mode, nothing kept" in log, "the server did not start the call in free mode")
         mine = [t for w, t in chats if w == "user"]
-        hers = [t for w, t in chats if w == "jarvis"]
+        hers = [t for w, t in chats if w == "hq"]
         # A pause can split the question in two turns, and the second half may come after the answer.
         need(mine and "capital of france" in norm(" ".join(mine)), f"the page did not get his words (H6): {mine}")
         need(hers and "paris" in norm(" ".join(hers)), f"no answer on the page, or a wrong one (H6): {hers}")
@@ -1084,20 +1084,20 @@ console.log(JSON.stringify({{
         need('type: "typed", text' in page, "the call page doesn't send what he types")
         need('typeForm.classList.toggle("show", state === "live")' in page, "the text box isn't tied to being on a call")
         bot_src = (APP / "bot.py").read_text()
-        need('message.get("type") == "typed"' in bot_src and "type_to_jarvis(worker, call.llm, call_state" in bot_src,
-             "the call server doesn't pass a typed message on to Jarvis")
+        need('message.get("type") == "typed"' in bot_src and "type_to_agent(worker, call.llm, call_state" in bot_src,
+             "the call server doesn't pass a typed message on to HQ")
 
-        from pipeline import type_to_jarvis
+        from pipeline import type_to_agent
 
         live = await self.get_live()
         llm = live.llm
         lines: list[tuple[str, str]] = []
         live.call.transcript.on_line = lambda who, text: lines.append((who, text))
-        need(not await type_to_jarvis(live.worker, llm, live.call_state, "   "), "an empty message was sent on")
+        need(not await type_to_agent(live.worker, llm, live.call_state, "   "), "an empty message was sent on")
         n = len(llm.turns)
         say(f"typing: {Q_TYPED}")
         t0 = time.perf_counter()
-        need(await type_to_jarvis(live.worker, llm, live.call_state, Q_TYPED), "the typed message was refused")
+        need(await type_to_agent(live.worker, llm, live.call_state, Q_TYPED), "the typed message was refused")
         await live.wait_for(lambda: len(llm.turns) > n and not llm._replying, 90, "Claude's reply to the typed message")
         await live.wait_for(lambda: not live.call.fillers.talking
                             and live.after_tts.first("tts_stopped", t0)[0] is not None, 30, "the voice to finish")
@@ -1105,12 +1105,12 @@ console.log(JSON.stringify({{
         turn = llm.turns[n]
         t_aud, _ = live.after_tts.first("audio", t0)
         reply = " ".join(t["reply"].strip() for t in llm.turns[n:]).strip()
-        say(f"   Jarvis said: {reply!r}; first sound {(t_aud - t0) if t_aud else float('nan'):.1f} s after sending")
+        say(f"   She said: {reply!r}; first sound {(t_aud - t0) if t_aud else float('nan'):.1f} s after sending")
         need(turn["words"] == Q_TYPED, f"the turn didn't get his typed words: {turn['words']!r}")
         need("typed this in the chat" in turn["sent"], "Claude wasn't told the message was typed")
         need("rome" in norm(reply), f"no answer, or a wrong one: {reply!r}")
         need(t_aud is not None, "she didn't answer out loud")
-        need(("user", Q_TYPED) in lines and any(w == "jarvis" and "rome" in norm(t) for w, t in lines),
+        need(("user", Q_TYPED) in lines and any(w == "hq" and "rome" in norm(t) for w, t in lines),
              f"the chat log didn't get both lines: {lines}")
         tx = live.call.transcript.path.read_text()
         need(f"**{config.USER_LABEL}:** {Q_TYPED} *(typed)*" in tx, "the transcript doesn't mark the line as typed")
@@ -1241,7 +1241,7 @@ console.log(JSON.stringify({{
         jv = ROOT
         rm = self.tmp / "roadmap-L.md"
         rm.write_text(ROADMAP.read_text())
-        env = {**os.environ, "JARVIS_ROADMAP": str(rm)}
+        env = {**os.environ, "HQ_ROADMAP": str(rm)}
         def jobs(*a):
             r = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
             need(r.returncode == 0, f"jobs.py {a[0]} failed: {r.stderr.strip()}")
@@ -1283,8 +1283,10 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         need(pol.decide("Bash", {"command": f"{q_} stop"}).verdict == ALLOW, "a call can't stop a job")
         need(pol.decide("Bash", {"command": f"{q_} done 3"}).verdict == DENY, "a call may mark a job done")
         need("jobs.py\" add" in config.VOICE_RULES and "clear go" in config.VOICE_RULES, "the call rules don't say how to queue a job")
-        app = Path.home() / "Applications/Jarvis Routine.app"
-        need(app.exists(), "the Jarvis Routine helper app isn't built")
+        # Until it's rebuilt under its new name (H54, M9), the helper from before still runs the routine.
+        app = next((a for a in (Path.home() / "Applications/HQ Routine.app", Path.home() / "Applications/Jarvis Routine.app")
+                    if a.exists()), Path.home() / "Applications/HQ Routine.app")
+        need(app.exists(), "the HQ Routine helper app isn't built")
         need("--no-chrome" in (jv / "routine/tick.py").read_text() and "-g" in (jv / "routine/tick.py").read_text(),
              "jobs would ask about Chrome or open in front")
         # L7: windows close themselves once their chat ends; L8: the mail check is started by the
@@ -1318,7 +1320,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         need("usage()" in main_.split("tick()")[0], "the routine doesn't run the usage check every minute")
         need("--output-format stream-json" in tick and "{json.dumps(STREAM)}" in tick,
              "the mail check doesn't save the usage its own run brings back")
-        need("usage-check.command" not in tick and "Jarvis usage check" not in tick,
+        need("usage-check.command" not in tick,
              "the routine still opens a window for a usage check")
         uc = (jv / "routine/usage-check.py").read_text()
         need("bin/claude" not in uc and '"-p"' not in uc, "the usage check can still start Claude (a paid run)")
@@ -1485,18 +1487,18 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         need('id="cancel"' in page and ">Cancel<" in page, "the Cancel button is missing from the call page")
         need(page.index('id="mute"') < page.index('id="cancel"') < page.index('id="orbwrap"'),
              "Cancel doesn't sit next to the talk button")
-        need('m.type === "jarvis-cancellable") showCancel(m.on === true)' in page,
+        need('m.type === "hq-cancellable") showCancel(m.on === true)' in page,
              "Cancel isn't tied to the server saying it can still be taken back")
         tap = page.split("function sendCancel() {", 1)[1].split("\n}", 1)[0]  # H38: the tap goes through sendCancel
         need('type: "cancel"' in tap and 'showOrb("listening")' in tap,
              "a tap on Cancel doesn't send it, or the thinking circle and tick don't stop at once")
-        need('m.type === "jarvis-cancelled") markCancelled()' in page and ".me.cancelled" in page,
+        need('m.type === "hq-cancelled") markCancelled()' in page and ".me.cancelled" in page,
              "the chat doesn't mark his line as cancelled")
         bot_src = (APP / "bot.py").read_text()
         need('message.get("type") == "cancel"' in bot_src and "cancel_turn(ptt.user_aggregator, call.llm, call_state)" in bot_src
              and "call.llm.on_cancellable = cancellable" in bot_src, "the call server doesn't handle Cancel")
 
-        from pipeline import cancel_turn, type_to_jarvis
+        from pipeline import cancel_turn, type_to_agent
 
         live = await self.get_live()
         llm = live.llm
@@ -1506,7 +1508,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         llm.on_cancellable = flags.append
         n = len(llm.turns)
         say(f"typing, then cancelling: {Q_CANCEL}")
-        need(await type_to_jarvis(live.worker, llm, live.call_state, Q_CANCEL), "the typed message was refused")
+        need(await type_to_agent(live.worker, llm, live.call_state, Q_CANCEL), "the typed message was refused")
         await live.wait_for(lambda: llm.cancellable, 30, "her turn to start (Cancel showing)")
         t0 = time.perf_counter()
         need(await cancel_turn(agg, llm, live.call_state), "Cancel was refused while she was thinking")
@@ -1526,13 +1528,13 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         m = len(llm.turns)
         say(f"typing: {Q_AFTER_CANCEL}")
         t1 = time.perf_counter()
-        need(await type_to_jarvis(live.worker, llm, live.call_state, Q_AFTER_CANCEL), "the second message was refused")
+        need(await type_to_agent(live.worker, llm, live.call_state, Q_AFTER_CANCEL), "the second message was refused")
         await live.wait_for(lambda: len(llm.turns) > m and not llm._replying, 90, "Claude's reply to the second question")
         await live.wait_for(lambda: not live.call.fillers.talking
                             and live.after_tts.first("tts_stopped", t1)[0] is not None, 30, "the voice to finish")
         nxt = llm.turns[m]
         reply = " ".join(t["reply"].strip() for t in llm.turns[m:]).strip()
-        say(f"   Jarvis said: {reply!r}")
+        say(f"   She said: {reply!r}")
         need(nxt["words"] == Q_AFTER_CANCEL, f"the cancelled words came back into the next turn: {nxt['words']!r}")
         need("cancelled what he said" in nxt["sent"] and Q_CANCEL[:20] in nxt["sent"], "Claude wasn't told about the cancel")
         need(f"{config.USER} cut in" not in nxt["sent"], "the cancel was told to Claude as a cut-in")
@@ -1638,7 +1640,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         with urllib.request.urlopen("http://127.0.0.1:4748/routines.json", timeout=5) as resp:
             need("incidents" in json.loads(resp.read()), "the status server doesn't serve the incident log")
         wd = (jv / "routine/watchdog.py").read_text()
-        installed = Path.home() / "Library/Application Support/JarvisVA/watchdog.py"
+        installed = Path.home() / "Library/Application Support/HQ/watchdog.py"
         need("events.jsonl" in wd and installed.exists() and installed.read_text() == wd,
              "the watchdog doesn't log what it fixes, or the installed one is old")
         t = (jv / "routine/tick.py").read_text()
@@ -1668,7 +1670,10 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         need("micOpen(false)" in fn and "TALK_SOUND_MS" in fn and "if (holding && !muted) micOpen(true)" in fn,
              "the mic isn't kept silent while the sound plays")
         down = page.split('muteBtn.addEventListener("pointerdown"', 1)[1].split("});", 1)[0]
-        need("startAudio()" in down, "the audio isn't unlocked inside the touch (the iPhone may stay silent)")
+        # Since H49 the touch and the space bar share pressStart, which unlocks the audio.
+        press = page.split("function pressStart(", 1)[1].split("\n}", 1)[0]
+        need("startAudio()" in down or ("pressStart(" in down and "startAudio()" in press),
+             "the audio isn't unlocked inside the touch (the iPhone may stay silent)")
         need("if (oldIos()) { try { click(); }" in page and 'setAttribute("switch", "")' in page,
              "the H24 buzz or click changed")
         return f"low sound ({int(max(freqs))}→{int(min(freqs))} Hz, tick {int(tick_low)}+ Hz) on Talking…, not on a tap; mic silent while it sounds; audio unlocked in the touch"
@@ -1687,7 +1692,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
   const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
   const press = () => muteBtn.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, bubbles: true }));
   const lift = () => document.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1, bubbles: true }));
-  const server = st => onServerMessage({ data: JSON.stringify({ type: "jarvis-state", state: st }) });
+  const server = st => onServerMessage({ data: JSON.stringify({ type: "hq-state", state: st }) });
   async function held(name, ms, during) {
     let bad = 0, n = 0, seen = "";
     for (let t = 0; t < ms; t += 250) {
@@ -1744,8 +1749,8 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         road = ROADMAP.read_text()
         road = "# 🧪 TESTING" + road[road.index("\n"):]
         road = re.sub(r"^- Job \d+ · .*\n", "", road, flags=re.M)
-        road = re.sub(r"^(\*\*Mail check:\*\*.*\n)", r"\1\n- Job 98 · done 10:00 · agreed 2026-10-10 09:00 · Build H33 on the Jarvis VA roadmap\n"
-                      r"- Job 99 · running since 10:05 · agreed 2026-10-10 09:01 · Fix F10 on the Jarvis VA roadmap\n", road, count=1, flags=re.M)
+        road = re.sub(r"^(\*\*Mail check:\*\*.*\n)", r"\1\n- Job 98 · done 10:00 · agreed 2026-10-10 09:00 · Build H33 on the HQ roadmap\n"
+                      r"- Job 99 · running since 10:05 · agreed 2026-10-10 09:01 · Fix F10 on the HQ roadmap\n", road, count=1, flags=re.M)
         site_roadmap(site).write_text(road)
         now = int(time.time())
         t0 = now - 30 * 60
@@ -1760,7 +1765,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
             {"n": 97, "st": "STOPPED", "start": now - 3600, "end": now - 2700},
             {"n": 97, "st": "BUILDING", "start": now - 600, "end": now - 300}], "texts": {"97": "Build H23 on the roadmap"}}))
         port = 4791
-        env = {**os.environ, "JARVIS_STATUS_PORT": str(port)}
+        env = {**os.environ, "HQ_STATUS_PORT": str(port)}
         proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
@@ -1852,14 +1857,14 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
             "- 23:00:02 *call: connected; connectors: none*\n"
             f"- 23:00:05 **{config.USER_LABEL}:** What's on tomorrow? *(typed)*\n"
             "- 23:00:06 `Read challenges.md` · done (reading in the folder)\n"
-            "- 23:00:09 **Jarvis:** Only the dentist at ten.\n"
+            "- 23:00:09 **HQ:** Only the dentist at ten.\n"
             f"- 23:00:12 **{config.USER_LABEL}:** Shoes. *(cut in)* *(cancelled)*\n"
             "- 23:00:14 **Jarvis:** Right, so *(cut off)*\n\nEnded 23:00:20\n"))
         (calls / "2099-12-31-2300-2.md").write_text(head + "- 23:00:40 *filler: Hi there!*\n- 23:00:41 *call: The caller hung up*\n")
         last = transcript.last_call(calls)
         need(last and last["name"] == "2099-12-31-2300", f"the last call with something said wasn't picked: {last and last['name']}")
         lines = last["lines"]
-        need([l["who"] for l in lines] == ["filler", "user", "jarvis", "user", "jarvis"],
+        need([l["who"] for l in lines] == ["filler", "user", "hq", "user", "hq"],
              f"the wrong lines came out of the transcript (tools or call notes in it?): {[l['who'] for l in lines]}")
         need(lines[1]["text"] == "What's on tomorrow?" and lines[3]["cancelled"] and not lines[1]["cancelled"]
              and lines[4]["text"] == "Right, so (cut off)", f"the marks weren't read right: {lines}")
@@ -1897,7 +1902,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
   calledHere = true; clearChat(); setState("live", "On the call");
   out.push("live:" + (both() ? "ok" : "MISSING"));
   out.push("livechat:" + (chatLog.querySelector(".msg") ? "OLD LINES" : "ok"));
-  addChat("user", "New line"); addChat("jarvis", "New answer");
+  addChat("user", "New line"); addChat("hq", "New answer");
   cleanup("Call ended");
   out.push("after:" + (both() ? "ok" : "MISSING"));
   chatBtn.click(); await wait(400);
@@ -1966,7 +1971,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
                 for i, c in enumerate([60] * 10 + [75] * 10 + [95] * 10)]
         (site / ".status/temperature-history.jsonl").write_text("\n".join(json.dumps(h) for h in hist) + "\n")
         port = 4792
-        env = {**os.environ, "JARVIS_STATUS_PORT": str(port)}
+        env = {**os.environ, "HQ_STATUS_PORT": str(port)}
         proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
@@ -2075,7 +2080,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
                 for i, p in enumerate([60 - i * 2 for i in range(30)])]
         (site / ".status/battery-history.jsonl").write_text("\n".join(json.dumps(h) for h in hist) + "\n")
         port = 4793
-        env = {**os.environ, "JARVIS_STATUS_PORT": str(port)}
+        env = {**os.environ, "HQ_STATUS_PORT": str(port)}
         proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
@@ -2201,7 +2206,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
         (site / ".status/stats.json").write_text(json.dumps({**hist[-1], "t": now, "cpu_user": 30.0, "cpu_system": 19.0, "swap": 2**30,
                                                             "mem_app": 0, "mem_wired": 0, "mem_compressed": 0, "over": 60, "words": "x"}))
         port = 4794
-        env = {**os.environ, "JARVIS_STATUS_PORT": str(port)}
+        env = {**os.environ, "HQ_STATUS_PORT": str(port)}
         proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
@@ -2326,7 +2331,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
         # The status line leaves a sign of life.
         act = tmp / "sl.json"
         await asyncio.to_thread(subprocess.run, [sys.executable, str(ROOT / "routine/statusline.py")], input="{}",
-                                capture_output=True, text=True, env={**os.environ, "JARVIS_ACTIVITY": str(act)}, timeout=30)
+                                capture_output=True, text=True, env={**os.environ, "HQ_ACTIVITY": str(act)}, timeout=30)
         need(act.exists() and json.loads(act.read_text())["at"] > time.time() - 60, "the status line leaves no sign of life")
 
         tick = (ROOT / "routine/tick.py").read_text()
@@ -2340,8 +2345,8 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
             cmd = tmp / f"w{n}.command"
             cmd.write_text(f"""#!/bin/zsh
 printf '\\e[2t'
-printf '\\e]0;Jarvis happy flow 33\\a'
-export JARVIS_NUDGE_DIR={json.dumps(str(tmp))}
+printf '\\e]0;HQ happy flow 33\\a'
+export HQ_NUDGE_DIR={json.dumps(str(tmp))}
 JT=$(tty)
 /usr/bin/python3 {json.dumps(str(ROOT / 'routine/nudge.py'))} {n} "$JT" $$ </dev/null >/dev/null 2>&1 &!
 echo started > {json.dumps(str(out))}
@@ -2356,7 +2361,7 @@ read -r line; echo "got:$line" >> {json.dumps(str(out))}
             await asyncio.sleep(0.5)
         need(all(o.exists() for o in outs.values()), "the test windows didn't start")
         await asyncio.sleep(1)
-        os.environ["JARVIS_NUDGE_DIR"] = str(tmp)
+        os.environ["HQ_NUDGE_DIR"] = str(tmp)
         try:
             for n, other in ((9901, 9902), (9902, None)):
                 t = time.time()
@@ -2372,7 +2377,7 @@ read -r line; echo "got:$line" >> {json.dumps(str(out))}
                 if other:
                     need("got:" not in outs[other].read_text(), "continue landed in the other window too")
         finally:
-            os.environ.pop("JARVIS_NUDGE_DIR", None)
+            os.environ.pop("HQ_NUDGE_DIR", None)
         closed = 0
         for _ in range(30):
             # A closed window can linger in the list for a while with no tabs and invisible: that counts as closed.
@@ -2401,7 +2406,7 @@ end tell"""], timeout=20)
         jv = ROOT
         rm = self.tmp / "roadmap-H39.md"
         rm.write_text(ROADMAP.read_text())
-        env = {**os.environ, "JARVIS_ROADMAP": str(rm)}
+        env = {**os.environ, "HQ_ROADMAP": str(rm)}
         def jobs(*a, ok=True):
             r = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
             need((r.returncode == 0) == ok, f"jobs.py {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
@@ -2471,8 +2476,8 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
 (async () => {
   const out = [], wait = ms => new Promise(r => setTimeout(r, ms)), sent = [];
   dc = { readyState: "open", send: x => { if (String(x).startsWith("{")) sent.push(JSON.parse(x).type); }, close() {} };
-  const server = st => onServerMessage({ data: JSON.stringify({ type: "jarvis-state", state: st }) });
-  const can = on => onServerMessage({ data: JSON.stringify({ type: "jarvis-cancellable", on }) });
+  const server = st => onServerMessage({ data: JSON.stringify({ type: "hq-state", state: st }) });
+  const can = on => onServerMessage({ data: JSON.stringify({ type: "hq-cancellable", on }) });
   const shown = () => cancelBtn.classList.contains("show");
   const asking = () => cxAsk.classList.contains("open");
   const check = (name, ok, why) => out.push(name + ":" + (ok ? "ok" : "WRONG " + why));
@@ -2537,7 +2542,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         bot_src = (APP / "bot.py").read_text()
         need("late_cancel(worker, call.llm, call_state" in bot_src, "the call server doesn't send a late Cancel on")
 
-        from pipeline import late_cancel, type_to_jarvis
+        from pipeline import late_cancel, type_to_agent
 
         live = await self.get_live()
         llm = live.llm
@@ -2547,7 +2552,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         n = len(llm.turns)
         say(f"typing, then cancelling late: {Q_LATE_CANCEL}")
         t0 = time.perf_counter()
-        need(await type_to_jarvis(live.worker, llm, live.call_state, Q_LATE_CANCEL), "the typed message was refused")
+        need(await type_to_agent(live.worker, llm, live.call_state, Q_LATE_CANCEL), "the typed message was refused")
         await live.wait_for(lambda: len(llm.turns) > n and llm.turns[n]["reply"].strip(), 90, "her answer to start")
         await live.wait_for(lambda: live.after_tts.first("audio", t0)[0] is not None, 30, "her voice to start")
         await asyncio.sleep(1.5)
@@ -2572,7 +2577,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         need(f"{config.USER} typed this" not in btn["sent"], "the button's line was told to Claude as something he typed")
         need(True not in flags, f"the Cancel line itself was offered for cancelling: {flags}")
         reply = btn["reply"].strip()
-        say(f"   Jarvis said: {reply!r}")
+        say(f"   She said: {reply!r}")
         need(len(reply) < 120 and not re.search(r"\b(twenty|thirty|forty)\b", norm(reply)), f"she went on counting: {reply!r}")
         need(not await late_cancel(live.worker, llm, live.call_state), "a second late Cancel took back the Cancel line")
         tx = live.call.transcript.path.read_text()
@@ -2596,15 +2601,15 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
 (async () => {
   const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
   const check = (name, ok, why) => out.push(name + ":" + (ok ? "ok" : "WRONG " + why));
-  const server = st => onServerMessage({ data: JSON.stringify({ type: "jarvis-state", state: st }) });
+  const server = st => onServerMessage({ data: JSON.stringify({ type: "hq-state", state: st }) });
   const on = () => voiceBtn.getAttribute("aria-pressed") === "true";
-  try { localStorage.removeItem("jarvis-voice-off"); } catch (e) {}
+  try { localStorage.removeItem("hq-voice-off"); } catch (e) {}
   voiceOff = false; applyVoice();
   const cs = getComputedStyle(voiceBtn);
   check("there", cs.display !== "none" && cs.position === "fixed" && !on() && !audioEl.muted, cs.display + "/" + cs.position + "/" + on());
   // before a call: off, remembered
   voiceBtn.click(); await wait(50);
-  check("idle-off", on() && audioEl.muted && localStorage.getItem("jarvis-voice-off") === "on", on() + "/" + audioEl.muted);
+  check("idle-off", on() && audioEl.muted && localStorage.getItem("hq-voice-off") === "on", on() + "/" + audioEl.muted);
   // her track arrives while it's off: switched off too
   const ctx = new AudioContext(), dst = ctx.createMediaStreamDestination();
   audioEl.srcObject = dst.stream; applyVoice();
@@ -2615,19 +2620,19 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
   check("status", statusEl.textContent.includes("voice off"), statusEl.textContent);
   server("speaking"); await wait(50);
   check("orb", orbLabel.textContent === "Speaking · voice off", orbLabel.textContent);
-  onServerMessage({ data: JSON.stringify({ type: "jarvis-chat", who: "jarvis", text: "Paris is the capital." }) });
-  check("chat", [...chatLog.querySelectorAll(".msg.jarvis")].some(d => d.textContent === "Paris is the capital."), chatLog.textContent);
+  onServerMessage({ data: JSON.stringify({ type: "hq-chat", who: "hq", text: "Paris is the capital." }) });
+  check("chat", [...chatLog.querySelectorAll(".msg.hq")].some(d => d.textContent === "Paris is the capital."), chatLog.textContent);
   // the talk button, its low sound, and Cancel as before
   server("listening");
   let sounds = 0; const ts = talkSound; talkSound = () => { sounds++; return ts(); };
   muteBtn.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, bubbles: true })); await wait(600);
   check("talk", muteBtn.classList.contains("talk") && sounds === 1 && audioEl.muted, muteBtn.className + "/" + sounds);
   document.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1, bubbles: true })); await wait(100);
-  onServerMessage({ data: JSON.stringify({ type: "jarvis-cancellable", on: true }) }); server("thinking"); await wait(50);
+  onServerMessage({ data: JSON.stringify({ type: "hq-cancellable", on: true }) }); server("thinking"); await wait(50);
   check("cancel", cancelBtn.classList.contains("show"), cancelBtn.className);
   // on again during the call: track and element back on, status without it
   voiceBtn.click(); await wait(50);
-  check("live-on", !on() && !audioEl.muted && tr() && localStorage.getItem("jarvis-voice-off") === "off", on() + "/" + audioEl.muted + "/" + tr());
+  check("live-on", !on() && !audioEl.muted && tr() && localStorage.getItem("hq-voice-off") === "off", on() + "/" + audioEl.muted + "/" + tr());
   check("status-on", !statusEl.textContent.includes("voice off"), statusEl.textContent);
   // and off again, to be remembered by the second load
   voiceBtn.click(); await wait(50);
@@ -2670,7 +2675,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
 
     # 36
     async def flow36(self) -> str:
-        """H41: the Type to Jarvis box is a text field that grows downward as he types, up to about six
+        """H41: the Type to HQ box is a text field that grows downward as he types, up to about six
         lines, then scrolls inside. No Claude turns. The real call page in a headless browser at phone
         width, on a fake live call: one line stays one line high, a few lines grow it so all of it shows,
         a long text stops at the max and scrolls; on the computer Enter sends and Shift+Enter doesn't,
@@ -2835,7 +2840,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         need("(the run ended with an error: error_during_execution)" in out, f"stream-usage doesn't say the error: {out!r}")
         html = (jv / "status/index.html").read_text()
         need("What it said last" in html and "i.detail" in html, "the status page doesn't show what a failed run said")
-        installed = Path.home() / "Library/Application Support/JarvisVA/watchdog.py"
+        installed = Path.home() / "Library/Application Support/HQ/watchdog.py"
         need(installed.exists() and installed.read_text() == (jv / "routine/watchdog.py").read_text(),
              "the installed watchdog isn't the new one: run routine/install-watchdog.sh")
         return ("the 17:00 run reads as no internet, with its last lines; counted in a row; the watchdog notes it once, "
@@ -2887,11 +2892,11 @@ shift; exec "$@"
         L.write(False)
         need(json.loads(Path(L.NOW_FILE).read_text())["on"] is False, "the reading isn't written for the status page")
         # The one-time setup: only the two exact commands, checked by visudo, the real pmset path.
-        rule = (ROOT / "routine/jarvis-lidsleep.sudoers").read_text()
+        rule = (ROOT / "routine/hq-lidsleep.sudoers").read_text()
         body = [x for x in rule.splitlines() if x.strip() and not x.startswith("#")]
         need(body == ["YOUR_USER ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0"],
              f"the sudoers rule allows more than the two commands: {body}")
-        v = await asyncio.to_thread(run, ["/usr/sbin/visudo", "-cf", str(ROOT / "routine/jarvis-lidsleep.sudoers")], timeout=20)
+        v = await asyncio.to_thread(run, ["/usr/sbin/visudo", "-cf", str(ROOT / "routine/hq-lidsleep.sudoers")], timeout=20)
         need(v.returncode == 0, f"the sudoers rule doesn't pass visudo: {(v.stdout + v.stderr).strip()}")
         inst = (ROOT / "routine/install-lidsleep.sh").read_text()
         need("visudo -cf" in inst and inst.index("visudo -cf") < inst.index("mv ") and "chmod 440" in inst,
@@ -2916,7 +2921,7 @@ shift; exec "$@"
         (site / ".status/lidsleep.json").write_text(json.dumps({"t": now, "on": True, "words": "x", "setup": False, "setup_line": "y"}))
         port = 4795
         proc = subprocess.Popen([shutil.which("node") or "/opt/homebrew/bin/node", str(site / "status/server.mjs"), "--quiet"],
-                                env={**os.environ, "JARVIS_STATUS_PORT": str(port)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                env={**os.environ, "HQ_STATUS_PORT": str(port)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             base = f"http://127.0.0.1:{port}"
             for _ in range(50):
@@ -2983,14 +2988,14 @@ console.log(JSON.stringify({{
         tpl = ROOT / "template"
         need(tpl.is_dir(), "HQ has no template folder")
         files = ["README.md", "CLAUDE.md", "rules.md", "where-things-go.md", "me.md", "vision.md",
-                 "current-situation.md", "challenges.md", "inbox.md", "coaching/log.md", "Jarvis VA/roadmap.md",
-                 "Jarvis VA/calls/.gitkeep", "reviews/.gitkeep", ".claude/settings.json", ".claude/mail-commit.sh",
+                 "current-situation.md", "challenges.md", "inbox.md", "coaching/log.md", "HQ/roadmap.md",
+                 "HQ/calls/.gitkeep", "reviews/.gitkeep", ".claude/settings.json", ".claude/mail-commit.sh",
                  ".claude/skills/life-coach/SKILL.md"]
         missing = [f for f in files if not (tpl / f).exists()]
         need(not missing, f"the template is missing {missing}")
         for rel in re.findall(r"@([\w./-]+\.md)", (tpl / "CLAUDE.md").read_text()):
             need((tpl / rel).exists(), f"the template's CLAUDE.md loads {rel}, which isn't there")
-        for f in ("README.md", "rules.md", "me.md", "vision.md", "current-situation.md", "challenges.md", "Jarvis VA/roadmap.md"):
+        for f in ("README.md", "rules.md", "me.md", "vision.md", "current-situation.md", "challenges.md", "HQ/roadmap.md"):
             need("put your own things here" in (tpl / f).read_text().lower(), f"{f} doesn't say put your own things here")
         me = (tpl / "me.md").read_text()
         need("**Name:**" in me and "What's important to me" in me and "What HQ should manage for me" in me,
@@ -3013,7 +3018,7 @@ console.log(JSON.stringify({{
         need("Contents of" in q and "challenges.md" in q and "inbox.md" in q, "the Quick load doesn't read the template")
         loops = open_loops.read(tpl)
         need(not loops.very_important, f"the blank mail list has very important items: {loops.very_important}")
-        roadmap = tpl / "Jarvis VA/roadmap.md"
+        roadmap = tpl / "HQ/roadmap.md"
         js = f"""import {{ readFileSync }} from 'node:fs';
 import {{ parseRoadmap }} from '{(ROOT / "status/parse.mjs").as_uri()}';
 const r = parseRoadmap(readFileSync({json.dumps(str(roadmap))}, 'utf8'));
@@ -3023,7 +3028,7 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         r = json.loads(out.stdout)
         need(not r["problems"] and r["state"] == "WAITING" and r["phases"] >= 1,
              f"the status page can't read the template's roadmap: {r}")
-        env = dict(os.environ, JARVIS_ROADMAP=str(roadmap))
+        env = dict(os.environ, HQ_ROADMAP=str(roadmap))
         q2 = sp.run([sys.executable, str(ROOT / "routine/jobs.py"), "list"], capture_output=True, text=True, env=env, timeout=30)
         need(q2.returncode == 0 and "Routine: on" in q2.stdout and "No jobs yet" in q2.stdout,
              f"the queue can't read the template's roadmap: {q2.stdout}{q2.stderr}")
@@ -3178,7 +3183,7 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         jv = ROOT
         rm = self.tmp / "roadmap-H43.md"
         rm.write_text(ROADMAP.read_text())
-        env = {**os.environ, "JARVIS_ROADMAP": str(rm)}
+        env = {**os.environ, "HQ_ROADMAP": str(rm)}
         def run(script, *a, ok=True):
             r = sp.run(["python3", str(jv / "routine" / script), *a], capture_output=True, text=True, env=env)
             need((r.returncode == 0) == ok, f"{script} {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
@@ -3391,7 +3396,7 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
         Turn everything on set to say only what it would do."""
         import urllib.request, urllib.error
         port = 4797
-        env = {**os.environ, "JARVIS_STATUS_PORT": str(port), "HQ_FIX_DRY": "1"}
+        env = {**os.environ, "HQ_STATUS_PORT": str(port), "HQ_FIX_DRY": "1"}
         log = open(self.tmp / "h28-server.log", "w")
         srv = subprocess.Popen(["node", str(ROOT / "status/server.mjs"), "--quiet"], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
         base = f"http://127.0.0.1:{port}"
@@ -3503,13 +3508,13 @@ window.addEventListener('load', () => setTimeout(() => {
         need(all(a["personality"] and a["speciality"] for a in every[:2]), "an agent has no personality or speciality")
         # A workspace's own agents: a change, a new one, a hidden one, a headshot; bad entries ignored.
         ws = self.tmp / "agents-ws"
-        (ws / "Jarvis VA" / "agents").mkdir(parents=True)
-        (ws / "Jarvis VA" / "agents" / "agents.json").write_text(json.dumps([
+        (ws / "HQ" / "agents").mkdir(parents=True)
+        (ws / "HQ" / "agents" / "agents.json").write_text(json.dumps([
             {"id": "donna", "personality": "Test personality.", "model": "evil; rm"},
             {"id": "coach", "name": "Coach", "load": "deep", "speciality": "Life coaching"},
             {"id": "pepper", "hidden": True},
             {"id": "../x", "name": "Bad", "load": "quick"}, {"id": "noload", "name": "No load"}, "junk"]))
-        (ws / "Jarvis VA" / "agents" / "coach.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (ws / "HQ" / "agents" / "coach.png").write_bytes(b"\x89PNG\r\n\x1a\n")
         mine = agents.load(ws)
         need([a["id"] for a in mine] == ["donna", "pepper", "coach"], f"the workspace's agents aren't read right: {[a['id'] for a in mine]}")
         need([a["id"] for a in agents.visible(ws)] == ["donna", "coach"], "a hidden agent still shows")
@@ -3701,7 +3706,7 @@ setTimeout(() => {
 (async () => {
   const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
   const key = (type, el, repeat) => (el || document.body).dispatchEvent(new KeyboardEvent(type, { code: "Space", key: " ", repeat: !!repeat, bubbles: true, cancelable: true }));
-  const server = st => onServerMessage({ data: JSON.stringify({ type: "jarvis-state", state: st }) });  // as on a real call
+  const server = st => onServerMessage({ data: JSON.stringify({ type: "hq-state", state: st }) });  // as on a real call
   const look = () => (muted ? "muted" : "open") + "/" + (muteBtn.classList.contains("talk") ? "talk" : muteBtn.classList.contains("transcribing") ? "yellow" : "-");
   key("keydown"); await wait(50); key("keyup"); await wait(50);
   out.push("before:" + look() + "/" + pressId);
@@ -3774,7 +3779,7 @@ FLOWS = {
     19: ("The status page on the phone, and the status button", False, "flow19"),
     20: ("The usage check: no Claude, every minute, what a call may do", False, "flow20"),
     21: ("The usage check shows the latest saved usage and its age", False, "flow21"),
-    22: ("Typing to Jarvis on a call: she answers out loud, chat gets both", True, "flow22"),
+    22: ("Typing to HQ on a call: she answers out loud, chat gets both", True, "flow22"),
     23: ("A buzz on push to talk; Hang up asks Are you sure?", False, "flow23"),
     24: ("Cancel while she thinks: no answer, line marked cancelled", True, "flow24"),
     25: ("Routines respond: missed runs caught up, incidents logged, commits locked", False, "flow25"),
@@ -3788,7 +3793,7 @@ FLOWS = {
     33: ("A quiet job gets continue typed into its own window; stuck shows", False, "flow33"),
     34: ("The queue runs in list order; a call can move waiting jobs", False, "flow34"),
     35: ("A mute button for her voice; the chat still gets her lines", False, "flow35"),
-    36: ("Typing to Jarvis: the text field grows; Enter on phone and computer", False, "flow36"),
+    36: ("Typing to HQ: the text field grows; Enter on phone and computer", False, "flow36"),
     37: ("A failed routine run says why; the watchdog sees one that keeps failing", False, "flow37"),
     38: ("More laptop stats folded in under Laptop: CPU, GPU, memory, disk, network", False, "flow38"),
     39: ("The lid-closed sleep switch: read, flipped from a call, shown under Laptop", False, "flow39"),
@@ -3815,7 +3820,7 @@ async def main(args) -> bool:
         print(f"No such flow: {bad}. The flows are 1 to {len(FLOWS)}.")
         return False
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    print(f"== Jarvis VA happy flows · {stamp} · flows {chosen}" + (" · quick (no Claude turns)" if args.quick else ""))
+    print(f"== HQ happy flows · {stamp} · flows {chosen}" + (" · quick (no Claude turns)" if args.quick else ""))
     tmp = Path(tempfile.mkdtemp(prefix="happy-flows-", dir=config.SCRATCH))
     run_ = Run(tmp)
     # Flow 7 closes the live call; if it runs, it must come after the others that use that call.
@@ -3870,7 +3875,7 @@ async def main(args) -> bool:
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(description="Jarvis VA happy flows (phase G)")
+    p = argparse.ArgumentParser(description="HQ happy flows (phase G)")
     p.add_argument("--only", default="", help="comma-separated flow numbers, e.g. 3,5")
     p.add_argument("--quick", action="store_true", help="skip the flows that use Claude turns (2-7)")
     p.add_argument("--keep", action="store_true", help="keep the scratch folder")

@@ -6,13 +6,13 @@ page, while its own output said why (no internet: the API server couldn't be rea
 
 - reason(lines, code): the plain reason from a run's own output, plus its last lines as they were.
 - record(key, ok, …): the failures in a row per routine, kept outside the Documents folder
-  (~/Library/Application Support/JarvisVA/failures.json), so the watchdog (H20) can read them without
+  (~/Library/Application Support/HQ/failures.json), so the watchdog (H20) can read them without
   any macOS permission and notice a routine that keeps failing, not only one that's missed or stopped.
 - retry_asked(key): the watchdog asked for one more try (the helper had given up, the internet is back).
 """
 import json, os, re, tempfile, time
 
-SUPPORT = os.path.expanduser("~/Library/Application Support/JarvisVA")
+SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
 FILE = os.path.join(SUPPORT, "failures.json")
 
 # Known reasons, first match wins: (pattern in the output, plain words).

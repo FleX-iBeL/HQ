@@ -1,4 +1,4 @@
-"""Jarvis VA settings, in one place. Override any of them with an environment variable."""
+"""HQ settings, in one place. Override any of them with an environment variable."""
 import os
 from pathlib import Path
 
@@ -9,9 +9,9 @@ SCRATCH = ROOT / "scratch"  # empty working folder for the plain Claude (git-ign
 # be a link to a folder elsewhere). The call's Claude works there, like a chat in that folder, on
 # the resolved path, so the folder's settings and Claude's memory for it are the same as in a chat.
 WORKSPACE = Path(os.environ.get("HQ_WORKSPACE", str(ROOT / "workspace")))
-FOLDER = Path(os.environ.get("JARVIS_FOLDER", os.path.realpath(WORKSPACE)))
-DATA = FOLDER / "Jarvis VA"  # the roadmap and the call transcripts
-CALLS = Path(os.environ.get("JARVIS_CALLS", str(DATA / "calls")))  # one transcript per call
+FOLDER = Path(os.environ.get("HQ_FOLDER", os.path.realpath(WORKSPACE)))
+DATA = FOLDER / "HQ"  # the roadmap and the call transcripts
+CALLS = Path(os.environ.get("HQ_CALLS", str(DATA / "calls")))  # one transcript per call
 # M5: who the user is comes from their workspace (me.md), never from this code.
 import me as _me
 ME = _me.load(FOLDER)
@@ -26,24 +26,24 @@ def _local_timezone() -> str:
 
 
 TIMEZONE = _local_timezone()
-# JARVIS_PLAIN=1 goes back to the A2 plain Claude (no files, tools or connectors).
-PLAIN = os.environ.get("JARVIS_PLAIN", "") == "1"
-# After hang-up Claude writes down what matters, commits and pushes. JARVIS_WRAP_UP=dry
-# makes it only say what it would do (tests); JARVIS_WRAP_UP=off skips it.
-WRAP_UP = os.environ.get("JARVIS_WRAP_UP", "on")
-WRAP_UP_TIMEOUT_SECS = float(os.environ.get("JARVIS_WRAP_UP_TIMEOUT_SECS", "600"))
+# HQ_PLAIN=1 goes back to the A2 plain Claude (no files, tools or connectors).
+PLAIN = os.environ.get("HQ_PLAIN", "") == "1"
+# After hang-up Claude writes down what matters, commits and pushes. HQ_WRAP_UP=dry
+# makes it only say what it would do (tests); HQ_WRAP_UP=off skips it.
+WRAP_UP = os.environ.get("HQ_WRAP_UP", "on")
+WRAP_UP_TIMEOUT_SECS = float(os.environ.get("HQ_WRAP_UP_TIMEOUT_SECS", "600"))
 
-# The brain. Sonnet is the talker; JARVIS_MODEL=haiku tries Haiku 4.5 instead.
+# The brain. Sonnet is the talker; HQ_MODEL=haiku tries Haiku 4.5 instead.
 MODEL_ALIASES = {
     "sonnet": "claude-sonnet-5-5",
     "haiku": "claude-haiku-4-5-20251001",
     "opus": "claude-opus-5-5",
 }
-_model = os.environ.get("JARVIS_MODEL", "sonnet")
+_model = os.environ.get("HQ_MODEL", "sonnet")
 MODEL = MODEL_ALIASES.get(_model, _model)
 # Effort for the talker: low keeps the first words quick. (Thinking can't be switched
 # off with "disabled" on Sonnet 5.5; low effort is the supported way to keep it short.)
-EFFORT = os.environ.get("JARVIS_EFFORT", "low")
+EFFORT = os.environ.get("HQ_EFFORT", "low")
 # The call page has two buttons: Quick (Sonnet, the default) and Deep (Opus, for sparring and
 # bigger planning; 9 October 2026). Deep thinks a little longer before it speaks.
 CALL_MODES = {"quick": "sonnet", "deep": "opus", "free": "sonnet"}  # "free": old pages (before H8)
@@ -51,17 +51,17 @@ CALL_MODES = {"quick": "sonnet", "deep": "opus", "free": "sonnet"}  # "free": ol
 # Claude on Sonnet. None of the user's files, no connectors, no tools, no transcript, no log, no
 # commit, and their words are not written to the server log. Its working folder is an empty one
 # outside the workspace, so no CLAUDE.md or memory of theirs can be found from it.
-FREE_DIR = Path(os.environ.get("JARVIS_FREE_DIR", str(Path.home() / ".jarvis-va" / "free")))
+FREE_DIR = Path(os.environ.get("HQ_FREE_DIR", str(Path.home() / ".hq" / "free")))
 # H8 (9 October 2026): Free is a switch on top of Quick and Deep, so it runs on Sonnet or
 # Opus; and "I do want it to be able to access the internet". Its only tools: searching the web and
 # reading a web page. Still none of the user's files, connectors, calendar or mail.
 FREE_TOOLS = ["WebSearch", "WebFetch"]
-DEEP_EFFORT = os.environ.get("JARVIS_DEEP_EFFORT", "medium")
+DEEP_EFFORT = os.environ.get("HQ_DEEP_EFFORT", "medium")
 
 
 def effort_for(model: str) -> str:
     return DEEP_EFFORT if model == MODEL_ALIASES["opus"] else EFFORT
-CLAUDE_CLI = os.environ.get("JARVIS_CLAUDE_CLI", "/opt/homebrew/bin/claude")
+CLAUDE_CLI = os.environ.get("HQ_CLAUDE_CLI", "/opt/homebrew/bin/claude")
 
 # Phase K, lighter calls (9 October 2026: "ok can we put this on roadmap, with a backup
 # kind of thing that if we dont like it, we can revert it?"). One switch per step, on by default;
@@ -77,11 +77,11 @@ for _line in (ROOT / "switches.env").read_text().splitlines() if (ROOT / "switch
 
 def _switch(name: str) -> bool:
     return os.environ.get(name, _SWITCHES.get(name, "1")) != "0"
-LIGHT_NOTES = _switch("JARVIS_LIGHT_NOTES")  # K1: Quick has the log's open commitments, not two days of entries
-NO_DOCS = _switch("JARVIS_NO_DOCS")  # K2: no Claude Docs tools on Quick or Deep
-TOOLS_ON_DEMAND = _switch("JARVIS_TOOLS_ON_DEMAND")  # K3: connector tools loaded when needed (tool search on)
-CHEAP_AFTER_CALL = _switch("JARVIS_CHEAP_AFTER_CALL")  # K4: the after-call work runs on AFTER_CALL_MODEL
-AFTER_CALL_MODEL = os.environ.get("JARVIS_AFTER_CALL_MODEL", "haiku")  # the CLI on this laptop (2.1.286) maps this to Haiku 4.5; it doesn't know Haiku 5.5 yet
+LIGHT_NOTES = _switch("HQ_LIGHT_NOTES")  # K1: Quick has the log's open commitments, not two days of entries
+NO_DOCS = _switch("HQ_NO_DOCS")  # K2: no Claude Docs tools on Quick or Deep
+TOOLS_ON_DEMAND = _switch("HQ_TOOLS_ON_DEMAND")  # K3: connector tools loaded when needed (tool search on)
+CHEAP_AFTER_CALL = _switch("HQ_CHEAP_AFTER_CALL")  # K4: the after-call work runs on AFTER_CALL_MODEL
+AFTER_CALL_MODEL = os.environ.get("HQ_AFTER_CALL_MODEL", "haiku")  # the CLI on this laptop (2.1.286) maps this to Haiku 4.5; it doesn't know Haiku 5.5 yet
 DOCS_SERVER = "mcp__claude_ai_Claude_Docs"
 
 
@@ -90,7 +90,7 @@ def light_switches() -> str:
         ("K1 notes", LIGHT_NOTES), ("K2 no Docs", NO_DOCS), ("K3 tools on demand", TOOLS_ON_DEMAND),
         ("K4 cheap after-call", CHEAP_AFTER_CALL)))
 
-SYSTEM_PROMPT = """You are Jarvis, {user}'s assistant, on a live voice call with them. \
+SYSTEM_PROMPT = """You are {user}'s assistant in HQ, on a live voice call with them. \
 Everything you write is turned into speech the moment you write it, and {user} hears it through their earphones.
 
 How to talk:
@@ -113,7 +113,7 @@ so don't make anything up about it."""
 # A3: added to the folder's own instructions (CLAUDE.md, rules.md), not instead of them.
 VOICE_RULES = """# This chat is a live voice call
 
-{user} is talking to you on a live voice call (Jarvis VA), through their earphones. Everything \
+{user} is talking to you on a live voice call (HQ), through their earphones. Everything \
 you write as text is turned into speech the moment you write it. His words reach you \
 through speech recognition.
 
@@ -158,7 +158,7 @@ it in passing ("I've blocked it until half eight"), not as an explanation.
 - Writing things down during the call works as usual (where-things-go.md). Only the quiet notes, \
 the commit and the push happen after he hangs up.
 - Work for the computer (building, a bigger job, anything agreed for "let's go") goes in the queue \
-on the Jarvis VA roadmap; the computer starts it by itself within about a minute, one job at a time, \
+on the HQ roadmap; the computer starts it by itself within about a minute, one job at a time, \
 in a window he can watch. Agree it first: what exactly, and write it on the roadmap and in the \
 status block's Next line as usual. Only on his clear go ("let's go", "do it", "start it"), add it: \
 python3 "{HQ}/routine/jobs.py" add "<the job in one self-contained line, with everything the \
@@ -191,7 +191,7 @@ Fable is the last one from a normal chat, so say it's the last known one.
 it off ("back to normal", sleeps when the lid closes) add off. Flip it on his ask, then tell him in a \
 sentence which it is now. On drains the battery in a bag, so when he turns it on, say that once. If \
 it says the one-time setup isn't done, tell him he types one line once in Terminal with his laptop \
-password; it's on the Jarvis VA roadmap under H45, and he can do it next time he's at the laptop.
+password; it's on the HQ roadmap under H45, and he can do it next time he's at the laptop.
 """
 # M1: the routine's scripts are in HQ, outside the folder the call works in.
 VOICE_RULES = VOICE_RULES.replace("{HQ}", str(ROOT))
@@ -220,11 +220,11 @@ Reply with one short line saying which files you would update and what you would
 WRAP_UP_PROMPT = WRAP_UP_PROMPT.replace("@USER@", USER)
 WRAP_UP_DRY_PROMPT = WRAP_UP_DRY_PROMPT.replace("@USER@", USER)
 
-# Fillers: when Claude hasn't said anything this long after the user's turn ends, Jarvis
+# Fillers: when Claude hasn't said anything this long after the user's turn ends, HQ
 # says one of these right away (pre-recorded at call start). And when Claude starts a tool
 # mid-reply after this long a silence, a tool filler.
-FILLER_AFTER_SECS = float(os.environ.get("JARVIS_FILLER_AFTER_SECS", "1.2"))
-TOOL_FILLER_SILENCE_SECS = float(os.environ.get("JARVIS_TOOL_FILLER_SILENCE_SECS", "2.0"))
+FILLER_AFTER_SECS = float(os.environ.get("HQ_FILLER_AFTER_SECS", "1.2"))
+TOOL_FILLER_SILENCE_SECS = float(os.environ.get("HQ_TOOL_FILLER_SILENCE_SECS", "2.0"))
 # 9 October 2026: "i want the conversation to sound like real human" and "as if i call
 # it up and the person is sitting behind a desk and is fulltime my assistant." So the lines
 # fit what she's doing: the calendar, the mail, writing something down, looking something up.
@@ -258,7 +258,7 @@ TOOL_FILLERS = {
 }
 
 
-# Jarvis opens the call (9 October 2026: "i want that Jarvis starts the conversation, not me.
+# HQ opens the call (9 October 2026: "i want that [it] starts the conversation, not me.
 # something like \"Hey there, what can i do for you\""). Picked by time of day. {n} is ", Name"
 # (or nothing), {s} is " Name" (or nothing), from me.md.
 _GREETINGS = {
@@ -296,38 +296,38 @@ def tool_kind(name: str) -> str:
         return "read"
     return "tool"
 
-# Hearing. A short word list helps Whisper with names: Jarvis, the agents (H29), the user's name,
+# Hearing. A short word list helps Whisper with names: HQ, the agents (H29), the user's name,
 # and their own "Names to hear" from me.md (M5).
 import agents as _agents  # noqa: E402
-WHISPER_MODEL = os.environ.get("JARVIS_WHISPER", "mlx-community/whisper-large-v3-turbo")
+WHISPER_MODEL = os.environ.get("HQ_WHISPER", "mlx-community/whisper-large-v3-turbo")
 WHISPER_PROMPT = os.environ.get(
-    "JARVIS_WHISPER_PROMPT",
-    ", ".join(w for w in ["Jarvis", *_agents.names(FOLDER), ME["name"], ME["hear"].rstrip(".")] if w) + ".",
+    "HQ_WHISPER_PROMPT",
+    ", ".join(w for w in ["HQ", *_agents.names(FOLDER), ME["name"], ME["hear"].rstrip(".")] if w) + ".",
 )
 
 # Ears. How long a silence must be before the turn may end. Pipecat's default is 0.2 s,
 # but Whisper needs about a second, and in that second the user often goes on talking,
 # which split one question into several Claude turns. 0.5 s kept every test question whole.
-VAD_STOP_SECS = float(os.environ.get("JARVIS_VAD_STOP_SECS", "0.5"))
+VAD_STOP_SECS = float(os.environ.get("HQ_VAD_STOP_SECS", "0.5"))
 # Whisper large-v3-turbo on the M2: about 1.0 to 1.2 s from the end of speech to the text.
-WHISPER_P99_SECS = float(os.environ.get("JARVIS_WHISPER_P99_SECS", "1.5"))
-# H12: in free talking, once the turn looks finished, wait this much longer before Jarvis
+WHISPER_P99_SECS = float(os.environ.get("HQ_WHISPER_P99_SECS", "1.5"))
+# H12: in free talking, once the turn looks finished, wait this much longer before HQ
 # takes it; if he goes on talking in that time, the turn stays his. The call page shows the
 # wait in yellow. 9 October 2026: "just keep it yellow for a little longer while we wait."
-TURN_GRACE_SECS = float(os.environ.get("JARVIS_TURN_GRACE_SECS", "1.0"))
+TURN_GRACE_SECS = float(os.environ.get("HQ_TURN_GRACE_SECS", "1.0"))
 # H11: a turn never ends while Whisper is still turning a piece of speech into text. If that
 # takes longer than this (it shouldn't), the turn may end anyway, so a call can't hang.
-TRANSCRIBING_MAX_SECS = float(os.environ.get("JARVIS_TRANSCRIBING_MAX_SECS", "6"))
+TRANSCRIBING_MAX_SECS = float(os.environ.get("HQ_TRANSCRIBING_MAX_SECS", "6"))
 
 # Voice.
-VOICE = os.environ.get("JARVIS_VOICE", "af_heart")
+VOICE = os.environ.get("HQ_VOICE", "af_heart")
 # A long first sentence may be cut once at a comma after this many words; later ones never.
-FIRST_CLAUSE_MIN_WORDS = int(os.environ.get("JARVIS_FIRST_CLAUSE_MIN_WORDS", "10"))
+FIRST_CLAUSE_MIN_WORDS = int(os.environ.get("HQ_FIRST_CLAUSE_MIN_WORDS", "10"))
 # H18 (10 October 2026): Pipecat gives up on a reply's audio when the voice sends nothing for 3 s,
 # and drops the sentence. On a busy MacBook Kokoro sometimes needs longer for one sentence, so
 # the reply ended without sound (likely bug F4 too). The reply's end is marked explicitly, so this
 # only matters while Kokoro is still working.
-TTS_STALL_SECS = float(os.environ.get("JARVIS_TTS_STALL_SECS", "12"))
+TTS_STALL_SECS = float(os.environ.get("HQ_TTS_STALL_SECS", "12"))
 # Voices the user can pick on the call page (9 October 2026). Heart is the default.
 VOICES = {
     "af_heart": "Heart", "af_bella": "Bella", "am_michael": "Michael", "bf_isabella": "Isabella",
@@ -342,5 +342,5 @@ KOKORO_MODEL = MODELS / "kokoro-v1.0.onnx"
 KOKORO_VOICES = MODELS / "voices-v1.0.bin"
 
 # Serving. Only this MacBook for now; A4 opens it to the phone over Tailscale.
-HOST = os.environ.get("JARVIS_HOST", "127.0.0.1")
-PORT = int(os.environ.get("JARVIS_PORT", "7860"))
+HOST = os.environ.get("HQ_HOST", "127.0.0.1")
+PORT = int(os.environ.get("HQ_PORT", "7860"))

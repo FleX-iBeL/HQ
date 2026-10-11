@@ -55,10 +55,10 @@ SR = 16000
 CHUNK = 320  # 20 ms at 16 kHz
 
 QUESTIONS = [
-    "Hey Jarvis, what's a good way to start a quiet morning? Keep it short.",
+    "Hey there, what's a good way to start a quiet morning? Keep it short.",
     "Nice, and what's one small thing I can do in the evening",
 ]
-LONG_QUESTION = "Hey Jarvis, tell me a long story about a lighthouse keeper in at least forty sentences, in several chapters"
+LONG_QUESTION = "Hey there, tell me a long story about a lighthouse keeper in at least forty sentences, in several chapters"
 CUT_IN = "Wait, stop for a second."
 
 
@@ -167,7 +167,7 @@ async def wait_for(cond, timeout: float, what: str):
 
 async def main(args):
     model = config.MODEL_ALIASES.get(args.model, args.model)
-    print(f"== Jarvis VA A2 test · brain {model} · effort {config.EFFORT}")
+    print(f"== HQ A2 test · brain {model} · effort {config.EFFORT}")
 
     kokoro = Kokoro(str(config.KOKORO_MODEL), str(config.KOKORO_VOICES))
 

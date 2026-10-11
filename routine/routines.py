@@ -1,20 +1,20 @@
 """H19: every routine writes its own line for the status page, each time it runs.
 
-The lines live in Jarvis VA/.status/routines.json (local only, like the usage reading), one entry per
+The lines live in .status/routines.json (local only, like the usage reading), one entry per
 routine: {"at": epoch seconds of this write, "state": ok|running|waiting|off|down, "text": what it
 did or found, "last": epoch of its last real run, "next": epoch of its next run, "every": how often
 it is expected to write, in seconds}. The status server serves it with the watchdog's own line (H20),
 and the page turns a line red when it is overdue: that routine has stopped.
 
 The helper also leaves a heartbeat outside the Documents folder, which the watchdog (H20) can read
-without any macOS permission: ~/Library/Application Support/JarvisVA/heartbeat.
+without any macOS permission: ~/Library/Application Support/HQ/heartbeat.
 """
 import json, os, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
 FILE = os.path.join(JV, ".status", "routines.json")
-SUPPORT = os.path.expanduser("~/Library/Application Support/JarvisVA")
+SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
 HEARTBEAT = os.path.join(SUPPORT, "heartbeat")
 
 

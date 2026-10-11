@@ -5,10 +5,10 @@ MacBook's own DNS doesn't use MagicDNS), the same offer as the web page, no STUN
 fake microphone (Kokoro says one sentence). Checks:
   - the answer offers the 100.x Tailscale address as a candidate and no outside (STUN) one
   - the call connects, over which address pair
-  - audio comes back from Jarvis
+  - audio comes back from HQ
   - Hang up (the data-channel message the page sends) is noticed at once by the server
 
-Run it against a server started with  JARVIS_WRAP_UP=dry JARVIS_CALLS=<scratch folder> app/start.sh
+Run it against a server started with  HQ_WRAP_UP=dry HQ_CALLS=<scratch folder> app/start.sh
 so the after-call work changes nothing.   .venv/bin/python app/test_a4.py
 Uses one turn of the Max plan.
 """
@@ -38,7 +38,7 @@ HOST = (_ts.get("Self", {}).get("DNSName") or "").rstrip(".")
 TS_IP = (_ts.get("Self", {}).get("TailscaleIPs") or [""])[0]
 URL = f"https://{HOST}:8443"
 SR = 48000
-QUESTION = "Hey Jarvis, say hello to me in four words."
+QUESTION = "Hey there, say hello to me in four words."
 
 
 class FakeMic(AudioStreamTrack):
@@ -120,7 +120,7 @@ async def main() -> bool:
     async with aiohttp.ClientSession(connector=conn) as s:
         async with s.get(URL + "/") as r:
             page = await r.text()
-            check("page over https via Tailscale serve", r.status == 200 and "Jarvis" in page, f"{r.status}")
+            check("page over https via Tailscale serve", r.status == 200 and "HQ" in page, f"{r.status}")
         for p, t in [("manifest.webmanifest", "json"), ("apple-touch-icon.png", "image/png")]:
             async with s.get(f"{URL}/{p}") as r:
                 check(f"/{p}", r.status == 200, r.headers.get("content-type", ""))
@@ -147,7 +147,7 @@ async def main() -> bool:
     t0 = time.perf_counter()
     while heard["first"] is None and time.perf_counter() - t0 < 60:
         await asyncio.sleep(0.2)
-    check("audio from Jarvis came back", heard["first"] is not None, f"{heard['loud']} loud frames")
+    check("audio from HQ came back", heard["first"] is not None, f"{heard['loud']} loud frames")
     await asyncio.sleep(5)  # let it speak a bit
 
     print("hanging up (data channel message, as the page does)...")

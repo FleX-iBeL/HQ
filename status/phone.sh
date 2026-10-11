@@ -2,12 +2,12 @@
 # H13: the status page on the phone, on its own address, independent of the call line.
 # Makes sure the status server runs (quietly, no browser window) and that Tailscale serves it
 # over HTTPS inside the tailnet only (never Funnel). Does nothing when both are already so.
-# Run every minute by the Jarvis Routine helper (routine/tick.py), so it also starts at login.
+# Run every minute by the HQ Routine helper (routine/tick.py), so it also starts at login.
 # Phone: https://<this-mac>.<tailnet>.ts.net:8444  (Tailscale on)
 cd "$(dirname "$0")/.." || exit 1
 TS=/usr/local/bin/tailscale
 NODE=/opt/homebrew/bin/node
-PORT="${JARVIS_STATUS_PORT:-4748}"
+PORT="${HQ_STATUS_PORT:-4748}"
 TS_HTTPS_PORT=8444   # 443 is another service, 8443 is the call line
 mkdir -p scratch
 if ! lsof -ti "tcp:$PORT" -sTCP:LISTEN >/dev/null 2>&1; then

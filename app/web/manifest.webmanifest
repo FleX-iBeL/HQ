@@ -1,6 +1,6 @@
 {
-  "name": "Jarvis",
-  "short_name": "Jarvis",
+  "name": "HQ Call",
+  "short_name": "HQ Call",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#12161e",

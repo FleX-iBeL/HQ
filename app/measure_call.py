@@ -4,11 +4,11 @@ calling costs 2% of usage").
 Opens a call in test mode (nothing can change, no after-call work), lets it warm up, asks one
 question that needs the calendar, closes it, and reads the session's own record of every step:
 how many tokens were read from the cache, written to it, and written out. Also lists what the
-session had loaded (tools per connector). Run from the Jarvis VA folder:
+session had loaded (tools per connector). Run from the HQ folder:
 
     .venv/bin/python app/measure_call.py                 # Quick, as the switches are now
     .venv/bin/python app/measure_call.py --load deep
-    JARVIS_LIGHT_NOTES=0 .venv/bin/python app/measure_call.py   # with a switch off (see config.py)
+    HQ_LIGHT_NOTES=0 .venv/bin/python app/measure_call.py   # with a switch off (see config.py)
 """
 from __future__ import annotations
 

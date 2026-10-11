@@ -31,8 +31,10 @@ except Exception:  # the app must still show something
 
 STATUS = "http://127.0.0.1:4748"
 CALL_PORT = 7860
-HELPER_APP = os.path.expanduser("~/Applications/Jarvis Routine.app")
-SUPPORT = os.path.expanduser("~/Library/Application Support/JarvisVA")
+# The helper app; until it is rebuilt under its new name (H54, 11 October 2026), the old one still runs.
+HELPER_APPS = [os.path.expanduser("~/Applications/HQ Routine.app"), os.path.expanduser("~/Applications/Jarvis Routine.app")]
+HELPER_APP = next((a for a in HELPER_APPS if os.path.isdir(a)), HELPER_APPS[0])
+SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
 PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 # The same names and order as the status page's Routines section.
@@ -141,13 +143,13 @@ def helper_pids():
     out = []
     for line in r.stdout.splitlines():
         pid, _, comm = line.strip().partition(" ")
-        if comm.strip().endswith("Jarvis Routine.app/Contents/MacOS/applet"):
+        if comm.strip().endswith(tuple(os.path.basename(a) + "/Contents/MacOS/applet" for a in HELPER_APPS)):
             out.append(int(pid))
     return out
 
 
 def watchdog_label():
-    return hqpaths.agent_label("jarvis-watchdog") if hqpaths else "com.hq.jarvis-watchdog"
+    return hqpaths.agent_label("watchdog") if hqpaths else "com.hq.watchdog"
 
 
 def watchdog_loaded(label):

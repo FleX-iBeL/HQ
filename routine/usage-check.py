@@ -14,9 +14,9 @@ What it does: when usage-live.json is newer than what the status page shows, it 
 F7, and the reading keeps the time it was really read). A newer full reading from a normal chat is
 never overwritten. Then it prints the numbers and how old they are.
 
-The Jarvis Routine helper (tick.py) runs it every minute. A call runs it with no options when he
+The HQ Routine helper (tick.py) runs it every minute. A call runs it with no options when he
 asks what the usage is:
-    python3 "Jarvis VA/routine/usage-check.py"
+    python3 "routine/usage-check.py"
 """
 import json, os, subprocess, sys, time
 from datetime import datetime

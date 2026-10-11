@@ -23,7 +23,7 @@ Everything in this folder is private (health, work, money, relationships, family
 - @coaching/log.md (what we worked on, their words, open commitments)
 - @inbox.md (new mail the hourly mail check found, waiting for their yes; very important items on top, until resolved)
 
-Not loaded, read only when needed, with the Read tool: `reviews/`, `Jarvis VA/roadmap.md`, `Jarvis VA/calls/`, and any folder they add. Never read files with `cat` in Bash: long output gets cut off.
+Not loaded, read only when needed, with the Read tool: `reviews/`, `HQ/roadmap.md`, `HQ/calls/`, and any folder they add. Never read files with `cat` in Bash: long output gets cut off.
 
 ## Start of every session
 

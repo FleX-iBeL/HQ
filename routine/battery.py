@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""H37: the laptop's battery, every minute, run by the Jarvis Routine helper (tick.py). No Claude, no
+"""H37: the laptop's battery, every minute, run by the HQ Routine helper (tick.py). No Claude, no
 usage, no password. 10 October 2026, after the supermarket with the laptop in his bag and no
 charger: "I also want a battery percentage on the status page, because I had a feeling maybe my laptop
 died. I had no idea how much battery I had." "Same thing, we want to run it with routines on the
@@ -10,12 +10,12 @@ background in the terminal."
 - The ranges (Claude's choice): on battery, low under 20% (red), getting low 20 to 39% (yellow), fine
   from 40%. On the charger it's never an alarm, whatever the percentage: it's filling up.
 
-Writes Jarvis VA/.status/battery.json (the latest reading), appends one line a minute to
+Writes .status/battery.json (the latest reading), appends one line a minute to
 .status/battery-history.jsonl (a day kept), writes its routine line ("battery": ok, low when getting
 low, down when low) and opens an incident while it's low on battery.
 
-    python3 "Jarvis VA/routine/battery.py"          one reading, written and printed
-    python3 "Jarvis VA/routine/battery.py" --dry    one reading, printed only
+    python3 "routine/battery.py"          one reading, written and printed
+    python3 "routine/battery.py" --dry    one reading, printed only
 """
 import json, os, re, subprocess, sys, tempfile, time
 

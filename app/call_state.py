@@ -1,10 +1,10 @@
-"""H3: what is Jarvis doing right now? Sent to the call page so the user can see it.
+"""H3: what is HQ doing right now? Sent to the call page so the user can see it.
 
 States: "listening" (your turn), "hearing" (you are talking), "thinking" (working on the answer),
 "speaking". H11/H12, both shown in yellow: "transcribing" (he let go of the talk button and his last
 words are still being turned into text) and "waiting" (a pause in free talking: she waits a moment
 longer, in case he goes on). Two small pass-through processors (StateTap) feed one shared CallState; every change
-is sent once, as {"type": "jarvis-state", "state": ...}, over the call's data channel.
+is sent once, as {"type": "hq-state", "state": ...}, over the call's data channel.
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ class CallState:
         self.history.append((time.time(), state))
         if self._send:
             try:
-                self._send({"type": "jarvis-state", "state": state})
+                self._send({"type": "hq-state", "state": state})
             except Exception:
                 pass
 
@@ -68,7 +68,7 @@ class CallState:
         if not self._user_talking:
             if kind is None and self._send:
                 try:
-                    self._send({"type": "jarvis-state", "state": self.state})
+                    self._send({"type": "hq-state", "state": self.state})
                 except Exception:
                     pass
             return

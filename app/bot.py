@@ -1,4 +1,4 @@
-"""Jarvis VA: a live voice call with Claude, at the desk.
+"""HQ: a live voice call with Claude, at the desk.
 
 Start it with app/start.sh, open http://127.0.0.1:7860 and press Connect.
 Each browser connection is one call (call.py) with its own Claude session: since A3 the
@@ -29,7 +29,7 @@ from pipecat.workers.runner import WorkerRunner
 
 from call import Call
 from call_state import CallState
-from pipeline import PushToTalk, build_pipeline, cancel_turn, late_cancel, type_to_jarvis
+from pipeline import PushToTalk, build_pipeline, cancel_turn, late_cancel, type_to_agent
 
 
 # H46: True while the call line answers an offer from a page on this MacBook itself (see CallerHere).
@@ -42,7 +42,7 @@ def keep_audio_in_the_tailnet() -> None:
     the call's audio to, not its Wi-Fi or public IPv6 addresses. With no outside STUN/TURN
     servers either, the audio can only travel through Tailscale. If the MacBook has no
     Tailscale address (Tailscale off), all addresses are offered, so the call still works
-    at the desk. JARVIS_TAILNET_ONLY=0 turns this off.
+    at the desk. HQ_TAILNET_ONLY=0 turns this off.
 
     H46 (11 October 2026): the HQ app on this MacBook (WebKit) never offers a Tailscale address,
     only Wi-Fi, so its calls timed out. When the caller offers one of this MacBook's own addresses,
@@ -52,7 +52,7 @@ def keep_audio_in_the_tailnet() -> None:
 
     import aioice.ice as ice
 
-    if os.environ.get("JARVIS_TAILNET_ONLY", "1") == "0":
+    if os.environ.get("HQ_TAILNET_ONLY", "1") == "0":
         return
     global _all_addresses
     original = _all_addresses = ice.get_host_addresses
@@ -164,17 +164,17 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
     # prime the Claude session, load Whisper, run Kokoro once. The pipeline starts right away.
     warming = asyncio.create_task(call.warm())
 
-    # H3: tell the call page what Jarvis is doing (listening, thinking, speaking).
+    # H3: tell the call page what HQ is doing (listening, thinking, speaking).
     call_state = CallState(connection.send_app_message if connection is not None else None)
     # H6: every spoken line also goes to the call page, for the chat log.
     if connection is not None:
         def to_page(who: str, text: str) -> None:
-            connection.send_app_message({"type": "jarvis-chat", "who": who, "text": text})
+            connection.send_app_message({"type": "hq-chat", "who": who, "text": text})
         call.transcript.on_line = to_page
 
         # H31: the Cancel button shows while what he said can still be taken back.
         def cancellable(on: bool) -> None:
-            connection.send_app_message({"type": "jarvis-cancellable", "on": on})
+            connection.send_app_message({"type": "hq-cancellable", "on": on})
         call.llm.on_cancellable = cancellable
     # H9: while the talk button is held, the turn stays his.
     ptt = PushToTalk()
@@ -190,7 +190,7 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("The caller connected")
-        # Jarvis opens the call, like an assistant picking up the phone.
+        # HQ opens the call, like an assistant picking up the phone.
         asyncio.create_task(call.fillers.greet())
 
     @transport.event_handler("on_client_disconnected")
@@ -211,15 +211,15 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
                 await ptt.set_held(bool(message.get("held")))
             elif isinstance(message, dict) and message.get("type") == "typed":
                 # H18: he typed in the chat instead of talking; she answers out loud as usual.
-                await type_to_jarvis(worker, call.llm, call_state, str(message.get("text") or ""))
+                await type_to_agent(worker, call.llm, call_state, str(message.get("text") or ""))
             elif isinstance(message, dict) and message.get("type") == "cancel":
                 # H31: he takes back what he just said, before she answers.
                 if await cancel_turn(ptt.user_aggregator, call.llm, call_state):
-                    connection.send_app_message({"type": "jarvis-cancelled"})
+                    connection.send_app_message({"type": "hq-cancelled"})
                 else:
                     # H38: too late for that: she stops, and "Cancel last message" goes in as his turn.
                     await late_cancel(worker, call.llm, call_state,
-                                      lambda: connection.send_app_message({"type": "jarvis-cancelled"}))
+                                      lambda: connection.send_app_message({"type": "hq-cancelled"}))
 
     runner = WorkerRunner(handle_sigint=handle_sigint)
     await runner.add_workers(worker)
@@ -237,7 +237,7 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
 async def bot(runner_args: RunnerArguments):
     """Entry point for Pipecat's runner: one call per browser connection."""
     if not isinstance(runner_args, SmallWebRTCRunnerArguments):
-        raise RuntimeError("Jarvis VA only runs over the small WebRTC transport (-t webrtc)")
+        raise RuntimeError("HQ only runs over the small WebRTC transport (-t webrtc)")
     transport = SmallWebRTCTransport(
         webrtc_connection=runner_args.webrtc_connection,
         params=TransportParams(audio_in_enabled=True, audio_out_enabled=True),

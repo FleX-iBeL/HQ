@@ -34,7 +34,7 @@ On the call page: hold to talk (or talk freely), a chat that shows what you both
 - **Donna:** Sonnet, with the basics loaded (your rules, your to-do list, the mail list, the last notes). Calm, quick, organised. For your agenda, your list, mail and quick orders. (This was Quick.)
 - **Pepper:** Opus, with everything loaded, your vision too. Warm, sharp, sees the whole picture. For planning, sparring, thinking things through. (This was Deep.)
 
-The call line itself is still called Jarvis. Each agent's headshot is a drawn placeholder until you put a picture in your workspace (`Jarvis VA/agents/donna.jpg`, `pepper.jpg`; pictures stay in your workspace, never in HQ). You can change an agent or add your own in `Jarvis VA/agents/agents.json` (see `app/agents.py`): a name, a personality, a speciality, a model, and how much of your workspace she loads (`quick` or `deep`).
+Each agent's headshot is a drawn placeholder until you put a picture in your workspace (`HQ/agents/donna.jpg`, `pepper.jpg`; pictures stay in your workspace, never in HQ). You can change an agent or add your own in `HQ/agents/agents.json` (see `app/agents.py`): a name, a personality, a speciality, a model, and how much of your workspace she loads (`quick` or `deep`).
 
 **And Free on top of any agent:**
 
@@ -50,7 +50,7 @@ Your workspace is a folder of plain text (Markdown) files that Claude reads at t
 
 ### The routine and the job queue
 
-A small helper runs every minute, without Claude, so it costs nothing while waiting. It looks at the job queue on your roadmap (`workspace/Jarvis VA/roadmap.md`). A job is work you agreed on a call ("build this", "sort that out"). When nothing is running, it starts the highest job on the list in a Terminal window, as a normal Claude chat, minimized so it doesn't take over your screen. One job at a time; the rest wait their turn. From a call you can add jobs, move them up or down, stop one, or switch the whole thing off.
+A small helper runs every minute, without Claude, so it costs nothing while waiting. It looks at the job queue on your roadmap (`workspace/HQ/roadmap.md`). A job is work you agreed on a call ("build this", "sort that out"). When nothing is running, it starts the highest job on the list in a Terminal window, as a normal Claude chat, minimized so it doesn't take over your screen. One job at a time; the rest wait their turn. From a call you can add jobs, move them up or down, stop one, or switch the whole thing off.
 
 It watches your Claude usage: it stops at the line you set for the 5-hour and the weekly limits, and starts again when there's room. If a job goes quiet (no internet, say), it types "continue" into its window, three times at the most, then marks it as stuck.
 

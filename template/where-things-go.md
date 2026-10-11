@@ -24,8 +24,8 @@ A file with an @ in front of its name in CLAUDE.md is loaded in full at the star
 | Done and let-go items, and challenge log lines, older than two weeks | `challenges-archive.md` | on demand |
 | New mail from the hourly mail check, waiting for your yes | `inbox.md` | @ |
 | Weekly reviews | `reviews/YYYY-Www.md` | on demand |
-| The status block, the job queue, the roadmap of what HQ builds next | `Jarvis VA/roadmap.md` | on demand (the status page reads it) |
-| Call transcripts (full, one file per call) | `Jarvis VA/calls/YYYY-MM-DD-HHMM.md` | on demand |
+| The status block, the job queue, the roadmap of what HQ builds next | `HQ/roadmap.md` | on demand (the status page reads it) |
+| Call transcripts (full, one file per call) | `HQ/calls/YYYY-MM-DD-HHMM.md` | on demand |
 | Appointments and time blocks | the calendar: the visual of the files above, never the only place | when asked or when planning |
 | Something new (a goal, a plan, a project) | a new `.md` file or folder here, plus a line in this map | decide per file |
 

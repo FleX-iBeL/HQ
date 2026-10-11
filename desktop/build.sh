@@ -44,7 +44,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSMicrophoneUsageDescription</key><string>HQ uses the microphone for calls with Jarvis.</string>
+  <key>NSMicrophoneUsageDescription</key><string>HQ uses the microphone for calls.</string>
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
   <key>HQPath</key><string>$HQ</string>
   $ICON

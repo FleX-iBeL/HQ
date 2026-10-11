@@ -92,7 +92,7 @@ class Call:
             note = "" if self.free else open_loops.call_note(self._loops or open_loops.read(config.FOLDER))
             self.open_loops_note = note
             text = (
-                f"[Call system: {config.USER} is calling you now on Jarvis VA, the voice call. It is {stamp}. "
+                f"[Call system: {config.USER} is calling you now on HQ, the voice call. It is {stamp}. "
                 + (f"{note}\n" if note else "")
                 + "Don't do anything yet and use no tools. Reply with only the word: ready]"
             )
@@ -130,7 +130,7 @@ class Call:
                 self.transcript.path.unlink(missing_ok=True)
                 return
             if self.wrap_up_mode == "off":
-                logger.info("After-call work is off (JARVIS_WRAP_UP=off)")
+                logger.info("After-call work is off (HQ_WRAP_UP=off)")
                 return
             # Nobody can answer questions now, and the transcript is closed.
             self.policy.listener = None

@@ -1,4 +1,4 @@
-"""H36: wake up a job that has gone quiet. Run by the Jarvis Routine helper (tick.py) every minute while a
+"""H36: wake up a job that has gone quiet. Run by the HQ Routine helper (tick.py) every minute while a
 job runs; no Claude, no usage.
 
 10 October 2026 (call at 16:08): he went to the supermarket with the laptop and lost internet; job 15
@@ -26,7 +26,7 @@ import json, os, subprocess, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
-RUN = os.environ.get("JARVIS_NUDGE_DIR") or os.path.join(JV, "scratch", "routine")  # the env: for the happy flow
+RUN = os.environ.get("HQ_NUDGE_DIR") or os.path.join(JV, "scratch", "routine")  # the env: for the happy flow
 ACTIVITY = os.path.join(RUN, "job-activity.json")  # written by statusline.py: {"at", "session", "transcript"}
 REQUEST = os.path.join(RUN, "nudge-request.json")  # {"n", "at", "text"}: read by nudge.py in job n's window
 RESULT = os.path.join(RUN, "nudge-result.json")  # {"n", "at", "ok", "said"}: written by nudge.py

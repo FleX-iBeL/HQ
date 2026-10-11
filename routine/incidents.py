@@ -2,10 +2,10 @@
 was back. 10 October 2026: "preferably, it should also log somewhere in monitoring when services
 went disconnected and what it did to fix it."
 
-Kept in Jarvis VA/.status/incidents.json (local only, like the routine lines), the newest 100. One entry:
+Kept in .status/incidents.json (local only, like the routine lines), the newest 100. One entry:
 {"id", "key" (the routine), "down" (epoch), "why", "fixes": [{"at", "what"}], "back" (epoch, or None while
-still down)}. Written by the Jarvis Routine helper (tick.py). The watchdog can't write in the Documents
-folder, so it leaves what it did in ~/Library/Application Support/JarvisVA/events.jsonl, and the helper
+still down)}. Written by the HQ Routine helper (tick.py). The watchdog can't write in the Documents
+folder, so it leaves what it did in ~/Library/Application Support/HQ/events.jsonl, and the helper
 picks that up here. The status server serves the log at /incidents.json for the Routines section.
 """
 import json, os, tempfile, time
@@ -13,7 +13,7 @@ import json, os, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
 FILE = os.path.join(JV, ".status", "incidents.json")
-EVENTS = os.path.expanduser("~/Library/Application Support/JarvisVA/events.jsonl")
+EVENTS = os.path.expanduser("~/Library/Application Support/HQ/events.jsonl")
 KEEP = 100
 
 

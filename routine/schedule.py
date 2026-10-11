@@ -21,11 +21,11 @@ routine is on and no job runs or waits. Then the item whose time came first beco
 queue (so it starts within the same minute), and the item says which job it became.
 
 usage (from the workspace):
-  python3 "Jarvis VA/routine/schedule.py" add "WHEN" "TEXT" [--past-the-line]   plan an item
+  python3 "routine/schedule.py" add "WHEN" "TEXT" [--past-the-line]   plan an item
         WHEN: 2026-10-13 15:00 · today 15:00 · tomorrow 9:30 · tuesday 15:00 (the next one) · now
-  python3 "Jarvis VA/routine/schedule.py" list                                  what's planned, and what came of it
-  python3 "Jarvis VA/routine/schedule.py" cancel N                              cancel waiting item N
-  python3 "Jarvis VA/routine/schedule.py" move N "WHEN"                         give waiting item N another day or time
+  python3 "routine/schedule.py" list                                  what's planned, and what came of it
+  python3 "routine/schedule.py" cancel N                              cancel waiting item N
+  python3 "routine/schedule.py" move N "WHEN"                         give waiting item N another day or time
 Used by the routine itself: promote (and status, for its routine line).
 """
 import datetime as dt

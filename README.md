@@ -42,7 +42,7 @@ When a step fails, its line says why and what to do; fix it and run the installe
 | Tailscale (optional) | Calling from the phone, privately, without opening anything to the internet | `brew install --cask tailscale`, then sign in |
 | About 4 GB free | The Python environment (~1.6 GB), the voice (~330 MB), speech recognition (~1.6 GB, downloaded on the first call) | `df -h ~` |
 
-Some scripts call Claude Code and Node at Homebrew's place (`/opt/homebrew/bin/claude`, `/opt/homebrew/bin/node`). If `which claude` says something else, either link it there or set `JARVIS_CLAUDE_CLI` for the call line and change `CLAUDE` and `NODE` at the top of `routine/tick.py`.
+Some scripts call Claude Code and Node at Homebrew's place (`/opt/homebrew/bin/claude`, `/opt/homebrew/bin/node`). If `which claude` says something else, either link it there or set `HQ_CLAUDE_CLI` for the call line and change `CLAUDE` and `NODE` at the top of `routine/tick.py`.
 
 ### 1. The workspace: the person's own files
 
@@ -52,7 +52,7 @@ HQ is the app; **`workspace/` is theirs.** HQ's repo never uploads it, and updat
 - **If `workspace/` already exists, never overwrite it.** It holds their notes.
 - Make it its own git repo: `git -C workspace init`, then a first commit. HQ commits and pushes their notes after calls and jobs; a private GitHub repo as `origin` is the backup. Until there is a remote, the push step fails while the commit is kept; set one up with them, or leave it.
 - Then ask them to fill in `workspace/me.md` (their name, what's important, what HQ should manage), or offer to do it together: they talk, you write it down in their words.
-- The call reads a few lines of `me.md` itself: **Name** (how Jarvis greets them and what their lines in a transcript are called), **Names to hear** (names speech recognition should get right), **Never change** (workspace folders a call never changes or commits), **Private words** (for the privacy check below) and the section **On calls** (their language, how they like times said). All optional; nothing about a person is in HQ's own code.
+- The call reads a few lines of `me.md` itself: **Name** (how HQ greets them and what their lines in a transcript are called), **Names to hear** (names speech recognition should get right), **Never change** (workspace folders a call never changes or commits), **Private words** (for the privacy check below) and the section **On calls** (their language, how they like times said). All optional; nothing about a person is in HQ's own code.
 
 ### 2. The call line's Python environment
 
@@ -78,14 +78,14 @@ HQ reads mail through the **Gmail** connector and the calendar through the **Goo
 
 ```sh
 app/start.sh                     # with Tailscale: the phone line too
-JARVIS_NO_PHONE=1 app/start.sh   # without Tailscale: this computer only
+HQ_NO_PHONE=1 app/start.sh   # without Tailscale: this computer only
 ```
 
 Then open http://127.0.0.1:7860 in the browser, allow the microphone, pick Donna, and say hello. Log: `scratch/server.log`. Stop: `app/stop.sh`.
 
 On the phone (Tailscale on, on both): the address `start.sh` prints, `https://<this-mac>.<tailnet>.ts.net:8443`, in Safari, then Share → Add to Home Screen.
 
-Who to call (since 0.2, the agents): **Donna** (Sonnet, the basics loaded, fast; was Quick) and **Pepper** (Opus, everything loaded, for planning and thinking; was Deep). Their headshots are placeholders until the user puts pictures in `workspace/Jarvis VA/agents/` (`pepper.jpg`, `donna.jpg`); agents can be changed or added there in `agents.json` (see `app/agents.py`). On top of any agent, **Free**: plain Claude with no connectors, none of their files, no notes and nothing saved, only the web. Free is for testing and showing HQ to others.
+Who to call (since 0.2, the agents): **Donna** (Sonnet, the basics loaded, fast; was Quick) and **Pepper** (Opus, everything loaded, for planning and thinking; was Deep). Their headshots are placeholders until the user puts pictures in `workspace/HQ/agents/` (`pepper.jpg`, `donna.jpg`); agents can be changed or added there in `agents.json` (see `app/agents.py`). On top of any agent, **Free**: plain Claude with no connectors, none of their files, no notes and nothing saved, only the web. Free is for testing and showing HQ to others.
 
 ### 6. The status page
 
@@ -93,7 +93,7 @@ Who to call (since 0.2, the agents): **Donna** (Sonnet, the basics loaded, fast;
 node status/server.mjs
 ```
 
-http://localhost:4748, this computer only. It reads `workspace/Jarvis VA/roadmap.md` every few seconds; that file is the only place the status is written. On the phone: `status/phone.sh` puts it on `:8444` in the tailnet, with its own home-screen icon.
+http://localhost:4748, this computer only. It reads `workspace/HQ/roadmap.md` every few seconds; that file is the only place the status is written. On the phone: `status/phone.sh` puts it on `:8444` in the tailnet, with its own home-screen icon.
 
 ### 6b. The Mac app (optional)
 
@@ -105,7 +105,7 @@ The same on the phone, nothing to build: the status page's phone address with `/
 
 These keep HQ running without anyone watching. All three ask macOS for permission once.
 
-- **The helper app** (the routine, every minute, and the start at login): `sh routine/build-app.sh` builds *Jarvis Routine* into `~/Applications`. Then copy the LaunchAgent (the `.plist` file in `app/`) to `~/Library/LaunchAgents/` and `launchctl load` it there. macOS asks whether it may reach the Documents folder: **Allow**. When it starts a job or the mail check, macOS may ask whether it may control Terminal: **Allow**. Log: `scratch/routine/routine.log`.
+- **The helper app** (the routine, every minute, and the start at login): `sh routine/build-app.sh` builds *HQ Routine* into `~/Applications`. Then copy the LaunchAgent (the `.plist` file in `app/`) to `~/Library/LaunchAgents/` and `launchctl load` it there. macOS asks whether it may reach the Documents folder: **Allow**. When it starts a job or the mail check, macOS may ask whether it may control Terminal: **Allow**. Log: `scratch/routine/routine.log`.
 - **The watchdog** (every 5 minutes, brings the helper back): `sh routine/install-watchdog.sh`.
 - **Lid closed, keep working** (optional): `sudo sh routine/install-lidsleep.sh` once, with their password typed by them. After that a call can switch it on and off. Never type or store their password yourself.
 
@@ -123,7 +123,7 @@ The happy flows are HQ's tests: the main things that must work when all goes wel
 
 They run on their own port and never touch the live call line. **All must pass.** A failed flow says why; fix it and run it again. A flow that needs something they chose not to set up (Tailscale, the lid switch) may fail for that reason: say so plainly instead of hiding it.
 
-Then the real test: a call from the phone or the browser, a question about today's calendar, and hang up. The transcript lands in `workspace/Jarvis VA/calls/`, and the notes in `workspace/coaching/log.md`.
+Then the real test: a call from the phone or the browser, a question about today's calendar, and hang up. The transcript lands in `workspace/HQ/calls/`, and the notes in `workspace/coaching/log.md`.
 
 ### When it breaks
 

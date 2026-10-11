@@ -9,7 +9,7 @@ about them comes from workspace/me.md (the template ships it blank):
     **Private words:** words that must never end up in HQ itself (the privacy check), comma separated
     ## On calls      anything extra for the call rules (their language, how they say times, ...)
 
-Every part is optional. Without a name, Jarvis greets without one and the rules say "the user".
+Every part is optional. Without a name, HQ greets without one and the rules say "the user".
 HQ_USER_NAME overrides the name (tests).
 """
 import os

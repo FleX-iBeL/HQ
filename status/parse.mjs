@@ -1,8 +1,8 @@
 /**
- * Reads the status out of Jarvis VA/roadmap.md. The roadmap is the only place the status is written;
+ * Reads the status out of HQ/roadmap.md. The roadmap is the only place the status is written;
  * the status page (tools/status/index.html) draws what this returns and stores nothing itself.
  *
- * The block at the top of Jarvis VA/roadmap.md, up to the first line with only "---":
+ * The block at the top of HQ/roadmap.md, up to the first line with only "---":
  *   # <emoji> STATE IN CAPITALS
  *   ## Now: … (or Next: …)
  *   **Label:** one or two short lines
@@ -156,7 +156,7 @@ export function parseRoadmap(markdown) {
   }
 
   const limit = /\*\*Usage limit:\s*(\d{1,3})\s*%/.exec(markdown);
-  // Jarvis VA: a flat stop line for the weekly limits, instead of spreading them over the week.
+  // HQ: a flat stop line for the weekly limits, instead of spreading them over the week.
   const weekly = /\*\*Weekly limit:\s*(\d{1,3})\s*%/.exec(markdown);
 
   return {
