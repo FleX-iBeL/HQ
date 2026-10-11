@@ -2,7 +2,7 @@
 
 What was added and changed in each version of HQ, newest first. The small grey version number on the call page, the status page and in the Mac app opens this. Fixes get a patch number (0.2.1), bigger features the next minor (0.3). "Coming next" is what's built but not in a version yet; at a release it gets the version's number and date.
 
-## Coming next
+## 0.3 · 11 October 2026
 
 ### New
 - Updates: HQ looks a few times a day whether a newer version is out. A small bar shows what's new with an Update button; your changes are saved on a backup branch first, and your workspace and your own builds in local/ are never touched.
