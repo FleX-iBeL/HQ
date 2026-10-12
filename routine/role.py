@@ -77,11 +77,19 @@ def _save(path, data):
     os.replace(tmp, path)
 
 
+def _test_on_real_pairing() -> bool:
+    """A test (HQ_UNDER_TEST) whose HQ memory is this computer's real one, so it would read the real role.json:
+    only throwaway HQs with their own HQ_SUPPORT may pair under a test (flow 65)."""
+    return hqpaths.under_test() and os.path.realpath(SUPPORT) == hqpaths.real_support()
+
+
 def config() -> dict:
     """The setup, or {} when this HQ is on its own (no other HQ: main, nothing to look for). A test's copy of the
     roadmap (HQ_ROADMAP without its own HQ_SUPPORT) is always on its own: on a paired backup its jobs and planned
     items would otherwise go to the real main's job list (found in H56.7, when the flows ran on the VPS)."""
     if os.environ.get("HQ_ROADMAP") and not os.environ.get("HQ_SUPPORT"):
+        return {}
+    if _test_on_real_pairing():  # F17: a test never uses this HQ's real pairing
         return {}
     c = _load(CONFIG, {})
     return c if c.get("peer") else {}
@@ -377,7 +385,13 @@ def forward(script: str, args: list[str]) -> int:
     """jobs.py or schedule.py on the backup: a call's write goes to the main as a request. Prints what the main
     said. When the main can't be reached, the request is kept here and goes on by itself (or runs here when this
     one takes over)."""
+    if _test_on_real_pairing():
+        sys.stderr.write("Refused (F17): a test may not hand anything to the other HQ through the real pairing.\n")
+        return 3
     c = config()
+    if not c:  # nothing to hand it to
+        sys.stderr.write("This HQ isn't paired; nothing to hand it to.\n")
+        return 3
     peer = c.get("peer_name") or "the main HQ"
     try:
         code, d = _request(c["peer"].rstrip("/") + "/api/forward", {"script": script, "args": args}, "forward", timeout=90)

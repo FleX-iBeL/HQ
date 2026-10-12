@@ -35,5 +35,6 @@ block = f"""# {states[state]}
 
 *Updated {time.strftime('%Y-%m-%d')}{' · ' + note if note else ''}*
 """
+hqpaths.guard_roadmap(path)  # F17
 open(path, "w", encoding="utf8").write(block + sep + rest)
 print(block)

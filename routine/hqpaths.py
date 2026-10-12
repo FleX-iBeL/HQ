@@ -27,6 +27,42 @@ FOLDER = os.path.realpath(WORKSPACE)
 DATA = os.path.join(FOLDER, "HQ")
 ROADMAP = os.environ.get("HQ_ROADMAP") or os.path.join(DATA, "roadmap.md")
 
+# F17 (12 October 2026): the happy flows on the VPS reached the real job list (through the backup's forward to
+# the main). A test (HQ_UNDER_TEST, set by app/happy_flows.py for itself and everything it starts) may never change
+# the real workspace's roadmap, nor hand anything to the other HQ through this HQ's real pairing.
+
+
+def real_roadmap() -> str:
+    """The real workspace's roadmap, whatever HQ_ROADMAP says: HQ_REAL_ROADMAP (the happy flows name it once, so
+    every copy of HQ a flow starts knows it), else this HQ's own workspace link."""
+    return os.path.realpath(os.environ.get("HQ_REAL_ROADMAP")
+                            or os.path.join(os.path.realpath(os.path.join(HQ, "workspace")), "HQ", "roadmap.md"))
+
+
+def under_test() -> bool:
+    return bool(os.environ.get("HQ_UNDER_TEST"))
+
+
+def real_support() -> str:
+    """This computer's real HQ memory, whatever HQ_SUPPORT says (HQ_REAL_SUPPORT names it for a test)."""
+    if os.environ.get("HQ_REAL_SUPPORT"):
+        return os.path.realpath(os.path.expanduser(os.environ["HQ_REAL_SUPPORT"]))
+    saved = os.environ.pop("HQ_SUPPORT", None)
+    try:
+        return os.path.realpath(support_dir())
+    finally:
+        if saved is not None:
+            os.environ["HQ_SUPPORT"] = saved
+
+
+def guard_roadmap(path: str | None = None) -> None:
+    """Stop with an error when a test is about to change the real workspace's roadmap (F17)."""
+    if under_test() and os.path.realpath(path or ROADMAP) == real_roadmap():
+        sys.stderr.write("Refused (F17): a test may not change the real workspace's roadmap "
+                         f"({path or ROADMAP}). Give it its own copy with HQ_ROADMAP.\n")
+        sys.exit(3)
+
+
 # H56.1 (12 October 2026): HQ also runs on a Linux server, as the routine and the watchdog (systemd there).
 # The Mac stays exactly as it was; on Linux the same parts find their own places and programs.
 IS_MAC = sys.platform == "darwin"

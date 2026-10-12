@@ -5060,6 +5060,79 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         return " · ".join(notes)
 
 
+    async def flow67(self) -> str:
+        """F17: under a test, jobs.py, schedule.py and set-status.py refuse the real workspace's roadmap, and the real
+        pairing is never used. Proven on throwaway copies standing in for the real ones; the real job list is only
+        read, before and after."""
+        import subprocess as sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        def queue_parts(text):
+            parts = []
+            for heading in ("## The queue", "## The schedule"):
+                i = text.find("\n" + heading + "\n")
+                j = text.find("\n## ", i + 1) if i >= 0 else -1
+                parts.append(text[i:j] if i >= 0 else "")
+            return parts
+        real_before = queue_parts(ROADMAP.read_text())
+        need(os.environ.get("HQ_UNDER_TEST") == "1", "the happy flows don't mark themselves as a test")
+        need(os.path.realpath(os.environ.get("HQ_REAL_ROADMAP", "")) == os.path.realpath(ROADMAP),
+             f"the happy flows don't name the real roadmap: {os.environ.get('HQ_REAL_ROADMAP')}")
+        fake_real = self.tmp / "f17-real" / "roadmap.md"   # stands in for the real one
+        fake_real.parent.mkdir(parents=True, exist_ok=True)
+        fake_real.write_text(ROADMAP.read_text())
+        own = self.tmp / "f17-own.md"                      # a test's own copy
+        own.write_text(ROADMAP.read_text())
+        support = self.tmp / "f17-support"                 # stands in for this computer's real HQ memory
+        support.mkdir(exist_ok=True)
+        (support / "role.json").write_text(json.dumps({"name": "here", "peer": "https://127.0.0.1:9/", "peer_name": "there",
+                                                      "main": "there", "chosen_at": 1}))
+        (support / "role-state.json").write_text(json.dumps({"acting": "backup"}))
+        base = {**os.environ, "HQ_UNDER_TEST": "1", "HQ_REAL_ROADMAP": str(fake_real), "HQ_REAL_SUPPORT": str(support),
+                "HQ_SUPPORT": str(support)}
+        def run(script, *a, roadmap, extra=None):
+            env = {**base, "HQ_ROADMAP": str(roadmap), **(extra or {})}
+            path = ROOT / ("status" if script == "set-status.py" else "routine") / script
+            return sp.run([sys.executable, str(path), *a], capture_output=True, text=True, env=env, timeout=60)
+        untouched = fake_real.read_text()
+        for script, args in (("jobs.py", ["add", "flow 67 job", "--kind", "other"]), ("jobs.py", ["off"]),
+                             ("schedule.py", ["add", "tomorrow 9:30", "flow 67 planned"]),
+                             ("set-status.py", ["BUILDING", "flow 67", "", "", "Phase F|F17 🔨", "flow 67"])):
+            r = run(script, *args, roadmap=fake_real, extra={"HQ_SUPPORT": str(self.tmp / "f17-other")})
+            need(r.returncode != 0 and "F17" in r.stderr, f"{script} {args[0]} wasn't refused on the real roadmap: {r.returncode} {r.stdout[-200:]} {r.stderr[-200:]}")
+        need(fake_real.read_text() == untouched, "a refused write still changed the real roadmap")
+        r = run("jobs.py", "list", roadmap=fake_real, extra={"HQ_SUPPORT": str(self.tmp / "f17-other")})
+        need(r.returncode == 0, f"reading the real list under a test was refused: {r.stderr[-200:]}")
+        r = run("jobs.py", "add", "flow 67 own job", "--kind", "other", roadmap=own, extra={"HQ_SUPPORT": str(self.tmp / "f17-other")})
+        need(r.returncode == 0 and "flow 67 own job" in own.read_text(), f"a test's own copy can't be written: {r.stderr[-200:]}")
+        # The real pairing: a test on this computer's real HQ memory (here a stand-in, paired as the backup) isn't
+        # paired, so a call's write stays on the test's own copy and nothing is handed on or kept for the main.
+        own2 = self.tmp / "f17-own2.md"
+        own2.write_text(ROADMAP.read_text())
+        r = run("jobs.py", "add", "flow 67 not forwarded", "--kind", "other", roadmap=own2)
+        need(r.returncode == 0 and "flow 67 not forwarded" in own2.read_text() and "handed" not in r.stdout,
+             f"a test on the real pairing didn't stay on its own copy: {r.returncode} {r.stdout[-200:]} {r.stderr[-200:]}")
+        need(not (support / "role-pending.jsonl").exists(), "a test's request was kept to be handed to the real main")
+        r = sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import role; sys.exit(role.forward('jobs', ['add', 'x']))",
+                    str(ROOT / "routine")], capture_output=True, text=True, env={**base, "HQ_ROADMAP": str(own2)}, timeout=30)
+        need(r.returncode == 3 and "F17" in r.stderr and not (support / "role-pending.jsonl").exists(),
+             f"handing on through the real pairing wasn't refused: {r.returncode} {r.stderr[-200:]}")
+        probe = "import sys; sys.path.insert(0, sys.argv[1]); import role; print(bool(role.config()), role.acting())"
+        r = sp.run([sys.executable, "-c", probe, str(ROOT / "routine")], capture_output=True, text=True,
+                   env={**base, "HQ_ROADMAP": str(own2)}, timeout=30)
+        need(r.stdout.split() == ["False", "main"], f"a test still reads the real pairing: {r.stdout} {r.stderr[-200:]}")
+        env = {k: v for k, v in base.items() if k not in ("HQ_UNDER_TEST", "HQ_ROADMAP")}
+        r = sp.run([sys.executable, "-c", probe, str(ROOT / "routine")], capture_output=True, text=True, env=env, timeout=30)
+        need(r.stdout.split() == ["True", "backup"], f"outside a test the pairing should be read (the check itself is wrong): {r.stdout} {r.stderr[-200:]}")
+        # Throwaway HQs with their own memory may still pair under a test (flow 65).
+        r = sp.run([sys.executable, "-c", probe, str(ROOT / "routine")], capture_output=True, text=True,
+                   env={**base, "HQ_ROADMAP": str(own2), "HQ_REAL_SUPPORT": str(self.tmp / "f17-other")}, timeout=30)
+        need(r.stdout.split() == ["True", "backup"], f"a throwaway HQ's own pairing is refused under a test: {r.stdout} {r.stderr[-200:]}")
+        need(queue_parts(ROADMAP.read_text()) == real_before, "the real job list or schedule changed during the flow")
+        return ("jobs.py, schedule.py and set-status.py refuse the real roadmap under a test (a stand-in copy, unchanged); "
+                "reading it still works, a test's own copy is written; the real pairing is never read or used; "
+                "throwaway HQs still pair; the real job list unchanged")
+
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -5402,6 +5475,7 @@ FLOWS = {
     64: ("F16: the call page fits the screen before, during and after a call; no scrolling into white space", False, "flow64"),
     65: ("H56.3: main and backup: two throwaway HQs hand the main role back and forth; alone, an HQ is simply main", False, "flow65"),
     66: ("H56.4: the two-way sync: two private Syncthings, both ways, video left out, conflicts kept and merged, only the main commits", False, "flow66"),
+    67: ("F17: a test never changes the real job list, schedule or status block, nor uses the real pairing", False, "flow67"),
 }
 
 
@@ -5413,6 +5487,13 @@ async def main(args) -> bool:
         return False
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     print(f"== HQ happy flows · {stamp} · flows {chosen}" + (" · quick (no Claude turns)" if args.quick else ""))
+    # F17: everything the flows start knows it's a test, and which roadmap and HQ memory are the real ones,
+    # so jobs.py, schedule.py, set-status.py and role.py refuse them (a flow works on its own copies only).
+    os.environ["HQ_UNDER_TEST"] = "1"
+    os.environ.setdefault("HQ_REAL_ROADMAP", os.path.realpath(ROADMAP))
+    sys.path.insert(0, str(ROOT / "routine"))
+    import hqpaths as _hqp
+    os.environ.setdefault("HQ_REAL_SUPPORT", _hqp.real_support())
     tmp = Path(tempfile.mkdtemp(prefix="happy-flows-", dir=config.SCRATCH))
     run_ = Run(tmp)
     # Flow 7 closes the live call; if it runs, it must come after the others that use that call.

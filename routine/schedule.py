@@ -94,6 +94,7 @@ def write(text, items):
         else:
             head, sep, rest = text.partition("\n---\n")
             text = head + sep + "\n" + body + rest.lstrip("\n")
+    jobs.hqpaths.guard_roadmap(jobs.ROADMAP)  # F17
     tmp = jobs.ROADMAP + ".tmp"
     open(tmp, "w", encoding="utf8").write(text)
     os.replace(tmp, jobs.ROADMAP)

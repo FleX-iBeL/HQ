@@ -109,6 +109,7 @@ def write(text, jobs, on):
         # Right under the status block.
         head, sep, rest = text.partition("\n---\n")
         text = head + sep + "\n" + body + rest.lstrip("\n")
+    hqpaths.guard_roadmap(ROADMAP)  # F17
     tmp = ROADMAP + ".tmp"
     open(tmp, "w", encoding="utf8").write(text)
     os.replace(tmp, ROADMAP)
