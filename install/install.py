@@ -106,6 +106,9 @@ UNIT = os.environ.get("HQ_UNIT", "hq")
 MAC_ONLY_PACKAGES = {"mlx", "mlx-metal", "mlx-whisper", "more-itertools", "networkx", "regex", "scipy",
                      "setuptools", "tiktoken", "torch"}
 LISTEN_MODULE = "mlx_whisper" if IS_MAC else "faster_whisper"
+# H56.5: the quick happy flows that hold on a Linux server today (the rest are written for the Mac and get their
+# Linux side when HQ on a server is made the main one, H56.7).
+LINUX_FLOWS = "8,15,16,20,23,26,34,41,42,44,45,51,54,56,60,61,63,65,66"
 VOICE_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 VOICE_FILES = {"kokoro-v1.0.onnx": 300_000_000, "voices-v1.0.bin": 25_000_000}  # minimum sizes
 
@@ -759,13 +762,15 @@ class Installer:
         if FAKE:
             return "simulated (test)"
         py = os.path.join(HQ, ".venv", "bin", "python")
-        r = sh([py, os.path.join(HQ, "app", "happy_flows.py"), "--quick"], cwd=HQ, timeout=900, check=False)
+        r = sh([py, os.path.join(HQ, "app", "happy_flows.py"), "--quick"] + ([] if IS_MAC else ["--only", LINUX_FLOWS]),
+               cwd=HQ, timeout=900, check=False)
         last = [l for l in (r.stdout + r.stderr).splitlines() if " passed " in l]
         if r.returncode != 0:
             failed = [l.strip() for l in r.stdout.splitlines() if "FAILED" in l][:3]
             raise Fail("happy flows: " + (last[-1] if last else "failed") + (" · " + " · ".join(failed) if failed else ""),
                        "Each failed flow says why; the whole output is in scratch/install/install.log.")
-        return "quick happy flows: " + (last[-1].split(" · ")[0] if last else "pass")
+        return ("quick happy flows: " if IS_MAC else "the happy flows that hold on Linux: ") + \
+            (last[-1].split(" · ")[0] if last else "pass")
 
     def steps(self) -> list:
         S = Step
