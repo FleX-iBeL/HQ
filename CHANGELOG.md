@@ -4,6 +4,18 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 0.4.1 · 12 October 2026
+
+### New
+- Which HQ it is, small under the name: VPS on a server, Local · macOS on a laptop. On the status page, the call page and in the Mac app's strip.
+
+### Changed
+- Moneypenny's locked card now just says "Clearance pending."
+- On a server, the status page leaves out the Laptop section and the laptop's temperature and battery lines, since a server has no laptop to read.
+
+### Fixed
+- The server's call page has the night icon too, also when you add it to your phone's home screen (no old icon, no white border).
+
 ## 0.4 · 12 October 2026
 
 ### New
