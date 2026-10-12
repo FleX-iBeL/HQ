@@ -166,6 +166,7 @@
   const WORDS = { happy: 'All good: tail going', alert: 'Keeping an eye on something', bark: 'Something is off', run: 'Turning things on…', sleep: 'Asleep: the status page doesn’t answer' };
   let fixing = false;
   let last = null;
+  let lastDrag = '';
   const hq = window.hq = {
     state: () => ({ mood: $('dog').getAttribute('class').replace('dog ', ''), light: $('light').className.replace('light ', ''), head: $('head').textContent, tab: document.querySelector('.tabs [aria-pressed="true"]').dataset.tab, open: document.body.classList.contains('open'), fix: !$('fix').disabled }),
     update(h) {
@@ -191,17 +192,30 @@
         return d;
       }));
       if (document.body.classList.contains('open')) send({ do: 'height', px: document.body.scrollHeight });
+      hq.dragMap();
     },
     fixing(on, said) {
       fixing = on;
       if (said !== undefined) $('said').textContent = said;
       if (last) hq.update(last);
     },
-    zoom(pct) { $('zoom-level').textContent = `${pct}%`; },
+    // F15: the buttons' places, sent to the app whenever they move, so a click anywhere else in the bar moves the window.
+    dragMap() {
+      const bar = document.querySelector('.bar').getBoundingClientRect();
+      const nodrag = [...document.querySelectorAll('.bar .dog, .bar .tabs, .bar .zoom, .bar .fix, .bar .ver, .bar .newver')]
+        .map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0)
+        .map((r) => [r.left, r.top, r.width, r.height].map((n) => Math.round(n)));
+      const m = { do: 'drag', bar: Math.round(bar.bottom), nodrag };
+      const key = JSON.stringify(m);
+      if (key !== lastDrag) { lastDrag = key; send(m); }
+      return m;
+    },
+    zoom(pct) { $('zoom-level').textContent = `${pct}%`; hq.dragMap(); },
     tab(t) {
       for (const b of document.querySelectorAll('.tabs button')) b.setAttribute('aria-pressed', String(b.dataset.tab === t));
       document.body.classList.toggle('call', t === 'call');
       if (t === 'call' && document.body.classList.contains('open')) { document.body.classList.remove('open'); send({ do: 'height', px: 89 }); }
+      hq.dragMap();
     },
   };
   for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => { hq.tab(b.dataset.tab); send({ do: 'tab', tab: b.dataset.tab }); });
@@ -216,6 +230,7 @@
     document.body.classList.toggle('open');
     send({ do: 'height', px: document.body.classList.contains('open') ? document.body.scrollHeight : 89 });
   });
+  new ResizeObserver(() => hq.dragMap()).observe(document.querySelector('.bar'));
   send({ do: 'ready' });
 </script>
 </body>

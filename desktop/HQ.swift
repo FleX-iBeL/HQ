@@ -22,9 +22,42 @@ func hqFolder() -> String {
     return NSString(string: "~/Documents/Claude/HQ").expandingTildeInPath
 }
 
+// F15 (12 October 2026, call at 10:47), in the user's words: "normal apps you can just. Click somewhere near the
+// top and then you can just drag it around. So I just want it to be like a normal app." The strip fills the
+// title bar, and WebKit inside an app ignores the page's drag hint (-webkit-app-region is Electron's), so only the
+// window's thin edge moved it. The strip now tells the app where its buttons are (hq.dragMap in shell.html); a
+// click anywhere else in the strip's top bar moves the window, and a double click does what the Mac's own setting
+// for a title bar says (zoom, minimise or nothing).
+final class ShellView: WKWebView {
+    var barHeight: CGFloat = SHELL_HEIGHT - 1
+    var noDrag: [NSRect] = []  // in the page's own points, measured from the top left
+
+    func draggable(_ top: NSPoint) -> Bool {
+        top.y >= 0 && top.y < barHeight && !noDrag.contains { $0.contains(top) }
+    }
+
+    func inBar(_ event: NSEvent) -> Bool {
+        let p = convert(event.locationInWindow, from: nil)
+        return draggable(NSPoint(x: p.x, y: isFlipped ? p.y : bounds.height - p.y))
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard inBar(event), let w = window else { return super.mouseDown(with: event) }
+        if event.clickCount == 2 {
+            switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize" {
+            case "Minimize": w.miniaturize(nil)
+            case "None": break
+            default: w.zoom(nil)
+            }
+            return
+        }
+        w.performDrag(with: event)
+    }
+}
+
 final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
     var window: NSWindow!
-    var shell: WKWebView!
+    var shell: ShellView!
     var status: WKWebView!
     var call: WKWebView!
     var shellHeight: NSLayoutConstraint!
@@ -59,7 +92,7 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
 
         let shellConf = WKWebViewConfiguration()
         shellConf.userContentController.add(self, name: "hq")
-        shell = WKWebView(frame: .zero, configuration: shellConf)
+        shell = ShellView(frame: .zero, configuration: shellConf)
         shell.setValue(false, forKey: "drawsBackground")
         status = page()
         let saved = UserDefaults.standard.double(forKey: "statusZoom")
@@ -197,7 +230,10 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
             self.status.evaluateJavaScript("document.title") { title, _ in
                 let s = (state as? String) ?? "null"
                 let t = String(data: try! JSONSerialization.data(withJSONObject: [(title as? String) ?? ""]), encoding: .utf8)!
-                print("{\"strip\": \(s), \"status_loaded\": \(self.statusLoaded), \"status_title\": \(t)}")
+                // F15: an empty spot of the bar moves the window, a button doesn't.
+                let button = self.shell.noDrag.first.map { NSPoint(x: $0.midX, y: $0.midY) } ?? NSPoint(x: -1, y: -1)
+                let drag = "{\"bar\": \(Int(self.shell.barHeight)), \"buttons\": \(self.shell.noDrag.count), \"empty_moves\": \(self.shell.draggable(NSPoint(x: 20, y: 44))), \"button_moves\": \(self.shell.draggable(button))}"
+                print("{\"strip\": \(s), \"status_loaded\": \(self.statusLoaded), \"status_title\": \(t), \"drag\": \(drag)}")
                 fflush(stdout)
                 exit(0)
             }
@@ -261,6 +297,11 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
             status.evaluateJavaScript(what == "update" ? "window.hqUpdate && hqUpdate.ask()" : "window.hqUpdate && hqUpdate.open()", completionHandler: nil)
         case "zoom":
             zoom((m["by"] as? NSNumber)?.intValue ?? 0)
+        case "drag":  // F15: where the strip's buttons are, so the rest of its bar moves the window
+            shell.barHeight = CGFloat((m["bar"] as? NSNumber)?.doubleValue ?? Double(SHELL_HEIGHT - 1))
+            shell.noDrag = (m["nodrag"] as? [[NSNumber]] ?? []).compactMap { r in
+                r.count == 4 ? NSRect(x: r[0].doubleValue, y: r[1].doubleValue, width: r[2].doubleValue, height: r[3].doubleValue) : nil
+            }
         case "height":
             let px = CGFloat((m["px"] as? NSNumber)?.doubleValue ?? Double(SHELL_HEIGHT))
             shellHeight.constant = max(SHELL_HEIGHT, min(px, 480))

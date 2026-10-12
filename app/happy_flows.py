@@ -103,7 +103,7 @@ Run them before and after every update; they print a short pass/fail table at th
      down) and gives the dog its mood; turning things on only starts what's off and never stops
      anything; the strip (headless browser) shows each mood, the light, the tabs and the button only
      when something is off; the app builds, checks its files, and its real window, never shown, loads
-     the strip and the status page
+     the strip and the status page; the strip's empty top bar moves the window, its buttons don't (F15)
   47 the phone version of the Mac app (H28), no Claude: the status server (its own test port) serves the
      Mac app's own strip at /hq with the phone's script and look, its icon and manifest; the dog's
      reading is the Mac app's; Turn everything on only answers the HQ page (and only says what it would
@@ -3543,6 +3543,10 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
              f"the app's strip got no reading: {got['strip']}")
         if live["mood"] != "sleep":
             need(got["status_loaded"] and "HQ" in got["status_title"][0], f"the app didn't load the status page: {got}")
+        # F15: the strip's empty space moves the window like a normal Mac app; its buttons don't.
+        d = got.get("drag") or {}
+        need(d.get("bar", 0) >= 80 and d.get("buttons", 0) >= 1 and d.get("empty_moves") is True and d.get("button_moves") is False,
+             f"the window can't be dragged from the strip's top bar, or a button drags it (F15): {d}")
         swift = (ROOT / "desktop/HQ.swift").read_text()
         need("status.pageZoom = next" in swift and 'item("Smaller", #selector(zoomOut), "-"' in swift and 'id="zoom-in"' in page,
              "the status page can't be made bigger or smaller (H47)")
@@ -3550,7 +3554,7 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
              "the app doesn't open on Call, or its call page still hides the address (H46)")
         need('origin.host == "127.0.0.1"' in swift and "applicationShouldTerminateAfterLastWindowClosed" in swift,
              "the microphone isn't limited to this MacBook, or closing doesn't quit")
-        return f"seven made-up states judged like the status page; turning on starts only what's off, stops nothing; the strip's five moods move; the app builds and its window read: {got['strip']['head']}"
+        return f"seven made-up states judged like the status page; turning on starts only what's off, stops nothing; the strip's five moods move; the app builds and its window read: {got['strip']['head']}; the bar drags the window, its {d['buttons']} buttons don't"
 
     async def flow47(self) -> str:
         """H28: the phone version of the Mac app. No Claude turns. Its own status server on a test port, with

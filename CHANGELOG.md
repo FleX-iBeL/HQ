@@ -10,6 +10,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ### Fixed
 - A Quick call kept the log's open commitments only when they stood above the newest entries; now wherever they stand.
+- The Mac app's window moves like a normal Mac app: drag it from anywhere in the top bar that isn't a button. A double click there does what your Mac's title bar setting says.
 
 ## 0.3 · 11 October 2026
 
