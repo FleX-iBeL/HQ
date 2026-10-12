@@ -44,13 +44,17 @@ const FILES = {
   '/update-ui.js': ['status/update-ui.js', 'text/javascript; charset=utf-8'],
 };
 
-// H56.7: a second HQ (a server) gives its pages its own name and its status page its own icon, so both sit on
-// the phone's home screen side by side. HQ_LABEL (e.g. VPS); without it nothing changes.
+// H56.7: a second HQ (a server) gives its pages its own name and its own icons, so both sit on the phone's
+// home screen side by side. HQ_LABEL (e.g. VPS); without it nothing changes. H84: its icon is HQ's house at
+// night, with the stars and the moon (desktop/make_night_icon.py), for its status page and its /hq alike.
 const LABEL = (process.env.HQ_LABEL ?? '').trim().replace(/[<>&"]/g, '');
 const LABELLED = {
-  '/apple-touch-icon.png': 'status/icons/server-180.png',
-  '/icon-192.png': 'status/icons/server-192.png',
-  '/icon-512.png': 'status/icons/server-512.png',
+  '/apple-touch-icon.png': 'status/icons/hq-night-180.png',
+  '/icon-192.png': 'status/icons/hq-night-192.png',
+  '/icon-512.png': 'status/icons/hq-night-512.png',
+  '/hq-icon-180.png': 'status/icons/hq-night-180.png',
+  '/hq-icon-192.png': 'status/icons/hq-night-192.png',
+  '/hq-icon-512.png': 'status/icons/hq-night-512.png',
 };
 function labelled(path, body) {
   if (!LABEL) return body;
