@@ -111,7 +111,8 @@ DEFAULTS: list[dict] = [
     # H73 (12 October 2026, call at 12:23), in the user's words: "Moneypenny could be Fable. And that's kind of
     # fitting as well because Moneypenny is famous for running things behind the scenes." "we could just put it
     # sort of like grayed out. And just say something like coming soon" and "I just want the icon to be yellow ...
-    # As they show like an M for Moneypenny." Locked: never picked, never called. The wording is Claude's.
+    # As they show like an M for Moneypenny." Locked: never picked, never called. Her line, picked by the user from
+    # Claude's options (cloud session, 12 October 2026): "oehhh clearance pending is nice".
     {
         "id": "moneypenny",
         "name": "Moneypenny",
@@ -121,7 +122,7 @@ DEFAULTS: list[dict] = [
         "voice": "bf_emma",
         "colour": "#ca8a04",
         "coming_soon": True,
-        "speciality": "Behind the scenes. Hand her the big things; they get done, and nobody sees how",
+        "speciality": "Clearance pending.",
         "character": "Few words, cool, a little mysterious. All business",
         "personality": (
             "Few words, cool and a little mysterious. All business. She runs the big, heavy jobs behind the "
