@@ -20,6 +20,13 @@ http://localhost:4748/install (and on the phone's status address). Its data: scr
 the whole run's output: scratch/install/install.log. Python's standard library only, so it runs on the
 python3 macOS ships, before HQ's own Python environment exists.
 
+On a Linux server (H56.5, 12 October 2026) the same two rounds run, with the Linux parts from H56.1 and
+H56.2 instead of the Mac's: systemd user units instead of the helper app and the LaunchAgents
+(routine/install-linux.sh), tmux instead of Terminal windows, faster-whisper instead of MLX, and no lid switch
+or Mac app. Nothing is installed with sudo: what's missing is named, with the line to install it. Run it
+there the same way, usually with --yes --no-page (there's no browser on a server; the checklist is still on the
+status page, /install).
+
 For the happy flows (flow 43), in a throwaway copy: HQ_INSTALL_FAKE=1 simulates every step that touches
 the computer outside HQ (Homebrew, downloads, launchctl, sudo, Terminal, servers) and runs the rest for
 real; HQ_INSTALL_FAIL=<step id> makes that step fail, to see the checklist stop there.
@@ -50,7 +57,14 @@ PAGE = os.path.join(HQ, "install", "checklist.html")
 PAGE_PORT = int(os.environ.get("HQ_INSTALL_PORT", "4749"))
 FAKE = os.environ.get("HQ_INSTALL_FAKE") == "1"
 FORCE_FAIL = os.environ.get("HQ_INSTALL_FAIL", "")
-SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
+IS_MAC = platform.system() == "Darwin"
+sys.path.insert(0, os.path.join(HQ, "routine"))
+try:
+    import hqpaths  # H56.1: HQ's own memory and the units' names, the same as the routine works them out
+    SUPPORT = hqpaths.SUPPORT
+except Exception:
+    hqpaths = None
+    SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
 HEARTBEAT = os.path.join(SUPPORT, "heartbeat")
 HELPER_APP = os.path.expanduser("~/Applications/HQ Routine.app")
 AGENTS = os.path.expanduser("~/Library/LaunchAgents")
@@ -83,9 +97,23 @@ WATCHDOG_AGENT = _label(os.path.join(HQ, "routine", "install-watchdog.sh"), r"<k
 # The HQ path the repo's helper files were written with (whatever home folder it was), replaced by
 # this HQ's path when installing.
 SHIPPED_HQ = re.compile(r'/Users/[^/"<\s]+(?:/[^/"<\s]+)*?/HQ(?=[/"<]|$)')
-BREW_PATHS = ["/opt/homebrew/bin", "/usr/local/bin"]
+BREW_PATHS = (["/opt/homebrew/bin", "/usr/local/bin"] if IS_MAC
+              else [os.path.expanduser("~/.local/bin"), os.path.expanduser("~/.npm-global/bin"), "/usr/local/bin"])
+STATUS_PORT = int(os.environ.get("HQ_STATUS_PORT", "4748"))
+CALL_PORT = int(os.environ.get("HQ_PORT", "7860"))
+UNIT = os.environ.get("HQ_UNIT", "hq")
+# H56.5: on Linux the call listens with faster-whisper; MLX and what only mlx-whisper needs are left out.
+MAC_ONLY_PACKAGES = {"mlx", "mlx-metal", "mlx-whisper", "more-itertools", "networkx", "regex", "scipy",
+                     "setuptools", "tiktoken", "torch"}
+LISTEN_MODULE = "mlx_whisper" if IS_MAC else "faster_whisper"
 VOICE_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 VOICE_FILES = {"kokoro-v1.0.onnx": 300_000_000, "voices-v1.0.bin": 25_000_000}  # minimum sizes
+
+HEADS_UP_LINUX = (
+    "Heads-up before we start: on a server nothing is installed with sudo and nothing asks. What's missing is "
+    "named with the line to install it. Claude Code must be signed in here once (run claude), and Claude must "
+    "trust the workspace once (run claude in it and answer yes), since nobody answers that question for a job."
+)
 
 HEADS_UP = (
     "Heads-up before we start: the setup will ask for your password, and macOS will ask a few times "
@@ -117,7 +145,7 @@ class Checklist:
         self.data = {
             "run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "mode": mode, "fake": FAKE, "hq": HQ, "workspace": WORKSPACE,
-            "heads_up": HEADS_UP, "machine": f"{platform.system()} {platform.machine()}",
+            "heads_up": HEADS_UP if IS_MAC else HEADS_UP_LINUX, "machine": f"{platform.system()} {platform.machine()}",
             "phase": "setup" if mode != "test" else "test", "result": "running", "finished": None,
             "steps": [{"id": s.id, "phase": s.phase, "title": s.title, "asks": s.asks, "optional": s.optional,
                        "state": "todo", "detail": "", "fix": "", "started": None, "ended": None} for s in steps],
@@ -262,13 +290,15 @@ class Installer:
     # -- setup --
 
     def heads_up(self):
-        say("\n" + HEADS_UP + "\n")
+        say("\n" + (HEADS_UP if IS_MAC else HEADS_UP_LINUX) + "\n")
         say("The checklist, live: http://localhost:%d" % PAGE_PORT)
         if not self.args.yes and sys.stdin.isatty():
             input("Press Enter to start. ")
-        return "told: password and Allow a few times, once"
+        return "told: password and Allow a few times, once" if IS_MAC else "told: nothing asks; what's missing is named"
 
     def mac(self):
+        if platform.system() == "Linux":
+            return self._linux()
         if platform.system() != "Darwin":
             raise Fail(f"this is {platform.system()}, not a Mac",
                        "HQ 0.1 is built for a Mac; on Windows, Claude builds the Mac-only parts (README, Mac-only parts).")
@@ -277,9 +307,25 @@ class Installer:
                        "Speech recognition runs on the Apple chip (MLX); see the README's Mac-only parts.")
         return f"macOS {platform.mac_ver()[0]}, Apple chip"
 
+    def _linux(self):
+        """H56.5: a Linux server with systemd (the units of H56.1 run as the user, with lingering)."""
+        if not which("systemctl") or subprocess.run(["systemctl", "--user", "show-environment"],
+                                                    capture_output=True).returncode != 0:
+            raise Fail("this Linux has no systemd for the user (systemctl --user)",
+                       "HQ on Linux runs its routine and watchdog as systemd user units; on another system, Claude "
+                       "builds them in local/ (README, platform parts).")
+        name = platform.system()
+        try:
+            name = dict(l.strip().split("=", 1) for l in open("/etc/os-release") if "=" in l).get("PRETTY_NAME", name).strip('"')
+        except OSError:
+            pass
+        return f"{name}, {platform.machine()}, systemd"
+
     def tools(self):
         if FAKE:
             return "simulated (test)"
+        if not IS_MAC:
+            return self._tools_linux()
         have, missing = [], []
         for name in ["brew", "claude", "uv", "node", "git"]:
             (have if which(name) else missing).append(name)
@@ -299,6 +345,23 @@ class Installer:
         if int(node_v.lstrip("v").split(".")[0]) < 20:
             raise Fail(f"Node {node_v} is too old (20 or newer)", "brew upgrade node")
         return "Claude Code, Homebrew, Python 3.12, uv, Node %s, git" % node_v
+
+    def _tools_linux(self):
+        missing = [n for n in ["git", "node", "curl", "tmux"] if not which(n)]
+        if missing:
+            raise Fail("not installed: " + ", ".join(missing),
+                       "sudo apt install " + " ".join("nodejs" if m == "node" else m for m in missing)
+                       + " (node 20 or newer), then run the installer again.")
+        if not which("uv"):
+            raise Fail("uv isn't installed", "curl -LsSf https://astral.sh/uv/install.sh | sh, then run the installer again.")
+        if not which("claude"):
+            raise Fail("Claude Code isn't installed",
+                       "npm install -g @anthropic-ai/claude-code (or https://claude.com/claude-code), sign in with your "
+                       "Claude plan (run claude once), then run the installer again.")
+        node_v = sh(["node", "--version"]).stdout.strip()
+        if int(node_v.lstrip("v").split(".")[0]) < 20:
+            raise Fail(f"Node {node_v} is too old (20 or newer)", "Install a newer Node (nodejs 20 or newer).")
+        return f"Claude Code, git, Node {node_v}, uv, tmux, curl (Python 3.12 comes with uv)"
 
     def signed_in(self):
         if FAKE:
@@ -331,14 +394,20 @@ class Installer:
         if FAKE:
             return "simulated (test)"
         py = os.path.join(HQ, ".venv", "bin", "python")
-        check = [py, "-c", "import pipecat, mlx_whisper, kokoro_onnx, claude_agent_sdk"]
+        check = [py, "-c", f"import pipecat, {LISTEN_MODULE}, kokoro_onnx, claude_agent_sdk"]
         if os.path.exists(py) and subprocess.run(check, capture_output=True).returncode == 0:
             return "already there"
         say("Making the Python environment (a few minutes, about 1.6 GB)")
         sh(["uv", "venv", "--python", "3.12", ".venv"], cwd=HQ)
         sh(["uv", "pip", "install", "--python", py, "--only-binary", ":all:", "tokenizers", "faster-whisper==1.2.1"],
            cwd=HQ, timeout=1800)
-        sh(["uv", "pip", "install", "--python", py, "-r", "app/requirements.txt"], cwd=HQ, timeout=1800)
+        reqs = "app/requirements.txt"
+        if not IS_MAC:  # H56.5: the same list without MLX and what only mlx-whisper needs
+            reqs = os.path.join(OUT, "requirements-linux.txt")
+            keep = [l for l in open(os.path.join(HQ, "app", "requirements.txt"))
+                    if l.split("==")[0].strip().lower() not in MAC_ONLY_PACKAGES]
+            open(reqs, "w").writelines(keep)
+        sh(["uv", "pip", "install", "--python", py, "-r", reqs], cwd=HQ, timeout=1800)
         sh(check)
         return "made, and everything imports"
 
@@ -366,6 +435,13 @@ class Installer:
         if own:  # H59: the user's own start at login, in local/ (for example on Windows)
             sh(own)
             return "your own start at login (local/)"
+        if not IS_MAC:  # H56.5: the units of H56.1; the routine, the call line and the watchdog start now
+            before = os.path.getmtime(HEARTBEAT) if os.path.exists(HEARTBEAT) else 0
+            sh(["/bin/sh", os.path.join(HQ, "routine", "install-linux.sh")], timeout=120)
+            if not wait_for(lambda: os.path.exists(HEARTBEAT) and os.path.getmtime(HEARTBEAT) > before, 150, 2):
+                raise Fail("the routine's timer is on but it didn't run within 2 minutes",
+                           f"systemctl --user status {UNIT}-routine.service; log: scratch/routine/routine.log")
+            return f"systemd user units ({UNIT}-routine every minute, {UNIT}-start at the start), lingering on"
         os.makedirs(os.path.join(HQ, "scratch", "routine"), exist_ok=True)
         # The helper and its LaunchAgent with this HQ's path.
         src = with_this_hq(open(os.path.join(HQ, "routine", "routine.applescript")).read())
@@ -397,7 +473,24 @@ class Installer:
     def terminal(self):
         if "helper" in self.skip:
             raise Skip("left out with the helper")
-        return self._terminal_window(asking=True)
+        return self._terminal_window(asking=True) if IS_MAC else self._tmux_window()
+
+    def _tmux_window(self):
+        """H56.5: on Linux jobs and the mail check run in a detached tmux session (H56.2) that ends by itself."""
+        if FAKE:
+            return "simulated (test)"
+        if not which("tmux"):
+            raise Fail("tmux isn't installed", "sudo apt install tmux, then run the installer again.")
+        mark = os.path.join(OUT, "tmux-ok")
+        if os.path.exists(mark):
+            os.remove(mark)
+        name = f"{UNIT}-install-check"
+        sh(["tmux", "new-session", "-d", "-s", name, f"date > '{mark}'"])
+        if not wait_for(lambda: os.path.exists(mark), 20, 0.5):
+            raise Fail("a tmux session didn't run its script", "tmux new-session -d works for this user?")
+        if not wait_for(lambda: subprocess.run(["tmux", "has-session", "-t", name], capture_output=True).returncode != 0, 20, 0.5):
+            raise Fail("the tmux session ran but didn't end by itself", f"tmux kill-session -t {name}")
+        return "a tmux session opened, ran, and ended by itself, nothing asked"
 
     def _terminal_window(self, asking: bool):
         """The way jobs and the mail check open and close their windows: open -g -a Terminal with a
@@ -445,12 +538,22 @@ class Installer:
         if own:  # H59: the user's own watchdog, in local/
             sh(own)
             return "your own watchdog (local/)"
+        if not IS_MAC:  # H56.5: put in with the routine by install-linux.sh
+            return self._linux_timer("watchdog", "every 5 minutes, and a minute after the start")
         sh(["/bin/zsh", os.path.join(HQ, "routine", "install-watchdog.sh")])
         if not agent_loaded(WATCHDOG_AGENT):
             raise Fail("the watchdog didn't load", "Log: ~/Library/Application Support/HQ/watchdog.out")
         return "every 5 minutes and at login"
 
+    def _linux_timer(self, what, says):
+        timer = f"{UNIT}-{what}.timer"
+        if subprocess.run(["systemctl", "--user", "is-active", "--quiet", timer]).returncode != 0:
+            raise Fail(f"{timer} isn't running", f"sh routine/install-linux.sh; then systemctl --user status {timer}")
+        return f"{timer}: {says}"
+
     def desktop(self):
+        if not IS_MAC:
+            raise Skip("the Mac app: not on Linux (the status page and calls work in the browser)")
         if "desktop" in self.skip:
             raise Skip("left out (--skip desktop): the status page and calls still work in the browser")
         if FAKE:
@@ -461,6 +564,8 @@ class Installer:
         return "~/Applications/HQ.app (macOS asks Documents access and the microphone once, the first time)"
 
     def t_desktop(self):
+        if not IS_MAC:
+            raise Skip("not on Linux")
         if "desktop" in self.skip:
             raise Skip("left out")
         if FAKE:
@@ -471,6 +576,8 @@ class Installer:
         return "finds its files"
 
     def lidsleep(self):
+        if not IS_MAC:
+            raise Skip("a laptop part: not on a server")
         if "lidsleep" in self.skip:
             raise Skip("left out (--skip lidsleep): a call can't flip the lid-closed sleep")
         if FAKE:
@@ -494,37 +601,65 @@ class Installer:
     def status_page(self):
         if FAKE:
             return "simulated (test)"
-        if not http_ok("http://127.0.0.1:4748/"):
+        if not http_ok(f"http://127.0.0.1:{STATUS_PORT}/"):
             subprocess.Popen([which("node") or "node", os.path.join(HQ, "status", "server.mjs"), "--quiet"],
                              cwd=HQ, stdout=open(os.path.join(OUT, "status-server.log"), "a"),
                              stderr=subprocess.STDOUT, start_new_session=True)
-        if not wait_for(lambda: http_ok("http://127.0.0.1:4748/"), 15):
-            raise Fail("the status page didn't answer on port 4748", "Log: scratch/install/status-server.log")
-        return "http://localhost:4748 (this checklist too: /install)"
+        if not wait_for(lambda: http_ok(f"http://127.0.0.1:{STATUS_PORT}/"), 15):
+            raise Fail(f"the status page didn't answer on port {STATUS_PORT}", "Log: scratch/install/status-server.log")
+        return f"http://localhost:{STATUS_PORT} (this checklist too: /install)"
 
     def call_line(self):
         if FAKE:
             return "simulated (test)"
-        if not http_ok("http://127.0.0.1:7860/"):
+        if not http_ok(f"http://127.0.0.1:{CALL_PORT}/"):
             env = {} if (which("tailscale") and "tailscale" not in self.skip) else {"HQ_NO_PHONE": "1"}
-            sh(["/bin/zsh", os.path.join(HQ, "app", "start.sh")], env=env, timeout=60)
-        if not wait_for(lambda: http_ok("http://127.0.0.1:7860/"), 90, 2):
-            raise Fail("the call line didn't answer on port 7860", "Log: scratch/server.log")
-        return "http://127.0.0.1:7860 (the browser asks for the microphone on the first call: Allow)"
+            start = ["/bin/zsh", os.path.join(HQ, "app", "start.sh")] if IS_MAC else \
+                    ["/bin/bash", os.path.join(HQ, "app", "start-linux.sh")]
+            sh(start, env=env, timeout=120)
+        if not wait_for(lambda: http_ok(f"http://127.0.0.1:{CALL_PORT}/"), 120, 2):
+            raise Fail(f"the call line didn't answer on port {CALL_PORT}", "Log: scratch/server.log")
+        if not IS_MAC:
+            return (f"http://127.0.0.1:{CALL_PORT}, on the phone through Tailscale on port 8443 "
+                    "(the browser asks for the microphone on the first call: Allow)")
+        return f"http://127.0.0.1:{CALL_PORT} (the browser asks for the microphone on the first call: Allow)"
 
     def tailscale(self):
         if "tailscale" in self.skip:
             raise Skip("left out (--skip tailscale): calls from this computer only")
         if FAKE:
             return "simulated (test)"
-        ts = which("tailscale") or ("/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+        ts = which("tailscale") or ("/usr/bin/tailscale" if os.path.exists("/usr/bin/tailscale") else None) or ("/Applications/Tailscale.app/Contents/MacOS/Tailscale"
                                     if os.path.exists("/Applications/Tailscale.app") else None)
         if not ts:
-            raise Warn("not installed: calls from this computer only (optional; brew install --cask tailscale)")
+            raise Warn("not installed: calls from this computer only (optional; "
+                       + ("brew install --cask tailscale)" if IS_MAC else "https://tailscale.com/download/linux)"))
         r = subprocess.run([ts, "status"], capture_output=True, text=True)
         if r.returncode != 0:
             raise Warn("installed but not signed in: open Tailscale and sign in, on the phone too (optional)")
         return "on: the phone can call"
+
+    def trust(self):
+        """H56.5: on a server a job's chat opens in the workspace, and Claude Code asks once whether to trust it;
+        nobody answers there (H56.2). The same check as the routine's."""
+        if IS_MAC:
+            raise Skip("on a Mac Claude asks you the first time a job opens")
+        if FAKE:
+            return "simulated (test)"
+        try:
+            projects = json.load(open(os.path.expanduser("~/.claude.json"))).get("projects") or {}
+        except (OSError, ValueError):
+            projects = {}
+        p = os.path.realpath(WORKSPACE)
+        while True:
+            if (projects.get(p) or {}).get("hasTrustDialogAccepted"):
+                return "Claude trusts the workspace: jobs can start here"
+            up = os.path.dirname(p)
+            if up == p:
+                break
+            p = up
+        raise Warn(f"Claude doesn't trust the workspace yet, so jobs wait: run claude once in {os.path.realpath(WORKSPACE)}, "
+                   "answer yes, then /exit")
 
     def connectors(self):
         raise Warn("for you and your Claude: connect Gmail and Google Calendar in claude.ai → Settings → "
@@ -547,7 +682,7 @@ class Installer:
         py = os.path.join(HQ, ".venv", "bin", "python")
         if not os.path.exists(py):
             raise Fail("no Python environment", "Run the installer without --test-only.")
-        sh([py, "-c", "import pipecat, mlx_whisper, kokoro_onnx, claude_agent_sdk"], timeout=120)
+        sh([py, "-c", f"import pipecat, {LISTEN_MODULE}, kokoro_onnx, claude_agent_sdk"], timeout=120)
         return "everything imports"
 
     def t_voice(self):
@@ -564,28 +699,35 @@ class Installer:
             raise Skip("left out")
         if FAKE:
             return "simulated (test)"
-        if not agent_loaded(HELPER_AGENT):
+        if not IS_MAC:
+            self._linux_timer("routine", "on")
+        elif not agent_loaded(HELPER_AGENT):
             raise Fail("the start at login isn't loaded", "Run the installer without --test-only.")
         if not wait_for(lambda: (heartbeat_age() or 999) < 150, 130, 5):
             raise Fail("the helper hasn't run its routine in the last few minutes",
                        "Privacy & Security → Files and Folders → HQ Routine → Documents on; log: scratch/routine/routine.log")
-        return "loaded at login, ran its routine %d seconds ago" % (heartbeat_age() or 0)
+        return ("loaded at login" if IS_MAC else f"{UNIT}-routine.timer on") + \
+            ", ran its routine %d seconds ago" % (heartbeat_age() or 0)
 
     def t_terminal(self):
         if "helper" in self.skip:
             raise Skip("left out")
-        return self._terminal_window(asking=False)
+        return self._terminal_window(asking=False) if IS_MAC else self._tmux_window()
 
     def t_watchdog(self):
         if "helper" in self.skip:
             raise Skip("left out")
         if FAKE:
             return "simulated (test)"
+        if not IS_MAC:
+            return self._linux_timer("watchdog", "on")
         if not agent_loaded(WATCHDOG_AGENT):
             raise Fail("the watchdog isn't loaded", "Run the installer without --test-only.")
         return "loaded"
 
     def t_lidsleep(self):
+        if not IS_MAC:
+            raise Skip("not on a server")
         if "lidsleep" in self.skip:
             raise Skip("left out")
         if FAKE:
@@ -599,16 +741,17 @@ class Installer:
     def t_status(self):
         if FAKE:
             return "simulated (test)"
-        if not http_ok("http://127.0.0.1:4748/roadmap.md"):
+        if not http_ok(f"http://127.0.0.1:{STATUS_PORT}/roadmap.md"):
             raise Fail("the status page doesn't answer", "node status/server.mjs; log: scratch/install/status-server.log")
         return "answers, and reads the roadmap"
 
     def t_call(self):
         if FAKE:
             return "simulated (test)"
-        if not http_ok("http://127.0.0.1:7860/"):
-            raise Fail("the call line doesn't answer", "app/start.sh; log: scratch/server.log")
-        return "answers on 7860"
+        if not http_ok(f"http://127.0.0.1:{CALL_PORT}/"):
+            raise Fail("the call line doesn't answer", ("app/start.sh" if IS_MAC else "app/start-linux.sh")
+                       + "; log: scratch/server.log")
+        return f"answers on {CALL_PORT}"
 
     def t_flows(self):
         if "flows" in self.skip:
@@ -628,14 +771,17 @@ class Installer:
         S = Step
         setup = [
             S("heads_up", "Heads-up: your password and Allow, a few times", "setup", self.heads_up),
-            S("mac", "A Mac with an Apple chip", "setup", self.mac),
-            S("tools", "Claude Code, Homebrew, Python 3.12, uv, Node, git", "setup", self.tools),
+            S("mac", "A Mac with an Apple chip" if IS_MAC else "A Linux server with systemd", "setup", self.mac),
+            S("tools", "Claude Code, Homebrew, Python 3.12, uv, Node, git" if IS_MAC
+              else "Claude Code, git, Node, uv, tmux, curl", "setup", self.tools),
             S("signed_in", "Claude Code signed in with a Claude plan", "setup", self.signed_in),
             S("workspace", "Your workspace (from the template; an existing one is never touched)", "setup", self.workspace),
             S("venv", "The call line's Python environment", "setup", self.venv),
             S("voice", "The voice (Kokoro, Heart the default)", "setup", self.voice),
-            S("helper", "The helper app: the routine and the start at login", "setup", self.helper, asks=True),
-            S("terminal", "Terminal windows for jobs and the mail check", "setup", self.terminal, asks=True),
+            S("helper", "The helper app: the routine and the start at login" if IS_MAC
+              else "The routine and the start at boot: systemd user units", "setup", self.helper, asks=IS_MAC),
+            S("terminal", "Terminal windows for jobs and the mail check" if IS_MAC
+              else "tmux sessions for jobs and the mail check", "setup", self.terminal, asks=IS_MAC),
             S("watchdog", "The watchdog", "setup", self.watchdog),
             S("lidsleep", "Lid closed, keep working (optional)", "setup", self.lidsleep, asks=True, optional=True),
             S("status_page", "The status page", "setup", self.status_page),
@@ -644,12 +790,15 @@ class Installer:
             S("tailscale", "Calling from the phone: Tailscale (optional)", "setup", self.tailscale, optional=True),
             S("connectors", "Mail and calendar: the Gmail and Google Calendar connectors", "setup", self.connectors),
         ]
+        if not IS_MAC:  # on a Mac Claude asks the person the first time a job opens
+            setup.insert(-1, S("trust", "Claude trusts the workspace, so jobs can start", "setup", self.trust))
         test = [
             S("workspace", "The workspace is there", "test", self.t_workspace),
             S("venv", "The Python environment imports", "test", self.t_venv),
             S("voice", "The voice files", "test", self.t_voice),
             S("helper", "The helper runs every minute, nothing asks", "test", self.t_helper),
-            S("terminal", "A Terminal window opens and closes, nothing asks", "test", self.t_terminal),
+            S("terminal", "A Terminal window opens and closes, nothing asks" if IS_MAC
+              else "A tmux session opens and ends, nothing asks", "test", self.t_terminal),
             S("watchdog", "The watchdog is loaded", "test", self.t_watchdog),
             S("lidsleep", "The lid switch works without a password", "test", self.t_lidsleep, optional=True),
             S("status_page", "The status page answers", "test", self.t_status),
@@ -668,7 +817,7 @@ def run(args) -> bool:
                          + (" · simulated" if FAKE else "") + f"\nHQ: {HQ}\nworkspace: {WORKSPACE}\n")
     cl = Checklist("test" if args.test_only else "full", steps)
     srv = None if args.no_page else serve_page()
-    if srv and not args.no_browser and not FAKE:
+    if srv and not args.no_browser and not FAKE and IS_MAC:
         subprocess.run(["/usr/bin/open", f"http://localhost:{PAGE_PORT}"], capture_output=True)
     failed = None
     for s in steps:
