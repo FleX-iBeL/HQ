@@ -128,11 +128,58 @@ def clear(*paths):
             pass
 
 
-def open_window(cmd: str) -> None:
+TMUX = hqpaths.tool("tmux", "/usr/bin/tmux")  # H56.2: the job windows off a Mac
+LINUX_WINDOWS = hqpaths.window_kind() == "tmux"
+
+
+def open_window(cmd: str, name: str = "") -> None:
     """Opens a job's or the mail check's window to run the script `cmd`: on a Mac a Terminal window, in the
-    background; a user's own part local/open-window (H59) gets the script's path instead, on any computer."""
+    background; a user's own part local/open-window (H59) gets the script's path instead, on any computer.
+    H56.2: off a Mac, a detached tmux session called hqpaths.session(name) (hq-job-63, hq-mail): hidden, to be
+    watched with `tmux attach -t <session>`, and gone by itself once the script ends. It gets PATH and every
+    HQ_* setting (a tmux server that already runs would otherwise give its own), and runs in its own systemd
+    scope when there is one, so it never belongs to the routine's one-minute run."""
     own = hqpaths.part_cmd("open-window", cmd)
-    subprocess.run(own or ["/usr/bin/open", "-g", "-a", "Terminal", cmd], check=True)
+    if own or hqpaths.IS_MAC:
+        subprocess.run(own or ["/usr/bin/open", "-g", "-a", "Terminal", cmd], check=True)
+        return
+    sess = hqpaths.session(name)
+    subprocess.run([TMUX, "kill-session", "-t", "=" + sess], capture_output=True)  # an old one by that name
+    envs = [x for k, v in os.environ.items() if k == "PATH" or k.startswith("HQ_") for x in ("-e", f"{k}={v}")]
+    tm = [TMUX, "new-session", "-d", "-s", sess, "-x", "200", "-y", "50", *envs, "/bin/bash", cmd]
+    scope = ["systemd-run", "--user", "--scope", "--quiet", f"--unit={sess}-{int(time.time())}-{os.getpid()}"]
+    r = subprocess.run(scope + tm, capture_output=True, text=True) if os.environ.get("XDG_RUNTIME_DIR") else None
+    if r is None or (r.returncode and not subprocess.run([TMUX, "has-session", "-t", "=" + sess], capture_output=True).returncode == 0):
+        r = subprocess.run(tm, capture_output=True, text=True)  # no systemd scope here: tmux on its own
+    if r.returncode:
+        raise RuntimeError(f"tmux couldn't open {sess}: {(r.stderr or r.stdout).strip()[:200]}")
+
+
+TRUST_NOTE = os.path.join(RUN, "trust-note")
+
+
+def workspace_trusted() -> bool:
+    """H56.2: a job's chat opens in the workspace, and the first time Claude Code opens a folder it asks whether
+    to trust it; on a server nobody answers, so the job would sit there. Claude Code keeps the answer in
+    ~/.claude.json (projects[<folder>].hasTrustDialogAccepted); the workspace or a folder above it counts.
+    When that file can't be read, it counts as trusted (as before). HQ_CLAUDE_JSON reads another file (a test)."""
+    try:
+        projects = json.load(open(os.environ.get("HQ_CLAUDE_JSON") or os.path.expanduser("~/.claude.json"))).get("projects") or {}
+    except (OSError, ValueError):
+        return True
+    p = FOLDER
+    while True:
+        if (projects.get(p) or {}).get("hasTrustDialogAccepted"):
+            return True
+        up = os.path.dirname(p)
+        if up == p:
+            return False
+        p = up
+
+
+def watch_line(n) -> str:
+    """H56.2: on the status page, how to watch job n from the laptop (only off a Mac)."""
+    return f"; watch it: {hqpaths.watch_cmd(f'job-{n}')}" if LINUX_WINDOWS else ""
 
 
 # L7: a Terminal window closes itself once its chat has ended. The window's own script runs the chat
@@ -154,6 +201,8 @@ done
   """ + json.dumps(os.path.join(HERE, "close-window.applescript")) + """ "$T" """ + json.dumps(os.path.join(RUN, "close.log")) + """ </dev/null >/dev/null 2>&1 &!
 exit 0
 """
+# H56.2: in tmux the session closes by itself once its script ends, and nudge.py ends with it; nothing to close.
+CLOSE_WINDOW_TMUX = "exit 0\n"
 
 
 def children(pid):
@@ -163,7 +212,7 @@ def children(pid):
 
 def is_claude(pid):
     r = subprocess.run(["/bin/ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True)
-    return r.stdout.strip().endswith("claude")
+    return quiet.is_claude_comm(r.stdout)
 
 
 def end_chat(pid):
@@ -187,9 +236,10 @@ def end_chat(pid):
 def start(job):
     n = job["n"]
     os.makedirs(RUN, exist_ok=True)
+    where = "a tmux session" if LINUX_WINDOWS else "a Terminal window"
     prompt = (
         f"let's go. This is job {n} from the queue on the HQ roadmap, started by the routine "
-        f"(phase L) in a Terminal window. The job, as agreed on the call: {job['text']}\n\n"
+        f"(phase L) in {where}. The job, as agreed on the call: {job['text']}\n\n"
         "Follow the HQ build notes, the section \"Jobs started by the routine\". "
         + ("The user said on the call that this job may go past the 5-hour usage line; the weekly line still "
            "counts (F13): read the usage with --weekly-only, and on STOP hold as usual." if job["past"] else "")
@@ -202,7 +252,7 @@ def start(job):
     pfile = os.path.join(RUN, f"job-{n}.prompt")
     open(pfile, "w").write(prompt)
     cmd = os.path.join(RUN, f"job-{n}.command")
-    open(cmd, "w").write(f"""#!/bin/zsh
+    open(cmd, "w").write(job_script_tmux(n, settings, pfile) if LINUX_WINDOWS else f"""#!/bin/zsh
 # Job {n}, started by the HQ routine (phase L).
 cd {json.dumps(FOLDER)} || exit 1
 # 9 October 2026: the windows shouldn't take over the screen. Opened in the background,
@@ -226,10 +276,27 @@ JT=$(tty)
         pass
     jobs("mark", str(n), "running since " + time.strftime("%H:%M"))
     json.dump({"n": n, "pid": None, "started": time.time()}, open(STATE, "w"))
-    open_window(cmd)
-    status("BUILDING", f"Job {n} · started by the routine in a Terminal window",
+    open_window(cmd, f"job-{n}")
+    status("BUILDING", f"Job {n} · started by the routine in {where}{watch_line(n)}",
            f"job {n} started by the routine: {job['text'][:90]}")
     log(f"started job {n}")
+
+
+def job_script_tmux(n, settings, pfile):
+    """H56.2: job n's script in a tmux session (bash): the same chat, its status line and nudge.py, which
+    types into this session's own pane ($TMUX_PANE) instead of a Terminal tab."""
+    return f"""#!/bin/bash
+# Job {n}, started by the HQ routine (phase L) in the tmux session {hqpaths.session(f'job-{n}')} (H56.2).
+cd {json.dumps(FOLDER)} || exit 1
+echo "HQ · job {n}, started by the routine at $(date +%H:%M)."
+echo "This is a normal chat: watch it, and type in between whenever you like. Leave it with Ctrl-b d; it closes by itself once the job is done."
+echo
+echo $$ > {json.dumps(PIDFILE)}
+# H36: wakes the chat up when it has gone quiet (types continue into this pane only).
+{json.dumps(PY)} {json.dumps(os.path.join(HERE, 'nudge.py'))} {n} "tmux:$TMUX_PANE" $$ </dev/null >/dev/null 2>&1 & disown
+{CLAUDE} --no-chrome --permission-mode auto --settings {json.dumps(settings)} \\
+  -n "HQ job {n}" "$(cat {json.dumps(pfile)})"
+""" + CLOSE_WINDOW_TMUX
 
 
 # The hourly mail check (L8). Only the Gmail reading tools, editing the mail list and its one commit
@@ -425,7 +492,7 @@ def start_mail():
     # The instructions with this workspace's own path in them.
     instructions = os.path.join(RUN, "mail-check.md")
     open(instructions, "w").write(open(os.path.join(HERE, "mail-check.md")).read().replace("{WORKSPACE}", FOLDER))
-    open(cmd, "w").write(f"""#!/bin/zsh
+    open(cmd, "w").write(mail_script_tmux(instructions, run_file) if LINUX_WINDOWS else f"""#!/bin/zsh
 # The hourly mail check, started by the HQ routine (phase L, L8). Hidden: opened in the
 # background, minimized to the Dock, and the window closes itself when it's done (L7).
 cd {json.dumps(FOLDER)} || exit 1
@@ -450,9 +517,29 @@ echo $$ > {json.dumps(MAIL_PID)}
         json.dump({**r, "started": time.time()}, open(MAIL_RETRY, "w"))
     open(MAIL_LAST, "w").write(str(int(time.time())))
     json.dump({"pid": None, "started": time.time()}, open(MAIL_STATE, "w"))
-    open_window(cmd)
+    open_window(cmd, "mail")
     log("started the mail check")
     routines.beat("mail", state="running", text="Started", last=time.time(), next=mail_next(time.time()), every=60)
+
+
+def mail_script_tmux(instructions, run_file):
+    """H56.2: the mail check's script in its own hidden tmux session (bash), otherwise the same as on the Mac."""
+    return f"""#!/bin/bash
+# The hourly mail check, started by the HQ routine (L8) in the tmux session {hqpaths.session('mail')} (H56.2).
+# Hidden; the session ends by itself when it's done.
+cd {json.dumps(FOLDER)} || exit 1
+echo "HQ · the hourly mail check, started by the routine at $(date +%H:%M). It closes by itself."
+echo
+echo $$ > {json.dumps(MAIL_PID)}
+{{ echo "--- $(date '+%Y-%m-%d %H:%M:%S')"
+  # L10: streamed, so the plan limits that come back with the run are saved, for free.
+  {CLAUDE} -p --no-chrome --model sonnet --permission-mode dontAsk --no-session-persistence \\
+    --output-format stream-json --verbose \\
+    --allowedTools {json.dumps(MAIL_ALLOW)} --disallowedTools {json.dumps(MAIL_DENY)} \\
+    < {json.dumps(instructions)} 2>&1 | {json.dumps(PY)} {json.dumps(STREAM)}
+  echo "--- exit ${{PIPESTATUS[0]}}"
+  {json.dumps(PY)} {json.dumps(USAGE)}; }} 2>&1 | tee -a {json.dumps(os.path.join(RUN, 'mail.log'))} {json.dumps(run_file)}
+""" + CLOSE_WINDOW_TMUX
 
 
 # The usage check (L10). Every minute, no Claude: the latest saved usage (a job's status line, or the
@@ -630,7 +717,8 @@ def jobs_line(q):
     running = q.get("running") or []
     waiting = len(q.get("ready") or []) + len(q.get("held") or [])
     if running:
-        text = f"Job {running[0]['n']} running" + (f", {waiting} waiting" if waiting else "")
+        text = (f"Job {running[0]['n']} running" + (f", {waiting} waiting" if waiting else "")
+                + watch_line(running[0]["n"]))
         state = "running"
     elif not q.get("on", True):
         text, state = "Switched off from a call", "off"
@@ -680,10 +768,10 @@ def tick():
         schedule_line()
     except Exception as e:
         log(f"schedule line: {e!r}")
-    if not hqpaths.IS_MAC and not hqpaths.part("open-window"):
-        # H56.1: off a Mac there's no Terminal for a job's or the mail check's window yet; until there is
-        # (or the user's own local/open-window), both wait here, shown as off, and nothing is started.
-        why = "Not on this computer yet: HQ has no window here to run it in"
+    if not hqpaths.window_kind():
+        # H56.1: off a Mac without tmux (H56.2) or the user's own local/open-window, there's no window for a
+        # job or the mail check; both wait here, shown as off, and nothing is started.
+        why = "Not on this computer yet: HQ has no window here to run it in (install tmux)"
         routines.beat("mail", state="off", text=why, every=60)
         routines.beat("jobs", state="off", text=why, every=60)
         return
@@ -763,6 +851,18 @@ def tick():
         if not line:
             return
     job = line[0]
+    if LINUX_WINDOWS and not workspace_trusted():
+        # H56.2: wait, and say what to do, instead of starting a chat into a question nobody answers.
+        why = (f"Claude on this server hasn't been told to trust the workspace yet: run claude once in "
+               f"{FOLDER} and answer yes")
+        routines.beat("jobs", state="waiting", text=f"Job {job['n']} waits: {why}", every=60)
+        if not os.path.exists(TRUST_NOTE):
+            open(TRUST_NOTE, "w").write(str(job["n"]))
+            status("STOPPED", f"Job {job['n']} waits: Claude doesn't trust the workspace on this server yet",
+                   f"job {job['n']} waits: {why}")
+            log(f"job {job['n']} waits: the workspace isn't trusted by Claude here")
+        return
+    clear(TRUST_NOTE)
     # F13: a job let past the line only skips the 5-hour line; the weekly line always counts, so a
     # past-the-line job held at the weekly line waits here quietly instead of being started every minute.
     g = subprocess.run([NODE, os.path.join(JV, "status", "save-usage.mjs"), "--gate"]

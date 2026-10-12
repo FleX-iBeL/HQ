@@ -134,6 +134,33 @@ def start_script() -> str:
     return os.path.join(HQ, "app", "start.sh" if IS_MAC else "start-linux.sh")
 
 
+def window_kind() -> str | None:
+    """H56.2: where a job's or the mail check's window opens: "own" (the user's local/open-window), "terminal"
+    (a Mac's Terminal), "tmux" (a tmux session, on Linux or anywhere tmux is found off a Mac), else None."""
+    if part("open-window"):
+        return "own"
+    if IS_MAC:
+        return "terminal"
+    return "tmux" if shutil.which(tool("tmux", "tmux")) or os.path.isfile(tool("tmux", "tmux")) else None
+
+
+def session(name: str) -> str:
+    """H56.2: the tmux session of a job or the mail check, e.g. session("job-63") → hq-job-63 (HQ_UNIT's prefix,
+    so a second HQ on one server has its own sessions)."""
+    return unit(name)
+
+
+def ssh_host() -> str:
+    """H56.2: the name to reach this server by from the laptop, for the watch line on the status page:
+    HQ_SSH_HOST, else this computer's own name."""
+    return os.environ.get("HQ_SSH_HOST") or socket.gethostname().split(".")[0]
+
+
+def watch_cmd(name: str) -> str:
+    """H56.2: the one line that watches a job's tmux session from the laptop."""
+    return f"ssh -t {ssh_host()} tmux attach -t {session(name)}"
+
+
 def agent_label(name: str, default_prefix: str = "com.hq") -> str:
     """The id of an installed LaunchAgent, e.g. agent_label("watchdog"): the one in
     ~/Library/LaunchAgents ending in .<name>.plist (an older install may use another prefix),

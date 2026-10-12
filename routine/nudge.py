@@ -9,6 +9,9 @@ needs no macOS permission (the same way the window closes itself, L7), and it ne
 window. It ends when the window's script ends.
 
     nudge.py N TTY PARENT_PID
+
+H56.2: off a Mac the job runs in a tmux session; then TTY is "tmux:<pane>" ($TMUX_PANE) and the text is typed
+with tmux send-keys into that pane only, then Enter.
 """
 import json, os, subprocess, sys, time
 
@@ -43,15 +46,28 @@ def alive(pid):
         return False
 
 
+def type_tmux(pane, text):
+    tmux = os.environ.get("HQ_TMUX") or "tmux"
+    r = subprocess.run([tmux, "send-keys", "-t", pane, "-l", text], capture_output=True, text=True, timeout=15)
+    if r.returncode:
+        return (r.stderr or r.stdout).strip() or "window not found"
+    time.sleep(0.5)  # the chat takes the text first, then Enter sends it
+    r = subprocess.run([tmux, "send-keys", "-t", pane, "Enter"], capture_output=True, text=True, timeout=15)
+    return "typed" if r.returncode == 0 else (r.stderr or r.stdout).strip()
+
+
 def main():
     n, tty, parent = int(sys.argv[1]), sys.argv[2], int(sys.argv[3])
     while alive(parent):
         req = quiet.pending(n)
         if req:
             quiet.clear_request()
-            r = subprocess.run(["/usr/bin/osascript", "-e", TYPE, tty, req.get("text") or quiet.TEXT],
-                               capture_output=True, text=True, timeout=30)
-            said = (r.stdout + r.stderr).strip()
+            if tty.startswith("tmux:"):
+                said = type_tmux(tty[5:], req.get("text") or quiet.TEXT)
+            else:
+                r = subprocess.run(["/usr/bin/osascript", "-e", TYPE, tty, req.get("text") or quiet.TEXT],
+                                   capture_output=True, text=True, timeout=30)
+                said = (r.stdout + r.stderr).strip()
             tmp = quiet.RESULT + ".tmp"
             json.dump({"n": n, "at": time.time(), "ok": said == "typed", "said": said}, open(tmp, "w"))
             os.replace(tmp, quiet.RESULT)

@@ -2588,6 +2588,7 @@ fail() { echo "FAIL $*"; exit 1; }
 [ -z "$SERVER_BEFORE" ] || fail "port $SP is already in use on the Linux machine"
 ss -Hltn "sport = :$CP" | grep -q . && fail "port $CP is already in use on the Linux machine"
 cp -r "$H/template" "$T/workspace" && ln -s "$T/workspace" "$H/workspace"
+(cd "$H" && python3 routine/jobs.py mail-off >/dev/null) || fail "couldn't switch the test's mail check off"
 sh "$H/routine/install-linux.sh" --no-start >/dev/null || fail "the Linux install failed"
 for x in routine.timer watchdog.timer start.service; do
   [ "$(systemctl --user is-enabled $U-$x)" = enabled ] || fail "$U-$x isn't enabled, so it wouldn't start after a restart"
@@ -2600,11 +2601,11 @@ python3 - "$H" <<'PYC' || fail "the routine's lines are wrong"
 import json, sys
 d = json.load(open(sys.argv[1] + "/.status/routines.json"))
 assert d["helper"]["state"] == "ok", d["helper"]
-assert d["jobs"]["state"] == "off" and "Not on this computer yet" in d["jobs"]["text"], d["jobs"]
-assert d["mail"]["state"] == "off", d["mail"]
+assert d["jobs"]["state"] in ("ok", "off"), d["jobs"]  # H56.2: with tmux there, jobs can run (nothing waits here)
+assert d["mail"]["state"] == "off", d["mail"]  # switched off for the test: never a real mail check
 assert "temp" not in d and "battery" not in d, "laptop readings on a server"
 PYC
-echo "OK the routine runs on the minute; jobs and the mail check wait; no laptop readings"
+echo "OK the routine runs on the minute; no laptop readings"
 SRV=$(spid)
 systemctl --user stop $U-routine.timer
 systemctl --user start $U-watchdog.service
@@ -2642,6 +2643,144 @@ echo "ALL OK"
         r = run_there("bash -s", input=script.encode(), capture_output=True, timeout=330)
         out = r.stdout.decode() + r.stderr.decode()
         left = run_there(f'ls -d "$HOME/{tag}" ~/.config/systemd/user/{tag}-* 2>/dev/null', capture_output=True).stdout.decode().strip()
+        need("ALL OK" in out, next((l[5:] for l in out.splitlines() if l.startswith("FAIL ")), out.strip()[-300:]))
+        need(not left, f"the test left something behind on the Linux machine: {left}")
+        oks = [l[3:] for l in out.splitlines() if l.startswith("OK ")]
+        return "; ".join(notes + [f"on Linux ({host or 'here'}): " + "; ".join(oks) + "; everything removed again"])
+
+    async def flow63(self) -> str:
+        """H56.2: job windows and the mail check on Linux, in tmux. No Claude turns: a stand-in for Claude (a small
+        script given as HQ_CLAUDE) plays the job's chat and the mail check. On this computer: the Mac still opens
+        Terminal windows (the scripts are zsh, as before). With a Linux machine (this one, or HQ_TEST_LINUX=<ssh
+        host>): HQ and the blank template go to a throwaway folder there with their own memory, ports and session
+        names, nothing of the user's; the routine (tick.py, run by hand) must start the mail check in its own hidden
+        tmux session that ends by itself with the check counted as ok; start a throwaway job in its own tmux session
+        with the watch line on the status page; nudge.py must type continue into that session's pane; and once the
+        job says done, the routine must end its chat so the session closes. Then everything is removed again."""
+        import subprocess as sp, importlib
+        jv = ROOT
+        sys.path.insert(0, str(jv / "routine"))
+        hqpaths = importlib.import_module("hqpaths")
+        notes = []
+        if hqpaths.IS_MAC:
+            tick = importlib.import_module("tick")
+            need(hqpaths.window_kind() in ("terminal", "own") and not tick.LINUX_WINDOWS,
+                 "on the Mac jobs no longer open in Terminal")
+            need(tick.watch_line(1) == "", "the Mac's status page got a tmux watch line")
+            need(tick.CLOSE_WINDOW.startswith("T=$(tty)"), "the Mac's windows no longer close themselves")
+            notes.append("the Mac still opens Terminal windows")
+        host = os.environ.get("HQ_TEST_LINUX")
+        if not hqpaths.IS_LINUX and not host:
+            return "; ".join(notes + ["the Linux part skipped: set HQ_TEST_LINUX=<ssh host> to run it on a Linux machine"])
+        run_there = (lambda cmd, **k: sp.run(["ssh", "-o", "BatchMode=yes", host, cmd], **k)) if host else \
+            (lambda cmd, **k: sp.run(["bash", "-c", cmd], **k))
+        tag = f"hqflow63-{os.getpid()}"
+        files = sp.run(["git", "-C", str(jv), "ls-files", "-co", "--exclude-standard"], capture_output=True, text=True).stdout
+        files = "\n".join(l for l in files.splitlines() if l and not l.startswith("workspace"))
+        tar = sp.run(["tar", "--no-xattrs", "-czf", "-", "-T", "-"] if hqpaths.IS_MAC else ["tar", "-czf", "-", "-T", "-"],
+                     input=files.encode(), capture_output=True, cwd=str(jv), env={**os.environ, "COPYFILE_DISABLE": "1"})
+        need(tar.returncode == 0, f"couldn't pack HQ: {tar.stderr.decode()[:200]}")
+        r = run_there(f'T="$HOME/{tag}"; mkdir -p "$T/HQ" && tar -xzf - -C "$T/HQ"', input=tar.stdout, capture_output=True)
+        need(r.returncode == 0, f"couldn't unpack HQ on the Linux machine: {r.stderr.decode()[:200]}")
+        script = r"""
+T="$HOME/@TAG@"; H="$T/HQ"; S="$T/state"; U="@TAG@"; CP=7898; SP=4798
+export HQ_UNIT=$U HQ_SUPPORT=$S HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_PORT=$CP HQ_STATUS_PORT=$SP
+export HQ_CLAUDE="$T/bin/claude" HQ_SSH_HOST=testvps HQ_FAKE_HQ="$H" HQ_FAKE_DIR="$T" HQ_CLAUDE_JSON="$T/claude.json"
+spid() { ss -Hltnp "sport = :$SP" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2; }
+SERVER_BEFORE=$(spid)
+cleanup() {
+  for s in $(tmux ls -F '#S' 2>/dev/null | grep "^$U-"); do tmux kill-session -t "=$s"; done
+  P=$(spid); [ -n "$P" ] && [ "$P" != "$SERVER_BEFORE" ] && kill "$P"
+  rm -rf "$T"
+}
+trap cleanup EXIT
+fail() { echo "FAIL $* | log: $(tail -3 "$H/scratch/routine/routine.log" 2>/dev/null | tr '\n' ' ')"; exit 1; }
+[ -z "$SERVER_BEFORE" ] || fail "port $SP is already in use on the Linux machine"
+command -v tmux >/dev/null || fail "tmux isn't installed"
+cp -r "$H/template" "$T/workspace" && ln -s "$T/workspace" "$H/workspace"
+mkdir -p "$T/bin" "$H/scratch/routine"
+cat > "$T/bin/claude" <<'FAKE'
+#!/bin/bash
+# A stand-in for Claude (happy flow 63). The mail check (-p): one answer in the stream's shape.
+if [[ " $* " == *" -p "* ]]; then
+  cat >/dev/null
+  echo '{"type":"result","subtype":"success","result":"Flow 63: nothing new"}'
+  exit 0
+fi
+# A job: wait for what's typed into this pane, then say done, then wait to be ended by the routine.
+N=$(grep -o 'HQ job [0-9]*' <<<"$*" | head -1 | awk '{print $3}')
+echo "flow 63 job $N: waiting for continue"
+read -r line
+echo "$line" > "$HQ_FAKE_DIR/typed"
+python3 "$HQ_FAKE_HQ/routine/jobs.py" done "$N" > "$HQ_FAKE_DIR/done.out" 2>&1
+exec sleep 600
+FAKE
+chmod +x "$T/bin/claude"
+cd "$H"
+# A saved usage reading well under the lines, so the routine may start a job.
+python3 - <<'PYC'
+import json, time
+from datetime import datetime
+r = {"five_hour": {"used_percentage": 5, "resets_at": int(time.time()) + 3600},
+     "seven_day": {"used_percentage": 5, "resets_at": int(time.time()) + 86400}}
+json.dump({"savedAt": datetime.now().astimezone().isoformat(timespec="seconds"), "rate_limits": r},
+          open("scratch/routine/usage-live.json", "w"))
+PYC
+node status/save-usage.mjs --statusline --any --by "flow 63" >/dev/null || fail "couldn't save a usage reading"
+N=$(python3 routine/jobs.py add "flow 63 throwaway job" | grep -o 'Job [0-9]*\|job [0-9]*' | head -1 | awk '{print $2}')
+[ -n "$N" ] || fail "couldn't add the throwaway job"
+echo '{"projects": {}}' > "$T/claude.json"
+python3 routine/tick.py || fail "the routine's look failed"
+[ -e scratch/routine/job.json ] && fail "a job was started while Claude doesn't trust the workspace here"
+grep -q "hasn't been told to trust the workspace" .status/routines.json || fail "the jobs line doesn't say why the job waits"
+grep -q "doesn't trust the workspace" workspace/HQ/roadmap.md || fail "the status block doesn't say why the job waits"
+echo "OK a job waits, and says why, while Claude doesn't trust the workspace on this server"
+python3 -c "import json; json.dump({'projects': {'$T': {'hasTrustDialogAccepted': True}}}, open('$T/claude.json', 'w'))"
+python3 routine/tick.py || fail "the routine's look failed"
+timeout 30 bash -c "until [ -s scratch/routine/job.pid ]; do sleep 1; done" || fail "the job's script didn't start"
+tmux has-session -t "=$U-job-$N" 2>/dev/null || fail "the job has no tmux session $U-job-$N"
+OUT=$(python3 - "$N" "$U" 2>&1 <<'PYC'
+
+import json, re, sys
+n, u = sys.argv[1], sys.argv[2]
+head = open("workspace/HQ/roadmap.md").read().partition("\n---\n")[0]
+want = f"ssh -t testvps tmux attach -t {u}-job-{n}"
+assert "tmux session" in head and want in head, head[:400]
+PYC
+) || fail "the status page doesn't say how to watch the job: $(echo "$OUT" | tail -2 | tr '\n' ' ' | cut -c1-500)"
+python3 routine/tick.py >/dev/null 2>&1  # the next minute's look: the jobs line with the watch line
+grep -q "watch it: ssh -t testvps tmux attach -t $U-job-$N" .status/routines.json || fail "the jobs line doesn't say how to watch it"
+echo "OK the job runs in its own tmux session, and the status page says: ssh -t testvps tmux attach -t <session>"
+timeout 60 bash -c "until [ ! -s scratch/routine/mail.pid ] || ! kill -0 \$(cat scratch/routine/mail.pid) 2>/dev/null; do sleep 1; done"
+tmux has-session -t "=$U-mail" 2>/dev/null && fail "the mail check's session didn't end by itself"
+grep -q -- "--- exit 0" scratch/routine/mail.log || fail "the mail check didn't run to its end: $(tail -3 scratch/routine/mail.log)"
+python3 routine/tick.py >/dev/null 2>&1
+python3 - <<'PYC' || fail "the mail check's line isn't ok"
+import json
+d = json.load(open(".status/routines.json"))
+assert d["mail"]["state"] == "ok" and "nothing new" in d["mail"]["text"], d["mail"]
+PYC
+echo "OK the mail check ran hidden in its own tmux session, ended by itself, and counts as ok"
+sleep 2
+python3 -c "import sys; sys.path.insert(0, 'routine'); import quiet; quiet.request($N)"
+timeout 30 bash -c "until [ -s '$T/typed' ]; do sleep 1; done" || fail "continue wasn't typed into the job's pane"
+grep -qx continue "$T/typed" || fail "something else was typed: $(cat $T/typed)"
+grep -q '"ok": true' scratch/routine/nudge-result.json || fail "nudge.py didn't say it typed"
+echo "OK continue is typed into the job's own pane"
+timeout 20 bash -c "until grep -q 'Job $N · done' workspace/HQ/roadmap.md; do sleep 1; done" || fail "the job's done mark didn't land: $(cat $T/done.out)"
+tmux has-session -t "=$U-job-$N" 2>/dev/null || fail "the session closed before the routine ended it"
+python3 routine/tick.py >/dev/null 2>&1
+sleep 2
+tmux has-session -t "=$U-job-$N" 2>/dev/null && fail "the job's session is still open after its done mark"
+grep -q "job $N finished; closed its window" scratch/routine/routine.log || fail "the routine didn't say it closed the job"
+[ -e scratch/routine/job.json ] && fail "the routine still thinks a job runs"
+echo "OK after its done mark the routine ends the chat and the session closes by itself"
+echo "ALL OK"
+""".replace("@TAG@", tag)
+        r = run_there("bash -s", input=script.encode(), capture_output=True, timeout=240)
+        out = r.stdout.decode() + r.stderr.decode()
+        left = run_there(f'ls -d "$HOME/{tag}" 2>/dev/null; tmux ls -F "#S" 2>/dev/null | grep "^{tag}-"',
+                         capture_output=True).stdout.decode().strip()
         need("ALL OK" in out, next((l[5:] for l in out.splitlines() if l.startswith("FAIL ")), out.strip()[-300:]))
         need(not left, f"the test left something behind on the Linux machine: {left}")
         oks = [l[3:] for l in out.splitlines() if l.startswith("OK ")]
@@ -4817,6 +4956,7 @@ FLOWS = {
     60: ("H65: a call reads HQ freely (files, logs, status page data); changes still ask", False, "flow60"),
     61: ("H56.1: the routine and the watchdog on Linux; the Mac as it was", False, "flow61"),
     62: ("H73: Moneypenny, coming soon: a locked card under Donna and Pepper, never called", False, "flow62"),
+    63: ("H56.2: job windows and the mail check on Linux, in tmux: a throwaway job and mail check", False, "flow63"),
 }
 
 

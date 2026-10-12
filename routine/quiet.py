@@ -56,17 +56,22 @@ def activity():
         return {}
 
 
+def is_claude_comm(comm):
+    """The chat's process name: claude, or claude.exe for the native build on Linux (H56.2)."""
+    return os.path.basename(comm.strip()) in ("claude", "claude.exe") or comm.strip().endswith("claude")
+
+
 def claude_of(pid):
     """The chat (claude) in the job's window: the window's script itself (jobs before L7), or its child."""
     if not pid:
         return None
     r = subprocess.run(["/bin/ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True)
-    if r.stdout.strip().endswith("claude"):
+    if is_claude_comm(r.stdout):
         return pid
     kids = subprocess.run(["/usr/bin/pgrep", "-P", str(pid)], capture_output=True, text=True).stdout.split()
     for k in kids:
         r = subprocess.run(["/bin/ps", "-o", "comm=", "-p", k], capture_output=True, text=True)
-        if r.stdout.strip().endswith("claude"):
+        if is_claude_comm(r.stdout):
             return int(k)
     return None
 
