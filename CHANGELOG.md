@@ -9,6 +9,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - HQ's routine and watchdog run on a Linux server too, as systemd timers that start by themselves after a restart (`routine/install-linux.sh`). The call line has a Linux start and stop (`app/start-linux.sh`, `app/stop-linux.sh`). On a Mac nothing changes.
 
 ### Changed
+- Each agent has her own character on calls and sounds like a person, not an AI: Donna quick and dry, a bit cheeky; Pepper warm, calm and direct; Moneypenny few words, cool, all business. Each greets you her own way and pushes back her own way, and nobody talks while she thinks (the thinking sound stays). These are HQ's defaults: Settings shows each one's character under her voice, `python3 app/agents.py` prints them, and you change them for yourself in `agents/agents.json`.
 - Each agent starts with her own voice: Donna with Bella, Pepper with Heart. Still yours to change in Settings; a voice you already picked stays.
 - On a call, HQ itself can be read without asking, the same as your workspace: its files, its logs (like the hourly mail check's) and the status page's data. Changing anything in HQ still asks you first.
 

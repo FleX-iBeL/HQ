@@ -31,10 +31,13 @@ On the call page: hold to talk (or talk freely), a chat that shows what you both
 
 **Who you call: the agents.** Since 0.2 you pick an agent, each with her own name, face, personality and speciality:
 
-- **Donna:** Sonnet, with the basics loaded (your rules, your to-do list, the mail list, the last notes). Calm, quick, organised. For your agenda, your list, mail and quick orders. (This was Quick.)
-- **Pepper:** Opus, with everything loaded, your vision too. Warm, sharp, sees the whole picture. For planning, sparring, thinking things through. (This was Deep.)
+- **Donna:** Sonnet, with the basics loaded (your rules, your to-do list, the mail list, the last notes). Quick and dry, a bit cheeky, knows what you need before you finish. For your agenda, your list, mail and quick orders. (This was Quick.) She picks up with "Hey you. What do you need?"
+- **Pepper:** Opus, with everything loaded, your vision too. Warm, calm and direct, takes a beat before she answers. For planning, sparring, thinking things through. (This was Deep.) She picks up with "Hey, <your name>. What's on your mind?"
+- **Moneypenny** (coming soon, Fable): few words, cool, a little mysterious, all business. For the big jobs behind the scenes. "<Your name>. Go ahead."
 
-Each agent's headshot is a drawn placeholder until you put a picture in your workspace (`HQ/agents/donna.jpg`, `pepper.jpg`; pictures stay in your workspace, never in HQ). You can change an agent or add your own in `HQ/agents/agents.json` (see `app/agents.py`): a name, a personality, a speciality, a model, and how much of your workspace she loads (`quick` or `deep`).
+Each one talks like her own person, not like an AI: her own greetings and her own way of pushing back, and no talking while she thinks (a soft thinking sound instead). These characters are HQ's defaults; Settings on the call page shows each agent's character under her voice, marked HQ's default or your own. You can change any of it for your own HQ (see below), and `python3 app/agents.py` prints each agent's character as it is now.
+
+Each agent's headshot is a drawn placeholder until you put a picture in your workspace (`HQ/agents/donna.jpg`, `pepper.jpg`; pictures stay in your workspace, never in HQ). You can change an agent or add your own in `HQ/agents/agents.json` (see `app/agents.py`): a name, a character, a personality, how she pushes back, her greetings, a speciality, a model, and how much of your workspace she loads (`quick` or `deep`).
 
 **And Free on top of any agent:**
 

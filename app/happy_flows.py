@@ -133,6 +133,10 @@ Run them before and after every update; they print a short pass/fail table at th
      browser at iPhone 13 sizes (Safari and the home screen), a small phone, and the desktop app's size (?app):
      on a call the old layout stays (the picker and her card keep their room) and the page can't be scrolled
      into white space; a screen too short for the status line still scrolls; nothing scrolls before or after
+  69 H76 and H77, no Claude: each agent her own character. Donna, Pepper and Moneypenny in HQ's defaults with the
+     agreed greeting first and push-back line, nothing personal, the name from me.md filled in; her character and
+     the human rules after the call rules, no talk while thinking; a call greets in her words; a workspace's own
+     character (agents.json) wins and is marked as its own; /api/agents, Settings and the readme show the defaults
 
 Safe to run while the live phone line is up: the flows use their own server on port 7871
 (HQ_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
@@ -620,7 +624,9 @@ class Run:
                 break
             await asyncio.sleep(0.5)
         greeting = re.findall(r"Filler: (.+)", log)
-        all_greetings = {g for part in config.GREETINGS.values() for g in part}
+        import agents  # H76: each agent greets in her own words
+        all_greetings = {g for part in config.GREETINGS.values() for g in part} | {
+            g for a in agents.load(config.FOLDER) for part in agents.PARTS for g in agents.greetings(a, config.ME["name"] or None, part)}
         need(any(g in all_greetings for g in greeting), f"{mode}: the server log has no greeting line (Filler: ...): {greeting}")
         need(f"Call started on {model}" in log, f"{mode}: the call did not start on {model}")
         need(any(w == "filler" and t in all_greetings for w, t in chats),
@@ -3963,7 +3969,7 @@ setTimeout(() => {
   out.push('greyed:' + (card ? getComputedStyle(card.querySelector('div')).opacity + '/' + getComputedStyle(card.querySelector('img')).opacity : 'none'));
   if (card) card.click();
   out.push('picked:' + agent + '/' + mode + ' inagents:' + ('moneypenny' in AGENTS));
-  out.push('voices:' + [...document.querySelectorAll('#voices .row span')].map(s => s.textContent).join(','));
+  out.push('voices:' + [...document.querySelectorAll('#voices .row span')].map(s => s.firstChild.textContent).join(','));
   setState('live', 'x'); out.push('oncall:' + getComputedStyle(document.getElementById('soon')).visibility); setState('idle', 'x');
   const pre = document.createElement('pre'); pre.id = 'h73'; pre.textContent = 'H73RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
 }, 1500);
@@ -4174,7 +4180,7 @@ setTimeout(async () => {
 setTimeout(() => {
   const out = [];
   out.push('order:' + [...document.querySelectorAll('#modes button')].map(b => b.dataset.agent).join(','));
-  out.push('voices:' + [...document.querySelectorAll('#voices .row span')].map(s => s.textContent).join(','));
+  out.push('voices:' + [...document.querySelectorAll('#voices .row span')].map(s => s.firstChild.textContent).join(','));
   out.push('defaults:' + voiceFor('donna') + '/' + voiceFor('pepper'));
   const sel = document.querySelector('#voices select[data-agent="pepper"]');
   sel.value = 'bf_emma'; sel.dispatchEvent(new Event('change'));
@@ -4457,15 +4463,17 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
             need(transcript.continue_from(bad, calls) is None, f"{bad!r} could be continued")
         # The call: her greeting, what its Claude is told, the transcript's line; never on Free.
         cc = Call(model="sonnet", calls_dir=calls, wrap_up="dry", test_mode=True, continues=name)
-        need(cc.fillers._texts["greeting"] == config.CONTINUE_GREETINGS, f"the greeting isn't the continue one: {cc.fillers._texts['greeting']}")
+        need(cc.fillers._texts["greeting"] == config.continue_greetings(cc.agent) and cc.fillers._texts["greeting"],
+             f"the greeting isn't her continue one (H76): {cc.fillers._texts['greeting']}")
         note = cc._continue_note()
-        need("continue from where we left off" in note and "Tuesday at ten works." in note and "Pepper" in note,
+        need("picking up where you left off" in note and "Tuesday at ten works." in note and "Pepper" in note,
              f"the warm-up note doesn't carry the earlier call: {note[:200]}")
         cc.transcript.path.unlink(missing_ok=True)
-        for g in config.CONTINUE_GREETINGS:
+        import agents
+        for g in config.CONTINUE_GREETINGS + config.continue_greetings(agents.find(config.FOLDER, "pepper")):
             need(not config.ME["name"] or config.ME["name"] in g, f"the name from me.md isn't in the greeting: {g}")
         cf = Call(model="sonnet", free=True, continues=name)
-        need(cf.continued is None and cf.fillers._texts["greeting"] == config.greetings_now() and cf.transcript.path is None,
+        need(cf.continued is None and cf.fillers._texts["greeting"] == config.greetings_now(cf.agent) and cf.transcript.path is None,
              "a Free call continued an earlier call")
         t = transcript.CallTranscript(self.tmp / "h60-calls", model="test", agent="Pepper", continues=c)
         t.user("Test.")
@@ -4585,7 +4593,8 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
             await asyncio.sleep(0.5)
         self.turns += 1
         greet = [t for w, t in chats if w == "filler"]
-        need(greet and greet[0] in config.CONTINUE_GREETINGS, f"the greeting wasn't the continue one: {greet}")
+        every_continue = set(config.CONTINUE_GREETINGS) | {g for a in agents.load(config.FOLDER) for g in config.continue_greetings(a)}
+        need(greet and greet[0] in every_continue, f"the greeting wasn't the continue one: {greet}")
         need(f"continues {name}" in log, "the server log doesn't say the call continues the earlier one")
         need(f"({name})" in new_head and "Continues the call of" in new_head, f"the new transcript doesn't say which call it continues: {new_head[:300]!r}")
         say(f"   greeting {greet[0]!r}")
@@ -5225,6 +5234,118 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         return "nothing typed: Send greyed out; a moment's hold shows Yes above it; sliding onto it and letting go sends Yes as a typed turn, which answers a waiting yes question; elsewhere, a short hold, typed text or off a call: nothing; no hint"
 
 
+    # 69
+    async def flow69(self) -> str:
+        """H76 and H77: each agent her own character on calls, as HQ's defaults a workspace can change. No Claude turns."""
+        import agents
+        from call import Call
+        name = config.ME["name"] or None
+        every = {a["id"]: a for a in agents.load(config.FOLDER)}
+        agreed = {"donna": ("Hey you. What do you need?", "You said that yesterday too. Shall I just put it in?"),
+                  "pepper": ("Hey{s}. What's on your mind?", "Honestly? That's the third build today. Is this the needle mover, or the fun one?"),
+                  "moneypenny": ("{N}Go ahead.", "Noted. It'll be done. Just not tonight.")}
+        base = {a["id"]: a for a in agents.DEFAULTS}
+        for aid, (greet, push) in agreed.items():
+            a = base[aid]
+            need(a.get("character") and a.get("personality") and a.get("pushback") == push and a.get("continue_greetings"),
+                 f"{aid}: no character, personality, the agreed push-back or continue greetings in HQ's defaults")
+            g = agents._greetings(a["greetings"])
+            need(set(g) == set(agents.PARTS) and all(v[0] == greet for v in g.values()),
+                 f"{aid}: the agreed greeting isn't first at every part of the day: {g}")
+            need(agents.is_default(every[aid]) or (ROOT / "workspace/HQ/agents/agents.json").exists(), f"{aid} isn't marked HQ's default")
+        need(agents.fill("Hey{s}. What's on your mind?", "Sam") == "Hey Sam. What's on your mind?"
+             and agents.fill("Hey{s}. What's on your mind?", None) == "Hey. What's on your mind?"
+             and agents.fill("{N}Go ahead.", "Sam") == "Sam. Go ahead." and agents.fill("{N}Go ahead.", None) == "Go ahead."
+             and agents.fill("Morning{n}.", "Sam") == "Morning, Sam.", "the name from me.md isn't filled into the greetings right")
+        greets = [set(g for p in agents.PARTS for g in agents.greetings(base[i] | {"greetings": agents._greetings(base[i]["greetings"])}, "Sam", p)) for i in agreed]
+        need(not (greets[0] & greets[1] or greets[0] & greets[2] or greets[1] & greets[2]), "two agents share a greeting")
+        src = (APP / "agents.py").read_text()
+        need(not name or name not in src, "the user's name is written in HQ's agents.py")
+        # Her character and the human rules after the call rules; no announcing tools or thinking out loud.
+        p_ = every["pepper"]
+        per = agents.persona(p_, "Sam")
+        need(p_["personality"] in per and p_["pushback"] in per and agents.HUMAN in per and "thinking sound" in per,
+             "her character, push-back line or the human rules aren't in what her session is told")
+        need("Let me look at your calendar" not in config.VOICE_RULES and "Don't announce a tool" in config.VOICE_RULES
+             and '"Good question."' not in config.VOICE_RULES, "the call rules still tell her to talk while she works")
+        # A call greets in her words; the call system's own greetings only for an agent without any.
+        for aid in ("donna", "pepper"):
+            c = Call(model="sonnet", calls_dir=self.tmp / "calls69", wrap_up="dry", test_mode=True, agent=aid)
+            want = agents.greetings(every[aid], name, config.day_part())
+            need(c.agent["id"] == aid and c.fillers._texts["greeting"] == want and want,
+                 f"{aid}'s call doesn't greet in her words: {c.fillers._texts['greeting']}")
+            if c.transcript.path:
+                c.transcript.path.unlink(missing_ok=True)
+        need(config.greetings_now({"id": "x", "greetings": {}}) == config.GREETINGS[config.day_part()],
+             "an agent without greetings doesn't get the call system's")
+        # H77: a workspace's own character wins, only what it gives; marked as its own.
+        ws = self.tmp / "agents69"
+        (ws / "HQ" / "agents").mkdir(parents=True)
+        (ws / "HQ" / "agents" / "agents.json").write_text(json.dumps([
+            {"id": "donna", "character": "Soft and slow", "pushback": "Are you sure?", "greetings": ["Hello{s}."]},
+            {"id": "pepper", "greetings": 42, "continue_greetings": [1, ""]},
+            {"id": "coach", "name": "Coach", "load": "deep"}]))
+        mine = {a["id"]: a for a in agents.load(ws)}
+        d = mine["donna"]
+        need(d["character"] == "Soft and slow" and d["pushback"] == "Are you sure?" and d["personality"] == base["donna"]["personality"]
+             and all(agents.greetings(d, "Sam", p) == ["Hello Sam."] for p in agents.PARTS),
+             f"the workspace's own character isn't applied, or not only what it gives: {d}")
+        need(not agents.is_default(d), "a changed character still counts as HQ's default")
+        need(mine["pepper"]["greetings"] == {} and mine["pepper"]["continue_greetings"] == [] and not agents.is_default(mine["pepper"]),
+             "bad greetings in agents.json aren't dropped")
+        need(config.greetings_now(mine["coach"]) == config.GREETINGS[config.day_part()] and not agents.is_default(mine["coach"]),
+             "a new agent without greetings doesn't get the call system's")
+        pub = agents.public(d)
+        need(pub["character"] == "Soft and slow" and pub["default"] is False and "personality" not in pub and "pushback" not in pub,
+             f"the page gets too much or doesn't know it's her own: {pub}")
+        text = agents.describe(ws, "Sam")
+        need("Donna (sonnet): Soft and slow. [changed in your workspace" in text and "Pepper (opus)" in text and "Hello Sam." in text,
+             f"describe doesn't show the workspace's characters: {text[:300]}")
+        r = await asyncio.to_thread(run, [sys.executable, str(APP / "agents.py")], timeout=60)
+        need(r.returncode == 0 and "Donna (sonnet)" in r.stdout and "Pepper (opus)" in r.stdout and "Moneypenny (fable, coming soon)" in r.stdout,
+             f"python3 app/agents.py doesn't print the agents: {(r.stderr or r.stdout)[-300:]!r}")
+        # The page and the docs show the defaults.
+        await self.ensure_server()
+        code, body, _ = http_get("/api/agents")
+        j = json.loads(body or b"{}")
+        listed = j.get("agents", []) + j.get("soon", [])
+        need(code == 200 and all(a.get("character") and "default" in a and "pushback" not in a for a in listed),
+             f"/api/agents doesn't give each agent's character and whether it's the default: {body[:200]!r}")
+        page = http_get("/")[1].decode()
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        harness = r"""<script>
+setTimeout(() => {
+  const out = [...document.querySelectorAll('#voices .row span')].map(s => s.firstChild.textContent + '=' + ((s.querySelector('small.character') || {}).textContent || 'none'));
+  const pre = document.createElement('pre'); pre.id = 'h77'; pre.textContent = 'H77RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
+}, 1500);
+</script>"""
+        f = self.tmp / "h77.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h77-profile'}",
+                                          "--disable-web-security", "--virtual-time-budget=5000", "--dump-dom", f.as_uri()], timeout=60)
+        m = re.search(r'<pre id="h77">H77RESULT (.*?) END</pre>', r.stdout)
+        need(m, f"the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        say(f"   {m.group(1)}")
+        rows = dict(x.split("=", 1) for x in m.group(1).split(" | "))
+        for a in [x for x in listed if not x.get("coming_soon")]:
+            shown = rows.get("Voice " + a["full_name"], "none")
+            need(shown.startswith(a["character"]) and (("HQ's default" in shown) == a["default"]),
+                 f"Settings doesn't show {a['name']}'s character and whether it's the default: {shown}")
+        readme = (ROOT / "README.md").read_text()
+        tmpl = (ROOT / "template/HQ/agents/README.md").read_text()
+        about = (ROOT / "ABOUT.md").read_text()
+        need("python3 app/agents.py" in readme and "pushback" in readme and "agents.json" in readme and "HQ's defaults" in readme,
+             "the readme doesn't tell their Claude the characters are defaults they can change")
+        need(all(x in tmpl for x in ("Hey you. What do you need?", "Just not tonight.", '"pushback"', '"greetings"')),
+             "the template's agents readme doesn't show the defaults and how to change them")
+        need("Quick and dry" in about and "HQ's defaults" in about, "ABOUT.md doesn't describe the characters")
+        return ("Donna, Pepper and Moneypenny each with her agreed greeting and push-back, nothing personal; her character and no "
+                "talking while she thinks; calls greet in her words; a workspace's own character wins and is marked; "
+                "Settings, /api/agents, agents.py and the readme show the defaults")
+
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -5569,6 +5690,7 @@ FLOWS = {
     66: ("H56.4: the two-way sync: two private Syncthings, both ways, video left out, conflicts kept and merged, only the main commits", False, "flow66"),
     67: ("F17: a test never changes the real job list, schedule or status block, nor uses the real pairing", False, "flow67"),
     68: ("H72: the hidden Yes: hold the greyed-out Send, slide onto Yes, let go sends Yes", False, "flow68"),
+    69: ("H76, H77: each agent her own character on calls, HQ's defaults a workspace can change", False, "flow69"),
 }
 
 

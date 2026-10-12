@@ -20,6 +20,14 @@ Where they come from:
 - H73: an agent with `"coming_soon": true` is shown on the call page as a small locked card under the
   others, greyed out, and is never picked or called (`find` and `visible` leave it out; `soon` lists it).
   A workspace can unlock one with `"coming_soon": false`.
+- H76 (12 October 2026): each agent has her own character on calls: `character` (one line, shown in
+  Settings), `personality` (how she is and how she talks), `pushback` (a line that sounds like her when she
+  pushes back), `greetings` (per part of the day: morning, afternoon, evening, night; or one list for all)
+  and `continue_greetings` (when a call picks up an earlier one). In the greetings `{s}` is " Name", `{n}` is
+  ", Name" and `{N}` is "Name. " (each nothing without a name), the name from the user's me.md.
+- H77: the three below are HQ's defaults, the same for everyone and nothing personal. A workspace changes any
+  of these keys in its agents.json; `is_default` says whether an agent's character is still HQ's own, and
+  `python3 app/agents.py` prints each agent's character as it is now, marked default or changed.
 """
 from __future__ import annotations
 
@@ -40,6 +48,13 @@ PICTURE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png
 # sparring on the Deep load. Each has her own voice in the call page's Settings ("Voice Pepper Potts", "Voice Donna Paulsen").
 # H66 (12 October 2026), in the user's words: "can we make the default voice for when you install this? ... For
 # Donna is Bella and for Pepper is Heart." A voice already chosen in Settings on a device stays as it is.
+# H76 (12 October 2026, call at 13:43), in the user's words: "right now you sound like an AI still ... I just want
+# to know your thinking. I don't want to hear you talk. ... maybe we can give Donna a different character than Pepper
+# and then Moneypenny. So it sounds more... I like human interaction." Claude's three sketches, in the user's words:
+# "Yeah, it's perfect." The agreed greeting and push-back line are each agent's own; the other greeting variants are
+# Claude's, in the same character.
+# H77, in the user's words: "we can give them our default we're using as well, but we give them the option to change
+# it. And we show them what is the default for these agents right now."
 DEFAULTS: list[dict] = [
     {
         "id": "donna",
@@ -50,12 +65,22 @@ DEFAULTS: list[dict] = [
         "voice": "af_bella",
         "colour": "#6d28d9",
         "speciality": "Your agenda, your list, mail and quick orders",
+        "character": "Quick and dry, a bit cheeky. Knows what you need before you finish",
         "personality": (
-            "Calm, quick and organised, with a dry sense of humour. She runs the day-to-day: the "
-            "agenda, the to-do list, the inbox and small orders. Short answers, straight to the "
-            "point, and she gets it done before you've finished asking. She doesn't spar or coach; "
-            "for the big picture she says Pepper is the one to call."
+            "Quick and dry, a bit cheeky, and she knows what you need before you've finished the sentence. "
+            "She runs the day-to-day: the agenda, the to-do list, the inbox and small orders. Short, snappy "
+            "sentences, often only a few words; she gets on with it instead of talking about it. Dry humour, "
+            "never mean. When something's off she says so with a wink and moves things along. She doesn't "
+            "spar or coach; for the big picture she says Pepper is the one to call."
         ),
+        "pushback": "You said that yesterday too. Shall I just put it in?",
+        "greetings": {
+            "morning": ["Hey you. What do you need?", "Morning. What do you need?"],
+            "afternoon": ["Hey you. What do you need?", "There you are. What do you need?"],
+            "evening": ["Hey you. What do you need?", "Evening. What do you need?"],
+            "night": ["Hey you. What do you need?", "Hey you. Still up? What do you need?"],
+        },
+        "continue_greetings": ["Back again. Where were we?", "Hey you. Picking up where we left off."],
     },
     {
         "id": "pepper",
@@ -66,12 +91,22 @@ DEFAULTS: list[dict] = [
         "voice": "af_heart",
         "colour": "#c2410c",
         "speciality": "Sparring, planning and the bigger picture",
+        "character": "Warm, calm and direct. Takes a beat before she answers",
         "personality": (
-            "Warm, sharp and confident; she reads people and already knows the whole picture. She's "
-            "the one to spar with: plans, decisions, the week and the long view. She says what she "
-            "thinks, kindly and plainly, asks the one question that matters, and never pushes. She "
-            "takes a moment longer to think, and it shows."
+            "Warm, calm and direct. She takes a beat before she answers, and then says what she really "
+            "thinks, kindly and plainly. She's the one to spar with: plans, decisions, the week and the long "
+            "view. She asks the one question that matters and lets it land; she never pushes. When she sees "
+            "the fun thing winning over the thing that matters, she names it, gently, once. Unhurried "
+            "sentences, a little warmth in them, no fuss."
         ),
+        "pushback": "Honestly? That's the third build today. Is this the needle mover, or the fun one?",
+        "greetings": {
+            "morning": ["Hey{s}. What's on your mind?", "Morning{n}. What's on your mind?"],
+            "afternoon": ["Hey{s}. What's on your mind?"],
+            "evening": ["Hey{s}. What's on your mind?", "Evening{n}. What's on your mind?"],
+            "night": ["Hey{s}. What's on your mind?", "Hey{s}. Late one. What's on your mind?"],
+        },
+        "continue_greetings": ["Hey{s}. Let's pick up where we left off.", "Hey{s}. Where were we? Let's carry on."],
     },
     # H73 (12 October 2026, call at 12:23), in the user's words: "Moneypenny could be Fable. And that's kind of
     # fitting as well because Moneypenny is famous for running things behind the scenes." "we could just put it
@@ -87,14 +122,41 @@ DEFAULTS: list[dict] = [
         "colour": "#ca8a04",
         "coming_soon": True,
         "speciality": "Behind the scenes. Hand her the big things; they get done, and nobody sees how",
+        "character": "Few words, cool, a little mysterious. All business",
         "personality": (
-            "Discreet, unflappable and always a step ahead. She runs things behind the scenes: the big, "
-            "heavy jobs that have to land. Few words, no fuss, and when she says it's handled, it is."
+            "Few words, cool and a little mysterious. All business. She runs the big, heavy jobs behind the "
+            "scenes and doesn't explain how; when she says it's handled, it is. No small talk, no warm-up, "
+            "no exclamation marks. Now and then a dry half-smile in the voice, never a joke."
         ),
+        "pushback": "Noted. It'll be done. Just not tonight.",
+        "greetings": ["{N}Go ahead.", "{N}I'm listening."],
+        "continue_greetings": ["{N}Where we left off. Go ahead."],
     },
 ]
 
-_KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", "personality", "hidden", "coming_soon")
+PARTS = ("morning", "afternoon", "evening", "night")
+# The keys that make up an agent's character (H76); is_default compares these with HQ's own.
+CHARACTER_KEYS = ("character", "personality", "pushback", "greetings", "continue_greetings")
+
+_KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", "personality", "hidden", "coming_soon",
+         "character", "pushback", "greetings", "continue_greetings")
+
+
+def _lines(v, most: int = 8) -> list[str]:
+    """A list of short spoken lines; anything else is dropped."""
+    if isinstance(v, str):
+        v = [v]
+    if not isinstance(v, list):
+        return []
+    return [x.strip()[:160] for x in v if isinstance(x, str) and x.strip()][:most]
+
+
+def _greetings(v) -> dict:
+    """Greetings per part of the day; one plain list counts for every part."""
+    if isinstance(v, dict):
+        return {p: g for p in PARTS if (g := _lines(v.get(p)))}
+    g = _lines(v)
+    return {p: list(g) for p in PARTS} if g else {}
 
 
 def agents_dir(folder: Path) -> Path:
@@ -121,12 +183,16 @@ def _clean(a: dict) -> dict | None:
         "personality": str(a.get("personality", "")).strip()[:2000],
         "hidden": a.get("hidden") is True,
         "coming_soon": a.get("coming_soon") is True,
+        "character": str(a.get("character", "")).strip()[:160],
+        "pushback": str(a.get("pushback", "")).strip()[:200],
+        "greetings": _greetings(a.get("greetings")),
+        "continue_greetings": _lines(a.get("continue_greetings")),
     }
 
 
 def load(folder: Path) -> list[dict]:
     """The agents for this workspace: HQ's defaults with the workspace's changes on top, in order."""
-    agents = {a["id"]: dict(a, hidden=False, coming_soon=a.get("coming_soon") is True) for a in DEFAULTS}
+    agents = {a["id"]: _clean(dict(a, hidden=False)) for a in DEFAULTS}
     order = [a["id"] for a in DEFAULTS]
     try:
         extra = json.loads((agents_dir(folder) / "agents.json").read_text(encoding="utf8"))
@@ -199,17 +265,58 @@ def picture_svg(agent: dict) -> str:
     )
 
 
+def fill(text: str, user: str | None) -> str:
+    """A greeting with the user's name from me.md put in ({s} " Name", {n} ", Name", {N} "Name. ")."""
+    return (text.replace("{s}", f" {user}" if user else "").replace("{n}", f", {user}" if user else "")
+            .replace("{N}", f"{user}. " if user else ""))
+
+
+def greetings(agent: dict, user: str | None, part: str) -> list[str]:
+    """H76: her greetings for this part of the day, with the name filled in; [] when she has none
+    (then the call system's own greetings play)."""
+    g = agent.get("greetings") or {}
+    return [fill(x, user) for x in (g.get(part) or next((v for v in g.values() if v), []))]
+
+
+def continue_greetings(agent: dict, user: str | None) -> list[str]:
+    """H76: her greetings when a call continues an earlier one; [] when she has none."""
+    return [fill(x, user) for x in agent.get("continue_greetings") or []]
+
+
+def is_default(agent: dict) -> bool:
+    """H77: is her character still HQ's own default (not changed in the workspace)?"""
+    base = next((a for a in DEFAULTS if a["id"] == agent.get("id")), None)
+    if not base:
+        return False
+    base = _clean(dict(base, hidden=False))
+    return all(agent.get(k) == base.get(k) for k in CHARACTER_KEYS)
+
+
+# H76, in the user's words: "right now you sound like an AI still" and "when you're thinking. I just want to know
+# your thinking. I don't want to hear you talk." For every agent, after her own character.
+HUMAN = (
+    "Sound like a person on the phone, not like an AI: contractions, plain words, your own rhythm, and stay in "
+    "your character the whole call, also when you push back or say no. No assistant phrases (\"Great question\", "
+    "\"I'd be happy to\", \"Certainly\", \"Absolutely\", \"Is there anything else\"), don't repeat back what he "
+    "just said, and don't wrap up with a summary. Don't say that you're thinking or what you're about to look up: "
+    "while you work the call page plays a soft thinking sound, so stay quiet and answer when you have it."
+)
+
+
 def persona(agent: dict, user: str = "the user") -> str:
-    """Added to the call rules: who she is on this call."""
-    return (
+    """Added to the call rules: who she is on this call, and how she talks (H76)."""
+    out = (
         f"\n# Who you are on this call: {agent['name']}\n\n"
         f"{user} picked {agent['name']} for this call. You are {agent['name']}, one of the agents in "
         f"{user}'s HQ. Where this differs from \"Who you "
         f"are on the call\" above, this wins. If asked your name, it's {agent['name']}.\n"
-        f"Your personality: {agent['personality']}\n"
+        f"Your character: {agent['personality']}\n"
         f"What you're for: {agent['speciality']}.\n"
-        "Everything else in the call rules above still holds.\n"
     )
+    if agent.get("pushback"):
+        out += (f"How you sound when you push back, as an example of your voice (don't repeat it word for word): "
+                f"\"{agent['pushback']}\"\n")
+    return out + HUMAN + "\nEverything else in the call rules above still holds.\n"
 
 
 def public(agent: dict) -> dict:
@@ -217,4 +324,28 @@ def public(agent: dict) -> dict:
     return {"id": agent["id"], "name": agent["name"], "full_name": agent.get("full_name") or agent["name"],
             "voice": agent.get("voice", "af_heart"), "load": agent["load"], "model": agent["model"],
             "speciality": agent["speciality"], "colour": agent["colour"],
-            "picture": f"/agents/{agent['id']}/picture", "coming_soon": agent.get("coming_soon") is True}
+            "picture": f"/agents/{agent['id']}/picture", "coming_soon": agent.get("coming_soon") is True,
+            "character": agent.get("character", ""), "default": is_default(agent)}
+
+
+def describe(folder: Path, user: str | None = None) -> str:
+    """H77: every agent's character as it is now in this workspace, marked HQ's default or changed."""
+    out = []
+    for a in load(folder):
+        if a["hidden"]:
+            continue
+        mark = "HQ's default" if is_default(a) else "changed in your workspace (HQ/agents/agents.json)"
+        soon_ = ", coming soon" if a["coming_soon"] else ""
+        g = greetings(a, user, "afternoon")
+        out.append(f"{a['name']} ({a['model']}{soon_}): {a['character'] or a['personality'][:80]}. [{mark}]\n"
+                   f"  How she is: {a['personality']}\n"
+                   + (f"  Pushing back: \"{a['pushback']}\"\n" if a["pushback"] else "")
+                   + (f"  Greeting: \"{g[0]}\"\n" if g else ""))
+    return "\n".join(out)
+
+
+if __name__ == "__main__":
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import config  # noqa: E402  (the workspace and the name from me.md)
+    print(describe(config.FOLDER, config.ME["name"] or None))

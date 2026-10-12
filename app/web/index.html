@@ -396,6 +396,12 @@ function showVoices() {
     const row = document.createElement("div"); row.className = "row";
     const label = document.createElement("span"); label.textContent = "Voice " + (a.full_name || a.name);
     const sel = document.createElement("select"); sel.dataset.agent = a.id; sel.setAttribute("aria-label", label.textContent);
+    // H77: her character under her voice, and whether it's HQ's default or the workspace's own (agents.json)
+    if (a.character) {
+      const c = document.createElement("small"); c.className = "character";
+      c.textContent = a.character + (a.default ? " · HQ's default" : " · your own");
+      label.append(c);
+    }
     sel.append(voiceOpts.content.cloneNode(true)); sel.value = voiceFor(a.id);
     sel.addEventListener("change", () => { try { localStorage.setItem("hq-voice-" + a.id, sel.value); } catch (e) {} });
     row.append(label, sel); voicesEl.append(row);

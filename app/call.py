@@ -75,7 +75,9 @@ class Call:
         self.tts = make_tts(self.voice)
         self.fillers = FillerPlayer(self.tts._kokoro, voice=self.voice, on_play=self.transcript.filler,
                                     waiting_lines=waiting_lines,
-                                    greetings=config.CONTINUE_GREETINGS if self.continued else None)
+                                    # H76: her own greetings, in her character
+                                    greetings=config.continue_greetings(self.agent) if self.continued
+                                    else config.greetings_now(self.agent))
         self.llm = ClaudeSessionLLMService(
             self.brain, stop_brain_on_end=False, fillers=self.fillers,
             policy=self.policy, transcript=self.transcript,
@@ -91,7 +93,7 @@ class Call:
         who = f" with {c['agent']}" if c.get("agent") else ""
         return (
             f"This call continues the earlier call of {c['started']}{who}. The call system greets "
-            f"{config.USER} with \"let's continue from where we left off\", so pick up from there: "
+            f"{config.USER} by saying you're picking up where you left off, so pick up from there: "
             "know what was said and where it ended, without reading it back unless asked. "
             "What was said on that call, oldest first (\"You\" is you):\n"
             f"<earlier-call>\n{c['text']}\n</earlier-call>\n"

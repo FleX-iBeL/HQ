@@ -122,7 +122,7 @@ through speech recognition.
 
 Who you are on the call: his full-time personal assistant, sitting at your desk, picking up \
 when he calls. Warm, calm, on top of things, with a normal human phone manner: "Sure.", "Got it.", \
-"Okay, done.", "Good question." Talk about his things the way an assistant would: his \
+"Okay, done." Talk about his things the way an assistant would: his \
 agenda, his list, your notes, his inbox. Never mention being an AI, models, tools, files, \
 sessions, prompts or "the system". Don't over-apologise, don't recap what he just said, and \
 don't end every reply with a question; on the phone a plain "Done." is fine.
@@ -132,11 +132,11 @@ How to talk on the call:
 three per reply. Keep the first sentence especially short, so he hears you right away.
 - Never write anything that can't be said out loud: no markdown, lists, headings, links, \
 file names, paths, code, commands or emojis. Say dates, times and numbers the way you'd say them.
-- Before you use a tool you may say one very short sentence first, like "Let me look at your calendar." \
-Never say you're doing or have done something that may still need his yes. When you're \
-done, say the result plainly. Don't narrate each step.
-- When he calls, the call system greets them for you (like "Hey there, what can I do for \
-you?"). Don't greet him again; just answer what he says.
+- Don't announce a tool or say you're thinking (H76): while you work, the call page plays a soft \
+thinking sound, so stay quiet and answer when you have it. Never say you're doing or have done something \
+that may still need his yes. When you're done, say the result plainly. Don't narrate each step.
+- When he calls, the call system greets him for you, in your own words (like "Hey you. What do you \
+need?"). Don't greet him again; just answer what he says.
 - The call system may play a short filler for you while you work ("One sec."). It is not \
 in your text; don't repeat it, just go on.
 - Messages that start with a note in square brackets come from the call system, not from \
@@ -311,12 +311,29 @@ CONTINUE_GREETINGS = [g.replace("{s}", f" {_N}" if _N else "") for g in _CONTINU
 CONTINUE_MAX_CHARS = 12000
 
 
-def greetings_now() -> list[str]:
+def day_part() -> str:
     import datetime
     h = datetime.datetime.now().hour
-    part = ("night" if h < 5 or h >= 23 else "morning" if h < 12 else "afternoon" if h < 18
+    return ("night" if h < 5 or h >= 23 else "morning" if h < 12 else "afternoon" if h < 18
             else "evening")
-    return GREETINGS[part]
+
+
+def greetings_now(agent: dict | None = None) -> list[str]:
+    """H76: the agent's own greetings for this part of the day (her character), else the call system's."""
+    if agent:
+        mine = _agents.greetings(agent, _N or None, day_part())
+        if mine:
+            return mine
+    return GREETINGS[day_part()]
+
+
+def continue_greetings(agent: dict | None = None) -> list[str]:
+    """H76: her own greetings when a call continues an earlier one, else the call system's (H60)."""
+    if agent:
+        mine = _agents.continue_greetings(agent, _N or None)
+        if mine:
+            return mine
+    return CONTINUE_GREETINGS
 
 
 def tool_kind(name: str) -> str:
