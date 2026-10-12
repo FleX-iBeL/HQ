@@ -4986,6 +4986,12 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         tar = sp.run(["tar", "--no-xattrs", "-czf", "-", "-T", "-"] if hqpaths.IS_MAC else ["tar", "-czf", "-", "-T", "-"],
                      input=files.encode(), capture_output=True, cwd=str(jv), env={**os.environ, "COPYFILE_DISABLE": "1"})
         need(tar.returncode == 0, f"couldn't pack HQ: {tar.stderr.decode()[:200]}")
+        # H56.7: a test's roadmap copy is always on its own, so flows run on a paired backup never reach the
+        # real main's job list.
+        iso = sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import role; print(role.config())",
+                      str(jv / "routine")], capture_output=True, text=True,
+                     env={**{k: v for k, v in os.environ.items() if k != "HQ_SUPPORT"}, "HQ_ROADMAP": "/nonexistent/roadmap.md"})
+        need(iso.stdout.strip() == "{}", f"a test's roadmap copy reads the real pairing: {iso.stdout.strip()[:120]}")
         tag = f"hqflow65-{os.getpid()}"
         script = FLOW65_SCRIPT.replace("@TAG@", tag)
         notes = []

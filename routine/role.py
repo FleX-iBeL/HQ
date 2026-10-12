@@ -78,7 +78,11 @@ def _save(path, data):
 
 
 def config() -> dict:
-    """The setup, or {} when this HQ is on its own (no other HQ: main, nothing to look for)."""
+    """The setup, or {} when this HQ is on its own (no other HQ: main, nothing to look for). A test's copy of the
+    roadmap (HQ_ROADMAP without its own HQ_SUPPORT) is always on its own: on a paired backup its jobs and planned
+    items would otherwise go to the real main's job list (found in H56.7, when the flows ran on the VPS)."""
+    if os.environ.get("HQ_ROADMAP") and not os.environ.get("HQ_SUPPORT"):
+        return {}
     c = _load(CONFIG, {})
     return c if c.get("peer") else {}
 
