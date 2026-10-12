@@ -387,7 +387,7 @@ function showMode() {
   freeBtn.setAttribute("aria-pressed", String(free));
 }
 freeBtn.addEventListener("click", () => {
-  if (state !== "idle") return;
+  if (state !== "idle" || freeOnly) return;
   free = !free; try { localStorage.setItem("hq-free", free ? "on" : "off"); } catch (e) {}
   showMode();
 });
@@ -413,7 +413,13 @@ function showAgents(list) {
   mode = AGENTS[agent].load;
   showMode(); showVoices();
 }
-fetch("/api/agents", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => j && showAgents(j.agents)).catch(() => {});
+// H55: a line that only does Free calls (the test line on a server) says so, and Free can't be switched off.
+let freeOnly = false;
+fetch("/api/agents", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => {
+  if (!j) return;
+  if (j.free_only) { freeOnly = free = true; freeBtn.disabled = true; }
+  showAgents(j.agents); showMode();
+}).catch(() => {});
 // H9: the Settings sheet (Free, voice, waiting lines, thinking sound), only before a call.
 const setBtn = document.getElementById("setbtn"), setEl = document.getElementById("settings"), shade = document.getElementById("shade");
 function showSettings(open) {

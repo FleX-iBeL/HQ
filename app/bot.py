@@ -254,7 +254,7 @@ async def bot(runner_args: RunnerArguments):
     # either: a plain Claude with the internet, nothing of his. mode "free" is from an old page.
     body = runner_args.body if isinstance(runner_args.body, dict) else {}
     mode = str(body.get("mode", "quick"))
-    free = body.get("free") is True or mode == "free"
+    free = body.get("free") is True or mode == "free" or config.FREE_ONLY
     # H29: the page sends the agent (Pepper, Donna, ...); her model and load win over the mode.
     # A page from before H29 sends only the mode: the agent with that load.
     agent = agents.find(config.FOLDER, str(body.get("agent", "")) or None, mode if mode in ("quick", "deep") else None)
@@ -308,7 +308,8 @@ if __name__ == "__main__":
 
     @app.get("/api/agents", include_in_schema=False)
     async def agent_list():
-        return JSONResponse({"agents": [_agents.public(a) for a in _agents.visible(config.FOLDER)]}, headers=_NO_CACHE)
+        return JSONResponse({"agents": [_agents.public(a) for a in _agents.visible(config.FOLDER)],
+                             "free_only": config.FREE_ONLY}, headers=_NO_CACHE)
 
     @app.get("/agents/{agent_id}/picture", include_in_schema=False)
     async def agent_picture(agent_id: str):

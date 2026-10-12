@@ -28,6 +28,9 @@ def _local_timezone() -> str:
 TIMEZONE = _local_timezone()
 # HQ_PLAIN=1 goes back to the A2 plain Claude (no files, tools or connectors).
 PLAIN = os.environ.get("HQ_PLAIN", "") == "1"
+# H55 (12 October 2026): HQ_FREE_ONLY=1 makes every call a Free call, whatever the page sends:
+# for a test line on a server with nothing of the user's on it (the VPS).
+FREE_ONLY = os.environ.get("HQ_FREE_ONLY", "") == "1"
 # After hang-up Claude writes down what matters, commits and pushes. HQ_WRAP_UP=dry
 # makes it only say what it would do (tests); HQ_WRAP_UP=off skips it.
 WRAP_UP = os.environ.get("HQ_WRAP_UP", "on")
@@ -317,7 +320,13 @@ def tool_kind(name: str) -> str:
 # Hearing. A short word list helps Whisper with names: HQ, the agents (H29), the user's name,
 # and their own "Names to hear" from me.md (M5).
 import agents as _agents  # noqa: E402
-WHISPER_MODEL = os.environ.get("HQ_WHISPER", "mlx-community/whisper-large-v3-turbo")
+# H55 (12 October 2026): off a Mac there is no MLX, so Whisper runs on the CPU with faster-whisper.
+# On the VPS (4 cores) large was 7 s a sentence, small about 2 s, base about 1 s; small hears
+# a real voice outside better, so it's the default there. HQ_STT and HQ_WHISPER override both.
+import sys as _sys  # noqa: E402
+STT_ENGINE = os.environ.get("HQ_STT", "mlx" if _sys.platform == "darwin" else "faster")
+WHISPER_MODEL = os.environ.get(
+    "HQ_WHISPER", "mlx-community/whisper-large-v3-turbo" if STT_ENGINE == "mlx" else "small")
 WHISPER_PROMPT = os.environ.get(
     "HQ_WHISPER_PROMPT",
     ", ".join(w for w in ["HQ", *_agents.names(FOLDER), ME["name"], ME["hear"].rstrip(".")] if w) + ".",

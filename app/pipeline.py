@@ -32,7 +32,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.services.kokoro.tts import KokoroTTSService
-from pipecat.services.whisper.stt import WhisperSTTServiceMLX
+from pipecat.services.whisper.stt import WhisperSTTService, WhisperSTTServiceMLX
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
     TurnAnalyzerUserTurnStopStrategy,
@@ -126,7 +126,65 @@ class HQWhisperSTT(WhisperSTTServiceMLX):
             await self.push_frame(SegmentDoneFrame())
 
 
-def make_stt(quiet: bool = False) -> HQWhisperSTT:
+class HQFasterWhisperSTT(WhisperSTTService):
+    """H55 (12 October 2026): the same as HQWhisperSTT, off a Mac (no MLX): faster-whisper on the
+    CPU, int8, one beam, as timed on the VPS. The run_stt body follows WhisperSTTService.run_stt
+    in pipecat 1.12.0; the changes are the beam, the initial prompt and the SegmentDoneFrame."""
+
+    def __init__(self, *, initial_prompt: str | None = None, quiet: bool = False, **kwargs):
+        super().__init__(device="cpu", compute_type="int8", **kwargs)
+        self._initial_prompt = initial_prompt or None
+        self._quiet = quiet
+
+    def warm_up(self) -> float:
+        t = time.perf_counter()
+        if self._model is not None:
+            list(self._model.transcribe(np.zeros(16000, dtype=np.float32), language="en", beam_size=1)[0])
+        return time.perf_counter() - t
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        try:
+            if not self._model:
+                raise RuntimeError("Whisper model not available")
+            await self.start_processing_metrics()
+            audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
+            language = cast("Language | None", self._settings.language)
+
+            def transcribe():
+                segments, _ = self._model.transcribe(audio_float, language=language, beam_size=1,
+                                                     initial_prompt=self._initial_prompt)
+                return list(segments)
+
+            segments = await asyncio.to_thread(transcribe)
+            text = ""
+            threshold = self._settings.no_speech_prob
+            for segment in segments:
+                if threshold is None or segment.no_speech_prob < threshold:
+                    text += f"{segment.text} "
+            await self.stop_processing_metrics()
+            text = text.strip()
+            if text:
+                if not self._quiet:
+                    logger.debug(f"Transcription: [{text}]")
+                yield TranscriptionFrame(text, self._user_id, time_now_iso8601(), language)
+        except Exception as e:
+            yield ErrorFrame(error=f"Whisper error: {e}")
+        yield SegmentDoneFrame()
+
+    async def _handle_user_stopped_speaking(self, frame):
+        await super()._handle_user_stopped_speaking(frame)
+        if not self.is_usable:
+            await self.push_frame(SegmentDoneFrame())
+
+
+def make_stt(quiet: bool = False) -> HQWhisperSTT | HQFasterWhisperSTT:
+    if config.STT_ENGINE == "faster":  # H55: off a Mac
+        return HQFasterWhisperSTT(
+            initial_prompt=config.WHISPER_PROMPT,
+            quiet=quiet,
+            ttfs_p99_latency=config.WHISPER_P99_SECS,
+            settings=WhisperSTTService.Settings(model=config.WHISPER_MODEL, language=Language.EN),
+        )
     return HQWhisperSTT(
         initial_prompt=config.WHISPER_PROMPT,
         quiet=quiet,
