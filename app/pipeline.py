@@ -147,7 +147,8 @@ class HQFasterWhisperSTT(WhisperSTTService):
         name = str(self._settings.model)
         with self._LOCK:
             if name not in self._MODELS:
-                self._MODELS[name] = WhisperModel(name, device="cpu", compute_type="int8")
+                self._MODELS[name] = WhisperModel(name, device="cpu", compute_type="int8",
+                                                  cpu_threads=__import__("os").cpu_count() or 4)
             self._model = self._MODELS[name]
 
     def warm_up(self) -> float:
