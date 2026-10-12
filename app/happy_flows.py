@@ -3775,6 +3775,73 @@ window.addEventListener('load', () => setTimeout(() => {
                 pass
             log.close()
 
+    # 62
+    async def flow62(self) -> str:
+        """H73: Moneypenny, coming soon. In HQ's defaults (Fable, yellow), never picked or called; the call
+        page shows her as a smaller locked card under Donna and Pepper, greyed out, her icon yellow with an M.
+        The page is the same in the desktop app and the phone version. No Claude turns."""
+        import agents
+        every = {a["id"]: a for a in agents.load(config.FOLDER)}
+        m = every.get("moneypenny")
+        need(m and m["coming_soon"] and m["model"] == "fable" and m["colour"].lower() == "#ca8a04",
+             f"Moneypenny isn't in the defaults as a locked Fable agent in yellow: {m}")
+        need([a["id"] for a in agents.visible(config.FOLDER)] == ["donna", "pepper"]
+             and [a["id"] for a in agents.soon(config.FOLDER)] == ["moneypenny"], "Moneypenny can be picked, or isn't listed as coming soon")
+        need(agents.find(config.FOLDER, "moneypenny")["id"] == "donna" and agents.find(config.FOLDER, None, "deep")["id"] == "pepper",
+             "a call can still reach Moneypenny")
+        need("Moneypenny" not in config.WHISPER_PROMPT, "Moneypenny is in the speech recognition prompt though she can't be called")
+        need(">M</text>" in agents.picture_svg(m) and "#ca8a04" in agents.picture_svg(m), "her placeholder isn't a yellow M")
+        # A workspace can unlock her, or hide her.
+        ws = self.tmp / "agents62"
+        (ws / "HQ" / "agents").mkdir(parents=True)
+        (ws / "HQ" / "agents" / "agents.json").write_text(json.dumps([{"id": "moneypenny", "coming_soon": False}]))
+        need([a["id"] for a in agents.visible(ws)] == ["donna", "pepper", "moneypenny"] and not agents.soon(ws), "a workspace can't unlock her")
+        (ws / "HQ" / "agents" / "agents.json").write_text(json.dumps([{"id": "moneypenny", "hidden": True}]))
+        need(not agents.soon(ws), "a hidden locked agent still shows")
+        await self.ensure_server()
+        code, body, _ = http_get("/api/agents")
+        j = json.loads(body or b"{}")
+        need(code == 200 and [a["id"] for a in j.get("agents", [])] == ["donna", "pepper"]
+             and [a["id"] for a in j.get("soon", [])] == ["moneypenny"] and "personality" not in j["soon"][0],
+             f"/api/agents doesn't list her apart as coming soon: {body[:200]!r}")
+        code, body, ctype = http_get("/agents/moneypenny/picture")
+        need(code == 200 and ctype.startswith("image/"), "her picture doesn't load")
+        page = http_get("/")[1].decode()
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        harness = r"""<script>
+setTimeout(() => {
+  const out = [], card = document.querySelector('#soon .card[data-soon="moneypenny"]');
+  out.push('buttons:' + [...document.querySelectorAll('#modes button')].map(b => b.dataset.agent).join(','));
+  out.push('card:' + (card ? card.textContent.replace(/\s+/g, ' ').trim() : 'none'));
+  out.push('below:' + (card ? String(card.getBoundingClientRect().top > document.getElementById('modes').getBoundingClientRect().bottom) : 'none'));
+  out.push('smaller:' + (card ? String(card.querySelector('img').getBoundingClientRect().width < document.querySelector('#modes img').getBoundingClientRect().width) : 'none'));
+  out.push('greyed:' + (card ? getComputedStyle(card.querySelector('div')).opacity + '/' + getComputedStyle(card.querySelector('img')).opacity : 'none'));
+  if (card) card.click();
+  out.push('picked:' + agent + '/' + mode + ' inagents:' + ('moneypenny' in AGENTS));
+  out.push('voices:' + [...document.querySelectorAll('#voices .row span')].map(s => s.textContent).join(','));
+  setState('live', 'x'); out.push('oncall:' + getComputedStyle(document.getElementById('soon')).visibility); setState('idle', 'x');
+  const pre = document.createElement('pre'); pre.id = 'h73'; pre.textContent = 'H73RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
+}, 1500);
+</script>"""
+        f = self.tmp / "h73.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h73-profile'}",
+                                          "--disable-web-security", "--virtual-time-budget=5000", "--dump-dom", f.as_uri()], timeout=60)
+        mm = re.search(r'<pre id="h73">H73RESULT (.*?) END</pre>', r.stdout)
+        need(mm, f"the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+        say(f"   {mm.group(1)}")
+        need(res["buttons"] == "donna,pepper", f"Moneypenny is a button you can pick: {res}")
+        need(res["card"].startswith("Moneypenny") and "Coming soon" in res["card"], f"her card doesn't say coming soon: {res}")
+        need(res["below"] == "true" and res["smaller"] == "true", f"her card isn't smaller and under Donna and Pepper: {res}")
+        need(float(res["greyed"].split("/")[0]) < 1 and res["greyed"].split("/")[1] == "1", f"her card isn't greyed out, or her yellow icon is: {res}")
+        need(res["picked"].startswith("donna/quick inagents:false"), f"tapping her card picked her: {res}")
+        need("Moneypenny" not in res["voices"], f"she has a voice in Settings: {res}")
+        need(res["oncall"] == "hidden", f"her card shows during a call: {res}")
+        return "Moneypenny: a smaller locked card under Donna and Pepper, coming soon, yellow M, never picked or called"
+
     # 48
     async def flow48(self) -> str:
         """H29: the agents. Pepper (Quick's load, Sonnet) and Donna (Deep's load, Opus) replace the Quick and
@@ -3801,7 +3868,7 @@ window.addEventListener('load', () => setTimeout(() => {
             {"id": "../x", "name": "Bad", "load": "quick"}, {"id": "noload", "name": "No load"}, "junk"]))
         (ws / "HQ" / "agents" / "coach.png").write_bytes(b"\x89PNG\r\n\x1a\n")
         mine = agents.load(ws)
-        need([a["id"] for a in mine] == ["donna", "pepper", "coach"], f"the workspace's agents aren't read right: {[a['id'] for a in mine]}")
+        need([a["id"] for a in mine] == ["donna", "pepper", "moneypenny", "coach"], f"the workspace's agents aren't read right: {[a['id'] for a in mine]}")
         need([a["id"] for a in agents.visible(ws)] == ["donna", "coach"], "a hidden agent still shows")
         need(mine[0]["personality"] == "Test personality." and mine[0]["name"] == "Donna", "a workspace change isn't applied")
         need(agents.picture(ws, "coach") and not agents.picture(ws, "donna") and not agents.picture(ws, "../coach"),
@@ -4728,6 +4795,7 @@ FLOWS = {
     59: ("H62: after a crash the job runs again, first in line, picking up where it left off", False, "flow59"),
     60: ("H65: a call reads HQ freely (files, logs, status page data); changes still ask", False, "flow60"),
     61: ("H56.1: the routine and the watchdog on Linux; the Mac as it was", False, "flow61"),
+    62: ("H73: Moneypenny, coming soon: a locked card under Donna and Pepper, never called", False, "flow62"),
 }
 
 

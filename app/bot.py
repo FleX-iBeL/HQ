@@ -309,6 +309,7 @@ if __name__ == "__main__":
     @app.get("/api/agents", include_in_schema=False)
     async def agent_list():
         return JSONResponse({"agents": [_agents.public(a) for a in _agents.visible(config.FOLDER)],
+                             "soon": [_agents.public(a) for a in _agents.soon(config.FOLDER)],  # H73
                              "free_only": config.FREE_ONLY}, headers=_NO_CACHE)
 
     @app.get("/agents/{agent_id}/picture", include_in_schema=False)

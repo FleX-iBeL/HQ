@@ -5,6 +5,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ## Coming next
 
 ### New
+- Moneypenny, coming soon: a third agent on Fable, shown as a small locked card under Donna and Pepper. She can't be picked or called yet. A workspace can unlock her in `agents/agents.json` with `"coming_soon": false`.
 - HQ's routine and watchdog run on a Linux server too, as systemd timers that start by themselves after a restart (`routine/install-linux.sh`). The call line has a Linux start and stop (`app/start-linux.sh`, `app/stop-linux.sh`). On a Mac nothing changes.
 
 ### Changed

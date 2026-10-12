@@ -17,6 +17,9 @@ Where they come from:
   (it needs at least a name and a load). `"hidden": true` leaves an agent out of the call page.
 - The headshot: `HQ/agents/<id>.jpg` (or .jpeg, .png, .webp) in the workspace. Pictures stay in
   the workspace, never in HQ. Without one, the call page shows a drawn placeholder (picture_svg).
+- H73: an agent with `"coming_soon": true` is shown on the call page as a small locked card under the
+  others, greyed out, and is never picked or called (`find` and `visible` leave it out; `soon` lists it).
+  A workspace can unlock one with `"coming_soon": false`.
 """
 from __future__ import annotations
 
@@ -70,9 +73,28 @@ DEFAULTS: list[dict] = [
             "takes a moment longer to think, and it shows."
         ),
     },
+    # H73 (12 October 2026, call at 12:23), in the user's words: "Moneypenny could be Fable. And that's kind of
+    # fitting as well because Moneypenny is famous for running things behind the scenes." "we could just put it
+    # sort of like grayed out. And just say something like coming soon" and "I just want the icon to be yellow ...
+    # As they show like an M for Moneypenny." Locked: never picked, never called. The wording is Claude's.
+    {
+        "id": "moneypenny",
+        "name": "Moneypenny",
+        "load": "deep",
+        "model": "fable",
+        "full_name": "Miss Moneypenny",
+        "voice": "bf_emma",
+        "colour": "#ca8a04",
+        "coming_soon": True,
+        "speciality": "Behind the scenes. Hand her the big things; they get done, and nobody sees how",
+        "personality": (
+            "Discreet, unflappable and always a step ahead. She runs things behind the scenes: the big, "
+            "heavy jobs that have to land. Few words, no fuss, and when she says it's handled, it is."
+        ),
+    },
 ]
 
-_KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", "personality", "hidden")
+_KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", "personality", "hidden", "coming_soon")
 
 
 def agents_dir(folder: Path) -> Path:
@@ -98,12 +120,13 @@ def _clean(a: dict) -> dict | None:
         "speciality": str(a.get("speciality", "")).strip()[:120],
         "personality": str(a.get("personality", "")).strip()[:2000],
         "hidden": a.get("hidden") is True,
+        "coming_soon": a.get("coming_soon") is True,
     }
 
 
 def load(folder: Path) -> list[dict]:
     """The agents for this workspace: HQ's defaults with the workspace's changes on top, in order."""
-    agents = {a["id"]: dict(a, hidden=False) for a in DEFAULTS}
+    agents = {a["id"]: dict(a, hidden=False, coming_soon=a.get("coming_soon") is True) for a in DEFAULTS}
     order = [a["id"] for a in DEFAULTS]
     try:
         extra = json.loads((agents_dir(folder) / "agents.json").read_text(encoding="utf8"))
@@ -124,7 +147,13 @@ def load(folder: Path) -> list[dict]:
 
 
 def visible(folder: Path) -> list[dict]:
-    return [a for a in load(folder) if not a["hidden"]]
+    """The agents a call can be made with (not hidden, not coming soon)."""
+    return [a for a in load(folder) if not a["hidden"] and not a["coming_soon"]]
+
+
+def soon(folder: Path) -> list[dict]:
+    """H73: the locked agents, shown greyed out as coming soon; never called."""
+    return [a for a in load(folder) if not a["hidden"] and a["coming_soon"]]
 
 
 def names(folder: Path) -> list[str]:
@@ -134,7 +163,7 @@ def names(folder: Path) -> list[str]:
 def find(folder: Path, agent_id: str | None = None, mode: str | None = None) -> dict:
     """The agent a call asked for. Without a known id, the first visible agent with that load
     (pages from before H29 send only mode quick or deep), else the first one."""
-    every = load(folder)
+    every = [a for a in load(folder) if not a["coming_soon"]]  # H73: a locked agent is never called
     by_id = {a["id"]: a for a in every}
     if agent_id and str(agent_id).lower() in by_id:
         return by_id[str(agent_id).lower()]
@@ -188,4 +217,4 @@ def public(agent: dict) -> dict:
     return {"id": agent["id"], "name": agent["name"], "full_name": agent.get("full_name") or agent["name"],
             "voice": agent.get("voice", "af_heart"), "load": agent["load"], "model": agent["model"],
             "speciality": agent["speciality"], "colour": agent["colour"],
-            "picture": f"/agents/{agent['id']}/picture"}
+            "picture": f"/agents/{agent['id']}/picture", "coming_soon": agent.get("coming_soon") is True}
