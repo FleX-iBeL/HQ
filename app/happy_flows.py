@@ -129,6 +129,10 @@ Run them before and after every update; they print a short pass/fail table at th
      lines, trimmed from the start), the continue greeting with the name from me.md, never on Free; on the
      call page Continue at the foot of an opened call, only when not on a call and not as Free, the offer it
      sends and the chat it starts with; a real continued call greets so, and its transcript says which call
+  64 F16, no Claude: the call page fits the screen. The real call page (with Moneypenny's card) in a headless
+     browser at iPhone 13 sizes (Safari and the home screen), a small phone, and the desktop app's size (?app):
+     before, during, with the chat open, and after a call nothing scrolls past the screen; Donna, Pepper and her
+     card look as before, and take no room on a call
 
 Safe to run while the live phone line is up: the flows use their own server on port 7871
 (HQ_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
@@ -3981,6 +3985,59 @@ setTimeout(() => {
         need(res["oncall"] == "hidden", f"her card shows during a call: {res}")
         return "Moneypenny: a smaller locked card under Donna and Pepper, coming soon, yellow M, never picked or called"
 
+    async def flow64(self) -> str:
+        """F16: the call page fits the screen, before, during and after a call. Since H73 the coming-soon card,
+        and before it the hidden agent picker, kept their room on a call and pushed the page past the phone's
+        screen, so it scrolled into white space. The real page in a headless browser. No Claude turns."""
+        await self.ensure_server()
+        page = http_get("/")[1].decode()
+        need("body.oncall #modes, body.oncall #modehint, body.oncall #soon { display:none; }" in page,
+             "the agent picker and the coming-soon card still keep their room on a call")
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        harness = r"""<script>
+setTimeout(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const over = () => document.scrollingElement.scrollHeight - innerHeight;
+  const box = id => { const r = document.getElementById(id).getBoundingClientRect(); return [r.top, r.bottom, r.height]; };
+  const card = document.querySelector('#soon .card');
+  out.push('card:' + (card ? 'yes' : 'no'));
+  const [, mb] = box('modes'), [ht] = box('modehint'), [st] = box('soon');
+  out.push('idle:' + over());
+  out.push('apart:' + (ht >= mb && st >= mb ? 'yes' : 'no'));
+  out.push('sizes:' + Math.round(box('modes')[2]) + '/' + (card ? Math.round(card.getBoundingClientRect().height) : 0));
+  calledHere = true; setState('connecting', ''); await wait(100); out.push('connecting:' + over());
+  setState('live', 'On the call'); setMuted(false); await wait(100); out.push('live:' + over());
+  out.push('room:' + box('modes')[2] + '/' + box('soon')[2] + '/' + box('modehint')[2]);
+  chatBtn.click(); await wait(200); out.push('chat:' + over()); showChat(false);
+  cleanup('Call ended'); await wait(200); out.push('after:' + over());
+  const pre = document.createElement('pre'); pre.id = 'f16'; pre.textContent = 'F16RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
+}, 1500);
+</script>"""
+        f = self.tmp / "f16.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1))
+        fa = self.tmp / "f16app.html"  # the desktop app loads the page with ?app
+        fa.write_text(f.read_text().replace('new URLSearchParams(location.search).has("app")', "true", 1))
+        sizes = [("iPhone 13 in Safari", "390,664", f), ("iPhone 13 from the home screen", "390,844", f),
+                 ("a small phone in Safari", "375,553", f), ("the desktop app", "1180,780", fa)]
+        seen = []
+        for name, size, page_file in sizes:
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'f16-profile'}",
+                                              "--disable-web-security", f"--window-size={size}", "--virtual-time-budget=8000", "--dump-dom", page_file.as_uri()], timeout=60)
+            mm = re.search(r'<pre id="f16">F16RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{name}: the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+            say(f"   {name} ({size}): {mm.group(1)}")
+            need(res["card"] == "yes", f"{name}: Moneypenny's card isn't on the page, so the test proves nothing: {res}")
+            for when in ("idle", "connecting", "live", "chat", "after"):
+                need(int(res[when]) <= 0, f"{name}: the page scrolls {res[when]}px past the screen ({when}): {res}")
+            need(res["apart"] == "yes", f"{name}: the hint or her card overlaps Donna and Pepper: {res}")
+            need(res["room"] == "0/0/0", f"{name}: the picker or her card still takes room on a call: {res}")
+            seen.append(res["sizes"])
+        need(len(set(seen[:2])) == 1, f"Donna, Pepper or her card look different between the iPhone 13 sizes: {seen}")
+        return "the call page fits on iPhone 13 (Safari and home screen), a small phone and the desktop app: before, during, chat open, after"
+
     # 48
     async def flow48(self) -> str:
         """H29: the agents. Pepper (Quick's load, Sonnet) and Donna (Deep's load, Opus) replace the Quick and
@@ -4957,6 +5014,7 @@ FLOWS = {
     61: ("H56.1: the routine and the watchdog on Linux; the Mac as it was", False, "flow61"),
     62: ("H73: Moneypenny, coming soon: a locked card under Donna and Pepper, never called", False, "flow62"),
     63: ("H56.2: job windows and the mail check on Linux, in tmux: a throwaway job and mail check", False, "flow63"),
+    64: ("F16: the call page fits the screen before, during and after a call; no scrolling into white space", False, "flow64"),
 }
 
 
