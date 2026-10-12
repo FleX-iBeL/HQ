@@ -4,7 +4,9 @@ HQ pushes with its own key (a deploy key with write access on the public repo), 
 alias github.com-hq in ~/.ssh/config, so a job can push without anyone at the Terminal. Before
 anything goes up, `app/privacy.py --history` must say nothing personal; one hit and nothing is pushed.
 
-    python3 routine/push.py            privacy check, then push the current branch and the tags
+    python3 routine/push.py            privacy check, then push the current branch (the working branch, dev)
+    python3 routine/push.py --release  privacy check, then push main and the version tags (only on a release,
+                                       on the user's say-so; H90)
     python3 routine/push.py --dry-run  the same, but git only shows what it would push
     python3 routine/push.py --check    only checks that GitHub accepts HQ's key; pushes nothing
 
@@ -18,6 +20,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 REMOTE = "origin"
+WORK_BRANCH = "dev"      # H90: every job's commits go here
+RELEASE_BRANCH = "main"  # H90: only on a release, with the version tags
 
 
 def git(*args: str) -> subprocess.CompletedProcess:
@@ -63,11 +67,19 @@ def main() -> int:
     if not branch:
         print("Not pushed: HQ isn't on a branch.")
         return 2
+    # H90: day-to-day work goes to the working branch; main and the tags only move on a release.
+    release = "--release" in sys.argv
+    if branch == RELEASE_BRANCH and not release:
+        print(f"Not pushed: {RELEASE_BRANCH} only goes up on a release (add --release, on the user's say-so). "
+              f"Work goes to {WORK_BRANCH}.")
+        return 2
     if git("status", "--porcelain").stdout.strip():
         print("Note: HQ has changes that aren't committed; only what's committed goes up.")
 
-    for what, args in ((f"branch {branch}", ["push", *dry, REMOTE, branch]),
-                       ("tags", ["push", *dry, REMOTE, "--tags"])):
+    steps = [(f"branch {branch}", ["push", *dry, REMOTE, branch])]
+    if release:
+        steps.append(("tags", ["push", *dry, REMOTE, "--tags"]))
+    for what, args in steps:
         r = git(*args)
         out = (r.stdout + r.stderr).strip()
         if r.returncode != 0:
