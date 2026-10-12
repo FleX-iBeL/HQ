@@ -485,9 +485,9 @@
         const what = el('div', 'what', label);
         if (sub) what.append(el('small', '', sub));
         const times = el('span', 'soft when', when);
-        const rate = perHour >= 1 ? `${perHour}% an hour` : `about ${Math.round(perHour * 24)}% a day`;
+        const rate = perHour >= 1 ? `${Math.round(perHour / 6) / 10}% a minute` : `a little every minute, about ${Math.round(perHour * 24)}% a day`;
         if (next) times.append(el('small', '', `Stop line ${limit}%, moving from ${clock(next)}`));
-        else if (perHour && limit < 100) times.append(el('small', '', `Stop line ${limit}%, moving up ${rate}`));
+        else if (perHour && limit < 100) times.append(el('small', '', `Stop line ${limit}%, climbing ${rate}`));
         else if (limit !== null && cls !== 'context') times.append(el('small', '', `Stop line ${limit}%${perHour ? ' until the reset' : ', fixed'}`));
         if (resets) times.append(el('small', '', `Resets at ${clock(resets)}`));
         row.append(what, bar(percent, limit), el('span', 'pct', `${percent}%`), times);
