@@ -42,6 +42,7 @@ import quiet  # H36: a job that has gone quiet gets continue typed into its own 
 import failures  # H42: why a run failed, in plain words, and how many times in a row (the watchdog reads it)
 import crash  # H62: a job stopped by a crash runs again from the top of the line
 import role  # H56.3: main and backup; only the main runs the mail check, the jobs and the scheduler
+import sync  # H56.4: the two-way sync of the workspace and Claude's memory with the other HQ
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
@@ -779,6 +780,10 @@ def became_main():
     """H56.3: this HQ has just become the acting main (it took over, or got the role back). The mail check waits
     for its next full hour instead of counting the hours the other one checked as missed, and a job the queue
     still shows running on the other one runs again here from the top of the line (H62's rerun)."""
+    try:
+        sync.align(log=log)  # H56.4: git lined up with GitHub first, keeping the files the sync brought
+    except Exception as e:
+        log(f"sync align: {e!r}")
     last = mail_last() or 0
     hour = int(time.time()) // MAIL_EVERY * MAIL_EVERY
     if last < hour:
@@ -802,6 +807,12 @@ def tick():
     except Exception as e:
         log(f"role: {e!r}")
         r = {"acting": role.acting()}
+    # H56.4: the two-way sync, on both: its line, conflict copies (the main queues a merge job), and on the main
+    # a commit of what came over from the other side. Not set up (no second HQ): nothing at all.
+    try:
+        sync.tick(main=r["acting"] == "main", log=log, routines=routines, incidents=incidents)
+    except Exception as e:
+        log(f"sync: {e!r}")
     if r["acting"] == "backup":
         on_backup()
         return

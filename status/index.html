@@ -617,6 +617,7 @@
         ['schedule', 'Scheduler', 'Planned work; only when no job runs or waits'],
         ['usage', 'Usage check', 'Every minute, free'],
         ['phone', 'Status page', 'Also on the phone'],
+        ['sync', 'Two-way sync', 'Only with a second HQ: the workspace and Claude\'s memory, both ways'],
         ['call', 'Call line', 'For calls from the phone'],
         ['temp', 'Laptop temperature', 'Every minute, free, no password'],
         ['battery', 'Laptop battery', 'Every minute, free'],
@@ -636,7 +637,7 @@
         const card = el('div', 'card');
         for (const [key, name, about] of ROUTINES) {
           const x = all[key];
-          if (key === 'role' && !x) continue;  // H56.3: an HQ on its own says nothing about it
+          if ((key === 'role' || key === 'sync') && !x) continue;  // H56.3/H56.4: an HQ on its own says nothing about them
           let state = x?.state ?? 'off';
           let text = x?.text ?? 'No line yet';
           const late = x && now - x.at > (x.every ?? 60) * 2 + 60;

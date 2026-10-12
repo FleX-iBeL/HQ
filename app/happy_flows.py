@@ -4991,6 +4991,50 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         return " · ".join(notes)
 
 
+    async def flow66(self) -> str:
+        """H56.4: the two-way sync. Two private, throwaway Syncthings (A, the laptop, and B, the server) on spare
+        ports, talking only to each other on this computer (no discovery, no relays), each with a throwaway HQ,
+        the blank template as its workspace (a git repo with a throwaway origin) and its own memory folder;
+        nothing of the user's, and the user's own Syncthing is never touched. On this computer, and with a Linux
+        machine too (HQ_TEST_LINUX=<ssh host>). Checked: alone, the sync does nothing and shows no line; set up,
+        a change on either side shows up on the other within seconds, the memory folder too; video, audio, git's
+        folder and this computer's own Claude settings never go over; the main commits what came over and pushes
+        it, the backup commits nothing; both sides changing the same note at once keeps both (a conflict copy),
+        the line and the incidents say so and the main queues one merge job (once); once merged, the line is
+        green and the incident closed; an HQ that becomes main lines its git up with GitHub, keeping the files;
+        the routine's own minute writes the sync line; remove stops it and leaves the files. Then everything is
+        removed again."""
+        import subprocess as sp, importlib
+        jv = ROOT
+        sys.path.insert(0, str(jv / "routine"))
+        hqpaths = importlib.import_module("hqpaths")
+        files = sp.run(["git", "-C", str(jv), "ls-files", "-co", "--exclude-standard"], capture_output=True, text=True).stdout
+        files = "\n".join(l for l in files.splitlines() if l and not l.startswith("workspace"))
+        tar = sp.run(["tar", "--no-xattrs", "-czf", "-", "-T", "-"] if hqpaths.IS_MAC else ["tar", "-czf", "-", "-T", "-"],
+                     input=files.encode(), capture_output=True, cwd=str(jv), env={**os.environ, "COPYFILE_DISABLE": "1"})
+        need(tar.returncode == 0, f"couldn't pack HQ: {tar.stderr.decode()[:200]}")
+        tag = f"hqflow66-{os.getpid()}"
+        script = FLOW66_SCRIPT.replace("@TAG@", tag)
+        notes = []
+        places = [("this Mac" if hqpaths.IS_MAC else "here", lambda cmd, **k: sp.run(["bash", "-c", cmd], **k), "/tmp")]
+        host = os.environ.get("HQ_TEST_LINUX")
+        if host and not hqpaths.IS_LINUX:
+            places.append((host, lambda cmd, **k: sp.run(["ssh", "-o", "BatchMode=yes", host, cmd], **k), "$HOME"))
+        for where, run_there, base in places:
+            r = run_there(f'T="{base}/{tag}"; mkdir -p "$T" && cat > "$T/hq.tgz"', input=tar.stdout, capture_output=True)
+            need(r.returncode == 0, f"couldn't copy HQ to {where}: {r.stderr.decode()[:200]}")
+            r = run_there("bash -s", input=script.replace("@BASE@", base).encode(), capture_output=True, timeout=330)
+            out = r.stdout.decode() + r.stderr.decode()
+            left = run_there(f'ls -d "{base}/{tag}" 2>/dev/null', capture_output=True).stdout.decode().strip()
+            need("ALL OK" in out, f"on {where}: " + next((l[5:] for l in out.splitlines() if l.startswith("FAIL ")), out.strip()[-400:]))
+            need(not left, f"the test left something behind on {where}: {left}")
+            oks = [l[3:] for l in out.splitlines() if l.startswith("OK ")]
+            notes.append(f"on {where}: " + "; ".join(oks) + "; everything removed again")
+        if not host and not hqpaths.IS_LINUX:
+            notes.append("on Linux skipped: set HQ_TEST_LINUX=<ssh host> to run it there too")
+        return " · ".join(notes)
+
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -5096,6 +5140,176 @@ ra routine/role.py alone | grep -q "on its own" && [ "$(ra routine/role.py actin
 echo "ALL OK"
 """
 
+
+# H56.4: happy flow 66's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
+FLOW66_SCRIPT = r"""
+# H56.4, happy flow 66: two private Syncthings and two throwaway HQs, A (laptop) and B (vps), nothing of the user's.
+T="@BASE@/@TAG@"; export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+GA=8396; GB=8397; LA=22096; LB=22097; PIDS=""
+fail() { echo "FAIL $*"; exit 1; }
+cleanup() { for p in $PIDS; do kill "$p" 2>/dev/null; done; sleep 1; for p in $PIDS; do kill -9 "$p" 2>/dev/null; done; rm -rf "${T:?}"; }
+trap cleanup EXIT
+command -v syncthing >/dev/null || fail "Syncthing isn't installed here"
+command -v git >/dev/null || fail "git isn't installed here"
+NOW=$(date +%s)
+git init -q --bare -b main "$T/origin.git" 2>/dev/null || fail "couldn't make the throwaway origin"
+for X in A B; do
+  mkdir -p "$T/$X/HQ" "$T/$X/state" "$T/$X/mem" && tar -xzf "$T/hq.tgz" -C "$T/$X/HQ" 2>/dev/null || fail "couldn't unpack HQ"
+  echo "{\"at\": $NOW}" > "$T/$X/state/watchdog.json"; echo "$NOW" > "$T/$X/state/heartbeat"
+done
+cp -R "$T/A/HQ/template" "$T/A/HQ/workspace"
+G="git -c user.name=hq-test -c user.email=hq-test@example.invalid"
+(cd "$T/A/HQ/workspace" && $G init -q -b main && $G add -A && $G commit -q -m start && $G remote add origin "$T/origin.git" && $G push -q -u origin main) || fail "couldn't make A's workspace a repo"
+$G clone -q "$T/origin.git" "$T/B/HQ/workspace" || fail "couldn't clone B's workspace"
+for X in A B; do (cd "$T/$X/HQ/workspace" && git config user.name hq-test && git config user.email hq-test@example.invalid); done
+WA="$T/A/HQ/workspace"; WB="$T/B/HQ/workspace"
+ENVA="HQ_SUPPORT=$T/A/state HQ_SYNCTHING_HOME=$T/A/st HQ_STATUS_PORT=4795 HQ_PORT=7892 HQ_UNIT=@TAG@-a HQ_NO_PHONE=1 HQ_CALL_FIX=off"
+ENVB="HQ_SUPPORT=$T/B/state HQ_SYNCTHING_HOME=$T/B/st HQ_STATUS_PORT=4794 HQ_PORT=7891 HQ_UNIT=@TAG@-b HQ_NO_PHONE=1 HQ_CALL_FIX=off"
+ra() { (cd "$T/A/HQ" && env $ENVA python3 "$@"); }
+rb() { (cd "$T/B/HQ" && env $ENVB python3 "$@"); }
+st() { X=$1; shift; (cd "$T/$X/HQ" && env HQ_SYNCTHING_HOME="$T/$X/st" python3 -c "
+import sys, json; sys.path.insert(0, 'routine'); import sync
+a = sys.argv[1:]; r = sync.api(a[1], a[0], json.loads(a[2]) if len(a) > 2 else None); print(json.dumps(r))" "$@"); }
+wait_for() { for i in $(seq 1 ${2:-60}); do eval "$1" && return 0; sleep 1; done; return 1; }
+
+# Alone: nothing at all.
+for f in ra rb; do $f routine/jobs.py off >/dev/null && $f routine/jobs.py mail-off >/dev/null || fail "couldn't switch the test's routine off"; done
+[ "$(ra routine/sync.py tick)" = null ] || fail "an HQ with no sync set up did something"
+ra routine/sync.py | grep -q "on its own" || fail "an HQ on its own doesn't say so"
+echo "OK alone: no sync, no line"
+
+# Two private Syncthings, only talking to each other on this computer.
+for X in A B; do
+  syncthing generate --home="$T/$X/st" >/dev/null 2>&1 || fail "couldn't make a throwaway Syncthing"
+done
+python3 - "$T/A/st/config.xml" $GA $LA "$T/B/st/config.xml" $GB $LB <<'PY'
+import sys, xml.etree.ElementTree as ET
+a = sys.argv[1:]
+for p, gui, listen in (a[0:3], a[3:6]):
+    t = ET.parse(p); r = t.getroot()
+    r.find("gui").find("address").text = f"127.0.0.1:{gui}"
+    o = r.find("options")
+    for x in o.findall("listenAddress"):
+        o.remove(x)
+    ET.SubElement(o, "listenAddress").text = f"tcp://127.0.0.1:{listen}"
+    for k, v in (("globalAnnounceEnabled", "false"), ("localAnnounceEnabled", "false"), ("relaysEnabled", "false"),
+                 ("natEnabled", "false"), ("urAccepted", "-1"), ("autoUpgradeIntervalH", "0"),
+                 ("startBrowser", "false"), ("crashReportingEnabled", "false")):
+        x = o.find(k)
+        if x is None:
+            x = ET.SubElement(o, k)
+        x.text = v
+    for f in r.findall("folder"):
+        r.remove(f)
+    t.write(p)
+PY
+for X in A B; do
+  STNODEFAULTFOLDER=1 STNOUPGRADE=1 syncthing serve --home="$T/$X/st" --no-browser > "$T/$X/st.log" 2>&1 &
+  PIDS="$PIDS $!"
+done
+wait_for "st A GET /rest/system/status >/dev/null 2>&1 && st B GET /rest/system/status >/dev/null 2>&1" 40 || fail "the throwaway Syncthings didn't start: $(tail -3 "$T/A/st.log")"
+IA=$(st A GET /rest/system/status | python3 -c "import json,sys; print(json.load(sys.stdin)['myID'])")
+IB=$(st B GET /rest/system/status | python3 -c "import json,sys; print(json.load(sys.stdin)['myID'])")
+st A PUT /rest/config/devices/$IB "{\"deviceID\": \"$IB\", \"name\": \"vps\", \"addresses\": [\"tcp://127.0.0.1:$LB\"]}" >/dev/null || fail "couldn't pair A"
+st B PUT /rest/config/devices/$IA "{\"deviceID\": \"$IA\", \"name\": \"laptop\", \"addresses\": [\"tcp://127.0.0.1:$LA\"]}" >/dev/null || fail "couldn't pair B"
+wait_for "st A GET /rest/system/connections | grep -q '\"connected\": true'" 60 || fail "the throwaway Syncthings didn't connect"
+echo "OK two private Syncthings, paired only with each other"
+
+# Setup on both.
+OUT=$(ra routine/sync.py setup vps --memory "$T/A/mem") || fail "setup on A failed: $OUT"
+rb routine/sync.py setup laptop --memory "$T/B/mem" >/dev/null || fail "setup on B failed"
+grep -q "mp4" "$WA/.stignore" && grep -q "^.git$" "$WA/.stignore" || fail "the workspace's ignore list is missing video or git"
+grep -q ".sync-conflict" "$WA/.git/info/exclude" || fail "Syncthing's own files aren't kept out of git"
+st A GET /rest/config/folders/hq-workspace | grep -q '"maxConflicts": -1' || fail "conflict copies aren't all kept"
+wait_for "ra routine/sync.py | grep -q 'In sync with vps'" 60 || fail "the two didn't get in sync: $(ra routine/sync.py)"
+[ -z "$(cd "$WA" && git status --porcelain -- . ':!HQ/roadmap.md')" ] || fail "setting up the sync left changes in git: $(cd "$WA" && git status --porcelain | head -3)"
+echo "OK set up on both: the workspace and the memory, video, audio and git left out"
+
+# Both ways, within seconds.
+echo "from the laptop" > "$WA/note-a.md"; echo "memory from the laptop" > "$T/A/mem/m.md"
+S=$(date +%s)
+wait_for "[ -f '$WB/note-a.md' ] && [ -f '$T/B/mem/m.md' ]" 30 || fail "a change on A didn't reach B"
+D1=$(( $(date +%s) - S ))
+echo "from the server" > "$WB/note-b.md"
+S=$(date +%s)
+wait_for "[ -f '$WA/note-b.md' ]" 30 || fail "a change on B didn't reach A"
+D2=$(( $(date +%s) - S ))
+echo "OK both ways: laptop to server in ${D1} s (memory too), server to laptop in ${D2} s"
+
+# What never goes over.
+echo video > "$WA/clip.MP4"; echo audio > "$WA/voice.m4a"; mkdir -p "$WA/.claude"; echo '{}' > "$WA/.claude/settings.local.json"
+echo marker > "$WA/after.md"
+wait_for "[ -f '$WB/after.md' ]" 30 || fail "a change after the video didn't reach B"
+sleep 3
+{ [ -f "$WB/clip.MP4" ] || [ -f "$WB/voice.m4a" ]; } && fail "video or audio went over"
+[ -f "$WB/.claude/settings.local.json" ] && fail "this computer's own Claude settings went over"
+[ "$(cd "$WA" && git rev-parse HEAD)" = "$(cd "$WB" && git rev-parse HEAD)" ] || fail "git's folder went over"
+echo "OK video, audio, git's folder and this computer's own Claude settings stay where they are"
+
+# The main commits what came over (and pushes it); the backup commits nothing.
+BEFORE_B=$(cd "$WB" && git rev-parse HEAD)
+rb routine/sync.py tick --backup >/dev/null
+[ "$(cd "$WB" && git rev-parse HEAD)" = "$BEFORE_B" ] || fail "the backup committed"
+OUT=$(ra routine/sync.py tick)
+echo "$OUT" | grep -q '"committed": [1-9]' || fail "the main didn't commit what came over: $OUT"
+(cd "$WA" && git log -1 --format=%s | grep -q "Sync: from vps") || fail "the commit doesn't say where it came from"
+(cd "$WA" && git show --stat HEAD | grep -q "note-b.md") || fail "the commit doesn't have the file that came over"
+(cd "$WA" && git show --stat HEAD | grep -q "note-a.md") && fail "the main committed its own file as if it came over"
+[ "$(git --git-dir="$T/origin.git" rev-parse main)" = "$(cd "$WA" && git rev-parse HEAD)" ] || fail "the commit wasn't pushed"
+echo "OK the main commits what came over, file by file, and pushes it; the backup commits nothing"
+
+# Both change the same note at once: both kept, said, one merge job.
+echo "same start" > "$WA/shared.md"
+wait_for "[ -f '$WB/shared.md' ]" 30 || fail "shared.md didn't reach B"
+sleep 2
+st A PATCH /rest/config/devices/$IB '{"paused": true}' >/dev/null || fail "couldn't pause"
+wait_for "! st A GET /rest/system/connections | grep -q '\"connected\": true'" 30 || fail "the pause didn't disconnect"
+echo "the laptop's version" > "$WA/shared.md"; sleep 1; echo "the server's version" > "$WB/shared.md"
+sleep 4
+st A PATCH /rest/config/devices/$IB '{"paused": false}' >/dev/null
+wait_for "ls '$WA' '$WB' | grep -q 'shared.sync-conflict-'" 60 || fail "no conflict copy came: $(ls "$WA" "$WB" | grep shared)"
+wait_for "[ \$(ls '$WA' | grep -c 'shared') -ge 2 ]" 30 || fail "the conflict copy didn't reach A"
+ra routine/sync.py conflicts | grep -q "shared.md" || fail "the conflict isn't listed"
+OUT=$(ra routine/sync.py tick); echo "$OUT" | grep -q '"queued": \[[0-9]' || fail "no merge job was queued: $OUT"
+grep -q "Sync conflict (H56.4)" "$WA/HQ/roadmap.md" || fail "the merge job isn't on the queue"
+ra routine/sync.py tick | grep -q '"queued": \[\]' || fail "a second look queued it again"
+[ "$(grep -c "Sync conflict (H56.4)" "$WA/HQ/roadmap.md")" = 1 ] || fail "the merge job was queued more than once"
+grep -q 'conflict cop' "$T/A/HQ/.status/routines.json" || fail "the sync line doesn't say there's a conflict"
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])); i=[x for x in d['incidents'] if x['key']=='sync' and not x.get('back')]; assert i and i[0]['fixes'], d" "$T/A/HQ/.status/incidents.json" || fail "the conflict isn't in the incidents with its merge job"
+wait_for "ls '$WB' | grep -q 'shared.sync-conflict-'" 30 || fail "the conflict copy didn't reach B"
+rb routine/sync.py tick --backup | grep -q '"queued": \[\]' || fail "the backup queued a merge too"
+grep -q 'the main one merges it' "$T/B/HQ/.status/routines.json" || fail "the backup's line doesn't say the main merges it"
+echo "OK both changed the same note: both versions kept, the line and the incidents say so, one merge job queued on the main"
+
+# The merge (here by hand, as the job would): one file with both, the copy gone; then green.
+C=$(ls "$WA" | grep 'shared.sync-conflict-' | head -1)
+{ echo "the laptop's version"; echo "the server's version"; } > "$WA/shared.md"; rm -f "${WA:?}/${C:?}"
+wait_for "! ls '$WB' | grep -q 'shared.sync-conflict-' && grep -q \"server's\" '$WB/shared.md' && grep -q \"laptop's\" '$WB/shared.md'" 30 || fail "the merge didn't reach B"
+wait_for "ra routine/sync.py tick | grep -q '\"state\": \"ok\"'" 30 || fail "the line didn't go green after the merge: $(ra routine/sync.py tick)"
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert not [x for x in d['incidents'] if x['key']=='sync' and not x.get('back')]" "$T/A/HQ/.status/incidents.json" || fail "the incident didn't close"
+echo "OK once merged the copy is gone on both, the line is green and the incident closed"
+
+# An HQ that becomes main lines its git up with GitHub, keeping the files.
+cp "$WB/shared.md" "$T/keep.md"
+[ "$(cd "$WB" && git rev-parse HEAD)" != "$(git --git-dir="$T/origin.git" rev-parse main)" ] || fail "B wasn't behind for the test"
+OUT=$(rb routine/sync.py align 2>&1); [ "$(echo "$OUT" | tail -1)" = True ] || fail "align failed: $OUT"
+[ "$(cd "$WB" && git rev-parse HEAD)" = "$(git --git-dir="$T/origin.git" rev-parse main)" ] || fail "align didn't line B up with GitHub"
+cmp -s "$WB/shared.md" "$T/keep.md" && [ -f "$WB/note-a.md" ] || fail "align changed the files"
+echo "OK an HQ that becomes main lines its git up with GitHub, keeping its files"
+
+# The routine's own minute writes the line.
+ra routine/tick.py >/dev/null 2>&1
+python3 -c "import json,sys; s=json.load(open(sys.argv[1]))['sync']; assert s['state'] in ('ok','running'), s" "$T/A/HQ/.status/routines.json" || fail "the routine's minute didn't write the sync line"
+echo "OK the routine's minute writes the sync line"
+
+# Remove: no more sync, files stay.
+ra routine/sync.py remove >/dev/null
+st A GET /rest/config/folders | grep -q hq-workspace && fail "the folder is still in Syncthing"
+{ [ -f "$WA/note-b.md" ] && [ "$(ra routine/sync.py tick)" = null ]; } || fail "remove lost files or the sync still runs"
+echo "OK remove stops it and leaves the files"
+echo "ALL OK"
+"""
+
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
     2: ("The greeting plays first, on Quick and Deep", True, "flow2"),
@@ -5162,6 +5376,7 @@ FLOWS = {
     63: ("H56.2: job windows and the mail check on Linux, in tmux: a throwaway job and mail check", False, "flow63"),
     64: ("F16: the call page fits the screen before, during and after a call; no scrolling into white space", False, "flow64"),
     65: ("H56.3: main and backup: two throwaway HQs hand the main role back and forth; alone, an HQ is simply main", False, "flow65"),
+    66: ("H56.4: the two-way sync: two private Syncthings, both ways, video left out, conflicts kept and merged, only the main commits", False, "flow66"),
 }
 
 
