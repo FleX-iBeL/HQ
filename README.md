@@ -66,7 +66,7 @@ The first line of `app/requirements.txt` explains the faster-whisper exception. 
 
 ### 3. The voice
 
-Kokoro, local and free. Download `kokoro-v1.0.onnx` and `voices-v1.0.bin` from the `model-files-v1.0` release of [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx/releases) into `models/`. All nine voices are in that one file (about 28 MB); Heart (`af_heart`) is the default. Speech recognition (Whisper large-v3-turbo, MLX) downloads itself on the first call.
+Kokoro, local and free. Download `kokoro-v1.0.onnx` and `voices-v1.0.bin` from the `model-files-v1.0` release of [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx/releases) into `models/`. All nine voices are in that one file (about 28 MB); Heart (`af_heart`) is the default; Donna starts with Bella (`af_bella`), Pepper with Heart, both changeable in Settings. Speech recognition (Whisper large-v3-turbo, MLX) downloads itself on the first call.
 
 ### 4. Mail and calendar: the connectors
 

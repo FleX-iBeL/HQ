@@ -3771,6 +3771,7 @@ setTimeout(() => {
   const out = [];
   out.push('order:' + [...document.querySelectorAll('#modes button')].map(b => b.dataset.agent).join(','));
   out.push('voices:' + [...document.querySelectorAll('#voices .row span')].map(s => s.textContent).join(','));
+  out.push('defaults:' + voiceFor('donna') + '/' + voiceFor('pepper'));
   const sel = document.querySelector('#voices select[data-agent="pepper"]');
   sel.value = 'bf_emma'; sel.dispatchEvent(new Event('change'));
   out.push('sent:' + voiceFor('pepper') + '/' + voiceFor('donna'));
@@ -3788,7 +3789,8 @@ setTimeout(() => {
         say(f"   {m.group(1)}")
         need(res["order"].startswith("donna,pepper"), f"the agents aren't Donna then Pepper: {res}")
         need(res["voices"].startswith("Voice Donna Paulsen,Voice Pepper Potts"), f"Settings doesn't have a voice for each: {res}")
-        need(res["sent"] == "bf_emma/af_heart", f"Pepper's voice isn't her own: {res}")
+        need(res["defaults"] == "af_bella/af_heart", f"a fresh install doesn't give Donna Bella and Pepper Heart (H66): {res}")
+        need(res["sent"] == "bf_emma/af_bella", f"Pepper's voice isn't her own: {res}")
         need(res["inapp"] == "none", f"the status button still shows inside the app: {res}")
         return "Donna left, Pepper right; Voice Donna Paulsen and Voice Pepper Potts, each her own; no waiting lines; no status button inside the app"
 

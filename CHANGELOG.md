@@ -5,6 +5,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ## Coming next
 
 ### Changed
+- Each agent starts with her own voice: Donna with Bella, Pepper with Heart. Still yours to change in Settings; a voice you already picked stays.
 - On a call, HQ itself can be read without asking, the same as your workspace: its files, its logs (like the hourly mail check's) and the status page's data. Changing anything in HQ still asks you first.
 
 ### Fixed

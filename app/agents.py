@@ -35,6 +35,8 @@ PICTURE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png
 # Pepper." Then: "sonnet is not for sparring planning and the bigger picture, and opus is not for mail and quick
 # orders". So the roles went with the models: Donna (Sonnet) the day-to-day on the Quick load, Pepper (Opus) the
 # sparring on the Deep load. Each has her own voice in the call page's Settings ("Voice Pepper Potts", "Voice Donna Paulsen").
+# H66 (12 October 2026), in the user's words: "can we make the default voice for when you install this? ... For
+# Donna is Bella and for Pepper is Heart." A voice already chosen in Settings on a device stays as it is.
 DEFAULTS: list[dict] = [
     {
         "id": "donna",
@@ -42,7 +44,7 @@ DEFAULTS: list[dict] = [
         "load": "quick",
         "model": "sonnet",
         "full_name": "Donna Paulsen",
-        "voice": "af_heart",
+        "voice": "af_bella",
         "colour": "#6d28d9",
         "speciality": "Your agenda, your list, mail and quick orders",
         "personality": (

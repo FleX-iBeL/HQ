@@ -24,7 +24,7 @@ You open the call page (in the browser, or as an icon on your phone's home scree
 - **Ears:** knows when you start and stop talking, and stops talking itself when you cut in (Silero VAD and Pipecat's smart-turn model).
 - **Hearing:** your voice into text (Whisper large-v3-turbo, local).
 - **Brain:** Claude Code, on your own Claude plan, working in your workspace with your rules and your connectors. Only the thinking goes to Anthropic, the same as any Claude chat.
-- **Voice:** the reply spoken sentence by sentence while Claude is still thinking (Kokoro, local, nine voices, Heart by default).
+- **Voice:** the reply spoken sentence by sentence while Claude is still thinking (Kokoro, local, nine voices; by default Bella for Donna and Heart for Pepper).
 - **Phone line:** your phone reaches your computer privately through Tailscale, with nothing open to the internet.
 
 On the call page: hold to talk (or talk freely), a chat that shows what you both said, a text box to type instead of talking, a Cancel button when you said something you didn't mean, a mute switch for her voice, and the status page one tap away.

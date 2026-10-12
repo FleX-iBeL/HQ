@@ -332,9 +332,10 @@ const modeHint = document.getElementById("modehint");
 // none of his files, no calendar or mail, nothing saved.
 // H29: the agents replace the Quick and Deep buttons: Pepper loads like Quick (Sonnet), Donna like Deep
 // (Opus). The list comes from the server (/api/agents); these two are what shows until it answers.
-// H46: Donna (Sonnet) on the left, Pepper (Opus) on the right, each with her own voice.
+// H46: Donna (Sonnet) on the left, Pepper (Opus) on the right, each with her own voice
+// (H66: by default Bella for Donna, Heart for Pepper).
 let AGENTS = {
-  donna: { id: "donna", name: "Donna", full_name: "Donna Paulsen", voice: "af_heart", load: "quick", model: "sonnet", speciality: "Your agenda, your list, mail and quick orders" },
+  donna: { id: "donna", name: "Donna", full_name: "Donna Paulsen", voice: "af_bella", load: "quick", model: "sonnet", speciality: "Your agenda, your list, mail and quick orders" },
   pepper: { id: "pepper", name: "Pepper", full_name: "Pepper Potts", voice: "af_heart", load: "deep", model: "opus", speciality: "Sparring, planning and the bigger picture" },
 };
 if (new URLSearchParams(location.search).has("app")) document.body.classList.add("inapp");
