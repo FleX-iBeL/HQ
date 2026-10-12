@@ -376,10 +376,17 @@
       // H14/H15/H16: every part folds open and closed with its arrow; the choice is remembered on this device.
       const shownJobs = new Set();
       const folds = new Map();
+      // 12 October 2026, the user's pick: these start the same every time the page opens, whatever was left last time.
+      const fixedStart = {
+        routines: false, laptop: false, log: false,
+        jobs: true, 'jobs-running': true, 'jobs-waiting': true,
+        schedule: true, 'schedule-coming': true, 'roadmap-open': true,
+      };
       function isOpen(key, start) {
         if (!folds.has(key)) {
           let saved = null;
-          try { saved = localStorage.getItem(`fold:${key}`); } catch {}
+          if (key in fixedStart) start = fixedStart[key];
+          else try { saved = localStorage.getItem(`fold:${key}`); } catch {}
           folds.set(key, saved === null ? start : saved === 'yes');
         }
         return folds.get(key);
@@ -651,6 +658,7 @@
           overdue turns red: that routine has stopped writing, so it has stopped. */
       const ROUTINES = [
         ['role', 'Main or backup', 'Only with a second HQ: the main one runs the mail check, the jobs and the scheduler'],
+        ['sync', 'Two-way sync', 'Only with a second HQ: the workspace and Claude\'s memory, both ways'],
         ['helper', 'Routine helper', 'Runs everything below, every minute'],
         ['watchdog', 'Watchdog', 'Checks the helper every 5 minutes, apart from it'],
         ['mail', 'Mail check', 'Every hour'],
@@ -658,7 +666,6 @@
         ['schedule', 'Scheduler', 'Planned work; only when no job runs or waits'],
         ['usage', 'Usage check', 'Every minute, free'],
         ['phone', 'Status page', 'Also on the phone'],
-        ['sync', 'Two-way sync', 'Only with a second HQ: the workspace and Claude\'s memory, both ways'],
         ['call', 'Call line', 'For calls from the phone'],
         ['temp', 'Laptop temperature', 'Every minute, free, no password'],
         ['battery', 'Laptop battery', 'Every minute, free'],
@@ -1364,11 +1371,7 @@
         if (s.phases.length) {
           const box = el('section');
           box.append(el('h2', '', 'Roadmap'));
-          // The phase being worked on starts open; the rest open on a click.
-          if (s.current && s.current.phase !== openedCurrent) {
-            openedCurrent = s.current.phase;
-            opened.add(openedCurrent);
-          }
+          // Every phase starts closed and opens on a click (12 October 2026, the user's pick).
           const complete = (p) => p.steps.length > 0 && p.steps.every((x) => x.status === 'done');
           const stepItem = (st) => {
             const li = el('li', st.status);
