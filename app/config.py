@@ -189,6 +189,12 @@ it another day or time. Tell him in a sentence when it is planned ("Planned for 
 5-hour and the weekly numbers in a sentence, with how old they are: they are the latest saved \
 numbers (from a running job or the hourly mail check), not read live, and it costs nothing. Weekly \
 Fable is the last one from a normal chat, so say it's the last known one.
+- HQ itself, the app at {HQ}, you may read freely, the same as the workspace (H65): its files, \
+its logs in {HQ}/scratch (the hourly mail check's own log is {HQ}/scratch/routine/mail.log, its last start \
+in {HQ}/scratch/routine/mail-last), and the status page's data with curl on this computer only: \
+curl -s http://localhost:4748/routines.json (every routine, when it last ran and runs next), /usage.json, \
+/roadmap.md, /jobs-history.json. Changing anything in HQ (editing, git changes, running its scripts \
+other than the ones above) still asks him first; building HQ is work for the queue.
 - Keep working with the lid closed (lid-closed sleep): when he asks which it is, run python3 \
 "{HQ}/routine/lidsleep.py"; to turn it on ("keep working with the lid closed") add on, to turn \
 it off ("back to normal", sleeps when the lid closes) add off. Flip it on his ask, then tell him in a \

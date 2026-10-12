@@ -29,6 +29,14 @@ from pathlib import Path
 
 # M1: the routine's scripts a call may run (the queue, the usage, lid-closed sleep) are HQ's own.
 HQ_ROUTINE = Path(os.path.realpath(Path(__file__).resolve().parent.parent / "routine"))
+# H65: HQ itself (the app: its code, logs and the status page's data). A call reads it freely, like the
+# workspace; changing anything in it still asks.
+HQ_ROOT = Path(os.path.realpath(Path(__file__).resolve().parent.parent))
+# H65: the status page's server, on this computer only. A call may read its pages (GET), nothing else.
+STATUS_HOSTS = ("localhost", "127.0.0.1")
+STATUS_PORT = os.environ.get("HQ_STATUS_PORT", "4748")
+CURL_SAFE_FLAGS = {"-s", "-S", "-sS", "-Ss", "-f", "-fs", "-sf", "-fsS", "-sSf", "-L", "-m", "--max-time",
+                   "--silent", "--show-error", "--fail", "--compressed", "-g", "--globoff"}
 
 ALLOW, ASK, DENY = "allow", "ask", "deny"
 
@@ -140,6 +148,8 @@ class Policy:
             path = inp.get("file_path") or inp.get("path") or str(self.folder)
             if self.inside(path):
                 return Decision(ALLOW, "reading in the folder")
+            if self.in_hq(path):
+                return Decision(ALLOW, "reading in HQ")
             return _ask(f"read {Path(path).name} outside your workspace", "reading outside the folder")
         if tool in EDIT_TOOLS:
             return self._edit(inp.get("file_path") or "")
@@ -157,6 +167,8 @@ class Policy:
         if not path:
             return Decision(DENY, "no file named")
         if not self.inside(path):
+            if self.in_hq(path):
+                return _ask(f"change {Path(path).name} in HQ", "a change in HQ")
             return _ask(f"change {Path(path).name}, outside your workspace", "a file outside the folder")
         rel = self.rel(path)
         top = rel.parts[0] if rel.parts else ""
@@ -207,12 +219,17 @@ class Policy:
         prog, args = words[0], words[1:]
         if prog == "cd":
             target = args[0] if args else str(Path.home())
-            return Decision(ALLOW, "moving within the folder") if self.inside(target) else _ask(
-                "go outside your workspace", "a folder outside")
+            if self.inside(target):
+                return Decision(ALLOW, "moving within the folder")
+            if self.in_hq(target):
+                return Decision(ALLOW, "moving within HQ")
+            return _ask("go outside your workspace", "a folder outside")
         if prog == "date":
             return Decision(ALLOW, "the date")
         if prog == "git":
             return self._git(args)
+        if prog == "curl":
+            return self._curl(args)
         # Phase L: the queue of jobs for the computer. Adding, stopping, overruling, moving (H39) and switching
         # the routine only writes the queue on the roadmap, like writing in the folder; the call
         # uses them on his clear go. The job's own steps (done, held, mark, next) are not for calls.
@@ -245,20 +262,49 @@ class Policy:
             paths = [a for a in args if not a.startswith("-") and ("/" in a or Path(self.folder, a).exists())]
             if all(self.inside(p) for p in paths):
                 return Decision(ALLOW, "reading in the folder")
+            if all(self.inside(p) or self.in_hq(p) for p in paths):
+                return Decision(ALLOW, "reading in HQ")
             return _ask("look at something outside your workspace", "reading outside the folder")
         return _ask(f"run the command {prog}", "a shell command")
 
+    def _curl(self, args: list[str]) -> Decision:
+        """H65: reading the status page's data (GET on this computer's status server); anything else asks."""
+        urls, i = [], 0
+        while i < len(args):
+            a = args[i]
+            if a in ("-m", "--max-time"):
+                i += 2
+                continue
+            if a.startswith("-"):
+                if a not in CURL_SAFE_FLAGS:
+                    return _ask("run curl that way", "curl with options")
+            else:
+                urls.append(a)
+            i += 1
+        if not urls:
+            return _ask("run curl", "curl")
+        for u in urls:
+            m = re.match(r"^(?:https?://)?([^/:?#]+):(\d+)(/[^\s]*)?$", u)
+            if not m or m.group(1) not in STATUS_HOSTS or m.group(2) != STATUS_PORT:
+                return _ask("fetch something from the internet", "curl elsewhere")
+        return Decision(ALLOW, "reading the status page")
+
     def _git(self, args: list[str]) -> Decision:
-        # "git -C <dir> …" must point inside the folder.
+        # "git -C <dir> …" must point inside the folder; in HQ (H65) only to look.
+        in_hq = False
         while args and args[0] in ("-C", "-c"):
             if args[0] == "-C" and len(args) > 1 and not self.inside(args[1]):
-                return _ask("run git outside your workspace", "git elsewhere")
+                if not self.in_hq(args[1]):
+                    return _ask("run git outside your workspace", "git elsewhere")
+                in_hq = True
             args = args[2:]
         if not args:
             return Decision(ALLOW, "git")
         sub, rest = args[0], args[1:]
         if sub in SAFE_GIT_READ:
             return Decision(ALLOW, "looking at git")
+        if in_hq:
+            return _ask(f"run git {sub} in HQ", "a git change in HQ")
         if sub == "add":
             files = [a for a in rest if a != "--"]
             bad = [a for a in files if a.startswith("-") or a in (".", "*", ":/", "./") or any(c in a for c in "*?[")]
@@ -306,6 +352,14 @@ class Policy:
             p = self.folder / p
         real = Path(os.path.realpath(p))
         return real == self.folder or self.folder in real.parents
+
+    def in_hq(self, path: str) -> bool:
+        """H65: inside HQ itself (the app). The workspace link resolves to the folder, so it isn't counted here."""
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = self.folder / p
+        real = Path(os.path.realpath(p))
+        return real == HQ_ROOT or HQ_ROOT in real.parents
 
     def hq_script(self, path: str, name: str) -> bool:
         """M1: one of HQ's own routine scripts (HQ is the app, outside the folder the call works in)."""

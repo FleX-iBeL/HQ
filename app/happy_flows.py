@@ -2472,6 +2472,61 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         need("move N before M" in config.VOICE_RULES, "the call rules don't say how to move a job")
         return "top, up, down, bottom, before and after keep the line right; held keeps its place; routine takes the top; page numbers them; call may move"
 
+    async def flow60(self) -> str:
+        """H65: a call reads HQ freely, like the workspace: its files, its logs, git to look, and the
+        status page's data with curl on this computer. Changing anything in HQ still asks; curl
+        anywhere else, or with options that send or save, asks. No Claude turns."""
+        from policy import Policy, ALLOW, ASK
+        pol = Policy(config.FOLDER)
+        hq = Path(os.path.realpath(ROOT))
+        log = hq / "scratch/routine/mail.log"
+        def v(tool, inp):
+            return pol.decide(tool, inp).verdict
+        allow = [
+            ("Read", {"file_path": str(hq / "app/policy.py")}),
+            ("Read", {"file_path": str(log)}),
+            ("Grep", {"pattern": "mail", "path": str(hq / "scratch/routine")}),
+            ("Glob", {"pattern": "*.log", "path": str(hq / "scratch")}),
+            ("Bash", {"command": f'tail -n 20 "{log}"'}),
+            ("Bash", {"command": f'cat "{hq}/scratch/routine/mail-last"'}),
+            ("Bash", {"command": f'ls -la "{hq}/scratch/routine" | head'}),
+            ("Bash", {"command": f'cd "{hq}" && ls'}),
+            ("Bash", {"command": f'git -C "{hq}" log --oneline -5'}),
+            ("Bash", {"command": "curl -s http://localhost:4748/routines.json"}),
+            ("Bash", {"command": "curl -sS --max-time 5 http://127.0.0.1:4748/usage.json"}),
+            ("Bash", {"command": "curl -s localhost:4748/jobs-history.json?h=6"}),
+        ]
+        for tool, inp in allow:
+            need(v(tool, inp) == ALLOW, f"a call has to ask to read HQ: {tool} {inp}")
+        ask = [
+            ("Edit", {"file_path": str(hq / "app/policy.py"), "old_string": "a", "new_string": "b"}),
+            ("Write", {"file_path": str(hq / "scratch/routine/mail-last"), "content": "0"}),
+            ("Bash", {"command": f'git -C "{hq}" commit -m x'}),
+            ("Bash", {"command": f'git -C "{hq}" checkout main'}),
+            ("Bash", {"command": f'find "{hq}/scratch" -delete'}),
+            ("Bash", {"command": f'python3 "{hq}/routine/tick.py" --mail-now'}),
+            ("Bash", {"command": "curl -s -X POST -H x-hq:fix http://localhost:4748/hq/fix"}),
+            ("Bash", {"command": "curl -s -d x http://localhost:4748/api/update/start"}),
+            ("Bash", {"command": "curl -s -o /tmp/x http://localhost:4748/usage.json"}),
+            ("Bash", {"command": "curl -s https://example.com"}),
+            ("Bash", {"command": "curl -s http://localhost:9999/x"}),
+            ("Read", {"file_path": str(Path.home() / ".ssh/config")}),
+        ]
+        for tool, inp in ask:
+            need(v(tool, inp) == ASK, f"a call may change HQ or read elsewhere without asking: {tool} {inp}")
+        need(pol.decide("Edit", {"file_path": str(hq / "app/x.py")}).question.endswith("in HQ?"),
+             "a change in HQ isn't asked about as a change in HQ")
+        # The workspace still works as before, through HQ's workspace link too.
+        need(v("Read", {"file_path": str(config.FOLDER / "rules.md")}) == ALLOW, "reading the workspace now asks")
+        need(v("Edit", {"file_path": str(config.FOLDER / "inbox.md")}) == ALLOW, "writing in the workspace now asks")
+        if (ROOT / "workspace").exists():
+            need(v("Edit", {"file_path": str(ROOT / "workspace" / "inbox.md")}) == ALLOW,
+                 "writing through HQ's workspace link is counted as HQ")
+        need("H65" in config.VOICE_RULES and "localhost:4748/routines.json" in config.VOICE_RULES
+             and "mail.log" in config.VOICE_RULES, "the call rules don't say HQ may be read freely")
+        need("{HQ}" not in config.VOICE_RULES, "the call rules still have a placeholder")
+        return f"{len(allow)} reads in HQ and the status page go freely; {len(ask)} changes or reads elsewhere still ask"
+
     async def flow59(self) -> str:
         """H62: after a crash the job carries on. No Claude turns, no job started, nothing written outside
         the test: a made-up crash on a copy of the roadmap (a boot time after the job's start, a fake panic
@@ -4545,6 +4600,7 @@ FLOWS = {
     57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),
     58: ("H60: continue an earlier call: Continue in Past calls, the greeting, the earlier call as context", True, "flow58"),
     59: ("H62: after a crash the job runs again, first in line, picking up where it left off", False, "flow59"),
+    60: ("H65: a call reads HQ freely (files, logs, status page data); changes still ask", False, "flow60"),
 }
 
 

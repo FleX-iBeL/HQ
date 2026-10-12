@@ -2,6 +2,14 @@
 
 What was added and changed in each version of HQ, newest first. The small grey version number on the call page, the status page and in the Mac app opens this. Fixes get a patch number (0.2.1), bigger features the next minor (0.3). "Coming next" is what's built but not in a version yet; at a release it gets the version's number and date.
 
+## Coming next
+
+### Changed
+- On a call, HQ itself can be read without asking, the same as your workspace: its files, its logs (like the hourly mail check's) and the status page's data. Changing anything in HQ still asks you first.
+
+### Fixed
+- A Quick call kept the log's open commitments only when they stood above the newest entries; now wherever they stand.
+
 ## 0.3 · 11 October 2026
 
 ### New

@@ -40,6 +40,8 @@ def trim_log(text: str, today: datetime.date, days: int = LOG_DAYS) -> str:
         m = _ENTRY.match(line)
         if m:
             keep = datetime.date.fromisoformat(m.group(1)) >= first
+        elif line.startswith("## "):  # a section that isn't a dated entry (Open commitments), wherever it stands
+            keep = True
         if keep:
             out.append(line)
     out.append("\n[On a Quick call only the open commitments are here; every entry is in the file, newest first. "
