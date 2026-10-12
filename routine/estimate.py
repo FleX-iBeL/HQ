@@ -6,6 +6,8 @@ list still waiting)" and "that it improves it at the end so we can collect real 
 How it works:
   - Every job gets a kind from the words in its text (kind_of): transcribing, a big change (the whole
     set of happy flows), a change to the call (the call line restarts at the end), a build, or other.
+    A call can give the kind itself (jobs.py add --kind); that wins over the guess, is stored with the
+    job's estimate, and is the kind it learns under when it finishes (H70).
   - A job's estimate is set when it's added (jobs.py add): the median of how long the last jobs of
     its kind really took, the newest counting most; with too few of its kind, the last jobs of any kind
     count too; with no history at all, 15 minutes.
@@ -25,6 +27,8 @@ usage:
   python3 routine/estimate.py plan      the estimates as JSON (the status server shows them)
   python3 routine/estimate.py list      the estimates in words (jobs.py list adds them too)
   python3 routine/estimate.py seed      fill the history once from the jobs history (H33) and the job prompts
+  python3 routine/estimate.py kind TEXT        the kind kind_of guesses for a text
+  python3 routine/estimate.py check-kinds      every finished job: the kind it learned under, next to today's guess (H70)
 """
 import json, os, re, statistics, sys, time
 
@@ -73,9 +77,20 @@ def kind_of(text):
         return "big"
     if re.search(r"restart(s)? the call line (as|at) the (very )?last step", t) and not re.search(r"don'?t restart the call line", t):
         return "call"
-    if re.search(r"^build\b|\bbuild [a-z]\d", t):
+    # Build work by its wording anywhere (H70): "Build exactly what the H56.2 row says", "build the ...",
+    # or a roadmap sub-step like "H56.1 on the HQ roadmap". A plain "H68 on the roadmap: research only"
+    # stays other, as before.
+    # "Don't build the backup" or "nothing built" says what not to do, so negated wording doesn't count.
+    tb = re.sub(r"\b(don'?t|do not|never|not|nothing|no need to) (build|built)\b[^.;:]*", " ", t)
+    if re.search(r"^build\b|\bbuild [a-z]\d|\bbuild exactly what\b|\bbuild the\b|^[a-z]\d+\.\d+ on the (hq )?roadmap", tb):
         return "build"
     return "other"
+
+
+def kind_given(kind):
+    """A kind set by hand (jobs.py add --kind), or None. Unknown words are refused by jobs.py."""
+    k = (kind or "").strip().lower()
+    return k if k in KINDS else None
 
 
 # ---------- files ----------
@@ -150,10 +165,10 @@ def _weighted_median(values):
     return pairs[-1][0]
 
 
-def estimate_for(text, hist=None):
-    """(minutes, kind, how many past jobs it's based on)."""
+def estimate_for(text, hist=None, kind=None):
+    """(minutes, kind, how many past jobs it's based on). A kind given by hand wins over the guess (H70)."""
     hist = history() if hist is None else hist
-    kind = kind_of(text)
+    kind = kind_given(kind) or kind_of(text)
     real = [h for h in hist if isinstance(h.get("actual"), (int, float)) and h["actual"] > 0]
     same = [h["actual"] for h in real if h.get("kind") == kind][-RECENT:]
     if len(same) >= MIN_KIND:
@@ -167,10 +182,14 @@ def estimate_for(text, hist=None):
 
 # ---------- called by jobs.py (inside its lock) ----------
 
-def on_add(n, text):
+def on_add(n, text, kind=None):
+    """kind: set by hand (jobs.py add --kind); it's stored here and goes into the history when the job
+    finishes, so a hand-set kind learns in the right pile (H70)."""
     st = _load_state()
-    est, kind, based = estimate_for(text)
-    st[str(n)] = {"est": est, "kind": kind, "based": based, "set": int(time.time())}
+    est, kind_, based = estimate_for(text, kind=kind)
+    st[str(n)] = {"est": est, "kind": kind_, "based": based, "set": int(time.time())}
+    if kind_given(kind):
+        st[str(n)]["by_hand"] = True
     _save_state(st)
     return st[str(n)]
 
@@ -387,6 +406,25 @@ def seed():
     print(f"Seeded {n_} finished jobs.")
 
 
+def check_kinds():
+    """H70: today's kind_of on every finished job's text next to the kind it learned under, so a change
+    to the guess can be checked against the earlier jobs. Hand-set kinds say so."""
+    js, _ = _queue()
+    texts = {j["n"]: j["text"] for j in js}
+    for h in history():
+        n = h["n"]
+        text = texts.get(n, "")
+        p = os.path.join(PROMPTS, f"job-{n}.prompt")
+        if not text and os.path.exists(p):
+            text = open(p, encoding="utf8").read()
+            i = text.find("The job, as agreed on the call:")
+            text = text[i:] if i >= 0 else text
+        if not text:
+            continue
+        now = kind_of(text)
+        print(f"job {n}: learned {h.get('kind')}, guessed now {now}" + ("" if now == h.get("kind") else "  <- differs"))
+
+
 def main(argv):
     cmd = argv[0] if argv else "--help"
     if cmd == "plan":
@@ -404,6 +442,8 @@ def main(argv):
         seed()
     elif cmd == "kind":
         print(kind_of(" ".join(argv[1:])))
+    elif cmd == "check-kinds":
+        check_kinds()
     else:
         print(__doc__)
 

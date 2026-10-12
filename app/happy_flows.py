@@ -4410,6 +4410,12 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
                            ("Build H3, not the whole set. Don't restart the call line.", "build"),
                            ("Measure the token cost of one run", "other")):
             need(est("kind", text).strip() == kind, f"{text!r} isn't seen as {kind}")
+        # H70: build work by its wording anywhere, and a negated "build" doesn't count.
+        for text, kind in (("H56.2 on the HQ roadmap (step 2 of 7). Build exactly what the H56.2 row says", "build"),
+                           ("H56.6 on the HQ roadmap (step 6 of 7). Do exactly what the H56.6 row says", "build"),
+                           ("Continue H55: set up a test call line. Don't build the backup or the sync (H56)", "other"),
+                           ("H68 on the roadmap: research only for H56. Nothing built", "other")):
+            need(est("kind", text).strip() == kind, f"H70: {text!r} isn't seen as {kind}")
         # Made-up past jobs: calls took 10 to 16 minutes, builds 5 to 7.
         est_dir.mkdir(parents=True, exist_ok=True)
         hist = [{"n": 900 + i, "kind": k, "est": None, "actual": a, "done": 1, "how": "seed"}
@@ -4457,6 +4463,21 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
              f"how close the estimates have been is wrong: {p['accuracy']}")
         c_out = jobs("add", "Build H4, flow 54. Restart the call line as the very last step")
         need("Estimate: about 16 min" in c_out, f"the next estimate didn't learn from the real time: {c_out}")
+        # H70: --kind wins over the guess, is stored with the estimate, and the job learns under it.
+        jobs("add", "Measure something, flow 54", "--kind", "nonsense", ok=False)
+        d_out = jobs("add", "Measure the token cost of one run, flow 54", "--kind", "call")
+        d = int(d_out.split()[1])
+        need("Estimate: about 16 min" in d_out, f"H70: --kind call doesn't take the calls' estimate: {d_out}")
+        sd = json.loads((est_dir / "job-estimates.json").read_text())[str(d)]
+        need(sd["kind"] == "call" and sd.get("by_hand"), f"H70: the hand-set kind isn't stored: {sd}")
+        need("--kind" not in json.loads(jobs("next"))["waiting"][-1]["text"], "H70: --kind ended up in the job's text")
+        e_ = int(jobs("add", "Build H5, flow 54. Restart the call line as the very last step", "--kind=build").split()[1])
+        need(json.loads((est_dir / "job-estimates.json").read_text())[str(e_)]["kind"] == "build", "H70: --kind=build isn't taken")
+        jobs("mark", str(d), "running since " + time.strftime("%H:%M"))
+        jobs("done", str(d))
+        last = json.loads((est_dir / "job-estimates-history.jsonl").read_text().splitlines()[-1])
+        need(last["n"] == d and last["kind"] == "call", f"H70: a hand-set kind doesn't learn in its own pile: {last}")
+        need("--kind" in config.VOICE_RULES and "H70" in config.VOICE_RULES, "H70: the call rules don't say to pass --kind")
         need(real.exists() == (before is not None) and (before is None or real.read_text() == before),
              "the test touched the real estimates history")
         # The status page: the server serves the plan, the page shows it in words.

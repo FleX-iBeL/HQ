@@ -13,7 +13,9 @@ The waiting jobs (ready or held) run in the order they stand on the list, top fi
 a new job goes at the bottom, and "move" changes its place. The job numbers never change.
 
 usage (from the workspace):
-  python3 "routine/jobs.py" add "TEXT" [--past-the-line]   a call's let's go: the job is ready
+  python3 "routine/jobs.py" add "TEXT" [--past-the-line] [--kind K]   a call's let's go: the job is ready;
+                                                           K (transcribe, big, call, build, other) sets the
+                                                           kind for its estimate instead of the guess (H70)
   python3 "routine/jobs.py" list                           the queue, as on the roadmap, with each job's estimate (H61)
   python3 "routine/jobs.py" stop [N]                       stop the running job (or cancel ready job N)
   python3 "routine/jobs.py" overrule N                     job N may go past the 5-hour line (the weekly line still counts)
@@ -223,6 +225,17 @@ def main(argv):
         if cmd == "add":
             past = "--past-the-line" in args
             words = [a for a in args if a != "--past-the-line"]
+            kind = None  # H70: the kind for its estimate, given by the call; wins over the guess
+            for i, a in enumerate(words):
+                if a == "--kind" or a.startswith("--kind="):
+                    kind = a.split("=", 1)[1] if "=" in a else (words[i + 1] if i + 1 < len(words) else "")
+                    words = words[:i] + words[i + (1 if "=" in a else 2):]
+                    break
+            if kind is not None:
+                kind = kind.strip().lower()
+                import estimate as est_
+                if kind not in est_.KINDS:
+                    sys.exit(f"--kind is one of: {', '.join(est_.KINDS)}.")
             if not words or not one_line(" ".join(words)):
                 sys.exit("What should the job do? Give it as one self-contained line.")
             n = max([j["n"] for j in jobs] + [0]) + 1
@@ -230,7 +243,7 @@ def main(argv):
                  "text": one_line(" ".join(words)).replace("·", "-")}
             jobs.append(j)
             write(text, jobs, on)
-            e = estimate("on_add", n, j["text"])
+            e = estimate("on_add", n, j["text"], kind)
             waiting = [x for x in line_up(jobs) if x["n"] != n]
             busy = any(x["state"].startswith(("running", "stop asked")) for x in jobs)
             if not on:
@@ -324,7 +337,12 @@ def main(argv):
             jobs.append(new)
             jobs = move(jobs, n, "top")
             write(text, jobs, on)
-            estimate("on_add", n, new["text"])
+            try:  # H70: the rerun keeps the kind the first run had (a hand-set one too)
+                import estimate as est_
+                first_kind = (est_._load_state().get(str(j["n"])) or {}).get("kind")
+            except Exception:
+                first_kind = None
+            estimate("on_add", n, new["text"], first_kind)
             print(f"Job {j['n']} ended by a crash; requeued as job {n}, number 1 in line.")
             return
         if cmd == "mark":

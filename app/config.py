@@ -167,7 +167,11 @@ status block's Next line as usual. Only on his clear go ("let's go", "do it", "s
 python3 "{HQ}/routine/jobs.py" add "<the job in one self-contained line, with everything the \
 computer needs: the steps, and his words where they matter>". Don't write "the Next line": copy what \
 it says, so a later change can't change this job. Add --past-the-line only when he says it may go \
-past the usage line; it only goes past the 5-hour line, the weekly line always counts (F13). Then tell him it's queued, and whether something runs before it. If the job \
+past the usage line; it only goes past the 5-hour line, the weekly line always counts (F13). \
+Always add --kind with what the job is, for its estimate (H70): transcribe (transcribing recordings), \
+big (runs the whole set of happy flows), call (restarts the call line as its last step), build \
+(building or changing HQ otherwise, a roadmap step like H56.2 too), other (research, moving or \
+checking things). Then tell him it's queued, and whether something runs before it. If the job \
 restarts the call line, tell him the call will drop and to call back when it's done.
 - The queue on a call: "list" says what runs and waits, with each waiting job's place in line \
 and its estimate (H61: how long, and when it should be done; the last line the whole list), learned \
