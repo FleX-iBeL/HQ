@@ -132,6 +132,9 @@ Run them before and after every update; they print a short pass/fail table at th
   71 H87, no Claude: the 5-hour stop line moves 10% every half hour after a reset, up to 100% in the last,
      or stays at a fixed number: the line on made-up readings, the roadmap's setting (moving by default), the
      switch script and the status server's switch on copies, what a call may run, the call rules
+  72 H83, no Claude: which HQ this is (the label, else Local and the system) in Python and the status server,
+     on the status page, /where.json and the strip's reading, with and without a label; the call page's line
+     takes no room
   64 F16, no Claude: the call page fits the screen. The real call page (with Moneypenny's card) in a headless
      browser at iPhone 13 sizes (Safari and the home screen), a small phone, and the desktop app's size (?app):
      on a call the old layout stays (the picker and her card keep their room) and the page can't be scrolled
@@ -5642,6 +5645,68 @@ console.log(JSON.stringify({{
                 "still skips only the 5-hour one; moving by default; switched on a copy by the script, the page (its header "
                 "only) and a call; the real roadmap refused")
 
+
+    async def flow72(self) -> str:
+        """H83, no Claude: which HQ this is, small under the name. The rule (the label, else Local and this computer's
+        system) the same in Python and in the status server; the status page, /where.json (readable from the call
+        page's port) and the strip's reading (/hq.json, hq_control.py health) all carry it, with and without a label;
+        the strip and the call page show it, the call page out of the flow so nothing on the call screen moves (F16)."""
+        import urllib.request
+        sys.path.insert(0, str(ROOT / "routine"))
+        import hqpaths
+        system = {"darwin": "macOS", "linux": "Linux", "win32": "Windows"}.get(sys.platform, sys.platform)
+        here = f"Local · {system}"
+        old = os.environ.pop("HQ_LABEL", None)
+        try:
+            need(hqpaths.where() == here, f"without a label, where() says {hqpaths.where()!r}")
+            os.environ["HQ_LABEL"] = " VPS "
+            need(hqpaths.where() == "VPS", f"with HQ_LABEL=VPS, where() says {hqpaths.where()!r}")
+        finally:
+            os.environ.pop("HQ_LABEL", None)
+            if old is not None:
+                os.environ["HQ_LABEL"] = old
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        seen = []
+        for label, port in (("", 4793), ("VPS", 4794)):
+            env = {k: v for k, v in os.environ.items() if k != "HQ_LABEL"}
+            env.update({"HQ_STATUS_PORT": str(port), "HQ_FIX_DRY": "1"})
+            if label:
+                env["HQ_LABEL"] = label
+            want = label or here
+            log = open(self.tmp / f"h83-server-{port}.log", "w")
+            srv = subprocess.Popen([node, str(ROOT / "status/server.mjs"), "--quiet"], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+            base = f"http://127.0.0.1:{port}"
+
+            def get(path):
+                with urllib.request.urlopen(base + path, timeout=60) as r:
+                    return r.headers, r.read().decode()
+            try:
+                for _ in range(50):
+                    try:
+                        await asyncio.to_thread(get, "/where.json")
+                        break
+                    except Exception:
+                        await asyncio.sleep(0.2)
+                hd, body = await asyncio.to_thread(get, "/where.json")
+                need(json.loads(body) == {"where": want}, f"/where.json says {body} (want {want!r})")
+                need(hd.get("access-control-allow-origin") == "*", "the call page's port can't read /where.json")
+                _, page = await asyncio.to_thread(get, "/")
+                need(f'<meta name="hq-where" content="{want}" />' in page, f"the status page doesn't carry {want!r}")
+                _, body = await asyncio.to_thread(get, "/hq.json")
+                need(json.loads(body).get("where") == want, f"the strip's reading says {json.loads(body).get('where')!r} (want {want!r})")
+                seen.append(want)
+            finally:
+                srv.terminate()
+                srv.wait(timeout=10)
+        status = (ROOT / "status/index.html").read_text()
+        need("meta[name=\"hq-where\"]" in status and "el('small', 'where', WHERE)" in status, "the status page doesn't show it under HQ")
+        shell = (ROOT / "desktop/shell.html").read_text()
+        need('id="where"' in shell and "$('where').textContent = h.where" in shell, "the strip (Mac app and phone) doesn't show it")
+        call = (ROOT / "app/web/index.html").read_text()
+        need('<h1>HQ<small id="where"></small></h1>' in call and "/where.json" in call
+             and re.search(r"h1 #where \{ position:absolute;", call), "the call page doesn't show it, or it takes room (F16)")
+        return f"the status page, the strip's reading and /where.json say {seen[0]!r} without a label and {seen[1]!r} with one; shown under HQ on the status page, the strip and the call page, the call screen unmoved"
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -5989,6 +6054,7 @@ FLOWS = {
     69: ("H76, H77: each agent her own character on calls, HQ's defaults a workspace can change", False, "flow69"),
     70: ("H75: she hangs up herself after his clear goodbye, once it has been heard; never on a passing okay", False, "flow70"),
     71: ("H87, H91: the three stop lines move every minute, or each stays fixed; switched from the page or a call", False, "flow71"),
+    72: ("H83: which HQ this is (VPS, or Local · macOS), small under the name on the status page, the strip and the call page", False, "flow72"),
 }
 
 

@@ -69,6 +69,16 @@ IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
 
+def where() -> str:
+    """H83 (12 October 2026): which HQ this is, shown small under the name on the status page, the phone
+    version and the Mac app. HQ_LABEL (the server's, e.g. VPS) when set, else this computer: "Local · macOS",
+    "Local · Linux" or "Local · Windows" (the wording is Claude's choice). status/server.mjs says the same."""
+    label = os.environ.get("HQ_LABEL", "").strip()
+    if label:
+        return label
+    return "Local · " + ("macOS" if IS_MAC else "Linux" if IS_LINUX else "Windows" if os.name == "nt" else sys.platform)
+
+
 def support_dir() -> str:
     """HQ's own memory outside the workspace (the heartbeat, the watchdog's line and log, failures in a row):
     ~/Library/Application Support/HQ on a Mac (where macOS lets the watchdog read without asking), else

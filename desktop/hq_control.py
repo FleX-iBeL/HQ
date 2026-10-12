@@ -217,6 +217,8 @@ def main(argv):
         return 0
     out = judge(data)
     out["at"] = time.time()
+    # H83: which HQ this is, small under the name in the strip (the Mac app and the phone version).
+    out["where"] = hqpaths.where() if hqpaths else ""
     # H59: the version and a newer one, for the strip (a look on GitHub is started in the background when due).
     try:
         import update

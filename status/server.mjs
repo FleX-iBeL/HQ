@@ -56,13 +56,20 @@ const LABELLED = {
   '/hq-icon-192.png': 'status/icons/hq-night-192.png',
   '/hq-icon-512.png': 'status/icons/hq-night-512.png',
 };
+// H83 (12 October 2026): which HQ this is, small under the name on the status page (and through
+// hq_control.py's health on the phone version and in the Mac app): the label, else this computer.
+// routine/hqpaths.py's where() says the same.
+const OS_NAME = { darwin: 'macOS', linux: 'Linux', win32: 'Windows' }[process.platform] ?? process.platform;
+const WHERE = LABEL || `Local · ${OS_NAME}`;
 function labelled(path, body) {
-  if (!LABEL) return body;
   if (path === '/' || path === '/index.html') {
-    return String(body)
+    const page = String(body).replace('<meta name="hq-where" content="" />', `<meta name="hq-where" content="${WHERE}" />`);
+    if (!LABEL) return page;
+    return page
       .replace('<title>HQ · status</title>', `<title>HQ ${LABEL} · status</title>`)
       .replace('content="Status"', `content="Status ${LABEL}"`);
   }
+  if (!LABEL) return body;
   if (path === '/manifest.webmanifest' || path === '/hq.webmanifest') {
     const m = JSON.parse(String(body));
     m.name = `${m.name} (${LABEL})`;
@@ -353,6 +360,12 @@ const server = createServer(async (req, res) => {
       const said = String(err ? errOut || out : out).trim();
       res.writeHead(err ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ ok: !err, said }));
     });
+    return;
+  }
+  // H83: which HQ this is, for the call page (another port, so it may read only this, nothing else).
+  if (path0 === '/where.json') {
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' })
+      .end(JSON.stringify({ where: WHERE }));
     return;
   }
   if (path0 === '/hq.json') {

@@ -43,6 +43,11 @@
     body #soon { margin-top:-4px; }
   }
   h1 { margin:0; font-size:34px; font-weight:650; letter-spacing:.5px; }
+  /* H83: which HQ this is (VPS, or Local · macOS), small under the name. Out of the flow, in the gap below,
+     so nothing on the call screen moves (F16). */
+  h1 { position:relative; }
+  h1 #where { position:absolute; left:50%; top:100%; transform:translateX(-50%); white-space:nowrap; margin-top:1px;
+              font-size:11px; font-weight:600; letter-spacing:.04em; color:var(--muted); }
   #status { color:var(--muted); min-height:1.4em; max-width:22em; }
   #btn { width:min(62vw,240px); height:min(62vw,240px); border-radius:50%; border:0; background:var(--accent); color:#04120f;
          font:650 26px/1 -apple-system,sans-serif; box-shadow:0 0 0 0 var(--ring); cursor:pointer; flex-shrink:0; }
@@ -281,7 +286,7 @@
 <!-- H59: the small grey version in the corner (a tap shows the changelog), and a bar when a new version is out -->
 <div id="hqu-call-line" style="position:fixed; top:calc(4px + env(safe-area-inset-top)); right:8px; z-index:5"></div>
 <div id="hqu-call-banner" style="width:100%; max-width:560px"></div>
-<h1>HQ</h1>
+<h1>HQ<small id="where"></small></h1>
 <div id="modes" role="group" aria-label="Kind of call">
   <button type="button" data-mode="quick" data-agent="donna"><img src="/agents/donna/picture" alt=""><span>Donna</span></button>
   <button type="button" data-mode="deep" data-agent="pepper"><img src="/agents/pepper/picture" alt=""><span>Pepper</span></button>
@@ -373,6 +378,14 @@ let AGENTS = {
   pepper: { id: "pepper", name: "Pepper", full_name: "Pepper Potts", voice: "af_heart", load: "deep", model: "opus", speciality: "Sparring, planning and the bigger picture" },
 };
 if (new URLSearchParams(location.search).has("app")) document.body.classList.add("inapp");
+// H83: which HQ this is, from its status page (8444 next to the phone's 8443, else 4748 on this computer).
+(async () => {
+  try {
+    const at = location.port === "8443" ? `https://${location.hostname}:8444` : `${location.protocol}//${location.hostname}:4748`;
+    const r = await fetch(`${at}/where.json`, { cache: "no-store" });
+    if (r.ok) document.getElementById("where").textContent = (await r.json()).where || "";
+  } catch {}
+})();
 const MODEL_NAME = { sonnet: "Sonnet", opus: "Opus", haiku: "Haiku", fable: "Fable" };
 function modelName(a) { return MODEL_NAME[a.model] || a.model; }
 // M2: Free said plainly, for showing others (HQ 0.1): no connectors, no files, no notes, only the web.
