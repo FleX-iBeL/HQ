@@ -243,6 +243,9 @@ def start(job):
         f"let's go. This is job {n} from the queue on the HQ roadmap, started by the routine "
         f"(phase L) in {where}. The job, as agreed on the call: {job['text']}\n\n"
         "Follow the HQ build notes, the section \"Jobs started by the routine\". "
+        # H90: one HQ code on every computer: the working branch on GitHub is where every job starts and ends.
+        "Before the first step, bring HQ up to date with its working branch (dev) from GitHub; when done, push "
+        "HQ's commits to dev with routine/push.py, after its privacy check. Never main, never the version tags. "
         + ("The user said on the call that this job may go past the 5-hour usage line; the weekly line still "
            "counts (F13): read the usage with --weekly-only, and on STOP hold as usual." if job["past"] else "")
     )
