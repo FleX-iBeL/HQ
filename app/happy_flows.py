@@ -129,6 +129,9 @@ Run them before and after every update; they print a short pass/fail table at th
      lines, trimmed from the start), the continue greeting with the name from me.md, never on Free; on the
      call page Continue at the foot of an opened call, only when not on a call and not as Free, the offer it
      sends and the chat it starts with; a real continued call greets so, and its transcript says which call
+  71 H87, no Claude: the 5-hour stop line moves 10% every half hour after a reset, up to 100% in the last,
+     or stays at a fixed number: the line on made-up readings, the roadmap's setting (moving by default), the
+     switch script and the status server's switch on copies, what a call may run, the call rules
   64 F16, no Claude: the call page fits the screen. The real call page (with Moneypenny's card) in a headless
      browser at iPhone 13 sizes (Safari and the home screen), a small phone, and the desktop app's size (?app):
      on a call the old layout stays (the picker and her card keep their room) and the page can't be scrolled
@@ -5232,6 +5235,135 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         return ("the mark is never spoken or written; the rule with its phrases is in Free and full calls; "
                 "an okay keeps the call; a goodbye ends it once heard; more words after it keep it")
 
+    async def flow71(self) -> str:
+        """H87, no Claude: the 5-hour stop line moves through the session, 10% for every half hour after a reset
+        up to 100% in the last, or stays at a fixed number; switched from the status page or a call. The line on
+        made-up readings (the weekly lines untouched, no reset time keeps the fixed number, past the line still
+        skips it), the roadmap's setting (moving when it isn't named: HQ's default), the switch script on a
+        copy, the status server's switch on a copy, what a call may run, the call rules, the page and the template."""
+        import subprocess as sp
+        from policy import Policy, ALLOW, DENY
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        js = f"""import {{ stopLine, usageVerdict, movingFiveHour }} from {json.dumps((ROOT / 'status/usage.mjs').as_uri())};
+import {{ parseRoadmap }} from {json.dumps((ROOT / 'status/parse.mjs').as_uri())};
+const R = new Date('2026-10-12T20:00:00Z'), S = R.getTime() - 5 * 36e5;
+const five = {{ label: '5-hour limit', resetsAt: R.toISOString() }};
+const week = {{ label: 'Weekly · all models', resetsAt: new Date(R.getTime() + 3 * 864e5).toISOString() }};
+const at = (min) => stopLine(five, 70, new Date(S + min * 6e4), null, true);
+const lines = Array.from({{ length: 10 }}, (_, i) => at(i * 30 + 1).line);
+const r = (p) => ({{ readable: true, limits: [{{ ...five, percent: p }}, {{ ...week, percent: 5 }}] }});
+const when = new Date(S + 61 * 6e4);  // 1 h in: the line is at 30%
+const base = '# x\\n\\n- **Usage limit: 70%.** y\\n';
+console.log(JSON.stringify({{
+  lines, firstNext: at(1).next, lastNext: at(299).next, end: at(299).line,
+  fixed: stopLine(five, 70, new Date(S + 6e4), null, false).line,
+  noReset: stopLine({{ label: '5-hour limit', resetsAt: null }}, 70, new Date(), null, true).line,
+  weekSame: stopLine(week, 70, when, null, true).line === stopLine(week, 70, when, null, false).line,
+  stops: usageVerdict(r(35), 70, when, null, {{ moving: true }}).stop,
+  under: usageVerdict(r(25), 70, when, null, {{ moving: true }}).stop,
+  fixedNoStop: usageVerdict(r(35), 70, when, null, {{ moving: false }}).stop,
+  pastSkips: usageVerdict(r(95), 70, when, null, {{ moving: true, weeklyOnly: true }}).stop,
+  reason: usageVerdict(r(35), 70, when, null, {{ moving: true }}).reason,
+  dflt: parseRoadmap(base).usageMoving, onLine: parseRoadmap(base + '- **5-hour line: moving.** z\\n').usageMoving,
+  offLine: parseRoadmap(base + '- **5-hour line: fixed.** z\\n').usageMoving,
+  helper: movingFiveHour(null) }}));"""
+        out = await asyncio.to_thread(sp.run, [node, "--input-type=module", "-e", js], capture_output=True, text=True)
+        need(out.returncode == 0, f"the line check didn't run: {out.stderr.strip()[-300:]}")
+        d = json.loads(out.stdout.strip().splitlines()[-1])
+        need(d["lines"] == [10, 20, 30, 40, 50, 60, 70, 80, 90, 100], f"the moving line isn't 10% a half hour: {d['lines']}")
+        need(d["firstNext"] == "2026-10-12T15:30:00.000Z" and d["lastNext"] is None and d["end"] == 100,
+             f"the moving line's next step is off: {d['firstNext']}, {d['lastNext']}, {d['end']}")
+        need(d["fixed"] == 70 and d["noReset"] == 70 and d["helper"] is None, "fixed, or moving without a reset time, isn't the fixed number")
+        need(d["weekSame"], "the moving 5-hour line changed the weekly line")
+        need(d["stops"] and not d["under"] and not d["fixedNoStop"], "the verdict doesn't follow the moving line")
+        need("its stop line is 30%" in d["reason"], f"the reason doesn't name the moving line: {d['reason']}")
+        need(not d["pastSkips"], "a job past the line stops at the moving 5-hour line")
+        need(d["dflt"] is True and d["onLine"] is True and d["offLine"] is False, "the roadmap's 5-hour line setting isn't read (moving by default)")
+
+        # The switch script, on a copy of the template's roadmap; the real roadmap is refused under a test.
+        copy = self.tmp / "h87-roadmap.md"
+        copy.write_text((ROOT / "template/HQ/roadmap.md").read_text())
+        need("**5-hour line: moving.**" in copy.read_text(), "the template doesn't start with the moving line (HQ's default)")
+        script = str(ROOT / "routine/usageline.py")
+        env = {**os.environ, "HQ_ROADMAP": str(copy)}
+        ul = lambda *a, e=env: sp.run(["python3", script, *a], capture_output=True, text=True, env=e)  # noqa: E731
+        o = ul()
+        need(o.returncode == 0 and "moves" in o.stdout, f"reading the setting: {o.stdout}{o.stderr}")
+        o = ul("fixed", "60")
+        t = copy.read_text()
+        need(o.returncode == 0 and "fixed at 60%" in o.stdout and "**Usage limit: 60%" in t and "**5-hour line: fixed.**" in t,
+             f"fixing it at 60 didn't: {o.stdout}{o.stderr}")
+        o = ul("moving")
+        t = copy.read_text()
+        need(o.returncode == 0 and "**5-hour line: moving.**" in t and "**Usage limit: 60%" in t and t.count("5-hour line:") == 1,
+             f"moving again didn't, or lost the number: {o.stdout}{o.stderr}")
+        need(ul("fixed", "0").returncode == 2 and ul("fixed", "150").returncode == 2 and ul("sideways").returncode == 2,
+             "the script takes a number outside 1 to 100, or an unknown word")
+        need(copy.read_text() == t, "a refused switch still changed the roadmap")
+        bare = self.tmp / "h87-bare.md"
+        bare.write_text("# x\n\n- **Usage limit: 70%.** y\n")
+        need(ul("fixed", e={**os.environ, "HQ_ROADMAP": str(bare)}).returncode == 0 and
+             bare.read_text().count("**5-hour line: fixed.**") == 1, "a roadmap without the setting doesn't get its line")
+        real = ul("moving", e={**os.environ, "HQ_ROADMAP": os.environ.get("HQ_REAL_ROADMAP", str(ROADMAP))})
+        need(real.returncode != 0, "under a test, the switch changed the real roadmap")
+
+        # The status server's switch, on a copy of the status page and the routine.
+        site = self.tmp / "h87"
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        shutil.copytree(ROOT / "routine", site / "routine", ignore=shutil.ignore_patterns("__pycache__", "*.o"))
+        (site / ".status").mkdir()
+        road = site_roadmap(site)
+        road.write_text((ROOT / "template/HQ/roadmap.md").read_text())
+        port = 4793
+        proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"],
+                                env={**os.environ, "HQ_STATUS_PORT": str(port), "HQ_ROADMAP": str(road)},
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            base = f"http://127.0.0.1:{port}"
+            for _ in range(50):
+                if http_get("/roadmap.md", base)[0] == 200:
+                    break
+                await asyncio.sleep(0.2)
+
+            def post(body: dict, header: str | None = "usage-line") -> tuple[int, dict]:
+                req = urllib.request.Request(f"{base}/api/usage-line", data=json.dumps(body).encode(), method="POST",
+                                             headers={"content-type": "application/json", **({"x-hq": header} if header else {})})
+                try:
+                    with urllib.request.urlopen(req, timeout=20) as r_:
+                        return r_.status, json.loads(r_.read() or b"null")
+                except urllib.error.HTTPError as e:
+                    return e.code, {}
+            code, _ = await asyncio.to_thread(post, {"mode": "fixed", "limit": 55}, None)
+            need(code == 403 and "**5-hour line: moving.**" in road.read_text(), "the switch works without the page's header")
+            code, ans = await asyncio.to_thread(post, {"mode": "fixed", "limit": 55})
+            t = road.read_text()
+            need(code == 200 and ans.get("ok") and "**5-hour line: fixed.**" in t and "**Usage limit: 55%" in t,
+                 f"the page's switch didn't fix the line at 55: {code} {ans}")
+            code, ans = await asyncio.to_thread(post, {"mode": "moving"})
+            need(code == 200 and "**5-hour line: moving.**" in road.read_text(), f"the page's switch didn't make it move: {code} {ans}")
+            code, _ = await asyncio.to_thread(post, {"mode": "fixed", "limit": 0})
+            need(code == 400, "the page's switch took 0%")
+            _, page, _ = http_get("/", base)
+            html = page.decode()
+            need("fiveHourSwitch(limit, moving)" in html and "s.usageMoving" in html and "'x-hq': 'usage-line'" in html,
+                 "the status page has no 5-hour line switch")
+        finally:
+            proc.terminate()
+
+        # A call: reads it, makes it move, fixes it at a number; nothing else.
+        pol = Policy(config.FOLDER)
+        c = f'python3 "{ROOT}/routine/usageline.py"'
+        for extra in ("", " moving", " fixed", " fixed 60"):
+            need(pol.decide("Bash", {"command": c + extra}).verdict == ALLOW, f"a call can't run the 5-hour line switch with '{extra.strip()}'")
+        for extra in (" fixed sixty", " off", " moving 60"):
+            need(pol.decide("Bash", {"command": c + extra}).verdict == DENY, f"a call may run the 5-hour line switch with '{extra.strip()}'")
+        need("usageline.py" in config.VOICE_RULES and "half hour" in config.VOICE_RULES and "fixed 60" in config.VOICE_RULES,
+             "the call rules don't say how to switch the 5-hour line")
+        save = (ROOT / "status/save-usage.mjs").read_text()
+        need(save.count("moving") >= 4, "the usage check and the jobs' gate don't use the moving line")
+        return ("10% a half hour up to 100%, weekly untouched, past the line still skips it; moving by default; "
+                "switched on a copy by the script, the page (its header only) and a call; the real roadmap refused")
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -5576,6 +5708,7 @@ FLOWS = {
     66: ("H56.4: the two-way sync: two private Syncthings, both ways, video left out, conflicts kept and merged, only the main commits", False, "flow66"),
     67: ("F17: a test never changes the real job list, schedule or status block, nor uses the real pairing", False, "flow67"),
     70: ("H75: she hangs up herself after his clear goodbye, once it has been heard; never on a passing okay", False, "flow70"),
+    71: ("H87: the 5-hour line moves 10% every half hour of the session, or stays fixed; switched from the page or a call", False, "flow71"),
 }
 
 

@@ -9,6 +9,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - HQ's routine and watchdog run on a Linux server too, as systemd timers that start by themselves after a restart (`routine/install-linux.sh`). The call line has a Linux start and stop (`app/start-linux.sh`, `app/stop-linux.sh`). On a Mac nothing changes.
 
 ### Changed
+- The 5-hour usage line moves through the session: 10% right after a reset, 10% more every half hour, 100% in the last half hour. A switch on the status page (and a call, on your ask) makes it a fixed number of your choice instead. A job let past the line still skips it; the weekly line counts as before.
 - Each agent starts with her own voice: Donna with Bella, Pepper with Heart. Still yours to change in Settings; a voice you already picked stays.
 - On a call, HQ itself can be read without asking, the same as your workspace: its files, its logs (like the hourly mail check's) and the status page's data. Changing anything in HQ still asks you first.
 

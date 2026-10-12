@@ -42,9 +42,28 @@ const STEP_MS = 6 * 60 * 60 * 1000;
 /** A weekly line never stands below this, so the start of a week is not a sudden cap (copied from an earlier project, 2026-10-09). */
 const FLOOR = 20;
 
+/** H87: the moving 5-hour line grows 10% every half hour of the session: 10% in its first half hour, 100% in its last. */
+const FIVE_MS = 5 * 60 * 60 * 1000;
+const HALF_HOUR = 30 * 60 * 1000;
+
+/**
+ * H87: where the moving 5-hour line stands at a given moment, from the limit's reset time. The
+ * session started five hours before the reset; each half hour that has begun allows 10% more.
+ * Without a reset time it can't move, so the fixed number counts.
+ * @returns {{ line: number, next: string | null } | null} null when there is no reset time
+ */
+export function movingFiveHour(resetsAt, now = new Date()) {
+  const reset = resetsAt ? new Date(resetsAt).getTime() : NaN;
+  if (Number.isNaN(reset)) return null;
+  const start = Math.round(reset / 60000) * 60000 - FIVE_MS;
+  const begun = Math.min(10, Math.max(1, Math.floor((now.getTime() - start) / HALF_HOUR) + 1));
+  return { line: begun * 10, next: begun < 10 ? new Date(start + begun * HALF_HOUR).toISOString() : null };
+}
+
 /**
  * The stop line for one limit at a given moment, in percent. The 5-hour limit stops at the
- * roadmap's stop line. A weekly limit is spread over its week instead, all 100% of it: the week
+ * roadmap's stop line, or, with the moving line on (H87, "**5-hour line: moving**", HQ's default),
+ * at 10% for every half hour of the session that has begun. A weekly limit is spread over its week instead, all 100% of it: the week
  * before its reset is cut into 28 steps of six hours, and each step that has begun allows one
  * 28th (about 3.6%), but the line never stands below 20%. So it stands at 20% for the week's
  * first day and a half, at 21.4% from the sixth step, at 50% halfway, and at 100% in its last
@@ -55,8 +74,12 @@ const FLOOR = 20;
  * @param {Date} [now]
  * @returns {{ line: number, next: string | null } | null} next: when the line moves up again
  */
-export function stopLine(l, limit, now = new Date(), weekly = null) {
+export function stopLine(l, limit, now = new Date(), weekly = null, moving = false) {
   if (limit === null) return null;
+  if (moving && /5-hour/i.test(l.label)) {
+    const m = movingFiveHour(l.resetsAt, now);
+    if (m) return m;
+  }
   // A flat weekly stop line ("**Weekly limit: N%**" in the roadmap) wins over the spread.
   if (weekly !== null && /^weekly/i.test(l.label)) return { line: weekly, next: null };
   const reset = l.resetsAt ? new Date(l.resetsAt).getTime() : NaN;
@@ -79,9 +102,10 @@ export function stopLine(l, limit, now = new Date(), weekly = null) {
  * @param {ReturnType<typeof usageReading> | null} reading
  * @param {number | null} limit the stop line in percent; null means there is none
  * @param {Date} [now]
- * @param {{ weeklyOnly?: boolean }} [opts] weeklyOnly: only the weekly limits count (F13: a job past the line)
+ * @param {{ weeklyOnly?: boolean, moving?: boolean }} [opts] weeklyOnly: only the weekly limits count (F13: a job past the line);
+ *   moving: the 5-hour line moves through the session (H87)
  */
-export function usageVerdict(reading, limit, now = new Date(), weekly = null, { weeklyOnly = false } = {}) {
+export function usageVerdict(reading, limit, now = new Date(), weekly = null, { weeklyOnly = false, moving = false } = {}) {
   if (!reading?.readable) return { stop: true, reason: 'The usage could not be read.' };
   if (limit === null) return { stop: false, reason: '' };
   // A kept reading (F6) is old and from another session: shown, but never a stop.
@@ -89,7 +113,7 @@ export function usageVerdict(reading, limit, now = new Date(), weekly = null, { 
   const over = reading.limits
     .filter((l) => !l.kept)
     .filter((l) => !weeklyOnly || /^weekly/i.test(l.label))
-    .map((l) => ({ ...l, line: stopLine(l, limit, now, weekly).line }))
+    .map((l) => ({ ...l, line: stopLine(l, limit, now, weekly, moving).line }))
     .filter((l) => l.percent >= l.line);
   if (over.length === 0) return { stop: false, reason: '' };
   return {

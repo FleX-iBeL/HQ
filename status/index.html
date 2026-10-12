@@ -114,6 +114,8 @@
       .meter.over .pct { color: var(--red); }
       .alarm { margin: 0; padding: 0 4px; color: var(--red); font-weight: 600; }
       .usage > .soft, .plain { margin: 0; padding: 0 4px; }
+      .usage > .fiveline { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 0 4px; }
+      .usage > .fiveline > .soft { margin-right: 4px; }
       .card > .plain { padding: 16px 20px; }
 
       /* Steps of the phase being worked on. */
@@ -490,9 +492,9 @@
       ];
 
       /** The last usage reading a session saved. The page cannot take one itself. */
-      function drawUsage(u, limit, weekly = null) {
+      function drawUsage(u, limit, weekly = null, moving = false) {
         const age = u ? Date.now() - new Date(u.checkedAt).getTime() : 0;
-        const verdict = usageVerdict(u, limit, new Date(), weekly);
+        const verdict = usageVerdict(u, limit, new Date(), weekly, { moving });
         // An old reading is shown dimmed: usage may have moved on since.
         const box = el('section', `usage${u && age > 20 * 60000 ? ' stale' : ''}`);
         const head = el('div', 'head');
@@ -533,12 +535,16 @@
             card.append(row);
             continue;
           }
-          const at = stopLine(l, limit, new Date(), weekly);
+          const at = stopLine(l, limit, new Date(), weekly, moving);
           const fiveHour = /5-hour/i.test(l.label) && l.resetsAt ? new Date(l.resetsAt) : null;
           card.append(meter(l.label.replace(' · ', ', '), u.plan && l === limits[0] ? `${u.plan} plan` : '', l.percent, l.resetsAt ? until(l.resetsAt) : '', at ? at.line : null, '', at ? at.next : null, fiveHour));
         }
         box.append(card);
         if (u?.readable && verdict.stop) box.append(el('p', 'alarm', `Stop line reached. ${verdict.reason}`));
+        if (limit !== null) box.append(fiveHourSwitch(limit, moving));
+        const fiveWords = moving
+          ? 'For the 5-hour limit it moves through the session: 10% in the first half hour after a reset, 10% more every half hour, 100% in the last.'
+          : `For the 5-hour limit it stays at ${limit}%.`;
         box.append(
           el(
             'p',
@@ -546,11 +552,46 @@
             limit === null
               ? 'Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are. They are not live: older than 20 minutes, the whole box is greyed out. A greyed-out bar is an old number.'
               : weekly !== null
-                ? `The dark mark is the stop line: work stops when a plan limit reaches it. ${limit}% for the 5-hour limit, ${weekly}% for the weekly limits. Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.`
-                : `The dark mark is the stop line: work stops when a plan limit reaches it. For the 5-hour limit it stays at ${limit}%. For the weekly limits it starts at 20%, moves up four times a day once the week's own share passes that, reaching 100% at the end of the week. Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.`,
+                ? `The dark mark is the stop line: work stops when a plan limit reaches it. ${fiveWords} ${weekly}% for the weekly limits. Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.`
+                : `The dark mark is the stop line: work stops when a plan limit reaches it. ${fiveWords} For the weekly limits it starts at 20%, moves up four times a day once the week's own share passes that, reaching 100% at the end of the week. Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.`,
           ),
         );
         return box;
+      }
+
+      /** H87: the 5-hour line's switch: moving through the session, or fixed at a number (steps of 5). It writes
+       *  the roadmap through the status server, so both HQs and the calls read the same setting. */
+      let lineBusy = false;
+      async function setFiveHour(mode, limit = null) {
+        if (lineBusy) return;
+        lineBusy = true;
+        try {
+          await fetch('/api/usage-line', { method: 'POST', headers: { 'x-hq': 'usage-line', 'content-type': 'application/json' }, body: JSON.stringify({ mode, limit }) });
+        } catch {}
+        lineBusy = false;
+        tick();
+      }
+      function fiveHourSwitch(limit, moving) {
+        const row = el('div', 'controls fiveline');
+        row.append(el('span', 'soft', '5-hour line'));
+        const chip = (text, pressed, on) => {
+          const b = el('button', 'chip range', text);
+          b.setAttribute('aria-pressed', String(pressed));
+          b.addEventListener('click', on);
+          return b;
+        };
+        row.append(
+          chip('Moving', moving, () => !moving && setFiveHour('moving')),
+          chip(moving ? 'Fixed' : `Fixed at ${limit}%`, !moving, () => moving && setFiveHour('fixed')),
+        );
+        if (!moving) {
+          const minus = chip('−', false, () => setFiveHour('fixed', Math.max(5, limit - 5)));
+          const plus = chip('+', false, () => setFiveHour('fixed', Math.min(100, limit + 5)));
+          minus.setAttribute('aria-label', 'Lower the fixed line by 5%');
+          plus.setAttribute('aria-label', 'Raise the fixed line by 5%');
+          row.append(minus, plus);
+        }
+        return row;
       }
 
       function chevron() {
@@ -1196,7 +1237,7 @@
 
         app.append(drawRoutines(routines));
         app.append(drawTemperature(routines));
-        app.append(drawUsage(usage, s.usageLimit, s.weeklyLimit));
+        app.append(drawUsage(usage, s.usageLimit, s.weeklyLimit, s.usageMoving));
 
         if (s.current) {
           const box = el('section');

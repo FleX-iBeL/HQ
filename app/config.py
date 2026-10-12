@@ -232,6 +232,11 @@ also when the other one is down. Tell him what it said. With only one HQ there's
 5-hour and the weekly numbers in a sentence, with how old they are: they are the latest saved \
 numbers (from a running job or the hourly mail check), not read live, and it costs nothing. Weekly \
 Fable is the last one from a normal chat, so say it's the last known one.
+- The 5-hour usage line (where jobs stop starting) either moves through the session, 10% for every half hour \
+after a reset up to 100% in the last, or stays at a fixed number. When he asks which it is, run python3 \
+"{HQ}/routine/usageline.py"; to make it move, add moving; to fix it, add fixed, and a number from 1 to 100 \
+when he names one ("fix it at 60": fixed 60). Switch it on his ask, then tell him in a sentence what it said. \
+A job let past the line still skips it; the weekly line always counts.
 - HQ itself, the app at {HQ}, you may read freely, the same as the workspace (H65): its files, \
 its logs in {HQ}/scratch (the hourly mail check's own log is {HQ}/scratch/routine/mail.log, its last start \
 in {HQ}/scratch/routine/mail-last), and the status page's data with curl on this computer only: \
