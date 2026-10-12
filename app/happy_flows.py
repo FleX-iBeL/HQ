@@ -4703,8 +4703,10 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         live = json.loads(body) if code == 200 else {}
         need("estimate" in live and "accuracy" in (live["estimate"] or {}), f"the live status server has no estimates: {code}")
         q = json.loads(sp.run(["python3", str(jv / "routine/jobs.py"), "next"], capture_output=True, text=True).stdout)
-        if q["running"] or q["waiting"]:
-            chrome = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))[-1]
+        # The page in a headless browser only where there is one (a Mac); on a server the parts above suffice (H56.7).
+        browsers = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        if (q["running"] or q["waiting"]) and browsers:
+            chrome = browsers[-1]
             r = await asyncio.to_thread(run, [str(chrome), "--headless", "--disable-gpu", "--no-first-run", "--window-size=900,3000",
                                               f"--user-data-dir={self.tmp / 'h61'}", "--virtual-time-budget=8000", "--dump-dom", "http://127.0.0.1:4748/"], timeout=120)
             need("(estimate)" in r.stdout and "Estimates" in r.stdout, "the live status page doesn't show the estimates on the job list")
