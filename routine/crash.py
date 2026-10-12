@@ -20,22 +20,29 @@ rerun, or one queued by hand after a crash) that crashes too is not queued again
 of the line goes on (Claude's choice, so a job that brings the Mac down can't loop). The rerun goes through
 the usage gate like any job.
 """
-import glob, os, re, subprocess, time
+import glob, os, re, sys, time
 
-PANIC_DIR = "/Library/Logs/DiagnosticReports"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hqpaths  # noqa: E402
+
+# H56.1: on Linux the boot time is btime in /proc/stat, and a kernel crash leaves its record in pstore
+# (systemd-pstore moves it to /var/lib/systemd/pstore after the next start). No record there means
+# "went down" (a restart or power loss), as on a Mac without a panic report.
+PANIC_DIR = "/Library/Logs/DiagnosticReports" if hqpaths.IS_MAC else "/var/lib/systemd/pstore"
+PANIC_GLOB = "*.panic" if hqpaths.IS_MAC else os.path.join("**", "*")
 RERUN = re.compile(r"^Rerun of job \d+")
 
 
 def boottime():
-    r = subprocess.run(["/usr/sbin/sysctl", "-n", "kern.boottime"], capture_output=True, text=True)
-    m = re.search(r"sec = (\d+)", r.stdout)
-    return int(m.group(1)) if m else 0
+    return hqpaths.boottime()
 
 
 def panic_after(since, folder=PANIC_DIR):
-    """When macOS wrote a panic report after `since` (epoch), or None."""
+    """When macOS wrote a panic report (Linux: a crash record in pstore) after `since` (epoch), or None."""
     times = []
-    for p in glob.glob(os.path.join(folder, "*.panic")):
+    for p in glob.glob(os.path.join(folder, PANIC_GLOB), recursive=True):
+        if not os.path.isfile(p):
+            continue
         try:
             t = os.path.getmtime(p)
         except OSError:
@@ -84,8 +91,10 @@ def recover(job, s, jobs, incidents, status, log, boot=None, panic_dir=PANIC_DIR
         return False
     started = started_of(job, s, now)
     panic = panic_after(started, panic_dir)
-    how = (f"the Mac crashed (macOS wrote a panic report) and started again at {clock(boot)}" if panic
-           else f"the Mac went down and started again at {clock(boot)}")
+    what = "the Mac" if hqpaths.IS_MAC else "the server"
+    record = "macOS wrote a panic report" if hqpaths.IS_MAC else "the kernel left a crash record"
+    how = (f"{what} crashed ({record}) and started again at {clock(boot)}" if panic
+           else f"{what} went down and started again at {clock(boot)}")
     out = jobs("crashed", str(n), how).strip()
     m = re.search(r"requeued as job (\d+)", out)
     if m:

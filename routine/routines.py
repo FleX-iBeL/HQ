@@ -7,14 +7,17 @@ it is expected to write, in seconds}. The status server serves it with the watch
 and the page turns a line red when it is overdue: that routine has stopped.
 
 The helper also leaves a heartbeat outside the Documents folder, which the watchdog (H20) can read
-without any macOS permission: ~/Library/Application Support/HQ/heartbeat.
+without any macOS permission: ~/Library/Application Support/HQ/heartbeat (on Linux ~/.local/state/hq; H56.1).
 """
-import json, os, tempfile, time
+import json, os, sys, tempfile, time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
 FILE = os.path.join(JV, ".status", "routines.json")
-SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
+import hqpaths  # noqa: E402  H56.1: HQ's own memory, a folder that fits each computer
+SUPPORT = hqpaths.SUPPORT
 HEARTBEAT = os.path.join(SUPPORT, "heartbeat")
 
 

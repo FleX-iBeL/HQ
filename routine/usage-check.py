@@ -26,7 +26,9 @@ JV = os.path.normpath(os.path.join(HERE, ".."))
 RUN = os.path.join(JV, "scratch", "routine")
 LIVE = os.path.join(RUN, "usage-live.json")
 SAVED = os.path.join(JV, ".status", "usage.json")
-NODE = "/opt/homebrew/bin/node"
+sys.path.insert(0, HERE)
+import hqpaths  # noqa: E402
+NODE = hqpaths.tool("node", "/opt/homebrew/bin/node")  # H56.1: found where it is on Linux
 SOURCES = {"mail check": "the hourly mail check", "call": "a call", "": "a job's status line"}
 
 

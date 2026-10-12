@@ -8,12 +8,15 @@ still down)}. Written by the HQ Routine helper (tick.py). The watchdog can't wri
 folder, so it leaves what it did in ~/Library/Application Support/HQ/events.jsonl, and the helper
 picks that up here. The status server serves the log at /incidents.json for the Routines section.
 """
-import json, os, tempfile, time
+import json, os, sys, tempfile, time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
 FILE = os.path.join(JV, ".status", "incidents.json")
-EVENTS = os.path.expanduser("~/Library/Application Support/HQ/events.jsonl")
+import hqpaths  # noqa: E402  H56.1: HQ's own memory, a folder that fits each computer
+EVENTS = os.path.join(hqpaths.SUPPORT, "events.jsonl")
 KEEP = 100
 
 

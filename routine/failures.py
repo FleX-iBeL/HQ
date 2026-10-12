@@ -10,9 +10,11 @@ page, while its own output said why (no internet: the API server couldn't be rea
   any macOS permission and notice a routine that keeps failing, not only one that's missed or stopped.
 - retry_asked(key): the watchdog asked for one more try (the helper had given up, the internet is back).
 """
-import json, os, re, tempfile, time
+import json, os, re, sys, tempfile, time
 
-SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hqpaths  # noqa: E402  H56.1: HQ's own memory, a folder that fits each computer
+SUPPORT = hqpaths.SUPPORT
 FILE = os.path.join(SUPPORT, "failures.json")
 
 # Known reasons, first match wins: (pattern in the output, plain words).

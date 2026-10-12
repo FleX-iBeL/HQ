@@ -1342,7 +1342,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         jv = ROOT
         tmp = Path(tempfile.mkdtemp(prefix="usage-", dir=config.SCRATCH))
         try:
-            for f in ("routine/usage-check.py", "routine/stream-usage.py", "routine/usagelive.py", "status/save-usage.mjs",
+            for f in ("routine/usage-check.py", "routine/hqpaths.py", "routine/stream-usage.py", "routine/usagelive.py", "status/save-usage.mjs",
                       "status/parse.mjs", "status/usage.mjs", "status/paths.mjs", "roadmap.md"):
                 dst = site_roadmap(tmp) if f == "roadmap.md" else tmp / f
                 dst.parent.mkdir(parents=True, exist_ok=True)
@@ -1653,7 +1653,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         need("events.jsonl" in wd and installed.exists() and installed.read_text() == wd,
              "the watchdog doesn't log what it fixes, or the installed one is old")
         t = (jv / "routine/tick.py").read_text()
-        need("def watchdog_check" in t and "def helper_gap" in t and "kickstart" in t and "app\", \"start.sh" in t,
+        need("def watchdog_check" in t and "def helper_gap" in t and "kickstart" in t and "hqpaths.start_script()" in t,
              "the helper doesn't check the watchdog, its own gaps, or the call line")
         return f"incident log keeps why, fix and back; missed mail caught up, failed one retried; waiting jobs yellow; commits wait their turn ({waited:.1f} s) and take only their own files; page, server and watchdog in place"
 
@@ -1959,7 +1959,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
         for args, want in cases:
             need(T.judge(*args) == want, f"judge{args} gave {T.judge(*args)}, wanted {want}")
         tick = (ROOT / "routine/tick.py").read_text()
-        need("TEMPERATURE = os.path.join(HERE, \"temperature.py\")" in tick and "[PY, TEMPERATURE]" in tick,
+        need("TEMPERATURE = os.path.join(HERE, \"temperature.py\")" in tick and "(\"temperature\", TEMPERATURE, 150)" in tick and "[PY, script]" in tick,
              "the routine doesn't run the temperature check every minute")
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -2064,7 +2064,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
                            ("Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t12%; discharging; (no estimate) present: true", (12, False, False, "discharging", None))]:
             need(B.parse(text) == want, f"pmset read wrong: {B.parse(text)}, wanted {want}")
         tick = (ROOT / "routine/tick.py").read_text()
-        need("BATTERY = os.path.join(HERE, \"battery.py\")" in tick and "[PY, BATTERY]" in tick,
+        need("BATTERY = os.path.join(HERE, \"battery.py\")" in tick and "(\"battery\", BATTERY, 60)" in tick and "[PY, script]" in tick,
              "the routine doesn't run the battery check every minute")
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -2187,7 +2187,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
         need(y["mem_used"] == 450000 * 16384 and y["mem_pressure"] == 31 and y["mem_level"] == "normal", f"memory maths wrong: {y}")
         need(S.size(16 * 2**30) == "16.0 GB" and S.size(1500, True) == "1.5 KB/s", f"sizes in words wrong: {S.size(16 * 2**30)} {S.size(1500, True)}")
         tick = (ROOT / "routine/tick.py").read_text()
-        need('STATS = os.path.join(HERE, "stats.py")' in tick and "[PY, STATS]" in tick, "the routine doesn't run the stats every minute")
+        need('STATS = os.path.join(HERE, "stats.py")' in tick and "(\"stats\", STATS, 150)" in tick and "[PY, script]" in tick, "the routine doesn't run the stats every minute")
         need("routines.beat" not in (ROOT / "routine/stats.py").read_text(), "the stats write a routine line (they shouldn't touch the lights)")
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -2526,6 +2526,126 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
              and "mail.log" in config.VOICE_RULES, "the call rules don't say HQ may be read freely")
         need("{HQ}" not in config.VOICE_RULES, "the call rules still have a placeholder")
         return f"{len(allow)} reads in HQ and the status page go freely; {len(ask)} changes or reads elsewhere still ask"
+
+    async def flow61(self) -> str:
+        """H56.1: HQ's routine and watchdog on a Linux server. No Claude turns. On this computer: the Mac's own
+        parts are as they were (where HQ keeps its memory, the programs, the crash check). With a Linux machine
+        (this one, or HQ_TEST_LINUX=<ssh host>): HQ's files and the blank template go to a throwaway folder
+        there, with their own units, memory and ports and nothing of the user's; the routine must run on the
+        minute by itself, the status page it starts must outlive the run, the watchdog must start a stopped
+        routine again and end a hanging run without the status page, the units must be enabled with lingering
+        on (so they start after a restart), and the crash check must read Linux's boot time. Then everything
+        is removed again. Tailscale is never changed (HQ_NO_PHONE) and no call line is started (HQ_CALL_FIX=off)."""
+        import subprocess as sp, importlib
+        jv = ROOT
+        sys.path.insert(0, str(jv / "routine"))
+        hqpaths = importlib.import_module("hqpaths")
+        crash = importlib.import_module("crash")
+        notes = []
+        if hqpaths.IS_MAC:
+            need(hqpaths.SUPPORT == os.path.expanduser("~/Library/Application Support/HQ") or os.environ.get("HQ_SUPPORT"),
+                 f"on the Mac HQ's memory moved: {hqpaths.SUPPORT}")
+            need(crash.PANIC_DIR == "/Library/Logs/DiagnosticReports" and crash.PANIC_GLOB == "*.panic",
+                 "on the Mac the crash check no longer reads macOS's panic reports")
+            need(hqpaths.tool("node", "/opt/homebrew/bin/node") == (os.environ.get("HQ_NODE") or "/opt/homebrew/bin/node"),
+                 "on the Mac node is looked for somewhere else")
+            need(hqpaths.tailscale("serve", "status")[0] != "sudo" and hqpaths.shell() == "/bin/zsh"
+                 and hqpaths.start_script().endswith("app/start.sh"), "on the Mac the call line or its scripts changed")
+            r = sp.run(["/usr/sbin/sysctl", "-n", "kern.boottime"], capture_output=True, text=True)
+            need(f"sec = {hqpaths.boottime()}," in r.stdout, "the Mac's boot time isn't read as before")
+            notes.append("the Mac's parts are as they were")
+        for f, sh in (("routine/install-linux.sh", "sh"), ("app/start-linux.sh", "bash"), ("app/stop-linux.sh", "bash"),
+                      ("status/phone.sh", "sh")):
+            r = sp.run([sh, "-n", str(jv / f)], capture_output=True, text=True)
+            need(r.returncode == 0, f"{f} doesn't read as a shell script: {r.stderr.strip()}")
+        host = os.environ.get("HQ_TEST_LINUX")
+        if not hqpaths.IS_LINUX and not host:
+            return "; ".join(notes + ["the Linux part skipped: set HQ_TEST_LINUX=<ssh host> to run it on a Linux machine"])
+        run_there = (lambda cmd, **k: sp.run(["ssh", "-o", "BatchMode=yes", host, cmd], **k)) if host else \
+            (lambda cmd, **k: sp.run(["bash", "-c", cmd], **k))
+        tag = f"hqflow61-{os.getpid()}"
+        files = sp.run(["git", "-C", str(jv), "ls-files", "-co", "--exclude-standard"], capture_output=True, text=True).stdout
+        files = "\n".join(l for l in files.splitlines() if l and not l.startswith("workspace"))
+        tar = sp.run(["tar", "--no-xattrs", "-czf", "-", "-T", "-"] if hqpaths.IS_MAC else ["tar", "-czf", "-", "-T", "-"],
+                     input=files.encode(), capture_output=True, cwd=str(jv), env={**os.environ, "COPYFILE_DISABLE": "1"})
+        need(tar.returncode == 0, f"couldn't pack HQ: {tar.stderr.decode()[:200]}")
+        r = run_there(f'T="$HOME/{tag}"; mkdir -p "$T/HQ" && tar -xzf - -C "$T/HQ"', input=tar.stdout, capture_output=True)
+        need(r.returncode == 0, f"couldn't unpack HQ on the Linux machine: {r.stderr.decode()[:200]}")
+        script = r"""
+T="$HOME/@TAG@"; H="$T/HQ"; S="$T/state"; U="@TAG@"; CP=7899; SP=4799
+export HQ_UNIT=$U HQ_SUPPORT=$S HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_PORT=$CP HQ_STATUS_PORT=$SP
+spid() { ss -Hltnp "sport = :$SP" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2; }
+SERVER_BEFORE=$(spid)
+cleanup() {
+  M=$(systemctl --user show -p MainPID --value $U-routine.service 2>/dev/null); [ -n "$M" ] && [ "$M" != 0 ] && kill "$M" 2>/dev/null
+  rm -rf "$HOME/.config/systemd/user/$U-routine.service.d"
+  sh "$H/routine/install-linux.sh" --remove >/dev/null 2>&1
+  P=$(spid); [ -n "$P" ] && [ "$P" != "$SERVER_BEFORE" ] && kill "$P"
+  rm -rf "$T"
+}
+trap cleanup EXIT
+fail() { echo "FAIL $*"; exit 1; }
+[ -z "$SERVER_BEFORE" ] || fail "port $SP is already in use on the Linux machine"
+ss -Hltn "sport = :$CP" | grep -q . && fail "port $CP is already in use on the Linux machine"
+cp -r "$H/template" "$T/workspace" && ln -s "$T/workspace" "$H/workspace"
+sh "$H/routine/install-linux.sh" --no-start >/dev/null || fail "the Linux install failed"
+for x in routine.timer watchdog.timer start.service; do
+  [ "$(systemctl --user is-enabled $U-$x)" = enabled ] || fail "$U-$x isn't enabled, so it wouldn't start after a restart"
+done
+[ "$(loginctl show-user "$USER" -p Linger --value)" = yes ] || fail "lingering is off: nothing would start after a restart"
+systemctl --user start $U-routine.timer $U-watchdog.timer
+timeout 80 bash -c "until [ -s $S/heartbeat ]; do sleep 2; done" || fail "the routine didn't run by itself within a minute"
+timeout 80 bash -c "until ss -Hltn 'sport = :$SP' | grep -q .; do sleep 2; done" || fail "the status page didn't start"
+python3 - "$H" <<'PYC' || fail "the routine's lines are wrong"
+import json, sys
+d = json.load(open(sys.argv[1] + "/.status/routines.json"))
+assert d["helper"]["state"] == "ok", d["helper"]
+assert d["jobs"]["state"] == "off" and "Not on this computer yet" in d["jobs"]["text"], d["jobs"]
+assert d["mail"]["state"] == "off", d["mail"]
+assert "temp" not in d and "battery" not in d, "laptop readings on a server"
+PYC
+echo "OK the routine runs on the minute; jobs and the mail check wait; no laptop readings"
+SRV=$(spid)
+systemctl --user stop $U-routine.timer
+systemctl --user start $U-watchdog.service
+systemctl --user is-active --quiet $U-routine.timer || fail "the watchdog didn't start the stopped routine again"
+grep -q "wasn't running: started its timer again" "$S/watchdog.log" || fail "the watchdog didn't say what it did"
+echo "OK a stopped routine is started again by the watchdog"
+mkdir -p "$HOME/.config/systemd/user/$U-routine.service.d"
+printf '[Service]\nExecStart=\nExecStart=/bin/sleep 600\n' > "$HOME/.config/systemd/user/$U-routine.service.d/hang.conf"
+systemctl --user daemon-reload
+systemctl --user start --no-block $U-routine.service
+timeout 20 bash -c "until [ \"\$(systemctl --user show -p MainPID --value $U-routine.service)\" != 0 ]; do sleep 1; done"
+HANG=$(systemctl --user show -p MainPID --value $U-routine.service)
+rm -rf "$HOME/.config/systemd/user/$U-routine.service.d"; systemctl --user daemon-reload
+python3 -c "import time; open('$S/heartbeat', 'w').write(str(time.time() - 700))"
+systemctl --user start $U-watchdog.service
+sleep 1
+kill -0 "$HANG" 2>/dev/null && fail "the watchdog didn't end the hanging run"
+[ "$(spid)" = "$SRV" ] || fail "ending the hanging run took the status page down too"
+grep -q "a run was hanging, ended it" "$S/watchdog.log" || fail "the watchdog didn't say it ended the hanging run"
+echo "OK a hanging run is ended and the routine restarted; the status page stays up"
+timeout 80 bash -c "until grep -q '\"key\": \"helper\"' $H/.status/incidents.json 2>/dev/null; do sleep 2; done" \
+  || fail "the next run didn't put the helper's time away in the incidents"
+echo "OK the incident says the routine was away, and what the watchdog did"
+cd "$H" && python3 - <<'PYC' || fail "the crash check doesn't read Linux's boot time"
+import sys; sys.path.insert(0, "routine"); import hqpaths, crash
+btime = int(open("/proc/stat").read().split("btime ")[1].split()[0])
+assert hqpaths.boottime() == btime and crash.boottime() == btime
+assert crash.went_down({"n": 1, "state": ""}, {"n": 1, "started": btime - 60}) == btime
+assert crash.went_down({"n": 1, "state": ""}, {"n": 1, "started": btime + 60}) is None
+assert crash.PANIC_DIR == "/var/lib/systemd/pstore"
+PYC
+echo "OK the crash check reads Linux's boot time"
+echo "ALL OK"
+""".replace("@TAG@", tag)
+        r = run_there("bash -s", input=script.encode(), capture_output=True, timeout=330)
+        out = r.stdout.decode() + r.stderr.decode()
+        left = run_there(f'ls -d "$HOME/{tag}" ~/.config/systemd/user/{tag}-* 2>/dev/null', capture_output=True).stdout.decode().strip()
+        need("ALL OK" in out, next((l[5:] for l in out.splitlines() if l.startswith("FAIL ")), out.strip()[-300:]))
+        need(not left, f"the test left something behind on the Linux machine: {left}")
+        oks = [l[3:] for l in out.splitlines() if l.startswith("OK ")]
+        return "; ".join(notes + [f"on Linux ({host or 'here'}): " + "; ".join(oks) + "; everything removed again"])
 
     async def flow59(self) -> str:
         """H62: after a crash the job carries on. No Claude turns, no job started, nothing written outside
@@ -3071,7 +3191,7 @@ shift; exec "$@"
         need(pol.decide("Bash", {"command": "sudo pmset -a disablesleep 1"}).verdict != ALLOW, "a call may run sudo itself")
         need("lidsleep.py" in config.VOICE_RULES and "lid closed" in config.VOICE_RULES, "the call rules don't say how to flip it")
         tick = (ROOT / "routine/tick.py").read_text()
-        need('LIDSLEEP = os.path.join(HERE, "lidsleep.py")' in tick and "[PY, LIDSLEEP]" in tick, "the routine doesn't read it every minute")
+        need('LIDSLEEP = os.path.join(HERE, "lidsleep.py")' in tick and "(\"lid sleep\", LIDSLEEP, 30)" in tick and "[PY, script]" in tick, "the routine doesn't read it every minute")
         need("sudo" not in tick.split("[PY, LIDSLEEP]")[0].split("H45")[-1], "the routine flips it")
         # The status page: served, and shown under Laptop.
         site = self.tmp / "h45site"
@@ -4607,6 +4727,7 @@ FLOWS = {
     58: ("H60: continue an earlier call: Continue in Past calls, the greeting, the earlier call as context", True, "flow58"),
     59: ("H62: after a crash the job runs again, first in line, picking up where it left off", False, "flow59"),
     60: ("H65: a call reads HQ freely (files, logs, status page data); changes still ask", False, "flow60"),
+    61: ("H56.1: the routine and the watchdog on Linux; the Mac as it was", False, "flow61"),
 }
 
 

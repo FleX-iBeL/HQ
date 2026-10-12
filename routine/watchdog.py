@@ -16,10 +16,25 @@ watchdog that pings every 5 minutes".
 
 It runs from ~/Library/Application Support/HQ (installed there by install-watchdog.sh) and never
 touches the Documents folder, so macOS asks no permission. Its log: watchdog.log next to it.
-"""
-import json, os, socket, subprocess, time
 
-SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
+H56.1 (12 October 2026), on a Linux server: the helper is the systemd user timer hq-routine.timer, which
+runs routine/tick.py every minute (hq-routine.service), and this watchdog is its own timer, every 5 minutes
+and after a restart (install-linux.sh puts both in). It runs from HQ's routine folder there (no permission
+to work around), and HQ's own memory is ~/.local/state/hq. The helper isn't running: the timer is started
+again. Stuck: the minute's run that hangs is ended and the timer restarted. HQ_UNIT and HQ_SUPPORT, set in
+the units, give a second HQ on one server its own units and memory.
+"""
+import json, os, socket, subprocess, sys, time
+
+IS_MAC = sys.platform == "darwin"
+# The same as hqpaths.support_dir(); this file runs on its own (copied out of HQ on a Mac), so it's written here too.
+if os.environ.get("HQ_SUPPORT"):
+    SUPPORT = os.path.expanduser(os.environ["HQ_SUPPORT"])
+elif IS_MAC:
+    SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
+else:
+    SUPPORT = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hq")
+UNIT = os.environ.get("HQ_UNIT") or "hq"  # Linux: the units are <UNIT>-routine.timer, <UNIT>-routine.service
 # The helper app; until it is rebuilt under its new name (H54, 11 October 2026), the old one still runs.
 APPS = [os.path.expanduser("~/Applications/HQ Routine.app"), os.path.expanduser("~/Applications/Jarvis Routine.app")]
 APP = next((a for a in APPS if os.path.isdir(a)), APPS[0])
@@ -27,6 +42,34 @@ EVERY = 300
 STUCK = 360
 KEEPS_FAILING = 2  # H42: failures in a row before the watchdog calls it "keeps failing"
 NAMES = {"mail": "the mail check"}
+
+
+def systemctl(*args):
+    return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True)
+
+
+def linux_helper(beat, age):
+    """H56.1: the helper on Linux is a timer. Returns (state, text) like the Mac's checks below."""
+    timer, service = f"{UNIT}-routine.timer", f"{UNIT}-routine.service"
+    if systemctl("is-active", "--quiet", timer).returncode != 0:
+        r = systemctl("start", timer)
+        if r.returncode:
+            return "down", f"The helper's timer wasn't running, and it couldn't be started: {(r.stderr or r.stdout).strip()[:120]}"
+        return "fixed", "The helper wasn't running: started its timer again"
+    if beat and age > STUCK:
+        # A minute's run that hangs keeps the timer from starting the next one: end it, restart the timer.
+        # A one-shot run that hasn't finished is "activating", not "active".
+        hanging = systemctl("show", "-p", "ActiveState", "--value", service).stdout.strip() in ("activating", "active", "deactivating")
+        if hanging:
+            # Only tick.py itself: what it started (the status page, the call line) runs in the same group.
+            if systemctl("kill", "--kill-whom=main", service).returncode:
+                systemctl("kill", "--kill-who=main", service)
+            time.sleep(3)
+        systemctl("restart", timer)
+        systemctl("start", "--no-block", service)
+        return "fixed", (f"The helper was stuck (no heartbeat for {int(age // 60)} min"
+                         + ("; a run was hanging, ended it" if hanging else "") + "): restarted it")
+    return "ok", "The helper is alive"
 
 
 def pids():
@@ -133,8 +176,13 @@ def main():
     except (OSError, ValueError):
         beat = 0
     age = now - beat
-    ps = pids()
-    if not ps:
+    ps = pids() if IS_MAC else []
+    if not IS_MAC:
+        state, text = linux_helper(beat, age)
+        if state != "ok":
+            log(text)
+            event(text)
+    elif not ps:
         subprocess.run(["/usr/bin/open", "-g", APP])
         state, text = "fixed", "The helper wasn't running: started it again"
         log(text)

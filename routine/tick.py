@@ -68,8 +68,8 @@ STATS = os.path.join(HERE, "stats.py")  # H44: CPU, GPU, memory, disk, network; 
 LIDSLEEP = os.path.join(HERE, "lidsleep.py")  # H45: lid-closed sleep on or off, read only; no Claude
 STREAM = os.path.join(HERE, "stream-usage.py")  # L10: the mail check's own run brings the usage back
 DONE_GRACE = 20  # seconds between a job's done mark and closing its chat, so its last reply lands
-NODE = "/opt/homebrew/bin/node"
-CLAUDE = "/opt/homebrew/bin/claude"
+NODE = hqpaths.tool("node", "/opt/homebrew/bin/node")  # H56.1: found where it is on Linux
+CLAUDE = hqpaths.tool("claude", "/opt/homebrew/bin/claude")
 PY = sys.executable or "/usr/bin/python3"
 
 
@@ -470,13 +470,13 @@ def usage():
 
 def status_page():
     # H13: the status server and its Tailscale address; a line in the log only when something was started.
-    r = subprocess.run(["/bin/zsh", os.path.join(JV, "status", "phone.sh")], capture_output=True, text=True)
+    r = subprocess.run([hqpaths.shell(), os.path.join(JV, "status", "phone.sh")], capture_output=True, text=True)
     for line in (r.stdout + r.stderr).strip().splitlines():
         log(line)
-    up = listening(4748)
-    ts = subprocess.run(["/usr/local/bin/tailscale", "serve", "status"], capture_output=True, text=True).stdout
-    on_phone = ":8444" in ts
-    text = ("Status page up, also on the phone" if up and on_phone
+    up = listening(hqpaths.status_port())
+    # H56.1: HQ_NO_PHONE=1 (a second HQ on one computer, or a test) leaves Tailscale alone; then the page alone counts.
+    on_phone = NO_PHONE or ":8444" in tailscale_status()
+    text = ("Status page up" if up and NO_PHONE else "Status page up, also on the phone" if up and on_phone
             else "Status page up, but not on the phone (Tailscale)" if up else "Status server is not running")
     routines.beat("phone", state="ok" if up and on_phone else "down", last=time.time(), next=time.time() + 60, every=60,
                   text=text)
@@ -499,27 +499,37 @@ def status_page():
 
 
 def listening(port):
-    r = subprocess.run(["/usr/sbin/lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"], capture_output=True, text=True)
-    return bool(r.stdout.strip())
+    return hqpaths.listening(port)
+
+
+NO_PHONE = bool(os.environ.get("HQ_NO_PHONE"))
+# H56.1: HQ_CALL_FIX=off: the call line is only reported, never started or changed (a second HQ on one
+# computer that shares another's call line, or a test).
+CALL_FIX = os.environ.get("HQ_CALL_FIX", "on") != "off"
+
+
+def tailscale_status():
+    return subprocess.run(hqpaths.tailscale("serve", "status"), capture_output=True, text=True).stdout
 
 
 def call_line():
     # H19: the call line isn't a routine the helper runs, but it is what the calls need, so its state shows too.
     # H22: a real check every minute: the call page answers on this MacBook, and the phone address is on.
     import urllib.request
+    port = hqpaths.call_port()
     try:
-        with urllib.request.urlopen("http://127.0.0.1:7860/", timeout=5) as r:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as r:
             answers = r.status == 200
     except Exception:
         answers = False
-    ts = subprocess.run(["/usr/local/bin/tailscale", "serve", "status"], capture_output=True, text=True).stdout
-    phone = ":8443" in ts
+    phone = NO_PHONE or ":8443" in tailscale_status()
     now = time.time()
     if answers and phone:
-        state, text = "ok", "Up: the call page answers, and the phone address is on"
+        state, text = "ok", ("Up: the call page answers" if NO_PHONE
+                             else "Up: the call page answers, and the phone address is on")
     elif answers:
         state, text = "down", "The call page answers, but the phone address is off: calls from the phone won't connect"
-    elif listening(7860):
+    elif listening(port):
         state, text = "down", "Running, but the call page doesn't answer"
     else:
         state, text = "down", "Down: calls won't connect"
@@ -532,33 +542,30 @@ def call_line():
         incidents.up("call")
         return
     inc = incidents.down("call", text)
-    if not inc:
+    if not inc or not CALL_FIX:
         return
     tried = [f["at"] for f in inc.get("fixes", [])]
     quiet = not tried or now - max(tried) > 600
     if answers and not phone and now - inc["down"] >= 120 and quiet:
-        subprocess.run(["/usr/local/bin/tailscale", "serve", "--bg", "--https=8443", "http://127.0.0.1:7860"],
+        subprocess.run(hqpaths.tailscale("serve", "--bg", "--https=8443", f"http://127.0.0.1:{port}"),
                        capture_output=True, timeout=30)
         incidents.fix("call", "Turned the phone address on again")
         log("call line: phone address turned on again")
-    elif not listening(7860) and now - inc["down"] >= 180 and quiet:
+    elif not listening(port) and now - inc["down"] >= 180 and quiet:
         out = open(os.path.join(JV, "scratch", "launchagent.log"), "a")
-        subprocess.Popen(["/bin/zsh", os.path.join(JV, "app", "start.sh")], stdout=out, stderr=out,
+        start_sh = hqpaths.start_script()
+        subprocess.Popen(["/bin/zsh" if hqpaths.IS_MAC else "/bin/bash", start_sh], stdout=out, stderr=out,
                          stdin=subprocess.DEVNULL, start_new_session=True)
-        incidents.fix("call", "Nothing was listening for 3 minutes: started it again (app/start.sh)")
+        incidents.fix("call", f"Nothing was listening for 3 minutes: started it again (app/{os.path.basename(start_sh)})")
         log("call line: started it again")
 
 
 def boottime():
-    r = subprocess.run(["/usr/sbin/sysctl", "-n", "kern.boottime"], capture_output=True, text=True)
-    m = re.search(r"sec = (\d+)", r.stdout)
-    return int(m.group(1)) if m else 0
+    return hqpaths.boottime()
 
 
 def waketime():
-    r = subprocess.run(["/usr/sbin/sysctl", "-n", "kern.waketime"], capture_output=True, text=True)
-    m = re.search(r"sec = (\d+)", r.stdout)
-    return int(m.group(1)) if m else 0
+    return hqpaths.waketime()
 
 
 def helper_gap():
@@ -575,7 +582,7 @@ def helper_gap():
         return
     boot, wake = boottime(), waketime()
     if boot > old:
-        why = f"The MacBook restarted at {clock(boot)}"
+        why = f"The {'MacBook' if hqpaths.IS_MAC else 'server'} restarted at {clock(boot)}"
     elif wake > old:
         why = f"The MacBook was asleep until {clock(wake)}"
     elif any("stuck" in w for _, w in events):
@@ -584,7 +591,8 @@ def helper_gap():
         why = "It stopped; the reason isn't known"
     fixes = [(a, f"Watchdog: {w}") for a, w in events if old - 60 <= a <= now]
     if not fixes:
-        fixes = [(boot, "macOS started it at login")] if boot > old else [(now, "It came back on its own")]
+        fixes = ([(boot, "macOS started it at login" if hqpaths.IS_MAC else "systemd started it after the restart")]
+                 if boot > old else [(now, "It came back on its own")])
     incidents.past("helper", old + 60, now, why, fixes)
     log(f"helper was away {int((now - old) // 60)} min: {why}")
 
@@ -603,11 +611,19 @@ def watchdog_check():
     inc = incidents.down("watchdog", f"No check from the watchdog since {clock(at)}" if at else "The watchdog has never checked in")
     tried = [f["at"] for f in (inc or {}).get("fixes", [])]
     if not tried or now - max(tried) > 600:
-        r = subprocess.run(["/bin/launchctl", "kickstart", f"gui/{os.getuid()}/{hqpaths.agent_label('watchdog')}"],
-                           capture_output=True, text=True)
-        incidents.fix("watchdog", "Asked macOS to run it again" if r.returncode == 0
-                      else f"Couldn't start it ({(r.stderr or r.stdout).strip()[:80]}); run routine/install-watchdog.sh")
-        log("watchdog: asked macOS to run it again")
+        if hqpaths.IS_MAC:
+            r = subprocess.run(["/bin/launchctl", "kickstart", f"gui/{os.getuid()}/{hqpaths.agent_label('watchdog')}"],
+                               capture_output=True, text=True)
+            who, fix = "macOS", "routine/install-watchdog.sh"
+        else:
+            # H56.1: on Linux the watchdog is a systemd timer; starting its service runs one check now,
+            # and starting the timer puts it back on its five minutes.
+            r = subprocess.run(["systemctl", "--user", "start", hqpaths.unit("watchdog.timer"), hqpaths.unit("watchdog.service")],
+                               capture_output=True, text=True)
+            who, fix = "systemd", "routine/install-linux.sh"
+        incidents.fix("watchdog", f"Asked {who} to run it again" if r.returncode == 0
+                      else f"Couldn't start it ({(r.stderr or r.stdout).strip()[:80]}); run {fix}")
+        log(f"watchdog: asked {who} to run it again")
 
 
 def jobs_line(q):
@@ -664,6 +680,13 @@ def tick():
         schedule_line()
     except Exception as e:
         log(f"schedule line: {e!r}")
+    if not hqpaths.IS_MAC and not hqpaths.part("open-window"):
+        # H56.1: off a Mac there's no Terminal for a job's or the mail check's window yet; until there is
+        # (or the user's own local/open-window), both wait here, shown as off, and nothing is started.
+        why = "Not on this computer yet: HQ has no window here to run it in"
+        routines.beat("mail", state="off", text=why, every=60)
+        routines.beat("jobs", state="off", text=why, every=60)
+        return
     try:
         mail(q)  # H30: on its own, also while a job runs
     except Exception as e:
@@ -786,26 +809,15 @@ if __name__ == "__main__":
             usage()
         except Exception as e:
             log(f"usage: {e!r}")
-        try:
-            # H35: the laptop's temperature and macOS's heat warning (writes its own routine line).
-            subprocess.run([PY, TEMPERATURE], capture_output=True, text=True, timeout=150)
-        except Exception as e:
-            log(f"temperature: {e!r}")
-        try:
-            # H37: the laptop's battery, charging or not (writes its own routine line).
-            subprocess.run([PY, BATTERY], capture_output=True, text=True, timeout=60)
-        except Exception as e:
-            log(f"battery: {e!r}")
-        try:
-            # H44: the totals Activity Monitor shows (no routine line, no alarms: just to look at).
-            subprocess.run([PY, STATS], capture_output=True, text=True, timeout=150)
-        except Exception as e:
-            log(f"stats: {e!r}")
-        try:
-            # H45: whether the laptop keeps working with the lid closed (only read here, never changed).
-            subprocess.run([PY, LIDSLEEP], capture_output=True, text=True, timeout=30)
-        except Exception as e:
-            log(f"lid sleep: {e!r}")
+        # H35 the laptop's temperature and macOS's heat warning, H37 its battery, H44 the totals Activity Monitor
+        # shows (no line, no alarms), H45 whether it keeps working with the lid closed (only read here). Each
+        # writes its own routine line. H56.1: these are the laptop's own, so Mac only.
+        for name, script, timeout in (("temperature", TEMPERATURE, 150), ("battery", BATTERY, 60),
+                                      ("stats", STATS, 150), ("lid sleep", LIDSLEEP, 30)) if hqpaths.IS_MAC else ():
+            try:
+                subprocess.run([PY, script], capture_output=True, text=True, timeout=timeout)
+            except Exception as e:
+                log(f"{name}: {e!r}")
         try:
             watchdog_check()
         except Exception as e:

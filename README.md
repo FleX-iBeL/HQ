@@ -134,6 +134,10 @@ Then the real test: a call from the phone or the browser, a question about today
 
 ---
 
+### 7b. On a Linux server: the routine and the watchdog (systemd)
+
+On Linux the helper app and the LaunchAgents are systemd user units instead: `sh routine/install-linux.sh` puts in `hq-routine.timer` (the routine, every minute), `hq-watchdog.timer` (every 5 minutes, starts the routine again when it's gone, ends a run that hangs) and `hq-start.service` (the call line, through `app/start-linux.sh`, when the server starts), switches lingering on, and starts them. They start by themselves after a restart. HQ's own memory is `~/.local/state/hq` there. `--dry` shows the units, `--remove` takes them out. Tailscale's serve settings belong to root on Linux, so HQ calls it with `sudo -n` (no password; `HQ_TS_SUDO=0` if the user is Tailscale's operator). Battery, temperature, the laptop stats and the lid switch stay Mac only. Jobs and the hourly mail check don't run on Linux yet: they need a window to run in there (or your own `local/open-window`); until then their lines say so. Happy flow 61 checks all of it on a Linux machine: run it there, or from a Mac with `HQ_TEST_LINUX=<ssh host>`.
+
 ## Mac-only parts, and what to do on Windows
 
 **HQ 0.1 is built for Claude on a Mac with an Apple chip.** These parts have no Windows version yet, and there's no ready alternative in this repo. On Windows, **Claude builds them itself** for that computer, following how the Mac version works:

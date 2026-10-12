@@ -105,13 +105,19 @@ function updateTool(args, cacheMs = 0) {
   });
 }
 
+// H56.1: HQ's own memory, the same folder as routine/hqpaths.py's support_dir(): HQ_SUPPORT, else on a Mac
+// ~/Library/Application Support/HQ, else $XDG_STATE_HOME/hq (~/.local/state/hq).
+const SUPPORT = process.env.HQ_SUPPORT
+  || (process.platform === 'darwin' ? join(homedir(), 'Library/Application Support/HQ')
+    : join(process.env.XDG_STATE_HOME || join(homedir(), '.local/state'), 'hq'));
+
 // H19/H20: every routine's own line, plus the watchdog's, which lives outside the Documents folder.
 async function routines() {
   const read = async (path) => {
     try { return JSON.parse(await readFile(path, 'utf8')); } catch { return null; }
   };
   const data = (await read(join(root, '.status/routines.json'))) ?? {};
-  const dog = await read(join(homedir(), 'Library/Application Support/HQ/watchdog.json'));
+  const dog = await read(join(SUPPORT, 'watchdog.json'));
   if (dog) data.watchdog = dog;
   // H30: the incident log (what went down, why, what was done, when it was back), newest first.
   const inc = (await read(join(root, '.status/incidents.json')))?.incidents ?? [];
