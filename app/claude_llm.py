@@ -94,6 +94,10 @@ class ClaudeSessionLLMService(LLMService):
         self.on_cancellable = None  # H31: told True/False when Cancel may be tapped (the call page)
         self._cancellable = False
         self._late_cancel: str | None = None  # H38: the Cancel button's line, waiting to go in as his turn
+        self.on_hangup = None  # H75: async, called once her goodbye has been heard (bot.py ends the call)
+        self._hangup_task = None
+        self._spoke_at = 0.0  # H75: when her voice last started, and stopped
+        self._quiet_at = 0.0
         # For tests and logs: what happened in each turn.
         self.turns: list[dict] = []
 
@@ -194,6 +198,8 @@ class ClaudeSessionLLMService(LLMService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, InterruptionFrame):
             logger.debug(f"Interruption reached the Claude service (replying={self._replying}, cancel_asked={self._cancel_asked})")
+        if isinstance(frame, InterruptionFrame):
+            self._drop_hangup("he cut in")  # H75: he said more, so the call goes on
         if isinstance(frame, InterruptionFrame) and self._cancel_asked:
             pass  # H31: his Cancel, not a cut-in: nothing to tell Claude about what he heard
         elif isinstance(frame, InterruptionFrame) and self._replying and self.turns:
@@ -216,8 +222,10 @@ class ClaudeSessionLLMService(LLMService):
             self.brain.cancel_turn()
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
+            self._spoke_at = time.perf_counter()
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
+            self._quiet_at = time.perf_counter()
 
         await self.push_frame(frame, direction)
 
@@ -226,6 +234,7 @@ class ClaudeSessionLLMService(LLMService):
         if not words:
             logger.debug("No new words from the user in this turn; not answering")
             return
+        self._drop_hangup("he said more")
         button = bool(self._late_cancel) and self._late_cancel in words
         if button:
             self._late_cancel = None
@@ -273,6 +282,7 @@ class ClaudeSessionLLMService(LLMService):
         reply = self.brain.ask(text)
         watch = self.create_task(self._watch_for_fillers(turn), "filler-watch") if self.fillers else None
         open_text = False  # text pushed since the last response start (for flushing at a tool)
+        mark = MarkFilter(config.HANGUP_MARK)  # H75: her hang-up mark is never spoken
         try:
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
@@ -290,6 +300,9 @@ class ClaudeSessionLLMService(LLMService):
                         await self.push_frame(LLMFullResponseStartFrame())
                         open_text = False
                     continue
+                piece = mark.feed(piece)
+                if not piece:
+                    continue
                 if turn["first_text_s"] is None:
                     turn["first_text_s"] = time.perf_counter() - t0
                     await self.stop_ttfb_metrics()
@@ -303,6 +316,15 @@ class ClaudeSessionLLMService(LLMService):
                 if piece.strip():
                     open_text = True
                 await self._push_llm_text(piece)
+            tail = mark.flush()
+            if tail:
+                turn["reply"] += tail
+                await self._push_llm_text(tail)
+            if mark.found:
+                turn["hangup"] = True
+                if self.on_hangup is not None and not turn.get("cancelled"):
+                    logger.info("H75: she said goodbye and hangs up once it has been heard")
+                    self._hangup_task = asyncio.create_task(self._hang_up_after_goodbye(t0), name="hangup")
         except asyncio.CancelledError:
             turn["interrupted"] = True
             if not turn.get("cancelled"):
@@ -327,6 +349,41 @@ class ClaudeSessionLLMService(LLMService):
                 self.transcript.reply(turn["reply"], cut_off=turn["interrupted"])
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
+
+    # -- H75: she hangs up after his goodbye -------------------------------------
+
+    HANGUP_QUIET_SECS = 1.0  # her voice quiet this long after the goodbye: it has been heard
+    HANGUP_NO_VOICE_SECS = 4.0  # no voice at all after the reply (voice off, nothing said): hang up anyway
+    HANGUP_MAX_SECS = 25.0  # never wait longer than this
+
+    def _drop_hangup(self, why: str) -> None:
+        task, self._hangup_task = self._hangup_task, None
+        if task is not None and not task.done():
+            task.cancel()
+            logger.info(f"H75: not hanging up after all: {why}")
+
+    async def _hang_up_after_goodbye(self, t0: float) -> None:
+        """Waits until her goodbye has been spoken (her voice started after his turn and has been
+        quiet for a moment), then calls on_hangup. Cancelled when he says anything more."""
+        try:
+            done_at = time.perf_counter()
+            while True:
+                await asyncio.sleep(0.1)
+                now = time.perf_counter()
+                if now - done_at > self.HANGUP_MAX_SECS:
+                    break
+                spoke = self._spoke_at > t0
+                if not spoke and now - done_at > self.HANGUP_NO_VOICE_SECS:
+                    break
+                if spoke and not self._bot_speaking and self._quiet_at > self._spoke_at \
+                        and now - self._quiet_at >= self.HANGUP_QUIET_SECS:
+                    break
+            self._hangup_task = None
+            await self.on_hangup()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"H75: hanging up failed: {e!r}")
 
     async def _watch_for_fillers(self, turn: dict):
         """At most one filler per wait: while Claude is quiet after the user's turn, and
@@ -403,6 +460,38 @@ class ClaudeSessionLLMService(LLMService):
             self._cut_reply = ""
             self._worked_on = False
         return text, notes, cut_in
+
+
+class MarkFilter:
+    """H75: takes a marker out of streamed text, also when it comes in pieces. feed() returns what
+    may be spoken now (a possible start of the marker is held back); flush() what was held at the
+    end; found says whether the marker came (its case doesn't matter)."""
+
+    def __init__(self, marker: str):
+        self.m = marker.lower()
+        self.buf = ""
+        self.found = False
+
+    def feed(self, piece: str) -> str:
+        s, self.buf = self.buf + piece, ""
+        out = ""
+        while True:
+            i = s.lower().find(self.m)
+            if i < 0:
+                break
+            out += s[:i]
+            s = s[i + len(self.m):]
+            self.found = True
+        low = s.lower()
+        for k in range(min(len(s), len(self.m) - 1), 0, -1):
+            if self.m.startswith(low[-k:]):
+                self.buf, s = s[-k:], s[:-k]
+                break
+        return out + s
+
+    def flush(self) -> str:
+        b, self.buf = self.buf, ""
+        return b
 
 
 def _norm(s: str) -> str:

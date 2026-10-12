@@ -229,6 +229,22 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
                     await late_cancel(worker, call.llm, call_state,
                                       lambda: connection.send_app_message({"type": "hq-cancelled"}))
 
+    # H75: she said goodbye after his clear goodbye and it has been heard: the call ends as if he
+    # tapped Hang up. The page is told first (it closes the same way); the server doesn't wait on it.
+    async def agent_hangs_up():
+        if call.ended_by_agent:
+            return
+        call.ended_by_agent = True
+        logger.info(f"{call.agent['name']} hung up after the goodbye")
+        if connection is not None:
+            try:
+                connection.send_app_message({"type": "hq-hangup"})
+            except Exception:
+                pass
+        await asyncio.sleep(1.0)
+        await worker.cancel()
+    call.llm.on_hangup = agent_hangs_up
+
     runner = WorkerRunner(handle_sigint=handle_sigint)
     await runner.add_workers(worker)
     try:

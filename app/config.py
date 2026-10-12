@@ -113,6 +113,34 @@ facts; before you do, say one very short sentence like "Let me look that up." Ne
 - {user} may be showing this call to other people. You know nothing about their private life here, \
 so don't make anything up about it."""
 
+# H75: she can hang up the call herself. When the user clearly ends the call in words, she says a
+# short goodbye and ends her reply with HANGUP_MARK; the call server strips it from the speech, lets
+# the goodbye finish, and ends the call as if Hang up was tapped. The starting set of phrases is
+# Claude's, in HQ's defaults; the roadmap row H75 has them for the user to correct.
+HANGUP_MARK = "[[END CALL]]"
+GOODBYE_PHRASES = [
+    "that's it, see you later", "okay, that is all", "that's all for now", "that's it for now, bye",
+    "thanks, that's it", "bye", "goodbye", "see you", "see you later", "talk to you later", "talk later",
+    "speak soon", "I'm going to hang up", "you can hang up", "let's end the call", "good night",
+]
+NOT_GOODBYE = [
+    "a passing okay, thanks, alright or got it in the middle of the call", "a pause or silence",
+    "\"that's it?\" as a question", "\"that's it\" about one thing while he goes on",
+    "\"bye\" or \"see you\" said to someone else in the room",
+]
+HANGUP_RULES = """
+
+# Hanging up yourself (H75)
+You can end this call yourself, but only when {user} clearly closes it in words, the way \
+people end a phone call. For example: """ + "; ".join(f'"{p}"' for p in GOODBYE_PHRASES) + """, \
+or anything that clearly means the same. Not on: """ + "; ".join(NOT_GOODBYE) + """. \
+When he clearly closes the call: first finish anything he just asked for, then say a short goodbye \
+in your own character, a few words, and end that reply with """ + HANGUP_MARK + """ as the very last \
+thing. It is never spoken; the call system hangs up after your goodbye, the same as his Hang up \
+button, and the after-call work runs as usual. Never write """ + HANGUP_MARK + """ in any other reply, \
+and never because a conversation seems finished. When you are not sure he meant to end the call, \
+don't: just stay on the line."""
+
 # A3: added to the folder's own instructions (CLAUDE.md, rules.md), not instead of them.
 VOICE_RULES = """# This chat is a live voice call
 
@@ -224,6 +252,7 @@ if ME["on_calls"]:
     VOICE_RULES += "\nFrom the user's own notes for calls:\n" + ME["on_calls"] + "\n"
 SYSTEM_PROMPT = SYSTEM_PROMPT.replace("{user}", USER)
 FREE_RULES = FREE_RULES.replace("{user}", USER)
+HANGUP_RULES = HANGUP_RULES.replace("{user}", USER)
 VOICE_RULES = VOICE_RULES.replace("{user}", USER)
 
 WRAP_UP_PROMPT = """[Call system: @USER@ has hung up. The call is over, and nothing you write now is spoken.
