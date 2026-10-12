@@ -558,7 +558,7 @@
             'soft',
             !lines
               ? 'Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are. They are not live: older than 20 minutes, the whole box is greyed out. A greyed-out bar is an old number.'
-              : 'The dark mark is the stop line: work stops when a plan limit reaches it. Each of the three lines either moves, recalculated every minute from its own reset (the 5-hour line from 10% after a reset, 20% more an hour, up to 100% at the next; a weekly line from 20% up to 100% at its reset, about 14% a day), or stays at a fixed number; switch each one above, or from a call. A job let past the line only skips the 5-hour line. Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.',
+              : 'The dark mark is the stop line: work stops when a plan limit reaches it. Each of the three lines either moves, recalculated every minute from its own reset (it climbs a little every minute, smoothly: the 5-hour line from 10% after a reset up to 100% at the next, a weekly line from 20% up to 100% at its reset), or stays at a fixed number; switch each one above, or from a call. A job let past the line only skips the 5-hour line. Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.',
           ),
         );
         return box;
