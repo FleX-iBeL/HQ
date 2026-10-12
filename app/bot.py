@@ -309,9 +309,25 @@ if __name__ == "__main__":
     async def phone_page():
         return FileResponse(WEB / "index.html", media_type="text/html", headers=_NO_CACHE)
 
+    # H96 (12 October 2026): on a second HQ (a server, HQ_LABEL set, e.g. VPS) the call page gets the same night
+    # icon as its status page (H84, status/icons/hq-night-*.png), and its own name in the manifest, so it sits next
+    # to the laptop's on the home screen. Without HQ_LABEL nothing changes: the laptop keeps the daytime icon.
+    LABEL = os.environ.get("HQ_LABEL", "").strip().replace("<", "").replace(">", "").replace("&", "").replace('"', "")
+    NIGHT = Path(__file__).resolve().parent.parent / "status" / "icons"
+    ICONS = {"apple-touch-icon.png": WEB / "apple-touch-icon.png", "icon-192.png": WEB / "icon-192.png",
+             "icon-512.png": WEB / "icon-512.png"}
+    if LABEL:
+        ICONS = {"apple-touch-icon.png": NIGHT / "hq-night-180.png", "icon-192.png": NIGHT / "hq-night-192.png",
+                 "icon-512.png": NIGHT / "hq-night-512.png"}
+
     @app.get("/manifest.webmanifest", include_in_schema=False)
     async def phone_manifest():
-        return FileResponse(WEB / "manifest.webmanifest", media_type="application/manifest+json", headers=_NO_CACHE)
+        if not LABEL:
+            return FileResponse(WEB / "manifest.webmanifest", media_type="application/manifest+json", headers=_NO_CACHE)
+        from fastapi.responses import JSONResponse as _JSON
+        m = json.loads((WEB / "manifest.webmanifest").read_text())
+        m["name"], m["short_name"] = f"{m['name']} ({LABEL})", f"{m['short_name']} {LABEL}"
+        return _JSON(m, media_type="application/manifest+json", headers=_NO_CACHE)
 
     # H34: the last call's conversation, for the chat before a call. Read only, from the saved
     # transcripts in calls/; nothing is written. Free calls are never saved, so never shown.
@@ -397,7 +413,7 @@ if __name__ == "__main__":
     for _icon in ("apple-touch-icon.png", "icon-192.png", "icon-512.png"):
         def _make(name):
             async def icon():
-                return FileResponse(WEB / name, media_type="image/png")
+                return FileResponse(ICONS[name], media_type="image/png")
             return icon
         app.add_api_route("/" + _icon, _make(_icon), methods=["GET"], include_in_schema=False)
 
