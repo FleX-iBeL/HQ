@@ -131,15 +131,30 @@ class HQFasterWhisperSTT(WhisperSTTService):
     CPU, int8, one beam, as timed on the VPS. The run_stt body follows WhisperSTTService.run_stt
     in pipecat 1.12.0; the changes are the beam, the initial prompt and the SegmentDoneFrame."""
 
+    # One model for every call, and one transcription at a time: a model per call, loaded again
+    # at every call, left the second call on the VPS stuck in its first transcription.
+    _MODELS: dict[str, Any] = {}
+    _LOCK = __import__("threading").Lock()
+
     def __init__(self, *, initial_prompt: str | None = None, quiet: bool = False, **kwargs):
         super().__init__(device="cpu", compute_type="int8", **kwargs)
         self._initial_prompt = initial_prompt or None
         self._quiet = quiet
 
+    def _load(self):
+        from faster_whisper import WhisperModel
+
+        name = str(self._settings.model)
+        with self._LOCK:
+            if name not in self._MODELS:
+                self._MODELS[name] = WhisperModel(name, device="cpu", compute_type="int8")
+            self._model = self._MODELS[name]
+
     def warm_up(self) -> float:
         t = time.perf_counter()
         if self._model is not None:
-            list(self._model.transcribe(np.zeros(16000, dtype=np.float32), language="en", beam_size=1)[0])
+            with self._LOCK:
+                list(self._model.transcribe(np.zeros(16000, dtype=np.float32), language="en", beam_size=1)[0])
         return time.perf_counter() - t
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
@@ -151,9 +166,10 @@ class HQFasterWhisperSTT(WhisperSTTService):
             language = cast("Language | None", self._settings.language)
 
             def transcribe():
-                segments, _ = self._model.transcribe(audio_float, language=language, beam_size=1,
-                                                     initial_prompt=self._initial_prompt)
-                return list(segments)
+                with self._LOCK:
+                    segments, _ = self._model.transcribe(audio_float, language=language, beam_size=1,
+                                                         initial_prompt=self._initial_prompt)
+                    return list(segments)
 
             segments = await asyncio.to_thread(transcribe)
             text = ""
