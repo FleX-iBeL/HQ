@@ -15,6 +15,7 @@ Uses one turn of the Max plan.
 import asyncio
 import fractions
 import json
+import os
 import re
 import subprocess
 import sys
@@ -36,6 +37,9 @@ from kokoro_onnx import Kokoro  # noqa: E402
 _ts = json.loads(subprocess.run(["/usr/local/bin/tailscale", "status", "--json"], capture_output=True, text=True).stdout or "{}")
 HOST = (_ts.get("Self", {}).get("DNSName") or "").rstrip(".")
 TS_IP = (_ts.get("Self", {}).get("TailscaleIPs") or [""])[0]
+# H56.5: another HQ's call line on the tailnet (a server): HQ_TEST_HOST=<its ts.net name> HQ_TEST_IP=<its 100.x>
+HOST = os.environ.get("HQ_TEST_HOST") or HOST
+TS_IP = os.environ.get("HQ_TEST_IP") or TS_IP
 URL = f"https://{HOST}:8443"
 SR = 48000
 QUESTION = "Hey there, say hello to me in four words."
