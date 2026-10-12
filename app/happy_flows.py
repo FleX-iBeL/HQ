@@ -131,8 +131,8 @@ Run them before and after every update; they print a short pass/fail table at th
      sends and the chat it starts with; a real continued call greets so, and its transcript says which call
   64 F16, no Claude: the call page fits the screen. The real call page (with Moneypenny's card) in a headless
      browser at iPhone 13 sizes (Safari and the home screen), a small phone, and the desktop app's size (?app):
-     before, during, with the chat open, and after a call nothing scrolls past the screen; Donna, Pepper and her
-     card look as before, and take no room on a call
+     on a call the old layout stays (the picker and her card keep their room) and the page can't be scrolled
+     into white space; a screen too short for the status line still scrolls; nothing scrolls before or after
 
 Safe to run while the live phone line is up: the flows use their own server on port 7871
 (HQ_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
@@ -3986,20 +3986,24 @@ setTimeout(() => {
         return "Moneypenny: a smaller locked card under Donna and Pepper, coming soon, yellow M, never picked or called"
 
     async def flow64(self) -> str:
-        """F16: the call page fits the screen, before, during and after a call. Since H73 the coming-soon card,
-        and before it the hidden agent picker, kept their room on a call and pushed the page past the phone's
-        screen, so it scrolled into white space. The real page in a headless browser. No Claude turns."""
+        """F16: on a call the page can't be scrolled into white space, and (reopened) the call screen keeps its
+        old layout: the hidden agent picker and Moneypenny's card keep their room, so the round button, Mute and
+        the status line sit where they always did. The scrolling is locked instead, as long as the listening
+        line fits on the screen. The real page in a headless browser. No Claude turns."""
         await self.ensure_server()
         page = http_get("/")[1].decode()
-        need("body.oncall #modes, body.oncall #modehint, body.oncall #soon { display:none; }" in page,
-             "the agent picker and the coming-soon card still keep their room on a call")
+        need("html.calllock, html.calllock body { overflow:hidden; overscroll-behavior:none; }" in page,
+             "the call page doesn't lock its scrolling on a call")
+        need("body.oncall" not in page, "the picker and her card take no room on a call again (job 72), so the call screen sits too high")
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
-        harness = r"""<script>
+        # Phones and the Mac app draw scrollbars over the page; headless Chrome takes room for them, so it doesn't here.
+        harness = r"""<style>html{scrollbar-width:none}</style><script>
 setTimeout(async () => {
   const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
   const over = () => document.scrollingElement.scrollHeight - innerHeight;
+  const locked = () => getComputedStyle(document.documentElement).overflowY === 'hidden' && getComputedStyle(document.body).overflowY === 'hidden';
   const box = id => { const r = document.getElementById(id).getBoundingClientRect(); return [r.top, r.bottom, r.height]; };
   const card = document.querySelector('#soon .card');
   out.push('card:' + (card ? 'yes' : 'no'));
@@ -4007,11 +4011,16 @@ setTimeout(async () => {
   out.push('idle:' + over());
   out.push('apart:' + (ht >= mb && st >= mb ? 'yes' : 'no'));
   out.push('sizes:' + Math.round(box('modes')[2]) + '/' + (card ? Math.round(card.getBoundingClientRect().height) : 0));
-  calledHere = true; setState('connecting', ''); await wait(100); out.push('connecting:' + over());
-  setState('live', 'On the call'); setMuted(false); await wait(100); out.push('live:' + over());
-  out.push('room:' + box('modes')[2] + '/' + box('soon')[2] + '/' + box('modehint')[2]);
-  chatBtn.click(); await wait(200); out.push('chat:' + over()); showChat(false);
-  cleanup('Call ended'); await wait(200); out.push('after:' + over());
+  calledHere = true; setState('connecting', ''); await wait(100); out.push('connecting:' + (locked() ? 'locked' : 'free'));
+  setState('live', 'On the call'); setMuted(false); await wait(100);
+  out.push('live:' + (locked() ? 'locked' : 'free'));
+  out.push('room:' + (box('modes')[2] > 0 && box('soon')[2] > 0 ? 'kept' : 'gone'));
+  out.push('btn:' + Math.round(box('btn')[0]) + ' mute:' + Math.round(box('mute')[0]));
+  out.push('statusfits:' + (box('orbwrap')[1] <= innerHeight ? 'yes' : 'no'));
+  out.push('orb:' + Math.round(box('orbwrap')[1]) + ' status:' + Math.round(box('status')[1]) + ' h:' + innerHeight);
+  chatBtn.click(); await wait(200); out.push('chat:' + (locked() || over() <= 0 ? 'ok' : 'scrolls')); showChat(false); await wait(100);
+  out.push('back:' + (locked() ? 'locked' : 'free'));
+  cleanup('Call ended'); await wait(200); out.push('after:' + over()); out.push('afterlock:' + (locked() ? 'locked' : 'free'));
   const pre = document.createElement('pre'); pre.id = 'f16'; pre.textContent = 'F16RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
 }, 1500);
 </script>"""
@@ -4019,24 +4028,32 @@ setTimeout(async () => {
         f.write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1))
         fa = self.tmp / "f16app.html"  # the desktop app loads the page with ?app
         fa.write_text(f.read_text().replace('new URLSearchParams(location.search).has("app")', "true", 1))
-        sizes = [("iPhone 13 in Safari", "390,664", f), ("iPhone 13 from the home screen", "390,844", f),
-                 ("a small phone in Safari", "375,553", f), ("the desktop app", "1180,780", fa)]
+        # The last field: whether the status line fits there on a call, so the page locks.
+        sizes = [("iPhone 13 in Safari", "390,664", f, True), ("iPhone 13 from the home screen", "390,844", f, True),
+                 ("a small phone in Safari", "375,553", f, False), ("the desktop app", "1180,780", fa, True)]
         seen = []
-        for name, size, page_file in sizes:
+        for name, size, page_file, fits in sizes:
             r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'f16-profile'}",
                                               "--disable-web-security", f"--window-size={size}", "--virtual-time-budget=8000", "--dump-dom", page_file.as_uri()], timeout=60)
             mm = re.search(r'<pre id="f16">F16RESULT (.*?) END</pre>', r.stdout)
             need(mm, f"{name}: the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
-            res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+            res = dict(part.split(":", 1) for part in mm.group(1).replace(" mute:", " | mute:").replace(" status:", " | status:").replace(" h:", " | h:").split(" | "))
             say(f"   {name} ({size}): {mm.group(1)}")
             need(res["card"] == "yes", f"{name}: Moneypenny's card isn't on the page, so the test proves nothing: {res}")
-            for when in ("idle", "connecting", "live", "chat", "after"):
-                need(int(res[when]) <= 0, f"{name}: the page scrolls {res[when]}px past the screen ({when}): {res}")
+            need(int(res["idle"]) <= 0 and int(res["after"]) <= 0, f"{name}: the page scrolls past the screen before or after a call: {res}")
             need(res["apart"] == "yes", f"{name}: the hint or her card overlaps Donna and Pepper: {res}")
-            need(res["room"] == "0/0/0", f"{name}: the picker or her card still takes room on a call: {res}")
+            need(res["room"] == "kept", f"{name}: the picker or her card takes no room on a call, so the call screen sits too high: {res}")
+            need(res["afterlock"] == "free", f"{name}: the page stays locked after the call: {res}")
+            need(res["chat"] == "ok", f"{name}: with the chat open the page scrolls: {res}")
+            if fits:
+                need(res["statusfits"] == "yes", f"{name}: the listening line doesn't fit on a call: {res}")
+                for when in ("connecting", "live", "back"):
+                    need(res[when] == "locked", f"{name}: the page can be scrolled into white space on a call ({when}): {res}")
+            else:
+                need(res["live"] == "free", f"{name}: the listening line is off the screen and can't be scrolled to: {res}")
             seen.append(res["sizes"])
         need(len(set(seen[:2])) == 1, f"Donna, Pepper or her card look different between the iPhone 13 sizes: {seen}")
-        return "the call page fits on iPhone 13 (Safari and home screen), a small phone and the desktop app: before, during, chat open, after"
+        return "on a call the old layout stays and the page can't be scrolled (iPhone 13 Safari and home screen, desktop app); a small phone still scrolls to its listening line"
 
     # 48
     async def flow48(self) -> str:
