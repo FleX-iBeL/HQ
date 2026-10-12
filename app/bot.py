@@ -304,21 +304,45 @@ if __name__ == "__main__":
     WEB = Path(__file__).resolve().parent / "web"
     _NO_CACHE = {"Cache-Control": "no-cache"}
 
-    @app.get("/", include_in_schema=False)
-    @app.get("/call", include_in_schema=False)
-    async def phone_page():
-        return FileResponse(WEB / "index.html", media_type="text/html", headers=_NO_CACHE)
-
     # H96 (12 October 2026): on a second HQ (a server, HQ_LABEL set, e.g. VPS) the call page gets the same night
     # icon as its status page (H84, status/icons/hq-night-*.png), and its own name in the manifest, so it sits next
     # to the laptop's on the home screen. Without HQ_LABEL nothing changes: the laptop keeps the daytime icon.
+    # F21 (12 October 2026): the iPhone kept the old icon under the old addresses, so on a server the page and the
+    # manifest point at new names (NIGHT_LINKS, NIGHT_NAMES), every apple-touch-icon iOS may look for at the root
+    # (with and without -precomposed, and the 180x180 sizes) and a favicon are the night icon too, and the icons
+    # are served with no-cache. The night PNGs are opaque squares to the edges (RGB, no alpha): no border.
     LABEL = os.environ.get("HQ_LABEL", "").strip().replace("<", "").replace(">", "").replace("&", "").replace('"', "")
     NIGHT = Path(__file__).resolve().parent.parent / "status" / "icons"
     ICONS = {"apple-touch-icon.png": WEB / "apple-touch-icon.png", "icon-192.png": WEB / "icon-192.png",
              "icon-512.png": WEB / "icon-512.png"}
+    NIGHT_NAMES = {"hq-call-night-180.png": NIGHT / "hq-night-180.png",
+                   "hq-call-night-192.png": NIGHT / "hq-night-192.png",
+                   "hq-call-night-512.png": NIGHT / "hq-night-512.png"}
+    NIGHT_LINKS = ('<link rel="apple-touch-icon" sizes="180x180" href="hq-call-night-180.png">\n'
+                   '<link rel="apple-touch-icon" href="hq-call-night-180.png">\n'
+                   '<link rel="apple-touch-icon-precomposed" href="hq-call-night-180.png">\n'
+                   '<link rel="icon" type="image/png" sizes="192x192" href="hq-call-night-192.png">')
     if LABEL:
         ICONS = {"apple-touch-icon.png": NIGHT / "hq-night-180.png", "icon-192.png": NIGHT / "hq-night-192.png",
-                 "icon-512.png": NIGHT / "hq-night-512.png"}
+                 "icon-512.png": NIGHT / "hq-night-512.png",
+                 "apple-touch-icon-precomposed.png": NIGHT / "hq-night-180.png",
+                 "apple-touch-icon-180x180.png": NIGHT / "hq-night-180.png",
+                 "apple-touch-icon-180x180-precomposed.png": NIGHT / "hq-night-180.png",
+                 "favicon.png": NIGHT / "hq-night-192.png", **NIGHT_NAMES}
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/call", include_in_schema=False)
+    async def phone_page():
+        if not LABEL:
+            return FileResponse(WEB / "index.html", media_type="text/html", headers=_NO_CACHE)
+        html = (WEB / "index.html").read_text().replace(
+            '<link rel="apple-touch-icon" href="apple-touch-icon.png">', NIGHT_LINKS)
+        return Response(html, media_type="text/html; charset=utf-8", headers=_NO_CACHE)
+
+    if LABEL:
+        @app.get("/favicon.ico", include_in_schema=False)
+        async def favicon():
+            return FileResponse(NIGHT / "hq-night-192.png", media_type="image/png", headers=_NO_CACHE)
 
     @app.get("/manifest.webmanifest", include_in_schema=False)
     async def phone_manifest():
@@ -327,6 +351,8 @@ if __name__ == "__main__":
         from fastapi.responses import JSONResponse as _JSON
         m = json.loads((WEB / "manifest.webmanifest").read_text())
         m["name"], m["short_name"] = f"{m['name']} ({LABEL})", f"{m['short_name']} {LABEL}"
+        m["icons"] = [{"src": "/hq-call-night-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                      {"src": "/hq-call-night-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]
         return _JSON(m, media_type="application/manifest+json", headers=_NO_CACHE)
 
     # H34: the last call's conversation, for the chat before a call. Read only, from the saved
@@ -410,10 +436,10 @@ if __name__ == "__main__":
         out = await asyncio.to_thread(_update, "start" if what == "start" else "status")
         return JSONResponse(out, status_code=200 if out else 500, headers=_NO_CACHE)
 
-    for _icon in ("apple-touch-icon.png", "icon-192.png", "icon-512.png"):
+    for _icon in ICONS:
         def _make(name):
             async def icon():
-                return FileResponse(ICONS[name], media_type="image/png")
+                return FileResponse(ICONS[name], media_type="image/png", headers=_NO_CACHE if LABEL else None)
             return icon
         app.add_api_route("/" + _icon, _make(_icon), methods=["GET"], include_in_schema=False)
 
