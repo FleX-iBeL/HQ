@@ -36,63 +36,108 @@ export function usageReading(tool, about = {}) {
   };
 }
 
-/** A weekly limit's stop line goes up in steps: seven days, four steps a day. */
-const STEPS = 28;
-const STEP_MS = 6 * 60 * 60 * 1000;
-/** A weekly line never stands below this, so the start of a week is not a sudden cap (copied from an earlier project, 2026-10-09). */
-const FLOOR = 20;
-
-/** H87: the moving 5-hour line grows 10% every half hour of the session: 10% in its first half hour, 100% in its last. */
-const FIVE_MS = 5 * 60 * 60 * 1000;
-const HALF_HOUR = 30 * 60 * 1000;
-
 /**
- * H87: where the moving 5-hour line stands at a given moment, from the limit's reset time. The
- * session started five hours before the reset; each half hour that has begun allows 10% more.
- * Without a reset time it can't move, so the fixed number counts.
- * @returns {{ line: number, next: string | null } | null} null when there is no reset time
+ * H91 (12 October 2026, call at 21:00): "So all three of them move each minute and then all three have a
+ * fixed possibility." The three stop lines: the 5-hour line, the weekly all-models line and the weekly
+ * Fable line. Each either moves (HQ's default) or stays at a fixed number of his choice; the settings sit
+ * in the roadmap (lineSettings below), so the laptop and the server read the same ones.
+ *
+ * Moving: the line is the share of the limit's window that has gone by, recalculated every minute, so it
+ * grows smoothly up to 100% in the window's last minute, the minute before its reset. It never stands below
+ * its floor, so a fresh window is not a sudden cap: 10% for the 5-hour line (as H87 started), 20% for the
+ * weekly lines (as F1 started). So the 5-hour line climbs 20% an hour after its first half hour; a weekly
+ * line about 0.6% an hour (14% a day) after its first day and a half. The times follow from the reset time,
+ * so nothing has to be kept anywhere. Without a reset time a moving line can't move: its fixed number counts.
  */
-export function movingFiveHour(resetsAt, now = new Date()) {
-  const reset = resetsAt ? new Date(resetsAt).getTime() : NaN;
-  if (Number.isNaN(reset)) return null;
-  const start = Math.round(reset / 60000) * 60000 - FIVE_MS;
-  const begun = Math.min(10, Math.max(1, Math.floor((now.getTime() - start) / HALF_HOUR) + 1));
-  return { line: begun * 10, next: begun < 10 ? new Date(start + begun * HALF_HOUR).toISOString() : null };
+export const LINES = {
+  five: { label: '5-hour', windowMs: 5 * 60 * 60 * 1000, floor: 10 },
+  weekly: { label: 'Weekly · all models', windowMs: 7 * 24 * 60 * 60 * 1000, floor: 20 },
+  fable: { label: 'Weekly · Fable', windowMs: 7 * 24 * 60 * 60 * 1000, floor: 20 },
+};
+/** A weekly line fixed without a number of its own (and no flat "**Weekly limit: N%**"): Claude's choice. */
+export const WEEKLY_FIXED = 90;
+
+/** Which of the three lines a plan limit's label belongs to. */
+export function lineKey(label) {
+  if (/5-hour/i.test(label ?? '')) return 'five';
+  if (/^weekly/i.test(label ?? '')) return /fable/i.test(label) ? 'fable' : 'weekly';
+  return null;
 }
 
 /**
- * The stop line for one limit at a given moment, in percent. The 5-hour limit stops at the
- * roadmap's stop line, or, with the moving line on (H87, "**5-hour line: moving**", HQ's default),
- * at 10% for every half hour of the session that has begun. A weekly limit is spread over its week instead, all 100% of it: the week
- * before its reset is cut into 28 steps of six hours, and each step that has begun allows one
- * 28th (about 3.6%), but the line never stands below 20%. So it stands at 20% for the week's
- * first day and a half, at 21.4% from the sixth step, at 50% halfway, and at 100% in its last
- * six hours. The times follow from the reset time, so nothing has to be kept
- * anywhere.
- * @param {{ label: string, resetsAt: string | null }} l
- * @param {number | null} limit the stop line in percent; null means there is none
- * @param {Date} [now]
- * @returns {{ line: number, next: string | null } | null} next: when the line moves up again
+ * The three lines' settings from the roadmap, or null when it names no usage limit (then nothing stops).
+ *   - **Usage limit: 70%.**                 the 5-hour line's fixed number (also: there are stop lines at all)
+ *   - **5-hour line: moving.** / fixed.     H87; moving when it isn't named
+ *   - **Weekly line: moving; fixed at 90% when switched.** / **Weekly line: fixed at 90%.**
+ *   - **Fable line: …**                     the same, for the weekly Fable limit
+ * Older roadmaps: without a Weekly or Fable line, a flat "**Weekly limit: N%**" fixes both at N,
+ * else both move.
+ * @returns {{ five: {moving: boolean, fixed: number}, weekly: {moving: boolean, fixed: number}, fable: {moving: boolean, fixed: number} } | null}
  */
-export function stopLine(l, limit, now = new Date(), weekly = null, moving = false) {
-  if (limit === null) return null;
-  if (moving && /5-hour/i.test(l.label)) {
-    const m = movingFiveHour(l.resetsAt, now);
-    if (m) return m;
-  }
-  // A flat weekly stop line ("**Weekly limit: N%**" in the roadmap) wins over the spread.
-  if (weekly !== null && /^weekly/i.test(l.label)) return { line: weekly, next: null };
-  const reset = l.resetsAt ? new Date(l.resetsAt).getTime() : NaN;
-  if (!/^weekly/i.test(l.label) || Number.isNaN(reset)) return { line: limit, next: null };
-  // The reset time comes a fraction of a second early or late; the steps sit on the whole minute.
-  const start = Math.round(reset / 60000) * 60000 - STEPS * STEP_MS;
-  const begun = Math.min(STEPS, Math.max(1, Math.floor((now.getTime() - start) / STEP_MS) + 1));
-  // The first step whose line is above the floor; until then the line stays at the floor.
-  const rises = Math.max(begun + 1, Math.floor((FLOOR * STEPS) / 100) + 1);
-  return {
-    line: Math.max(FLOOR, Math.round(((100 * begun) / STEPS) * 10) / 10),
-    next: rises <= STEPS ? new Date(start + (rises - 1) * STEP_MS).toISOString() : null,
+export function lineSettings(markdown) {
+  const limit = /\*\*Usage limit:\s*(\d{1,3})\s*%/.exec(markdown);
+  if (!limit) return null;
+  const flat = /\*\*Weekly limit:\s*(\d{1,3})\s*%/.exec(markdown);
+  const read = (name) => {
+    const m = new RegExp(`\\*\\*${name} line:\\s*(moving|fixed)\\b([^*]*)\\*\\*`, 'i').exec(markdown);
+    if (!m) return null;
+    const n = /(\d{1,3})\s*%/.exec(m[2]);
+    return { moving: m[1].toLowerCase() === 'moving', fixed: n ? Number(n[1]) : null };
   };
+  const five = read('5-hour');
+  const old = { moving: !flat, fixed: flat ? Number(flat[1]) : WEEKLY_FIXED };
+  const week = read('Weekly');
+  const fable = read('Fable');
+  return {
+    five: { moving: five ? five.moving : true, fixed: Number(limit[1]) },
+    weekly: week ? { moving: week.moving, fixed: week.fixed ?? old.fixed } : old,
+    fable: fable ? { moving: fable.moving, fixed: fable.fixed ?? old.fixed } : old,
+  };
+}
+
+/**
+ * Where a moving line stands at a given moment, from its limit's reset time.
+ * @returns {{ line: number, next: string | null, perHour: number } | null} next: when it leaves its floor
+ *   (null once it moves every minute, or at 100%); perHour: how fast it climbs; null without a reset time
+ */
+export function movingLine(key, resetsAt, now = new Date()) {
+  const reset = resetsAt ? new Date(resetsAt).getTime() : NaN;
+  if (Number.isNaN(reset) || !LINES[key]) return null;
+  const { windowMs, floor } = LINES[key];
+  const minutes = windowMs / 60000;
+  // The reset time comes a fraction of a second early or late; the line moves on the whole minute.
+  const start = Math.round(reset / 60000) * 60000 - windowMs;
+  const begun = Math.min(minutes, Math.max(1, Math.floor((now.getTime() - start) / 60000) + 1));
+  const line = Math.max(floor, Math.round((1000 * begun) / minutes) / 10);
+  // The first minute whose share, to one decimal, is above the floor.
+  const rises = Math.ceil(((floor + 0.05) * minutes) / 100);
+  return {
+    line,
+    next: begun < rises ? new Date(start + (rises - 1) * 60000).toISOString() : null,
+    perHour: Math.round((100 * 36e5 * 10) / windowMs) / 10,
+  };
+}
+
+/** H87's name for the 5-hour one, kept for whoever still calls it. */
+export const movingFiveHour = (resetsAt, now = new Date()) => movingLine('five', resetsAt, now);
+
+/**
+ * The stop line for one plan limit at a given moment, in percent: its own line, moving or fixed
+ * (lineSettings). A limit that is none of the three (none today) stops at the 5-hour line's fixed number.
+ * @param {{ label: string, resetsAt: string | null }} l
+ * @param {ReturnType<typeof lineSettings>} lines null: no stop lines at all
+ * @returns {{ line: number, next: string | null, perHour?: number, moving: boolean } | null}
+ */
+export function stopLine(l, lines, now = new Date()) {
+  if (!lines) return null;
+  const key = lineKey(l.label);
+  const s = key ? lines[key] : null;
+  if (!s) return { line: lines.five.fixed, next: null, moving: false };
+  if (s.moving) {
+    const m = movingLine(key, l.resetsAt, now);
+    if (m) return { ...m, moving: true };
+  }
+  return { line: s.fixed, next: null, moving: false };
 }
 
 /**
@@ -100,20 +145,19 @@ export function stopLine(l, limit, now = new Date(), weekly = null, moving = fal
  * stopLine), and when the usage could not be read. The context window is shown but never stops
  * the work.
  * @param {ReturnType<typeof usageReading> | null} reading
- * @param {number | null} limit the stop line in percent; null means there is none
+ * @param {ReturnType<typeof lineSettings>} lines null: the roadmap names no usage limit, nothing stops
  * @param {Date} [now]
- * @param {{ weeklyOnly?: boolean, moving?: boolean }} [opts] weeklyOnly: only the weekly limits count (F13: a job past the line);
- *   moving: the 5-hour line moves through the session (H87)
+ * @param {{ weeklyOnly?: boolean }} [opts] weeklyOnly: only the weekly limits count (F13: a job past the line)
  */
-export function usageVerdict(reading, limit, now = new Date(), weekly = null, { weeklyOnly = false, moving = false } = {}) {
+export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = false } = {}) {
   if (!reading?.readable) return { stop: true, reason: 'The usage could not be read.' };
-  if (limit === null) return { stop: false, reason: '' };
+  if (!lines) return { stop: false, reason: '' };
   // A kept reading (F6) is old and from another session: shown, but never a stop.
   // F13: a job let past the line only skips the 5-hour line; the weekly lines always count.
   const over = reading.limits
     .filter((l) => !l.kept)
     .filter((l) => !weeklyOnly || /^weekly/i.test(l.label))
-    .map((l) => ({ ...l, line: stopLine(l, limit, now, weekly, moving).line }))
+    .map((l) => ({ ...l, line: stopLine(l, lines, now).line }))
     .filter((l) => l.percent >= l.line);
   if (over.length === 0) return { stop: false, reason: '' };
   return {

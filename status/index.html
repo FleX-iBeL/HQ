@@ -469,16 +469,19 @@
         return box;
       }
 
-      /** limit: where the stop line stands for this row now; next: when it moves up (weekly limits). */
+      /** limit: where the stop line stands for this row now; next: when it starts moving up; perHour: how fast it moves (H91). */
       /** resets: for the 5-hour limit, the moment it resets, shown under "Resets in …" (BACKLOG 36). */
-      function meter(label, sub, percent, when, limit, cls = '', next = null, resets = null) {
+      function meter(label, sub, percent, when, limit, cls = '', next = null, resets = null, perHour = 0) {
         const over = limit !== null && percent >= limit;
         const near = limit !== null && !over && percent >= limit - 10;
         const row = el('div', `meter ${cls}${over ? ' over' : near ? ' near' : ''}`);
         const what = el('div', 'what', label);
         if (sub) what.append(el('small', '', sub));
         const times = el('span', 'soft when', when);
-        if (next) times.append(el('small', '', `Stop line ${limit}%, up at ${clock(next)}`));
+        const rate = perHour >= 1 ? `${perHour}% an hour` : `about ${Math.round(perHour * 24)}% a day`;
+        if (next) times.append(el('small', '', `Stop line ${limit}%, moving from ${clock(next)}`));
+        else if (perHour && limit < 100) times.append(el('small', '', `Stop line ${limit}%, moving up ${rate}`));
+        else if (limit !== null && cls !== 'context') times.append(el('small', '', `Stop line ${limit}%${perHour ? ' until the reset' : ', fixed'}`));
         if (resets) times.append(el('small', '', `Resets at ${clock(resets)}`));
         row.append(what, bar(percent, limit), el('span', 'pct', `${percent}%`), times);
         return row;
@@ -492,9 +495,9 @@
       ];
 
       /** The last usage reading a session saved. The page cannot take one itself. */
-      function drawUsage(u, limit, weekly = null, moving = false) {
+      function drawUsage(u, lines) {
         const age = u ? Date.now() - new Date(u.checkedAt).getTime() : 0;
-        const verdict = usageVerdict(u, limit, new Date(), weekly, { moving });
+        const verdict = usageVerdict(u, lines, new Date());
         // An old reading is shown dimmed: usage may have moved on since.
         const box = el('section', `usage${u && age > 20 * 60000 ? ' stale' : ''}`);
         const head = el('div', 'head');
@@ -535,45 +538,42 @@
             card.append(row);
             continue;
           }
-          const at = stopLine(l, limit, new Date(), weekly, moving);
+          const at = stopLine(l, lines, new Date());
           const fiveHour = /5-hour/i.test(l.label) && l.resetsAt ? new Date(l.resetsAt) : null;
-          card.append(meter(l.label.replace(' · ', ', '), u.plan && l === limits[0] ? `${u.plan} plan` : '', l.percent, l.resetsAt ? until(l.resetsAt) : '', at ? at.line : null, '', at ? at.next : null, fiveHour));
+          card.append(meter(l.label.replace(' · ', ', '), u.plan && l === limits[0] ? `${u.plan} plan` : '', l.percent, l.resetsAt ? until(l.resetsAt) : '', at ? at.line : null, '', at ? at.next : null, fiveHour, at?.perHour ?? 0));
         }
         box.append(card);
         if (u?.readable && verdict.stop) box.append(el('p', 'alarm', `Stop line reached. ${verdict.reason}`));
-        if (limit !== null) box.append(fiveHourSwitch(limit, moving));
-        const fiveWords = moving
-          ? 'For the 5-hour limit it moves through the session: 10% in the first half hour after a reset, 10% more every half hour, 100% in the last.'
-          : `For the 5-hour limit it stays at ${limit}%.`;
+        if (lines) for (const key of ['five', 'weekly', 'fable']) box.append(lineSwitch(key, lines[key]));
         box.append(
           el(
             'p',
             'soft',
-            limit === null
+            !lines
               ? 'Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are. They are not live: older than 20 minutes, the whole box is greyed out. A greyed-out bar is an old number.'
-              : weekly !== null
-                ? `The dark mark is the stop line: work stops when a plan limit reaches it. ${fiveWords} ${weekly}% for the weekly limits. Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.`
-                : `The dark mark is the stop line: work stops when a plan limit reaches it. ${fiveWords} For the weekly limits it starts at 20%, moves up four times a day once the week's own share passes that, reaching 100% at the end of the week. Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.`,
+              : 'The dark mark is the stop line: work stops when a plan limit reaches it. Each of the three lines either moves, recalculated every minute from its own reset (the 5-hour line from 10% after a reset, 20% more an hour, up to 100% at the next; a weekly line from 20% up to 100% at its reset, about 14% a day), or stays at a fixed number; switch each one above, or from a call. A job let past the line only skips the 5-hour line. Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.',
           ),
         );
         return box;
       }
 
-      /** H87: the 5-hour line's switch: moving through the session, or fixed at a number (steps of 5). It writes
-       *  the roadmap through the status server, so both HQs and the calls read the same setting. */
+      /** H87, H91: each stop line's switch: moving every minute, or fixed at a number (steps of 5). It writes
+       *  the roadmap through the status server, so both HQs and the calls read the same settings. */
       let lineBusy = false;
-      async function setFiveHour(mode, limit = null) {
+      async function setLine(line, mode, limit = null) {
         if (lineBusy) return;
         lineBusy = true;
         try {
-          await fetch('/api/usage-line', { method: 'POST', headers: { 'x-hq': 'usage-line', 'content-type': 'application/json' }, body: JSON.stringify({ mode, limit }) });
+          await fetch('/api/usage-line', { method: 'POST', headers: { 'x-hq': 'usage-line', 'content-type': 'application/json' }, body: JSON.stringify({ line, mode, limit }) });
         } catch {}
         lineBusy = false;
         tick();
       }
-      function fiveHourSwitch(limit, moving) {
+      const LINE_NAMES = { five: '5-hour line', weekly: 'Weekly line', fable: 'Fable line' };
+      function lineSwitch(key, s) {
         const row = el('div', 'controls fiveline');
-        row.append(el('span', 'soft', '5-hour line'));
+        row.dataset.line = key;
+        row.append(el('span', 'soft', LINE_NAMES[key]));
         const chip = (text, pressed, on) => {
           const b = el('button', 'chip range', text);
           b.setAttribute('aria-pressed', String(pressed));
@@ -581,14 +581,14 @@
           return b;
         };
         row.append(
-          chip('Moving', moving, () => !moving && setFiveHour('moving')),
-          chip(moving ? 'Fixed' : `Fixed at ${limit}%`, !moving, () => moving && setFiveHour('fixed')),
+          chip('Moving', s.moving, () => !s.moving && setLine(key, 'moving')),
+          chip(s.moving ? 'Fixed' : `Fixed at ${s.fixed}%`, !s.moving, () => s.moving && setLine(key, 'fixed')),
         );
-        if (!moving) {
-          const minus = chip('−', false, () => setFiveHour('fixed', Math.max(5, limit - 5)));
-          const plus = chip('+', false, () => setFiveHour('fixed', Math.min(100, limit + 5)));
-          minus.setAttribute('aria-label', 'Lower the fixed line by 5%');
-          plus.setAttribute('aria-label', 'Raise the fixed line by 5%');
+        if (!s.moving) {
+          const minus = chip('−', false, () => setLine(key, 'fixed', Math.max(5, s.fixed - 5)));
+          const plus = chip('+', false, () => setLine(key, 'fixed', Math.min(100, s.fixed + 5)));
+          minus.setAttribute('aria-label', `Lower the fixed ${LINE_NAMES[key]} by 5%`);
+          plus.setAttribute('aria-label', `Raise the fixed ${LINE_NAMES[key]} by 5%`);
           row.append(minus, plus);
         }
         return row;
@@ -1237,7 +1237,7 @@
 
         app.append(drawRoutines(routines));
         app.append(drawTemperature(routines));
-        app.append(drawUsage(usage, s.usageLimit, s.weeklyLimit, s.usageMoving));
+        app.append(drawUsage(usage, s.usageLines));
 
         if (s.current) {
           const box = el('section');

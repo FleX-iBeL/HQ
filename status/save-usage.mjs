@@ -3,7 +3,7 @@
 //   node "status/save-usage.mjs" <<'JSON'    (then the usage tool's output as JSON, then JSON)
 //   node "status/save-usage.mjs" --by "Opus 5.5 · A2" <<'JSON' …
 // Writes .status/usage.json (not in version history). The stop line is the
-// "**Usage limit: N%**" in the roadmap, or the moving 5-hour line (H87); for the weekly limits it is earned over the week (stopLine in usage.mjs).
+// "**Usage limit: N%**" in the roadmap and its three lines (5-hour, weekly, Fable), each moving every minute or fixed (H91; stopLine in usage.mjs).
 // Ends with code 0 when work may go on, 2 when it has to stop.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -51,14 +51,14 @@ function fromStatusline() {
 }
 
 if (process.argv.includes('--gate')) {
-  const { usageLimit: limit, weeklyLimit: weekly, usageMoving: moving } = parseRoadmap(readFileSync(ROADMAP, 'utf8'));
+  const { usageLines: lines } = parseRoadmap(readFileSync(ROADMAP, 'utf8'));
   let saved = null;
   try {
     saved = JSON.parse(readFileSync(join(root, '.status/usage.json'), 'utf8'));
   } catch {}
   const now = new Date();
   if (saved?.readable) saved.limits = saved.limits.filter((l) => !l.resetsAt || Date.parse(l.resetsAt) > now.getTime());
-  const v = usageVerdict(saved, limit, now, weekly, { weeklyOnly, moving });
+  const v = usageVerdict(saved, lines, now, { weeklyOnly });
   console.log(v.stop ? `STOP. ${v.reason}` : weeklyOnly ? 'OK to go on (past the 5-hour line; the weekly lines are under).' : 'OK to go on.');
   process.exit(v.stop ? 2 : 0);
 }
@@ -99,10 +99,10 @@ if (process.argv.includes('--statusline') || !reading.readable) {
 mkdirSync(join(root, '.status'), { recursive: true });
 writeFileSync(join(root, '.status/usage.json'), `${JSON.stringify(reading, null, 2)}\n`);
 
-const { usageLimit: limit, weeklyLimit: weekly, usageMoving: moving } = parseRoadmap(readFileSync(ROADMAP, 'utf8'));
-const verdict = usageVerdict(reading, limit, new Date(), weekly, { weeklyOnly, moving });
+const { usageLines: lines } = parseRoadmap(readFileSync(ROADMAP, 'utf8'));
+const verdict = usageVerdict(reading, lines, new Date(), { weeklyOnly });
 for (const l of reading.limits) {
-  const at = stopLine(l, limit, new Date(), weekly, moving);
+  const at = stopLine(l, lines, new Date());
   if (l.kept) {
     const reset = l.resetsAt && Date.parse(l.resetsAt) <= Date.now();
     console.log(`${String(reset ? 0 : l.percent).padStart(3)}%  ${l.label}  (${reset ? `reset since ${l.resetsAt}` : `last known, read ${l.keptAt}`}; this session can't read it)`);
@@ -114,6 +114,6 @@ if (reading.context) console.log(`${String(reading.context.percent).padStart(3)}
 console.log(
   verdict.stop
     ? `STOP. ${verdict.reason} Set the status block to STOPPED with this reason.`
-    : `OK to go on${limit === null ? ' (the roadmap names no usage limit)' : weeklyOnly ? ': past the 5-hour line, and the weekly lines are under' : ': everything is under its stop line'}.`,
+    : `OK to go on${lines === null ? ' (the roadmap names no usage limit)' : weeklyOnly ? ': past the 5-hour line, and the weekly lines are under' : ': everything is under its stop line'}.`,
 );
 process.exit(verdict.stop ? 2 : 0);

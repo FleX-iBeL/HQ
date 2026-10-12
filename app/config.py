@@ -232,11 +232,15 @@ also when the other one is down. Tell him what it said. With only one HQ there's
 5-hour and the weekly numbers in a sentence, with how old they are: they are the latest saved \
 numbers (from a running job or the hourly mail check), not read live, and it costs nothing. Weekly \
 Fable is the last one from a normal chat, so say it's the last known one.
-- The 5-hour usage line (where jobs stop starting) either moves through the session, 10% for every half hour \
-after a reset up to 100% in the last, or stays at a fixed number. When he asks which it is, run python3 \
-"{HQ}/routine/usageline.py"; to make it move, add moving; to fix it, add fixed, and a number from 1 to 100 \
-when he names one ("fix it at 60": fixed 60). Switch it on his ask, then tell him in a sentence what it said. \
-A job let past the line still skips it; the weekly line always counts.
+- The usage stop lines (where jobs stop starting), three of them: the 5-hour line, the weekly line \
+(all models) and the weekly Fable line. Each either moves, recalculated every minute from its own reset \
+(the 5-hour one from 10% after a reset, about 20% more an hour, up to 100% at the next; a weekly one from \
+20% up to 100% at its reset, about 14% a day), or stays at a fixed number. When he asks which they are or \
+where they stand, run python3 "{HQ}/routine/usageline.py" and tell him in a sentence or two. To switch one, \
+add which (5-hour, weekly or fable; nothing means the 5-hour one), then moving, or fixed and a number from 1 \
+to 100 when he names one ("fix the weekly one at 95": weekly fixed 95; "fix it at 60": fixed 60). Switch it \
+on his ask, then tell him in a sentence what it said. A job let past the line still only skips the 5-hour \
+line; the weekly lines always count.
 - HQ itself, the app at {HQ}, you may read freely, the same as the workspace (H65): its files, \
 its logs in {HQ}/scratch (the hourly mail check's own log is {HQ}/scratch/routine/mail.log, its last start \
 in {HQ}/scratch/routine/mail-last), and the status page's data with curl on this computer only: \

@@ -935,13 +935,16 @@ import {{ stopLine }} from '{(status / "usage.mjs").as_uri()}';
 const r = parseRoadmap(readFileSync({json.dumps(str(ROADMAP))}, 'utf8'));
 const reset = new Date('2026-10-13T12:00:00Z');
 const week = {{ label: 'Weekly · all models', resetsAt: reset.toISOString() }};
-const at = (ms) => stopLine(week, r.usageLimit, new Date(reset.getTime() - ms)).line;
+const L = r.usageLines ?? {{}};
+const mv = {{ ...L, weekly: {{ moving: true, fixed: 90 }} }};
+const at = (ms) => stopLine(week, mv, new Date(reset.getTime() - ms)).line;
 const DAY = 864e5;
 const steps = Array.from({{ length: 29 }}, (_, i) => at(7 * DAY - 6e4 - i * 6 * 36e5));
 console.log(JSON.stringify({{
   problems: r.problems, state: r.state, usageLimit: r.usageLimit, weeklyLimit: r.weeklyLimit,
-  phases: r.phases.map((p) => p.id), start: at(7 * DAY - 6e4), mid: at(3.5 * DAY), end: at(36e5),
-  five: stopLine({{ label: '5-hour limit', resetsAt: reset.toISOString() }}, r.usageLimit).line,
+  phases: r.phases.map((p) => p.id), start: at(7 * DAY - 6e4), mid: at(3.5 * DAY), end: at(3e4),
+  five: stopLine({{ label: '5-hour limit', resetsAt: reset.toISOString() }}, {{ ...mv, five: {{ moving: false, fixed: r.usageLimit }} }}).line,
+  lines: Object.keys(L).sort().join(','),
   rising: steps.every((v, i) => i === 0 || v >= steps[i - 1]), distinct: new Set(steps).size,
 }}));
 """
@@ -952,11 +955,12 @@ console.log(JSON.stringify({{
         need(d["state"] and "G" in d["phases"], f"the roadmap's state or phases are off: {d['state']}, {d['phases']}")
         need(d["usageLimit"] == 70, f"the 5-hour stop line is {d['usageLimit']}, not 70")
         need(d["weeklyLimit"] is None, f"a flat weekly line ({d['weeklyLimit']}%) is set in the roadmap: the weekly lines won't move")
-        need(d["five"] == 70, f"the 5-hour line moved: {d['five']}")
+        need(d["five"] == 70, f"the fixed 5-hour line moved: {d['five']}")
+        need(d["lines"] == "fable,five,weekly", f"the roadmap's three stop lines aren't read: {d['lines']}")
         need(d["start"] == 20, f"a weekly line starts at {d['start']}, not 20")
         need(d["end"] == 100, f"a weekly line ends at {d['end']}, not 100")
         need(45 <= d["mid"] <= 60, f"a weekly line halfway is {d['mid']}")
-        need(d["rising"] and d["distinct"] > 20, "the weekly line does not rise step by step")
+        need(d["rising"] and d["distinct"] > 20, "the weekly line does not rise through the week")
         # the page itself, when its server is running (it is only on this MacBook)
         code, body, _ = http_get("/roadmap.md", "http://127.0.0.1:4748", timeout=3)
         extra = ""
@@ -3384,12 +3388,13 @@ const future = new Date(Date.now() + 3 * 86400000).toISOString();
 const r = (five, week, kept = false) => ({{ readable: true, limits: [
   {{ label: '5-hour limit', percent: five, resetsAt: future }},
   {{ label: 'Weekly · all models', percent: week, resetsAt: future, kept }} ] }});
-const v = (x, o) => usageVerdict(x, 70, new Date(), 50, o).stop;
+const L = {{ five: {{ moving: false, fixed: 70 }}, weekly: {{ moving: false, fixed: 50 }}, fable: {{ moving: false, fixed: 50 }} }};
+const v = (x, o) => usageVerdict(x, L, new Date(), o).stop;
 console.log(JSON.stringify({{
   fiveOverNormal: v(r(90, 10)), fiveOverPast: v(r(90, 10), {{ weeklyOnly: true }}),
   weekOverPast: v(r(10, 60), {{ weeklyOnly: true }}), bothOverPast: v(r(90, 60), {{ weeklyOnly: true }}),
   keptWeekPast: v(r(90, 99, true), {{ weeklyOnly: true }}),
-  unreadablePast: usageVerdict({{ readable: false }}, 70, new Date(), 50, {{ weeklyOnly: true }}).stop }}));"""
+  unreadablePast: usageVerdict({{ readable: false }}, L, new Date(), {{ weeklyOnly: true }}).stop }}));"""
         out = sp.run(["node", "--input-type=module", "-e", js], capture_output=True, text=True)
         need(out.returncode == 0, f"the verdict check didn't run: {out.stderr.strip()[:200]}")
         d = json.loads(out.stdout)
@@ -5449,54 +5454,83 @@ setTimeout(() => {
                 "an okay keeps the call; a goodbye ends it once heard; more words after it keep it")
 
     async def flow71(self) -> str:
-        """H87, no Claude: the 5-hour stop line moves through the session, 10% for every half hour after a reset
-        up to 100% in the last, or stays at a fixed number; switched from the status page or a call. The line on
-        made-up readings (the weekly lines untouched, no reset time keeps the fixed number, past the line still
-        skips it), the roadmap's setting (moving when it isn't named: HQ's default), the switch script on a
-        copy, the status server's switch on a copy, what a call may run, the call rules, the page and the template."""
+        """H87, H91, no Claude: the three stop lines (5-hour, weekly all models, weekly Fable) each move every minute,
+        the share of their window gone by (never below 10% or 20%), up to 100% in the minute before the reset, or stay
+        at a fixed number; each switched from the status page or a call. The lines on made-up readings (each its own
+        setting, no reset time keeps the fixed number, past the line still skips only the 5-hour one), the roadmap's
+        settings (moving when they aren't named; an old flat weekly limit still fixes both weekly lines), the switch
+        script on a copy, the status server's switch on a copy, what a call may run, the call rules, the page and the
+        template."""
         import subprocess as sp
         from policy import Policy, ALLOW, DENY
         node = shutil.which("node") or "/opt/homebrew/bin/node"
-        js = f"""import {{ stopLine, usageVerdict, movingFiveHour }} from {json.dumps((ROOT / 'status/usage.mjs').as_uri())};
+        js = f"""import {{ stopLine, usageVerdict, movingFiveHour, lineSettings }} from {json.dumps((ROOT / 'status/usage.mjs').as_uri())};
 import {{ parseRoadmap }} from {json.dumps((ROOT / 'status/parse.mjs').as_uri())};
-const R = new Date('2026-10-12T20:00:00Z'), S = R.getTime() - 5 * 36e5;
+const R = new Date('2026-10-12T20:00:00Z'), S = R.getTime() - 5 * 36e5, W = R.getTime() + 3 * 864e5, WS = W - 7 * 864e5;
 const five = {{ label: '5-hour limit', resetsAt: R.toISOString() }};
-const week = {{ label: 'Weekly · all models', resetsAt: new Date(R.getTime() + 3 * 864e5).toISOString() }};
-const at = (min) => stopLine(five, 70, new Date(S + min * 6e4), null, true);
-const lines = Array.from({{ length: 10 }}, (_, i) => at(i * 30 + 1).line);
-const r = (p) => ({{ readable: true, limits: [{{ ...five, percent: p }}, {{ ...week, percent: 5 }}] }});
-const when = new Date(S + 61 * 6e4);  // 1 h in: the line is at 30%
+const week = {{ label: 'Weekly · all models', resetsAt: new Date(W).toISOString() }};
+const fable = {{ label: 'Weekly · Fable', resetsAt: new Date(W).toISOString() }};
+const M = {{ five: {{ moving: true, fixed: 70 }}, weekly: {{ moving: true, fixed: 90 }}, fable: {{ moving: true, fixed: 90 }} }};
+const F = {{ five: {{ moving: false, fixed: 70 }}, weekly: {{ moving: false, fixed: 95 }}, fable: {{ moving: false, fixed: 85 }} }};
+const at = (min, L = M) => stopLine(five, L, new Date(S + min * 6e4 + 1000));
+const wk = (min, l = week, L = M) => stopLine(l, L, new Date(WS + min * 6e4 + 1000));
+const r = (p, w = 5) => ({{ readable: true, limits: [{{ ...five, percent: p }}, {{ ...week, percent: w }}] }});
+const when = new Date(S + 60 * 6e4 + 1000);  // 1 h in, the 61st minute: the line is at 20.3%
 const base = '# x\\n\\n- **Usage limit: 70%.** y\\n';
 console.log(JSON.stringify({{
-  lines, firstNext: at(1).next, lastNext: at(299).next, end: at(299).line,
-  fixed: stopLine(five, 70, new Date(S + 6e4), null, false).line,
-  noReset: stopLine({{ label: '5-hour limit', resetsAt: null }}, 70, new Date(), null, true).line,
-  weekSame: stopLine(week, 70, when, null, true).line === stopLine(week, 70, when, null, false).line,
-  stops: usageVerdict(r(35), 70, when, null, {{ moving: true }}).stop,
-  under: usageVerdict(r(25), 70, when, null, {{ moving: true }}).stop,
-  fixedNoStop: usageVerdict(r(35), 70, when, null, {{ moving: false }}).stop,
-  pastSkips: usageVerdict(r(95), 70, when, null, {{ moving: true, weeklyOnly: true }}).stop,
-  reason: usageVerdict(r(35), 70, when, null, {{ moving: true }}).reason,
-  dflt: parseRoadmap(base).usageMoving, onLine: parseRoadmap(base + '- **5-hour line: moving.** z\\n').usageMoving,
-  offLine: parseRoadmap(base + '- **5-hour line: fixed.** z\\n').usageMoving,
+  first: at(0).line, half: at(29).line, after: at(30).line, hour: at(60).line, mid: at(150).line, last: at(299).line,
+  perMinute: at(61).line > at(60).line && at(62).line > at(61).line, perHour: at(60).perHour,
+  firstNext: at(0).next, movingNext: at(100).next,
+  wFirst: wk(0).line, wMid: wk(5040).line, wLast: wk(10079).line, wRises: wk(4000).line < wk(4010).line && wk(4010).line < wk(4020).line,
+  wPerHour: wk(4000).perHour, fableMoves: wk(5040, fable).line,
+  fixed: at(10, F).line, wFixed: wk(5040, week, F).line, fFixed: wk(5040, fable, F).line,
+  mixed: [stopLine(week, {{ ...M, weekly: F.weekly }}, new Date(WS + 5040 * 6e4)).line,
+          stopLine(fable, {{ ...M, weekly: F.weekly }}, new Date(WS + 5040 * 6e4)).line],
+  noReset: stopLine({{ label: '5-hour limit', resetsAt: null }}, M, new Date()).line,
+  noResetW: stopLine({{ label: 'Weekly · Fable', resetsAt: null }}, M, new Date()).line,
+  stops: usageVerdict(r(25), M, when).stop, under: usageVerdict(r(18), M, when).stop,
+  fixedNoStop: usageVerdict(r(25), F, when).stop,
+  weekStops: usageVerdict(r(5, 60), M, new Date(WS + 5040 * 6e4)).stop,
+  weekFixedNoStop: usageVerdict(r(5, 60), F, new Date(WS + 5040 * 6e4)).stop,
+  pastSkips: usageVerdict(r(95), M, when, {{ weeklyOnly: true }}).stop,
+  pastWeek: usageVerdict(r(95, 60), M, new Date(WS + 5040 * 6e4), {{ weeklyOnly: true }}).stop,
+  reason: usageVerdict(r(25), M, when).reason,
+  none: lineSettings('# x'), dflt: parseRoadmap(base).usageLines,
+  set: lineSettings(base + '- **5-hour line: fixed.** z\\n- **Weekly line: fixed at 95%.** z\\n- **Fable line: moving; fixed at 80% when switched.** z\\n'),
+  flat: lineSettings(base + '- **Weekly limit: 60%.** z\\n'),
+  dfltMoving: parseRoadmap(base).usageMoving, offLine: parseRoadmap(base + '- **5-hour line: fixed.** z\\n').usageMoving,
   helper: movingFiveHour(null) }}));"""
         out = await asyncio.to_thread(sp.run, [node, "--input-type=module", "-e", js], capture_output=True, text=True)
         need(out.returncode == 0, f"the line check didn't run: {out.stderr.strip()[-300:]}")
         d = json.loads(out.stdout.strip().splitlines()[-1])
-        need(d["lines"] == [10, 20, 30, 40, 50, 60, 70, 80, 90, 100], f"the moving line isn't 10% a half hour: {d['lines']}")
-        need(d["firstNext"] == "2026-10-12T15:30:00.000Z" and d["lastNext"] is None and d["end"] == 100,
-             f"the moving line's next step is off: {d['firstNext']}, {d['lastNext']}, {d['end']}")
-        need(d["fixed"] == 70 and d["noReset"] == 70 and d["helper"] is None, "fixed, or moving without a reset time, isn't the fixed number")
-        need(d["weekSame"], "the moving 5-hour line changed the weekly line")
-        need(d["stops"] and not d["under"] and not d["fixedNoStop"], "the verdict doesn't follow the moving line")
-        need("its stop line is 30%" in d["reason"], f"the reason doesn't name the moving line: {d['reason']}")
-        need(not d["pastSkips"], "a job past the line stops at the moving 5-hour line")
-        need(d["dflt"] is True and d["onLine"] is True and d["offLine"] is False, "the roadmap's 5-hour line setting isn't read (moving by default)")
+        need((d["first"], d["half"], d["after"], d["hour"], d["mid"], d["last"]) == (10, 10, 10.3, 20.3, 50.3, 100),
+             f"the moving 5-hour line isn't the session's share, from 10% up to 100%: {d}")
+        need(d["perMinute"] and d["perHour"] == 20, "the 5-hour line doesn't move every minute, 20% an hour")
+        need(d["firstNext"] == "2026-10-12T15:30:00.000Z" and d["movingNext"] is None, f"the 5-hour line's start is off: {d['firstNext']}, {d['movingNext']}")
+        need(d["wFirst"] == 20 and 49 <= d["wMid"] <= 51 and d["wLast"] == 100 and d["wRises"] and d["wPerHour"] == 0.6,
+             f"the weekly line doesn't move every minute from 20% to 100%: {d['wFirst']}, {d['wMid']}, {d['wLast']}, {d['wPerHour']}")
+        need(d["fableMoves"] == d["wMid"], "the Fable line doesn't move like the weekly one")
+        need((d["fixed"], d["wFixed"], d["fFixed"]) == (70, 95, 85), f"a fixed line isn't its own number: {d['fixed']}, {d['wFixed']}, {d['fFixed']}")
+        need(d["mixed"][0] == 95 and d["mixed"][1] == d["wMid"], f"one line's switch changed another: {d['mixed']}")
+        need(d["noReset"] == 70 and d["noResetW"] == 90 and d["helper"] is None, "moving without a reset time isn't the fixed number")
+        need(d["stops"] and not d["under"] and not d["fixedNoStop"], "the verdict doesn't follow the moving 5-hour line")
+        need(d["weekStops"] and not d["weekFixedNoStop"], "the verdict doesn't follow the weekly line's setting")
+        need("its stop line is 20.3%" in d["reason"], f"the reason doesn't name the moving line: {d['reason']}")
+        need(not d["pastSkips"] and d["pastWeek"], "a job past the line stops at the 5-hour line, or skips the weekly one")
+        need(d["none"] is None and all(v["moving"] for v in d["dflt"].values()) and d["dflt"]["weekly"]["fixed"] == 90,
+             f"the roadmap's settings aren't read (moving by default): {d['none']}, {d['dflt']}")
+        st = d["set"]
+        need(st["five"] == {"moving": False, "fixed": 70} and st["weekly"] == {"moving": False, "fixed": 95}
+             and st["fable"] == {"moving": True, "fixed": 80}, f"the three settings aren't read: {st}")
+        need(d["flat"]["weekly"] == {"moving": False, "fixed": 60} == d["flat"]["fable"], f"an old flat weekly limit isn't read: {d['flat']}")
+        need(d["dfltMoving"] is True and d["offLine"] is False, "the old 5-hour setting field isn't kept")
 
         # The switch script, on a copy of the template's roadmap; the real roadmap is refused under a test.
         copy = self.tmp / "h87-roadmap.md"
         copy.write_text((ROOT / "template/HQ/roadmap.md").read_text())
-        need("**5-hour line: moving.**" in copy.read_text(), "the template doesn't start with the moving line (HQ's default)")
+        tt = copy.read_text()
+        need("**5-hour line: moving.**" in tt and "**Weekly line: moving; fixed at 90% when switched.**" in tt
+             and "**Fable line: moving; fixed at 90% when switched.**" in tt, "the template doesn't start with all three lines moving (HQ's default)")
         script = str(ROOT / "routine/usageline.py")
         env = {**os.environ, "HQ_ROADMAP": str(copy)}
         ul = lambda *a, e=env: sp.run(["python3", script, *a], capture_output=True, text=True, env=e)  # noqa: E731
@@ -5510,13 +5544,34 @@ console.log(JSON.stringify({{
         t = copy.read_text()
         need(o.returncode == 0 and "**5-hour line: moving.**" in t and "**Usage limit: 60%" in t and t.count("5-hour line:") == 1,
              f"moving again didn't, or lost the number: {o.stdout}{o.stderr}")
-        need(ul("fixed", "0").returncode == 2 and ul("fixed", "150").returncode == 2 and ul("sideways").returncode == 2,
+        o = ul("weekly", "fixed", "95")
+        t = copy.read_text()
+        need(o.returncode == 0 and "fixed at 95%" in o.stdout and "**Weekly line: fixed at 95%.**" in t
+             and "**Fable line: moving; fixed at 90% when switched.**" in t and "**5-hour line: moving.**" in t,
+             f"fixing the weekly line at 95 didn't, or touched another: {o.stdout}{o.stderr}")
+        o = ul("fable", "fixed")
+        t = copy.read_text()
+        need(o.returncode == 0 and "**Fable line: fixed at 90%.**" in t, f"fixing the Fable line at its number didn't: {o.stdout}{o.stderr}")
+        o = ul("weekly", "moving")
+        t = copy.read_text()
+        need(o.returncode == 0 and "**Weekly line: moving; fixed at 95% when switched.**" in t and t.count("Weekly line:") == 1,
+             f"moving the weekly line again didn't, or lost its number: {o.stdout}{o.stderr}")
+        o = ul()
+        need(o.returncode == 0 and all(w in o.stdout for w in ("5-hour line", "weekly line (all models)", "Fable line is fixed at 90%")),
+             f"reading all three: {o.stdout}{o.stderr}")
+        need(ul("fixed", "0").returncode == 2 and ul("fixed", "150").returncode == 2 and ul("sideways").returncode == 2
+             and ul("weekly", "fixed", "sixty").returncode == 2 and ul("fable", "off").returncode == 2,
              "the script takes a number outside 1 to 100, or an unknown word")
         need(copy.read_text() == t, "a refused switch still changed the roadmap")
         bare = self.tmp / "h87-bare.md"
         bare.write_text("# x\n\n- **Usage limit: 70%.** y\n")
         need(ul("fixed", e={**os.environ, "HQ_ROADMAP": str(bare)}).returncode == 0 and
              bare.read_text().count("**5-hour line: fixed.**") == 1, "a roadmap without the setting doesn't get its line")
+        need(ul("fable", "fixed", "80", e={**os.environ, "HQ_ROADMAP": str(bare)}).returncode == 0 and
+             ul("weekly", "moving", e={**os.environ, "HQ_ROADMAP": str(bare)}).returncode == 0, "a roadmap without the weekly lines can't switch them")
+        bl = bare.read_text().split("\n")
+        need([l.split(":")[0] for l in bl if " line:" in l] == ["- **5-hour line", "- **Weekly line", "- **Fable line"],
+             f"the lines aren't added in their order under the usage limit: {bl}")
         real = ul("moving", e={**os.environ, "HQ_ROADMAP": os.environ.get("HQ_REAL_ROADMAP", str(ROADMAP))})
         need(real.returncode != 0, "under a test, the switch changed the real roadmap")
 
@@ -5556,26 +5611,36 @@ console.log(JSON.stringify({{
             need(code == 200 and "**5-hour line: moving.**" in road.read_text(), f"the page's switch didn't make it move: {code} {ans}")
             code, _ = await asyncio.to_thread(post, {"mode": "fixed", "limit": 0})
             need(code == 400, "the page's switch took 0%")
+            code, ans = await asyncio.to_thread(post, {"line": "weekly", "mode": "fixed", "limit": 95})
+            t = road.read_text()
+            need(code == 200 and "**Weekly line: fixed at 95%.**" in t and "**5-hour line: moving.**" in t,
+                 f"the page's weekly switch didn't fix it at 95: {code} {ans}")
+            code, ans = await asyncio.to_thread(post, {"line": "fable", "mode": "fixed"})
+            need(code == 200 and "**Fable line: fixed at 90%.**" in road.read_text(), f"the page's Fable switch didn't: {code} {ans}")
+            code, _ = await asyncio.to_thread(post, {"line": "monthly", "mode": "moving"})
+            need(code == 400, "the page's switch took an unknown line")
             _, page, _ = http_get("/", base)
             html = page.decode()
-            need("fiveHourSwitch(limit, moving)" in html and "s.usageMoving" in html and "'x-hq': 'usage-line'" in html,
-                 "the status page has no 5-hour line switch")
+            need("lineSwitch(key, lines[key])" in html and "['five', 'weekly', 'fable']" in html and "s.usageLines" in html
+                 and "'x-hq': 'usage-line'" in html and "moving up" in html, "the status page doesn't have the three line switches")
         finally:
             proc.terminate()
 
         # A call: reads it, makes it move, fixes it at a number; nothing else.
         pol = Policy(config.FOLDER)
         c = f'python3 "{ROOT}/routine/usageline.py"'
-        for extra in ("", " moving", " fixed", " fixed 60"):
-            need(pol.decide("Bash", {"command": c + extra}).verdict == ALLOW, f"a call can't run the 5-hour line switch with '{extra.strip()}'")
-        for extra in (" fixed sixty", " off", " moving 60"):
-            need(pol.decide("Bash", {"command": c + extra}).verdict == DENY, f"a call may run the 5-hour line switch with '{extra.strip()}'")
-        need("usageline.py" in config.VOICE_RULES and "half hour" in config.VOICE_RULES and "fixed 60" in config.VOICE_RULES,
-             "the call rules don't say how to switch the 5-hour line")
+        for extra in ("", " moving", " fixed", " fixed 60", " weekly", " weekly moving", " weekly fixed 95", " fable fixed",
+                      " fable fixed 80%", " 5-hour moving"):
+            need(pol.decide("Bash", {"command": c + extra}).verdict == ALLOW, f"a call can't run the line switch with '{extra.strip()}'")
+        for extra in (" fixed sixty", " off", " moving 60", " weekly off", " fable fixed sixty", " monthly moving", " weekly fable moving"):
+            need(pol.decide("Bash", {"command": c + extra}).verdict == DENY, f"a call may run the line switch with '{extra.strip()}'")
+        need("usageline.py" in config.VOICE_RULES and "every minute" in config.VOICE_RULES and "weekly fixed 95" in config.VOICE_RULES
+             and "fable" in config.VOICE_RULES, "the call rules don't say how to switch the three lines")
         save = (ROOT / "status/save-usage.mjs").read_text()
-        need(save.count("moving") >= 4, "the usage check and the jobs' gate don't use the moving line")
-        return ("10% a half hour up to 100%, weekly untouched, past the line still skips it; moving by default; "
-                "switched on a copy by the script, the page (its header only) and a call; the real roadmap refused")
+        need(save.count("usageLines") >= 2, "the usage check and the jobs' gate don't use the three lines")
+        return ("all three lines move every minute (10% or 20% up to 100%) or stay fixed, each on its own; past the line "
+                "still skips only the 5-hour one; moving by default; switched on a copy by the script, the page (its header "
+                "only) and a call; the real roadmap refused")
 
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
@@ -5923,7 +5988,7 @@ FLOWS = {
     68: ("H72: the hidden Yes: hold the greyed-out Send, slide onto Yes, let go sends Yes", False, "flow68"),
     69: ("H76, H77: each agent her own character on calls, HQ's defaults a workspace can change", False, "flow69"),
     70: ("H75: she hangs up herself after his clear goodbye, once it has been heard; never on a passing okay", False, "flow70"),
-    71: ("H87: the 5-hour line moves 10% every half hour of the session, or stays fixed; switched from the page or a call", False, "flow71"),
+    71: ("H87, H91: the three stop lines move every minute, or each stays fixed; switched from the page or a call", False, "flow71"),
 }
 
 

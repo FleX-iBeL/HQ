@@ -329,21 +329,23 @@ const server = createServer(async (req, res) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(out.data));
     return;
   }
-  // H87: the 5-hour line's switch on the page (moving, or fixed at a number), through routine/usageline.py, which
+  // H87, H91: the stop lines' switches on the page (each moving, or fixed at a number), through routine/usageline.py, which
   // writes it in the roadmap. Needs the x-hq header, so a page from elsewhere can't press it.
   if (path0 === '/api/usage-line') {
     if (req.method !== 'POST' || req.headers['x-hq'] !== 'usage-line') {
-      res.writeHead(403).end('Only the HQ page can switch the 5-hour line');
+      res.writeHead(403).end('Only the HQ page can switch the usage lines');
       return;
     }
     let body = {};
     try { body = JSON.parse(await readBody(req)); } catch {}
+    // H91: which line (five, weekly or fable; five when not named), then moving, or fixed with a number.
+    const which = body.line == null ? 'five' : ['five', 'weekly', 'fable'].includes(body.line) ? body.line : null;
     const args = body.mode === 'moving' ? ['moving'] : body.mode === 'fixed' ? ['fixed'].concat(body.limit != null ? [String(body.limit)] : []) : null;
-    if (!args) {
-      res.writeHead(400).end('mode is moving or fixed');
+    if (!args || !which) {
+      res.writeHead(400).end('line is five, weekly or fable; mode is moving or fixed');
       return;
     }
-    execFile('/usr/bin/python3', [join(root, 'routine/usageline.py'), ...args], { timeout: 20000 }, (err, out, errOut) => {
+    execFile('/usr/bin/python3', [join(root, 'routine/usageline.py'), which, ...args], { timeout: 20000 }, (err, out, errOut) => {
       const said = String(err ? errOut || out : out).trim();
       res.writeHead(err ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ ok: !err, said }));
     });

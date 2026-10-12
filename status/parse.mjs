@@ -13,8 +13,11 @@
  * "| ✅ | D1 Name | …"; the other columns (what you get, backlog, model) and the text under the
  * table are kept as they are written, for the page to show when a phase is opened.
  *
- * Anywhere in the file, "**Usage limit: 70%**" is the share of a plan limit at which work stops.
+ * Anywhere in the file, "**Usage limit: 70%**" is the share of a plan limit at which work stops; the three
+ * stop lines' settings (moving or fixed, H91) are read by lineSettings in usage.mjs.
  */
+
+import { lineSettings } from './usage.mjs';
 
 const MARKS = { '✅': 'done', '🔨': 'doing', '⬜': 'todo', '❓': 'ask' };
 const STATES = ['BUILDING', 'TESTING', 'RELEASING', 'WAITING', 'DONE', 'STOPPED'];
@@ -166,6 +169,8 @@ export function parseRoadmap(markdown) {
     usageLimit: limit ? Number(limit[1]) : null,
     weeklyLimit: weekly ? Number(weekly[1]) : null,
     usageMoving: five ? five[1].toLowerCase() === 'moving' : true,
+    // H91: the three stop lines (5-hour, weekly all models, weekly Fable), each moving or fixed.
+    usageLines: lineSettings(markdown),
     state,
     title,
     headline: h2 ? plain(h2.slice(3)) : '',
