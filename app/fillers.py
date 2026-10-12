@@ -103,6 +103,11 @@ class FillerPlayer(FrameProcessor):
         rest = [x for k, texts in self._texts.items() for x in (texts if k == "greeting" else texts[1:])
                 if x != greeting[0]]
         order = [greeting[0]] + first + rest
+        if not self.waiting_lines:
+            # H55: with the waiting lines off only the greetings ever play, so only those are
+            # recorded (on a server's CPU all of them took about a minute and slowed the call).
+            order = [greeting[0]] + [x for x in greeting[1:]]
+            first = []
         for i, text in enumerate(order):
             if text not in self._audio:
                 self._audio[text] = await asyncio.to_thread(self._render, text, sample_rate)
