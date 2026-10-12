@@ -61,9 +61,12 @@ const LABELLED = {
 // routine/hqpaths.py's where() says the same.
 const OS_NAME = { darwin: 'macOS', linux: 'Linux', win32: 'Windows' }[process.platform] ?? process.platform;
 const WHERE = LABEL || `Local · ${OS_NAME}`;
+// H92: a Mac is the laptop; on a server (Linux) the page leaves the Laptop section out. HQ_LAPTOP=1 or 0 overrides (tests).
+const LAPTOP = process.env.HQ_LAPTOP ? process.env.HQ_LAPTOP === '1' : process.platform === 'darwin';
 function labelled(path, body) {
   if (path === '/' || path === '/index.html') {
-    const page = String(body).replace('<meta name="hq-where" content="" />', `<meta name="hq-where" content="${WHERE}" />`);
+    const page = String(body).replace('<meta name="hq-where" content="" />', `<meta name="hq-where" content="${WHERE}" />`)
+      .replace('<meta name="hq-laptop" content="" />', `<meta name="hq-laptop" content="${LAPTOP ? 'yes' : 'no'}" />`);
     if (!LABEL) return page;
     return page
       .replace('<title>HQ · status</title>', `<title>HQ ${LABEL} · status</title>`)

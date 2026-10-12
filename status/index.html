@@ -10,6 +10,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Status" />
     <meta name="hq-where" content="" />
+    <meta name="hq-laptop" content="" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <style>
       /* A plain status page, as any website has one: light, one column, ordinary type. */
@@ -367,6 +368,9 @@
       const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision' };
       const app = document.getElementById('app');
       const WHERE = document.querySelector('meta[name="hq-where"]')?.content ?? '';  // H83, filled in by the server
+      // H92: on a server (not a Mac) there is no laptop to read: no Laptop section, no battery in the top line,
+      // and no laptop temperature or battery lines under Routines. Filled in by the server; empty shows them.
+      const LAPTOP = document.querySelector('meta[name="hq-laptop"]')?.content !== 'no';
       const el = (tag, cls, text) => {
         const n = document.createElement(tag);
         if (cls) n.className = cls;
@@ -673,7 +677,7 @@
         ['call', 'Call line', 'For calls from the phone'],
         ['temp', 'Laptop temperature', 'Every minute, free, no password'],
         ['battery', 'Laptop battery', 'Every minute, free'],
-      ];
+      ].filter(([key]) => LAPTOP || (key !== 'temp' && key !== 'battery'));  // H92
       function drawRoutines(r) {
         const box = el('section');
         const now = r?.now ?? Date.now() / 1000;
@@ -1218,7 +1222,7 @@
         if (WHERE) brand.append(el('small', 'where', WHERE));
         name.append(brand, el('span', '', 'Build status'));
         // H37: the battery in the top line, so it shows without scrolling or opening anything.
-        const bt = routines?.battery;
+        const bt = LAPTOP ? routines?.battery : null;  // H92
         if (bt) {
           const bOld = (routines.now ?? Date.now() / 1000) - bt.t > 180;
           const pill = el('span', `batpill ${bOld ? 'old' : bt.lvl}`, `Battery ${bt.pct}%${bt.charging ? ' · charging' : bt.plugged ? ' · on the charger' : ''}${bOld ? ' · old reading' : ''}`);
@@ -1251,7 +1255,7 @@
         app.append(now);
 
         app.append(drawRoutines(routines));
-        app.append(drawTemperature(routines));
+        if (LAPTOP) app.append(drawTemperature(routines));  // H92: no Laptop section on a server
         app.append(drawUsage(usage, s.usageLines));
 
         if (s.current) {

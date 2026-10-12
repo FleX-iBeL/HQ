@@ -135,6 +135,10 @@ Run them before and after every update; they print a short pass/fail table at th
   72 H83, no Claude: which HQ this is (the label, else Local and the system) in Python and the status server,
      on the status page, /where.json and the strip's reading, with and without a label; the call page's line
      takes no room
+  73 H92, no Claude: no laptop on a server. The status page in a headless browser, served as a server
+     (HQ_LAPTOP=0) and as the laptop (HQ_LAPTOP=1), with a hot laptop and a low battery: on a server no Laptop
+     section, no battery in the top line, no laptop lines or bars under Routines, and the Routines light green;
+     on the laptop all of it as before, the light red
   64 F16, no Claude: the call page fits the screen. The real call page (with Moneypenny's card) in a headless
      browser at iPhone 13 sizes (Safari and the home screen), a small phone, and the desktop app's size (?app):
      on a call the old layout stays (the picker and her card keep their room) and the page can't be scrolled
@@ -5707,6 +5711,84 @@ console.log(JSON.stringify({{
              and re.search(r"h1 #where \{ position:absolute;", call), "the call page doesn't show it, or it takes room (F16)")
         return f"the status page, the strip's reading and /where.json say {seen[0]!r} without a label and {seen[1]!r} with one; shown under HQ on the status page, the strip and the call page, the call screen unmoved"
 
+    async def flow73(self) -> str:
+        """H92, no Claude: on a server there is no laptop to read. The status page in a headless browser, served once as a
+        server (HQ_LAPTOP=0) and once as the laptop (HQ_LAPTOP=1), with a hot laptop and a low battery written down."""
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the status page in")
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        site = self.tmp / "h92"
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        (site / ".status").mkdir()
+        shutil.copy(ROADMAP, site_roadmap(site))
+        now = int(time.time())
+        lines = {k: {"state": "ok", "text": "fine", "at": now, "every": 60} for k in ["helper", "watchdog", "mail", "jobs", "usage", "phone", "call"]}
+        lines["temp"] = {"state": "down", "text": "Hot: 95°C on the chip", "at": now, "every": 60}
+        lines["battery"] = {"state": "down", "text": "Low battery: 12%, on battery", "at": now, "every": 60}
+        (site / ".status/routines.json").write_text(json.dumps(lines))
+        (site / ".status/battery.json").write_text(json.dumps({"t": now, "pct": 12, "plugged": False, "charging": False, "lvl": "low",
+                                                              "ranges": {"low": 20, "getting_low": 40}}))
+        (site / ".status/temperature.json").write_text(json.dumps({"t": now, "cpu": 95.0, "avg": 88.0, "lvl": "hot", "slow": False,
+                                                                  "ranges": {"warm": 70, "hot": 90}}))
+        (site / ".status/routines-history.jsonl").write_text(json.dumps({"t": now - 60, "s": {k: v["state"] for k, v in lines.items()}}) + "\n")
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  for (let i = 0; i < 40 && !document.querySelector('.routine'); i++) await wait(250);
+  await wait(1500);
+  out.push('laptop:' + (document.querySelector('section.laptop') ? 'yes' : 'no'));
+  out.push('pill:' + (document.querySelector('.batpill') ? 'yes' : 'no'));
+  out.push('rows:' + [...document.querySelectorAll('.routine .name')].map(n => n.textContent).filter(t => /Laptop/.test(t)).length);
+  out.push('lanes:' + [...document.querySelectorAll('.lane .who')].map(n => n.textContent).filter(t => /Laptop/.test(t)).length);
+  out.push('alllanes:' + document.querySelectorAll('.lane .who').length);
+  const rl = [...document.querySelectorAll('section')].find(s => /Routines/.test(s.querySelector('summary')?.textContent || ''));
+  out.push('light:' + (rl && rl.querySelector('.light').className));
+  const pre = document.createElement('pre'); pre.id = 'h92'; pre.textContent = 'H92RESULT ' + out.join(' | ') + ' END';
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        idx = site / "status/index.html"
+        idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
+        seen = {}
+        for laptop, port in (("0", 4796), ("1", 4797)):
+            env = {**os.environ, "HQ_STATUS_PORT": str(port), "HQ_LAPTOP": laptop, "HQ_FIX_DRY": "1"}
+            proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=env,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                base = f"http://127.0.0.1:{port}"
+                for _ in range(50):
+                    if http_get("/routines.json", base)[0] == 200:
+                        break
+                    await asyncio.sleep(0.2)
+                _, page, _ = http_get("/", base)
+                want = "no" if laptop == "0" else "yes"
+                need(f'<meta name="hq-laptop" content="{want}" />'.encode() in page, f"the page doesn't say hq-laptop {want}")
+                # Off a Mac the browser's own sandbox is refused by the system; only our own page is opened here.
+                r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                                  f"--user-data-dir={self.tmp / ('h92-profile' + laptop)}",
+                                                  "--virtual-time-budget=20000", "--dump-dom", base + "/"], timeout=120)
+                m = re.search(r'<pre id="h92">H92RESULT (.*?) END</pre>', r.stdout)
+                need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+                res = dict(part.split(":", 1) for part in m.group(1).split(" | "))
+                say(f"   HQ_LAPTOP={laptop}: {m.group(1)[:300]}")
+                seen[laptop] = res
+            finally:
+                proc.terminate()
+                proc.wait(timeout=10)
+        srv, lap = seen["0"], seen["1"]
+        need(srv["laptop"] == "no" and srv["pill"] == "no", f"a server still shows the laptop: section {srv['laptop']}, battery {srv['pill']}")
+        need(srv["rows"] == "0" and srv["lanes"] == "0", f"a server still has laptop lines under Routines: {srv['rows']} lines, {srv['lanes']} bars")
+        need(int(srv["alllanes"]) > 0, "a server shows no bars at all under Routines")
+        need(srv["light"] == "light", f"on a server a hot laptop and a low battery still colour the Routines light: {srv['light']}")
+        need(lap["laptop"] == "yes" and lap["pill"] == "yes", f"the laptop lost its Laptop section or battery: {lap['laptop']}, {lap['pill']}")
+        need(lap["rows"] == "2" and lap["lanes"] == "2", f"the laptop lost its temperature and battery lines: {lap['rows']} lines, {lap['lanes']} bars")
+        need(lap["light"] == "light down", f"on the laptop a hot laptop doesn't make the Routines light red: {lap['light']}")
+        return "on a server no Laptop section, no battery in the top line, no laptop lines or bars under Routines, the light green; on the laptop all of it as before, the light red"
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -6055,6 +6137,7 @@ FLOWS = {
     70: ("H75: she hangs up herself after his clear goodbye, once it has been heard; never on a passing okay", False, "flow70"),
     71: ("H87, H91: the three stop lines move every minute, or each stays fixed; switched from the page or a call", False, "flow71"),
     72: ("H83: which HQ this is (VPS, or Local · macOS), small under the name on the status page, the strip and the call page", False, "flow72"),
+    73: ("H92: on a server the status page shows no Laptop section and no laptop lines under Routines", False, "flow73"),
 }
 
 
