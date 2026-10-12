@@ -5132,6 +5132,98 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
                 "reading it still works, a test's own copy is written; the real pairing is never read or used; "
                 "throwaway HQs still pair; the real job list unchanged")
 
+    # 68
+    async def flow68(self) -> str:
+        """H72: the hidden Yes. No Claude turns. The real call page in a headless browser at phone width,
+        on a fake live call: with nothing typed Send stays greyed out; a short hold shows nothing and sends
+        nothing; a hold of a moment shows a small Yes above it, Send still greyed out; sliding onto Yes and
+        letting go sends "Yes" as a typed turn; letting go elsewhere sends nothing; with text typed, or off a
+        call, no Yes ever shows. No hint on the page. On the server a typed "Yes" goes the same way as a
+        typed or spoken yes, so it answers a question waiting for his yes."""
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const check = (name, ok, why) => out.push(name + ":" + (ok ? "ok" : "WRONG " + why));
+  const sent = [];
+  dc = { readyState: "open", send: t => sent.push(JSON.parse(t)), close() {} };
+  setState("live", "On the call"); showChat(true); await wait(50);
+  const shown = () => yesBtn.classList.contains("show") && yesBtn.getBoundingClientRect().height > 0;
+  const mid = el => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+  const at = (el) => { const [x, y] = mid(el); return document.elementFromPoint(x, y); };
+  const pe = (type, x, y) => sendWrap.dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: "touch", isPrimary: true, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+  const [sx, sy] = mid(typeSend);
+  check("greyed", typeSend.disabled && getComputedStyle(typeSend).opacity < 0.6 && !shown(), typeSend.disabled + "/" + getComputedStyle(typeSend).opacity);
+  check("touch-reaches", sendWrap.contains(at(typeSend)), String(at(typeSend) && at(typeSend).id));
+  // a short hold: nothing shows, nothing goes
+  pe("pointerdown", sx, sy); await wait(600);
+  check("short-hidden", !shown(), yesBtn.className);
+  pe("pointerup", sx, sy); await wait(30);
+  check("short-nothing", sent.length === 0, JSON.stringify(sent));
+  // a hold of a moment: Yes shows above Send, Send still greyed out
+  pe("pointerdown", sx, sy); await wait(1700);
+  const yb = yesBtn.getBoundingClientRect(), sb = typeSend.getBoundingClientRect();
+  check("shows", shown() && yb.bottom <= sb.top && typeSend.disabled, yesBtn.className + " " + yb.bottom + "/" + sb.top);
+  const [yx, yy] = mid(yesBtn);
+  pe("pointermove", yx, yy); await wait(30);
+  check("over", yesBtn.classList.contains("over"), yesBtn.className);
+  pe("pointerup", yx, yy); await wait(30);
+  check("sends-yes", sent.length === 1 && sent[0].type === "typed" && sent[0].text === "Yes", JSON.stringify(sent));
+  check("gone-after", !shown() && typeIn.value === "" && typeSend.disabled, yesBtn.className);
+  // shown, but let go on Send itself: nothing
+  pe("pointerdown", sx, sy); await wait(1700);
+  pe("pointermove", yx, yy); pe("pointermove", sx, sy); await wait(30);
+  check("off-again", shown() && !yesBtn.classList.contains("over"), yesBtn.className);
+  pe("pointerup", sx, sy); await wait(30);
+  check("elsewhere-nothing", sent.length === 1 && !shown(), JSON.stringify(sent));
+  // a cancelled touch: nothing
+  pe("pointerdown", sx, sy); await wait(1700); pe("pointercancel", yx, yy); await wait(30);
+  check("cancel-nothing", sent.length === 1 && !shown(), JSON.stringify(sent));
+  // something typed: Send is Send, no Yes
+  typeIn.value = "hello"; typeIn.dispatchEvent(new Event("input", { bubbles: true })); await wait(30);
+  pe("pointerdown", sx, sy); await wait(1700);
+  check("typed-no-yes", !typeSend.disabled && !shown(), typeSend.disabled + "/" + yesBtn.className);
+  pe("pointerup", sx, sy);
+  typeIn.value = ""; typeIn.dispatchEvent(new Event("input", { bubbles: true })); await wait(30);
+  // a Yes showing when the call ends goes away; off a call nothing shows
+  pe("pointerdown", sx, sy); await wait(1700);
+  setState("idle", ""); await wait(30);
+  check("call-ends", !shown(), yesBtn.className);
+  pe("pointerup", yx, yy); pe("pointerdown", sx, sy); await wait(1700);
+  check("off-call", !shown() && sent.length === 1, yesBtn.className + " " + sent.length);
+  pe("pointerup", yx, yy);
+  // hidden: no hint anywhere
+  check("hidden", yesBtn.getAttribute("aria-hidden") === "true" && !yesBtn.title && !typeSend.title && !sendWrap.title && yesBtn.tabIndex === -1, "hint");
+  const pre = document.createElement("pre"); pre.id = "h72"; pre.textContent = "H72RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f = self.tmp / "h72.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--window-size=390,844",
+                                          f"--user-data-dir={self.tmp / 'h72-profile'}", "--virtual-time-budget=30000", "--dump-dom", f.as_uri()], timeout=90)
+        m = re.search(r'<pre id="h72">H72RESULT (.*?) END</pre>', r.stdout)
+        need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        res = m.group(1)
+        say(f"   {res}")
+        need(all(part.endswith(":ok") for part in res.split(" | ")), f"the hidden Yes is wrong: {res}")
+        # No hint in the page's words: the only visible "Yes" is the button itself, and no hold or swipe hint.
+        visible = re.sub(r"<script.*?</script>|<style.*?</style>|<!--.*?-->", "", page, flags=re.S)
+        need(len(re.findall(r">\s*Yes\s*<", visible)) == 1 and not re.search(r"(?i)hold send|swipe|slide up", visible),
+             "the page hints at the hidden Yes")
+        # The server: a typed line is his turn like a spoken one, and that turn answers a waiting question.
+        llm_src = (APP / "claude_llm.py").read_text()
+        need("self.policy.answer(words)" in llm_src and 'message.get("type") == "typed"' in (APP / "bot.py").read_text(),
+             "a typed line no longer answers a waiting question")
+        from policy import is_clear_yes
+        need(is_clear_yes("Yes"), "a typed Yes isn't a clear yes")
+        return "nothing typed: Send greyed out; a moment's hold shows Yes above it; sliding onto it and letting go sends Yes as a typed turn, which answers a waiting yes question; elsewhere, a short hold, typed text or off a call: nothing; no hint"
+
 
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
@@ -5476,6 +5568,7 @@ FLOWS = {
     65: ("H56.3: main and backup: two throwaway HQs hand the main role back and forth; alone, an HQ is simply main", False, "flow65"),
     66: ("H56.4: the two-way sync: two private Syncthings, both ways, video left out, conflicts kept and merged, only the main commits", False, "flow66"),
     67: ("F17: a test never changes the real job list, schedule or status block, nor uses the real pairing", False, "flow67"),
+    68: ("H72: the hidden Yes: hold the greyed-out Send, slide onto Yes, let go sends Yes", False, "flow68"),
 }
 
 

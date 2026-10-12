@@ -234,6 +234,16 @@
   #typesend { flex-shrink:0; border:0; border-radius:999px; padding:0 18px; height:46px; background:var(--accent); color:#04120f;
               font:600 16px/1 -apple-system,sans-serif; cursor:pointer; }
   #typesend:disabled { opacity:.45; cursor:default; }
+  /* H72: hidden on purpose, no hint anywhere. Holding the greyed-out Send for a moment shows a small Yes
+     just above it; sliding onto it and letting go sends "Yes". The disabled Send lets the touch through
+     to its wrapper, which keeps the slide (no scrolling, no text selection, no long-press menu). */
+  #sendwrap { position:relative; flex-shrink:0; display:flex; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+  #typesend:disabled { pointer-events:none; }
+  #yesbtn { display:none; position:absolute; left:50%; bottom:calc(100% + 12px); transform:translateX(-50%); border:0; border-radius:999px;
+            padding:0 16px; height:38px; background:var(--ring); color:var(--fg); font:600 15px/1 -apple-system,sans-serif; pointer-events:none;
+            box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  #yesbtn.show { display:block; }
+  #yesbtn.over { background:var(--accent); color:#04120f; transform:translateX(-50%) scale(1.08); }
   /* H8: with the chat open during a call, the log sits at the top and the controls stay below it:
      what HQ is doing, the talk button, Hang up. */
   body.chatting { justify-content:flex-end; gap:14px; padding-bottom:calc(16px + env(safe-area-inset-bottom)); min-height:100%; }
@@ -306,7 +316,7 @@
   <button id="setdone" type="button">Done</button>
 </div>
 <div id="chat" role="dialog" aria-label="Chat log"><div id="chathead"><h2 id="chattitle">What was said</h2><button id="chatclose" type="button">Close</button></div><div id="chatlog"></div>
-  <form id="typeform" autocomplete="off"><textarea id="typein" rows="1" enterkeyhint="send" placeholder="Type to Donna" aria-label="Type to Donna" maxlength="2000"></textarea><button id="typesend" type="submit" disabled>Send</button></form></div>
+  <form id="typeform" autocomplete="off"><textarea id="typein" rows="1" enterkeyhint="send" placeholder="Type to Donna" aria-label="Type to Donna" maxlength="2000"></textarea><span id="sendwrap"><button id="yesbtn" type="button" tabindex="-1" aria-hidden="true">Yes</button><button id="typesend" type="submit" disabled>Send</button></span></form></div>
 <button id="chatbtn" type="button" aria-label="Chat log" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"/></svg>
   <span class="badge"></span>
@@ -685,6 +695,7 @@ function canType() { return state === "live" && dc && dc.readyState === "open"; 
 function showTyping() {
   typeForm.classList.toggle("show", state === "live");
   typeSend.disabled = !(canType() && typeIn.value.trim());
+  if (state !== "live") { try { yesReset(); } catch (e) {} }  // H72 (before its setup has run, there is nothing to reset)
 }
 // H41: the box grows downward line by line as he types, so all of it stays readable, up to its
 // max-height (about six lines); after that it scrolls inside. On a phone (a touch screen) Enter is a new
@@ -704,14 +715,48 @@ typeIn.addEventListener("keydown", ev => {
   ev.preventDefault();
   typeForm.requestSubmit();
 });
+function sendTyped(text) {
+  if (!text || !canType()) return false;
+  try { dc.send(JSON.stringify({ type: "typed", text })); } catch (e) { errEl.textContent = "Couldn't send that. Try again."; return false; }
+  hideCancel();  // H38: a new turn of his
+  return true;
+}
 typeForm.addEventListener("submit", ev => {
   ev.preventDefault();
-  const text = typeIn.value.trim();
-  if (!text || !canType()) return;
-  try { dc.send(JSON.stringify({ type: "typed", text })); } catch (e) { errEl.textContent = "Couldn't send that. Try again."; return; }
+  if (!sendTyped(typeIn.value.trim())) return;
   typeIn.value = ""; fitTyping(); showTyping();
-  hideCancel();  // H38: a new turn of his
 });
+// H72: a hidden Yes, for him as a developer shortcut (12 October 2026: "Nobody will ever try this
+// combination out, so end users will never find this."). Only on a call, with nothing typed, so Send
+// is greyed out: hold it YES_HOLD_MS and a small Yes shows just above it; slide onto it and let go,
+// and "Yes" goes out as a typed turn, so it also answers a question waiting for his yes, like a typed
+// or spoken yes. Letting go anywhere else, or before Yes shows, does nothing. Send stays greyed out.
+const sendWrap = document.getElementById("sendwrap"), yesBtn = document.getElementById("yesbtn");
+const YES_HOLD_MS = 1500, YES_PAD = 14;  // a moment's hold (Claude's choice), and a little room around Yes for the thumb
+let yesPid = null, yesTimer = null;
+const yesQuiet = () => typeSend.disabled && canType() && !typeIn.value.trim();
+function yesReset() { clearTimeout(yesTimer); yesTimer = null; yesPid = null; yesBtn.classList.remove("show", "over"); }
+function overYes(x, y) {
+  if (!yesBtn.classList.contains("show")) return false;
+  const r = yesBtn.getBoundingClientRect();
+  return x >= r.left - YES_PAD && x <= r.right + YES_PAD && y >= r.top - YES_PAD && y <= r.bottom + YES_PAD;
+}
+sendWrap.addEventListener("pointerdown", ev => {
+  if (!yesQuiet()) return;  // something typed: Send works as always
+  ev.preventDefault();  // keeps the keyboard and the text box as they are
+  yesReset(); yesPid = ev.pointerId;
+  try { sendWrap.setPointerCapture(ev.pointerId); } catch (e) {}
+  yesTimer = setTimeout(() => { yesTimer = null; if (yesPid !== null && yesQuiet()) { yesBtn.classList.add("show"); buzz(); } }, YES_HOLD_MS);
+});
+sendWrap.addEventListener("pointermove", ev => { if (ev.pointerId === yesPid) yesBtn.classList.toggle("over", overYes(ev.clientX, ev.clientY)); });
+sendWrap.addEventListener("pointerup", ev => {
+  if (ev.pointerId !== yesPid) return;
+  const hit = overYes(ev.clientX, ev.clientY) && yesQuiet();
+  yesReset();
+  if (hit) sendTyped("Yes");
+});
+sendWrap.addEventListener("pointercancel", ev => { if (ev.pointerId === yesPid) yesReset(); });
+sendWrap.addEventListener("contextmenu", ev => ev.preventDefault());
 document.getElementById("chatclose").addEventListener("click", () => showChat(false));
 
 // H13: the status page inside the app, read only. On the phone it is the status page's own Tailscale
