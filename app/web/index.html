@@ -549,6 +549,7 @@ function onServerMessage(ev) {
     else if (m && m.type === "hq-chat") addChat(m.who, m.text);
     else if (m && m.type === "hq-cancellable") showCancel(m.on === true);
     else if (m && m.type === "hq-cancelled") markCancelled();
+    else if (m && m.type === "hq-hangup" && state !== "idle") hangup();  // H75: she hung up after his goodbye
   } catch (e) {}
 }
 

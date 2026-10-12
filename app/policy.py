@@ -267,6 +267,12 @@ class Policy:
             if len(args) == 1:
                 return Decision(ALLOW, "reading the usage")
             return Decision(DENY, "the usage check from a call takes no options")
+        # H87: the 5-hour usage line, moving through the session or fixed at a number. Reads it, or switches it.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "usageline.py"):
+            if (len(args) == 1 or args[1:] == ["moving"] or args[1:] == ["fixed"]
+                    or (len(args) == 3 and args[1] == "fixed" and args[2].rstrip("%").isdigit())):
+                return Decision(ALLOW, "the 5-hour usage line")
+            return Decision(DENY, "the 5-hour line takes only moving, or fixed with a number")
         # H45: lid-closed sleep. Reads it, or flips it on or off; the script itself only runs the two exact
         # pmset commands the one-time setup allows without a password, nothing else.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "lidsleep.py"):

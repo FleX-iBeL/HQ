@@ -10,6 +10,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ### Changed
 - Each agent has her own character on calls and sounds like a person, not an AI: Donna quick and dry, a bit cheeky; Pepper warm, calm and direct; Moneypenny few words, cool, all business. Each greets you her own way and pushes back her own way, and nobody talks while she thinks (the thinking sound stays). These are HQ's defaults: Settings shows each one's character under her voice, `python3 app/agents.py` prints them, and you change them for yourself in `agents/agents.json`.
+- The 5-hour usage line moves through the session: 10% right after a reset, 10% more every half hour, 100% in the last half hour. A switch on the status page (and a call, on your ask) makes it a fixed number of your choice instead. A job let past the line still skips it; the weekly line counts as before.
 - Each agent starts with her own voice: Donna with Bella, Pepper with Heart. Still yours to change in Settings; a voice you already picked stays.
 - On a call, HQ itself can be read without asking, the same as your workspace: its files, its logs (like the hourly mail check's) and the status page's data. Changing anything in HQ still asks you first.
 

@@ -28,7 +28,8 @@ Put your own things here. What you want HQ to build or manage next, agreed on a 
 
 Legend: ✅ done · 🔨 in progress · ⬜ not started · ❓ needs a decision from you first.
 
-- **Usage limit: 70%.** The 5-hour usage line: jobs stop starting above it. Change it to your own.
+- **Usage limit: 70%.** The 5-hour usage line when it's fixed: jobs stop starting above it. Change it to your own.
+- **5-hour line: moving.** Moving: the 5-hour usage line grows 10% every half hour of the session, 10% right after a reset up to 100% in its last half hour (H87). Fixed: it stays at the usage limit above. Switched from a call or the status page.
 
 ## Phase A · Getting started
 

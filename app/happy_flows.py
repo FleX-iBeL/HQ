@@ -129,6 +129,9 @@ Run them before and after every update; they print a short pass/fail table at th
      lines, trimmed from the start), the continue greeting with the name from me.md, never on Free; on the
      call page Continue at the foot of an opened call, only when not on a call and not as Free, the offer it
      sends and the chat it starts with; a real continued call greets so, and its transcript says which call
+  71 H87, no Claude: the 5-hour stop line moves 10% every half hour after a reset, up to 100% in the last,
+     or stays at a fixed number: the line on made-up readings, the roadmap's setting (moving by default), the
+     switch script and the status server's switch on copies, what a call may run, the call rules
   64 F16, no Claude: the call page fits the screen. The real call page (with Moneypenny's card) in a headless
      browser at iPhone 13 sizes (Safari and the home screen), a small phone, and the desktop app's size (?app):
      on a call the old layout stays (the picker and her card keep their room) and the page can't be scrolled
@@ -5346,6 +5349,234 @@ setTimeout(() => {
                 "Settings, /api/agents, agents.py and the readme show the defaults")
 
 
+    # 70
+    async def flow70(self) -> str:
+        """H75: she hangs up herself after his clear goodbye. No Claude turns: the rules are read from
+        what each kind of call gets, and the real call service is driven by a stand-in for Claude."""
+        from claude_llm import ClaudeSessionLLMService, MarkFilter
+        from pipecat.processors.aggregators.llm_context import LLMContext
+        from pipeline import make_brain
+        from policy import Policy
+        mark = config.HANGUP_MARK
+        # The mark is taken out of the speech, also when it streams in pieces.
+        f = MarkFilter(mark)
+        said = "".join(f.feed(x) for x in ["Bye, S", "am. [", "[END", " CALL]", "]"]) + f.flush()
+        need(f.found and mark not in said and said.startswith("Bye, Sam."), f"the mark isn't taken out: {said!r}")
+        f = MarkFilter(mark)
+        said = "".join(f.feed(x) for x in ["Two [", "[notes]] and [x]"]) + f.flush()
+        need(not f.found and said == "Two [[notes]] and [x]", f"ordinary brackets are lost or taken for the mark: {said!r}")
+        # The rule is in every kind of call: Free (plain Claude) and the full call, with the phrases and the never-on list.
+        rules = config.HANGUP_RULES
+        for ph in ["that's it, see you later", "okay, that is all"]:
+            need(ph in rules and ph in config.GOODBYE_PHRASES, f"the starting phrase {ph!r} is missing")
+        need("a passing okay" in rules and "a pause or silence" in rules and "When you are not sure" in rules,
+             "the rule doesn't say when not to hang up")
+        free = make_brain(config.MODEL, None, cwd=self.tmp / "free70", free=True)
+        need(rules in free._options.system_prompt, "a Free call doesn't get the hang-up rule")
+        full = make_brain(config.MODEL, Policy(config.FOLDER, dry_run=True), load="deep")
+        need(rules in full._options.system_prompt["append"], "a full call doesn't get the hang-up rule")
+        need("{user}" not in rules, "the name in the rule isn't filled in from me.md")
+
+        class Stand:  # stands in for the Claude session: answers with the pieces it's given
+            model = "stand-in"
+            def __init__(self): self.replies = []
+            async def start(self): pass
+            async def stop(self): pass
+            def cancel_turn(self): pass
+            async def ask(self, text):
+                for piece in self.replies.pop(0):
+                    await asyncio.sleep(0.01)
+                    yield piece
+
+        class Script:  # what the transcript is told
+            def __init__(self): self.replies = []
+            def user(self, *a, **k): pass
+            def note(self, *a, **k): pass
+            def reply(self, text, cut_off=False): self.replies.append(text)
+
+        brain, script = Stand(), Script()
+        llm = ClaudeSessionLLMService(brain, transcript=script)
+        spoken: list[str] = []
+        async def nothing(*a, **k): pass
+        async def speak(text): spoken.append(text)
+        llm.push_frame = nothing
+        llm._push_llm_text = speak
+        llm.start_processing_metrics = llm.stop_processing_metrics = nothing
+        llm.start_ttfb_metrics = llm.stop_ttfb_metrics = nothing
+        hung: list[float] = []
+        async def on_hangup(): hung.append(time.perf_counter())
+        llm.on_hangup = on_hangup
+        llm.HANGUP_QUIET_SECS, llm.HANGUP_NO_VOICE_SECS, llm.HANGUP_MAX_SECS = 0.3, 1.0, 5.0
+        msgs: list[dict] = []
+        async def turn(words, reply):
+            msgs.append({"role": "user", "content": words})
+            brain.replies.append(reply)
+            await llm._process_context(LLMContext(messages=list(msgs)))
+            msgs.append({"role": "assistant", "content": "".join(reply)})
+        # 1. A passing okay: she answers, and stays on.
+        await turn("Okay, and what about tomorrow?", ["Tomorrow is ", "free."])
+        await asyncio.sleep(1.3)
+        need(not hung and llm._hangup_task is None, "she hung up without a goodbye")
+        # 2. His goodbye: the goodbye is spoken without the mark, and the call ends once it has been heard.
+        spoken.clear()
+        await turn("That's it, see you later.", ["See you", " later.", " [[END", " CALL]]"])
+        need(mark not in "".join(spoken) and "See you later." in "".join(spoken), f"the mark was spoken: {spoken}")
+        need(mark not in script.replies[-1], "the mark went into the transcript")
+        llm._bot_speaking, llm._spoke_at = True, time.perf_counter()  # her voice says the goodbye
+        await asyncio.sleep(0.6)
+        need(not hung, "she hung up while her goodbye was still being spoken")
+        llm._bot_speaking, llm._quiet_at = False, time.perf_counter()
+        await asyncio.sleep(0.8)
+        need(len(hung) == 1 and hung[0] - llm._quiet_at >= 0.25, "the call didn't end after the goodbye was heard")
+        # 3. He says more right after her goodbye: the call goes on.
+        hung.clear()
+        await turn("Bye!", ["Bye.", "[[END CALL]]"])
+        need(llm._hangup_task is not None, "no hang-up started after the goodbye")
+        await turn("Oh wait, one more thing.", ["Sure, go ahead."])
+        await asyncio.sleep(1.5)
+        need(not hung, "she hung up although he said more")
+        # The server and the page: the same way as his Hang up.
+        bot = (APP / "bot.py").read_text()
+        hook = bot.split("async def agent_hangs_up():", 1)[1].split("call.llm.on_hangup = agent_hangs_up", 1)[0]
+        need('"hq-hangup"' in hook and "await worker.cancel()" in hook and "call.ended_by_agent = True" in hook,
+             "the call server doesn't end the call like Hang up does")
+        callpy = (APP / "call.py").read_text()
+        need("hung up after the goodbye" in callpy, "the transcript doesn't say she hung up")
+        page = (APP / "web/index.html").read_text()
+        need('m.type === "hq-hangup" && state !== "idle") hangup();' in page,
+             "the call page (phone and desktop app) doesn't close the call when she hangs up")
+        return ("the mark is never spoken or written; the rule with its phrases is in Free and full calls; "
+                "an okay keeps the call; a goodbye ends it once heard; more words after it keep it")
+
+    async def flow71(self) -> str:
+        """H87, no Claude: the 5-hour stop line moves through the session, 10% for every half hour after a reset
+        up to 100% in the last, or stays at a fixed number; switched from the status page or a call. The line on
+        made-up readings (the weekly lines untouched, no reset time keeps the fixed number, past the line still
+        skips it), the roadmap's setting (moving when it isn't named: HQ's default), the switch script on a
+        copy, the status server's switch on a copy, what a call may run, the call rules, the page and the template."""
+        import subprocess as sp
+        from policy import Policy, ALLOW, DENY
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        js = f"""import {{ stopLine, usageVerdict, movingFiveHour }} from {json.dumps((ROOT / 'status/usage.mjs').as_uri())};
+import {{ parseRoadmap }} from {json.dumps((ROOT / 'status/parse.mjs').as_uri())};
+const R = new Date('2026-10-12T20:00:00Z'), S = R.getTime() - 5 * 36e5;
+const five = {{ label: '5-hour limit', resetsAt: R.toISOString() }};
+const week = {{ label: 'Weekly · all models', resetsAt: new Date(R.getTime() + 3 * 864e5).toISOString() }};
+const at = (min) => stopLine(five, 70, new Date(S + min * 6e4), null, true);
+const lines = Array.from({{ length: 10 }}, (_, i) => at(i * 30 + 1).line);
+const r = (p) => ({{ readable: true, limits: [{{ ...five, percent: p }}, {{ ...week, percent: 5 }}] }});
+const when = new Date(S + 61 * 6e4);  // 1 h in: the line is at 30%
+const base = '# x\\n\\n- **Usage limit: 70%.** y\\n';
+console.log(JSON.stringify({{
+  lines, firstNext: at(1).next, lastNext: at(299).next, end: at(299).line,
+  fixed: stopLine(five, 70, new Date(S + 6e4), null, false).line,
+  noReset: stopLine({{ label: '5-hour limit', resetsAt: null }}, 70, new Date(), null, true).line,
+  weekSame: stopLine(week, 70, when, null, true).line === stopLine(week, 70, when, null, false).line,
+  stops: usageVerdict(r(35), 70, when, null, {{ moving: true }}).stop,
+  under: usageVerdict(r(25), 70, when, null, {{ moving: true }}).stop,
+  fixedNoStop: usageVerdict(r(35), 70, when, null, {{ moving: false }}).stop,
+  pastSkips: usageVerdict(r(95), 70, when, null, {{ moving: true, weeklyOnly: true }}).stop,
+  reason: usageVerdict(r(35), 70, when, null, {{ moving: true }}).reason,
+  dflt: parseRoadmap(base).usageMoving, onLine: parseRoadmap(base + '- **5-hour line: moving.** z\\n').usageMoving,
+  offLine: parseRoadmap(base + '- **5-hour line: fixed.** z\\n').usageMoving,
+  helper: movingFiveHour(null) }}));"""
+        out = await asyncio.to_thread(sp.run, [node, "--input-type=module", "-e", js], capture_output=True, text=True)
+        need(out.returncode == 0, f"the line check didn't run: {out.stderr.strip()[-300:]}")
+        d = json.loads(out.stdout.strip().splitlines()[-1])
+        need(d["lines"] == [10, 20, 30, 40, 50, 60, 70, 80, 90, 100], f"the moving line isn't 10% a half hour: {d['lines']}")
+        need(d["firstNext"] == "2026-10-12T15:30:00.000Z" and d["lastNext"] is None and d["end"] == 100,
+             f"the moving line's next step is off: {d['firstNext']}, {d['lastNext']}, {d['end']}")
+        need(d["fixed"] == 70 and d["noReset"] == 70 and d["helper"] is None, "fixed, or moving without a reset time, isn't the fixed number")
+        need(d["weekSame"], "the moving 5-hour line changed the weekly line")
+        need(d["stops"] and not d["under"] and not d["fixedNoStop"], "the verdict doesn't follow the moving line")
+        need("its stop line is 30%" in d["reason"], f"the reason doesn't name the moving line: {d['reason']}")
+        need(not d["pastSkips"], "a job past the line stops at the moving 5-hour line")
+        need(d["dflt"] is True and d["onLine"] is True and d["offLine"] is False, "the roadmap's 5-hour line setting isn't read (moving by default)")
+
+        # The switch script, on a copy of the template's roadmap; the real roadmap is refused under a test.
+        copy = self.tmp / "h87-roadmap.md"
+        copy.write_text((ROOT / "template/HQ/roadmap.md").read_text())
+        need("**5-hour line: moving.**" in copy.read_text(), "the template doesn't start with the moving line (HQ's default)")
+        script = str(ROOT / "routine/usageline.py")
+        env = {**os.environ, "HQ_ROADMAP": str(copy)}
+        ul = lambda *a, e=env: sp.run(["python3", script, *a], capture_output=True, text=True, env=e)  # noqa: E731
+        o = ul()
+        need(o.returncode == 0 and "moves" in o.stdout, f"reading the setting: {o.stdout}{o.stderr}")
+        o = ul("fixed", "60")
+        t = copy.read_text()
+        need(o.returncode == 0 and "fixed at 60%" in o.stdout and "**Usage limit: 60%" in t and "**5-hour line: fixed.**" in t,
+             f"fixing it at 60 didn't: {o.stdout}{o.stderr}")
+        o = ul("moving")
+        t = copy.read_text()
+        need(o.returncode == 0 and "**5-hour line: moving.**" in t and "**Usage limit: 60%" in t and t.count("5-hour line:") == 1,
+             f"moving again didn't, or lost the number: {o.stdout}{o.stderr}")
+        need(ul("fixed", "0").returncode == 2 and ul("fixed", "150").returncode == 2 and ul("sideways").returncode == 2,
+             "the script takes a number outside 1 to 100, or an unknown word")
+        need(copy.read_text() == t, "a refused switch still changed the roadmap")
+        bare = self.tmp / "h87-bare.md"
+        bare.write_text("# x\n\n- **Usage limit: 70%.** y\n")
+        need(ul("fixed", e={**os.environ, "HQ_ROADMAP": str(bare)}).returncode == 0 and
+             bare.read_text().count("**5-hour line: fixed.**") == 1, "a roadmap without the setting doesn't get its line")
+        real = ul("moving", e={**os.environ, "HQ_ROADMAP": os.environ.get("HQ_REAL_ROADMAP", str(ROADMAP))})
+        need(real.returncode != 0, "under a test, the switch changed the real roadmap")
+
+        # The status server's switch, on a copy of the status page and the routine.
+        site = self.tmp / "h87"
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        shutil.copytree(ROOT / "routine", site / "routine", ignore=shutil.ignore_patterns("__pycache__", "*.o"))
+        (site / ".status").mkdir()
+        road = site_roadmap(site)
+        road.write_text((ROOT / "template/HQ/roadmap.md").read_text())
+        port = 4793
+        proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"],
+                                env={**os.environ, "HQ_STATUS_PORT": str(port), "HQ_ROADMAP": str(road)},
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            base = f"http://127.0.0.1:{port}"
+            for _ in range(50):
+                if http_get("/roadmap.md", base)[0] == 200:
+                    break
+                await asyncio.sleep(0.2)
+
+            def post(body: dict, header: str | None = "usage-line") -> tuple[int, dict]:
+                req = urllib.request.Request(f"{base}/api/usage-line", data=json.dumps(body).encode(), method="POST",
+                                             headers={"content-type": "application/json", **({"x-hq": header} if header else {})})
+                try:
+                    with urllib.request.urlopen(req, timeout=20) as r_:
+                        return r_.status, json.loads(r_.read() or b"null")
+                except urllib.error.HTTPError as e:
+                    return e.code, {}
+            code, _ = await asyncio.to_thread(post, {"mode": "fixed", "limit": 55}, None)
+            need(code == 403 and "**5-hour line: moving.**" in road.read_text(), "the switch works without the page's header")
+            code, ans = await asyncio.to_thread(post, {"mode": "fixed", "limit": 55})
+            t = road.read_text()
+            need(code == 200 and ans.get("ok") and "**5-hour line: fixed.**" in t and "**Usage limit: 55%" in t,
+                 f"the page's switch didn't fix the line at 55: {code} {ans}")
+            code, ans = await asyncio.to_thread(post, {"mode": "moving"})
+            need(code == 200 and "**5-hour line: moving.**" in road.read_text(), f"the page's switch didn't make it move: {code} {ans}")
+            code, _ = await asyncio.to_thread(post, {"mode": "fixed", "limit": 0})
+            need(code == 400, "the page's switch took 0%")
+            _, page, _ = http_get("/", base)
+            html = page.decode()
+            need("fiveHourSwitch(limit, moving)" in html and "s.usageMoving" in html and "'x-hq': 'usage-line'" in html,
+                 "the status page has no 5-hour line switch")
+        finally:
+            proc.terminate()
+
+        # A call: reads it, makes it move, fixes it at a number; nothing else.
+        pol = Policy(config.FOLDER)
+        c = f'python3 "{ROOT}/routine/usageline.py"'
+        for extra in ("", " moving", " fixed", " fixed 60"):
+            need(pol.decide("Bash", {"command": c + extra}).verdict == ALLOW, f"a call can't run the 5-hour line switch with '{extra.strip()}'")
+        for extra in (" fixed sixty", " off", " moving 60"):
+            need(pol.decide("Bash", {"command": c + extra}).verdict == DENY, f"a call may run the 5-hour line switch with '{extra.strip()}'")
+        need("usageline.py" in config.VOICE_RULES and "half hour" in config.VOICE_RULES and "fixed 60" in config.VOICE_RULES,
+             "the call rules don't say how to switch the 5-hour line")
+        save = (ROOT / "status/save-usage.mjs").read_text()
+        need(save.count("moving") >= 4, "the usage check and the jobs' gate don't use the moving line")
+        return ("10% a half hour up to 100%, weekly untouched, past the line still skips it; moving by default; "
+                "switched on a copy by the script, the page (its header only) and a call; the real roadmap refused")
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -5691,6 +5922,8 @@ FLOWS = {
     67: ("F17: a test never changes the real job list, schedule or status block, nor uses the real pairing", False, "flow67"),
     68: ("H72: the hidden Yes: hold the greyed-out Send, slide onto Yes, let go sends Yes", False, "flow68"),
     69: ("H76, H77: each agent her own character on calls, HQ's defaults a workspace can change", False, "flow69"),
+    70: ("H75: she hangs up herself after his clear goodbye, once it has been heard; never on a passing okay", False, "flow70"),
+    71: ("H87: the 5-hour line moves 10% every half hour of the session, or stays fixed; switched from the page or a call", False, "flow71"),
 }
 
 

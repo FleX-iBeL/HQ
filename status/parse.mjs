@@ -158,10 +158,14 @@ export function parseRoadmap(markdown) {
   const limit = /\*\*Usage limit:\s*(\d{1,3})\s*%/.exec(markdown);
   // HQ: a flat stop line for the weekly limits, instead of spreading them over the week.
   const weekly = /\*\*Weekly limit:\s*(\d{1,3})\s*%/.exec(markdown);
+  // H87: the 5-hour line moves through the session ("**5-hour line: moving**", also when the line is
+  // missing: HQ's default) or stays at the usage limit's fixed number ("**5-hour line: fixed**").
+  const five = /\*\*5-hour line:\s*(moving|fixed)\b/i.exec(markdown);
 
   return {
     usageLimit: limit ? Number(limit[1]) : null,
     weeklyLimit: weekly ? Number(weekly[1]) : null,
+    usageMoving: five ? five[1].toLowerCase() === 'moving' : true,
     state,
     title,
     headline: h2 ? plain(h2.slice(3)) : '',

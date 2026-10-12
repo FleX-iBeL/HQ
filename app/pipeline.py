@@ -253,7 +253,7 @@ def make_brain(model: str | None = None, policy: Policy | None = None, cwd=None,
         options = call_session_options(
             model=model,
             folder=config.FOLDER,
-            voice_rules=config.VOICE_RULES + persona,
+            voice_rules=config.VOICE_RULES + config.HANGUP_RULES + persona,
             policy=policy,
             cli_path=config.CLAUDE_CLI,
             effort=config.effort_for(model),
@@ -261,7 +261,7 @@ def make_brain(model: str | None = None, policy: Policy | None = None, cwd=None,
         )
     return ClaudeBrain(
         model=model,
-        system_prompt=config.SYSTEM_PROMPT + (config.FREE_RULES if free else "") + persona,
+        system_prompt=config.SYSTEM_PROMPT + (config.FREE_RULES if free else "") + config.HANGUP_RULES + persona,
         cwd=cwd or config.SCRATCH,
         cli_path=config.CLAUDE_CLI,
         effort=config.effort_for(model),

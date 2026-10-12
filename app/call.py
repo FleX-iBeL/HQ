@@ -86,6 +86,7 @@ class Call:
         self.open_loops_note = ""
         self.wrap_up_reply: str | None = None
         self._finished = False
+        self.ended_by_agent = False  # H75: she hung up after his goodbye
 
     def _continue_note(self) -> str:
         """H60: what the new call's Claude gets about the call it continues."""
@@ -144,7 +145,8 @@ class Call:
             return
         self._finished = True
         try:
-            self.transcript.note(f"{config.USER_LABEL} hung up")
+            self.transcript.note(f"{self.agent['name']} hung up after the goodbye" if self.ended_by_agent
+                                 else f"{config.USER_LABEL} hung up")
             self.transcript.end()
             if self.free:
                 logger.info("Free mode: nothing kept, no after-call work")
