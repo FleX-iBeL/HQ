@@ -1156,6 +1156,8 @@ console.log(JSON.stringify({{
         import datetime as _dt
 
         import quick_context
+        sys.path.insert(0, str(ROOT / "routine"))
+        import log_cycle
         from call import Call
         from policy import Policy
         from pipeline import make_brain
@@ -1177,13 +1179,19 @@ console.log(JSON.stringify({{
         if mem.exists():
             first = next((l for l in mem.read_text().splitlines() if l.startswith("- ")), "")
             need(first and first in text, "Quick is missing Claude's memory")
-        # The log: open commitments and only the last two days.
+        # The log: open commitments and only the recent entries (K1, H100: three hours; off: two days).
         log = (folder / "coaching/log.md").read_text()
-        days = sorted({m for m in re.findall(r"^## (\d{4}-\d{2}-\d{2})", log, re.M)}, reverse=True)
+        heads = re.findall(r"^## \d{4}-\d{2}-\d{2}.*$", log, re.M)
         need("## Open commitments" in text, "Quick is missing the log's open commitments")
-        first = _dt.date.today() - _dt.timedelta(days=quick_context.LOG_DAYS - 1)
-        old = [d for d in days if _dt.date.fromisoformat(d) < first]
-        need(not any(f"\n## {d} " in text for d in old), "Quick has log entries older than two days")
+        if config.LIGHT_NOTES:
+            cut = _dt.datetime.now() - _dt.timedelta(hours=quick_context.LOG_HOURS, minutes=1)
+            old = [h for h in heads if log_cycle.when(h) < cut]
+            fresh = [h for h in heads if log_cycle.when(h) >= cut + _dt.timedelta(minutes=2)]
+            need(all(h in text for h in fresh), "Quick is missing log entries of the last three hours")
+        else:
+            first = _dt.date.today() - _dt.timedelta(days=quick_context.LOG_DAYS - 1)
+            old = [h for h in heads if log_cycle.when(h).date() < first]
+        need(not any(f"\n{h}\n" in text for h in old), "Quick has log entries older than it should")
         # The sessions: Quick switches the CLI's CLAUDE.md off and brings its own text; Deep doesn't.
         pol = Policy(folder, dry_run=True)
         q = make_brain(config.MODEL_ALIASES["sonnet"], pol, load="quick")._options
@@ -1199,8 +1207,6 @@ console.log(JSON.stringify({{
              and "load=load" in (config.ROOT / "app" / "bot.py").read_text(),
              "the call page's Quick or Deep doesn't reach the call's load")
         # Phase K: each switch does what it says (they're on unless switched off).
-        if config.LIGHT_NOTES:
-            need(not any(f"\n## {d} " in text for d in days), "K1: Quick still has log entries")
         for opts in (q, d):
             need((config.DOCS_SERVER in opts.disallowed_tools) == config.NO_DOCS, "K2: the Docs switch isn't followed")
             need(opts.env.get("ENABLE_TOOL_SEARCH") == ("true" if config.TOOLS_ON_DEMAND else "false"), "K3: the tool switch isn't followed")
@@ -5789,6 +5795,56 @@ console.log(JSON.stringify({{
         need(lap["light"] == "light down", f"on the laptop a hot laptop doesn't make the Routines light red: {lap['light']}")
         return "on a server no Laptop section, no battery in the top line, no laptop lines or bars under Routines, the light green; on the laptop all of it as before, the light red"
 
+    async def flow74(self) -> str:
+        """H100, no Claude: the coaching log keeps three hours. On a throwaway workspace: entries older than three hours
+        move to the archive, newest first, word for word; the head and the open commitments stay whatever their age;
+        a Quick call's text has only the last three hours; the routine runs the move on the main, never on the real
+        log under a test."""
+        import collections
+        import datetime as _dt
+
+        sys.path.insert(0, str(ROOT / "routine"))
+        import log_cycle
+        import quick_context
+
+        ws = self.tmp / "h100" / "coaching"
+        ws.mkdir(parents=True)
+        now = _dt.datetime(2026, 10, 13, 12, 0)
+        e = lambda t, what: f"## {t:%Y-%m-%d %H:%M} · {what}\n\n- note of {what}\n"
+        log = ("# Coaching Log\n\nNewest first.\n\n" + e(now - _dt.timedelta(minutes=30), "fresh call") + "\n"
+               + e(now - _dt.timedelta(hours=2, minutes=50), "two hours fifty") + "\n"
+               + e(now - _dt.timedelta(hours=3, minutes=10), "three hours ten") + "\n"
+               + "## Open commitments\n\n- an old promise, still open\n\n"
+               + e(now - _dt.timedelta(days=3), "three days ago") + "\n## 2026-10-05 · setup\n\n- an entry with a date only\n")
+        arch = log_cycle.ARCHIVE_HEAD + "\n" + e(now - _dt.timedelta(days=2), "already archived")
+        (ws / "log.md").write_text(log)
+        (ws / "log-archive.md").write_text(arch)
+        text = quick_context.trim_log(log, now.date(), now=now)
+        n = log_cycle.move(ws.parent, now=now)
+        need(n == 3, f"{n} entries moved, not the three older than three hours")
+        new_log, new_arch = (ws / "log.md").read_text(), (ws / "log-archive.md").read_text()
+        for keep in ("# Coaching Log", "fresh call", "two hours fifty", "## Open commitments", "an old promise"):
+            need(keep in new_log, f"the log lost {keep!r}")
+        for gone in ("three hours ten", "three days ago", "a date only"):
+            need(gone not in new_log and gone in new_arch, f"{gone!r} didn't move to the archive")
+        heads = [l for l in new_arch.splitlines() if l.startswith("## ")]
+        need(heads == sorted(heads, reverse=True) and len(heads) == 4, f"the archive isn't newest first: {heads}")
+        before = collections.Counter(l for l in (log + arch).splitlines() if l.strip())
+        after = collections.Counter(l for l in (new_log + new_arch).splitlines() if l.strip())
+        need(before == after, "a line was lost, changed or doubled in the move")
+        need(log_cycle.move(ws.parent, now=now) == 0, "a second look moved something again")
+        if config.LIGHT_NOTES:
+            need("fresh call" in text and "two hours fifty" in text and "an old promise" in text,
+                 "a Quick call is missing the last three hours or the open commitments")
+            need("three hours ten" not in text and "three days ago" not in text, "a Quick call has notes older than three hours")
+        tick = (ROOT / "routine" / "tick.py").read_text()
+        need("log_move()" in tick and "under_test()" in tick.split("def log_move")[1].split("def tick")[0],
+             "the routine doesn't run the move, or would move the real log under a test")
+        claude_md = (ROOT / "template" / "CLAUDE.md").read_text() + (ROOT / "template" / "where-things-go.md").read_text()
+        need("three hours" in claude_md, "the template still says the log keeps two weeks")
+        return (f"3 of 5 entries moved (older than {log_cycle.HOURS} hours), word for word, newest first; head and open "
+                "commitments stayed; nothing moved twice; Quick has only the last three hours")
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -6138,6 +6194,7 @@ FLOWS = {
     71: ("H87, H91: the three stop lines move every minute, or each stays fixed; switched from the page or a call", False, "flow71"),
     72: ("H83: which HQ this is (VPS, or Local · macOS), small under the name on the status page, the strip and the call page", False, "flow72"),
     73: ("H92: on a server the status page shows no Laptop section and no laptop lines under Routines", False, "flow73"),
+    74: ("H100: the coaching log keeps three hours; older entries move to its archive, calls load only those", False, "flow74"),
 }
 
 

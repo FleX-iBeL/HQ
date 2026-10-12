@@ -80,7 +80,7 @@ for _line in (ROOT / "switches.env").read_text().splitlines() if (ROOT / "switch
 
 def _switch(name: str) -> bool:
     return os.environ.get(name, _SWITCHES.get(name, "1")) != "0"
-LIGHT_NOTES = _switch("HQ_LIGHT_NOTES")  # K1: Quick has the log's open commitments, not two days of entries
+LIGHT_NOTES = _switch("HQ_LIGHT_NOTES")  # K1 (H100): Quick has the last three hours of the log and its open commitments, not two days
 NO_DOCS = _switch("HQ_NO_DOCS")  # K2: no Claude Docs tools on Quick or Deep
 TOOLS_ON_DEMAND = _switch("HQ_TOOLS_ON_DEMAND")  # K3: connector tools loaded when needed (tool search on)
 CHEAP_AFTER_CALL = _switch("HQ_CHEAP_AFTER_CALL")  # K4: the after-call work runs on AFTER_CALL_MODEL

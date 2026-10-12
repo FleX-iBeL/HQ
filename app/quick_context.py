@@ -16,25 +16,35 @@ from __future__ import annotations
 
 import datetime
 import re
+import sys
 from pathlib import Path
 
 import config
 
+sys.path.insert(0, str(config.ROOT / "routine"))
+import log_cycle  # H100: the same three-hour cut as the routine's move to the archive
+
 # The files a Quick call has in full, relative to the folder. coaching/log.md is trimmed (below).
 QUICK_FILES = ["rules.md", "where-things-go.md", "challenges.md", "inbox.md", "coaching/log.md"]
-# "The last couple of days of notes": the log's entries from today and the day before, plus its
-# open commitments (whatever their age).
+# "The last couple of days of notes": with K1 switched off, the log's entries from today and the day before,
+# plus its open commitments (whatever their age). K1 on (H100): the last three hours and the open commitments.
 LOG_DAYS = 2
+LOG_HOURS = log_cycle.HOURS
 
 _IMPORT = re.compile(r"@([\w./-]+\.md)")
 _ENTRY = re.compile(r"^## (\d{4}-\d{2}-\d{2})\b")
 
 
-def trim_log(text: str, today: datetime.date, days: int = LOG_DAYS) -> str:
-    """The log's head and open commitments, and only the entries of the last `days` days."""
+def trim_log(text: str, today: datetime.date, days: int = LOG_DAYS, now: datetime.datetime | None = None) -> str:
+    """The log's head and open commitments, and only the recent entries: with K1 on the last three hours
+    (H100, 13 October 2026: "Yeah, I'm even thinking maybe three hours"), else the last `days` days."""
+    if config.LIGHT_NOTES:
+        now = now or datetime.datetime.now()
+        out = log_cycle.recent(text, now, LOG_HOURS)
+        return out.rstrip() + (f"\n\n[On a call only the notes of the last {LOG_HOURS} hours and the open commitments "
+                               "are here. Older notes are in coaching/log-archive.md, newest first: read them only "
+                               "when he asks about something earlier.]\n")
     first = today - datetime.timedelta(days=days - 1)
-    if config.LIGHT_NOTES:  # K1: no entries at all, only the head and the open commitments
-        first = datetime.date.max
     out, keep = [], True
     for line in text.splitlines():
         m = _ENTRY.match(line)
@@ -44,9 +54,7 @@ def trim_log(text: str, today: datetime.date, days: int = LOG_DAYS) -> str:
             keep = True
         if keep:
             out.append(line)
-    out.append("\n[On a Quick call only the open commitments are here; every entry is in the file, newest first. "
-               "Read it when a question needs what happened earlier.]" if config.LIGHT_NOTES else
-               f"\n[On a Quick call only the entries from {first:%-d %B} on are here; older ones are in the file.]")
+    out.append(f"\n[On a Quick call only the entries from {first:%-d %B} on are here; older ones are in the file.]")
     return "\n".join(out).rstrip() + "\n"
 
 
@@ -77,8 +85,8 @@ def build(folder: Path, today: datetime.date | None = None) -> str:
     parts = [
         "# This is a Quick call",
         f"{config.USER} picked Quick: calendar, mail and small orders. Only part of the folder is loaded: "
-        + ("the rules, where things go, the to-do list, the mail list and the open commitments from the "
-           "notes (every note itself is in the log file). " if config.LIGHT_NOTES else
+        + (f"the rules, where things go, the to-do list, the mail list, the last {LOG_HOURS} hours of notes and "
+           "the open commitments (older notes are in the log archive). " if config.LIGHT_NOTES else
            "the rules, where things go, the to-do list, the mail list and the last two days of notes. ")
         + "The rest of the folder (the vision, the current situation and the coaching skill) is "
         "not loaded. Read a file when a question needs it; for sparring, planning "

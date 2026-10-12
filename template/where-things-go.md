@@ -20,7 +20,7 @@ A file with an @ in front of its name in CLAUDE.md is loaded in full at the star
 | Where you stand now: work, health, money, home, people, appointments and their context | `current-situation.md` | @ |
 | Everything to do: tasks, priorities, deadlines, status, done, let go, shopping wishlist, groceries | `challenges.md` | @ |
 | What happened in each conversation: your words, commitments, follow-ups | `coaching/log.md` | @ |
-| Log entries older than two weeks | `coaching/log-archive.md` | on demand |
+| Log entries older than three hours | `coaching/log-archive.md` | on demand: when they ask about something earlier |
 | Done and let-go items, and challenge log lines, older than two weeks | `challenges-archive.md` | on demand |
 | New mail from the hourly mail check, waiting for your yes | `inbox.md` | @ |
 | Weekly reviews | `reviews/YYYY-Www.md` | on demand |
@@ -42,7 +42,7 @@ A file with an @ in front of its name in CLAUDE.md is loaded in full at the star
 
 So the loaded files stay small. At the start of every session (and in every maintenance check):
 
-- Coaching log: entries older than 14 days move to `coaching/log-archive.md`, newest first. Open commitments stay, whatever their age.
+- Coaching log: entries older than three hours move to `coaching/log-archive.md`, newest first; HQ's routine does this by itself every minute. Open commitments stay, whatever their age. Older notes are read there only when asked about.
 - Challenges: done and let-go rows older than 14 days move to `challenges-archive.md`, with their details. Log lines older than 14 days move there too. Open items never move.
 - Moving only: never shorten, rewrite or delete.
 

@@ -20,7 +20,7 @@ Everything in this folder is private (health, work, money, relationships, family
 - @vision.md (the north star)
 - @current-situation.md (where they stand right now; keep it up to date)
 - @challenges.md (their priority system and everything open in it)
-- @coaching/log.md (what we worked on, their words, open commitments)
+- @coaching/log.md (what we worked on, their words, open commitments; only the last three hours of notes, older ones in `coaching/log-archive.md`, read when asked about)
 - @inbox.md (new mail the hourly mail check found, waiting for their yes; very important items on top, until resolved)
 
 Not loaded, read only when needed, with the Read tool: `reviews/`, `HQ/roadmap.md`, `HQ/calls/`, and any folder they add. Never read files with `cat` in Bash: long output gets cut off.
@@ -29,7 +29,7 @@ Not loaded, read only when needed, with the Read tool: `reviews/`, `HQ/roadmap.m
 
 No calendar check and no mail check at the start of a chat; the hourly mail check keeps the mail list up to date. Open the calendar or the mail only when they ask, or when the work needs it (planning their days and weeks).
 
-Before the first answer, run the two-week cycle (`where-things-go.md`), silently. Then tell them in plain words what's on the mail list: the very important items first, every session, until they say they're resolved or not that important; then the rest. Only after they confirm an item, write it into the right place.
+Before the first answer, run the two-week cycle (`where-things-go.md`) for the challenges, silently (the coaching log keeps three hours; HQ's routine moves the rest). Then tell them in plain words what's on the mail list: the very important items first, every session, until they say they're resolved or not that important; then the rest. Only after they confirm an item, write it into the right place.
 
 Confirm what the notes say instead of assuming; notes can be stale.
 

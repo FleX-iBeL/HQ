@@ -43,6 +43,7 @@ import failures  # H42: why a run failed, in plain words, and how many times in 
 import crash  # H62: a job stopped by a crash runs again from the top of the line
 import role  # H56.3: main and backup; only the main runs the mail check, the jobs and the scheduler
 import sync  # H56.4: the two-way sync of the workspace and Claude's memory with the other HQ
+import log_cycle  # H100: the coaching log keeps three hours; older entries move to its archive
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
@@ -825,6 +826,21 @@ def became_main():
             log(f"role: {out.strip()}")
 
 
+def log_move():
+    """H100: on the main, move the log's entries older than three hours to its archive, and commit both through
+    the lock. A test never moves the real workspace's log."""
+    if hqpaths.under_test() and FOLDER == os.path.realpath(os.path.join(JV, "workspace")):
+        return
+    n = log_cycle.move(FOLDER)
+    if not n:
+        return
+    r = subprocess.run([PY, os.path.join(HERE, "gitlock.py"), "commit",
+                        f"Log: {n} entr{'y' if n == 1 else 'ies'} older than {log_cycle.HOURS} hours moved to the archive",
+                        log_cycle.LOG, log_cycle.ARCHIVE], capture_output=True, text=True, timeout=400)
+    log(f"log cycle: moved {n} to the archive" + ("" if r.returncode == 0 else
+        f"; commit failed ({r.returncode}): {(r.stderr or r.stdout).strip()[:200]}"))
+
+
 def tick():
     # H56.3: main or backup first. Alone (no other HQ set up) this is main at once, with no network and no line.
     try:
@@ -842,6 +858,10 @@ def tick():
         stale_job_here()
         on_backup()
         return
+    try:
+        log_move()
+    except Exception as e:
+        log(f"log cycle: {e!r}")
     handing_back = r.get("handing_back")
     q = json.loads(jobs("next"))
     jobs_line(q)
