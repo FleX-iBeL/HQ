@@ -19,7 +19,9 @@ server, never waits on one, and says nothing about it.
 
 Kept in HQ's own memory on this computer (hqpaths.SUPPORT), never in the workspace (which syncs):
     role.json        the setup: {"name", "peer" (the other HQ's status page address), "main" (the name of the
-                     chosen main), "chosen_at", "takeover" (seconds, optional)}
+                     chosen main), "chosen_at", "takeover" (seconds, optional), "peer_ip" (optional: connect to
+                     this address for the peer's name, its certificate still checked against the name; for a
+                     computer whose own DNS gives the name's public address, as a Mac without Tailscale DNS)}
     role-state.json  what the routine last decided: {"acting": "main"|"backup", "since", "why", ...}
     role-pending.jsonl  requests made on the backup while the main couldn't be reached; sent on (or run here
                      once this one takes over) by the routine.
@@ -31,7 +33,7 @@ completely down: when the server comes back, it sees the newer choice and is the
 usage (from the workspace):
   python3 "routine/role.py"                       which one is main, in plain words (a call may run this)
   python3 "routine/role.py" main here|other|NAME  make this one, the other one, or NAME the main (a call may run this)
-  python3 "routine/role.py" setup PEER_URL [--name NAME] [--main here|other|NAME] [--takeover SECONDS]
+  python3 "routine/role.py" setup PEER_URL [--name NAME] [--main here|other|NAME] [--takeover SECONDS] [--peer-ip IP]
                                                   pair this HQ with another (not from a call)
   python3 "routine/role.py" alone                 forget the other HQ: this one is main by itself again
 Used by HQ itself: tick (the routine, every minute), acting, json, serve (the status server's /api/role and
@@ -39,8 +41,8 @@ Used by HQ itself: tick (the routine, every minute), acting, json, serve (the st
 """
 from __future__ import annotations
 
-import json, os, socket, ssl, subprocess, sys, time
-import urllib.error, urllib.request
+import http.client, json, os, socket, ssl, subprocess, sys, time
+import urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -131,6 +133,27 @@ def busy() -> str:
 
 # -- talking to the other HQ ---------------------------------------------------------------------------
 
+def _pinned(ip):
+    """A urllib handler that connects to ip whatever the name resolves to, keeping the name for TLS (H56.7)."""
+    def _connect(conn):
+        sock = socket.create_connection((ip, conn.port), conn.timeout)
+        conn.sock = conn._context.wrap_socket(sock, server_hostname=conn.host) if hasattr(conn, "_context") else sock
+
+    class HTTPS(http.client.HTTPSConnection):
+        connect = _connect
+
+    class HTTP(http.client.HTTPConnection):
+        connect = _connect
+
+    class Handler(urllib.request.HTTPSHandler, urllib.request.HTTPHandler):
+        def https_open(self, req):
+            return self.do_open(HTTPS, req, context=self._context)
+
+        def http_open(self, req):
+            return self.do_open(HTTP, req)
+    return Handler
+
+
 def _request(url, data=None, header="", timeout=TIMEOUT):
     req = urllib.request.Request(url, data=None if data is None else json.dumps(data).encode(),
                                  headers={"content-type": "application/json", **({"x-hq": header} if header else {})},
@@ -138,6 +161,12 @@ def _request(url, data=None, header="", timeout=TIMEOUT):
     ctx = ssl.create_default_context()
     if os.environ.get("HQ_ROLE_INSECURE"):  # a test against a self-made certificate
         ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
+    c = _load(CONFIG, {})
+    ip = c.get("peer_ip")
+    if ip and c.get("peer") and urllib.parse.urlsplit(url).hostname == urllib.parse.urlsplit(c["peer"]).hostname:
+        opener = urllib.request.build_opener(_pinned(ip)(context=ctx))
+        with opener.open(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read().decode() or "null")
     with urllib.request.urlopen(req, timeout=timeout, context=ctx if url.startswith("https") else None) as r:
         return r.status, json.loads(r.read().decode() or "null")
 
@@ -475,6 +504,8 @@ def main(argv):
                 c["name"] = args[i + 1]
             elif args[i] == "--takeover":
                 c["takeover"] = float(args[i + 1])
+            elif args[i] == "--peer-ip":
+                c["peer_ip"] = args[i + 1]
             elif args[i] == "--main":
                 c["_main"] = args[i + 1]
             i += 2

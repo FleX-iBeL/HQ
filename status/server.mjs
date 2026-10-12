@@ -44,6 +44,30 @@ const FILES = {
   '/update-ui.js': ['status/update-ui.js', 'text/javascript; charset=utf-8'],
 };
 
+// H56.7: a second HQ (a server) gives its pages its own name and its status page its own icon, so both sit on
+// the phone's home screen side by side. HQ_LABEL (e.g. VPS); without it nothing changes.
+const LABEL = (process.env.HQ_LABEL ?? '').trim().replace(/[<>&"]/g, '');
+const LABELLED = {
+  '/apple-touch-icon.png': 'status/icons/server-180.png',
+  '/icon-192.png': 'status/icons/server-192.png',
+  '/icon-512.png': 'status/icons/server-512.png',
+};
+function labelled(path, body) {
+  if (!LABEL) return body;
+  if (path === '/' || path === '/index.html') {
+    return String(body)
+      .replace('<title>HQ · status</title>', `<title>HQ ${LABEL} · status</title>`)
+      .replace('content="Status"', `content="Status ${LABEL}"`);
+  }
+  if (path === '/manifest.webmanifest' || path === '/hq.webmanifest') {
+    const m = JSON.parse(String(body));
+    m.name = `${m.name} (${LABEL})`;
+    m.short_name = `${m.short_name} ${LABEL}`;
+    return JSON.stringify(m, null, 2);
+  }
+  return body;
+}
+
 // H28: the phone version of the Mac app (H27). The Mac app's own strip (desktop/shell.html), unchanged, with
 // the phone's script and look added, so the phone and the Mac always look the same. Its own home-screen icon.
 const PHONE_HEAD = `
@@ -58,9 +82,11 @@ const PHONE_HEAD = `
 `;
 async function hqPage() {
   const shell = await readFile(join(root, 'desktop/shell.html'), 'utf8');
+  const head = LABEL ? PHONE_HEAD.replace('content="HQ"', `content="HQ ${LABEL}"`) : PHONE_HEAD;
   return shell
     .replace(/<meta name="viewport"[^>]*>\n?/, '')
-    .replace('</head>', PHONE_HEAD + '</head>')
+    .replace('<title>HQ</title>', LABEL ? `<title>HQ ${LABEL}</title>` : '<title>HQ</title>')
+    .replace('</head>', head + '</head>')
     .replace('<body>', '<body class="phone">');
 }
 // H28: the same judgement the Mac app shows (desktop/hq_control.py), and its Turn everything on, which only
@@ -352,7 +378,9 @@ const server = createServer(async (req, res) => {
     return;
   }
   try {
-    const body = await readFile(entry[0].startsWith('/') ? entry[0] : join(root, entry[0]));
+    const path = (req.url ?? '/').split('?')[0];
+    const file = (LABEL && LABELLED[path]) || entry[0];
+    const body = labelled(path, await readFile(file.startsWith('/') ? file : join(root, file)));
     res.writeHead(200, { 'content-type': entry[1], 'cache-control': 'no-store' }).end(body);
   } catch {
     // No usage reading yet is not an error: the page says so.

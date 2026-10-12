@@ -776,6 +776,28 @@ def on_backup():
     clear(GATE_NOTE, TRUST_NOTE)
 
 
+def stale_job_here():
+    """H56.7: this HQ is the backup but a job it started still runs here: the lid was closed mid-job, the other
+    one took over and ran it again (became_main), and now this one woke up. When the job list no longer shows
+    that job running, its chat here is ended, so the same job never runs twice. Only that job's own chat."""
+    s = load_state()
+    if not s or not alive(s.get("pid")):
+        return
+    try:
+        running = [j["n"] for j in json.loads(jobs("next")).get("running") or []]
+    except Exception:
+        return
+    if s.get("n") in running:
+        return
+    end_chat(s.get("pid"))
+    clear()
+    quiet.clear_request()
+    peer = role.config().get("peer_name") or "the other HQ"
+    incidents.past("role", time.time(), time.time(), f"Job {s.get('n')} was still running here after {peer} took over",
+                   [(time.time(), f"Ended its chat here: the job list says {peer} took it over")])
+    log(f"role: ended job {s.get('n')}'s chat here; {peer} took it over while this one was away")
+
+
 def became_main():
     """H56.3: this HQ has just become the acting main (it took over, or got the role back). The mail check waits
     for its next full hour instead of counting the hours the other one checked as missed, and a job the queue
@@ -814,6 +836,7 @@ def tick():
     except Exception as e:
         log(f"sync: {e!r}")
     if r["acting"] == "backup":
+        stale_job_here()
         on_backup()
         return
     handing_back = r.get("handing_back")
