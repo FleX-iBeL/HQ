@@ -32,6 +32,18 @@ HQ_ROUTINE = Path(os.path.realpath(Path(__file__).resolve().parent.parent / "rou
 # H65: HQ itself (the app: its code, logs and the status page's data). A call reads it freely, like the
 # workspace; changing anything in it still asks.
 HQ_ROOT = Path(os.path.realpath(Path(__file__).resolve().parent.parent))
+
+
+def is_backup() -> bool:
+    """H56.3: this HQ is the backup now (routine/role.py; alone it's always main). Never raises."""
+    try:
+        import sys
+        if str(HQ_ROUTINE) not in sys.path:
+            sys.path.insert(0, str(HQ_ROUTINE))
+        import role
+        return role.is_backup()
+    except Exception:
+        return False
 # H65: the status page's server, on this computer only. A call may read its pages (GET), nothing else.
 STATUS_HOSTS = ("localhost", "127.0.0.1")
 STATUS_PORT = os.environ.get("HQ_STATUS_PORT", "4748")
@@ -245,6 +257,11 @@ class Policy:
             if sub in ("add", "list", "cancel", "move"):
                 return Decision(ALLOW, "the schedule for the computer")
             return Decision(DENY, "that part of the schedule is only for the computer itself")
+        # H56.3: main and backup. Asking which one is main, and making one the main on his ask.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "role.py"):
+            if len(args) == 1 or (len(args) == 3 and args[1] == "main"):
+                return Decision(ALLOW, "which HQ is main")
+            return Decision(DENY, "from a call, the role script only says which one is main, or makes one the main")
         # L9/L10: the usage check. Reads the latest saved usage and shows it on the status page, nothing else.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usage-check.py"):
             if len(args) == 1:
@@ -316,6 +333,9 @@ class Policy:
             if any(self.rel(a).parts[:1] and self.rel(a).parts[0] in self.protected for a in files):
                 return Decision(DENY, "that folder never goes to GitHub")
             return Decision(ALLOW, "git add, files by name")
+        if sub in ("commit", "push") and is_backup():
+            # H56.3: only the main one commits; on the backup the notes go over with the sync.
+            return Decision(DENY, "this HQ is the backup now: only the main one commits, the files go over with the sync")
         if sub == "commit":
             if any(a in ("-a", "--all", "--amend", "--no-verify", "-n") or a.startswith("--amend") for a in rest):
                 return _ask("commit in a special way", "a special commit")

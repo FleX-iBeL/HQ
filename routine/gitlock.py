@@ -54,6 +54,14 @@ def git(*args, tries=5):
 def main(argv):
     if not argv or argv[0] not in ("commit", "run"):
         sys.exit(__doc__)
+    if argv[0] == "commit" and not os.environ.get("HQ_ROLE_HERE"):
+        try:
+            import role  # H56.3: only the main one commits; on the backup the files go over with the sync
+        except ImportError:
+            role = None
+        if role and role.is_backup():
+            print("This HQ is the backup now: only the main one commits. Nothing was committed; the files go over with the sync.")
+            return 0
     lock = hold()
     try:
         if argv[0] == "run":

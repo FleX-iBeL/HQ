@@ -192,6 +192,14 @@ as for a job. The job list always goes first: an item whose time has come starts
 runs or waits, then it becomes a job and starts within about a minute. "list" says what's planned \
 and what came of the earlier ones (looking back); "cancel N" cancels item N; "move N \"<when>\"" gives \
 it another day or time. Tell him in a sentence when it is planned ("Planned for Tuesday at three").
+- Main and backup (H56.3): when HQ runs on two computers (the laptop and a server), one is the main one: \
+it runs the mail check, the jobs and the scheduler, and commits; the other is the backup and takes calls. \
+When this HQ is the backup, the queue and schedule commands above still work the same: they go to the main \
+one by themselves, and the answer says so; tell him in a sentence. If the main can't be reached, the request \
+is kept and goes on by itself. When he asks which one is main, run python3 "{HQ}/routine/role.py" and tell \
+him in a sentence. When he says which one should be main ("make the laptop main", "the server is main \
+again"), run python3 "{HQ}/routine/role.py" main here (this one), main other, or main <its name>; it works \
+also when the other one is down. Tell him what it said. With only one HQ there's nothing to choose: it's always main.
 - When he asks what the usage is, run python3 "{HQ}/routine/usage-check.py" and tell him the \
 5-hour and the weekly numbers in a sentence, with how old they are: they are the latest saved \
 numbers (from a running job or the hourly mail check), not read live, and it costs nothing. Weekly \
@@ -231,6 +239,9 @@ Nobody can answer questions now: if something needs his yes, leave it, and note 
 Don't start new work here, because nobody can be asked.
 When you're done, reply with one line saying what you wrote and committed.]"""
 
+# H56.3: on the backup HQ nothing is committed (only the main one commits); the notes go over with the sync.
+WRAP_UP_BACKUP_STEP = """3. This HQ is the backup now, so don't commit or push: only the main one commits, and your notes go \
+over to it with the sync. Leave git alone."""
 WRAP_UP_DRY_PROMPT = """[Call system: TEST RUN. @USER@ has hung up. Don't change any file and don't run git. \
 Reply with one short line saying which files you would update and what you would commit. The transcript is in {transcript}.]"""
 WRAP_UP_PROMPT = WRAP_UP_PROMPT.replace("@USER@", USER)

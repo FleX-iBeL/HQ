@@ -41,6 +41,7 @@ import incidents  # H30: what went down, why, what was done, when it was back
 import quiet  # H36: a job that has gone quiet gets continue typed into its own window
 import failures  # H42: why a run failed, in plain words, and how many times in a row (the watchdog reads it)
 import crash  # H62: a job stopped by a crash runs again from the top of the line
+import role  # H56.3: main and backup; only the main runs the mail check, the jobs and the scheduler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
@@ -454,9 +455,13 @@ def why_missed(due):
     return "Not known: the helper was running"
 
 
-def mail(q):
-    """L8, H30: the hourly mail check, on its own, also while a job runs."""
+def mail(q, start_new=True):
+    """L8, H30: the hourly mail check, on its own, also while a job runs. H56.3: a main that is handing its
+    role back lets a running check finish but starts no new one (start_new False)."""
     if mail_running():
+        return
+    if not start_new:
+        routines.beat("mail", state="ok", text="Handing over to the main one; it runs the next check", every=60)
         return
     if not q.get("mail", True):
         routines.beat("mail", state="off", text="Switched off from a call", every=60)
@@ -761,7 +766,46 @@ def schedule_line():
     routines.beat("schedule", state=d["state"], text=d["text"], last=time.time(), next=d.get("next"), every=60)
 
 
+def on_backup():
+    """H56.3: this HQ is the backup. The other one runs the mail check, the jobs and the scheduler; their lines say so."""
+    peer = role.config().get("peer_name") or "the other HQ"
+    text = f"Runs on the main one, {peer}; this HQ is the backup"
+    for key in ("mail", "jobs", "schedule"):
+        routines.beat(key, state="ok", text=text, last=None, next=None, every=60, why="", detail=[], run="")
+    clear(GATE_NOTE, TRUST_NOTE)
+
+
+def became_main():
+    """H56.3: this HQ has just become the acting main (it took over, or got the role back). The mail check waits
+    for its next full hour instead of counting the hours the other one checked as missed, and a job the queue
+    still shows running on the other one runs again here from the top of the line (H62's rerun)."""
+    last = mail_last() or 0
+    hour = int(time.time()) // MAIL_EVERY * MAIL_EVERY
+    if last < hour:
+        os.makedirs(RUN, exist_ok=True)
+        open(MAIL_LAST, "w").write(str(hour))
+        clear(MAIL_RETRY)
+    q = json.loads(jobs("next"))
+    s = load_state()
+    for job in q.get("running") or []:
+        if s is None or s.get("n") != job["n"]:
+            peer = role.config().get("peer_name") or "the other HQ"
+            out = jobs("crashed", str(job["n"]), f"the main one ({peer}) couldn't be reached while it ran, and this HQ took over")
+            incidents.fix("role", out.strip()[:200])
+            log(f"role: {out.strip()}")
+
+
 def tick():
+    # H56.3: main or backup first. Alone (no other HQ set up) this is main at once, with no network and no line.
+    try:
+        r = role.tick(jobs_cmd=jobs, log=log, incidents=incidents, routines=routines, on_main=became_main)
+    except Exception as e:
+        log(f"role: {e!r}")
+        r = {"acting": role.acting()}
+    if r["acting"] == "backup":
+        on_backup()
+        return
+    handing_back = r.get("handing_back")
     q = json.loads(jobs("next"))
     jobs_line(q)
     try:
@@ -776,7 +820,7 @@ def tick():
         routines.beat("jobs", state="off", text=why, every=60)
         return
     try:
-        mail(q)  # H30: on its own, also while a job runs
+        mail(q, start_new=not handing_back)  # H30: on its own, also while a job runs
     except Exception as e:
         log(f"mail: {e!r}")
     running = q["running"]
@@ -833,6 +877,11 @@ def tick():
             log(f"job {s.get('n')} finished; closed its window")
         clear()
         quiet.clear_request()  # H36: a nudge that wasn't picked up is for nobody now
+    if handing_back:
+        # H56.3: the main one is back; this HQ starts nothing new and hands the role back at its next look.
+        routines.beat("jobs", state="ok", text="Handing over to the main one; it starts the next job", every=60)
+        routines.beat("schedule", state="ok", text="Handing over to the main one", every=60)
+        return
     if not q["on"]:
         return
     # H39: the waiting job highest on the list goes first (ready, or held for the usage and now

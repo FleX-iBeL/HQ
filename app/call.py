@@ -25,6 +25,7 @@ J2: the warm-up message carries the very important open items from his mail list
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from pathlib import Path
 
@@ -169,6 +170,11 @@ class Call:
                 start_short=self.transcript.started.strftime("%Y-%m-%d %H:%M"),
                 transcript=rel,
             )
+            if template is config.WRAP_UP_PROMPT:
+                from policy import is_backup  # H56.3: the backup never commits
+                if is_backup():
+                    prompt = re.sub(r"^3\. Then commit and push.*?no here-documents\.$", lambda m: config.WRAP_UP_BACKUP_STEP,
+                                    prompt, count=1, flags=re.S | re.M)
             t = time.perf_counter()
             if config.CHEAP_AFTER_CALL and self.brain._client:  # K4: the quiet work on a cheaper model
                 try:

@@ -609,6 +609,7 @@
       /** H19/H20: each routine, its state, what it last did, when it runs next. A line that is
           overdue turns red: that routine has stopped writing, so it has stopped. */
       const ROUTINES = [
+        ['role', 'Main or backup', 'Only with a second HQ: the main one runs the mail check, the jobs and the scheduler'],
         ['helper', 'Routine helper', 'Runs everything below, every minute'],
         ['watchdog', 'Watchdog', 'Checks the helper every 5 minutes, apart from it'],
         ['mail', 'Mail check', 'Every hour'],
@@ -635,6 +636,7 @@
         const card = el('div', 'card');
         for (const [key, name, about] of ROUTINES) {
           const x = all[key];
+          if (key === 'role' && !x) continue;  // H56.3: an HQ on its own says nothing about it
           let state = x?.state ?? 'off';
           let text = x?.text ?? 'No line yet';
           const late = x && now - x.at > (x.every ?? 60) * 2 + 60;

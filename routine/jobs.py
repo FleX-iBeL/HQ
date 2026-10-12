@@ -208,6 +208,11 @@ def main(argv):
         print(__doc__)
         return
     cmd, args = argv[0], argv[1:]
+    # H56.3: on the backup HQ, a call's change to the queue goes to the main one as a request, so only
+    # one HQ ever writes it. HQ_ROLE_HERE is set when the main runs such a request itself.
+    import role
+    if cmd in role.WRITES["jobs"] and not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
+        sys.exit(role.forward("jobs", list(argv)))
     now = time.strftime("%H:%M")
     with locked():
         text, jobs, on = read()

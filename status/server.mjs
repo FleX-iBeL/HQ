@@ -89,6 +89,28 @@ function estimates() {
   });
 }
 
+// H56.3: main and backup. The other HQ asks this one's role (GET /api/role), tells it a newer choice of main (POST
+// /api/role) and, when this one is the main, hands it a call's change to the queue or the schedule (POST
+// /api/forward). All of it is routine/role.py's; the posts need the x-hq header, so a page from elsewhere can't.
+function roleTool(args, body) {
+  return new Promise((resolve) => {
+    const child = execFile('/usr/bin/python3', [join(root, 'routine/role.py'), 'serve', ...args], { timeout: 150000 }, (err, out) => {
+      let data = null;
+      try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
+      resolve({ code: err?.code ?? 0, data });
+    });
+    child.stdin.end(body ?? '');
+  });
+}
+function readBody(req) {
+  return new Promise((resolve) => {
+    let b = '';
+    req.on('data', (c) => { b += c; if (b.length > 100000) req.destroy(); });
+    req.on('end', () => resolve(b));
+    req.on('error', () => resolve(''));
+  });
+}
+
 // H59: the version, a newer one, the update and the changelog, from routine/update.py (the call server answers the
 // same addresses). A look on GitHub is started in the background by update.py itself, a few times a day. Starting
 // or checking needs the x-hq header, so a page from elsewhere can't press it.
@@ -264,6 +286,21 @@ const server = createServer(async (req, res) => {
     let out = await updateTool(path0.endsWith('start') ? ['start'] : ['check', '--force']);
     if (path0.endsWith('check')) out = await updateTool(['status']);
     res.writeHead(out ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(out));
+    return;
+  }
+  if (path0 === '/api/role' || path0 === '/api/forward') {
+    const post = req.method === 'POST';
+    if (post && req.headers['x-hq'] !== (path0 === '/api/role' ? 'role' : 'forward')) {
+      res.writeHead(403).end('Only another HQ can ask this');
+      return;
+    }
+    if (!post && path0 === '/api/forward') {
+      res.writeHead(405).end('POST only');
+      return;
+    }
+    const out = await roleTool([path0 === '/api/forward' ? 'forward' : post ? 'set' : 'get'], post ? await readBody(req) : '');
+    const status = out.code === 3 ? 409 : out.code === 2 ? 400 : out.data ? 200 : 500;
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(out.data));
     return;
   }
   if (path0 === '/hq.json') {

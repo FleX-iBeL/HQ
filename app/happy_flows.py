@@ -1621,7 +1621,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         repo.mkdir()
         hq = self.tmp / "hq"  # M1: the lock is HQ's; git runs in the workspace, a link to the user's repo
         (hq / "routine").mkdir(parents=True)
-        for f in ("gitlock.py", "hqpaths.py"):
+        for f in ("gitlock.py", "hqpaths.py", "role.py"):
             (hq / "routine" / f).write_text((jv / "routine" / f).read_text())
         (hq / "workspace").symlink_to(repo)
         g = lambda *a: sp.run(["git", *a], cwd=repo, capture_output=True, text=True)
@@ -4949,6 +4949,152 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         need(code == 403, f"an update can be started without the page's header: {code}")
         return "grey version, bar, quiet on a call, warning off a Mac with Cancel, no warning on a Mac, latest version, changelog; all pages carry it"
 
+    async def flow65(self) -> str:
+        """H56.3: main and backup. Two throwaway HQs (A, the laptop, and B, the server), each a copy of HQ with the
+        blank template and its own memory and status server on spare ports, nothing of the user's, both with their
+        routine and mail check switched off so nothing real ever starts. On this computer, and with a Linux machine
+        too (HQ_TEST_LINUX=<ssh host>). Checked: alone, an HQ is main and never looks for another; paired, the
+        choice of main reaches the other one; on the backup a call's job and planned item go to the main, git isn't
+        committed and the routine's mail, jobs and scheduler lines say they run on the main; with the main down
+        the backup keeps a request, takes over after the few minutes (here 4 seconds) and runs it, opening an
+        incident; when the main is back it becomes the backup until the other has finished its job, then gets
+        the role back; making this one main from a call works with the other one down, and the other one takes
+        that choice over when it's back. Then everything is removed again."""
+        import subprocess as sp, importlib
+        jv = ROOT
+        sys.path.insert(0, str(jv / "routine"))
+        hqpaths = importlib.import_module("hqpaths")
+        files = sp.run(["git", "-C", str(jv), "ls-files", "-co", "--exclude-standard"], capture_output=True, text=True).stdout
+        files = "\n".join(l for l in files.splitlines() if l and not l.startswith("workspace"))
+        tar = sp.run(["tar", "--no-xattrs", "-czf", "-", "-T", "-"] if hqpaths.IS_MAC else ["tar", "-czf", "-", "-T", "-"],
+                     input=files.encode(), capture_output=True, cwd=str(jv), env={**os.environ, "COPYFILE_DISABLE": "1"})
+        need(tar.returncode == 0, f"couldn't pack HQ: {tar.stderr.decode()[:200]}")
+        tag = f"hqflow65-{os.getpid()}"
+        script = FLOW65_SCRIPT.replace("@TAG@", tag)
+        notes = []
+        places = [("this Mac" if hqpaths.IS_MAC else "here", lambda cmd, **k: sp.run(["bash", "-c", cmd], **k), "/tmp")]
+        host = os.environ.get("HQ_TEST_LINUX")
+        if host and not hqpaths.IS_LINUX:
+            places.append((host, lambda cmd, **k: sp.run(["ssh", "-o", "BatchMode=yes", host, cmd], **k), "$HOME"))
+        for where, run_there, base in places:
+            r = run_there(f'T="{base}/{tag}"; mkdir -p "$T" && cat > "$T/hq.tgz"', input=tar.stdout, capture_output=True)
+            need(r.returncode == 0, f"couldn't copy HQ to {where}: {r.stderr.decode()[:200]}")
+            r = run_there("bash -s", input=script.replace("@BASE@", base).encode(), capture_output=True, timeout=300)
+            out = r.stdout.decode() + r.stderr.decode()
+            left = run_there(f'ls -d "{base}/{tag}" 2>/dev/null', capture_output=True).stdout.decode().strip()
+            need("ALL OK" in out, f"on {where}: " + next((l[5:] for l in out.splitlines() if l.startswith("FAIL ")), out.strip()[-400:]))
+            need(not left, f"the test left something behind on {where}: {left}")
+            oks = [l[3:] for l in out.splitlines() if l.startswith("OK ")]
+            notes.append(f"on {where}: " + "; ".join(oks) + "; everything removed again")
+        if not host and not hqpaths.IS_LINUX:
+            notes.append("on Linux skipped: set HQ_TEST_LINUX=<ssh host> to run it there too")
+        return " · ".join(notes)
+
+
+# H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
+FLOW65_SCRIPT = r"""
+# H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
+T="@BASE@/@TAG@"; PA=4796; PB=4797; SA=; SB=
+fail() { echo "FAIL $*"; exit 1; }
+cleanup() { [ -n "$SA" ] && kill "$SA" 2>/dev/null; [ -n "$SB" ] && kill "$SB" 2>/dev/null; sleep 0.3; rm -rf "$T"; }
+trap cleanup EXIT
+NOW=$(date +%s)
+for X in A B; do
+  mkdir -p "$T/$X/HQ" "$T/$X/state" && tar -xzf "$T/hq.tgz" -C "$T/$X/HQ" 2>/dev/null || fail "couldn't unpack HQ"
+  cp -R "$T/$X/HQ/template" "$T/$X/HQ/workspace"
+  # The throwaway's own watchdog line and heartbeat, so its routine never reaches for the real watchdog.
+  echo "{\"at\": $NOW}" > "$T/$X/state/watchdog.json"; echo "$NOW" > "$T/$X/state/heartbeat"
+done
+ENVA="HQ_SUPPORT=$T/A/state HQ_STATUS_PORT=$PA HQ_PORT=7894 HQ_UNIT=@TAG@-a HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_ROLE_ONLINE=1"
+ENVB="HQ_SUPPORT=$T/B/state HQ_STATUS_PORT=$PB HQ_PORT=7893 HQ_UNIT=@TAG@-b HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_ROLE_ONLINE=1"
+NODE=$(command -v node || echo /opt/homebrew/bin/node)
+ra() { (cd "$T/A/HQ" && env $ENVA python3 "$@"); }
+rb() { (cd "$T/B/HQ" && env $ENVB python3 "$@"); }
+starta() { (cd "$T/A/HQ" && exec env $ENVA "$NODE" status/server.mjs --quiet >> "$T/A/server.log" 2>&1) & SA=$!; }
+startb() { (cd "$T/B/HQ" && exec env $ENVB "$NODE" status/server.mjs --quiet >> "$T/B/server.log" 2>&1) & SB=$!; }
+up() { for i in $(seq 1 40); do curl -s -m 2 "http://127.0.0.1:$1/api/role" >/dev/null && return 0; sleep 0.25; done; return 1; }
+acting() { python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('acting'))" "$1/state/role-state.json"; }
+roadmap() { cat "$T/$1/HQ/workspace/HQ/roadmap.md"; }
+lines() { cat "$T/$1/HQ/.status/routines.json" 2>/dev/null; }
+starta; startb; up $PA && up $PB || fail "the throwaway status servers didn't start: $(tail -3 "$T/A/server.log")"
+
+# Alone.
+for f in ra rb; do $f routine/jobs.py off >/dev/null && $f routine/jobs.py mail-off >/dev/null || fail "couldn't switch the test's routine off"; done
+[ "$(ra routine/role.py acting)" = main ] || fail "an HQ on its own isn't main"
+ra routine/role.py tick | grep -q '"alone": true' || fail "an HQ on its own looked for another"
+ra routine/jobs.py add "alone job" --kind other >/dev/null && roadmap A | grep -q "alone job" || fail "an HQ on its own can't add a job"
+ra routine/tick.py || fail "the routine's look failed on an HQ on its own"
+lines A | grep -q '"role"' && fail "an HQ on its own shows a main-or-backup line"
+curl -s "http://127.0.0.1:$PA/api/role" | grep -q '"paired": *false' || fail "the status server doesn't answer the role"
+echo "OK alone: main, looks for nothing, says nothing about it"
+
+# Paired: B is chosen main.
+rb routine/role.py setup "http://127.0.0.1:$PA" --name vps --takeover 4 >/dev/null
+ra routine/role.py setup "http://127.0.0.1:$PB" --name laptop --takeover 4 >/dev/null
+rb routine/role.py setup "http://127.0.0.1:$PA" --main here | grep -q "vps is the main one now" || fail "couldn't make vps main"
+ra routine/role.py json | grep -q '"main": "vps"' || fail "the choice of main didn't reach the other HQ"
+rb routine/tick.py; ra routine/tick.py
+[ "$(acting "$T/B")" = main ] && [ "$(acting "$T/A")" = backup ] || fail "after the choice: B $(acting "$T/B"), A $(acting "$T/A")"
+lines A | grep -q 'Backup (laptop); vps is the main one' || fail "the backup's line doesn't say so"
+lines A | grep -q '"text": "Runs on the main one, vps; this HQ is the backup"' || fail "the backup's mail, jobs and scheduler lines don't say they run on the main"
+lines B | grep -q '"text": "Main (vps)"' || fail "the main's line doesn't say so"
+echo "OK the choice of main reaches the other one; the backup's mail check, jobs and scheduler say they run on the main"
+
+# On the backup: a call's job and planned item go to the main; nothing is committed.
+OUT=$(ra routine/jobs.py add "from a call on the backup" --kind other)
+echo "$OUT" | grep -q "handed to the main one, vps" || fail "a job on the backup wasn't handed to the main: $OUT"
+roadmap B | grep -q "from a call on the backup" || fail "the job didn't reach the main's queue"
+roadmap A | grep -q "from a call on the backup" && fail "the backup wrote the job in its own queue too"
+ra routine/schedule.py add "tomorrow 9:30" "planned on the backup" | grep -q "handed to the main" || fail "a planned item on the backup wasn't handed to the main"
+roadmap B | grep -q "planned on the backup" || fail "the planned item didn't reach the main"
+ra routine/jobs.py list >/dev/null || fail "the backup can't read its queue"
+ra routine/gitlock.py commit "test" x | grep -q "backup now" || fail "the backup would commit"
+(cd "$T/A/HQ/app" && env $ENVA python3 -c "import policy; assert policy.is_backup()") || fail "a call on the backup doesn't know it's the backup"
+echo "OK on the backup a call's job and planned item go to the main; nothing is committed there"
+
+# The main goes down: the backup keeps a request, takes over after the few minutes, runs it.
+kill "$SB"; SB=; sleep 0.5
+ra routine/tick.py
+[ "$(acting "$T/A")" = backup ] || fail "the backup took over at once, without waiting"
+ra routine/jobs.py add "while the main is down" --kind other | grep -q "kept here" || fail "a request on the backup wasn't kept while the main was down"
+sleep 5
+ra routine/tick.py
+[ "$(acting "$T/A")" = main ] || fail "the backup didn't take over: $(ra routine/role.py)"
+roadmap A | grep -q "while the main is down" || fail "the kept request didn't run once the backup took over"
+grep -q '"key": "role"' "$T/A/HQ/.status/incidents.json" && grep -q "took over as main" "$T/A/HQ/.status/incidents.json" || fail "the takeover isn't in the incidents"
+echo "OK with the main down the backup keeps the request, takes over after the few minutes, runs it, and notes it"
+
+# The main is back: it waits as backup until the other has finished its job, then gets the role back.
+startb; up $PB || fail "B's status server didn't come back"
+rb routine/tick.py
+[ "$(acting "$T/B")" = backup ] || fail "the returning main took the role while the other was still main"
+ra routine/tick.py
+echo '{"n": 9, "pid": null, "started": 0}' > "$T/A/HQ/scratch/routine/job.json"
+python3 -c "import json,sys; p=sys.argv[1]; s=json.load(open(p)); s['peer_looks']=1; json.dump(s,open(p,'w'))" "$T/A/state/role-state.json"
+(cd "$T/A/HQ" && env $ENVA python3 -c "import sys; sys.path.insert(0,'routine'); import role; r=role.tick(); assert r['acting']=='main' and r['handing_back'], r") \
+  || fail "the backup handed back while its job still ran"
+rm -f "$T/A/HQ/scratch/routine/job.json"
+ra routine/tick.py
+[ "$(acting "$T/A")" = backup ] || fail "the backup didn't hand the role back once its job was done"
+rb routine/tick.py
+[ "$(acting "$T/B")" = main ] || fail "the main didn't get its role back"
+grep -q "handed the main role back" "$T/A/HQ/.status/incidents.json" || fail "handing back isn't in the incidents"
+echo "OK the main back: it waits until the other has finished its job, then gets the role back"
+
+# From a call to the laptop, with the server down: make the laptop main; the server takes that over when it's back.
+kill "$SB"; SB=; sleep 0.5
+ra routine/role.py main here | grep -q "can't be reached" || fail "making this one main with the other down didn't say so"
+ra routine/tick.py
+[ "$(acting "$T/A")" = main ] || fail "the laptop isn't main after being made main"
+startb; up $PB || fail "B's status server didn't come back"
+for i in 1 2 3; do rb routine/tick.py; ra routine/tick.py; done
+rb routine/role.py json | grep -q '"main": "laptop"' || fail "the server didn't take the newer choice over"
+[ "$(acting "$T/A")" = main ] && [ "$(acting "$T/B")" = backup ] || fail "after it was back: A $(acting "$T/A"), B $(acting "$T/B")"
+echo "OK made main from a call with the other one down; the other takes that over when it's back"
+
+ra routine/role.py alone | grep -q "on its own" && [ "$(ra routine/role.py acting)" = main ] || fail "alone again didn't work"
+echo "ALL OK"
+"""
 
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
@@ -5015,6 +5161,7 @@ FLOWS = {
     62: ("H73: Moneypenny, coming soon: a locked card under Donna and Pepper, never called", False, "flow62"),
     63: ("H56.2: job windows and the mail check on Linux, in tmux: a throwaway job and mail check", False, "flow63"),
     64: ("F16: the call page fits the screen before, during and after a call; no scrolling into white space", False, "flow64"),
+    65: ("H56.3: main and backup: two throwaway HQs hand the main role back and forth; alone, an HQ is simply main", False, "flow65"),
 }
 
 
