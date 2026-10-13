@@ -41,7 +41,7 @@ Used by HQ itself: tick (the routine, every minute), acting, json, serve (the st
 """
 from __future__ import annotations
 
-import http.client, json, os, socket, ssl, subprocess, sys, time
+import contextlib, fcntl, http.client, json, os, socket, ssl, subprocess, sys, time
 import urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -55,6 +55,7 @@ PENDING = os.path.join(SUPPORT, "role-pending.jsonl")
 TAKEOVER = 300  # a few minutes without the main before the backup takes over (Claude's choice)
 BACK_LOOKS = 2  # looks in a row the main must answer before the backup hands back (no flapping)
 TIMEOUT = 8
+TELL_TIMEOUT = 30  # telling the other one a choice: it may wait for its own minute's look to finish first (F19)
 PY = sys.executable or "/usr/bin/python3"
 
 # What a call may ask of the queue and the schedule, and so what the backup hands to the main.
@@ -75,6 +76,38 @@ def _save(path, data):
     with open(tmp, "w") as f:
         json.dump(data, f, indent=1)
     os.replace(tmp, path)
+
+
+@contextlib.contextmanager
+def _locked(wait=20.0):
+    """F19: one decision about this HQ's role at a time: the routine's minute, a choice made from a call here, and
+    the other HQ telling this one its choice. Raises TimeoutError when it can't get its turn within `wait`."""
+    os.makedirs(SUPPORT, exist_ok=True)
+    f = open(os.path.join(SUPPORT, "role.lock"), "a")
+    try:
+        end = time.time() + wait
+        while True:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.time() >= end:
+                    raise TimeoutError("role.lock")
+                time.sleep(0.2)
+        yield
+    finally:
+        f.close()
+
+
+def _log(msg):
+    """The routine's log, for what happens outside its minute (a choice from a call, the other one telling this one)."""
+    try:
+        run = os.path.join(hqpaths.HQ, "scratch", "routine")
+        os.makedirs(run, exist_ok=True)
+        with open(os.path.join(run, "routine.log"), "a") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except OSError:
+        pass
 
 
 def _test_on_real_pairing() -> bool:
@@ -127,6 +160,7 @@ def mine() -> dict:
     s = _load(STATE, {})
     return {"name": my_name(c), "main": chosen_main(c), "chosen_at": c.get("chosen_at", 0), "acting": acting(),
             "busy": busy(), "since": s.get("since"), "paired": bool(c), "at": time.time(),
+            "took_over": bool(s.get("took_over")),  # F19: took over (main gone) or just handing over a choice
             "label": hqpaths.short_name()}  # H88: the name of its heartbeat line on the other's status page
 
 
@@ -228,15 +262,90 @@ def choose(who: str) -> str:
         return f"There's no HQ called {name}: this one is {me}, the other one is {other}."
     c.update({"main": name, "chosen_at": time.time()})
     _save(CONFIG, c)
-    told = ""
+    # F19: the hand-over happens now, not at the next minute's looks. The one stepping down tells the other it's the
+    # backup, and the other starts as main on that answer; nothing waits for both routines' minutes to line up.
+    d = None
     try:
-        code, _ = _request(c["peer"].rstrip("/") + "/api/role", {"main": name, "chosen_at": c["chosen_at"]}, "role")
-        told = " It told the other one right away." if code == 200 else ""
+        with _locked():
+            s = _load(STATE, {})
+            step_down = name != me and acting() == "main" and not busy() and not s.get("took_over")
+            if step_down:
+                _set(s, "backup", f"{name} was made main; handed the role over", _log, handing_back=None)
+                _save(STATE, s)
+            d = _tell(c, name)
+            s = _load(STATE, {})
+            if step_down and not (d and d.get("acting") == "main"):
+                # The other one didn't start as main: this one stays main until its minute's look sees it has.
+                _set(s, "main", f"{name} was made main; this one stays main until it has taken over", _log)
+            elif name == me and d and d.get("acting") == "backup" and acting() != "main":
+                _set(s, "main", "the chosen main", _log, on_main_pending=True, took_over=None, handing_back=None)
+            _save(STATE, s)
+    except TimeoutError:  # this HQ's minute is busy deciding: still tell the other one; the next look does the rest
+        d = _tell(c, name)
+    _beat()
+    if not d:
+        turn = (" This one starts running the routines within a minute." if name == me else
+                " This one stays main until the other one is back and has taken over.")
+        return f"{name} is the main one now. The other one can't be reached now; it takes this choice over as soon as it's back.{turn}"
+    if acting() == ("main" if name == me else "backup"):
+        return f"{name} is the main one now. It told the other one, and the switch is done."
+    doing = busy() if name != me else d.get("busy")
+    return (f"{name} is the main one now. It told the other one right away. The switch happens as soon as "
+            f"{doing or 'what runs there now'} is done, so nothing runs twice.")
+
+
+def _tell(c, main):
+    """Tell the other HQ the choice of main and what this one is doing now; its answer (its own role), or None."""
+    try:
+        code, d = _request(c["peer"].rstrip("/") + "/api/role", {"main": main, "chosen_at": c.get("chosen_at"),
+                           "acting": acting(), "busy": busy()}, "role", timeout=TELL_TIMEOUT)
+        return d if code == 200 and isinstance(d, dict) else None
     except Exception:
-        told = " The other one can't be reached now; it takes this choice over as soon as it's back."
-    turn = (" This one starts running the routines within a minute" if name == me else
-            " This one stops starting new work within a minute; a job already running here finishes first")
-    return f"{name} is the main one now.{told}{turn}."
+        return None
+
+
+def settle(sender: dict) -> None:
+    """F19: the other HQ has just told this one its choice (POST /api/role), so it's up. Hand over now instead of
+    at the next minute's look: step down when the other is chosen and nothing runs here, or start as main when this
+    one is chosen and the other says it's the backup. A main that took over (the other was gone) is left to the
+    minute's look, which also writes the incident."""
+    try:
+        with _locked():
+            c = config()
+            if not c:
+                return
+            me, s = my_name(c), _load(STATE, {})
+            peer = c.get("peer_name") or "the other HQ"
+            if chosen_main(c) == me:
+                if sender.get("acting") == "backup" and acting() != "main":
+                    _set(s, "main", "the chosen main", _log, on_main_pending=True, took_over=None, handing_back=None)
+            elif acting() == "main" and not s.get("took_over"):
+                doing = busy()
+                if doing:
+                    s["handing_back"] = True
+                    _set(s, "main", f"{peer} was made main; this one hands the role over once {doing} is done", _log)
+                else:
+                    _set(s, "backup", f"{peer} was made main; handed the role over", _log, handing_back=None)
+            _save(STATE, s)
+    except TimeoutError:
+        return  # this HQ's minute is deciding right now; its next look does it
+    _beat()
+
+
+def _beat():
+    """The status page's main-or-backup line, right after a hand-over outside the routine's minute."""
+    try:
+        import routines
+        c = config()
+        if not c:
+            return
+        s, me = _load(STATE, {}), my_name(c)
+        chosen = chosen_main(c) == me
+        p = s.get("peer") or {}
+        routines.beat("role", state="waiting" if s.get("acting") == "main" and not chosen else "ok",
+                      text=line(s, p or True, me, c.get("peer_name") or "the other HQ", 0, TAKEOVER, chosen))
+    except Exception:
+        pass
 
 
 def adopt(main: str, chosen_at: float) -> bool:
@@ -268,10 +377,15 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
     c = config()
     if not c:
         return {"acting": "main", "alone": True}
+    p = peer_role(c)
+    lock = contextlib.ExitStack()
+    try:  # F19: a hand-over from a call, or told by the other one, may be deciding right now; this look waits its turn
+        lock.enter_context(_locked(30))
+    except TimeoutError:
+        return {"acting": acting(), "handing_back": bool(_load(STATE, {}).get("handing_back")), "busy_deciding": True}
     now = time.time()
     s = _load(STATE, {})
     me = my_name(c)
-    p = peer_role(c)
     if p:
         if p.get("name") and c.get("peer_name") != p["name"]:
             full = _load(CONFIG, {})
@@ -297,8 +411,11 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
     if chosen:
         if p and p.get("acting") == "main":
             what = f" ({p['busy']})" if p.get("busy") else ""
+            # F19: only a main that took over took over; one that was simply main before is handing a choice over.
             changed = _set(s, "backup", f"{peer} took over while this one was away; it hands the main role back "
-                                        f"once it has finished what it's doing{what}", log)
+                                        f"once it has finished what it's doing{what}" if p.get("took_over", True) else
+                           f"{peer} is handing the main role over" + (f" once {p['busy']} is done" if p.get("busy")
+                                                                      else " now"), log)
         else:
             changed = _set(s, "main", "the chosen main", log)
     else:
@@ -323,7 +440,12 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
                            took_over=now, handing_back=None)
         else:
             changed = _set(s, "backup", f"{peer} is the main one", log, handing_back=None)
+    pending = s.pop("on_main_pending", None)
     _save(STATE, s)
+    lock.close()
+    # F19: stepped down while the other one answers: tell it now, so it starts as main without waiting a minute.
+    if changed and was == "main" and s["acting"] == "backup" and p:
+        _tell(c, chosen_main(c))
     # The incident log: a takeover is the main going down, handing back is it being up again.
     if incidents:
         if changed and s["acting"] == "main" and s.get("took_over") == now:
@@ -333,7 +455,7 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
         elif changed and was == "main" and s["acting"] == "backup" and took and incidents.is_down("role"):
             incidents.fix("role", f"{peer} was back; handed the main role back at {_clock(now)}")
             incidents.up("role")
-    if changed and s["acting"] == "main" and on_main:
+    if (changed or pending) and s["acting"] == "main" and on_main:
         try:
             on_main()
         except Exception as e:
@@ -458,6 +580,7 @@ def serve(kind: str) -> int:
     d = json.loads(sys.stdin.read() or "{}")
     if kind == "set":
         adopt(d.get("main"), d.get("chosen_at"))
+        settle(d)  # F19: hand over now, not at the next minute's look
         print(json.dumps(mine()))
         return 0
     if kind == "forward":

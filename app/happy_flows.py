@@ -6451,6 +6451,34 @@ rb routine/role.py json | grep -q '"main": "laptop"' || fail "the server didn't 
 [ "$(acting "$T/A")" = main ] && [ "$(acting "$T/B")" = backup ] || fail "after it was back: A $(acting "$T/A"), B $(acting "$T/B")"
 echo "OK made main from a call with the other one down; the other takes that over when it's back"
 
+# F19: from a call with both up, the switch is done at once, without waiting for the routines' minutes, and the
+# reason never says the other one took over when it was simply main before.
+OUT=$(ra routine/role.py main other)
+echo "$OUT" | grep -q "the switch is done" || fail "making the other main with both up didn't switch at once: $OUT"
+[ "$(acting "$T/B")" = main ] && [ "$(acting "$T/A")" = backup ] || fail "right after making vps main: A $(acting "$T/A"), B $(acting "$T/B")"
+OUT=$(ra routine/role.py main here)
+echo "$OUT" | grep -q "the switch is done" || fail "making this one main from the backup didn't switch at once: $OUT"
+[ "$(acting "$T/A")" = main ] && [ "$(acting "$T/B")" = backup ] || fail "right after making the laptop main: A $(acting "$T/A"), B $(acting "$T/B")"
+grep -q "on_main_pending" "$T/A/state/role-state.json" || fail "the new main won't line up its routines at its next look"
+ra routine/tick.py; rb routine/tick.py
+grep -q "on_main_pending" "$T/A/state/role-state.json" && fail "the new main's next look didn't line up its routines"
+rb routine/role.py main here | grep -q "the switch is done" || fail "making vps main from vps didn't switch at once"
+[ "$(acting "$T/B")" = main ] && [ "$(acting "$T/A")" = backup ] || fail "after vps made itself main: A $(acting "$T/A"), B $(acting "$T/B")"
+# With a job running on the main, it waits for the job; once done, the hand-over is at once again.
+echo '{"n": 9, "pid": null, "started": 0}' > "$T/B/HQ/scratch/routine/job.json"
+OUT=$(ra routine/role.py main here)
+echo "$OUT" | grep -q "as soon as job 9 is done" || fail "making this one main while the other runs a job didn't say it waits: $OUT"
+[ "$(acting "$T/A")" = backup ] && [ "$(acting "$T/B")" = main ] || fail "the switch didn't wait for the job: A $(acting "$T/A"), B $(acting "$T/B")"
+ra routine/tick.py
+grep -q "took over while this one was away" "$T/A/state/role-state.json" && fail "the reason says vps took over, while it was simply main before"
+grep -q "handing the main role over once job 9 is done" "$T/A/state/role-state.json" || fail "the reason doesn't say vps is handing over after its job"
+rm -f "$T/B/HQ/scratch/routine/job.json"
+rb routine/tick.py
+[ "$(acting "$T/B")" = backup ] && [ "$(acting "$T/A")" = main ] || fail "once the job was done, the hand-over waited for the next look: A $(acting "$T/A"), B $(acting "$T/B")"
+for i in 1 2; do ra routine/tick.py; rb routine/tick.py; done
+[ "$(acting "$T/A")" = main ] && [ "$(acting "$T/B")" = backup ] || fail "the looks after the switch changed it: A $(acting "$T/A"), B $(acting "$T/B")"
+echo "OK F19: from a call the switch is at once when nothing runs, after the job when one does, with the right reason"
+
 ra routine/role.py alone | grep -q "on its own" && [ "$(ra routine/role.py acting)" = main ] || fail "alone again didn't work"
 echo "ALL OK"
 """
