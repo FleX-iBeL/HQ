@@ -7283,7 +7283,7 @@ print("H88OUT " + json.dumps(out))
                 "his lines green, hers in her colour, also in a past call")
 
     async def flow84(self) -> str:
-        """H106, no Claude: the mic and sound choice in Settings, on the real call page in a headless browser with
+        """H106, H112, no Claude: the mic and sound choice in Settings (and on a call), on the real call page in a headless browser with
         stand-in devices (AirPods, the phone's mic, a podcast mic; two outputs). Every input is listed after Default;
         a choice is remembered on this device and the call's getUserMedia asks for exactly that mic, also when the
         browser gave it a new id (found by its name); a mic that's gone falls back to the default and says so;
@@ -7314,7 +7314,8 @@ print("H88OUT " + json.dumps(out))
     enumerateDevices: async () => devs.map(d => ({ ...d })),
     getUserMedia: async c => { asked.push(JSON.stringify(c.audio));
       if (gone && c.audio.deviceId) { const e = new Error("gone"); e.name = "OverconstrainedError"; throw e; }
-      return { getTracks: () => [], getAudioTracks: () => [] }; },
+      const tr = { kind: "audio", enabled: true, stopped: false, from: c.audio.deviceId ? c.audio.deviceId.exact : "", stop() { this.stopped = true; } };
+      return { getTracks: () => [tr], getAudioTracks: () => [tr] }; },
     addEventListener: () => {} } });
   const sinks = []; audioEl.setSinkId = async id => { sinks.push(id); };
   showSettings(true); await listDevices();
@@ -7346,6 +7347,33 @@ print("H88OUT " + json.dumps(out))
     outSel.value = ""; outSel.dispatchEvent(new Event("change"));
     check("sound-default", sinks.at(-1) === "", sinks.join(","));
   }
+  // H112: on a call the round mic button opens only the mic and sound rows, and a new mic takes over at once.
+  gone = false; showSettings(false);
+  check("no-devbtn-before", getComputedStyle(devBtn).display === "none", getComputedStyle(devBtn).display);
+  const sent = [], sender = { track: null, replaceTrack: async t => { sent.push(t); sender.track = t; } };
+  stream = await openMic(); sender.track = stream.getAudioTracks()[0];
+  pc = { getSenders: () => [sender], close() {} };
+  setState("live", "On the call");
+  check("devbtn-on-call", getComputedStyle(devBtn).display !== "none", getComputedStyle(devBtn).display);
+  devBtn.click();
+  check("sheet-open", setEl.classList.contains("open") && setEl.classList.contains("incall"), setEl.className);
+  const shown = r => r && getComputedStyle(r).display !== "none";
+  check("only-mic-sound", shown(micSel.closest(".row")) && !shown(document.getElementById("free").closest(".row"))
+    && !shown(soundBtn.closest(".row")) && !shown(document.getElementById("voices")), "rows shown wrong");
+  const first = stream.getAudioTracks()[0];
+  first.enabled = false;  // muted on the call
+  micSel.value = "air"; micSel.dispatchEvent(new Event("change"));
+  for (let i = 0; i < 50 && !sent.length; i++) await new Promise(r => setTimeout(r, 20));
+  const now = sent.at(-1);
+  check("switched-at-once", !!now && now.from === "air" && stream.getAudioTracks()[0] === now, now ? now.from : "nothing sent");
+  check("old-mic-stopped", first.stopped === true, String(first.stopped));
+  check("mute-kept", now && now.enabled === false, now ? String(now.enabled) : "-");
+  check("same-call", pc && pc.getSenders()[0] === sender, "a new connection");
+  setState("live", "On the call");
+  check("stays-open", setEl.classList.contains("open"), setEl.className);
+  setState("idle", "Call ended");
+  check("closes-after-call", !setEl.classList.contains("open") && getComputedStyle(devBtn).display === "none", setEl.className);
+  pc = null; stream = null;
   devs = devs.map(d => ({ ...d, label: "" })); await listDevices();
   check("ask-names", !micAskRow.hidden, "hidden");
   } catch (e) { out.push("crash:WRONG " + e); }
@@ -7365,7 +7393,8 @@ print("H88OUT " + json.dumps(out))
         say(f"   {m.group(1)}")
         need(all(part.endswith(":ok") for part in m.group(1).split(" | ")), f"the mic or sound choice isn't right: {m.group(1)}")
         return ("every mic listed after Default, the choice remembered and used by the call, found again by its name, "
-                "a gone mic falls back to the default; the sound choice only where the browser can, and used")
+                "a gone mic falls back to the default; the sound choice only where the browser can, and used; "
+                "on a call the mic button opens only mic and sound, a new mic takes over at once, muted stays muted")
 
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
@@ -7803,7 +7832,7 @@ FLOWS = {
     81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data", False, "flow81"),
     82: ("H104, H108: times on calls as 5 30 in the afternoon, no colon, no words, never half, quarter or o'clock", False, "flow82"),
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one, and a space to doodle", False, "flow83"),
-    84: ("H106: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can", False, "flow84"),
+    84: ("H106, H112: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can; changed on a call at once", False, "flow84"),
     85: ("H79: ask for another agent by name: she hands over, or brings her in on a three-way call", False, "flow85"),
     86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back", False, "flow86"),
     87: ("H98: the dog sits by its empty bowl and says Update! in green when a newer version is out", False, "flow87"),

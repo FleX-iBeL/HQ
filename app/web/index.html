@@ -131,6 +131,15 @@
   /* H106: the mic and sound choice; long device names are cut, the full name is in the list. */
   #settings select.dev { min-width:0; max-width:56%; text-overflow:ellipsis; }
   #settings .row[hidden] { display:none; }
+  /* H112: on a call the same sheet opens with only the mic and sound rows, from a round button right above the
+     chat bubble (only while the call is on), and a new choice takes effect at once. */
+  #devbtn { position:fixed; right:16px; bottom:calc(152px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
+            border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:none; align-items:center; justify-content:center;
+            cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  #devbtn.show { display:flex; }
+  #devbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
+  #devbtn svg { width:26px; height:26px; }
+  #settings.incall .row:not(.devrow), #settings.incall #voices { display:none; }
   #setdone { margin-top:8px; padding:14px; border-radius:999px; border:0; background:var(--fg); color:var(--bg); font:600 17px/1 -apple-system,sans-serif; cursor:pointer; }
   /* H3: what HQ is doing. Hidden outside a call. */
   #orbwrap { display:none; flex-direction:column; align-items:center; gap:10px; margin:-8px 0; }
@@ -372,9 +381,9 @@
     <option value="bm_george">George (British)</option>
     <option value="bm_fable">Fable (British)</option>
   </template>
-  <div class="row"><span>Microphone<small id="micnote">What she hears you with</small></span><select id="mic" class="dev" aria-label="Microphone"><option value="">Default</option></select></div>
-  <div class="row" id="micaskrow" hidden><span>Device names<small>The browser only names them once the page may use the mic</small></span><button id="micask" class="sw" type="button">Show</button></div>
-  <div class="row" id="outrow" hidden><span>Sound<small>Where her voice plays</small></span><select id="out" class="dev" aria-label="Sound"><option value="">Default</option></select></div>
+  <div class="row devrow"><span>Microphone<small id="micnote">What she hears you with</small></span><select id="mic" class="dev" aria-label="Microphone"><option value="">Default</option></select></div>
+  <div class="row devrow" id="micaskrow" hidden><span>Device names<small>The browser only names them once the page may use the mic</small></span><button id="micask" class="sw" type="button">Show</button></div>
+  <div class="row devrow" id="outrow" hidden><span>Sound<small>Where her voice plays</small></span><select id="out" class="dev" aria-label="Sound"><option value="">Default</option></select></div>
   <div class="row"><span>Thinking sound<small>A soft tick while she thinks</small></span><button id="sound" class="sw" type="button" aria-pressed="true">On</button></div>
   <button id="setdone" type="button">Done</button>
 </div>
@@ -383,6 +392,9 @@
 <button id="chatbtn" type="button" aria-label="Chat log" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"/></svg>
   <span class="badge"></span>
+</button>
+<button id="devbtn" type="button" aria-label="Microphone and sound" aria-expanded="false" aria-controls="settings">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>
 </button>
 <div id="statsheet" role="dialog" aria-label="Status"><div id="stathead"><h2>Status</h2><button id="statclose" type="button">Close</button></div><iframe id="statframe" title="Status" src="about:blank"></iframe></div>
 <button id="statbtn" type="button" aria-label="Status page" aria-expanded="false">
@@ -573,13 +585,20 @@ fetch("/api/agents", { cache: "no-store" }).then(r => r.ok ? r.json() : null).th
   showAgents(j.agents); showSoon(j.soon); showMode();
 }).catch(() => {});
 // H9: the Settings sheet (Free, voice, waiting lines, thinking sound), only before a call.
+// H112: on a call only its mic and sound rows, opened with the round mic button.
 const setBtn = document.getElementById("setbtn"), setEl = document.getElementById("settings"), shade = document.getElementById("shade");
+const devBtn = document.getElementById("devbtn"), setTitle = setEl.querySelector("h2");
 function showSettings(open) {
+  const inCall = open && state === "live";
+  setEl.classList.toggle("incall", inCall);
+  setTitle.textContent = inCall ? "Microphone and sound" : "Settings";
   setEl.classList.toggle("open", open); shade.classList.toggle("open", open);
   if (open) listDevices();  // H106
-  setBtn.setAttribute("aria-expanded", String(open));
+  setBtn.setAttribute("aria-expanded", String(open && !inCall));
+  devBtn.setAttribute("aria-expanded", String(inCall));
 }
 setBtn.addEventListener("click", () => { if (state === "idle") showSettings(true); });
+devBtn.addEventListener("click", () => { if (state === "live") showSettings(!setEl.classList.contains("open")); });
 document.getElementById("setdone").addEventListener("click", () => showSettings(false));
 shade.addEventListener("click", () => showSettings(false));
 let pc = null, dc = null, stream = null, pingTimer = null, wakeLock = null, state = "idle", muted = false;
@@ -651,7 +670,7 @@ function devSave(sel, key, kind) {
     else localStorage.setItem(key, JSON.stringify({ id: sel.value, label: d ? d.label : (old && old.label) || "" }));
   } catch (e) {}
 }
-micSel.addEventListener("change", () => devSave(micSel, "hq-mic", "audioinput"));
+micSel.addEventListener("change", () => { devSave(micSel, "hq-mic", "audioinput"); switchMic(); });
 outSel.addEventListener("change", () => { devSave(outSel, "hq-out", "audiooutput"); applySink(); });
 document.getElementById("micask").addEventListener("click", async () => {
   try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach(t => t.stop()); } catch (e) {}
@@ -673,6 +692,25 @@ async function openMic() {
     errEl.textContent = "The chosen microphone isn't here, so the default one is used.";
     return await navigator.mediaDevices.getUserMedia({ audio: micAudio(false) });
   }
+}
+// H112: a new mic chosen on a call takes over at once: it's opened, sent in place of the old one (no new
+// connection, the call goes on), and the old one is stopped. Muted stays muted, push to talk stays shut.
+let micSwap = 0;
+async function switchMic() {
+  if (!pc || !stream || state !== "live") return;
+  const n = ++micSwap;
+  let fresh;
+  try { fresh = await openMic(); }
+  catch (e) { errEl.textContent = "That microphone couldn't be opened, so the call keeps the one it had."; return; }
+  const t = fresh.getAudioTracks()[0], sender = pc && pc.getSenders().find(x => !x.track || x.track.kind === "audio");
+  if (n !== micSwap || !t || !sender || !stream) { fresh.getTracks().forEach(x => x.stop()); return; }
+  const old = stream;
+  t.enabled = old.getAudioTracks().some(x => x.enabled);
+  try { await sender.replaceTrack(t); }
+  catch (e) { fresh.getTracks().forEach(x => x.stop()); errEl.textContent = "The call couldn't switch microphones, so it keeps the one it had."; return; }
+  if (stream !== old) { fresh.getTracks().forEach(x => x.stop()); return; }  // hung up meanwhile
+  stream = fresh; old.getTracks().forEach(x => x.stop());
+  listDevices();
 }
 // Where her voice (and the thinking sound) plays; only where the browser can choose.
 function applySink() {
@@ -1291,7 +1329,8 @@ function setState(s, text) {
   modesEl.classList.toggle("hide", s !== "idle");
   soonEl.classList.toggle("hide", s !== "idle");  // H73
   setBtn.classList.toggle("hide", s !== "idle");
-  if (s !== "idle") showSettings(false);
+  devBtn.classList.toggle("show", s === "live");  // H112
+  if (s !== "live" ? setEl.classList.contains("incall") || s !== "idle" : !setEl.classList.contains("incall")) showSettings(false);
   if (s !== "live") thinkingSound(false);
   // H34: the bubble is always there; before a call it opens the last call, after one this call.
   if (s !== "live") typeIn.blur();
