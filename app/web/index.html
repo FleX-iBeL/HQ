@@ -77,6 +77,9 @@
   /* F16 (reopened): on a call the screen keeps its old layout (the hidden picker and her card keep their room,
      so the call's buttons sit where they always did), but it can't be scrolled into the white space below. */
   html.calllock, html.calllock body { overflow:hidden; overscroll-behavior:none; }
+  /* F20: a swipe that reaches the end of a sheet's list stays in that list; on the iPhone it could carry on
+     into the call screen behind it, which then stayed pushed down once the sheet closed. */
+  #histlist, #histlog, #chatlog { overscroll-behavior:contain; }
   #mute { display:none; min-width:150px; padding:14px 22px; border-radius:999px; border:2px solid var(--muted); background:transparent; color:var(--fg);
           font:600 18px/1 -apple-system,sans-serif; cursor:pointer; }
   #mute.show { display:inline-block; }
@@ -637,7 +640,15 @@ const chatBtn = document.getElementById("chatbtn"), chatEl = document.getElement
       chatLog = document.getElementById("chatlog"), badge = chatBtn.querySelector(".badge");
 let unread = 0;
 function chatOpen() { return chatEl.classList.contains("open"); }
-function showLayout() { document.body.classList.toggle("chatting", (chatOpen() || statOpen() || histOpen()) && state === "live"); fitCall(); }
+// F20: when a sheet closes on a call, the call screen goes back to where it was: once now, and again once the
+// phone has settled its own scrolling (the iPhone finishes a swipe or a layout change a moment later).
+let sheetWasOpen = false;
+function showLayout() {
+  const open = chatOpen() || statOpen() || histOpen();
+  document.body.classList.toggle("chatting", open && state === "live"); fitCall();
+  if (sheetWasOpen && !open && state !== "idle") { requestAnimationFrame(() => fitCall()); setTimeout(fitCall, 350); }
+  sheetWasOpen = open;
+}
 // F16 (reopened): on a call the page doesn't scroll, as long as the listening line (or, before it shows, the
 // call's buttons) fits on the screen, as on the old layout without scrolling; the status line under it may sit
 // low. On a screen too short for it, it scrolls as it always did, so nothing is out of reach.
@@ -648,7 +659,7 @@ function fitCall() {
   const last = [orbWrap, cancelBtn, muteBtn, btn].find(e => e && e.offsetParent !== null) || btn;
   const fits = last.getBoundingClientRect().bottom + scrollY <= innerHeight;
   root.classList.toggle("calllock", fits);
-  if (fits) scrollTo(0, 0);
+  if (fits) { scrollTo(0, 0); document.body.scrollTop = 0; }
 }
 addEventListener("resize", () => fitCall());
 function showBadge() { badge.textContent = unread > 9 ? "9+" : String(unread); badge.classList.toggle("show", unread > 0 && !chatOpen()); }

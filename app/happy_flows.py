@@ -142,7 +142,8 @@ Run them before and after every update; they print a short pass/fail table at th
   64 F16, no Claude: the call page fits the screen. The real call page (with Moneypenny's card) in a headless
      browser at iPhone 13 sizes (Safari and the home screen), a small phone, and the desktop app's size (?app):
      on a call the old layout stays (the picker and her card keep their room) and the page can't be scrolled
-     into white space; a screen too short for the status line still scrolls; nothing scrolls before or after
+     into white space, and after Past calls is opened and closed it's back where it was (F20); a screen too short
+     for the status line still scrolls; nothing scrolls before or after
   69 H76 and H77, no Claude: each agent her own character. Donna, Pepper and Moneypenny in HQ's defaults with the
      agreed greeting first and push-back line, nothing personal, the name from me.md filled in; her character and
      the human rules after the call rules, no talk while thinking; a call greets in her words; a workspace's own
@@ -332,13 +333,13 @@ class Server:
         return http_get("/")[0] == 200
 
     def start(self) -> subprocess.CompletedProcess:
-        return run([str(APP / "start.sh")], env=self.env, timeout=120)
+        return run([str(APP / ("start-linux.sh" if sys.platform.startswith("linux") else "start.sh"))], env=self.env, timeout=120)
 
     def stop(self, path_prefix: str | None = None) -> subprocess.CompletedProcess:
         env = dict(self.env)
         if path_prefix:
             env["PATH"] = path_prefix + os.pathsep + env["PATH"]
-        return run([str(APP / "stop.sh")], env=env, timeout=120)
+        return run([str(APP / ("stop-linux.sh" if sys.platform.startswith("linux") else "stop.sh"))], env=env, timeout=120)
 
     def log_size(self) -> int:
         try:
@@ -4024,14 +4025,17 @@ setTimeout(() => {
         """F16: on a call the page can't be scrolled into white space, and (reopened) the call screen keeps its
         old layout: the hidden agent picker and Moneypenny's card keep their room, so the round button, Mute and
         the status line sit where they always did. The scrolling is locked instead, as long as the listening
-        line fits on the screen. The real page in a headless browser. No Claude turns."""
+        line fits on the screen. F20: after Past calls is opened and closed on a call, the call screen is back where
+        it was, also when the phone's scrolling carries on a moment after the close. The real page in a headless
+        browser. No Claude turns."""
         await self.ensure_server()
         page = http_get("/")[1].decode()
         need("html.calllock, html.calllock body { overflow:hidden; overscroll-behavior:none; }" in page,
              "the call page doesn't lock its scrolling on a call")
         need("body.oncall" not in page, "the picker and her card take no room on a call again (job 72), so the call screen sits too high")
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
-        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         # Phones and the Mac app draw scrollbars over the page; headless Chrome takes room for them, so it doesn't here.
         harness = r"""<style>html{scrollbar-width:none}</style><script>
@@ -4055,6 +4059,10 @@ setTimeout(async () => {
   out.push('orb:' + Math.round(box('orbwrap')[1]) + ' status:' + Math.round(box('status')[1]) + ' h:' + innerHeight);
   chatBtn.click(); await wait(200); out.push('chat:' + (locked() || over() <= 0 ? 'ok' : 'scrolls')); showChat(false); await wait(100);
   out.push('back:' + (locked() ? 'locked' : 'free'));
+  // F20: Past calls opened and closed on a call; the phone's own scrolling carries on a moment after the close.
+  const b0 = Math.round(box('btn')[0]), s0 = Math.round(box('status')[1]);
+  showHistory(true); await wait(300); showHistory(false); scrollTo(0, 60); await wait(500);
+  out.push('past:' + (scrollY === 0 && Math.round(box('btn')[0]) === b0 && Math.round(box('status')[1]) === s0 ? 'back' : 'moved'));
   cleanup('Call ended'); await wait(200); out.push('after:' + over()); out.push('afterlock:' + (locked() ? 'locked' : 'free'));
   const pre = document.createElement('pre'); pre.id = 'f16'; pre.textContent = 'F16RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
 }, 1500);
@@ -4068,7 +4076,8 @@ setTimeout(async () => {
                  ("a small phone in Safari", "375,553", f, False), ("the desktop app", "1180,780", fa, True)]
         seen = []
         for name, size, page_file, fits in sizes:
-            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'f16-profile'}",
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'f16-profile'}",
                                               "--disable-web-security", f"--window-size={size}", "--virtual-time-budget=8000", "--dump-dom", page_file.as_uri()], timeout=60)
             mm = re.search(r'<pre id="f16">F16RESULT (.*?) END</pre>', r.stdout)
             need(mm, f"{name}: the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -4084,11 +4093,13 @@ setTimeout(async () => {
                 need(res["statusfits"] == "yes", f"{name}: the listening line doesn't fit on a call: {res}")
                 for when in ("connecting", "live", "back"):
                     need(res[when] == "locked", f"{name}: the page can be scrolled into white space on a call ({when}): {res}")
+                need(res["past"] == "back", f"{name}: after Past calls opened and closed on a call, the call screen isn't back where it was (F20): {res}")
             else:
-                need(res["live"] == "free", f"{name}: the listening line is off the screen and can't be scrolled to: {res}")
+                # Off a Mac the fonts are a pixel smaller, so here it may just fit; then it's locked, rightly.
+                need(res["live"] == "free" or res["statusfits"] == "yes", f"{name}: the listening line is off the screen and can't be scrolled to: {res}")
             seen.append(res["sizes"])
         need(len(set(seen[:2])) == 1, f"Donna, Pepper or her card look different between the iPhone 13 sizes: {seen}")
-        return "on a call the old layout stays and the page can't be scrolled (iPhone 13 Safari and home screen, desktop app); a small phone still scrolls to its listening line"
+        return "on a call the old layout stays, the page can't be scrolled and Past calls closes back to the same place (iPhone 13 Safari and home screen, desktop app); a small phone still scrolls to its listening line"
 
     # 48
     async def flow48(self) -> str:
@@ -4400,7 +4411,8 @@ setTimeout(() => {
         need(sorted(p.name for p in calls.iterdir()) == before, "asking for the calls changed the calls folder")
         one_json = json.dumps(one)
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
-        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         page = (APP / "web/index.html").read_text()
         harness = r"""
@@ -4450,7 +4462,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
         f = self.tmp / "h57.html"
         f.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
         for where, q in (("phone", ""), ("app", "?app=1")):
-            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--window-size=390,844",
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=390,844",
                                               f"--user-data-dir={self.tmp / ('h57-' + where)}", "--virtual-time-budget=20000", "--dump-dom", f.as_uri() + q], timeout=120)
             m = re.search(r'<pre id="h57">H57RESULT (.*?) END</pre>', r.stdout)
             need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
@@ -4511,7 +4523,8 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
 
         # The call page: the Continue button.
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
-        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         page = (APP / "web/index.html").read_text()
         one = transcript.read_call(name, calls)
@@ -4565,7 +4578,7 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         f = self.tmp / "h60.html"
         f.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
         for where, q in (("phone", ""), ("app", "?app=1")):
-            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--window-size=390,844",
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=390,844",
                                               f"--user-data-dir={self.tmp / ('h60-' + where)}", "--virtual-time-budget=30000", "--dump-dom", f.as_uri() + q], timeout=120)
             m = re.search(r'<pre id="h60">H60RESULT (.*?) END</pre>', r.stdout)
             need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
