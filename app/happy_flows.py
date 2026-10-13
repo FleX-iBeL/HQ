@@ -5460,7 +5460,7 @@ setTimeout(() => {
         need(not f.found and said == "Two [[notes]] and [x]", f"ordinary brackets are lost or taken for the mark: {said!r}")
         # The rule is in every kind of call: Free (plain Claude) and the full call, with the phrases and the never-on list.
         rules = config.HANGUP_RULES
-        for ph in ["that's it, see you later", "okay, that is all"]:
+        for ph in ["that's it, see you later", "okay, that is all", "okay, thanks, appreciate you", "cheers"]:
             need(ph in rules and ph in config.GOODBYE_PHRASES, f"the starting phrase {ph!r} is missing")
         need("a passing okay" in rules and "a pause or silence" in rules and "When you are not sure" in rules,
              "the rule doesn't say when not to hang up")

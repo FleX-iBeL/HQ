@@ -122,9 +122,13 @@ GOODBYE_PHRASES = [
     "that's it, see you later", "okay, that is all", "that's all for now", "that's it for now, bye",
     "thanks, that's it", "bye", "goodbye", "see you", "see you later", "talk to you later", "talk later",
     "speak soon", "I'm going to hang up", "you can hang up", "let's end the call", "good night",
+    # H102: his own ways of saying all is good and she can hang up.
+    "okay, thanks, appreciate you", "thanks, appreciate you", "appreciate you", "perfect, appreciate you",
+    "cheers", "okay, cheers", "thanks, cheers",
 ]
 NOT_GOODBYE = [
-    "a passing okay, thanks, alright or got it in the middle of the call", "a pause or silence",
+    "a passing okay, thanks, alright or got it in the middle of the call (but thanks with \"appreciate you\" \
+or \"cheers\" closes it)", "a pause or silence",
     "\"that's it?\" as a question", "\"that's it\" about one thing while he goes on",
     "\"bye\" or \"see you\" said to someone else in the room",
 ]
