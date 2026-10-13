@@ -12,10 +12,17 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
-  :root { --bg:#f4f6f8; --fg:#12161e; --muted:#5b6574; --accent:#0f9d8a; --stop:#d9392b; --ring:rgba(15,157,138,.25); --wait:#e5a800; }
+  :root { --base:#f4f6f8; --fg:#12161e; --muted:#5b6574; --accent:#0f9d8a; --stop:#d9392b; --ring:rgba(15,157,138,.25); --wait:#e5a800; --me:#22c55e; --tintpct:9%; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#12161e; --fg:#eef1f5; --muted:#8c97a8; --accent:#2dd4bf; --stop:#ef5a4c; --ring:rgba(45,212,191,.25); --wait:#facc15; }
+    :root { --base:#12161e; --fg:#eef1f5; --muted:#8c97a8; --accent:#2dd4bf; --stop:#ef5a4c; --ring:rgba(45,212,191,.25); --wait:#facc15; --me:#4ade80; --tintpct:16%; }
   }
+  /* H86: on a call the screen takes a very soft tint of her colour (Donna purple, Pepper red, Moneypenny
+     yellow), so he sees who he's talking to. Two of them (a three-way call, H79): the screen is cut
+     diagonally, top right to bottom left, one colour each. --tintA and --tintB are set by paintTint(). */
+  :root { --bg:var(--base); }
+  html.tinted { --bg:color-mix(in srgb, var(--tintA) var(--tintpct), var(--base));
+                --bg2:color-mix(in srgb, var(--tintB) var(--tintpct), var(--base)); }
+  html.tinted body { background:linear-gradient(to bottom right, var(--bg) 50%, var(--bg2) 50%) fixed; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   /* H9: iOS enlarges text when the phone turns sideways and doesn't always shrink it back. */
   html { -webkit-text-size-adjust:100%; text-size-adjust:100%; }
@@ -199,8 +206,8 @@
   #histlist .day { color:var(--muted); font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; padding:14px 4px 4px; }
   #histlist .empty, #histlog .empty { color:var(--muted); text-align:center; margin:auto; }
   #histlog .msg { max-width:82%; padding:9px 13px; border-radius:16px; font-size:16px; line-height:1.35; overflow-wrap:anywhere; }
-  #histlog .me { align-self:flex-end; background:var(--accent); color:#04120f; border-bottom-right-radius:5px; }
-  #histlog .hq { align-self:flex-start; background:var(--ring); color:var(--fg); border-bottom-left-radius:5px; }
+  #histlog .me { align-self:flex-end; background:var(--me); color:#04120f; border-bottom-right-radius:5px; }
+  #histlog .hq { align-self:flex-start; background:var(--ring); background:color-mix(in srgb, var(--her, var(--accent)) 24%, var(--bg)); color:var(--fg); border-bottom-left-radius:5px; }
   #histlog .filler { align-self:flex-start; color:var(--muted); font-style:italic; font-size:14px; padding:2px 13px; }
   /* H60: Continue, at the foot of an opened call, only when not on a call (Claude's choice: the one main action of
      that view, at the bottom where the thumb is, after reading; left clear for the round buttons). */
@@ -231,8 +238,8 @@
   .msg p + p, .msg p + ul, .msg p + ol, .msg ul + p, .msg ol + p { margin-top:6px; }
   .msg ul, .msg ol { margin:4px 0 0; padding-left:20px; }
   .msg li + li { margin-top:2px; }
-  #chatlog .me { align-self:flex-end; background:var(--accent); color:#04120f; border-bottom-right-radius:5px; }
-  #chatlog .hq { align-self:flex-start; background:var(--ring); color:var(--fg); border-bottom-left-radius:5px; }
+  #chatlog .me { align-self:flex-end; background:var(--me); color:#04120f; border-bottom-right-radius:5px; }
+  #chatlog .hq { align-self:flex-start; background:var(--ring); background:color-mix(in srgb, var(--her, var(--accent)) 24%, var(--bg)); color:var(--fg); border-bottom-left-radius:5px; }
   #chatlog .filler { align-self:flex-start; color:var(--muted); font-style:italic; font-size:14px; padding:2px 13px; }
   #chatlog .empty { color:var(--muted); text-align:center; margin:auto; }
   /* H18: type to HQ during a call, when he can't talk. Only shown while on a call. */
@@ -382,8 +389,8 @@ const modeHint = document.getElementById("modehint");
 // H46: Donna (Sonnet) on the left, Pepper (Opus) on the right, each with her own voice
 // (H66: by default Bella for Donna, Heart for Pepper).
 let AGENTS = {
-  donna: { id: "donna", name: "Donna", full_name: "Donna Paulsen", voice: "af_bella", load: "quick", model: "sonnet", speciality: "Your agenda, your list, mail and quick orders" },
-  pepper: { id: "pepper", name: "Pepper", full_name: "Pepper Potts", voice: "af_heart", load: "deep", model: "opus", speciality: "Sparring, planning and the bigger picture" },
+  donna: { id: "donna", name: "Donna", full_name: "Donna Paulsen", voice: "af_bella", load: "quick", model: "sonnet", colour: "#6d28d9", speciality: "Your agenda, your list, mail and quick orders" },
+  pepper: { id: "pepper", name: "Pepper", full_name: "Pepper Potts", voice: "af_heart", load: "deep", model: "opus", colour: "#c2410c", speciality: "Sparring, planning and the bigger picture" },
 };
 if (new URLSearchParams(location.search).has("app")) document.body.classList.add("inapp");
 // H83: which HQ this is, from its status page (8444 next to the phone's 8443, else 4748 on this computer).
@@ -401,6 +408,18 @@ function hintFor(a) {
   return free ? `Free on ${modelName(a)}: plain Claude, no connectors, no files, no notes, only the web. Nothing saved`
               : `${modelName(a)}: ${a.speciality}`;
 }
+// H86: her colour, by id or name; the screen tinted in the colours of who's on the call (none when idle).
+function agentColour(a) {
+  const x = typeof a === "string" ? (AGENTS[a] || agentNamed(a)) : a;
+  return x && /^#[0-9a-fA-F]{6}$/.test(x.colour || "") ? x.colour : null;
+}
+function onCall() { return [agent]; }  // H79 (three-way) adds the second one here
+function paintTint(ids) {
+  const cs = (ids || []).map(agentColour).filter(Boolean), root = document.documentElement;
+  root.classList.toggle("tinted", cs.length > 0);
+  if (cs.length) { root.style.setProperty("--tintA", cs[0]); root.style.setProperty("--tintB", cs[1] || cs[0]); }
+}
+function herColour(div, who) { const c = agentColour(who || agent); if (c) div.style.setProperty("--her", c); }
 function callName() { return (AGENTS[agent] || {name: "HQ"}).name + (free ? " · Free" : ""); }
 // H46: a voice for each agent, in Settings ("Voice Pepper Potts", "Voice Donna Paulsen"). Each is remembered
 // on this device; the first time, the one voice chosen before H46, else her default.
@@ -567,7 +586,7 @@ function onServerMessage(ev) {
   try {
     const m = JSON.parse(ev.data);
     if (m && m.type === "hq-state") showOrb(m.state);
-    else if (m && m.type === "hq-chat") addChat(m.who, m.text);
+    else if (m && m.type === "hq-chat") addChat(m.who, m.text, false, m.agent);
     else if (m && m.type === "hq-cancellable") showCancel(m.on === true);
     else if (m && m.type === "hq-cancelled") markCancelled();
     else if (m && m.type === "hq-hangup" && state !== "idle") hangup();  // H75: she hung up after his goodbye
@@ -694,7 +713,7 @@ async function loadLastCall() {
   chatLog.innerHTML = "";
   chatTitle.textContent = "Last call · " + data.started;
   for (const l of lines) {
-    addChat(l.who, l.text, true);
+    addChat(l.who, l.text, true, l.agent || data.agent);
     if (l.cancelled) markCancelled();
   }
   chatLog.scrollTop = chatLog.scrollHeight;
@@ -732,7 +751,7 @@ function formatted(el, text) {
     inlineMarks(para, line.replace(/^#{1,6}\s+/, ""));
   }
 }
-function addChat(who, text, old) {
+function addChat(who, text, old, her) {
   if (!text) return;
   const empty = chatLog.querySelector(".empty"); if (empty) empty.remove();
   const atEnd = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
@@ -740,7 +759,7 @@ function addChat(who, text, old) {
   // M5: the user's own lines are anything that isn't HQ or a filler ("user", or the older name servers before M5 sent).
   const mine = who !== "hq" && who !== "filler";
   div.className = "msg " + (mine ? "me" : who);
-  if (who === "hq") formatted(div, text); else div.textContent = text;
+  if (who === "hq") { formatted(div, text); herColour(div, her); } else div.textContent = text;
   chatLog.appendChild(div);
   if (atEnd || mine) chatLog.scrollTop = chatLog.scrollHeight;
   if (!chatOpen() && who !== "filler" && !old) { unread++; showBadge(); }
@@ -904,7 +923,7 @@ async function readCall(name) {
     if (!l.text) continue;
     const div = document.createElement("div");
     div.className = "msg " + (l.who === "hq" || l.who === "filler" ? l.who : "me") + (l.cancelled ? " cancelled" : "");
-    if (l.who === "hq") formatted(div, l.text); else div.textContent = l.text;
+    if (l.who === "hq") { formatted(div, l.text); herColour(div, l.agent || data.agent); } else div.textContent = l.text;
     histLog.appendChild(div);
   }
   if (!histLog.querySelector(".msg")) histNote(histLog, "Nothing said");
@@ -1000,6 +1019,7 @@ function setState(s, text) {
   showLayout();
   showMode();
   showHistFoot();  // H60: Continue only when not on a call
+  paintTint(s === "idle" ? [] : onCall());  // H86
 }
 
 // Mute: the mic sends silence, so HQ can finish what it's doing without being cut off.
@@ -1159,7 +1179,7 @@ async function call() {
   if (cont && !free) {
     contLabel = "continuing " + cont.started;
     chatTitle.textContent = "Continuing · " + cont.started;
-    for (const l of cont.lines) { if (l.who === "filler") continue; addChat(l.who, l.text, true); if (l.cancelled) markCancelled(); }
+    for (const l of cont.lines) { if (l.who === "filler") continue; addChat(l.who, l.text, true, l.agent || cont.agent); if (l.cancelled) markCancelled(); }
     const d = document.createElement("div"); d.className = "divider"; d.textContent = "Continued now"; chatLog.appendChild(d);
   }
   setState("connecting", "Connecting…");

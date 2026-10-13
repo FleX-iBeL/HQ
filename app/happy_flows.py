@@ -6150,6 +6150,71 @@ console.log(JSON.stringify({{
         return ("both calls may use bold and short lists; the voice gets them plain (also in pieces, numbers kept); "
                 "the chat and the saved call keep her lines; the call page shows bold, italics and lists, his lines and HTML stay text")
 
+    async def flow78(self) -> str:
+        """H86, no Claude: the real call page in a headless browser. Before a call the screen is plain; on a call
+        it takes a soft tint of her colour (Donna's, then Pepper's differs); two on the call (a three-way call,
+        H79) cut the screen diagonally in both colours; after the call it's plain again. In the chat his lines
+        are green and hers are in her own colour, also in a past call opened from the list (by its agent)."""
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const check = (name, ok, why) => out.push(name + ":" + (ok ? "ok" : "WRONG " + why));
+  const root = document.documentElement, bodyBg = () => getComputedStyle(document.body).backgroundImage;
+  const bg = el => getComputedStyle(el).backgroundColor;
+  agent = "donna";
+  setState("idle", "");
+  check("idle-plain", !root.classList.contains("tinted") && bodyBg() === "none", bodyBg());
+  setState("live", "On the call");
+  const donna = bodyBg();
+  check("live-tinted", root.classList.contains("tinted") && donna.includes("gradient"), donna);
+  const parts = donna.match(/(rgb|color)\([^)]*\)/g) || [];
+  check("one-colour", parts.length === 2 && parts[0] === parts[1], donna);
+  const send = (who, text) => onServerMessage({ data: JSON.stringify({ type: "hq-chat", who, text }) });
+  send("hq", "Hi, Donna here.");
+  send("user", "Hi.");
+  await wait(50);
+  const [h, me] = chatLog.querySelectorAll(".msg");
+  check("her-colour", h.style.getPropertyValue("--her") === AGENTS.donna.colour, h.style.cssText);
+  check("me-green", /rgb\(34, 197, 94\)|rgb\(74, 222, 128\)/.test(bg(me)), bg(me));
+  check("differ", bg(h) !== bg(me), bg(h) + " vs " + bg(me));
+  setState("idle", "");
+  check("after-plain", !root.classList.contains("tinted"), root.className);
+  agent = "pepper"; setState("live", "On the call");
+  check("pepper-differs", bodyBg() !== donna && bodyBg().includes("gradient"), bodyBg());
+  paintTint(["donna", "pepper"]);
+  const two = (bodyBg().match(/(rgb|color)\([^)]*\)/g) || []);
+  check("two-colours", two.length === 2 && two[0] !== two[1], bodyBg());
+  setState("idle", "");
+  histEl.classList.add("open");
+  const r = { agent: "Pepper", started: "today", lines: [{ who: "hq", text: "Pepper here." }, { who: "user", text: "Hi." }] };
+  histGet = async () => r;
+  await readCall("2026-10-13-1400");
+  const hh = histLog.querySelector(".msg.hq");
+  check("past-call", hh && hh.style.getPropertyValue("--her") === AGENTS.pepper.colour, hh ? hh.style.cssText : "none");
+  const pre = document.createElement("pre"); pre.id = "h86"; pre.textContent = "H86RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f = self.tmp / "h86.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run",
+                                          *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                          f"--user-data-dir={self.tmp / 'h86-profile'}", "--window-size=390,844",
+                                          "--virtual-time-budget=20000", "--dump-dom", f.as_uri()], timeout=90)
+        m = re.search(r'<pre id="h86">H86RESULT (.*?) END</pre>', r.stdout)
+        need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        say(f"   {m.group(1)}")
+        need(all(part.endswith(":ok") for part in m.group(1).split(" | ")), f"the colours aren't right: {m.group(1)}")
+        return ("plain before and after a call; on a call a soft tint of her colour, two on the call cut diagonally; "
+                "his lines green, hers in her colour, also in a past call")
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -6503,6 +6568,7 @@ FLOWS = {
     75: ("F18: the status page on the phone never gets wider than the screen; it only scrolls up and down", False, "flow75"),
     76: ("H78: his own calendar changes go without asking; with other people in it, or not looked at first, they don't", False, "flow76"),
     77: ("H82: her text shows formatted in the call's chat (bold, lists) while the voice stays plain", False, "flow77"),
+    78: ("H86: the screen in the colour of who I'm calling; my lines green, hers in her colour", False, "flow78"),
 }
 
 

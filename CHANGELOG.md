@@ -5,6 +5,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ## Coming next
 
 ### New
+- On a call the screen takes a soft tint of who you're talking to: purple for Donna, red for Pepper, yellow for Moneypenny. In the chat your lines are green and hers are in her own colour, also in past calls.
 - More goodbyes she hangs up on: "okay, thanks, appreciate you" and "cheers" end the call by themselves, the same as "bye".
 - Your agents put things in your calendar, move them and delete them without asking first. An appointment with other people in it, or an invitation, still gets checked with you. Before moving or deleting one she looks at it, and what it was is kept in the call's transcript, so it can always be put back.
 - Planned work under Scheduled shows an estimate too: how long it should take, and when it should be done, counting the jobs and the planned work before it. A call can say what kind of work it is when planning it, and that goes with it when it becomes a job.
