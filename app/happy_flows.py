@@ -5835,6 +5835,12 @@ setTimeout(() => {
         need(ag.SWITCH_MARK.format(name=two["name"]) in rules and ag.THREE_WAY_MARK.format(name=two["name"]) in rules
              and "secretary style" in rules and two["speciality"] in rules, "the rules miss a mark, or asking first")
         need(ag.switch_rules(one, [], "Sam") == "", "rules without anyone to switch to")
+        # H122: "bring in" is always a three-way call, "give me" always hands over; asking only for other words.
+        hand = next((l for l in rules.splitlines() if ag.SWITCH_MARK.format(name=two["name"]) in l), "")
+        three = next((l for l in rules.splitlines() if ag.THREE_WAY_MARK.format(name=two["name"]) in l), "")
+        need(f'Give me {two["name"]}' in hand and "connect me through" in hand and "always mean hand over, never ask" in hand
+             and f'Bring in {two["name"]}' in three and "always mean a three-way call, never ask" in three
+             and "Bring in" not in hand and "Give me" not in three, "H122: bring in and give me aren't fixed")
         marks = ag.switch_marks([two])
         # The marks are never spoken, also in pieces; ordinary brackets stay.
         m = Marks([config.HANGUP_MARK, *marks])

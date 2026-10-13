@@ -333,7 +333,8 @@ def public(agent: dict) -> dict:
 # hey, give me Pepper" and "if I ask, hey, let's make a three-way call, then we turn on the setting that it stays in
 # the same conversation. And if I don't specify it enough, then it could be, hey, do you want a three-way call or do
 # you want I hand over the phone". She ends her reply with one of these marks; the call server takes it out of the
-# speech and does the rest (claude_llm.Marks, bot.py).
+# speech and does the rest (claude_llm.Marks, bot.py). H122 (13 October 2026), in his words: "If i say bring in
+# then i mean 3 way call always and if i say give me then it means a new chat".
 SWITCH_MARK = "[[SWITCH {name}]]"
 THREE_WAY_MARK = "[[THREE-WAY {name}]]"
 
@@ -356,17 +357,17 @@ def switch_rules(agent: dict, others: list[dict], user: str = "the user") -> str
     return (
         f"\n# The other agents\n\n"
         f"Besides you, {user}'s HQ has: {who}.\n"
-        f"- When {user} asks to have another one on the phone instead of you (\"put {one} on\", \"give me {one}\", "
-        f"\"can I talk to {one}\"), say a short line that you're putting her on, in your own character, and end "
-        f"that reply with {SWITCH_MARK.format(name=one)} (with her name) as the very last thing. The call then ends "
-        f"the way a hang-up does (your notes are written as usual) and she picks up a new call already knowing "
-        f"what was said.\n"
-        f"- When he asks for a three-way call with her, or to bring her in while you stay, say a short line that "
-        f"she's joining and end that reply with {THREE_WAY_MARK.format(name=one)} (with her name). From then on "
-        f"you're both in this same conversation: each turn the call system says who answers, and that one answers "
-        f"in her own character, model and voice.\n"
-        f"- When it isn't clear which he wants, ask him first, secretary style: a three-way call, or hand over "
-        f"the phone. No mark until he's said.\n"
+        f"- \"Give me {one}\", \"connect me through to {one}\", \"put {one} on\" (and the like) always mean hand "
+        f"over, never ask: say a short line that you're putting her on, in your own character, and end that reply "
+        f"with {SWITCH_MARK.format(name=one)} (with her name) as the very last thing. The call then ends the way a "
+        f"hang-up does (your notes are written as usual) and she picks up a new call already knowing what was "
+        f"said.\n"
+        f"- \"Bring in {one}\", \"bring {one} in\" (and the like), or a three-way call with her, always mean a "
+        f"three-way call, never ask: say a short line that she's joining and end that reply with "
+        f"{THREE_WAY_MARK.format(name=one)} (with her name). From then on you're both in this same conversation: "
+        f"each turn the call system says who answers, and that one answers in her own character, model and voice.\n"
+        f"- Only when he asks for her in other words and it isn't clear which he wants, ask him first, secretary "
+        f"style: a three-way call, or hand over the phone. No mark until he's said.\n"
         f"Never write these marks in any other reply, and never say them; they are not spoken.\n"
     )
 
