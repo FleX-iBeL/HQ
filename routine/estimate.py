@@ -17,7 +17,9 @@ How it works:
     else the time since it started.
   - plan(): for the running job the time left and when it should be done; for each waiting job, in
     its place in line, how long and when it should be done; the total for the whole list. A held job
-    (usage line), and everything after it, waits on the usage, so it gets no "done around" time.
+    (usage line), and everything after it, waits on the usage. H109 (13 October 2026): it still gets its
+    "done around" time as if the usage allowed it, with waits "usage", so the page and a call say it will
+    be later because of the usage limit. Only with the routine off there are no times.
   - Planned items (H95, 13 October 2026): an item on the schedule gets a kind when it's planned
     (schedule.py add --kind, from a call, else the guess from its text), kept in schedule-kinds.json, and
     the same estimate as a job of that kind would get. plan() gives each waiting item how long, and when
@@ -633,11 +635,11 @@ def plan(now=None):
             left_total += GAP
         cursor += est * 60
         left_total += est
-        out["jobs"][str(j["n"])] = {"est": est, "kind": kind, "eta": None if waits else int(cursor),
+        out["jobs"][str(j["n"])] = {"est": est, "kind": kind, "eta": int(cursor) if on else None,
                                     "waits": "usage" if waits and on else ("off" if not on else None)}
     if running or line:
         out["total"] = {"jobs": len(running) + len(line), "minutes": round(left_total),
-                        "eta": None if waits else int(cursor), "waits": ("usage" if on else "off") if waits else None}
+                        "eta": int(cursor) if on else None, "waits": ("usage" if on else "off") if waits else None}
     out["items"] = _plan_items(cursor, waits, on, hist, run, run_end)
     out["items_total"] = _items_total(out["items"], waits, on)
     return out
@@ -651,7 +653,7 @@ def _items_total(items, waits, on):
     t = {"items": len(items), "minutes": round(sum(e["est"] for e in items.values())), "eta": None, "waits": None}
     if waits or not on:
         t["waits"] = "off" if not on else "usage"
-    elif all(e.get("eta") for e in items.values()):
+    if on and all(e.get("eta") for e in items.values()):  # H109: held by the usage, still a time, later
         t["eta"] = max(e["eta"] for e in items.values())
     return t
 
@@ -668,7 +670,8 @@ def _schedule():
 def _plan_items(cursor, waits, on, hist, run, run_end=None):
     """H95: each waiting planned item, soonest first: how long, and when it should start and be done. It
     starts at its time, or once the job list and the items before it are done (the job list goes first);
-    the routine looks every minute. Waiting on the usage or the routine off: no times, only how long.
+    the routine looks every minute. The routine off: no times, only how long. Waiting on the usage (H109):
+    the times as if the usage allowed it, with waits "usage", said as later because of the usage limit.
     H99: an item with the priority tag starts at its time, or once the running job and the tagged items
     before it are done, ahead of the waiting jobs; a tagged item that cuts in makes the job list (and so
     the other items) end that much later."""
@@ -687,7 +690,7 @@ def _plan_items(cursor, waits, on, hist, run, run_end=None):
             e["priority"] = True
         if waits or not on:
             e["waits"] = "off" if not on else "usage"
-        else:
+        if on:
             at = dt.datetime.strptime(i["at"], "%Y-%m-%d %H:%M").timestamp()
             if i.get("priority"):  # H99: from when the running job is done, not the whole job list
                 start = max(at, pcursor) + GAP * 60
@@ -702,6 +705,9 @@ def _plan_items(cursor, waits, on, hist, run, run_end=None):
             e["later"] = start - at > 5 * 60  # starts later than planned: the job list or earlier items first
         out[str(i["n"])] = e
     return out
+
+
+USAGE_LATE = "later, because the usage limit holds the jobs"  # H109: said next to a time the usage holds back
 
 
 def dur(m):
@@ -727,6 +733,8 @@ def words(n, p):
         s = f"about {dur(e['est'])}"
     if e.get("eta"):
         s += f", done around {hhmm(e['eta'])}"
+        if e.get("waits") == "usage":
+            s += f", but {USAGE_LATE}"
     elif e.get("waits") == "usage":
         s += ", when it's done waits on the usage"
     elif e.get("waits") == "off":
@@ -746,6 +754,8 @@ def item_words(n, p):
         if e.get("later"):
             s += f", starts around {day(e['start'])}{hhmm(e['start'])} (after the work before it)"
         s += f", done around {day(e['eta'])}{hhmm(e['eta'])}"
+        if e.get("waits") == "usage":
+            s += f", but {USAGE_LATE}"
     elif e.get("waits") == "usage":
         s += ", when it's done waits on the usage"
     elif e.get("waits") == "off":
@@ -760,6 +770,8 @@ def total_words(p):
     s = f"All {t['jobs']} job{'s' if t['jobs'] != 1 else ''}: about {dur(t['minutes'])}"
     if t.get("eta"):
         s += f", all done around {hhmm(t['eta'])}"
+        if t.get("waits") == "usage":
+            s += f", but {USAGE_LATE}"
     elif t.get("waits") == "usage":
         s += "; when it's done waits on the usage"
     elif t.get("waits") == "off":
@@ -777,6 +789,8 @@ def items_total_words(p):
         day = "" if time.strftime("%Y-%m-%d", time.localtime(t["eta"])) == time.strftime("%Y-%m-%d", time.localtime(p["now"])) \
             else time.strftime("%A ", time.localtime(t["eta"]))
         s += f", all done around {day}{hhmm(t['eta'])}, after the job list"
+        if t.get("waits") == "usage":
+            s += f", but {USAGE_LATE}"
     elif t.get("waits") == "usage":
         s += "; when it's done waits on the usage"
     elif t.get("waits") == "off":

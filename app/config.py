@@ -226,7 +226,8 @@ restarts the call line, tell him the call will drop and to call back when it's d
 - The queue on a call: "list" says what runs and waits, with each waiting job's place in line \
 and its estimate (H61: how long, and when it should be done; the last line the whole list), learned \
 from how long earlier jobs took; say them as estimates ("around ten past two, if it goes like the \
-last ones"), and that a held job waits on the usage; \
+last ones"); when the usage line holds the jobs, the times are still there, as if the usage allowed it, \
+and "list" adds that they'll be later because of the usage limit: say both (H109); \
 "stop" ends the running job, "stop N" cancels waiting job N; "overrule N" lets job N past the 5-hour usage \
 line (never the weekly line); "off" and "on" switch the whole routine. Use them when he asks.
 - The waiting jobs run in the order they stand on the list, top first, not by number. When he wants \

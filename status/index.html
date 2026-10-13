@@ -197,6 +197,8 @@
       /* H99: the priority tag on a planned item */
       .prio { display: inline-block; font-size: 12px; font-weight: 600; color: var(--amber-ink); border: 1px solid var(--amber); border-radius: 999px; padding: 0 7px; margin-right: 6px; vertical-align: 1px; }
       .eta.over { color: var(--amber-ink); }
+      /* H109: held by the usage line, the times still show, with a soft red note that they'll be later */
+      .late { color: color-mix(in srgb, var(--red) 65%, var(--soft)); }
       .row.eta-sum { display: block; font-size: 13px; }
 
       /* H19: every routine, its state, when it last ran and runs next. */
@@ -632,6 +634,15 @@
       /** H61: the estimates in words, the same as routine/estimate.py says them to a call. */
       const etaDur = (m) => { m = Math.round(m); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${String(m % 60).padStart(2, '0')}` : ''}`; };
       const etaTime = (t) => new Date(t * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      /** H109: a time the usage line holds back: still shown, with this note next to it in soft red. */
+      const USAGE_LATE = 'later, because the usage limit holds the jobs';
+      const etaLate = (e) => !!(e?.eta && e.waits === 'usage');
+      const lateNote = (e) => (etaLate(e) ? USAGE_LATE.charAt(0).toUpperCase() + USAGE_LATE.slice(1) : '');
+      function etaSpan(cls, w, e) {
+        const n = el('span', cls, w);
+        if (etaLate(e)) n.append(el('span', 'late', ` · ${USAGE_LATE}`));
+        return n;
+      }
       function etaWords(E, n) {
         const e = E?.jobs?.[n];
         if (!e) return '';
@@ -684,7 +695,7 @@
       }
 
       /** A part that folds open and closed with an arrow. start: open or folded the first time. */
-      function foldPart(key, start, title, counts, sub = false) {
+      function foldPart(key, start, title, counts, sub = false, late = '') {
         const fold = el('details', `fold${sub ? ' sub' : ''}`);
         fold.open = isOpen(key, start);
         fold.addEventListener('toggle', () => {
@@ -695,7 +706,11 @@
         const t = el('span', 'fold-title');
         t.append(chevron(), el(sub ? 'h3' : 'h2', '', title));
         summary.append(t);
-        if (counts) summary.append(el('span', 'soft', counts));
+        if (counts) {
+          const c = el('span', 'soft', counts);
+          if (late) c.append(el('span', 'late', ` · ${late}`));  // H109
+          summary.append(c);
+        }
         fold.append(summary);
         return fold;
       }
@@ -1334,7 +1349,7 @@
           const E = routines?.estimate ?? null;
           const total = etaTotal(E);
           const counts = q.on ? `${of('running').length} running · ${of('waiting').length} waiting${total ? ` · ${total}` : ' · the routine looks every minute'}` : 'The routine is off';
-          const fold = foldPart('jobs', true, 'Jobs from calls', counts);
+          const fold = foldPart('jobs', true, 'Jobs from calls', counts, false, q.on && total ? lateNote(E?.total) : '');
           const parts = el('div', 'parts');
           for (const [g, title, st, start] of [['running', 'Running', 'doing', true], ['waiting', 'Waiting', 'todo', true], ['finished', 'Finished', 'done', false]]) {
             // H39: waiting jobs keep their place in line (the order they will run), not their number.
@@ -1355,7 +1370,7 @@
               const left = el('div', 'jobtext');
               left.append(text);
               const w = etaWords(E, j.n);
-              if (w) left.append(el('span', `eta${E.jobs[j.n].over ? ' over' : ''}`, w));
+              if (w) left.append(etaSpan(`eta${E.jobs[j.n].over ? ' over' : ''}`, w, E.jobs[j.n]));
               row.append(left, mark);
               card.append(row);
             }
@@ -1391,10 +1406,11 @@
             return `${x.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} ${t}`;
           };
           const itemsTotal = coming.length ? etaItemsTotal(routines?.estimate) : '';
-          const fold = foldPart('schedule', true, 'Scheduled', `${coming.length} planned${due ? ` · ${due} due` : ''}${itemsTotal ? ` · ${itemsTotal}` : ''} · the job list goes first, except for priority`);
+          const itemsLate = itemsTotal ? lateNote(routines?.estimate?.items_total) : '';  // H109
+          const fold = foldPart('schedule', true, 'Scheduled', `${coming.length} planned${due ? ` · ${due} due` : ''}${itemsTotal ? ` · ${itemsTotal}` : ''} · the job list goes first, except for priority`, false, itemsLate);
           const parts = el('div', 'parts');
           for (const [key, title, list, st, start] of [['coming', 'Planned', coming, 'todo', true], ['back', 'Looking back', back, 'done', false]]) {
-            const part = foldPart(`schedule-${key}`, start, title, `${list.length}${key === 'coming' && itemsTotal ? ` · ${itemsTotal}` : ''}`, true);
+            const part = foldPart(`schedule-${key}`, start, title, `${list.length}${key === 'coming' && itemsTotal ? ` · ${itemsTotal}` : ''}`, true, key === 'coming' ? itemsLate : '');
             const card = el('div', 'card');
             for (const i of list) {
               const isDue = key === 'coming' && i.at <= nowStamp;
@@ -1411,7 +1427,7 @@
               const left = el('div', 'jobtext');
               left.append(text);
               const w = key === 'coming' ? etaItem(routines?.estimate, i.n) : '';
-              if (w) left.append(el('span', 'eta', w));
+              if (w) left.append(etaSpan('eta', w, routines.estimate.items[i.n]));
               row.append(left, mark);
               card.append(row);
             }

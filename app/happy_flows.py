@@ -4922,12 +4922,17 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need("Estimate: about 14 min, done around" in lst and "All 2 jobs: about 21 min, all done around" in lst and "(estimate)" in lst,
              f"list doesn't say the estimates: {lst}")
         need("No estimate has been checked" in lst, f"list doesn't say how close the estimates have been: {lst}")
-        # A held job, and everything after it, waits on the usage.
+        # A held job, and everything after it, waits on the usage. H109: the times stay, as if the usage
+        # allowed it, and the words say they'll be later because of the usage limit.
         jobs("held", str(a))
         p = json.loads(est("plan"))
-        need(p["jobs"][str(a)]["waits"] == "usage" and not p["jobs"][str(a)]["eta"] and not p["jobs"][str(b)]["eta"]
-             and p["total"]["waits"] == "usage", f"a held job doesn't wait on the usage: {p['jobs']} {p['total']}")
-        need("waits on the usage" in jobs("list"), "list doesn't say a held job waits on the usage")
+        need(p["jobs"][str(a)]["waits"] == "usage" and p["jobs"][str(b)]["waits"] == "usage" and p["total"]["waits"] == "usage",
+             f"a held job doesn't wait on the usage: {p['jobs']} {p['total']}")
+        need(p["jobs"][str(a)]["eta"] and p["jobs"][str(b)]["eta"] - p["jobs"][str(a)]["eta"] == (6 + 1) * 60
+             and p["total"]["eta"] == p["jobs"][str(b)]["eta"], f"H109: held by the usage, the times are gone: {p['jobs']} {p['total']}")
+        lst = jobs("list")
+        need("done around" in lst and "later, because the usage limit holds the jobs" in lst and "all done around" in lst,
+             f"H109: list doesn't keep the times with the usage note: {lst}")
         # It runs, and finishes: its estimate next to how long it really took, and the next estimate learns.
         jobs("mark", str(a), "running since " + time.strftime("%H:%M", time.localtime(time.time() - 30 * 60)))
         st = json.loads((est_dir / "job-estimates.json").read_text())[str(a)]
@@ -4998,6 +5003,20 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need(tot["items"] == 3 and tot["minutes"] == sum(it[k]["est"] for k in it) and tot["eta"] == max(it[k]["eta"] for k in it),
              f"H107: the planned items' total is wrong: {tot} {it}")
         need("All 3 planned items: about" in lst and "all done around" in lst, f"H107: the scheduler's list doesn't say the total: {lst}")
+        # H109: a job held by the usage: the planned items keep their times, with the usage note.
+        h_ = int(jobs("add", "Build H6, flow 54", "--kind=build").split()[1])
+        jobs("held", str(h_))
+        ph = json.loads(est("plan"))
+        need(all(ph["items"][k]["eta"] and ph["items"][k]["waits"] == "usage" for k in ph["items"])
+             and ph["items_total"]["eta"] and ph["items_total"]["waits"] == "usage",
+             f"H109: held by the usage, the planned items lose their times: {ph['items']} {ph['items_total']}")
+        lh = sched("list")
+        need(lh.count("later, because the usage limit holds the jobs") >= 4, f"H109: the scheduler's list doesn't say they'll be later: {lh}")
+        jobs("mark", str(h_), "cancelled 12:00")
+        page9 = (jv / "status/index.html").read_text()
+        need("function etaSpan" in page9 and ".late {" in page9 and "lateNote(E?.total)" in page9 and "itemsLate" in page9,
+             "H109: the status page doesn't show the soft red usage note")
+        need("H109" in config.VOICE_RULES, "H109: the call rules don't say the times stay with the usage note")
         jobs("off")
         need(json.loads(est("plan"))["items"][str(i1)]["waits"] == "off" and "the routine is off" in sched("list"),
              "H95: with the routine off, a planned item still says when it's done")
@@ -5048,7 +5067,7 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need("H61" in config.VOICE_RULES and "estimate" in config.VOICE_RULES, "the call rules don't say the list has estimates")
         return ("kinds from the job's words; estimate set when added; per job and total with done-around; held waits on the usage; "
                 "done writes estimate next to real time and the next estimate learns; page and list show them; "
-                "planned items too, after the job list and the items before them, their kind going with them (H95), and their total (H107)")
+                "planned items too, after the job list and the items before them, their kind going with them (H95), and their total (H107); held by the usage, the times stay with a soft red note (H109)")
 
     # 55
     async def flow55(self) -> str:
