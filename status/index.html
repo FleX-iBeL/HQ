@@ -290,6 +290,10 @@
       .top .name .batpill.getting-low { background: color-mix(in srgb, var(--yellow) 22%, var(--card)); color: var(--ink); }
       .top .name .batpill.low { background: var(--red); color: #fff; }
       .top .name .batpill.old { background: var(--track); color: var(--soft); }
+      /* H118: which computer is main, plainly, next to the name: green on the main, grey on the backup. */
+      .top .name .rolepill { font-size: 14px; font-weight: 700; padding: 2px 10px; border-radius: 999px; white-space: nowrap; align-self: center; }
+      .top .name .rolepill.main { background: var(--green); color: #fff; }
+      .top .name .rolepill.backup { background: var(--track); color: var(--ink); }
       /* H45: lid-closed sleep, one plain line under the battery; yellow-ish when on, since it drains the battery. */
       .lidsleep { margin: 6px 0 0; font-size: 14px; }
       .lidsleep.on b { color: var(--ink); } .lidsleep.on { background: color-mix(in srgb, var(--yellow) 14%, var(--card)); border-radius: 4px; padding: 2px 6px; display: inline-block; }
@@ -1285,6 +1289,13 @@
         brand.append(el('strong', '', 'HQ'));
         if (WHERE) brand.append(el('small', 'where', WHERE));
         name.append(brand, el('span', '', 'Build status'));
+        // H118: whether this one is main or backup, and which computer is main, at a glance (none on its own).
+        const rb = routines?.routines?.role?.badge;
+        if (rb?.text) {
+          const pill = el('span', `rolepill ${rb.acting === 'main' ? 'main' : 'backup'}`, rb.text);
+          pill.title = routines.routines.role.text ?? '';
+          name.append(pill);
+        }
         // H37: the battery in the top line, so it shows without scrolling or opening anything.
         const bt = LAPTOP ? routines?.battery : null;  // H92
         if (bt) {

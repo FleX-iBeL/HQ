@@ -6550,7 +6550,7 @@ console.log(JSON.stringify({{
                     except Exception:
                         await asyncio.sleep(0.2)
                 hd, body = await asyncio.to_thread(get, "/where.json")
-                need(json.loads(body) == {"where": want}, f"/where.json says {body} (want {want!r})")
+                need(json.loads(body).get("where") == want, f"/where.json says {body} (want {want!r})")
                 need(hd.get("access-control-allow-origin") == "*", "the call page's port can't read /where.json")
                 _, page = await asyncio.to_thread(get, "/")
                 need(f'<meta name="hq-where" content="{want}" />' in page, f"the status page doesn't carry {want!r}")
@@ -6568,6 +6568,91 @@ console.log(JSON.stringify({{
         need('<h1>HQ<small id="where"></small></h1>' in call and "/where.json" in call
              and re.search(r"h1 #where \{ position:absolute;", call), "the call page doesn't show it, or it takes room (F16)")
         return f"the status page, the strip's reading and /where.json say {seen[0]!r} without a label and {seen[1]!r} with one; shown under HQ on the status page, the strip and the call page, the call screen unmoved"
+
+    async def flow89(self) -> str:
+        """H118, no Claude: which computer is main, at a glance. role.py's badge in throwaway HQ memories (on its own:
+        none; the main: Main; the backup: Backup · <the other> is main, by the other's label, else its name), written
+        with the routine's main-or-backup line and dropped once on its own again; /where.json and the strip's reading
+        carry it; the status page, the strip and the call page show it as a pill."""
+        import urllib.request
+        sp = {}
+
+        def badge(name, cfg=None, state=None, label="", drop=False):
+            sup = self.tmp / f"h118-{name}"
+            sup.mkdir(exist_ok=True)
+            if cfg is not None:
+                (sup / "role.json").write_text(json.dumps(cfg))
+            if state is not None:
+                (sup / "role-state.json").write_text(json.dumps(state))
+            rfile = self.tmp / f"h118-{name}-routines.json"
+            if drop:
+                rfile.write_text(json.dumps({"role": {"text": "Main (old)", "badge": {"text": "Main"}}, "mail": {"text": "x"}}))
+            env = {k: v for k, v in os.environ.items() if k not in ("HQ_ROADMAP", "HQ_LABEL")}
+            env["HQ_SUPPORT"] = str(sup)
+            if label:
+                env["HQ_LABEL"] = label
+            code = ("import sys, json; sys.path.insert(0, sys.argv[1]); import role, routines; routines.FILE = sys.argv[2]\n"
+                    "out = role.badge()\n"
+                    "if sys.argv[3] == '1': role.tick(routines=routines); out = json.load(open(sys.argv[2]))\n"
+                    "print(json.dumps(out))")
+            r = subprocess.run([sys.executable, "-c", code, str(ROOT / "routine"), str(rfile), "1" if drop else "0"],
+                               env=env, capture_output=True, text=True, timeout=60)
+            need(r.returncode == 0, f"role.badge ({name}) failed: {r.stderr[-400:]}")
+            return json.loads(r.stdout.strip().splitlines()[-1])
+
+        need(badge("alone") == {}, "an HQ on its own shows a badge")
+        left = badge("alone-drop", drop=True)
+        need("role" not in left and "mail" in left, f"on its own again, the main-or-backup line stays: {left}")
+        pair = {"name": "srv", "peer": "https://other.example:8444", "main": "srv", "chosen_at": 1, "peer_name": "mac"}
+        b = badge("main", pair, {"acting": "main", "peer": {"name": "mac", "label": "Laptop"}}, label="VPS")
+        need(b == {"acting": "main", "main": "VPS", "text": "Main"}, f"the main's badge says {b}")
+        b = badge("backup", {**pair, "name": "mac", "peer_name": "srv"}, {"acting": "backup", "peer": {"name": "srv", "label": "VPS"}}, label="Laptop")
+        need(b == {"acting": "backup", "main": "VPS", "text": "Backup · VPS is main"}, f"the backup's badge says {b}")
+        b = badge("backup-old", {**pair, "name": "mac", "peer_name": "srv"}, {"acting": "backup", "peer": {"name": "srv"}}, label="Laptop")
+        need(b["text"] == "Backup · srv is main", f"without the other's label, the backup's badge says {b}")
+        b = badge("undecided", {**pair, "name": "mac"}, {}, label="Laptop")
+        need(b["acting"] == "backup" and b["main"] == "mac", f"not decided yet, the badge follows the choice: {b}")
+        src = (ROOT / "routine/role.py").read_text()
+        need(src.count("badge=badge(c, s)") == 2, "the routine's main-or-backup line doesn't carry the badge")
+        need('"label")}' in src, "the other's label isn't kept with what it answered")
+
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        env = {k: v for k, v in os.environ.items() if k != "HQ_LABEL"}
+        env.update({"HQ_STATUS_PORT": "4789", "HQ_FIX_DRY": "1"})
+        log = open(self.tmp / "h118-server.log", "w")
+        srv = subprocess.Popen([node, str(ROOT / "status/server.mjs"), "--quiet"], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+
+        def get(path):
+            with urllib.request.urlopen("http://127.0.0.1:4789" + path, timeout=60) as r:
+                return r.read().decode()
+        try:
+            for _ in range(50):
+                try:
+                    await asyncio.to_thread(get, "/where.json")
+                    break
+                except Exception:
+                    await asyncio.sleep(0.2)
+            w = json.loads(await asyncio.to_thread(get, "/where.json"))
+            try:
+                real = json.loads((ROOT / ".status/routines.json").read_text()).get("role", {}).get("badge")
+            except Exception:
+                real = None
+            need("role" in w and w["role"] == real, f"/where.json's role is {w.get('role')} (the routine line says {real})")
+            h = json.loads(await asyncio.to_thread(get, "/hq.json"))
+            need("role" in h and isinstance(h["role"], dict), f"the strip's reading has no role: {h.get('role')!r}")
+        finally:
+            srv.terminate()
+            srv.wait(timeout=10)
+        status = (ROOT / "status/index.html").read_text()
+        need("routines?.routines?.role?.badge" in status and "rolepill" in status, "the status page doesn't show the pill")
+        shell = (ROOT / "desktop/shell.html").read_text()
+        need("h.role && h.role.text" in shell and ".who .where .role.main" in shell, "the strip (Mac app and phone) doesn't show the pill")
+        call = (ROOT / "app/web/index.html").read_text()
+        need("w.role && w.role.text" in call and "h1 #where .role.main" in call and "setInterval(loadWhere" in call,
+             "the call page doesn't show the pill, or doesn't look again")
+        return ("the badge: none on its own (and the old line dropped), Main on the main, Backup · VPS is main on the backup "
+                f"(by the other's name when it has no label); /where.json and the strip's reading carry it ({real}); a pill on "
+                "the status page, the strip and the call page")
 
     async def flow73(self) -> str:
         """H92, no Claude: on a server there is no laptop to read. The status page in a headless browser, served once as a
@@ -7883,6 +7968,7 @@ FLOWS = {
     86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back", False, "flow86"),
     87: ("H98: the dog sits by its empty bowl and says Update! in green when a newer version is out", False, "flow87"),
     88: ("H113: a job held by the usage line carries on in its own chat, or in a fresh one with a note at which step", False, "flow88"),
+    89: ("H118: which computer is main, at a glance: a pill next to the name on the status page, the strip and the call page", False, "flow89"),
 }
 
 

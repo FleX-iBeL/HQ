@@ -435,9 +435,12 @@ const server = createServer(async (req, res) => {
     return;
   }
   // H83: which HQ this is, for the call page (another port, so it may read only this, nothing else).
+  // H118: and which computer is main (role.py's badge, with its routine line; none when this HQ is on its own).
   if (path0 === '/where.json') {
+    let role = null;
+    try { role = JSON.parse(await readFile(join(root, '.status/routines.json'), 'utf8'))?.role?.badge ?? null; } catch {}
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' })
-      .end(JSON.stringify({ where: WHERE }));
+      .end(JSON.stringify({ where: WHERE, role }));
     return;
   }
   if (path0 === '/hq.json') {

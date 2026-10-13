@@ -357,7 +357,8 @@ def _beat():
         chosen = chosen_main(c) == me
         p = s.get("peer") or {}
         routines.beat("role", state="waiting" if s.get("acting") == "main" and not chosen else "ok",
-                      text=line(s, p or True, me, c.get("peer_name") or "the other HQ", 0, TAKEOVER, chosen))
+                      text=line(s, p or True, me, c.get("peer_name") or "the other HQ", 0, TAKEOVER, chosen),
+                      badge=badge(c, s))
     except Exception:
         pass
 
@@ -432,6 +433,8 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
     no line. on_main() is called once when this HQ becomes the acting main (the routine lines up its timers)."""
     c = config()
     if not c:
+        if routines:
+            routines.drop("role")  # H118: an HQ on its own again shows no main-or-backup line or badge
         return {"acting": "main", "alone": True}
     p = peer_role(c)
     lock = contextlib.ExitStack()
@@ -454,7 +457,7 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
         s["peer_seen"] = now
         s["peer_lost_since"] = None
         s["peer_looks"] = int(s.get("peer_looks") or 0) + 1
-        s["peer"] = {k: p.get(k) for k in ("name", "acting", "busy", "main")}
+        s["peer"] = {k: p.get(k) for k in ("name", "acting", "busy", "main", "label")}
     else:
         s["peer_looks"] = 0
         s["lost_looks"] = int(s.get("lost_looks") or 0) + 1
@@ -555,7 +558,7 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
     _deliver(s["acting"], p, c, jobs_cmd, log)
     if routines:
         routines.beat("role", state=_line_state(s, p, lost, chosen), text=line(s, p, me, peer, lost, takeover, chosen),
-                      last=now, next=now + 60, every=60)
+                      last=now, next=now + 60, every=60, badge=badge(c, s))
     return {"acting": s["acting"], "handing_back": bool(s.get("handing_back")), "peer": peer, "why": s.get("why")}
 
 
@@ -668,6 +671,9 @@ def serve(kind: str) -> int:
     if kind == "get":
         print(json.dumps(mine()))
         return 0
+    if kind == "badge":  # H118
+        print(json.dumps(badge()))
+        return 0
     d = json.loads(sys.stdin.read() or "{}")
     if kind == "set":
         adopt(d.get("main"), d.get("chosen_at"))
@@ -686,6 +692,23 @@ def serve(kind: str) -> int:
         print(json.dumps({"code": code, "out": out, "err": err}))
         return 0
     return 2
+
+
+def badge(c=None, s=None) -> dict:
+    """H118 (13 October 2026, in the user's words: "i would love to have a more UX friendly way to seeing which is
+    the main; local or vps"): which computer is main, plainly, for the badge under the name on the status page, the
+    call page and the strip (the Mac app and the phone version). {} when this HQ is on its own: nothing to show.
+    "acting" is this one's role now; "main" the short name of the computer that is main (this one's, or the
+    other's: VPS, Laptop); "text" what the badge says (the wording is Claude's choice)."""
+    c = c if c is not None else config()
+    if not c:
+        return {}
+    s = s if s is not None else _load(STATE, {})
+    a = s.get("acting") if s.get("acting") in ("main", "backup") else acting()
+    here = hqpaths.short_name()
+    there = (s.get("peer") or {}).get("label") or c.get("peer_name") or "the other HQ"
+    main = here if a == "main" else there
+    return {"acting": a, "main": main, "text": "Main" if a == "main" else f"Backup · {main} is main"}
 
 
 def describe() -> str:

@@ -55,6 +55,10 @@
   h1 { position:relative; }
   h1 #where { position:absolute; left:50%; top:100%; transform:translateX(-50%); white-space:nowrap; margin-top:1px;
               font-size:11px; font-weight:600; letter-spacing:.04em; color:var(--muted); }
+  /* H118: which computer is main, a small pill after it: green on the main, grey on the backup. */
+  h1 #where .role { margin-left:6px; padding:1px 7px; border-radius:999px; font-weight:700; letter-spacing:.02em; }
+  h1 #where .role.main { background:#1a7f37; color:#fff; }
+  h1 #where .role.backup { background:rgba(127,127,127,.25); color:inherit; }
   #status { color:var(--muted); min-height:1.4em; max-width:22em; }
   #btn { width:min(62vw,240px); height:min(62vw,240px); border-radius:50%; border:0; background:var(--accent); color:#04120f;
          font:650 26px/1 -apple-system,sans-serif; box-shadow:0 0 0 0 var(--ring); cursor:pointer; flex-shrink:0; }
@@ -466,13 +470,26 @@ let AGENTS = {
 };
 if (new URLSearchParams(location.search).has("app")) document.body.classList.add("inapp");
 // H83: which HQ this is, from its status page (8444 next to the phone's 8443, else 4748 on this computer).
-(async () => {
+// H118: with a pill saying which computer is main; looked at again every minute and when the page comes back.
+async function loadWhere() {
   try {
     const at = location.port === "8443" ? `https://${location.hostname}:8444` : `${location.protocol}//${location.hostname}:4748`;
     const r = await fetch(`${at}/where.json`, { cache: "no-store" });
-    if (r.ok) document.getElementById("where").textContent = (await r.json()).where || "";
+    if (!r.ok) return;
+    const w = await r.json();
+    const box = document.getElementById("where");
+    box.textContent = w.where || "";
+    if (w.role && w.role.text) {
+      const pill = document.createElement("span");
+      pill.className = `role ${w.role.acting === "main" ? "main" : "backup"}`;
+      pill.textContent = w.role.text;
+      box.append(pill);
+    }
   } catch {}
-})();
+}
+loadWhere();
+setInterval(loadWhere, 60000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") loadWhere(); });
 // F25: her direct line (H80), only on the phone (8443). Inside the HQ page (8444) the tap opens that page's own
 // /direct, where its notifications were allowed; opened on its own, this address's /direct (the call line
 // passes it on to the status page). A dot when she texted since it was last opened.

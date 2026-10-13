@@ -32,6 +32,10 @@
   .who b { font-size: 15px; display: flex; align-items: center; gap: 8px; }
   .who .where { font-size: 11px; font-weight: 600; color: var(--soft); letter-spacing: .02em; margin-top: 1px; }
   .who .where:empty { display: none; }
+  /* H118: which computer is main, a pill after it: green on the main, grey on the backup. */
+  .who .where .role { margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-weight: 700; }
+  .who .where .role.main { background: var(--green); color: #fff; }
+  .who .where .role.backup { background: color-mix(in srgb, var(--grey) 25%, transparent); color: var(--ink); }
   .who .head { color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
   .who .said { color: var(--soft); font-size: 12px; margin-top: 2px; min-height: 16px; }
   .light { width: 11px; height: 11px; border-radius: 50%; background: var(--grey); display: inline-block; }
@@ -208,6 +212,12 @@
       $('light').className = `light ${h.light}`;
       $('head').textContent = h.headline;
       $('where').textContent = h.where || '';  // H83: which HQ this is (VPS, or Local · macOS)
+      if (h.role && h.role.text) {  // H118: and which computer is main, as a pill after it
+        const pill = document.createElement('span');
+        pill.className = `role ${h.role.acting === 'main' ? 'main' : 'backup'}`;
+        pill.textContent = h.role.text;
+        $('where').append(pill);
+      }
       $('fix').disabled = fixing || !(h.off && h.off.length);
       // H59: the version from update.py (through hq_control.py health)
       $('ver').textContent = u.version ? `v${u.version}` + (u.updating ? ' · updating…' : u.available ? '' : u.latest && !u.offline ? ' · the latest version' : '') : '';
