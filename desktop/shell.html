@@ -101,7 +101,26 @@
   .dog.sleep .ear { transform: rotate(14deg); }
   .dog.sleep .zz { animation: float 2.4s ease-in infinite; }
   .dog.sleep .zz.two { animation-delay: 1.2s; }
-  @media (prefers-reduced-motion: reduce) { .dog * { animation: none !important; } }
+  /* H98 (12 October 2026), in the user's words: "it can just sit in front of a bowl for his food and it just says
+     update in green, just like the woof says in red, but then update in green. And it can bark. But it sits.
+     Wagging and still waiting in front of... A bowl of his, just like a dog bowl of food. But it's empty."
+     So when a newer version is out (H59): the dog sits by its empty bowl, wags, looks from the bowl to you, and
+     now and then barks Update! in green. [Claude's choice: a red bark or sleep still wins, they matter more.] */
+  .dog .sit, .dog .bowl, .dog .feed { opacity: 0; }
+  .dog .body { transform-origin: 60px 46px; }
+  @keyframes look { 0%, 40% { transform: rotate(12deg); } 55%, 90% { transform: rotate(-4deg); } 100% { transform: rotate(12deg); } }
+  @keyframes now-and-then { 0%, 68%, 100% { opacity: 0; transform: scale(.7); } 74%, 94% { opacity: 1; transform: scale(1); } }
+  @keyframes open-now-and-then { 0%, 70%, 96%, 100% { opacity: 0; } 74%, 92% { opacity: 1; } }
+  .dog.hungry .body { transform: rotate(-14deg); }
+  .dog.hungry .tail-spot { transform: translate(0, 9px); }
+  .dog.hungry .leg.rear { opacity: 0; }
+  .dog.hungry .sit, .dog.hungry .bowl { opacity: 1; }
+  .dog.hungry .tail { animation: wag .3s ease-in-out infinite alternate; }
+  .dog.hungry .head-g { animation: look 4s ease-in-out infinite; }
+  .dog.hungry .ear { transform: rotate(-10deg); }
+  .dog.hungry .feed { animation: now-and-then 4s ease-in-out infinite; transform-origin: 80px 7px; }
+  .dog.hungry .mouth-open { animation: open-now-and-then 4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .dog * { animation: none !important; } .dog.hungry .feed { opacity: 1; } }
   /* H59: the small grey version next to HQ (a click shows the changelog), and a pill when a new one is out. */
   .ver { font: 400 11px/1.2 inherit; color: var(--grey); background: none; border: 0; padding: 0 2px; cursor: pointer; -webkit-app-region: no-drag; }
   .ver:hover { text-decoration: underline; }
@@ -118,11 +137,13 @@
         <path d="M2 40h8M0 48h10M4 56h8" />
       </g>
       <g class="whole">
-        <g class="tail"><path d="M22 40 C12 34 10 24 14 18" fill="none" stroke="var(--fur-dark)" stroke-width="5" stroke-linecap="round" /></g>
-        <rect class="leg b" x="27" y="50" width="6" height="16" rx="3" fill="var(--fur-dark)" />
+        <g class="tail-spot"><g class="tail"><path d="M22 40 C12 34 10 24 14 18" fill="none" stroke="var(--fur-dark)" stroke-width="5" stroke-linecap="round" /></g></g>
+        <rect class="leg b rear" x="27" y="50" width="6" height="16" rx="3" fill="var(--fur-dark)" />
         <rect class="leg a" x="53" y="50" width="6" height="16" rx="3" fill="var(--fur-dark)" />
-        <ellipse cx="42" cy="46" rx="22" ry="12" fill="var(--fur)" />
-        <rect class="leg a" x="33" y="50" width="6" height="17" rx="3" fill="var(--fur)" />
+        <g class="sit"><ellipse cx="31" cy="57" rx="10" ry="8" fill="var(--fur)" />
+          <rect x="30" y="61" width="12" height="6" rx="3" fill="var(--fur-dark)" /></g>
+        <ellipse class="body" cx="42" cy="46" rx="22" ry="12" fill="var(--fur)" />
+        <rect class="leg a rear" x="33" y="50" width="6" height="17" rx="3" fill="var(--fur)" />
         <rect class="leg b" x="59" y="50" width="6" height="17" rx="3" fill="var(--fur)" />
         <g class="head-g">
           <path d="M58 40 C56 32 60 26 66 32" fill="var(--fur)" />
@@ -136,6 +157,10 @@
           <path d="M57 41 h20" stroke="var(--blue)" stroke-width="3" stroke-linecap="round" />
         </g>
       </g>
+      <g class="bowl"><path d="M73 64 h25 l-3.5 8 h-18 Z" fill="var(--blue)" />
+        <ellipse cx="85.5" cy="64" rx="12.5" ry="2.6" fill="var(--rule)" stroke="var(--blue)" stroke-width="1.4" /></g>
+      <g class="feed"><rect x="64" y="0" width="34" height="13" rx="6" fill="var(--green)" />
+        <text x="81" y="9.5" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">Update!</text></g>
       <g class="woof"><rect x="70" y="0" width="28" height="13" rx="6" fill="var(--red)" />
         <text x="84" y="9.5" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">Woof!</text></g>
       <text class="zz" x="82" y="16" font-size="9" font-weight="700" fill="var(--soft)">z</text>
@@ -166,7 +191,7 @@
 <script>
   const $ = (id) => document.getElementById(id);
   const send = (m) => { try { webkit.messageHandlers.hq.postMessage(m); } catch { console.log('hq', JSON.stringify(m)); } };
-  const WORDS = { happy: 'All good: tail going', alert: 'Keeping an eye on something', bark: 'Something is off', run: 'Turning things on…', sleep: 'Asleep: the status page doesn’t answer' };
+  const WORDS = { happy: 'All good: tail going', alert: 'Keeping an eye on something', bark: 'Something is off', run: 'Turning things on…', sleep: 'Asleep: the status page doesn’t answer', hungry: 'A new version is out: waiting by the empty bowl for the update' };
   let fixing = false;
   let last = null;
   let lastDrag = '';
@@ -174,7 +199,10 @@
     state: () => ({ mood: $('dog').getAttribute('class').replace('dog ', ''), light: $('light').className.replace('light ', ''), head: $('head').textContent, tab: document.querySelector('.tabs [aria-pressed="true"]').dataset.tab, open: document.body.classList.contains('open'), fix: !$('fix').disabled }),
     update(h) {
       last = h;
-      const mood = fixing ? 'run' : h.mood;
+      const u = h.update || {};
+      // H98: a newer version makes the dog sit by its empty bowl, unless something is off or it's asleep.
+      const hungry = !!u.available && !u.updating && (h.mood === 'happy' || h.mood === 'alert');
+      const mood = fixing ? 'run' : hungry ? 'hungry' : h.mood;
       $('dog').setAttribute('class', `dog ${mood}`);
       $('dogtitle').textContent = `The watchdog: ${WORDS[mood]}`;
       $('light').className = `light ${h.light}`;
@@ -182,7 +210,6 @@
       $('where').textContent = h.where || '';  // H83: which HQ this is (VPS, or Local · macOS)
       $('fix').disabled = fixing || !(h.off && h.off.length);
       // H59: the version from update.py (through hq_control.py health)
-      const u = h.update || {};
       $('ver').textContent = u.version ? `v${u.version}` + (u.updating ? ' · updating…' : u.available ? '' : u.latest && !u.offline ? ' · the latest version' : '') : '';
       $('newver').textContent = u.available ? `v${u.latest} is out · Update` : '';
       $('newver').classList.toggle('show', !!u.available && !u.updating);

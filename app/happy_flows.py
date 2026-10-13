@@ -5859,6 +5859,63 @@ setTimeout(() => {
         return ("hand-over and three-way marks never spoken; hand-over once heard, the other continues the call as picking "
                 "up; three-way keeps one conversation, the one named or fitting answers in her voice; lines say who")
 
+    async def flow87(self) -> str:
+        """H98, no Claude: the dog's own mood for an update. The Mac app's strip (also the phone's, /hq) in a headless
+        browser: with a newer version out (H59) the dog sits by its empty bowl, wags and now and then barks Update!
+        in green; a red bark, sleep or turning things on still win; no newer version or updating: its usual mood."""
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the strip in")
+        page = (ROOT / "desktop/shell.html").read_text()
+        harness = r"""<script>
+(() => {
+  const out = [], dog = document.getElementById('dog');
+  const NEW = { version: '0.2', latest: '0.3', available: true };
+  const one = (mood, update, light = 'ok') => { hq.update({ light, mood, headline: 'All working', off: [], routines: [], update }); return hq.state().mood; };
+  hq.tab('status');
+  out.push('happy:' + one('happy', NEW));
+  const seen = (sel) => getComputedStyle(dog.querySelector(sel)).opacity;
+  const moving = (sel) => getComputedStyle(dog.querySelector(sel)).animationName;
+  out.push('bowl:' + seen('.bowl') + '/' + seen('.sit') + '/' + seen('.leg.rear'));
+  const feed = dog.querySelector('.feed');
+  out.push('feed:' + feed.textContent.trim() + '/' + getComputedStyle(feed.querySelector('rect')).fill + '/' + moving('.feed'));
+  out.push('wag:' + moving('.tail') + '/' + moving('.head-g') + '/' + moving('.mouth-open'));
+  out.push('title:' + document.getElementById('dogtitle').textContent);
+  out.push('green:' + getComputedStyle(document.documentElement).getPropertyValue('--green').trim());
+  out.push('alert:' + one('alert', NEW, 'waiting'));
+  out.push('bark:' + one('bark', NEW, 'down'));
+  out.push('sleep:' + one('sleep', NEW, 'down'));
+  out.push('none:' + one('happy', {}) + '/' + seen('.bowl'));
+  out.push('updating:' + one('happy', { ...NEW, updating: true }));
+  one('happy', NEW); hq.fixing(true, 'Turning on');
+  out.push('fixing:' + hq.state().mood);
+  hq.fixing(false, '');
+  out.push('back:' + hq.state().mood);
+  const pre = document.createElement('pre'); pre.id = 'h98'; pre.textContent = 'H98RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
+})();
+</script>"""
+        f = self.tmp / "h98-shell.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                          f"--user-data-dir={self.tmp / 'h98-profile'}",
+                                          "--virtual-time-budget=2000", "--dump-dom", f.as_uri()], timeout=60)
+        m = re.search(r'<pre id="h98">H98RESULT (.*?) END</pre>', r.stdout)
+        need(m, f"the strip test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        res = dict(part.split(":", 1) for part in m.group(1).split(" | "))
+        say(f"   {m.group(1)}")
+        need(res["happy"] == "hungry" and res["alert"] == "hungry", f"a newer version doesn't make the dog sit by its bowl: {res}")
+        need(res["bowl"] == "1/1/0", f"the bowl, the sitting or the rear legs are wrong: {res['bowl']}")
+        green = res["green"]
+        rgb = tuple(int(green[i:i + 2], 16) for i in (1, 3, 5)) if green.startswith("#") else None
+        need(res["feed"].startswith("Update!/") and rgb and res["feed"].split("/")[1] == f"rgb({rgb[0]}, {rgb[1]}, {rgb[2]})"
+             and res["feed"].endswith("/now-and-then"), f"Update! isn't in green now and then: {res['feed']} ({green})")
+        need(res["wag"] == "wag/look/open-now-and-then", f"the dog doesn't wag, look and bark: {res['wag']}")
+        need("new version" in res["title"], f"the dog's title doesn't say why: {res['title']}")
+        need(res["bark"] == "bark" and res["sleep"] == "sleep" and res["fixing"] == "run", f"the update covers a problem: {res}")
+        need(res["none"] == "happy/0" and res["updating"] == "happy" and res["back"] == "hungry", f"the bowl shows without a newer version: {res}")
+        return "a newer version: the dog sits by its empty bowl, wags, looks up and barks Update! in green now and then; a red bark, sleep and turning on still win; no newer version or updating: its usual mood"
+
     async def flow86(self) -> str:
         """H80, no Claude: Donna's direct line. A push message encrypted for a stand-in phone decrypts back (RFC 8291)
         and its VAPID token verifies with the shared key; a gone phone is dropped. The routine's look takes stock
@@ -7541,6 +7598,7 @@ FLOWS = {
     84: ("H106: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can", False, "flow84"),
     85: ("H79: ask for another agent by name: she hands over, or brings her in on a three-way call", False, "flow85"),
     86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back", False, "flow86"),
+    87: ("H98: the dog sits by its empty bowl and says Update! in green when a newer version is out", False, "flow87"),
 }
 
 
