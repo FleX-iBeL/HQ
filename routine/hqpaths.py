@@ -79,6 +79,15 @@ def where() -> str:
     return "Local · " + ("macOS" if IS_MAC else "Linux" if IS_LINUX else "Windows" if os.name == "nt" else sys.platform)
 
 
+def short_name() -> str:
+    """H88 (13 October 2026): this computer's short name for its heartbeat line on both status pages: HQ_LABEL
+    when set (the server's, VPS), "Laptop" on a Mac, else the computer's own name (Claude's choice)."""
+    label = os.environ.get("HQ_LABEL", "").strip()
+    if label:
+        return label
+    return "Laptop" if IS_MAC else socket.gethostname().split(".")[0]
+
+
 def support_dir() -> str:
     """HQ's own memory outside the workspace (the heartbeat, the watchdog's line and log, failures in a row):
     ~/Library/Application Support/HQ on a Mac (where macOS lets the watchdog read without asking), else

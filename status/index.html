@@ -698,6 +698,17 @@
         ['temp', 'Laptop temperature', 'Every minute, free, no password'],
         ['battery', 'Laptop battery', 'Every minute, free'],
       ].filter(([key]) => LAPTOP || (key !== 'temp' && key !== 'battery'));  // H92
+      /** H88: with a second HQ, a heartbeat line for each computer (Laptop, VPS), right after Main or backup and
+          the sync, in the order of their names; its graph bar too. Taken from the lines themselves. */
+      let beats = [];
+      function routineList(all) {
+        const found = Object.entries(all ?? {}).filter(([k]) => k.startsWith('beat-'))
+          .map(([k, x]) => [k, x?.name ?? k.slice(5), 'Only with a second HQ: a heartbeat every minute, whether this computer is up and online, or the other one answers']);
+        if (found.length) beats = found.sort((a, b) => a[1].localeCompare(b[1]));
+        else if (all) beats = [];
+        const i = ROUTINES.findIndex(([k]) => k === 'helper');
+        return [...ROUTINES.slice(0, i), ...beats, ...ROUTINES.slice(i)];
+      }
       function drawRoutines(r) {
         const box = el('section');
         const now = r?.now ?? Date.now() / 1000;
@@ -711,7 +722,7 @@
         let hot = false;  // H35: a hot laptop is red, but it's not a routine that stopped working
         let lowBat = false;  // H37: low battery on battery is red too, but it's not a routine that stopped working
         const card = el('div', 'card');
-        for (const [key, name, about] of ROUTINES) {
+        for (const [key, name, about] of routineList(all)) {
           const x = all[key];
           if ((key === 'role' || key === 'sync') && !x) continue;  // H56.3/H56.4: an HQ on its own says nothing about them
           let state = x?.state ?? 'off';
@@ -765,7 +776,7 @@
       /** H30: the incident log. 10 October 2026: "it should also log somewhere in monitoring when
           services went disconnected and what it did to fix it." Newest first; a red edge is still down. */
       function drawIncidents(list, now) {
-        const names = Object.fromEntries(ROUTINES.map(([k, n]) => [k, n]));
+        const names = Object.fromEntries(routineList(null).map(([k, n]) => [k, n]));
         const open = list.filter((i) => !i.back).length;
         const fold = foldPart('incidents', open > 0, 'Incidents', list.length ? `${open ? `${open} still down · ` : ''}last ${Math.min(list.length, 30)}` : 'None so far', true);
         const box = el('div', 'incidents');
@@ -884,7 +895,7 @@
         const lanes = el('div', 'lanes');
         const line = el('p', 'picked-line soft', picked ?? 'Hover or tap a piece of a bar to see what it was.');
         drawJobLanes(lanes, from, now, line);
-        for (const [key, name] of ROUTINES) {
+        for (const [key, name] of routineList(null)) {
           const lane = el('div', 'lane');
           lane.append(el('span', 'who', name));
           const strip = el('div', 'strip');

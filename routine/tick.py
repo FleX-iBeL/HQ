@@ -42,6 +42,7 @@ import quiet  # H36: a job that has gone quiet gets continue typed into its own 
 import failures  # H42: why a run failed, in plain words, and how many times in a row (the watchdog reads it)
 import crash  # H62: a job stopped by a crash runs again from the top of the line
 import role  # H56.3: main and backup; only the main runs the mail check, the jobs and the scheduler
+import heartbeat  # H88: a heartbeat line for each of the two computers
 import sync  # H56.4: the two-way sync of the workspace and Claude's memory with the other HQ
 import log_cycle  # H100: the coaching log keeps three hours; older entries move to its archive
 
@@ -854,6 +855,11 @@ def tick():
         sync.tick(main=r["acting"] == "main", log=log, routines=routines, incidents=incidents)
     except Exception as e:
         log(f"sync: {e!r}")
+    # H88: the heartbeats, on both: this computer is up and online, the other one answers. Alone: nothing.
+    try:
+        heartbeat.tick(routines=routines, incidents=incidents, log=log)
+    except Exception as e:
+        log(f"heartbeat: {e!r}")
     if r["acting"] == "backup":
         stale_job_here()
         on_backup()

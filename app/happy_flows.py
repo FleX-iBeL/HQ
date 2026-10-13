@@ -5870,6 +5870,141 @@ console.log(JSON.stringify({{
         need(lap["light"] == "light down", f"on the laptop a hot laptop doesn't make the Routines light red: {lap['light']}")
         return "on a server no Laptop section, no battery in the top line, no laptop lines or bars under Routines, the light green; on the laptop all of it as before, the light red"
 
+    async def flow79(self) -> str:
+        """H88, no Claude: heartbeats for both computers. The routine's part with a throwaway HQ memory (its own
+        pairing, a stand-in for the other HQ on a spare port, the lines and incidents caught, nothing real written):
+        alone no lines; paired, this computer up and online and the other answering; one missed answer yellow, two
+        red with an incident, closed when it answers again; offline, this one red and the other "can't tell"; a
+        new name leaves no old line. Then the status page in a headless browser: Laptop and VPS right after Main
+        or backup, red when down, with their bars in the graph."""
+        import subprocess as sp
+        sup = self.tmp / "h88-support"
+        sup.mkdir()
+        driver = self.tmp / "h88-driver.py"
+        driver.write_text(r"""
+import http.server, json, os, sys, threading
+sys.path.insert(0, sys.argv[1])
+import heartbeat, role
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        b = json.dumps({"name": "far-away", "label": "VPS", "main": "far-away", "acting": "main"}).encode()
+        self.send_response(200); self.send_header("content-type", "application/json"); self.end_headers(); self.wfile.write(b)
+    def log_message(self, *a): pass
+srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+class R:
+    lines, dropped = {}, []
+    def beat(self, k, **f): self.lines[k] = f
+    def drop(self, prefix, keep=()):
+        for k in [k for k in self.lines if k.startswith(prefix) and k not in keep]:
+            del self.lines[k]; self.dropped.append(k)
+class I:
+    log, open_ = [], set()
+    def is_down(self, k): return k in self.open_
+    def down(self, k, why, at=None): self.log.append(("down", k, why)); self.open_.add(k)
+    def fix(self, k, what, at=None): self.log.append(("fix", k, what))
+    def up(self, k, at=None): self.log.append(("up", k)); self.open_.discard(k)
+r, i, out = R(), I(), {}
+r.lines["beat-old"] = {"state": "ok"}
+out["alone"] = [heartbeat.tick(routines=r, incidents=i), sorted(r.lines)]
+json.dump({"name": "here", "peer": f"http://127.0.0.1:{srv.server_port}/", "peer_name": "far-away", "main": "here", "chosen_at": 1},
+          open(os.path.join(os.environ["HQ_SUPPORT"], "role.json"), "w"))
+out["label"] = role.mine().get("label")
+def snap(): return {k: [v["name"], v["state"], v["text"]] for k, v in sorted(r.lines.items())}
+heartbeat.tick(routines=r, incidents=i, online=True); out["up"] = snap()
+heartbeat.tick(routines=r, incidents=i, online=True, peer={}); out["miss1"] = snap()
+heartbeat.tick(routines=r, incidents=i, online=True, peer={}); out["miss2"] = snap(); out["inc2"] = list(i.log)
+heartbeat.tick(routines=r, incidents=i, online=True); out["back"] = snap(); out["inc3"] = list(i.log)
+heartbeat.tick(routines=r, incidents=i, online=False, peer={}); out["offline"] = snap()
+os.environ["HQ_LABEL"] = "Server"
+heartbeat.tick(routines=r, incidents=i, online=True); out["renamed"] = snap()
+print("H88OUT " + json.dumps(out))
+""")
+        env = {**os.environ, "HQ_SUPPORT": str(sup), "HQ_LABEL": "Laptop"}
+        env.pop("HQ_ROADMAP", None)
+        r = sp.run([sys.executable, str(driver), str(ROOT / "routine")], capture_output=True, text=True, env=env, timeout=120)
+        m = re.search(r"H88OUT (.*)", r.stdout)
+        need(m, f"the heartbeat test didn't finish: {(r.stderr or r.stdout)[-400:]}")
+        o = json.loads(m.group(1))
+        need(o["alone"][0] is None and o["alone"][1] == [], f"alone, an HQ still writes heartbeat lines or keeps old ones: {o['alone']}")
+        need(o["label"] == "Laptop", f"the role answer doesn't carry this computer's short name: {o['label']}")
+        need(o["up"] == {"beat-laptop": ["Laptop", "ok", "Up and online"], "beat-vps": ["VPS", "ok", o["up"]["beat-vps"][2]]}
+             and o["up"]["beat-vps"][2].startswith("Answers ("), f"paired, the two lines aren't both green: {o['up']}")
+        need(o["miss1"]["beat-vps"][1] == "waiting", f"one missed answer isn't yellow: {o['miss1']}")
+        need(o["miss2"]["beat-vps"][1] == "down" and "Doesn't answer since" in o["miss2"]["beat-vps"][2], f"two missed answers aren't red: {o['miss2']}")
+        need(any(e[0] == "down" and e[1] == "beat-vps" for e in o["inc2"]), f"no incident when the other stopped answering: {o['inc2']}")
+        need(o["back"]["beat-vps"][1] == "ok" and o["inc3"][-1] == ["up", "beat-vps"], f"answering again doesn't turn green and close the incident: {o['back']} {o['inc3'][-2:]}")
+        need(o["offline"]["beat-laptop"][1] == "down" and o["offline"]["beat-vps"][1] == "waiting" and "Can't tell" in o["offline"]["beat-vps"][2],
+             f"offline isn't this one red and the other can't tell: {o['offline']}")
+        need(sorted(o["renamed"]) == ["beat-server", "beat-vps"], f"a new name left an old line behind: {sorted(o['renamed'])}")
+        # The status page.
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the status page in")
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        site = self.tmp / "h88"
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        (site / ".status").mkdir()
+        shutil.copy(ROADMAP, site_roadmap(site))
+        now = int(time.time())
+        lines = {k: {"state": "ok", "text": "fine", "at": now, "every": 60} for k in ["helper", "watchdog", "mail", "jobs", "usage", "phone", "call"]}
+        lines["role"] = {"state": "ok", "text": "Main (here)", "at": now, "every": 60}
+        lines["beat-vps"] = {"state": "down", "text": "Doesn't answer since 12:00", "name": "VPS", "at": now, "every": 60}
+        lines["beat-laptop"] = {"state": "ok", "text": "Up and online", "name": "Laptop", "at": now, "every": 60}
+        (site / ".status/routines.json").write_text(json.dumps(lines))
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  for (let i = 0; i < 40 && !document.querySelector('.routine'); i++) await wait(250);
+  await wait(2500);
+  out.push('rows:' + [...document.querySelectorAll('.routine .name')].map(n => n.textContent).join(','));
+  out.push('vps:' + ([...document.querySelectorAll('.routine')].find(r => r.querySelector('.name')?.textContent === 'VPS')?.className ?? ''));
+  out.push('lanes:' + [...document.querySelectorAll('.lane .who')].map(n => n.textContent).filter(t => t === 'Laptop' || t === 'VPS').join(','));
+  const pre = document.createElement('pre'); pre.id = 'h88'; pre.textContent = 'H88RESULT ' + out.join(' | ') + ' END';
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        idx = site / "status/index.html"
+        idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
+        import socket as _socket
+        with _socket.socket() as _s:  # a free port: a spare one may be taken by another HQ's test server
+            _s.bind(("127.0.0.1", 0))
+            port = _s.getsockname()[1]
+        env = {**os.environ, "HQ_STATUS_PORT": str(port), "HQ_LAPTOP": "0", "HQ_FIX_DRY": "1"}
+        proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            base = f"http://127.0.0.1:{port}"
+            for _ in range(50):
+                if http_get("/routines.json", base)[0] == 200:
+                    break
+                await asyncio.sleep(0.2)
+            hist = b""
+            for _ in range(25):
+                _, hist, _ = http_get("/routines-history.json?h=1", base)
+                if b"beat-vps" in hist:
+                    break
+                await asyncio.sleep(0.2)
+            need(b'"beat-vps":"down"' in hist and b'"beat-laptop":"ok"' in hist, f"the graph's record has no heartbeat lines: {hist[-300:]!r}")
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'h88-profile'}", "--virtual-time-budget=20000", "--dump-dom", base + "/"], timeout=120)
+        finally:
+            proc.terminate()
+            proc.wait(timeout=10)
+        m = re.search(r'<pre id="h88">H88RESULT (.*?) END</pre>', r.stdout)
+        need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        res = dict(part.split(":", 1) for part in m.group(1).split(" | "))
+        say(f"   page: {m.group(1)[:300]}")
+        rows = res["rows"].split(",")
+        need(rows[:3] == ["Main or backup", "Laptop", "VPS"], f"Laptop and VPS aren't right after Main or backup: {rows[:5]}")
+        need("down" in res["vps"], f"the VPS line isn't red when it doesn't answer: {res['vps']}")
+        need(res["lanes"] == "Laptop,VPS", f"the graph has no bars for Laptop and VPS: {res['lanes']}")
+        return ("alone no lines; paired both green, one miss yellow, two red with an incident, closed when back; offline this "
+                "one red and the other can't tell; a new name leaves no old line; on the page Laptop and VPS right after Main "
+                "or backup, the VPS red, both with bars in the graph")
+
     async def flow76(self) -> str:
         """H78, no Claude: the call's policy on calendar changes, with made-up events (nothing reaches the calendar).
         Adding goes without asking; moving or deleting too, once the event was looked at on this call (what it was
@@ -6569,6 +6704,7 @@ FLOWS = {
     76: ("H78: his own calendar changes go without asking; with other people in it, or not looked at first, they don't", False, "flow76"),
     77: ("H82: her text shows formatted in the call's chat (bold, lists) while the voice stays plain", False, "flow77"),
     78: ("H86: the screen in the colour of who I'm calling; my lines green, hers in her colour", False, "flow78"),
+    79: ("H88: heartbeats for both computers: this one up and online, the other answering; on both status pages", False, "flow79"),
 }
 
 

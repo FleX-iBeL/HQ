@@ -202,7 +202,8 @@ const HISTORY = join(root, '.status/routines-history.jsonl');
 const DAY = 24 * 3600;
 function effective(r) {
   const out = {};
-  for (const k of KEYS) {
+  // H88: the heartbeat lines (beat-laptop, beat-vps, …) are named after the computers, so they're taken as they come.
+  for (const k of [...KEYS, ...Object.keys(r.routines).filter((x) => x.startsWith('beat-'))]) {
     const x = r.routines[k];
     if (!x) { out[k] = k === 'watchdog' ? 'down' : 'none'; continue; }
     const late = r.now - x.at > (x.every ?? 60) * 2 + 60;

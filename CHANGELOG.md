@@ -5,6 +5,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ## Coming next
 
 ### New
+- With a second HQ (a laptop and a server), a heartbeat for each under Routines on both status pages: whether this computer is up and online, and whether the other one answers, every minute, apart from which one is main. Two missed answers in a row turn it red and go in the incident log.
 - On a call the screen takes a soft tint of who you're talking to: purple for Donna, red for Pepper, yellow for Moneypenny. In the chat your lines are green and hers are in her own colour, also in past calls.
 - More goodbyes she hangs up on: "okay, thanks, appreciate you" and "cheers" end the call by themselves, the same as "bye".
 - Your agents put things in your calendar, move them and delete them without asking first. An appointment with other people in it, or an invitation, still gets checked with you. Before moving or deleting one she looks at it, and what it was is kept in the call's transcript, so it can always be put back.

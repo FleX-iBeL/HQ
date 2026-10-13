@@ -45,6 +45,24 @@ def beat(key, **fields):
         pass
 
 
+def drop(prefix, keep=()):
+    """H88: remove the lines whose key starts with prefix, except those in keep (a heartbeat line whose
+    computer got another name, or an HQ that is on its own again). Never raises."""
+    try:
+        data = read()
+        gone = [k for k in data if k.startswith(prefix) and k not in keep]
+        if not gone:
+            return
+        for k in gone:
+            del data[k]
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(FILE), prefix=".routines")
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=1)
+        os.replace(tmp, FILE)
+    except Exception:
+        pass
+
+
 def heartbeat():
     try:
         os.makedirs(SUPPORT, exist_ok=True)

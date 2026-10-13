@@ -126,7 +126,8 @@ def mine() -> dict:
     c = config()
     s = _load(STATE, {})
     return {"name": my_name(c), "main": chosen_main(c), "chosen_at": c.get("chosen_at", 0), "acting": acting(),
-            "busy": busy(), "since": s.get("since"), "paired": bool(c), "at": time.time()}
+            "busy": busy(), "since": s.get("since"), "paired": bool(c), "at": time.time(),
+            "label": hqpaths.short_name()}  # H88: the name of its heartbeat line on the other's status page
 
 
 def busy() -> str:
