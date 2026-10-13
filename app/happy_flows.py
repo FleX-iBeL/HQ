@@ -6157,6 +6157,79 @@ setTimeout(() => {
                 os.environ["HQ_CLAUDE_PROJECTS"] = old
         return "a new job's chat gets an id; held, it picks its own chat up with the step; chat gone or other computer: a fresh chat with the note"
 
+    async def flow90(self) -> str:
+        """H120, no Claude, no network: the weather every three hours. What's worth a text from a made-up forecast
+        and rain radar (sun, rain coming by the minute, a rainy day never saying go outside, quiet at night and
+        when nothing changed), when a look is due, the place from me.md (blank in the template), a look that texts
+        through the direct line in a throwaway folder, and the routine's wiring."""
+        import importlib
+        from datetime import datetime as dt
+        sys.path.insert(0, str(ROOT / "app"))
+        import weather as w
+        importlib.reload(w)
+        hrs = [f"2026-10-14T{h:02d}:00" for h in range(24)]
+        def fc(rain=0.0, prob=5, code=1):
+            return {"current": {"temperature_2m": 17.2, "weather_code": code}, "daily": {"sunset": ["2026-10-14T18:50"]},
+                    "hourly": {"time": hrs, "temperature_2m": [15] * 24, "precipitation": [rain] * 24,
+                               "precipitation_probability": [prob] * 24, "weather_code": [code] * 24}}
+        day, night = dt(2026, 10, 14, 11, 5), dt(2026, 10, 14, 22, 0)
+        dry = [("11:05", 0.0)] * 24
+        got = w.decide(fc(), dry, day, [], "Town")
+        need(got and got[0] == "sun" and "sunset at 18:50" in got[1], f"a sunny day: {got}")
+        need(w.decide(fc(), dry, day, ["sun"]) is None, "the sun was texted twice in a day")
+        got = w.decide(fc(), [("11:05", 0.0)] * 6 + [("11:35", 0.6), ("11:40", 2.0)], day, [])
+        need(got and got[0] == "rain" and "11:35" in got[1] and "steady" in got[1], f"rain by the minute: {got}")
+        f2 = fc(); f2["hourly"]["precipitation_probability"] = [5] * 12 + [80] * 2 + [5] * 10
+        got = w.decide(f2, [], day, [])
+        need(got and got[0] == "rain" and "12:00" in got[1], f"rain likely in the next hours: {got}")
+        got = w.decide(fc(rain=1.2, code=63), [("11:05", 1.5)] * 24, day, [])
+        need(got and got[0] == "cosy" and "cosy inside" in got[1], f"a rainy day: {got}")
+        need(w.decide(fc(rain=1.2, code=63), [], day, ["cosy"]) is None, "the rainy day was texted twice")
+        need(w.decide(fc(), dry, night, []) is None and w.decide(fc(code=3), dry, day, []) is None,
+             "she texts at night, or on a grey dry day")
+        need(w.parse_rain("000|11:05\n109|11:10\nxx\n141|11:15") == [("11:05", 0.0), ("11:10", 1.0), ("11:15", 10.0)],
+             "Buienradar's rain text is read wrong")
+        # The look: a throwaway folder, a made-up place, the network and her text stood in for.
+        folder = self.tmp / "weather-H120"
+        keep = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_WEATHER_PLACE", "HQ_WEATHER")}
+        import direct_line as dl
+        sent, real = [], (w.forecast, w.rain_text, dl.text)
+        try:
+            os.environ.update({"HQ_DIRECT_DIR": str(folder), "HQ_WEATHER_PLACE": "Testtown"})
+            os.environ.pop("HQ_WEATHER", None)
+            w._write({"where": {"place": "Testtown", "lat": 52.0, "lon": 5.0, "tz": "Europe/Amsterdam",
+                                "country": "NL", "name": "Testtown"}})
+            noon = dt(2026, 10, 14, 12, 0).timestamp()
+            need(w.due(noon) and not w.due(dt(2026, 10, 14, 23, 30).timestamp()) and
+                 not w.due(dt(2026, 10, 14, 6, 0).timestamp()), "a look is due at night, or not in the day")
+            w.forecast, w.rain_text = (lambda _w: fc(rain=1.2, code=63)), (lambda _w: [])
+            dl.text = lambda why, facts: sent.append((why, facts))
+            got = w.look(now=noon)
+            need(got and got[0] == "cosy" and sent == [got], f"the look didn't text the rainy day: {got} {sent}")
+            need(not w.due(noon + 3600) and w.due(noon + 3 * 3600), "not every three hours after a look")
+            need(w.look(now=noon + 3 * 3600) is None and len(sent) == 1, "the rainy day was texted again")
+            os.environ["HQ_WEATHER"] = "0"
+            need(not w.due(noon + 9 * 3600), "HQ_WEATHER=0 doesn't switch it off")
+        finally:
+            w.forecast, w.rain_text, dl.text = real
+            for k, v in keep.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        # The place from me.md; the template asks for it, blank.
+        import me as _me
+        need(_me.load(ROOT / "template")["place"] == "", "the template's place isn't blank")
+        need("**Where I am:**" in (ROOT / "template/me.md").read_text(), "the template doesn't ask where you are")
+        (folder / "me.md").write_text("**Name:** X\n\n**Where I am:** Testtown, NL\n")
+        need(_me.load(folder)["place"] == "Testtown, NL", "me.md's place isn't read")
+        # The wiring: the routine starts it on the main, her prompts and plain lines know the three kinds.
+        tick = (ROOT / "routine/tick.py").read_text().split("def direct_watch")[1].split("\ndef ")[0]
+        need("weather.start()" in tick and "if main:" in tick, "the routine doesn't start the look on the main")
+        need(all(k in dl.PLAIN for k in ("sun", "rain", "cosy")) and "never suggest going outside" in dl.compose_prompt("cosy", "").lower(),
+             "her texts don't know sun, rain and cosy")
+        gi = (Path(config.FOLDER) / ".gitignore")
+        if gi.exists():
+            need("HQ/direct-line/weather.json" in gi.read_text(), "the weather state isn't kept off GitHub")
+        return "sun, rain by the minute and by the hour, a rainy day (never outside), quiet at night and on grey days; due every three hours in the day; me.md's place; texted once"
+
     async def flow86(self) -> str:
         """H80, no Claude: Donna's direct line. A push message encrypted for a stand-in phone decrypts back (RFC 8291)
         and its VAPID token verifies with the shared key; a gone phone is dropped. The routine's look takes stock
@@ -8027,6 +8100,7 @@ FLOWS = {
     87: ("H98: the dog sits by its empty bowl and says Update! in green when a newer version is out", False, "flow87"),
     88: ("H113: a job held by the usage line carries on in its own chat, or in a fresh one with a note at which step", False, "flow88"),
     89: ("H118: which computer is main, at a glance: a pill next to the name on the status page, the strip and the call page", False, "flow89"),
+    90: ("H120: the weather every three hours: sun, rain coming, a rainy day stays inside; quiet otherwise and at night", False, "flow90"),
 }
 
 

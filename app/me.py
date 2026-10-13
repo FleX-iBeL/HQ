@@ -7,6 +7,7 @@ about them comes from workspace/me.md (the template ships it blank):
     **Names to hear:** words that help speech recognition (names, places, brands), comma separated
     **Never change:** folders in the workspace a call never changes or commits, comma separated
     **Private words:** words that must never end up in HQ itself (the privacy check), comma separated
+    **Where I am:** the town (or town, country) for the weather every three hours (H120)
     ## On calls      anything extra for the call rules (their language, how they say times, ...)
 
 Every part is optional. Without a name, HQ greets without one and the rules say "the user".
@@ -48,4 +49,5 @@ def load(folder: Path) -> dict:
         "on_calls": _section(text, "On calls"),
         "protected": _list(_field(text, "Never change")),
         "private": _list(_field(text, "Private words")),
+        "place": _field(text, "Where I am"),
     }

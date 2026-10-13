@@ -20,6 +20,10 @@ Put your own things here. Write it in your own words, as much or as little as yo
 
 [Words that must never end up in HQ itself, if you ever change HQ and share it: your name, people, places. Comma separated.]
 
+**Where I am:** 
+
+[The town you're in (or town, country), for the weather: every three hours in the day HQ looks, and texts you when there's sun, rain coming or a rainy day. Change it when you travel.]
+
 ## What's important to me
 
 [What matters most to you right now, and what you're working towards. People, health, work, money, freedom, whatever it is.]

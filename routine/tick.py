@@ -877,6 +877,11 @@ def direct_watch():
     q = json.loads(jobs("next")) if main else None
     for why, facts in direct_line.watch(q, main=main):
         log(f"direct line: texting ({why})")
+    # H120: the weather every three hours in the day, on the main; she texts only when there's something to say.
+    if main:
+        import weather
+        if weather.start():
+            log("direct line: looking at the weather")
 
 
 def tick():

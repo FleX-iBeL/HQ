@@ -22,6 +22,9 @@ Kept in the workspace's HQ/direct-line/, so both computers have it through the s
 And per computer, in .status/direct-line.json: what she saw last minute (jobs, incidents), so she texts only on
 a change.
 
+The weather (H120, weather.py): every three hours in the day she texts when there's sun, rain coming or a rainy
+day (why sun, rain, cosy), quiet otherwise.
+
 She texts (watch(), every minute from tick.py): when the job list is finished (nothing running or waiting, after
 there was), when a very important mail lands in inbox.md, when something stays down (an incident open for three
 minutes; the backup taking over at once) and again when it's back. In her own character, through Claude; without
@@ -312,6 +315,9 @@ PLAIN = {
     "down": "Something's not right on my end: {facts} I'm on it, I'll tell you when it's sorted.",
     "back": "Sorted. {facts}",
     "hello": "Hi, it's me. This is our direct line now, text me any time.",
+    "sun": "The sun's out. {facts} Something nice outside, maybe a walk while it's quiet?",
+    "rain": "Heads up, rain's coming. {facts}",
+    "cosy": "Rainy one today. {facts} Good day for a book and something warm inside.",
 }
 
 TEXT_RULES = """# This is a text chat: HQ's direct line
@@ -335,6 +341,13 @@ def compose_prompt(why: str, facts: str) -> str:
                 "technical details, no alarm; say you're keeping an eye on it.",
         "back": "Something that was down is fine again. A short all-clear.",
         "hello": "Say hi: this is your new direct line with him.",
+        "sun": "The weather where he is looks good: sunny and dry for the next hours. Nudge him, lightly, to do "
+               "something nice outside: enjoy the sun, or a walk while it's quiet. One idea at most, not pushy.",
+        "rain": "Rain is coming where he is. A short heads-up with when it starts (the time from the facts), so he "
+                "can take it into account.",
+        "cosy": "It's a rainy day where he is. Suggest something cosy inside: a book, or something else nice "
+                "indoors. Never suggest going outside today; in his words: \"Don't prompt me on rainy days to go "
+                "outside because it doesn't make any sense.\"",
     }.get(why, "Tell him this, in a text.")
     return (f"{what}\n\nThe facts (for you, don't copy them as they are):\n{facts or '(none)'}\n\n"
             "Write only the text message itself, one to three short sentences, as yourself.")
