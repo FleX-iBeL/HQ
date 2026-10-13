@@ -4,6 +4,9 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+### Fixed
+- Changing the mic and sound during a call. Picking the AirPods (or any output the computer already plays on) as the Sound no longer makes her voice much quieter. On the iPhone, Safari and the Mac app the old mic is let go first, so the new one can take over. Where a device won't switch, the call screen says so plainly: on the iPhone, iOS picks the mic and sound itself during a call (Control Center); with the AirPods' own mic on, they play in quieter call mode; a mic that sends no sound is named (F24).
+
 ## 0.4.2 · 13 October 2026
 
 ### New

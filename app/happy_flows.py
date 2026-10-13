@@ -7288,7 +7288,9 @@ print("H88OUT " + json.dumps(out))
         a choice is remembered on this device and the call's getUserMedia asks for exactly that mic, also when the
         browser gave it a new id (found by its name); a mic that's gone falls back to the default and says so;
         Default asks for no mic in particular. The Sound row shows only where setSinkId exists, and her voice is
-        sent to the chosen output."""
+        sent to the chosen output. F24: the output the computer already plays on stays on the default path; where
+        the page can't choose the sound it says so; in WebKit the old mic is let go before the new one opens; a mic
+        the iPhone doesn't switch to is said plainly."""
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
         cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
@@ -7305,16 +7307,19 @@ print("H88OUT " + json.dumps(out))
     { kind: "audioinput", deviceId: "air", label: "AirPods" },
     { kind: "audioinput", deviceId: "phone", label: "iPhone Microphone" },
     { kind: "audioinput", deviceId: "pod", label: "Podcast Mic USB" },
-    { kind: "audiooutput", deviceId: "airout", label: "AirPods" },
-    { kind: "audiooutput", deviceId: "spk", label: "Speaker" },
+    { kind: "audiooutput", deviceId: "default", label: "Default - AirPods", groupId: "g-air" },
+    { kind: "audiooutput", deviceId: "airout", label: "AirPods", groupId: "g-air" },
+    { kind: "audiooutput", deviceId: "spk", label: "Speaker", groupId: "g-spk" },
   ];
-  const asked = [];
-  let gone = false;
+  const asked = [], order = [];
+  let gone = false, stuck = null;
   Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: {
     enumerateDevices: async () => devs.map(d => ({ ...d })),
-    getUserMedia: async c => { asked.push(JSON.stringify(c.audio));
+    getUserMedia: async c => { asked.push(JSON.stringify(c.audio)); order.push("open");
       if (gone && c.audio.deviceId) { const e = new Error("gone"); e.name = "OverconstrainedError"; throw e; }
-      const tr = { kind: "audio", enabled: true, stopped: false, from: c.audio.deviceId ? c.audio.deviceId.exact : "", stop() { this.stopped = true; } };
+      const from = stuck || (c.audio.deviceId ? c.audio.deviceId.exact : ""), dv = devs.find(d => d.deviceId === from && d.kind === "audioinput");
+      const tr = { kind: "audio", enabled: true, stopped: false, from, label: dv ? dv.label : "Default - AirPods",
+        getSettings() { return { deviceId: from || "default" }; }, stop() { this.stopped = true; order.push("stop " + from); } };
       return { getTracks: () => [tr], getAudioTracks: () => [tr] }; },
     addEventListener: () => {} } });
   const sinks = []; audioEl.setSinkId = async id => { sinks.push(id); };
@@ -7346,7 +7351,12 @@ print("H88OUT " + json.dumps(out))
     check("sound-sent", sinks.at(-1) === "spk", sinks.join(","));
     outSel.value = ""; outSel.dispatchEvent(new Event("change"));
     check("sound-default", sinks.at(-1) === "", sinks.join(","));
+    // F24: the output the computer already plays on (the AirPods) stays on the default path, so it isn't quieter.
+    outSel.value = "airout"; outSel.dispatchEvent(new Event("change"));
+    check("same-as-default-stays-default", sinks.at(-1) === "", sinks.join(","));
+    outSel.value = ""; outSel.dispatchEvent(new Event("change"));
   }
+  check("no-sink-row", noSinkRow.hidden === !outRow.hidden, "nosink " + noSinkRow.hidden + " out " + outRow.hidden);
   // H112: on a call the round mic button opens only the mic and sound rows, and a new mic takes over at once.
   gone = false; showSettings(false);
   check("no-devbtn-before", getComputedStyle(devBtn).display === "none", getComputedStyle(devBtn).display);
@@ -7369,6 +7379,21 @@ print("H88OUT " + json.dumps(out))
   check("old-mic-stopped", first.stopped === true, String(first.stopped));
   check("mute-kept", now && now.enabled === false, now ? String(now.enabled) : "-");
   check("same-call", pc && pc.getSenders()[0] === sender, "a new connection");
+  // F24: WebKit (the iPhone, Safari, the Mac app) lets the old mic go first, else the new one never comes.
+  ONE_MIC = true; IS_IOS = true; order.length = 0; sent.length = 0;
+  await new Promise(r => setTimeout(r, 100)); await listDevices();  // the first switch's own look at the devices is done
+  micSel.value = "phone2"; micSel.dispatchEvent(new Event("change"));
+  for (let i = 0; i < 200 && stream.getAudioTracks()[0].from !== "phone2"; i++) await new Promise(r => setTimeout(r, 20));
+  check("webkit-old-first", order[0] === "stop air" && order[1] === "open" && sent.at(-1) && sent.at(-1).from === "phone2", order.join(",") + " sent " + (sent.at(-1) && sent.at(-1).from) + " options " + [...micSel.options].map(o => o.textContent).join(","));
+  check("webkit-switched-quietly", errEl.textContent === "", errEl.textContent);
+  // The iPhone keeps the AirPods whatever the page asks: the page says so plainly.
+  stuck = "air"; sent.length = 0;
+  micSel.value = "phone2"; micSel.dispatchEvent(new Event("change"));
+  for (let i = 0; i < 50 && !/kept/.test(errEl.textContent); i++) await new Promise(r => setTimeout(r, 20));
+  check("iphone-says-kept", /The iPhone kept AirPods/.test(errEl.textContent) && /Control Center/.test(errEl.textContent), errEl.textContent);
+  stuck = null; ONE_MIC = false; IS_IOS = false; errEl.textContent = "";
+  await listDevices();
+  check("iphone-sound-note", noSinkRow.hidden || /computer/.test(noSinkNote.textContent), noSinkNote.textContent);
   setState("live", "On the call");
   check("stays-open", setEl.classList.contains("open"), setEl.className);
   setState("idle", "Call ended");
@@ -7394,7 +7419,9 @@ print("H88OUT " + json.dumps(out))
         need(all(part.endswith(":ok") for part in m.group(1).split(" | ")), f"the mic or sound choice isn't right: {m.group(1)}")
         return ("every mic listed after Default, the choice remembered and used by the call, found again by its name, "
                 "a gone mic falls back to the default; the sound choice only where the browser can, and used; "
-                "on a call the mic button opens only mic and sound, a new mic takes over at once, muted stays muted")
+                "on a call the mic button opens only mic and sound, a new mic takes over at once, muted stays muted; "
+                "F24: the output already in use stays on the default path, WebKit lets the old mic go first, "
+                "and a mic the iPhone won't switch to is said plainly")
 
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""

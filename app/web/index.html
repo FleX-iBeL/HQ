@@ -383,7 +383,8 @@
   </template>
   <div class="row devrow"><span>Microphone<small id="micnote">What she hears you with</small></span><select id="mic" class="dev" aria-label="Microphone"><option value="">Default</option></select></div>
   <div class="row devrow" id="micaskrow" hidden><span>Device names<small>The browser only names them once the page may use the mic</small></span><button id="micask" class="sw" type="button">Show</button></div>
-  <div class="row devrow" id="outrow" hidden><span>Sound<small>Where her voice plays</small></span><select id="out" class="dev" aria-label="Sound"><option value="">Default</option></select></div>
+  <div class="row devrow" id="outrow" hidden><span>Sound<small id="outnote">Where her voice plays</small></span><select id="out" class="dev" aria-label="Sound"><option value="">Default</option></select></div>
+  <div class="row devrow" id="nosinkrow" hidden><span>Sound<small id="nosinknote">This browser can't choose where her voice plays</small></span></div>
   <div class="row"><span>Thinking sound<small>A soft tick while she thinks</small></span><button id="sound" class="sw" type="button" aria-pressed="true">On</button></div>
   <button id="setdone" type="button">Done</button>
 </div>
@@ -638,7 +639,13 @@ soundBtn.addEventListener("click", () => {
 // Remembered on this device by id and name (Safari may change the id); a choice that isn't here falls back to Default.
 const micSel = document.getElementById("mic"), outSel = document.getElementById("out"), micNote = document.getElementById("micnote");
 const outRow = document.getElementById("outrow"), micAskRow = document.getElementById("micaskrow");
-const CAN_SINK = typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
+let CAN_SINK = typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
+// F24: the iPhone (any browser there) decides the mic and sound itself; WebKit (Safari, the Mac app) keeps one mic
+// open at a time, so a new one only comes once the old one is let go.
+const UA = navigator.userAgent || "";
+let IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
+let ONE_MIC = IS_IOS || (/AppleWebKit/.test(UA) && !/Chrome|Chromium|Edg/.test(UA));
+const outNote = document.getElementById("outnote"), noSinkRow = document.getElementById("nosinkrow"), noSinkNote = document.getElementById("nosinknote");
 let devList = [];
 function devPick(key) { try { return JSON.parse(localStorage.getItem(key) || "null"); } catch (e) { return null; } }
 function devOf(kind) { return devList.filter(d => d.kind === kind && d.deviceId && d.deviceId !== "default" && d.deviceId !== "communications"); }
@@ -661,6 +668,11 @@ async function listDevices() {
   fillDev(micSel, ins, "hq-mic", "Microphone");
   outRow.hidden = !CAN_SINK || !outs.length;
   if (!outRow.hidden) fillDev(outSel, outs, "hq-out", "Speaker");
+  // F24: where the page can't choose, it says so instead of seeming to.
+  noSinkRow.hidden = !outRow.hidden;
+  noSinkNote.textContent = IS_IOS ? "The iPhone decides where her voice plays: change it in Control Center"
+    : "This browser can't choose: her voice plays where the computer's own sound goes";
+  showOutNote();
   micAskRow.hidden = ins.some(d => d.label) || !navigator.mediaDevices.getUserMedia;
 }
 function devSave(sel, key, kind) {
@@ -695,28 +707,90 @@ async function openMic() {
 }
 // H112: a new mic chosen on a call takes over at once: it's opened, sent in place of the old one (no new
 // connection, the call goes on), and the old one is stopped. Muted stays muted, push to talk stays shut.
+// F24: in WebKit (the iPhone, Safari, the Mac app) the old mic is let go first, else the new one never comes;
+// afterwards the page checks which mic it really got and whether it sends any sound, and says so when not.
 let micSwap = 0;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function trackDev(t) { let id = ""; try { id = (t.getSettings && t.getSettings().deviceId) || ""; } catch (e) {} return { id, label: (t && t.label) || "" }; }
+function baseName(l) { return String(l || "").replace(/^(Default|Communications) - /, "").replace(/\s*\(.*\)\s*$/, "").trim(); }
 async function switchMic() {
   if (!pc || !stream || state !== "live") return;
-  const n = ++micSwap;
-  let fresh;
+  const n = ++micSwap, old = stream, oldT = old.getAudioTracks()[0];
+  const sender = pc.getSenders().find(x => !x.track || x.track.kind === "audio");
+  if (!sender) return;
+  const was = old.getAudioTracks().some(x => x.enabled), before = oldT ? trackDev(oldT) : { id: "", label: "" };
+  errEl.textContent = "";
+  let fresh, back = false;
+  if (ONE_MIC) old.getTracks().forEach(x => x.stop());
   try { fresh = await openMic(); }
-  catch (e) { errEl.textContent = "That microphone couldn't be opened, so the call keeps the one it had."; return; }
-  const t = fresh.getAudioTracks()[0], sender = pc && pc.getSenders().find(x => !x.track || x.track.kind === "audio");
-  if (n !== micSwap || !t || !sender || !stream) { fresh.getTracks().forEach(x => x.stop()); return; }
-  const old = stream;
-  t.enabled = old.getAudioTracks().some(x => x.enabled);
+  catch (e) {
+    if (!ONE_MIC) { errEl.textContent = "That microphone couldn't be opened, so the call keeps the one it had."; return; }
+    const a = micAudio(false);
+    try { fresh = await navigator.mediaDevices.getUserMedia({ audio: before.id ? { ...a, deviceId: { exact: before.id } } : a }); }
+    catch (e2) { try { fresh = await navigator.mediaDevices.getUserMedia({ audio: a }); } catch (e3) { fresh = null; } }
+    if (!fresh) { errEl.textContent = "No microphone could be opened. Hang up and call again."; return; }
+    back = true;
+  }
+  const t = fresh.getAudioTracks()[0];
+  if (n !== micSwap || !t || stream !== old || !pc) { fresh.getTracks().forEach(x => x.stop()); return; }  // another choice, or hung up
+  t.enabled = was;
   try { await sender.replaceTrack(t); }
   catch (e) { fresh.getTracks().forEach(x => x.stop()); errEl.textContent = "The call couldn't switch microphones, so it keeps the one it had."; return; }
   if (stream !== old) { fresh.getTracks().forEach(x => x.stop()); return; }  // hung up meanwhile
-  stream = fresh; old.getTracks().forEach(x => x.stop());
-  listDevices();
+  stream = fresh; if (!ONE_MIC) old.getTracks().forEach(x => x.stop());
+  await listDevices();
+  if (back) { errEl.textContent = "That microphone couldn't be opened, so the call went back to the one it had."; return; }
+  // Which mic it really got: the iPhone keeps its own choice (with AirPods on, theirs), whatever the page asks.
+  const want = devFind(devOf("audioinput"), devPick("hq-mic")), got = trackDev(t);
+  const same = (x, y) => x.label && y.label ? baseName(x.label) === baseName(y.label) : !x.id || x.id === y.deviceId;
+  if (want && (got.id || got.label) && !same(got, want)) {
+    const kept = got.label ? baseName(got.label) : "the microphone it had";
+    errEl.textContent = IS_IOS ? "The iPhone kept " + kept + ": during a call iOS picks the microphone itself. Change it in Control Center."
+      : "The browser kept " + kept + ". Hang up, pick the microphone, and call again.";
+    return;
+  }
+  // A mic that opens but sends nothing at all (no sound energy in three seconds, while not muted).
+  const energy = async () => { let e = null; try { (await pc.getStats(sender.track)).forEach(r => { if (r.type === "media-source" && typeof r.totalAudioEnergy === "number") e = r.totalAudioEnergy; }); } catch (x) {} return e; };
+  const e0 = pc.getStats ? await energy() : null;
+  if (e0 === null) return;
+  await sleep(3000);
+  if (n !== micSwap || stream !== fresh || !pc || !t.enabled) return;
+  const e1 = await energy();
+  if (t.readyState === "ended" || t.muted || (e1 !== null && e1 === e0))
+    errEl.textContent = "That microphone sends no sound, so she can't hear you. Pick another one, or Default.";
 }
 // Where her voice (and the thinking sound) plays; only where the browser can choose.
+// F24: the output the computer already plays on stays on the default path. In Chrome on the Mac a call's voice sent
+// to a named output (even the same AirPods) comes out much quieter; on the default path it plays at full sound.
+function sinkFor() {
+  const d = devFind(devOf("audiooutput"), devPick("hq-out"));
+  if (!d) return { id: "", d: null };
+  const def = devList.find(x => x.kind === "audiooutput" && x.deviceId === "default");
+  const isDef = def && ((d.groupId && d.groupId === def.groupId) || (!!d.label && baseName(def.label) === baseName(d.label)));
+  return { id: isDef ? "" : d.deviceId, d };
+}
+function showOutNote() {
+  const { id, d } = sinkFor(), t = stream && stream.getAudioTracks()[0];
+  const def = devList.find(x => x.kind === "audiooutput" && x.deviceId === "default");
+  const outName = baseName(d ? d.label : def ? def.label : ""), micName = baseName(t ? t.label : "");
+  if (outName && micName && outName === micName && /AirPods|Buds|Beats|Bluetooth|Headset|Hands-Free/i.test(outName))
+    outNote.textContent = "Their own mic is on, so they play in call mode, which is quieter. Pick the computer's microphone for their full sound.";
+  else if (id)
+    outNote.textContent = "If her voice is quiet here, pick this one as the computer's own sound output and leave this on Default.";
+  else outNote.textContent = "Where her voice plays";
+}
 function applySink() {
   if (!CAN_SINK) return;
-  const d = devFind(devOf("audiooutput"), devPick("hq-out")), id = d ? d.deviceId : "";
-  try { audioEl.setSinkId(id).catch(() => {}); } catch (e) {}
+  const { id } = sinkFor();
+  showOutNote();
+  const moved = audioEl.sinkId !== id;
+  try {
+    audioEl.setSinkId(id).then(() => {
+      // A new output gets a fresh start of her voice on it, at full volume.
+      audioEl.volume = 1;
+      if (moved && audioEl.srcObject && state !== "idle") { const s = audioEl.srcObject; audioEl.srcObject = null; audioEl.srcObject = s; applyVoice(); audioEl.play().catch(() => {}); }
+    }).catch(() => {});
+  } catch (e) {}
   try { if (audioCtx && audioCtx.setSinkId) audioCtx.setSinkId(id).catch(() => {}); } catch (e) {}
 }
 listDevices();
