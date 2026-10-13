@@ -20,7 +20,7 @@ const by = flag >= 0 ? (process.argv[flag + 1] ?? '') : 'HQ session';
 // (routine/statusline.py) saves what Claude Code knows of the plan limits; --statusline reads that.
 //   node "status/save-usage.mjs" --statusline --by "Opus 5.5 · job 3"
 // --gate: the routine's check before it starts a job, on the last saved reading (nothing is
-// written; a window whose reset has passed counts as empty).
+// written; a window whose reset has passed counts as empty). It keeps H114's buffer under each line.
 // F13: --weekly-only (with --gate or --statusline) for a job let past the line: it only goes past
 // the 5-hour line; the weekly lines still count, so it waits at the weekly line like any other job.
 // L10: --any takes the saved numbers whatever their age (the routine's usage check, every minute);
@@ -58,7 +58,8 @@ if (process.argv.includes('--gate')) {
   } catch {}
   const now = new Date();
   if (saved?.readable) saved.limits = saved.limits.filter((l) => !l.resetsAt || Date.parse(l.resetsAt) > now.getTime());
-  const v = usageVerdict(saved, lines, now, { weeklyOnly });
+  // H114: a new job keeps a buffer under the lines (5 points under the 5-hour one, 1 under the weekly ones).
+  const v = usageVerdict(saved, lines, now, { weeklyOnly, start: true });
   console.log(v.stop ? `STOP. ${v.reason}` : weeklyOnly ? 'OK to go on (past the 5-hour line; the weekly lines are under).' : 'OK to go on.');
   process.exit(v.stop ? 2 : 0);
 }

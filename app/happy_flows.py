@@ -6194,6 +6194,13 @@ console.log(JSON.stringify({{
   pastSkips: usageVerdict(r(95), M, when, {{ weeklyOnly: true }}).stop,
   pastWeek: usageVerdict(r(95, 60), M, new Date(WS + 5040 * 6e4), {{ weeklyOnly: true }}).stop,
   reason: usageVerdict(r(25), M, when).reason,
+  // H114: a new job keeps 5 points under the 5-hour line and 1 under each weekly one; a running job goes on to the line.
+  b5: [66, 65, 64].map((p) => usageVerdict(r(p), F, when, {{ start: true }}).stop), b5run: usageVerdict(r(66), F, when).stop,
+  b5move: [16, 15].map((p) => usageVerdict(r(p), M, when, {{ start: true }}).stop),
+  bWeek: [94, 93].map((p) => usageVerdict(r(5, p), F, when, {{ start: true }}).stop), bWeekRun: usageVerdict(r(5, 94), F, when).stop,
+  bFable: [84, 83].map((p) => usageVerdict({{ readable: true, limits: [{{ ...fable, percent: p }}] }}, F, when, {{ start: true }}).stop),
+  bPast: [usageVerdict(r(95, 94), F, when, {{ weeklyOnly: true, start: true }}).stop, usageVerdict(r(95, 93), F, when, {{ weeklyOnly: true, start: true }}).stop],
+  bReason: usageVerdict(r(66), F, when, {{ start: true }}).reason,
   none: lineSettings('# x'), dflt: parseRoadmap(base).usageLines,
   set: lineSettings(base + '- **5-hour line: fixed.** z\\n- **Weekly line: fixed at 95%.** z\\n- **Fable line: moving; fixed at 80% when switched.** z\\n'),
   flat: lineSettings(base + '- **Weekly limit: 60%.** z\\n'),
@@ -6216,6 +6223,16 @@ console.log(JSON.stringify({{
         need(d["weekStops"] and not d["weekFixedNoStop"], "the verdict doesn't follow the weekly line's setting")
         need("its stop line is 20.3%" in d["reason"], f"the reason doesn't name the moving line: {d['reason']}")
         need(not d["pastSkips"] and d["pastWeek"], "a job past the line stops at the 5-hour line, or skips the weekly one")
+        # H114: the buffer before a new job starts, only in the routine's start check, never named where he looks.
+        need(d["b5"] == [True, True, False] and not d["b5run"], f"a new job doesn't keep 5 points under the 5-hour line: {d['b5']}, {d['b5run']}")
+        need(d["b5move"] == [True, False], f"the 5-hour buffer doesn't follow the moving line: {d['b5move']}")
+        need(d["bWeek"] == [True, False] and not d["bWeekRun"] and d["bFable"] == [True, False],
+             f"a new job doesn't keep 1 point under the weekly lines: {d['bWeek']}, {d['bWeekRun']}, {d['bFable']}")
+        need(d["bPast"] == [True, False], f"a job past the line skips the weekly buffer: {d['bPast']}")
+        need("close to its stop line of 70%" in d["bReason"] and "buffer" not in d["bReason"].lower(), f"the waiting reason is off: {d['bReason']}")
+        gate = (ROOT / "status/save-usage.mjs").read_text()
+        need("{ weeklyOnly, start: true }" in gate, "the routine's start check doesn't keep the buffer")
+        need(gate.count("start: true") == 1, "the running job's own check keeps the buffer too")
         need(d["none"] is None and all(v["moving"] for v in d["dflt"].values()) and d["dflt"]["weekly"]["fixed"] == 90,
              f"the roadmap's settings aren't read (moving by default): {d['none']}, {d['dflt']}")
         st = d["set"]

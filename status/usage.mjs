@@ -141,15 +141,25 @@ export function stopLine(l, lines, now = new Date()) {
 }
 
 /**
+ * H114 (13 October 2026, call at 19:53): "If the line is 70%, then if it's 65... It doesn't trigger it" and
+ * "for the weekly I want a 1% buffer". A new job only starts this far under a stop line (in points), so it
+ * isn't stopped right after starting; a job already running still goes on until the line itself. Only the
+ * routine's start check (save-usage.mjs --gate) uses it, and nothing of it shows where he looks: "it doesn't
+ * need to show up. In the user interface, it's just we need to have it."
+ */
+export const START_BUFFER = { five: 5, weekly: 1, fable: 1 };
+
+/**
  * Whether work may go on. It stops when any plan limit is at or above its stop line (see
  * stopLine), and when the usage could not be read. The context window is shown but never stops
  * the work.
  * @param {ReturnType<typeof usageReading> | null} reading
  * @param {ReturnType<typeof lineSettings>} lines null: the roadmap names no usage limit, nothing stops
  * @param {Date} [now]
- * @param {{ weeklyOnly?: boolean }} [opts] weeklyOnly: only the weekly limits count (F13: a job past the line)
+ * @param {{ weeklyOnly?: boolean, start?: boolean }} [opts] weeklyOnly: only the weekly limits count (F13: a
+ *   job past the line); start: the check before a new job starts, which keeps START_BUFFER under each line (H114)
  */
-export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = false } = {}) {
+export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = false, start = false } = {}) {
   if (!reading?.readable) return { stop: true, reason: 'The usage could not be read.' };
   if (!lines) return { stop: false, reason: '' };
   // A kept reading (F6) is old and from another session: shown, but never a stop.
@@ -157,11 +167,17 @@ export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = fa
   const over = reading.limits
     .filter((l) => !l.kept)
     .filter((l) => !weeklyOnly || /^weekly/i.test(l.label))
-    .map((l) => ({ ...l, line: stopLine(l, lines, now).line }))
-    .filter((l) => l.percent >= l.line);
+    .map((l) => {
+      const line = stopLine(l, lines, now).line;
+      const buffer = start ? START_BUFFER[lineKey(l.label) ?? 'five'] : 0;
+      return { ...l, line, from: Math.round(10 * (line - buffer)) / 10 };
+    })
+    .filter((l) => l.percent >= l.from);
   if (over.length === 0) return { stop: false, reason: '' };
   return {
     stop: true,
-    reason: `${over.map((l) => `${l.label} is at ${l.percent}%, its stop line is ${l.line}%`).join('; ')}.`,
+    reason: `${over
+      .map((l) => (l.percent >= l.line ? `${l.label} is at ${l.percent}%, its stop line is ${l.line}%` : `${l.label} is at ${l.percent}%, close to its stop line of ${l.line}%`))
+      .join('; ')}.`,
   };
 }
