@@ -634,6 +634,18 @@
         else if (e.waits === 'off') s += ' · the routine is off';
         return `${s} (estimate)`;
       }
+      /** H95: a planned item's estimate in words, the same as routine/estimate.py says it to a call. */
+      function etaItem(E, n) {
+        const e = E?.items?.[n];
+        if (!e) return '';
+        const today = new Date().toDateString();
+        const at = (t) => `${new Date(t * 1000).toDateString() === today ? '' : `${new Date(t * 1000).toLocaleDateString('en-GB', { weekday: 'short' })} `}${etaTime(t)}`;
+        let s = `About ${etaDur(e.est)}`;
+        if (e.eta) s += `${e.later ? ` · starts around ${at(e.start)}, after the work before it` : ''} · done around ${at(e.eta)}`;
+        else if (e.waits === 'usage') s += ' · when it\'s done waits on the usage';
+        else if (e.waits === 'off') s += ' · the routine is off';
+        return `${s} (estimate)`;
+      }
       function etaTotal(E) {
         const t = E?.total;
         if (!t) return '';
@@ -1351,7 +1363,12 @@
               mark.append(el('i'), document.createTextNode(word.replace(/, past the line$/, '')));
               const text = el('span', 'job', `${day(i.at)} · Item ${i.n} · ${i.text}`);
               text.addEventListener('click', () => text.classList.toggle('all'));
-              row.append(text, mark);
+              // H95: a planned item shows its estimate too, as a job does.
+              const left = el('div', 'jobtext');
+              left.append(text);
+              const w = key === 'coming' ? etaItem(routines?.estimate, i.n) : '';
+              if (w) left.append(el('span', 'eta', w));
+              row.append(left, mark);
               card.append(row);
             }
             if (!list.length) card.append(el('div', 'row soft', key === 'coming' ? 'Nothing planned.' : 'Nothing yet.'));

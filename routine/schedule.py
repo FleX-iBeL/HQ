@@ -21,9 +21,11 @@ routine is on and no job runs or waits. Then the item whose time came first beco
 queue (so it starts within the same minute), and the item says which job it became.
 
 usage (from the workspace):
-  python3 "routine/schedule.py" add "WHEN" "TEXT" [--past-the-line]   plan an item
+  python3 "routine/schedule.py" add "WHEN" "TEXT" [--past-the-line] [--kind K]   plan an item
         WHEN: 2026-10-13 15:00 · today 15:00 · tomorrow 9:30 · tuesday 15:00 (the next one) · now
-  python3 "routine/schedule.py" list                                  what's planned, and what came of it
+        K: what kind of work, for its estimate, as for a job (H95): transcribe, big, call, build, other
+  python3 "routine/schedule.py" list                                  what's planned, with each item's estimate
+                                                                      (H95), and what came of the earlier ones
   python3 "routine/schedule.py" cancel N                              cancel waiting item N
   python3 "routine/schedule.py" move N "WHEN"                         give waiting item N another day or time
 Used by the routine itself: promote (and status, for its routine line).
@@ -145,6 +147,22 @@ def show(i, now=None):
     return f"Item {i['n']} · {say_when(i['at'])} · {state}{jobs.PAST if i['past'] else ''} · {i['text']}"
 
 
+def estimate(fn, *a):
+    """H95: the planned items' estimates (routine/estimate.py), the same way the queue does it: never in
+    the way of the schedule itself; a failure is only said."""
+    return jobs.estimate(fn, *a)
+
+
+def with_estimate(i, p):
+    """A planned item with its estimate under it (H95), as jobs.py list does for jobs."""
+    try:
+        import estimate as est
+        w = est.item_words(i["n"], p) if p else ""
+    except Exception:
+        w = ""
+    return show(i) + (f"\n    Estimate: {w}" if w else "")
+
+
 def find(items, n):
     for i in items:
         if i["n"] == n:
@@ -183,6 +201,7 @@ def promote():
             queue.append({"n": n, "state": "ready", "past": item["past"], "agreed": time.strftime("%Y-%m-%d %H:%M"),
                           "text": f"Scheduled item {item['n']}, planned for {say_when(item['at'])}: {item['text']}"})
             jobs.write(text, queue, on)
+            estimate("item_on_job", item["n"], item["text"], n, queue[-1]["text"])  # H95: its kind goes with it
             text = open(jobs.ROADMAP, encoding="utf8").read()
             item["state"] = f"started as job {n} at {time.strftime('%H:%M')}"
             changed = True
@@ -233,14 +252,32 @@ def main(argv):
         if cmd == "list":
             coming = sorted((i for i in items if i["state"] == "waiting"), key=lambda i: (i["at"], i["n"]))
             done = [i for i in items if i["state"] != "waiting"]
-            print("Planned:\n" + ("\n".join(show(i) for i in coming) or "Nothing planned."))
+            try:  # H95: each planned item's estimate
+                import estimate as est
+                p = est.plan()
+            except Exception:
+                p = None
+            print("Planned:\n" + ("\n".join(with_estimate(i, p) for i in coming) or "Nothing planned."))
             print("Looking back:\n" + ("\n".join(show(i) for i in reversed(done)) or "Nothing yet."))
             return
         if cmd == "add":
             past = "--past-the-line" in args
-            rest = [a for a in args if a != "--past-the-line"]
+            rest, kind, skip = [], None, False
+            for k, a in enumerate(args):  # H95: --kind for its estimate, as for a job (H70)
+                if skip:
+                    skip = False
+                elif a == "--kind" or a.startswith("--kind="):
+                    kind = a.split("=", 1)[1] if "=" in a else (args[k + 1] if k + 1 < len(args) else "")
+                    skip = "=" not in a
+                elif a != "--past-the-line":
+                    rest.append(a)
+            if kind is not None:
+                kind = kind.strip().lower()
+                import estimate as est_
+                if kind not in est_.KINDS:
+                    sys.exit(f"--kind is one of: {', '.join(est_.KINDS)}.")
             if len(rest) < 2 or not jobs.one_line(" ".join(rest[1:])):
-                sys.exit('Usage: add "WHEN" "TEXT" [--past-the-line], for example: add "tuesday 15:00" "Build ..."')
+                sys.exit('Usage: add "WHEN" "TEXT" [--past-the-line] [--kind K], for example: add "tuesday 15:00" "Build ..." --kind build')
             at = when(rest[0].split())
             if at < dt.datetime.now().replace(second=0, microsecond=0) - dt.timedelta(minutes=1):
                 sys.exit(f"{say_when(at.strftime(FMT))} has already passed. Give a time ahead, or now.")
@@ -249,6 +286,7 @@ def main(argv):
                     "added": time.strftime(FMT), "text": jobs.one_line(" ".join(rest[1:])).replace("·", "-")}
             items.append(item)
             write(text, items)
+            estimate("item_on_add", n, item["text"], kind)
             busy = any(not j["state"].startswith(JOB_FINISHED) for j in queue)
             after = (" Its time has come; it starts once the job list is empty." if due(item)
                      else " It starts then, once the job list is empty.")
@@ -256,7 +294,12 @@ def main(argv):
                 after += " The routine is off right now."
             elif due(item) and not busy:
                 after = " Its time has come; it starts within about a minute."
-            print(f"Item {n} is planned for {say_when(item['at'])}.{after}")
+            try:  # H95: its estimate, as a job gets when it's added
+                import estimate as est
+                w = est.item_words(n, est.plan())
+            except Exception:
+                w = ""
+            print(f"Item {n} is planned for {say_when(item['at'])}.{after}" + (f"\nEstimate: {w}" if w else ""))
             return
         if cmd in ("cancel", "move"):
             if not args or not args[0].isdigit():
@@ -267,6 +310,7 @@ def main(argv):
             if cmd == "cancel":
                 i["state"] = f"cancelled {time.strftime('%H:%M')}"
                 write(text, items)
+                estimate("item_forget", i["n"])
                 print(f"Item {i['n']} cancelled; it won't start.")
                 return
             if len(args) < 2:

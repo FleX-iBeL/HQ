@@ -18,6 +18,11 @@ How it works:
   - plan(): for the running job the time left and when it should be done; for each waiting job, in
     its place in line, how long and when it should be done; the total for the whole list. A held job
     (usage line), and everything after it, waits on the usage, so it gets no "done around" time.
+  - Planned items (H95, 13 October 2026): an item on the schedule gets a kind when it's planned
+    (schedule.py add --kind, from a call, else the guess from its text), kept in schedule-kinds.json, and
+    the same estimate as a job of that kind would get. plan() gives each waiting item how long, and when
+    it should start and be done: at its time, or later when the job list or the items before it are
+    still running. When it becomes a job, its kind goes with it.
 
 Files, in HQ's .status (never in the repo): job-estimates.json (each job's estimate, set when added,
 and when it started) and job-estimates-history.jsonl (one line per finished job: estimate and real).
@@ -25,7 +30,7 @@ A test's copy of the roadmap (HQ_ROADMAP) gets its own files next to it, so test
 
 usage:
   python3 routine/estimate.py plan      the estimates as JSON (the status server shows them)
-  python3 routine/estimate.py list      the estimates in words (jobs.py list adds them too)
+  python3 routine/estimate.py list      the estimates in words (jobs.py list and schedule.py list add them too)
   python3 routine/estimate.py seed      fill the history once from the jobs history (H33) and the job prompts
   python3 routine/estimate.py kind TEXT        the kind kind_of guesses for a text
   python3 routine/estimate.py check-kinds      every finished job: the kind it learned under, next to today's guess (H70)
@@ -45,6 +50,7 @@ elif _TEST:
 else:
     DIR = os.path.join(ROOT, ".status")
 STATE = os.path.join(DIR, "job-estimates.json")
+ITEMS = os.path.join(DIR, "schedule-kinds.json")  # H95: each planned item's kind, set when it's planned
 HISTORY = os.path.join(DIR, "job-estimates-history.jsonl")
 # The minute-by-minute record of the status server (H33). A test's roadmap copy doesn't read the real one.
 SAMPLES = os.environ.get("HQ_ROUTINES_HISTORY") or ("" if _TEST else os.path.join(ROOT, ".status", "routines-history.jsonl"))
@@ -82,7 +88,9 @@ def kind_of(text):
     # stays other, as before.
     # "Don't build the backup" or "nothing built" says what not to do, so negated wording doesn't count.
     tb = re.sub(r"\b(don'?t|do not|never|not|nothing|no need to) (build|built)\b[^.;:]*", " ", t)
-    if re.search(r"^build\b|\bbuild [a-z]\d|\bbuild exactly what\b|\bbuild the\b|^[a-z]\d+\.\d+ on the (hq )?roadmap", tb):
+    # H95: the way planned items are worded, "Read the F18 row first and fix it as it says", counts too.
+    if re.search(r"^build\b|\bbuild [a-z]\d|\bbuild exactly what\b|\bbuild the\b|^[a-z]\d+\.\d+ on the (hq )?roadmap"
+                 r"|\b(build|fix) it as it says\b|\bthen fix it\b", tb):
         return "build"
     return "other"
 
@@ -182,13 +190,14 @@ def estimate_for(text, hist=None, kind=None):
 
 # ---------- called by jobs.py (inside its lock) ----------
 
-def on_add(n, text, kind=None):
+def on_add(n, text, kind=None, by_hand=None):
     """kind: set by hand (jobs.py add --kind); it's stored here and goes into the history when the job
-    finishes, so a hand-set kind learns in the right pile (H70)."""
+    finishes, so a hand-set kind learns in the right pile (H70). by_hand: False for a kind that was a
+    guess made earlier (a planned item's, H95), so it isn't marked as set by hand."""
     st = _load_state()
     est, kind_, based = estimate_for(text, kind=kind)
     st[str(n)] = {"est": est, "kind": kind_, "based": based, "set": int(time.time())}
-    if kind_given(kind):
+    if kind_given(kind) and by_hand is not False:
         st[str(n)]["by_hand"] = True
     _save_state(st)
     return st[str(n)]
@@ -224,6 +233,54 @@ def on_done(n, text="", started_hhmm=None):
     st.pop(str(n), None)
     _save_state(st)
     return rec
+
+
+# ---------- planned items (H95), called by schedule.py (inside the queue's lock) ----------
+
+def _load_items():
+    try:
+        return json.load(open(ITEMS))
+    except Exception:
+        return {}
+
+
+def _save_items(d):
+    os.makedirs(DIR, exist_ok=True)
+    tmp = ITEMS + ".tmp"
+    json.dump(d, open(tmp, "w"), indent=1)
+    os.replace(tmp, ITEMS)
+
+
+def item_kind(n, text=""):
+    """(kind, set by hand) of planned item n: the kind given when it was planned, else the guess."""
+    e = _load_items().get(str(n)) or {}
+    k = kind_given(e.get("kind"))
+    return (k, bool(e.get("by_hand"))) if k else (kind_of(text), False)
+
+
+def item_on_add(n, text, kind=None):
+    """A planned item's kind, set when it's planned: given by the call (schedule.py add --kind), else guessed."""
+    d = _load_items()
+    d[str(n)] = {"kind": kind_given(kind) or kind_of(text), "set": int(time.time())}
+    if kind_given(kind):
+        d[str(n)]["by_hand"] = True
+    _save_items(d)
+    return d[str(n)]
+
+
+def item_on_job(n, text, job_n, job_text):
+    """The item became job job_n: its kind goes with it (the job's own text starts with "Scheduled item ...",
+    which would spoil the guess), and the item's line here is no longer needed."""
+    kind, by_hand = item_kind(n, text)
+    e = on_add(job_n, job_text, kind, by_hand)
+    item_forget(n)
+    return e
+
+
+def item_forget(n):
+    d = _load_items()
+    if d.pop(str(n), None) is not None:
+        _save_items(d)
 
 
 def _from_hhmm(hhmm, now):
@@ -309,6 +366,41 @@ def plan(now=None):
     if running or line:
         out["total"] = {"jobs": len(running) + len(line), "minutes": round(left_total),
                         "eta": None if waits else int(cursor), "waits": ("usage" if on else "off") if waits else None}
+    out["items"] = _plan_items(cursor, waits, on, hist)
+    return out
+
+
+def _schedule():
+    try:
+        import schedule as sc
+        import jobs as q
+        return sc.read(open(q.ROADMAP, encoding="utf8").read())
+    except Exception:
+        return []
+
+
+def _plan_items(cursor, waits, on, hist):
+    """H95: each waiting planned item, soonest first: how long, and when it should start and be done. It
+    starts at its time, or once the job list and the items before it are done (the job list goes first);
+    the routine looks every minute. Waiting on the usage or the routine off: no times, only how long."""
+    import datetime as dt
+    items = sorted((i for i in _schedule() if i["state"] == "waiting"), key=lambda i: (i["at"], i["n"]))
+    out = {}
+    for i in items:
+        kind, by_hand = item_kind(i["n"], i["text"])
+        est, kind, _ = estimate_for(i["text"], hist, kind)
+        e = {"est": est, "kind": kind, "start": None, "eta": None, "waits": None}
+        if by_hand:
+            e["by_hand"] = True
+        if waits or not on:
+            e["waits"] = "off" if not on else "usage"
+        else:
+            at = dt.datetime.strptime(i["at"], "%Y-%m-%d %H:%M").timestamp()
+            start = max(at, cursor) + GAP * 60  # cursor: now, or when the job list should be done
+            cursor = start + est * 60
+            e["start"], e["eta"] = int(start), int(cursor)
+            e["later"] = start - at > 5 * 60  # starts later than planned: the job list or earlier items first
+        out[str(i["n"])] = e
     return out
 
 
@@ -335,6 +427,25 @@ def words(n, p):
         s = f"about {dur(e['est'])}"
     if e.get("eta"):
         s += f", done around {hhmm(e['eta'])}"
+    elif e.get("waits") == "usage":
+        s += ", when it's done waits on the usage"
+    elif e.get("waits") == "off":
+        s += ", the routine is off"
+    return s + " (estimate)"
+
+
+def item_words(n, p):
+    """H95: a planned item's estimate in words, for schedule.py list and a call."""
+    e = (p.get("items") or {}).get(str(n))
+    if not e:
+        return ""
+    s = f"about {dur(e['est'])}"
+    if e.get("eta"):
+        day = lambda t: "" if time.strftime("%Y-%m-%d", time.localtime(t)) == time.strftime("%Y-%m-%d", time.localtime(p["now"])) \
+            else time.strftime("%A ", time.localtime(t))
+        if e.get("later"):
+            s += f", starts around {day(e['start'])}{hhmm(e['start'])} (after the work before it)"
+        s += f", done around {day(e['eta'])}{hhmm(e['eta'])}"
     elif e.get("waits") == "usage":
         s += ", when it's done waits on the usage"
     elif e.get("waits") == "off":

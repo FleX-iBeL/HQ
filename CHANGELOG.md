@@ -4,6 +4,9 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+### New
+- Planned work under Scheduled shows an estimate too: how long it should take, and when it should be done, counting the jobs and the planned work before it. A call can say what kind of work it is when planning it, and that goes with it when it becomes a job.
+
 ## 0.4.1 · 12 October 2026
 
 ### New

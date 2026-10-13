@@ -3645,6 +3645,10 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         # Only the test's own jobs: finish whatever the copy has waiting or running.
         for j in q()["waiting"] + q()["running"]:
             jobs("mark", str(j["n"]), "done 00:00")
+        # And only its own items: the copy's planned items could be due already.
+        for l in sched("list").split("Looking back")[0].splitlines():
+            if l.startswith("Item "):
+                sched("cancel", l.split()[1])
         later = sched("add", "tuesday 15:00", "flow 45 later")
         need("Tuesday" in later and "planned" in later, f"a weekday isn't understood: {later}")
         now = sched("add", "now", "flow 45 now", "--past-the-line")
@@ -4721,6 +4725,58 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         last = json.loads((est_dir / "job-estimates-history.jsonl").read_text().splitlines()[-1])
         need(last["n"] == d and last["kind"] == "call", f"H70: a hand-set kind doesn't learn in its own pile: {last}")
         need("--kind" in config.VOICE_RULES and "H70" in config.VOICE_RULES, "H70: the call rules don't say to pass --kind")
+        # H95: planned items get a kind and an estimate when planned, and when they should be done, counting
+        # the job list and the items before them; the kind goes with the item when it becomes a job.
+        def sched(*a, ok=True):
+            r = sp.run(["python3", str(jv / "routine/schedule.py"), *a], capture_output=True, text=True, env=env)
+            need((r.returncode == 0) == ok, f"schedule.py {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
+            return r.stdout + r.stderr
+        for l in sched("list").split("Looking back")[0].splitlines():  # only the test's own items
+            if l.startswith("Item "):
+                sched("cancel", l.split()[1])
+        need(est("kind", "F18 on the HQ roadmap: the page swipes. Read the F18 row first and fix it as it says.").strip() == "build",
+             "H95: a planned item's wording isn't seen as a build")
+        sched("add", "tomorrow 15:00", "Measure something, flow 54", "--kind", "nonsense", ok=False)
+        i1_out = sched("add", "tomorrow 15:00", "H1 on the HQ roadmap, flow 54. Read the H1 row first and build it as it says.")
+        i1 = int(i1_out.split()[1])
+        need("Estimate: about" in i1_out and "(estimate)" in i1_out, f"H95: planning an item doesn't say its estimate: {i1_out}")
+        i2 = int(sched("add", "tomorrow 15:01", "Measure the token cost of one run, flow 54", "--kind", "call").split()[1])
+        i3 = int(sched("add", "now", "Measure the token cost of a call, flow 54", "--kind=transcribe").split()[1])
+        kinds = json.loads((est_dir / "schedule-kinds.json").read_text())
+        need(kinds[str(i1)]["kind"] == "build" and not kinds[str(i1)].get("by_hand") and kinds[str(i2)]["kind"] == "call"
+             and kinds[str(i2)].get("by_hand") and kinds[str(i3)]["kind"] == "transcribe", f"H95: the items' kinds are wrong: {kinds}")
+        need("--kind" not in sched("list"), "H95: --kind ended up in the item's text")
+        p = json.loads(est("plan"))
+        it = p["items"]
+        at1 = time.mktime(time.strptime(time.strftime("%Y-%m-%d", time.localtime(time.time() + 86400)) + " 15:00", "%Y-%m-%d %H:%M"))
+        need(it[str(i3)]["start"] == p["total"]["eta"] + 60 and it[str(i3)]["later"],
+             f"H95: a due item doesn't wait for the job list in its estimate: {it[str(i3)]} {p['total']}")
+        need(it[str(i1)]["start"] == at1 + 60 and it[str(i1)]["eta"] == it[str(i1)]["start"] + it[str(i1)]["est"] * 60,
+             f"H95: an item later on doesn't start at its own time: {it[str(i1)]}")
+        need(it[str(i2)]["start"] == max(at1 + 60, it[str(i1)]["eta"]) + 60 and it[str(i2)]["kind"] == "call",
+             f"H95: an item doesn't count the item before it: {it[str(i2)]}")
+        lst = sched("list")
+        need(lst.count("Estimate: about") == 3 and "done around" in lst, f"H95: the scheduler's list doesn't say the estimates: {lst}")
+        jobs("off")
+        need(json.loads(est("plan"))["items"][str(i1)]["waits"] == "off" and "the routine is off" in sched("list"),
+             "H95: with the routine off, a planned item still says when it's done")
+        jobs("on")
+        # The job list empty: the due item becomes a job, its hand-set kind with it; its line in the kinds file goes.
+        for j in json.loads(jobs("next"))["waiting"]:
+            jobs("mark", str(j["n"]), "cancelled 12:00")
+        did = sched("promote")
+        need(f"item {i3} became job" in did, f"H95: the due item didn't become a job: {did}")
+        jn = did.split()[-1]
+        sj = json.loads((est_dir / "job-estimates.json").read_text())[jn]
+        need(sj["kind"] == "transcribe" and sj.get("by_hand"), f"H95: the item's kind didn't go with it to its job: {sj}")
+        sched("cancel", str(i2))
+        kinds = json.loads((est_dir / "schedule-kinds.json").read_text())
+        need(str(i3) not in kinds and str(i2) not in kinds and str(i1) in kinds, f"H95: the kinds file keeps what's gone: {kinds}")
+        sched("cancel", str(i1))
+        jobs("mark", jn, "cancelled 12:00")
+        need("function etaItem" in (jv / "status/index.html").read_text(), "H95: the status page doesn't show planned items' estimates")
+        need("H95" in config.VOICE_RULES and "each item with its estimate" in config.VOICE_RULES,
+             "H95: the call rules don't say planned items have estimates")
         need(real.exists() == (before is not None) and (before is None or real.read_text() == before),
              "the test touched the real estimates history")
         # The status page: the server serves the plan, the page shows it in words.
@@ -4745,7 +4801,8 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need(pol.decide("Bash", {"command": f'python3 "{ROOT}/routine/jobs.py" list'}).verdict == ALLOW, "a call can't read the list")
         need("H61" in config.VOICE_RULES and "estimate" in config.VOICE_RULES, "the call rules don't say the list has estimates")
         return ("kinds from the job's words; estimate set when added; per job and total with done-around; held waits on the usage; "
-                "done writes estimate next to real time and the next estimate learns; page and list show them")
+                "done writes estimate next to real time and the next estimate learns; page and list show them; "
+                "planned items too, after the job list and the items before them, their kind going with them (H95)")
 
     # 55
     async def flow55(self) -> str:
