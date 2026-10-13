@@ -618,6 +618,7 @@ def plan(now=None):
         left_total += nxt
         out["jobs"][str(j["n"])] = {"est": est, "kind": e.get("kind") or kind_of(j["text"]), "so_far": done_min,
                                     "left": left, "over": over, "eta": None if waits else int(cursor)}
+    run_end = cursor  # H99: when the running job should be done; a priority item can start from there
     line = [j for j in js if j["state"] == "ready" or j["state"].startswith("held")]
     for j in line:
         e = st.get(str(j["n"])) or {}
@@ -637,7 +638,7 @@ def plan(now=None):
     if running or line:
         out["total"] = {"jobs": len(running) + len(line), "minutes": round(left_total),
                         "eta": None if waits else int(cursor), "waits": ("usage" if on else "off") if waits else None}
-    out["items"] = _plan_items(cursor, waits, on, hist, run)
+    out["items"] = _plan_items(cursor, waits, on, hist, run, run_end)
     out["items_total"] = _items_total(out["items"], waits, on)
     return out
 
@@ -664,26 +665,40 @@ def _schedule():
         return []
 
 
-def _plan_items(cursor, waits, on, hist, run):
+def _plan_items(cursor, waits, on, hist, run, run_end=None):
     """H95: each waiting planned item, soonest first: how long, and when it should start and be done. It
     starts at its time, or once the job list and the items before it are done (the job list goes first);
-    the routine looks every minute. Waiting on the usage or the routine off: no times, only how long."""
+    the routine looks every minute. Waiting on the usage or the routine off: no times, only how long.
+    H99: an item with the priority tag starts at its time, or once the running job and the tagged items
+    before it are done, ahead of the waiting jobs; a tagged item that cuts in makes the job list (and so
+    the other items) end that much later."""
     import datetime as dt
-    items = sorted((i for i in _schedule() if i["state"] == "waiting"), key=lambda i: (i["at"], i["n"]))
+    items = sorted((i for i in _schedule() if i["state"] == "waiting"),
+                   key=lambda i: (not i.get("priority"), i["at"], i["n"]))
     out = {}
+    pcursor = cursor if run_end is None else run_end
     for i in items:
         kind, by_hand = item_kind(i["n"], i["text"])
         est, kind, _ = estimate_for(i["text"], hist, kind, run["name"])
         e = {"est": est, "kind": kind, "start": None, "eta": None, "waits": None}
         if by_hand:
             e["by_hand"] = True
+        if i.get("priority"):
+            e["priority"] = True
         if waits or not on:
             e["waits"] = "off" if not on else "usage"
         else:
             at = dt.datetime.strptime(i["at"], "%Y-%m-%d %H:%M").timestamp()
-            start = max(at, cursor) + GAP * 60  # cursor: now, or when the job list should be done
-            cursor = start + est * 60
-            e["start"], e["eta"] = int(start), int(cursor)
+            if i.get("priority"):  # H99: from when the running job is done, not the whole job list
+                start = max(at, pcursor) + GAP * 60
+                pcursor = start + est * 60
+                if start < cursor:  # it cuts in ahead of the waiting jobs
+                    cursor += (est + GAP) * 60
+                e["start"], e["eta"] = int(start), int(pcursor)
+            else:
+                start = max(at, cursor) + GAP * 60  # cursor: now, or when the job list should be done
+                cursor = start + est * 60
+                e["start"], e["eta"] = int(start), int(cursor)
             e["later"] = start - at > 5 * 60  # starts later than planned: the job list or earlier items first
         out[str(i["n"])] = e
     return out

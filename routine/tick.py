@@ -17,7 +17,8 @@ so waiting costs no usage. What it does, in order:
 - No job running and one is waiting: take the one highest on the list (H39), check the last saved usage against the stop lines (L4; skipped
   for a job marked past the line: only the weekly line then, F13), then start it in a Terminal window as a normal chat with let's go (L5).
 - Nothing running and nothing waiting: the scheduler (H43) may turn an item whose time has come into a job,
-  which then starts the same way. The job list always goes first.
+  which then starts the same way. The job list always goes first, except for an item with the priority tag
+  (H99): with nothing running, it becomes a job first in line, ahead of the waiting jobs.
 
 Before all that, every minute: the status page on the phone (H13) is kept up, on its own address and
 independent of the call line (status/phone.sh does nothing when it already runs). So it starts at login too.
@@ -755,8 +756,12 @@ def schedule_promote():
         return ""
     if out.startswith("item "):
         log(f"schedule: {out}")
-        status("BUILDING", f"Scheduled {out.split(' became ')[0]} starts as {out.split(' became ')[1]}",
-               f"scheduled {out}, now that the job list is empty")
+        what, job = out.split(" became ")
+        prio = job.endswith("(priority)")  # H99: it went ahead of the waiting jobs
+        job = job.split(",")[0]
+        status("BUILDING", f"Scheduled {what} starts as {job}" + (", ahead of the waiting jobs" if prio else ""),
+               f"scheduled {what} became {job}, " + ("first in line: it has priority" if prio
+                                                     else "now that the job list is empty"))
         return out
     return ""
 
@@ -972,16 +977,15 @@ def tick():
     line = q.get("waiting")
     if line is None:
         line = (q["ready"] or []) + (q["held"] or [])
-    if not line:
-        # H43: the job list goes first; only now, with nothing running or waiting, may a scheduled item
-        # whose time has come become a job (at the bottom of the queue), and it starts right away.
-        did = schedule_promote()
-        if not did:
-            return
+    # H43: the job list goes first; only with nothing running or waiting may a scheduled item whose time
+    # has come become a job (at the bottom of the queue), and it starts right away. H99: an item with the
+    # priority tag doesn't wait for the waiting jobs: with nothing running it goes first in line.
+    did = schedule_promote()
+    if did:
         q = json.loads(jobs("next"))
         line = q.get("waiting") or []
-        if not line:
-            return
+    if not line:
+        return
     job = line[0]
     if LINUX_WINDOWS and not workspace_trusted():
         # H56.2: wait, and say what to do, instead of starting a chat into a question nobody answers.

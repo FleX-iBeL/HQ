@@ -14,20 +14,29 @@ It lives in roadmap.md, in the section "## The schedule" right under the queue. 
 States: waiting (its time hasn't come, or it has and it waits for the job list) · started as job 41 at
 15:02 · job 41 done 15:40 (or stopped, ended, cancelled: how its job finished, for looking back) ·
 cancelled 22:50. ", past the line" after the state: the job it becomes may go past the 5-hour usage line
-(the weekly line always counts, F13).
+(the weekly line always counts, F13). ", priority" before it (H99): the item has the priority tag.
 
 The job list always goes first: every minute the routine runs "promote", which only does something when the
 routine is on and no job runs or waits. Then the item whose time came first becomes a job at the bottom of the
 queue (so it starts within the same minute), and the item says which job it became.
 
+The priority tag (H99, 13 October 2026; the user's words on the call of 12 October at 22:40: "if we have things
+in the scheduler we can give it like a priority tag. And then it has priority over the normal job list line. If
+not, then the normal job list line has priority."): a tagged item whose time has come doesn't wait for the job
+list. Once no job runs, it becomes a job first in line, ahead of the waiting jobs (after any tagged item that
+went in before it), and starts within the same minute. A running job is never stopped for it.
+
 usage (from the workspace):
-  python3 "routine/schedule.py" add "WHEN" "TEXT" [--past-the-line] [--kind K]   plan an item
+  python3 "routine/schedule.py" add "WHEN" "TEXT" [--past-the-line] [--kind K] [--priority]   plan an item
+        --priority: the priority tag (H99): at its time it goes ahead of the waiting jobs
         WHEN: 2026-10-13 15:00 · today 15:00 · tomorrow 9:30 · tuesday 15:00 (the next one) · now
         K: what kind of work, for its estimate, as for a job (H95): transcribe, big, call, build, other
   python3 "routine/schedule.py" list                                  what's planned, with each item's estimate
                                                                       (H95), and what came of the earlier ones
   python3 "routine/schedule.py" cancel N                              cancel waiting item N
   python3 "routine/schedule.py" move N "WHEN"                         give waiting item N another day or time
+  python3 "routine/schedule.py" priority N [off]                      tag waiting item N priority (H99), or take
+                                                                      the tag off again
 Used by the routine itself: promote (and status, for its routine line).
 """
 import datetime as dt
@@ -49,6 +58,7 @@ FMT = "%Y-%m-%d %H:%M"
 KEEP_FINISHED = 20  # enough to look back on a couple of weeks of planned work
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 JOB_FINISHED = jobs.FINISHED
+PRIORITY = ", priority"  # H99: the tag, written in the state, before ", past the line"
 
 
 def section(text):
@@ -72,8 +82,11 @@ def read(text):
             if m:
                 state = m.group(2)
                 past = state.endswith(jobs.PAST)
-                items.append({"n": int(m.group(1)), "state": state[: -len(jobs.PAST)] if past else state,
-                              "past": past, "at": m.group(3), "added": m.group(4), "text": m.group(5)})
+                state = state[: -len(jobs.PAST)] if past else state
+                prio = state.endswith(PRIORITY)
+                items.append({"n": int(m.group(1)), "state": state[: -len(PRIORITY)] if prio else state,
+                              "past": past, "priority": prio, "at": m.group(3), "added": m.group(4),
+                              "text": m.group(5)})
     return items
 
 
@@ -83,7 +96,7 @@ def write(text, items):
     drop = {i["n"] for i in finished[:-KEEP_FINISHED]} if len(finished) > KEEP_FINISHED else set()
     coming = sorted((i for i in items if i["state"] == "waiting"), key=lambda i: (i["at"], i["n"]))
     order = sorted(finished, key=lambda i: i["n"]) + coming
-    lines = [f"- Item {i['n']} · {i['state']}{jobs.PAST if i['past'] else ''} · at {i['at']} · added {i['added']} · {i['text']}"
+    lines = [f"- Item {i['n']} · {tags(i)} · at {i['at']} · added {i['added']} · {i['text']}"
              for i in order if i["n"] not in drop]
     body = f"{HEADING}\n\n{INTRO}\n\n" + ("\n".join(lines) if lines else "Nothing planned yet.") + "\n\n"
     sec = section(text)
@@ -136,6 +149,11 @@ def say_when(at):
     return f"{d.strftime('%A')} {d.day} {d.strftime('%B')}, {d.strftime('%H:%M')}"
 
 
+def tags(i):
+    """The state as written: with the priority tag (H99) and past the line, when they're there."""
+    return f"{i['state']}{PRIORITY if i.get('priority') else ''}{jobs.PAST if i['past'] else ''}"
+
+
 def due(item, now=None):
     return item["state"] == "waiting" and item["at"] <= (now or dt.datetime.now()).strftime(FMT)
 
@@ -143,8 +161,10 @@ def due(item, now=None):
 def show(i, now=None):
     state = i["state"]
     if due(i, now):
-        state = "due, waits for the job list to be empty"
-    return f"Item {i['n']} · {say_when(i['at'])} · {state}{jobs.PAST if i['past'] else ''} · {i['text']}"
+        state = ("due, goes first in line once no job runs" if i.get("priority")
+                 else "due, waits for the job list to be empty")
+    return (f"Item {i['n']} · {say_when(i['at'])} · {state}{PRIORITY if i.get('priority') else ''}"
+            f"{jobs.PAST if i['past'] else ''} · {i['text']}")
 
 
 def estimate(fn, *a):
@@ -185,27 +205,42 @@ def sync(items, queue):
 
 
 def promote():
-    """The routine, every minute: only when the routine is on and no job runs or waits, the item whose
-    time came first becomes a job. Returns what it did, as one line (empty when nothing)."""
+    """The routine, every minute. A due item with the priority tag (H99): once no job runs, it becomes a job
+    first in line, ahead of the waiting jobs (after the tagged ones that went in before it). Any other item:
+    only when the routine is on and no job runs or waits, the item whose time came first becomes a job.
+    Returns what it did, as one line (empty when nothing)."""
     with jobs.locked():
         text, queue, on = jobs.read()
         items = read(text)
         changed = sync(items, queue)
+        running = any(not j["state"].startswith(JOB_FINISHED) and not jobs.waiting(j) for j in queue)
         busy = any(not j["state"].startswith(JOB_FINISHED) for j in queue)
         now = dt.datetime.now()
-        ready = sorted((i for i in items if due(i, now)), key=lambda i: (i["at"], i["n"]))
+        ready = sorted((i for i in items if due(i, now)), key=lambda i: (not i.get("priority"), i["at"], i["n"]))
         did = ""
-        if on and not busy and ready:
-            item = ready[0]
+        item = ready[0] if ready else None
+        if on and item and (not busy or (item.get("priority") and not running)):
             n = max([j["n"] for j in queue] + [0]) + 1
-            queue.append({"n": n, "state": "ready", "past": item["past"], "agreed": time.strftime("%Y-%m-%d %H:%M"),
-                          "text": f"Scheduled item {item['n']}, planned for {say_when(item['at'])}: {item['text']}"})
+            job = {"n": n, "state": "ready", "past": item["past"], "agreed": time.strftime("%Y-%m-%d %H:%M"),
+                   "text": f"Scheduled item {item['n']}, planned for {say_when(item['at'])}: {item['text']}"}
+            if item.get("priority"):
+                # H99: first in line, after the waiting jobs that came from tagged items before it.
+                tagged = {int(m.group(1)) for i in items if i.get("priority")
+                          for m in [re.match(r"started as job (\d+)", i["state"])] if m}
+                line = jobs.line_up(queue)
+                k = 0
+                while k < len(line) and line[k]["n"] in tagged:
+                    k += 1
+                line.insert(k, job)
+                queue = [x for x in queue if not jobs.waiting(x)] + line
+            else:
+                queue.append(job)
             jobs.write(text, queue, on)
-            estimate("item_on_job", item["n"], item["text"], n, queue[-1]["text"])  # H95: its kind goes with it
+            estimate("item_on_job", item["n"], item["text"], n, job["text"])  # H95: its kind goes with it
             text = open(jobs.ROADMAP, encoding="utf8").read()
             item["state"] = f"started as job {n} at {time.strftime('%H:%M')}"
             changed = True
-            did = f"item {item['n']} became job {n}"
+            did = f"item {item['n']} became job {n}" + (", first in line (priority)" if item.get("priority") else "")
         if changed:
             write(text, items)
         return did
@@ -220,6 +255,11 @@ def status():
     if not coming:
         return {"state": "ok", "text": "Nothing planned; looks every minute", "next": None}
     first = coming[0]
+    prio = [i for i in coming if i.get("priority") and due(i, now)]
+    if prio and on:
+        # H99: a tagged item goes ahead of the waiting jobs, but never stops a running one.
+        return {"state": "ok", "text": f"Item {prio[0]['n']} is due with priority; goes first once no job runs",
+                "next": None}
     if due(first, now):
         why = "the routine is off" if not on else "the job list goes first"
         # Waiting for the job list is how it's meant to work, so it's not shown as a warning.
@@ -275,7 +315,7 @@ def main(argv):
                 elif a == "--kind" or a.startswith("--kind="):
                     kind = a.split("=", 1)[1] if "=" in a else (args[k + 1] if k + 1 < len(args) else "")
                     skip = "=" not in a
-                elif a != "--past-the-line":
+                elif a not in ("--past-the-line", "--priority"):
                     rest.append(a)
             if kind is not None:
                 kind = kind.strip().lower()
@@ -283,12 +323,13 @@ def main(argv):
                 if kind not in est_.KINDS:
                     sys.exit(f"--kind is one of: {', '.join(est_.KINDS)}.")
             if len(rest) < 2 or not jobs.one_line(" ".join(rest[1:])):
-                sys.exit('Usage: add "WHEN" "TEXT" [--past-the-line] [--kind K], for example: add "tuesday 15:00" "Build ..." --kind build')
+                sys.exit('Usage: add "WHEN" "TEXT" [--past-the-line] [--kind K] [--priority], for example: add "tuesday 15:00" "Build ..." --kind build')
             at = when(rest[0].split())
             if at < dt.datetime.now().replace(second=0, microsecond=0) - dt.timedelta(minutes=1):
                 sys.exit(f"{say_when(at.strftime(FMT))} has already passed. Give a time ahead, or now.")
             n = max([i["n"] for i in items] + [0]) + 1
-            item = {"n": n, "state": "waiting", "past": past, "at": at.strftime(FMT),
+            prio = "--priority" in args
+            item = {"n": n, "state": "waiting", "past": past, "priority": prio, "at": at.strftime(FMT),
                     "added": time.strftime(FMT), "text": jobs.one_line(" ".join(rest[1:])).replace("·", "-")}
             items.append(item)
             write(text, items)
@@ -296,6 +337,9 @@ def main(argv):
             busy = any(not j["state"].startswith(JOB_FINISHED) for j in queue)
             after = (" Its time has come; it starts once the job list is empty." if due(item)
                      else " It starts then, once the job list is empty.")
+            if prio:  # H99
+                after = (" It has priority: its time has come, so it goes first in line once no job runs."
+                         if due(item) else " It has priority: at its time it goes ahead of the waiting jobs.")
             if not on:
                 after += " The routine is off right now."
             elif due(item) and not busy:
@@ -307,12 +351,20 @@ def main(argv):
                 w = ""
             print(f"Item {n} is planned for {say_when(item['at'])}.{after}" + (f"\nEstimate: {w}" if w else ""))
             return
-        if cmd in ("cancel", "move"):
+        if cmd in ("cancel", "move", "priority"):
             if not args or not args[0].isdigit():
-                sys.exit(f"Usage: {cmd} N" + (' "WHEN"' if cmd == "move" else ""))
+                sys.exit(f"Usage: {cmd} N" + (' "WHEN"' if cmd == "move" else " [off]" if cmd == "priority" else ""))
             i = find(items, int(args[0]))
             if i["state"] != "waiting":
-                sys.exit(f"Item {i['n']} isn't waiting any more ({i['state']}); only a waiting item can be {'cancelled' if cmd == 'cancel' else 'moved'}.")
+                verb = {"cancel": "cancelled", "move": "moved", "priority": "tagged"}[cmd]
+                sys.exit(f"Item {i['n']} isn't waiting any more ({i['state']}); only a waiting item can be {verb}.")
+            if cmd == "priority":  # H99: the tag, on (default) or off
+                on_ = (args[1].lower() if len(args) > 1 else "on") not in ("off", "no", "remove")
+                i["priority"] = on_
+                write(text, items)
+                print(f"Item {i['n']} has priority now: at its time it goes ahead of the waiting jobs." if on_
+                      else f"Item {i['n']} has no priority tag now: it waits for the job list, as usual.")
+                return
             if cmd == "cancel":
                 i["state"] = f"cancelled {time.strftime('%H:%M')}"
                 write(text, items)

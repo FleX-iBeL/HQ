@@ -245,6 +245,12 @@ each item with its estimate (how long, and when it should be done, counting the 
 before it; say them as estimates, as for jobs), then the total for all planned items together (H107: how \
 long, and when the last should be done; say it when he asks how long the planned work takes), and what came of the earlier ones (looking back); "cancel N" cancels item N; "move N \"<when>\"" gives \
 it another day or time. Tell him in a sentence when it is planned ("Planned for Tuesday at three").
+- The priority tag (H99): only on his say-so, a planned item can get the tag, when it is planned (add \
+--priority to the add) or later ("priority N"; "priority N off" takes it off). A tagged item doesn't wait \
+for the job list: when its time comes, it goes first in line, ahead of the waiting jobs, and starts as \
+soon as no job runs; a running job is never stopped for it. Without the tag the job list goes first. \
+"list" shows the tag as ", priority" after the item's state; say it as "with priority". The status page \
+shows it under Scheduled.
 - Main and backup (H56.3): when HQ runs on two computers (the laptop and a server), one is the main one: \
 it runs the mail check, the jobs and the scheduler, and commits; the other is the backup and takes calls. \
 When this HQ is the backup, the queue and schedule commands above still work the same: they go to the main \

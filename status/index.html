@@ -194,6 +194,8 @@
       /* H61: each job's estimate, under its text, and how close the estimates have been. */
       .jobtext { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
       .eta { font-size: 13px; color: var(--soft); }
+      /* H99: the priority tag on a planned item */
+      .prio { display: inline-block; font-size: 12px; font-weight: 600; color: var(--amber-ink); border: 1px solid var(--amber); border-radius: 999px; padding: 0 7px; margin-right: 6px; vertical-align: 1px; }
       .eta.over { color: var(--amber-ink); }
       .row.eta-sum { display: block; font-size: 13px; }
 
@@ -1382,24 +1384,28 @@
           const coming = sc.items.filter(isWaiting).sort((a, b) => a.at.localeCompare(b.at) || a.n - b.n);
           const back = sc.items.filter((i) => !isWaiting(i)).sort((a, b) => b.n - a.n);
           const due = coming.filter((i) => i.at <= nowStamp).length;
+          const isPrio = (i) => /, priority(, past the line)?$/.test(i.state);  // H99
           const day = (at) => {
             const [d, t] = at.split(' ');
             const x = new Date(`${d}T${t}:00`);
             return `${x.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} ${t}`;
           };
           const itemsTotal = coming.length ? etaItemsTotal(routines?.estimate) : '';
-          const fold = foldPart('schedule', true, 'Scheduled', `${coming.length} planned${due ? ` · ${due} due, after the job list` : ''}${itemsTotal ? ` · ${itemsTotal}` : ''} · the job list goes first`);
+          const fold = foldPart('schedule', true, 'Scheduled', `${coming.length} planned${due ? ` · ${due} due` : ''}${itemsTotal ? ` · ${itemsTotal}` : ''} · the job list goes first, except for priority`);
           const parts = el('div', 'parts');
           for (const [key, title, list, st, start] of [['coming', 'Planned', coming, 'todo', true], ['back', 'Looking back', back, 'done', false]]) {
             const part = foldPart(`schedule-${key}`, start, title, `${list.length}${key === 'coming' && itemsTotal ? ` · ${itemsTotal}` : ''}`, true);
             const card = el('div', 'card');
             for (const i of list) {
               const isDue = key === 'coming' && i.at <= nowStamp;
-              const word = isDue ? 'Due, after the job list' : key === 'coming' ? 'Planned' : i.state.charAt(0).toUpperCase() + i.state.slice(1);
+              // H99: a tagged item doesn't wait for the job list; it goes first once no job runs.
+              const word = isDue ? (isPrio(i) ? 'Due, goes first' : 'Due, after the job list') : key === 'coming' ? 'Planned' : i.state.charAt(0).toUpperCase() + i.state.slice(1);
               const row = el('div', `row ${isDue ? 'doing' : /cancelled|stopped|ended/.test(i.state) ? 'soft' : st}`);
               const mark = el('span', 'mark');
-              mark.append(el('i'), document.createTextNode(word.replace(/, past the line$/, '')));
-              const text = el('span', 'job', `${day(i.at)} · Item ${i.n} · ${i.text}`);
+              mark.append(el('i'), document.createTextNode(word.replace(/, past the line$/, '').replace(/, priority$/, '')));
+              const text = el('span', 'job');
+              if (isPrio(i)) text.append(el('span', 'prio', 'Priority'));
+              text.append(document.createTextNode(`${day(i.at)} · Item ${i.n} · ${i.text}`));
               text.addEventListener('click', () => text.classList.toggle('all'));
               // H95: a planned item shows its estimate too, as a job does.
               const left = el('div', 'jobtext');

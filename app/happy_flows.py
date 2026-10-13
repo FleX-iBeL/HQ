@@ -3711,14 +3711,54 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         sched("cancel", str(n_later))
         need("Nothing planned." in sched("list"), "a cancelled item is still planned")
         need("add \"WHEN\"" in sched("--help") or 'add "WHEN"' in sched("--help"), "--help doesn't say how to plan")
+        # H99: the priority tag. A tagged item goes ahead of the waiting jobs, never stops a running one, and
+        # a later tagged item lines up after the tagged ones before it.
+        b1, b2 = (int(jobs("add", f"flow 45 waiting {k}").split()[1]) for k in (1, 2))
+        p1_out = sched("add", "now", "flow 45 priority one", "--priority")
+        need("priority" in p1_out, f"planning with --priority doesn't say so: {p1_out}")
+        p1 = int(p1_out.split()[1])
+        need(f"Item {p1} " in sched("list") and ", priority" in sched("list").split("Looking back")[0],
+             "list doesn't show the priority tag")
+        st = json.loads(sched("status"))
+        need(f"Item {p1} is due with priority" in st["text"], f"the routine line doesn't say the tagged item goes first: {st}")
+        jobs("mark", str(b1), "running since 00:02")
+        need("Nothing to start" in sched("promote"), "a tagged item went in while a job was running")
+        jobs("done", str(b1))
+        did = sched("promote")
+        need(f"item {p1} became job" in did and "first in line" in did, f"the tagged item didn't go first: {did}")
+        w = q()["waiting"]
+        need([x["n"] for x in w][1:] == [b2] and "flow 45 priority one" in w[0]["text"],
+             f"the tagged item's job isn't first in line, ahead of the waiting job: {w}")
+        j1 = w[0]["n"]
+        p2 = int(sched("add", "now", "flow 45 priority two").split()[1])
+        need("Nothing to start" in sched("promote"), "an untagged item went in while jobs were waiting")
+        need("has priority now" in sched("priority", str(p2)), "tagging a planned item later doesn't work")
+        did = sched("promote")
+        w = q()["waiting"]
+        need(f"item {p2} became job" in did and [x["n"] for x in w][0] == j1 and [x["n"] for x in w][2:] == [b2]
+             and "flow 45 priority two" in w[1]["text"], f"a second tagged item doesn't line up after the first: {w}")
+        p3 = int(sched("add", "sunday 10:00", "flow 45 priority three", "--priority").split()[1])
+        ep = sp.run(["python3", "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); import estimate; "
+                     "print(json.dumps(estimate.plan()['items']))", str(jv / "routine")],
+                    capture_output=True, text=True, env=env)
+        need(json.loads(ep.stdout or "{}").get(str(p3), {}).get("priority"), f"the estimate doesn't know the tag: {ep.stdout} {ep.stderr}")
+        need("no priority tag now" in sched("priority", str(p3), "off") and ", priority" not in sched("list").split("Looking back")[0],
+             "taking the tag off doesn't work")
+        sched("priority", str(p1), ok=False)  # it's a job now, not waiting
+        sched("cancel", str(p3))
+        for x in q()["waiting"]:
+            jobs("done", str(x["n"]))
+        sched("promote")
         # The queue keeps working with the schedule under it, and the schedule survives the queue's writes.
         text = rm.read_text()
         need(text.count("## The schedule") == 1 and text.count("## The queue") == 1
              and text.index("## The queue") < text.index("## The schedule"), "the schedule isn't right under the queue")
         # The routine asks the scheduler only when nothing runs or waits.
         tick = (jv / "routine/tick.py").read_text()
-        i_line, i_prom = tick.index("if not line:\n        # H43"), tick.index("did = schedule_promote()")
-        need(i_line < i_prom < tick.index("job = line[0]"), "the routine asks the scheduler before the job list")
+        # H99: every minute with nothing running it asks (promote itself keeps the job list first, untagged).
+        i_prom = tick.index("did = schedule_promote()")
+        need(tick.index("    if not q[\"on\"]:\n        return") < i_prom < tick.index("job = line[0]") and "H99" in tick,
+             "the routine doesn't ask the scheduler before it picks a job")
         need("schedule_line()" in tick, "the scheduler has no routine line")
         # The status page reads it and shows it, with its own routine line.
         js = f"""import {{ parseRoadmap }} from {json.dumps(str(jv / 'status/parse.mjs'))};
@@ -3734,12 +3774,14 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
         # A call may plan, list, move and cancel; promoting is the routine's own.
         pol = Policy(config.FOLDER)
         s_ = f'python3 "{ROOT}/routine/schedule.py"'
-        for sub in ('add "tuesday 15:00" "x"', "list", "cancel 3", 'move 3 "tomorrow 9:30"'):
+        for sub in ('add "tuesday 15:00" "x"', "list", "cancel 3", 'move 3 "tomorrow 9:30"', "priority 3", "priority 3 off"):
             need(pol.decide("Bash", {"command": f"{s_} {sub}"}).verdict == ALLOW, f"a call can't {sub.split()[0]}")
         need(pol.decide("Bash", {"command": f"{s_} promote"}).verdict == DENY, "a call may promote an item")
         need("schedule.py" in config.VOICE_RULES and "job list always goes first" in config.VOICE_RULES,
              "the call rules don't say how to plan work")
-        return "plans by day and time; waits while a job runs, waits or the routine is off; then becomes one job, past the line kept; looking back, move, cancel; page, routine line, call rules"
+        need("--priority" in config.VOICE_RULES and "'prio'" in page and "Due, goes first" in page,
+             "the call rules or the status page don't know the priority tag (H99)")
+        return "plans by day and time; waits while a job runs, waits or the routine is off; then becomes one job, past the line kept; looking back, move, cancel; priority tag goes first in line, never stops a running job (H99); page, routine line, call rules"
 
     async def flow46(self) -> str:
         """H27: the Mac desktop app. No Claude turns. The watchdog part on made-up routine lines, its turning-on
