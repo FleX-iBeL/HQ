@@ -4808,13 +4808,35 @@ window.fetch = async (url, opt) => {
   setState("idle", "Tap to call");
   out.push("idle:" + (shown(foot) ? "ok" : "WRONG"));
   cont.click();
-  for (let i = 0; i < 60 && !OFFERS.length; i++) await wait(100);
+  for (let i = 0; i < 200 && !OFFERS.length; i++) await wait(100);
   await wait(300);
   const rd = OFFERS.length ? OFFERS[0].request_data : {};
-  out.push("offer:" + (rd.continue === "__NAME__" && rd.agent === "pepper" && rd.mode === "deep" && rd.free === false ? "ok" : "WRONG " + JSON.stringify(rd)));
+  out.push("offer:" + (rd.continue === "__NAME__" && rd.agent === "pepper" && rd.mode === "deep" && rd.free === false ? "ok" : "WRONG " + JSON.stringify(rd) + " err=" + errEl.textContent + " st=" + statusEl.textContent));
   const msgs = chatLog.querySelectorAll(".msg");
   out.push("chat:" + (!histOpen() && msgs.length === 4 && chatLog.querySelector(".divider") && chatLog.querySelectorAll(".msg.me.cancelled").length === 1
-    && chatTitle.textContent.startsWith("Continuing") ? "ok" : "WRONG " + msgs.length + " " + chatTitle.textContent));
+    && chatTitle.textContent === "Pepper" ? "ok" : "WRONG " + msgs.length + " " + chatTitle.textContent));  // H115: only who's on it
+  // H119: after reopening the app the chat shows the last call, with Call back at its foot.
+  for (let i = 0; i < 50 && state !== "idle"; i++) await wait(100);
+  continueFrom = null; histShown = null; showHistory(false);
+  calledHere = false; lastCallName = null; agent = "donna"; mode = "quick"; showMode(); clearChat(); setState("idle", "Tap to call");
+  const cfoot = document.getElementById("chatfoot"), ccont = document.getElementById("chatcont");
+  out.push("chatnofoot:" + (!shown(cfoot) ? "ok" : "WRONG"));
+  chatBtn.click(); await wait(400);
+  out.push("chatfoot:" + (chatOpen() && shown(cfoot) && !ccont.disabled && ccont.textContent === "Call back and continue with Pepper"
+    && ccont.getBoundingClientRect().left >= histBtn.getBoundingClientRect().right
+    && ccont.getBoundingClientRect().right <= chatBtn.getBoundingClientRect().left ? "ok" : "WRONG " + ccont.textContent));
+  free = true; showMode(); showChatFoot();
+  out.push("chatfree:" + (ccont.disabled && document.getElementById("chatcontnote").textContent.includes("Free") ? "ok" : "WRONG"));
+  ccont.click(); await wait(200);
+  out.push("chatfreenocall:" + (state === "idle" && OFFERS.length === 1 ? "ok" : "WRONG"));
+  free = false; showMode(); showChatFoot();
+  // The offer itself is checked above with Continue; here what Call back hands to the call.
+  const CALLED = [], realCall = call;
+  call = () => { CALLED.push({ cont: continueFrom && continueFrom.name, agent, mode, free }); };
+  ccont.click(); await wait(200);
+  call = realCall;
+  const c2 = CALLED[0] || {};
+  out.push("chatcall:" + (CALLED.length === 1 && c2.cont === "__NAME__" && c2.agent === "pepper" && c2.mode === "deep" && c2.free === false ? "ok" : "WRONG " + JSON.stringify(CALLED)));
   continueFrom = null; histShown = null;
   const pre = document.createElement("pre"); pre.id = "h60"; pre.textContent = "H60RESULT " + out.join(" | ") + " END";
   document.body.appendChild(pre);
@@ -4824,14 +4846,14 @@ window.fetch = async (url, opt) => {
         stub = ("<script>const OFFERS = []; const CALLS = " + json.dumps({"calls": transcript.list_calls(calls)[:1]}) + ", ONE = " + json.dumps(one) + """;
 window.fetch = async (url, opts) => {
   if (String(url) === "api/offer") { OFFERS.push(JSON.parse(opts.body)); return { ok: false, status: 599, json: async () => ({}) }; }
-  return { ok: true, json: async () => (String(url).startsWith("api/calls/") ? ONE : String(url) === "api/calls" ? CALLS : { lines: [] }) };
+  return { ok: true, json: async () => (String(url).startsWith("api/calls/") || String(url) === "api/last-call" ? ONE : String(url) === "api/calls" ? CALLS : { lines: [] }) };
 };
 try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: async () => new MediaStream() } }); } catch (e) {}</script>""")
         f = self.tmp / "h60.html"
         f.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
         for where, q in (("phone", ""), ("app", "?app=1")):
             r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=390,844",
-                                              f"--user-data-dir={self.tmp / ('h60-' + where)}", "--virtual-time-budget=30000", "--dump-dom", f.as_uri() + q], timeout=120)
+                                              f"--user-data-dir={self.tmp / ('h60-' + where)}", "--virtual-time-budget=60000", "--dump-dom", f.as_uri() + q], timeout=120)
             m = re.search(r'<pre id="h60">H60RESULT (.*?) END</pre>', r.stdout)
             need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
             res = m.group(1)

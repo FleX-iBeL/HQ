@@ -6,6 +6,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ### Added
 - With two HQs (the laptop and a server), you see at a glance which one is main: a pill next to the name on the status page, in the Mac app, the phone version and on the call page. Green "Main" on the main one; grey "Backup · VPS is main" (or "Laptop is main") on the other. An HQ on its own shows nothing new (H118).
+- Call back from the chat: when you open the app and tap the chat bubble, it shows your last call with a button at the bottom to call back and carry on where you left off, with the same agent, like Continue in Past calls (H119).
 
 ### Changed
 - On a call the chat's top line says only who you're calling with: her name, both names on a three-way call, all of them with more (H115).
