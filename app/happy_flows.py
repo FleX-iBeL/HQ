@@ -60,6 +60,7 @@ Run them before and after every update; they print a short pass/fail table at th
   29 the chat and status buttons always on the call page (H34): before, during and after a call; before
      any call in the app the chat shows the last saved call (read only, tool lines left out), after a
      call that call stays; with no saved calls a short note; the server's /api/last-call changes nothing
+     H115: on a call the chat's top line is only who's on it: one name, both, or all of them
   30 the laptop's temperature (H35): the real sensors read without a password; normal, warm and hot
      judged right (hot also when macOS slows down); the routine runs it every minute; the status server
      serves it and its history; a hot laptop shows the bar, graph and heat warning, both lights red
@@ -1902,7 +1903,8 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
     async def flow29(self) -> str:
         """H34: the chat and status buttons are always on the call page, also before a call, and before
         any call in the app the chat shows the last saved call (read only). No Claude turns: made-up
-        transcripts in the test server's own calls folder, and the real call page in a headless browser."""
+        transcripts in the test server's own calls folder, and the real call page in a headless browser.
+        H115: on a call the chat's top line says only who's on it (one name, both, all of them)."""
         import transcript
         calls = self.server.calls
         calls.mkdir(parents=True, exist_ok=True)
@@ -1936,7 +1938,8 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         need(sorted(p.name for p in calls.iterdir()) == before, "asking for the last call changed the calls folder")
         # The page, before, during and after a call.
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
-        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         page = (APP / "web/index.html").read_text()
         harness = r"""
@@ -1958,10 +1961,16 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
   out.push("live:" + (both() ? "ok" : "MISSING"));
   out.push("livechat:" + (chatLog.querySelector(".msg") ? "OLD LINES" : "ok"));
   addChat("user", "New line"); addChat("hq", "New answer");
+  // H115: on a call the chat's top line is only who's on it: one name, both on a three-way call, all with more.
+  AGENTS = { pa: { name: "Ann" }, pb: { name: "Bea" }, pc: { name: "Cat" } }; agent = "pa"; panel = [];
+  showCallTitle(); const one = chatTitle.textContent;
+  panel = ["pa", "pb"]; showCallTitle(); const two = chatTitle.textContent;
+  panel = ["pa", "pb", "pc"]; showCallTitle(); const three = chatTitle.textContent;
+  out.push("names:" + (one === "Ann" && two === "Ann & Bea" && three === "Ann, Bea & Cat" ? "ok" : "WRONG " + [one, two, three].join("/")));
   cleanup("Call ended");
   out.push("after:" + (both() ? "ok" : "MISSING"));
   chatBtn.click(); await wait(400);
-  out.push("afterchat:" + (chatLog.querySelectorAll(".msg").length === 2 && chatTitle.textContent === "What was said" ? "ok" : "REPLACED"));
+  out.push("afterchat:" + (chatLog.querySelectorAll(".msg").length === 2 && chatTitle.textContent === "Ann, Bea & Cat" ? "ok" : "REPLACED " + chatTitle.textContent));
   showChat(false);
   // No saved calls at all: a short empty note.
   calledHere = false; lastCallName = null; stubEmpty = true; chatBtn.click(); await wait(400);
@@ -1975,7 +1984,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
 window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { lines: [] } : LASTCALL) });</script>"""
         f = self.tmp / "h34.html"
         f.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
-        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--window-size=390,844",
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=390,844",
                                           "--virtual-time-budget=20000", "--dump-dom", f.as_uri()], timeout=120)
         m = re.search(r'<pre id="h34">H34RESULT (.*?) END</pre>', r.stdout)
         need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -1983,7 +1992,8 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
         say(f"   {res}")
         need(all(part.endswith(":ok") for part in res.split(" | ")), f"the buttons or the chat aren't right: {res}")
         return ("chat and status buttons before, during and after a call; before a call the chat shows the last saved call "
-                "(tool lines left out, cancelled marked), read only; after a call that call stays; no calls: a short note")
+                "(tool lines left out, cancelled marked), read only; on a call its top line is only who's on it (H115); after a call "
+                "that call stays; no calls: a short note")
 
     # 30
     async def flow30(self) -> str:

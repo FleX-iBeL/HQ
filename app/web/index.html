@@ -520,7 +520,13 @@ function paintTint(ids) {
   if (cs.length) { root.style.setProperty("--tintA", cs[0]); root.style.setProperty("--tintB", cs[1] || cs[0]); }
 }
 function herColour(div, who) { const c = agentColour(who || agent); if (c) div.style.setProperty("--her", c); }
-function callName() { return onCall().map(id => (AGENTS[id] || {name: "HQ"}).name).join(" & ") + (free ? " · Free" : ""); }
+// H115: on a call the chat's top line says only who's on it: her name, both on a three-way call, all of them with more.
+function namesOnCall() {
+  const ns = onCall().map(id => (AGENTS[id] || {name: "HQ"}).name);
+  return ns.length > 2 ? ns.slice(0, -1).join(", ") + " & " + ns[ns.length - 1] : ns.join(" & ");
+}
+function showCallTitle() { chatTitle.textContent = namesOnCall(); }
+function callName() { return namesOnCall() + (free ? " · Free" : ""); }
 // H46: a voice for each agent, in Settings ("Voice Pepper Potts", "Voice Donna Paulsen"). Each is remembered
 // on this device; the first time, the one voice chosen before H46, else her default.
 const voicesEl = document.getElementById("voices"), voiceOpts = document.getElementById("voiceopts");
@@ -859,7 +865,7 @@ function onServerMessage(ev) {
     else if (m && m.type === "hq-hangup" && state !== "idle") hangup();  // H75: she hung up after his goodbye
     else if (m && m.type === "hq-switch" && state !== "idle") switchTo(m.agent, m.call);  // H79: she put the other one on
     else if (m && m.type === "hq-three-way" && Array.isArray(m.agents)) {  // H79: the other one joined
-      panel = m.agents.filter(id => AGENTS[id]); paintTint(onCall());
+      panel = m.agents.filter(id => AGENTS[id]); paintTint(onCall()); showCallTitle();
       if (state === "live" && !muted) setState("live", onCallText());
     }
   } catch (e) {}
@@ -1600,13 +1606,12 @@ async function call() {
   errEl.textContent = "";
   startAudio();  // inside the tap, before anything waits
   calledHere = true;  // H34: from now on the chat is this session's call, not the saved one
-  clearChat(); chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showLayout();
+  clearChat(); showCallTitle(); chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showLayout();
   // H60: a continued call starts with the earlier call's lines in the chat, then a line where this one begins.
   const cont = continueFrom; continueFrom = null; contLabel = "";
   const handover = handoverNext && !!cont; handoverNext = false;  // H79
   if (cont && !free) {
     contLabel = handover ? "from " + cont.agent : "continuing " + cont.started;
-    chatTitle.textContent = handover ? (AGENTS[agent] || {}).name + " · from " + cont.agent : "Continuing · " + cont.started;
     for (const l of cont.lines) { if (l.who === "filler") continue; addChat(l.who, l.text, true, l.agent || cont.agent); if (l.cancelled) markCancelled(); }
     const d = document.createElement("div"); d.className = "divider";
     d.textContent = handover ? (AGENTS[agent] || {}).name + " picked up" : "Continued now"; chatLog.appendChild(d);
