@@ -22,7 +22,8 @@ usage (from the workspace):
   python3 "routine/jobs.py" move N top|up|down|bottom      move waiting job N in the line (H39)
   python3 "routine/jobs.py" move N before|after M          put waiting job N just before or after job M
   python3 "routine/jobs.py" done N                         the job's own chat, when it's finished
-  python3 "routine/jobs.py" held N                         the job's own chat, when the usage says STOP
+  python3 "routine/jobs.py" held N                         the job's own chat, when the usage says STOP; the
+                                                           next start carries on from there (H113)
   python3 "routine/jobs.py" off | on                       jobs from calls off or on
   python3 "routine/jobs.py" mail-off | mail-on             the hourly mail check off or on (L8)
 Used by the routine itself: next, mark N STATE, crashed N "HOW" (H62: job N ended by a crash; its rerun
@@ -315,6 +316,13 @@ def main(argv):
             j["state"] = f"done {now}" if cmd == "done" else "held: usage over the line"
             write(text, jobs, on)
             print(show(j))
+            if cmd == "held":
+                # H113: when and at about which step, so the next start carries on from there.
+                try:
+                    import carryon
+                    carryon.on_held(j["n"], text)
+                except Exception as e:
+                    print(f"(couldn't note the step for the carry-on: {e!r})", file=sys.stderr)
             if cmd == "done" and not was.startswith("done"):
                 # H61: its estimate next to how long it really took, so the next estimates learn.
                 m = re.match(r"running since (\d\d:\d\d)", was)

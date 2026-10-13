@@ -45,6 +45,7 @@ import crash  # H62: a job stopped by a crash runs again from the top of the lin
 import role  # H56.3: main and backup; only the main runs the mail check, the jobs and the scheduler
 import heartbeat  # H88: a heartbeat line for each of the two computers
 import estimate  # H81: the estimates learn from both computers
+import carryon  # H113: a job held by the usage line carries on in its own chat, or with a note
 import sync  # H56.4: the two-way sync of the workspace and Claude's memory with the other HQ
 import log_cycle  # H100: the coaching log keeps three hours; older entries move to its archive
 
@@ -243,16 +244,29 @@ def start(job):
     n = job["n"]
     os.makedirs(RUN, exist_ok=True)
     where = "a tmux session" if LINUX_WINDOWS else "a Terminal window"
-    prompt = (
-        f"let's go. This is job {n} from the queue on the HQ roadmap, started by the routine "
-        f"(phase L) in {where}. The job, as agreed on the call: {job['text']}\n\n"
-        "Follow the HQ build notes, the section \"Jobs started by the routine\". "
-        # H90: one HQ code on every computer: the working branch on GitHub is where every job starts and ends.
-        "Before the first step, bring HQ up to date with its working branch (dev) from GitHub; when done, push "
-        "HQ's commits to dev with routine/push.py, after its privacy check. Never main, never the version tags. "
-        + ("The user said on the call that this job may go past the 5-hour usage line; the weekly line still "
-           "counts (F13): read the usage with --weekly-only, and on STOP hold as usual." if job["past"] else "")
-    )
+    past_note = ("The user said on the call that this job may go past the 5-hour usage line; the weekly line still "
+                 "counts (F13): read the usage with --weekly-only, and on STOP hold as usual." if job["past"] else "")
+    # H113: a job the usage line held picks its own chat up again when it's still here; else a fresh chat
+    # with a note at about which step it stopped. Every chat gets its id up front, so it can be found again.
+    try:
+        roadmap = open(hqpaths.ROADMAP, encoding="utf8").read()
+    except OSError:
+        roadmap = ""
+    plan = carryon.plan(job, roadmap, FOLDER)
+    if plan["mode"] == "resume":
+        prompt = carryon.resume_prompt(n, where, plan, job["text"], past_note)
+    else:
+        prompt = (
+            f"let's go. This is job {n} from the queue on the HQ roadmap, started by the routine "
+            f"(phase L) in {where}. The job, as agreed on the call: {job['text']}"
+            + (carryon.fresh_note(n, plan) if plan["mode"] == "fresh" else "") + "\n\n"
+            "Follow the HQ build notes, the section \"Jobs started by the routine\". "
+            # H90: one HQ code on every computer: the working branch on GitHub is where every job starts and ends.
+            "Before the first step, bring HQ up to date with its working branch (dev) from GitHub; when done, push "
+            "HQ's commits to dev with routine/push.py, after its privacy check. Never main, never the version tags. "
+            + past_note
+        )
+    chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")
     # The job's settings (its status line) with this HQ's path, written fresh each time.
     settings = os.path.join(RUN, "job-settings.json")
     json.dump({"statusLine": {"type": "command",
@@ -261,7 +275,7 @@ def start(job):
     pfile = os.path.join(RUN, f"job-{n}.prompt")
     open(pfile, "w").write(prompt)
     cmd = os.path.join(RUN, f"job-{n}.command")
-    open(cmd, "w").write(job_script_tmux(n, settings, pfile) if LINUX_WINDOWS else f"""#!/bin/zsh
+    open(cmd, "w").write(job_script_tmux(n, settings, pfile, chat) if LINUX_WINDOWS else f"""#!/bin/zsh
 # Job {n}, started by the HQ routine (phase L).
 cd {json.dumps(FOLDER)} || exit 1
 # 9 October 2026: the windows shouldn't take over the screen. Opened in the background,
@@ -275,7 +289,7 @@ echo $$ > {json.dumps(PIDFILE)}
 # H36: wakes the chat up when it has gone quiet (types continue into this window only).
 JT=$(tty)
 /usr/bin/python3 {json.dumps(os.path.join(HERE, 'nudge.py'))} {n} "$JT" $$ </dev/null >/dev/null 2>&1 &!
-{CLAUDE} --no-chrome --permission-mode auto --settings {json.dumps(settings)} \\
+{CLAUDE} --no-chrome --permission-mode auto --settings {json.dumps(settings)} {chat} \\
   -n "HQ job {n}" "$(cat {json.dumps(pfile)})"
 """ + CLOSE_WINDOW)
     os.chmod(cmd, 0o755)
@@ -286,12 +300,15 @@ JT=$(tty)
     jobs("mark", str(n), "running since " + time.strftime("%H:%M"))
     json.dump({"n": n, "pid": None, "started": time.time()}, open(STATE, "w"))
     open_window(cmd, f"job-{n}")
-    status("BUILDING", f"Job {n} · started by the routine in {where}{watch_line(n)}",
-           f"job {n} started by the routine: {job['text'][:90]}")
-    log(f"started job {n}")
+    carryon.started(n, plan)
+    how = {"resume": "carries on in its own chat after the usage hold",
+           "fresh": "started again after the usage hold, in a fresh chat with a note"}.get(plan["mode"])
+    status("BUILDING", f"Job {n} · " + (how or "started by the routine") + f" in {where}{watch_line(n)}",
+           f"job {n} {how or 'started by the routine'}: {job['text'][:90]}")
+    log(f"started job {n}" + (f" ({plan['mode']}, chat {plan['session']})" if how else ""))
 
 
-def job_script_tmux(n, settings, pfile):
+def job_script_tmux(n, settings, pfile, chat=""):
     """H56.2: job n's script in a tmux session (bash): the same chat, its status line and nudge.py, which
     types into this session's own pane ($TMUX_PANE) instead of a Terminal tab."""
     return f"""#!/bin/bash
@@ -303,7 +320,7 @@ echo
 echo $$ > {json.dumps(PIDFILE)}
 # H36: wakes the chat up when it has gone quiet (types continue into this pane only).
 {json.dumps(PY)} {json.dumps(os.path.join(HERE, 'nudge.py'))} {n} "tmux:$TMUX_PANE" $$ </dev/null >/dev/null 2>&1 & disown
-{CLAUDE} --no-chrome --permission-mode auto --settings {json.dumps(settings)} \\
+{CLAUDE} --no-chrome --permission-mode auto --settings {json.dumps(settings)} {chat} \\
   -n "HQ job {n}" "$(cat {json.dumps(pfile)})"
 """ + CLOSE_WINDOW_TMUX
 

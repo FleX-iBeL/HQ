@@ -5977,6 +5977,106 @@ setTimeout(() => {
         need(res["none"] == "happy/0" and res["updating"] == "happy" and res["back"] == "hungry", f"the bowl shows without a newer version: {res}")
         return "a newer version: the dog sits by its empty bowl, wags, looks up and barks Update! in green now and then; a red bark, sleep and turning on still win; no newer version or updating: its usual mood"
 
+    async def flow88(self) -> str:
+        """H113: a job stopped by the usage line carries on where it left off. No Claude turns, no window: a
+        copy of the roadmap, its own carry-on folder and a stand-in for Claude Code's chats, and the routine's
+        start of a job caught before it opens anything."""
+        import subprocess as sp, importlib
+        jv = ROOT
+        sys.path.insert(0, str(jv / "routine"))
+        rm = self.tmp / "roadmap-H113.md"
+        rm.write_text(ROADMAP.read_text())
+        co_dir, chats = self.tmp / "carryon-H113", self.tmp / "claude-projects-H113"
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_CARRYON": str(co_dir)}
+        def jobs(*a, ok=True):
+            r = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
+            need((r.returncode == 0) == ok, f"jobs.py {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
+            return r.stdout + r.stderr
+        for j in json.loads(jobs("next"))["waiting"]:
+            jobs("stop", str(j["n"]))
+        for j in json.loads(jobs("next"))["running"]:
+            jobs("mark", str(j["n"]), "stopped 00:00")
+        a, b = (int(jobs("add", f"flow 88 job {x}").split()[1]) for x in "ab")
+        carryon = importlib.import_module("carryon")
+        tick = importlib.import_module("tick")
+        saved = (carryon.DIR, tick.RUN, tick.STATE, tick.PIDFILE, tick.hqpaths.ROADMAP, tick.open_window,
+                 tick.status, tick.jobs, tick.log, os.environ.get("HQ_CLAUDE_PROJECTS"))
+        run = self.tmp / "run-H113"
+        run.mkdir(exist_ok=True)
+        caught = {"status": [], "jobs": [], "opened": []}
+        carryon.DIR, tick.RUN, tick.STATE, tick.PIDFILE = str(co_dir), str(run), str(run / "job.json"), str(run / "job.pid")
+        tick.hqpaths.ROADMAP = str(rm)
+        tick.open_window = lambda cmd, name="": caught["opened"].append((cmd, name))
+        tick.status = lambda *x: caught["status"].append(x)
+        tick.jobs = lambda *x: caught["jobs"].append(x) or ""
+        tick.log = lambda m: None
+        os.environ["HQ_CLAUDE_PROJECTS"] = str(chats)
+        def start(n):
+            job = next(j for j in json.loads(jobs("next"))["waiting"] if j["n"] == n)
+            caught["opened"].clear()
+            tick.start(job)
+            need(caught["opened"], f"job {n} wasn't started")
+            return (run / f"job-{n}.command").read_text(), (run / f"job-{n}.prompt").read_text()
+        try:
+            # A new job gets its own chat id up front, so it can be found again.
+            cmd, prompt = start(a)
+            sid = carryon.load(a).get("session")
+            need(sid and f"--session-id {sid}" in cmd and "--resume" not in cmd, f"a new job's chat has no id: {cmd}")
+            need(prompt.startswith(f"let's go. This is job {a} from the queue") and "H113" not in prompt,
+                 f"a new job's prompt changed: {prompt[:200]}")
+            # The usage says STOP at a step: the hold notes when and where.
+            jobs("mark", str(a), "running since 12:00")
+            txt = rm.read_text()
+            head, sep, rest = txt.partition("\n---\n")
+            head = re.sub(r"^## Now: .*$", f"## Now: Job {a} · building the second half of flow 88", head, count=1, flags=re.M)
+            rm.write_text(head + sep + rest)
+            jobs("held", str(a))
+            rec = carryon.load(a)
+            need(rec.get("held") and rec.get("step") == "building the second half of flow 88" and rec.get("session") == sid,
+                 f"the hold didn't note the step: {rec}")
+            # Started again on the same computer with its chat still there: it picks its own chat up again.
+            slug = re.sub(r"[^A-Za-z0-9]", "-", tick.FOLDER)
+            (chats / slug).mkdir(parents=True, exist_ok=True)
+            (chats / slug / f"{sid}.jsonl").write_text("{}\n")
+            cmd, prompt = start(a)
+            need(f"--resume {sid}" in cmd and "--session-id" not in cmd, f"a held job didn't pick its own chat up: {cmd}")
+            need(prompt.startswith(f"let's go again. This is job {a}") and "your own earlier chat" in prompt
+                 and "building the second half of flow 88" in prompt and prompt.rstrip().endswith("flow 88 job a"),
+                 f"the carry-on prompt: {prompt}")
+            need("carries on in its own chat" in caught["status"][-1][1], f"the status block doesn't say so: {caught['status'][-1]}")
+            need(carryon.load(a).get("session") == sid and not carryon.load(a).get("held"), f"the hold wasn't used up: {carryon.load(a)}")
+            # Held again, but the old chat is gone: a fresh chat with the note.
+            jobs("mark", str(a), "running since 12:30")
+            jobs("held", str(a))
+            (chats / slug / f"{sid}.jsonl").unlink()
+            cmd, prompt = start(a)
+            sid2 = carryon.load(a).get("session")
+            need(sid2 and sid2 != sid and f"--session-id {sid2}" in cmd and "--resume" not in cmd, f"no fresh chat: {cmd}")
+            need(prompt.startswith(f"let's go. This is job {a}") and "stopped by the usage line" in prompt
+                 and "building the second half of flow 88" in prompt and "can't be found here" in prompt
+                 and "First look at what the first run left" in prompt, f"the fresh chat's note: {prompt}")
+            # The other computer picks a held job up (no record here): a fresh chat, the step from the roadmap's log.
+            jobs("mark", str(b), "running since 13:00")
+            jobs("held", str(b))
+            (co_dir / f"job-{b}.json").unlink()
+            txt = rm.read_text()
+            head, sep, rest = txt.partition("\n---\n")
+            head = re.sub(r"^## Now: .*$", f"## Now: Job {b} waits for the usage line", head, count=1, flags=re.M)
+            head = head.replace("\n- ", f"\n- 13:05 job {b}: held, usage over the line\n- 13:04 job {b}: running the flows\n- ", 1)
+            rm.write_text(head + sep + rest)
+            cmd, prompt = start(b)
+            need("--session-id" in cmd and "stopped by the usage line" in prompt and "at about this step: running the flows" in prompt
+                 and "isn't on this computer" in prompt, f"the other computer's fresh chat: {prompt}")
+            need("--session-id" in tick.job_script_tmux(b, "s.json", "p", "--session-id x"), "the tmux script doesn't pass the chat id")
+        finally:
+            (carryon.DIR, tick.RUN, tick.STATE, tick.PIDFILE, tick.hqpaths.ROADMAP, tick.open_window,
+             tick.status, tick.jobs, tick.log, old) = saved
+            if old is None:
+                os.environ.pop("HQ_CLAUDE_PROJECTS", None)
+            else:
+                os.environ["HQ_CLAUDE_PROJECTS"] = old
+        return "a new job's chat gets an id; held, it picks its own chat up with the step; chat gone or other computer: a fresh chat with the note"
+
     async def flow86(self) -> str:
         """H80, no Claude: Donna's direct line. A push message encrypted for a stand-in phone decrypts back (RFC 8291)
         and its VAPID token verifies with the shared key; a gone phone is dropped. The routine's look takes stock
@@ -7677,6 +7777,7 @@ FLOWS = {
     85: ("H79: ask for another agent by name: she hands over, or brings her in on a three-way call", False, "flow85"),
     86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back", False, "flow86"),
     87: ("H98: the dog sits by its empty bowl and says Update! in green when a newer version is out", False, "flow87"),
+    88: ("H113: a job held by the usage line carries on in its own chat, or in a fresh one with a note at which step", False, "flow88"),
 }
 
 
