@@ -135,8 +135,10 @@ Run them before and after every update; they print a short pass/fail table at th
   72 H83, no Claude: which HQ this is (the label, else Local and the system) in Python and the status server,
      on the status page, /where.json and the strip's reading, with and without a label; the call page's line
      takes no room
-  82 H104, no Claude: times digit by digit. Quick and Deep are told 9:30 is "nine thirty" and 10:45 "ten forty
-     five", never half, quarter or o'clock, and no example in the call rules says a time the old way
+  82 H104 and H108, no Claude: times as "5 30 in the afternoon". Quick and Deep are told to write 12-hour
+     digits with a space, then the part of the day, never a colon, words, half, quarter or o'clock; no example
+     in the call rules says a time another way; the speech filter says a stray 5:30 as "5 30"; Kokoro reads
+     "5 30" as five thirty with no pause (when the model is there)
   83 H105, no Claude: the notes button. Notes kept one line each in a throwaway notes file (a line a call
      wrote by hand read too), cleared one by one or all, the doodle kept only as a PNG; /api/notes only from
      the page; the real call page in a headless browser, phone and app: the round button above Past calls
@@ -6055,22 +6057,49 @@ console.log(JSON.stringify({{
         return "on a server no Laptop section, no battery in the top line, no laptop lines or bars under Routines, the light green; on the laptop all of it as before, the light red"
 
     async def flow82(self) -> str:
-        """H104, no Claude: times digit by digit. Both kinds of call (Quick and Deep) are told to say 9:30 as
-        "nine thirty" and 10:45 as "ten forty five", never "half", "quarter" or "o'clock", and no example in
-        the call rules or in the call system's ask-first note still says a time the old way."""
+        """H104, then H108, no Claude: times as 12-hour digits with a space instead of the colon, then the part
+        of the day ("5 30 in the afternoon", "10 in the evening"). Both kinds of call (Quick and Deep) are told
+        so; no example in the call rules or in the call system's ask-first note still says a time another way
+        (in words, with a colon, half, quarter or o'clock); the speech filter turns a stray 5:30 into "5 30",
+        also when it streams in pieces; and Kokoro reads "5 30" as five thirty, with no pause."""
         import brain
+        from claude_llm import SpeechFilter
         rules = {"Quick": config.SYSTEM_PROMPT, "Deep": config.VOICE_RULES}
         for kind, text in rules.items():
-            need('"nine thirty"' in text and '"ten forty five"' in text and "digit by digit" in text,
-                 f"a {kind} call isn't told to say times digit by digit")
+            need('"5 30 in the afternoon"' in text and '"10 in the evening"' in text and "never a colon" in text.lower(),
+                 f"a {kind} call isn't told to write times as 5 30 in the afternoon")
         hours = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
-        old = re.compile(rf"half ({hours}|past)|\b({hours}) o'clock|quarter (past|to)", re.I)
+        tens = "fifteen|thirty|forty|forty five|forty-five"
+        old = re.compile(rf"half ({hours}|past)|\b({hours}) o'clock|quarter (past|to)|\b({hours}) ({tens})\b"
+                         rf"|\b\d{{1,2}}:\d\d\b(?! today| tomorrow)", re.I)
         ask = brain.refusal_text(type("D", (), {"verdict": "ask", "question": "a test", "retry": False, "why": ""})())
         own = config.ME["on_calls"] or ""  # the user's own notes (me.md) may quote the old style; only HQ's rules count
+        tools = config.VOICE_RULES[config.VOICE_RULES.find("When is a day and a time"):][:400]  # the scheduler's syntax
         for name, text in {**rules, "the ask-first note": ask}.items():
-            hit = old.search(text.replace(own, "") if own else text)
-            need(not hit, f"{name} still says a time the old way: {hit and hit.group(0)!r}")
-        return "Quick and Deep both say times digit by digit; no old-style time left in the call rules or the ask-first note"
+            text = text.replace(own, "") if own else text
+            text = text.replace(tools, "")
+            hit = old.search(text)
+            need(not hit, f"{name} still says a time another way: {hit and hit.group(0)!r}")
+        need('Saturday at 6 30 in the evening?' in ask, "the ask-first note's example isn't in the new style")
+
+        def spoken(pieces):
+            f = SpeechFilter()
+            return "".join(f.feed(p) for p in pieces) + f.flush()
+        for pieces in (["The gym at 5:30 in the afternoon."], ["The gym at 5", ":", "30 in the afternoon."],
+                       ["The gym at 5:", "30 in the afternoon."]):
+            got = spoken(pieces)
+            need(got == "The gym at 5 30 in the afternoon.", f"the voice still gets a colon in a time: {got!r} from {pieces}")
+        got = spoken(["Two things: one, ", "and 3: two."])
+        need(got == "Two things: one, and 3: two.", f"a colon that isn't in a time changed: {got!r}")
+
+        said = "Kokoro not checked (no model here)"
+        if config.KOKORO_MODEL.exists():
+            from kokoro_onnx import Kokoro
+            k = Kokoro(str(config.KOKORO_MODEL), str(config.MODELS / "voices-v1.0.bin"))
+            ph = k.tokenizer.phonemize("The gym at 5 30 in the afternoon.", lang="en-us")
+            need(":" not in ph and "θˈɜːɾi" in ph and "fˈaɪv" in ph, f"Kokoro doesn't read 5 30 as five thirty: {ph!r}")
+            said = "Kokoro reads 5 30 as five thirty, no pause"
+        return f"Quick and Deep both write times as 5 30 in the afternoon; no other style left in the call rules or the ask-first note; a stray 5:30 is spoken as 5 30; {said}"
 
     async def flow81(self) -> str:
         """H81, no Claude: job estimates per computer, and patterns from all the data. The estimator on its own
@@ -7151,7 +7180,7 @@ FLOWS = {
     79: ("H88: heartbeats for both computers: this one up and online, the other answering; on both status pages", False, "flow79"),
     80: ("F9: a call left quiet stays connected: no idle timeout; a hang-up or a lost connection still ends it", False, "flow80"),
     81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data", False, "flow81"),
-    82: ("H104: times on calls are said digit by digit (nine thirty), never half, quarter or o'clock", False, "flow82"),
+    82: ("H104, H108: times on calls as 5 30 in the afternoon, no colon, no words, never half, quarter or o'clock", False, "flow82"),
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one, and a space to doodle", False, "flow83"),
     84: ("H106: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can", False, "flow84"),
 }

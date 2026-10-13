@@ -100,7 +100,7 @@ How to talk:
 - Short spoken sentences, like a person on the phone. Usually one to three sentences per reply.
 - Keep your first sentence especially short, a few words, so he hears you right away.
 {format}
-- Say numbers and dates the way you would say them out loud. Say times digit by digit, never with "half", "quarter" or "o'clock": 9:30 is "nine thirty", 10:45 is "ten forty five", 18:30 is "six thirty" (H104).
+- Say numbers and dates the way you would say them out loud. {times}
 - If you didn't catch something, say so briefly and ask him to repeat it.
 - Their words come to you through speech recognition, so names and words in other \
 languages can be misheard; go with the most likely meaning.
@@ -112,6 +112,13 @@ FORMAT_RULE = """- Your text also shows in the chat on the call page, formatted 
 for a word that matters, and when you name several things, a short list: each item on its own line starting \
 with "- " or "1. ". The marks are never spoken, so write each item as a short phrase that also sounds right \
 read out loud. Nothing else: no headings, tables, links, code, emojis or single-asterisk italics."""
+
+# H104, then H108 (13 October 2026, call at 15:10): times as 12-hour digits with a space for the colon,
+# then the part of the day. Kokoro reads "5 30" as five thirty; a colon makes it pause. Both kinds of call.
+TIMES_RULE = """Write times as 12-hour digits with a space instead of the colon, then the part of the day: \
+"8 30 in the morning", "12 45 in the afternoon", "5 30 in the afternoon", and a full hour as just the number: \
+"10 in the evening", "11 at night". Never a colon (it makes the voice pause), never in words, never "half", \
+"quarter" or "o'clock" (H108)."""
 
 # H8: added to SYSTEM_PROMPT in free mode. Claude's wording.
 FREE_RULES = """
@@ -191,16 +198,16 @@ he calls. Name them in your first reply, after answering him, every call, until 
 resolved or not that important.
 - Some actions need his okay. If a tool call is refused with "needs {user}'s yes", check it \
 with him like a real assistant would, in one natural sentence with the details ("Shall I put \
-that in for Saturday at six thirty?"), never "say yes or no", and stop; the call system tells \
+that in for Saturday at 6 30 in the evening?"), never "say yes or no", and stop; the call system tells \
 you his answer. If he answers with a change ("yes, but make it seven"), make the change and \
 check again. Never ask by any other means, and never try a way around a refusal.
 - The calendar (H78): adding, moving and deleting his own events goes without asking; just do it \
 and say it's done. Before you move or delete one, look at it first, so it can be put back if he \
 changes his mind. An event with other people in it still needs his okay; the call system asks for you.
 - When something is done, confirm it the way a person would: "Done, it's in for Saturday at \
-six thirty, until eight thirty." If you filled something in yourself, like an end time, just say \
-it in passing ("I've blocked it until eight thirty"), not as an explanation.
-- Say times digit by digit, never with "half", "quarter" or "o'clock": 9:30 is "nine thirty", 10:45 is "ten forty five", 14:15 is "two fifteen", 10:00 is just "ten" (H104).
+6 30 in the evening, until 8 30." If you filled something in yourself, like an end time, just say \
+it in passing ("I've blocked it until 8 30"), not as an explanation.
+- {times}
 - Writing things down during the call works as usual (where-things-go.md). Only the quiet notes, \
 the commit and the push happen after he hangs up.
 - Work for the computer (building, a bigger job, anything agreed for "let's go") goes in the queue \
@@ -277,11 +284,11 @@ it says the one-time setup isn't done, tell him he types one line once in Termin
 password; it's on the HQ roadmap under H45, and he can do it next time he's at the laptop.
 """
 # M1: the routine's scripts are in HQ, outside the folder the call works in.
-VOICE_RULES = VOICE_RULES.replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
+VOICE_RULES = VOICE_RULES.replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE).replace("{times}", TIMES_RULE)
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:
     VOICE_RULES += "\nFrom the user's own notes for calls:\n" + ME["on_calls"] + "\n"
-SYSTEM_PROMPT = SYSTEM_PROMPT.replace("{format}", FORMAT_RULE).replace("{user}", USER)
+SYSTEM_PROMPT = SYSTEM_PROMPT.replace("{format}", FORMAT_RULE).replace("{times}", TIMES_RULE).replace("{user}", USER)
 FREE_RULES = FREE_RULES.replace("{user}", USER)
 HANGUP_RULES = HANGUP_RULES.replace("{user}", USER)
 VOICE_RULES = VOICE_RULES.replace("{user}", USER)

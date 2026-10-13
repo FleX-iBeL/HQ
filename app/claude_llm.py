@@ -505,7 +505,8 @@ class SpeechFilter:
     without the marks. Asterisks and backticks are dropped; a list or heading mark at the start of a
     line ("- ", "* ", "1. ", "## ") is dropped, also when it streams in pieces (a possible start of one
     is held back); a line break becomes a sentence end when the line didn't end in one, so each list
-    item is said as its own phrase. feed() returns what may be spoken now; flush() what was held."""
+    item is said as its own phrase. H108: a colon between digits (5:30) becomes a space, so the voice
+    doesn't pause in a time. feed() returns what may be spoken now; flush() what was held."""
 
     _MARK = re.compile(r"[ \t]*(?:[-*+\u2022]|\d{1,3}[.)]|#{1,6})[ \t]+")
     _MAYBE = re.compile(r"[ \t]*(?:[-*+\u2022]|\d{1,3}[.)]?|#{1,6})?")
@@ -542,6 +543,15 @@ class SpeechFilter:
                 self.line_start = True
             elif ch in "*`":
                 continue
+            elif ch == ":" and self.last.isdigit():
+                # H108: a time's colon (5:30) makes Kokoro pause; said as "5 30". At a piece's end it
+                # waits for the next piece to see whether a digit follows.
+                if i == len(s):
+                    self.buf = ":"
+                    break
+                out.append(" " if s[i].isdigit() else ":")
+                if not s[i].isdigit():
+                    self.last = ":"
             else:
                 out.append(ch)
                 if not ch.isspace():
