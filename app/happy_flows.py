@@ -147,6 +147,10 @@ Run them before and after every update; they print a short pass/fail table at th
      agreed greeting first and push-back line, nothing personal, the name from me.md filled in; her character and
      the human rules after the call rules, no talk while thinking; a call greets in her words; a workspace's own
      character (agents.json) wins and is marked as its own; /api/agents, Settings and the readme show the defaults
+  75 F18, no Claude: the status page never gets wider than the phone. A copy of the status page in a headless
+     browser at phone widths (iPhone 13, a small phone), with a job and a roadmap note holding a long path and a
+     key that can't be broken at a space, every fold open: nothing sticks out sideways and the page can't be
+     swiped sideways; the redraw only scrolls the page back when it moved
 
 Safe to run while the live phone line is up: the flows use their own server on port 7871
 (HQ_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
@@ -5852,6 +5856,87 @@ console.log(JSON.stringify({{
         need(lap["light"] == "light down", f"on the laptop a hot laptop doesn't make the Routines light red: {lap['light']}")
         return "on a server no Laptop section, no battery in the top line, no laptop lines or bars under Routines, the light green; on the laptop all of it as before, the light red"
 
+    async def flow75(self) -> str:
+        """F18, no Claude: the status page on the phone only scrolls up and down. A copy of the status page in a
+        headless browser at phone widths, with a job and a roadmap note that hold a long path and a key (no space
+        to break at), every fold opened: no element's right edge is past the screen and the page is no wider than it."""
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the status page in")
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        page = (ROOT / "status/index.html").read_text()
+        need("if (window.scrollY !== y || window.scrollX !== 0) window.scrollTo(0, y);" in page,
+             "the redraw scrolls the page back every time again (that stops a swipe on the phone halfway)")
+        site = self.tmp / "f18"
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        (site / ".status").mkdir()
+        long_path = "/home/someone/HQ/workspace/HQ/roadmap.sync-conflict-20261012-223405-5Q2D7XN-and-a-long-tail.md"
+        key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAwk8/o+vb4By0L7LRCWdxgnYI7o0qc/Lund+DC/zojPxxxxxxxxxxxxxxxx"
+        rm = ROADMAP.read_text()
+        need("\n## The queue\n" in rm and "\n## The schedule\n" in rm, "the roadmap has no queue or schedule to add to")
+        rm = rm.replace("\n## The schedule\n", f"\n- Job 9001 · waiting · agreed 2026-10-13 12:00 · Merge {long_path} into the roadmap.\n\n## The schedule\n", 1)
+        rm = rm.replace("\n## The schedule\n", f"\n## The schedule\n\n- Item 9001 · waiting · at 2026-12-31 23:59 · added 2026-10-13 12:00 · Look at {long_path}.\n", 1)
+        rm += f"\n\n## Phase Z · Test\n\n| | Step | What you get | Model |\n|---|---|---|---|\n| ⬜ | Z1 A long word | The key `{key}` and the file `{long_path}` | Sonnet |\n"
+        site_roadmap(site).write_text(rm)
+        harness = r"""
+<script>
+(async () => {
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  for (let i = 0; i < 40 && !document.querySelector('section'); i++) await wait(250);
+  await wait(1500);
+  document.querySelectorAll('details').forEach(d => d.open = true);
+  await wait(1000);
+  const W = document.documentElement.clientWidth, out = [];
+  out.push('page:' + document.documentElement.scrollWidth + '/' + W);
+  const wide = [];
+  for (const el of document.querySelectorAll('main *')) {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.right > W + 1) wide.push(el.tagName + '.' + el.className + ' ' + Math.round(r.right) + ' ' + el.textContent.slice(0, 40).replace(/[|:]/g, ' '));
+  }
+  out.push('wide:' + wide.length + (wide.length ? ' ' + wide.slice(0, 3).join(' ; ') : ''));
+  out.push('found:' + (document.body.textContent.includes('sync-conflict-20261012') ? 'yes' : 'no'));
+  out.push('key:' + (document.body.textContent.includes('Lund+DC/zojPxxxx') ? 'yes' : 'no'));
+  const pre = document.createElement('pre'); pre.id = 'f18'; pre.textContent = 'F18RESULT ' + out.join(' | ') + ' END';
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        idx = site / "status/index.html"
+        idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
+        port = 4798
+        env = {**os.environ, "HQ_STATUS_PORT": str(port), "HQ_FIX_DRY": "1"}
+        proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=env,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        seen = []
+        try:
+            base = f"http://127.0.0.1:{port}"
+            for _ in range(50):
+                if http_get("/routines.json", base)[0] == 200:
+                    break
+                await asyncio.sleep(0.2)
+            for w in (390, 320):
+                # A phone: its own width as the page's width (the viewport meta), touch, three pixels to one.
+                r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run",
+                                                  *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                                  f"--user-data-dir={self.tmp / ('f18-profile' + str(w))}",
+                                                  f"--window-size={w},844", "--force-device-scale-factor=3", "--enable-viewport", "--touch-events=enabled",
+                                                  "--virtual-time-budget=20000", "--dump-dom", base + "/"], timeout=120)
+                m = re.search(r'<pre id="f18">F18RESULT (.*?) END</pre>', r.stdout)
+                need(m, f"the page test didn't finish at {w}: {(r.stderr or r.stdout)[-300:]!r}")
+                res = dict(part.split(":", 1) for part in m.group(1).split(" | "))
+                say(f"   {w} wide: {m.group(1)[:300]}")
+                need(res["found"] == "yes", f"at {w} the job with the long path isn't on the page")
+                need(res["key"] == "yes", f"at {w} the roadmap note with the key isn't on the page")
+                sw, cw = (int(x) for x in res["page"].split("/"))
+                need(sw <= cw, f"at {w} the page is {sw} wide on a {cw} screen: it swipes sideways")
+                need(res["wide"] == "0", f"at {w} something sticks out past the screen: {res['wide']}")
+                seen.append(f"{w}: {sw}/{cw}")
+        finally:
+            proc.terminate()
+            proc.wait(timeout=10)
+        return "with a long path in a job and the schedule and a key in a roadmap note, every fold open: " + ", ".join(seen) + " wide, nothing sticks out; the redraw only scrolls back when it moved"
+
     async def flow74(self) -> str:
         """H100, no Claude: the coaching log keeps three hours. On a throwaway workspace: entries older than three hours
         move to the archive, newest first, word for word; the head and the open commitments stay whatever their age;
@@ -6252,6 +6337,7 @@ FLOWS = {
     72: ("H83: which HQ this is (VPS, or Local · macOS), small under the name on the status page, the strip and the call page", False, "flow72"),
     73: ("H92: on a server the status page shows no Laptop section and no laptop lines under Routines", False, "flow73"),
     74: ("H100: the coaching log keeps three hours; older entries move to its archive, calls load only those", False, "flow74"),
+    75: ("F18: the status page on the phone never gets wider than the screen; it only scrolls up and down", False, "flow75"),
 }
 
 
