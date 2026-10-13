@@ -5870,6 +5870,54 @@ console.log(JSON.stringify({{
         need(lap["light"] == "light down", f"on the laptop a hot laptop doesn't make the Routines light red: {lap['light']}")
         return "on a server no Laptop section, no battery in the top line, no laptop lines or bars under Routines, the light green; on the laptop all of it as before, the light red"
 
+    async def flow80(self) -> str:
+        """F9, no Claude: a call left quiet stays connected. Pipecat ends a pipeline after 5 minutes with nothing
+        spoken or heard (typed lines and her thinking don't count); the call line turns that off. Two tiny pipelines,
+        nothing else: one with a 1 s idle timeout ends by itself (the cause, so a Pipecat update can't hide it), one
+        with the call's own setting is still running after 3 s. Then the code: the call server uses that setting, and
+        a real hang-up or a lost connection still ends the call."""
+        from pipecat.pipeline.pipeline import Pipeline
+        from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+        from pipecat.processors.filters.identity_filter import IdentityFilter
+        from pipecat.workers.runner import WorkerRunner
+
+        need(config.CALL_IDLE_SECS is None, f"the call line has an idle timeout again ({config.CALL_IDLE_SECS} s)")
+
+        async def quiet_for(secs: float, idle) -> bool:
+            """True when a pipeline with this idle timeout is still running after secs of nothing."""
+            worker = PipelineWorker(Pipeline([IdentityFilter()]), params=PipelineParams(),
+                                    idle_timeout_secs=idle, check_dangling_tasks=False)
+            idled = []
+
+            @worker.event_handler("on_idle_timeout")
+            async def on_idle(w):
+                idled.append(True)
+
+            runner = WorkerRunner(handle_sigint=False)
+            await runner.add_workers(worker)
+            task = asyncio.create_task(runner.run())
+            await asyncio.sleep(secs)
+            alive = not idled and not task.done()
+            if alive:
+                await worker.cancel()
+            try:
+                await asyncio.wait_for(task, 10)
+            except Exception:
+                pass
+            return alive
+
+        need(not await quiet_for(3.0, 1.0), "a 1 s idle timeout didn't end a quiet pipeline: the cause can't be shown")
+        need(await quiet_for(3.0, config.CALL_IDLE_SECS), "a quiet pipeline with the call's setting ended by itself")
+        bot = (APP / "bot.py").read_text()
+        need("idle_timeout_secs=config.CALL_IDLE_SECS" in bot, "the call server doesn't use the call's idle setting")
+        gone = bot.split('@transport.event_handler("on_client_disconnected")', 1)[1].split("@", 1)[0]
+        need("await worker.cancel()" in gone, "a lost connection no longer ends the call")
+        page = (APP / "web/index.html").read_text()
+        need('pc.connectionState === "failed" || pc.connectionState === "closed"' in page,
+             "the call page no longer closes a call whose connection failed")
+        return ("a 1 s idle timeout ends a quiet pipeline; the call's setting (none) keeps it on; "
+                "the call server uses it; a lost connection or hang-up still ends the call")
+
     async def flow79(self) -> str:
         """H88, no Claude: heartbeats for both computers. The routine's part with a throwaway HQ memory (its own
         pairing, a stand-in for the other HQ on a spare port, the lines and incidents caught, nothing real written):
@@ -6733,6 +6781,7 @@ FLOWS = {
     77: ("H82: her text shows formatted in the call's chat (bold, lists) while the voice stays plain", False, "flow77"),
     78: ("H86: the screen in the colour of who I'm calling; my lines green, hers in her colour", False, "flow78"),
     79: ("H88: heartbeats for both computers: this one up and online, the other answering; on both status pages", False, "flow79"),
+    80: ("F9: a call left quiet stays connected: no idle timeout; a hang-up or a lost connection still ends it", False, "flow80"),
 }
 
 

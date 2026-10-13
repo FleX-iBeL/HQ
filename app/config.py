@@ -442,6 +442,11 @@ FIRST_CLAUSE_MIN_WORDS = int(os.environ.get("HQ_FIRST_CLAUSE_MIN_WORDS", "10"))
 # the reply ended without sound (likely bug F4 too). The reply's end is marked explicitly, so this
 # only matters while Kokoro is still working.
 TTS_STALL_SECS = float(os.environ.get("HQ_TTS_STALL_SECS", "12"))
+# F9 (13 October 2026): Pipecat ends a call after 5 minutes with nothing spoken or heard (its idle
+# timeout); typed lines and her thinking don't count, so a quiet or typed call dropped. A call now
+# stays on until he hangs up, she hangs up, or the connection itself goes (on_client_disconnected).
+# A number in seconds brings a timeout back; empty or 0 means none.
+CALL_IDLE_SECS = float(os.environ.get("HQ_CALL_IDLE_SECS") or 0) or None
 # Voices the user can pick on the call page (9 October 2026). Heart is the default.
 VOICES = {
     "af_heart": "Heart", "af_bella": "Bella", "am_michael": "Michael", "bf_isabella": "Isabella",

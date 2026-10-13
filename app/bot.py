@@ -193,6 +193,7 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+        idle_timeout_secs=config.CALL_IDLE_SECS,  # F9: a quiet call stays on
     )
 
     @transport.event_handler("on_client_connected")
