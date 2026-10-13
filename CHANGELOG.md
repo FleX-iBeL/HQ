@@ -5,6 +5,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ## Coming next
 
 ### New
+- In Settings, choose which microphone the call listens with (every one the device has, like AirPods, the phone's own or a podcast mic), and, where the browser allows it, where her voice plays. Remembered on each device. An experiment: on an iPhone the sound can't be chosen by a page.
 - A notes button on the call page, right above Past calls, always there: your own quick notes to go through with your agent whenever you like, each cleared once it's done (or all at once), and a small paper space under them to write or doodle on with a finger or the mouse. Your agent can read both on a call.
 - With a second HQ (a laptop and a server), a heartbeat for each under Routines on both status pages: whether this computer is up and online, and whether the other one answers, every minute, apart from which one is main. Two missed answers in a row turn it red and go in the incident log.
 - On a call the screen takes a soft tint of who you're talking to: purple for Donna, red for Pepper, yellow for Moneypenny. In the chat your lines are green and hers are in her own colour, also in past calls.

@@ -6671,6 +6671,91 @@ print("H88OUT " + json.dumps(out))
         return ("plain before and after a call; on a call a soft tint of her colour, two on the call cut diagonally; "
                 "his lines green, hers in her colour, also in a past call")
 
+    async def flow84(self) -> str:
+        """H106, no Claude: the mic and sound choice in Settings, on the real call page in a headless browser with
+        stand-in devices (AirPods, the phone's mic, a podcast mic; two outputs). Every input is listed after Default;
+        a choice is remembered on this device and the call's getUserMedia asks for exactly that mic, also when the
+        browser gave it a new id (found by its name); a mic that's gone falls back to the default and says so;
+        Default asks for no mic in particular. The Sound row shows only where setSinkId exists, and her voice is
+        sent to the chosen output."""
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        harness = r"""
+<script>
+(async () => {
+  const out = [], check = (name, ok, why) => out.push(name + ":" + (ok ? "ok" : "WRONG " + why));
+  try {
+  localStorage.removeItem("hq-mic"); localStorage.removeItem("hq-out");
+  let devs = [
+    { kind: "audioinput", deviceId: "default", label: "Default - AirPods" },
+    { kind: "audioinput", deviceId: "air", label: "AirPods" },
+    { kind: "audioinput", deviceId: "phone", label: "iPhone Microphone" },
+    { kind: "audioinput", deviceId: "pod", label: "Podcast Mic USB" },
+    { kind: "audiooutput", deviceId: "airout", label: "AirPods" },
+    { kind: "audiooutput", deviceId: "spk", label: "Speaker" },
+  ];
+  const asked = [];
+  let gone = false;
+  Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: {
+    enumerateDevices: async () => devs.map(d => ({ ...d })),
+    getUserMedia: async c => { asked.push(JSON.stringify(c.audio));
+      if (gone && c.audio.deviceId) { const e = new Error("gone"); e.name = "OverconstrainedError"; throw e; }
+      return { getTracks: () => [], getAudioTracks: () => [] }; },
+    addEventListener: () => {} } });
+  const sinks = []; audioEl.setSinkId = async id => { sinks.push(id); };
+  showSettings(true); await listDevices();
+  const names = [...micSel.options].map(o => o.textContent);
+  check("all-inputs", names.join(",") === "Default,AirPods,iPhone Microphone,Podcast Mic USB", names.join(","));
+  check("default-first", micSel.value === "", micSel.value);
+  let a = JSON.parse(JSON.stringify(micAudio()));
+  check("default-no-device", !a.deviceId && a.echoCancellation === true, JSON.stringify(a));
+  micSel.value = "phone"; micSel.dispatchEvent(new Event("change"));
+  check("remembered", (localStorage.getItem("hq-mic") || "").includes("iPhone Microphone"), localStorage.getItem("hq-mic"));
+  await openMic();
+  check("call-uses-it", asked.at(-1).includes('"exact":"phone"'), asked.at(-1));
+  devs = devs.map(d => d.deviceId === "phone" ? { ...d, deviceId: "phone2" } : d);
+  await listDevices();
+  check("kept-after-new-id", micSel.value === "phone2", micSel.value);
+  await openMic();
+  check("found-by-name", asked.at(-1).includes('"exact":"phone2"'), asked.at(-1));
+  micSel.value = "pod"; micSel.dispatchEvent(new Event("change"));
+  devs = devs.filter(d => d.deviceId !== "pod"); gone = true; await listDevices();
+  check("gone-shown", [...micSel.options].some(o => o.textContent === "Podcast Mic USB (not here now)"), [...micSel.options].map(o => o.textContent).join(","));
+  errEl.textContent = ""; await openMic();
+  check("gone-falls-back", !asked.at(-1).includes("deviceId") && /default one/.test(errEl.textContent), asked.at(-1) + " " + errEl.textContent);
+  micSel.value = ""; micSel.dispatchEvent(new Event("change"));
+  check("back-to-default", localStorage.getItem("hq-mic") === null && !micAudio().deviceId, localStorage.getItem("hq-mic"));
+  check("sound-row", outRow.hidden === !CAN_SINK, "CAN_SINK " + CAN_SINK + " hidden " + outRow.hidden);
+  if (CAN_SINK) {
+    outSel.value = "spk"; outSel.dispatchEvent(new Event("change"));
+    check("sound-sent", sinks.at(-1) === "spk", sinks.join(","));
+    outSel.value = ""; outSel.dispatchEvent(new Event("change"));
+    check("sound-default", sinks.at(-1) === "", sinks.join(","));
+  }
+  devs = devs.map(d => ({ ...d, label: "" })); await listDevices();
+  check("ask-names", !micAskRow.hidden, "hidden");
+  } catch (e) { out.push("crash:WRONG " + e); }
+  const pre = document.createElement("pre"); pre.id = "h106"; pre.textContent = "H106RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f = self.tmp / "h106.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run",
+                                          *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                          f"--user-data-dir={self.tmp / 'h106-profile'}", "--window-size=390,844",
+                                          "--virtual-time-budget=20000", "--dump-dom", f.as_uri()], timeout=90)
+        m = re.search(r'<pre id="h106">H106RESULT (.*?) END</pre>', r.stdout)
+        need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        say(f"   {m.group(1)}")
+        need(all(part.endswith(":ok") for part in m.group(1).split(" | ")), f"the mic or sound choice isn't right: {m.group(1)}")
+        return ("every mic listed after Default, the choice remembered and used by the call, found again by its name, "
+                "a gone mic falls back to the default; the sound choice only where the browser can, and used")
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -7058,6 +7143,7 @@ FLOWS = {
     81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data", False, "flow81"),
     82: ("H104: times on calls are said digit by digit (nine thirty), never half, quarter or o'clock", False, "flow82"),
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one, and a space to doodle", False, "flow83"),
+    84: ("H106: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can", False, "flow84"),
 }
 
 

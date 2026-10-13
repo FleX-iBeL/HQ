@@ -128,6 +128,9 @@
         color:var(--fg); font:600 15px/1 -apple-system,sans-serif; cursor:pointer; }
   .sw.on { background:var(--accent); color:#04120f; border-color:var(--accent); }
   #settings select { flex-shrink:0; font:600 15px/1 -apple-system,sans-serif; color:var(--fg); background:transparent; border:2px solid var(--muted); border-radius:999px; padding:8px 12px; }
+  /* H106: the mic and sound choice; long device names are cut, the full name is in the list. */
+  #settings select.dev { min-width:0; max-width:56%; text-overflow:ellipsis; }
+  #settings .row[hidden] { display:none; }
   #setdone { margin-top:8px; padding:14px; border-radius:999px; border:0; background:var(--fg); color:var(--bg); font:600 17px/1 -apple-system,sans-serif; cursor:pointer; }
   /* H3: what HQ is doing. Hidden outside a call. */
   #orbwrap { display:none; flex-direction:column; align-items:center; gap:10px; margin:-8px 0; }
@@ -369,6 +372,9 @@
     <option value="bm_george">George (British)</option>
     <option value="bm_fable">Fable (British)</option>
   </template>
+  <div class="row"><span>Microphone<small id="micnote">What she hears you with</small></span><select id="mic" class="dev" aria-label="Microphone"><option value="">Default</option></select></div>
+  <div class="row" id="micaskrow" hidden><span>Device names<small>The browser only names them once the page may use the mic</small></span><button id="micask" class="sw" type="button">Show</button></div>
+  <div class="row" id="outrow" hidden><span>Sound<small>Where her voice plays</small></span><select id="out" class="dev" aria-label="Sound"><option value="">Default</option></select></div>
   <div class="row"><span>Thinking sound<small>A soft tick while she thinks</small></span><button id="sound" class="sw" type="button" aria-pressed="true">On</button></div>
   <button id="setdone" type="button">Done</button>
 </div>
@@ -568,6 +574,7 @@ fetch("/api/agents", { cache: "no-store" }).then(r => r.ok ? r.json() : null).th
 const setBtn = document.getElementById("setbtn"), setEl = document.getElementById("settings"), shade = document.getElementById("shade");
 function showSettings(open) {
   setEl.classList.toggle("open", open); shade.classList.toggle("open", open);
+  if (open) listDevices();  // H106
   setBtn.setAttribute("aria-expanded", String(open));
 }
 setBtn.addEventListener("click", () => { if (state === "idle") showSettings(true); });
@@ -606,6 +613,73 @@ soundBtn.addEventListener("click", () => {
   soundOn = !soundOn; try { localStorage.setItem("hq-sound", soundOn ? "on" : "off"); } catch (e) {}
   showSound();
 });
+// H106: which microphone the call listens with and, where the browser can (setSinkId), where her voice plays.
+// Remembered on this device by id and name (Safari may change the id); a choice that isn't here falls back to Default.
+const micSel = document.getElementById("mic"), outSel = document.getElementById("out"), micNote = document.getElementById("micnote");
+const outRow = document.getElementById("outrow"), micAskRow = document.getElementById("micaskrow");
+const CAN_SINK = typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
+let devList = [];
+function devPick(key) { try { return JSON.parse(localStorage.getItem(key) || "null"); } catch (e) { return null; } }
+function devOf(kind) { return devList.filter(d => d.kind === kind && d.deviceId && d.deviceId !== "default" && d.deviceId !== "communications"); }
+function devFind(list, p) { return (p && p.id) ? (list.find(d => d.deviceId === p.id) || (p.label && list.find(d => d.label === p.label)) || null) : null; }
+function fillDev(sel, list, key, word) {
+  const p = devPick(key), hit = devFind(list, p);
+  sel.textContent = "";
+  const add = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); };
+  add("", "Default");
+  list.forEach((d, i) => add(d.deviceId, d.label || word + " " + (i + 1)));
+  if (p && p.id && !hit) add(p.id, (p.label || word) + " (not here now)");
+  sel.value = hit ? hit.deviceId : (p && p.id) || "";
+}
+async function listDevices() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+    micSel.disabled = true; micNote.textContent = "This browser can't choose one"; return;
+  }
+  try { devList = await navigator.mediaDevices.enumerateDevices(); } catch (e) { devList = []; }
+  const ins = devOf("audioinput"), outs = devOf("audiooutput");
+  fillDev(micSel, ins, "hq-mic", "Microphone");
+  outRow.hidden = !CAN_SINK || !outs.length;
+  if (!outRow.hidden) fillDev(outSel, outs, "hq-out", "Speaker");
+  micAskRow.hidden = ins.some(d => d.label) || !navigator.mediaDevices.getUserMedia;
+}
+function devSave(sel, key, kind) {
+  const d = devOf(kind).find(x => x.deviceId === sel.value), old = devPick(key);
+  try {
+    if (!sel.value) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify({ id: sel.value, label: d ? d.label : (old && old.label) || "" }));
+  } catch (e) {}
+}
+micSel.addEventListener("change", () => devSave(micSel, "hq-mic", "audioinput"));
+outSel.addEventListener("change", () => { devSave(outSel, "hq-out", "audiooutput"); applySink(); });
+document.getElementById("micask").addEventListener("click", async () => {
+  try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach(t => t.stop()); } catch (e) {}
+  listDevices();
+});
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener("devicechange", () => listDevices());
+// What the call's getUserMedia asks for: the chosen mic, exactly, else the default.
+function micAudio(chosen = true) {
+  const a = { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, p = chosen && devPick("hq-mic");
+  if (!p || !p.id) return a;
+  const d = devFind(devOf("audioinput"), p);
+  return { ...a, deviceId: { exact: d ? d.deviceId : p.id } };
+}
+async function openMic() {
+  const want = micAudio();
+  try { return await navigator.mediaDevices.getUserMedia({ audio: want }); }
+  catch (e) {
+    if (!want.deviceId || !e || !/Overconstrained|NotFound|NotReadable/.test(e.name || "")) throw e;
+    errEl.textContent = "The chosen microphone isn't here, so the default one is used.";
+    return await navigator.mediaDevices.getUserMedia({ audio: micAudio(false) });
+  }
+}
+// Where her voice (and the thinking sound) plays; only where the browser can choose.
+function applySink() {
+  if (!CAN_SINK) return;
+  const d = devFind(devOf("audiooutput"), devPick("hq-out")), id = d ? d.deviceId : "";
+  try { audioEl.setSinkId(id).catch(() => {}); } catch (e) {}
+  try { if (audioCtx && audioCtx.setSinkId) audioCtx.setSinkId(id).catch(() => {}); } catch (e) {}
+}
+listDevices();
 function startAudio() {
   // H24: also made when the thinking sound is off, for the click on older iPhones.
   try {
@@ -1370,13 +1444,14 @@ async function call() {
   setState("connecting", "Connecting…");
   try {
     if (!window.isSecureContext || !navigator.mediaDevices) throw new Error("Open this page through the https address.");
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    stream = await openMic();  // H106: the mic chosen in Settings
+    listDevices().then(applySink);  // the names are known now; her voice goes where it was chosen
     pc = new RTCPeerConnection({ iceServers: [] });
     stream.getAudioTracks().forEach(t => pc.addTrack(t, stream));
     dc = pc.createDataChannel("chat", { ordered: true });
     dc.onmessage = onServerMessage;
     dc.onopen = () => { showTyping(); pingTimer = setInterval(() => { try { dc.send("ping: " + Date.now()); } catch (e) {} }, 1000); };
-    pc.ontrack = ev => { audioEl.srcObject = ev.streams[0] || new MediaStream([ev.track]); applyVoice(); audioEl.play().catch(() => {}); };  // H40
+    pc.ontrack = ev => { audioEl.srcObject = ev.streams[0] || new MediaStream([ev.track]); applyVoice(); applySink(); audioEl.play().catch(() => {}); };  // H40, H106
     pc.onconnectionstatechange = () => {
       if (pc && pc.connectionState === "connected") { setState("live", muted ? "Muted: she can't hear you" : onCallText()); }
       if (pc && (pc.connectionState === "failed" || pc.connectionState === "closed") && state !== "idle") { cleanup("Call ended"); }
