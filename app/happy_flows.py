@@ -6041,6 +6041,115 @@ console.log(JSON.stringify({{
         return (f"3 of 5 entries moved (older than {log_cycle.HOURS} hours), word for word, newest first; head and open "
                 "commitments stayed; nothing moved twice; Quick has only the last three hours")
 
+    # 77
+    async def flow77(self) -> str:
+        """H82, no Claude: her text may have bold and short lists for the chat; the voice never says the marks.
+        Checked: both kinds of call are told so; the speech filter takes the marks out, also when they stream in
+        pieces, and keeps numbers like 1.5 and 2026; the real call service driven by a stand-in speaks it plain
+        while the transcript gets it with its line breaks; the saved call keeps them (<br>) and gives them back
+        for the chat, and a continued call gets one line; the real call page in a headless browser shows bold
+        and lists for her, and his lines and anything like HTML stay plain text."""
+        from claude_llm import ClaudeSessionLLMService, SpeechFilter
+        from pipecat.processors.aggregators.llm_context import LLMContext
+        import transcript as tr
+        rule = config.FORMAT_RULE
+        need(rule in config.SYSTEM_PROMPT and rule in config.VOICE_RULES and "{format}" not in config.SYSTEM_PROMPT + config.VOICE_RULES,
+             "a kind of call isn't told it may use bold and lists")
+        need("No markdown" not in config.SYSTEM_PROMPT and "no markdown" not in config.VOICE_RULES, "a call is still told no markdown at all")
+
+        def spoken(pieces):
+            f = SpeechFilter()
+            return "".join(f.feed(x) for x in pieces) + f.flush()
+        text = "Three things:\n- **Bold** one\n- two\n\n1. three\n## Later\n1.5 hours in 2026, *really*."
+        whole = spoken([text])
+        need(whole == "Three things: Bold one. two.  three. Later. 1.5 hours in 2026, really.", f"the speech isn't plain: {whole!r}")
+        for n in range(1, len(text)):
+            need(spoken([text[:n], text[n:]]) == whole, f"cut at {n} the speech differs: {spoken([text[:n], text[n:]])!r}")
+        need(spoken(["Fine, ", "done."]) == "Fine, done.", "a plain reply changed")
+
+        class Stand:
+            model = "stand-in"
+            def __init__(self): self.replies = []
+            async def start(self): pass
+            async def stop(self): pass
+            def cancel_turn(self): pass
+            async def ask(self, text):
+                for piece in self.replies.pop(0):
+                    await asyncio.sleep(0.005)
+                    yield piece
+
+        folder = self.tmp / "h82calls"
+        script = tr.CallTranscript(folder, model="stand-in")
+        told: list[tuple[str, str]] = []
+        script.on_line = lambda who, t: told.append((who, t))
+        brain = Stand()
+        llm = ClaudeSessionLLMService(brain, transcript=script)
+        said: list[str] = []
+        async def nothing(*a, **k): pass
+        async def speak(t): said.append(t)
+        llm.push_frame = nothing
+        llm._push_llm_text = speak
+        llm.start_processing_metrics = llm.stop_processing_metrics = nothing
+        llm.start_ttfb_metrics = llm.stop_ttfb_metrics = nothing
+        brain.replies.append(["Two ", "things:\n", "- ", "**Call", " the bank**\n", "- Book ", "the dentist"])
+        await llm._process_context(LLMContext(messages=[{"role": "user", "content": "What's left?"}]))
+        voice = "".join(said)
+        need("*" not in voice and "- " not in voice and "Call the bank." in voice and voice.strip().endswith("Book the dentist"),
+             f"the voice got the marks: {voice!r}")
+        need(told and told[-1] == ("hq", "Two things:\n- **Call the bank**\n- Book the dentist"), f"the chat didn't get her text with its lines: {told[-1:]}")
+        script.reply("Plain answer.")
+        script.end()
+        raw = script.path.read_text()
+        need("**HQ:** Two things:<br>- **Call the bank**<br>- Book the dentist\n" in raw, "the saved call doesn't keep her lines")
+        lines = tr.read_lines(script.path)
+        hers = [ln["text"] for ln in lines if ln["who"] == "hq"]
+        need(hers == ["Two things:\n- **Call the bank**\n- Book the dentist", "Plain answer."], f"the saved call gives back: {hers}")
+        cont = tr.continue_from(script.path.stem, folder)
+        need(cont and "You: Two things: - **Call the bank** - Book the dentist" in cont["text"] and "\n" not in cont["text"].split("\n")[-1],
+             f"a continued call doesn't get her line as one line: {cont and cont['text']!r}")
+
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const check = (name, ok, why) => out.push(name + ":" + (ok ? "ok" : "WRONG " + why));
+  setState("live", "On the call");
+  const send = (who, text) => onServerMessage({ data: JSON.stringify({ type: "hq-chat", who, text }) });
+  send("hq", "Two things:\n- **Call the bank** today\n- Book *the dentist*\n\n1. first\n2. second");
+  send("user", "Is **this** <b>bold</b>?");
+  send("hq", "Plain <img src=x onerror=window.bad=1> line.");
+  await wait(100);
+  const msgs = [...chatLog.querySelectorAll(".msg")], h = msgs[0], me = msgs[1], plain = msgs[2];
+  check("bold", h.querySelector("strong") && h.querySelector("strong").textContent === "Call the bank", h.innerHTML);
+  check("italic", h.querySelector("em") && h.querySelector("em").textContent === "the dentist", h.innerHTML);
+  check("ul", h.querySelectorAll("ul > li").length === 2, h.innerHTML);
+  check("ol", h.querySelectorAll("ol > li").length === 2 && h.querySelector("ol").start === 1, h.innerHTML);
+  check("no-marks", !h.textContent.includes("*") && !h.textContent.includes("- "), h.textContent);
+  check("his-plain", me.textContent === "Is **this** <b>bold</b>?" && !me.querySelector("b,strong"), me.innerHTML);
+  check("no-html", !plain.querySelector("img") && plain.textContent.includes("<img") && !window.bad, plain.innerHTML);
+  const pre = document.createElement("pre"); pre.id = "h82"; pre.textContent = "H82RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f = self.tmp / "h82.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run",
+                                          *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                          f"--user-data-dir={self.tmp / 'h82-profile'}", "--window-size=390,844",
+                                          "--virtual-time-budget=20000", "--dump-dom", f.as_uri()], timeout=90)
+        m = re.search(r'<pre id="h82">H82RESULT (.*?) END</pre>', r.stdout)
+        need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        say(f"   {m.group(1)}")
+        need(all(part.endswith(":ok") for part in m.group(1).split(" | ")), f"the chat isn't formatted right: {m.group(1)}")
+        return ("both calls may use bold and short lists; the voice gets them plain (also in pieces, numbers kept); "
+                "the chat and the saved call keep her lines; the call page shows bold, italics and lists, his lines and HTML stay text")
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -6393,6 +6502,7 @@ FLOWS = {
     74: ("H100: the coaching log keeps three hours; older entries move to its archive, calls load only those", False, "flow74"),
     75: ("F18: the status page on the phone never gets wider than the screen; it only scrolls up and down", False, "flow75"),
     76: ("H78: his own calendar changes go without asking; with other people in it, or not looked at first, they don't", False, "flow76"),
+    77: ("H82: her text shows formatted in the call's chat (bold, lists) while the voice stays plain", False, "flow77"),
 }
 
 

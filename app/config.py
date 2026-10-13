@@ -99,12 +99,19 @@ Everything you write is turned into speech the moment you write it, and {user} h
 How to talk:
 - Short spoken sentences, like a person on the phone. Usually one to three sentences per reply.
 - Keep your first sentence especially short, a few words, so he hears you right away.
-- Plain words only. No markdown, no lists, no headings, no emojis, no URLs, no code.
+{format}
 - Say numbers, dates and times the way you would say them out loud.
 - If you didn't catch something, say so briefly and ask him to repeat it.
 - Their words come to you through speech recognition, so names and words in other \
 languages can be misheard; go with the most likely meaning.
 - If a message starts with a note in square brackets, it is from the call system, not from {user}."""
+
+# H82: what she writes is also shown in the chat on the call page, formatted there (bold, lists); the
+# speech gets it without the marks (claude_llm.SpeechFilter). Both kinds of call get this line.
+FORMAT_RULE = """- Your text also shows in the chat on the call page, formatted there. You may use **bold** \
+for a word that matters, and when you name several things, a short list: each item on its own line starting \
+with "- " or "1. ". The marks are never spoken, so write each item as a short phrase that also sounds right \
+read out loud. Nothing else: no headings, tables, links, code, emojis or single-asterisk italics."""
 
 # H8: added to SYSTEM_PROMPT in free mode. Claude's wording.
 FREE_RULES = """
@@ -162,8 +169,9 @@ don't end every reply with a question; on the phone a plain "Done." is fine.
 How to talk on the call:
 - Follow rules.md as a person on the phone would: short spoken sentences, usually one to \
 three per reply. Keep the first sentence especially short, so he hears you right away.
-- Never write anything that can't be said out loud: no markdown, lists, headings, links, \
-file names, paths, code, commands or emojis. Say dates, times and numbers the way you'd say them.
+- Never write anything that can't be said out loud: no headings, tables, links, file names, \
+paths, code, commands or emojis. Say dates, times and numbers the way you'd say them.
+{format}
 - Don't announce a tool or say you're thinking (H76): while you work, the call page plays a soft \
 thinking sound, so stay quiet and answer when you have it. Never say you're doing or have done something \
 that may still need his yes. When you're done, say the result plainly. Don't narrate each step.
@@ -264,11 +272,11 @@ it says the one-time setup isn't done, tell him he types one line once in Termin
 password; it's on the HQ roadmap under H45, and he can do it next time he's at the laptop.
 """
 # M1: the routine's scripts are in HQ, outside the folder the call works in.
-VOICE_RULES = VOICE_RULES.replace("{HQ}", str(ROOT))
+VOICE_RULES = VOICE_RULES.replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:
     VOICE_RULES += "\nFrom the user's own notes for calls:\n" + ME["on_calls"] + "\n"
-SYSTEM_PROMPT = SYSTEM_PROMPT.replace("{user}", USER)
+SYSTEM_PROMPT = SYSTEM_PROMPT.replace("{format}", FORMAT_RULE).replace("{user}", USER)
 FREE_RULES = FREE_RULES.replace("{user}", USER)
 HANGUP_RULES = HANGUP_RULES.replace("{user}", USER)
 VOICE_RULES = VOICE_RULES.replace("{user}", USER)

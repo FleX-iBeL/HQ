@@ -105,10 +105,12 @@ class CallTranscript:
             pass
 
     def reply(self, words: str, *, cut_off: bool = False) -> None:
-        words = _one_line(words)
+        # H82: her lines keep their line breaks (a list), for the chat; in the file they are <br>.
+        words = _keep_lines(words)
         if not words and not cut_off:
             return
         self._tell("hq", (words or "…") + (" (cut off)" if cut_off else ""))
+        words = words.replace("\n", "<br>")
         if cut_off:
             self._line(f"**HQ:** {words or '…'} *(cut off)*")
         else:
@@ -158,7 +160,7 @@ def read_lines(path: Path) -> list[dict]:
             text = rest[len(config.USER_LABEL) + 5:].strip() + (" (Cancel button)" if "Cancel button" in marks else "")
             out.append({"who": "user", "text": text, "at": hhmm, "cancelled": "cancelled" in marks})
         elif rest.startswith(_HERS):
-            text = rest.split(":** ", 1)[1].strip() + (" (cut off)" if "cut off" in marks else "")
+            text = rest.split(":** ", 1)[1].strip().replace("<br>", "\n") + (" (cut off)" if "cut off" in marks else "")
             out.append({"who": "hq", "text": text, "at": hhmm})
         elif rest.startswith("*filler: ") and rest.endswith("*"):
             out.append({"who": "filler", "text": rest[9:-1].strip(), "at": hhmm})
@@ -246,7 +248,7 @@ def continue_from(name: str, folder: Path | None = None, max_chars: int | None =
     said = [ln for ln in data["lines"] if ln["who"] != "filler" and not ln.get("cancelled")]
     if not said:
         return None
-    rows = [f"{ln['at']} {config.USER_LABEL if ln['who'] == 'user' else 'You'}: {ln['text']}" for ln in said]
+    rows = [f"{ln['at']} {config.USER_LABEL if ln['who'] == 'user' else 'You'}: {_one_line(ln['text'])}" for ln in said]
     kept, size = [], 0
     for row in reversed(rows):
         if kept and size + len(row) + 1 > limit:
@@ -262,3 +264,13 @@ def continue_from(name: str, folder: Path | None = None, max_chars: int | None =
 
 def _one_line(text: str) -> str:
     return " ".join((text or "").split()).replace("`", "'")
+
+
+def _keep_lines(text: str) -> str:
+    """H82: like _one_line, but her line breaks stay (one at most between two lines)."""
+    lines = [_one_line(line) for line in (text or "").replace("<br>", "\n").splitlines()]
+    out: list[str] = []
+    for line in lines:
+        if line or (out and out[-1]):
+            out.append(line)
+    return "\n".join(out).strip()

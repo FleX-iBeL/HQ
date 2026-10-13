@@ -283,6 +283,7 @@ class ClaudeSessionLLMService(LLMService):
         watch = self.create_task(self._watch_for_fillers(turn), "filler-watch") if self.fillers else None
         open_text = False  # text pushed since the last response start (for flushing at a tool)
         mark = MarkFilter(config.HANGUP_MARK)  # H75: her hang-up mark is never spoken
+        speech = SpeechFilter()  # H82: bold and list marks are for the chat, never spoken
         try:
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
@@ -315,11 +316,15 @@ class ClaudeSessionLLMService(LLMService):
                 turn["last_text"] = time.perf_counter()
                 if piece.strip():
                     open_text = True
-                await self._push_llm_text(piece)
+                said = speech.feed(piece)
+                if said:
+                    await self._push_llm_text(said)
             tail = mark.flush()
             if tail:
                 turn["reply"] += tail
-                await self._push_llm_text(tail)
+            said = speech.feed(tail) + speech.flush()
+            if said:
+                await self._push_llm_text(said)
             if mark.found:
                 turn["hangup"] = True
                 if self.on_hangup is not None and not turn.get("cancelled"):
@@ -492,6 +497,62 @@ class MarkFilter:
     def flush(self) -> str:
         b, self.buf = self.buf, ""
         return b
+
+
+
+class SpeechFilter:
+    """H82: her text may have bold and short lists, for the chat on the call page; the voice gets it
+    without the marks. Asterisks and backticks are dropped; a list or heading mark at the start of a
+    line ("- ", "* ", "1. ", "## ") is dropped, also when it streams in pieces (a possible start of one
+    is held back); a line break becomes a sentence end when the line didn't end in one, so each list
+    item is said as its own phrase. feed() returns what may be spoken now; flush() what was held."""
+
+    _MARK = re.compile(r"[ \t]*(?:[-*+\u2022]|\d{1,3}[.)]|#{1,6})[ \t]+")
+    _MAYBE = re.compile(r"[ \t]*(?:[-*+\u2022]|\d{1,3}[.)]?|#{1,6})?")
+    _ENDS = ".!?:;,"
+
+    def __init__(self):
+        self.buf = ""
+        self.line_start = True
+        self.last = ""  # the last character spoken that wasn't a space
+
+    def feed(self, piece: str) -> str:
+        s, self.buf = self.buf + piece, ""
+        out = []
+        i = 0
+        while i < len(s):
+            if self.line_start:
+                rest = s[i:]
+                m = self._MARK.match(rest)
+                if m:
+                    i += m.end()
+                    self.line_start = False
+                    continue
+                if self._MAYBE.fullmatch(rest):
+                    self.buf = rest  # could still become a mark: wait for the next piece
+                    break
+                self.line_start = False
+            ch = s[i]
+            i += 1
+            if ch == "\n":
+                if self.last and self.last not in self._ENDS:
+                    out.append(".")
+                    self.last = "."
+                out.append(" ")
+                self.line_start = True
+            elif ch in "*`":
+                continue
+            else:
+                out.append(ch)
+                if not ch.isspace():
+                    self.last = ch
+        return "".join(out)
+
+    def flush(self) -> str:
+        b, self.buf = self.buf, ""
+        self.line_start = True
+        self.last = ""
+        return b.replace("*", "").replace("`", "")
 
 
 def _norm(s: str) -> str:
