@@ -464,14 +464,16 @@ function agentColour(a) {
   const x = typeof a === "string" ? (AGENTS[a] || agentNamed(a)) : a;
   return x && /^#[0-9a-fA-F]{6}$/.test(x.colour || "") ? x.colour : null;
 }
-function onCall() { return [agent]; }  // H79 (three-way) adds the second one here
+// H79: on a three-way call both are on it (the server says who, hq-three-way); else the one called.
+let panel = [];
+function onCall() { return panel.length ? panel : [agent]; }
 function paintTint(ids) {
   const cs = (ids || []).map(agentColour).filter(Boolean), root = document.documentElement;
   root.classList.toggle("tinted", cs.length > 0);
   if (cs.length) { root.style.setProperty("--tintA", cs[0]); root.style.setProperty("--tintB", cs[1] || cs[0]); }
 }
 function herColour(div, who) { const c = agentColour(who || agent); if (c) div.style.setProperty("--her", c); }
-function callName() { return (AGENTS[agent] || {name: "HQ"}).name + (free ? " · Free" : ""); }
+function callName() { return onCall().map(id => (AGENTS[id] || {name: "HQ"}).name).join(" & ") + (free ? " · Free" : ""); }
 // H46: a voice for each agent, in Settings ("Voice Pepper Potts", "Voice Donna Paulsen"). Each is remembered
 // on this device; the first time, the one voice chosen before H46, else her default.
 const voicesEl = document.getElementById("voices"), voiceOpts = document.getElementById("voiceopts");
@@ -709,6 +711,11 @@ function onServerMessage(ev) {
     else if (m && m.type === "hq-cancellable") showCancel(m.on === true);
     else if (m && m.type === "hq-cancelled") markCancelled();
     else if (m && m.type === "hq-hangup" && state !== "idle") hangup();  // H75: she hung up after his goodbye
+    else if (m && m.type === "hq-switch" && state !== "idle") switchTo(m.agent, m.call);  // H79: she put the other one on
+    else if (m && m.type === "hq-three-way" && Array.isArray(m.agents)) {  // H79: the other one joined
+      panel = m.agents.filter(id => AGENTS[id]); paintTint(onCall());
+      if (state === "live" && !muted) setState("live", onCallText());
+    }
   } catch (e) {}
 }
 
@@ -1056,7 +1063,21 @@ async function readCall(name) {
 // call, and Free calls are never saved). It starts a call with that call's agent (else the one picked), the new
 // call gets what was said on it, she greets with "let's continue from where we left off", and the chat starts
 // with the earlier lines.
-let histShown = null, continueFrom = null;
+let histShown = null, continueFrom = null, handoverNext = false;
+// H79: she put another agent on: this call ends as a hang-up does, and the other one is called right away,
+// continuing this call (the server reads what was said on it), greeting as if she picked up the phone.
+async function switchTo(id, name) {
+  if (!AGENTS[id]) { hangup(); return; }
+  hangup();
+  let data = null;
+  try { if (name) { const r = await fetch("api/calls/" + encodeURIComponent(name), { cache: "no-store" }); if (r.ok) data = await r.json(); } } catch (e) {}
+  await new Promise(res => setTimeout(res, 700));  // the hang-up has closed
+  if (state !== "idle") return;
+  agent = id; mode = AGENTS[id].load; showMode();
+  try { localStorage.setItem("hq-agent", agent); localStorage.setItem("hq-mode", mode); } catch (e) {}
+  continueFrom = data && data.lines ? data : null; handoverNext = !!continueFrom;
+  call();
+}
 const histCont = document.getElementById("histcont"), histContNote = document.getElementById("histcontnote");
 function agentNamed(name) { return Object.values(AGENTS).find(a => a.name === name); }
 function showHistFoot() {
@@ -1435,11 +1456,13 @@ async function call() {
   clearChat(); chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showLayout();
   // H60: a continued call starts with the earlier call's lines in the chat, then a line where this one begins.
   const cont = continueFrom; continueFrom = null; contLabel = "";
+  const handover = handoverNext && !!cont; handoverNext = false;  // H79
   if (cont && !free) {
-    contLabel = "continuing " + cont.started;
-    chatTitle.textContent = "Continuing · " + cont.started;
+    contLabel = handover ? "from " + cont.agent : "continuing " + cont.started;
+    chatTitle.textContent = handover ? (AGENTS[agent] || {}).name + " · from " + cont.agent : "Continuing · " + cont.started;
     for (const l of cont.lines) { if (l.who === "filler") continue; addChat(l.who, l.text, true, l.agent || cont.agent); if (l.cancelled) markCancelled(); }
-    const d = document.createElement("div"); d.className = "divider"; d.textContent = "Continued now"; chatLog.appendChild(d);
+    const d = document.createElement("div"); d.className = "divider";
+    d.textContent = handover ? (AGENTS[agent] || {}).name + " picked up" : "Continued now"; chatLog.appendChild(d);
   }
   setState("connecting", "Connecting…");
   try {
@@ -1459,7 +1482,9 @@ async function call() {
     await pc.setLocalDescription(await pc.createOffer());
     await gathered(pc);
     const r = await fetch("api/offer", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, agent, free, voice: voiceFor(agent), ...(cont && !free ? { continue: cont.name } : {}) } }) });
+      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, agent, free, voice: voiceFor(agent),
+        voices: Object.fromEntries(Object.keys(AGENTS).map(id => [id, voiceFor(id)])),  // H79: a three-way call speaks in both
+        ...(cont && !free ? { continue: cont.name } : {}), ...(handover && !free ? { handover: true } : {}) } }) });
     if (!r.ok) throw new Error("The call server said " + r.status);
     const answer = await r.json();
     await pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });
@@ -1495,6 +1520,7 @@ hangShade.addEventListener("click", () => askHangup(false));
 function cleanup(text) {
   askHangup(false);
   contLabel = "";  // H60
+  panel = [];  // H79
   clearInterval(pingTimer); pingTimer = null;
   try { if (dc) dc.close(); } catch (e) {}
   try { if (pc) { pc.onconnectionstatechange = null; pc.close(); } } catch (e) {}

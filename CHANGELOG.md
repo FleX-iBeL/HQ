@@ -5,6 +5,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ## Coming next
 
 ### New
+- Ask for another agent by name on a call. "Give me Pepper" and she puts her on: the call ends the way a hang-up does (notes and all) and Pepper picks up a new call right away, knowing what was said. Or ask for a three-way call: both stay in the same conversation, the one you name (or whose thing it is) answers, in her own voice and model, and the screen is split in both colours. Not sure which you mean, and she asks (H79).
 - The planned work has a total too, like the job list: the Scheduled heading on the status page and the scheduler's list on calls say how long all planned items take together and when the last one should be done, after the job list (H107).
 - In Settings, choose which microphone the call listens with (every one the device has, like AirPods, the phone's own or a podcast mic), and, where the browser allows it, where her voice plays. Remembered on each device. An experiment: on an iPhone the sound can't be chosen by a page.
 - A notes button on the call page, right above Past calls, always there: your own quick notes to go through with your agent whenever you like, each cleared once it's done (or all at once), and a small paper space under them to write or doodle on with a finger or the mouse. Your agent can read both on a call.

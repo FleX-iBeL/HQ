@@ -40,6 +40,7 @@ class CallTranscript:
         self.on_line: Callable[[str, str], None] | None = None  # H6: (who, text) for the call page
         self.path: Path | None = None
         self._last_user = ""  # H31: the last line he said, so Cancel can mark it
+        self.speaker = ""  # H79: on a three-way call, who answers now; her lines say **HQ (Name):**
         if not keep:
             return  # H7: free mode, nothing written to disk
         folder = folder or config.CALLS
@@ -111,10 +112,11 @@ class CallTranscript:
             return
         self._tell("hq", (words or "…") + (" (cut off)" if cut_off else ""))
         words = words.replace("\n", "<br>")
+        hq = f"**HQ ({self.speaker}):**" if self.speaker else "**HQ:**"
         if cut_off:
-            self._line(f"**HQ:** {words or '…'} *(cut off)*")
+            self._line(f"{hq} {words or '…'} *(cut off)*")
         else:
-            self._line(f"**HQ:** {words}")
+            self._line(f"{hq} {words}")
 
     def filler(self, words: str) -> None:
         self._tell("filler", _one_line(words))
@@ -133,6 +135,7 @@ class CallTranscript:
 
 # Her lines: **HQ:** since H54 (11 October 2026); saved calls from before still say the old name.
 _HERS = ("**HQ:** ", "**Jarvis:** ")
+_HERS_ON_THREE_WAY = re.compile(r"^\*\*HQ \(([^)*]+)\):\*\* ")  # H79: **HQ (Donna):** on a three-way call
 _LINE = re.compile(r"^- (\d\d:\d\d):\d\d (.*)$")
 _MARK = re.compile(r"\s*\*\((typed|cut in|cut off|cancelled|Cancel button)\)\*\s*$")
 
@@ -159,9 +162,10 @@ def read_lines(path: Path) -> list[dict]:
         if rest.startswith(f"**{config.USER_LABEL}:** "):
             text = rest[len(config.USER_LABEL) + 5:].strip() + (" (Cancel button)" if "Cancel button" in marks else "")
             out.append({"who": "user", "text": text, "at": hhmm, "cancelled": "cancelled" in marks})
-        elif rest.startswith(_HERS):
+        elif rest.startswith(_HERS) or _HERS_ON_THREE_WAY.match(rest):
             text = rest.split(":** ", 1)[1].strip().replace("<br>", "\n") + (" (cut off)" if "cut off" in marks else "")
-            out.append({"who": "hq", "text": text, "at": hhmm})
+            who3 = _HERS_ON_THREE_WAY.match(rest)
+            out.append({"who": "hq", "text": text, "at": hhmm, **({"agent": who3.group(1)} if who3 else {})})
         elif rest.startswith("*filler: ") and rest.endswith("*"):
             out.append({"who": "filler", "text": rest[9:-1].strip(), "at": hhmm})
     return [line for line in out if line["text"]]
@@ -236,7 +240,8 @@ def read_call(name: str, folder: Path | None = None) -> dict | None:
     return {**_about(path, lines), "lines": lines}
 
 
-def continue_from(name: str, folder: Path | None = None, max_chars: int | None = None) -> dict | None:
+def continue_from(name: str, folder: Path | None = None, max_chars: int | None = None,
+                  me: str | None = None) -> dict | None:
     """H60: an earlier saved call, to continue on a new call: when it was, its agent, and what was said
     as a block of text for the new call's Claude (his lines and hers as read_lines gives them, her waiting
     lines and cancelled lines left out). A long call is trimmed from the start, so the newest is kept.
@@ -248,7 +253,13 @@ def continue_from(name: str, folder: Path | None = None, max_chars: int | None =
     said = [ln for ln in data["lines"] if ln["who"] != "filler" and not ln.get("cancelled")]
     if not said:
         return None
-    rows = [f"{ln['at']} {config.USER_LABEL if ln['who'] == 'user' else 'You'}: {_one_line(ln['text'])}" for ln in said]
+    # H79: me is the agent who continues it; lines another agent said (a hand-over, a three-way call) carry her name
+    def who(ln: dict) -> str:
+        if ln["who"] == "user":
+            return config.USER_LABEL
+        hers = ln.get("agent") or data.get("agent") or ""
+        return hers if me and hers and hers != me else "You"
+    rows = [f"{ln['at']} {who(ln)}: {_one_line(ln['text'])}" for ln in said]
     kept, size = [], 0
     for row in reversed(rows):
         if kept and size + len(row) + 1 > limit:

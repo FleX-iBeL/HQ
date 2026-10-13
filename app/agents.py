@@ -329,6 +329,73 @@ def public(agent: dict) -> dict:
             "character": agent.get("character", ""), "default": is_default(agent)}
 
 
+# H79 (12 October 2026, call at 14:05), in the user's words: "hey, can you put Pepper on for a moment, please? Or
+# hey, give me Pepper" and "if I ask, hey, let's make a three-way call, then we turn on the setting that it stays in
+# the same conversation. And if I don't specify it enough, then it could be, hey, do you want a three-way call or do
+# you want I hand over the phone". She ends her reply with one of these marks; the call server takes it out of the
+# speech and does the rest (claude_llm.Marks, bot.py).
+SWITCH_MARK = "[[SWITCH {name}]]"
+THREE_WAY_MARK = "[[THREE-WAY {name}]]"
+
+
+def switch_marks(others: list[dict]) -> dict[str, tuple[str, str]]:
+    """Every mark she may end a reply with to bring in another agent: mark -> ("switch"|"three-way", agent id)."""
+    out = {}
+    for a in others:
+        out[SWITCH_MARK.format(name=a["name"])] = ("switch", a["id"])
+        out[THREE_WAY_MARK.format(name=a["name"])] = ("three-way", a["id"])
+    return out
+
+
+def switch_rules(agent: dict, others: list[dict], user: str = "the user") -> str:
+    """H79: added to her persona: the other agents, and how to hand over or start a three-way call."""
+    if not others:
+        return ""
+    who = "; ".join(f"{a['name']} ({a['speciality']})" for a in others)
+    one = others[0]["name"]
+    return (
+        f"\n# The other agents\n\n"
+        f"Besides you, {user}'s HQ has: {who}.\n"
+        f"- When {user} asks to have another one on the phone instead of you (\"put {one} on\", \"give me {one}\", "
+        f"\"can I talk to {one}\"), say a short line that you're putting her on, in your own character, and end "
+        f"that reply with {SWITCH_MARK.format(name=one)} (with her name) as the very last thing. The call then ends "
+        f"the way a hang-up does (your notes are written as usual) and she picks up a new call already knowing "
+        f"what was said.\n"
+        f"- When he asks for a three-way call with her, or to bring her in while you stay, say a short line that "
+        f"she's joining and end that reply with {THREE_WAY_MARK.format(name=one)} (with her name). From then on "
+        f"you're both in this same conversation: each turn the call system says who answers, and that one answers "
+        f"in her own character, model and voice.\n"
+        f"- When it isn't clear which he wants, ask him first, secretary style: a three-way call, or hand over "
+        f"the phone. No mark until he's said.\n"
+        f"Never write these marks in any other reply, and never say them; they are not spoken.\n"
+    )
+
+
+def _stems(text: str) -> set[str]:
+    return set(re.findall(r"[a-z]{4,}", text.lower())) - {"your", "with", "that", "this", "what", "about", "have"}
+
+
+def pick(panel: list[dict], words: str, last: str | None = None) -> dict:
+    """H79: on a three-way call, who answers this turn. In the user's words (12 October 2026): "which person would
+    make most sense". The one he names (named both: the one named last); else the one whose speciality shares the
+    most words with his (Claude's choice: words of four letters or more, "plan" matches "planning"); else the one
+    who answered last."""
+    low = words.lower()
+    named = [a for a in panel if re.search(rf"\b{re.escape(a['name'].lower())}\b", low)]
+    if named:
+        return max(named, key=lambda a: low.rfind(a["name"].lower()))
+    his = _stems(low)
+
+    def score(a: dict) -> int:
+        return sum(1 for s in _stems(a["speciality"]) if any(w.startswith(s) or s.startswith(w) for w in his))
+    scores = [(score(a), a) for a in panel]
+    best = max(s for s, _ in scores)
+    tops = [a for s, a in scores if s == best]
+    if best > 0 and len(tops) == 1:
+        return tops[0]
+    return next((a for a in panel if a["id"] == last), panel[0])
+
+
 def describe(folder: Path, user: str | None = None) -> str:
     """H77: every agent's character as it is now in this workspace, marked HQ's default or changed."""
     out = []

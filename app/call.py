@@ -46,7 +46,8 @@ class Call:
     def __init__(self, *, model: str | None = None, voice: str | None = None, calls_dir: Path | None = None,
                  wrap_up: str = config.WRAP_UP, test_mode: bool = False, waiting_lines: bool = True,
                  free: bool = False, load: str | None = None, loops: "open_loops.OpenLoops | None" = None,
-                 agent: str | None = None, continues: str | None = None):
+                 agent: str | None = None, continues: str | None = None, handover: bool = False,
+                 voices: dict | None = None):
         self._loops = loops
         self.model = config.MODEL_ALIASES.get(model or "", model or config.MODEL)
         self.free = free
@@ -57,9 +58,19 @@ class Call:
         # goes after the call rules. Without one asked for, the agent with this call's load.
         self.agent = agents.find(config.FOLDER, agent, self.load)
         persona = agents.persona(self.agent, config.USER)
+        # H79: the other agents she can hand over to or bring in (never on Free: one plain Claude)
+        self.others = [] if free else [a for a in agents.visible(config.FOLDER) if a["id"] != self.agent["id"]]
+        persona += agents.switch_rules(self.agent, self.others, config.USER)
+        self.panel: list[dict] = [self.agent]  # H79: who's on the call; two on a three-way call
+        self.speaker = self.agent  # H79: who answers now
+        self.voices: dict[str, str] = {k: str(v) for k, v in (voices or {}).items()}  # H79: each agent's voice from the page
+        self.switched_to: dict | None = None  # H79: she handed the call over to this one
         self.wrap_up_mode = "off" if free else wrap_up  # "on", "dry" or "off"
         # H60: the earlier call this one continues (read before this call's own transcript exists)
-        self.continued = None if free or not continues else transcript.continue_from(continues, calls_dir)
+        # H79: handover: the earlier call's agent just put her on (he asked for her); she picks up the phone
+        self.handover = bool(handover)
+        self.continued = None if free or not continues else transcript.continue_from(continues, calls_dir,
+                                                                                     me=self.agent["name"])
         self.transcript = CallTranscript(calls_dir, model=self.model, keep=not free, agent=self.agent["name"],
                                          continues=self.continued)
         if free:
@@ -72,16 +83,19 @@ class Call:
             self.brain = make_brain(self.model, self.policy, load=self.load, persona=persona)
         self.stt = make_stt(quiet=free)
         self.voice = voice if voice in config.VOICES else config.VOICE
+        self.voices.setdefault(self.agent["id"], self.voice)
         self.tts = make_tts(self.voice)
         self.fillers = FillerPlayer(self.tts._kokoro, voice=self.voice, on_play=self.transcript.filler,
                                     waiting_lines=waiting_lines,
                                     # H76: her own greetings, in her character
-                                    greetings=config.continue_greetings(self.agent) if self.continued
-                                    else config.greetings_now(self.agent))
+                                    greetings=config.continue_greetings(self.agent)
+                                    if self.continued and not self.handover else config.greetings_now(self.agent))
         self.llm = ClaudeSessionLLMService(
             self.brain, stop_brain_on_end=False, fillers=self.fillers,
             policy=self.policy, transcript=self.transcript,
         )
+        self.llm.switch_marks = agents.switch_marks(self.others)
+        self.llm.before_turn = self._before_turn
         self.prime_s: float | None = None
         self.open_loops_note = ""
         self.wrap_up_reply: str | None = None
@@ -92,13 +106,72 @@ class Call:
         """H60: what the new call's Claude gets about the call it continues."""
         c = self.continued
         who = f" with {c['agent']}" if c.get("agent") else ""
+        if self.handover and c.get("agent") and c["agent"] != self.agent["name"]:
+            return (
+                f"{c['agent']} just put you on the phone: {config.USER} asked for you on the call of {c['started']}, "
+                "so the call system greets him as you picking up. Carry on right where it was, like taking over the "
+                "phone, knowing what was said, without reading it back. What was said on that call, oldest first "
+                f"(\"You\" is you; {c['agent']}'s lines carry her name):\n"
+                f"<earlier-call>\n{c['text']}\n</earlier-call>\n"
+            )
         return (
             f"This call continues the earlier call of {c['started']}{who}. The call system greets "
             f"{config.USER} by saying you're picking up where you left off, so pick up from there: "
             "know what was said and where it ended, without reading it back unless asked. "
-            "What was said on that call, oldest first (\"You\" is you):\n"
+            "What was said on that call, oldest first (\"You\" is you; another agent's lines carry her name):\n"
             f"<earlier-call>\n{c['text']}\n</earlier-call>\n"
         )
+
+    # -- H79: another agent on the call -----------------------------------------
+
+    def voice_for(self, agent: dict) -> str:
+        v = self.voices.get(agent["id"]) or agent.get("voice") or config.VOICE
+        return v if v in config.VOICES else config.VOICE
+
+    async def three_way(self, other_id: str) -> dict | None:
+        """She brought another agent in: from the next turn both are on the call, in the same conversation."""
+        other = next((a for a in self.others if a["id"] == other_id), None)
+        if other is None or other in self.panel:
+            return None
+        self.panel.append(other)
+        self._joined = other
+        self.transcript.note(f"{other['name']} joined: a three-way call with {', '.join(a['name'] for a in self.panel)}")
+        return other
+
+    def _speak_as(self, agent: dict) -> None:
+        """Her voice from now on (the fillers too)."""
+        v = self.voice_for(agent)
+        from pipecat.transcriptions.language import Language
+        self.tts._settings.voice = v
+        self.tts._settings.language = self.tts.language_to_service_language(
+            Language.EN_GB if config.voice_lang(v) == "en-gb" else Language.EN)
+        self.fillers._voice = v
+
+    async def _before_turn(self, words: str) -> list[str]:
+        """On a three-way call: who answers this turn, her model and voice, and a note saying so."""
+        if len(self.panel) < 2:
+            return []
+        who = agents.pick(self.panel, words, self.speaker["id"])
+        notes = []
+        joined, self._joined = getattr(self, "_joined", None), None
+        if joined is not None:
+            notes.append(f"[Call system: {joined['name']} is now on this call too, a three-way call. Who she is:"
+                         f"{agents.persona(joined, config.USER)}]")
+        if who is not self.speaker:
+            model = config.MODEL_ALIASES.get(who["model"], who["model"])
+            if self.brain._client and model != self.brain.model:
+                try:
+                    await self.brain._client.set_model(model)
+                    self.brain.model = model
+                except Exception as e:
+                    logger.warning(f"H79: model switch to {model} failed: {e!r}")
+            self._speak_as(who)
+            self.speaker = who
+        self.transcript.speaker = who["name"]
+        rest = ", ".join(a["name"] for a in self.panel if a is not who)
+        notes.append(f"[Call system: three-way call with {rest}. {who['name']} answers this turn: answer as "
+                     f"{who['name']}, in her character, and only as her.]")
+        return notes
 
     def _on_decision(self, tool, summary, decision):
         if tool in SESSION_TOOLS and tool != "Skill":
@@ -145,7 +218,9 @@ class Call:
             return
         self._finished = True
         try:
-            self.transcript.note(f"{self.agent['name']} hung up after the goodbye" if self.ended_by_agent
+            self.transcript.note(f"{self.speaker['name']} put {self.switched_to['name']} on: the call goes on with her"
+                                 if self.switched_to else
+                                 f"{self.speaker['name']} hung up after the goodbye" if self.ended_by_agent
                                  else f"{config.USER_LABEL} hung up")
             self.transcript.end()
             if self.free:

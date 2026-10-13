@@ -95,6 +95,13 @@ class ClaudeSessionLLMService(LLMService):
         self._cancellable = False
         self._late_cancel: str | None = None  # H38: the Cancel button's line, waiting to go in as his turn
         self.on_hangup = None  # H75: async, called once her goodbye has been heard (bot.py ends the call)
+        # H79: the marks that bring in another agent (agents.switch_marks: mark -> ("switch"|"three-way", id)),
+        # async on_switch(id) once her hand-over line has been heard, async on_three_way(id) right after the reply,
+        # and async before_turn(words) -> notes for this turn (a three-way call picks who answers; Call sets it).
+        self.switch_marks: dict[str, tuple[str, str]] = {}
+        self.on_switch = None
+        self.on_three_way = None
+        self.before_turn = None
         self._hangup_task = None
         self._spoke_at = 0.0  # H75: when her voice last started, and stopped
         self._quiet_at = 0.0
@@ -267,6 +274,11 @@ class ClaudeSessionLLMService(LLMService):
                 )
             if self.transcript:
                 self.transcript.note((f"{config.USER} said yes to: " if yes else "not approved: ") + asked)
+        if self.before_turn is not None:
+            try:
+                notes = list(await self.before_turn(words)) + notes
+            except Exception as e:
+                logger.error(f"H79: picking who answers failed: {e!r}")
         text = "\n".join(notes + [words])
 
         turn = {
@@ -282,7 +294,8 @@ class ClaudeSessionLLMService(LLMService):
         reply = self.brain.ask(text)
         watch = self.create_task(self._watch_for_fillers(turn), "filler-watch") if self.fillers else None
         open_text = False  # text pushed since the last response start (for flushing at a tool)
-        mark = MarkFilter(config.HANGUP_MARK)  # H75: her hang-up mark is never spoken
+        # H75: her hang-up mark is never spoken; H79: nor the marks that bring in another agent
+        mark = Marks([config.HANGUP_MARK, *self.switch_marks])
         speech = SpeechFilter()  # H82: bold and list marks are for the chat, never spoken
         try:
             await self.push_frame(LLMFullResponseStartFrame())
@@ -325,11 +338,22 @@ class ClaudeSessionLLMService(LLMService):
             said = speech.feed(tail) + speech.flush()
             if said:
                 await self._push_llm_text(said)
-            if mark.found:
+            asked = [self.switch_marks[m] for m in self.switch_marks if mark.found(m)]
+            if mark.found(config.HANGUP_MARK):
                 turn["hangup"] = True
                 if self.on_hangup is not None and not turn.get("cancelled"):
                     logger.info("H75: she said goodbye and hangs up once it has been heard")
                     self._hangup_task = asyncio.create_task(self._hang_up_after_goodbye(t0), name="hangup")
+            elif asked and not turn.get("cancelled"):
+                kind, other = asked[-1]
+                turn[kind.replace("-", "_")] = other
+                if kind == "switch" and self.on_switch is not None:
+                    logger.info(f"H79: she hands over to {other} once her line has been heard")
+                    self._hangup_task = asyncio.create_task(
+                        self._hang_up_after_goodbye(t0, then=lambda: self.on_switch(other)), name="switch")
+                elif kind == "three-way" and self.on_three_way is not None:
+                    logger.info(f"H79: {other} joins, a three-way call")
+                    await self.on_three_way(other)
         except asyncio.CancelledError:
             turn["interrupted"] = True
             if not turn.get("cancelled"):
@@ -367,7 +391,7 @@ class ClaudeSessionLLMService(LLMService):
             task.cancel()
             logger.info(f"H75: not hanging up after all: {why}")
 
-    async def _hang_up_after_goodbye(self, t0: float) -> None:
+    async def _hang_up_after_goodbye(self, t0: float, then=None) -> None:
         """Waits until her goodbye has been spoken (her voice started after his turn and has been
         quiet for a moment), then calls on_hangup. Cancelled when he says anything more."""
         try:
@@ -384,7 +408,7 @@ class ClaudeSessionLLMService(LLMService):
                         and now - self._quiet_at >= self.HANGUP_QUIET_SECS:
                     break
             self._hangup_task = None
-            await self.on_hangup()
+            await (then() if then else self.on_hangup())
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -498,6 +522,28 @@ class MarkFilter:
         b, self.buf = self.buf, ""
         return b
 
+
+
+class Marks:
+    """H79: several markers taken out of the same streamed text (a MarkFilter for each, one after the other);
+    found(marker) says whether that one came."""
+
+    def __init__(self, markers):
+        self.filters = [MarkFilter(m) for m in markers]
+
+    def feed(self, piece: str) -> str:
+        for f in self.filters:
+            piece = f.feed(piece)
+        return piece
+
+    def flush(self) -> str:
+        out = ""
+        for f in self.filters:
+            out = f.feed(out) + f.flush()
+        return out
+
+    def found(self, marker: str) -> bool:
+        return any(f.found for f in self.filters if f.m == marker.lower())
 
 
 class SpeechFilter:

@@ -5727,6 +5727,138 @@ setTimeout(() => {
         return ("the mark is never spoken or written; the rule with its phrases is in Free and full calls; "
                 "an okay keeps the call; a goodbye ends it once heard; more words after it keep it")
 
+    async def flow85(self) -> str:
+        """H79: ask for another agent by name: she hands over (the call ends as a hang-up does and the other one picks
+        up a new call that continues it) or brings her in (a three-way call: one conversation, each turn the one who
+        fits answers in her own model and voice). No Claude turns: a stand-in drives the real call service."""
+        import agents as ag
+        from call import Call
+        from claude_llm import ClaudeSessionLLMService, Marks
+        from pipecat.processors.aggregators.llm_context import LLMContext
+        from transcript import CallTranscript, continue_from, read_lines
+        every = ag.visible(config.FOLDER)
+        need(len(every) >= 2, "fewer than two agents to switch between")
+        one, two = every[0], every[1]
+        # The rules: every other agent by name, hand over, three-way, and asking when it isn't clear.
+        rules = ag.switch_rules(one, [two], "Sam")
+        need(ag.SWITCH_MARK.format(name=two["name"]) in rules and ag.THREE_WAY_MARK.format(name=two["name"]) in rules
+             and "secretary style" in rules and two["speciality"] in rules, "the rules miss a mark, or asking first")
+        need(ag.switch_rules(one, [], "Sam") == "", "rules without anyone to switch to")
+        marks = ag.switch_marks([two])
+        # The marks are never spoken, also in pieces; ordinary brackets stay.
+        m = Marks([config.HANGUP_MARK, *marks])
+        sw = ag.SWITCH_MARK.format(name=two["name"])
+        said = "".join(m.feed(x) for x in ["Putting her on. [", "[SWITCH ", two["name"] + "]", "]"]) + m.flush()
+        need(m.found(sw) and not m.found(config.HANGUP_MARK) and said == "Putting her on. ", f"the mark isn't taken out: {said!r}")
+        m = Marks([config.HANGUP_MARK, *marks])
+        said = "".join(m.feed(x) for x in ["Two [", "[notes]] [x"]) + m.flush()
+        need(said == "Two [[notes]] [x" and not any(m.found(k) for k in marks), f"ordinary brackets lost: {said!r}")
+        # Who answers on a three-way call: the one named; else the one whose speciality fits; else the last one.
+        a, b = dict(one, speciality="Your agenda, your list, mail and quick orders"), dict(two, speciality="Sparring, planning and the bigger picture")
+        need(ag.pick([a, b], f"{b['name']}, what do you think?", a["id"]) is b, "the one named doesn't answer")
+        need(ag.pick([a, b], f"Thanks {a['name']}. And {b['name']}?", a["id"]) is b, "named both: not the one named last")
+        need(ag.pick([a, b], "Any new mail today?", b["id"]) is a, "mail doesn't go to the one for mail")
+        need(ag.pick([a, b], "Let's plan the bigger picture for next week", a["id"]) is b, "planning doesn't go to the planner")
+        need(ag.pick([a, b], "Hmm, okay.", b["id"]) is b, "nothing fits: not the one who answered last")
+
+        class Stand:
+            model = "stand-in"
+            def __init__(self): self.replies, self.sent = [], []
+            async def start(self): pass
+            async def stop(self): pass
+            def cancel_turn(self): pass
+            async def ask(self, text):
+                self.sent.append(text)
+                for piece in self.replies.pop(0):
+                    await asyncio.sleep(0.01)
+                    yield piece
+
+        class Script:
+            def __init__(self): self.replies = []
+            def user(self, *a, **k): pass
+            def note(self, *a, **k): pass
+            def reply(self, text, cut_off=False): self.replies.append(text)
+
+        brain, script = Stand(), Script()
+        llm = ClaudeSessionLLMService(brain, transcript=script)
+        spoken: list[str] = []
+        async def nothing(*a, **k): pass
+        async def speak(text): spoken.append(text)
+        llm.push_frame = nothing
+        llm._push_llm_text = speak
+        llm.start_processing_metrics = llm.stop_processing_metrics = nothing
+        llm.start_ttfb_metrics = llm.stop_ttfb_metrics = nothing
+        llm.HANGUP_QUIET_SECS, llm.HANGUP_NO_VOICE_SECS, llm.HANGUP_MAX_SECS = 0.3, 1.0, 5.0
+        llm.switch_marks = marks
+        switched, joined, hung = [], [], []
+        async def on_switch(x): switched.append(x)
+        async def on_join(x): joined.append(x)
+        async def on_hangup(): hung.append(1)
+        llm.on_switch, llm.on_three_way, llm.on_hangup = on_switch, on_join, on_hangup
+        msgs: list[dict] = []
+        async def turn(words, reply):
+            msgs.append({"role": "user", "content": words})
+            brain.replies.append(reply)
+            await llm._process_context(LLMContext(messages=list(msgs)))
+            msgs.append({"role": "assistant", "content": "".join(reply)})
+        # Hand over: spoken without the mark, and only once her line has been heard.
+        await turn(f"Give me {two['name']}.", ["Sure, putting her on.", " [[SWITCH ", two["name"], "]]"])
+        need(sw not in "".join(spoken) + script.replies[-1], "the hand-over mark was spoken or written")
+        llm._bot_speaking, llm._spoke_at = True, time.perf_counter()
+        await asyncio.sleep(0.5)
+        need(not switched, "handed over while her line was still being spoken")
+        llm._bot_speaking, llm._quiet_at = False, time.perf_counter()
+        await asyncio.sleep(0.7)
+        need(switched == [two["id"]] and not hung and not joined, f"no hand-over after her line: {switched}")
+        # Three-way: she joins right after the reply, nothing hangs up.
+        await turn("Let's make it a three-way call.", ["Bringing her in.", ag.THREE_WAY_MARK.format(name=two["name"])])
+        need(joined == [two["id"]] and len(switched) == 1 and llm._hangup_task is None, "the three-way call didn't start")
+        # On the call: who answers, her voice, her notes, her lines in the transcript.
+        calls = self.tmp / "calls85"
+        c = Call(calls_dir=calls, test_mode=True, agent=one["id"], voices={one["id"]: "af_bella", two["id"]: "bf_emma"})
+        need(c.llm.switch_marks == ag.switch_marks(c.others) and two["id"] in [x["id"] for x in c.others] and one["id"] not in [x["id"] for x in c.others],
+             "the call doesn't know the others")
+        need(await c._before_turn("hello") == [], "notes on a call with one agent")
+        await c.three_way(two["id"])
+        need([x["id"] for x in c.panel] == [one["id"], two["id"]], "she isn't on the call")
+        notes = await c._before_turn(f"{two['name']}, what do you think?")
+        need(c.speaker["id"] == two["id"] and c.tts._settings.voice == "bf_emma" and c.tts._settings.language == "en-gb"
+             and c.fillers._voice == "bf_emma", "the voice didn't switch to hers")
+        need(any("now on this call too" in n for n in notes) and f"{two['name']} answers this turn" in notes[-1],
+             f"no note on who answers: {notes}")
+        c.transcript.user("What do you think?")
+        c.transcript.reply("I'd plan it first.")
+        notes = await c._before_turn(f"And {one['name']}?")
+        need(c.speaker["id"] == one["id"] and c.tts._settings.voice == "af_bella" and len(notes) == 1, "the voice didn't switch back")
+        c.transcript.reply("Agreed.")
+        lines = read_lines(c.transcript.path)
+        need([ln.get("agent") for ln in lines if ln["who"] == "hq"] == [two["name"], one["name"]], f"her lines don't say who: {lines}")
+        # The hand-over: the other one gets it with the earlier agent's lines by name, and greets as picking up.
+        c.transcript.end()
+        cont = continue_from(c.transcript.path.stem, calls, me=two["name"])
+        need(f"You: I'd plan it first." in cont["text"] and f"{one['name']}: Agreed." in cont["text"], f"continue text: {cont['text']}")
+        d = Call(calls_dir=calls, test_mode=True, agent=two["id"], continues=c.transcript.path.stem, handover=True)
+        need(f"{one['name']} just put you on the phone" in d._continue_note(), "the new call doesn't know it was handed over")
+        need("Continues the call of" in d.transcript.path.read_text(), "the new transcript doesn't say which call it continues")
+        c.switched_to, c.ended_by_agent = two, True
+        c._finished = False; c.wrap_up_mode = "off"; c.llm.turns.append({"words": "What do you think?"})
+        await c.finish()
+        need(f"put {two['name']} on" in c.transcript.path.read_text(), "the transcript doesn't say she put the other one on")
+        free = Call(calls_dir=calls, test_mode=True, free=True)
+        need(free.others == [] and free.llm.switch_marks == {}, "Free calls can switch")
+        # The server and the page.
+        bot = (APP / "bot.py").read_text()
+        need('"hq-switch"' in bot and '"hq-three-way"' in bot and "call.llm.on_switch" in bot and "call.llm.on_three_way" in bot
+             and 'body.get("handover")' in bot and 'body.get("voices")' in bot, "the call server doesn't hand over or bring her in")
+        page = (APP / "web/index.html").read_text()
+        need('m.type === "hq-switch"' in page and "switchTo(m.agent, m.call)" in page and 'm.type === "hq-three-way"' in page
+             and "handover: true" in page and "voices: Object.fromEntries" in page and "return panel.length ? panel : [agent]" in page,
+             "the call page doesn't call the other one or show the three-way call")
+        for x in (c, d, free):
+            await x.brain.stop()
+        return ("hand-over and three-way marks never spoken; hand-over once heard, the other continues the call as picking "
+                "up; three-way keeps one conversation, the one named or fitting answers in her voice; lines say who")
+
     async def flow71(self) -> str:
         """H87, H91, no Claude: the three stop lines (5-hour, weekly all models, weekly Fable) each move every minute,
         the share of their window gone by (never below 10% or 20%), up to 100% in the minute before the reset, or stay
@@ -7232,6 +7364,7 @@ FLOWS = {
     82: ("H104, H108: times on calls as 5 30 in the afternoon, no colon, no words, never half, quarter or o'clock", False, "flow82"),
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one, and a space to doodle", False, "flow83"),
     84: ("H106: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can", False, "flow84"),
+    85: ("H79: ask for another agent by name: she hands over, or brings her in on a three-way call", False, "flow85"),
 }
 
 

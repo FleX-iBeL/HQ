@@ -143,7 +143,7 @@ def _filter_the_log() -> None:
 async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connection=None,
                    model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
                    free: bool = False, load: str | None = None, agent: str | None = None,
-                   continues: str | None = None) -> None:
+                   continues: str | None = None, handover: bool = False, voices: dict | None = None) -> None:
     global _free_calls, _calls_on
     _filter_the_log()
     if free:
@@ -151,7 +151,8 @@ async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connect
     _calls_on += 1
     try:
         await _run_call(transport, handle_sigint, connection, model=model, voice=voice,
-                        waiting_lines=waiting_lines, free=free, load=load, agent=agent, continues=continues)
+                        waiting_lines=waiting_lines, free=free, load=load, agent=agent, continues=continues,
+                        handover=handover, voices=voices)
     finally:
         _calls_on -= 1
         if free:
@@ -161,9 +162,9 @@ async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connect
 async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connection=None,
                     model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
                     free: bool = False, load: str | None = None, agent: str | None = None,
-                    continues: str | None = None) -> None:
+                    continues: str | None = None, handover: bool = False, voices: dict | None = None) -> None:
     call = Call(model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent,
-                continues=continues)
+                continues=continues, handover=handover, voices=voices)
     logger.info(f"Call started on {call.model} with {call.agent['name']}, voice {call.voice}, {'free' if free else call.load + ' load'}; "
                 + ("free mode, nothing kept" if free else f"transcript: {call.transcript.path.name}")
                 + (f"; continues {call.continued['name']}" if call.continued else ""))
@@ -177,7 +178,9 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
     # H6: every spoken line also goes to the call page, for the chat log.
     if connection is not None:
         def to_page(who: str, text: str) -> None:
-            connection.send_app_message({"type": "hq-chat", "who": who, "text": text})
+            # H79: on a three-way call her lines say who said them (her colour in the chat)
+            her = {"agent": call.transcript.speaker} if who == "hq" and call.transcript.speaker else {}
+            connection.send_app_message({"type": "hq-chat", "who": who, "text": text, **her})
         call.transcript.on_line = to_page
 
         # H31: the Cancel button shows while what he said can still be taken back.
@@ -246,6 +249,36 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
         await worker.cancel()
     call.llm.on_hangup = agent_hangs_up
 
+    # H79: he asked for another agent. Hand over: the call ends as a hang-up does (notes and all) and the page
+    # calls her at once, continuing this call. Three-way: she joins this same conversation.
+    async def agent_switches(other_id: str):
+        if call.ended_by_agent:
+            return
+        other = next((a for a in call.others if a["id"] == other_id), None)
+        if other is None:
+            return
+        call.ended_by_agent = True
+        call.switched_to = other
+        logger.info(f"H79: {call.speaker['name']} puts {other['name']} on")
+        if connection is not None:
+            try:
+                connection.send_app_message({"type": "hq-switch", "agent": other["id"],
+                                             "call": call.transcript.path.stem if call.transcript.path else None})
+            except Exception:
+                pass
+        await asyncio.sleep(1.0)
+        await worker.cancel()
+    call.llm.on_switch = agent_switches
+
+    async def agent_joins(other_id: str):
+        other = await call.three_way(other_id)
+        if other is not None and connection is not None:
+            try:
+                connection.send_app_message({"type": "hq-three-way", "agents": [a["id"] for a in call.panel]})
+            except Exception:
+                pass
+    call.llm.on_three_way = agent_joins
+
     runner = WorkerRunner(handle_sigint=handle_sigint)
     await runner.add_workers(worker)
     try:
@@ -286,9 +319,12 @@ async def bot(runner_args: RunnerArguments):
     load = mode if mode in ("quick", "deep") else "quick"
     # H60: Continue in Past calls sends the earlier call's name; never on Free (Call checks it's a saved call).
     continues = str(body.get("continue") or "") or None
+    # H79: a hand-over from another agent (the page calls her right after), and every agent's voice from Settings
+    handover = body.get("handover") is True
+    voices = body.get("voices") if isinstance(body.get("voices"), dict) else {}
     await run_call(transport, runner_args.handle_sigint, runner_args.webrtc_connection,
                    model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent["id"],
-                   continues=None if free else continues)
+                   continues=None if free else continues, handover=handover and not free, voices=voices)
 
 
 if __name__ == "__main__":
