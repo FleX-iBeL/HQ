@@ -843,6 +843,20 @@ def log_move():
         f"; commit failed ({r.returncode}): {(r.stderr or r.stdout).strip()[:200]}"))
 
 
+def direct_watch():
+    """H80: Donna texts on HQ's own direct line when the job list is finished, a very important mail comes in, or
+    something stays down (and again when it's back). On the backup only this computer's own incidents (a takeover
+    is texted by the one that took over). Never in a test on the real workspace."""
+    if hqpaths.under_test() and FOLDER == os.path.realpath(os.path.join(JV, "workspace")):
+        return
+    sys.path.insert(0, os.path.join(JV, "app"))
+    import direct_line
+    main = role.acting() == "main"
+    q = json.loads(jobs("next")) if main else None
+    for why, facts in direct_line.watch(q, main=main):
+        log(f"direct line: texting ({why})")
+
+
 def tick():
     # H56.3: main or backup first. Alone (no other HQ set up) this is main at once, with no network and no line.
     try:
@@ -1041,6 +1055,10 @@ if __name__ == "__main__":
         except Exception as e:
             log(f"watchdog check: {e!r}")
         tick()
+        try:
+            direct_watch()
+        except Exception as e:
+            log(f"direct line: {e!r}")
     except Exception as e:  # never let one bad minute stop the next
         log(f"error: {e!r}")
         sys.exit(1)

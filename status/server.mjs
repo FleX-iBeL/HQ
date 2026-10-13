@@ -7,8 +7,9 @@
 // Starting it a second time does nothing: the page that is already open keeps working.
 // It only listens on this MacBook (127.0.0.1), never on the network. The phone reaches it through
 // Tailscale serve (tailnet only), set up by status/phone.sh (H13).
-import { execFile } from 'node:child_process';
-import { appendFile, readFile, writeFile } from 'node:fs/promises';
+import { execFile, spawn } from 'node:child_process';
+import { existsSync, openSync } from 'node:fs';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -40,6 +41,9 @@ const FILES = {
   '/hq-icon-180.png': ['status/icons/hq-180.png', 'image/png'],
   '/hq-icon-192.png': ['status/icons/hq-192.png', 'image/png'],
   '/hq-icon-512.png': ['status/icons/hq-512.png', 'image/png'],
+  // H80: the direct line, a chat with only her, and its service worker (scope /, for her texts on the lock screen)
+  '/direct': ['status/direct.html', 'text/html; charset=utf-8'],
+  '/direct-sw.js': ['status/direct-sw.js', 'text/javascript; charset=utf-8'],
   // H59: the version, a newer one and the changelog (the same file the call page loads)
   '/update-ui.js': ['status/update-ui.js', 'text/javascript; charset=utf-8'],
 };
@@ -304,8 +308,63 @@ async function temperatureHistory(hours, file = '.status/temperature-history.jso
   }
 }
 
+// H80: the direct line. The thread is a file in the workspace (both computers have it through the sync); her
+// name, colour and the push key come from app/direct_line.py, which also takes a phone's subscription and answers
+// his texts (in the background, so the page doesn't wait). Every POST needs the x-hq header, so a page from
+// elsewhere can't text her or sign a phone up; the server itself is only on this computer and the tailnet.
+const DIRECT_DIR = process.env.HQ_DIRECT_DIR ?? join(dirname(ROADMAP), 'direct-line');
+const DIRECT_PY = existsSync(join(root, '.venv/bin/python')) ? join(root, '.venv/bin/python') : '/usr/bin/python3';
+const DIRECT_TOOL = join(root, 'app/direct_line.py');
+let directInfo = null;
+function directTool(args, input = '') {
+  return new Promise((resolve) => {
+    const p = execFile(DIRECT_PY, [DIRECT_TOOL, ...args], { timeout: 30000, cwd: root }, (err, out) => {
+      let data = null;
+      try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
+      resolve(err ? null : data);
+    });
+    if (input) p.stdin.end(input); else p.stdin.end();
+  });
+}
+async function directThread() {
+  try {
+    return (await readFile(join(DIRECT_DIR, 'thread.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => {
+      try { return JSON.parse(l); } catch { return null; }
+    }).filter((m) => m && m.text).slice(-200);
+  } catch {
+    return [];
+  }
+}
+async function directRoute(path0, req, res) {
+  const json = (code, data) => res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(data));
+  if (path0 === '/direct.json' || path0 === '/direct/key') {
+    if (!directInfo || !directInfo.key) directInfo = (await directTool(['info'])) || directInfo;
+    if (path0 === '/direct/key') return json(directInfo ? 200 : 500, { key: directInfo?.key ?? '' });
+    return json(200, { agent: directInfo, messages: await directThread() });
+  }
+  if (req.method !== 'POST' || req.headers['x-hq'] !== 'direct') return res.writeHead(403).end('Only the HQ page can text her');
+  let body = {};
+  try { body = JSON.parse(await readBody(req)); } catch {}
+  if (path0 === '/direct/subscribe') {
+    const out = await directTool(['subscribe'], JSON.stringify(body));
+    if (out) directInfo = null;
+    return json(out ? 200 : 400, out ?? { ok: false });
+  }
+  const text = String(body.text ?? '').trim().slice(0, 4000);
+  if (!text) return json(400, { ok: false, said: 'nothing to send' });
+  await mkdir(DIRECT_DIR, { recursive: true });
+  await appendFile(join(DIRECT_DIR, 'thread.jsonl'), JSON.stringify({ at: Date.now() / 1000, from: 'me', text, why: '' }) + '\n');
+  const log = openSync(join(root, 'scratch', 'direct-line.log'), 'a');
+  spawn(DIRECT_PY, [DIRECT_TOOL, 'reply'], { cwd: root, detached: true, stdio: ['ignore', log, log] }).unref();
+  return json(200, { ok: true });
+}
+
 const server = createServer(async (req, res) => {
   const path0 = (req.url ?? '/').split('?')[0];
+  if (path0 === '/direct.json' || path0 === '/direct/key' || path0 === '/direct/send' || path0 === '/direct/subscribe') {
+    try { await directRoute(path0, req, res); } catch { if (!res.headersSent) res.writeHead(500).end('The direct line had a problem'); }
+    return;
+  }
   if (path0 === '/hq' || path0 === '/hq/') {
     try {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(await hqPage());
