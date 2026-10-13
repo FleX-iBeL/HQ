@@ -17,6 +17,16 @@ check are done.] And at 13:21: "if other people don't have a VPS, I want to make
 the repo, Everything works fine." So with no other HQ set up, this one is simply main, never looks for a
 server, never waits on one, and says nothing about it.
 
+F23 (13 October 2026): the laptop slept seven minutes, woke up, counted its own sleep as the server being gone and
+took over, while the server carried on as main: two mains for twenty minutes. In the user's words: "is this going
+correct? my laptop was turned off and i worked on the vps, but now the macbook wants to take over main". So the
+minutes without the main only count while this computer has been awake the whole time (a gap between its looks,
+or a wake or restart since the last one, starts the count again); before taking over it asks the main once more,
+directly and through the sync (Syncthing still connected means its computer is up), and doesn't take over when it
+answers either way; once a backup that took over has seen the main again, it starts nothing new until it has
+handed back, even when a later look fails; and a chosen main that gave way to one that took over stays the backup
+until that one hands back or has itself been gone for the full takeover time, so there are never two mains.
+
 Kept in HQ's own memory on this computer (hqpaths.SUPPORT), never in the workspace (which syncs):
     role.json        the setup: {"name", "peer" (the other HQ's status page address), "main" (the name of the
                      chosen main), "chosen_at", "takeover" (seconds, optional), "peer_ip" (optional: connect to
@@ -53,7 +63,9 @@ CONFIG = os.path.join(SUPPORT, "role.json")
 STATE = os.path.join(SUPPORT, "role-state.json")
 PENDING = os.path.join(SUPPORT, "role-pending.jsonl")
 TAKEOVER = 300  # a few minutes without the main before the backup takes over (Claude's choice)
-BACK_LOOKS = 2  # looks in a row the main must answer before the backup hands back (no flapping)
+BACK_LOOKS = 2  # looks the main must answer before the backup hands back (no flapping)
+LOST_LOOKS = 2  # F23: looks in a row without the main before a takeover, whatever the minutes say
+AWAY_GAP = 180  # F23: a gap this long between two looks means this computer was asleep or stopped (looks are every 60)
 TIMEOUT = 8
 TELL_TIMEOUT = 30  # telling the other one a choice: it may wait for its own minute's look to finish first (F19)
 PY = sys.executable or "/usr/bin/python3"
@@ -278,7 +290,8 @@ def choose(who: str) -> str:
                 # The other one didn't start as main: this one stays main until its minute's look sees it has.
                 _set(s, "main", f"{name} was made main; this one stays main until it has taken over", _log)
             elif name == me and d and d.get("acting") == "backup" and acting() != "main":
-                _set(s, "main", "the chosen main", _log, on_main_pending=True, took_over=None, handing_back=None)
+                _set(s, "main", "the chosen main", _log, on_main_pending=True, took_over=None, handing_back=None,
+                     gave_way=None)
             _save(STATE, s)
     except TimeoutError:  # this HQ's minute is busy deciding: still tell the other one; the next look does the rest
         d = _tell(c, name)
@@ -318,7 +331,8 @@ def settle(sender: dict) -> None:
             peer = c.get("peer_name") or "the other HQ"
             if chosen_main(c) == me:
                 if sender.get("acting") == "backup" and acting() != "main":
-                    _set(s, "main", "the chosen main", _log, on_main_pending=True, took_over=None, handing_back=None)
+                    _set(s, "main", "the chosen main", _log, on_main_pending=True, took_over=None, handing_back=None,
+                         gave_way=None)
             elif acting() == "main" and not s.get("took_over"):
                 doing = busy()
                 if doing:
@@ -370,6 +384,48 @@ def _set(state, acting_now, why, log=None, **extra):
     return was != acting_now
 
 
+def _woke() -> float:
+    """When this computer last woke or started (a Mac's kern.waketime, the boot time). HQ_ROLE_WAKETIME sets it for
+    a test."""
+    if os.environ.get("HQ_ROLE_WAKETIME"):
+        return float(os.environ["HQ_ROLE_WAKETIME"])
+    try:
+        return float(max(hqpaths.waketime(), hqpaths.boottime()))
+    except Exception:
+        return 0.0
+
+
+def _awake_since(s, now) -> float:
+    """F23: since when this computer has been awake and looking without a break. A gap between two looks, or a
+    wake or restart since the last look, starts it again: time asleep never counts as the main being gone."""
+    last = s.get("last_look")
+    since = s.get("awake_since") or now
+    if not last or now - float(last) > AWAY_GAP:
+        since = now
+    woke = _woke()
+    if since < woke <= now:
+        since = woke
+    return since
+
+
+def _main_still_there(c):
+    """F23: the last check before taking over. Asks the main once more, a few seconds apart, and asks Syncthing
+    whether the main's computer is still connected. Returns why not to take over ('' when it's really gone).
+    When it answers it's up, busy or not, so this one doesn't take over."""
+    for _ in range(2):
+        time.sleep(float(os.environ.get("HQ_ROLE_RETRY", "3")))
+        p = peer_role(c)
+        if p:
+            return f"it answered again ({p['busy']})" if p.get("busy") else "it answered again"
+    try:
+        import sync
+        if sync.is_set() and sync.look().get("peer_up"):
+            return "its computer is still connected through the sync"
+    except Exception:
+        pass
+    return ""
+
+
 def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -> dict:
     """One look (the routine, every minute). Decides whether this HQ acts as main or backup now, writes its routine
     line, and sends on requests made here while the main couldn't be reached. Alone: returns at once, no network,
@@ -401,10 +457,18 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
         s["peer"] = {k: p.get(k) for k in ("name", "acting", "busy", "main")}
     else:
         s["peer_looks"] = 0
+        s["lost_looks"] = int(s.get("lost_looks") or 0) + 1
         s["peer_lost_since"] = s.get("peer_lost_since") or now
+    if p:
+        s["lost_looks"] = 0
+    # F23: only minutes this computer was awake and looking count; a sleep, a restart or a stopped routine
+    # starts the count again from when it was back.
+    s["awake_since"] = _awake_since(s, now)
+    s["last_look"] = now
     peer = c.get("peer_name") or "the other HQ"
-    lost = now - s["peer_lost_since"] if s.get("peer_lost_since") else 0
+    lost = now - max(s["peer_lost_since"], s["awake_since"]) if s.get("peer_lost_since") else 0
     takeover = float(c.get("takeover") or TAKEOVER)
+    gone = not p and lost >= takeover and int(s.get("lost_looks") or 0) >= LOST_LOOKS
     chosen = chosen_main(c) == me
     was = s.get("acting")
     took = s.get("took_over")
@@ -412,32 +476,59 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
         if p and p.get("acting") == "main":
             what = f" ({p['busy']})" if p.get("busy") else ""
             # F19: only a main that took over took over; one that was simply main before is handing a choice over.
+            took_over = p.get("took_over", True)
             changed = _set(s, "backup", f"{peer} took over while this one was away; it hands the main role back "
-                                        f"once it has finished what it's doing{what}" if p.get("took_over", True) else
+                                        f"once it has finished what it's doing{what}" if took_over else
                            f"{peer} is handing the main role over" + (f" once {p['busy']} is done" if p.get("busy")
                                                                       else " now"), log)
+            s["gave_way"] = now if took_over else None
+        elif not p and was == "backup" and s.get("gave_way") and not (gone and online() and not _main_still_there(c)):
+            # F23: gave way to the other one, which took over; one look that doesn't reach it isn't the role back,
+            # or both would be main. It stays the backup until the other hands back (it tells this one, or a look
+            # sees it as the backup) or has been gone for the full takeover time.
+            changed = _set(s, "backup", s.get("why") or f"{peer} took over while this one was away", log)
         else:
-            changed = _set(s, "main", "the chosen main", log)
+            changed = _set(s, "main", "the chosen main" if p or not s.get("gave_way") else
+                           f"took the main role back: {peer} couldn't be reached for {int(lost // 60)} minutes",
+                           log, gave_way=None)
     else:
         if was == "main":
-            # Took over earlier, or was the main until the other one was chosen. Hand back once the main answers
-            # again (two looks in a row) and nothing runs here; until then this one stays main, so nothing is
-            # ever left without one.
-            if p and s["peer_looks"] >= BACK_LOOKS:
+            # Took over earlier, or was the main until the other one was chosen. Hand back once the main has
+            # answered again (two looks) and nothing runs here; until then this one stays main, so nothing is
+            # ever left without one. F23: from the first answer on, it starts nothing new, also when a later look
+            # misses (a shaky line), until it has handed back or the main has been gone for the full time again.
+            if p:
+                s["main_back"] = True
+                s["back_looks"] = int(s.get("back_looks") or 0) + 1
+            elif s.get("main_back") and gone:
+                s["main_back"], s["back_looks"] = None, 0
+            if p and s["back_looks"] >= BACK_LOOKS:
                 doing = busy()
                 if doing:
                     s["handing_back"] = True
                     changed = _set(s, "main", f"{peer} is back; this one hands the main role back once {doing} is done", log)
                 else:
-                    changed = _set(s, "backup", f"handed the main role back to {peer}", log, took_over=None, handing_back=None)
+                    changed = _set(s, "backup", f"handed the main role back to {peer}", log, took_over=None,
+                                   handing_back=None, main_back=None, back_looks=0)
             else:
-                s["handing_back"] = bool(p)
+                s["handing_back"] = bool(s.get("main_back"))
                 changed = _set(s, "main", f"{peer} is back; handing the main role over at the next look" if p
+                               else f"{peer} answered again but not now; this one starts nothing new and hands the "
+                                    "main role back when it answers" if s.get("main_back")
                                else s.get("why") if s.get("took_over") else f"{peer} was made main but can't be "
                                "reached; this one stays main until it answers", log)
-        elif not p and lost >= takeover and online():
-            changed = _set(s, "main", f"took over: {peer} couldn't be reached for {int(lost // 60)} minutes", log,
-                           took_over=now, handing_back=None)
+        elif gone and online():
+            why_not = _main_still_there(c)
+            if why_not:
+                s["peer_lost_since"], s["lost_looks"] = now, 0
+                changed = _set(s, "backup", f"{peer} is the main one; it didn't answer for a few minutes, but "
+                                            f"{why_not}, so this one didn't take over", log, handing_back=None)
+                if log:
+                    log(f"role: didn't take over: {why_not}")
+            else:
+                changed = _set(s, "main", f"took over: {peer} couldn't be reached for {int(lost // 60)} minutes "
+                                          "while this computer was awake", log,
+                               took_over=now, handing_back=None, main_back=None, back_looks=0)
         else:
             changed = _set(s, "backup", f"{peer} is the main one", log, handing_back=None)
     pending = s.pop("on_main_pending", None)
@@ -449,8 +540,8 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
     # The incident log: a takeover is the main going down, handing back is it being up again.
     if incidents:
         if changed and s["acting"] == "main" and s.get("took_over") == now:
-            incidents.down("role", f"{peer}, the main one, couldn't be reached since {_clock(s['peer_lost_since'])}",
-                           at=s["peer_lost_since"])
+            since = max(s["peer_lost_since"], s.get("awake_since") or 0)
+            incidents.down("role", f"{peer}, the main one, couldn't be reached since {_clock(since)}", at=since)
             incidents.fix("role", f"This one took over as main at {_clock(now)} and started the routines")
         elif changed and was == "main" and s["acting"] == "backup" and took and incidents.is_down("role"):
             incidents.fix("role", f"{peer} was back; handed the main role back at {_clock(now)}")

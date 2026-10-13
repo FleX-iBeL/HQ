@@ -6809,8 +6809,8 @@ for X in A B; do
   # The throwaway's own watchdog line and heartbeat, so its routine never reaches for the real watchdog.
   echo "{\"at\": $NOW}" > "$T/$X/state/watchdog.json"; echo "$NOW" > "$T/$X/state/heartbeat"
 done
-ENVA="HQ_SUPPORT=$T/A/state HQ_STATUS_PORT=$PA HQ_PORT=7894 HQ_UNIT=@TAG@-a HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_ROLE_ONLINE=1"
-ENVB="HQ_SUPPORT=$T/B/state HQ_STATUS_PORT=$PB HQ_PORT=7893 HQ_UNIT=@TAG@-b HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_ROLE_ONLINE=1"
+ENVA="HQ_SUPPORT=$T/A/state HQ_STATUS_PORT=$PA HQ_PORT=7894 HQ_UNIT=@TAG@-a HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_ROLE_ONLINE=1 HQ_ROLE_RETRY=0.2"
+ENVB="HQ_SUPPORT=$T/B/state HQ_STATUS_PORT=$PB HQ_PORT=7893 HQ_UNIT=@TAG@-b HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_ROLE_ONLINE=1 HQ_ROLE_RETRY=0.2"
 NODE=$(command -v node || echo /opt/homebrew/bin/node)
 ra() { (cd "$T/A/HQ" && env $ENVA python3 "$@"); }
 rb() { (cd "$T/B/HQ" && env $ENVB python3 "$@"); }
@@ -6923,6 +6923,55 @@ rb routine/tick.py
 for i in 1 2; do ra routine/tick.py; rb routine/tick.py; done
 [ "$(acting "$T/A")" = main ] && [ "$(acting "$T/B")" = backup ] || fail "the looks after the switch changed it: A $(acting "$T/A"), B $(acting "$T/B")"
 echo "OK F19: from a call the switch is at once when nothing runs, after the job when one does, with the right reason"
+
+# F23: time asleep never counts as the main being gone; the last check before a takeover; never two mains.
+setst() { python3 -c "import json,sys,time; p=sys.argv[1]; s=json.load(open(p)); n=time.time()
+for kv in sys.argv[2:]:
+    k, v = kv.split('='); s[k] = n - float(v[3:]) if v.startswith('ago') else json.loads(v)
+json.dump(s, open(p, 'w'))" "$1/state/role-state.json" "${@:2}"; }
+rb routine/role.py main here | grep -q "the switch is done" || fail "couldn't make vps main again for F23"
+[ "$(acting "$T/B")" = main ] && [ "$(acting "$T/A")" = backup ] || fail "before F23: A $(acting "$T/A"), B $(acting "$T/B")"
+kill "$SB"; SB=; sleep 0.5
+ra routine/tick.py
+# Asleep for ten minutes: the last look was ten minutes ago, the main unreachable since then.
+setst "$T/A" last_look=ago600 peer_lost_since=ago600 awake_since=ago600 lost_looks=9
+ra routine/tick.py
+[ "$(acting "$T/A")" = backup ] || fail "the backup took over after a ten-minute gap between its looks (asleep): $(ra routine/role.py)"
+# Woke up a moment ago (the Mac's wake time), the last look just before the sleep: the minutes before the wake don't count.
+setst "$T/A" last_look=ago30 peer_lost_since=ago600 awake_since=ago600 lost_looks=9
+(cd "$T/A/HQ" && env $ENVA HQ_ROLE_WAKETIME=$(( $(date +%s) - 1 )) python3 routine/tick.py)
+[ "$(acting "$T/A")" = backup ] || fail "the backup counted the time before its wake as the main being gone: $(ra routine/role.py)"
+# The main answers again on the last check (busy with a job): no takeover.
+setst "$T/A" last_look=ago30 peer_lost_since=ago600 awake_since=ago600 lost_looks=9
+(cd "$T/A/HQ" && env $ENVA python3 -c "
+import sys; sys.path.insert(0, 'routine'); import role
+answers = iter([None, {'name': 'vps', 'acting': 'main', 'busy': 'job 7', 'main': 'vps'}])
+role.peer_role = lambda c=None: next(answers, None)
+r = role.tick(); assert r['acting'] == 'backup' and 'answered again (job 7)' in r['why'], r") \
+  || fail "the backup took over although the main answered on the last check"
+# Awake the whole time and still nothing: it does take over.
+ra routine/tick.py; sleep 5; ra routine/tick.py
+[ "$(acting "$T/A")" = main ] || fail "the backup didn't take over after being awake the whole takeover time: $(ra routine/role.py)"
+echo "OK F23: time asleep doesn't count, a main that answers on the last check isn't taken over, a real outage is"
+# The main is back and gives way; a shaky line (one look missed) doesn't make it main again next to the other.
+startb; up $PB || fail "B's status server didn't come back"
+rb routine/tick.py
+[ "$(acting "$T/B")" = backup ] || fail "the returning main took the role while the other was main"
+kill "$SA"; SA=; sleep 0.5
+rb routine/tick.py
+[ "$(acting "$T/B")" = backup ] || fail "one missed look made the returning main main again: two mains"
+starta; up $PA || fail "A's status server didn't come back"
+ra routine/tick.py
+[ "$(acting "$T/A")" = main ] && grep -q '"handing_back": true' "$T/A/state/role-state.json" || fail "the one that took over didn't stop starting new things once the main was back"
+kill "$SB"; SB=; sleep 0.5
+ra routine/tick.py
+grep -q '"handing_back": true' "$T/A/state/role-state.json" || fail "one missed look made the one that took over start new things again"
+startb; up $PB || fail "B's status server didn't come back"
+ra routine/tick.py
+[ "$(acting "$T/A")" = backup ] && [ "$(acting "$T/B")" = main ] || fail "the hand-back after a shaky line: A $(acting "$T/A"), B $(acting "$T/B")"
+for i in 1 2; do rb routine/tick.py; ra routine/tick.py; done
+[ "$(acting "$T/A")" = backup ] && [ "$(acting "$T/B")" = main ] || fail "the looks after the hand-back changed it: A $(acting "$T/A"), B $(acting "$T/B")"
+echo "OK F23: never two mains: the returning main stays the backup through a missed look, the other starts nothing new and hands back"
 
 ra routine/role.py alone | grep -q "on its own" && [ "$(ra routine/role.py acting)" = main ] || fail "alone again didn't work"
 echo "ALL OK"

@@ -17,6 +17,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - Planned work under Scheduled shows an estimate too: how long it should take, and when it should be done, counting the jobs and the planned work before it. A call can say what kind of work it is when planning it, and that goes with it when it becomes a job.
 
 ### Fixed
+- With a laptop and a server, the laptop waking up from sleep no longer takes over as main: only minutes it was awake the whole time count as the server being gone. Before taking over it asks the server once more, also through the sync, and a server that gave way stays the backup through a missed look, so there are never two mains at once (F23).
 - A call left quiet no longer drops after five minutes. Nothing spoken or heard for five minutes (typing and her thinking didn't count) used to end the call; now it stays on until someone hangs up or the connection itself goes.
 - Making one HQ main from a call switches right away when nothing runs on the other one, instead of a minute or two later; with a job running there, it switches the moment that job is done. The reason shown no longer says the other one took over when it was simply main before.
 
