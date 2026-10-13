@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 0.4.2 · 13 October 2026
+
 ### New
 - Change the microphone and the sound in the middle of a call, without hanging up. A round mic button on the call screen, right above the chat bubble, opens just those two choices; a new mic takes over at once and the call goes on (muted stays muted), and her voice moves to the new sound right away where the browser allows it (H112).
 - A job the usage limit stopped carries on where it left off: on the same computer it picks its own chat back up, with everything it remembers; when it can't (the other computer takes it, or the chat is gone), a fresh chat is told it was stopped and at about which step, and looks at what the first run left before carrying on (H113).
@@ -22,6 +24,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - More goodbyes she hangs up on: "okay, thanks, appreciate you" and "cheers" end the call by themselves, the same as "bye".
 - Your agents put things in your calendar, move them and delete them without asking first. An appointment with other people in it, or an invitation, still gets checked with you. Before moving or deleting one she looks at it, and what it was is kept in the call's transcript, so it can always be put back.
 - Planned work under Scheduled shows an estimate too: how long it should take, and when it should be done, counting the jobs and the planned work before it. A call can say what kind of work it is when planning it, and that goes with it when it becomes a job.
+- A new job keeps a little room under the usage limits before it starts: it waits when the usage is within 5% of the 5-hour line or within 1% of a weekly line, so a job doesn't start just to be stopped (H114).
+- Planned work whose time passed while the job list, the usage or a switched-off routine held it back still runs, one after another, earliest first; none is skipped. The scheduler's list on calls says how many more are waiting (H111).
 
 ### Fixed
 - With a laptop and a server, the laptop waking up from sleep no longer takes over as main: only minutes it was awake the whole time count as the server being gone. Before taking over it asks the server once more, also through the sync, and a server that gave way stays the backup through a missed look, so there are never two mains at once (F23).
