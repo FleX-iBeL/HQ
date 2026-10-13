@@ -638,7 +638,21 @@ def plan(now=None):
         out["total"] = {"jobs": len(running) + len(line), "minutes": round(left_total),
                         "eta": None if waits else int(cursor), "waits": ("usage" if on else "off") if waits else None}
     out["items"] = _plan_items(cursor, waits, on, hist, run)
+    out["items_total"] = _items_total(out["items"], waits, on)
     return out
+
+
+def _items_total(items, waits, on):
+    """H107: all planned items together, like the job list's total: how long they take together, and when
+    the last one should be done (the job list goes first, so its time is already in each item's)."""
+    if not items:
+        return None
+    t = {"items": len(items), "minutes": round(sum(e["est"] for e in items.values())), "eta": None, "waits": None}
+    if waits or not on:
+        t["waits"] = "off" if not on else "usage"
+    elif all(e.get("eta") for e in items.values()):
+        t["eta"] = max(e["eta"] for e in items.values())
+    return t
 
 
 def _schedule():
@@ -731,6 +745,23 @@ def total_words(p):
     s = f"All {t['jobs']} job{'s' if t['jobs'] != 1 else ''}: about {dur(t['minutes'])}"
     if t.get("eta"):
         s += f", all done around {hhmm(t['eta'])}"
+    elif t.get("waits") == "usage":
+        s += "; when it's done waits on the usage"
+    elif t.get("waits") == "off":
+        s += "; the routine is off"
+    return s + " (estimate)."
+
+
+def items_total_words(p):
+    """H107: the planned items' total in words, for schedule.py list and a call."""
+    t = p.get("items_total")
+    if not t:
+        return ""
+    s = f"All {t['items']} planned item{'s' if t['items'] != 1 else ''}: about {dur(t['minutes'])}"
+    if t.get("eta"):
+        day = "" if time.strftime("%Y-%m-%d", time.localtime(t["eta"])) == time.strftime("%Y-%m-%d", time.localtime(p["now"])) \
+            else time.strftime("%A ", time.localtime(t["eta"]))
+        s += f", all done around {day}{hhmm(t['eta'])}, after the job list"
     elif t.get("waits") == "usage":
         s += "; when it's done waits on the usage"
     elif t.get("waits") == "off":

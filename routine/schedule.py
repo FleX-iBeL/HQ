@@ -258,6 +258,12 @@ def main(argv):
             except Exception:
                 p = None
             print("Planned:\n" + ("\n".join(with_estimate(i, p) for i in coming) or "Nothing planned."))
+            try:  # H107: the planned items' total, as jobs.py list ends with the job list's
+                tw = est.items_total_words(p) if p and coming else ""
+            except Exception:
+                tw = ""
+            if tw:
+                print(tw)
             print("Looking back:\n" + ("\n".join(show(i) for i in reversed(done)) or "Nothing yet."))
             return
         if cmd == "add":

@@ -4949,9 +4949,16 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
              f"H95: an item doesn't count the item before it: {it[str(i2)]}")
         lst = sched("list")
         need(lst.count("Estimate: about") == 3 and "done around" in lst, f"H95: the scheduler's list doesn't say the estimates: {lst}")
+        # H107: all planned items together, as the job list has: how long, and when the last should be done.
+        tot = p["items_total"]
+        need(tot["items"] == 3 and tot["minutes"] == sum(it[k]["est"] for k in it) and tot["eta"] == max(it[k]["eta"] for k in it),
+             f"H107: the planned items' total is wrong: {tot} {it}")
+        need("All 3 planned items: about" in lst and "all done around" in lst, f"H107: the scheduler's list doesn't say the total: {lst}")
         jobs("off")
         need(json.loads(est("plan"))["items"][str(i1)]["waits"] == "off" and "the routine is off" in sched("list"),
              "H95: with the routine off, a planned item still says when it's done")
+        need(json.loads(est("plan"))["items_total"]["waits"] == "off" and json.loads(est("plan"))["items_total"]["eta"] is None,
+             "H107: with the routine off, the planned items' total still says when it's done")
         jobs("on")
         # The job list empty: the due item becomes a job, its hand-set kind with it; its line in the kinds file goes.
         for j in json.loads(jobs("next"))["waiting"]:
@@ -4967,6 +4974,9 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         sched("cancel", str(i1))
         jobs("mark", jn, "cancelled 12:00")
         need("function etaItem" in (jv / "status/index.html").read_text(), "H95: the status page doesn't show planned items' estimates")
+        need("function etaItemsTotal" in (jv / "status/index.html").read_text() and "itemsTotal ? ` · ${itemsTotal}`" in (jv / "status/index.html").read_text(),
+             "H107: the status page's Scheduled heading doesn't show the planned items' total")
+        need("H107" in config.VOICE_RULES, "H107: the call rules don't say the scheduler's list has a total")
         need("H95" in config.VOICE_RULES and "each item with its estimate" in config.VOICE_RULES,
              "H95: the call rules don't say planned items have estimates")
         need(real.exists() == (before is not None) and (before is None or real.read_text() == before),
@@ -4994,7 +5004,7 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need("H61" in config.VOICE_RULES and "estimate" in config.VOICE_RULES, "the call rules don't say the list has estimates")
         return ("kinds from the job's words; estimate set when added; per job and total with done-around; held waits on the usage; "
                 "done writes estimate next to real time and the next estimate learns; page and list show them; "
-                "planned items too, after the job list and the items before them, their kind going with them (H95)")
+                "planned items too, after the job list and the items before them, their kind going with them (H95), and their total (H107)")
 
     # 55
     async def flow55(self) -> str:

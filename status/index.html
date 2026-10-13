@@ -660,6 +660,17 @@
         if (t.eta) return `all done around ${etaTime(t.eta)} (estimate, about ${etaDur(t.minutes)})`;
         return `about ${etaDur(t.minutes)} (estimate; ${t.waits === 'usage' ? 'waits on the usage' : 'the routine is off'})`;
       }
+      /** H107: all planned items together, the same way etaTotal does it for the job list. */
+      function etaItemsTotal(E) {
+        const t = E?.items_total;
+        if (!t) return '';
+        if (t.eta) {
+          const x = new Date(t.eta * 1000);
+          const d = x.toDateString() === new Date().toDateString() ? '' : `${x.toLocaleDateString('en-GB', { weekday: 'short' })} `;
+          return `all done around ${d}${etaTime(t.eta)} (estimate, about ${etaDur(t.minutes)})`;
+        }
+        return `about ${etaDur(t.minutes)} (estimate; ${t.waits === 'usage' ? 'waits on the usage' : 'the routine is off'})`;
+      }
       function etaAccuracy(a) {
         if (!a?.count) return 'Estimates: none checked against a finished job yet. Each job that finishes teaches the next estimates.';
         return `Estimates lately: off by ${a.avg_off} min on average over the last ${a.count} job${a.count === 1 ? '' : 's'}; ${a.within} close, ${a.longer} took longer. Each job that finishes teaches the next ones.`;
@@ -1376,10 +1387,11 @@
             const x = new Date(`${d}T${t}:00`);
             return `${x.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} ${t}`;
           };
-          const fold = foldPart('schedule', true, 'Scheduled', `${coming.length} planned${due ? ` · ${due} due, after the job list` : ''} · the job list goes first`);
+          const itemsTotal = coming.length ? etaItemsTotal(routines?.estimate) : '';
+          const fold = foldPart('schedule', true, 'Scheduled', `${coming.length} planned${due ? ` · ${due} due, after the job list` : ''}${itemsTotal ? ` · ${itemsTotal}` : ''} · the job list goes first`);
           const parts = el('div', 'parts');
           for (const [key, title, list, st, start] of [['coming', 'Planned', coming, 'todo', true], ['back', 'Looking back', back, 'done', false]]) {
-            const part = foldPart(`schedule-${key}`, start, title, `${list.length}`, true);
+            const part = foldPart(`schedule-${key}`, start, title, `${list.length}${key === 'coming' && itemsTotal ? ` · ${itemsTotal}` : ''}`, true);
             const card = el('div', 'card');
             for (const i of list) {
               const isDue = key === 'coming' && i.at <= nowStamp;
