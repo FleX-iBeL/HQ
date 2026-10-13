@@ -97,38 +97,8 @@
   } catch {
     window.webkit = shim;
   }
-  // H80: on the phone, her direct line: a small round button at the bottom left opens the chat with her (/direct),
-  // where her texts are allowed onto the lock screen once. A dot shows when she texted since it was last opened.
-  function directButton() {
-    if (!PHONE || document.getElementById('direct-btn')) return;
-    const a = document.createElement('a');
-    a.id = 'direct-btn';
-    a.href = '/direct';
-    a.setAttribute('aria-label', 'Text her');
-    a.textContent = '💬';
-    a.style.cssText = 'position:fixed;left:14px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:50;width:44px;height:44px;' +
-      'border-radius:50%;background:#7c3aed;color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;' +
-      'text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.4)';
-    const dot = document.createElement('span');
-    dot.style.cssText = 'position:absolute;top:2px;right:2px;width:10px;height:10px;border-radius:50%;background:#ef4444;display:none';
-    a.append(dot);
-    document.body.append(a);
-    const look = async () => {
-      try {
-        const d = await (await fetch('/direct.json', { cache: 'no-store' })).json();
-        if (d.agent) a.style.background = d.agent.colour;
-        const last = (d.messages || []).filter((m) => m.from === 'agent').slice(-1)[0];
-        let seen = 0;
-        try { seen = Number(localStorage.getItem('hq-direct-seen') || 0); } catch {}
-        dot.style.display = last && last.at > seen ? 'block' : 'none';
-      } catch {}
-    };
-    a.addEventListener('click', () => { try { localStorage.setItem('hq-direct-seen', String(Date.now() / 1000)); } catch {} });
-    look();
-    setInterval(look, 15000);
-  }
-  document.addEventListener('DOMContentLoaded', directButton);
-  if (document.readyState !== 'loading') directButton();
+  // H80's direct-line bubble used to be added here, over the call page's voice button; since F25 it is in the
+  // call page itself (app/web/index.html), so it shows whether the phone's icon opens this page or the call page.
   window.hqPhone = { tab, health, callURL, frames: () => frames };
   document.addEventListener('visibilitychange', () => { if (!document.hidden) health(); });
 })();

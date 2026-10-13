@@ -518,6 +518,31 @@ if __name__ == "__main__":
         out = await asyncio.to_thread(_update, "start" if what == "start" else "status")
         return JSONResponse(out, status_code=200 if out else 500, headers=_NO_CACHE)
 
+    # F25: Donna's direct line (H80) through the call line too. The phone's home-screen icon can be this
+    # call page itself (8443) rather than the HQ page (8444), so its bubble, its chat and its notifications
+    # have to work on this address: these few paths are passed on to the status server on this computer,
+    # unchanged, the x-hq header included (only the HQ page can text her).
+    import httpx as _httpx
+
+    _STATUS = f"http://127.0.0.1:{os.environ.get('HQ_STATUS_PORT', '4748')}"
+    _DIRECT = ("/direct", "/direct.json", "/direct/key", "/direct/send", "/direct/subscribe", "/direct-sw.js",
+               "/hq-icon-180.png", "/hq-icon-192.png")
+
+    async def _direct(request: Request):
+        head = {k: v for k, v in request.headers.items() if k.lower() in ("x-hq", "content-type")}
+        try:
+            async with _httpx.AsyncClient(timeout=90) as cl:
+                r = await cl.request(request.method, _STATUS + request.url.path, headers=head,
+                                     content=await request.body())
+        except _httpx.HTTPError:
+            return Response("The direct line can't be reached right now", status_code=502, media_type="text/plain")
+        keep = {k: v for k, v in r.headers.items() if k.lower() in ("content-type", "cache-control")}
+        return Response(r.content, status_code=r.status_code, headers=keep)
+
+    for _path in _DIRECT:
+        app.add_api_route(_path, _direct, methods=["GET", "POST"] if _path.startswith("/direct/") else ["GET"],
+                          include_in_schema=False)
+
     for _icon in ICONS:
         def _make(name):
             async def icon():

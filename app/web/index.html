@@ -275,6 +275,14 @@
   #notesbtn { position:fixed; left:16px; bottom:calc(152px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
              border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
              cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  /* F25: Donna's direct line (H80) on the phone, above the notes button: the home-screen icon can be this
+     page itself (8443) or the HQ page around it (8444), so the bubble lives here, where both show it. */
+  #directbtn { position:fixed; left:16px; bottom:calc(220px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
+               border-radius:50%; background:#6d28d9; color:#fff; display:none; align-items:center; justify-content:center;
+               text-decoration:none; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  #directbtn.on { display:flex; }
+  #directbtn svg { width:26px; height:26px; }
+  #directbtn i { position:absolute; top:3px; right:3px; width:12px; height:12px; border-radius:50%; background:#ef4444; display:none; }
   #notesbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
   #notesbtn svg { width:26px; height:26px; }
   #notesheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
@@ -413,6 +421,9 @@
 <button id="notesbtn" type="button" aria-label="Notes" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
 </button>
+<a id="directbtn" href="/direct" aria-label="Text Donna">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-5A8 8 0 1 1 21 12z"/></svg><i></i>
+</a>
 <button id="voicebtn" type="button" aria-label="Mute her voice" aria-pressed="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path class="on" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="off" d="M16 9l6 6M22 9l-6 6"/></svg>
 </button>
@@ -464,6 +475,29 @@ if (new URLSearchParams(location.search).has("app")) document.body.classList.add
     const r = await fetch(`${at}/where.json`, { cache: "no-store" });
     if (r.ok) document.getElementById("where").textContent = (await r.json()).where || "";
   } catch {}
+})();
+// F25: her direct line (H80), only on the phone (8443). Inside the HQ page (8444) the tap opens that page's own
+// /direct, where its notifications were allowed; opened on its own, this address's /direct (the call line
+// passes it on to the status page). A dot when she texted since it was last opened.
+(() => {
+  if (location.port !== "8443") return;
+  const a = document.getElementById("directbtn");
+  const framed = window.top !== window;
+  if (framed) { a.href = `https://${location.hostname}:8444/direct`; a.target = "_top"; }
+  a.classList.add("on");
+  const look = async () => {
+    try {
+      const d = await (await fetch("/direct.json", { cache: "no-store" })).json();
+      if (d.agent) { a.style.background = d.agent.colour; a.setAttribute("aria-label", `Text ${d.agent.name}`); }
+      const last = (d.messages || []).filter((m) => m.from === "agent").slice(-1)[0];
+      let seen = 0;
+      try { seen = Number(localStorage.getItem("hq-direct-seen") || 0); } catch {}
+      a.querySelector("i").style.display = last && last.at > seen ? "block" : "none";
+    } catch {}
+  };
+  a.addEventListener("click", () => { try { localStorage.setItem("hq-direct-seen", String(Date.now() / 1000)); } catch {} });
+  look();
+  setInterval(look, 15000);
 })();
 const MODEL_NAME = { sonnet: "Sonnet", opus: "Opus", haiku: "Haiku", fable: "Fable" };
 function modelName(a) { return MODEL_NAME[a.model] || a.model; }

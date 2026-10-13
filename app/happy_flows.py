@@ -6270,8 +6270,18 @@ setTimeout(() => {
             finally:
                 srv.terminate()
                 srv.wait(timeout=10)
-            pj = (ROOT / "desktop/phone.js").read_text()
-            need("direct-btn" in pj and "'/direct'" in pj, "the phone version has no button for her chat")
+            # F25: the bubble is in the call page (shown on 8443, whether the phone's icon opens it or the HQ page
+            # around it), no longer over the voice button from phone.js; the call line passes her paths on.
+            web = (ROOT / "app/web/index.html").read_text()
+            need('id="directbtn"' in web and 'location.port !== "8443"' in web and ":8444/direct" in web and 'target = "_top"' in web,
+                 "the call page has no bubble for her chat on the phone")
+            need("direct-btn" not in (ROOT / "desktop/phone.js").read_text(), "the HQ page still lays its own bubble over the voice button")
+            bot = (ROOT / "app/bot.py").read_text()
+            need(all(f'"{p}"' in bot.split("_DIRECT = (")[1][:300] for p in ("/direct", "/direct.json", "/direct/key", "/direct/send",
+                                                                               "/direct/subscribe", "/direct-sw.js")),
+                 "the call line doesn't pass her chat on to the status page")
+            dh = (ROOT / "status/direct.html").read_text()
+            need("location.port === '8443'" in dh and "'/manifest.webmanifest'" in dh, "the chat doesn't know it's opened through the call line")
         finally:
             for key, v in saved.items():
                 if v is None:

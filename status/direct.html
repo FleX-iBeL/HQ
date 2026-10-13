@@ -47,6 +47,14 @@
 <div id="typing"></div>
 <form id="f"><textarea id="in" rows="1" placeholder="Text her"></textarea><button type="submit">Send</button></form>
 <script>
+  // F25: also served through the call line (8443), when the phone's home-screen icon is the call page itself:
+  // back goes to the call page, and the page keeps that app's manifest and icon.
+  const CALL = location.port === '8443';
+  if (CALL) {
+    document.querySelector('header a').href = '/';
+    document.querySelector('link[rel=manifest]').href = '/manifest.webmanifest';
+    document.querySelector('link[rel=apple-touch-icon]').href = '/apple-touch-icon.png';
+  }
 (() => {
   const list = document.getElementById('list');
   const input = document.getElementById('in');
@@ -87,7 +95,7 @@
         info = d.agent;
         document.getElementById('who').textContent = info.name;
         document.documentElement.style.setProperty('--her', info.colour);
-        document.getElementById('face').src = (location.port === '8444' ? `https://${location.hostname}:8443` : 'http://127.0.0.1:7860') + `/agents/${info.id}/picture`;
+        document.getElementById('face').src = (CALL ? '' : location.port === '8444' ? `https://${location.hostname}:8443` : 'http://127.0.0.1:7860') + `/agents/${info.id}/picture`;
         input.placeholder = 'Text ' + info.name;
         document.title = info.name;
       }
