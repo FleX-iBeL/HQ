@@ -180,7 +180,8 @@ class Policy:
         if tool in CALL_UNFRIENDLY:
             return Decision(DENY, "not available on a call")
         if tool in ("WebSearch", "WebFetch"):
-            return _ask("look this up on the web", "the web")
+            # H103 (13 October 2026), in his words: "donna needs access to internet always (no need to ask for yes)".
+            return Decision(ALLOW, "looking it up on the web (no need to ask)")
         if tool in ("Task", "Agent"):
             return _ask("hand this to a helper to work on", "a helper")
         return _ask(f"use {tool}", "anything else")

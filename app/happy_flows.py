@@ -2511,7 +2511,8 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
     async def flow60(self) -> str:
         """H65: a call reads HQ freely, like the workspace: its files, its logs, git to look, and the
         status page's data with curl on this computer. Changing anything in HQ still asks; curl
-        anywhere else, or with options that send or save, asks. No Claude turns."""
+        anywhere else, or with options that send or save, asks. H103: web search and reading a web
+        page never ask. No Claude turns."""
         from policy import Policy, ALLOW, ASK
         pol = Policy(config.FOLDER)
         hq = Path(os.path.realpath(ROOT))
@@ -2552,6 +2553,12 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
             need(v(tool, inp) == ASK, f"a call may change HQ or read elsewhere without asking: {tool} {inp}")
         need(pol.decide("Edit", {"file_path": str(hq / "app/x.py")}).question.endswith("in HQ?"),
              "a change in HQ isn't asked about as a change in HQ")
+        # H103: web search and reading a web page go without asking, on every call and after hang-up too.
+        for tool, inp in (("WebSearch", {"query": "library opening hours today"}),
+                          ("WebFetch", {"url": "https://example.com", "prompt": "the main heading"})):
+            need(v(tool, inp) == ALLOW, f"a call still asks before a web lookup: {tool}")
+            need(Policy(config.FOLDER, unattended=True).decide(tool, inp).verdict == ALLOW,
+                 f"a web lookup after hang-up is refused: {tool}")
         # The workspace still works as before, through HQ's workspace link too.
         need(v("Read", {"file_path": str(config.FOLDER / "rules.md")}) == ALLOW, "reading the workspace now asks")
         need(v("Edit", {"file_path": str(config.FOLDER / "inbox.md")}) == ALLOW, "writing in the workspace now asks")
@@ -6842,7 +6849,7 @@ FLOWS = {
     57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),
     58: ("H60: continue an earlier call: Continue in Past calls, the greeting, the earlier call as context", True, "flow58"),
     59: ("H62: after a crash the job runs again, first in line, picking up where it left off", False, "flow59"),
-    60: ("H65: a call reads HQ freely (files, logs, status page data); changes still ask", False, "flow60"),
+    60: ("H65: a call reads HQ freely (files, logs, status page data); changes still ask; web lookups never ask (H103)", False, "flow60"),
     61: ("H56.1: the routine and the watchdog on Linux; the Mac as it was", False, "flow61"),
     62: ("H73: Moneypenny, coming soon: a locked card under Donna and Pepper, never called", False, "flow62"),
     63: ("H56.2: job windows and the mail check on Linux, in tmux: a throwaway job and mail check", False, "flow63"),
