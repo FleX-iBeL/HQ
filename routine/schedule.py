@@ -20,6 +20,12 @@ The job list always goes first: every minute the routine runs "promote", which o
 routine is on and no job runs or waits. Then the item whose time came first becomes a job at the bottom of the
 queue (so it starts within the same minute), and the item says which job it became.
 
+Looking back (H111, 13 October 2026; the user's words on the call of 13 October at 17:40: "it needs to look at
+right now or previous time, not just right now"): an item is due from its time on, not only in that minute. Every
+item whose time has passed while the job list, the usage or the routine being off held it back stays waiting,
+and when the scheduler gets its turn they all run, one after another, earliest first. None is skipped or dropped.
+Priority doesn't change: the job list still goes first, and only a tagged item (H99) goes ahead of it.
+
 The priority tag (H99, 13 October 2026; the user's words on the call of 12 October at 22:40: "if we have things
 in the scheduler we can give it like a priority tag. And then it has priority over the normal job list line. If
 not, then the normal job list line has priority."): a tagged item whose time has come doesn't wait for the job
@@ -50,7 +56,8 @@ HEADING = "## The schedule"
 INTRO = (
     "Work planned ahead for a day and a time (H43). The job list always goes first: when an item's time has "
     "come and no job runs or waits, the routine puts it in the queue as a job, and it starts within about a "
-    "minute. Kept by the routine's schedule script; the lines are not edited by hand. A call can add, list, "
+    "minute. An item whose time passed while it waited is never skipped: they run one after another, earliest "
+    "first (H111). Kept by the routine's schedule script; the lines are not edited by hand. A call can add, list, "
     "move and cancel items."
 )
 LINE = re.compile(r"^- Item (\d+) · (.+?) · at (\d{4}-\d\d-\d\d \d\d:\d\d) · added (\d{4}-\d\d-\d\d \d\d:\d\d) · (.*)$")
@@ -155,6 +162,8 @@ def tags(i):
 
 
 def due(item, now=None):
+    """H111: due from its time on, also long after it (while the job list or the usage held it back), never
+    only in that minute."""
     return item["state"] == "waiting" and item["at"] <= (now or dt.datetime.now()).strftime(FMT)
 
 
@@ -204,6 +213,13 @@ def sync(items, queue):
     return changed
 
 
+def passed(items, now=None):
+    """H111: the waiting items whose time has come, in the order they run: tagged first (H99), then the
+    earliest time first."""
+    now = now or dt.datetime.now()
+    return sorted((i for i in items if due(i, now)), key=lambda i: (not i.get("priority"), i["at"], i["n"]))
+
+
 def promote():
     """The routine, every minute. A due item with the priority tag (H99): once no job runs, it becomes a job
     first in line, ahead of the waiting jobs (after the tagged ones that went in before it). Any other item:
@@ -216,7 +232,7 @@ def promote():
         running = any(not j["state"].startswith(JOB_FINISHED) and not jobs.waiting(j) for j in queue)
         busy = any(not j["state"].startswith(JOB_FINISHED) for j in queue)
         now = dt.datetime.now()
-        ready = sorted((i for i in items if due(i, now)), key=lambda i: (not i.get("priority"), i["at"], i["n"]))
+        ready = passed(items, now)  # H111: every item whose time has passed, not only this minute's
         did = ""
         item = ready[0] if ready else None
         if on and item and (not busy or (item.get("priority") and not running)):
@@ -262,8 +278,10 @@ def status():
                 "next": None}
     if due(first, now):
         why = "the routine is off" if not on else "the job list goes first"
+        more = len(passed(items, now)) - 1  # H111: the others whose time passed wait their turn, none skipped
+        more = f", {more} more after it, earliest first" if more > 0 else ""
         # Waiting for the job list is how it's meant to work, so it's not shown as a warning.
-        return {"state": "ok", "text": f"Item {first['n']} is due; waits: {why}", "next": None}
+        return {"state": "ok", "text": f"Item {first['n']} is due{more}; waits: {why}", "next": None}
     at = dt.datetime.strptime(first["at"], FMT)
     more = f", {len(coming) - 1} more after it" if len(coming) > 1 else ""
     return {"state": "ok", "text": f"Next: item {first['n']}, {say_when(first['at'])}{more}", "next": at.timestamp()}

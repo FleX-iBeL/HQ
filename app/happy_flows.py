@@ -3749,6 +3749,34 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         for x in q()["waiting"]:
             jobs("done", str(x["n"]))
         sched("promote")
+        # H111: looking back. Items whose time passed while the job list (or the usage) held them back are
+        # never skipped: when the scheduler's turn comes they all run, one after another, earliest first.
+        held = int(jobs("add", "flow 45 held by the usage").split()[1])
+        jobs("mark", str(held), "held: usage over the line")
+        past = {}
+        for at, name in (("09:15", "b"), ("08:05", "a"), ("11:40", "c")):
+            k = int(sched("add", "now", f"flow 45 passed {name}").split()[1])
+            past[name] = k
+            yday = (time.time() - 86400) if name == "a" else time.time()  # one from yesterday too
+            stamp = time.strftime("%Y-%m-%d", time.localtime(yday)) + " " + at
+            rm.write_text(re.sub(rf"^(- Item {k} · waiting · at )\S+ \S+", rf"\g<1>{stamp}", rm.read_text(), flags=re.M))
+        need("Nothing to start" in sched("promote"), "a passed item went ahead of a job held by the usage")
+        st = json.loads(sched("status"))
+        need(f"Item {past['a']} is due, 2 more after it, earliest first" in st["text"] and "job list goes first" in st["text"],
+             f"the routine line doesn't say the passed items wait their turn: {st}")
+        jobs("done", str(held))
+        for name in ("a", "b", "c"):
+            did = sched("promote")
+            need(f"item {past[name]} became job" in did, f"the passed items don't run earliest first ({name}): {did}")
+            w = q()["waiting"]
+            need(len(w) == 1, f"more than one passed item went in at once: {w}")
+            need("Nothing to start" in sched("promote"), "a passed item went in while its turn wasn't there")
+            jobs("done", str(w[0]["n"]))
+        sched("promote")
+        lst = sched("list")
+        need(all(f"Item {past[x]} " in lst.split("Looking back")[1] for x in past)
+             and not any(f"Item {past[x]} " in lst.split("Looking back")[0] for x in past),
+             f"a passed item got lost or is still planned: {lst}")
         # The queue keeps working with the schedule under it, and the schedule survives the queue's writes.
         text = rm.read_text()
         need(text.count("## The schedule") == 1 and text.count("## The queue") == 1
@@ -3781,7 +3809,9 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
              "the call rules don't say how to plan work")
         need("--priority" in config.VOICE_RULES and "'prio'" in page and "Due, goes first" in page,
              "the call rules or the status page don't know the priority tag (H99)")
-        return "plans by day and time; waits while a job runs, waits or the routine is off; then becomes one job, past the line kept; looking back, move, cancel; priority tag goes first in line, never stops a running job (H99); page, routine line, call rules"
+        need("H111" in config.VOICE_RULES and "earliest first" in config.VOICE_RULES,
+             "the call rules don't say passed items still run, earliest first (H111)")
+        return "plans by day and time; waits while a job runs, waits or the routine is off; then becomes one job, past the line kept; looking back, move, cancel; priority tag goes first in line, never stops a running job (H99); passed items all run after the job list, earliest first, none lost (H111); page, routine line, call rules"
 
     async def flow46(self) -> str:
         """H27: the Mac desktop app. No Claude turns. The watchdog part on made-up routine lines, its turning-on

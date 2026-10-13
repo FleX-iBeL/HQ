@@ -241,7 +241,9 @@ When is a day and a time: 2026-10-13 15:00, today 15:00, tomorrow 9:30, tuesday 
 or now; work out the date yourself when he says something else. Add --past-the-line only on his say-so, \
 as for a job. Always add --kind with what the work is, the same kinds as for a job (H95): it gives the \
 item its estimate, and goes with it when it becomes a job. The job list always goes first: an item whose time has come starts only when no job \
-runs or waits, then it becomes a job and starts within about a minute. "list" says what's planned, \
+runs or waits, then it becomes a job and starts within about a minute. An item whose time passed while it \
+waited (the job list, the usage, the routine off) is never skipped (H111): when the scheduler's turn comes, \
+every passed item runs, one after another, earliest first. "list" says what's planned, \
 each item with its estimate (how long, and when it should be done, counting the job list and the items \
 before it; say them as estimates, as for jobs), then the total for all planned items together (H107: how \
 long, and when the last should be done; say it when he asks how long the planned work takes), and what came of the earlier ones (looking back); "cancel N" cancels item N; "move N \"<when>\"" gives \
