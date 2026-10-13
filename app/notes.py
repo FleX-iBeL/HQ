@@ -3,7 +3,8 @@
 One file in the workspace (never in HQ's code): HQ/notes.md, or HQ_NOTES. Each note is one line under
 "## Notes", "- YYYY-MM-DD HH:MM:SS · text" (line breaks kept as <br>), newest at the bottom, so a call
 reads it like any other file and goes through it with the user; a note is cleared by removing its line
-(the page's Clear does the same). The small doodle space is one picture next to it, notes-doodle.png.
+(the page's Clear does the same). Since H117 just text: the doodle space is gone, and a notes-doodle.png
+saved before is left where it is, unread.
 A line a call wrote by hand ("- something") counts as a note too; its id is a hash of the line.
 
     python3 app/notes.py            the notes, as the page gets them (JSON)
@@ -22,18 +23,12 @@ import config  # noqa: E402
 
 NOTES = Path(os.environ.get("HQ_NOTES", str(config.DATA / "notes.md")))
 MAX_TEXT = 2000
-MAX_DOODLE = 2_000_000  # bytes of PNG
 HEAD = ("# Quick notes\n\n"
         "> **Private.** Written on the call page's notes button (H105). Go through them together whenever "
-        "asked; once a topic is gone through, remove its line (the page's Clear does the same). The doodle "
-        "space is the picture notes-doodle.png next to this file.\n\n"
+        "asked; once a topic is gone through, remove its line (the page's Clear does the same).\n\n"
         "## Notes\n\n")
 _STAMP = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) · (.*)$")
 _lock = threading.Lock()
-
-
-def doodle_path(notes: Path | None = None) -> Path:
-    return (notes or NOTES).with_name("notes-doodle.png")
 
 
 def _id(line: str) -> str:
@@ -80,8 +75,7 @@ def items(notes: Path | None = None) -> list[dict]:
 
 
 def read(notes: Path | None = None) -> dict:
-    d = doodle_path(notes)
-    return {"items": items(notes), "doodle": int(d.stat().st_mtime * 1000) if d.exists() else None}
+    return {"items": items(notes)}
 
 
 def add(text: str, notes: Path | None = None) -> dict | None:
@@ -119,21 +113,6 @@ def clear_all(notes: Path | None = None) -> int:
         if gone:
             _write(notes, head, kept)
     return gone
-
-
-def save_doodle(png: bytes, notes: Path | None = None) -> bool:
-    """An empty picture clears the doodle; anything else must be a PNG under MAX_DOODLE."""
-    d = doodle_path(notes)
-    if not png:
-        d.unlink(missing_ok=True)
-        return True
-    if len(png) > MAX_DOODLE or not png.startswith(b"\x89PNG\r\n\x1a\n"):
-        return False
-    d.parent.mkdir(parents=True, exist_ok=True)
-    tmp = d.with_name(d.name + ".tmp")
-    tmp.write_bytes(png)
-    os.replace(tmp, d)
-    return True
 
 
 if __name__ == "__main__":

@@ -446,7 +446,7 @@ if __name__ == "__main__":
         except Exception:
             return None
 
-    # H105: the quick notes and the doodle space behind the round notes button. Kept in the workspace (notes.py);
+    # H105: the quick notes behind the round notes button (just text since H117). Kept in the workspace (notes.py);
     # changed only from the call page itself (the header x-hq: notes), like the update's buttons.
     import notes as _notes
 
@@ -474,21 +474,6 @@ if __name__ == "__main__":
             _notes.clear_all()
         else:
             return JSONResponse({"error": "no change asked"}, status_code=400)
-        return JSONResponse(_notes.read(), headers=_NO_CACHE)
-
-    @app.get("/api/notes/doodle", include_in_schema=False)
-    async def notes_doodle():
-        pic = _notes.doodle_path()
-        if not pic.exists():
-            return Response(status_code=404)
-        return FileResponse(pic, media_type="image/png", headers=_NO_CACHE)
-
-    @app.post("/api/notes/doodle", include_in_schema=False)
-    async def notes_doodle_save(request: Request):
-        if request.headers.get("x-hq") != "notes":
-            return JSONResponse({"error": "Only the HQ page can change the notes"}, status_code=403)
-        if not _notes.save_doodle(await request.body()):
-            return JSONResponse({"error": "not a picture HQ keeps"}, status_code=400)
         return JSONResponse(_notes.read(), headers=_NO_CACHE)
 
     @app.get("/api/busy", include_in_schema=False)

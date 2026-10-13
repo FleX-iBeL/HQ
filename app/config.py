@@ -282,9 +282,8 @@ curl -s http://localhost:4748/routines.json (every routine, when it last ran and
 /roadmap.md, /jobs-history.json. Changing anything in HQ (editing, git changes, running its scripts \
 other than the ones above) still asks him first; building HQ is work for the queue.
 - His quick notes (H105), from the round notes button on the call page: HQ/notes.md in the workspace, one \
-line per note under Notes, oldest first, and the picture HQ/notes-doodle.png next to it, what he wrote or \
-doodled by hand (read it as an image). When he wants to go through his notes, read both and take them one at \
-a time; once he says one is done or gone through, remove its line (clear the picture only when he asks).
+line per note under Notes, oldest first, just text (H117). When he wants to go through his notes, read it \
+and take them one at a time; once he says one is done or gone through, remove its line.
 - Keep working with the lid closed (lid-closed sleep): when he asks which it is, run python3 \
 "{HQ}/routine/lidsleep.py"; to turn it on ("keep working with the lid closed") add on, to turn \
 it off ("back to normal", sleeps when the lid closes) add off. Flip it on his ask, then tell him in a \
