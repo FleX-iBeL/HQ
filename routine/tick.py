@@ -43,6 +43,7 @@ import failures  # H42: why a run failed, in plain words, and how many times in 
 import crash  # H62: a job stopped by a crash runs again from the top of the line
 import role  # H56.3: main and backup; only the main runs the mail check, the jobs and the scheduler
 import heartbeat  # H88: a heartbeat line for each of the two computers
+import estimate  # H81: the estimates learn from both computers
 import sync  # H56.4: the two-way sync of the workspace and Claude's memory with the other HQ
 import log_cycle  # H100: the coaching log keeps three hours; older entries move to its archive
 
@@ -860,6 +861,11 @@ def tick():
         heartbeat.tick(routines=routines, incidents=incidents, log=log)
     except Exception as e:
         log(f"heartbeat: {e!r}")
+    # H81: the other HQ's finished jobs, for estimates on both computers (at most every ten minutes). Alone: nothing.
+    try:
+        estimate.pull(log=log)
+    except Exception as e:
+        log(f"estimates: {e!r}")
     if r["acting"] == "backup":
         stale_job_here()
         on_backup()

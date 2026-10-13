@@ -665,6 +665,11 @@
         return `Estimates lately: off by ${a.avg_off} min on average over the last ${a.count} job${a.count === 1 ? '' : 's'}; ${a.within} close, ${a.longer} took longer. Each job that finishes teaches the next ones.`;
       }
 
+      // H81: what the estimates learned: which computer they're for, how the computers compare, the patterns.
+      function etaLearned(E) {
+        return (E?.learned || []).join(' ');
+      }
+
       /** A part that folds open and closed with an arrow. start: open or folded the first time. */
       function foldPart(key, start, title, counts, sub = false) {
         const fold = el('details', `fold${sub ? ' sub' : ''}`);
@@ -1343,11 +1348,13 @@
             }
             if (!jobs.length) card.append(el('div', 'row soft', g === 'finished' ? 'None kept.' : `Nothing ${g}.`));
             if (g === 'finished' && E) card.append(el('div', 'row soft eta-sum', etaAccuracy(E.accuracy)));
+            if (g === 'finished' && etaLearned(E)) card.append(el('div', 'row soft eta-sum', etaLearned(E)));
             part.append(card);
             parts.append(part);
           }
           // H61: how close the estimates have been lately, always in view under the job list.
           if (E) parts.append(el('p', 'soft eta', etaAccuracy(E.accuracy)));
+          if (etaLearned(E)) parts.append(el('p', 'soft eta', etaLearned(E)));
           fold.append(parts);
           box.append(fold);
           app.append(box);

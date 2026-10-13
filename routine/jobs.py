@@ -169,6 +169,7 @@ def with_estimates(jobs):
         lines.append(show(j, places.get(j["n"])) + (f"\n    Estimate: {w}" if w else ""))
     lines.append(est.total_words(p))
     lines.append(est.accuracy_words(p["accuracy"]))
+    lines.extend(p.get("learned") or [])  # H81: which computer, how the two compare, the patterns
     return "\n".join(lines) if jobs else "No jobs yet."
 
 

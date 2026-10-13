@@ -5870,6 +5870,87 @@ console.log(JSON.stringify({{
         need(lap["light"] == "light down", f"on the laptop a hot laptop doesn't make the Routines light red: {lap['light']}")
         return "on a server no Laptop section, no battery in the top line, no laptop lines or bars under Routines, the light green; on the laptop all of it as before, the light red"
 
+    async def flow81(self) -> str:
+        """H81, no Claude: job estimates per computer, and patterns from all the data. The estimator on its own
+        files (a throwaway roadmap copy and estimates folder, nothing real read or written), two made-up computers:
+        a finished job notes its computer and tags; the other computer's jobs count, scaled by how much slower or
+        faster this one turned out to be; a computer with no history starts from the other's; a tag seen often
+        moves the estimate; the words say it; share gives only this computer's lines; the status server answers
+        /api/estimates and the page and the job list show what was learned."""
+        import subprocess as sp
+        rm = self.tmp / "roadmap-H81.md"
+        rm.write_text(ROADMAP.read_text())
+        d = self.tmp / "roadmap-H81-estimates"
+        d.mkdir(parents=True, exist_ok=True)
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ESTIMATES": str(d)}
+        env.pop("HQ_ROUTINES_HISTORY", None)
+        script = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import estimate as E
+out = {}
+A = {"name": "lap", "label": "Laptop", "type": "laptop"}
+B = {"name": "vps", "label": "VPS", "type": "server"}
+# The laptop takes twice as long as the VPS for builds; the VPS has the history.
+h = [{"n": i, "kind": "build", "actual": a, "done": i, "machine": m, "tags": t}
+     for i, (a, m, t) in enumerate([(10, "lap", []), (12, "lap", []), (10, "lap", []), (5, "vps", []), (6, "vps", []),
+                                    (5, "vps", []), (6, "vps", []), (5, "vps", []), (5, "vps", [])], 1)]
+out["vps"] = E.estimate_detail("Build H1", h, machine="vps")
+out["lap"] = E.estimate_detail("Build H1", h, machine="lap")
+out["factor"] = E.factor(E._real(h), "lap", "vps", "build")
+# A new computer with no history starts from the others', unscaled.
+out["new"] = E.estimate_detail("Build H1", [x for x in h if x["machine"] == "vps"], machine="new")
+# A tag seen on many jobs that took clearly longer than their kind's usual time moves the estimate.
+p = [{"n": 100 + i, "kind": "build", "actual": (20 if i % 2 else 5), "done": 100 + i, "machine": "vps",
+      "tags": (["internet"] if i % 2 else [])} for i in range(12)]
+out["pat"] = {k: list(v) for k, v in E.patterns(E._real(p)).items()}
+out["web"] = E.estimate_detail("Build H2: download the videos from the web", p, machine="vps")
+out["plain"] = E.estimate_detail("Build H3", p, machine="vps")
+out["tags"] = E.tags_of("let's go. This is job 5. The job, as agreed on the call: Scheduled item 3, planned for Tuesday: "
+                        "H9: fetch the page from the web. Planned on the call of 12 October. Pull dev first, push to dev when done.")
+# The words, for the status page and the job list.
+E.me = lambda: A
+E._peer = lambda: {"name": "vps", "label": "VPS", "type": "server", "lines": []}
+out["learned"] = E.learned(h + p, A)
+# share: only this computer's own lines; on_done notes the computer and the tags.
+open(E.HISTORY, "w").write("".join(json.dumps(x) + "\n" for x in h))
+out["share"] = E.share()
+E.on_add(500, "Build H5: search the web for prices")
+out["done"] = E.on_done(500, "Build H5: search the web for prices", "00:01")
+out["last"] = json.loads(open(E.HISTORY).read().splitlines()[-1])
+print("H81OUT " + json.dumps(out))
+"""
+        r = sp.run([sys.executable, "-c", script, str(ROOT / "routine")], capture_output=True, text=True, env=env, timeout=60)
+        m = re.search(r"H81OUT (.*)", r.stdout)
+        need(m, f"the estimator didn't run: {r.stdout[-500:]} {r.stderr[-1500:]}")
+        o = json.loads(m.group(1))
+        need(o["vps"]["est"] == 5 and o["vps"]["own"] == 6, f"on the VPS its own builds don't count first: {o['vps']}")
+        f, n = o["factor"]
+        need(1.5 < f < 2.1 and n == 3, f"the laptop isn't seen as about twice as slow as the VPS for builds: {o['factor']}")
+        need(7 <= o["lap"]["est"] <= 12 and o["lap"]["own"] == 3 and o["lap"]["other"] == 6, f"the laptop's estimate isn't its own builds plus the VPS's scaled: {o['lap']}")
+        need(o["new"]["est"] == 5 and o["new"]["own"] == 0 and o["new"]["other"] == 6,
+             f"a computer with no history doesn't start from the other's: {o['new']}")
+        need("internet" in o["pat"] and o["pat"]["internet"][0] >= 1.5, f"a slow tag isn't found as a pattern: {o['pat']}")
+        need(o["web"]["est"] > o["plain"]["est"] and o["web"]["pattern"] > 1 and o["plain"]["pattern"] == 1,
+             f"the pattern doesn't move the estimate of a job with that tag (only): {o['web']} {o['plain']}")
+        need(o["tags"] == ["internet", "status"], f"the tags read the routine's own wording too: {o['tags']}")
+        words = " ".join(o["learned"])
+        need("Estimates are for the Laptop, from 3 finished jobs there and 18 on the VPS" in words
+             and "The Laptop takes about 1." in words and "times as long as the VPS" in words and "need the internet take about" in words,
+             f"what was learned isn't said in words: {o['learned']}")
+        need(o["share"]["name"] == "lap" and [x["n"] for x in o["share"]["lines"]] == [1, 2, 3], f"share gives other computers' lines as its own: {o['share']}")
+        last = o["last"]
+        need(last["n"] == 500 and last.get("machine") and last.get("type") in ("laptop", "server") and "internet" in last["tags"],
+             f"a finished job doesn't note its computer and tags: {last}")
+        srv = (ROOT / "status/server.mjs").read_text()
+        need("path0 === '/api/estimates'" in srv and "'share'" in srv, "the status server doesn't answer /api/estimates")
+        page = (ROOT / "status/index.html").read_text()
+        need("etaLearned(E)" in page, "the status page doesn't show what the estimates learned")
+        need("p.get(\"learned\")" in (ROOT / "routine/jobs.py").read_text(), "the job list on calls doesn't say what was learned")
+        need("estimate.pull(log=log)" in (ROOT / "routine/tick.py").read_text(), "the routine doesn't pull the other HQ's finished jobs")
+        return ("each computer's own jobs first, the other's scaled (laptop about 2 times the VPS), a new computer starts "
+                "from the other's, a slow tag moves the estimate, said in words; only its own lines shared; served and shown")
+
     async def flow80(self) -> str:
         """F9, no Claude: a call left quiet stays connected. Pipecat ends a pipeline after 5 minutes with nothing
         spoken or heard (typed lines and her thinking don't count); the call line turns that off. Two tiny pipelines,
@@ -6782,6 +6863,7 @@ FLOWS = {
     78: ("H86: the screen in the colour of who I'm calling; my lines green, hers in her colour", False, "flow78"),
     79: ("H88: heartbeats for both computers: this one up and online, the other answering; on both status pages", False, "flow79"),
     80: ("F9: a call left quiet stays connected: no idle timeout; a hang-up or a lost connection still ends it", False, "flow80"),
+    81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data", False, "flow81"),
 }
 
 

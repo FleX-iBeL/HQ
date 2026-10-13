@@ -329,6 +329,15 @@ const server = createServer(async (req, res) => {
     res.writeHead(out ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(out));
     return;
   }
+  // H81: this computer's finished jobs (kind, minutes, its machine, tags; no job text), for the other HQ's estimates.
+  if (path0 === '/api/estimates') {
+    execFile('/usr/bin/python3', [join(root, 'routine/estimate.py'), 'share'], { timeout: 20000 }, (err, out) => {
+      let data = null;
+      try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
+      res.writeHead(data ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(data));
+    });
+    return;
+  }
   if (path0 === '/api/role' || path0 === '/api/forward') {
     const post = req.method === 'POST';
     if (post && req.headers['x-hq'] !== (path0 === '/api/role' ? 'role' : 'forward')) {
