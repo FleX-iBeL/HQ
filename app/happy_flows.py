@@ -804,8 +804,9 @@ class Run:
         start = len(live.call.policy.log)
         # A day with no doubt about which one is meant ("tomorrow" at four in the morning is ambiguous).
         day = (datetime.now() + timedelta(days=2)).strftime("%A")
-        r1 = await live.ask(f"Please put a new event in my calendar on {day} at noon, called test call.",
-                            "needs a yes")
+        # H78: his own calendar entries go without asking now; one with someone else invited still needs a yes.
+        r1 = await live.ask(f"Please put a new event in my calendar on {day} at noon, called test call, "
+                            "and invite test at example dot com.", "needs a yes")
         asked = [(t, d.verdict) for t, _, d in live.call.policy.log[start:] if d.verdict == "ask"]
         say(f"   asked about: {asked} | pending: {[q for _, _, q in live.call.policy.pending]}")
         done = [t for t, _, d in live.call.policy.log[start:] if "create_event" in t and d.verdict == "allow"]
@@ -5869,6 +5870,46 @@ console.log(JSON.stringify({{
         need(lap["light"] == "light down", f"on the laptop a hot laptop doesn't make the Routines light red: {lap['light']}")
         return "on a server no Laptop section, no battery in the top line, no laptop lines or bars under Routines, the light green; on the laptop all of it as before, the light red"
 
+    async def flow76(self) -> str:
+        """H78, no Claude: the call's policy on calendar changes, with made-up events (nothing reaches the calendar).
+        Adding goes without asking; moving or deleting too, once the event was looked at on this call (what it was
+        goes into the transcript's line); other people in it, or answering an invitation, asks; a test run stops all."""
+        from policy import Policy, ALLOW, ASK, DENY
+        import brain as _brain
+        from pipeline import make_brain
+        C = "mcp__claude_ai_Google_Calendar__"
+        pol = Policy(config.FOLDER)
+        need(pol.decide(C + "create_event", {"summary": "Gym"}).verdict == ALLOW, "adding his own event still asks")
+        need(pol.decide(C + "create_event", {"summary": "Lunch", "attendees": [{"email": "a@example.com"}]}).verdict == ASK,
+             "adding an event with someone invited doesn't ask")
+        d = pol.decide(C + "delete_event", {"eventId": "own1"})
+        need(d.verdict == DENY and d.retry and "Not yet" in _brain.refusal_text(d),
+             "deleting an event she hasn't looked at isn't stopped, or not as a 'look first'")
+        answer = [{"type": "text", "text": json.dumps({"events": [
+            {"id": "own1", "summary": "Gym", "start": {"dateTime": "2026-10-14T10:00:00+02:00"},
+             "end": {"dateTime": "2026-10-14T11:00:00+02:00"}, "organizer": {"email": "me@example.com", "self": True}},
+            {"id": "with1", "summary": "Lunch", "start": {"dateTime": "2026-10-15T12:00:00+02:00"},
+             "end": {"dateTime": "2026-10-15T13:00:00+02:00"}, "organizer": {"email": "me@example.com", "self": True},
+             "attendees": [{"email": "me@example.com", "self": True}, {"email": "a@example.com"}]},
+            {"id": "inv1", "summary": "Their meeting", "start": {"date": "2026-10-16"},
+             "organizer": {"email": "someone@example.com"}}]})}]
+        pol.seen(C + "list_events", answer)
+        d = pol.decide(C + "delete_event", {"eventId": "own1"})
+        need(d.verdict == ALLOW and '"Gym"' in d.why and "2026-10-14T10:00" in d.why,
+             f"deleting his own event she looked at doesn't go, or doesn't keep what it was: {d.why}")
+        need(pol.decide(C + "update_event", {"eventId": "own1", "start": {}}).verdict == ALLOW, "moving his own event still asks")
+        need(pol.decide(C + "update_event", {"eventId": "own1", "attendees": [{"email": "b@example.com"}]}).verdict == ASK,
+             "inviting someone to his event doesn't ask")
+        need(pol.decide(C + "update_event", {"eventId": "with1", "start": {}}).verdict == ASK, "moving an event with others in it doesn't ask")
+        need(pol.decide(C + "delete_event", {"eventId": "inv1"}).verdict == ASK, "deleting someone else's invitation doesn't ask")
+        need(pol.decide(C + "respond_to_event", {"eventId": "inv1"}).verdict == ASK, "answering an invitation doesn't ask")
+        test = Policy(config.FOLDER, dry_run=True)
+        need(test.decide(C + "create_event", {"summary": "Gym"}).verdict == DENY, "a test run can change the calendar")
+        need("The calendar (H78)" in config.VOICE_RULES, "the call isn't told it may change the calendar")
+        opts = make_brain(config.MODEL_ALIASES["sonnet"], test, load="quick")._options
+        need("PostToolUse" in opts.hooks, "the call doesn't tell the policy what a calendar read showed")
+        return "adding goes; moving and deleting after a look, with what it was kept; others in it and invitations ask; tests change nothing"
+
     async def flow75(self) -> str:
         """F18, no Claude: the status page on the phone only scrolls up and down. A copy of the status page in a
         headless browser at phone widths, with a job and a roadmap note that hold a long path and a key (no space
@@ -6351,6 +6392,7 @@ FLOWS = {
     73: ("H92: on a server the status page shows no Laptop section and no laptop lines under Routines", False, "flow73"),
     74: ("H100: the coaching log keeps three hours; older entries move to its archive, calls load only those", False, "flow74"),
     75: ("F18: the status page on the phone never gets wider than the screen; it only scrolls up and down", False, "flow75"),
+    76: ("H78: his own calendar changes go without asking; with other people in it, or not looked at first, they don't", False, "flow76"),
 }
 
 

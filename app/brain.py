@@ -99,6 +99,11 @@ def call_session_options(
             out["permissionDecisionReason"] = refusal_text(d)
         return {"hookSpecificOutput": out}
 
+    async def post_tool_use(hook_input, tool_use_id, context):
+        # H78: what a calendar read showed, so a move or delete knows who's in the event and what it was.
+        policy.seen(hook_input.get("tool_name", ""), hook_input.get("tool_response"))
+        return {}
+
     async def can_use_tool(tool_name, tool_input, ctx):
         # Normally not reached: the hook above already decided. Kept as the fallback.
         d = policy.decide(tool_name, tool_input or {})
@@ -116,7 +121,8 @@ def call_session_options(
         # K2: no Claude Docs on calls (the whole server, so its tools aren't loaded at all).
         disallowed_tools=_policy.CALL_UNFRIENDLY + _policy.gmail_never_tool_names()
         + ([_config.DOCS_SERVER] if _config.NO_DOCS else []),
-        hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre_tool_use])]},
+        hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre_tool_use])],
+               "PostToolUse": [HookMatcher(matcher=None, hooks=[post_tool_use])]},
         can_use_tool=can_use_tool,
         include_partial_messages=True,
         effort=effort,
@@ -142,6 +148,8 @@ def refusal_text(d: "_policy.Decision") -> str:
             f"(What needs his okay: {d.question}) Never say \"say yes or no\". Then stop and wait for "
             "his answer. If the call system then tells you he said yes, make exactly the same call again."
         )
+    if d.retry:
+        return f"Not yet: {d.why}. No need to ask {_config.USER} for this."
     return f"Not allowed on this call: {d.why}. Don't try another way; tell {_config.USER} briefly if it matters."
 
 

@@ -45,7 +45,7 @@ Each agent's headshot is a drawn placeholder until you put a picture in your wor
 
 After a call, the transcript is saved and the call's notes go into your log, in your own words, then committed (Free calls are never saved).
 
-**Things that need your yes** (changing your calendar, anything in your mail) are checked with you in one sentence first. **Mail is never sent**: drafts at the most.
+**Things that need your yes** (a calendar appointment with other people in it, anything in your mail) are checked with you in one sentence first. Your own calendar she just changes: adding, moving, deleting, and what it was is kept in the call's transcript so it can be put back. **Mail is never sent**: drafts at the most.
 
 ### The workspace and its files
 

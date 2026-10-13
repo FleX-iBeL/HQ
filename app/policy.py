@@ -58,6 +58,7 @@ class Decision:
     verdict: str  # ALLOW, ASK or DENY
     why: str  # one short line, for the log and the transcript
     question: str = ""  # for ASK: what HQ asks, in plain words
+    retry: bool = False  # H78: a DENY that's only "not yet": do what `why` says, then make the same call again
 
 
 # -- the lists -------------------------------------------------------------------
@@ -72,6 +73,13 @@ EDIT_TOOLS = {"Edit", "Write", "MultiEdit"}
 # Connectors are matched by server name, so they work whatever prefix the CLI gives them
 # (mcp__claude_ai_Google_Calendar__list_events in the CLI).
 CALENDAR_READ = {"list_calendars", "list_events", "get_event", "search_events", "suggest_time"}
+# H78 (12 October 2026, in the user's words): "If there are other people included in this appointment, then maybe
+# ask for a confirmation. If it's just my account, I just put things in my calendar. ... We can always turn it back."
+# So adding, moving and deleting go without asking, on every call; an event with other people in it (attendees, or
+# someone else's invitation) and answering an invitation still ask. Before a move or a delete she must have read the
+# event on this call, so the policy knows whether others are in it and keeps what it was (see seen()).
+CALENDAR_ADD = {"create_event"}
+CALENDAR_CHANGE = {"update_event", "delete_event"}
 GMAIL_READ = {"search_threads", "get_thread", "get_message", "list_drafts", "get_draft", "list_labels"}
 GMAIL_NEVER = {"send_message", "send", "reply", "forward", "send_draft"}
 
@@ -103,6 +111,8 @@ class Policy:
     approved: set[tuple[str, str]] = field(default_factory=set)
     log: list[tuple[str, str, Decision]] = field(default_factory=list)  # (tool, summary, decision)
     listener: object = None  # called as listener(tool, summary, decision), e.g. the transcript
+    # H78: calendar events read on this call: event id -> (others in it?, what it was, in one line).
+    events: dict[str, tuple[bool, str]] = field(default_factory=dict)
 
     def __post_init__(self):
         self.folder = Path(os.path.realpath(self.folder))
@@ -151,7 +161,7 @@ class Policy:
             if "calendar" in s:
                 if name in CALENDAR_READ:
                     return Decision(ALLOW, "reading the calendar")
-                return _ask(_calendar_question(name, inp), "a calendar change")
+                return self._calendar(name, inp)
             return _ask(f"use {_plain(name)} in {server.replace('_', ' ')}", "another connector")
 
         if tool in SESSION_TOOLS:
@@ -174,6 +184,36 @@ class Policy:
         if tool in ("Task", "Agent"):
             return _ask("hand this to a helper to work on", "a helper")
         return _ask(f"use {tool}", "anything else")
+
+    def _calendar(self, name: str, inp: dict) -> Decision:
+        """H78: his own calendar changes go without asking; with other people in it, ask."""
+        if _has_others(inp):
+            return _ask(_calendar_question(name, inp), "a calendar change with other people in it")
+        if name in CALENDAR_ADD:
+            return Decision(ALLOW, "adding to the calendar (no need to ask)")
+        if name in CALENDAR_CHANGE:
+            ev = self.events.get(str(inp.get("eventId") or ""))
+            if ev is None:
+                return Decision(DENY, "look at this event first (get_event), so it can be put back, and to see "
+                                      "whether other people are in it; then try again", retry=True)
+            others, was = ev
+            if others:
+                return _ask(_calendar_question(name, inp), "a calendar change with other people in it")
+            verb = "deleting" if "delete" in name else "moving or changing"
+            return Decision(ALLOW, f"{verb} in the calendar (no need to ask); it was: {was}")
+        return _ask(_calendar_question(name, inp), "a calendar change")
+
+    def seen(self, tool: str, response) -> None:
+        """H78: after a calendar read, remember each event it showed: whether others are in it, and what it was,
+        so a move or delete can be put back (the line goes into the transcript with the change). Never raises."""
+        server, name = _mcp_parts(tool)
+        if "calendar" not in server.lower() or name not in CALENDAR_READ:
+            return
+        try:
+            for ev in _event_dicts(response):
+                self.events[str(ev["id"])] = (_has_others(ev), _event_line(ev))
+        except Exception:
+            pass
 
     def _edit(self, path: str) -> Decision:
         if not path:
@@ -445,6 +485,49 @@ def _calendar_question(name: str, inp: dict) -> str:
     return f"change{what or ' an event'} in your calendar"
 
 
+def _has_others(ev: dict) -> bool:
+    """Other people in an event: an attendee who isn't him, or an organizer who isn't one of his calendars."""
+    for a in ev.get("attendees") or []:
+        if not (isinstance(a, dict) and a.get("self")):
+            return True
+    org = ev.get("organizer")
+    return isinstance(org, dict) and bool(org.get("email")) and not org.get("self")
+
+
+def _event_line(ev: dict) -> str:
+    def when(k):
+        t = ev.get(k) or {}
+        return str(t.get("dateTime") or t.get("date") or "?") if isinstance(t, dict) else "?"
+    bits = [f"\"{ev.get('summary') or '(no title)'}\"", f"{when('start')} to {when('end')}"]
+    if ev.get("location"):
+        bits.append(f"at {ev['location']}")
+    if ev.get("recurringEventId"):
+        bits.append("one of a series")
+    return ", ".join(bits)[:300]
+
+
+def _event_dicts(x, depth: int = 0):
+    """Every event in a calendar tool's answer, whatever wraps it (content blocks, JSON in text, a list)."""
+    if depth > 8:
+        return
+    if isinstance(x, str):
+        t = x.strip()
+        if t[:1] in "[{":
+            try:
+                yield from _event_dicts(json.loads(t), depth + 1)
+            except ValueError:
+                pass
+    elif isinstance(x, list):
+        for y in x:
+            yield from _event_dicts(y, depth + 1)
+    elif isinstance(x, dict):
+        if x.get("id") and isinstance(x.get("start"), dict):
+            yield x
+        for k, y in x.items():
+            if k in ("events", "items", "content", "text", "result", "structuredContent", "event") or isinstance(y, str):
+                yield from _event_dicts(y, depth + 1)
+
+
 def _mcp_parts(tool: str) -> tuple[str, str]:
     if not tool.startswith("mcp__"):
         return "", ""
@@ -465,6 +548,9 @@ def _key(inp: dict) -> str:
 def _writes(tool: str, inp: dict) -> bool:
     if tool in EDIT_TOOLS:
         return True
+    server, name = _mcp_parts(tool)
+    if "calendar" in server.lower() and name not in CALENDAR_READ:
+        return True  # H78: a calendar change goes without asking now, so a test run stops it here
     if tool == "Bash":
         c = inp.get("command") or ""
         return bool(re.search(r"\bgit\s+(add|commit|push)\b", c))
