@@ -135,6 +135,8 @@ Run them before and after every update; they print a short pass/fail table at th
   72 H83, no Claude: which HQ this is (the label, else Local and the system) in Python and the status server,
      on the status page, /where.json and the strip's reading, with and without a label; the call page's line
      takes no room
+  82 H104, no Claude: times digit by digit. Quick and Deep are told 9:30 is "nine thirty" and 10:45 "ten forty
+     five", never half, quarter or o'clock, and no example in the call rules says a time the old way
   73 H92, no Claude: no laptop on a server. The status page in a headless browser, served as a server
      (HQ_LAPTOP=0) and as the laptop (HQ_LAPTOP=1), with a hot laptop and a low battery: on a server no Laptop
      section, no battery in the top line, no laptop lines or bars under Routines, and the Routines light green;
@@ -5877,6 +5879,24 @@ console.log(JSON.stringify({{
         need(lap["light"] == "light down", f"on the laptop a hot laptop doesn't make the Routines light red: {lap['light']}")
         return "on a server no Laptop section, no battery in the top line, no laptop lines or bars under Routines, the light green; on the laptop all of it as before, the light red"
 
+    async def flow82(self) -> str:
+        """H104, no Claude: times digit by digit. Both kinds of call (Quick and Deep) are told to say 9:30 as
+        "nine thirty" and 10:45 as "ten forty five", never "half", "quarter" or "o'clock", and no example in
+        the call rules or in the call system's ask-first note still says a time the old way."""
+        import brain
+        rules = {"Quick": config.SYSTEM_PROMPT, "Deep": config.VOICE_RULES}
+        for kind, text in rules.items():
+            need('"nine thirty"' in text and '"ten forty five"' in text and "digit by digit" in text,
+                 f"a {kind} call isn't told to say times digit by digit")
+        hours = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+        old = re.compile(rf"half ({hours}|past)|\b({hours}) o'clock|quarter (past|to)", re.I)
+        ask = brain.refusal_text(type("D", (), {"verdict": "ask", "question": "a test", "retry": False, "why": ""})())
+        own = config.ME["on_calls"] or ""  # the user's own notes (me.md) may quote the old style; only HQ's rules count
+        for name, text in {**rules, "the ask-first note": ask}.items():
+            hit = old.search(text.replace(own, "") if own else text)
+            need(not hit, f"{name} still says a time the old way: {hit and hit.group(0)!r}")
+        return "Quick and Deep both say times digit by digit; no old-style time left in the call rules or the ask-first note"
+
     async def flow81(self) -> str:
         """H81, no Claude: job estimates per computer, and patterns from all the data. The estimator on its own
         files (a throwaway roadmap copy and estimates folder, nothing real read or written), two made-up computers:
@@ -6871,6 +6891,7 @@ FLOWS = {
     79: ("H88: heartbeats for both computers: this one up and online, the other answering; on both status pages", False, "flow79"),
     80: ("F9: a call left quiet stays connected: no idle timeout; a hang-up or a lost connection still ends it", False, "flow80"),
     81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data", False, "flow81"),
+    82: ("H104: times on calls are said digit by digit (nine thirty), never half, quarter or o'clock", False, "flow82"),
 }
 
 

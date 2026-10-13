@@ -143,7 +143,7 @@ def refusal_text(d: "_policy.Decision") -> str:
         return (
             f"Not done: this needs {_config.USER}'s yes first. Check it with him the way an assistant on "
             "the phone would, in one short natural sentence with the details that matter, e.g. "
-            '"Shall I put dinner with a friend in your agenda, Saturday at half six?" or '
+            '"Shall I put dinner with a friend in your agenda, Saturday at six thirty?" or '
             '"So that\'s breakfast tomorrow at ten, until eleven. Want me to put it in?" '
             f"(What needs his okay: {d.question}) Never say \"say yes or no\". Then stop and wait for "
             "his answer. If the call system then tells you he said yes, make exactly the same call again."
