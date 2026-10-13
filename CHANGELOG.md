@@ -5,6 +5,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ## Coming next
 
 ### New
+- A job the usage limit stopped carries on where it left off: on the same computer it picks its own chat back up, with everything it remembers; when it can't (the other computer takes it, or the chat is gone), a fresh chat is told it was stopped and at about which step, and looks at what the first run left before carrying on (H113).
 - When the usage limit holds the jobs, the estimates stay: every waiting job and planned item still shows how long it takes and when it should be done, as if the usage allowed it, with a note next to it in soft red that it will be later because of the usage limit. The totals too, on the status page and in the lists on calls (H109).
 - A priority tag for planned work. Tag an item when you plan it, or later, and when its time comes it doesn't wait for the job list: it goes first in line, ahead of the waiting jobs, and starts as soon as the running job is done (a running job is never stopped for it). Without the tag the job list goes first, as before. The tag shows under Scheduled on the status page and in the scheduler's list on calls (H99).
 - When a newer version of HQ is out, the watchdog dog in the Mac app and the phone version sits wagging in front of its empty food bowl, looks up at you now and then, and barks Update! in green, the way it barks Woof! in red. Something that's off or asleep still comes first (H98).
