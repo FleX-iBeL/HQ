@@ -304,6 +304,46 @@
   #directbtn.on { display:flex; }
   #directbtn svg { width:26px; height:26px; }
   #directbtn i { position:absolute; top:3px; right:3px; width:12px; height:12px; border-radius:50%; background:#ef4444; display:none; }
+  /* H101: his calendar. Right side, where the call's mic button sits during a call (only before and after a call, so
+     the two never meet). The appointments come from his Google Calendar, read only (app/agenda.py); a tap opens one,
+     and "Call about this" starts a call that knows what it's about. */
+  #calbtn { position:fixed; right:16px; bottom:calc(152px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
+            border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
+            cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  #calbtn.hide { display:none; }
+  #calbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
+  #calbtn svg { width:26px; height:26px; }
+  #calsheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
+              border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:8px;
+              padding:14px 16px calc(220px + env(safe-area-inset-bottom)); text-align:left; user-select:text; -webkit-user-select:text; }
+  #calsheet.open { display:flex; }
+  #calhead { position:relative; }
+  #calsheet h2 { margin:0; font-size:15px; font-weight:600; color:var(--muted); text-align:center; padding:0 64px; }
+  #calclose, #calback { position:absolute; top:-8px; border:0; background:transparent; color:var(--fg); font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
+  #calclose { right:-6px; }
+  #calback { left:-6px; display:none; }
+  #calsheet.reading #calback { display:block; }
+  #callist, #calone { flex:1; min-height:60px; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; display:flex; flex-direction:column; }
+  #calone { display:none; gap:10px; }
+  #calsheet.reading #callist { display:none; }
+  #calsheet.reading #calone { display:flex; }
+  #callist .day { color:var(--muted); font-size:13px; font-weight:600; margin:12px 0 4px; }
+  #callist .day:first-child { margin-top:0; }
+  #callist .appt { display:flex; gap:12px; align-items:baseline; width:100%; border:0; background:transparent; color:var(--fg); text-align:left;
+                   padding:9px 8px; border-radius:12px; cursor:pointer; font:16px/1.3 -apple-system,sans-serif; }
+  #callist .appt:hover, #callist .appt:focus-visible { background:color-mix(in srgb, var(--fg) 7%, var(--bg)); }
+  #callist .appt .t { flex-shrink:0; width:3.2em; color:var(--muted); font-variant-numeric:tabular-nums; font-size:14px; }
+  #callist .appt .w { flex:1; min-width:0; overflow-wrap:anywhere; }
+  #callist .appt small { display:block; color:var(--muted); font-size:12px; margin-top:2px; }
+  #callist .appt.free .w { color:var(--muted); }
+  #callist .empty, #calone .empty { color:var(--muted); text-align:center; margin:auto; }
+  #calone h3 { margin:0; font-size:20px; line-height:1.3; overflow-wrap:anywhere; }
+  #calone .line { color:var(--muted); font-size:15px; }
+  #calone .notes { white-space:pre-wrap; overflow-wrap:anywhere; font-size:15px; line-height:1.4; padding:10px 12px; border-radius:12px;
+                   background:color-mix(in srgb, var(--fg) 7%, var(--bg)); }
+  #calgo { border:0; border-radius:14px; background:var(--accent); color:#04120f; font:600 17px/1 -apple-system,sans-serif; padding:15px 12px; cursor:pointer; margin-top:4px; }
+  #calgo:disabled { opacity:.45; cursor:default; }
+  #calnote { color:var(--muted); font-size:12px; text-align:center; min-height:1em; }
   #notesbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
   #notesbtn svg { width:26px; height:26px; }
   #notesheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
@@ -346,7 +386,7 @@
   body.chatting::after { display:none; }
   body.chatting h1, body.chatting #modes, body.chatting #modehint, body.chatting #setbtn,
   body.chatting #freetag { display:none; }
-  body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet, body.chatting #notesheet { top:0; height:auto; bottom:calc(318px + env(safe-area-inset-bottom));
+  body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet, body.chatting #notesheet, body.chatting #calsheet { top:0; height:auto; bottom:calc(318px + env(safe-area-inset-bottom));
                         border-top:0; border-bottom:1px solid var(--muted); border-radius:0 0 18px 18px;
                         padding:calc(14px + env(safe-area-inset-top)) 16px 12px; box-shadow:0 8px 24px rgba(0,0,0,.2); }
   body.chatting #orbwrap { order:1; flex-direction:row; gap:12px; margin:0; }
@@ -439,6 +479,11 @@
   <small id="notesnote"></small></div>
 <button id="notesbtn" type="button" aria-label="Notes" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+</button>
+<div id="calsheet" role="dialog" aria-label="Calendar"><div id="calhead"><button id="calback" type="button">‹ Days</button><h2 id="caltitle">Calendar</h2><button id="calclose" type="button">Close</button></div>
+  <div id="callist"></div><div id="calone"></div><small id="calnote"></small></div>
+<button id="calbtn" type="button" aria-label="Calendar" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 14h2M14 14h2M8 18h2"/></svg>
 </button>
 <a id="directbtn" href="/direct" aria-label="Text Donna">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-5A8 8 0 1 1 21 12z"/></svg><i></i>
@@ -991,7 +1036,7 @@ function chatOpen() { return chatEl.classList.contains("open"); }
 // phone has settled its own scrolling (the iPhone finishes a swipe or a layout change a moment later).
 let sheetWasOpen = false;
 function showLayout() {
-  const open = chatOpen() || statOpen() || histOpen() || notesOpen();
+  const open = chatOpen() || statOpen() || histOpen() || notesOpen() || calOpen();
   document.body.classList.toggle("chatting", open && state === "live"); fitCall();
   if (sheetWasOpen && !open && state !== "idle") { requestAnimationFrame(() => fitCall()); setTimeout(fitCall, 350); }
   sheetWasOpen = open;
@@ -1117,6 +1162,7 @@ function showChat(open) {
   if (open) showStatus(false);  // H13: one sheet at a time
   if (open) showHistory(false); // H57
   if (open) showNotes(false);   // H105
+  if (open) showCal(false);     // H101
   if (open) loadLastCall();     // H34: before a call, fresh each time it opens
   chatEl.classList.toggle("open", open);
   chatBtn.setAttribute("aria-expanded", String(open));
@@ -1211,6 +1257,7 @@ function showStatus(open) {
   if (open && chatOpen()) { chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showBadge(); }
   if (open) showHistory(false);  // H57: one sheet at a time
   if (open) showNotes(false);    // H105
+  if (open) showCal(false);      // H101
   statEl.classList.toggle("open", open);
   statBtn.setAttribute("aria-expanded", String(open));
   const want = open ? statusUrl() : "about:blank";
@@ -1345,6 +1392,7 @@ function showHistory(open) {
     if (chatOpen()) { chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showBadge(); }
     if (statOpen()) showStatus(false);
     showNotes(false);  // H105
+    showCal(false);    // H101
   }
   histEl.classList.toggle("open", open);
   histBtn.setAttribute("aria-expanded", String(open));
@@ -1402,6 +1450,7 @@ function showNotes(open) {
     if (chatOpen()) { chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showBadge(); }
     if (statOpen()) showStatus(false);
     if (histOpen()) showHistory(false);
+    showCal(false);  // H101
   }
   notesEl.classList.toggle("open", open);
   notesBtn.setAttribute("aria-expanded", String(open));
@@ -1410,6 +1459,106 @@ function showNotes(open) {
 }
 notesBtn.addEventListener("click", () => showNotes(!notesOpen()));
 document.getElementById("notesclose").addEventListener("click", () => showNotes(false));
+// H101: his calendar, read only, from his Google Calendar (app/agenda.py through /api/calendar). Opening it asks for a
+// fresh read when the last one is older than a quarter of an hour; the list shows what's saved meanwhile and updates
+// when the new read is in. A tap opens one appointment; "Call about this" calls with it as the call's context.
+const calBtn = document.getElementById("calbtn"), calEl = document.getElementById("calsheet"),
+      calList = document.getElementById("callist"), calOne = document.getElementById("calone"),
+      calTitle = document.getElementById("caltitle"), calNote = document.getElementById("calnote");
+let calAsk = 0, calTimer = null, aboutNext = null;
+function calOpen() { return calEl.classList.contains("open"); }
+function calDate(iso) { const d = new Date(iso.length === 10 ? iso + "T00:00:00" : iso); return isNaN(d) ? null : d; }
+function calHM(d) { return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); }
+function calDayKey(d) { return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate(); }
+function calDayName(d) {
+  const t = new Date(), tm = new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1);
+  const name = d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
+  return calDayKey(d) === calDayKey(t) ? "Today · " + name : calDayKey(d) === calDayKey(tm) ? "Tomorrow · " + name : name;
+}
+function calWhen(e) {
+  const a = calDate(e.start), b = e.end ? calDate(e.end) : null;
+  if (!a) return e.start;
+  const day = calDayName(a);
+  if (e.all_day) return day + ", all day";
+  return day + ", " + calHM(a) + (b ? " to " + calHM(b) : "");
+}
+function calLooked(d) {
+  if (d.looking) return "Reading your calendar…";
+  if (d.error) return "Couldn't read the calendar just now" + (d.looked ? "; showing the last read" : "") + ".";
+  if (!d.looked) return "";
+  const m = Math.round((Date.now() / 1000 - d.looked) / 60);
+  return "From Google Calendar, " + (m < 1 ? "just now" : m < 60 ? m + " min ago" : Math.round(m / 60) + " h ago");
+}
+function showCalList(d) {
+  calNote.textContent = d ? calLooked(d) : "";
+  if (calEl.classList.contains("reading")) return;
+  if (!d || !Array.isArray(d.events)) { histNote(calList, "Couldn't load the calendar. Try again."); return; }
+  calList.innerHTML = "";
+  let day = "";
+  for (const e of d.events) {
+    const a = calDate(e.start); if (!a) continue;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const shown = e.all_day || a >= today ? a : today;  // a running appointment that started earlier counts for today
+    const k = calDayKey(shown);
+    if (k !== day) { day = k; const h = document.createElement("div"); h.className = "day"; h.textContent = calDayName(shown); calList.appendChild(h); }
+    const b = document.createElement("button"); b.type = "button"; b.className = "appt" + (e.free ? " free" : "");
+    const t = document.createElement("span"); t.className = "t"; t.textContent = e.all_day ? "Day" : calHM(a);
+    const w = document.createElement("span"); w.className = "w"; w.textContent = e.title;
+    const sub = [e.calendar !== "Main" ? e.calendar : "", e.where].filter(Boolean).join(" · ");
+    if (sub) { const s = document.createElement("small"); s.textContent = sub; w.appendChild(s); }
+    b.append(t, w);
+    b.addEventListener("click", () => showAppt(e));
+    calList.appendChild(b);
+  }
+  if (!calList.children.length) histNote(calList, d.looking ? "Reading your calendar…" : d.looked ? "Nothing in the next two weeks" : "Not read yet");
+}
+function showAppt(e) {
+  calEl.classList.add("reading"); calTitle.textContent = "Appointment";
+  calOne.innerHTML = "";
+  const h = document.createElement("h3"); h.textContent = e.title;
+  const when = document.createElement("div"); when.className = "line"; when.textContent = calWhen(e);
+  calOne.append(h, when);
+  for (const x of [e.where, e.calendar !== "Main" ? e.calendar + " calendar" : "", e.free ? "Shown as free" : ""]) {
+    if (!x) continue; const l = document.createElement("div"); l.className = "line"; l.textContent = x; calOne.appendChild(l);
+  }
+  if (e.notes) { const n = document.createElement("div"); n.className = "notes"; n.textContent = e.notes; calOne.appendChild(n); }
+  const go = document.createElement("button"); go.type = "button"; go.id = "calgo";
+  const a = AGENTS[agent] || {};
+  go.textContent = "Call " + (a.name || "") + " about this";
+  go.disabled = free || state !== "idle";
+  go.addEventListener("click", () => {
+    if (free || state !== "idle") return;
+    aboutNext = e; showCal(false); call();
+  });
+  calOne.appendChild(go);
+  if (free) { const n = document.createElement("small"); n.className = "line"; n.textContent = "Free is on. Turn it off in Settings to call about an appointment."; calOne.appendChild(n); }
+}
+async function loadCal(fresh) {
+  const ask = ++calAsk;
+  if (!calList.querySelector(".appt")) histNote(calList, "Loading…");
+  const d = await histGet("api/calendar" + (fresh ? "?fresh=1" : ""));
+  if (ask !== calAsk || !calOpen()) return;
+  showCalList(d);
+  clearTimeout(calTimer);
+  if (d && d.looking) calTimer = setTimeout(() => { if (calOpen()) loadCal(false); }, 4000);  // the new read comes in
+}
+function showCal(open) {
+  if (open === calOpen()) return;
+  if (open) {
+    if (chatOpen()) { chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showBadge(); }
+    if (statOpen()) showStatus(false);
+    if (histOpen()) showHistory(false);
+    if (notesOpen()) showNotes(false);
+  }
+  calEl.classList.toggle("open", open);
+  calEl.classList.remove("reading"); calTitle.textContent = "Calendar";
+  calBtn.setAttribute("aria-expanded", String(open));
+  if (open) loadCal(true); else { calAsk++; clearTimeout(calTimer); }
+  showLayout();
+}
+calBtn.addEventListener("click", () => showCal(!calOpen()));
+document.getElementById("calclose").addEventListener("click", () => showCal(false));
+document.getElementById("calback").addEventListener("click", () => { calEl.classList.remove("reading"); calTitle.textContent = "Calendar"; loadCal(false); });
 // H117: grows line by line with what's typed, up to its max-height, then scrolls inside (as fitTyping, H41).
 function fitNote() {
   notesIn.style.height = "auto";
@@ -1483,6 +1632,8 @@ function setState(s, text) {
   soonEl.classList.toggle("hide", s !== "idle");  // H73
   setBtn.classList.toggle("hide", s !== "idle");
   devBtn.classList.toggle("show", s === "live");  // H112
+  calBtn.classList.toggle("hide", s !== "idle");  // H101: before and after a call only
+  if (s !== "idle") showCal(false);
   if (s !== "live" ? setEl.classList.contains("incall") || s !== "idle" : !setEl.classList.contains("incall")) showSettings(false);
   if (s !== "live") thinkingSound(false);
   // H34: the bubble is always there; before a call it opens the last call, after one this call.
@@ -1649,6 +1800,7 @@ async function call() {
   clearChat(); showCallTitle(); chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showLayout();
   // H60: a continued call starts with the earlier call's lines in the chat, then a line where this one begins.
   const cont = continueFrom; continueFrom = null; contLabel = "";
+  const appt = aboutNext; aboutNext = null;  // H101: started from an appointment in the calendar
   const handover = handoverNext && !!cont; handoverNext = false;  // H79
   if (cont && !free) {
     contLabel = handover ? "from " + cont.agent : "continuing " + cont.started;
@@ -1676,7 +1828,7 @@ async function call() {
     const r = await fetch("api/offer", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, agent, free, voice: voiceFor(agent),
         voices: Object.fromEntries(Object.keys(AGENTS).map(id => [id, voiceFor(id)])),  // H79: a three-way call speaks in both
-        ...(cont && !free ? { continue: cont.name } : {}), ...(handover && !free ? { handover: true } : {}) } }) });
+        ...(cont && !free ? { continue: cont.name } : {}), ...(appt && !free ? { about: appt.id } : {}), ...(handover && !free ? { handover: true } : {}) } }) });
     if (!r.ok) throw new Error("The call server said " + r.status);
     const answer = await r.json();
     await pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });

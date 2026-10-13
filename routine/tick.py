@@ -882,6 +882,10 @@ def direct_watch():
         import weather
         if weather.start():
             log("direct line: looking at the weather")
+        # H101: his calendar, read only, every hour in the day, for the call page's calendar.
+        import agenda
+        if agenda.start():
+            log("calendar: reading it (read only)")
 
 
 def tick():

@@ -145,6 +145,14 @@ Run them before and after every update; they print a short pass/fail table at th
      saved before left alone); /api/notes only from the page; the real call page in a headless browser, phone
      and app: the round button above Past calls before, during and after a call, the sheet without paper, the
      note field growing with what's typed and back after Add, add, clear, clear all on a second tap
+  91 H101, no Claude: the calendar. A stand-in for the read-only Claude run (only list_calendars and
+     list_events allowed, everything that writes refused): the tool results read from its stream, word for
+     word (an answer too big for the chat read from Claude Code's own file, nothing outside it), cancelled
+     ones left out, the main calendar called Main, a failed read keeping the last days; hourly in the day only,
+     again on opening after a quarter of an hour; /api/calendar on the test server's own copy, ?fresh=1
+     reading again; the call's note, greeting and transcript line; the real call page in a headless
+     browser, phone and app: the round button on the right before and after a call (gone on a call), the
+     days, a tap on one, Back, "Call about this" sending the appointment, off on Free, one sheet at a time
   73 H92, no Claude: no laptop on a server. The status page in a headless browser, served as a server
      (HQ_LAPTOP=0) and as the laptop (HQ_LAPTOP=1), with a hot laptop and a low battery: on a server no Laptop
      section, no battery in the top line, no laptop lines or bars under Routines, and the Routines light green;
@@ -332,6 +340,9 @@ class Server:
             "HQ_PORT": str(TEST_PORT), "HQ_NO_PHONE": "1", "HQ_WRAP_UP": "dry",
             "HQ_CALLS": str(self.calls), "HQ_LOG": str(self.log), "HQ_PID_FILE": str(self.pidfile),
             "HQ_NOTES": str(self.notes),
+            # H101: never the workspace's own calendar copy, and never a real Claude run to read Google
+            "HQ_CALENDAR_FILE": str(tmp / "calendar-server" / "calendar.json"),
+            "HQ_CALENDAR_FAKE": str(tmp / "calendar-server" / "stream.txt"),
         }
 
     @property
@@ -4727,6 +4738,208 @@ window.fetch = async (url, opt) => {
                 "before, during and after a call, phone and app: the sheet without paper, the note field growing and back after Add, add, "
                 "clear, clear all on a second tap")
 
+    async def flow91(self) -> str:
+        """H101, no Claude: the calendar inside HQ. agenda.py with a stand-in for the read-only Claude run, the
+        test server's /api/calendar on its own copy (the workspace's is never touched), the call's note, greeting
+        and transcript line, and the real call page in a headless browser, phone and desktop app."""
+        import agenda
+        import transcript
+        real = Path(os.path.join(agenda.hqpaths.DATA, "calendar.json"))
+        real_before = real.read_bytes() if real.exists() else None
+        need(not any(t in x for x in agenda.ALLOW for t in ("create", "update", "delete", "respond")) and
+             all(agenda.TOOL + t in agenda.DENY for t in ("create_event", "update_event", "delete_event", "respond_to_event")),
+             "the calendar read may write to the calendar")
+        src = (APP / "agenda.py").read_text()
+        need("--permission-mode\", \"dontAsk\"" in src and "--allowedTools" in src, "the calendar read isn't a dontAsk run with only its tools")
+        d = self.tmp / "h101"
+        d.mkdir(parents=True, exist_ok=True)
+        big = Path.home() / ".claude" / f"hq-flow91-{os.getpid()}.txt"
+        outside = d / "outside.txt"
+        def stream(main_answer: str) -> str:
+            cals = {"calendars": [{"id": "me@example.com", "summary": "me@example.com"},
+                                  {"id": "work-calendar-id", "summary": "Work"}]}
+            work = {"events": [
+                {"id": "w1", "summary": "Dentist", "start": {"dateTime": "2099-01-02T10:00:00+01:00"}, "end": {"dateTime": "2099-01-02T10:30:00+01:00"},
+                 "location": "Main street 1", "description": "Bring the card", "htmlLink": "https://x"},
+                {"id": "w2", "summary": "Gone", "status": "cancelled", "start": {"dateTime": "2099-01-02T11:00:00+01:00"}},
+                {"id": "w3", "summary": "Her lecture", "transparency": "transparent", "start": {"dateTime": "2099-01-01T09:00:00+01:00"},
+                 "end": {"dateTime": "2099-01-01T11:00:00+01:00"}}]}
+            lines = [
+                {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": agenda.TOOL + "list_calendars", "input": {}}]}},
+                {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": json.dumps(cals)}]}]}},
+                {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t2", "name": agenda.TOOL + "list_events", "input": {"calendarId": "me@example.com"}},
+                                                              {"type": "tool_use", "id": "t3", "name": agenda.TOOL + "list_events", "input": {"calendarId": "work-calendar-id"}}]}},
+                {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t2", "content": main_answer}]}},
+                {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t3", "content": json.dumps(work)}]}},
+                {"type": "result", "result": "done"}]
+            return "\n".join(json.dumps(l) for l in lines) + "\nnot json\n"
+        mine = {"events": [{"id": "m1", "summary": "Birthday", "start": {"date": "2099-01-01"}, "end": {"date": "2099-01-02"}},
+                           {"id": "m1", "summary": "Birthday", "start": {"date": "2099-01-01"}, "end": {"date": "2099-01-02"}}]}
+        big.write_text(json.dumps(mine))
+        fake = d / "stream.txt"
+        fake.write_text(stream(f"<persisted-output>\nOutput too large (63KB). Full output saved to: {big}\n\nPreview: ..."))
+        env_before = {k: os.environ.get(k) for k in ("HQ_CALENDAR_FILE", "HQ_CALENDAR_FAKE", "HQ_CALENDAR")}
+        os.environ["HQ_CALENDAR_FILE"] = str(d / "calendar.json")
+        os.environ["HQ_CALENDAR_FAKE"] = str(fake)
+        os.environ.pop("HQ_CALENDAR", None)
+        try:
+            t0 = datetime(2099, 1, 1, 12, 0).timestamp()
+            st = agenda.look(now=t0)
+            ev = st.get("events") or []
+            need(not st.get("error") and [e["title"] for e in ev] == ["Birthday", "Her lecture", "Dentist"],
+                 f"the appointments weren't read as Google gave them: {st.get('error')} {[e['title'] for e in ev]}")
+            need(not big.exists(), "the saved big answer wasn't read and removed")
+            b, l, dn = ev
+            need(b["all_day"] and b["calendar"] == "Main" and l["free"] and l["calendar"] == "Work" and dn["where"] == "Main street 1"
+                 and dn["notes"] == "Bring the card" and not dn["all_day"] and len({e["id"] for e in ev}) == 3,
+                 f"the appointments' details aren't right: {ev}")
+            need([c["name"] for c in st["calendars"]] == ["Main", "Work"], f"the calendars aren't named right: {st['calendars']}")
+            outside.write_text(json.dumps(mine))
+            need(agenda._persisted(f"<persisted-output>\nFull output saved to: {outside}\n") .startswith("<persisted-output>")
+                 and outside.exists(), "a file outside Claude Code's own folder was read")
+            fake.write_text("")
+            st2 = agenda.look(now=t0 + 60)
+            need(st2.get("error") and [e["title"] for e in st2.get("events") or []] == ["Birthday", "Her lecture", "Dentist"]
+                 and st2.get("looked") == st["looked"], f"a failed read didn't keep the last days with the error: {st2}")
+            need(agenda.read(now=t0)["error"] and len(agenda.read(now=t0)["events"]) == 3, "the page doesn't get the last days and the error")
+            need(len(agenda.read(now=datetime(2099, 1, 2, 12, 0).timestamp())["events"]) == 0,
+                 "appointments that are over aren't left out")
+            s0 = {"looked": t0}
+            need(not agenda.due(datetime(2099, 1, 1, 12, 30).timestamp(), s0) and agenda.due(datetime(2099, 1, 1, 13, 1).timestamp(), s0)
+                 and not agenda.due(datetime(2099, 1, 2, 3, 0).timestamp(), s0) and not agenda.due(datetime(2099, 1, 1, 23, 30).timestamp(), s0),
+                 "the hourly read isn't every hour in the day only")
+            need(not agenda.due(datetime(2099, 1, 1, 14, 0).timestamp(), {"looked": t0, "running": datetime(2099, 1, 1, 13, 59).timestamp()}),
+                 "a read was started while one runs")
+            os.environ["HQ_CALENDAR"] = "0"
+            need(not agenda.due(datetime(2099, 1, 1, 14, 0).timestamp(), s0) and not agenda.refresh(), "HQ_CALENDAR=0 doesn't switch it off")
+            os.environ.pop("HQ_CALENDAR")
+            note = agenda.call_note(dn, "Sam")
+            need("<appointment>" in note and "Dentist" in note and "Main street 1" in note and "Bring the card" in note
+                 and "read only" in note, f"the call's note isn't right: {note!r}")
+            g = agenda.greetings({"title": "Dentist 🦷"}, "Sam")
+            need(g and all("Dentist" in x and "Sam" in x and "🦷" not in x for x in g), f"the greeting doesn't name the appointment: {g}")
+            tr = transcript.CallTranscript(d / "calls", model="test", agent="Pepper", about=agenda.when_line(dn))
+            tr.user("Hello")
+            head = tr.path.read_text()
+            need("About the appointment: Dentist (" in head and transcript.read_call(tr.path.stem, d / "calls") is not None,
+                 f"the transcript doesn't say which appointment, or can't be read back: {head!r}")
+            csrc, bsrc = (APP / "call.py").read_text(), (APP / "bot.py").read_text()
+            need("agenda.call_note(self.about" in csrc and "None if free or not isinstance(about, dict)" in csrc
+                 and "None if free else _agenda.about(" in bsrc, "the call doesn't get the appointment, or gets it on Free")
+        finally:
+            for k, v in env_before.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            big.unlink(missing_ok=True)
+
+        await self.ensure_server()
+        sfile = Path(self.server.env["HQ_CALENDAR_FILE"])
+        sfile.parent.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        sfile.write_text(json.dumps({"looked": now, "calendars": [], "events": [
+            {"id": "s1", "title": "Soon", "start": datetime.fromtimestamp(now + 3600).astimezone().isoformat(), "end": "", "all_day": False}]}))
+        code, body, _ = http_get("/api/calendar")
+        got = json.loads(body) if code == 200 else {}
+        need(code == 200 and [e["title"] for e in got.get("events", [])] == ["Soon"] and not got.get("looking"),
+             f"/api/calendar didn't answer with the test copy ({code} {body[:120]!r})")
+        Path(self.server.env["HQ_CALENDAR_FAKE"]).write_text(stream(json.dumps(mine)))
+        code, body, _ = http_get("/api/calendar?fresh=1")
+        need(code == 200 and not json.loads(body).get("looking"), "a fresh read was started though the last one is minutes old")
+        sfile.write_text(json.dumps({"looked": now - 3600, "events": []}))
+        code, body, _ = http_get("/api/calendar?fresh=1")
+        need(code == 200, f"/api/calendar?fresh=1 failed ({code})")
+        for _ in range(40):
+            if [e["title"] for e in json.loads(http_get("/api/calendar")[1] or b"{}").get("events", [])][:1] == ["Birthday"]:
+                break
+            await asyncio.sleep(0.5)
+        else:
+            need(False, f"opening the calendar didn't read it again: {sfile.read_text()[:300]!r}")
+        need((real.read_bytes() if real.exists() else None) == real_before, "the workspace's own calendar copy was touched")
+
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        need("...(appt && !free ? { about: appt.id } : {})" in page, "the call's offer doesn't carry the appointment")
+        stub = r"""<script>
+var ASKED = [], T = new Date(); T.setHours(0, 0, 0, 0);
+function at(days, h, m) { const d = new Date(T); d.setDate(d.getDate() + days); d.setHours(h, m || 0); return d.toISOString(); }
+var EVENTS = [
+  { id: "e1", title: "Shower and yoga", start: at(0, 23, 0), end: at(0, 23, 45), all_day: false, where: "", notes: "", calendar: "Main", free: false },
+  { id: "e2", title: "Her lecture", start: at(1, 11), end: at(1, 12, 45), all_day: false, where: "Town hall", notes: "", calendar: "Family", free: true },
+  { id: "e3", title: "Dentist", start: at(2, 10), end: at(2, 10, 30), all_day: false, where: "Main street 1", notes: "Bring the card", calendar: "Main", free: false }];
+window.fetch = async (url, opt) => {
+  url = String(url);
+  if (url.startsWith("api/calendar")) { ASKED.push(url); return { ok: true, json: async () => ({ on: true, looked: Date.now() / 1000 - 120, looking: false, error: "", events: EVENTS }) }; }
+  return { ok: true, json: async () => ({ lines: [], calls: [], items: [] }) };
+};</script>"""
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const shown = el => getComputedStyle(el).display !== "none" && el.getBoundingClientRect().width > 0;
+  const CALLED = []; call = function () { CALLED.push(aboutNext ? aboutNext.id : "none"); aboutNext = null; };
+  const placed = () => { const c = calBtn.getBoundingClientRect(), h = chatBtn.getBoundingClientRect();
+    return shown(calBtn) && Math.abs(c.left - h.left) < 2 && c.bottom <= h.top && h.top - c.bottom < 20; };
+  await wait(300);
+  out.push("start:" + (placed() ? "ok" : "WRONG"));
+  calBtn.click(); await wait(400);
+  const appts = () => calList.querySelectorAll(".appt"), days = () => calList.querySelectorAll(".day");
+  out.push("open:" + (calOpen() && calBtn.getAttribute("aria-expanded") === "true" && appts().length === 3 && days().length === 3
+    && days()[0].textContent.startsWith("Today") && days()[1].textContent.startsWith("Tomorrow")
+    && appts()[1].classList.contains("free") && appts()[1].textContent.includes("Family") && ASKED[0] === "api/calendar?fresh=1"
+    && calNote.textContent.includes("2 min ago") ? "ok" : "WRONG " + appts().length + " " + days().length + " " + ASKED));
+  const lastRow = appts()[2].getBoundingClientRect(), cb = calBtn.getBoundingClientRect();
+  out.push("clear-of-buttons:" + (calList.getBoundingClientRect().bottom <= cb.top + 1 ? "ok" : "WRONG"));
+  appts()[2].click(); await wait(200);
+  const go = document.getElementById("calgo");
+  out.push("one:" + (calEl.classList.contains("reading") && calOne.textContent.includes("Dentist") && calOne.textContent.includes("Bring the card")
+    && calOne.textContent.includes("Main street 1") && go && !go.disabled && shown(document.getElementById("calback")) ? "ok" : "WRONG"));
+  document.getElementById("calback").click(); await wait(300);
+  out.push("back:" + (!calEl.classList.contains("reading") && appts().length === 3 ? "ok" : "WRONG"));
+  appts()[2].click(); await wait(100);
+  document.getElementById("calgo").click(); await wait(100);
+  out.push("call:" + (CALLED.join() === "e3" && !calOpen() ? "ok" : "WRONG " + CALLED));
+  free = true; calBtn.click(); await wait(300); appts()[0].click(); await wait(100);
+  out.push("free:" + (document.getElementById("calgo").disabled && calOne.textContent.includes("Free is on") ? "ok" : "WRONG"));
+  document.getElementById("calgo").click(); await wait(50);
+  out.push("freecall:" + (CALLED.length === 1 ? "ok" : "WRONG")); free = false;
+  chatBtn.click(); await wait(300);
+  out.push("onesheet:" + (chatOpen() && !calOpen() ? "ok" : "WRONG"));
+  calBtn.click(); await wait(300);
+  out.push("onesheet2:" + (calOpen() && !chatOpen() ? "ok" : "WRONG"));
+  notesBtn.click(); await wait(300);
+  out.push("onesheet3:" + (notesOpen() && !calOpen() ? "ok" : "WRONG"));
+  showNotes(false); calBtn.click(); await wait(300);
+  calledHere = true; setState("live", "On the call");
+  out.push("live:" + (!shown(calBtn) && !calOpen() ? "ok" : "WRONG"));
+  cleanup("Call ended"); await wait(100);
+  out.push("after:" + (placed() ? "ok" : "MISSING"));
+  document.getElementById("calclose").click();
+  const pre = document.createElement("pre"); pre.id = "h101"; pre.textContent = "H101RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f2 = self.tmp / "h101.html"
+        f2.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
+        for where, q in (("phone", ""), ("app", "?app=1")):
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=390,844",
+                                              f"--user-data-dir={self.tmp / ('h101-' + where)}", "--virtual-time-budget=20000", "--dump-dom", f2.as_uri() + q], timeout=120)
+            m = re.search(r'<pre id="h101">H101RESULT (.*?) END</pre>', r.stdout)
+            need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
+            res = m.group(1)
+            say(f"   {where}: {res}")
+            need(all(part.endswith(":ok") for part in res.split(" | ")), f"the calendar button or sheet isn't right ({where}): {res}")
+        return ("read only through a stand-in run (only the two reading tools), the tool results word for word (a big answer from "
+                "Claude Code's own file, nothing outside it), cancelled left out, Main, a failed read keeping the last days; hourly in "
+                "the day, again on opening; /api/calendar on its own copy, ?fresh=1 reading again; the call's note, greeting and "
+                "transcript line; the page, phone and app: the button on the right before and after a call, the days, one "
+                "appointment, Back, Call about this sending it, off on Free, one sheet at a time")
+
     async def flow58(self) -> str:
         """H60: continue an earlier call. The transcript code (what goes in, trimmed from the start, refused
         names), the call (greeting, warm-up note, never on Free), the call page in a headless browser (the
@@ -8101,6 +8314,7 @@ FLOWS = {
     88: ("H113: a job held by the usage line carries on in its own chat, or in a fresh one with a note at which step", False, "flow88"),
     89: ("H118: which computer is main, at a glance: a pill next to the name on the status page, the strip and the call page", False, "flow89"),
     90: ("H120: the weather every three hours: sun, rain coming, a rainy day stays inside; quiet otherwise and at night", False, "flow90"),
+    91: ("H101: my calendar inside HQ, read only from Google; a tap on an appointment starts a call about it", False, "flow91"),
 }
 
 

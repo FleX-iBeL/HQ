@@ -143,7 +143,8 @@ def _filter_the_log() -> None:
 async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connection=None,
                    model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
                    free: bool = False, load: str | None = None, agent: str | None = None,
-                   continues: str | None = None, handover: bool = False, voices: dict | None = None) -> None:
+                   continues: str | None = None, handover: bool = False, voices: dict | None = None,
+                   about: dict | None = None) -> None:
     global _free_calls, _calls_on
     _filter_the_log()
     if free:
@@ -152,7 +153,7 @@ async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connect
     try:
         await _run_call(transport, handle_sigint, connection, model=model, voice=voice,
                         waiting_lines=waiting_lines, free=free, load=load, agent=agent, continues=continues,
-                        handover=handover, voices=voices)
+                        handover=handover, voices=voices, about=about)
     finally:
         _calls_on -= 1
         if free:
@@ -162,12 +163,14 @@ async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connect
 async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connection=None,
                     model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
                     free: bool = False, load: str | None = None, agent: str | None = None,
-                    continues: str | None = None, handover: bool = False, voices: dict | None = None) -> None:
+                    continues: str | None = None, handover: bool = False, voices: dict | None = None,
+                    about: dict | None = None) -> None:
     call = Call(model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent,
-                continues=continues, handover=handover, voices=voices)
+                continues=continues, handover=handover, voices=voices, about=about)
     logger.info(f"Call started on {call.model} with {call.agent['name']}, voice {call.voice}, {'free' if free else call.load + ' load'}; "
                 + ("free mode, nothing kept" if free else f"transcript: {call.transcript.path.name}")
-                + (f"; continues {call.continued['name']}" if call.continued else ""))
+                + (f"; continues {call.continued['name']}" if call.continued else "")
+                + (f"; about an appointment ({call.about['title']})" if call.about else ""))
 
     # Warm everything up in the background while the browser finishes connecting: open and
     # prime the Claude session, load Whisper, run Kokoro once. The pipeline starts right away.
@@ -322,9 +325,12 @@ async def bot(runner_args: RunnerArguments):
     # H79: a hand-over from another agent (the page calls her right after), and every agent's voice from Settings
     handover = body.get("handover") is True
     voices = body.get("voices") if isinstance(body.get("voices"), dict) else {}
+    # H101: a call started from an appointment in the calendar sends its id; the saved appointment goes in. Never on Free.
+    import agenda as _agenda
+    about = None if free else _agenda.about(str(body.get("about") or ""))
     await run_call(transport, runner_args.handle_sigint, runner_args.webrtc_connection,
                    model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent["id"],
-                   continues=None if free else continues, handover=handover and not free, voices=voices)
+                   continues=None if free else continues, handover=handover and not free, voices=voices, about=about)
 
 
 if __name__ == "__main__":
@@ -475,6 +481,16 @@ if __name__ == "__main__":
         else:
             return JSONResponse({"error": "no change asked"}, status_code=400)
         return JSONResponse(_notes.read(), headers=_NO_CACHE)
+
+    # H101: his calendar, read only (agenda.py). ?fresh=1 (the page opening it) reads Google again when the last read
+    # is older than a quarter of an hour; the answer says it's reading, and the page asks again a bit later.
+    import agenda as _agenda_api
+
+    @app.get("/api/calendar", include_in_schema=False)
+    async def calendar_read(request: Request):
+        if request.query_params.get("fresh") == "1" and not config.FREE_ONLY:
+            await asyncio.to_thread(_agenda_api.refresh)
+        return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
 
     @app.get("/api/busy", include_in_schema=False)
     async def busy():
