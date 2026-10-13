@@ -5859,6 +5859,181 @@ setTimeout(() => {
         return ("hand-over and three-way marks never spoken; hand-over once heard, the other continues the call as picking "
                 "up; three-way keeps one conversation, the one named or fitting answers in her voice; lines say who")
 
+    async def flow86(self) -> str:
+        """H80, no Claude: Donna's direct line. A push message encrypted for a stand-in phone decrypts back (RFC 8291)
+        and its VAPID token verifies with the shared key; a gone phone is dropped. The routine's look takes stock
+        first, then texts when the job list is finished, for a new very important mail (not for its status changing),
+        when something stays down and when it's back. A throwaway status server serves the chat and its service
+        worker, refuses a send without the HQ header, signs a phone up, and his text gets her (canned) reply."""
+        import base64
+        import urllib.request
+        sys.path.insert(0, str(ROOT / "routine"))
+        d = self.tmp / "h80"
+        d.mkdir()
+        saved = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_DIRECT_LOCAL", "HQ_DIRECT_DRY", "HQ_DIRECT")}
+        os.environ.update({"HQ_DIRECT_DIR": str(d / "line"), "HQ_DIRECT_LOCAL": str(d / "local.json"), "HQ_DIRECT_DRY": "1"})
+        os.environ.pop("HQ_DIRECT", None)
+        try:
+            import direct_line as dl
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import ec
+            from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+            b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+            unb64 = lambda s: base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+            # Push: encrypted for a stand-in phone, decrypted the way the phone does it.
+            phone = ec.generate_private_key(ec.SECP256R1())
+            p256dh = b64(phone.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint))
+            auth = b64(os.urandom(16))
+            body = dl.encrypt(b'{"body":"hi"}', p256dh, auth)
+            need(dl.decrypt(body, phone, auth) == b'{"body":"hi"}', "a push message doesn't decrypt back on the phone's side")
+            k = dl.keys()
+            need(dl.keys() == k and dl.public_key() == k["public"], "the push key isn't made once and kept")
+            hv = dl.vapid_header("https://push.example.com/send/abc", k)
+            m = re.fullmatch(r"vapid t=([\w-]+)\.([\w-]+)\.([\w-]+), k=([\w-]+)", hv)
+            need(m and m.group(4) == k["public"], f"the VAPID header is shaped wrong: {hv[:60]}")
+            claims = json.loads(unb64(m.group(2)))
+            need(claims["aud"] == "https://push.example.com" and claims["exp"] > time.time(), f"the VAPID claims are wrong: {claims}")
+            sig = unb64(m.group(3))
+            pub = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), unb64(k["public"]))
+            pub.verify(encode_dss_signature(int.from_bytes(sig[:32], "big"), int.from_bytes(sig[32:], "big")),
+                       f"{m.group(1)}.{m.group(2)}".encode(), ec.ECDSA(hashes.SHA256()))
+            # Two phones; the push services answer 201 for one and 410 (gone) for the other, which is dropped.
+            dl.subscribe({"endpoint": "https://push.example.com/a", "keys": {"p256dh": p256dh, "auth": auth}}, "phone a")
+            dl.subscribe({"endpoint": "https://push.example.com/b", "keys": {"p256dh": p256dh, "auth": auth}}, "phone b")
+            try:
+                dl.subscribe({"endpoint": "http://nope", "keys": {}})
+                need(False, "a broken subscription was taken")
+            except ValueError:
+                pass
+            sent = []
+
+            class _R:
+                status = 201
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+
+            def fake(req, timeout=0):
+                sent.append(req)
+                if req.full_url.endswith("/b"):
+                    raise urllib.error.HTTPError(req.full_url, 410, "Gone", {}, None)
+                return _R()
+            real_open = urllib.request.urlopen
+            os.environ["HQ_DIRECT_PUSH_TO"] = "1"
+            urllib.request.urlopen = fake
+            try:
+                said = dl.push("Hey, all done.")
+            finally:
+                urllib.request.urlopen = real_open
+                os.environ.pop("HQ_DIRECT_PUSH_TO", None)
+            need(said == ["201", "410"], f"push said {said}")
+            need([s["endpoint"] for s in dl.subscriptions()] == ["https://push.example.com/a"], "the gone phone wasn't dropped")
+            a = sent[0]
+            need(a.get_header("Content-encoding") == "aes128gcm" and a.get_header("Authorization", "").startswith("vapid t="),
+                 "the push request lacks its encoding or VAPID header")
+            got = json.loads(dl.decrypt(a.data, phone, auth))
+            need(got["body"] == "Hey, all done." and got["url"] == "/direct" and got["title"] == dl.agent()["name"],
+                 f"the phone would show {got}")
+            # The routine's look.
+            inbox = d / "inbox.md"
+            inbox.write_text("# Mail\n\n## Very important\n\n- 1 Oct · Old · Bill · old one · Status: new · [Gmail](x)\n\n## To check\n")
+            roadmap = d / "roadmap.md"
+            roadmap.write_text("- Job 7 · done 18:00 · build the thing\n")
+            look = lambda q, inc=(): dl.watch(q, inbox=inbox, roadmap=str(roadmap), incidents_data=list(inc), dry=False, spawn=lambda w, f: None)
+            busy = {"running": [{"n": 7, "text": "build the thing"}], "ready": [], "held": []}
+            need(look(busy) == [], "the first look texted about what was already there")
+            need(look(busy) == [], "she texted while the job list is still busy")
+            out = look({"running": [], "ready": [], "held": []})
+            need([w for w, _ in out] == ["jobs"] and "build the thing" in out[0][1], f"the finished job list gave {out}")
+            need(look({}) == [], "she texted twice that the job list is finished")
+            inbox.write_text(inbox.read_text().replace("Status: new · [Gmail](x)\n",
+                             "Status: new · [Gmail](x)\n- 13 Oct · Employer · Salary · a question · Why: work · Status: new · [Gmail](y)\n"))
+            out = look({})
+            need([w for w, _ in out] == ["mail"] and "Employer" in out[0][1] and "Gmail" not in out[0][1] and "Why:" not in out[0][1],
+                 f"the new very important mail gave {out}")
+            inbox.write_text(inbox.read_text().replace("a question · Why: work · Status: new", "a question, and a reminder · Why: work · Status: on the list"))
+            need(look({}) == [], "an update to a mail she already texted about was texted again")
+            now = time.time()
+            inc = [{"id": "i1", "key": "mail", "down": now - 30, "why": "no internet"}]
+            need(look({}, inc) == [], "something down for 30 seconds was texted")
+            inc[0]["down"] = now - 200
+            out = look({}, inc)
+            need([w for w, _ in out] == ["down"] and "no internet" in out[0][1], f"something down for a while gave {out}")
+            need(look({}, inc) == [], "she texted twice that it's down")
+            inc[0]["back"] = now
+            out = look({}, inc)
+            need([w for w, _ in out] == ["back"], f"back again gave {out}")
+            out = look({}, [{"id": "r1", "key": "role", "down": now, "why": "the main doesn't answer"}])
+            need([w for w, _ in out] == ["down"], f"a takeover wasn't texted at once: {out}")
+            need(dl.watch({}, main=False, inbox=inbox, incidents_data=[], dry=True) == [], "the backup texted about the job list or mail")
+            os.environ["HQ_DIRECT"] = "0"
+            need(dl.watch({"running": []}, inbox=inbox, incidents_data=[], dry=True) == [], "switched off, she still texted")
+            os.environ.pop("HQ_DIRECT")
+            msg = dl.text("jobs", "What ran: the thing")
+            need(msg["from"] == "agent" and msg["why"] == "jobs" and dl.thread()[-1]["text"] == msg["text"], "her text isn't in the thread")
+            tick = (ROOT / "routine/tick.py").read_text()
+            need("def direct_watch" in tick and "hqpaths.under_test()" in tick.split("def direct_watch")[1][:600],
+                 "the routine doesn't look every minute, or would text from a test on the real workspace")
+            # The status server: the chat, its service worker, the HQ header, a phone signing up, texting her back.
+            node = shutil.which("node") or "/opt/homebrew/bin/node"
+            port = 4791
+            env = dict(os.environ, HQ_STATUS_PORT=str(port), HQ_FIX_DRY="1")
+            log = open(self.tmp / "h80-server.log", "w")
+            srv = subprocess.Popen([node, str(ROOT / "status/server.mjs"), "--quiet"], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+            base = f"http://127.0.0.1:{port}"
+
+            def call(path, data=None, header=True):
+                req = urllib.request.Request(base + path, data=None if data is None else json.dumps(data).encode(),
+                                             headers={"x-hq": "direct", "content-type": "application/json"} if header else {})
+                try:
+                    with urllib.request.urlopen(req, timeout=60) as r:
+                        return r.status, r.read().decode()
+                except urllib.error.HTTPError as e:
+                    return e.code, e.read().decode()
+            try:
+                for _ in range(50):
+                    try:
+                        await asyncio.to_thread(call, "/direct.json")
+                        break
+                    except Exception:
+                        await asyncio.sleep(0.2)
+                code, page = await asyncio.to_thread(call, "/direct")
+                need(code == 200 and "/direct/send" in page and "pushManager" in page, "the chat page isn't served")
+                code, sw = await asyncio.to_thread(call, "/direct-sw.js")
+                need(code == 200 and "showNotification" in sw, "the service worker isn't served")
+                code, body = await asyncio.to_thread(call, "/direct.json")
+                j = json.loads(body)
+                need(j["agent"]["name"] == dl.agent()["name"] and j["agent"]["key"] == k["public"] and j["messages"][-1]["text"] == msg["text"],
+                     f"/direct.json says {body[:200]}")
+                code, _ = await asyncio.to_thread(call, "/direct/send", {"text": "hi"}, False)
+                need(code == 403, f"a send without the HQ header got {code}")
+                code, body = await asyncio.to_thread(call, "/direct/subscribe", {"subscription": {"endpoint": "https://push.example.com/c", "keys": {"p256dh": p256dh, "auth": auth}}, "device": "test"})
+                need(code == 200 and json.loads(body)["phones"] == 2, f"signing a phone up gave {code} {body}")
+                code, _ = await asyncio.to_thread(call, "/direct/send", {"text": "Is the job list done?"})
+                need(code == 200, f"his text got {code}")
+                for _ in range(100):
+                    th = dl.thread()
+                    if th[-1]["from"] == "agent" and "Is the job list done?" in th[-1]["text"]:
+                        break
+                    await asyncio.sleep(0.2)
+                th = dl.thread()
+                need(th[-2]["from"] == "me" and th[-2]["text"] == "Is the job list done?" and th[-1]["from"] == "agent",
+                     f"texting her back gave {th[-2:]}")
+                need(dl.unanswered() == [], "his text is still unanswered")
+            finally:
+                srv.terminate()
+                srv.wait(timeout=10)
+            pj = (ROOT / "desktop/phone.js").read_text()
+            need("direct-btn" in pj and "'/direct'" in pj, "the phone version has no button for her chat")
+        finally:
+            for key, v in saved.items():
+                if v is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = v
+        return ("push messages encrypt for the phone and carry a valid VAPID token, a gone phone is dropped; she texts once when the "
+                "job list is finished, for a new very important mail, when something stays down (a takeover at once) and when it's back; "
+                "the chat, its service worker, a phone signing up and texting her back work through the status server")
+
     async def flow71(self) -> str:
         """H87, H91, no Claude: the three stop lines (5-hour, weekly all models, weekly Fable) each move every minute,
         the share of their window gone by (never below 10% or 20%), up to 100% in the minute before the reset, or stay
@@ -7365,6 +7540,7 @@ FLOWS = {
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one, and a space to doodle", False, "flow83"),
     84: ("H106: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can", False, "flow84"),
     85: ("H79: ask for another agent by name: she hands over, or brings her in on a three-way call", False, "flow85"),
+    86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back", False, "flow86"),
 }
 
 
