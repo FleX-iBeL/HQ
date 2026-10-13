@@ -410,6 +410,51 @@ if __name__ == "__main__":
         except Exception:
             return None
 
+    # H105: the quick notes and the doodle space behind the round notes button. Kept in the workspace (notes.py);
+    # changed only from the call page itself (the header x-hq: notes), like the update's buttons.
+    import notes as _notes
+
+    @app.get("/api/notes", include_in_schema=False)
+    async def notes_read():
+        return JSONResponse(_notes.read(), headers=_NO_CACHE)
+
+    @app.post("/api/notes", include_in_schema=False)
+    async def notes_change(request: Request):
+        if request.headers.get("x-hq") != "notes":
+            return JSONResponse({"error": "Only the HQ page can change the notes"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict):
+            return JSONResponse({"error": "no change asked"}, status_code=400)
+        if isinstance(ask.get("add"), str):
+            if not _notes.add(ask["add"]):
+                return JSONResponse({"error": "nothing to add"}, status_code=400)
+        elif isinstance(ask.get("clear"), str):
+            if not _notes.clear(ask["clear"]):
+                return JSONResponse({"error": "no such note"}, status_code=404)
+        elif ask.get("clear_all") is True:
+            _notes.clear_all()
+        else:
+            return JSONResponse({"error": "no change asked"}, status_code=400)
+        return JSONResponse(_notes.read(), headers=_NO_CACHE)
+
+    @app.get("/api/notes/doodle", include_in_schema=False)
+    async def notes_doodle():
+        pic = _notes.doodle_path()
+        if not pic.exists():
+            return Response(status_code=404)
+        return FileResponse(pic, media_type="image/png", headers=_NO_CACHE)
+
+    @app.post("/api/notes/doodle", include_in_schema=False)
+    async def notes_doodle_save(request: Request):
+        if request.headers.get("x-hq") != "notes":
+            return JSONResponse({"error": "Only the HQ page can change the notes"}, status_code=403)
+        if not _notes.save_doodle(await request.body()):
+            return JSONResponse({"error": "not a picture HQ keeps"}, status_code=400)
+        return JSONResponse(_notes.read(), headers=_NO_CACHE)
+
     @app.get("/api/busy", include_in_schema=False)
     async def busy():
         return JSONResponse({"calls": _calls_on}, headers=_NO_CACHE)

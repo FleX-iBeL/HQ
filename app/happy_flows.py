@@ -137,6 +137,10 @@ Run them before and after every update; they print a short pass/fail table at th
      takes no room
   82 H104, no Claude: times digit by digit. Quick and Deep are told 9:30 is "nine thirty" and 10:45 "ten forty
      five", never half, quarter or o'clock, and no example in the call rules says a time the old way
+  83 H105, no Claude: the notes button. Notes kept one line each in a throwaway notes file (a line a call
+     wrote by hand read too), cleared one by one or all, the doodle kept only as a PNG; /api/notes only from
+     the page; the real call page in a headless browser, phone and app: the round button above Past calls
+     before, during and after a call, the sheet, add, clear, clear all on a second tap, drawing saved and wiped
   73 H92, no Claude: no laptop on a server. The status page in a headless browser, served as a server
      (HQ_LAPTOP=0) and as the laptop (HQ_LAPTOP=1), with a hot laptop and a low battery: on a server no Laptop
      section, no battery in the top line, no laptop lines or bars under Routines, and the Routines light green;
@@ -318,10 +322,12 @@ class Server:
         self.log = tmp / "server.log"
         self.pidfile = tmp / "server.pid"
         self.calls = tmp / "calls-server"
+        self.notes = tmp / "notes-server" / "notes.md"  # H105: never the workspace's own notes
         self.env = {
             **os.environ,
             "HQ_PORT": str(TEST_PORT), "HQ_NO_PHONE": "1", "HQ_WRAP_UP": "dry",
             "HQ_CALLS": str(self.calls), "HQ_LOG": str(self.log), "HQ_PID_FILE": str(self.pidfile),
+            "HQ_NOTES": str(self.notes),
         }
 
     @property
@@ -4481,6 +4487,165 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
             need(all(part.endswith(":ok") for part in res.split(" | ")), f"the past-calls button or sheet isn't right ({where}): {res}")
         return ("every saved call newest first with date, time and agent, one call read by name only, served read only; "
                 "the button above the voice button before, during and after a call, in the browser and the app; list, call, Back, Close")
+    async def flow83(self) -> str:
+        """H105, no Claude: the notes button. The notes file itself (notes.py on a throwaway copy), the call server's
+        /api/notes and /api/notes/doodle on the test server's own notes file (the workspace's is never touched), and
+        the real call page in a headless browser, phone and desktop app: the round button above Past calls, before,
+        during and after a call; the sheet, adding a note, clearing one and all, and drawing on the paper."""
+        import notes as _notes
+        real = _notes.NOTES
+        real_before = real.read_bytes() if real.exists() else None
+        real_pic = _notes.doodle_path(real)
+        pic_before = real_pic.stat().st_mtime if real_pic.exists() else None
+        f = self.tmp / "h105" / "HQ" / "notes.md"
+        need(_notes.read(f) == {"items": [], "doodle": None}, "a missing notes file isn't read as no notes")
+        a = _notes.add("  Call the dentist  ", f)
+        b = _notes.add("Two lines\nsecond one", f)
+        need(a and a["text"] == "Call the dentist" and len(a["when"]) == 19 and b and b["text"] == "Two lines\nsecond one",
+             f"adding notes went wrong: {a} {b}")
+        need(_notes.add("   ", f) is None, "an empty note was added")
+        text = f.read_text()
+        need(text.startswith("# Quick notes") and "## Notes" in text and "Two lines<br>second one" in text
+             and text.index("Call the dentist") < text.index("Two lines"), f"the notes file isn't as a call reads it: {text!r}")
+        f.write_text(text.rstrip("\n") + "\n- Written by a call\n\n## Later\n\nkept as it is\n")
+        got = _notes.items(f)
+        need([i["text"] for i in got] == ["Call the dentist", "Two lines\nsecond one", "Written by a call"] and got[2]["when"] == "",
+             f"a line written by hand isn't read as a note: {got}")
+        c = _notes.add("After the hand one", f)
+        need(_notes.items(f)[3]["text"] == "After the hand one" and "kept as it is" in f.read_text()
+             and f.read_text().index("After the hand one") < f.read_text().index("## Later"), "a new note didn't go at the end of Notes")
+        need(_notes.clear(got[1]["id"], f) and not _notes.clear("nope", f), "clearing one note by its id went wrong")
+        need([i["text"] for i in _notes.items(f)] == ["Call the dentist", "Written by a call", "After the hand one"], "the wrong note was cleared")
+        need(_notes.clear_all(f) == 3 and _notes.items(f) == [] and "kept as it is" in f.read_text() and "# Quick notes" in f.read_text(),
+             "clear all didn't keep the rest of the file")
+        png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4"
+                            "4e0000000049454e44ae426082")
+        need(not _notes.save_doodle(b"not a picture", f) and _notes.read(f)["doodle"] is None, "something that isn't a PNG was kept")
+        need(_notes.save_doodle(png, f) and _notes.doodle_path(f).read_bytes() == png and _notes.read(f)["doodle"], "the doodle wasn't kept")
+        need(_notes.save_doodle(b"", f) and not _notes.doodle_path(f).exists(), "an empty doodle didn't clear it")
+
+        await self.ensure_server()
+        def post(path, body, ctype="application/json", hq="notes"):
+            req = urllib.request.Request(TEST_URL + path, data=body, method="POST", headers={"content-type": ctype, **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        sf = self.server.notes
+        code, body, _ = http_get("/api/notes")
+        need(code == 200 and json.loads(body)["items"] == [], f"/api/notes didn't answer with no notes ({code} {body[:100]!r})")
+        need(post("/api/notes", b'{"add": "From elsewhere"}', hq="")[0] == 403 and not sf.exists(), "a change without the page's header was let in")
+        code, d = post("/api/notes", json.dumps({"add": "From the page"}).encode())
+        need(code == 200 and [i["text"] for i in d["items"]] == ["From the page"] and "From the page" in sf.read_text(),
+             f"adding through the server went wrong ({code} {d})")
+        need(post("/api/notes", b'{"add": "  "}')[0] == 400 and post("/api/notes", b'{"clear": "nope"}')[0] == 404
+             and post("/api/notes", b'[]')[0] == 400, "a bad change wasn't refused")
+        code, d = post("/api/notes/doodle", png, "image/png")
+        need(code == 200 and d["doodle"] and _notes.doodle_path(sf).read_bytes() == png, f"the doodle wasn't saved through the server ({code})")
+        code, got_png, ctype = http_get("/api/notes/doodle")
+        need(code == 200 and got_png == png and "png" in ctype, f"the doodle didn't come back ({code} {ctype})")
+        need(post("/api/notes/doodle", b"<svg/>", "image/png")[0] == 400, "a picture that isn't a PNG was let in")
+        code, d = post("/api/notes", json.dumps({"clear": d["items"][0]["id"]}).encode())
+        need(code == 200 and d["items"] == [], f"clearing through the server went wrong ({code} {d})")
+        need(post("/api/notes/doodle", b"", "image/png")[0] == 200 and http_get("/api/notes/doodle")[0] == 404, "clearing the doodle went wrong")
+
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        stub = r"""<script>
+var NOTES = [{ id: "a1", when: "2099-12-31 09:00:00", text: "Ask about the dentist" }, { id: "b2", when: "", text: "Two\nlines" }],
+    SENT = [], PIC = null, nextId = 1;
+window.fetch = async (url, opt) => {
+  url = String(url); const m = (opt && opt.method) || "GET", hq = opt && opt.headers && opt.headers["x-hq"];
+  const answer = () => ({ items: NOTES.slice(), doodle: PIC });
+  if (url === "api/notes" && m === "POST") {
+    const b = JSON.parse(opt.body); SENT.push((hq === "notes" ? "" : "NOHEADER ") + Object.keys(b)[0]);
+    if (b.add) NOTES.push({ id: "n" + (nextId++), when: "2099-12-31 10:00:00", text: b.add });
+    if (b.clear) NOTES = NOTES.filter(n => n.id !== b.clear);
+    if (b.clear_all) NOTES = [];
+    return { ok: true, json: async () => answer() };
+  }
+  if (url === "api/notes/doodle" && m === "POST") {
+    const size = opt.body.size; SENT.push("doodle:" + (size ? "png" : "empty") + ":" + (opt.headers["content-type"] || ""));
+    PIC = size ? 1234 : null; return { ok: true, json: async () => answer() };
+  }
+  if (url === "api/notes") return { ok: true, json: async () => answer() };
+  return { ok: true, json: async () => ({ lines: [], calls: [] }) };
+};</script>"""
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const shown = el => getComputedStyle(el).display !== "none" && el.getBoundingClientRect().width > 0;
+  const placed = () => { const n = notesBtn.getBoundingClientRect(), h = histBtn.getBoundingClientRect();
+    return shown(notesBtn) && Math.abs(n.left - h.left) < 2 && n.bottom <= h.top && h.top - n.bottom < 20; };
+  await wait(300);
+  out.push("start:" + (placed() ? "ok" : "WRONG"));
+  notesBtn.click(); await wait(400);
+  const rows = () => notesList.querySelectorAll(".note");
+  out.push("open:" + (notesOpen() && notesBtn.getAttribute("aria-expanded") === "true" && rows().length === 2
+    && rows()[0].textContent.includes("Ask about the dentist") && rows()[0].textContent.includes("2099-12-31 09:00")
+    && shown(doodle) && shown(notesIn) ? "ok" : "WRONG " + rows().length));
+  const sb = notesEl.getBoundingClientRect(), lastIn = doodle.getBoundingClientRect(), nb = notesBtn.getBoundingClientRect();
+  out.push("clear-of-buttons:" + (lastIn.bottom <= nb.top + 1 ? "ok" : "WRONG " + lastIn.bottom + " " + nb.top));
+  notesIn.value = "Buy tie wraps"; notesIn.dispatchEvent(new Event("input"));
+  notesForm.requestSubmit(); await wait(300);
+  out.push("add:" + (rows().length === 3 && rows()[2].textContent.includes("Buy tie wraps") && notesIn.value === "" && SENT.includes("add") ? "ok" : "WRONG " + SENT));
+  rows()[0].querySelector(".clr").click(); await wait(300);
+  out.push("clearone:" + (rows().length === 2 && !notesList.textContent.includes("dentist") && SENT.includes("clear") ? "ok" : "WRONG"));
+  notesAll.click(); await wait(100);
+  out.push("allasks:" + (rows().length === 2 && notesAll.classList.contains("sure") && !SENT.includes("clear_all") ? "ok" : "WRONG"));
+  notesAll.click(); await wait(300);
+  out.push("all:" + (rows().length === 0 && notesList.textContent.includes("No notes yet") && notesAll.disabled ? "ok" : "WRONG"));
+  const r = doodle.getBoundingClientRect(), ev = (type, x, y) => doodle.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1,
+    clientX: r.left + x, clientY: r.top + y, pointerType: "touch" }));
+  ev("pointerdown", 20, 20); ev("pointermove", 60, 40); ev("pointermove", 120, 30); ev("pointerup", 120, 30);
+  const px = ink.getImageData(Math.round(60 * doodle.width / r.width), Math.round(40 * doodle.height / r.height), 1, 1).data;
+  out.push("ink:" + (px[0] < 100 && doodleHint.style.display === "none" ? "ok" : "WRONG " + Array.from(px)));
+  await wait(1200);
+  out.push("saved:" + (SENT.includes("doodle:png:image/png") && !doodleDirty && doodleAt === 1234 ? "ok" : "WRONG " + SENT));
+  document.getElementById("doodleclr").click(); await wait(300);
+  out.push("wiped:" + (SENT.includes("doodle:empty:image/png") && doodleHint.style.display === "" ? "ok" : "WRONG " + SENT));
+  out.push("header:" + (!SENT.some(x => x.startsWith("NOHEADER")) ? "ok" : "WRONG"));
+  chatBtn.click(); await wait(300);
+  out.push("onesheet:" + (chatOpen() && !notesOpen() ? "ok" : "WRONG"));
+  notesBtn.click(); await wait(300);
+  out.push("onesheet2:" + (notesOpen() && !chatOpen() ? "ok" : "WRONG"));
+  histBtn.click(); await wait(300);
+  out.push("onesheet3:" + (histOpen() && !notesOpen() ? "ok" : "WRONG"));
+  showHistory(false);
+  calledHere = true; setState("live", "On the call");
+  out.push("live:" + (shown(notesBtn) ? "ok" : "MISSING"));
+  notesBtn.click(); await wait(300);
+  out.push("livesheet:" + (notesOpen() && document.body.classList.contains("chatting") ? "ok" : "WRONG"));
+  document.getElementById("notesclose").click(); await wait(200);
+  out.push("close:" + (!notesOpen() && notesBtn.getAttribute("aria-expanded") === "false" ? "ok" : "WRONG"));
+  cleanup("Call ended");
+  out.push("after:" + (placed() ? "ok" : "MISSING"));
+  const pre = document.createElement("pre"); pre.id = "h105"; pre.textContent = "H105RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f2 = self.tmp / "h105.html"
+        f2.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
+        for where, q in (("phone", ""), ("app", "?app=1")):
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=390,844",
+                                              f"--user-data-dir={self.tmp / ('h105-' + where)}", "--virtual-time-budget=20000", "--dump-dom", f2.as_uri() + q], timeout=120)
+            m = re.search(r'<pre id="h105">H105RESULT (.*?) END</pre>', r.stdout)
+            need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
+            res = m.group(1)
+            say(f"   {where}: {res}")
+            need(all(part.endswith(":ok") for part in res.split(" | ")), f"the notes button or sheet isn't right ({where}): {res}")
+        need((real.read_bytes() if real.exists() else None) == real_before
+             and (real_pic.stat().st_mtime if real_pic.exists() else None) == pic_before, "the workspace's own notes were touched")
+        return ("notes kept one line each in a throwaway notes file, a hand-written line read too, cleared one by one or all, the doodle "
+                "kept only as a PNG; the server's /api/notes only from the page; the button above Past calls before, during and after a "
+                "call, phone and app: the sheet, add, clear, clear all on a second tap, drawing saved and wiped")
+
     async def flow58(self) -> str:
         """H60: continue an earlier call. The transcript code (what goes in, trimmed from the start, refused
         names), the call (greeting, warm-up note, never on Free), the call page in a headless browser (the
@@ -6892,6 +7057,7 @@ FLOWS = {
     80: ("F9: a call left quiet stays connected: no idle timeout; a hang-up or a lost connection still ends it", False, "flow80"),
     81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data", False, "flow81"),
     82: ("H104: times on calls are said digit by digit (nine thirty), never half, quarter or o'clock", False, "flow82"),
+    83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one, and a space to doodle", False, "flow83"),
 }
 
 

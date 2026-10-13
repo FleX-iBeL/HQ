@@ -257,6 +257,43 @@
   /* H72: hidden on purpose, no hint anywhere. Holding the greyed-out Send for a moment shows a small Yes
      just above it; sliding onto it and letting go sends "Yes". The disabled Send lets the touch through
      to its wrapper, which keeps the slide (no scrolling, no text selection, no long-press menu). */
+  /* H105: his quick notes. Right above the Past calls button, bottom left, always there (the same in the desktop
+     app). Off a call the sheet ends above the round buttons on both sides. One sheet at a time: his notes, kept in his workspace (HQ/notes.md), a line to add one, a Clear on each
+     (gone through), and a small paper space to write or doodle on, kept as one picture next to the notes. */
+  #notesbtn { position:fixed; left:16px; bottom:calc(152px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
+             border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
+             cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  #notesbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
+  #notesbtn svg { width:26px; height:26px; }
+  #notesheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
+               border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:10px;
+               padding:14px 16px calc(216px + env(safe-area-inset-bottom)); text-align:left; user-select:text; -webkit-user-select:text; }
+  #notesheet.open { display:flex; }
+  #noteshead { position:relative; }
+  #notesheet h2 { margin:0; font-size:15px; font-weight:600; color:var(--muted); text-align:center; padding:0 64px; }
+  #notesclose, #notesall { position:absolute; top:-8px; border:0; background:transparent; color:var(--fg); font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
+  #notesclose { right:-6px; }
+  #notesall { left:-6px; color:var(--muted); font-weight:500; }
+  #notesall.sure { color:var(--stop); font-weight:600; }
+  #notesall:disabled { visibility:hidden; }
+  #noteslist { flex:1; min-height:60px; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; display:flex; flex-direction:column; gap:6px; }
+  #noteslist .note { display:flex; align-items:flex-start; gap:8px; padding:9px 4px 9px 12px; border-radius:12px; background:color-mix(in srgb, var(--fg) 7%, var(--bg)); }
+  #noteslist .txt { flex:1; white-space:pre-wrap; overflow-wrap:anywhere; font-size:16px; line-height:1.35; }
+  #noteslist .when { display:block; color:var(--muted); font-size:12px; margin-top:3px; }
+  #noteslist .clr { flex-shrink:0; border:0; background:transparent; color:var(--muted); font:600 14px/1 -apple-system,sans-serif; padding:6px 8px; cursor:pointer; }
+  #noteslist .empty { color:var(--muted); text-align:center; margin:auto; }
+  #notesform { display:flex; gap:8px; align-items:flex-end; }
+  #notesin { flex:1; resize:none; min-height:42px; max-height:120px; border:1px solid var(--muted); border-radius:12px; padding:10px 12px;
+             background:transparent; color:var(--fg); font:16px/1.3 -apple-system,sans-serif; }
+  #notesadd { border:0; border-radius:12px; background:var(--accent); color:#04120f; font:600 16px/1 -apple-system,sans-serif; padding:13px 16px; cursor:pointer; }
+  #notesadd:disabled { opacity:.45; cursor:default; }
+  #doodlewrap { position:relative; flex-shrink:0; }
+  #doodle { display:block; width:100%; height:min(190px, 24vh); border-radius:12px; background:#fffdf6; touch-action:none; cursor:crosshair; }
+  #doodleclr { position:absolute; right:6px; top:6px; border:0; border-radius:999px; background:rgba(0,0,0,.08); color:#333;
+               font:600 13px/1 -apple-system,sans-serif; padding:6px 10px; cursor:pointer; }
+  #doodlehint { position:absolute; left:12px; top:10px; color:#9a948a; font-size:13px; pointer-events:none; }
+  #notesnote { color:var(--muted); font-size:13px; min-height:0; text-align:center; }
+  #notesnote:empty { display:none; }
   #sendwrap { position:relative; flex-shrink:0; display:flex; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
   #typesend:disabled { pointer-events:none; }
   #yesbtn { display:none; position:absolute; left:50%; bottom:calc(100% + 12px); transform:translateX(-50%); border:0; border-radius:999px;
@@ -270,7 +307,7 @@
   body.chatting::after { display:none; }
   body.chatting h1, body.chatting #modes, body.chatting #modehint, body.chatting #setbtn,
   body.chatting #freetag { display:none; }
-  body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet { top:0; height:auto; bottom:calc(318px + env(safe-area-inset-bottom));
+  body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet, body.chatting #notesheet { top:0; height:auto; bottom:calc(318px + env(safe-area-inset-bottom));
                         border-top:0; border-bottom:1px solid var(--muted); border-radius:0 0 18px 18px;
                         padding:calc(14px + env(safe-area-inset-top)) 16px 12px; box-shadow:0 8px 24px rgba(0,0,0,.2); }
   body.chatting #orbwrap { order:1; flex-direction:row; gap:12px; margin:0; }
@@ -348,6 +385,14 @@
 <div id="histsheet" role="dialog" aria-label="Past calls"><div id="histhead"><button id="histback" type="button">‹ Calls</button><h2 id="histtitle">Past calls</h2><button id="histclose" type="button">Close</button></div><div id="histlist"></div><div id="histlog"></div><div id="histfoot"><button id="histcont" type="button">Continue this call</button><small id="histcontnote"></small></div></div>
 <button id="histbtn" type="button" aria-label="Past calls" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
+</button>
+<div id="notesheet" role="dialog" aria-label="Notes"><div id="noteshead"><button id="notesall" type="button" disabled>Clear all</button><h2>Notes</h2><button id="notesclose" type="button">Close</button></div>
+  <div id="noteslist"></div>
+  <form id="notesform" autocomplete="off"><textarea id="notesin" rows="1" placeholder="A quick note" aria-label="A quick note" maxlength="2000"></textarea><button id="notesadd" type="submit" disabled>Add</button></form>
+  <div id="doodlewrap"><canvas id="doodle" aria-label="Write or doodle here"></canvas><span id="doodlehint">Write or doodle here</span><button id="doodleclr" type="button">Clear</button></div>
+  <small id="notesnote"></small></div>
+<button id="notesbtn" type="button" aria-label="Notes" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
 </button>
 <button id="voicebtn" type="button" aria-label="Mute her voice" aria-pressed="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path class="on" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="off" d="M16 9l6 6M22 9l-6 6"/></svg>
@@ -668,7 +713,7 @@ function chatOpen() { return chatEl.classList.contains("open"); }
 // phone has settled its own scrolling (the iPhone finishes a swipe or a layout change a moment later).
 let sheetWasOpen = false;
 function showLayout() {
-  const open = chatOpen() || statOpen() || histOpen();
+  const open = chatOpen() || statOpen() || histOpen() || notesOpen();
   document.body.classList.toggle("chatting", open && state === "live"); fitCall();
   if (sheetWasOpen && !open && state !== "idle") { requestAnimationFrame(() => fitCall()); setTimeout(fitCall, 350); }
   sheetWasOpen = open;
@@ -767,6 +812,7 @@ function addChat(who, text, old, her) {
 function showChat(open) {
   if (open) showStatus(false);  // H13: one sheet at a time
   if (open) showHistory(false); // H57
+  if (open) showNotes(false);   // H105
   if (open) loadLastCall();     // H34: before a call, fresh each time it opens
   chatEl.classList.toggle("open", open);
   chatBtn.setAttribute("aria-expanded", String(open));
@@ -860,6 +906,7 @@ function statOpen() { return statEl.classList.contains("open"); }
 function showStatus(open) {
   if (open && chatOpen()) { chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showBadge(); }
   if (open) showHistory(false);  // H57: one sheet at a time
+  if (open) showNotes(false);    // H105
   statEl.classList.toggle("open", open);
   statBtn.setAttribute("aria-expanded", String(open));
   const want = open ? statusUrl() : "about:blank";
@@ -960,6 +1007,7 @@ function showHistory(open) {
   if (open) {
     if (chatOpen()) { chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showBadge(); }
     if (statOpen()) showStatus(false);
+    showNotes(false);  // H105
   }
   histEl.classList.toggle("open", open);
   histBtn.setAttribute("aria-expanded", String(open));
@@ -969,6 +1017,143 @@ function showHistory(open) {
 histBtn.addEventListener("click", () => showHistory(!histOpen()));
 document.getElementById("histclose").addEventListener("click", () => showHistory(false));
 document.getElementById("histback").addEventListener("click", () => loadHistory());
+
+// H105: his quick notes, behind the round button above Past calls. The notes are kept in his workspace through the
+// call server (/api/notes: add, clear one once it's gone through, clear all with a second tap), so a call can read
+// them and go through them with him. The paper under them is a small space to write or doodle with a finger or
+// the mouse; each stroke is saved as one picture (/api/notes/doodle) a moment after it ends, Clear wipes it.
+const notesBtn = document.getElementById("notesbtn"), notesEl = document.getElementById("notesheet"),
+      notesList = document.getElementById("noteslist"), notesIn = document.getElementById("notesin"),
+      notesAdd = document.getElementById("notesadd"), notesAll = document.getElementById("notesall"),
+      notesNote = document.getElementById("notesnote"), doodle = document.getElementById("doodle"),
+      doodleHint = document.getElementById("doodlehint");
+let notesAsk = 0, notesSure = null, doodleAt = null, doodleDirty = false, doodleTimer = null;
+function notesOpen() { return notesEl.classList.contains("open"); }
+async function notesSend(url, body, type) {
+  try {
+    const r = await fetch(url, { method: "POST", cache: "no-store", headers: { "x-hq": "notes", "content-type": type || "application/json" },
+                                 body: type ? body : JSON.stringify(body) });
+    if (r.ok) { notesNote.textContent = ""; return await r.json(); }
+  } catch (e) {}
+  notesNote.textContent = "Couldn't save that. Try again.";
+  return null;
+}
+function showNoteItems(data) {
+  if (!data || !Array.isArray(data.items)) { histNote(notesList, "Couldn't load the notes. Try again."); return; }
+  notesList.innerHTML = "";
+  for (const it of data.items) {
+    const row = document.createElement("div"); row.className = "note";
+    const t = document.createElement("div"); t.className = "txt"; t.textContent = it.text;
+    if (it.when) { const w = document.createElement("small"); w.className = "when"; w.textContent = it.when.slice(0, 16); t.appendChild(w); }
+    const c = document.createElement("button"); c.type = "button"; c.className = "clr"; c.textContent = "Clear";
+    c.setAttribute("aria-label", "Clear this note");
+    c.addEventListener("click", async () => { c.disabled = true; const d = await notesSend("api/notes", { clear: it.id }); if (d) showNoteItems(d); else c.disabled = false; });
+    row.append(t, c); notesList.appendChild(row);
+  }
+  if (!data.items.length) histNote(notesList, "No notes yet");
+  notesAll.disabled = !data.items.length; notesSure = null; notesAll.classList.remove("sure"); notesAll.textContent = "Clear all";
+  if (data.doodle !== undefined && data.doodle !== doodleAt && !doodleDirty) loadDoodle(data.doodle);
+}
+async function loadNotes() {
+  const ask = ++notesAsk;
+  if (!notesList.querySelector(".note")) histNote(notesList, "Loading…");
+  const data = await histGet("api/notes");
+  if (ask !== notesAsk || !notesOpen()) return;
+  showNoteItems(data);
+}
+function showNotes(open) {
+  if (open === notesOpen()) { if (open) loadNotes(); return; }
+  if (open) {
+    if (chatOpen()) { chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showBadge(); }
+    if (statOpen()) showStatus(false);
+    if (histOpen()) showHistory(false);
+  } else if (doodleDirty) saveDoodle();
+  notesEl.classList.toggle("open", open);
+  notesBtn.setAttribute("aria-expanded", String(open));
+  if (open) { sizeDoodle(); loadNotes(); } else notesAsk++;
+  showLayout();
+}
+notesBtn.addEventListener("click", () => showNotes(!notesOpen()));
+document.getElementById("notesclose").addEventListener("click", () => showNotes(false));
+notesIn.addEventListener("input", () => { notesAdd.disabled = !notesIn.value.trim(); });
+notesIn.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing && matchMedia("(hover: hover)").matches) { e.preventDefault(); notesForm.requestSubmit(); }
+});
+const notesForm = document.getElementById("notesform");
+notesForm.addEventListener("submit", async e => {
+  e.preventDefault();
+  const text = notesIn.value.trim(); if (!text) return;
+  notesAdd.disabled = true;
+  const d = await notesSend("api/notes", { add: text });
+  if (d) { notesIn.value = ""; showNoteItems(d); notesList.scrollTop = notesList.scrollHeight; }
+  notesAdd.disabled = !notesIn.value.trim();
+});
+notesAll.addEventListener("click", async () => {
+  if (!notesSure) {  // a second tap within four seconds clears them all
+    notesAll.classList.add("sure"); notesAll.textContent = "Sure? Tap again";
+    notesSure = setTimeout(() => { notesSure = null; notesAll.classList.remove("sure"); notesAll.textContent = "Clear all"; }, 4000);
+    return;
+  }
+  clearTimeout(notesSure); notesSure = null;
+  const d = await notesSend("api/notes", { clear_all: true }); if (d) showNoteItems(d);
+});
+// The paper: drawn in device pixels, dark ink on light paper (so the saved picture reads the same anywhere).
+const ink = doodle.getContext("2d");
+let drawing = null;
+function sizeDoodle() {
+  const r = doodle.getBoundingClientRect(), dpr = Math.max(1, window.devicePixelRatio || 1);
+  const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+  if (!w || !h || (doodle.width === w && doodle.height === h)) return;
+  const keep = doodle.width && doodle.height && doodleDirty ? doodle.toDataURL("image/png") : null;
+  doodle.width = w; doodle.height = h; paper();
+  if (keep) { const im = new Image(); im.onload = () => ink.drawImage(im, 0, 0, w, h); im.src = keep; }
+  else if (doodleAt) loadDoodle(doodleAt, true);
+}
+function paper() { ink.fillStyle = "#fffdf6"; ink.fillRect(0, 0, doodle.width, doodle.height); }
+function loadDoodle(at, force) {
+  if (at === doodleAt && !force) return;
+  doodleAt = at; paper(); doodleHint.style.display = at ? "none" : "";
+  if (!at) return;
+  const im = new Image();
+  im.onload = () => { if (doodleAt === at && !doodleDirty) { paper(); ink.drawImage(im, 0, 0, doodle.width, doodle.height); } };
+  im.src = "api/notes/doodle?t=" + at;
+}
+function doodlePoint(e) {
+  const r = doodle.getBoundingClientRect();
+  return [(e.clientX - r.left) * doodle.width / r.width, (e.clientY - r.top) * doodle.height / r.height];
+}
+doodle.addEventListener("pointerdown", e => {
+  sizeDoodle(); e.preventDefault();
+  try { doodle.setPointerCapture(e.pointerId); } catch (_) {}
+  drawing = doodlePoint(e); doodleHint.style.display = "none"; doodleDirty = true; clearTimeout(doodleTimer);
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  ink.strokeStyle = "#1d1d1f"; ink.fillStyle = "#1d1d1f"; ink.lineWidth = 2.6 * dpr; ink.lineCap = "round"; ink.lineJoin = "round";
+  ink.beginPath(); ink.arc(drawing[0], drawing[1], ink.lineWidth / 2, 0, Math.PI * 2); ink.fill();
+});
+doodle.addEventListener("pointermove", e => {
+  if (!drawing) return;
+  const p = doodlePoint(e);
+  ink.beginPath(); ink.moveTo(drawing[0], drawing[1]); ink.lineTo(p[0], p[1]); ink.stroke(); drawing = p;
+});
+function doodleUp() { if (!drawing) return; drawing = null; clearTimeout(doodleTimer); doodleTimer = setTimeout(saveDoodle, 700); }
+doodle.addEventListener("pointerup", doodleUp); doodle.addEventListener("pointercancel", doodleUp);
+async function saveDoodle() {
+  clearTimeout(doodleTimer); if (!doodleDirty) return;
+  // toDataURL, not toBlob: it's at once, where toBlob's callback can lag (or never come) in some web views
+  const bin = atob(doodle.toDataURL("image/png").split(",")[1] || ""), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  if (!bytes.length) return;
+  const blob = new Blob([bytes], { type: "image/png" });
+  doodleDirty = false;
+  const d = await notesSend("api/notes/doodle", blob, "image/png");
+  if (d) doodleAt = d.doodle; else doodleDirty = true;
+}
+document.getElementById("doodleclr").addEventListener("click", async () => {
+  clearTimeout(doodleTimer); doodleDirty = false; paper(); doodleHint.style.display = "";
+  const d = await notesSend("api/notes/doodle", new Blob([]), "image/png");
+  if (d) doodleAt = d.doodle;
+});
+addEventListener("resize", () => { if (notesOpen()) sizeDoodle(); });
 
 // H40: her voice off. On the iPhone a page can't set the volume, and starting a call switches the phone
 // to its call sound, which has its own, louder volume; so this silences her completely instead: the
