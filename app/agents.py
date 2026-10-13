@@ -18,8 +18,10 @@ Where they come from:
 - The headshot: `HQ/agents/<id>.jpg` (or .jpeg, .png, .webp) in the workspace. Pictures stay in
   the workspace, never in HQ. Without one, the call page shows a drawn placeholder (picture_svg).
 - H73: an agent with `"coming_soon": true` is shown on the call page as a small locked card under the
-  others, greyed out, and is never picked or called (`find` and `visible` leave it out; `soon` lists it).
-  A workspace can unlock one with `"coming_soon": false`.
+  others, greyed out, and isn't on the picker (`visible` leaves it out; `soon` lists it). H121: she can be
+  brought into a three-way or four-way call. A workspace can unlock one with `"coming_soon": false`.
+- An agent's model is an alias in `MODELS` or a full model id; a name HQ doesn't know yet runs on Opus
+  (`runs_on`).
 - H76 (12 October 2026): each agent has her own character on calls: `character` (one line, shown in
   Settings), `personality` (how she is and how she talks), `pushback` (a line that sounds like her when she
   pushes back), `greetings` (per part of the day: morning, afternoon, evening, night; or one list for all)
@@ -37,6 +39,7 @@ from html import escape
 from pathlib import Path
 
 LOADS = ("quick", "deep")
+MODELS = ("sonnet", "opus", "haiku")  # the aliases config.MODEL_ALIASES knows
 PICTURE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
 
 # [Claude's choice, 10 October 2026: Pepper takes Quick and Donna takes Deep; Moneypenny waits for a
@@ -213,6 +216,11 @@ def load(folder: Path) -> list[dict]:
     return [agents[i] for i in order]
 
 
+def runs_on(model: str) -> str:
+    """The model a call really uses for this agent: an alias HQ knows or a full id, else Opus."""
+    return model if model in MODELS or model.startswith("claude-") else "opus"
+
+
 def visible(folder: Path) -> list[dict]:
     """The agents a call can be made with (not hidden, not coming soon)."""
     return [a for a in load(folder) if not a["hidden"] and not a["coming_soon"]]
@@ -230,11 +238,11 @@ def names(folder: Path) -> list[str]:
 def find(folder: Path, agent_id: str | None = None, mode: str | None = None) -> dict:
     """The agent a call asked for. Without a known id, the first visible agent with that load
     (pages from before H29 send only mode quick or deep), else the first one."""
-    every = [a for a in load(folder) if not a["coming_soon"]]  # H73: a locked agent is never called
+    every = load(folder)
     by_id = {a["id"]: a for a in every}
     if agent_id and str(agent_id).lower() in by_id:
         return by_id[str(agent_id).lower()]
-    shown = [a for a in every if not a["hidden"]] or every
+    shown = [a for a in every if not a["hidden"] and not a["coming_soon"]] or every
     if mode in LOADS:
         for a in shown:
             if a["load"] == mode:
@@ -323,7 +331,7 @@ def persona(agent: dict, user: str = "the user") -> str:
 def public(agent: dict) -> dict:
     """What the call page gets: no personality text, just what it shows and sends."""
     return {"id": agent["id"], "name": agent["name"], "full_name": agent.get("full_name") or agent["name"],
-            "voice": agent.get("voice", "af_heart"), "load": agent["load"], "model": agent["model"],
+            "voice": agent.get("voice", "af_heart"), "load": agent["load"], "model": runs_on(agent["model"]),
             "speciality": agent["speciality"], "colour": agent["colour"],
             "picture": f"/agents/{agent['id']}/picture", "coming_soon": agent.get("coming_soon") is True,
             "character": agent.get("character", ""), "default": is_default(agent)}
@@ -343,9 +351,15 @@ def switch_marks(others: list[dict]) -> dict[str, tuple[str, str]]:
     """Every mark she may end a reply with to bring in another agent: mark -> ("switch"|"three-way", agent id)."""
     out = {}
     for a in others:
-        out[SWITCH_MARK.format(name=a["name"])] = ("switch", a["id"])
+        if not a.get("coming_soon"):  # H121: one still coming soon only joins, never takes over the call
+            out[SWITCH_MARK.format(name=a["name"])] = ("switch", a["id"])
         out[THREE_WAY_MARK.format(name=a["name"])] = ("three-way", a["id"])
     return out
+
+
+def way(panel: list) -> str:
+    """H121: what the call is with this many agents on it (and him): a three-way call, a four-way call."""
+    return {2: "three-way", 3: "four-way", 4: "five-way"}.get(len(panel), f"{len(panel) + 1}-way")
 
 
 def switch_rules(agent: dict, others: list[dict], user: str = "the user") -> str:
@@ -368,6 +382,9 @@ def switch_rules(agent: dict, others: list[dict], user: str = "the user") -> str
         f"each turn the call system says who answers, and that one answers in her own character, model and voice.\n"
         f"- Only when he asks for her in other words and it isn't clear which he wants, ask him first, secretary "
         f"style: a three-way call, or hand over the phone. No mark until he's said.\n"
+        + "".join(f"- {a['name']} can only be brought in, not handed over to: when he asks for her in any words, "
+                  f"bring her in ({THREE_WAY_MARK.format(name=a['name'])}).\n" for a in others if a.get("coming_soon"))
+        + "- More than one can be on the call: bring in another the same way, and it's a four-way call.\n"
         f"Never write these marks in any other reply, and never say them; they are not spoken.\n"
     )
 

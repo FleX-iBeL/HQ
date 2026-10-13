@@ -308,7 +308,7 @@ async def bot(runner_args: RunnerArguments):
     # H29: the page sends the agent (Pepper, Donna, ...); her model and load win over the mode.
     # A page from before H29 sends only the mode: the agent with that load.
     agent = agents.find(config.FOLDER, str(body.get("agent", "")) or None, mode if mode in ("quick", "deep") else None)
-    model = config.MODEL_ALIASES.get(agent["model"], agent["model"])
+    model = config.MODEL_ALIASES.get(agents.runs_on(agent["model"]), agent["model"])
     mode = agent["load"]
     # H46: each agent has her own voice (Settings on the call page); the page sends hers, else her default.
     voice = str(body.get("voice", "")) or agent.get("voice", "")  # one of config.VOICES, else the default (Call checks)

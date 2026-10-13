@@ -49,7 +49,7 @@ class Call:
                  agent: str | None = None, continues: str | None = None, handover: bool = False,
                  voices: dict | None = None):
         self._loops = loops
-        self.model = config.MODEL_ALIASES.get(model or "", model or config.MODEL)
+        self.model = config.MODEL_ALIASES.get(agents.runs_on(model), model) if model else config.MODEL
         self.free = free
         # B1: Quick loads only part of his folder, Deep everything. Without a mode from the page,
         # the model decides: Opus is Deep, the rest Quick.
@@ -58,10 +58,12 @@ class Call:
         # goes after the call rules. Without one asked for, the agent with this call's load.
         self.agent = agents.find(config.FOLDER, agent, self.load)
         persona = agents.persona(self.agent, config.USER)
-        # H79: the other agents she can hand over to or bring in (never on Free: one plain Claude)
-        self.others = [] if free else [a for a in agents.visible(config.FOLDER) if a["id"] != self.agent["id"]]
+        # H79: the other agents she can hand over to or bring in (never on Free: one plain Claude);
+        # H121: one still coming soon too, to bring in only (agents.switch_marks)
+        self.others = [] if free else [a for a in agents.visible(config.FOLDER) + agents.soon(config.FOLDER)
+                                       if a["id"] != self.agent["id"]]
         persona += agents.switch_rules(self.agent, self.others, config.USER)
-        self.panel: list[dict] = [self.agent]  # H79: who's on the call; two on a three-way call
+        self.panel: list[dict] = [self.agent]  # H79: who's on the call; two on a three-way call, three on a four-way (H121)
         self.speaker = self.agent  # H79: who answers now
         self.voices: dict[str, str] = {k: str(v) for k, v in (voices or {}).items()}  # H79: each agent's voice from the page
         self.switched_to: dict | None = None  # H79: she handed the call over to this one
@@ -135,7 +137,7 @@ class Call:
             return None
         self.panel.append(other)
         self._joined = other
-        self.transcript.note(f"{other['name']} joined: a three-way call with {', '.join(a['name'] for a in self.panel)}")
+        self.transcript.note(f"{other['name']} joined: a {agents.way(self.panel)} call with {', '.join(a['name'] for a in self.panel)}")
         return other
 
     def _speak_as(self, agent: dict) -> None:
@@ -155,10 +157,10 @@ class Call:
         notes = []
         joined, self._joined = getattr(self, "_joined", None), None
         if joined is not None:
-            notes.append(f"[Call system: {joined['name']} is now on this call too, a three-way call. Who she is:"
+            notes.append(f"[Call system: {joined['name']} is now on this call too, a {agents.way(self.panel)} call. Who she is:"
                          f"{agents.persona(joined, config.USER)}]")
         if who is not self.speaker:
-            model = config.MODEL_ALIASES.get(who["model"], who["model"])
+            model = config.MODEL_ALIASES.get(agents.runs_on(who["model"]), who["model"])
             if self.brain._client and model != self.brain.model:
                 try:
                     await self.brain._client.set_model(model)
@@ -169,7 +171,7 @@ class Call:
             self.speaker = who
         self.transcript.speaker = who["name"]
         rest = ", ".join(a["name"] for a in self.panel if a is not who)
-        notes.append(f"[Call system: three-way call with {rest}. {who['name']} answers this turn: answer as "
+        notes.append(f"[Call system: {agents.way(self.panel)} call with {rest}. {who['name']} answers this turn: answer as "
                      f"{who['name']}, in her character, and only as her.]")
         return notes
 

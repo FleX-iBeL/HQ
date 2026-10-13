@@ -439,7 +439,9 @@ WHISPER_MODEL = os.environ.get(
     "HQ_WHISPER", "mlx-community/whisper-large-v3-turbo" if STT_ENGINE == "mlx" else "small")
 WHISPER_PROMPT = os.environ.get(
     "HQ_WHISPER_PROMPT",
-    ", ".join(w for w in ["HQ", *_agents.names(FOLDER), ME["name"], ME["hear"].rstrip(".")] if w) + ".",
+    # H121: an agent still coming soon too, since she can be brought into a call
+    ", ".join(w for w in ["HQ", *_agents.names(FOLDER), *(a["name"] for a in _agents.soon(FOLDER)), ME["name"],
+                          ME["hear"].rstrip(".")] if w) + ".",
 )
 
 # Ears. How long a silence must be before the turn may end. Pipecat's default is 0.2 s,

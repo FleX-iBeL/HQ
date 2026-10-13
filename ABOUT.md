@@ -33,7 +33,7 @@ On the call page: hold to talk (or talk freely), a chat that shows what you both
 
 - **Donna:** Sonnet, with the basics loaded (your rules, your to-do list, the mail list, the last notes). Quick and dry, a bit cheeky, knows what you need before you finish. For your agenda, your list, mail and quick orders. (This was Quick.) She picks up with "Hey you. What do you need?"
 - **Pepper:** Opus, with everything loaded, your vision too. Warm, calm and direct, takes a beat before she answers. For planning, sparring, thinking things through. (This was Deep.) She picks up with "Hey, <your name>. What's on your mind?"
-- **Moneypenny** (coming soon, Fable): few words, cool, a little mysterious, all business. For the big jobs behind the scenes. "<Your name>. Go ahead."
+- **Moneypenny** (coming soon, Fable): few words, cool, a little mysterious, all business. For the big jobs behind the scenes. "<Your name>. Go ahead." Until then she can be brought into a three-way or four-way call, on Opus.
 
 Each one talks like her own person, not like an AI: her own greetings and her own way of pushing back, and no talking while she thinks (a soft thinking sound instead). These characters are HQ's defaults; Settings on the call page shows each agent's character under her voice, marked HQ's default or your own. You can change any of it for your own HQ (see below), and `python3 app/agents.py` prints each agent's character as it is now.
 

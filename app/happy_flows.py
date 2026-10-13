@@ -4057,7 +4057,7 @@ window.addEventListener('load', () => setTimeout(() => {
 
     # 62
     async def flow62(self) -> str:
-        """H73: Moneypenny, coming soon. In HQ's defaults (Fable, yellow), never picked or called; the call
+        """H73: Moneypenny, coming soon. In HQ's defaults (Fable, yellow), not on the picker; the call
         page shows her as a smaller locked card under Donna and Pepper, greyed out, her icon yellow with an M.
         The page is the same in the desktop app and the phone version. No Claude turns."""
         import agents
@@ -4067,9 +4067,12 @@ window.addEventListener('load', () => setTimeout(() => {
              f"Moneypenny isn't in the defaults as a locked Fable agent in yellow: {m}")
         need([a["id"] for a in agents.visible(config.FOLDER)] == ["donna", "pepper"]
              and [a["id"] for a in agents.soon(config.FOLDER)] == ["moneypenny"], "Moneypenny can be picked, or isn't listed as coming soon")
-        need(agents.find(config.FOLDER, "moneypenny")["id"] == "donna" and agents.find(config.FOLDER, None, "deep")["id"] == "pepper",
-             "a call can still reach Moneypenny")
-        need("Moneypenny" not in config.WHISPER_PROMPT, "Moneypenny is in the speech recognition prompt though she can't be called")
+        need(agents.find(config.FOLDER, None, "deep")["id"] == "pepper" and agents.find(config.FOLDER, "nobody")["id"] == "donna",
+             "a call without her asked for lands on Moneypenny")
+        # H121: she can be brought into a call, on Opus while there's no Fable, so the ears know her name
+        need(agents.runs_on(m["model"]) == "opus" and agents.runs_on("sonnet") == "sonnet"
+             and agents.runs_on("claude-x-1") == "claude-x-1", "a model HQ doesn't know isn't run on Opus")
+        need("Moneypenny" in config.WHISPER_PROMPT, "Moneypenny isn't in the speech recognition prompt")
         need(">M</text>" in agents.picture_svg(m) and "#ca8a04" in agents.picture_svg(m), "her placeholder isn't a yellow M")
         # A workspace can unlock her, or hide her.
         ws = self.tmp / "agents62"
@@ -4088,6 +4091,7 @@ window.addEventListener('load', () => setTimeout(() => {
         need(code == 200 and ctype.startswith("image/"), "her picture doesn't load")
         page = http_get("/")[1].decode()
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         harness = r"""<script>
@@ -4107,7 +4111,7 @@ setTimeout(() => {
 </script>"""
         f = self.tmp / "h73.html"
         f.write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1))
-        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h73-profile'}",
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--user-data-dir={self.tmp / 'h73-profile'}",
                                           "--disable-web-security", "--virtual-time-budget=5000", "--dump-dom", f.as_uri()], timeout=60)
         mm = re.search(r'<pre id="h73">H73RESULT (.*?) END</pre>', r.stdout)
         need(mm, f"the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -4120,7 +4124,7 @@ setTimeout(() => {
         need(res["picked"].startswith("donna/quick inagents:false"), f"tapping her card picked her: {res}")
         need("Moneypenny" not in res["voices"], f"she has a voice in Settings: {res}")
         need(res["oncall"] == "hidden", f"her card shows during a call: {res}")
-        return "Moneypenny: a smaller locked card under Donna and Pepper, coming soon, yellow M, never picked or called"
+        return "Moneypenny: a smaller locked card under Donna and Pepper, coming soon, yellow M, not on the picker; brought in on Opus"
 
     async def flow64(self) -> str:
         """F16: on a call the page can't be scrolled into white space, and (reopened) the call screen keeps its
@@ -5711,6 +5715,7 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
              f"/api/agents doesn't give each agent's character and whether it's the default: {body[:200]!r}")
         page = http_get("/")[1].decode()
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         harness = r"""<script>
@@ -5721,7 +5726,7 @@ setTimeout(() => {
 </script>"""
         f = self.tmp / "h77.html"
         f.write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1))
-        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h77-profile'}",
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--user-data-dir={self.tmp / 'h77-profile'}",
                                           "--disable-web-security", "--virtual-time-budget=5000", "--dump-dom", f.as_uri()], timeout=60)
         m = re.search(r'<pre id="h77">H77RESULT (.*?) END</pre>', r.stdout)
         need(m, f"the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -5955,6 +5960,20 @@ setTimeout(() => {
         c.transcript.reply("Agreed.")
         lines = read_lines(c.transcript.path)
         need([ln.get("agent") for ln in lines if ln["who"] == "hq"] == [two["name"], one["name"]], f"her lines don't say who: {lines}")
+        # H121: one still coming soon can be brought in too, never handed over to; then it's a four-way call.
+        locked = ag.soon(config.FOLDER)
+        if locked:
+            three_ = locked[0]
+            need(three_["id"] in [x["id"] for x in c.others] and ag.THREE_WAY_MARK.format(name=three_["name"]) in c.llm.switch_marks
+                 and ag.SWITCH_MARK.format(name=three_["name"]) not in c.llm.switch_marks, "the locked one can't be brought in, or can take over")
+            rules = ag.switch_rules(one, c.others, "Sam")
+            need(f"{three_['name']} can only be brought in" in rules and "four-way call" in rules, "the rules don't say she only joins")
+            await c.three_way(three_["id"])
+            need(len(c.panel) == 3 and ag.way(c.panel) == "four-way", "no four-way call")
+            notes = await c._before_turn(f"{three_['name']}, your turn.")
+            need(c.speaker["id"] == three_["id"] and any("a four-way call" in x for x in notes)
+                 and c.tts._settings.voice == c.voice_for(three_), f"she doesn't answer in her voice on the four-way call: {notes}")
+            await c._before_turn(f"And {one['name']}?")
         # The hand-over: the other one gets it with the earlier agent's lines by name, and greets as picking up.
         c.transcript.end()
         cont = continue_from(c.transcript.path.stem, calls, me=two["name"])
@@ -7980,7 +7999,7 @@ FLOWS = {
     59: ("H62: after a crash the job runs again, first in line, picking up where it left off", False, "flow59"),
     60: ("H65: a call reads HQ freely (files, logs, status page data); changes still ask; web lookups never ask (H103)", False, "flow60"),
     61: ("H56.1: the routine and the watchdog on Linux; the Mac as it was", False, "flow61"),
-    62: ("H73: Moneypenny, coming soon: a locked card under Donna and Pepper, never called", False, "flow62"),
+    62: ("H73: Moneypenny, coming soon: a locked card under Donna and Pepper, not on the picker", False, "flow62"),
     63: ("H56.2: job windows and the mail check on Linux, in tmux: a throwaway job and mail check", False, "flow63"),
     64: ("F16: the call page fits the screen before, during and after a call; no scrolling into white space", False, "flow64"),
     65: ("H56.3: main and backup: two throwaway HQs hand the main role back and forth; alone, an HQ is simply main", False, "flow65"),
@@ -8003,7 +8022,7 @@ FLOWS = {
     82: ("H104, H108: times on calls as 5 30 in the afternoon, no colon, no words, never half, quarter or o'clock", False, "flow82"),
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one; just text, the field grows (H117)", False, "flow83"),
     84: ("H106, H112: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can; changed on a call at once", False, "flow84"),
-    85: ("H79: ask for another agent by name: she hands over, or brings her in on a three-way call", False, "flow85"),
+    85: ("H79, H121: ask for another agent by name: she hands over, or brings her in on a three-way or four-way call", False, "flow85"),
     86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back", False, "flow86"),
     87: ("H98: the dog sits by its empty bowl and says Update! in green when a newer version is out", False, "flow87"),
     88: ("H113: a job held by the usage line carries on in its own chat, or in a fresh one with a note at which step", False, "flow88"),

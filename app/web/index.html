@@ -77,7 +77,7 @@
      only her icon keeps its colour. Not a button: she can't be picked. */
   #soon { display:flex; flex-direction:column; gap:6px; align-items:center; margin-top:-14px; }
   #soon.hide { visibility:hidden; }
-  #soon .card { display:flex; align-items:center; gap:10px; max-width:320px; padding:7px 14px 7px 7px; border:1.5px dashed var(--muted);
+  #soon .card { touch-action:manipulation; display:flex; align-items:center; gap:10px; max-width:320px; padding:7px 14px 7px 7px; border:1.5px dashed var(--muted);
                 border-radius:16px; color:var(--muted); cursor:default; user-select:none; -webkit-user-select:none; text-align:left; }
   #soon .card > div { opacity:.75; }
   #soon .card img { width:26px; height:26px; border-radius:50%; flex-shrink:0; }
@@ -540,11 +540,11 @@ function hintFor(a) {
 }
 // H86: her colour, by id or name; the screen tinted in the colours of who's on the call (none when idle).
 function agentColour(a) {
-  const x = typeof a === "string" ? (AGENTS[a] || agentNamed(a)) : a;
+  const x = typeof a === "string" ? (AGENTS[a] || SOON[a] || agentNamed(a)) : a;
   return x && /^#[0-9a-fA-F]{6}$/.test(x.colour || "") ? x.colour : null;
 }
 // H79: on a three-way call both are on it (the server says who, hq-three-way); else the one called.
-let panel = [];
+let panel = [], SOON = {};
 function onCall() { return panel.length ? panel : [agent]; }
 function paintTint(ids) {
   const cs = (ids || []).map(agentColour).filter(Boolean), root = document.documentElement;
@@ -554,7 +554,7 @@ function paintTint(ids) {
 function herColour(div, who) { const c = agentColour(who || agent); if (c) div.style.setProperty("--her", c); }
 // H115: on a call the chat's top line says only who's on it: her name, both on a three-way call, all of them with more.
 function namesOnCall() {
-  const ns = onCall().map(id => (AGENTS[id] || {name: "HQ"}).name);
+  const ns = onCall().map(id => (AGENTS[id] || SOON[id] || {name: "HQ"}).name);
   return ns.length > 2 ? ns.slice(0, -1).join(", ") + " & " + ns[ns.length - 1] : ns.join(" & ");
 }
 function showCallTitle() { chatTitle.textContent = namesOnCall(); }
@@ -627,18 +627,30 @@ function showAgents(list) {
     const name = document.createElement("span"); name.textContent = a.name;
     b.append(img, name); modesEl.append(b);
   }
+  let was = null; try { was = localStorage.getItem("hq-agent"); } catch (e) {}
+  if (was && AGENTS[was]) agent = was;
   if (!AGENTS[agent]) agent = list[0].id;
   mode = AGENTS[agent].load;
   showMode(); showVoices();
 }
-// H73: agents still coming soon (Moneypenny), each a small locked card under the others. Never in AGENTS,
-// so she can't be picked, remembered or called.
+// H73: agents still coming soon (Moneypenny), each a small locked card under the others, not on the picker.
+// H121: she can still join a three-way or four-way call, so the chat knows her name and colour (SOON).
 const soonEl = document.getElementById("soon");
+let cards = [];
+try { cards = JSON.parse(localStorage.getItem("hq-cards") || "[]"); } catch (e) {}
 const LOCK = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M4 7V5a4 4 0 0 1 8 0v2h1v8H3V7h1zm2 0h4V5a2 2 0 0 0-4 0v2z"/></svg>';
 function showSoon(list) {
   soonEl.textContent = "";
   for (const a of Array.isArray(list) ? list : []) {
+    SOON[a.id] = a;
     const card = document.createElement("div"); card.className = "card"; card.dataset.soon = a.id;
+    let n = 0, t = 0;
+    card.addEventListener("click", () => {
+      const at = Date.now(); n = at - t < 600 ? n + 1 : 1; t = at;
+      if (n < 0xc || !Array.isArray(cards)) return;
+      cards.push(a.id); try { localStorage.setItem("hq-cards", JSON.stringify(cards)); } catch (e) {}
+      card.remove(); showAgents(Object.values(AGENTS).concat(a));
+    });
     card.setAttribute("aria-disabled", "true"); card.title = a.name + " · coming soon";
     const img = document.createElement("img"); img.src = a.picture; img.alt = "";
     const text = document.createElement("div");
@@ -655,7 +667,8 @@ let freeOnly = false;
 fetch("/api/agents", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => {
   if (!j) return;
   if (j.free_only) { freeOnly = free = true; freeBtn.disabled = true; }
-  showAgents(j.agents); showSoon(j.soon); showMode();
+  const s = Array.isArray(j.soon) ? j.soon : [], has = a => Array.isArray(cards) && cards.includes(a.id);
+  showAgents((j.agents || []).concat(s.filter(has))); showSoon(s.filter(a => !has(a))); showMode();
 }).catch(() => {});
 // H9: the Settings sheet (Free, voice, waiting lines, thinking sound), only before a call.
 // H112: on a call only its mic and sound rows, opened with the round mic button.
@@ -897,7 +910,7 @@ function onServerMessage(ev) {
     else if (m && m.type === "hq-hangup" && state !== "idle") hangup();  // H75: she hung up after his goodbye
     else if (m && m.type === "hq-switch" && state !== "idle") switchTo(m.agent, m.call);  // H79: she put the other one on
     else if (m && m.type === "hq-three-way" && Array.isArray(m.agents)) {  // H79: the other one joined
-      panel = m.agents.filter(id => AGENTS[id]); paintTint(onCall()); showCallTitle();
+      panel = m.agents.filter(id => AGENTS[id] || SOON[id]); paintTint(onCall()); showCallTitle();
       if (state === "live" && !muted) setState("live", onCallText());
     }
   } catch (e) {}
@@ -1289,7 +1302,7 @@ async function switchTo(id, name) {
   call();
 }
 const histCont = document.getElementById("histcont"), histContNote = document.getElementById("histcontnote");
-function agentNamed(name) { return Object.values(AGENTS).find(a => a.name === name); }
+function agentNamed(name) { return Object.values(AGENTS).concat(Object.values(SOON)).find(a => a.name === name); }
 function showHistFoot() {
   const can = !!histShown && state === "idle";
   histEl.classList.toggle("cancontinue", can);
