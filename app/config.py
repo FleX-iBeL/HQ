@@ -108,10 +108,13 @@ languages can be misheard; go with the most likely meaning.
 
 # H82: what she writes is also shown in the chat on the call page, formatted there (bold, lists); the
 # speech gets it without the marks (claude_llm.SpeechFilter). Both kinds of call get this line.
+# H116: laid out for reading as in a chat app (paragraphs, a lead-in before a list); still no headings or tables.
 FORMAT_RULE = """- Your text also shows in the chat on the call page, formatted there. You may use **bold** \
 for a word that matters, and when you name several things, a short list: each item on its own line starting \
 with "- " or "1. ". The marks are never spoken, so write each item as a short phrase that also sounds right \
-read out loud. Nothing else: no headings, tables, links, code, emojis or single-asterisk italics."""
+read out loud. Lay a longer answer out for reading, as in a chat app: short paragraphs with an empty line \
+between them, a short lead-in line before a list, "1. " for steps or an order, an item may start with a **bold** \
+word or two. Nothing else: no headings, tables, links, code, emojis or single-asterisk italics."""
 
 # H104, then H108 (13 October 2026, call at 15:10): times as 12-hour digits with a space for the colon,
 # then the part of the day. Kokoro reads "5 30" as five thirty; a colon makes it pause. Both kinds of call.

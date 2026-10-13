@@ -258,11 +258,19 @@
   #chatclose { position:absolute; right:-6px; top:-8px; border:0; background:transparent; color:var(--fg); font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
   #chatlog { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; display:flex; flex-direction:column; gap:8px; }
   #chatlog .msg { max-width:82%; padding:9px 13px; border-radius:16px; font-size:16px; line-height:1.35; overflow-wrap:anywhere; }
-  /* H82: her lines formatted: bold, lists, paragraphs */
-  .msg p { margin:0; }
-  .msg p + p, .msg p + ul, .msg p + ol, .msg ul + p, .msg ol + p { margin-top:6px; }
-  .msg ul, .msg ol { margin:4px 0 0; padding-left:20px; }
-  .msg li + li { margin-top:2px; }
+  /* H82: her lines formatted: bold, lists, paragraphs. H116: laid out like a reply in an AI chat app: more air
+     between the lines and between paragraphs and lists, a bit wider, list marks and numbers softer than the
+     text, nested lists, item spacing (Claude's choices). Here and in Past calls. */
+  #chatlog .msg.hq, #histlog .msg.hq { max-width:90%; padding:10px 14px; line-height:1.5; }
+  .msg p, .msg ul, .msg ol { margin:0; }
+  .msg ul, .msg ol { padding-left:1.4em; }
+  #chatlog .msg > * + *, #histlog .msg > * + * { margin-top:.65em; }
+  .msg li { padding-left:.15em; }
+  .msg li + li { margin-top:.35em; }
+  .msg li > ul, .msg li > ol { margin-top:.35em; }
+  .msg li::marker { color:color-mix(in srgb, var(--fg) 55%, transparent); }
+  .msg ol > li::marker { font-variant-numeric:tabular-nums; font-weight:600; }
+  .msg strong { font-weight:650; }
   #chatlog .me { align-self:flex-end; background:var(--me); color:#04120f; border-bottom-right-radius:5px; }
   #chatlog .hq { align-self:flex-start; background:var(--ring); background:color-mix(in srgb, var(--her, var(--accent)) 24%, var(--bg)); color:var(--fg); border-bottom-left-radius:5px; }
   #chatlog .filler { align-self:flex-start; color:var(--muted); font-style:italic; font-size:14px; padding:2px 13px; }
@@ -1024,6 +1032,9 @@ async function loadLastCall() {
 }
 // H82: her lines show formatted: **bold**, *italics*, lines starting with "- ", "* " or "1. " as a list,
 // line breaks kept. Built from text nodes only, so nothing she writes can become HTML on the page.
+// H116: as in an AI chat app: an indented item is a list inside the item above (two levels deep at most),
+// an indented plain line goes on with that item, a list stays one list across empty lines (1. … 2. …),
+// a line like --- is only a break, and a heading she shouldn't have written shows as a bold line.
 function inlineMarks(el, s) {
   const parts = s.split(/\*\*(.+?)\*\*|\*([^*\s](?:[^*]*[^*\s])?)\*/g);
   for (let i = 0; i < parts.length; i += 3) {
@@ -1034,25 +1045,46 @@ function inlineMarks(el, s) {
 }
 function formatted(el, text) {
   el.textContent = "";
-  let list = null, para = null;
-  for (const raw of String(text || "").split("\n")) {
+  let lists = [], para = null;  // lists: the open lists, outermost first, each {list, indent, li}
+  for (const raw of String(text || "").replace(/\r/g, "").split("\n")) {
+    const indent = raw.match(/^[ \t]*/)[0].replace(/\t/g, "    ").length;
     const line = raw.trim();
+    if (/^([-*_])(?:\s*\1){2,}$/.test(line)) { lists = []; para = null; continue; }
     const m = line.match(/^(?:([-*+•])|(\d{1,3})[.)])\s+(.*)$/);
     if (m) {
       const kind = m[1] ? "UL" : "OL";
-      if (!list || list.tagName !== kind) {
-        list = document.createElement(kind);
+      while (lists.length > 1 && indent < lists[lists.length - 1].indent) lists.pop();
+      let top = lists[lists.length - 1];
+      if (top && indent > top.indent && top.li && lists.length < 3) {
+        const list = document.createElement(kind);
         if (kind === "OL" && +m[2] !== 1) list.start = +m[2];
-        el.appendChild(list);
+        top.li.appendChild(list);
+        lists.push(top = { list, indent, li: null });
+      } else if (!top || top.list.tagName !== kind) {
+        const list = document.createElement(kind);
+        if (kind === "OL" && +m[2] !== 1) list.start = +m[2];
+        (top ? top.list.parentNode : el).appendChild(list);
+        top = { list, indent: top ? top.indent : indent, li: null };
+        if (lists.length) lists[lists.length - 1] = top; else lists.push(top);
       }
-      const li = document.createElement("li"); inlineMarks(li, m[3]); list.appendChild(li);
+      const li = document.createElement("li"); inlineMarks(li, m[3]); top.list.appendChild(li); top.li = li;
       para = null; continue;
     }
-    list = null;
     if (!line) { para = null; continue; }
+    const last = lists[lists.length - 1];
+    if (last && last.li && indent > 0) {
+      last.li.appendChild(document.createElement("br")); inlineMarks(last.li, line); continue;
+    }
+    lists = [];
+    const head = line.match(/^#{1,6}\s+(.*)$/);
+    if (head) {
+      para = document.createElement("p"); el.appendChild(para);
+      const e = document.createElement("strong"); inlineMarks(e, head[1]); para.appendChild(e);
+      para = null; continue;
+    }
     if (para) para.appendChild(document.createElement("br"));
     else { para = document.createElement("p"); el.appendChild(para); }
-    inlineMarks(para, line.replace(/^#{1,6}\s+/, ""));
+    inlineMarks(para, line);
   }
 }
 function addChat(who, text, old, her) {

@@ -7259,6 +7259,9 @@ print("H88OUT " + json.dumps(out))
         for n in range(1, len(text)):
             need(spoken([text[:n], text[n:]]) == whole, f"cut at {n} the speech differs: {spoken([text[:n], text[n:]])!r}")
         need(spoken(["Fine, ", "done."]) == "Fine, done.", "a plain reply changed")
+        # H116: a nested item and a bold lead-in are said plain too
+        laid = spoken(["Plan:\n1. **Call** the bank\n   - ", "the bill\n\n2. Book"])
+        need(not re.search(r"[*#]|(^|\s)-\s|\d\.\s", laid) and "Call the bank." in laid and "the bill." in laid, f"a laid-out reply isn't said plain: {laid!r}")
 
         class Stand:
             model = "stand-in"
@@ -7325,6 +7328,19 @@ print("H88OUT " + json.dumps(out))
   check("no-marks", !h.textContent.includes("*") && !h.textContent.includes("- "), h.textContent);
   check("his-plain", me.textContent === "Is **this** <b>bold</b>?" && !me.querySelector("b,strong"), me.innerHTML);
   check("no-html", !plain.querySelector("img") && plain.textContent.includes("<img") && !window.bad, plain.innerHTML);
+  // H116: laid out like a reply in an AI chat app
+  send("hq", "Here's the plan:\n\n1. **The bank** first\n   - the bill\n   - the charger\n\n2. Then the dentist\n   before Friday\n---\n## Later\nThat's it.");
+  await wait(100);
+  const lay = [...chatLog.querySelectorAll(".msg")].pop();
+  const ol = lay.querySelector(":scope > ol");
+  check("one-ol", lay.querySelectorAll(":scope > ol").length === 1 && ol && ol.children.length === 2, lay.innerHTML);
+  check("nested", ol && ol.children[0].querySelectorAll(":scope > ul > li").length === 2, lay.innerHTML);
+  check("goes-on", ol && ol.children[1].textContent.includes("before Friday") && ol.children[1].querySelector("br"), lay.innerHTML);
+  check("lead-bold", ol && ol.children[0].firstChild.tagName === "STRONG", lay.innerHTML);
+  check("head-bold", [...lay.querySelectorAll(":scope > p > strong")].some(e => e.textContent === "Later") && !lay.textContent.includes("#") && !lay.textContent.includes("---"), lay.innerHTML);
+  check("paras", lay.querySelectorAll(":scope > p").length === 3, lay.innerHTML);
+  const cs = getComputedStyle(lay), lh = parseFloat(cs.lineHeight) / parseFloat(cs.fontSize);
+  check("air", lh >= 1.45 && parseFloat(getComputedStyle(ol).marginTop) > 6, cs.lineHeight + " " + getComputedStyle(ol).marginTop);
   const pre = document.createElement("pre"); pre.id = "h82"; pre.textContent = "H82RESULT " + out.join(" | ") + " END";
   document.body.appendChild(pre);
 })();
@@ -7341,7 +7357,8 @@ print("H88OUT " + json.dumps(out))
         say(f"   {m.group(1)}")
         need(all(part.endswith(":ok") for part in m.group(1).split(" | ")), f"the chat isn't formatted right: {m.group(1)}")
         return ("both calls may use bold and short lists; the voice gets them plain (also in pieces, numbers kept); "
-                "the chat and the saved call keep her lines; the call page shows bold, italics and lists, his lines and HTML stay text")
+                "the chat and the saved call keep her lines; the call page shows bold, italics and lists, his lines and HTML stay text; "
+                "H116: laid out like an AI chat app (paragraphs, nested and numbered lists, lead-in bold, more air)")
 
     async def flow78(self) -> str:
         """H86, no Claude: the real call page in a headless browser. Before a call the screen is plain; on a call
@@ -7978,7 +7995,7 @@ FLOWS = {
     74: ("H100: the coaching log keeps three hours; older entries move to its archive, calls load only those", False, "flow74"),
     75: ("F18: the status page on the phone never gets wider than the screen; it only scrolls up and down", False, "flow75"),
     76: ("H78: his own calendar changes go without asking; with other people in it, or not looked at first, they don't", False, "flow76"),
-    77: ("H82: her text shows formatted in the call's chat (bold, lists) while the voice stays plain", False, "flow77"),
+    77: ("H82, H116: her text shows formatted in the call's chat, laid out like an AI chat app, while the voice stays plain", False, "flow77"),
     78: ("H86: the screen in the colour of who I'm calling; my lines green, hers in her colour", False, "flow78"),
     79: ("H88: heartbeats for both computers: this one up and online, the other answering; on both status pages", False, "flow79"),
     80: ("F9: a call left quiet stays connected: no idle timeout; a hang-up or a lost connection still ends it", False, "flow80"),
