@@ -173,6 +173,7 @@ def mine() -> dict:
     return {"name": my_name(c), "main": chosen_main(c), "chosen_at": c.get("chosen_at", 0), "acting": acting(),
             "busy": busy(), "since": s.get("since"), "paired": bool(c), "at": time.time(),
             "took_over": bool(s.get("took_over")),  # F19: took over (main gone) or just handing over a choice
+            "took_over_at": s.get("took_over") or None,  # H139: when, so a main that never left can tell
             "label": hqpaths.short_name()}  # H88: the name of its heartbeat line on the other's status page
 
 
@@ -240,16 +241,25 @@ def peer_role(c=None):
         return None
 
 
+ONLINE_URLS = ("https://api.anthropic.com/", "https://github.com/")
+
+
 def online() -> bool:
     """This computer can reach the internet. A backup only takes over when it's online itself: without
-    internet it's this one that's cut off, not the main that's gone. HQ_ROLE_ONLINE=0/1 fixes it for a test."""
+    internet it's this one that's cut off, not the main that's gone. HQ_ROLE_ONLINE=0/1 fixes it for a test.
+    H139: a real HTTPS answer with a checked certificate (any status counts, an error page too), not just a
+    connection: a café's or a phone hotspot's network without real internet accepts any connection, so the
+    laptop thought it was online, took over while the server carried on as main, and both were main."""
     if os.environ.get("HQ_ROLE_ONLINE") in ("0", "1"):
         return os.environ["HQ_ROLE_ONLINE"] == "1"
-    for host in ("1.1.1.1", "8.8.8.8", "github.com"):
+    ctx = ssl.create_default_context()
+    for url in ONLINE_URLS:
         try:
-            socket.create_connection((host, 443), timeout=4).close()
+            urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=6, context=ctx).close()
             return True
-        except OSError:
+        except urllib.error.HTTPError:
+            return True
+        except Exception:
             continue
     return False
 
@@ -409,6 +419,21 @@ def _awake_since(s, now) -> float:
     return since
 
 
+def _stayed(s, p, was, takeover, prev_look=None) -> bool:
+    """H139: the chosen main sees the other one acting main after a takeover. True when this one was the acting
+    main, awake and looking since before the takeover (its last look came after it), and online at every look the
+    other one didn't answer: then
+    the other took over on a broken line (a café's network, the laptop's lid) and this one never left. An older
+    HQ that doesn't say when it took over: False, the F23 way (give way until it hands back)."""
+    at = p.get("took_over_at")
+    if was != "main" or not p.get("took_over", True) or not at:
+        return False
+    at = float(at)
+    if float(s.get("awake_since") or 0) > at or float(prev_look or 0) < at:
+        return False
+    return not (s.get("offline_seen") and float(s["offline_seen"]) >= at - takeover - 120)
+
+
 def _main_still_there(c):
     """F23: the last check before taking over. Asks the main once more, a few seconds apart, and asks Syncthing
     whether the main's computer is still connected. Returns why not to take over ('' when it's really gone).
@@ -462,11 +487,14 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
         s["peer_looks"] = 0
         s["lost_looks"] = int(s.get("lost_looks") or 0) + 1
         s["peer_lost_since"] = s.get("peer_lost_since") or now
+        if not online():  # H139: a look this one was cut off itself; the main that stayed checks it on return
+            s["offline_seen"] = now
     if p:
         s["lost_looks"] = 0
     # F23: only minutes this computer was awake and looking count; a sleep, a restart or a stopped routine
     # starts the count again from when it was back.
     s["awake_since"] = _awake_since(s, now)
+    prev_look = s.get("last_look")
     s["last_look"] = now
     peer = c.get("peer_name") or "the other HQ"
     lost = now - max(s["peer_lost_since"], s["awake_since"]) if s.get("peer_lost_since") else 0
@@ -476,7 +504,14 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
     was = s.get("acting")
     took = s.get("took_over")
     if chosen:
-        if p and p.get("acting") == "main":
+        if p and p.get("acting") == "main" and _stayed(s, p, was, takeover, prev_look):
+            # H139: this one was main, awake and online the whole time the other one couldn't see it: the other
+            # took over on a broken line, not because this one was gone. It stays main; the other hands back.
+            changed = _set(s, "main", "the chosen main", log, gave_way=None)
+            if log:
+                log(f"role: {peer} took over while this one was main and online the whole time; this one stays "
+                    "main and it hands back")
+        elif p and p.get("acting") == "main":
             what = f" ({p['busy']})" if p.get("busy") else ""
             # F19: only a main that took over took over; one that was simply main before is handing a choice over.
             took_over = p.get("took_over", True)
@@ -503,6 +538,10 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
             if p:
                 s["main_back"] = True
                 s["back_looks"] = int(s.get("back_looks") or 0) + 1
+                if p.get("acting") == "main" or not s.get("took_over"):
+                    # H139: the chosen main says it's main itself (it never left), or this one didn't take over but
+                    # is handing a choice over (F19): hand back now, not a look later. The looks are for a return.
+                    s["back_looks"] = max(s["back_looks"], BACK_LOOKS)
             elif s.get("main_back") and gone:
                 s["main_back"], s["back_looks"] = None, 0
             if p and s["back_looks"] >= BACK_LOOKS:

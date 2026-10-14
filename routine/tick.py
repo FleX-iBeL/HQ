@@ -930,7 +930,10 @@ def tick():
     # H56.4: the two-way sync, on both: its line, conflict copies (the main queues a merge job), and on the main
     # a commit of what came over from the other side. Not set up (no second HQ): nothing at all.
     try:
-        sync.tick(main=r["acting"] == "main", log=log, routines=routines, incidents=incidents)
+        # H139: a main that is handing back (the chosen main answers again) queues no merge jobs and commits
+        # nothing: the chosen main does, or both queue the same conflict copies.
+        sync.tick(main=r["acting"] == "main" and not r.get("handing_back"), log=log, routines=routines,
+                  incidents=incidents)
     except Exception as e:
         log(f"sync: {e!r}")
     # H88: the heartbeats, on both: this computer is up and online, the other one answers. Alone: nothing.

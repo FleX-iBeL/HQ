@@ -7557,6 +7557,102 @@ console.log(JSON.stringify({{
              and re.search(r"h1 #where \{ position:absolute;", call), "the call page doesn't show it, or it takes room (F16)")
         return f"the status page, the strip's reading and /where.json say {seen[0]!r} without a label and {seen[1]!r} with one; shown under HQ on the status page, the strip and the call page, the call screen unmoved"
 
+    async def flow95(self) -> str:
+        """H139, no Claude: the laptop's lid closed and opened again never leaves two mains. In throwaway HQ memories
+        with role.py's look at the other one stood in: the online check wants a real HTTPS answer (a network that
+        only accepts connections, like a café's or a phone hotspot's without internet, isn't online); a backup that
+        can't reach the main and isn't really online doesn't take over; when one took over on a broken line while the
+        chosen main stayed awake, online and main, the chosen main stays main and the other hands back at its first
+        look (or, with a job running, starts nothing new and queues no merge jobs); a chosen main that really was
+        away (asleep, or offline itself) or an older HQ that doesn't say when it took over still gives way (F23)."""
+        import socket as so, threading
+        now = time.time()
+
+        def look(name, cfg, state, peer, online=True, busy="", woke=1.0):
+            sup = self.tmp / f"h139-{name}"
+            sup.mkdir(exist_ok=True)
+            (sup / "role.json").write_text(json.dumps(cfg))
+            (sup / "role-state.json").write_text(json.dumps(state))
+            env = {k: v for k, v in os.environ.items() if k not in ("HQ_ROADMAP",)}
+            env.update(HQ_SUPPORT=str(sup), HQ_ROLE_RETRY="0", HQ_ROLE_ONLINE="1" if online else "0",
+                       HQ_ROLE_WAKETIME=str(woke))
+            code = ("import sys, json; sys.path.insert(0, sys.argv[1]); import role\n"
+                    "peer = json.loads(sys.argv[2]); role.peer_role = lambda c=None: peer\n"
+                    "role.busy = lambda: sys.argv[3]\n"
+                    "r = role.tick(log=lambda m: None)\n"
+                    "print(json.dumps({**r, 'state': json.load(open(role.STATE)), 'mine': role.mine()}))")
+            r = subprocess.run([sys.executable, "-c", code, str(ROOT / "routine"), json.dumps(peer), busy],
+                               env=env, capture_output=True, text=True, timeout=60)
+            need(r.returncode == 0, f"role.tick ({name}) failed: {r.stderr[-600:]}")
+            return json.loads(r.stdout.strip().splitlines()[-1])
+
+        # A network that accepts any connection but gives no real answer is not online.
+        srv = so.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(8)
+        port = srv.getsockname()[1]
+
+        def accept():
+            try:
+                while True:
+                    c, _ = srv.accept()
+                    c.sendall(b"HTTP/1.1 302 Found\r\nLocation: http://portal.example/\r\n\r\n")
+                    c.close()
+            except OSError:
+                pass
+        threading.Thread(target=accept, daemon=True).start()
+        env = {k: v for k, v in os.environ.items() if k != "HQ_ROLE_ONLINE"}
+        r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import role; "
+                            f"role.ONLINE_URLS = ('https://127.0.0.1:{port}/',); print(role.online())", str(ROOT / "routine")],
+                           env=env, capture_output=True, text=True, timeout=60)
+        srv.close()
+        need(r.stdout.strip() == "False", f"a network that only accepts connections counts as online: {r.stdout}{r.stderr[-300:]}")
+        src = (ROOT / "routine/role.py").read_text()
+        need("create_connection((host, 443)" not in src, "the online check still only opens a connection")
+
+        lap = {"name": "laptop", "peer": "https://vps.example:8444", "main": "vps", "chosen_at": 1, "peer_name": "vps", "takeover": 300}
+        vps = {"name": "vps", "peer": "https://laptop.example:8444", "main": "vps", "chosen_at": 1, "peer_name": "laptop", "takeover": 300}
+        # The lid closed at a café: the laptop looks every minute but has no real internet, the server can't be seen.
+        lost = {"acting": "backup", "last_look": now - 60, "awake_since": now - 3600, "peer_lost_since": now - 900,
+                "lost_looks": 9}
+        r = look("cafe", lap, lost, None, online=False)
+        need(r["acting"] == "backup", f"the laptop without real internet took over: {r}")
+        r = look("cafe-online", lap, lost, None, online=True)
+        need(r["acting"] == "main", f"a backup that's really online and can't see the main for long didn't take over: {r}")
+        took = r["state"]["took_over"]
+        need(r["mine"].get("took_over_at") == took, f"the one that took over doesn't say when: {r['mine']}")
+        took = now - 600  # it took over ten minutes ago; the server looked every minute since
+        laptop_says = {"name": "laptop", "acting": "main", "busy": "", "main": "vps", "took_over": True,
+                       "took_over_at": took, "label": "Laptop"}
+        # The lid opens: the server was main, awake and online the whole time: it stays main.
+        vstate = {"acting": "main", "last_look": now - 30, "awake_since": now - 7200, "why": "the chosen main"}
+        r = look("vps-stayed", vps, vstate, laptop_says)
+        need(r["acting"] == "main" and not r["state"].get("gave_way"), f"the server that never left gave way: {r}")
+        # The laptop sees the server acting main: it hands back at this first look.
+        server_says = {"name": "vps", "acting": "main", "busy": "", "main": "vps", "took_over": False, "label": "VPS"}
+        r = look("laptop-back", lap, {"acting": "main", "took_over": took, "last_look": now - 60,
+                                      "awake_since": now - 3600, "why": "took over"}, server_says)
+        need(r["acting"] == "backup", f"the laptop didn't hand back at its first look at the server as main: {r}")
+        # With a job running there, it starts nothing new and lets the main queue the merges.
+        r = look("laptop-busy", lap, {"acting": "main", "took_over": took, "last_look": now - 60,
+                                      "awake_since": now - 3600, "why": "took over"}, server_says, busy="job 9")
+        need(r["acting"] == "main" and r["handing_back"], f"with a job running the laptop isn't handing back: {r}")
+        tick_src = (ROOT / "routine/tick.py").read_text()
+        need('main=r["acting"] == "main" and not r.get("handing_back")' in tick_src,
+             "a main that hands back still queues merge jobs for the sync's conflict copies")
+        # F23 kept: a server that really was away (asleep: woke after the takeover) or offline itself gives way.
+        r = look("vps-asleep", vps, {**vstate, "awake_since": took + 30}, laptop_says)
+        need(r["acting"] == "backup" and r["state"].get("gave_way"), f"a main that was asleep didn't give way: {r}")
+        r = look("vps-offline", vps, {**vstate, "offline_seen": took - 60}, laptop_says)
+        need(r["acting"] == "backup", f"a main that was offline itself didn't give way: {r}")
+        r = look("vps-stopped", vps, {**vstate, "last_look": took - 60}, laptop_says)
+        need(r["acting"] == "backup", f"a main whose routine didn't look since the takeover didn't give way: {r}")
+        old = {k: v for k, v in laptop_says.items() if k != "took_over_at"}
+        r = look("vps-old-peer", vps, vstate, old)
+        need(r["acting"] == "backup", f"with an older HQ that doesn't say when it took over, the main didn't give way: {r}")
+        return ("no takeover without real internet; after the lid the main that stayed stays, the other hands back at "
+                "once and queues no merges; one really away still gives way")
+
     async def flow89(self) -> str:
         """H118, no Claude: which computer is main, at a glance. role.py's badge in throwaway HQ memories (on its own:
         none; the main: Main; the backup: Backup · <the other> is main, by the other's label, else its name), written
@@ -8979,6 +9075,7 @@ FLOWS = {
     92: ("H124: Donna texts first: pings for appointments he picked (a bell shows them), reminders, her own notes", False, "flow92"),
     93: ("H125: Donna's watch list: she keeps an eye out for a mail or the weather and texts when it comes", False, "flow93"),
     94: ("H135: the weather in the app: a widget on the main screen, a sheet with warnings (KNMI), UV and the next hours", False, "flow94"),
+    95: ("H139: closing and opening the laptop's lid never leaves two mains: a real online check, the main that stayed stays", False, "flow95"),
 }
 
 
