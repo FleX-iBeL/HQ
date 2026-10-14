@@ -157,7 +157,7 @@ class Call:
     async def _before_turn(self, words: str) -> list[str]:
         """On a three-way call: who answers this turn, her model and voice, and a note saying so."""
         if len(self.panel) < 2:
-            return []
+            return self._goodbye_note(self.speaker, words)
         who = agents.pick(self.panel, words, self.speaker["id"])
         notes = []
         joined, self._joined = getattr(self, "_joined", None), None
@@ -178,7 +178,18 @@ class Call:
         rest = ", ".join(a["name"] for a in self.panel if a is not who)
         notes.append(f"[Call system: {agents.way(self.panel)} call with {rest}. {who['name']} answers this turn: answer as "
                      f"{who['name']}, in her character, and only as her.]")
-        return notes
+        return notes + self._goodbye_note(who, words)
+
+    def _goodbye_note(self, who: dict, words: str) -> list[str]:
+        """H129: on a turn that may be his goodbye, what he's doing right now (his calendar, else his to-do list), so
+        her goodbye comments on it. Not on Free (nothing of his here), not for an agent with her own goodbye."""
+        if self.free or who.get("own_goodbye") or not config.sounds_like_goodbye(words):
+            return []
+        try:
+            return [agenda.goodbye_note(config.USER)]
+        except Exception as e:
+            logger.warning(f"H129: what he's doing now couldn't be read: {e!r}")
+            return []
 
     def _on_decision(self, tool, summary, decision):
         if tool in SESSION_TOOLS and tool != "Skill":

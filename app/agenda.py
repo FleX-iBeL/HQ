@@ -368,6 +368,47 @@ def greetings(e: dict, name: str = "") -> list[str]:
     return [f"Hi{n}. About {title}. What do you need?", f"Hey{n}. Let's talk about {title}. What's up?"]
 
 
+# H129 (14 October 2026, call at 13:02, Pepper): when he closes a call, the goodbye comments on what he's doing right
+# now. In the user's words: "I want you to check what is on my to-do list right now, or on my calendar, I mean, what
+# I'm doing right now. And then you can give me a comment on that one as you say goodbye instead of a generic goodbye."
+# Read from the saved days only (no Claude run), so the goodbye isn't slow.
+SOON = 90 * 60  # an appointment starting within this counts as what he's doing next
+
+
+def right_now(now: float | None = None, soon: int = SOON) -> dict | None:
+    """The timed appointment happening now, else the first one starting within `soon` seconds; None without one.
+    Whole days don't count: they say little about what he's doing this moment."""
+    t = now or time.time()
+    events = [e for e in _read().get("events") or [] if not e.get("all_day") and e.get("start")]
+    on, next_ = [], []
+    for e in events:
+        a = _sort_key(e["start"])
+        b = _sort_key(e.get("end") or e["start"])
+        if a <= t < max(b, a + 60):
+            on.append(e)
+        elif t < a <= t + soon:
+            next_.append(e)
+    if on:  # the one that started last is the most precise "right now"
+        return max(on, key=lambda e: _sort_key(e["start"]))
+    return min(next_, key=lambda e: _sort_key(e["start"])) if next_ else None
+
+
+def goodbye_note(user: str = "the user", now: float | None = None) -> str:
+    """What the call's Claude gets on a turn that sounds like a goodbye: what he's doing right now, to comment on."""
+    t = now or time.time()
+    e = right_now(t) if on() else None
+    if e:
+        a = _sort_key(e["start"])
+        hhmm = datetime.fromtimestamp(a).strftime("%H:%M")
+        what = re.sub(r"\s+", " ", e.get("title", "")).strip()
+        where = f", at {e['where']}" if e.get("where") else ""
+        when = f"on now (started {hhmm})" if a <= t else f"starting at {hhmm}"
+        return (f"[Call system, only if {user} is closing the call now: right now in his calendar: {what}{where}, "
+                f"{when}. Comment on that in your goodbye.]")
+    return (f"[Call system, only if {user} is closing the call now: nothing in his calendar right now or soon. Comment "
+            "in your goodbye on something that's up on his to-do list now, from what you already know of it.]")
+
+
 def call_note(e: dict, user: str = "the user") -> str:
     """What a call's Claude gets when the call was started from this appointment."""
     lines = [f"Title: {e.get('title', '')}", f"When: {when_words(e)}", f"Calendar: {e.get('calendar', '')}"]

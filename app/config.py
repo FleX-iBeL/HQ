@@ -1,4 +1,5 @@
 """HQ settings, in one place. Override any of them with an environment variable."""
+import re
 import os
 from pathlib import Path
 
@@ -179,6 +180,18 @@ or \"cheers\" closes it)", "a pause or silence",
     "\"that's it?\" as a question", "\"that's it\" about one thing while he goes on",
     "\"bye\" or \"see you\" said to someone else in the room",
 ]
+# H129: a turn that may be his goodbye gets a note on what he's doing right now (agenda.goodbye_note). Loose on
+# purpose: the note only counts when he really closes the call, so a passing "cheers" costs nothing.
+GOODBYE_WORDS = ("bye", "goodbye", "see you", "see ya", "talk to you later", "talk later", "speak soon", "hang up",
+                 "end the call", "good night", "appreciate you", "cheers", "that's it", "that is it", "that's all",
+                 "that is all")
+
+
+def sounds_like_goodbye(words: str) -> bool:
+    w = " " + re.sub(r"[^a-z' ]+", " ", (words or "").lower().replace("\u2019", "'")) + " "
+    return any(f" {g} " in w for g in GOODBYE_WORDS)
+
+
 HANGUP_RULES = """
 
 # Hanging up yourself (H75)
@@ -187,7 +200,10 @@ people end a phone call. For example: """ + "; ".join(f'"{p}"' for p in GOODBYE_
 or anything that clearly means the same. Not on: """ + "; ".join(NOT_GOODBYE) + """. \
 When he clearly closes the call: first finish anything he just asked for, then say a short goodbye \
 in your own character, a few words, and end that reply with """ + HANGUP_MARK + """ as the very last \
-thing. It is never spoken; the call system hangs up after your goodbye, the same as his Hang up \
+thing. H129: when the call system's note on that turn says what he's doing right now (his calendar, \
+or else what's up on his to-do list), make the goodbye a short comment on that, the way a colleague \
+would as he heads off, instead of a generic goodbye: one or two short sentences, from what you already \
+know, no tools, so the goodbye comes right away. Without such a note, just the short goodbye. It is never spoken; the call system hangs up after your goodbye, the same as his Hang up \
 button, and the after-call work runs as usual. Never write """ + HANGUP_MARK + """ in any other reply, \
 and never because a conversation seems finished. When you are not sure he meant to end the call, \
 don't: just stay on the line."""

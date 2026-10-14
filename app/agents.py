@@ -30,6 +30,8 @@ Where they come from:
 - H77: the three below are HQ's defaults, the same for everyone and nothing personal. A workspace changes any
   of these keys in its agents.json; `is_default` says whether an agent's character is still HQ's own, and
   `python3 app/agents.py` prints each agent's character as it is now, marked default or changed.
+- H129 (14 October 2026): when he closes a call, the goodbye comments on what he's doing right now (his calendar,
+  else his to-do list). `"own_goodbye": true` keeps an agent's own short goodbye instead (Moneypenny, by default).
 """
 from __future__ import annotations
 
@@ -153,6 +155,9 @@ DEFAULTS: list[dict] = [
         "voice": "bf_emma",
         "colour": "#ca8a04",
         "coming_soon": True,
+        # H129: her goodbye stays her own, no comment on what he's doing now. In the user's words: "Yes, but I
+        # want the exception for Moneypenny."
+        "own_goodbye": True,
         "speciality": "Clearance pending.",
         "character": "Few words, cool, a little mysterious. All business",
         "personality": (
@@ -176,7 +181,7 @@ PARTS = ("morning", "afternoon", "evening", "night")
 CHARACTER_KEYS = ("character", "personality", "pushback", "greetings", "continue_greetings")
 
 _KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", "personality", "hidden", "coming_soon",
-         "character", "pushback", "greetings", "continue_greetings")
+         "character", "pushback", "greetings", "continue_greetings", "own_goodbye")
 
 
 def _lines(v, most: int = 8) -> list[str]:
@@ -224,6 +229,7 @@ def _clean(a: dict) -> dict | None:
         "pushback": str(a.get("pushback", "")).strip()[:200],
         "greetings": _greetings(a.get("greetings")),
         "continue_greetings": _lines(a.get("continue_greetings")),
+        "own_goodbye": a.get("own_goodbye") is True,
     }
 
 

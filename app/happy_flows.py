@@ -6215,6 +6215,50 @@ setTimeout(() => {
         full = make_brain(config.MODEL, Policy(config.FOLDER, dry_run=True), load="deep")
         need(rules in full._options.system_prompt["append"], "a full call doesn't get the hang-up rule")
         need("{user}" not in rules, "the name in the rule isn't filled in from me.md")
+        # H129: the goodbye comments on what he's doing right now: the appointment on now or soon in HQ's own saved
+        # calendar, else his to-do list; Moneypenny keeps her own goodbye. Read from the saved days, no Claude run.
+        need("H129" in rules and "what he's doing right now" in rules and "no tools" in rules,
+             "the rule doesn't say to comment on what he's doing right now")
+        for w in ["okay, thanks, appreciate you", "Cheers!", "bye", "That's it, see you later"]:
+            need(config.sounds_like_goodbye(w), f"{w!r} isn't taken as a possible goodbye")
+        for w in ["what's on my calendar today", "put that on the list", "add tea later today"]:
+            need(not config.sounds_like_goodbye(w), f"{w!r} is taken as a goodbye")
+        import agenda, agents
+        from datetime import datetime as _dt, timedelta as _td
+        cal_env = os.environ.get("HQ_CALENDAR_FILE")
+        os.environ["HQ_CALENDAR_FILE"] = str(self.tmp / "cal129" / "calendar.json")
+        try:
+            t0 = _dt.now().astimezone().replace(second=0, microsecond=0)
+            ev = lambda title, a, b, **k: {"id": title, "title": title, "start": (t0 + _td(minutes=a)).isoformat(),
+                                           "end": (t0 + _td(minutes=b)).isoformat(), "all_day": False, **k}
+            agenda._write({"events": [{"id": "d", "title": "A whole day", "start": t0.strftime("%Y-%m-%d"),
+                                       "end": "", "all_day": True}]})
+            n = agenda.goodbye_note("Sam")
+            need("nothing in his calendar" in n and "to-do list" in n, f"without an appointment it isn't the to-do list: {n!r}")
+            agenda._write({"events": [ev("Gym", 30, 90), ev("Lunch", -20, 20, where="the kitchen")]})
+            n = agenda.goodbye_note("Sam")
+            need("Lunch" in n and "the kitchen" in n and "on now" in n and "Gym" not in n,
+                 f"the appointment on now isn't the one: {n!r}")
+            agenda._write({"events": [ev("Gym", 30, 90), ev("Later thing", 200, 260)]})
+            n = agenda.goodbye_note("Sam")
+            need("Gym" in n and "starting at" in n and "Later" not in n, f"the one starting soon isn't the one: {n!r}")
+            # Who gets the note: not Moneypenny (her own goodbye), not on Free, only on a turn that may be a goodbye.
+            import call as _call
+            mp = next(a for a in agents.load(config.FOLDER) if a["id"] == "moneypenny")
+            pp = next(a for a in agents.load(config.FOLDER) if a["id"] == "pepper")
+            need(mp.get("own_goodbye") and not pp.get("own_goodbye"), "Moneypenny doesn't keep her own goodbye")
+            fake = type("C", (), {"free": False})()
+            gb = _call.Call._goodbye_note
+            need(gb(fake, pp, "cheers") and "Gym" in gb(fake, pp, "cheers")[0], "Pepper's goodbye turn gets no note")
+            need(gb(fake, mp, "cheers") == [], "Moneypenny's goodbye turn gets the note")
+            need(gb(fake, pp, "what's next on my list") == [], "an ordinary turn gets the goodbye note")
+            fake.free = True
+            need(gb(fake, pp, "cheers") == [], "a Free call gets his calendar in the goodbye note")
+        finally:
+            if cal_env is None:
+                os.environ.pop("HQ_CALENDAR_FILE", None)
+            else:
+                os.environ["HQ_CALENDAR_FILE"] = cal_env
 
         class Stand:  # stands in for the Claude session: answers with the pieces it's given
             model = "stand-in"
@@ -6285,7 +6329,7 @@ setTimeout(() => {
         need('m.type === "hq-hangup" && state !== "idle") hangup();' in page,
              "the call page (phone and desktop app) doesn't close the call when she hangs up")
         return ("the mark is never spoken or written; the rule with its phrases is in Free and full calls; "
-                "an okay keeps the call; a goodbye ends it once heard; more words after it keep it")
+                "an okay keeps the call; a goodbye ends it once heard; more words after it keep it; H129: the goodbye note says what he's doing now (calendar, else to-do list), not for Moneypenny")
 
     async def flow85(self) -> str:
         """H79: ask for another agent by name: she hands over (the call ends as a hang-up does and the other one picks
