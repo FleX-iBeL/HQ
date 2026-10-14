@@ -689,8 +689,9 @@ function showAgents(list) {
 // H73: agents still coming soon (Moneypenny), each a small locked card under the others, not on the picker.
 // H121: she can still join a three-way or four-way call, so the chat knows her name and colour (SOON).
 const soonEl = document.getElementById("soon");
+// H126: only for this page; closing the app locks her again, and an old saved one goes.
 let cards = [];
-try { cards = JSON.parse(localStorage.getItem("hq-cards") || "[]"); } catch (e) {}
+try { localStorage.removeItem("hq-cards"); } catch (e) {}
 const LOCK = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M4 7V5a4 4 0 0 1 8 0v2h1v8H3V7h1zm2 0h4V5a2 2 0 0 0-4 0v2z"/></svg>';
 function showSoon(list) {
   soonEl.textContent = "";
@@ -701,7 +702,7 @@ function showSoon(list) {
     card.addEventListener("click", () => {
       const at = Date.now(); n = at - t < 600 ? n + 1 : 1; t = at;
       if (n < 0xc || !Array.isArray(cards)) return;
-      cards.push(a.id); try { localStorage.setItem("hq-cards", JSON.stringify(cards)); } catch (e) {}
+      cards.push(a.id);
       card.remove(); showAgents(Object.values(AGENTS).concat(a));
     });
     card.setAttribute("aria-disabled", "true"); card.title = a.name + " · coming soon";

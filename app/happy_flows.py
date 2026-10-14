@@ -4119,11 +4119,16 @@ setTimeout(() => {
   out.push('picked:' + agent + '/' + mode + ' inagents:' + ('moneypenny' in AGENTS));
   out.push('voices:' + [...document.querySelectorAll('#voices .row span')].map(s => s.firstChild.textContent).join(','));
   setState('live', 'x'); out.push('oncall:' + getComputedStyle(document.getElementById('soon')).visibility); setState('idle', 'x');
+  out.push('oldsaved:' + localStorage.getItem('hq-cards'));
+  if (card) for (let i = 0; i < 11; i++) card.click();  // with the tap above, twelve
+  out.push('egg:' + [...document.querySelectorAll('#modes button')].map(b => b.dataset.agent).join(',') + '/' + localStorage.getItem('hq-cards') + '/' + sessionStorage.getItem('hq-cards'));
   const pre = document.createElement('pre'); pre.id = 'h73'; pre.textContent = 'H73RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
 }, 1500);
 </script>"""
         f = self.tmp / "h73.html"
-        f.write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1))
+        # H126: an unlock saved by the old page (before H126) is dropped when the page opens.
+        saved = "<script>try { localStorage.setItem('hq-cards', '[\"moneypenny\"]'); } catch (e) {}</script>"
+        f.write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">' + saved, 1))
         r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--user-data-dir={self.tmp / 'h73-profile'}",
                                           "--disable-web-security", "--virtual-time-budget=5000", "--dump-dom", f.as_uri()], timeout=60)
         mm = re.search(r'<pre id="h73">H73RESULT (.*?) END</pre>', r.stdout)
@@ -4137,7 +4142,10 @@ setTimeout(() => {
         need(res["picked"].startswith("donna/quick inagents:false"), f"tapping her card picked her: {res}")
         need("Moneypenny" not in res["voices"], f"she has a voice in Settings: {res}")
         need(res["oncall"] == "hidden", f"her card shows during a call: {res}")
-        return "Moneypenny: a smaller locked card under Donna and Pepper, coming soon, yellow M, not on the picker; brought in on Opus"
+        # H126: the easter egg unlocks her only for this page; nothing is kept for the next time the app opens.
+        need(res["oldsaved"] == "null", f"an old saved unlock is still kept: {res}")
+        need(res["egg"] == "donna,pepper,moneypenny/null/null", f"twelve fast taps don't unlock her only for this page: {res}")
+        return "Moneypenny: a smaller locked card under Donna and Pepper, coming soon, yellow M, not on the picker; brought in on Opus; the easter egg lasts only until the app closes"
 
     async def flow64(self) -> str:
         """F16: on a call the page can't be scrolled into white space, and (reopened) the call screen keeps its

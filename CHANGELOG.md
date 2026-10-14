@@ -11,7 +11,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - The weather every three hours: in the day, HQ looks at the weather where you are (the town in your me.md, under Where I am), with rain by the minute in the Netherlands and Belgium. When there's something worth saying, Donna texts you on the direct line: sun, something nice outside; rain coming, a heads-up with when; a rainy day, something cosy inside, never "go outside". Quiet otherwise, and never at night (H120).
 - With two HQs (the laptop and a server), you see at a glance which one is main: a pill next to the name on the status page, in the Mac app, the phone version and on the call page. Green "Main" on the main one; grey "Backup · VPS is main" (or "Laptop is main") on the other. An HQ on its own shows nothing new (H118).
 - Moneypenny can be brought into a call: "bring in Moneypenny" makes a three-way call, and bringing in one more makes it a four-way call, so you can hear the voices side by side. She still can't be picked or handed over to, and runs on Opus until Fable is out (H121).
-- There's an easter egg. It has to do with Moneypenny.
+- There's an easter egg. It has to do with Moneypenny, and it lasts until you close the app.
 - Call back from the chat: when you open the app and tap the chat bubble, it shows your last call with a button at the bottom to call back and carry on where you left off, with the same agent, like Continue in Past calls (H119).
 
 ### Changed
