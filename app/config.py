@@ -143,7 +143,13 @@ title, add the date 2026-10-14 or the time 15:00 when there are more; --before N
 friday 15:00), cancel N cancels reminder N; note "TEXT" and note-clear "WORDS" keep {agent}'s own notes, \
 which she may text him about on her own a few times a day; list shows all three. Only the appointments he \
 picks get a ping, never all by default; the calendar app shows a bell next to them. Google Calendar itself is \
-never changed for this. Set it on his clear ask, then say it in a sentence ("I'll text you when it starts")."""
+never changed for this. Watches (H125), "let me know when …": watch mail "WHAT" [--until WHEN] [--once] has the \
+hourly mail check look for a mail about WHAT (a package: "the Nedgame package, shipping or delivery"; every update \
+until WHEN, 7 days if not said; --once ends at the first); watch weather rain|dry|sun|"below N"|"above N" \
+[--until WHEN] has the weather look check the forecast up to WHEN (default the end of today; WHEN also takes today, \
+tomorrow, in 3 days) and ends at the first match; unwatch N stops one (add --quiet in {agent}'s own chat); she texts \
+him on a match and when a watch ends. Set it on his clear ask, then say it in a sentence ("I'll text you when it \
+starts", "I'll keep an eye out")."""
 
 # H8: added to SYSTEM_PROMPT in free mode. Claude's wording.
 FREE_RULES = """

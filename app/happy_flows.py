@@ -5046,7 +5046,7 @@ window.fetch = async (url, opt) => {
                         f'python3 "{script}" note "x"', f'python3 "{script}" list'):
                 dec = pol.decide("Bash", {"command": cmd})
                 need(dec.verdict == ALLOW, f"a call may not run {cmd}: {dec}")
-            need(pol.decide("Bash", {"command": f'python3 "{script}" watch'}).verdict == DENY, "a call may run the routine's part")
+            need(pol.decide("Bash", {"command": f'python3 "{script}" match 1 "x"'}).verdict == DENY, "a call may run the mail check's part")
             # the bell from agenda
             import agenda
             pings.appt_on({"id": "a3", "title": "Lunch", "start": iso(13, day=2)})
@@ -6660,6 +6660,157 @@ setTimeout(() => {
         if gi.exists():
             need("HQ/direct-line/weather.json" in gi.read_text(), "the weather state isn't kept off GitHub")
         return "sun, rain by the minute and by the hour, a rainy day (never outside), quiet at night and on grey days; due every three hours in the day; me.md's place; texted once"
+
+    async def flow93(self) -> str:
+        """H125, no Claude, no network: Donna's watch list. routine/pings.py on its own copies: a mail watch and a
+        weather watch added (and refused when unclear), the mail check's lines and its match (kept once, texted once,
+        every update until its time, ending when one answers it), a weather watch checked against a made-up forecast
+        (rain later today, dry, sun, colder than N) and ending at the first match, its time up and his stop each
+        texted; the weather look every 30 minutes only while a weather watch is open (her three-hourly texts not more
+        often); the mail check's instructions and its one allowed command, the call's and her chat's rules and
+        policy, her texts' kinds, and her watches in /api/notes on the test server."""
+        import importlib
+        import pings
+        import direct_line
+        sys.path.insert(0, str(ROOT / "app"))
+        import weather as w
+        importlib.reload(w)
+        from policy import Policy, ALLOW, DENY
+        d = self.tmp / "h125"
+        d.mkdir(parents=True, exist_ok=True)
+        keep = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_CALENDAR_FILE", "HQ_AGENT_NOTES", "HQ_DIRECT_DRY",
+                                               "HQ_WEATHER_PLACE", "HQ_WEATHER", "HQ_INITIATIVE")}
+        real = Path(os.path.join(pings.hqpaths.DATA, "direct-line", "pings.json"))
+        real_before = real.read_bytes() if real.exists() else None
+        os.environ.update({"HQ_DIRECT_DIR": str(d / "line"), "HQ_CALENDAR_FILE": str(d / "calendar.json"),
+                           "HQ_AGENT_NOTES": str(d / "notes-donna.md"), "HQ_DIRECT_DRY": "1",
+                           "HQ_WEATHER_PLACE": "Testtown", "HQ_INITIATIVE": "0"})
+        os.environ.pop("HQ_WEATHER", None)
+        texts = []
+        spawn = lambda why, facts: texts.append((why, facts))
+        try:
+            now = datetime(2099, 1, 1, 12, 0)
+            t = lambda h, m=0, day=1: datetime(2099, 1, day, h, m).timestamp()
+            # adding: mail for 7 days by default, weather until the end of today and once; unclear ones refused
+            m1 = pings.watch_add("mail", "the package from Nedgame: shipping or delivery", now=now)
+            need(m1["until"] == "2099-01-08 12:00" and not m1["once"], f"a mail watch's default isn't 7 days, every update: {m1}")
+            w1 = pings.watch_add("weather", "raining", now=now)
+            need(w1["what"] == "rain" and w1["until"] == "2099-01-01 23:00" and w1["once"], f"a weather watch's default: {w1}")
+            need(pings.watch_add("weather", "below 3°C", until=datetime(2099, 1, 2, 9), now=now)["what"] == "below 3", "below N isn't read")
+            for bad in (("weather", "snowstorm"), ("tea", "x"), ("mail", "  ")):
+                try:
+                    pings.watch_add(*bad, now=now)
+                    need(False, f"an unclear watch was taken: {bad}")
+                except ValueError:
+                    pass
+            need(pings.when("in 3 days", now) == datetime(2099, 1, 4, 12) and pings.when("tomorrow", now) == datetime(2099, 1, 2, 23),
+                 "a watch's until isn't read")
+            # the mail check: its lines and its match
+            lines = pings.mail_watch_text(now=t(12))
+            need(f"Watch {m1['n']}: the package from Nedgame" in lines and "rain" not in lines, f"the mail check's lines: {lines}")
+            need(pings.match(m1["n"], "13 Jan · Nedgame · Order sent · packed and sent", key="L1", now=t(12, 5)) == "new"
+                 and pings.match(m1["n"], "again", key="L1", now=t(12, 6)) == "seen", "a mail match isn't kept once")
+            got = pings.watch(t(12, 7), spawn=spawn)
+            need([x[0] for x in got] == ["watch"] and "packed and sent" in got[0][1] and "keep watching" in got[0][1],
+                 f"a mail match wasn't texted, or ended the watch: {got}")
+            need(not pings.watch(t(12, 8), spawn=spawn), "a match was texted twice")
+            pings.match(m1["n"], "14 Jan · Nedgame · Delivered", key="L2", answers=True, now=t(13))
+            got = pings.watch(t(13, 1), spawn=spawn)
+            need([x[0] for x in got] == ["watch"] and "stop watching" in got[0][1] and not pings.open_watches("mail", now=t(13, 2)),
+                 f"a mail that answers it didn't end the watch: {got}")
+            need(pings.match(m1["n"], "late", key="L3", now=t(13, 3)) != "new", "an ended watch still takes matches")
+            # the weather: checked against a forecast, the first match ends it
+            hrs = [f"2099-01-01T{h:02d}:00" for h in range(24)] + [f"2099-01-02T{h:02d}:00" for h in range(24)]
+            def fc(prob=None, code=None, temp=None):
+                prob, code, temp = prob or [5] * 48, code or [3] * 48, temp or [10] * 48
+                return {"current": {"temperature_2m": temp[12], "weather_code": code[12], "precipitation": 0},
+                        "daily": {"sunset": ["2099-01-01T17:00"]},
+                        "hourly": {"time": hrs, "precipitation_probability": prob, "weather_code": code,
+                                   "temperature_2m": temp, "precipitation": [0] * 48}}
+            later = fc(prob=[5] * 16 + [80] * 3 + [5] * 29)
+            until = datetime(2099, 1, 1, 23)
+            need(w.check_watch("rain", fc(), [], now, until) is None, "rain found in a dry forecast")
+            got = w.check_watch("rain", later, [], now, until)
+            need(got and "16:00" in got[1], f"rain later today isn't found: {got}")
+            need(w.check_watch("rain", later, [], now, datetime(2099, 1, 1, 15)) is None, "rain after the watch's time counted")
+            got = w.check_watch("rain", fc(), [("12:05", 0.0), ("12:30", 0.8)], now, until)
+            need(got and "12:30" in got[1], f"rain by the minute isn't found: {got}")
+            got = w.check_watch("dry", later, [("16:05", 0.9)], now.replace(hour=16), until)
+            need(got and "19:00" in got[1], f"dry again isn't found: {got}")
+            need("14:00" in (w.check_watch("sun", fc(code=[3] * 14 + [1] * 34), [], now, until) or ("", ""))[1], "sun isn't found")
+            need("20:00" in (w.check_watch("below 3", fc(temp=[10] * 20 + [2] * 28), [], now, until) or ("", ""))[1], "colder than N isn't found")
+            ws = [x for x in pings.open_watches("weather", now=t(12, 30)) if x["what"] == "rain"]
+            new = w.check_watches(later, [], now.replace(minute=30), "Testtown", ws=ws)
+            need(len(new) == 1 and not w.check_watches(later, [], now.replace(minute=59), "Testtown", ws=ws), "a weather match was kept twice")
+            got = pings.watch(t(12, 31), spawn=spawn)
+            need([x[0] for x in got] == ["watch"] and "16:00" in got[0][1] and "stop watching" in got[0][1]
+                 and not [x for x in pings.open_watches("weather", now=t(12, 32)) if x["what"] == "rain"],
+                 f"the rain watch wasn't texted and ended at its first match: {got}")
+            # its time up, and his stop, are texted; once
+            got = pings.watch(t(9, day=2), spawn=spawn)
+            need([x[0] for x in got] == ["watch-end"] and "Nothing came" in got[0][1], f"a watch whose time is up: {got}")
+            w2 = pings.watch_add("weather", "sun", now=datetime(2099, 1, 2, 10))
+            w3 = pings.watch_add("weather", "dry", now=datetime(2099, 1, 2, 10))
+            pings.unwatch(w2["n"], now=t(10, 1, day=2))
+            pings.unwatch(w3["n"], quiet=True, now=t(10, 1, day=2))
+            got = pings.watch(t(10, 2, day=2), spawn=spawn)
+            need([x[0] for x in got] == ["watch-end"] and "stop watching" in got[0][1] and not pings.watch(t(10, 3, day=2), spawn=spawn),
+                 f"his stop isn't texted once, or --quiet still texted: {got}")
+            need("Watches" in pings.listing() and pings.unwatch(w2["n"]) is None, "the list doesn't show the watches")
+            # the weather look: every 30 minutes only while a weather watch is open; her three-hourly texts stay
+            w._write({"where": {"place": "Testtown", "lat": 52.0, "lon": 5.0, "tz": "Europe/Amsterdam", "country": "NL", "name": "Testtown"},
+                      "looked": t(11, day=2), "general": t(11, day=2)})
+            need(not w.due(t(11, 40, day=2)), "a look every 30 minutes without a weather watch")
+            w4 = pings.watch_add("weather", "rain", now=datetime(2099, 1, 2, 11, 30))
+            need(w.due(t(11, 40, day=2)) and w.watch_due(t(11, 40, day=2)) and not w.general_due(t(11, 40, day=2)),
+                 "no look every 30 minutes while a weather watch is open")
+            sent, realfn = [], (w.forecast, w.rain_text, direct_line.text)
+            w.forecast, w.rain_text = (lambda _w: fc(code=[1] * 48)), (lambda _w: [])
+            direct_line.text = lambda why, facts: sent.append(why)
+            try:
+                need(w.look(now=t(11, 40, day=2), general=False) is None and not sent, "a watch look sent her three-hourly text")
+                need(not w.due(t(12, day=2)) and w.due(t(12, 10, day=2)), "the watch look isn't every 30 minutes")
+                need(w.general_due(t(14, day=2)), "the three-hourly look moved with the watch looks")
+            finally:
+                w.forecast, w.rain_text, direct_line.text = realfn
+            pings.unwatch(w4["n"], quiet=True)
+            need(not w.due(t(12, 10, day=2)), "still every 30 minutes after the last weather watch ended")
+            # her texts know both kinds
+            for why, word in (("watch", "keep an eye out"), ("watch-end", "stopped")):
+                need(why in direct_line.PLAIN and word in direct_line.compose_prompt(why, "x"), f"her texts don't know {why}")
+            # the rules, the policy, the mail check's instructions and its one command
+            need("watch mail" in config.VOICE_RULES and "watch weather" in config.VOICE_RULES and "unwatch" in direct_line._text_rules(),
+                 "the call's or her chat's rules don't say how to keep watches")
+            pol = Policy(config.FOLDER)
+            script = str(ROOT / "routine" / "pings.py")
+            for cmd in (f'python3 "{script}" watch mail "the package"', f'python3 "{script}" watch weather rain --until "today 18:00"',
+                        f'python3 "{script}" unwatch 3'):
+                need(pol.decide("Bash", {"command": cmd}).verdict == ALLOW, f"a call may not run {cmd}")
+            need(pol.decide("Bash", {"command": f'python3 "{script}" match 1 "x"'}).verdict == DENY, "a call may run the mail check's match")
+            mc = (ROOT / "routine" / "mail-check.md").read_text()
+            need("{WATCHES}" in mc and "{PINGS} match N" in mc and "--answers" in mc, "the mail check isn't told about the watches")
+            tsrc = (ROOT / "routine" / "tick.py").read_text()
+            need("pings.py')} match:*)" in tsrc and '.replace("{WATCHES}", mail_watches())' in tsrc,
+                 "the mail check doesn't get the watches or the match command")
+        finally:
+            for k, v in keep.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        need((real.read_bytes() if real.exists() else None) == real_before, "the workspace's own pings were touched")
+        # the test server: her watches come with her notes
+        await self.ensure_server()
+        sdir = Path(self.server.env["HQ_DIRECT_DIR"])
+        sdir.mkdir(parents=True, exist_ok=True)
+        (sdir / "pings.json").write_text(json.dumps({"watches": [
+            {"n": 1, "kind": "mail", "what": "the package", "until": "2099-01-08 12:00", "once": False, "matches": []}]}))
+        code, body, _ = http_get("/api/notes")
+        got = json.loads(body) if code == 200 else {}
+        ws = (got.get("hers") or {}).get("watches") or []
+        need(code == 200 and [x["text"] for x in ws] == ["Watching for a mail about the package"], f"/api/notes doesn't give her watches: {got}")
+        page = (ROOT / "app" / "web" / "index.html").read_text()
+        need("hers.watches" in page and "keeps an eye out" in page, "the notes sheet doesn't show her watches")
+        return ("mail and weather watches added (unclear ones refused), the mail check's match kept and texted once, every update until "
+                "one answers it; rain later today, dry, sun and colder than N from a forecast, ending at the first match; time up and "
+                "his stop texted; a look every 30 minutes only while a weather watch is open; rules, policy, mail check, /api/notes")
 
     async def flow86(self) -> str:
         """H80, no Claude: Donna's direct line. A push message encrypted for a stand-in phone decrypts back (RFC 8291)
@@ -8546,6 +8697,7 @@ FLOWS = {
     90: ("H120: the weather every three hours: sun, rain coming, a rainy day stays inside; quiet otherwise and at night", False, "flow90"),
     91: ("H101: my calendar inside HQ, read only from Google; a tap on an appointment starts a call about it", False, "flow91"),
     92: ("H124: Donna texts first: pings for appointments he picked (a bell shows them), reminders, her own notes", False, "flow92"),
+    93: ("H125: Donna's watch list: she keeps an eye out for a mail or the weather and texts when it comes", False, "flow93"),
 }
 
 

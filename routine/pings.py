@@ -29,6 +29,26 @@ first, then each text starts detached (direct_line.py text appt|remind FACTS, or
     python3 routine/pings.py note "TEXT"                 add a note to her own list
     python3 routine/pings.py note-clear "ID or words"    remove one of her notes
     python3 routine/pings.py due                         what would be texted now (nothing is sent)
+
+H125 (14 October 2026, call at 11:59, Pepper): her watch list, "let me know when …". In his words: "So hypothetically
+if i say hey i expect a package, can you keep an eye out on my email and let me know if i get some update on it" and
+"if in the future i also want to ask her for example to let me know if it will rain later today (just example) then
+the second solution would be better fitted". One list in pings.json (`watches`): each watch says where to look
+(KINDS: mail, weather; a new kind is a new name here plus the check that reads it), what to look for, until when.
+No routine of its own: the checks that already run read the list. The hourly mail check gets the open mail watches
+in its instructions and runs `match N` on a mail that fits; the weather look (H120, weather.py) checks the open
+weather watches, every 30 minutes while one is open. A match is texted by the next minute's watch(). A watch ends
+when it's answered (weather: the first match; mail: a match that answers it, like "delivered"), when its time is
+up, or when he says so (unwatch); she texts each end.
+
+    python3 routine/pings.py watch mail "WHAT" [--until WHEN] [--once]
+                                            a mail about WHAT; every one until WHEN (default 7 days), --once: the first
+    python3 routine/pings.py watch weather "rain|dry|sun|below N|above N" [--until WHEN] [--every]
+                                            when the forecast shows it before WHEN (default the end of today);
+                                            ends at the first match, --every: each new time it shows
+    python3 routine/pings.py unwatch N [--quiet]     he says so; she texts that it stopped (--quiet: not, when she's
+                                                     already answering him in her chat)
+    python3 routine/pings.py match N "FACTS" [--key K] [--answers]   the mail check: a mail fits watch N
 """
 from __future__ import annotations
 
@@ -54,6 +74,9 @@ KEEP_SENT = 30  # sent reminders kept, for looking back
 INITIATIVE_DAY = (9, 21)  # her own look at her notes: only in the day
 INITIATIVE_EVERY = 3 * 3600
 INITIATIVE_MAX = 2  # texts a day from her own initiative, at most
+KINDS = ("mail", "weather")  # H125: where a watch can look; more can follow
+WATCH_DAYS = {"mail": 7}  # a watch without --until: mail for 7 days, weather until the end of today
+KEEP_ENDED = 30  # ended watches kept, for looking back
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 
@@ -103,6 +126,7 @@ def read() -> dict:
     s.setdefault("appointments", {})
     s.setdefault("reminders", [])
     s.setdefault("initiative", {})
+    s.setdefault("watches", [])
     return s
 
 
@@ -185,6 +209,13 @@ def when(words: str, now: dt.datetime | None = None) -> dt.datetime:
     '2026-10-14 15:00' to a local time (minutes). ValueError when it can't be read."""
     now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
     s = " ".join(str(words).lower().split()).replace(".", ":")
+    m = re.fullmatch(r"in (\d+) ?(d|day|days)", s)
+    if m:
+        return now + dt.timedelta(days=int(m.group(1)))
+    if s in ("today", "tonight", "end of today", "end of the day"):
+        return now.replace(hour=23, minute=0) if now.hour < 23 else now.replace(hour=23, minute=59)
+    if s == "tomorrow":
+        return (now + dt.timedelta(days=1)).replace(hour=23, minute=0)
     m = re.fullmatch(r"in (\d+) ?(m|min|mins|minute|minutes|h|hr|hrs|hour|hours)", s)
     if m:
         n = int(m.group(1))
@@ -286,6 +317,165 @@ def note_clear(words: str) -> list[dict]:
     return hit
 
 
+# -- H125: her watch list ("let me know when …") ---------------------------------------------------------------
+
+WEATHER_LOOKS = ("rain", "dry", "sun", "below", "above")
+
+
+def weather_look(words: str) -> str:
+    """'rain', 'dry', 'sun', 'below 5', 'above 20' (°C); ValueError otherwise."""
+    w = " ".join(str(words).lower().replace("°c", "").replace("degrees", "").split())
+    m = re.fullmatch(r"(below|above) (-?\d+)", w)
+    if m:
+        return f"{m.group(1)} {int(m.group(2))}"
+    w = {"rains": "rain", "raining": "rain", "showers": "rain", "sunny": "sun", "sunshine": "sun", "dries up": "dry",
+         "stops raining": "dry"}.get(w, w)
+    if w in ("rain", "dry", "sun"):
+        return w
+    raise ValueError("A weather watch looks for rain, dry, sun, below N or above N (°C).")
+
+
+def watch_add(kind: str, what: str, until: dt.datetime | None = None, once: bool | None = None, by: str = "",
+              now: dt.datetime | None = None) -> dict:
+    if kind not in KINDS:
+        raise ValueError(f"A watch looks in {' or '.join(KINDS)}.")
+    now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
+    what = weather_look(what) if kind == "weather" else " ".join(str(what).split())[:300]
+    if not what:
+        raise ValueError("What should she look out for?")
+    if until is None:
+        until = now + dt.timedelta(days=WATCH_DAYS[kind]) if kind in WATCH_DAYS else when("today", now)
+    if until <= now:
+        raise ValueError(f"{until.strftime(FMT)} has passed already.")
+    with _Lock():
+        s = read()
+        n = max([int(w.get("n") or 0) for w in s["watches"]] + [int(s.get("last_watch") or 0)]) + 1
+        w = {"n": n, "kind": kind, "what": what, "until": until.strftime(FMT),
+             "once": (kind == "weather") if once is None else bool(once), "added": now.strftime(FMT), "by": by,
+             "matches": []}
+        s["watches"].append(w)
+        s["last_watch"] = n
+        _write(s)
+    return w
+
+
+def open_watches(kind: str | None = None, s: dict | None = None, now: float | None = None) -> list[dict]:
+    """The watches still open (not ended, time not up), of KIND or all."""
+    t = now or time.time()
+    s = read() if s is None else s
+    return [w for w in s["watches"] if not w.get("ended") and (kind is None or w.get("kind") == kind)
+            and _local_ts(w.get("until", "")) > t]
+
+
+def _local_ts(at: str) -> float:
+    try:
+        return time.mktime(time.strptime(at, FMT))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _find_watch(s: dict, n: int) -> dict | None:
+    return next((w for w in s["watches"] if int(w.get("n") or 0) == n), None)
+
+
+def match(n: int, facts: str, key: str = "", answers: bool = False, now: float | None = None) -> str:
+    """A check found something for watch N: kept as a match to text (by the next minute's watch()). The same KEY
+    (a mail's link, a weather look's finding) is kept once. Returns 'new', 'seen' or why it can't."""
+    t = now or time.time()
+    facts = str(facts).strip()[:1200]
+    if not facts:
+        return "no facts"
+    with _Lock():
+        s = read()
+        w = _find_watch(s, n)
+        if not w:
+            return f"no watch {n}"
+        if w.get("ended") or _local_ts(w.get("until", "")) <= t:
+            return f"watch {n} has ended"
+        key = key or facts
+        if any(m.get("key") == key for m in w["matches"]):
+            return "seen"
+        w["matches"].append({"key": key, "at": time.strftime(FMT, time.localtime(t)), "facts": facts,
+                             "answers": bool(answers or w.get("once")), "texted": ""})
+        _write(s)
+    return "new"
+
+
+def unwatch(n: int, quiet: bool = False, now: float | None = None) -> dict | None:
+    """He says so: the watch ends; she texts that it stopped unless QUIET."""
+    t = now or time.time()
+    with _Lock():
+        s = read()
+        w = _find_watch(s, n)
+        if not w or w.get("ended"):
+            return None
+        w["ended"] = {"at": time.strftime(FMT, time.localtime(t)), "why": "he said so", "texted": "" if not quiet else "quiet"}
+        _write(s)
+    return w
+
+
+def _watch_says(w: dict) -> str:
+    return (f"a mail about {w['what']}" if w["kind"] == "mail" else
+            {"rain": "rain", "dry": "dry weather", "sun": "sun"}.get(w["what"], f"the temperature {w['what']} °C")
+            if w["kind"] == "weather" else w["what"])
+
+
+def _watch_due(s: dict, t: float) -> list[tuple[str, str]]:
+    """Marks in S what's to text now about the watches and returns [(why, facts)]: matches not texted yet (why
+    watch), and ends not texted yet (why watch-end: time up, or he said so)."""
+    out = []
+    stamp = time.strftime(FMT, time.localtime(t))
+    for w in s["watches"]:
+        if w.get("ended") and w["ended"].get("texted"):
+            continue
+        asked = f"He asked you to let him know about {_watch_says(w)} (watch {w['n']}, open until {w['until']})."
+        for m in w["matches"]:
+            if m.get("texted") or w.get("ended"):
+                continue
+            m["texted"] = stamp
+            facts = f"{asked}\nWhat came: {m['facts']}"
+            if m.get("answers"):
+                w["ended"] = {"at": stamp, "why": "answered", "texted": stamp}
+                facts += "\nThis answers it: you stop watching for it now; say so in passing."
+            else:
+                facts += "\nYou keep watching until then."
+            out.append(("watch", facts))
+        if w.get("ended") and not w["ended"].get("texted"):
+            w["ended"]["texted"] = stamp
+            out.append(("watch-end", f"{asked}\nHe asked you to stop watching for it: say it's stopped."))
+        elif not w.get("ended") and _local_ts(w.get("until", "")) <= t:
+            got = len(w["matches"])
+            w["ended"] = {"at": stamp, "why": "time up", "texted": stamp}
+            out.append(("watch-end", f"{asked}\nIts time is up. "
+                        + (f"Nothing came for it." if not got else f"{got} update(s) came, all texted already.")
+                        + " Say you've stopped watching for it."))
+    ended = [w for w in s["watches"] if w.get("ended")]
+    s["watches"] = [w for w in s["watches"] if not w.get("ended")] + ended[-KEEP_ENDED:]
+    return out
+
+
+def mail_watch_text(now: float | None = None) -> str:
+    """For the hourly mail check's instructions: the open mail watches, one line each, or that there are none."""
+    ws = open_watches("mail", now=now)
+    if not ws:
+        return "(no open mail watches)"
+    return "\n".join(f"- Watch {w['n']}: {w['what']} (open until {w['until']}"
+                     + (", the first matching mail answers it" if w.get("once") else "") + ")" for w in ws)
+
+
+def _watch_line(w: dict) -> str:
+    return (f"- watch {w['n']} · {w['kind']} · {w['what']} · until {w['until']}"
+            + (" · ends at the first match" if w.get("once") else "")
+            + (f" · {len(w['matches'])} match(es)" if w.get("matches") else "")
+            + (f" · ended {w['ended']['at']} ({w['ended']['why']})" if w.get("ended") else ""))
+
+
+def watch_items() -> list[dict]:
+    """For the notes sheet in the app: the open watches in plain words."""
+    return [{"n": w["n"], "kind": w["kind"], "text": f"Watching for {_watch_says(w)}", "until": w["until"],
+             "matches": len(w.get("matches") or [])} for w in open_watches()]
+
+
 # -- every minute: what's due ---------------------------------------------------------------------
 
 def _say_at(start: str) -> str:
@@ -381,6 +571,7 @@ def watch(now: float | None = None, spawn=None, dry: bool = False) -> list[tuple
             at = _ts(p.get("start", ""))
             if at and at < t - 86400:
                 s["appointments"].pop(k)
+        out += _watch_due(s, t)  # H125
         sent = [r for r in s["reminders"] if r.get("sent")]
         s["reminders"] = [r for r in s["reminders"] if not r.get("sent")] + sent[-KEEP_SENT:]
         if initiative_due(t, s):
@@ -448,6 +639,8 @@ def listing() -> str:
     out += ["", "Reminders:"]
     out += [f"- {r['n']} · {r['at']} · {r['text']}" + (f" · sent {r['sent']}" if r.get("sent") else "")
             for r in s["reminders"] if not r.get("dropped")] or ["- none"]
+    out += ["", "Watches (\"let me know when …\"):"]
+    out += [_watch_line(w) for w in s["watches"]] or ["- none"]
     out += ["", f"{agent_name()}'s own notes ({notes_file().relative_to(hqpaths.FOLDER) if str(notes_file()).startswith(hqpaths.FOLDER) else notes_file()}):"]
     out += [f"- {i['when'][:16]} · {i['text']} · id {i['id']}" for i in her_notes()] or ["- none"]
     return "\n".join(out)
@@ -517,6 +710,44 @@ def main(argv: list[str]) -> int:
                   + "\n".join(f"- {i['text']} · id {i['id']}" for i in hit))
             return 1
         print(f"Cleared: {hit[0]['text']}")
+    elif cmd == "watch" and len(argv) >= 3:
+        rest = argv[3:]
+        until = None
+        try:
+            if "--until" in rest:
+                i = rest.index("--until")
+                if i + 1 >= len(rest):
+                    raise ValueError("--until takes a time: today 18:00, tomorrow, in 3 days, friday 15:00.")
+                until = when(rest[i + 1])
+            once = True if "--once" in rest else False if "--every" in rest else None
+            w = watch_add(argv[1], argv[2], until, once, by)
+        except ValueError as e:
+            print(e)
+            return 2
+        if w["kind"] == "weather":
+            sys.path.insert(0, str(ROOT / "app"))
+            try:
+                import weather as _w
+                if not _w.place():
+                    print("Note: no place in me.md under **Where I am:**, so the weather can't be looked at yet.")
+            except Exception:
+                pass
+        print(f"Watch {w['n']}: {_watch_says(w)}, until {w['until']}"
+              + (" (ends at the first match)." if w["once"] else " (every match until then)."))
+    elif cmd == "unwatch" and len(argv) >= 2 and argv[1].isdigit():
+        w = unwatch(int(argv[1]), quiet="--quiet" in argv)
+        if not w:
+            print(f"No open watch {argv[1]}.")
+            return 1
+        print(f"Watch {w['n']} stopped: {_watch_says(w)}.")
+    elif cmd == "match" and len(argv) >= 3 and argv[1].isdigit():
+        key = argv[argv.index("--key") + 1] if "--key" in argv and argv.index("--key") + 1 < len(argv) else ""
+        facts = " ".join(a for i, a in enumerate(argv[2:], 2)
+                         if a != "--answers" and a != "--key" and not (i > 0 and argv[i - 1] == "--key"))
+        got = match(int(argv[1]), facts, key, "--answers" in argv)
+        print({"new": f"Kept for watch {argv[1]}; she texts him within a minute.",
+               "seen": f"Already kept for watch {argv[1]}."}.get(got, got))
+        return 0 if got in ("new", "seen") else 1
     elif cmd == "due":
         print(json.dumps(due(), ensure_ascii=False, indent=1))
     else:

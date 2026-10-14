@@ -302,9 +302,10 @@ class Policy:
         # in the workspace (direct-line/pings.json, her notes file); Google Calendar is never touched by it.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "pings.py"):
             sub = args[1] if len(args) > 1 else "list"
-            if sub in ("list", "appt", "remind", "cancel", "note", "note-clear", "due"):
-                return Decision(ALLOW, "her pings, reminders and notes")
-            return Decision(DENY, "the pings script takes list, appt, remind, cancel, note or note-clear")
+            if sub in ("list", "appt", "remind", "cancel", "note", "note-clear", "due", "watch", "unwatch"):
+                return Decision(ALLOW, "her pings, reminders, notes and watches")
+            # H125: match is the mail check's own (it found a mail for a watch)
+            return Decision(DENY, "the pings script takes list, appt, remind, cancel, note, note-clear, watch or unwatch")
         # H56.3: main and backup. Asking which one is main, and making one the main on his ask.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "role.py"):
             if len(args) == 1 or (len(args) == 3 and args[1] == "main"):

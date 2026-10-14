@@ -24,6 +24,8 @@ a change.
 
 Donna texts first (H124, routine/pings.py): when an appointment he picked starts (why appt), a reminder he asked
 for (why remind), and now and then on her own about something on her own notes list (initiative).
+Her watch list (H125, routine/pings.py): a mail or the weather he asked her to keep an eye out for (why watch), and
+when a watch ends: its time is up, or he stopped it (why watch-end).
 
 The weather (H120, weather.py): every three hours in the day she texts when there's sun, rain coming or a rainy
 day (why sun, rain, cosy), quiet otherwise.
@@ -324,6 +326,8 @@ PLAIN = {
     "cosy": "Rainy one today. {facts} Good day for a book and something warm inside.",
     "appt": "Your appointment is on. {facts}",
     "remind": "Reminder, like you asked: {facts}",
+    "watch": "You asked me to keep an eye out. {facts}",
+    "watch-end": "I've stopped keeping an eye out. {facts}",
 }
 
 TEXT_RULES = """# This is a text chat: HQ's direct line
@@ -365,6 +369,11 @@ def compose_prompt(why: str, facts: str) -> str:
                 "A short text that it's on, its name and time in passing; where, only when the facts give a place.",
         "remind": "He asked you to remind him of this, at this time. Remind him, short and warm, in your own words; "
                   "keep what he asked to be reminded of clear. When the facts say it's late, say so in passing.",
+        "watch": "He asked you to keep an eye out for this, and it came (the facts say what). Tell him in a short "
+                 "text: what came, plainly (for a mail: who it's from and what it says about what he's waiting for; "
+                 "for the weather: what and when). Say whether you keep watching, as the facts say.",
+        "watch-end": "A watch he asked you for has ended (the facts say which and why). One short line that you've "
+                     "stopped keeping an eye out for it, and why (time up, nothing came; or he asked you to).",
     }.get(why, "Tell him this, in a text.")
     return (f"{what}\n\nThe facts (for you, don't copy them as they are):\n{facts or '(none)'}\n\n"
             "Write only the text message itself, one to three short sentences, as yourself.")

@@ -1443,7 +1443,8 @@ function showNoteItems(data) {
     row.append(t, c); notesList.appendChild(row);
   }
   const hers = data.hers && Array.isArray(data.hers.items) ? data.hers : null;  // H124: her own notes, under his
-  if (!data.items.length && !(hers && hers.items.length)) histNote(notesList, "No notes yet");
+  const watching = hers && Array.isArray(hers.watches) ? hers.watches : [];  // H125: what she keeps an eye out for
+  if (!data.items.length && !(hers && (hers.items.length || watching.length))) histNote(notesList, "No notes yet");
   else if (!data.items.length) { const n = document.createElement("div"); n.className = "none"; n.textContent = "No notes of yours yet"; notesList.appendChild(n); }
   if (hers && hers.items.length) {
     const h = document.createElement("div"); h.className = "hershead"; h.textContent = (hers.name || "Her") + "'s notes"; notesList.appendChild(h);
@@ -1456,6 +1457,17 @@ function showNoteItems(data) {
       c.setAttribute("aria-label", "Clear this note of " + (hers.name || "hers"));
       c.addEventListener("click", async () => { c.disabled = true; const d = await notesSend("api/notes", { clear_hers: it.id }); if (d) showNoteItems(d); else c.disabled = false; });
       row.append(t, c); notesList.appendChild(row);
+    }
+  }
+  if (watching.length) {
+    const h = document.createElement("div"); h.className = "hershead"; h.textContent = (hers.name || "She") + " keeps an eye out"; notesList.appendChild(h);
+    for (const w of watching) {
+      const row = document.createElement("div"); row.className = "note hers watch";
+      if ((AGENTS.donna || {}).colour) row.style.borderLeftColor = AGENTS.donna.colour;
+      const t = document.createElement("div"); t.className = "txt"; t.textContent = w.text;
+      const u = document.createElement("small"); u.className = "when";
+      u.textContent = "until " + String(w.until || "").slice(0, 16) + (w.matches ? " · " + w.matches + (w.matches === 1 ? " update" : " updates") : "");
+      t.appendChild(u); row.append(t); notesList.appendChild(row);
     }
   }
   notesAll.disabled = !data.items.length; notesSure = null; notesAll.classList.remove("sure"); notesAll.textContent = "Clear all";

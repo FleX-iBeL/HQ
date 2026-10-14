@@ -329,6 +329,8 @@ echo $$ > {json.dumps(PIDFILE)}
 # script are allowed; everything else is refused without asking (dontAsk), so it never waits on anyone.
 MAIL_ALLOW = ",".join([
     "Read", "Grep", "Glob", "Edit(/inbox.md)", "Bash(sh .claude/mail-commit.sh)",
+    # H125: a mail that fits one of Donna's open mail watches is kept for her to text (only that command).
+    f"Bash(python3 {os.path.join(JV, 'routine', 'pings.py')} match:*)",
     "mcp__claude_ai_Gmail__search_threads", "mcp__claude_ai_Gmail__get_thread", "mcp__claude_ai_Gmail__get_message",
 ])
 MAIL_DENY = ",".join("mcp__claude_ai_Gmail__" + t for t in (
@@ -521,7 +523,9 @@ def start_mail():
         clear(os.path.join(MAIL_RUNS, old))
     # The instructions with this workspace's own path in them.
     instructions = os.path.join(RUN, "mail-check.md")
-    open(instructions, "w").write(open(os.path.join(HERE, "mail-check.md")).read().replace("{WORKSPACE}", FOLDER))
+    # H125: with Donna's open mail watches in it, and the one command that keeps a match for her to text.
+    open(instructions, "w").write(open(os.path.join(HERE, "mail-check.md")).read().replace("{WORKSPACE}", FOLDER)
+                                  .replace("{WATCHES}", mail_watches()).replace("{PINGS}", os.path.join(JV, "routine", "pings.py")))
     open(cmd, "w").write(mail_script_tmux(instructions, run_file) if LINUX_WINDOWS else f"""#!/bin/zsh
 # The hourly mail check, started by the HQ routine (phase L, L8). Hidden: opened in the
 # background, minimized to the Dock, and the window closes itself when it's done (L7).
@@ -550,6 +554,16 @@ echo $$ > {json.dumps(MAIL_PID)}
     open_window(cmd, "mail")
     log("started the mail check")
     routines.beat("mail", state="running", text="Started", last=time.time(), next=mail_next(time.time()), every=60)
+
+
+def mail_watches():
+    """H125: Donna's open mail watches, one line each, for the mail check's instructions."""
+    try:
+        import pings
+        return pings.mail_watch_text()
+    except Exception as e:
+        log(f"mail watches: {e!r}")
+        return "(no open mail watches)"
 
 
 def mail_script_tmux(instructions, run_file):

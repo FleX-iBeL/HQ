@@ -461,7 +461,8 @@ if __name__ == "__main__":
         out = _notes.read()
         try:
             import pings as _pings
-            out["hers"] = {"name": _pings.agent_name(), "items": _pings.her_notes()}
+            out["hers"] = {"name": _pings.agent_name(), "items": _pings.her_notes(),
+                           "watches": _pings.watch_items()}  # H125: what she keeps an eye out for
         except Exception:
             pass
         return out
