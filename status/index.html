@@ -1382,6 +1382,10 @@
               left.append(text);
               const w = etaWords(E, j.n);
               if (w) left.append(etaSpan(`eta${E.jobs[j.n].over ? ' over' : ''}`, w, E.jobs[j.n]));
+              // H141: why the job first in line waits (how much room it needs under the usage line, how much there is).
+              const gate = routines?.routines?.jobs;
+              const gateText = gate?.state === 'waiting' && g === 'waiting' ? (gate.text ?? '') : '';
+              if (gateText.startsWith(`Job ${j.n} waits for the usage line: `)) left.append(el('span', 'eta over', gateText.slice(`Job ${j.n} waits for the usage line: `.length).replace(/^./, (c) => c.toUpperCase())));
               row.append(left, mark);
               card.append(row);
             }

@@ -7300,7 +7300,7 @@ setTimeout(() => {
         import subprocess as sp
         from policy import Policy, ALLOW, DENY
         node = shutil.which("node") or "/opt/homebrew/bin/node"
-        js = f"""import {{ stopLine, usageVerdict, movingFiveHour, lineSettings }} from {json.dumps((ROOT / 'status/usage.mjs').as_uri())};
+        js = f"""import {{ stopLine, usageVerdict, movingFiveHour, lineSettings, roomNeeded, START_ROOM }} from {json.dumps((ROOT / 'status/usage.mjs').as_uri())};
 import {{ parseRoadmap }} from {json.dumps((ROOT / 'status/parse.mjs').as_uri())};
 const R = new Date('2026-10-12T20:00:00Z'), S = R.getTime() - 5 * 36e5, W = R.getTime() + 3 * 864e5, WS = W - 7 * 864e5;
 const five = {{ label: '5-hour limit', resetsAt: R.toISOString() }};
@@ -7331,7 +7331,17 @@ console.log(JSON.stringify({{
   pastSkips: usageVerdict(r(95), M, when, {{ weeklyOnly: true }}).stop,
   pastWeek: usageVerdict(r(95, 60), M, new Date(WS + 5040 * 6e4), {{ weeklyOnly: true }}).stop,
   reason: usageVerdict(r(25), M, when).reason,
-  // H114: a new job keeps 5 points under the 5-hour line and 1 under each weekly one; a running job goes on to the line.
+  // H141 (was H114's fixed buffer): a new job needs room for its estimate, 1 point per 2 minutes under the 5-hour line and
+  // 0.2 under each weekly one; with no estimate the room of 10 minutes (H114's 5 and 1); a running job goes on to the line.
+  rates: START_ROOM, need: [roomNeeded('five', 12), roomNeeded('weekly', 12), roomNeeded('fable', 2), roomNeeded('five'), roomNeeded('weekly', 0)],
+  m12: [64, 63].map((p) => usageVerdict(r(p), F, when, {{ start: true, minutes: 12 }}).stop),
+  m30: [55, 54].map((p) => usageVerdict(r(p), F, when, {{ start: true, minutes: 30 }}).stop),
+  mWeek: [92, 91].map((p) => usageVerdict(r(5, p), F, when, {{ start: true, minutes: 30 }}).stop),
+  mWeek12: [94, 93].map((p) => usageVerdict(r(5, p), F, when, {{ start: true, minutes: 12 }}).stop),
+  mFable: [82, 81].map((p) => usageVerdict({{ readable: true, limits: [{{ ...fable, percent: p }}] }}, F, when, {{ start: true, minutes: 30 }}).stop),
+  mPast: [usageVerdict(r(95, 92), F, when, {{ weeklyOnly: true, start: true, minutes: 30 }}).stop, usageVerdict(r(95, 91), F, when, {{ weeklyOnly: true, start: true, minutes: 30 }}).stop],
+  mRun: usageVerdict(r(69), F, when, {{ minutes: 60 }}).stop,
+  mReason: usageVerdict(r(66), F, when, {{ start: true, minutes: 12 }}).reason,
   b5: [66, 65, 64].map((p) => usageVerdict(r(p), F, when, {{ start: true }}).stop), b5run: usageVerdict(r(66), F, when).stop,
   b5move: [16, 15].map((p) => usageVerdict(r(p), M, when, {{ start: true }}).stop),
   bWeek: [94, 93].map((p) => usageVerdict(r(5, p), F, when, {{ start: true }}).stop), bWeekRun: usageVerdict(r(5, 94), F, when).stop,
@@ -7360,16 +7370,47 @@ console.log(JSON.stringify({{
         need(d["weekStops"] and not d["weekFixedNoStop"], "the verdict doesn't follow the weekly line's setting")
         need("its stop line is 20.3%" in d["reason"], f"the reason doesn't name the moving line: {d['reason']}")
         need(not d["pastSkips"] and d["pastWeek"], "a job past the line stops at the 5-hour line, or skips the weekly one")
-        # H114: the buffer before a new job starts, only in the routine's start check, never named where he looks.
+        # H141: the room a new job needs grows with its estimate; the two rates in one place (usage.mjs's START_ROOM).
+        need(d["rates"] == {"per": 2, "five": 1, "weekly": 0.2, "fable": 0.2}, f"the rates aren't 1% and 0.2% per 2 minutes: {d['rates']}")
+        need(d["need"] == [6, 1.2, 0.2, 5, 1], f"the room a job needs isn't its estimate times the rate: {d['need']}")
+        need(d["m12"] == [True, False] and d["m30"] == [True, False], f"the 5-hour room doesn't grow with the estimate: {d['m12']}, {d['m30']}")
+        need(d["mWeek"] == [True, False] and d["mWeek12"] == [True, False] and d["mFable"] == [True, False],
+             f"the weekly room doesn't grow with the estimate: {d['mWeek']}, {d['mWeek12']}, {d['mFable']}")
+        need(d["mPast"] == [True, False], f"a job past the line skips the weekly room: {d['mPast']}")
+        need(not d["mRun"], "a running job's own check needs room for an estimate")
+        need("about 12 min of work needs 6% of room under its stop line of 70%, there's 4% (at 66%)" in d["mReason"],
+             f"the waiting reason doesn't say how much room it needs and has: {d['mReason']}")
+        # Without an estimate: the room of 10 minutes, the same as H114's old buffer.
         need(d["b5"] == [True, True, False] and not d["b5run"], f"a new job doesn't keep 5 points under the 5-hour line: {d['b5']}, {d['b5run']}")
         need(d["b5move"] == [True, False], f"the 5-hour buffer doesn't follow the moving line: {d['b5move']}")
         need(d["bWeek"] == [True, False] and not d["bWeekRun"] and d["bFable"] == [True, False],
              f"a new job doesn't keep 1 point under the weekly lines: {d['bWeek']}, {d['bWeekRun']}, {d['bFable']}")
         need(d["bPast"] == [True, False], f"a job past the line skips the weekly buffer: {d['bPast']}")
-        need("close to its stop line of 70%" in d["bReason"] and "buffer" not in d["bReason"].lower(), f"the waiting reason is off: {d['bReason']}")
+        need("about 10 min of work needs 5% of room under its stop line of 70%, there's 4% (at 66%)" in d["bReason"]
+             and "buffer" not in d["bReason"].lower(), f"the waiting reason is off: {d['bReason']}")
         gate = (ROOT / "status/save-usage.mjs").read_text()
-        need("{ weeklyOnly, start: true }" in gate, "the routine's start check doesn't keep the buffer")
-        need(gate.count("start: true") == 1, "the running job's own check keeps the buffer too")
+        need("{ weeklyOnly, start: true, minutes }" in gate and "'--minutes'" in gate, "the routine's start check doesn't take the job's estimate")
+        need(gate.count("start: true") == 1, "the running job's own check keeps the room too")
+        need("START_BUFFER" not in gate + (ROOT / "status/usage.mjs").read_text(), "H114's fixed buffer is still there")
+        tick = (ROOT / "routine/tick.py").read_text()
+        need('["--minutes", str(m)] if (m := job_minutes(job))' in tick and "def job_minutes(job):" in tick,
+             "the routine doesn't give the gate the job's estimate")
+        page = (ROOT / "status/index.html").read_text()
+        need("waits for the usage line: `" in page and "gate?.state === 'waiting'" in page, "the status page doesn't say why the job waits")
+        # jobs.py list says why the job first in line waits, from the routine's last start check (a copy, never the real note).
+        rmq = self.tmp / "h141-roadmap.md"
+        rmq.write_text((ROOT / "template/HQ/roadmap.md").read_text())
+        note = self.tmp / "h141-gate-note"
+        envq = {**os.environ, "HQ_ROADMAP": str(rmq), "HQ_GATE_NOTE": str(note)}
+        jq = lambda *a: sp.run(["python3", str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=envq)  # noqa: E731
+        for i in (1, 2):
+            jq("add", f"build thing {i}")
+        note.write_text("2 STOP. 5-hour limit: about 12 min of work needs 6% of room under its stop line of 70%, there's 4% (at 66%).")
+        o = jq("list").stdout
+        need("Job 2 · ready" in o and "    Waits for the usage line: 5-hour limit: about 12 min of work needs 6% of room" in o
+             and o.count("Waits for the usage line") == 1, f"jobs.py list doesn't say why the job waits: {o}")
+        jq("off")
+        need("Waits for the usage line" not in jq("list").stdout, "jobs.py list says it waits for the usage while the routine is off")
         need(d["none"] is None and all(v["moving"] for v in d["dflt"].values()) and d["dflt"]["weekly"]["fixed"] == 90,
              f"the roadmap's settings aren't read (moving by default): {d['none']}, {d['dflt']}")
         st = d["set"]

@@ -772,12 +772,24 @@ def jobs_line(q):
         # H30: waiting on purpose shows as waiting (yellow), with why, not as broken.
         n, _, why = open(GATE_NOTE).read().partition(" ")
         why = why.strip()
-        why = why[4:].strip(" :") if why.upper().startswith("STOP") else why
-        text, state = f"Job {n} waits for the usage line: {why[:110]}", "waiting"
+        why = why[4:].strip(" .:") if why.upper().startswith("STOP") else why
+        text, state = f"Job {n} waits for the usage line: {why[:240]}", "waiting"
     else:
         text = f"{waiting} waiting" if waiting else "Nothing waiting; looks every minute"
         state = "ok"
     routines.beat("jobs", state=state, text=text, every=60)
+
+
+def job_minutes(job):
+    """H141: the job's estimate in minutes (set when it was added, else made now), for the room it needs under
+    the usage lines; None when it can't be had (the gate then uses its own default)."""
+    try:
+        e = estimate._load_state().get(str(job["n"])) or {}
+        m = e.get("est") or estimate.estimate_for(job.get("text", ""))[0]
+        return max(1, int(round(m))) if m else None
+    except Exception as e:
+        log(f"estimate for the usage gate: {e!r}")
+        return None
 
 
 def schedule_promote():
@@ -1064,8 +1076,10 @@ def tick():
     clear(TRUST_NOTE)
     # F13: a job let past the line only skips the 5-hour line; the weekly line always counts, so a
     # past-the-line job held at the weekly line waits here quietly instead of being started every minute.
+    # H141: the room it needs under each line grows with its estimate (the rates are in status/usage.mjs).
     g = subprocess.run([NODE, os.path.join(JV, "status", "save-usage.mjs"), "--gate"]
-                       + (["--weekly-only"] if job["past"] else []),
+                       + (["--weekly-only"] if job["past"] else [])
+                       + (["--minutes", str(m)] if (m := job_minutes(job)) else []),
                        capture_output=True, text=True)
     if g.returncode:
         note = f"{job['n']} {g.stdout.strip()}"

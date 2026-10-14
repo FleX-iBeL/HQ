@@ -37,6 +37,10 @@ sys.path.insert(0, HERE)
 import hqpaths  # M1: the roadmap is in the workspace
 ROADMAP = hqpaths.ROADMAP
 LOCK = os.path.join(HERE, "..", "scratch", "routine", "queue.lock")
+# H141: why the job first in line waits, as the routine's start check last said it (tick.py writes it).
+# A test's roadmap copy (HQ_ROADMAP) never reads the real one.
+GATE_NOTE = os.environ.get("HQ_GATE_NOTE") or (
+    "" if os.environ.get("HQ_ROADMAP") else os.path.join(HERE, "..", "scratch", "routine", "gate-note"))
 HEADING = "## The queue"
 INTRO = (
     "Jobs agreed on a call, run one at a time on the MacBook by the routine (phase L). A call's let's go "
@@ -156,6 +160,17 @@ def estimate(fn, *a):
         return None
 
 
+def gate_words():
+    """H141: (job number, why it waits) from the routine's last start check, in plain words; (None, "") if none."""
+    try:
+        n, _, why = open(GATE_NOTE).read().strip().partition(" ")
+    except OSError:
+        return None, ""
+    why = why.strip()
+    why = why[4:].strip(" .:") + "." if why.upper().startswith("STOP") else why
+    return (int(n), why) if n.isdigit() and why else (None, "")
+
+
 def with_estimates(jobs):
     """H61: the list as on the roadmap, each job with its estimate, then the total and how close they've been."""
     places = {j["n"]: i + 1 for i, j in enumerate(line_up(jobs))}
@@ -165,9 +180,11 @@ def with_estimates(jobs):
     except Exception:
         return show_all(jobs)
     lines = []
+    gn, why = gate_words()
     for j in jobs:
         w = est.words(j["n"], p)
-        lines.append(show(j, places.get(j["n"])) + (f"\n    Estimate: {w}" if w else ""))
+        lines.append(show(j, places.get(j["n"])) + (f"\n    Estimate: {w}" if w else "")
+                     + (f"\n    Waits for the usage line: {why}" if j["n"] == gn and waiting(j) and p.get("on") else ""))
     lines.append(est.total_words(p))
     lines.append(est.accuracy_words(p["accuracy"]))
     lines.extend(p.get("learned") or [])  # H81: which computer, how the two compare, the patterns

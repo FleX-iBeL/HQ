@@ -141,13 +141,23 @@ export function stopLine(l, lines, now = new Date()) {
 }
 
 /**
- * H114 (13 October 2026, call at 19:53): "If the line is 70%, then if it's 65... It doesn't trigger it" and
- * "for the weekly I want a 1% buffer". A new job only starts this far under a stop line (in points), so it
- * isn't stopped right after starting; a job already running still goes on until the line itself. Only the
- * routine's start check (save-usage.mjs --gate) uses it, and nothing of it shows where he looks: "it doesn't
- * need to show up. In the user interface, it's just we need to have it."
+ * H141 (14 October 2026, call at 17:44), replacing H114's fixed buffer: "maybe based on the estimated time, we can
+ * see dynamically how much space there should be between now and the usage limit cap?", "1 % for every 2 minutes of
+ * estimated work?" and "so then its 0.2% for every 2 minutes for weekly?". A new job only starts when the room under
+ * each stop line is bigger than its own estimate needs; a job already running still goes on until the line itself.
+ * The two rates live here and only here: percent of room for every START_ROOM.per minutes of estimated work.
+ * Only the routine's start check (save-usage.mjs --gate --minutes N) uses them.
  */
-export const START_BUFFER = { five: 5, weekly: 1, fable: 1 };
+export const START_ROOM = { per: 2, five: 1, weekly: 0.2, fable: 0.2 };
+
+/** When the estimate isn't known: 10 minutes, the same room as H114's old buffer (5 and 1 points). */
+export const START_MINUTES = 10;
+
+/** The room (in points) a job of so many minutes needs under one stop line ('five', 'weekly' or 'fable'). */
+export function roomNeeded(key, minutes = START_MINUTES) {
+  const m = Number.isFinite(minutes) && minutes > 0 ? minutes : START_MINUTES;
+  return Math.round((10 * (START_ROOM[key] ?? START_ROOM.five) * m) / START_ROOM.per) / 10;
+}
 
 /**
  * Whether work may go on. It stops when any plan limit is at or above its stop line (see
@@ -156,10 +166,11 @@ export const START_BUFFER = { five: 5, weekly: 1, fable: 1 };
  * @param {ReturnType<typeof usageReading> | null} reading
  * @param {ReturnType<typeof lineSettings>} lines null: the roadmap names no usage limit, nothing stops
  * @param {Date} [now]
- * @param {{ weeklyOnly?: boolean, start?: boolean }} [opts] weeklyOnly: only the weekly limits count (F13: a
- *   job past the line); start: the check before a new job starts, which keeps START_BUFFER under each line (H114)
+ * @param {{ weeklyOnly?: boolean, start?: boolean, minutes?: number }} [opts] weeklyOnly: only the weekly limits
+ *   count (F13: a job past the line); start: the check before a new job starts, which needs room under each line for
+ *   the job's estimate of `minutes` (H141, roomNeeded)
  */
-export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = false, start = false } = {}) {
+export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = false, start = false, minutes } = {}) {
   if (!reading?.readable) return { stop: true, reason: 'The usage could not be read.' };
   if (!lines) return { stop: false, reason: '' };
   // A kept reading (F6) is old and from another session: shown, but never a stop.
@@ -169,15 +180,19 @@ export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = fa
     .filter((l) => !weeklyOnly || /^weekly/i.test(l.label))
     .map((l) => {
       const line = stopLine(l, lines, now).line;
-      const buffer = start ? START_BUFFER[lineKey(l.label) ?? 'five'] : 0;
-      return { ...l, line, from: Math.round(10 * (line - buffer)) / 10 };
+      const need = start ? roomNeeded(lineKey(l.label) ?? 'five', minutes) : 0;
+      return { ...l, line, need, room: Math.round(10 * (line - l.percent)) / 10 };
     })
-    .filter((l) => l.percent >= l.from);
+    .filter((l) => l.room <= l.need);
   if (over.length === 0) return { stop: false, reason: '' };
   return {
     stop: true,
     reason: `${over
-      .map((l) => (l.percent >= l.line ? `${l.label} is at ${l.percent}%, its stop line is ${l.line}%` : `${l.label} is at ${l.percent}%, close to its stop line of ${l.line}%`))
+      .map((l) =>
+        l.percent >= l.line
+          ? `${l.label} is at ${l.percent}%, its stop line is ${l.line}%`
+          : `${l.label}: about ${Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes) : START_MINUTES} min of work needs ${l.need}% of room under its stop line of ${l.line}%, there's ${l.room}% (at ${l.percent}%)`,
+      )
       .join('; ')}.`,
   };
 }
