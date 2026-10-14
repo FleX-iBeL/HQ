@@ -7494,7 +7494,7 @@ console.log(JSON.stringify({{
         tools = config.VOICE_RULES[config.VOICE_RULES.find("When is a day and a time"):][:400]  # the scheduler's syntax
         for name, text in {**rules, "the ask-first note": ask}.items():
             text = text.replace(own, "") if own else text
-            text = text.replace(tools, "")
+            text = text.replace(tools, "").replace(config.PINGS_RULE, "")  # H124's command syntax (pings.py), not speech
             hit = old.search(text)
             need(not hit, f"{name} still says a time another way: {hit and hit.group(0)!r}")
         need('Saturday at 6 30 in the evening?' in ask, "the ask-first note's example isn't in the new style")
