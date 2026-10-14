@@ -30,25 +30,12 @@
   html { height:100%; }
   /* H52: centred when there's room; when there isn't (the phone's HQ page, under its tabs), it starts at
      the top and scrolls, instead of cutting off the heading. The space at the bottom keeps the last line
-     clear of the round buttons in the corners. */
+     clear of the dock (H140). */
   body { background:var(--bg); color:var(--fg); font:17px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
          min-height:100%; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:28px;
          padding:calc(16px + env(safe-area-inset-top)) 16px calc(88px + env(safe-area-inset-bottom)); text-align:center; user-select:none; -webkit-user-select:none; }
   body::before, body::after { content:""; flex:1 1 0; margin:-14px 0; }
   #hqu-call-banner:not(:has(.hqu-bar.show)) { display:none; }  /* H59: no gap when there's no new version */
-  @media (max-height: 760px) {
-    body { gap:18px; }
-    h1 { font-size:28px; }
-    body:not(.chatting) #btn { width:min(50vw,190px); height:min(50vw,190px); }
-  }
-  /* F16: a short screen (a small phone with Safari's bars) still fits: tighter gaps and a smaller round button.
-     Only under 620 pixels high, so never on the iPhone 13 or in the desktop app. */
-  @media (max-height: 620px) {
-    body { gap:12px; }
-    body:not(.chatting) #btn { width:min(40vw,150px); height:min(40vw,150px); }
-    body #modehint { margin-top:-6px; }
-    body #soon { margin-top:-4px; }
-  }
   h1 { margin:0; font-size:34px; font-weight:650; letter-spacing:.5px; }
   /* H83: which HQ this is (VPS, or Local · macOS), small under the name. Out of the flow, in the gap below,
      so nothing on the call screen moves (F16). */
@@ -66,7 +53,7 @@
   #btn.busy { opacity:.6; }
   @keyframes pulse { 0%{box-shadow:0 0 0 0 var(--ring)} 70%{box-shadow:0 0 0 28px transparent} 100%{box-shadow:0 0 0 0 transparent} }
   #modes { display:flex; border:2px solid var(--muted); border-radius:999px; padding:3px; gap:3px; }
-  #modes.hide { visibility:hidden; }
+  #modes.hide { display:none; }
   #modes button { border:0; border-radius:999px; padding:5px 18px 5px 5px; background:transparent; color:var(--fg); font:600 17px/1 -apple-system,sans-serif; cursor:pointer;
                   display:inline-flex; align-items:center; gap:8px; }
   /* H29: each agent's headshot (or its placeholder) next to her name */
@@ -76,7 +63,7 @@
   /* H73: an agent still coming soon (Moneypenny): a smaller locked card under the others, greyed out;
      only her icon keeps its colour. Not a button: she can't be picked. */
   #soon { display:flex; flex-direction:column; gap:6px; align-items:center; margin-top:-14px; }
-  #soon.hide { visibility:hidden; }
+  #soon.hide { display:none; }
   #soon .card { touch-action:manipulation; display:flex; align-items:center; gap:10px; max-width:320px; padding:7px 14px 7px 7px; border:1.5px dashed var(--muted);
                 border-radius:16px; color:var(--muted); cursor:default; user-select:none; -webkit-user-select:none; text-align:left; }
   #soon .card > div { opacity:.75; }
@@ -85,8 +72,8 @@
   #soon .top svg { width:11px; height:11px; }
   #soon .tag { font:700 10px/1 -apple-system,sans-serif; letter-spacing:.5px; text-transform:uppercase; border:1px solid var(--muted); border-radius:999px; padding:3px 6px; }
   #soon .desc { font-size:12px; line-height:1.3; margin-top:3px; font-style:italic; }
-  /* F16 (reopened): on a call the screen keeps its old layout (the hidden picker and her card keep their room,
-     so the call's buttons sit where they always did), but it can't be scrolled into the white space below. */
+  /* F16 (reopened): on a call the screen can't be scrolled into the white space below. Since H140 (Modern) the
+     picker and her card step aside on a call and her orb leads, with Mute and Hang up under it. */
   html.calllock, html.calllock body { overflow:hidden; overscroll-behavior:none; }
   /* F20: a swipe that reaches the end of a sheet's list stays in that list; on the iPhone it could carry on
      into the call screen behind it, which then stayed pushed down once the sheet closed. */
@@ -125,25 +112,20 @@
   body.inapp #statbtn, body.inapp #statsheet { display:none !important; }
   #settings h2 { margin:0 0 6px; font-size:17px; font-weight:650; text-align:center; }
   #settings .row { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px 2px; border-bottom:1px solid var(--ring); }
-  #settings .row:last-of-type { border-bottom:0; }
   #settings .row span { font:600 16px/1.25 -apple-system,sans-serif; }
   #settings .row span b { font-weight:inherit; }
   #settings .row small { display:block; font-weight:400; font-size:13px; color:var(--muted); margin-top:2px; }
-  .sw { flex-shrink:0; min-width:64px; padding:9px 14px; border-radius:999px; border:2px solid var(--muted); background:transparent;
+  .sw { flex-shrink:0; min-width:58px; padding:9px 14px; border-radius:999px; border:0; background:var(--soft);
         color:var(--fg); font:600 15px/1 -apple-system,sans-serif; cursor:pointer; }
-  .sw.on { background:var(--accent); color:#04120f; border-color:var(--accent); }
+  .sw.on { background:var(--accent); color:#04120f; }
   #settings select { flex-shrink:0; font:600 15px/1 -apple-system,sans-serif; color:var(--fg); background:transparent; border:2px solid var(--muted); border-radius:999px; padding:8px 12px; }
   /* H106: the mic and sound choice; long device names are cut, the full name is in the list. */
   #settings select.dev { min-width:0; max-width:56%; text-overflow:ellipsis; }
   #settings .row[hidden] { display:none; }
-  /* H112: on a call the same sheet opens with only the mic and sound rows, from a round button right above the
-     chat bubble (only while the call is on), and a new choice takes effect at once. */
-  #devbtn { position:fixed; right:16px; bottom:calc(152px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
-            border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:none; align-items:center; justify-content:center;
-            cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  /* H112: on a call the same sheet opens with only the mic and sound rows, from the Mic button in the dock (only while
+     the call is on), and a new choice takes effect at once. */
+  #devbtn { display:none; align-items:center; justify-content:center; cursor:pointer; }
   #devbtn.show { display:flex; }
-  #devbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
-  #devbtn svg { width:26px; height:26px; }
   #settings.incall .row:not(.devrow), #settings.incall #voices { display:none; }
   #setdone { margin-top:8px; padding:14px; border-radius:999px; border:0; background:var(--fg); color:var(--bg); font:600 17px/1 -apple-system,sans-serif; cursor:pointer; }
   /* H3: what HQ is doing. Hidden outside a call. */
@@ -162,13 +144,9 @@
   @keyframes hear { from{ transform:scale(.95); } to{ transform:scale(1.08); } }
   @media (prefers-reduced-motion: reduce) { #orb.thinking, #orb.speaking, #orb.hearing, #orb.waiting, #orb.transcribing { animation-duration:3s; } }
   #err { color:var(--stop); max-width:22em; min-height:1.4em; font-size:15px; }
-  /* H6: the chat log. A round bubble button bottom right; tap to open the log, tap again to close. */
-  /* H13: the chat bubble sits a little higher; the status button is below it. */
+  /* H6: the chat log. A button in the dock; tap to open the log, tap again to close. */
   /* H34: both are always there, from the moment the app opens: before, during and after a call. */
-  #chatbtn { position:fixed; right:16px; bottom:calc(84px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
-             border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
-             cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
-  #chatbtn svg { width:26px; height:26px; }
+  #chatbtn { display:flex; align-items:center; justify-content:center; cursor:pointer; }
   #chatbtn .badge { position:absolute; top:-3px; right:-3px; min-width:20px; height:20px; padding:0 5px; border-radius:999px;
                     background:var(--accent); color:#04120f; font:700 12px/20px -apple-system,sans-serif; display:none; }
   #chatbtn .badge.show { display:block; }
@@ -176,30 +154,17 @@
           border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column;
           padding:14px 16px calc(84px + env(safe-area-inset-bottom)); text-align:left; user-select:text; -webkit-user-select:text; }
   #chat.open { display:flex; }
-  /* H13: the status page inside the app. The button bottom right, always there; tap to open, tap again
+  /* H13: the status page inside the app. Its button in the dock, always there; tap to open, tap again
      to close. Read only: the page itself, as on its own phone address. One sheet at a time. */
-  #statbtn { position:fixed; right:16px; bottom:calc(16px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
-             border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
-             cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
-  #statbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
-  #statbtn svg { width:26px; height:26px; }
-  /* H40: her voice on or off, whatever the phone's volume. Bottom left, always there, like the two
-     buttons on the right; red with a struck-through speaker while her voice is off. */
-  #voicebtn { position:fixed; left:16px; bottom:calc(16px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
-              border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
-              cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
-  #voicebtn svg { width:26px; height:26px; }
+  #statbtn { display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  /* H40: her voice on or off, whatever the phone's volume. Its button in the dock, always there;
+     a struck-through speaker while her voice is off. */
+  #voicebtn { display:flex; align-items:center; justify-content:center; cursor:pointer; }
   #voicebtn .off { display:none; }
-  #voicebtn[aria-pressed="true"] { background:var(--stop); color:#fff; }
   #voicebtn[aria-pressed="true"] .on { display:none; }
   #voicebtn[aria-pressed="true"] .off { display:inline; }
-  /* H57: every past call. Right above her voice button, bottom left, always there (the same place in
-     the desktop app); a list, newest first, and a tap opens that call read only, as the chat shows it. */
-  #histbtn { position:fixed; left:16px; bottom:calc(84px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
-             border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
-             cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
-  #histbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
-  #histbtn svg { width:26px; height:26px; }
+  /* H57: every past call. Its button in the dock, always there (the same in the desktop app); a list, newest first, and a tap opens that call read only, as the chat shows it. */
+  #histbtn { display:flex; align-items:center; justify-content:center; cursor:pointer; }
   #histsheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
                border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column;
                padding:14px 16px calc(84px + env(safe-area-inset-bottom)); text-align:left; user-select:text; -webkit-user-select:text; }
@@ -291,20 +256,15 @@
   /* H72: hidden on purpose, no hint anywhere. Holding the greyed-out Send for a moment shows a small Yes
      just above it; sliding onto it and letting go sends "Yes". The disabled Send lets the touch through
      to its wrapper, which keeps the slide (no scrolling, no text selection, no long-press menu). */
-  /* H105: his quick notes. Right above the Past calls button, bottom left, always there (the same in the desktop
-     app). Off a call the sheet ends above the round buttons on both sides. One sheet at a time: his notes, kept in his workspace (HQ/notes.md), a line to add one, a Clear on each
+  /* H105: his quick notes. Its button in the dock, always there (the same in the desktop
+     app). One sheet at a time: his notes, kept in his workspace (HQ/notes.md), a line to add one, a Clear on each
      (gone through). Since H117 just text: no paper to draw on, and the note field grows like the chat's. */
-  #notesbtn { position:fixed; left:16px; bottom:calc(152px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
-             border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
-             cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
-  /* F25: Donna's direct line (H80) on the phone, above the notes button: the home-screen icon can be this
+  #notesbtn { display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  /* F25: Donna's direct line (H80) on the phone, in the dock: the home-screen icon can be this
      page itself (8443) or the HQ page around it (8444), so the bubble lives here, where both show it. */
-  #directbtn { position:fixed; left:16px; bottom:calc(220px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
-               border-radius:50%; background:#6d28d9; color:#fff; display:none; align-items:center; justify-content:center;
-               text-decoration:none; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  #directbtn { display:none; align-items:center; justify-content:center; text-decoration:none; }
   #directbtn.on { display:flex; }
-  #directbtn svg { width:26px; height:26px; }
-  #directbtn i { position:absolute; top:3px; right:3px; width:12px; height:12px; border-radius:50%; background:#ef4444; display:none; }
+  #directbtn i { position:absolute; top:3px; right:calc(50% - 18px); width:10px; height:10px; border-radius:50%; background:#ef4444; display:none; }
   /* F29: a tap on the bubble opens her chat as a sheet over the call page, so a call keeps running: the chat
      itself (/direct, through the call line) in a frame. Above the round buttons, so her text field is free;
      dragged up by its handle to nearly the full screen, down far enough to close it. One sheet at a time. */
@@ -318,15 +278,11 @@
   #dirhead::before { content:""; position:absolute; left:50%; top:10px; width:40px; height:5px; margin-left:-20px; border-radius:3px; background:#5b616c; }
   #dirclose { position:absolute; right:6px; top:2px; border:0; background:transparent; color:#e8e9ec; font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
   #dirframe { flex:1; width:100%; border:0; background:#16181c; }
-  /* H101: his calendar. Right side, where the call's mic button sits during a call (only before and after a call, so
+  /* H101: his calendar. In the dock, where the call's Mic button sits during a call (only before and after a call, so
      the two never meet). The appointments come from his Google Calendar, read only (app/agenda.py); a tap opens one,
      and "Call about this" starts a call that knows what it's about. */
-  #calbtn { position:fixed; right:16px; bottom:calc(152px + env(safe-area-inset-bottom)); z-index:20; width:56px; height:56px;
-            border-radius:50%; border:0; background:var(--fg); color:var(--bg); display:flex; align-items:center; justify-content:center;
-            cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  #calbtn { display:flex; align-items:center; justify-content:center; cursor:pointer; }
   #calbtn.hide { display:none; }
-  #calbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
-  #calbtn svg { width:26px; height:26px; }
   #calsheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
               border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:8px;
               padding:14px 16px calc(220px + env(safe-area-inset-bottom)); text-align:left; user-select:text; -webkit-user-select:text; }
@@ -409,8 +365,6 @@
   #wxbody .hr { flex-shrink:0; width:52px; text-align:center; border-radius:12px; padding:6px 0; background:color-mix(in srgb, var(--fg) 7%, var(--bg)); font-size:14px; font-variant-numeric:tabular-nums; }
   #wxbody .hr small { display:block; color:var(--muted); font-size:11px; }
   #wxbody h3 { margin:4px 0 0; font-size:13px; font-weight:600; color:var(--muted); }
-  #notesbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
-  #notesbtn svg { width:26px; height:26px; }
   #notesheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
                border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:10px;
                padding:14px 16px calc(216px + env(safe-area-inset-bottom)); text-align:left; user-select:text; -webkit-user-select:text; }
@@ -456,12 +410,12 @@
   body.chatting #freetag { display:none; }
   body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet, body.chatting #notesheet, body.chatting #calsheet { top:0; height:auto; bottom:calc(318px + env(safe-area-inset-bottom));
                         border-top:0; border-bottom:1px solid var(--muted); border-radius:0 0 18px 18px;
-                        padding:calc(14px + env(safe-area-inset-top)) 16px 12px; box-shadow:0 8px 24px rgba(0,0,0,.2); }
-  body.chatting #orbwrap { order:1; flex-direction:row; gap:12px; margin:0; }
+                        padding:calc(14px + env(safe-area-inset-top)) 16px 12px; }
+  body.chatting #orbwrap { order:1; flex-direction:row; }
   body.chatting #orb { width:36px; height:36px; border-width:3px; }
-  body.chatting #status { order:2; font-size:14px; min-height:0; }
+  body.chatting #status { order:2; min-height:0; }
   body.chatting #mute { order:3; min-width:200px; padding:18px 26px; }
-  body.chatting #cancel { order:3; margin-top:0; }
+  body.chatting #cancel { order:3; }
   body.chatting #btn { order:4; width:auto; height:auto; padding:12px 28px; border-radius:999px; font-size:17px; animation:none; }
   body.chatting #err { order:5; min-height:0; }
   body.chatting #err:empty { display:none; }
@@ -480,160 +434,154 @@
   #hangno, #cxno { border:2px solid var(--muted); background:transparent; color:var(--fg); }
   #hangyes, #cxyes { border:0; background:var(--stop); color:#fff; }
 </style>
-<!-- H137: Modern, the second look. Everything below only applies with html.modern (picked in Settings, remembered on
-     this device); without it the page is Classic, exactly as it always was. Same buttons, same sheets, same behaviour:
-     only the layout and the look change. Claude's design: one calm column, the round buttons gathered in one dock at
-     the bottom (a tap on the open one closes it again, as before), sheets that reach down to the dock, softer cards,
-     each agent in her own colour, and her tint (H86) on a call. -->
-<style id="modernlook">
-  #dock { display:none; }
-  html.modern { --surface:#ffffff; --line:rgba(17,24,39,.09); --soft:color-mix(in srgb, var(--fg) 6%, var(--bg)); --dockh:66px; }
-  @media (prefers-color-scheme: dark) { html.modern { --surface:#1b1f27; --line:rgba(255,255,255,.08); } }
-  html.modern body { gap:22px; padding:calc(14px + env(safe-area-inset-top)) 16px calc(var(--dockh) + 34px + env(safe-area-inset-bottom));
+<!-- H137, H140: the look, Modern, the only one since H140 (14 October 2026); Classic is gone. These rules come after
+     the page's older ones above and win over them. Claude's design: one calm column, the round buttons gathered in one
+     dock at the bottom (a tap on the open one closes it again), sheets that reach down to the dock, softer cards, each
+     agent in her own colour, and her tint (H86) on a call. -->
+<style id="look">
+  :root { --surface:#ffffff; --line:rgba(17,24,39,.09); --soft:color-mix(in srgb, var(--fg) 6%, var(--bg)); --dockh:66px; }
+  @media (prefers-color-scheme: dark) { :root { --surface:#1b1f27; --line:rgba(255,255,255,.08); } }
+  body { gap:22px; padding:calc(14px + env(safe-area-inset-top)) 16px calc(var(--dockh) + 34px + env(safe-area-inset-bottom));
                      font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif; }
-  html.modern body::before { order:-3; }
+  body::before { order:-3; }
   /* The header: smaller, with which HQ this is under it. */
-  html.modern h1 { order:-2; font-size:24px; font-weight:700; letter-spacing:.2px; }
-  html.modern h1 #where { font-size:10.5px; }
+  h1 { order:-2; font-size:24px; font-weight:700; letter-spacing:.2px; }
+  h1 #where { font-size:10.5px; }
   /* Settings: a small pill top left, across from the version in the top right. */
-  html.modern #setbtn { position:fixed; left:12px; top:calc(8px + env(safe-area-inset-top)); z-index:6; margin:0; padding:7px 12px; border-radius:999px;
+  #setbtn { position:fixed; left:12px; top:calc(8px + env(safe-area-inset-top)); z-index:6; margin:0; padding:7px 12px; border-radius:999px;
                         background:var(--soft); color:var(--fg); font:600 13px/1 -apple-system,sans-serif; }
-  html.modern #setbtn svg { width:14px; height:14px; vertical-align:-2px; margin-right:5px; }
+  #setbtn svg { width:14px; height:14px; vertical-align:-2px; margin-right:5px; }
   /* The weather: a quiet chip right under the header, before a call. */
-  html.modern #wx { position:static; transform:none; order:-1; height:auto; min-width:0; max-width:100%; flex-direction:row; gap:10px;
+  #wx { position:static; transform:none; order:-1; height:auto; min-width:0; max-width:100%; flex-direction:row; gap:10px;
                     padding:8px 14px; border-radius:999px; box-shadow:none; background:var(--soft); margin-top:4px; z-index:auto; }
-  html.modern #wx .l2 { font-size:12.5px; }
-  html.modern #wx[aria-expanded="true"] { background:var(--accent); color:#04120f; }
+  #wx .l2 { font-size:12.5px; }
+  #wx[aria-expanded="true"] { background:var(--accent); color:#04120f; }
   /* The agents: cards side by side, the picked one in her own colour. */
-  html.modern #modes { border:0; padding:0; gap:10px; width:100%; max-width:380px; }
-  html.modern #modes.hide, html.modern #soon.hide { display:none; }
-  html.modern #modes button { flex:1 1 0; min-width:0; flex-direction:column; gap:8px; padding:14px 8px 12px; border-radius:20px; background:var(--surface);
+  #modes { border:0; padding:0; gap:10px; width:100%; max-width:380px; }
+  #modes button { flex:1 1 0; min-width:0; flex-direction:column; gap:8px; padding:14px 8px 12px; border-radius:20px; background:var(--surface);
                               border:1.5px solid var(--line); color:var(--fg); font:600 16px/1.1 -apple-system,sans-serif;
                               box-shadow:0 1px 2px rgba(0,0,0,.05); transition:border-color .15s, background .15s; }
-  html.modern #modes button img { width:52px; height:52px; box-shadow:0 0 0 3px var(--surface), 0 0 0 4px var(--line); }
-  html.modern #modes button.on { background:color-mix(in srgb, var(--her, var(--accent)) 13%, var(--surface)); border-color:var(--her, var(--accent)); color:var(--fg); }
-  html.modern #modes button.on img { box-shadow:0 0 0 3px var(--surface), 0 0 0 5px var(--her, var(--accent)); }
-  html.modern #modehint { margin-top:-12px; font-size:13.5px; max-width:340px; line-height:1.35; }
+  #modes button img { width:52px; height:52px; box-shadow:0 0 0 3px var(--surface), 0 0 0 4px var(--line); }
+  #modes button.on { background:color-mix(in srgb, var(--her, var(--accent)) 13%, var(--surface)); border-color:var(--her, var(--accent)); color:var(--fg); }
+  #modes button.on img { box-shadow:0 0 0 3px var(--surface), 0 0 0 5px var(--her, var(--accent)); }
+  #modehint { margin-top:-12px; font-size:13.5px; max-width:340px; line-height:1.35; }
   /* Who's coming soon: one slim locked line under the cards. */
-  html.modern #soon { margin-top:-10px; width:100%; max-width:380px; }
-  html.modern #soon .card { width:100%; max-width:none; border:1.5px dashed var(--line); border-radius:16px; padding:8px 12px 8px 8px; background:transparent; }
-  html.modern #soon .tag { border-color:var(--line); }
-  html.modern #freetag { margin-top:-12px; }
+  #soon { margin-top:-10px; width:100%; max-width:380px; }
+  #soon .card { width:100%; max-width:none; border:1.5px dashed var(--line); border-radius:16px; padding:8px 12px 8px 8px; background:transparent; }
+  #soon .tag { border-color:var(--line); }
+  #freetag { margin-top:-12px; }
   /* Call: a calm round button, a size smaller, with a soft glow. */
-  html.modern #btn { width:min(46vw,176px); height:min(46vw,176px); font:650 22px/1 -apple-system,sans-serif;
+  #btn { width:min(46vw,176px); height:min(46vw,176px); font:650 22px/1 -apple-system,sans-serif;
                      box-shadow:0 12px 32px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 0 0 var(--ring); }
-  html.modern #btn:not(.live) { animation:none; }
-  html.modern #status { font-size:15px; margin-top:-8px; }
+  #btn:not(.live) { animation:none; }
+  #status { font-size:15px; margin-top:-8px; }
   /* On a call: who's speaking is the big thing (the orb in her colour), with Mute and Hang up under it. */
-  html.modern body:has(#btn.live) #orbwrap, html.modern body:has(#btn.busy) #orbwrap { order:1; }
-  html.modern body:has(#btn.live) #status { order:2; }
-  html.modern #mute { order:3; } html.modern #cancel { order:3; }
-  html.modern body:has(#btn.live) #btn { order:4; } html.modern #err { order:5; }
-  html.modern #orbwrap { margin:8px 0 0; gap:14px; }
-  html.modern #orb { width:112px; height:112px; border-width:5px; }
-  html.tinted.modern #orb { --accent:var(--tintA); }
-  html.tinted.modern #orb.waiting, html.tinted.modern #orb.transcribing { --accent:var(--wait); }
-  html.modern #orblabel { font-size:19px; }
-  html.modern #btn.live { width:auto; height:auto; min-width:200px; padding:17px 34px; border-radius:999px; font-size:18px; animation:none;
+  body:has(#btn.live) #orbwrap, body:has(#btn.busy) #orbwrap { order:1; }
+  body:has(#btn.live) #status { order:2; }
+  #mute { order:3; } #cancel { order:3; }
+  body:has(#btn.live) #btn { order:4; } #err { order:5; }
+  #orbwrap { margin:8px 0 0; gap:14px; }
+  #orb { width:112px; height:112px; border-width:5px; }
+  html.tinted #orb { --accent:var(--tintA); }
+  html.tinted #orb.waiting, html.tinted #orb.transcribing { --accent:var(--wait); }
+  #orblabel { font-size:19px; }
+  #btn.live { width:auto; height:auto; min-width:200px; padding:17px 34px; border-radius:999px; font-size:18px; animation:none;
                           box-shadow:0 10px 26px color-mix(in srgb, var(--stop) 35%, transparent); }
-  html.modern #mute { min-width:200px; padding:16px 26px; border:0; background:var(--soft); font-size:17px; }
-  html.modern #mute.on { background:var(--fg); color:var(--bg); }
-  html.modern #mute.talk { background:var(--accent); color:#04120f; }
-  html.modern #mute.transcribing { background:var(--wait); color:#1a1300; }
-  html.modern #cancel { margin-top:-10px; border-width:1.5px; }
+  #mute { min-width:200px; padding:16px 26px; border:0; background:var(--soft); font-size:17px; }
+  #mute.on { background:var(--fg); color:var(--bg); }
+  #mute.talk { background:var(--accent); color:#04120f; }
+  #mute.transcribing { background:var(--wait); color:#1a1300; }
+  #cancel { margin-top:-10px; border-width:1.5px; }
   /* The dock: every round button in one bar at the bottom, each with its name under it. */
-  html.modern #dock { display:flex; position:fixed; z-index:20; left:10px; right:10px; bottom:calc(10px + env(safe-area-inset-bottom));
+  #dock { display:flex; position:fixed; z-index:20; left:10px; right:10px; bottom:calc(10px + env(safe-area-inset-bottom));
                       max-width:520px; margin:0 auto; height:var(--dockh); padding:6px; gap:2px; align-items:stretch; justify-content:space-around;
                       border-radius:22px; border:1px solid var(--line); background:color-mix(in srgb, var(--surface) 86%, transparent);
                       -webkit-backdrop-filter:blur(18px) saturate(1.4); backdrop-filter:blur(18px) saturate(1.4); box-shadow:0 10px 30px rgba(0,0,0,.14); }
-  html.modern #dock > * { position:relative; inset:auto; flex:1 1 0; min-width:0; max-width:76px; width:auto; height:auto; border-radius:16px; border:0;
+  #dock > * { position:relative; inset:auto; flex:1 1 0; min-width:0; max-width:76px; width:auto; height:auto; border-radius:16px; border:0;
                           background:transparent; color:var(--fg); box-shadow:none; flex-direction:column; gap:3px; padding:6px 2px 4px; text-decoration:none; }
-  html.modern #dock > * svg { width:23px; height:23px; }
-  html.modern #dock > *::after { content:attr(data-dl); font:600 10.5px/1 -apple-system,sans-serif; letter-spacing:.1px; color:var(--muted);
+  #dock > * svg { width:23px; height:23px; }
+  #dock > *::after { content:attr(data-dl); font:600 10.5px/1 -apple-system,sans-serif; letter-spacing:.1px; color:var(--muted);
                                  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
-  html.modern #dock > [aria-expanded="true"] { background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); }
-  html.modern #dock > [aria-expanded="true"]::after { color:var(--accent); }
-  html.modern #dock > #voicebtn[aria-pressed="true"] { background:color-mix(in srgb, var(--stop) 14%, transparent); color:var(--stop); }
-  html.modern #dock > #voicebtn[aria-pressed="true"]::after { content:"Voice off"; color:var(--stop); }
-  html.modern #dock > #directbtn { background:transparent !important; color:var(--her, #6d28d9); }
-  html.modern #dock > #directbtn i { top:3px; right:calc(50% - 18px); width:10px; height:10px; }
-  html.modern #chatbtn .badge { top:0; right:calc(50% - 22px); }
+  #dock > [aria-expanded="true"] { background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); }
+  #dock > [aria-expanded="true"]::after { color:var(--accent); }
+  #dock > #voicebtn[aria-pressed="true"] { background:color-mix(in srgb, var(--stop) 14%, transparent); color:var(--stop); }
+  #dock > #voicebtn[aria-pressed="true"]::after { content:"Voice off"; color:var(--stop); }
+  #dock > #directbtn { background:transparent !important; color:var(--her, #6d28d9); }
+  #chatbtn .badge { top:0; right:calc(50% - 22px); }
   /* Sheets: one shape for all of them, reaching down to the dock, with a handle on top and a soft Close. */
-  html.modern #chat, html.modern #histsheet, html.modern #statsheet, html.modern #notesheet, html.modern #calsheet, html.modern #wxsheet, html.modern #settings {
+  #chat, #histsheet, #statsheet, #notesheet, #calsheet, #wxsheet, #settings {
     max-width:640px; margin:0 auto; border:0; border-top:1px solid var(--line); border-radius:26px 26px 0 0; box-shadow:0 -12px 40px rgba(0,0,0,.18);
     padding:24px 18px calc(var(--dockh) + 22px + env(safe-area-inset-bottom)); }
-  html.modern #settings { padding-bottom:calc(18px + env(safe-area-inset-bottom)); max-height:calc(100dvh - 24px); overflow-y:auto; overscroll-behavior:contain; }
-  html.modern #chat::before, html.modern #histsheet::before, html.modern #statsheet::before, html.modern #notesheet::before,
-  html.modern #calsheet::before, html.modern #wxsheet::before, html.modern #settings::before {
+  #settings { padding-bottom:calc(18px + env(safe-area-inset-bottom)); max-height:calc(100dvh - 24px); overflow-y:auto; overscroll-behavior:contain; }
+  #chat::before, #histsheet::before, #statsheet::before, #notesheet::before,
+  #calsheet::before, #wxsheet::before, #settings::before {
     content:""; position:absolute; left:50%; top:8px; width:38px; height:5px; margin-left:-19px; border-radius:3px; background:var(--line); }
-  html.modern #settings::before { position:sticky; display:block; flex-shrink:0; margin:-14px auto 6px; left:auto; top:0; }
-  html.modern #chat h2, html.modern #histsheet h2, html.modern #statsheet h2, html.modern #notesheet h2, html.modern #calsheet h2, html.modern #wxsheet h2,
-  html.modern #settings h2 { color:var(--fg); font-size:17px; font-weight:700; }
-  html.modern #chatclose, html.modern #histclose, html.modern #statclose, html.modern #notesclose, html.modern #calclose, html.modern #wxclose {
+  #settings::before { position:sticky; display:block; flex-shrink:0; margin:-14px auto 6px; left:auto; top:0; }
+  #chat h2, #histsheet h2, #statsheet h2, #notesheet h2, #calsheet h2, #wxsheet h2,
+  #settings h2 { color:var(--fg); font-size:17px; font-weight:700; }
+  #chatclose, #histclose, #statclose, #notesclose, #calclose, #wxclose {
     top:-6px; right:-2px; padding:7px 12px; border-radius:999px; background:var(--soft); font-size:14px; }
-  html.modern #histback, html.modern #calback, html.modern #notesall { top:-6px; left:-2px; padding:7px 12px; border-radius:999px; font-size:14px; }
-  html.modern #histback, html.modern #calback { background:var(--soft); }
-  html.modern #histfoot { padding-left:0; } html.modern #chatfoot { padding:12px 0 0; }
-  html.modern #histcont, html.modern #chatcont, html.modern #calgo { border-radius:16px; }
-  html.modern #statframe { border-radius:16px; }
+  #histback, #calback, #notesall { top:-6px; left:-2px; padding:7px 12px; border-radius:999px; font-size:14px; }
+  #histback, #calback { background:var(--soft); }
+  #histfoot { padding-left:0; } #chatfoot { padding:12px 0 0; }
+  #histcont, #chatcont, #calgo { border-radius:16px; }
+  #statframe { border-radius:16px; }
   /* Lists in the sheets: soft cards instead of lines. */
-  html.modern #histlist { gap:6px; }
-  html.modern #histlist button { border:0; border-radius:14px; background:var(--soft); padding:13px 14px; }
-  html.modern #histlist .day { padding:12px 6px 2px; }
-  html.modern #callist .appt { border-radius:14px; }
-  html.modern #callist .day { margin:14px 0 4px 6px; text-transform:uppercase; letter-spacing:.04em; font-size:12px; }
-  html.modern #callist .day:first-child { margin-top:2px; }
-  html.modern #noteslist .note, html.modern #wxbody .fact, html.modern #wxbody .hr, html.modern #calone .notes { background:var(--soft); border-radius:14px; }
-  html.modern #calping { border:0; background:var(--soft); border-radius:16px; }
-  html.modern #calping.on { background:color-mix(in srgb, var(--accent) 16%, transparent); }
+  #histlist { gap:6px; }
+  #histlist button { border:0; border-radius:14px; background:var(--soft); padding:13px 14px; }
+  #histlist .day { padding:12px 6px 2px; }
+  #callist .appt { border-radius:14px; }
+  #callist .day { margin:14px 0 4px 6px; text-transform:uppercase; letter-spacing:.04em; font-size:12px; }
+  #callist .day:first-child { margin-top:2px; }
+  #noteslist .note, #wxbody .fact, #wxbody .hr, #calone .notes { background:var(--soft); border-radius:14px; }
+  #calping { border:0; background:var(--soft); border-radius:16px; }
+  #calping.on { background:color-mix(in srgb, var(--accent) 16%, transparent); }
   /* Chat: rounder bubbles, a field like a messaging app. */
-  html.modern #chatlog .msg, html.modern #histlog .msg { border-radius:20px; }
-  html.modern #chatlog .me, html.modern #histlog .me { border-bottom-right-radius:6px; }
-  html.modern #chatlog .hq, html.modern #histlog .hq { border-bottom-left-radius:6px; }
-  html.modern #typein, html.modern #notesin { border:1.5px solid var(--line); background:var(--soft); }
-  html.modern #typein:focus, html.modern #notesin:focus { border-color:var(--accent); }
+  #chatlog .msg, #histlog .msg { border-radius:20px; }
+  #chatlog .me, #histlog .me { border-bottom-right-radius:6px; }
+  #chatlog .hq, #histlog .hq { border-bottom-left-radius:6px; }
+  #typein, #notesin { border:1.5px solid var(--line); background:var(--soft); }
+  #typein:focus, #notesin:focus { border-color:var(--accent); }
   /* Settings: the rows as one list, the switches as small pills. */
-  html.modern #settings .row { border-bottom:1px solid var(--line); padding:12px 2px; }
-  html.modern .sw { border:0; background:var(--soft); min-width:58px; }
-  html.modern .sw.on { background:var(--accent); }
-  html.modern #settings select { border:1.5px solid var(--line); background:var(--soft); }
-  html.modern #setdone { border-radius:16px; margin-top:12px; position:sticky; bottom:0; flex-shrink:0; box-shadow:0 -8px 16px var(--bg); }
+  #settings .row { border-bottom:1px solid var(--line); padding:12px 2px; }
+  #settings select { border:1.5px solid var(--line); background:var(--soft); }
+  #setdone { border-radius:16px; margin-top:12px; position:sticky; bottom:0; flex-shrink:0; box-shadow:0 -8px 16px var(--bg); }
   /* The weather sheet's parts keep their height (the next hours were squeezed flat in a short sheet). */
-  html.modern #wxbody > * { flex-shrink:0; }
+  #wxbody > * { flex-shrink:0; }
   /* Hang up and Cancel ask first, as before, in a softer card. */
-  html.modern #hangask, html.modern #cxask { border-radius:24px; background:var(--surface); }
-  html.modern #hangno, html.modern #cxno { border:0; background:var(--soft); }
+  #hangask, #cxask { border-radius:24px; background:var(--surface); }
+  #hangno, #cxno { border:0; background:var(--soft); }
   /* With a sheet open on a call: the sheet on top, the call's controls in a short row above the dock. */
-  html.modern body.chatting { gap:12px; padding-bottom:calc(var(--dockh) + 22px + env(safe-area-inset-bottom)); }
-  html.modern body.chatting #chat, html.modern body.chatting #statsheet, html.modern body.chatting #histsheet,
-  html.modern body.chatting #notesheet, html.modern body.chatting #calsheet {
+  body.chatting { gap:12px; padding-bottom:calc(var(--dockh) + 22px + env(safe-area-inset-bottom)); }
+  body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet,
+  body.chatting #notesheet, body.chatting #calsheet {
     top:0; bottom:calc(var(--dockh) + 262px + env(safe-area-inset-bottom)); border-top:0; border-bottom:1px solid var(--line); border-radius:0 0 26px 26px;
     padding:calc(14px + env(safe-area-inset-top)) 16px 12px; }
-  html.modern body.chatting #chat::before, html.modern body.chatting #statsheet::before, html.modern body.chatting #histsheet::before,
-  html.modern body.chatting #notesheet::before, html.modern body.chatting #calsheet::before { display:none; }
-  html.modern body.chatting #orb { width:34px; height:34px; border-width:3px; }
-  html.modern body.chatting #orblabel { font-size:16px; }
-  html.modern body.chatting #mute { padding:14px 24px; }
-  html.modern body.chatting #btn.live { padding:13px 28px; font-size:16px; }
-  /* Donna's chat as a sheet over the page (F29): her own page follows the look (?look=). */
-  html.modern #dirsheet { max-width:640px; margin:0 auto; border-radius:26px 26px 0 0; background:var(--bg); }
-  html.modern #dirhead::before { background:var(--line); }
-  html.modern #dirclose { top:4px; right:8px; padding:6px 12px; border-radius:999px; background:var(--soft); color:var(--fg); font-size:14px; }
-  html.modern #dirframe { background:var(--bg); }
-  html.modern #hangask h2, html.modern #cxask h2 { font-weight:700; }
-  /* The look itself, in Settings. */
-  #lookrow .seg { display:inline-flex; gap:4px; flex-shrink:0; }
-  #lookrow .seg .sw { min-width:0; }
+  body.chatting #chat::before, body.chatting #statsheet::before, body.chatting #histsheet::before,
+  body.chatting #notesheet::before, body.chatting #calsheet::before { display:none; }
+  body.chatting #orb { width:34px; height:34px; border-width:3px; }
+  body.chatting #orblabel { font-size:16px; }
+  body.chatting #mute { padding:14px 24px; }
+  body.chatting #btn.live { padding:13px 28px; font-size:16px; }
+  /* Donna's chat as a sheet over the page (F29): her own page follows the look. */
+  #dirsheet { max-width:640px; margin:0 auto; border-radius:26px 26px 0 0; background:var(--bg); }
+  #dirhead::before { background:var(--line); }
+  #dirclose { top:4px; right:8px; padding:6px 12px; border-radius:999px; background:var(--soft); color:var(--fg); font-size:14px; }
+  #dirframe { background:var(--bg); }
+  #hangask h2, #cxask h2 { font-weight:700; }
   /* A short screen: a little tighter. */
   @media (max-height: 700px) {
-    html.modern body { gap:14px; }
-    html.modern #btn:not(.live) { width:min(38vw,140px); height:min(38vw,140px); }
-    html.modern #modes button { padding:10px 8px; } html.modern #modes button img { width:42px; height:42px; }
-    html.modern #orb { width:84px; height:84px; }
+    body { gap:14px; }
+    #btn:not(.live) { width:min(38vw,140px); height:min(38vw,140px); }
+    #modes button { padding:10px 8px; } #modes button img { width:42px; height:42px; }
+    #orb { width:84px; height:84px; }
+  }
+  /* F16, H140: a small phone with Safari's bars (under 620 pixels high) still fits before a call, without scrolling. */
+  @media (max-height: 620px) {
+    body { gap:10px; }
+    #modehint { margin-top:-6px; } #soon { margin-top:-4px; } #freetag { margin-top:-6px; }
   }
 </style>
-<!-- H137: the look this device picked (Classic until Modern is picked), set before anything is drawn. -->
-<script>try { if (localStorage.getItem("hq-look") === "modern") document.documentElement.classList.add("modern"); } catch (e) {}</script>
 </head>
 <body>
 <!-- H59: the small grey version in the corner (a tap shows the changelog), and a bar when a new version is out -->
@@ -657,7 +605,6 @@
 <div id="shade"></div>
 <div id="settings" role="dialog" aria-label="Settings">
   <h2>Settings</h2>
-  <div class="row" id="lookrow"><span>Look<small>Classic as it always was, or the new Modern. Kept on this device</small></span><span class="seg" role="group" aria-label="Look"><button type="button" class="sw" data-look="classic" aria-pressed="true">Classic</button><button type="button" class="sw" data-look="modern" aria-pressed="false">Modern</button></span></div>
   <div class="row"><span>Free<small>Plain Claude, for testing and showing others: no connectors (no mail, no calendar), none of your files, no notes, nothing saved. Only the web</small></span><button id="free" class="sw" type="button" aria-pressed="false">Off</button></div>
   <div id="voices"></div>
   <template id="voiceopts">
@@ -681,44 +628,45 @@
 <div id="chat" role="dialog" aria-label="Chat log"><div id="chathead"><h2 id="chattitle">What was said</h2><button id="chatclose" type="button">Close</button></div><div id="chatlog"></div>
   <form id="typeform" autocomplete="off"><textarea id="typein" rows="1" enterkeyhint="send" placeholder="Type to Donna" aria-label="Type to Donna" maxlength="2000"></textarea><span id="sendwrap"><button id="yesbtn" type="button" tabindex="-1" aria-hidden="true">Yes</button><button id="typesend" type="submit" disabled>Send</button></span></form>
   <div id="chatfoot"><button id="chatcont" type="button">Call back and continue</button><small id="chatcontnote"></small></div></div>
-<button id="chatbtn" type="button" aria-label="Chat log" aria-expanded="false">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"/></svg>
-  <span class="badge"></span>
-</button>
-<button id="devbtn" type="button" aria-label="Microphone and sound" aria-expanded="false" aria-controls="settings">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>
-</button>
 <div id="statsheet" role="dialog" aria-label="Status"><div id="stathead"><h2>Status</h2><button id="statclose" type="button">Close</button></div><iframe id="statframe" title="Status" src="about:blank"></iframe></div>
-<button id="statbtn" type="button" aria-label="Status page" aria-expanded="false">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h10M5 17h6"/></svg>
-</button>
 <div id="histsheet" role="dialog" aria-label="Past calls"><div id="histhead"><button id="histback" type="button">‹ Calls</button><h2 id="histtitle">Past calls</h2><button id="histclose" type="button">Close</button></div><div id="histlist"></div><div id="histlog"></div><div id="histfoot"><button id="histcont" type="button">Continue this call</button><small id="histcontnote"></small></div></div>
-<button id="histbtn" type="button" aria-label="Past calls" aria-expanded="false">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
-</button>
 <div id="notesheet" role="dialog" aria-label="Notes"><div id="noteshead"><button id="notesall" type="button" disabled>Clear all</button><h2>Notes</h2><button id="notesclose" type="button">Close</button></div>
   <div id="noteslist"></div>
   <form id="notesform" autocomplete="off"><textarea id="notesin" rows="1" placeholder="A quick note" aria-label="A quick note" maxlength="2000"></textarea><button id="notesadd" type="submit" disabled>Add</button></form>
   <small id="notesnote"></small></div>
-<button id="notesbtn" type="button" aria-label="Notes" aria-expanded="false">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
-</button>
 <div id="calsheet" role="dialog" aria-label="Calendar"><div id="calhead"><button id="calback" type="button">‹ Days</button><h2 id="caltitle">Calendar</h2><button id="calclose" type="button">Close</button></div>
   <div id="callist"></div><div id="calone"></div><small id="calnote"></small></div>
-<button id="calbtn" type="button" aria-label="Calendar" aria-expanded="false">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 14h2M14 14h2M8 18h2"/></svg>
-</button>
 <button id="wx" type="button" aria-label="Weather" aria-expanded="false"></button>
 <div id="wxsheet" role="dialog" aria-label="Weather"><div id="wxhead"><h2 id="wxtitle">Weather</h2><button id="wxclose" type="button">Close</button></div>
   <div id="wxbody"></div></div>
 <div id="dirsheet" role="dialog" aria-label="Text Donna"><div id="dirhead"><button id="dirclose" type="button">Close</button></div><iframe id="dirframe" title="Text Donna" src="about:blank"></iframe></div>
-<a id="directbtn" href="/direct" aria-label="Text Donna" aria-expanded="false">
+<nav id="dock" aria-label="HQ">
+<a id="directbtn" data-dl="Donna" href="/direct" aria-label="Text Donna" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-5A8 8 0 1 1 21 12z"/></svg><i></i>
 </a>
-<button id="voicebtn" type="button" aria-label="Mute her voice" aria-pressed="false">
+<button id="chatbtn" data-dl="Chat" type="button" aria-label="Chat log" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"/></svg>
+  <span class="badge"></span>
+</button>
+<button id="calbtn" data-dl="Calendar" type="button" aria-label="Calendar" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 14h2M14 14h2M8 18h2"/></svg>
+</button>
+<button id="devbtn" data-dl="Mic" type="button" aria-label="Microphone and sound" aria-expanded="false" aria-controls="settings">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>
+</button>
+<button id="notesbtn" data-dl="Notes" type="button" aria-label="Notes" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+</button>
+<button id="histbtn" data-dl="Calls" type="button" aria-label="Past calls" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
+</button>
+<button id="statbtn" data-dl="Status" type="button" aria-label="Status page" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h10M5 17h6"/></svg>
+</button>
+<button id="voicebtn" data-dl="Voice" type="button" aria-label="Mute her voice" aria-pressed="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path class="on" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="off" d="M16 9l6 6M22 9l-6 6"/></svg>
 </button>
-<nav id="dock" aria-label="HQ"></nav>
+</nav>
 <div id="hangshade"></div>
 <div id="hangask" role="alertdialog" aria-modal="true" aria-labelledby="hangq" aria-describedby="hangd">
   <h2 id="hangq">Are you sure?</h2><p id="hangd">This ends the call.</p>
@@ -968,35 +916,6 @@ setBtn.addEventListener("click", () => { if (state === "idle") showSettings(true
 devBtn.addEventListener("click", () => { if (state === "live") showSettings(!setEl.classList.contains("open")); });
 document.getElementById("setdone").addEventListener("click", () => showSettings(false));
 shade.addEventListener("click", () => showSettings(false));
-// H137: the look, Classic (HQ as it always looked) or Modern, picked in Settings and remembered on this device;
-// Classic until Modern is picked. In Modern the round buttons sit together in one dock at the bottom, each with its
-// name; in Classic they go back to their own corners. Same buttons, same ids, so everything works the same.
-const dockEl = document.getElementById("dock"), lookRow = document.getElementById("lookrow");
-const DOCK = [["directbtn", "Donna"], ["chatbtn", "Chat"], ["calbtn", "Calendar"], ["devbtn", "Mic"], ["notesbtn", "Notes"],
-              ["histbtn", "Calls"], ["statbtn", "Status"], ["voicebtn", "Voice"]];
-let look = "classic";
-try { if (localStorage.getItem("hq-look") === "modern") look = "modern"; } catch (e) {}
-function applyLook(l, save) {
-  look = l === "modern" ? "modern" : "classic";
-  if (save) { try { localStorage.setItem("hq-look", look); } catch (e) {} }
-  document.documentElement.classList.toggle("modern", look === "modern");
-  for (const [id, label] of DOCK) {
-    const el = document.getElementById(id);
-    if (!el) continue;
-    if (!el.hqSpot) { el.hqSpot = document.createComment(id); el.before(el.hqSpot); }
-    if (!el.dataset.dl) el.dataset.dl = label;
-    if (look === "modern") { if (el.parentNode !== dockEl) dockEl.append(el); }
-    else if (el.parentNode === dockEl) el.hqSpot.after(el);
-  }
-  lookRow.querySelectorAll("[data-look]").forEach(b => {
-    const on = b.dataset.look === look; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on));
-  });
-  // An open status page or her chat follows at once.
-  if (typeof statOpen === "function" && statOpen()) statFrame.setAttribute("src", statusUrl() + "?look=" + look);
-  if (typeof dirOpen === "function" && dirOpen()) document.getElementById("dirframe").setAttribute("src", "/direct?sheet&look=" + look);
-  if (typeof fitCall === "function") fitCall();
-}
-lookRow.addEventListener("click", ev => { const b = ev.target.closest("[data-look]"); if (b) applyLook(b.dataset.look, true); });
 let pc = null, dc = null, stream = null, pingTimer = null, wakeLock = null, state = "idle", muted = false;
 let transcribingBtn = false, transcribingTimer = null;  // H11
 
@@ -1537,7 +1456,7 @@ function showStatus(open) {
   if (open) closeWx();           // H135
   statEl.classList.toggle("open", open);
   statBtn.setAttribute("aria-expanded", String(open));
-  const want = open ? statusUrl() + "?look=" + look : "about:blank";  // H137: the status page follows the look
+  const want = open ? statusUrl() : "about:blank";
   if (statFrame.getAttribute("src") !== want) statFrame.setAttribute("src", want);
   showLayout();
 }
@@ -1786,7 +1705,7 @@ function showDirect(open) {
   }
   dirEl.classList.toggle("open", open);
   dirBtn.setAttribute("aria-expanded", String(open));
-  const want = open ? "/direct?sheet" + "&look=" + look : "about:blank";  // H137
+  const want = open ? "/direct?sheet" : "about:blank";
   if (dirFrame.getAttribute("src") !== want) dirFrame.setAttribute("src", want);
   showLayout();
 }
@@ -2395,7 +2314,6 @@ function cleanup(text) {
 
 btn.addEventListener("click", () => { if (state === "idle") call(); else if (state === "live") askHangup(true); });
 clearChat(); showMode(); showVoices(); showSound(); applyVoice(); loadLastCall();
-applyLook(look);  // H137
 // Closing the page or locking away from it also counts as hanging up.
 window.addEventListener("pagehide", ev => { if (ev.persisted) return; try { if (dc && dc.readyState === "open") dc.send(JSON.stringify({ type: "hangup" })); } catch (e) {} });
 document.addEventListener("visibilitychange", async () => {

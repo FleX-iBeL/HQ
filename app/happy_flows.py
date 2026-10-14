@@ -77,7 +77,7 @@ Run them before and after every update; they print a short pass/fail table at th
      its answer, a stuck job shows STOPPED, a job that wakes shows BUILDING again; the status line leaves its
      sign of life; then two real throwaway Terminal windows: continue is typed into the one asked for only,
      and both close themselves
-  35 a mute button for her voice (H40): on the call page (headless browser) a button bottom left, before
+  35 a mute button for her voice (H40): on the call page (headless browser) a button in the dock, before
      and during a call, mutes her audio and switches her incoming track off; her lines still reach the
      chat, the talk button, its low sound and Cancel work as before, and the next load remembers it
   37 a failed routine run says why (H42), on copies, no Claude: the 17:00 mail check's own output reads
@@ -123,7 +123,7 @@ Run them before and after every update; they print a short pass/fail table at th
      box, not inside the Hang up question; in the browser and on the phone space does nothing
   53 H57, no Claude: every past call. The transcript code lists the saved calls newest first with date, time
      and agent (calls without anything said left out), reads one by name and refuses any other name; the call
-     server serves both read only; on the call page (headless browser) the button sits right above the voice
+     server serves both read only; on the call page (headless browser) the button sits in the dock before the voice
      button, before, during and after a call, in the browser and in the app; the list opens, a tap shows that
      call (no tools, cancelled struck through), Back returns, Close closes; one sheet at a time
   58 H60, one Claude turn: continue an earlier call. What the new call gets of the earlier one (his and her
@@ -143,7 +143,7 @@ Run them before and after every update; they print a short pass/fail table at th
   83 H105, no Claude: the notes button. Notes kept one line each in a throwaway notes file (a line a call
      wrote by hand read too), cleared one by one or all, just text since H117 (no doodle endpoints, a picture
      saved before left alone); /api/notes only from the page; the real call page in a headless browser, phone
-     and app: the round button above Past calls before, during and after a call, the sheet without paper, the
+     and app: the button in the dock before Past calls before, during and after a call, the sheet without paper, the
      note field growing with what's typed and back after Add, add, clear, clear all on a second tap
   91 H101, no Claude: the calendar. A stand-in for the read-only Claude run (only list_calendars and
      list_events allowed, everything that writes refused): the tool results read from its stream, word for
@@ -1253,13 +1253,14 @@ console.log(JSON.stringify({{
         No Claude turns; the live phone line is only read, never changed."""
         import subprocess as sp
         jv = ROOT
-        # The call page: the bubble moved up, the status button below it, the page inside the app.
+        # The call page: the chat and status buttons in the dock, the page inside the app.
         page = (jv / "app/web/index.html").read_text()
         need('id="statbtn"' in page and 'id="statsheet"' in page and 'id="statframe"' in page,
              "the status button or its sheet is missing on the call page")
-        need("right:16px; bottom:calc(84px" in page.split("#chatbtn {", 1)[1][:200]
-             and "bottom:calc(16px" in page.split("#statbtn {", 1)[1][:200],
-             "the chat bubble is not above the status button")
+        # H140: both round buttons sit in the dock at the bottom, the chat before the status button.
+        dock = page.split('<nav id="dock"', 1)[1].split("</nav>", 1)[0]
+        need('id="chatbtn"' in dock and 'id="statbtn"' in dock and dock.index('id="chatbtn"') < dock.index('id="statbtn"'),
+             "the chat and status buttons aren't in the dock, the chat first")
         need(":8444/" in page and ":4748/" in page and 'statFrame.setAttribute("src", want)' in page
              and '"about:blank"' in page, "the status sheet doesn't load the status page's own address, or keeps it loaded when closed")
         need("if (open) showStatus(false)" in page, "the chat and the status page can be open at the same time")
@@ -1546,7 +1547,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         need("function cleanup(text) {\n  askHangup(false);" in page, "the question stays open after the call ends by itself")
         # H38: a rule may be shared with Cancel's question ("#hangask, #cxask {").
         z = lambda sel: int(re.search(re.escape(sel) + r"(?:, [#.\w-]+)* \{[^}]*?z-index:(\d+)", page).group(1))
-        need(z("#hangask") > max(z("#chat"), z("#statsheet"), z("#chatbtn"), z("#statbtn"), z("#settings")),
+        need(z("#hangask") > max(z("#chat"), z("#statsheet"), z("#dock"), z("#settings")),  # H140: the round buttons sit in the dock
              "the question can sit under the chat or the status page")
         return "buzz when Talking… starts (not on a tap); Hang up asks Are you sure?, Stay on keeps the call"
 
@@ -4119,7 +4120,7 @@ setTimeout(() => {
   if (card) card.click();
   out.push('picked:' + agent + '/' + mode + ' inagents:' + ('moneypenny' in AGENTS));
   out.push('voices:' + [...document.querySelectorAll('#voices .row span')].map(s => s.firstChild.textContent).join(','));
-  setState('live', 'x'); out.push('oncall:' + getComputedStyle(document.getElementById('soon')).visibility); setState('idle', 'x');
+  setState('live', 'x'); out.push('oncall:' + (getComputedStyle(document.getElementById('soon')).display === 'none' ? 'hidden' : 'shown'));  // H140: steps aside setState('idle', 'x');
   out.push('oldsaved:' + localStorage.getItem('hq-cards'));
   if (card) for (let i = 0; i < 11; i++) card.click();  // with the tap above, twelve
   out.push('egg:' + [...document.querySelectorAll('#modes button')].map(b => b.dataset.agent).join(',') + '/' + localStorage.getItem('hq-cards') + '/' + sessionStorage.getItem('hq-cards'));
@@ -4149,9 +4150,9 @@ setTimeout(() => {
         return "Moneypenny: a smaller locked card under Donna and Pepper, coming soon, yellow M, not on the picker; brought in on Opus; the easter egg lasts only until the app closes"
 
     async def flow64(self) -> str:
-        """F16: on a call the page can't be scrolled into white space, and (reopened) the call screen keeps its
-        old layout: the hidden agent picker and Moneypenny's card keep their room, so the round button, Mute and
-        the status line sit where they always did. The scrolling is locked instead, as long as the listening
+        """F16: on a call the page can't be scrolled into white space. Since H140 (Modern, the one look) the agent
+        picker and Moneypenny's card step aside on a call and her orb leads, then the status line, Mute and the
+        round button, in that order (before H140, Classic kept their room). The scrolling is locked as long as the listening
         line fits on the screen. F20: after Past calls is opened and closed on a call, the call screen is back where
         it was, also when the phone's scrolling carries on a moment after the close. The real page in a headless
         browser. No Claude turns."""
@@ -4180,7 +4181,8 @@ setTimeout(async () => {
   calledHere = true; setState('connecting', ''); await wait(100); out.push('connecting:' + (locked() ? 'locked' : 'free'));
   setState('live', 'On the call'); setMuted(false); await wait(100);
   out.push('live:' + (locked() ? 'locked' : 'free'));
-  out.push('room:' + (box('modes')[2] > 0 && box('soon')[2] > 0 ? 'kept' : 'gone'));
+  out.push('room:' + (box('modes')[2] === 0 && box('soon')[2] === 0 ? 'aside' : 'kept'));
+  out.push('order:' + (box('orbwrap')[0] < box('status')[0] && box('status')[0] < box('mute')[0] && box('mute')[0] < box('btn')[0] ? 'ok' : 'wrong'));
   out.push('btn:' + Math.round(box('btn')[0]) + ' mute:' + Math.round(box('mute')[0]));
   out.push('statusfits:' + (box('orbwrap')[1] <= innerHeight ? 'yes' : 'no'));
   out.push('orb:' + Math.round(box('orbwrap')[1]) + ' status:' + Math.round(box('status')[1]) + ' h:' + innerHeight);
@@ -4213,7 +4215,7 @@ setTimeout(async () => {
             need(res["card"] == "yes", f"{name}: Moneypenny's card isn't on the page, so the test proves nothing: {res}")
             need(int(res["idle"]) <= 0 and int(res["after"]) <= 0, f"{name}: the page scrolls past the screen before or after a call: {res}")
             need(res["apart"] == "yes", f"{name}: the hint or her card overlaps Donna and Pepper: {res}")
-            need(res["room"] == "kept", f"{name}: the picker or her card takes no room on a call, so the call screen sits too high: {res}")
+            need(res["room"] == "aside" and res["order"] == "ok", f"{name}: on a call the picker or her card still takes room, or her orb, the status line, Mute and the button aren't in that order (H140): {res}")
             need(res["afterlock"] == "free", f"{name}: the page stays locked after the call: {res}")
             need(res["chat"] == "ok", f"{name}: with the chat open the page scrolls: {res}")
             if fits:
@@ -4225,8 +4227,9 @@ setTimeout(async () => {
                 # Off a Mac the fonts are a pixel smaller, so here it may just fit; then it's locked, rightly.
                 need(res["live"] == "free" or res["statusfits"] == "yes", f"{name}: the listening line is off the screen and can't be scrolled to: {res}")
             seen.append(res["sizes"])
-        need(len(set(seen[:2])) == 1, f"Donna, Pepper or her card look different between the iPhone 13 sizes: {seen}")
-        return "on a call the old layout stays, the page can't be scrolled and Past calls closes back to the same place (iPhone 13 Safari and home screen, desktop app); a small phone still scrolls to its listening line"
+        # H140: Modern draws Donna and Pepper a little tighter on a short screen (under 700 high), on purpose; her card stays the same.
+        need(len({s.split("/")[1] for s in seen[:2]}) == 1, f"her card looks different between the iPhone 13 sizes: {seen}")
+        return "on a call her orb leads and the picker steps aside (H140), the page can't be scrolled and Past calls closes back to the same place (iPhone 13 Safari and home screen, desktop app); a small phone still scrolls to its listening line"
 
     # 48
     async def flow48(self) -> str:
@@ -4548,8 +4551,8 @@ setTimeout(() => {
   const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
   const shown = el => getComputedStyle(el).display !== "none" && el.getBoundingClientRect().width > 0;
   const voice = document.getElementById("voicebtn");
-  const placed = () => { const h = histBtn.getBoundingClientRect(), v = voice.getBoundingClientRect();
-    return shown(histBtn) && Math.abs(h.left - v.left) < 2 && h.bottom <= v.top && v.top - h.bottom < 20; };
+  // H140: in the dock, before her voice button.
+  const placed = () => ((a, b) => shown(a) && a.parentElement.id === "dock" && b.parentElement.id === "dock" && a.compareDocumentPosition(b) === Node.DOCUMENT_POSITION_FOLLOWING)(histBtn, voice);
   await wait(300);
   out.push("start:" + (placed() ? "ok" : "WRONG"));
   histBtn.click(); await wait(400);
@@ -4597,11 +4600,11 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
             say(f"   {where}: {res}")
             need(all(part.endswith(":ok") for part in res.split(" | ")), f"the past-calls button or sheet isn't right ({where}): {res}")
         return ("every saved call newest first with date, time and agent, one call read by name only, served read only; "
-                "the button above the voice button before, during and after a call, in the browser and the app; list, call, Back, Close")
+                "the button in the dock before the voice button before, during and after a call, in the browser and the app; list, call, Back, Close")
     async def flow83(self) -> str:
         """H105, no Claude: the notes button. The notes file itself (notes.py on a throwaway copy), the call server's
         /api/notes on the test server's own notes file (the workspace's is never touched), and the real call page in a
-        headless browser, phone and desktop app: the round button above Past calls, before, during and after a call;
+        headless browser, phone and desktop app: the button in the dock before Past calls, before, during and after a call;
         the sheet, adding a note, clearing one and all. Since H117 just text: no paper and no doodle endpoints, a
         picture saved before is left alone, and the note field grows with what's typed like the chat's."""
         import notes as _notes
@@ -4683,8 +4686,8 @@ window.fetch = async (url, opt) => {
 (async () => {
   const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
   const shown = el => getComputedStyle(el).display !== "none" && el.getBoundingClientRect().width > 0;
-  const placed = () => { const n = notesBtn.getBoundingClientRect(), h = histBtn.getBoundingClientRect();
-    return shown(notesBtn) && Math.abs(n.left - h.left) < 2 && n.bottom <= h.top && h.top - n.bottom < 20; };
+  // H140: in the dock, before Past calls.
+  const placed = () => ((a, b) => shown(a) && a.parentElement.id === "dock" && b.parentElement.id === "dock" && a.compareDocumentPosition(b) === Node.DOCUMENT_POSITION_FOLLOWING)(notesBtn, histBtn);
   await wait(300);
   out.push("start:" + (placed() ? "ok" : "WRONG"));
   notesBtn.click(); await wait(400);
@@ -4745,7 +4748,7 @@ window.fetch = async (url, opt) => {
         need((real.read_bytes() if real.exists() else None) == real_before
              and (real_pic.stat().st_mtime if real_pic.exists() else None) == pic_before, "the workspace's own notes were touched")
         return ("notes kept one line each in a throwaway notes file, a hand-written line read too, cleared one by one or all, just text "
-                "(no doodle endpoints, an old picture left alone); the server's /api/notes only from the page; the button above Past calls "
+                "(no doodle endpoints, an old picture left alone); the server's /api/notes only from the page; the button in the dock before Past calls "
                 "before, during and after a call, phone and app: the sheet without paper, the note field growing and back after Add, add, "
                 "clear, clear all on a second tap")
 
@@ -4893,8 +4896,8 @@ window.fetch = async (url, opt) => {
   const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
   const shown = el => getComputedStyle(el).display !== "none" && el.getBoundingClientRect().width > 0;
   const CALLED = []; call = function () { CALLED.push(aboutNext ? aboutNext.id : "none"); aboutNext = null; };
-  const placed = () => { const c = calBtn.getBoundingClientRect(), h = chatBtn.getBoundingClientRect();
-    return shown(calBtn) && Math.abs(c.left - h.left) < 2 && c.bottom <= h.top && h.top - c.bottom < 20; };
+  // H140: in the dock, after the chat button.
+  const placed = () => shown(calBtn) && ((a, b) => shown(a) && a.parentElement.id === "dock" && b.parentElement.id === "dock" && a.compareDocumentPosition(b) === Node.DOCUMENT_POSITION_FOLLOWING)(chatBtn, calBtn);
   await wait(300);
   out.push("start:" + (placed() ? "ok" : "WRONG"));
   calBtn.click(); await wait(400);
@@ -5240,7 +5243,7 @@ window.fetch = async (url, opt) => {
   out.push("list:" + (histOpen() && !shown(foot) ? "ok" : "WRONG"));
   histList.querySelector("button").click(); await wait(400);
   out.push("foot:" + (shown(foot) && !cont.disabled && cont.textContent === "Continue this call with Pepper"
-    && cont.getBoundingClientRect().left >= histBtn.getBoundingClientRect().right ? "ok" : "WRONG " + cont.textContent));
+    && cont.getBoundingClientRect().bottom <= document.getElementById("dock").getBoundingClientRect().top + 1 ? "ok" : "WRONG " + cont.textContent));
   document.getElementById("histback").click(); await wait(300);
   out.push("back:" + (!shown(foot) ? "ok" : "WRONG"));
   histList.querySelector("button").click(); await wait(300);
@@ -5269,8 +5272,7 @@ window.fetch = async (url, opt) => {
   out.push("chatnofoot:" + (!shown(cfoot) ? "ok" : "WRONG"));
   chatBtn.click(); await wait(400);
   out.push("chatfoot:" + (chatOpen() && shown(cfoot) && !ccont.disabled && ccont.textContent === "Call back and continue with Pepper"
-    && ccont.getBoundingClientRect().left >= histBtn.getBoundingClientRect().right
-    && ccont.getBoundingClientRect().right <= chatBtn.getBoundingClientRect().left ? "ok" : "WRONG " + ccont.textContent));
+    && ccont.getBoundingClientRect().bottom <= document.getElementById("dock").getBoundingClientRect().top + 1 ? "ok" : "WRONG " + ccont.textContent));
   free = true; showMode(); showChatFoot();
   out.push("chatfree:" + (ccont.disabled && document.getElementById("chatcontnote").textContent.includes("Free") ? "ok" : "WRONG"));
   ccont.click(); await wait(200);
@@ -7697,37 +7699,62 @@ console.log(JSON.stringify({{
                 "once and queues no merges; one really away still gives way")
 
     async def flow96(self) -> str:
-        """H137, no Claude: the Modern look next to Classic. The call page has a Look row in Settings (Classic and
-        Modern), Classic until Modern is picked, remembered on this device (set before anything is drawn); every Modern
-        rule only applies under html.modern, so Classic is exactly as before; in Modern the round buttons gather in one
-        dock and go back to their own spots in Classic (same ids, so everything works the same)."""
+        """H137, H140, no Claude: Modern is the only look. No Look row in Settings, no saved choice and no html.modern
+        switch: Modern's rules are the page's own (one style block, after the older rules), and the round buttons sit in
+        the dock in the page itself, each with its name. A device that saved Classic before H140 still gets Modern:
+        the real page in a headless browser, phone and desktop app, with "classic" saved on the device."""
         page = (APP / "web/index.html").read_text()
-        need('id="lookrow"' in page and 'data-look="classic"' in page and 'data-look="modern"' in page,
-             "the Look row with Classic and Modern is missing from Settings")
-        need('data-look="classic" aria-pressed="true"' in page, "Classic isn't the look before anything is picked")
-        head = page.split("</head>", 1)[0]
-        need('localStorage.getItem("hq-look") === "modern"' in head, "the picked look isn't set before the page is drawn")
-        css = head.split('<style id="modernlook">', 1)
-        need(len(css) == 2, "the Modern style block is missing")
-        rules = [r.strip() for r in re.sub(r"/\*.*?\*/", "", css[1].split("</style>", 1)[0], flags=re.S).split("}")]
-        loose = []
-        for r in rules:
-            if "{" not in r:
-                continue
-            sel = r.split("{", 1)[0].strip()
-            if not sel or sel.startswith("@media") or sel.startswith("html.modern") or sel in ("#dock",) or sel.startswith("#lookrow"):
-                continue
-            if all(part.strip().startswith(("html.modern", "html.tinted.modern")) for part in sel.split(",")):
-                continue
-            loose.append(sel)
-        need(not loose, f"Modern rules that also change Classic: {loose[:5]}")
-        need('id="dock"' in page, "the dock is missing")
-        for bid in ("directbtn", "chatbtn", "calbtn", "devbtn", "notesbtn", "histbtn", "statbtn", "voicebtn"):
-            need(f'["{bid}",' in page and f'id="{bid}"' in page, f"{bid} isn't in the dock or not on the page")
-        need("el.hqSpot.after(el)" in page, "Classic doesn't put the buttons back in their own spots")
-        need('localStorage.setItem("hq-look", look)' in page, "the picked look isn't remembered on this device")
-        need("applyLook(look)" in page, "the look isn't applied when the page starts")
-        return "the Look row in Settings, Classic by default and set before drawing, every Modern rule under html.modern, the dock with the same buttons, remembered on this device"
+        for gone, what in (('id="lookrow"', "the Look row in Settings"), ("data-look=", "the Classic and Modern buttons"),
+                           ("hq-look", "the saved look"), ("html.modern", "the html.modern switch"), ('classList.toggle("modern"', "the switch in the code"),
+                           ("applyLook", "applyLook"), ("look=", "the look passed to the status page or her chat"), ("hqSpot", "Classic's own spots for the buttons")):
+            need(gone not in page, f"{what} is still on the call page (H140: Modern only)")
+        need(page.count('<style id="look">') == 1, "the look's style block is missing")
+        dock = page.split('<nav id="dock" aria-label="HQ">', 1)
+        need(len(dock) == 2, "the dock is missing")
+        dock = dock[1].split("</nav>", 1)[0]
+        order = [("directbtn", "Donna"), ("chatbtn", "Chat"), ("calbtn", "Calendar"), ("devbtn", "Mic"), ("notesbtn", "Notes"),
+                 ("histbtn", "Calls"), ("statbtn", "Status"), ("voicebtn", "Voice")]
+        at = [dock.find(f'id="{bid}" data-dl="{label}"') for bid, label in order]
+        need(all(i >= 0 for i in at) and at == sorted(at), f"the dock doesn't hold the eight buttons with their names, in order: {at}")
+        need(all(page.count(f'id="{bid}"') == 1 for bid, _ in order), "a dock button is on the page twice")
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        await self.ensure_server()
+        saved = '<script>try { localStorage.setItem("hq-look", "classic"); } catch (e) {}</script>'
+        harness = r"""<script>
+setTimeout(() => {
+  const out = [], dk = document.getElementById("dock").getBoundingClientRect();
+  out.push("dock:" + (dk.height > 0 && Math.abs(dk.bottom - innerHeight) < 40 ? "ok" : "off " + Math.round(dk.top) + "/" + Math.round(dk.bottom)));
+  const ids = ["chatbtn", "histbtn", "notesbtn", "voicebtn"].concat(document.body.classList.contains("inapp") ? [] : ["statbtn"]);
+  const off = ids.filter(id => { const r = document.getElementById(id).getBoundingClientRect();
+    return !(r.width > 0 && r.left >= dk.left - 1 && r.right <= dk.right + 1 && r.top >= dk.top - 1 && r.bottom <= dk.bottom + 1); });
+  out.push("inside:" + (off.length ? off.join(",") : "ok"));
+  out.push("label:" + getComputedStyle(document.getElementById("chatbtn"), "::after").content);
+  out.push("lookrow:" + (document.querySelector("#settings [data-look]") ? "there" : "gone"));
+  const pre = document.createElement("pre"); pre.id = "h140"; pre.textContent = "H140RESULT " + out.join(" | ") + " END"; document.body.append(pre);
+}, 1500);
+</script>"""
+        f = self.tmp / "h140.html"
+        f.write_text(page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">' + saved, 1).replace("</body>", harness + "</body>", 1))
+        fa = self.tmp / "h140app.html"  # the desktop app loads the page with ?app
+        fa.write_text(f.read_text().replace('new URLSearchParams(location.search).has("app")', "true", 1))
+        seen = []
+        for name, size, page_file in (("the phone", "390,844", f), ("the desktop app", "1180,780", fa)):
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'h140-profile'}", "--disable-web-security", f"--window-size={size}",
+                                              "--virtual-time-budget=6000", "--dump-dom", page_file.as_uri()], timeout=60)
+            mm = re.search(r'<pre id="h140">H140RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{name}: the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+            say(f"   {name} ({size}): {mm.group(1)}")
+            need(res["dock"] == "ok", f"{name}: with Classic saved on the device, the dock isn't at the bottom: {res}")
+            need(res["inside"] == "ok", f"{name}: round buttons outside the dock: {res}")
+            need(res["label"] == '"Chat"', f"{name}: the dock's buttons have no names under them: {res}")
+            need(res["lookrow"] == "gone", f"{name}: the Look row is still in Settings: {res}")
+            seen.append(name)
+        return "Modern only: no Look row, no saved choice, no html.modern; the eight buttons in the dock with their names; Classic saved on a device still shows Modern (" + ", ".join(seen) + ")"
 
 
     # 98
@@ -9417,7 +9444,7 @@ FLOWS = {
     93: ("H125: Donna's watch list: she keeps an eye out for a mail or the weather and texts when it comes", False, "flow93"),
     94: ("H135: the weather in the app: a widget on the main screen, a sheet with warnings (KNMI), UV and the next hours", False, "flow94"),
     95: ("H139: closing and opening the laptop's lid never leaves two mains: a real online check, the main that stayed stays", False, "flow95"),
-    96: ("H137: the Modern look next to Classic: a Look switch in Settings, Classic until Modern is picked, the round buttons in one dock", False, "flow96"),
+    96: ("H137, H140: Modern is the only look: no Look switch, no saved choice, the round buttons in one dock", False, "flow96"),
     97: ("F31: a refused pull or push from a job shows up: the github incident, Donna texts at once, closed by the next one through", False, "flow97"),
     98: ("F32: a fresh install on an old release (a download, a shallow clone) sees the newer one and updates with one tap", False, "flow98"),
 }
