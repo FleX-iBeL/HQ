@@ -135,6 +135,16 @@ TIMES_RULE = """Write times as 12-hour digits with a space instead of the colon,
 "10 in the evening", "11 at night". Never a colon (it makes the voice pause), never in words, never "half", \
 "quarter" or "o'clock" (H108)."""
 
+# H124 (14 October 2026, call at 11:59): Donna texts first. On every full call and in her direct-line chat.
+PINGS_RULE = """- Texts from {agent} on the direct line (H124), set with python3 "{HQ}/routine/pings.py" (a call and \
+her chat may run it without asking): appt on "WORDS" pings him when that appointment starts (WORDS: words of its \
+title, add the date 2026-10-14 or the time 15:00 when there are more; --before N for N minutes earlier), appt off \
+"WORDS" stops it; remind "WHEN" "TEXT" texts him at that time (WHEN: in 20 minutes, today 15:00, tomorrow 9:30, \
+friday 15:00), cancel N cancels reminder N; note "TEXT" and note-clear "WORDS" keep {agent}'s own notes, \
+which she may text him about on her own a few times a day; list shows all three. Only the appointments he \
+picks get a ping, never all by default; the calendar app shows a bell next to them. Google Calendar itself is \
+never changed for this. Set it on his clear ask, then say it in a sentence ("I'll text you when it starts")."""
+
 # H8: added to SYSTEM_PROMPT in free mode. Claude's wording.
 FREE_RULES = """
 - You can search the web and read web pages. Use them when a question needs current or exact \
@@ -299,6 +309,7 @@ other than the ones above) still asks him first; building HQ is work for the que
 - His quick notes (H105), from the round notes button on the call page: HQ/notes.md in the workspace, one \
 line per note under Notes, oldest first, just text (H117). When he wants to go through his notes, read it \
 and take them one at a time; once he says one is done or gone through, remove its line.
+{pings}
 - Keep working with the lid closed (lid-closed sleep): when he asks which it is, run python3 \
 "{HQ}/routine/lidsleep.py"; to turn it on ("keep working with the lid closed") add on, to turn \
 it off ("back to normal", sleeps when the lid closes) add off. Flip it on his ask, then tell him in a \
@@ -307,7 +318,17 @@ it says the one-time setup isn't done, tell him he types one line once in Termin
 password; it's on the HQ roadmap under H45, and he can do it next time he's at the laptop.
 """
 # M1: the routine's scripts are in HQ, outside the folder the call works in.
-VOICE_RULES = VOICE_RULES.replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE).replace("{times}", TIMES_RULE)
+def _direct_agent() -> str:
+    try:
+        import agents as _agents
+        return _agents.find(FOLDER, os.environ.get("HQ_DIRECT_AGENT", "donna"))["name"]
+    except Exception:
+        return "Donna"
+
+
+PINGS_RULE = PINGS_RULE.replace("{HQ}", str(ROOT)).replace("{agent}", _direct_agent())
+VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
+               .replace("{times}", TIMES_RULE))
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:
     VOICE_RULES += "\nFrom the user's own notes for calls:\n" + ME["on_calls"] + "\n"

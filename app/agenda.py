@@ -314,6 +314,12 @@ def read(now: float | None = None) -> dict:
     t = now or time.time()
     today = datetime.fromtimestamp(t).strftime("%Y-%m-%d")
     events = [e for e in s.get("events") or [] if not _over(e, today, t)]
+    try:  # H124: the bell, on the appointments Donna will ping him for
+        import pings
+        bell = pings.pinged()
+        events = [{**e, "ping": e.get("id") in bell} for e in events]
+    except Exception:
+        pass
     return {"on": on(), "looked": s.get("looked"), "looking": running(s, t), "error": s.get("error", ""),
             "events": events}
 

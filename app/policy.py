@@ -298,6 +298,13 @@ class Policy:
             if sub in ("add", "list", "cancel", "move", "priority"):
                 return Decision(ALLOW, "the schedule for the computer")
             return Decision(DENY, "that part of the schedule is only for the computer itself")
+        # H124: Donna texts first. Picking appointments to ping, reminders and her own notes only writes HQ's own list
+        # in the workspace (direct-line/pings.json, her notes file); Google Calendar is never touched by it.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "pings.py"):
+            sub = args[1] if len(args) > 1 else "list"
+            if sub in ("list", "appt", "remind", "cancel", "note", "note-clear", "due"):
+                return Decision(ALLOW, "her pings, reminders and notes")
+            return Decision(DENY, "the pings script takes list, appt, remind, cancel, note or note-clear")
         # H56.3: main and backup. Asking which one is main, and making one the main on his ask.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "role.py"):
             if len(args) == 1 or (len(args) == 3 and args[1] == "main"):

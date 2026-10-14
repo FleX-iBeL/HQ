@@ -336,6 +336,11 @@
   #callist .appt .w { flex:1; min-width:0; overflow-wrap:anywhere; }
   #callist .appt small { display:block; color:var(--muted); font-size:12px; margin-top:2px; }
   #callist .appt.free .w { color:var(--muted); }
+  #callist .appt .bell { flex-shrink:0; width:16px; height:16px; color:var(--accent); align-self:center; }
+  #calping { border:1px solid var(--muted); border-radius:14px; background:transparent; color:var(--fg); font:600 16px/1 -apple-system,sans-serif;
+             padding:13px 12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
+  #calping svg { width:18px; height:18px; }
+  #calping.on { border-color:var(--accent); color:var(--accent); }
   #callist .empty, #calone .empty { color:var(--muted); text-align:center; margin:auto; }
   #calone h3 { margin:0; font-size:20px; line-height:1.3; overflow-wrap:anywhere; }
   #calone .line { color:var(--muted); font-size:15px; }
@@ -363,6 +368,9 @@
   #noteslist .when { display:block; color:var(--muted); font-size:12px; margin-top:3px; }
   #noteslist .clr { flex-shrink:0; border:0; background:transparent; color:var(--muted); font:600 14px/1 -apple-system,sans-serif; padding:6px 8px; cursor:pointer; }
   #noteslist .empty { color:var(--muted); text-align:center; margin:auto; }
+  #noteslist .hershead { color:var(--muted); font-size:13px; font-weight:600; margin:14px 0 2px 4px; }
+  #noteslist .note.hers { border-left:3px solid var(--her, #7c3aed); }
+  #noteslist .none { color:var(--muted); font-size:14px; padding:4px; }
   #notesform { display:flex; gap:8px; align-items:flex-end; }
   /* H117: the same field as the chat's (H41), growing with what's typed; it may go a bit further up, to about ten
      lines, then scrolls inside. Add stays at the bottom next to it. */
@@ -1434,7 +1442,22 @@ function showNoteItems(data) {
     c.addEventListener("click", async () => { c.disabled = true; const d = await notesSend("api/notes", { clear: it.id }); if (d) showNoteItems(d); else c.disabled = false; });
     row.append(t, c); notesList.appendChild(row);
   }
-  if (!data.items.length) histNote(notesList, "No notes yet");
+  const hers = data.hers && Array.isArray(data.hers.items) ? data.hers : null;  // H124: her own notes, under his
+  if (!data.items.length && !(hers && hers.items.length)) histNote(notesList, "No notes yet");
+  else if (!data.items.length) { const n = document.createElement("div"); n.className = "none"; n.textContent = "No notes of yours yet"; notesList.appendChild(n); }
+  if (hers && hers.items.length) {
+    const h = document.createElement("div"); h.className = "hershead"; h.textContent = (hers.name || "Her") + "'s notes"; notesList.appendChild(h);
+    for (const it of hers.items) {
+      const row = document.createElement("div"); row.className = "note hers";
+      if ((AGENTS.donna || {}).colour) row.style.borderLeftColor = AGENTS.donna.colour;
+      const t = document.createElement("div"); t.className = "txt"; t.textContent = it.text;
+      if (it.when) { const w = document.createElement("small"); w.className = "when"; w.textContent = it.when.slice(0, 16); t.appendChild(w); }
+      const c = document.createElement("button"); c.type = "button"; c.className = "clr"; c.textContent = "Clear";
+      c.setAttribute("aria-label", "Clear this note of " + (hers.name || "hers"));
+      c.addEventListener("click", async () => { c.disabled = true; const d = await notesSend("api/notes", { clear_hers: it.id }); if (d) showNoteItems(d); else c.disabled = false; });
+      row.append(t, c); notesList.appendChild(row);
+    }
+  }
   notesAll.disabled = !data.items.length; notesSure = null; notesAll.classList.remove("sure"); notesAll.textContent = "Clear all";
 }
 async function loadNotes() {
@@ -1507,10 +1530,34 @@ function showCalList(d) {
     const sub = [e.calendar !== "Main" ? e.calendar : "", e.where].filter(Boolean).join(" · ");
     if (sub) { const s = document.createElement("small"); s.textContent = sub; w.appendChild(s); }
     b.append(t, w);
+    if (e.ping) { b.insertAdjacentHTML("beforeend", BELL.replace("<svg", '<svg class="bell" aria-label="Ping on"')); b.classList.add("ping"); }  // H124
     b.addEventListener("click", () => showAppt(e));
     calList.appendChild(b);
   }
   if (!calList.children.length) histNote(calList, d.looking ? "Reading your calendar…" : d.looked ? "Nothing in the next two weeks" : "Not read yet");
+}
+// H124: the bell. Donna texts him when an appointment he picked starts (none by default); a call or her chat can pick
+// one, and so can the button in the appointment here. Only HQ's own list changes; Google Calendar never does.
+const BELL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
+function pingButton(e) {
+  const p = document.createElement("button"); p.type = "button"; p.id = "calping";
+  const name = (AGENTS.donna || {}).name || "Donna";
+  const paint = () => { p.classList.toggle("on", !!e.ping); p.innerHTML = BELL;
+    p.append(e.ping ? name + " texts you when it starts" : "Ask " + name + " to text you when it starts");
+    p.setAttribute("aria-pressed", String(!!e.ping)); };
+  paint();
+  p.addEventListener("click", async () => {
+    p.disabled = true;
+    const want = !e.ping;
+    try {
+      const r = await fetch("api/calendar/ping", { method: "POST", cache: "no-store",
+        headers: { "x-hq": "calendar", "content-type": "application/json" }, body: JSON.stringify({ id: e.id, on: want }) });
+      if (r.ok) { e.ping = want; const d = await r.json(); paint(); calNote.textContent = d ? calLooked(d) : ""; }
+      else calNote.textContent = "Couldn't change that. Try again.";
+    } catch (err) { calNote.textContent = "Couldn't change that. Try again."; }
+    p.disabled = false;
+  });
+  return p;
 }
 function showAppt(e) {
   calEl.classList.add("reading"); calTitle.textContent = "Appointment";
@@ -1531,6 +1578,7 @@ function showAppt(e) {
     aboutNext = e; showCal(false); call();
   });
   calOne.appendChild(go);
+  if (!e.all_day) calOne.appendChild(pingButton(e));
   if (free) { const n = document.createElement("small"); n.className = "line"; n.textContent = "Free is on. Turn it off in Settings to call about an appointment."; calOne.appendChild(n); }
 }
 async function loadCal(fresh) {

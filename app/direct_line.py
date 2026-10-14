@@ -22,6 +22,9 @@ Kept in the workspace's HQ/direct-line/, so both computers have it through the s
 And per computer, in .status/direct-line.json: what she saw last minute (jobs, incidents), so she texts only on
 a change.
 
+Donna texts first (H124, routine/pings.py): when an appointment he picked starts (why appt), a reminder he asked
+for (why remind), and now and then on her own about something on her own notes list (initiative).
+
 The weather (H120, weather.py): every three hours in the day she texts when there's sun, rain coming or a rainy
 day (why sun, rain, cosy), quiet otherwise.
 
@@ -36,6 +39,7 @@ Off: HQ_DIRECT=0 in switches.env. Tests: HQ_DIRECT_DRY=1 (her reply is canned, n
   python3 app/direct_line.py info                       her name and colour, the public key (JSON)
   .venv/bin/python app/direct_line.py text WHY "FACTS"  write and push one text (WHY: jobs, mail, down, back, hello)
   .venv/bin/python app/direct_line.py reply             answer his newest texts
+  .venv/bin/python app/direct_line.py initiative        her own look at her notes: a text, or quiet (H124)
   .venv/bin/python app/direct_line.py test              push a hello to every phone
   python3 app/direct_line.py watch --dry                what she would text now, without texting
 """
@@ -318,6 +322,8 @@ PLAIN = {
     "sun": "The sun's out. {facts} Something nice outside, maybe a walk while it's quiet?",
     "rain": "Heads up, rain's coming. {facts}",
     "cosy": "Rainy one today. {facts} Good day for a book and something warm inside.",
+    "appt": "Your appointment is on. {facts}",
+    "remind": "Reminder, like you asked: {facts}",
 }
 
 TEXT_RULES = """# This is a text chat: HQ's direct line
@@ -329,7 +335,14 @@ asks. Everything in the workspace's rules still holds (talk like a person, only 
 email, privacy). You can look things up and do things in his workspace as on a call, with the same limits: when \
 something needs his yes, ask for it in one short line and stop; his next text answers it. Times as on a call are \
 fine written normally here (17:30).
+
+{pings}
 """
+
+
+def _text_rules() -> str:
+    import config as _config
+    return TEXT_RULES.replace("{user}", user()).replace("{pings}", _config.PINGS_RULE)
 
 
 def compose_prompt(why: str, facts: str) -> str:
@@ -348,20 +361,26 @@ def compose_prompt(why: str, facts: str) -> str:
         "cosy": "It's a rainy day where he is. Suggest something cosy inside: a book, or something else nice "
                 "indoors. Never suggest going outside today; in his words: \"Don't prompt me on rainy days to go "
                 "outside because it doesn't make any sense.\"",
+        "appt": "He asked you to ping him for this appointment: it starts now (or in the minutes the facts say). "
+                "A short text that it's on, its name and time in passing; where, only when the facts give a place.",
+        "remind": "He asked you to remind him of this, at this time. Remind him, short and warm, in your own words; "
+                  "keep what he asked to be reminded of clear. When the facts say it's late, say so in passing.",
     }.get(why, "Tell him this, in a text.")
     return (f"{what}\n\nThe facts (for you, don't copy them as they are):\n{facts or '(none)'}\n\n"
             "Write only the text message itself, one to three short sentences, as yourself.")
 
 
-def compose(why: str, facts: str) -> str:
-    plain = PLAIN.get(why, "{facts}").format(facts=facts).strip()
+def compose(why: str, facts: str, raw: bool = False) -> str:
+    """Her text for WHY from FACTS, through Claude; the plain line without it. raw: FACTS is the whole prompt
+    (no plain line: on a failure it's QUIET)."""
+    plain = QUIET if raw else PLAIN.get(why, "{facts}").format(facts=facts).strip()
     if os.environ.get("HQ_DIRECT_PLAIN") == "1" or os.environ.get("HQ_DIRECT_DRY") == "1":
         return plain
     try:
         import asyncio
         import brain as _brain  # clears API key variables first
         a = agent()
-        system = (TEXT_RULES.replace("{user}", user()) + _agents.persona(a, user())
+        system = (_text_rules() + _agents.persona(a, user())
                   .replace("on this call", "on this chat").replace("call rules", "chat rules"))
         b = _brain.ClaudeBrain(model=a["model"], system_prompt=system, cwd=ROOT / "scratch" / "direct-line",
                                effort="low")
@@ -369,7 +388,7 @@ def compose(why: str, facts: str) -> str:
         async def go():
             out = []
             try:
-                async for piece in b.ask(compose_prompt(why, facts)):
+                async for piece in b.ask(facts if raw else compose_prompt(why, facts)):
                     if isinstance(piece, str):
                         out.append(piece)
             finally:
@@ -393,6 +412,36 @@ def text(why: str, facts: str) -> dict:
     """Write one text from her into the thread and push it to his phone."""
     msg = add("agent", compose(why, facts), why)
     msg["pushed"] = push(msg["text"])
+    return msg
+
+
+QUIET = "QUIET"
+
+INITIATIVE_PROMPT = """You keep your own notes for {user} (below), next to his calendar. Nobody asked you anything \
+now: this is your own look, a few times a day. Text him only when one of your notes is worth bringing up right now \
+(it fits this moment or what's coming in his day, it's waiting on him, or it's time to follow up), and never just to \
+check in. Most looks, stay quiet. If you text: one to three short sentences, as yourself, about that one thing. If \
+not, answer only the word QUIET.
+
+{facts}"""
+
+
+def initiative() -> dict | None:
+    """H124: her own look at her notes (from pings.watch, a few times a day). She texts only when one is worth it."""
+    import pings
+    facts = pings.initiative_facts()
+    if os.environ.get("HQ_DIRECT_DRY") == "1" or os.environ.get("HQ_DIRECT_PLAIN") == "1":
+        words = os.environ.get("HQ_INITIATIVE_SAYS", QUIET)
+    else:
+        words = compose("initiative", INITIATIVE_PROMPT.replace("{user}", user()).replace("{facts}", facts),
+                        raw=True)
+    words = _clean(words)
+    if not words or words.upper().strip(" .!") == QUIET or len(words) < 8:
+        print(time.strftime("%Y-%m-%d %H:%M:%S"), "initiative: quiet")
+        return None
+    msg = add("agent", words, "initiative")
+    msg["pushed"] = push(msg["text"])
+    pings.initiative_sent()
     return msg
 
 
@@ -440,7 +489,7 @@ def _answer(words: str) -> str:
     recent = thread(last=16)[:-1]
     history = "\n".join(f"{'Her' if m['from'] == 'agent' else 'Him'} ({time.strftime('%d %b %H:%M', time.localtime(m['at']))}): "
                         f"{m['text']}" for m in recent)
-    rules = (TEXT_RULES.replace("{user}", user()) + _agents.persona(a, user()).replace("on this call", "on this chat")
+    rules = (_text_rules() + _agents.persona(a, user()).replace("on this call", "on this chat")
              .replace("call rules", "chat rules"))
     opts = _brain.call_session_options(
         model=a["model"], folder=_config.FOLDER, voice_rules=rules, policy=pol, cli_path=_config.CLAUDE_CLI,
@@ -604,6 +653,9 @@ if __name__ == "__main__":
     elif cmd == "text" and len(args) >= 2:
         m = text(args[1], args[2] if len(args) > 2 else "")
         print(json.dumps(m, ensure_ascii=False))
+    elif cmd == "initiative":
+        m = initiative()
+        print(json.dumps(m, ensure_ascii=False) if m else "quiet")
     elif cmd == "reply":
         print(reply() or "")
     elif cmd == "subscribe":

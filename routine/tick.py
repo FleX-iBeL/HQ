@@ -886,6 +886,11 @@ def direct_watch():
         import agenda
         if agenda.start():
             log("calendar: reading it (read only)")
+        # H124: Donna texts first: a ping when an appointment he picked starts, a reminder he asked for, and now and
+        # then on her own about something on her own notes.
+        import pings
+        for why, _ in pings.watch():
+            log(f"direct line: texting ({why})" if why != "initiative" else "direct line: her own look at her notes")
 
 
 def tick():

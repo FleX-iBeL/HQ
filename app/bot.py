@@ -456,9 +456,19 @@ if __name__ == "__main__":
     # changed only from the call page itself (the header x-hq: notes), like the update's buttons.
     import notes as _notes
 
+    def _notes_both():
+        # H124: Donna's own notes come along, shown under his (read here, cleared with clear_hers).
+        out = _notes.read()
+        try:
+            import pings as _pings
+            out["hers"] = {"name": _pings.agent_name(), "items": _pings.her_notes()}
+        except Exception:
+            pass
+        return out
+
     @app.get("/api/notes", include_in_schema=False)
     async def notes_read():
-        return JSONResponse(_notes.read(), headers=_NO_CACHE)
+        return JSONResponse(_notes_both(), headers=_NO_CACHE)
 
     @app.post("/api/notes", include_in_schema=False)
     async def notes_change(request: Request):
@@ -478,9 +488,13 @@ if __name__ == "__main__":
                 return JSONResponse({"error": "no such note"}, status_code=404)
         elif ask.get("clear_all") is True:
             _notes.clear_all()
+        elif isinstance(ask.get("clear_hers"), str):
+            import pings as _pings
+            if not _notes.clear(ask["clear_hers"], _pings.notes_file()):
+                return JSONResponse({"error": "no such note"}, status_code=404)
         else:
             return JSONResponse({"error": "no change asked"}, status_code=400)
-        return JSONResponse(_notes.read(), headers=_NO_CACHE)
+        return JSONResponse(_notes_both(), headers=_NO_CACHE)
 
     # H101: his calendar, read only (agenda.py). ?fresh=1 (the page opening it) reads Google again when the last read
     # is older than a quarter of an hour; the answer says it's reading, and the page asks again a bit later.
@@ -490,6 +504,28 @@ if __name__ == "__main__":
     async def calendar_read(request: Request):
         if request.query_params.get("fresh") == "1" and not config.FREE_ONLY:
             await asyncio.to_thread(_agenda_api.refresh)
+        return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
+
+    # H124: the bell. A tap in the appointment asks Donna to ping him when it starts (or not any more). Only HQ's own
+    # list changes (routine/pings.py); Google Calendar is never written. Only from the page itself (x-hq: calendar).
+    @app.post("/api/calendar/ping", include_in_schema=False)
+    async def calendar_ping(request: Request):
+        if request.headers.get("x-hq") != "calendar":
+            return JSONResponse({"error": "Only the HQ page can change the pings"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict) or not isinstance(ask.get("id"), str):
+            return JSONResponse({"error": "which appointment?"}, status_code=400)
+        import pings as _pings
+        if ask.get("on"):
+            e = _agenda_api.about(ask["id"])
+            if not e:
+                return JSONResponse({"error": "no such appointment"}, status_code=404)
+            _pings.appt_on(e, int(ask.get("before") or 0), by="the calendar in the app")
+        else:
+            _pings.appt_off(ask["id"])
         return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
 
     @app.get("/api/busy", include_in_schema=False)

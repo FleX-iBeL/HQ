@@ -343,6 +343,8 @@ class Server:
             # H101: never the workspace's own calendar copy, and never a real Claude run to read Google
             "HQ_CALENDAR_FILE": str(tmp / "calendar-server" / "calendar.json"),
             "HQ_CALENDAR_FAKE": str(tmp / "calendar-server" / "stream.txt"),
+            # H124: never the workspace's own pings or her notes
+            "HQ_DIRECT_DIR": str(tmp / "direct-server"), "HQ_AGENT_NOTES": str(tmp / "direct-server" / "notes-donna.md"),
         }
 
     @property
@@ -4641,7 +4643,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
         old_pic = sf.with_name("notes-doodle.png")  # H117: a picture saved before stays where it is, unread
         old_pic.write_bytes(b"\x89PNG\r\n\x1a\nold")
         code, d = post("/api/notes", json.dumps({"clear": d["items"][0]["id"]}).encode())
-        need(code == 200 and d == {"items": []}, f"clearing through the server went wrong ({code} {d})")
+        need(code == 200 and d.get("items") == [], f"clearing through the server went wrong ({code} {d})")
         need(post("/api/notes/doodle", b"\x89PNG\r\n\x1a\nnew", "image/png")[0] != 200 and http_get("/api/notes/doodle")[0] != 200
              and old_pic.read_bytes() == b"\x89PNG\r\n\x1a\nold", "the doodle endpoints are still there, or the old picture was touched (H117)")
         old_pic.unlink()
@@ -4939,6 +4941,222 @@ window.fetch = async (url, opt) => {
                 "the day, again on opening; /api/calendar on its own copy, ?fresh=1 reading again; the call's note, greeting and "
                 "transcript line; the page, phone and app: the button on the right before and after a call, the days, one "
                 "appointment, Back, Call about this sending it, off on Free, one sheet at a time")
+
+    async def flow92(self) -> str:
+        """H124, no Claude: Donna texts first. routine/pings.py on its own copies (picking appointments, reminders,
+        her notes, what's due and sent once, her own look), the texts' kinds in direct_line (dry, nothing pushed),
+        the call's and her chat's rules and policy, agenda's bell, the test server's /api/calendar/ping and her
+        notes in /api/notes, and the real call page in a headless browser: the bell and the button."""
+        import pings
+        import direct_line
+        from policy import Policy, ALLOW, DENY
+        d = self.tmp / "h124"
+        d.mkdir(parents=True, exist_ok=True)
+        keep = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_CALENDAR_FILE", "HQ_AGENT_NOTES", "HQ_DIRECT_DRY",
+                                               "HQ_INITIATIVE_SAYS", "HQ_INITIATIVE", "HQ_DIRECT_LOCAL")}
+        real = Path(os.path.join(pings.hqpaths.DATA, "direct-line", "pings.json"))
+        real_before = real.read_bytes() if real.exists() else None
+        os.environ.update({"HQ_DIRECT_DIR": str(d / "line"), "HQ_CALENDAR_FILE": str(d / "calendar.json"),
+                           "HQ_AGENT_NOTES": str(d / "notes-donna.md"), "HQ_DIRECT_DRY": "1",
+                           "HQ_DIRECT_LOCAL": str(d / "local.json")})
+        os.environ.pop("HQ_INITIATIVE", None)
+        try:
+            t0 = datetime(2099, 1, 1, 12, 0).timestamp()
+            iso = lambda h, m=0, day=1: datetime(2099, 1, day, h, m).astimezone().isoformat()
+            (d / "calendar.json").write_text(json.dumps({"looked": t0, "events": [
+                {"id": "a1", "title": "Dentist check", "start": iso(12, 30), "end": iso(13), "all_day": False, "where": "Main street 1", "notes": ""},
+                {"id": "a2", "title": "Lunch", "start": iso(13), "end": iso(14), "all_day": False, "where": "", "notes": ""},
+                {"id": "a3", "title": "Lunch", "start": iso(13, day=2), "end": iso(14, day=2), "all_day": False, "where": "", "notes": ""},
+                {"id": "a4", "title": "Birthday", "start": "2099-01-01", "end": "2099-01-02", "all_day": True}]}))
+            need(not pings.pinged() and not pings.due(t0), "an appointment gets a ping without being picked")
+            need([e["id"] for e in pings.find_events("dentist", now=t0)] == ["a1"] and len(pings.find_events("lunch", now=t0)) == 2
+                 and [e["id"] for e in pings.find_events("lunch 2099-01-02", now=t0)] == ["a3"]
+                 and [e["id"] for e in pings.find_events("a2", now=t0)] == ["a2"] and not pings.find_events("birthday", now=t0),
+                 "finding the appointment by its words, date or id isn't right")
+            pings.appt_on(pings.find_events("dentist", now=t0)[0], before=10)
+            pings.appt_on(pings.find_events("a2", now=t0)[0])
+            need(pings.pinged() == {"a1", "a2"}, f"the bell's list isn't the picked ones: {pings.pinged()}")
+            need(not pings.due(datetime(2099, 1, 1, 12, 15).timestamp()), "the ping came before its ten minutes")
+            got = pings.watch(datetime(2099, 1, 1, 12, 21).timestamp(), spawn=lambda *a: None)
+            need([w for w, _ in got] == ["appt"] and "Dentist check" in got[0][1] and "in 9 minutes" in got[0][1]
+                 and "Main street 1" in got[0][1], f"the ping ten minutes before isn't right: {got}")
+            need(not pings.watch(datetime(2099, 1, 1, 12, 22).timestamp(), spawn=lambda *a: None), "a ping was sent twice")
+            need(pings.pinged() == {"a2"}, "a sent ping still shows the bell")
+            need(not pings.watch(datetime(2099, 1, 1, 13, 20).timestamp(), spawn=lambda *a: None) and
+                 not pings.read()["appointments"]["a2"].get("sent"), "a ping long after its start (HQ was off) was sent late")
+            pings.appt_off("a2")
+            need(not pings.pinged(), "appt off didn't stop the ping")
+            now = datetime(2099, 1, 1, 12, 0)
+            need(pings.when("in 20 minutes", now) == datetime(2099, 1, 1, 12, 20) and pings.when("15:00", now) == datetime(2099, 1, 1, 15)
+                 and pings.when("9:30", now) == datetime(2099, 1, 2, 9, 30) and pings.when("tomorrow 9.30", now) == datetime(2099, 1, 2, 9, 30)
+                 and pings.when("2099-01-05 08:00", now) == datetime(2099, 1, 5, 8), "reading a reminder's time isn't right")
+            try:
+                pings.when("25:00", now)
+                need(False, "a time that doesn't exist was taken")
+            except ValueError:
+                pass
+            r1 = pings.remind(datetime(2099, 1, 1, 15), "take the laundry out")
+            r2 = pings.remind(datetime(2099, 1, 1, 16), "call the plumber")
+            need(pings.cancel(r2["n"]) and not pings.cancel(r2["n"]), "cancelling a reminder isn't right")
+            got = pings.watch(datetime(2099, 1, 1, 15, 0, 30).timestamp(), spawn=lambda *a: None)
+            need([w for w, _ in got] == ["remind"] and "take the laundry out" in got[0][1] and "late" not in got[0][1],
+                 f"the reminder wasn't due at its time: {got}")
+            need(not pings.watch(datetime(2099, 1, 1, 15, 2).timestamp(), spawn=lambda *a: None), "a reminder was sent twice")
+            pings.remind(datetime(2099, 1, 1, 15, 10), "stretch")
+            got = pings.watch(datetime(2099, 1, 1, 15, 40).timestamp(), spawn=lambda *a: None)
+            need(got and "30 minutes late" in got[0][1], f"a late reminder doesn't say it's late: {got}")
+            # her own notes, and her own look at them
+            need(not pings.initiative_due(datetime(2099, 1, 1, 12).timestamp()), "she looks at her notes while she has none")
+            it = pings.note_add("Follow up on the dentist booking")
+            need(it and (d / "notes-donna.md").exists() and "Donna's notes" in (d / "notes-donna.md").read_text()
+                 and [i["text"] for i in pings.her_notes()] == ["Follow up on the dentist booking"], "her notes aren't kept like his")
+            need(pings.initiative_due(datetime(2099, 1, 1, 12).timestamp()) and not pings.initiative_due(datetime(2099, 1, 1, 22).timestamp())
+                 and not pings.initiative_due(datetime(2099, 1, 1, 7).timestamp()), "her own look isn't only in the day")
+            spawned = []
+            pings.watch(datetime(2099, 1, 1, 16).timestamp(), spawn=lambda w, f: spawned.append(w))
+            need(spawned == ["initiative"] and not pings.initiative_due(datetime(2099, 1, 1, 17).timestamp())
+                 and pings.initiative_due(datetime(2099, 1, 1, 19, 1).timestamp()), f"her own look isn't every three hours: {spawned}")
+            facts = pings.initiative_facts(datetime(2099, 1, 1, 12).timestamp())
+            need("Follow up on the dentist booking" in facts and "Lunch" in facts, f"her look doesn't see her notes and the day: {facts!r}")
+            os.environ["HQ_INITIATIVE_SAYS"] = "QUIET"
+            n0 = len(direct_line.thread())
+            need(direct_line.initiative() is None and len(direct_line.thread()) == n0, "she texted though she chose to stay quiet")
+            os.environ["HQ_INITIATIVE_SAYS"] = "Still want me to chase the dentist for you? They wrote again."
+            m = direct_line.initiative()
+            need(m and m["why"] == "initiative" and len(direct_line.thread()) == n0 + 1, "her own text didn't go in the thread")
+            for _ in range(pings.INITIATIVE_MAX - 1):
+                pings.initiative_sent()
+            st = pings.read()["initiative"]
+            need(int(st["texts"]) == pings.INITIATIVE_MAX, f"her own texts aren't counted per day: {st}")
+            day_t = datetime.strptime(st["day"] + " 20:59", "%Y-%m-%d %H:%M").timestamp()
+            need(not pings.initiative_due(day_t), "she may text on her own more than the day's most")
+            need(pings.note_clear("dentist") and not pings.her_notes(), "clearing her note didn't work")
+            # her texts' kinds, dry
+            for why, word in (("appt", "appointment"), ("remind", "remind")):
+                txt = direct_line.compose(why, "Dentist check")
+                need(why in direct_line.PLAIN and "Dentist check" in txt, f"no plain line for {why}: {txt!r}")
+                need(word in direct_line.compose_prompt(why, "x").lower(), f"her prompt for {why} isn't there")
+            # the rules and the policy: a call and her chat may set them, nothing else in the script
+            need("pings.py" in config.VOICE_RULES and "never all by default" in config.VOICE_RULES and "{pings}" not in config.VOICE_RULES,
+                 "the call rules don't say how to set her pings")
+            need("pings.py" in direct_line._text_rules(), "her chat doesn't know how to set pings")
+            pol = Policy(config.FOLDER)
+            script = str(ROOT / "routine" / "pings.py")
+            for cmd in (f'python3 "{script}" appt on "dentist"', f'python3 "{script}" remind "in 20 minutes" "tea"',
+                        f'python3 "{script}" note "x"', f'python3 "{script}" list'):
+                dec = pol.decide("Bash", {"command": cmd})
+                need(dec.verdict == ALLOW, f"a call may not run {cmd}: {dec}")
+            need(pol.decide("Bash", {"command": f'python3 "{script}" watch'}).verdict == DENY, "a call may run the routine's part")
+            # the bell from agenda
+            import agenda
+            pings.appt_on({"id": "a3", "title": "Lunch", "start": iso(13, day=2)})
+            rd = agenda.read(now=t0)
+            need([e["id"] for e in rd["events"] if e.get("ping")] == ["a3"], f"agenda doesn't mark the bell: {rd['events']}")
+            tsrc = (ROOT / "routine" / "tick.py").read_text()
+            need("pings.watch()" in tsrc and tsrc.index("pings.watch()") > tsrc.index("if main:\n        import weather"),
+                 "the routine doesn't look for due pings on the main")
+            need("create_event" not in (ROOT / "routine" / "pings.py").read_text(), "the pings may write to Google Calendar")
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        need((real.read_bytes() if real.exists() else None) == real_before, "the workspace's own pings were touched")
+
+        # the test server: the bell's button and her notes
+        await self.ensure_server()
+        sfile = Path(self.server.env["HQ_CALENDAR_FILE"])
+        sfile.parent.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        sfile.write_text(json.dumps({"looked": now, "calendars": [], "events": [
+            {"id": "s1", "title": "Soon", "start": datetime.fromtimestamp(now + 3600).astimezone().isoformat(), "end": "", "all_day": False}]}))
+
+        def post(path, body, hq):
+            req = urllib.request.Request(TEST_URL + path, data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read() or b"{}")
+            except urllib.error.HTTPError as e:
+                return e.code, {}
+        need(post("/api/calendar/ping", {"id": "s1", "on": True}, "")[0] == 403, "the pings could be changed without the page's header")
+        code, got = post("/api/calendar/ping", {"id": "s1", "on": True}, "calendar")
+        need(code == 200 and [e.get("ping") for e in got.get("events", [])] == [True], f"the bell didn't go on ({code} {got})")
+        need(post("/api/calendar/ping", {"id": "nope", "on": True}, "calendar")[0] == 404, "a ping for an appointment that isn't there")
+        code, got = post("/api/calendar/ping", {"id": "s1", "on": False}, "calendar")
+        need(code == 200 and [e.get("ping") for e in got.get("events", [])] == [False], "the bell didn't go off")
+        sp = Path(self.server.env["HQ_AGENT_NOTES"])
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        sp.write_text("# Donna's notes\n\n## Notes\n\n- 2099-01-01 12:00:00 · Chase the dentist\n")
+        code, body, _ = http_get("/api/notes")
+        got = json.loads(body) if code == 200 else {}
+        hers = (got.get("hers") or {}).get("items") or []
+        need(code == 200 and [i["text"] for i in hers] == ["Chase the dentist"] and got["hers"]["name"], f"/api/notes doesn't give her notes: {got}")
+        code, got = post("/api/notes", {"clear_hers": hers[0]["id"]}, "notes")
+        need(code == 200 and not got["hers"]["items"] and "Chase" not in sp.read_text(), "clearing her note from the page didn't work")
+
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        stub = r"""<script>
+var POSTED = [], T = new Date(); T.setHours(0, 0, 0, 0);
+function at(days, h, m) { const d = new Date(T); d.setDate(d.getDate() + days); d.setHours(h, m || 0); return d.toISOString(); }
+var EVENTS = [
+  { id: "e1", title: "Shower", start: at(0, 23, 0), end: at(0, 23, 45), all_day: false, where: "", notes: "", calendar: "Main", free: false, ping: true },
+  { id: "e2", title: "Dentist", start: at(2, 10), end: at(2, 10, 30), all_day: false, where: "", notes: "", calendar: "Main", free: false, ping: false }];
+var NOTES = { items: [{ id: "n1", when: "2099-01-01 12:00:00", text: "Mine" }], hers: { name: "Donna", items: [{ id: "h1", when: "2099-01-01 12:00:00", text: "Chase the dentist" }] } };
+window.fetch = async (url, opt) => {
+  url = String(url);
+  if (url.startsWith("api/calendar/ping")) { const b = JSON.parse(opt.body); POSTED.push(b.id + ":" + b.on + ":" + (opt.headers || {})["x-hq"]);
+    EVENTS.find(e => e.id === b.id).ping = b.on; return { ok: true, json: async () => ({ on: true, looked: Date.now() / 1000, events: EVENTS }) }; }
+  if (url.startsWith("api/calendar")) return { ok: true, json: async () => ({ on: true, looked: Date.now() / 1000 - 60, looking: false, error: "", events: EVENTS }) };
+  if (url.startsWith("api/notes")) { if (opt && opt.body) { const b = JSON.parse(opt.body); POSTED.push("note:" + b.clear_hers); NOTES.hers.items = []; } return { ok: true, json: async () => NOTES }; }
+  return { ok: true, json: async () => ({ lines: [], calls: [], items: [] }) };
+};</script>"""
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  await wait(300);
+  calBtn.click(); await wait(400);
+  const appts = () => calList.querySelectorAll(".appt");
+  out.push("bell:" + (appts().length === 2 && appts()[0].querySelector("svg.bell") && !appts()[1].querySelector("svg.bell") ? "ok" : "WRONG"));
+  appts()[1].click(); await wait(200);
+  let p = document.getElementById("calping");
+  out.push("button:" + (p && !p.classList.contains("on") && p.textContent.includes("Ask Donna") ? "ok" : "WRONG"));
+  p.click(); await wait(200); p = document.getElementById("calping");
+  out.push("on:" + (POSTED[0] === "e2:true:calendar" && p.classList.contains("on") && p.textContent.includes("Donna texts you") ? "ok" : "WRONG " + POSTED));
+  document.getElementById("calback").click(); await wait(300);
+  out.push("listbell:" + (appts()[1].querySelector("svg.bell") ? "ok" : "WRONG"));
+  document.getElementById("calclose").click(); await wait(100);
+  notesBtn.click(); await wait(400);
+  const hh = notesList.querySelector(".hershead"), hr = notesList.querySelector(".note.hers");
+  out.push("hers:" + (hh && hh.textContent === "Donna's notes" && hr && hr.textContent.includes("Chase the dentist") && notesList.querySelectorAll(".note").length === 2 ? "ok" : "WRONG"));
+  hr.querySelector(".clr").click(); await wait(300);
+  out.push("clearhers:" + (POSTED.includes("note:h1") && !notesList.querySelector(".note.hers") ? "ok" : "WRONG"));
+  const pre = document.createElement("pre"); pre.id = "h124"; pre.textContent = "H124RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f2 = self.tmp / "h124.html"
+        f2.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
+        for where, q in (("phone", ""), ("app", "?app=1")):
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=390,844",
+                                              f"--user-data-dir={self.tmp / ('h124-' + where)}", "--virtual-time-budget=20000", "--dump-dom", f2.as_uri() + q], timeout=120)
+            m = re.search(r'<pre id="h124">H124RESULT (.*?) END</pre>', r.stdout)
+            need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
+            res = m.group(1)
+            say(f"   {where}: {res}")
+            need(all(part.endswith(":ok") for part in res.split(" | ")), f"the bell or her notes aren't right on the page ({where}): {res}")
+        return ("only picked appointments get a ping (by words, date or id), ten minutes early when asked, once, never late after "
+                "HQ was off, off again; reminders at their time, once, cancelled, a late one saying so; her own notes like his, "
+                "her own look only in the day every three hours, quiet when she chooses, counted per day; the call's and her "
+                "chat's rules and policy; the bell from agenda; /api/calendar/ping and her notes in /api/notes on the test "
+                "server; the page, phone and app: the bell, the button, her notes under his")
 
     async def flow58(self) -> str:
         """H60: continue an earlier call. The transcript code (what goes in, trimmed from the start, refused
@@ -8327,6 +8545,7 @@ FLOWS = {
     89: ("H118: which computer is main, at a glance: a pill next to the name on the status page, the strip and the call page", False, "flow89"),
     90: ("H120: the weather every three hours: sun, rain coming, a rainy day stays inside; quiet otherwise and at night", False, "flow90"),
     91: ("H101: my calendar inside HQ, read only from Google; a tap on an appointment starts a call about it", False, "flow91"),
+    92: ("H124: Donna texts first: pings for appointments he picked (a bell shows them), reminders, her own notes", False, "flow92"),
 }
 
 
