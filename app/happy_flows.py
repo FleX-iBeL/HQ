@@ -7067,8 +7067,12 @@ setTimeout(() => {
             # F25: the bubble is in the call page (shown on 8443, whether the phone's icon opens it or the HQ page
             # around it), no longer over the voice button from phone.js; the call line passes her paths on.
             web = (ROOT / "app/web/index.html").read_text()
-            need('id="directbtn"' in web and 'location.port !== "8443"' in web and ":8444/direct" in web and 'target = "_top"' in web,
-                 "the call page has no bubble for her chat on the phone")
+            need('id="directbtn"' in web and 'location.port !== "8443"' in web, "the call page has no bubble for her chat on the phone")
+            # F29: a tap opens her chat in a sheet over the call page (a frame of /direct?sheet), never leaving the page,
+            # which ended a call; one sheet at a time, dragged up by its handle, closed again.
+            need('target = "_top"' not in web and 'id="dirsheet"' in web and 'id="dirframe"' in web and "e.preventDefault();" in web
+                 and '"/direct?sheet"' in web and web.count("showDirect(false)") >= 6 and "setPointerCapture" in web,
+                 "a tap on her bubble still leaves the call page instead of opening her chat in a sheet")
             need("direct-btn" not in (ROOT / "desktop/phone.js").read_text(), "the HQ page still lays its own bubble over the voice button")
             bot = (ROOT / "app/bot.py").read_text()
             need(all(f'"{p}"' in bot.split("_DIRECT = (")[1][:300] for p in ("/direct", "/direct.json", "/direct/key", "/direct/send",
@@ -7076,6 +7080,7 @@ setTimeout(() => {
                  "the call line doesn't pass her chat on to the status page")
             dh = (ROOT / "status/direct.html").read_text()
             need("location.port === '8443'" in dh and "'/manifest.webmanifest'" in dh, "the chat doesn't know it's opened through the call line")
+            need("has('sheet')" in dh and "if (!SHEET) bellState();" in dh, "her chat in the sheet still shows its back arrow or signs the phone up")
         finally:
             for key, v in saved.items():
                 if v is None:

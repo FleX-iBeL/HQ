@@ -50,8 +50,15 @@
   // F25: also served through the call line (8443), when the phone's home-screen icon is the call page itself:
   // back goes to the call page, and the page keeps that app's manifest and icon.
   const CALL = location.port === '8443';
+  // F29: opened in the sheet over the call page (?sheet): the sheet has its own Close, so no back arrow, and
+  // no notification button (they're allowed on this page opened on its own; a frame mustn't sign a phone up).
+  const SHEET = new URLSearchParams(location.search).has('sheet');
+  if (SHEET) {
+    document.querySelector('header a').remove();
+    document.body.style.paddingTop = '0';
+  }
+  if (CALL && !SHEET) document.querySelector('header a').href = '/';
   if (CALL) {
-    document.querySelector('header a').href = '/';
     document.querySelector('link[rel=manifest]').href = '/manifest.webmanifest';
     document.querySelector('link[rel=apple-touch-icon]').href = '/apple-touch-icon.png';
   }
@@ -169,7 +176,7 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
   try { localStorage.setItem('hq-direct-seen', String(Date.now() / 1000)); } catch {}
   load();
-  bellState();
+  if (!SHEET) bellState();
   setInterval(load, 3000);
 })();
 </script>
