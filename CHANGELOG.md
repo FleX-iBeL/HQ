@@ -15,6 +15,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - Call back from the chat: when you open the app and tap the chat bubble, it shows your last call with a button at the bottom to call back and carry on where you left off, with the same agent, like Continue in Past calls (H119).
 
 ### Changed
+- Donna's texts read like a person texting you in between: short, quick, casual, never the same line twice in a row. When the dev team's done building she just tells you they finished up, no details or status talk. The texts without Claude come in a few versions too, and never give technical details (H127).
 - Her replies in the call's chat read like a reply in an AI chat app: more space between lines and paragraphs, numbered lists and lists inside a list, a bold word to start an item, softer list marks. She's told to lay longer answers out that way. Still no headings or tables, and the voice stays plain (H116).
 - On a call the chat's top line says only who you're calling with: her name, both names on a three-way call, all of them with more (H115).
 - The quick notes are just text now: the paper to doodle on is gone, and the field you type a note in grows with what you type, over more lines, like the chat's (H117).

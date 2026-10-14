@@ -315,30 +315,104 @@ def push(text: str, title: str | None = None) -> list[str]:
 
 # -- what she says ------------------------------------------------------------------------------
 
+# H127 (14 October 2026, call at 12:35): every text short, quick and "super, super, super humanised, as in someone
+# is just texting in between". The plain lines (no Claude) come in a few versions, never the same one twice in a row.
 PLAIN = {
-    "jobs": "All done here, the job list is empty. {facts}",
-    "mail": "Heads up, this just came in: {facts}",
-    "down": "Something's not right on my end: {facts} I'm on it, I'll tell you when it's sorted.",
-    "back": "Sorted. {facts}",
-    "hello": "Hi, it's me. This is our direct line now, text me any time.",
-    "sun": "The sun's out. {facts} Something nice outside, maybe a walk while it's quiet?",
-    "rain": "Heads up, rain's coming. {facts}",
-    "cosy": "Rainy one today. {facts} Good day for a book and something warm inside.",
-    "appt": "Your appointment is on. {facts}",
-    "remind": "Reminder, like you asked: {facts}",
-    "watch": "You asked me to keep an eye out. {facts}",
-    "watch-end": "I've stopped keeping an eye out. {facts}",
+    "jobs": ["The team just wrapped up. All built 🙌",
+             "Dev team's done for now, everything's in.",
+             "That's a wrap from the team.",
+             "The devs just finished up. Nice work from them today.",
+             "Team's all done, nothing left on their plate."],
+    "mail": ["Heads up, this just came in: {facts}",
+             "Just landed in your mail: {facts}",
+             "One for you: {facts}"],
+    "down": ["Something's acting up on my end with {what}. I'm on it.",
+             "Small hiccup with {what}, I'm looking at it.",
+             "{What} is being a bit stubborn. On it, I'll tell you when it's fine."],
+    "back": ["All good again, {what}'s back.",
+             "Sorted, {what} is fine again.",
+             "Fixed. {What}'s back up."],
+    "hello": ["Hey, it's me! Text me here any time.",
+              "Hi! This is our own line now, text me whenever."],
+    "sun": ["Sun's out. Fancy a little walk?",
+            "Lovely out right now, maybe grab some sun?",
+            "Dry and sunny for a bit. Nice moment to step outside."],
+    "rain": ["Rain's coming. {facts}",
+             "Heads up, rain on the way. {facts}",
+             "Might want to stay in for a bit: rain coming. {facts}"],
+    "cosy": ["Rainy one today. Book and tea kind of day?",
+             "Proper wet day out there. Something cosy inside?",
+             "Rain all day, perfect excuse for a slow one indoors."],
+    "appt": ["It's time: {facts}",
+             "Starting now: {facts}",
+             "You wanted a nudge: {facts}"],
+    "remind": ["Reminder: {facts}",
+               "Quick reminder, like you asked: {facts}",
+               "Psst, {facts}"],
+    "watch": ["That thing you asked me to watch: {facts}",
+              "Got something for you: {facts}",
+              "News on what you asked me to keep an eye out for: {facts}"],
+    "watch-end": ["Stopped watching that one. {facts}",
+                  "I'm done keeping an eye on that. {facts}"],
 }
+
+# What went down, said the way a person would (the plain lines never give technical details).
+PLAIN_WHAT = {
+    "call": "the call line", "phone": "the phone link", "mail": "the mail check", "jobs": "the dev team's setup",
+    "helper": "the routine", "watchdog": "the watchdog", "usage": "the usage check", "status": "the status page",
+    "schedule": "the scheduler", "role": "the backup", "temp": "the laptop's temperature",
+    "battery": "the laptop's battery",
+}
+
+
+def _plain_what(facts: str) -> str:
+    keys = [line.split(":", 1)[0].strip() for line in (facts or "").splitlines() if line.strip()]
+    names = [PLAIN_WHAT.get(k, "") for k in keys]
+    names = [n for i, n in enumerate(names) if n and n not in names[:i]]
+    if not names:
+        return "one of the systems"
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _recent(why: str, n: int = 3) -> list[str]:
+    """Her last few texts of this kind, newest last, so a new one doesn't sound the same."""
+    try:
+        return [m["text"] for m in thread() if m.get("from") == "agent" and m.get("why") == why][-n:]
+    except Exception:
+        return []
+
+
+def plain(why: str, facts: str) -> str:
+    """The plain line for WHY, without Claude: one of its versions, not the one she sent last time."""
+    import random
+    options = PLAIN.get(why) or ["{facts}"]
+    if isinstance(options, str):
+        options = [options]
+    last = set(_recent(why, 1))
+    what = _plain_what(facts)
+    filled = [o.replace("{What}", what[:1].upper() + what[1:]).replace("{what}", what).replace("{facts}", facts or "")
+              .strip() for o in options]
+    fresh = [f for f in filled if f not in last] or filled
+    return re.sub(r"\s+", " ", random.choice(fresh)).strip(" :")
+
 
 TEXT_RULES = """# This is a text chat: HQ's direct line
 
 {user} is texting you on HQ's direct line, a private chat with only you, on his phone. It is not a call: \
-nothing is spoken. Write like a real person texting: short, warm, in your own character, one to four short \
-sentences, no headings, no lists unless he asks for one, no file names, job numbers or technical details unless he \
-asks. Everything in the workspace's rules still holds (talk like a person, only what benefits him, never send \
-email, privacy). You can look things up and do things in his workspace as on a call, with the same limits: when \
-something needs his yes, ask for it in one short line and stop; his next text answers it. Times as on a call are \
-fine written normally here (17:30).
+nothing is spoken. HQ is a real headquarters and you're one of the people working there; text him the way a \
+colleague texts in between, quick and human. In his words: "it should just be a short quick message and it should be \
+super humanised, super, super, super humanised, as in someone is just texting in between."
+
+- Short: usually one or two short sentences. Casual, warm, in your own character, with contractions. A quick text, \
+not a message or a report.
+- No greeting or sign-off, no headings, no lists unless he asks for one.
+- No system talk: no job numbers, item numbers, feature names, file names, statuses ("running", "waiting", "queue", \
+"incident") or technical details, unless he asks for them.
+- Never the same wording twice in a row; vary it like a person does. An emoji now and then is fine, one at most.
+- Everything in the workspace's rules still holds (talk like a person, only what benefits him, never send email, \
+privacy). You can look things up and do things in his workspace as on a call, with the same limits: when something \
+needs his yes, ask for it in one short line and stop; his next text answers it. Times are written normally here \
+(17:30).
 
 {pings}
 """
@@ -351,40 +425,49 @@ def _text_rules() -> str:
 
 def compose_prompt(why: str, facts: str) -> str:
     what = {
-        "jobs": "The job list is finished: nothing running or waiting any more. Let him know, in a text.",
-        "mail": "A very important mail just came in. Give him a heads-up in a text, what it is and what it asks, "
-                "in a few plain words.",
-        "down": "Something in HQ is down and hasn't come back by itself. Keep him in the loop, human, no "
-                "technical details, no alarm; say you're keeping an eye on it.",
-        "back": "Something that was down is fine again. A short all-clear.",
-        "hello": "Say hi: this is your new direct line with him.",
-        "sun": "The weather where he is looks good: sunny and dry for the next hours. Nudge him, lightly, to do "
-               "something nice outside: enjoy the sun, or a walk while it's quiet. One idea at most, not pushy.",
-        "rain": "Rain is coming where he is. A short heads-up with when it starts (the time from the facts), so he "
-                "can take it into account.",
-        "cosy": "It's a rainy day where he is. Suggest something cosy inside: a book, or something else nice "
-                "indoors. Never suggest going outside today; in his words: \"Don't prompt me on rainy days to go "
+        "jobs": "The dev team at HQ (the specialists he hands his builds to) just finished up everything they had. "
+                "Text him one short, cool line that the team's done, like a colleague passing it on. In his words: "
+                "\"When they are done building, there should be a cool message, something about how they finished "
+                "up. There don't need to be any details.\" So no details, no feature names, no numbers, nothing like "
+                "\"nothing running, nothing waiting\" or \"the job list is clear\", no status talk, and no tips on "
+                "how to use what they built. The facts are only background for you, never in the text.",
+        "mail": "An important mail just came in. A quick heads-up text: who it's from and what it wants from him, in "
+                "a few plain words.",
+        "down": "Something at HQ is acting up and hasn't fixed itself. A quick, calm text that something's off and "
+                "you're on it, in plain words (what it is in everyday terms, e.g. the call line); no technical "
+                "details, no alarm.",
+        "back": "Something that was acting up is fine again. A quick all-clear, a few words.",
+        "hello": "Say hi: this is your own direct line with him now. Quick and warm.",
+        "sun": "It's dry and sunny where he is for the next hours. A light nudge to enjoy it: the sun, or a short "
+               "walk. One idea at most, not pushy.",
+        "rain": "Rain is coming where he is. A quick heads-up with when it starts (the time from the facts).",
+        "cosy": "It's a rainy day where he is. Suggest something cosy inside: a book, or something nice indoors. "
+                "Never suggest going outside today; in his words: \"Don't prompt me on rainy days to go "
                 "outside because it doesn't make any sense.\"",
         "appt": "He asked you to ping him for this appointment: it starts now (or in the minutes the facts say). "
-                "A short text that it's on, its name and time in passing; where, only when the facts give a place.",
-        "remind": "He asked you to remind him of this, at this time. Remind him, short and warm, in your own words; "
-                  "keep what he asked to be reminded of clear. When the facts say it's late, say so in passing.",
-        "watch": "He asked you to keep an eye out for this, and it came (the facts say what). Tell him in a short "
-                 "text: what came, plainly (for a mail: who it's from and what it says about what he's waiting for; "
-                 "for the weather: what and when). Say whether you keep watching, as the facts say.",
-        "watch-end": "A watch he asked you for has ended (the facts say which and why). One short line that you've "
-                     "stopped keeping an eye out for it, and why (time up, nothing came; or he asked you to).",
-    }.get(why, "Tell him this, in a text.")
-    return (f"{what}\n\nThe facts (for you, don't copy them as they are):\n{facts or '(none)'}\n\n"
-            "Write only the text message itself, one to three short sentences, as yourself.")
+                "A quick text that it's on, its name and time in passing; where, only when the facts give a place.",
+        "remind": "He asked you to remind him of this, now. A quick reminder in your own words; keep what he wanted "
+                  "to be reminded of clear. When the facts say it's late, say so in passing.",
+        "watch": "He asked you to keep an eye out for this, and it came (the facts say what). A quick text with "
+                 "what came, plainly (a mail: who from and what it says about what he's waiting for; the weather: "
+                 "what and when). Whether you keep watching only in passing, as the facts say.",
+        "watch-end": "Something he asked you to watch has stopped (the facts say what and why). One quick line that "
+                     "you've stopped keeping an eye on it, and why in a few words (time's up and nothing came, or he "
+                     "asked).",
+    }.get(why, "Tell him this, in a quick text.")
+    before = _recent(why)
+    said = ("\n\nYour last texts like this, so this one sounds different:\n" + "\n".join(f"- {t}" for t in before)
+            if before else "")
+    return (f"{what}\n\nThe facts (for you, don't copy them as they are):\n{facts or '(none)'}{said}\n\n"
+            "Write only the text itself: one or two short sentences, the way you'd actually text him.")
 
 
 def compose(why: str, facts: str, raw: bool = False) -> str:
     """Her text for WHY from FACTS, through Claude; the plain line without it. raw: FACTS is the whole prompt
     (no plain line: on a failure it's QUIET)."""
-    plain = QUIET if raw else PLAIN.get(why, "{facts}").format(facts=facts).strip()
+    plain_line = QUIET if raw else plain(why, facts)
     if os.environ.get("HQ_DIRECT_PLAIN") == "1" or os.environ.get("HQ_DIRECT_DRY") == "1":
-        return plain
+        return plain_line
     try:
         import asyncio
         import brain as _brain  # clears API key variables first
@@ -405,10 +488,10 @@ def compose(why: str, facts: str, raw: bool = False) -> str:
             return "".join(out).strip()
 
         text = asyncio.run(asyncio.wait_for(go(), timeout=90))
-        return _clean(text) or plain
+        return _clean(text) or plain_line
     except Exception as e:
         print(f"compose: {e!r}", file=sys.stderr)
-        return plain
+        return plain_line
 
 
 def _clean(text: str) -> str:
@@ -429,8 +512,8 @@ QUIET = "QUIET"
 INITIATIVE_PROMPT = """You keep your own notes for {user} (below), next to his calendar. Nobody asked you anything \
 now: this is your own look, a few times a day. Text him only when one of your notes is worth bringing up right now \
 (it fits this moment or what's coming in his day, it's waiting on him, or it's time to follow up), and never just to \
-check in. Most looks, stay quiet. If you text: one to three short sentences, as yourself, about that one thing. If \
-not, answer only the word QUIET.
+check in. Most looks, stay quiet. If you text: one quick, casual line about that one thing, the way a colleague texts \
+in between (H127), no notes or system talk. If not, answer only the word QUIET.
 
 {facts}"""
 
@@ -559,7 +642,8 @@ def _jobs_done_facts(seen: dict, roadmap: str) -> str:
         m = re.search(rf"^- Job {int(n)} · ([^·]+)·", text, flags=re.M)
         state = m.group(1).strip() if m else "finished"
         lines.append(f"- {what[:160]} ({state})")
-    return "What ran:\n" + "\n".join(lines[-8:]) if lines else ""
+    # H127: only background for her; the text itself says the team finished up, no details.
+    return ("What the team worked on (background only, never in the text):\n" + "\n".join(lines[-8:])) if lines else ""
 
 
 def watch(q: dict | None = None, *, main: bool = True, incidents_data: list | None = None,

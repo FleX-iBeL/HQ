@@ -6954,6 +6954,20 @@ setTimeout(() => {
             os.environ.pop("HQ_DIRECT")
             msg = dl.text("jobs", "What ran: the thing")
             need(msg["from"] == "agent" and msg["why"] == "jobs" and dl.thread()[-1]["text"] == msg["text"], "her text isn't in the thread")
+            # H127: the team finished up, a short line with no details or status talk, not the same one twice in a row
+            nxt = dl.text("jobs", "What ran: the thing")
+            for m in (msg, nxt):
+                low = m["text"].lower()
+                need("the thing" not in low and "nothing running" not in low and "job list" not in low and len(m["text"]) < 80,
+                     f"the finished job list text has details or status talk: {m['text']!r}")
+            need(nxt["text"] != msg["text"], f"the same finished line twice in a row: {nxt['text']!r}")
+            need("no details" in dl.compose_prompt("jobs", "x") and "background" in dl.compose_prompt("jobs", "x")
+                 and "short" in dl.TEXT_RULES and "humanised" in dl.TEXT_RULES, "her prompts don't ask for a short, human text")
+            dl.add("agent", "Small test line.", "back")
+            need("Small test line." in dl.compose_prompt("back", "x"), "her prompt doesn't show her last texts of the kind")
+            low = dl.plain("down", "call: no answer on 7860\nmail: ENOTFOUND").lower()
+            need("the call line" in low and "mail check" in low and "7860" not in low and "enotfound" not in low,
+                 f"the plain down text gives technical details: {low!r}")
             tick = (ROOT / "routine/tick.py").read_text()
             need("def direct_watch" in tick and "hqpaths.under_test()" in tick.split("def direct_watch")[1][:600],
                  "the routine doesn't look every minute, or would text from a test on the real workspace")
@@ -6986,7 +7000,7 @@ setTimeout(() => {
                 need(code == 200 and "showNotification" in sw, "the service worker isn't served")
                 code, body = await asyncio.to_thread(call, "/direct.json")
                 j = json.loads(body)
-                need(j["agent"]["name"] == dl.agent()["name"] and j["agent"]["key"] == k["public"] and j["messages"][-1]["text"] == msg["text"],
+                need(j["agent"]["name"] == dl.agent()["name"] and j["agent"]["key"] == k["public"] and j["messages"][-1]["text"] == dl.thread()[-1]["text"],
                      f"/direct.json says {body[:200]}")
                 code, _ = await asyncio.to_thread(call, "/direct/send", {"text": "hi"}, False)
                 need(code == 403, f"a send without the HQ header got {code}")
