@@ -1639,6 +1639,12 @@ function pingButton(e) {
   });
   return p;
 }
+// F30: an appointment is called about with the agent who does the agenda (her speciality says so; HQ's
+// default Donna), whoever is picked on the page; else the one picked.
+function agendaAgent() {
+  const all = Object.values(AGENTS);
+  return all.find(a => /\bagenda\b|\bcalendar\b/i.test(a.speciality || "")) || AGENTS.donna || AGENTS[agent] || {};
+}
 function showAppt(e) {
   calEl.classList.add("reading"); calTitle.textContent = "Appointment";
   calOne.innerHTML = "";
@@ -1650,11 +1656,13 @@ function showAppt(e) {
   }
   if (e.notes) { const n = document.createElement("div"); n.className = "notes"; n.textContent = e.notes; calOne.appendChild(n); }
   const go = document.createElement("button"); go.type = "button"; go.id = "calgo";
-  const a = AGENTS[agent] || {};
+  const a = agendaAgent();
   go.textContent = "Call " + (a.name || "") + " about this";
   go.disabled = free || state !== "idle";
   go.addEventListener("click", () => {
     if (free || state !== "idle") return;
+    const who = agendaAgent();  // F30: whoever is picked on the page, an appointment is hers
+    if (who.id && who.id !== agent) { agent = who.id; mode = who.load; showMode(); }
     aboutNext = e; showCal(false); call();
   });
   calOne.appendChild(go);

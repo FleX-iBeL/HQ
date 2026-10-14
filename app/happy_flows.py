@@ -4911,9 +4911,11 @@ window.fetch = async (url, opt) => {
     && calOne.textContent.includes("Main street 1") && go && !go.disabled && shown(document.getElementById("calback")) ? "ok" : "WRONG"));
   document.getElementById("calback").click(); await wait(300);
   out.push("back:" + (!calEl.classList.contains("reading") && appts().length === 3 ? "ok" : "WRONG"));
+  agent = "pepper"; showMode();  // F30: whoever is picked, an appointment is called about with the agenda's agent
   appts()[2].click(); await wait(100);
+  out.push("label:" + (document.getElementById("calgo").textContent === "Call Donna about this" ? "ok" : "WRONG " + document.getElementById("calgo").textContent));
   document.getElementById("calgo").click(); await wait(100);
-  out.push("call:" + (CALLED.join() === "e3" && !calOpen() ? "ok" : "WRONG " + CALLED));
+  out.push("call:" + (CALLED.join() === "e3" && agent === "donna" && !calOpen() ? "ok" : "WRONG " + CALLED + " " + agent));
   free = true; calBtn.click(); await wait(300); appts()[0].click(); await wait(100);
   out.push("free:" + (document.getElementById("calgo").disabled && calOne.textContent.includes("Free is on") ? "ok" : "WRONG"));
   document.getElementById("calgo").click(); await wait(50);
@@ -4949,7 +4951,7 @@ window.fetch = async (url, opt) => {
                 "Claude Code's own file, nothing outside it), cancelled left out, Main, a failed read keeping the last days; hourly in "
                 "the day, again on opening; /api/calendar on its own copy, ?fresh=1 reading again; the call's note, greeting and "
                 "transcript line; the page, phone and app: the button on the right before and after a call, the days, one "
-                "appointment, Back, Call about this sending it, off on Free, one sheet at a time")
+                "appointment, Back, Call about this sending it to the agenda's agent (F30), off on Free, one sheet at a time")
 
     async def flow92(self) -> str:
         """H124, no Claude: Donna texts first. routine/pings.py on its own copies (picking appointments, reminders,
