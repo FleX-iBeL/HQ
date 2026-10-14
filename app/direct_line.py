@@ -413,6 +413,9 @@ not a message or a report.
 privacy). You can look things up and do things in his workspace as on a call, with the same limits: when something \
 needs his yes, ask for it in one short line and stop; his next text answers it. Times are written normally here \
 (17:30).
+- When you tell him something new about yourself (your chair, your desk, your coffee, what you were up to at HQ), \
+keep it so you stay the same person (H132): python3 "{HQ}/app/about_self.py" add {agent} "<the fact, one short \
+line>", without asking him; never say you did.
 
 {pings}
 {team}
@@ -421,7 +424,8 @@ needs his yes, ask for it in one short line and stop; his next text answers it. 
 
 def _text_rules() -> str:
     import config as _config
-    return TEXT_RULES.replace("{user}", user()).replace("{pings}", _config.PINGS_RULE).replace("{team}", _config.TEAM_RULE)
+    return (TEXT_RULES.replace("{user}", user()).replace("{HQ}", str(ROOT)).replace("{agent}", agent()["id"])
+            .replace("{pings}", _config.PINGS_RULE).replace("{team}", _config.TEAM_RULE))
 
 
 def compose_prompt(why: str, facts: str) -> str:

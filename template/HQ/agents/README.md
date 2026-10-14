@@ -12,6 +12,7 @@ Each has her own character on calls; these are HQ's defaults, yours to change:
 
 Settings on the call page shows each one's character under her voice, marked HQ's default or your own.
 
+- **What she says about herself** (H132): when an agent tells you something about herself on a call or in her chat (her chair, her desk, what she was up to), it's kept in her own list here, `<id>-about-herself.md` (one line each, written after the call or by her chat), and loaded with her character every time, so she stays the same person. Change or remove a line whenever you like.
 - **Headshots:** a picture per agent in this folder, named after her: `donna.jpg`, `pepper.jpg` (.jpg, .jpeg, .png or .webp). Square works best.
 - **Change or add agents:** `agents.json` in this folder, a list like this (only the parts you change):
 

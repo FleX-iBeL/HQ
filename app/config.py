@@ -386,7 +386,10 @@ WRAP_UP_PROMPT = """[Call system: @USER@ has hung up. The call is over, and noth
 Do the after-call work, quietly and fully, as in a normal chat:
 1. Write what matters from this call into the right places, as where-things-go.md says, in his words. \
 At least one entry in coaching/log.md, newest first, headed with today's date, the time the call \
-started ({start}) and the type "call", with his own words from the call and any commitments or follow-ups.
+started ({start}) and the type "call", with his own words from the call and any commitments or follow-ups. \
+If you or another agent on this call said something about herself (her chair, her desk, her coffee, what she was \
+doing at HQ), keep each new fact with python3 "@HQ@/app/about_self.py" add <her name> "<the fact, one short line>" \
+(H132; it skips what's already kept and prints her file, which you add to the commit too).
 2. The full transcript of the call is in {transcript}. Read it if you need to; don't change it.
 3. Then commit and push, as CLAUDE.md says: git add every file you changed plus the transcript, \
 each by name (never -A or a dot), then one plain command: git commit -q -m "Call {start_short}: <a short description>", then git push. \
@@ -400,7 +403,7 @@ WRAP_UP_BACKUP_STEP = """3. This HQ is the backup now, so don't commit or push: 
 over to it with the sync. Leave git alone."""
 WRAP_UP_DRY_PROMPT = """[Call system: TEST RUN. @USER@ has hung up. Don't change any file and don't run git. \
 Reply with one short line saying which files you would update and what you would commit. The transcript is in {transcript}.]"""
-WRAP_UP_PROMPT = WRAP_UP_PROMPT.replace("@USER@", USER)
+WRAP_UP_PROMPT = WRAP_UP_PROMPT.replace("@USER@", USER).replace("@HQ@", str(ROOT))
 WRAP_UP_DRY_PROMPT = WRAP_UP_DRY_PROMPT.replace("@USER@", USER)
 
 # Fillers: when Claude hasn't said anything this long after the user's turn ends, HQ

@@ -6201,9 +6201,33 @@ setTimeout(() => {
         need(all(x in tmpl for x in ("Hey you. What do you need?", "Just not tonight.", '"pushback"', '"greetings"')),
              "the template's agents readme doesn't show the defaults and how to change them")
         need("Quick and dry" in about and "HQ's defaults" in about, "ABOUT.md doesn't describe the characters")
+        # H132: what she says about herself is kept in her own list in the workspace, and comes with her persona
+        import about_self, direct_line
+        from policy import Policy
+        ws = self.tmp / "h132"
+        donna = agents.find(ws, "donna")
+        need(donna["about_self"] == [] and "nothing yet" in agents.persona(donna, "Sam"), "an agent without a list isn't told so")
+        need(about_self.add(ws, donna, "  I have a nice   chair by the window ") and not about_self.add(ws, donna, "I have a nice chair by the window."),
+             "a fact isn't kept, or is kept twice")
+        f = about_self.path(ws, "donna")
+        need(f == ws / "HQ/agents/donna-about-herself.md" and f.read_text().count("- I have a nice chair by the window\n") == 1,
+             f"her list isn't in the workspace's agents folder: {f}")
+        donna, pepper = agents.find(ws, "donna"), agents.find(ws, "pepper")
+        need("- I have a nice chair by the window" in agents.persona(donna, "Sam") and "chair by the window" not in agents.persona(pepper, "Sam"),
+             "her list doesn't come with her own persona only")
+        pol = Policy(config.FOLDER, dry_run=True)
+        need(pol.decide("Bash", {"command": f'python3 "{ROOT}/app/about_self.py" add Donna "x"'}).verdict == "allow"
+             and pol.decide("Bash", {"command": f'python3 "{ROOT}/app/about_self.py" rm Donna'}).verdict == "deny",
+             "a call or her chat can't keep a fact (or can do more than list and add)")
+        need("about_self.py\" add <her name>" in config.WRAP_UP_PROMPT and "@HQ@" not in config.WRAP_UP_PROMPT,
+             "the after-call notes don't keep what an agent said about herself")
+        need("about_self.py\" add donna" in direct_line._text_rules(), "her chat doesn't keep what she says about herself")
+        need(not name or name not in (APP / "about_self.py").read_text(), "the user's name is written in HQ's about_self.py")
+        need("about-herself" in tmpl, "the template's agents readme doesn't mention her own list")
         return ("Donna, Pepper and Moneypenny each with her agreed greeting and push-back, nothing personal; her character and no "
                 "talking while she thinks; calls greet in her words; a workspace's own character wins and is marked; "
-                "Settings, /api/agents, agents.py and the readme show the defaults")
+                "Settings, /api/agents, agents.py and the readme show the defaults; what she says about herself is kept in "
+                "her own list and comes with her persona (H132)")
 
 
     # 70

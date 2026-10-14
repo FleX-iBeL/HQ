@@ -306,6 +306,11 @@ class Policy:
                 return Decision(ALLOW, "her pings, reminders, notes and watches")
             # H125: match is the mail check's own (it found a mail for a watch)
             return Decision(DENY, "the pings script takes list, appt, remind, cancel, note, note-clear, watch or unwatch")
+        # H132: what an agent has said about herself, kept in her own list in the workspace (HQ/agents/).
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "about_self.py"):
+            if len(args) == 1 or args[1] in ("list", "add"):
+                return Decision(ALLOW, "her own list of what she has said about herself")
+            return Decision(DENY, "the about-herself script takes list or add")
         # H56.3: main and backup. Asking which one is main, and making one the main on his ask.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "role.py"):
             if len(args) == 1 or (len(args) == 3 and args[1] == "main"):
@@ -446,6 +451,13 @@ class Policy:
         if not p.is_absolute():
             p = self.folder / p
         return Path(os.path.realpath(p)) == HQ_ROUTINE / name
+
+    def hq_app_script(self, path: str, name: str) -> bool:
+        """H132: one of HQ's own app scripts, like hq_script for the routine's."""
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = self.folder / p
+        return Path(os.path.realpath(p)) == HQ_ROUTINE.parent / "app" / name
 
     def rel(self, path: str) -> Path:
         p = Path(path).expanduser()

@@ -40,6 +40,8 @@ import re
 from html import escape
 from pathlib import Path
 
+import about_self
+
 LOADS = ("quick", "deep")
 MODELS = ("sonnet", "opus", "haiku")  # the aliases config.MODEL_ALIASES knows
 PICTURE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
@@ -272,6 +274,8 @@ def load(folder: Path) -> list[dict]:
         elif (new := _clean(e)):
             agents[new["id"]] = new
             order.append(new["id"])
+    for a in agents.values():  # H132: what she has said about herself, kept in the workspace
+        a["about_self"] = about_self.facts(folder, a["id"])
     return [agents[i] for i in order]
 
 
@@ -389,7 +393,7 @@ def persona(agent: dict, user: str = "the user") -> str:
     if agent.get("pushback"):
         out += (f"How you sound when you push back, as an example of your voice (don't repeat it word for word): "
                 f"\"{agent['pushback']}\"\n")
-    return out + HUMAN + "\nEverything else in the call rules above still holds.\n"
+    return out + about_self.block(agent, user) + HUMAN + "\nEverything else in the call rules above still holds.\n"
 
 
 def public(agent: dict) -> dict:
