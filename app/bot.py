@@ -507,6 +507,16 @@ if __name__ == "__main__":
             await asyncio.to_thread(_agenda_api.refresh)
         return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
 
+    # H135: the weather in the app (weather.py view): ?fresh=1 reads it again when the last read is over 15 minutes
+    # old. Not on a Free-only line: the place comes from his own files.
+    @app.get("/api/weather", include_in_schema=False)
+    async def weather_read(request: Request):
+        if config.FREE_ONLY:
+            return JSONResponse({"off": "Free"}, headers=_NO_CACHE)
+        import weather as _weather
+        return JSONResponse(await asyncio.to_thread(_weather.view, request.query_params.get("fresh") == "1"),
+                            headers=_NO_CACHE)
+
     # H124: the bell. A tap in the appointment asks Donna to ping him when it starts (or not any more). Only HQ's own
     # list changes (routine/pings.py); Google Calendar is never written. Only from the page itself (x-hq: calendar).
     @app.post("/api/calendar/ping", include_in_schema=False)

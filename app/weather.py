@@ -21,12 +21,18 @@ H125: her watch list ("let me know if it rains later today", routine/pings.py). 
 the look comes every 30 minutes (WATCH_EVERY, 07:00 to 23:00), checks each open watch against the forecast up to
 its time, and keeps a match for her to text (pings.match); the texts above still come only every three hours.
 
+H135: the weather in the app. view() is what the call page shows (GET /api/weather): now (sunny or not, degrees,
+wind, chance of rain), today and the next hours, UV, the rain radar's two hours, and the official weather warnings
+for his area (code yellow and up; MeteoAlarm's feed, which carries KNMI's for the Netherlands). Read when the page
+asks and the last read is over 15 minutes old (APP_EVERY), kept in weather.json under "app".
+
 Kept in the direct line's folder (synced, off GitHub): weather.json, the last look, the place's coordinates and
 what she already said today. Off: HQ_WEATHER=0. HQ_WEATHER_PLACE overrides the place (tests).
 
   python3 app/weather.py status            the place, the last look, whether a look is due
   .venv/bin/python app/weather.py look     look now and text if there's something worth saying
   python3 app/weather.py look --dry        what she would text now, without texting
+  python3 app/weather.py view [--fresh]    what the app shows (H135)
 """
 from __future__ import annotations
 
@@ -95,21 +101,23 @@ def _get(url: str, timeout: int = 15) -> str:
         return r.read().decode("utf8", "replace")
 
 
-def where(s: dict | None = None) -> dict | None:
-    """The place's coordinates, its time zone and country, looked up once (Open-Meteo's geocoding) and kept."""
+def where(s: dict | None = None, region: bool = False) -> dict | None:
+    """The place's coordinates, its time zone and country, looked up once (Open-Meteo's geocoding) and kept.
+    REGION (H135, for the warnings): looked up again when it was kept from before without its region."""
     name = place()
     if not name:
         return None
     s = _read() if s is None else s
     got = s.get("where") or {}
-    if got.get("place") == name and "lat" in got:
+    if got.get("place") == name and "lat" in got and (not region or "region" in got):
         return got
     q = urllib.parse.urlencode({"name": name.split(",")[0].strip(), "count": 1, "language": "en"})
     res = (json.loads(_get(f"https://geocoding-api.open-meteo.com/v1/search?{q}")).get("results") or [None])[0]
     if not res:
         return None
     got = {"place": name, "lat": res["latitude"], "lon": res["longitude"], "tz": res.get("timezone") or "UTC",
-           "country": res.get("country_code") or "", "name": res.get("name") or name}
+           "country": res.get("country_code") or "", "name": res.get("name") or name,
+           "region": res.get("admin1") or ""}
     s["where"] = got
     return got
 
@@ -409,6 +417,210 @@ def start(now: float | None = None) -> bool:
     return True
 
 
+# -- H135: the weather in the app ------------------------------------------------------------------------
+
+APP_EVERY = 15 * 60  # the app's weather is read again when it's older than this
+WARN_FROM = 2  # MeteoAlarm's awareness levels: 1 green, 2 yellow, 3 orange, 4 red; shown from yellow
+LEVELS = {1: "green", 2: "yellow", 3: "orange", 4: "red"}
+# MeteoAlarm's feeds by country (the feed's name); elsewhere the app says there's no warnings feed for the place.
+METEOALARM = {"NL": "netherlands", "BE": "belgium", "DE": "germany", "FR": "france", "LU": "luxembourg",
+              "GB": "united-kingdom", "IE": "ireland", "ES": "spain", "PT": "portugal", "IT": "italy",
+              "AT": "austria", "CH": "switzerland", "DK": "denmark", "NO": "norway", "SE": "sweden",
+              "FI": "finland", "EE": "estonia", "LV": "latvia", "LT": "lithuania", "PL": "poland",
+              "CZ": "czechia", "SK": "slovakia", "HU": "hungary", "SI": "slovenia", "HR": "croatia",
+              "GR": "greece", "CY": "cyprus", "MT": "malta", "RO": "romania", "BG": "bulgaria", "RS": "serbia",
+              "IS": "iceland", "ME": "montenegro", "MK": "republic-of-north-macedonia", "BA": "bosnia-herzegovina",
+              "IL": "israel", "MD": "moldova", "UA": "ukraine"}
+# The names geocoding gives a region in English where the warnings use the local one.
+REGION_WORDS = {"north": "noord", "south": "zuid", "frisia": "friesland", "fryslan": "friesland"}
+WIND_DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+
+
+def app_forecast(w: dict) -> dict:
+    q = urllib.parse.urlencode({
+        "latitude": w["lat"], "longitude": w["lon"], "timezone": w.get("tz") or "auto", "forecast_days": 2,
+        "current": "temperature_2m,apparent_temperature,precipitation,weather_code,is_day,wind_speed_10m,"
+                   "wind_gusts_10m,wind_direction_10m,uv_index",
+        "hourly": "temperature_2m,precipitation,precipitation_probability,weather_code,uv_index,wind_speed_10m,is_day",
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,"
+                 "precipitation_probability_max,uv_index_max,sunrise,sunset,wind_speed_10m_max,wind_gusts_10m_max"})
+    return json.loads(_get(f"https://api.open-meteo.com/v1/forecast?{q}"))
+
+
+def _norm(t: str) -> str:
+    words = re.findall(r"[a-z]+", (t or "").lower().replace("â", "a"))
+    return "".join(REGION_WORDS.get(x, x) for x in words)
+
+
+def _level(info: dict) -> int:
+    for p in info.get("parameter") or []:
+        if p.get("valueName") == "awareness_level":
+            try:
+                return int(str(p.get("value")).split(";")[0])
+            except ValueError:
+                return 0
+    return 0
+
+
+def parse_warnings(feed: dict, w: dict, now: datetime) -> list[dict]:
+    """The warnings from a MeteoAlarm feed that cover the place's region (or the place itself), yellow and up, not
+    over yet; English where the feed has it. One per kind of weather, the highest level first. No network."""
+    areas = {_norm(w.get("region") or ""), _norm(w.get("name") or "")} - {""}
+    out = {}
+    for x in (feed or {}).get("warnings") or []:
+        alert = x.get("alert") or {}
+        if alert.get("msgType") == "Cancel" or alert.get("status") not in (None, "Actual"):
+            continue
+        infos = alert.get("info") or []
+        info = next((i for i in infos if str(i.get("language", "")).startswith("en")), infos[0] if infos else None)
+        if not info or _level(info) < WARN_FROM:
+            continue
+        hit = [a.get("areaDesc", "") for a in info.get("area") or [] if _norm(a.get("areaDesc", "")) in areas]
+        if not hit:
+            continue
+        try:
+            ends = datetime.fromisoformat(info["expires"])
+            if ends.tzinfo:
+                ends = ends.astimezone(now.tzinfo).replace(tzinfo=None) if now.tzinfo else ends.replace(tzinfo=None)
+            if ends <= now.replace(tzinfo=None):
+                continue
+        except (KeyError, ValueError):
+            pass
+        lvl = _level(info)
+        kind = next((p.get("value", "") for p in info.get("parameter") or [] if p.get("valueName") == "awareness_type"), "")
+        kind = kind.split(";")[-1].strip() or info.get("event", "")
+        one = {"level": LEVELS.get(lvl, str(lvl)), "n": lvl, "what": kind, "event": info.get("event", ""),
+               "headline": info.get("headline", ""), "text": (info.get("description") or "").strip(),
+               "from": info.get("onset") or info.get("effective") or "", "until": info.get("expires", ""),
+               "area": hit[0], "by": info.get("senderName", ""), "web": info.get("web", "")}
+        k = (kind.lower(), one["from"][:13])
+        if k not in out or out[k]["n"] < lvl:
+            out[k] = one
+    return sorted(out.values(), key=lambda o: (-o["n"], o["from"]))
+
+
+def warnings(w: dict, now: datetime) -> tuple[list[dict], str]:
+    """(warnings, the source's name or why there are none to read)."""
+    slug = METEOALARM.get(w.get("country") or "")
+    if not slug:
+        return [], "no warnings feed for this country"
+    feed = json.loads(_get(f"https://feeds.meteoalarm.org/api/v1/warnings/feeds-{slug}", timeout=20))
+    return parse_warnings(feed, w, now), "KNMI" if w.get("country") == "NL" else "MeteoAlarm"
+
+
+def uv_word(uv) -> str:
+    if uv is None:
+        return ""
+    uv = float(uv)
+    return "low" if uv < 3 else "moderate" if uv < 6 else "high" if uv < 8 else "very high" if uv < 11 else "extreme"
+
+
+def beaufort(kmh) -> int:
+    if kmh is None:
+        return 0
+    for b, top in enumerate([1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118]):
+        if kmh < top:
+            return b
+    return 12
+
+
+def icon(code, day: bool = True) -> str:
+    """One word for the page's picture: sun, moon, partly, cloud, fog, drizzle, rain, snow, storm."""
+    if code in (0, 1):
+        return "sun" if day else "moon"
+    if code == 2:
+        return "partly" if day else "cloud"
+    return {3: "cloud", 45: "fog", 48: "fog"}.get(code) or ("drizzle" if code in (51, 53, 55, 56, 57) else
+            "snow" if code in (71, 73, 75, 77, 85, 86) else "storm" if code in (95, 96, 99) else
+            "rain" if code is not None else "cloud")
+
+
+def build_view(fc: dict, minutes: list[tuple[str, float]], warns: list[dict], now: datetime, name: str = "",
+               warn_source: str = "") -> dict:
+    """What the app shows, from the forecast, the radar and the warnings. No network: the happy flow feeds it."""
+    cur = fc.get("current") or {}
+    h = fc.get("hourly") or {}
+    hours = []
+    for i, t in enumerate(h.get("time") or []):
+        at = datetime.fromisoformat(t)
+        if at < now.replace(minute=0, second=0, microsecond=0) or len(hours) >= 12:
+            continue
+        x = {k: (h.get(k) or [None] * (i + 1))[i] for k in h}
+        hours.append({"at": at.strftime("%H:%M"), "temp": x.get("temperature_2m"),
+                      "chance": x.get("precipitation_probability"), "mm": x.get("precipitation"),
+                      "uv": x.get("uv_index"), "icon": icon(x.get("weather_code"), bool(x.get("is_day", 1))),
+                      "text": WMO.get(x.get("weather_code"), "")})
+    code, day_now = cur.get("weather_code"), bool(cur.get("is_day", 1))
+    nxt = hours[:3]
+    chance = max([x["chance"] or 0 for x in nxt] or [0])
+    raining = (minutes[0][1] >= 0.1) if minutes else (cur.get("precipitation") or 0) >= 0.1
+    wind = cur.get("wind_speed_10m")
+    d = fc.get("daily") or {}
+    def daily(i):
+        g = lambda k: ((d.get(k) or []) + [None, None])[i]
+        if not (d.get("time") or [])[i:i + 1]:
+            return None
+        return {"date": d["time"][i], "text": WMO.get(g("weather_code"), ""), "icon": icon(g("weather_code")),
+                "max": g("temperature_2m_max"), "min": g("temperature_2m_min"), "mm": g("precipitation_sum"),
+                "chance": g("precipitation_probability_max"), "uv": g("uv_index_max"), "uv_word": uv_word(g("uv_index_max")),
+                "sunrise": (g("sunrise") or "")[11:16], "sunset": (g("sunset") or "")[11:16],
+                "wind": g("wind_speed_10m_max"), "gusts": g("wind_gusts_10m_max")}
+    if minutes:
+        wet = [hm for hm, mm in minutes if mm >= 0.1]
+        if raining:
+            stop = next((hm for hm, mm in minutes if mm < 0.1), "")
+            radar = f"Raining now, dry from about {stop}" if stop else "Raining for the next two hours"
+        else:
+            radar = f"Rain from about {wet[0]}" if wet else "Dry for the next two hours"
+    else:
+        radar = ""
+    sunny = code in SUN_CODES and day_now and not raining
+    return {"place": name, "now": {
+        "temp": cur.get("temperature_2m"), "feels": cur.get("apparent_temperature"), "code": code,
+        "text": WMO.get(code, ""), "icon": icon(code, day_now), "sunny": sunny, "day": day_now, "raining": raining,
+        "chance": chance, "wind": wind, "gusts": cur.get("wind_gusts_10m"), "bft": beaufort(wind),
+        "dir": WIND_DIRS[round((cur.get("wind_direction_10m") or 0) / 45) % 8] if wind is not None else "",
+        "uv": cur.get("uv_index"), "uv_word": uv_word(cur.get("uv_index"))},
+        "today": daily(0), "tomorrow": daily(1), "hours": hours, "radar": radar,
+        "minutes": [{"at": hm, "mm": mm} for hm, mm in minutes], "warnings": warns, "warn_source": warn_source}
+
+
+def view(fresh: bool = False, now: float | None = None) -> dict:
+    """What the app shows (H135): the last read, read again first when FRESH and it's over 15 minutes old. Says so
+    plainly when HQ has no place for him, or the weather is off."""
+    if not on():
+        return {"off": "The weather is off on this HQ."}
+    name = place()
+    if not name:
+        return {"off": "No place set yet. Tell me where you are (Where I am, in me.md) and the weather shows here."}
+    s = _read()
+    got = s.get("app") or {}
+    now = now or time.time()
+    if got.get("for") != name:
+        got = {}
+    if fresh and (not got or now - float(got.get("looked") or 0) >= APP_EVERY - 30):
+        try:
+            w = where(s, region=True)
+            if not w:
+                raise ValueError(f"couldn't find {name}")
+            loc = local_now(w["tz"], now).replace(tzinfo=None)
+            fc = app_forecast(w)
+            try:
+                minutes = rain_text(w)
+            except Exception:
+                minutes = []
+            try:
+                warns, source = warnings(w, loc)
+            except Exception:
+                warns, source = [], "the warnings couldn't be read just now"
+            got = build_view(fc, minutes, warns, loc, w.get("name") or name, source) | {"looked": now, "for": name}
+            s = _read() | {"where": s.get("where"), "app": got}  # the look may have written meanwhile
+            _write(s)
+        except Exception as e:
+            got = dict(got) | {"error": str(e)[:200]}
+    return got | {"for": name} if got else {"for": name, "looked": None}
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     cmd = args[0] if args else "status"
@@ -420,6 +632,8 @@ if __name__ == "__main__":
     elif cmd == "look":
         print(json.dumps(look(dry="--dry" in args, general=True if "--general" in args else False if "--watches" in args else None),
                          ensure_ascii=False))
+    elif cmd == "view":
+        print(json.dumps(view(fresh="--fresh" in args), ensure_ascii=False, indent=1))
     else:
         print(__doc__)
         sys.exit(2)

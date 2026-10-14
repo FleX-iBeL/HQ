@@ -6725,6 +6725,119 @@ setTimeout(() => {
                 os.environ["HQ_CLAUDE_PROJECTS"] = old
         return "a new job's chat gets an id; held, it picks its own chat up with the step; chat gone or other computer: a fresh chat with the note"
 
+    async def flow94(self) -> str:
+        """H135, no Claude, no network: the weather in the app. The view from a made-up forecast, radar and warnings
+        feed (sunny or not, degrees, wind in Bft, chance of rain, UV, the next hours, today and tomorrow), the
+        warnings that count (his region, yellow and up, not over, not cancelled, English, the English region name
+        matched to the local one), a blank place said plainly, the read kept for 15 minutes in a throwaway folder,
+        the call server's endpoint (not on Free) and the call page's widget and sheet (the widget out of the page's flow,
+        so the call screen keeps its room, flow 64)."""
+        import importlib
+        from datetime import datetime as dt
+        sys.path.insert(0, str(ROOT / "app"))
+        import weather as w
+        importlib.reload(w)
+        hrs = [f"2026-10-14T{h:02d}:00" for h in range(24)] + [f"2026-10-15T{h:02d}:00" for h in range(24)]
+        def fc(code=1, prob=10, day=1):
+            return {"current": {"temperature_2m": 17.4, "apparent_temperature": 15.1, "weather_code": code, "is_day": day,
+                                "precipitation": 0, "wind_speed_10m": 22.0, "wind_gusts_10m": 41.0,
+                                "wind_direction_10m": 230, "uv_index": 3.4},
+                    "hourly": {"time": hrs, "temperature_2m": [16] * 48, "precipitation": [0] * 48,
+                               "precipitation_probability": [prob] * 48, "weather_code": [code] * 48,
+                               "uv_index": [2] * 48, "wind_speed_10m": [20] * 48, "is_day": [1] * 48},
+                    "daily": {"time": ["2026-10-14", "2026-10-15"], "weather_code": [code, 61],
+                              "temperature_2m_max": [18.2, 14], "temperature_2m_min": [10.1, 9],
+                              "precipitation_sum": [0, 4.2], "precipitation_probability_max": [10, 80],
+                              "uv_index_max": [3.6, 1.2], "sunrise": ["2026-10-14T08:03", "2026-10-15T08:05"],
+                              "sunset": ["2026-10-14T18:48", "2026-10-15T18:46"],
+                              "wind_speed_10m_max": [25, 30], "wind_gusts_10m_max": [45, 60]}}
+        now = dt(2026, 10, 14, 11, 20)
+        v = w.build_view(fc(), [("11:20", 0.0)] * 24, [], now, "Town", "KNMI")
+        n = v["now"]
+        need(n["sunny"] and n["icon"] == "sun" and round(n["temp"]) == 17 and n["bft"] == 4 and n["dir"] == "SW"
+             and n["chance"] == 10 and n["uv_word"] == "moderate" and not n["raining"], f"the view now: {n}")
+        need(len(v["hours"]) == 12 and v["hours"][0]["at"] == "11:00" and v["radar"] == "Dry for the next two hours",
+             f"the next hours or the radar: {v['hours'][:1]} {v['radar']}")
+        need(v["today"]["uv_word"] == "moderate" and v["today"]["sunset"] == "18:48" and v["tomorrow"]["chance"] == 80
+             and v["tomorrow"]["icon"] == "rain", f"today and tomorrow: {v['today']} {v['tomorrow']}")
+        v = w.build_view(fc(code=63, prob=90), [("11:20", 1.2)] * 6 + [("11:50", 0.0)] * 18, [], now, "Town")
+        need(not v["now"]["sunny"] and v["now"]["raining"] and v["now"]["icon"] == "rain"
+             and v["radar"] == "Raining now, dry from about 11:50", f"rain now: {v['now']} {v['radar']}")
+        need(not w.build_view(fc(day=0), [], [], now)["now"]["sunny"] and w.icon(0, False) == "moon", "sunny at night")
+        # the warnings: his region (the English name matched to the local one), yellow and up, still on
+        def warn(area, level, expires="2026-10-14T23:00:00+02:00", lang="en-GB", kind="2; Wind", msg="Alert"):
+            return {"alert": {"msgType": msg, "status": "Actual", "info": [
+                {"language": lang, "event": "wind", "headline": f"Code {level} wind {area}", "description": "Gusts up to 75 km/h.",
+                 "onset": "2026-10-14T13:00:00+02:00", "expires": expires, "senderName": "KNMI",
+                 "area": [{"areaDesc": area}],
+                 "parameter": [{"valueName": "awareness_level", "value": f"{level}; x; y"},
+                               {"valueName": "awareness_type", "value": kind}]}]}}
+        feed = {"warnings": [warn("Noord-Holland", 2), warn("Noord-Holland", 1, kind="3; Thunderstorm"),
+                             warn("Zeeland", 3), warn("Noord-Holland", 3, expires="2026-10-14T09:00:00+02:00", kind="4; Fog"),
+                             warn("Noord-Holland", 3, msg="Cancel", kind="7; Rain"), warn("Noord-Holland", 2, lang="nl-NL", kind="2; Wind")]}
+        place = {"name": "Haarlem", "region": "North Holland", "country": "NL"}
+        got = w.parse_warnings(feed, place, now)
+        need(len(got) == 1 and got[0]["level"] == "yellow" and got[0]["what"] == "Wind" and got[0]["area"] == "Noord-Holland",
+             f"the warnings that count: {got}")
+        need(not w.parse_warnings(feed, {"name": "Breda", "region": "North Brabant", "country": "NL"}, now),
+             "a warning for another region was shown")
+        need(w.parse_warnings({"warnings": [warn("Zeeland", 3)]}, {"name": "Middelburg", "region": "Zeeland"}, now)[0]["level"] == "orange",
+             "an orange warning isn't read")
+        need(w.METEOALARM.get("NL") == "netherlands" and w.METEOALARM.get("EE") == "estonia", "the warnings feeds by country")
+        need(w.warnings({"country": "TH"}, now) == ([], "no warnings feed for this country"), "a country without a feed")
+        # view(): a blank place said plainly; the read kept for 15 minutes; a failed read keeps the last one
+        folder = self.tmp / "weather-H135"
+        keep = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_WEATHER_PLACE", "HQ_WEATHER")}
+        real = (w.app_forecast, w.rain_text, w.warnings, w.place)
+        calls = []
+        try:
+            os.environ.update({"HQ_DIRECT_DIR": str(folder)})
+            os.environ.pop("HQ_WEATHER", None)
+            os.environ.pop("HQ_WEATHER_PLACE", None)
+            w.place = lambda: ""
+            need("No place set yet" in (w.view(fresh=True).get("off") or ""), "a blank place isn't said plainly")
+            w.place = real[3]
+            os.environ["HQ_WEATHER_PLACE"] = "Testtown"
+            w._write({"where": {"place": "Testtown", "lat": 52.0, "lon": 5.0, "tz": "Europe/Amsterdam",
+                                "country": "NL", "name": "Testtown", "region": "Zeeland"}})
+            w.app_forecast = lambda _w: calls.append(1) or fc()
+            w.rain_text = lambda _w: []
+            w.warnings = lambda _w, _now: (w.parse_warnings({"warnings": [warn("Zeeland", 2)]}, _w, _now.replace(year=2026, month=10, day=14, hour=11)), "KNMI")
+            t0 = time.time()
+            v1 = w.view(fresh=True, now=t0)
+            need(v1.get("place") == "Testtown" and v1["now"]["temp"] == 17.4 and v1.get("warnings") and len(calls) == 1,
+                 f"the view wasn't read: {v1.get('error')} {calls}")
+            need(w.view(fresh=True, now=t0 + 600)["looked"] == t0 and len(calls) == 1, "read again within 15 minutes")
+            need(w.view(now=t0 + 3600)["looked"] == t0 and len(calls) == 1, "read without being asked fresh")
+            w.app_forecast = lambda _w: (_ for _ in ()).throw(OSError("offline"))
+            v3 = w.view(fresh=True, now=t0 + 3600)
+            need(v3.get("error") and v3["looked"] == t0 and v3["now"]["temp"] == 17.4, "a failed read didn't keep the last one")
+            os.environ["HQ_WEATHER_PLACE"] = "Othertown"
+            need(not w.view().get("now"), "another place's weather was shown")
+            os.environ["HQ_WEATHER"] = "0"
+            need(w.view().get("off"), "HQ_WEATHER=0 doesn't switch it off")
+        finally:
+            w.app_forecast, w.rain_text, w.warnings, w.place = real
+            for k, v in keep.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        # the call server and the page
+        bot = (ROOT / "app/bot.py").read_text()
+        ep = bot.split('@app.get("/api/weather"')[1].split("@app.")[0] if '@app.get("/api/weather"' in bot else ""
+        need("FREE_ONLY" in ep and "_weather.view" in ep and 'get("fresh") == "1"' in ep, "the call server has no /api/weather, or it's on Free")
+        page = (ROOT / "app/web/index.html").read_text()
+        for x in ('id="wx"', 'id="wxsheet"', '"api/weather"', "function paintWx", "function showWx", "body.chatting #wx"):
+            need(x in page, f"the call page misses {x}")
+        need(page.count("closeWx();") >= 6, "opening another sheet doesn't close the weather (one sheet at a time)")
+        pw = page.split("function paintWx")[1].split("\nfunction ")[0]
+        need('state === "idle"' in pw and "!free" in pw and "warnings" in pw and "d.off" in pw,
+             "the pill shows on a call or on Free, or misses the warning or the plain no-place line")
+        sb = page.split("function showWxBody")[1].split("\nasync function ")[0]
+        need(all(k in sb for k in ("wxLevel(w)", "UV now", "Next hours", "Tomorrow", "Chance of rain", "Wind")),
+             "the sheet misses the warnings, UV, the next hours, tomorrow, rain or wind")
+        need(re.search(r"#wx \{ position:fixed;", page), "the widget takes room in the page's flow (the call screen moves)")
+        need("var wxData" in page, "the pill's data isn't hoisted: showMode() paints it before the line runs")
+        return "the view (sun, degrees, Bft, rain, UV, hours, today, tomorrow), the warnings that count, a blank place said, kept 15 minutes, the endpoint off on Free, the pill and the sheet"
+
     async def flow90(self) -> str:
         """H120, no Claude, no network: the weather every three hours. What's worth a text from a made-up forecast
         and rain radar (sun, rain coming by the minute, a rainy day never saying go outside, quiet at night and
@@ -8865,6 +8978,7 @@ FLOWS = {
     91: ("H101: my calendar inside HQ, read only from Google; a tap on an appointment starts a call about it", False, "flow91"),
     92: ("H124: Donna texts first: pings for appointments he picked (a bell shows them), reminders, her own notes", False, "flow92"),
     93: ("H125: Donna's watch list: she keeps an eye out for a mail or the weather and texts when it comes", False, "flow93"),
+    94: ("H135: the weather in the app: a widget on the main screen, a sheet with warnings (KNMI), UV and the next hours", False, "flow94"),
 }
 
 

@@ -362,6 +362,52 @@
   #calgo { border:0; border-radius:14px; background:var(--accent); color:#04120f; font:600 17px/1 -apple-system,sans-serif; padding:15px 12px; cursor:pointer; margin-top:4px; }
   #calgo:disabled { opacity:.45; cursor:default; }
   #calnote { color:var(--muted); font-size:12px; text-align:center; min-height:1em; }
+  /* H135: the weather at a glance at the bottom between the round buttons, before a call (app/weather.py through /api/weather): sunny or
+     not, degrees, wind, chance of rain, and a warning when there is one. A tap opens its sheet with more: the
+     warnings (KNMI's, through MeteoAlarm), now, the radar's two hours, the next hours, UV, today and tomorrow. */
+  #wx { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(16px + env(safe-area-inset-bottom)); z-index:20;
+        display:none; flex-direction:column; align-items:center; justify-content:center; gap:3px; box-sizing:border-box;
+        height:56px; max-width:calc(100vw - 168px); min-width:120px; border:0; border-radius:18px; padding:0 14px;
+        background:color-mix(in srgb, var(--fg) 8%, var(--bg)); color:var(--fg); font:14px/1.15 -apple-system,sans-serif;
+        cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.18); }
+  #wx.show { display:flex; }
+  #wx[aria-expanded="true"] { background:var(--accent); color:#04120f; }
+  #wx .l1, #wx .l2 { display:flex; align-items:center; gap:6px; max-width:100%; white-space:nowrap; overflow:hidden; }
+  #wx .ic { font-size:17px; line-height:1; }
+  #wx .tp { font-weight:650; font-variant-numeric:tabular-nums; }
+  #wx .tx { overflow:hidden; text-overflow:ellipsis; }
+  #wx .l2 { color:var(--muted); font-size:12px; }
+  #wx[aria-expanded="true"] .l2 { color:inherit; }
+  #wx .wn { border-radius:999px; padding:1px 7px; font-size:11px; font-weight:700; color:#1f1600; background:#facc15; }
+  #wx .wn.orange { background:#fb923c; } #wx .wn.red { background:#ef4444; color:#fff; }
+  body.chatting #wx { display:none; }
+  #wxsheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
+             border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:8px;
+             padding:14px 16px calc(220px + env(safe-area-inset-bottom)); text-align:left; user-select:text; -webkit-user-select:text; }
+  #wxsheet.open { display:flex; }
+  #wxhead { position:relative; }
+  #wxsheet h2 { margin:0; font-size:15px; font-weight:600; color:var(--muted); text-align:center; padding:0 64px; }
+  #wxclose { position:absolute; right:-6px; top:-8px; border:0; background:transparent; color:var(--fg); font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
+  #wxbody { flex:1; min-height:60px; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; display:flex; flex-direction:column; gap:12px; }
+  #wxbody .empty { color:var(--muted); text-align:center; margin:auto; }
+  #wxbody .warn { border-radius:12px; padding:10px 12px; background:color-mix(in srgb, #facc15 22%, var(--bg)); border-left:4px solid #facc15; }
+  #wxbody .warn.orange { background:color-mix(in srgb, #fb923c 22%, var(--bg)); border-left-color:#fb923c; }
+  #wxbody .warn.red { background:color-mix(in srgb, #ef4444 22%, var(--bg)); border-left-color:#ef4444; }
+  #wxbody .warn b { display:block; font-size:16px; }
+  #wxbody .warn small, #wxbody .line, #wxbody .src { display:block; color:var(--muted); font-size:13px; margin-top:2px; }
+  #wxbody .warn p { margin:6px 0 0; font-size:14px; line-height:1.4; white-space:pre-wrap; }
+  #wxbody .nowarn { color:var(--muted); font-size:14px; }
+  #wxbody .big { display:flex; align-items:center; gap:14px; }
+  #wxbody .big .ic { font-size:46px; line-height:1; }
+  #wxbody .big .tp { font-size:38px; font-weight:650; font-variant-numeric:tabular-nums; }
+  #wxbody .big .tx { font-size:16px; }
+  #wxbody .facts { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  #wxbody .fact { border-radius:12px; padding:8px 10px; background:color-mix(in srgb, var(--fg) 7%, var(--bg)); font-size:15px; }
+  #wxbody .fact small { display:block; color:var(--muted); font-size:12px; }
+  #wxbody .hrs { display:flex; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:4px; }
+  #wxbody .hr { flex-shrink:0; width:52px; text-align:center; border-radius:12px; padding:6px 0; background:color-mix(in srgb, var(--fg) 7%, var(--bg)); font-size:14px; font-variant-numeric:tabular-nums; }
+  #wxbody .hr small { display:block; color:var(--muted); font-size:11px; }
+  #wxbody h3 { margin:4px 0 0; font-size:13px; font-weight:600; color:var(--muted); }
   #notesbtn[aria-expanded="true"] { background:var(--accent); color:#04120f; }
   #notesbtn svg { width:26px; height:26px; }
   #notesheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
@@ -506,6 +552,9 @@
 <button id="calbtn" type="button" aria-label="Calendar" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 14h2M14 14h2M8 18h2"/></svg>
 </button>
+<button id="wx" type="button" aria-label="Weather" aria-expanded="false"></button>
+<div id="wxsheet" role="dialog" aria-label="Weather"><div id="wxhead"><h2 id="wxtitle">Weather</h2><button id="wxclose" type="button">Close</button></div>
+  <div id="wxbody"></div></div>
 <div id="dirsheet" role="dialog" aria-label="Text Donna"><div id="dirhead"><button id="dirclose" type="button">Close</button></div><iframe id="dirframe" title="Text Donna" src="about:blank"></iframe></div>
 <a id="directbtn" href="/direct" aria-label="Text Donna" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-5A8 8 0 1 1 21 12z"/></svg><i></i>
@@ -673,6 +722,7 @@ function showMode() {
   modeHint.textContent = state === "idle" && AGENTS[agent] ? hintFor(AGENTS[agent]) : "";
   freeBtn.textContent = free ? "On" : "Off";
   freeTag.classList.toggle("show", free && state === "idle");
+  paintWx();  // H135: only before a call, not on Free
   freeBtn.classList.toggle("on", free);
   freeBtn.setAttribute("aria-pressed", String(free));
 }
@@ -1064,7 +1114,7 @@ function chatOpen() { return chatEl.classList.contains("open"); }
 // phone has settled its own scrolling (the iPhone finishes a swipe or a layout change a moment later).
 let sheetWasOpen = false;
 function showLayout() {
-  const open = chatOpen() || statOpen() || histOpen() || notesOpen() || calOpen();
+  const open = chatOpen() || statOpen() || histOpen() || notesOpen() || calOpen() || wxOpen();
   document.body.classList.toggle("chatting", open && state === "live"); fitCall();
   if (sheetWasOpen && !open && state !== "idle") { requestAnimationFrame(() => fitCall()); setTimeout(fitCall, 350); }
   sheetWasOpen = open;
@@ -1192,6 +1242,7 @@ function showChat(open) {
   if (open) showNotes(false);   // H105
   if (open) showCal(false);     // H101
   if (open) showDirect(false);  // F29
+  if (open) closeWx();          // H135
   if (open) loadLastCall();     // H34: before a call, fresh each time it opens
   chatEl.classList.toggle("open", open);
   chatBtn.setAttribute("aria-expanded", String(open));
@@ -1288,6 +1339,7 @@ function showStatus(open) {
   if (open) showNotes(false);    // H105
   if (open) showCal(false);      // H101
   if (open) showDirect(false);   // F29
+  if (open) closeWx();           // H135
   statEl.classList.toggle("open", open);
   statBtn.setAttribute("aria-expanded", String(open));
   const want = open ? statusUrl() : "about:blank";
@@ -1424,6 +1476,7 @@ function showHistory(open) {
     showNotes(false);  // H105
     showCal(false);    // H101
     showDirect(false); // F29
+    closeWx();         // H135
   }
   histEl.classList.toggle("open", open);
   histBtn.setAttribute("aria-expanded", String(open));
@@ -1510,6 +1563,7 @@ function showNotes(open) {
     if (histOpen()) showHistory(false);
     showCal(false);  // H101
     showDirect(false); // F29
+    closeWx();         // H135
   }
   notesEl.classList.toggle("open", open);
   notesBtn.setAttribute("aria-expanded", String(open));
@@ -1532,6 +1586,7 @@ function showDirect(open) {
     if (histOpen()) showHistory(false);
     if (notesOpen()) showNotes(false);
     if (calOpen()) showCal(false);
+    closeWx(); // H135
     dirEl.style.removeProperty("--dirh");
   }
   dirEl.classList.toggle("open", open);
@@ -1686,6 +1741,7 @@ function showCal(open) {
     if (histOpen()) showHistory(false);
     if (notesOpen()) showNotes(false);
     showDirect(false); // F29
+    closeWx();         // H135
   }
   calEl.classList.toggle("open", open);
   calEl.classList.remove("reading"); calTitle.textContent = "Calendar";
@@ -1696,6 +1752,133 @@ function showCal(open) {
 calBtn.addEventListener("click", () => showCal(!calOpen()));
 document.getElementById("calclose").addEventListener("click", () => showCal(false));
 document.getElementById("calback").addEventListener("click", () => { calEl.classList.remove("reading"); calTitle.textContent = "Calendar"; loadCal(false); });
+// H135: the weather in the app (app/weather.py through /api/weather). The widget at the bottom, between the round
+// buttons (out of the page's flow, so the call screen keeps its room), before a call and not on Free: sunny or not, degrees, wind, chance of rain, and the warning when there is one. A tap opens the sheet.
+// Read fresh when the page opens, every 15 minutes while it's shown, and when the sheet opens (the server only reads
+// Open-Meteo again when its last read is over 15 minutes old).
+const WX_ICON = { sun: "☀️", moon: "🌙", partly: "⛅", cloud: "☁️", fog: "🌫️", drizzle: "🌦️", rain: "🌧️", snow: "🌨️", storm: "⛈️" };
+var wxData = null, wxAsk = 0;  // var: showMode() paints the pill before this line has run
+function wxOpen() { const e = document.getElementById("wxsheet"); return !!e && e.classList.contains("open"); }
+function closeWx() { if (wxOpen()) showWx(false); }  // safe before the sheet's code has run (one sheet at a time)
+function wxDeg(t) { return t == null ? "–" : Math.round(t) + "°"; }
+function wxLevel(w) { return "Code " + w.level + (w.what ? " · " + w.what : ""); }
+function wxTime(iso) {
+  const d = new Date(iso); if (isNaN(d)) return iso || "";
+  const t = new Date(), tm = new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1);
+  const day = d.toDateString() === t.toDateString() ? "today" : d.toDateString() === tm.toDateString() ? "tomorrow"
+    : d.toLocaleDateString([], { weekday: "long" });
+  return day + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+function paintWx() {
+  const el = document.getElementById("wx"); if (!el) return;
+  const d = wxData;
+  const show = !!d && !d.off_free && state === "idle" && !free;
+  el.classList.toggle("show", show);
+  if (!show) return;
+  el.innerHTML = "";
+  const line = cls => { const l = document.createElement("span"); l.className = cls; el.appendChild(l); return l; };
+  const add = (to, cls, text) => { const s = document.createElement("span"); s.className = cls; s.textContent = text; to.appendChild(s); return s; };
+  const l1 = line("l1"), l2 = line("l2");
+  if (d.off || !d.now) {
+    add(l1, "ic", "🌤️"); add(l1, "tx", "Weather");
+    add(l2, "tx", d.off ? (/^No place/.test(d.off) ? "No place set yet" : "Off") : d.error ? "Couldn't read it now" : "Reading…");
+    return;
+  }
+  const n = d.now;
+  add(l1, "ic", WX_ICON[n.icon] || "🌤️");
+  add(l1, "tp", wxDeg(n.temp));
+  add(l1, "tx", n.sunny ? "Sunny" : n.text ? n.text[0].toUpperCase() + n.text.slice(1) : "");
+  const w = (d.warnings || [])[0];
+  if (w) add(l2, "wn " + w.level, "⚠ " + w.level);
+  add(l2, "tx", "wind " + n.bft + " Bft · rain " + (n.raining ? "now" : (n.chance || 0) + "%"));
+  el.setAttribute("aria-label", "Weather: " + l1.textContent + ", " + l2.textContent);
+}
+function showWxBody() {
+  const body = document.getElementById("wxbody"), d = wxData;
+  document.getElementById("wxtitle").textContent = d && d.place ? "Weather · " + d.place : "Weather";
+  body.innerHTML = "";
+  const div = (cls, text) => { const e = document.createElement("div"); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  if (!d) { histNote(body, "Couldn't load the weather. Try again."); return; }
+  if (d.off || !d.now) { histNote(body, d.off || (d.error ? "Couldn't read the weather just now." : "Reading the weather…")); return; }
+  const src = d.warn_source || "";
+  if ((d.warnings || []).length) {
+    for (const w of d.warnings) {
+      const b = div("warn " + w.level);
+      const t = document.createElement("b"); t.textContent = wxLevel(w); b.appendChild(t);
+      const when = document.createElement("small");
+      when.textContent = [w.from ? "From " + wxTime(w.from) : "", w.until ? "until " + wxTime(w.until) : "", w.area].filter(Boolean).join(", ");
+      b.appendChild(when);
+      if (w.headline) { const p = document.createElement("p"); p.textContent = w.headline + (w.text && w.text !== w.headline ? "\n" + w.text : ""); b.appendChild(p); }
+      body.appendChild(b);
+    }
+  } else body.appendChild(div("nowarn", /^(KNMI|MeteoAlarm)$/.test(src) ? "No weather warnings here right now (" + src + ")." : "Weather warnings: " + (src || "not read")));
+  const n = d.now, big = div("big");
+  big.append(div("ic", WX_ICON[n.icon] || "🌤️"), div("tp", wxDeg(n.temp)));
+  const tx = div("tx", (n.sunny ? "Sunny" : n.text ? n.text[0].toUpperCase() + n.text.slice(1) : ""));
+  if (n.feels != null) tx.appendChild(div("line", "Feels like " + wxDeg(n.feels)));
+  big.appendChild(tx); body.appendChild(big);
+  if (d.radar) body.appendChild(div("line", d.radar + " (rain radar)"));
+  const facts = div("facts");
+  const fact = (k, v) => { const f = div("fact", v); const s = document.createElement("small"); s.textContent = k; f.prepend(s); facts.appendChild(f); };
+  fact("Wind", n.wind == null ? "–" : (n.dir ? n.dir + " " : "") + Math.round(n.wind) + " km/h, " + n.bft + " Bft" + (n.gusts != null ? ", gusts " + Math.round(n.gusts) : ""));
+  fact("Chance of rain", n.raining ? "Raining now" : (n.chance || 0) + "% in the next 3 hours");
+  fact("UV now", n.uv == null ? "–" : Math.round(n.uv * 10) / 10 + (n.uv_word ? ", " + n.uv_word : ""));
+  if (d.today) fact("UV today, at most", d.today.uv == null ? "–" : Math.round(d.today.uv * 10) / 10 + ", " + d.today.uv_word);
+  body.appendChild(facts);
+  if ((d.hours || []).length) {
+    body.appendChild(Object.assign(document.createElement("h3"), { textContent: "Next hours" }));
+    const row = div("hrs");
+    for (const h of d.hours) {
+      const c = div("hr"); const t = document.createElement("small"); t.textContent = h.at; c.appendChild(t);
+      c.append(div("", WX_ICON[h.icon] || ""), div("", wxDeg(h.temp)));
+      const r = document.createElement("small"); r.textContent = (h.chance || 0) + "%"; c.appendChild(r);
+      row.appendChild(c);
+    }
+    body.appendChild(row);
+  }
+  for (const [name, x] of [["Today", d.today], ["Tomorrow", d.tomorrow]]) {
+    if (!x) continue;
+    body.appendChild(Object.assign(document.createElement("h3"), { textContent: name }));
+    body.appendChild(div("", (WX_ICON[x.icon] || "") + " " + (x.text ? x.text[0].toUpperCase() + x.text.slice(1) : "") + ", " + wxDeg(x.min) + " to " + wxDeg(x.max)));
+    body.appendChild(div("line", [ "rain " + (x.chance || 0) + "%" + (x.mm ? " (" + x.mm + " mm)" : ""),
+      x.uv != null ? "UV " + Math.round(x.uv) + " " + x.uv_word : "", x.gusts != null ? "gusts up to " + Math.round(x.gusts) + " km/h" : "",
+      x.sunrise ? "sun " + x.sunrise + " to " + x.sunset : ""].filter(Boolean).join(" · ")));
+  }
+  const m = d.looked ? Math.round((Date.now() / 1000 - d.looked) / 60) : null;
+  body.appendChild(div("src", "From Open-Meteo" + (d.radar ? ", Buienradar" : "") + (/^(KNMI|MeteoAlarm)$/.test(src) ? " and " + src : "") +
+    (m == null ? "" : ", " + (m < 1 ? "just now" : m < 60 ? m + " min ago" : Math.round(m / 60) + " h ago")) + (d.error ? ". Couldn't read it again just now." : "")));
+}
+async function loadWx(fresh) {
+  const ask = ++wxAsk;
+  const d = await histGet("api/weather" + (fresh ? "?fresh=1" : ""));
+  if (ask !== wxAsk) return;
+  if (d) wxData = d.off === "Free" ? { off_free: true } : d;
+  paintWx();
+  if (wxOpen()) showWxBody();
+}
+function showWx(open) {
+  const el = document.getElementById("wxsheet");
+  if (open === wxOpen()) return;
+  if (open) {
+    if (chatOpen()) { chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showBadge(); }
+    if (statOpen()) showStatus(false);
+    if (histOpen()) showHistory(false);
+    if (notesOpen()) showNotes(false);
+    if (calOpen()) showCal(false);
+    showDirect(false);
+  }
+  el.classList.toggle("open", open);
+  document.getElementById("wx").setAttribute("aria-expanded", String(open));
+  if (open) { showWxBody(); loadWx(true); }
+  showLayout();
+}
+document.getElementById("wx").addEventListener("click", () => showWx(!wxOpen()));
+document.getElementById("wxclose").addEventListener("click", () => showWx(false));
+loadWx(true);
+setInterval(() => { if (!document.hidden) loadWx(true); }, 15 * 60 * 1000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && (!wxData || !wxData.looked || Date.now() / 1000 - wxData.looked > 15 * 60)) loadWx(true);
+});
 // H117: grows line by line with what's typed, up to its max-height, then scrolls inside (as fitTyping, H41).
 function fitNote() {
   notesIn.style.height = "auto";
