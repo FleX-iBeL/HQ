@@ -190,17 +190,20 @@ GOODBYE_PHRASES = [
     # H102: his own ways of saying all is good and she can hang up.
     "okay, thanks, appreciate you", "thanks, appreciate you", "appreciate you", "perfect, appreciate you",
     "cheers", "okay, cheers", "thanks, cheers",
+    # H134: "you're the best" closes it too, with or without "perfect" or "thanks" before it.
+    "you're the best", "you are the best", "perfect, you're the best", "perfect, you are the best",
+    "thanks, you're the best", "thanks, you are the best",
 ]
 NOT_GOODBYE = [
     "a passing okay, thanks, alright or got it in the middle of the call (but thanks with \"appreciate you\" \
-or \"cheers\" closes it)", "a pause or silence",
+or \"cheers\" or \"you're the best\" closes it)", "a pause or silence",
     "\"that's it?\" as a question", "\"that's it\" about one thing while he goes on",
     "\"bye\" or \"see you\" said to someone else in the room",
 ]
 # H129: a turn that may be his goodbye gets a note on what he's doing right now (agenda.goodbye_note). Loose on
 # purpose: the note only counts when he really closes the call, so a passing "cheers" costs nothing.
 GOODBYE_WORDS = ("bye", "goodbye", "see you", "see ya", "talk to you later", "talk later", "speak soon", "hang up",
-                 "end the call", "good night", "appreciate you", "cheers", "that's it", "that is it", "that's all",
+                 "end the call", "good night", "appreciate you", "cheers", "you're the best", "you are the best", "that's it", "that is it", "that's all",
                  "that is all")
 
 

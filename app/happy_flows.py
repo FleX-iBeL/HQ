@@ -6248,7 +6248,8 @@ setTimeout(() => {
         need(not f.found and said == "Two [[notes]] and [x]", f"ordinary brackets are lost or taken for the mark: {said!r}")
         # The rule is in every kind of call: Free (plain Claude) and the full call, with the phrases and the never-on list.
         rules = config.HANGUP_RULES
-        for ph in ["that's it, see you later", "okay, that is all", "okay, thanks, appreciate you", "cheers"]:
+        for ph in ["that's it, see you later", "okay, that is all", "okay, thanks, appreciate you", "cheers",
+                   "you're the best", "you are the best", "perfect, you're the best", "thanks, you are the best"]:
             need(ph in rules and ph in config.GOODBYE_PHRASES, f"the starting phrase {ph!r} is missing")
         need("a passing okay" in rules and "a pause or silence" in rules and "When you are not sure" in rules,
              "the rule doesn't say when not to hang up")
@@ -6261,7 +6262,8 @@ setTimeout(() => {
         # calendar, else his to-do list; Moneypenny keeps her own goodbye. Read from the saved days, no Claude run.
         need("H129" in rules and "what he's doing right now" in rules and "no tools" in rules,
              "the rule doesn't say to comment on what he's doing right now")
-        for w in ["okay, thanks, appreciate you", "Cheers!", "bye", "That's it, see you later"]:
+        for w in ["okay, thanks, appreciate you", "Cheers!", "bye", "That's it, see you later",
+                  "Perfect, you're the best.", "Thanks, you are the best", "You\u2019re the best"]:
             need(config.sounds_like_goodbye(w), f"{w!r} isn't taken as a possible goodbye")
         for w in ["what's on my calendar today", "put that on the list", "add tea later today"]:
             need(not config.sounds_like_goodbye(w), f"{w!r} is taken as a goodbye")
