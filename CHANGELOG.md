@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 0.4.3 · 14 October 2026
+
 ### Added
 - A new look for HQ, everywhere (phone, phone version and Mac app): a calmer layout in one column, Settings as a small pill top left, the weather as a quiet chip under the name, Donna and Pepper as cards side by side with the one you pick in her own colour, and on a call her orb leads with Mute and Hang up under it. The round buttons are gathered in one dock at the bottom with their names under them, and every sheet reaches down to the dock. Same buttons, same behaviour. It's the only look: there's nothing to pick in Settings (H137, H140).
 - The weather in the app. Before a call, a small chip under the name on the call page shows the weather where you are (the town in your me.md, under Where I am): sunny or not, the degrees, the wind in Beaufort and the chance of rain, with a yellow, orange or red mark when there's an official weather warning (KNMI's in the Netherlands, through MeteoAlarm in Europe). Tap it for more: the warnings in full, now (feels like, wind and gusts, UV), the rain radar's next two hours, the next twelve hours, and today and tomorrow with UV, rain and sunrise and sunset. With no town set, it says so. Not on Free (H135).
@@ -19,6 +21,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - Moneypenny can be brought into a call: "bring in Moneypenny" makes a three-way call, and bringing in one more makes it a four-way call, so you can hear the voices side by side. She still can't be picked or handed over to, and runs on Opus until Fable is out (H121).
 - There's an easter egg. It has to do with Moneypenny, and it lasts until you close the app.
 - Call back from the chat: when you open the app and tap the chat bubble, it shows your last call with a button at the bottom to call back and carry on where you left off, with the same agent, like Continue in Past calls (H119).
+- Each agent keeps what she says about herself. When Donna, Pepper or Moneypenny tells you something about herself on a call, it goes in her own list in your workspace and comes with her on every later call, three-way call and text, so she stays the same person (H132).
+- Donna's direct line on the phone: the chat bubble now also shows in the call page on the phone, inside or outside the HQ page, and never covers the voice button (F25).
 
 ### Changed
 - The room a job needs under the usage limits grows with how long it's expected to take, instead of a fixed 5% and 1%: 1% under the 5-hour line and 0.2% under each weekly line for every 2 minutes of its estimate (a 12-minute job needs 6% and 1.2%), so a long job doesn't start just to get stuck halfway. Without an estimate it's the room of 10 minutes, as before. The status page and the team's list say why a job waits: how much room it needs and how much there is. The two rates are in one place, at the top of the usage code (H141).
@@ -26,6 +30,10 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - Her replies in the call's chat read like a reply in an AI chat app: more space between lines and paragraphs, numbered lists and lists inside a list, a bold word to start an item, softer list marks. She's told to lay longer answers out that way. Still no headings or tables, and the voice stays plain (H116).
 - On a call the chat's top line says only who you're calling with: her name, both names on a three-way call, all of them with more (H115).
 - The quick notes are just text now: the paper to doodle on is gone, and the field you type a note in grows with what you type, over more lines, like the chat's (H117).
+- Every agent on a call is as human as Donna's texts: Donna, Pepper and Moneypenny each have a fuller character of their own, one of the people at a real HQ, with her own habits and more greetings in her voice, and vary how they say things (H128).
+- "You're the best" closes the call, like the other goodbyes (H134).
+- "Bring in" someone is always a three-way call, and "give me" someone always hands the call over to her (H122).
+- On the phone, Settings has one row, Microphone and sound: what you pick there switches the mic, and her voice follows it. On the computer the Microphone and Sound rows stay apart (F26).
 
 ### Fixed
 - The team's time estimates no longer drop to about a minute for every job. A computer that didn't know how a job was meant (the backup, or one that just took over) guessed it from the words and lumped builds in with the quick merge jobs. Now merges and releases have their own kind, builds are recognised from more wording, the two computers share how each waiting job was meant, and a waiting job's estimate follows what the team learns while it waits. Every job since the first was sorted again, and only jobs with a measured time count (F34).
@@ -35,6 +43,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - Opening Donna's chat during a call no longer hangs up the call. The purple bubble now opens her chat as a sheet over the call page: drag its handle up to nearly the full screen, drag it down or tap Close to put it away, and the call keeps running. Her notifications work as before (F29).
 - Donna's texts when something in HQ stays down (and when it's back) never came, and since the weather, the calendar and her pings were added to the same minute's look, those stopped with it on the computer where it happened. Fixed, and each of those looks now runs on its own, so one can't stop the others (F28).
 - Changing the mic and sound during a call. Picking the AirPods (or any output the computer already plays on) as the Sound no longer makes her voice much quieter. On the iPhone, Safari and the Mac app the old mic is let go first, so the new one can take over. Where a device won't switch, the call screen says so plainly: on the iPhone, iOS picks the mic and sound itself during a call (Control Center); with the AirPods' own mic on, they play in quieter call mode; a mic that sends no sound is named (F24).
+- Calling about an appointment from the calendar inside HQ always goes to Donna, who keeps the agenda, whoever was picked (F30).
+- Donna's replies in her direct line also work on a computer that isn't a Mac (F27).
 
 ## 0.4.2 · 13 October 2026
 
