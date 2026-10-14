@@ -127,6 +127,7 @@
   #settings .row { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px 2px; border-bottom:1px solid var(--ring); }
   #settings .row:last-of-type { border-bottom:0; }
   #settings .row span { font:600 16px/1.25 -apple-system,sans-serif; }
+  #settings .row span b { font-weight:inherit; }
   #settings .row small { display:block; font-weight:400; font-size:13px; color:var(--muted); margin-top:2px; }
   .sw { flex-shrink:0; min-width:64px; padding:9px 14px; border-radius:999px; border:2px solid var(--muted); background:transparent;
         color:var(--fg); font:600 15px/1 -apple-system,sans-serif; cursor:pointer; }
@@ -670,7 +671,7 @@
     <option value="bm_george">George (British)</option>
     <option value="bm_fable">Fable (British)</option>
   </template>
-  <div class="row devrow"><span>Microphone<small id="micnote">What she hears you with</small></span><select id="mic" class="dev" aria-label="Microphone"><option value="">Default</option></select></div>
+  <div class="row devrow"><span><b id="micname">Microphone</b><small id="micnote">What she hears you with</small></span><select id="mic" class="dev" aria-label="Microphone"><option value="">Default</option></select></div>
   <div class="row devrow" id="micaskrow" hidden><span>Device names<small>The browser only names them once the page may use the mic</small></span><button id="micask" class="sw" type="button">Show</button></div>
   <div class="row devrow" id="outrow" hidden><span>Sound<small id="outnote">Where her voice plays</small></span><select id="out" class="dev" aria-label="Sound"><option value="">Default</option></select></div>
   <div class="row devrow" id="nosinkrow" hidden><span>Sound<small id="nosinknote">This browser can't choose where her voice plays</small></span></div>
@@ -1031,7 +1032,7 @@ soundBtn.addEventListener("click", () => {
 });
 // H106: which microphone the call listens with and, where the browser can (setSinkId), where her voice plays.
 // Remembered on this device by id and name (Safari may change the id); a choice that isn't here falls back to Default.
-const micSel = document.getElementById("mic"), outSel = document.getElementById("out"), micNote = document.getElementById("micnote");
+const micSel = document.getElementById("mic"), outSel = document.getElementById("out"), micNote = document.getElementById("micnote"), micName = document.getElementById("micname");
 const outRow = document.getElementById("outrow"), micAskRow = document.getElementById("micaskrow");
 let CAN_SINK = typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
 // F24: the iPhone (any browser there) decides the mic and sound itself; WebKit (Safari, the Mac app) keeps one mic
@@ -1039,6 +1040,10 @@ let CAN_SINK = typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMed
 const UA = navigator.userAgent || "";
 let IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
 let ONE_MIC = IS_IOS || (/AppleWebKit/.test(UA) && !/Chrome|Chromium|Edg/.test(UA));
+// F26: on a phone (the iPhone, the phone version, any touch-only phone) the sound goes where the mic is, so
+// there is one row, Microphone and sound, and no Sound row; on the computer (Mac app, browsers) the two stay apart.
+let IS_PHONE = IS_IOS || /Android.*Mobile|Mobile.*Android/.test(UA)
+  || (!!window.matchMedia && matchMedia("(pointer: coarse)").matches && !matchMedia("(any-pointer: fine)").matches);
 const outNote = document.getElementById("outnote"), noSinkRow = document.getElementById("nosinkrow"), noSinkNote = document.getElementById("nosinknote");
 let devList = [];
 function devPick(key) { try { return JSON.parse(localStorage.getItem(key) || "null"); } catch (e) { return null; } }
@@ -1054,16 +1059,20 @@ function fillDev(sel, list, key, word) {
   sel.value = hit ? hit.deviceId : (p && p.id) || "";
 }
 async function listDevices() {
+  // F26: the phone's one row says the sound follows the mic; the computer keeps the Sound row.
+  micName.textContent = IS_PHONE ? "Microphone and sound" : "Microphone";
+  micSel.setAttribute("aria-label", micName.textContent);
+  micNote.textContent = IS_PHONE ? "What she hears you with; her voice follows it" : "What she hears you with";
   if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
     micSel.disabled = true; micNote.textContent = "This browser can't choose one"; return;
   }
   try { devList = await navigator.mediaDevices.enumerateDevices(); } catch (e) { devList = []; }
   const ins = devOf("audioinput"), outs = devOf("audiooutput");
   fillDev(micSel, ins, "hq-mic", "Microphone");
-  outRow.hidden = !CAN_SINK || !outs.length;
+  outRow.hidden = IS_PHONE || !CAN_SINK || !outs.length;
   if (!outRow.hidden) fillDev(outSel, outs, "hq-out", "Speaker");
   // F24: where the page can't choose, it says so instead of seeming to.
-  noSinkRow.hidden = !outRow.hidden;
+  noSinkRow.hidden = IS_PHONE || !outRow.hidden;
   noSinkNote.textContent = IS_IOS ? "The iPhone decides where her voice plays: change it in Control Center"
     : "This browser can't choose: her voice plays where the computer's own sound goes";
   showOutNote();
@@ -1157,7 +1166,7 @@ async function switchMic() {
 // F24: the output the computer already plays on stays on the default path. In Chrome on the Mac a call's voice sent
 // to a named output (even the same AirPods) comes out much quieter; on the default path it plays at full sound.
 function sinkFor() {
-  const d = devFind(devOf("audiooutput"), devPick("hq-out"));
+  const d = IS_PHONE ? null : devFind(devOf("audiooutput"), devPick("hq-out"));  // F26: on the phone it follows the mic
   if (!d) return { id: "", d: null };
   const def = devList.find(x => x.kind === "audiooutput" && x.deviceId === "default");
   const isDef = def && ((d.groupId && d.groupId === def.groupId) || (!!d.label && baseName(def.label) === baseName(d.label)));

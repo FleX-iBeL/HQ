@@ -8925,7 +8925,18 @@ print("H88OUT " + json.dumps(out))
   micSel.value = "phone2"; micSel.dispatchEvent(new Event("change"));
   for (let i = 0; i < 50 && !/kept/.test(errEl.textContent); i++) await new Promise(r => setTimeout(r, 20));
   check("iphone-says-kept", /The iPhone kept AirPods/.test(errEl.textContent) && /Control Center/.test(errEl.textContent), errEl.textContent);
-  stuck = null; ONE_MIC = false; IS_IOS = false; errEl.textContent = "";
+  // F26: on the phone one row, Microphone and sound, and no Sound row; a saved output isn't used there.
+  stuck = null; IS_PHONE = true; await listDevices();
+  check("phone-one-row", micName.textContent === "Microphone and sound" && /follows/.test(micNote.textContent)
+    && outRow.hidden && noSinkRow.hidden && micSel.getAttribute("aria-label") === "Microphone and sound",
+    micName.textContent + " / " + micNote.textContent + " out " + outRow.hidden + " nosink " + noSinkRow.hidden);
+  localStorage.setItem("hq-out", JSON.stringify({ id: "spk", label: "Speaker" }));
+  check("phone-sound-follows", sinkFor().id === "", sinkFor().id);
+  localStorage.removeItem("hq-out");
+  IS_PHONE = false; await listDevices();
+  check("computer-two-rows", micName.textContent === "Microphone" && !/follows/.test(micNote.textContent)
+    && (outRow.hidden !== noSinkRow.hidden), micName.textContent + " out " + outRow.hidden + " nosink " + noSinkRow.hidden);
+  ONE_MIC = false; IS_IOS = false; errEl.textContent = "";
   await listDevices();
   check("iphone-sound-note", noSinkRow.hidden || /computer/.test(noSinkNote.textContent), noSinkNote.textContent);
   setState("live", "On the call");
@@ -8955,7 +8966,8 @@ print("H88OUT " + json.dumps(out))
                 "a gone mic falls back to the default; the sound choice only where the browser can, and used; "
                 "on a call the mic button opens only mic and sound, a new mic takes over at once, muted stays muted; "
                 "F24: the output already in use stays on the default path, WebKit lets the old mic go first, "
-                "and a mic the iPhone won't switch to is said plainly")
+                "and a mic the iPhone won't switch to is said plainly; F26: on the phone one row, Microphone and sound, "
+                "and the sound follows the mic, on the computer two rows")
 
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
@@ -9393,7 +9405,7 @@ FLOWS = {
     81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data", False, "flow81"),
     82: ("H104, H108: times on calls as 5 30 in the afternoon, no colon, no words, never half, quarter or o'clock", False, "flow82"),
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one; just text, the field grows (H117)", False, "flow83"),
-    84: ("H106, H112: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can; changed on a call at once", False, "flow84"),
+    84: ("H106, H112, F26: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can; changed on a call at once; one row on the phone", False, "flow84"),
     85: ("H79, H121, H130: ask for another agent by name: she hands over, or brings her in on a three-way or four-way call and she says hi", False, "flow85"),
     86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back", False, "flow86"),
     87: ("H98: the dog sits by its empty bowl and says Update! in green when a newer version is out", False, "flow87"),
