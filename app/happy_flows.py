@@ -6448,7 +6448,8 @@ setTimeout(() => {
         and its VAPID token verifies with the shared key; a gone phone is dropped. The routine's look takes stock
         first, then texts when the job list is finished, for a new very important mail (not for its status changing),
         when something stays down and when it's back. A throwaway status server serves the chat and its service
-        worker, refuses a send without the HQ header, signs a phone up, and his text gets her (canned) reply."""
+        worker, refuses a send without the HQ header, signs a phone up, and his text gets her (canned) reply. Off a
+        Mac her reply finds Claude on PATH (F27)."""
         import base64
         import urllib.request
         sys.path.insert(0, str(ROOT / "routine"))
@@ -6473,6 +6474,17 @@ setTimeout(() => {
             k = dl.keys()
             need(dl.keys() == k and dl.public_key() == k["public"], "the push key isn't made once and kept")
             hv = dl.vapid_header("https://push.example.com/send/abc", k)
+            # F27: her reply run finds Claude without HQ_CLAUDE_CLI (the status server starts it without one); off a
+            # Mac that's the claude on PATH, not the Mac's place.
+            import config as _cfg
+            cli_env = os.environ.pop("HQ_CLAUDE_CLI", None)
+            try:
+                found = _cfg._claude_cli()
+                if sys.platform != "darwin" and shutil.which("claude"):
+                    need(found == shutil.which("claude"), f"off a Mac her reply looks for Claude at {found}")
+            finally:
+                if cli_env is not None:
+                    os.environ["HQ_CLAUDE_CLI"] = cli_env
             m = re.fullmatch(r"vapid t=([\w-]+)\.([\w-]+)\.([\w-]+), k=([\w-]+)", hv)
             need(m and m.group(4) == k["public"], f"the VAPID header is shaped wrong: {hv[:60]}")
             claims = json.loads(unb64(m.group(2)))

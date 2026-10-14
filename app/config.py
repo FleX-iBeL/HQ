@@ -64,7 +64,19 @@ DEEP_EFFORT = os.environ.get("HQ_DEEP_EFFORT", "medium")
 
 def effort_for(model: str) -> str:
     return DEEP_EFFORT if model == MODEL_ALIASES["opus"] else EFFORT
-CLAUDE_CLI = os.environ.get("HQ_CLAUDE_CLI", "/opt/homebrew/bin/claude")
+# F27 (14 October 2026): the Mac's place only on a Mac. Off a Mac the first claude on PATH or in the usual
+# places (hqpaths.tool), so a run started without HQ_CLAUDE_CLI (Donna's direct line replies, started by
+# the status server) finds it on the VPS too.
+def _claude_cli() -> str:
+    if os.environ.get("HQ_CLAUDE_CLI"):
+        return os.environ["HQ_CLAUDE_CLI"]
+    import sys
+    sys.path.insert(0, str(ROOT / "routine"))
+    import hqpaths
+    return hqpaths.tool("claude", "/opt/homebrew/bin/claude")
+
+
+CLAUDE_CLI = _claude_cli()
 
 # Phase K, lighter calls (9 October 2026: "ok can we put this on roadmap, with a backup
 # kind of thing that if we dont like it, we can revert it?"). One switch per step, on by default;
