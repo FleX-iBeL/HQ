@@ -6423,6 +6423,35 @@ setTimeout(() => {
         # Three-way: she joins right after the reply, nothing hangs up.
         await turn("Let's make it a three-way call.", ["Bringing her in.", ag.THREE_WAY_MARK.format(name=two["name"])])
         need(joined == [two["id"]] and len(switched) == 1 and llm._hangup_task is None, "the three-way call didn't start")
+        # H130: once the line bringing her in has been heard, she says hi in a turn of her own; he speaking first drops it.
+        queued, his = [], []
+        async def queue(frame, *a, **k): queued.append(frame)
+        async def hi(x):
+            his.append(x)
+            return ["[Call system: you are her. Say hi.]"]
+        llm.queue_frame, llm.joined_hi = queue, hi
+        joined.clear()
+        await turn("Bring her in.", ["Bringing her in.", ag.THREE_WAY_MARK.format(name=two["name"])])
+        need(joined == [two["id"]] and llm._hangup_task is not None and not queued, "she says hi before the line was heard")
+        llm._bot_speaking, llm._spoke_at = True, time.perf_counter()
+        await asyncio.sleep(0.5)
+        need(not queued, "she says hi while the line bringing her in is still being spoken")
+        llm._bot_speaking, llm._quiet_at = False, time.perf_counter()
+        await asyncio.sleep(0.7)
+        need(len(queued) == 1 and queued[0].agent == two["id"], f"no hi once the line was heard: {queued}")
+        n_said = len(script.replies)
+        brain.replies.append(["Hey, I'm here."])
+        await llm._say_hi(queued[0].agent)
+        need(his == [two["id"]] and brain.sent[-1] == "[Call system: you are her. Say hi.]" and script.replies[n_said:] == ["Hey, I'm here."]
+             and llm.turns[-1]["hi"] and llm.turns[-1]["words"] == "", f"her hi isn't a turn of her own: {script.replies[n_said:]}")
+        need(llm.late_cancel_target() is not llm.turns[-1], "Cancel would take back her hi instead of his last turn")
+        queued.clear()
+        await turn("Bring her in.", ["Bringing her in.", ag.THREE_WAY_MARK.format(name=two["name"])])
+        await turn("Wait, one thing first.", ["Sure."])
+        await asyncio.sleep(1.2)
+        need(not queued and llm._hangup_task is None, "she still says hi after he spoke first")
+        llm.joined_hi = None
+        need("isinstance(frame, JoinedHiFrame)" in (APP / "claude_llm.py").read_text(), "the hi frame isn't run as a turn")
         # On the call: who answers, her voice, her notes, her lines in the transcript.
         calls = self.tmp / "calls85"
         c = Call(calls_dir=calls, test_mode=True, agent=one["id"], voices={one["id"]: "af_bella", two["id"]: "bf_emma"})
@@ -6443,6 +6472,17 @@ setTimeout(() => {
         c.transcript.reply("Agreed.")
         lines = read_lines(c.transcript.path)
         need([ln.get("agent") for ln in lines if ln["who"] == "hq"] == [two["name"], one["name"]], f"her lines don't say who: {lines}")
+        # H130: on the call, her hi: her voice and model from then on, a note to say she's there in her own words, once.
+        e = Call(calls_dir=calls, test_mode=True, agent=one["id"], voices={one["id"]: "af_bella", two["id"]: "bf_emma"})
+        need(e.llm.joined_hi == e._joined_hi and await e._joined_hi(two["id"]) == [], "a hi with nobody brought in")
+        await e.three_way(two["id"])
+        hi_notes = await e._joined_hi(two["id"])
+        need(e.speaker["id"] == two["id"] and e.tts._settings.voice == "bf_emma" and e.transcript.speaker == two["name"]
+             and len(hi_notes) == 2 and "has just been brought in" in hi_notes[0] and "a three-way call" in hi_notes[0]
+             and f"you are {two['name']}" in hi_notes[1] and "never a set greeting" in hi_notes[1], f"her hi note: {hi_notes}")
+        need(await e._joined_hi(two["id"]) == [] and not any("now on this call too" in x for x in await e._before_turn("Hi both.")),
+             "she's told twice that she joined")
+        await e.brain.stop()
         # H121: one still coming soon can be brought in too, never handed over to; then it's a four-way call.
         locked = ag.soon(config.FOLDER)
         if locked:
@@ -6481,7 +6521,8 @@ setTimeout(() => {
         for x in (c, d, free):
             await x.brain.stop()
         return ("hand-over and three-way marks never spoken; hand-over once heard, the other continues the call as picking "
-                "up; three-way keeps one conversation, the one named or fitting answers in her voice; lines say who")
+                "up; three-way keeps one conversation, the one named or fitting answers in her voice; lines say who; "
+                "the one brought in says hi in her own turn once the line was heard, not when he spoke first")
 
     async def flow87(self) -> str:
         """H98, no Claude: the dog's own mood for an update. The Mac app's strip (also the phone's, /hq) in a headless
@@ -8771,7 +8812,7 @@ FLOWS = {
     82: ("H104, H108: times on calls as 5 30 in the afternoon, no colon, no words, never half, quarter or o'clock", False, "flow82"),
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one; just text, the field grows (H117)", False, "flow83"),
     84: ("H106, H112: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can; changed on a call at once", False, "flow84"),
-    85: ("H79, H121: ask for another agent by name: she hands over, or brings her in on a three-way or four-way call", False, "flow85"),
+    85: ("H79, H121, H130: ask for another agent by name: she hands over, or brings her in on a three-way or four-way call and she says hi", False, "flow85"),
     86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back", False, "flow86"),
     87: ("H98: the dog sits by its empty bowl and says Update! in green when a newer version is out", False, "flow87"),
     88: ("H113: a job held by the usage line carries on in its own chat, or in a fresh one with a note at which step", False, "flow88"),

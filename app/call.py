@@ -103,6 +103,7 @@ class Call:
         )
         self.llm.switch_marks = agents.switch_marks(self.others)
         self.llm.before_turn = self._before_turn
+        self.llm.joined_hi = self._joined_hi
         self.prime_s: float | None = None
         self.open_loops_note = ""
         self.wrap_up_reply: str | None = None
@@ -164,6 +165,30 @@ class Call:
         if joined is not None:
             notes.append(f"[Call system: {joined['name']} is now on this call too, a {agents.way(self.panel)} call. Who she is:"
                          f"{agents.persona(joined, config.USER)}]")
+        await self._switch_to(who)
+        rest = ", ".join(a["name"] for a in self.panel if a is not who)
+        notes.append(f"[Call system: {agents.way(self.panel)} call with {rest}. {who['name']} answers this turn: answer as "
+                     f"{who['name']}, in her character, and only as her.]")
+        return notes + self._goodbye_note(who, words)
+
+    async def _joined_hi(self, other_id: str) -> list[str]:
+        """H130: once the line bringing her in has been heard, the one who joined says hi: her model and voice from
+        now on, and the note for her own first line. [] when she isn't the one who just joined (he spoke first)."""
+        joined = getattr(self, "_joined", None)
+        if joined is None or joined["id"] != other_id or len(self.panel) < 2:
+            return []
+        self._joined = None
+        await self._switch_to(joined)
+        rest = ", ".join(a["name"] for a in self.panel if a is not joined)
+        return [f"[Call system: {joined['name']} has just been brought in: a {agents.way(self.panel)} call with {rest} "
+                f"and {config.USER}. Who she is:{agents.persona(joined, config.USER)}]",
+                f"[Call system: you are {joined['name']}. Nobody has asked you anything yet: say one short line of your "
+                f"own that you're there now, the way a person joining a call says hi, in your character, picking up on "
+                f"what was said so far if it fits. Your own words, never a set greeting, never the same line as before. "
+                f"Just that line, no question to answer, no marks; then he goes on.]"]
+
+    async def _switch_to(self, who: dict) -> None:
+        """H79: from now on she answers: her model and her voice."""
         if who is not self.speaker:
             model = config.MODEL_ALIASES.get(agents.runs_on(who["model"]), who["model"])
             if self.brain._client and model != self.brain.model:
@@ -175,10 +200,6 @@ class Call:
             self._speak_as(who)
             self.speaker = who
         self.transcript.speaker = who["name"]
-        rest = ", ".join(a["name"] for a in self.panel if a is not who)
-        notes.append(f"[Call system: {agents.way(self.panel)} call with {rest}. {who['name']} answers this turn: answer as "
-                     f"{who['name']}, in her character, and only as her.]")
-        return notes + self._goodbye_note(who, words)
 
     def _goodbye_note(self, who: dict, words: str) -> list[str]:
         """H129: on a turn that may be his goodbye, what he's doing right now (his calendar, else his to-do list), so

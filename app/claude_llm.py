@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    DataFrame,
     Frame,
     InterruptionFrame,
     LLMContextFrame,
@@ -48,6 +49,15 @@ from pipecat.services.settings import LLMSettings
 
 import config
 from brain import ClaudeBrain, ToolStarted
+
+
+class JoinedHiFrame(DataFrame):
+    """H130: the one just brought in says hi. Queued to the service itself, so it runs like a turn: in order, and a
+    cut-in stops it the same way."""
+
+    def __init__(self, agent: str):
+        super().__init__()
+        self.agent = agent
 
 
 class ClaudeSessionLLMService(LLMService):
@@ -102,6 +112,9 @@ class ClaudeSessionLLMService(LLMService):
         self.on_switch = None
         self.on_three_way = None
         self.before_turn = None
+        # H130: async joined_hi(id) -> notes for her own first line once she's on the call ([] = she says nothing;
+        # Call sets it), asked once the line bringing her in has been heard
+        self.joined_hi = None
         self._hangup_task = None
         self._spoke_at = 0.0  # H75: when her voice last started, and stopped
         self._quiet_at = 0.0
@@ -118,7 +131,7 @@ class ClaudeSessionLLMService(LLMService):
     def cancellable(self) -> bool:
         """A turn is running and Claude hasn't said a word of the reply yet."""
         return bool(self._replying and self.turns and not self.turns[-1]["reply"].strip()
-                    and not self.turns[-1].get("cancelled"))
+                    and not self.turns[-1].get("cancelled") and not self.turns[-1].get("hi"))
 
     def _tell_cancellable(self, on: bool) -> None:
         if on == self._cancellable:
@@ -157,9 +170,10 @@ class ClaudeSessionLLMService(LLMService):
     def late_cancel_target(self) -> dict | None:
         """The turn a late Cancel takes back: his last turn, if it wasn't cancelled already and
         wasn't itself a Cancel-button line. None when there is nothing to take back."""
-        if not self.turns:
+        his = [t for t in self.turns if not t.get("hi")]  # H130: her hi when she joined isn't his turn
+        if not his:
             return None
-        turn = self.turns[-1]
+        turn = his[-1]
         if turn.get("cancelled") or turn.get("button"):
             return None
         return turn
@@ -223,6 +237,9 @@ class ClaudeSessionLLMService(LLMService):
         if isinstance(frame, LLMContextFrame):
             await self._process_context(frame.context)
             return
+        if isinstance(frame, JoinedHiFrame):
+            await self._say_hi(frame.agent)
+            return
 
         if isinstance(frame, InterruptionFrame):
             # In case a reply is still being drained or was mid-flight outside our task.
@@ -279,17 +296,37 @@ class ClaudeSessionLLMService(LLMService):
                 notes = list(await self.before_turn(words)) + notes
             except Exception as e:
                 logger.error(f"H79: picking who answers failed: {e!r}")
-        text = "\n".join(notes + [words])
+        await self._answer("\n".join(notes + [words]), words, button=button)
 
+    # -- H130: whoever is brought in says hi -------------------------------------
+
+    async def _say_hi(self, other: str) -> None:
+        """Her own first line once she's on the call, before he says anything more: a turn without his words."""
+        if self.joined_hi is None:
+            return
+        try:
+            notes = list(await self.joined_hi(other))
+        except Exception as e:
+            logger.error(f"H130: getting her ready to say hi failed: {e!r}")
+            return
+        if notes:
+            logger.info(f"H130: {other} says hi now she's on the call")
+            await self._answer("\n".join(notes), "", hi=True)
+
+    async def _queue_hi(self, other: str) -> None:
+        await self.queue_frame(JoinedHiFrame(other))
+
+    async def _answer(self, text: str, words: str, *, button: bool = False, hi: bool = False) -> None:
+        """One reply from the Claude session to text, spoken and written as it streams in."""
         turn = {
             "sent": text, "words": words, "reply": "", "first_text_s": None, "interrupted": False,
-            "tools": [], "fillers": [], "t0": time.perf_counter(), "button": button,
+            "tools": [], "fillers": [], "t0": time.perf_counter(), "button": button, "hi": hi,
         }
         self.turns.append(turn)
         t0 = turn["t0"]
         self._replying = True
         self._cancel_asked = False
-        if not button:
+        if not button and not hi:
             self._tell_cancellable(True)  # H38: the Cancel button's own line isn't offered for cancelling
         reply = self.brain.ask(text)
         watch = self.create_task(self._watch_for_fillers(turn), "filler-watch") if self.fillers else None
@@ -354,6 +391,10 @@ class ClaudeSessionLLMService(LLMService):
                 elif kind == "three-way" and self.on_three_way is not None:
                     logger.info(f"H79: {other} joins, a three-way call")
                     await self.on_three_way(other)
+                    if self.joined_hi is not None:
+                        # H130: once the line bringing her in has been heard, she says hi; he speaking first drops it
+                        self._hangup_task = asyncio.create_task(
+                            self._hang_up_after_goodbye(t0, then=lambda: self._queue_hi(other)), name="hi")
         except asyncio.CancelledError:
             turn["interrupted"] = True
             if not turn.get("cancelled"):
@@ -389,7 +430,7 @@ class ClaudeSessionLLMService(LLMService):
         task, self._hangup_task = self._hangup_task, None
         if task is not None and not task.done():
             task.cancel()
-            logger.info(f"H75: not hanging up after all: {why}")
+            logger.info(f"H75: not {'saying hi' if task.get_name() == 'hi' else 'hanging up'} after all: {why}")
 
     async def _hang_up_after_goodbye(self, t0: float, then=None) -> None:
         """Waits until her goodbye has been spoken (her voice started after his turn and has been
