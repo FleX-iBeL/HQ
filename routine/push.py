@@ -9,8 +9,12 @@ anything goes up, `app/privacy.py --history` must say nothing personal; one hit 
                                        on the user's say-so; H90)
     python3 routine/push.py --dry-run  the same, but git only shows what it would push
     python3 routine/push.py --check    only checks that GitHub accepts HQ's key; pushes nothing
+    python3 routine/push.py --pull     brings HQ up to date with dev from GitHub (fast-forward only), at a job's start
 
-Exits 0 when pushed (or the check passed), 1 when the privacy check found something, 2 when git failed.
+Exits 0 when pushed (or pulled, or the check passed), 1 when the privacy check found something, 2 when git failed.
+
+F31 (14 October 2026): a refused pull or push never passes silently. It opens the incident "github" (the status
+page's Incidents, and Donna texts at once); the next pull or push that goes through closes it again.
 """
 from __future__ import annotations
 
@@ -19,6 +23,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 REMOTE = "origin"
 WORK_BRANCH = "dev"      # H90: every job's commits go here
 RELEASE_BRANCH = "main"  # H90: only on a release, with the version tags
@@ -26,6 +31,48 @@ RELEASE_BRANCH = "main"  # H90: only on a release, with the version tags
 
 def git(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(ROOT), *args], text=True, capture_output=True)
+
+
+def refused(what: str, out: str) -> None:
+    """F31: a refused pull or push shows up: an incident (Donna texts about it at once), and a line saying so."""
+    last = next((l for l in reversed(out.strip().splitlines()) if l.strip()), "no answer")
+    try:
+        import incidents
+        incidents.down("github", f"{what} refused: {last[:200]}", detail=out.strip()[-1500:])
+    except Exception:
+        pass
+    print("Logged as an incident (github): it shows on the status page and Donna texts about it.")
+
+
+def went_through(what: str) -> None:
+    """F31: a pull or push that worked closes an open github incident."""
+    try:
+        import incidents
+        if incidents.is_down("github"):
+            incidents.fix("github", f"{what} went through again")
+            incidents.up("github")
+    except Exception:
+        pass
+
+
+def pull() -> int:
+    """F31: a job's start: dev from GitHub, fast-forward only. Uncommitted changes are left alone (git refuses
+    only when they'd be overwritten, and then says which)."""
+    branch = git("branch", "--show-current").stdout.strip()
+    if branch != WORK_BRANCH:
+        print(f"Not pulled: HQ is on {branch or 'no branch'}, not {WORK_BRANCH}. Switch first: git -C <HQ> checkout {WORK_BRANCH}")
+        return 2
+    r = git("pull", "--ff-only", REMOTE, WORK_BRANCH)
+    out = (r.stdout + r.stderr).strip()
+    if r.returncode != 0:
+        print(f"Pulling {WORK_BRANCH} failed:\n{out}")
+        refused(f"pulling {WORK_BRANCH}", out)
+        return 2
+    went_through(f"pulling {WORK_BRANCH}")
+    print(f"Pulled {WORK_BRANCH}." + (f"\n{out}" if out else ""))
+    if git("status", "--porcelain").stdout.strip():
+        print("Note: HQ has changes that aren't committed:\n" + git("status", "--short").stdout.rstrip())
+    return 0
 
 
 def ssh_host() -> str:
@@ -53,6 +100,8 @@ def check_key() -> int:
 def main() -> int:
     if "--check" in sys.argv:
         return check_key()
+    if "--pull" in sys.argv:
+        return pull()
     dry = ["--dry-run"] if "--dry-run" in sys.argv else []
 
     print("Privacy check of HQ and its whole history…")
@@ -61,6 +110,8 @@ def main() -> int:
     print(p.stdout.strip())
     if p.returncode != 0:
         print("Not pushed: the privacy check found something personal. Take it out first.")
+        if not dry:
+            refused("pushing (the privacy check found something personal)", p.stdout)
         return 1
 
     branch = git("branch", "--show-current").stdout.strip()
@@ -84,8 +135,12 @@ def main() -> int:
         out = (r.stdout + r.stderr).strip()
         if r.returncode != 0:
             print(f"Pushing the {what} failed:\n{out}")
+            if not dry:
+                refused(f"pushing the {what}", out)
             return 2
         print(f"Pushed the {what}{' (dry run)' if dry else ''}." + (f"\n{out}" if out else ""))
+        if not dry:
+            went_through(f"pushing the {what}")
     return 0
 
 

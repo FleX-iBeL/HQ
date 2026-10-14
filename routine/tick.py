@@ -262,8 +262,10 @@ def start(job):
             + (carryon.fresh_note(n, plan) if plan["mode"] == "fresh" else "") + "\n\n"
             "Follow the HQ build notes, the section \"Jobs started by the routine\". "
             # H90: one HQ code on every computer: the working branch on GitHub is where every job starts and ends.
-            "Before the first step, bring HQ up to date with its working branch (dev) from GitHub; when done, push "
-            "HQ's commits to dev with routine/push.py, after its privacy check. Never main, never the version tags. "
+            "Before the first step, bring HQ up to date with its working branch (dev) from GitHub with "
+            "routine/push.py --pull; when done, push HQ's commits to dev with routine/push.py, after its privacy check. "
+            "A refused pull or push is never passed over: say so in the status block's log and the coaching log (F31). "
+            "Never main, never the version tags. "
             + past_note
         )
     chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")

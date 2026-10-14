@@ -7653,6 +7653,107 @@ console.log(JSON.stringify({{
         return ("no takeover without real internet; after the lid the main that stayed stays, the other hands back at "
                 "once and queues no merges; one really away still gives way")
 
+    async def flow96(self) -> str:
+        """H137, no Claude: the Modern look next to Classic. The call page has a Look row in Settings (Classic and
+        Modern), Classic until Modern is picked, remembered on this device (set before anything is drawn); every Modern
+        rule only applies under html.modern, so Classic is exactly as before; in Modern the round buttons gather in one
+        dock and go back to their own spots in Classic (same ids, so everything works the same)."""
+        page = (APP / "web/index.html").read_text()
+        need('id="lookrow"' in page and 'data-look="classic"' in page and 'data-look="modern"' in page,
+             "the Look row with Classic and Modern is missing from Settings")
+        need('data-look="classic" aria-pressed="true"' in page, "Classic isn't the look before anything is picked")
+        head = page.split("</head>", 1)[0]
+        need('localStorage.getItem("hq-look") === "modern"' in head, "the picked look isn't set before the page is drawn")
+        css = head.split('<style id="modernlook">', 1)
+        need(len(css) == 2, "the Modern style block is missing")
+        rules = [r.strip() for r in re.sub(r"/\*.*?\*/", "", css[1].split("</style>", 1)[0], flags=re.S).split("}")]
+        loose = []
+        for r in rules:
+            if "{" not in r:
+                continue
+            sel = r.split("{", 1)[0].strip()
+            if not sel or sel.startswith("@media") or sel.startswith("html.modern") or sel in ("#dock",) or sel.startswith("#lookrow"):
+                continue
+            if all(part.strip().startswith(("html.modern", "html.tinted.modern")) for part in sel.split(",")):
+                continue
+            loose.append(sel)
+        need(not loose, f"Modern rules that also change Classic: {loose[:5]}")
+        need('id="dock"' in page, "the dock is missing")
+        for bid in ("directbtn", "chatbtn", "calbtn", "devbtn", "notesbtn", "histbtn", "statbtn", "voicebtn"):
+            need(f'["{bid}",' in page and f'id="{bid}"' in page, f"{bid} isn't in the dock or not on the page")
+        need("el.hqSpot.after(el)" in page, "Classic doesn't put the buttons back in their own spots")
+        need('localStorage.setItem("hq-look", look)' in page, "the picked look isn't remembered on this device")
+        need("applyLook(look)" in page, "the look isn't applied when the page starts")
+        return "the Look row in Settings, Classic by default and set before drawing, every Modern rule under html.modern, the dock with the same buttons, remembered on this device"
+
+    async def flow97(self) -> str:
+        """F31, no Claude, no network: a refused pull or push from a job never passes silently. push.py --pull and a
+        plain push against a throwaway HQ copy whose GitHub is a throwaway folder: a pull that works says so; a remote
+        that refuses opens the incident github (in a throwaway incident log) with git's own words; Donna's watch texts
+        about it at once, not after three minutes; the next pull that goes through closes it, and she says it's back."""
+        import importlib
+        sys.path.insert(0, str(ROOT / "routine"))
+        sys.path.insert(0, str(ROOT / "app"))
+        import incidents as inc
+        import push as pu
+        import direct_line as dl
+        importlib.reload(pu)
+        tmp = Path(tempfile.mkdtemp(prefix="hq-flow97-"))
+        real = (inc.FILE, pu.ROOT)
+        try:
+            def g(*a, cwd=tmp):
+                return subprocess.run(["git", *a], cwd=cwd, text=True, capture_output=True, check=True)
+            g("init", "-q", "--bare", "-b", "dev", str(tmp / "hub.git"))
+            g("clone", "-q", str(tmp / "hub.git"), str(tmp / "hq"))
+            hq = tmp / "hq"
+            g("checkout", "-q", "-b", "dev", cwd=hq)
+            (hq / "a.txt").write_text("one\n")
+            g("add", "a.txt", cwd=hq)
+            g("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "one", cwd=hq)
+            g("push", "-q", "origin", "dev", cwd=hq)
+            inc.FILE = str(tmp / "incidents.json")
+            pu.ROOT = hq
+            need(pu.pull() == 0, "a pull from a GitHub that answers didn't go through")
+            need(not inc.is_down("github"), "a pull that worked opened an incident")
+            g("remote", "set-url", "origin", str(tmp / "gone.git"), cwd=hq)
+            need(pu.pull() == 2, "a refused pull didn't fail")
+            open_ = inc.is_down("github")
+            need(open_ and "pulling dev refused" in open_["why"] and open_.get("detail"),
+                 f"a refused pull didn't open the github incident with git's words: {open_}")
+            r = pu.git("push", "origin", "dev")
+            need(r.returncode != 0, "the throwaway remote accepted a push")
+            pu.refused("pushing the branch dev", r.stdout + r.stderr)
+            need(len([i for i in inc.read()["incidents"] if i["key"] == "github"]) == 1, "a second refusal opened a second incident")
+            now = time.time()
+            data = inc.read()["incidents"]
+            look = lambda d: [w for w, _ in dl.watch({}, main=False, inbox=tmp / "none.md", incidents_data=d, dry=True)]
+            os.environ["HQ_DIRECT_STATE"] = str(tmp / "direct-state.json")
+            real_state = dl.local_state_file
+            dl.local_state_file = lambda: tmp / "direct-state.json"
+            try:
+                (tmp / "direct-state.json").write_text(json.dumps({"looked": now - 60}))
+                if not dl.on():
+                    note = "Donna's texts are off here, so her part was checked on the rule only"
+                    need('in ("role", "github")' in (ROOT / "app/direct_line.py").read_text(), "Donna doesn't text a refused push at once")
+                else:
+                    note = ""
+                    need(look(data) == ["down"], f"a refused pull wasn't texted at once: {look(data)}")
+            finally:
+                dl.local_state_file = real_state
+                os.environ.pop("HQ_DIRECT_STATE", None)
+            g("remote", "set-url", "origin", str(tmp / "hub.git"), cwd=hq)
+            need(pu.pull() == 0, "the pull after the fix didn't go through")
+            last = [i for i in inc.read()["incidents"] if i["key"] == "github"][-1]
+            need(last.get("back") and any("went through" in f["what"] for f in last["fixes"]),
+                 f"the next pull that worked didn't close the incident: {last}")
+            need("--pull" in (ROOT / "routine/tick.py").read_text(), "a job's start text doesn't pull with push.py --pull")
+        finally:
+            inc.FILE, pu.ROOT = real
+            shutil.rmtree(tmp, ignore_errors=True)
+        return ("a pull that works passes quietly; a refused pull or push opens the github incident with git's words, one "
+                "incident for several refusals, texted at once; the next one through closes it; jobs pull with push.py --pull"
+                + (f" ({note})" if note else ""))
+
     async def flow89(self) -> str:
         """H118, no Claude: which computer is main, at a glance. role.py's badge in throwaway HQ memories (on its own:
         none; the main: Main; the backup: Backup · <the other> is main, by the other's label, else its name), written
@@ -9076,6 +9177,8 @@ FLOWS = {
     93: ("H125: Donna's watch list: she keeps an eye out for a mail or the weather and texts when it comes", False, "flow93"),
     94: ("H135: the weather in the app: a widget on the main screen, a sheet with warnings (KNMI), UV and the next hours", False, "flow94"),
     95: ("H139: closing and opening the laptop's lid never leaves two mains: a real online check, the main that stayed stays", False, "flow95"),
+    96: ("H137: the Modern look next to Classic: a Look switch in Settings, Classic until Modern is picked, the round buttons in one dock", False, "flow96"),
+    97: ("F31: a refused pull or push from a job shows up: the github incident, Donna texts at once, closed by the next one through", False, "flow97"),
 }
 
 

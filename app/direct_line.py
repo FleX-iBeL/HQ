@@ -67,7 +67,7 @@ import agents as _agents  # noqa: E402  stdlib only
 
 VENV_PY = ROOT / ".venv" / "bin" / "python"
 AGENT_ID = os.environ.get("HQ_DIRECT_AGENT", "donna")
-DOWN_AFTER = 180  # an incident open this long gets a text; a takeover gets one at once
+DOWN_AFTER = 180  # an incident open this long gets a text; a takeover or a refused pull or push (F31) gets one at once
 KEEP = 400  # messages kept in the thread
 SUBJECT = "https://github.com/FleX-iBeL/HQ"  # the VAPID contact the push services ask for
 
@@ -361,7 +361,7 @@ PLAIN_WHAT = {
     "call": "the call line", "phone": "the phone link", "mail": "the mail check", "jobs": "the dev team's setup",
     "helper": "the routine", "watchdog": "the watchdog", "usage": "the usage check", "status": "the status page",
     "schedule": "the scheduler", "role": "the backup", "temp": "the laptop's temperature",
-    "battery": "the laptop's battery",
+    "battery": "the laptop's battery", "github": "sending the team's work to GitHub",
 }
 
 
@@ -700,7 +700,7 @@ def watch(q: dict | None = None, *, main: bool = True, incidents_data: list | No
     for e in incidents_data or []:
         iid = str(e.get("id"))
         if not e.get("back"):
-            if iid not in told and (e.get("key") == "role" or now - float(e.get("down") or now) >= DOWN_AFTER):
+            if iid not in told and (e.get("key") in ("role", "github") or now - float(e.get("down") or now) >= DOWN_AFTER):
                 if not first:
                     fixes = "; ".join(f.get("what", "") for f in (e.get("fixes") or [])[-2:])
                     downs.append(f"{e.get('key')}: {e.get('why') or 'down'}" + (f" (done so far: {fixes})" if fixes else ""))
