@@ -5,6 +5,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ## Coming next
 
 ### Added
+- Pepper sounds like herself on a call: warm, calm and unhurried, like a good phone call with someone who has time for you. Her own cadence and small human touches, no one-liners or jokes as her style, nothing like Donna. And no agent says "honestly" any more (H131).
 - Whoever you bring in says hi. On a three-way or four-way call, once the line bringing her in has been heard, the one who joined says a short line of her own that she's there, in her own voice and character, before you go on. If you speak first, she just answers you (H130).
 - A goodbye that fits your moment. When you close a call, Donna and Pepper say goodbye with a short comment on what you're doing right now: the appointment on now or coming up in your calendar, else something up on your to-do list. Moneypenny keeps her own goodbye (H129).
 - Donna keeps an eye out. Ask her "let me know when …" for your mail (a package you're expecting: she texts you each update until it's delivered, or for a week) or the weather ("let me know if it rains later today": she texts you when the forecast shows it, with when). While a weather watch is open she looks every half hour. She texts when a watch ends too: answered, its time up, or you stopped it. Her watches show under her notes behind the notes button (H125).

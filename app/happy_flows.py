@@ -165,7 +165,8 @@ Run them before and after every update; they print a short pass/fail table at th
   69 H76 and H77, no Claude: each agent her own character. Donna, Pepper and Moneypenny in HQ's defaults with the
      agreed greeting first and push-back line, nothing personal, the name from me.md filled in; her character and
      the human rules after the call rules, no talk while thinking; a call greets in her words; a workspace's own
-     character (agents.json) wins and is marked as its own; /api/agents, Settings and the readme show the defaults
+     character (agents.json) wins and is marked as its own; /api/agents, Settings and the readme show the defaults;
+     H131: no agent says "honestly", and Pepper's character has no one-liners
   75 F18, no Claude: the status page never gets wider than the phone. A copy of the status page in a headless
      browser at phone widths (iPhone 13, a small phone), with a job and a roadmap note holding a long path and a
      key that can't be broken at a space, every fold open: nothing sticks out sideways and the page can't be
@@ -6083,7 +6084,7 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         name = config.ME["name"] or None
         every = {a["id"]: a for a in agents.load(config.FOLDER)}
         agreed = {"donna": ("Hey you. What do you need?", "You said that yesterday too. Shall I just put it in?"),
-                  "pepper": ("Hey{s}. What's on your mind?", "Honestly? That's the third build today. Is this the needle mover, or the fun one?"),
+                  "pepper": ("Hey{s}. What's on your mind?", "So... that's the third build today. Is this the needle mover, or the fun one?"),
                   "moneypenny": ("{N}Go ahead.", "Noted. It'll be done. Just not tonight.")}
         base = {a["id"]: a for a in agents.DEFAULTS}
         for aid, (greet, push) in agreed.items():
@@ -6102,6 +6103,13 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         need(not (greets[0] & greets[1] or greets[0] & greets[2] or greets[1] & greets[2]), "two agents share a greeting")
         src = (APP / "agents.py").read_text()
         need(not name or name not in src, "the user's name is written in HQ's agents.py")
+        # H131: no "honestly" in any agent's own lines, and the human rules tell every agent not to say it.
+        for a in base.values():
+            lines = [a["character"], a["pushback"]] + [g for v in agents._greetings(a["greetings"]).values() for g in v] + a["continue_greetings"]
+            need(not any(re.search(r"(?i)\bhonestly\b|\bmm\b", x) for x in lines), f"{a['id']} still says honestly or Mm: {lines}")
+        need('never "honestly"' in agents.HUMAN, "the human rules don't drop honestly")
+        need('never says "honestly"' in base["pepper"]["personality"] and "no one-liners" in base["pepper"]["personality"],
+             "Pepper's character still invites honestly or one-liners (H131)")
         # Her character and the human rules after the call rules; no announcing tools or thinking out loud.
         p_ = every["pepper"]
         per = agents.persona(p_, "Sam")
