@@ -5,6 +5,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ## Coming next
 
 ### Added
+- "The team" instead of the job list. On calls and in Donna's chat the work the computer builds is "the team": no more job list, queue or job numbers in what's said. "Put it on the roadmap" only writes it on the roadmap; "give it to the team" is your go: it goes on the roadmap first if it isn't there yet, then to the team, without asking again.
 - Pepper sounds like herself on a call: warm, calm and unhurried, like a good phone call with someone who has time for you. Her own cadence and small human touches, no one-liners or jokes as her style, nothing like Donna. And no agent says "honestly" any more (H131).
 - Whoever you bring in says hi. On a three-way or four-way call, once the line bringing her in has been heard, the one who joined says a short line of her own that she's there, in her own voice and character, before you go on. If you speak first, she just answers you (H130).
 - A goodbye that fits your moment. When you close a call, Donna and Pepper say goodbye with a short comment on what you're doing right now: the appointment on now or coming up in your calendar, else something up on your to-do list. Moneypenny keeps her own goodbye (H129).

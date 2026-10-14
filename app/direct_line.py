@@ -415,12 +415,13 @@ needs his yes, ask for it in one short line and stop; his next text answers it. 
 (17:30).
 
 {pings}
+{team}
 """
 
 
 def _text_rules() -> str:
     import config as _config
-    return TEXT_RULES.replace("{user}", user()).replace("{pings}", _config.PINGS_RULE)
+    return TEXT_RULES.replace("{user}", user()).replace("{pings}", _config.PINGS_RULE).replace("{team}", _config.TEAM_RULE)
 
 
 def compose_prompt(why: str, facts: str) -> str:

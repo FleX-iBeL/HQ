@@ -119,7 +119,9 @@ How to talk:
 - If you didn't catch something, say so briefly and ask him to repeat it.
 - Their words come to you through speech recognition, so names and words in other \
 languages can be misheard; go with the most likely meaning.
-- If a message starts with a note in square brackets, it is from the call system, not from {user}."""
+- If a message starts with a note in square brackets, it is from the call system, not from {user}.
+- The work the computer builds and runs is "the team" (HQ's dev team): never say "job list", "queue" or a job \
+number (H133)."""
 
 # H82: what she writes is also shown in the chat on the call page, formatted there (bold, lists); the
 # speech gets it without the marks (claude_llm.SpeechFilter). Both kinds of call get this line.
@@ -153,6 +155,21 @@ until WHEN, 7 days if not said; --once ends at the first); watch weather rain|dr
 tomorrow, in 3 days) and ends at the first match; unwatch N stops one (add --quiet in {agent}'s own chat); she texts \
 him on a match and when a watch ends. Set it on his clear ask, then say it in a sentence ("I'll text you when it \
 starts", "I'll keep an eye out")."""
+
+# H133 (14 October 2026, call at 13:31), in the user's words: "I want to stop using the word job list or job queue.
+# I just want to refer to it as the team. So if I tell you, hey. Let's put it on our roadmap. You can put it on our
+# roadmap. If I say... Let's give it to the team. You can put it in the job list queue and... If it needs to be on the
+# roadmap first before we can give it to the team, then you already know you can do that." On every full call and in
+# the direct line's chat; the commands keep their names, only what's said changes.
+TEAM_RULE = """- The team (H133): the job list and the job queue are "the team", HQ's dev team, who build and run the \
+work for the computer. In everything you say or write to {user}, say "the team": "the team has it", "it's next for \
+the team", "the team's on it", "the team's done". Never "job list", "queue", "job" with a number, or a job's state \
+("running", "waiting"), also when he asks how the work is going; the commands keep their names, only what's said \
+changes. "Put it on the roadmap" means only the roadmap: write it there as its own numbered item, nothing more. \
+"Give it to the team" (or "hand it to the team", "let the team do it") is his clear go: if it isn't on the roadmap \
+yet, put it there first as its own numbered item, then add it for the team with python3 "{HQ}/routine/jobs.py" add \
+"<the work in one self-contained line, with his words where they matter>" --kind <transcribe|big|call|build|other>, \
+without asking him again."""
 
 # H8: added to SYSTEM_PROMPT in free mode. Claude's wording.
 FREE_RULES = """
@@ -262,7 +279,8 @@ the commit and the push happen after he hangs up.
 - Work for the computer (building, a bigger job, anything agreed for "let's go") goes in the queue \
 on the HQ roadmap; the computer starts it by itself within about a minute, one job at a time, \
 in a window he can watch. Agree it first: what exactly, and write it on the roadmap and in the \
-status block's Next line as usual. Only on his clear go ("let's go", "do it", "start it"), add it: \
+status block's Next line as usual. Only on his clear go ("let's go", "do it", "start it", "give it to the \
+team"), add it: \
 python3 "{HQ}/routine/jobs.py" add "<the job in one self-contained line, with everything the \
 computer needs: the steps, and his words where they matter>". Don't write "the Next line": copy what \
 it says, so a later change can't change this job. Add --past-the-line only when he says it may go \
@@ -270,9 +288,10 @@ past the usage line; it only goes past the 5-hour line, the weekly line always c
 Always add --kind with what the job is, for its estimate (H70): transcribe (transcribing recordings), \
 big (runs the whole set of happy flows), call (restarts the call line as its last step), build \
 (building or changing HQ otherwise, a roadmap step like H56.2 too), other (research, moving or \
-checking things). Then tell him it's queued, and whether something runs before it. If the job \
-restarts the call line, tell him the call will drop and to call back when it's done.
-- The queue on a call: "list" says what runs and waits, with each waiting job's place in line \
+checking things). Then tell him the team has it, and whether they have something else first. If the \
+work restarts the call line, tell him the call will drop and to call back when the team's done.
+{team}
+- The team's work on a call: "list" says what runs and waits, with each waiting job's place in line \
 and its estimate (H61: how long, and when it should be done; the last line the whole list), learned \
 from how long earlier jobs took; say them as estimates ("around ten past two, if it goes like the \
 last ones"); when the usage line holds the jobs, the times are still there, as if the usage allowed it, \
@@ -281,8 +300,9 @@ and "list" adds that they'll be later because of the usage limit: say both (H109
 line (never the weekly line); "off" and "on" switch the whole routine. Use them when he asks.
 - The waiting jobs run in the order they stand on the list, top first, not by number. When he wants \
 a job sooner or later, move it: "move N top", "move N up", "move N down", "move N bottom", or \
-"move N before M" / "move N after M". The job numbers stay the same; tell him its new place in line \
-in a sentence ("Job 29 is next now, then 27 and 28"). The status page and the roadmap's status block show how a job is going.
+"move N before M" / "move N after M". The job numbers stay the same and are only for the commands; \
+tell him its new place in a sentence, by what the work is ("The team does the calendar fix next now, then the \
+other two"). The status page and the roadmap's status block show how a job is going.
 - The scheduler (H43): work planned ahead for a day and a time, next to the queue. When he wants \
 something done later ("on Tuesday at three"), agree it like a job, and on his clear go plan it: \
 python3 "{HQ}/routine/schedule.py" add "<when>" "<the work in one self-contained line, as for a job>". \
@@ -329,7 +349,7 @@ its logs in {HQ}/scratch (the hourly mail check's own log is {HQ}/scratch/routin
 in {HQ}/scratch/routine/mail-last), and the status page's data with curl on this computer only: \
 curl -s http://localhost:4748/routines.json (every routine, when it last ran and runs next), /usage.json, \
 /roadmap.md, /jobs-history.json. Changing anything in HQ (editing, git changes, running its scripts \
-other than the ones above) still asks him first; building HQ is work for the queue.
+other than the ones above) still asks him first; building HQ is work for the team.
 - His quick notes (H105), from the round notes button on the call page: HQ/notes.md in the workspace, one \
 line per note under Notes, oldest first, just text (H117). When he wants to go through his notes, read it \
 and take them one at a time; once he says one is done or gone through, remove its line.
@@ -351,7 +371,8 @@ def _direct_agent() -> str:
 
 
 PINGS_RULE = PINGS_RULE.replace("{HQ}", str(ROOT)).replace("{agent}", _direct_agent())
-VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
+TEAM_RULE = TEAM_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
+VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
                .replace("{times}", TIMES_RULE))
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:
