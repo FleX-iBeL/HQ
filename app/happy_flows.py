@@ -5053,7 +5053,7 @@ window.fetch = async (url, opt) => {
             rd = agenda.read(now=t0)
             need([e["id"] for e in rd["events"] if e.get("ping")] == ["a3"], f"agenda doesn't mark the bell: {rd['events']}")
             tsrc = (ROOT / "routine" / "tick.py").read_text()
-            need("pings.watch()" in tsrc and tsrc.index("pings.watch()") > tsrc.index("if main:\n        import weather"),
+            need("pings.watch()" in tsrc and tsrc.index("pings.watch()") > tsrc.index("import weather"),
                  "the routine doesn't look for due pings on the main")
             need("create_event" not in (ROOT / "routine" / "pings.py").read_text(), "the pings may write to Google Calendar")
         finally:
@@ -6930,6 +6930,17 @@ setTimeout(() => {
             out = look({}, [{"id": "r1", "key": "role", "down": now, "why": "the main doesn't answer"}])
             need([w for w, _ in out] == ["down"], f"a takeover wasn't texted at once: {out}")
             need(dl.watch({}, main=False, inbox=inbox, incidents_data=[], dry=True) == [], "the backup texted about the job list or mail")
+            # F28: the incident log as the routine really reads it (a dict holding the list), not only a list
+            sys.path.insert(0, str(ROOT / "routine"))
+            import incidents as _inc
+            real_read = _inc.read
+            _inc.read = lambda: {"incidents": [{"id": "x1", "key": "net", "down": now - 999, "why": "no internet"}], "events_seen": 0}
+            try:
+                dl.watch({}, main=False, inbox=inbox, dry=True)
+            except Exception as e:
+                need(False, f"the real incident log breaks her look: {e!r}")
+            finally:
+                _inc.read = real_read
             os.environ["HQ_DIRECT"] = "0"
             need(dl.watch({"running": []}, inbox=inbox, incidents_data=[], dry=True) == [], "switched off, she still texted")
             os.environ.pop("HQ_DIRECT")

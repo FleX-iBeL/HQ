@@ -20,6 +20,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - The quick notes are just text now: the paper to doodle on is gone, and the field you type a note in grows with what you type, over more lines, like the chat's (H117).
 
 ### Fixed
+- Donna's texts when something in HQ stays down (and when it's back) never came, and since the weather, the calendar and her pings were added to the same minute's look, those stopped with it on the computer where it happened. Fixed, and each of those looks now runs on its own, so one can't stop the others (F28).
 - Changing the mic and sound during a call. Picking the AirPods (or any output the computer already plays on) as the Sound no longer makes her voice much quieter. On the iPhone, Safari and the Mac app the old mic is let go first, so the new one can take over. Where a device won't switch, the call screen says so plainly: on the iPhone, iOS picks the mic and sound itself during a call (Control Center); with the AirPods' own mic on, they play in quieter call mode; a mic that sends no sound is named (F24).
 
 ## 0.4.2 · 13 October 2026

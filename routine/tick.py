@@ -889,22 +889,35 @@ def direct_watch():
     import direct_line
     main = role.acting() == "main"
     q = json.loads(jobs("next")) if main else None
-    for why, facts in direct_line.watch(q, main=main):
-        log(f"direct line: texting ({why})")
+    # F28: each look on its own, so one that fails doesn't stop the others (the incidents' one did, from H80 on).
+    try:
+        for why, facts in direct_line.watch(q, main=main):
+            log(f"direct line: texting ({why})")
+    except Exception as e:
+        log(f"direct line: {e!r}")
     # H120: the weather every three hours in the day, on the main; she texts only when there's something to say.
     if main:
-        import weather
-        if weather.start():
-            log("direct line: looking at the weather")
+        try:
+            import weather
+            if weather.start():
+                log("direct line: looking at the weather")
+        except Exception as e:
+            log(f"weather: {e!r}")
         # H101: his calendar, read only, every hour in the day, for the call page's calendar.
-        import agenda
-        if agenda.start():
-            log("calendar: reading it (read only)")
+        try:
+            import agenda
+            if agenda.start():
+                log("calendar: reading it (read only)")
+        except Exception as e:
+            log(f"calendar: {e!r}")
         # H124: Donna texts first: a ping when an appointment he picked starts, a reminder he asked for, and now and
-        # then on her own about something on her own notes.
-        import pings
-        for why, _ in pings.watch():
-            log(f"direct line: texting ({why})" if why != "initiative" else "direct line: her own look at her notes")
+        # then on her own about something on her own notes. H125: her watches' matches and ends too.
+        try:
+            import pings
+            for why, _ in pings.watch():
+                log(f"direct line: texting ({why})" if why != "initiative" else "direct line: her own look at her notes")
+        except Exception as e:
+            log(f"pings: {e!r}")
 
 
 def tick():

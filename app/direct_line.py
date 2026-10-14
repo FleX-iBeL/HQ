@@ -603,7 +603,7 @@ def watch(q: dict | None = None, *, main: bool = True, incidents_data: list | No
     if incidents_data is None:
         try:
             import incidents as _inc
-            incidents_data = _inc.read()
+            incidents_data = _inc.read().get("incidents") or []  # F28: read() gives {"incidents": [...], ...}
         except Exception:
             incidents_data = []
     told = dict(s.get("told") or {})
