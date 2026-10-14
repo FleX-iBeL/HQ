@@ -2,9 +2,9 @@
 
 HQ is a personal headquarters you run on your own computer: a live voice call with Claude from your phone or laptop, where you can interrupt each other and Claude can actually do things (read and update your notes, check your mail and calendar, plan your week); a job queue that the computer works through by itself; a watchdog that keeps it all running; and a status page that shows what's happening, live.
 
-**HQ is still in development.** This is version 0.2. What it is, how it works, and what's coming next is in [ABOUT.md](ABOUT.md).
+**HQ is still in development.** Its version is in `VERSION`, and what changed in each one in `CHANGELOG.md`. What it is, how it works, and what's coming next is in [ABOUT.md](ABOUT.md).
 
-Get it: `git clone https://github.com/FleX-iBeL/HQ.git`, then follow the first install below.
+Get it: `git clone https://github.com/FleX-iBeL/HQ.git`, then follow the first install below. Clone it (don't download a ZIP, and don't check out an older tag): the clone is the newest released version, and its git history is what lets HQ update itself later. A copy without its history still updates with one tap (the first update turns it into a clone in place, every file kept), but a clone is the clean start.
 
 ---
 
@@ -183,7 +183,7 @@ What **Update** does (`routine/update.py`, which you can also run yourself: `pyt
 
 On a computer that isn't a Mac, tapping Update first explains that their own parts are kept safe and that Claude gets instructions to patch things up locally afterwards.
 
-By hand still works: `git pull` (or `git checkout v0.3`), then restart the call line (`app/stop.sh`, `app/start.sh`) and run the happy flows.
+By hand, for a Claude helping out: don't `git pull` or check out a tag and restart things one by one; that skips the backup, the restarts and the note. Run the same path the button runs: `python3 routine/update.py check --force` (it should say `"available": true`), then `python3 routine/update.py start`, and follow `python3 routine/update.py status` until its `run` says `done`; then read the note in `updates/`. If the check says `"offline": true`, its `why` says what failed.
 
 ### Your own parts: local/
 
@@ -205,6 +205,6 @@ Something with no name here (the speech recognition, the laptop readings): chang
 
 ### Versions
 
-Versions are git tags on this repo: `v0.2`, `v0.2.1`, `v0.3`. **Fixes get a patch number (0.2.1); bigger features the next minor (0.3).** HQ reads its own version from the newest tag in its history (`git describe`), else from the `VERSION` file.
+Versions are git tags on this repo: `v0.2`, `v0.2.1`, `v0.3`. **Fixes get a patch number (0.2.1); bigger features the next minor (0.3).** HQ reads its own version from the newest tag in its history (`git describe`), else (no history, no tags, or only older ones) from the `VERSION` file.
 
 Releasing one (the maintainer): in `CHANGELOG.md`, rename **Coming next** to the version and date (`## 0.3 · 12 October 2026`), put the same number in `VERSION`, commit, tag it with a short message (`git tag -a v0.3 -m "HQ 0.3"`), and push with `python3 routine/push.py`, which runs the privacy check first. Everyone's HQ sees it within a few hours.

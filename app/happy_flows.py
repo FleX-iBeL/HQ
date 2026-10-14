@@ -7686,6 +7686,145 @@ console.log(JSON.stringify({{
         need("applyLook(look)" in page, "the look isn't applied when the page starts")
         return "the Look row in Settings, Classic by default and set before drawing, every Modern rule under html.modern, the dock with the same buttons, remembered on this device"
 
+
+    # 98
+    async def flow98(self) -> str:
+        """F32, no network, no Claude: a friend's fresh install on an old release sees the newer one and installs it
+        with one tap. A made-up public repo in a throwaway folder (v0.3, then v0.4, both with today's update code and
+        status page) and two fresh installs of v0.3, the ways a friend may get one: a download without git history
+        (a ZIP), and a shallow clone of the old tag without its tags. Each gets its own status page on its own port,
+        on a computer whose git has no name or email. Checked: the version reads 0.3; the look sees v0.4 (also on
+        the download, where fetching what's new can't work, which used to count as offline: no bar, ever); Update
+        goes through (the download first becomes a clone in place); after it, 0.4 and the latest; the workspace,
+        local/ and the friend's own change are kept. Everything removed after."""
+        import socket as _so
+        import subprocess as sp
+        import urllib.request as ur
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        base = self.tmp / "f32"
+        up = base / "upstream"
+        if base.exists():
+            shutil.rmtree(base)
+        genv = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid", "GIT_TERMINAL_PROMPT": "0"}
+
+        def g(where, *a, env=genv):
+            r = sp.run(["git", "-C", str(where), *a], capture_output=True, text=True, env=env)
+            need(r.returncode == 0, f"git {' '.join(a)}: {r.stderr.strip()}")
+            return r.stdout.strip()
+        # The made-up public repo: HQ's own update code and status page, as they are now.
+        for d in ("routine", "status"):
+            shutil.copytree(ROOT / d, up / d, ignore=shutil.ignore_patterns("__pycache__", "icons"))
+        (up / "desktop").mkdir()
+        shutil.copy(ROOT / "desktop/shell.html", up / "desktop/shell.html")
+        shutil.copy(ROOT / ".gitignore", up / ".gitignore")
+        (up / "README.md").write_text("A made-up HQ, for flow 98.\n")
+        log = lambda body: "# Changelog\n\n" + body + "## 0.3 · 1 January 2026\n\n### New\n- The old version.\n"
+        (up / "CHANGELOG.md").write_text(log(""))
+        (up / "VERSION").write_text("0.3\n")
+        g(up, "init", "-q", "-b", "main"); g(up, "add", "-A"); g(up, "commit", "-qm", "0.3")
+        g(up, "tag", "-a", "v0.3", "-m", "HQ 0.3")
+        # The two fresh installs of 0.3, before 0.4 is out.
+        dl, sh_ = base / "download", base / "shallow"
+        dl.mkdir()
+        arch = sp.run(["git", "-C", str(up), "archive", "v0.3"], capture_output=True, check=True).stdout
+        sp.run(["tar", "-x", "-C", str(dl)], input=arch, check=True)
+        g(base, "clone", "-q", "--depth", "1", "--branch", "v0.3", "--no-tags", f"file://{up}", str(sh_))
+        g(sh_, "tag", "-d", "v0.3")  # a copy whose tags didn't come along (git describe finds nothing)
+        for me in (dl, sh_):
+            (me / "workspace").mkdir()
+            (me / "workspace/me.md").write_text("# mine, flow 98\n")
+            (me / "local").mkdir()
+            (me / "local/my-part.sh").write_text("# my own part, flow 98\n")
+            with open(me / "README.md", "a") as f:
+                f.write("my own line, flow 98\n")
+        # Then 0.4 comes out.
+        (up / "app").mkdir()
+        (up / "app/hello.txt").write_text("new in 0.4\n")
+        (up / "CHANGELOG.md").write_text(log("## 0.4 · 2 January 2026\n\n### New\n- Flow ninety-eight's new thing.\n\n"))
+        (up / "VERSION").write_text("0.4\n")
+        g(up, "add", "-A"); g(up, "commit", "-qm", "0.4"); g(up, "tag", "-a", "v0.4", "-m", "HQ 0.4")
+
+        def free_port() -> int:
+            with _so.socket() as s_:
+                s_.bind(("127.0.0.1", 0))
+                return s_.getsockname()[1]
+
+        def api(port, path, post=False):
+            req = ur.Request(f"http://127.0.0.1:{port}{path}", method="POST" if post else "GET",
+                             headers={"x-hq": "update"} if post else {})
+            with ur.urlopen(req, timeout=150) as r:
+                return json.loads(r.read())
+
+        notes = []
+        for name, me in (("download", dl), ("shallow clone", sh_)):
+            port, dead = free_port(), free_port()
+            rm = base / f"roadmap-{me.name}.md"
+            rm.write_text("# test\n\n## The queue\n\n**Routine:** on\n")
+            home = base / f"home-{me.name}"
+            home.mkdir()
+            # A computer whose git has no name or email yet: nothing global, and no guessing one from the system.
+            env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "HQ_LOCAL"))}
+            env.update({"HQ_STATUS_PORT": str(port), "HQ_UPDATE_URL": str(up), "HQ_UPDATE_RESTART": "0",
+                        "HQ_PLATFORM": "darwin", "HQ_ROADMAP": str(rm), "HQ_CALL_URL": f"http://127.0.0.1:{dead}",
+                        "HQ_WORKSPACE": str(me / "workspace"), "HQ_SUPPORT": str(base / f"support-{me.name}"),
+                        "HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0",
+                        "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "user.useConfigOnly", "GIT_CONFIG_VALUE_0": "true"})
+            (me / ".status").mkdir(exist_ok=True)
+            proc = sp.Popen([node, str(me / "status/server.mjs"), "--quiet"], env=env, cwd=str(me),
+                            stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+            try:
+                for _ in range(50):
+                    if http_get("/api/update", f"http://127.0.0.1:{port}")[0] == 200:
+                        break
+                    await asyncio.sleep(0.2)
+                s = await asyncio.to_thread(api, port, "/api/update")
+                need(s["version"] == "0.3", f"{name}: it doesn't read its own version: {s}")
+                # The page's first look starts the check by itself; give it a moment, then Check now.
+                for _ in range(40):
+                    s = await asyncio.to_thread(api, port, "/api/update")
+                    if s.get("latest"):
+                        break
+                    await asyncio.sleep(0.5)
+                need(s.get("available") and s.get("latest") == "0.4" and not s.get("offline"),
+                     f"{name}: the page's own look doesn't see v0.4: {s}")
+                s = await asyncio.to_thread(api, port, "/api/update/check", True)
+                need(s["available"] and s["new_tag"] == "v0.4" and s["new"], f"{name}: Check now doesn't see v0.4: {s}")
+                items = [i for sec in s["new"] for grp in sec["groups"] for i in grp["items"]]
+                if me is sh_:
+                    need("Flow ninety-eight's new thing." in items, f"{name}: what's new isn't there: {items}")
+                need(not (me / "app/hello.txt").exists(), f"{name}: the look changed HQ before Update was tapped")
+                # One tap.
+                s = await asyncio.to_thread(api, port, "/api/update/start", True)
+                for _ in range(120):
+                    s = await asyncio.to_thread(api, port, "/api/update")
+                    if s["run"].get("state") in ("done", "failed"):
+                        break
+                    await asyncio.sleep(0.5)
+                need(s["run"].get("state") == "done", f"{name}: the update didn't go through: {s['run']}")
+                need((me / "app/hello.txt").exists() and (me / "VERSION").read_text().strip() == "0.4",
+                     f"{name}: HQ isn't on 0.4 after the update")
+                s = await asyncio.to_thread(api, port, "/api/update/check", True)
+                need(s["version"] == "0.4" and not s["available"] and s["latest"] == "0.4",
+                     f"{name}: after the update it isn't the latest: {s}")
+                need((me / "workspace/me.md").read_text() == "# mine, flow 98\n"
+                     and (me / "local/my-part.sh").read_text() == "# my own part, flow 98\n",
+                     f"{name}: the workspace or local/ didn't survive")
+                br = (s["run"].get("saved") or {}).get("changes", {}).get("branch", "")
+                need(br.startswith("hq-backup/") and "my own line, flow 98" in g(me, "show", f"{br}:README.md"),
+                     f"{name}: the friend's own change isn't on the backup branch: {s['run']}")
+                need(g(me, "remote", "get-url", "origin") == str(up) if me is dl else True,
+                     f"{name}: the new clone doesn't know where updates come from")
+                notes.append(f"{name}: 0.3, sees v0.4, one tap, 0.4 and the latest, own change on {br.split('/')[-1]}")
+            finally:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except sp.TimeoutExpired:
+                    proc.kill()
+        shutil.rmtree(base, ignore_errors=True)
+        return "; ".join(notes)
+
     async def flow97(self) -> str:
         """F31, no Claude, no network: a refused pull or push from a job never passes silently. push.py --pull and a
         plain push against a throwaway HQ copy whose GitHub is a throwaway folder: a pull that works says so; a remote
@@ -9179,6 +9318,7 @@ FLOWS = {
     95: ("H139: closing and opening the laptop's lid never leaves two mains: a real online check, the main that stayed stays", False, "flow95"),
     96: ("H137: the Modern look next to Classic: a Look switch in Settings, Classic until Modern is picked, the round buttons in one dock", False, "flow96"),
     97: ("F31: a refused pull or push from a job shows up: the github incident, Donna texts at once, closed by the next one through", False, "flow97"),
+    98: ("F32: a fresh install on an old release (a download, a shallow clone) sees the newer one and updates with one tap", False, "flow98"),
 }
 
 

@@ -19,7 +19,9 @@ changelog what we've added/changed over the versions".
     update.py start             starts the update in the background (it waits for a call or a job to end)
     update.py run               the update itself (what start runs)
 
-The version is the newest version tag HQ's history contains (git describe, v0.2), else the VERSION file.
+The version is the newest version tag HQ's history contains (git describe, v0.2), else the VERSION file (F32: also
+when the history has no tags or only older ones). A copy without git history (a download) still sees a newer
+version, and its update first makes it a clone in place, every file kept.
 A newer version is a tag vX.Y or vX.Y.Z on the public repo with a higher number. The update:
   1. waits while a call is on (the call server's /api/busy) or a job runs (the queue), and says so;
   2. saves anything changed in HQ outside local/ (and the user's own commits) on a backup branch,
@@ -63,6 +65,8 @@ CALL_URL = os.environ.get("HQ_CALL_URL") or "http://127.0.0.1:7860"
 EVERY = 6 * 3600       # how often to look (Claude's choice: four times a day)
 RETRY = 30 * 60        # after a failed look (offline)
 PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+# F32: who the update's backup (a stash is a commit) is by, so it works on a computer whose git has no name yet.
+IDENTITY = ("-c", "user.name=HQ update", "-c", "user.email=hq-update@localhost")
 TAG = re.compile(r"^v(\d+)\.(\d+)(?:\.(\d+))?$")
 
 
@@ -114,22 +118,34 @@ def write_json(path: str, data: dict) -> None:
 
 # ---- this version -------------------------------------------------------------------------------------------
 
-def local_version() -> dict:
-    """{"tag": "v0.2", "version": "0.2", "ahead": 16}: the newest version tag in HQ's own history, and how many
-    changes came after it that aren't in a version yet. Without git: the VERSION file."""
-    try:
-        r = git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", timeout=10)
-        tag = r.stdout.strip()
-        if r.returncode == 0 and vtuple(tag):
-            ahead = git("rev-list", "--count", f"{tag}..HEAD", timeout=10).stdout.strip()
-            return {"tag": tag, "version": vname(tag), "ahead": int(ahead or 0)}
-    except Exception:
-        pass
+def has_git() -> bool:
+    """F32: HQ is its own git repo (a clone), not a download or a copy without one."""
+    return os.path.exists(os.path.join(HQ, ".git"))
+
+
+def file_version() -> str:
     try:
         v = open(os.path.join(HQ, "VERSION")).read().strip()
-        return {"tag": "v" + v, "version": v, "ahead": 0}
+        return v if vtuple("v" + v) else ""
     except OSError:
-        return {"tag": "", "version": "", "ahead": 0}
+        return ""
+
+
+def local_version() -> dict:
+    """{"tag": "v0.2", "version": "0.2", "ahead": 16}: the newest version tag in HQ's own history, and how many
+    changes came after it that aren't in a version yet. Without git, or when the history has no tags (a
+    download, a shallow clone), or only older ones than the VERSION file says: the VERSION file (F32)."""
+    fv = file_version()
+    try:
+        if has_git():
+            r = git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", timeout=10)
+            tag = r.stdout.strip()
+            if r.returncode == 0 and vtuple(tag) and (not fv or vtuple(tag) >= vtuple("v" + fv)):
+                ahead = git("rev-list", "--count", f"{tag}..HEAD", timeout=10).stdout.strip()
+                return {"tag": tag, "version": vname(tag), "ahead": int(ahead or 0)}
+    except Exception:
+        pass
+    return {"tag": "v" + fv, "version": fv, "ahead": 0} if fv else {"tag": "", "version": "", "ahead": 0}
 
 
 # ---- the changelog ------------------------------------------------------------------------------------------
@@ -179,13 +195,18 @@ def changelog() -> dict:
 
 # ---- looking for a newer one --------------------------------------------------------------------------------
 
-def remote_newest(url: str) -> str | None:
+def remote_tags(url: str) -> list[str]:
+    """Every version tag on the public repo (read only, no login); raises when it can't be reached."""
     r = subprocess.run(["git", "ls-remote", "--tags", "--refs", url], capture_output=True, text=True, timeout=25,
                        env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "PATH": os.environ.get("PATH", "") + ":" + PATH})
     if r.returncode:
         raise RuntimeError((r.stderr or "").strip().splitlines()[-1] if r.stderr.strip() else "can't reach it")
     tags = [ln.split("refs/tags/", 1)[1] for ln in r.stdout.splitlines() if "refs/tags/" in ln]
-    tags = [t for t in tags if vtuple(t)]
+    return [t for t in tags if vtuple(t)]
+
+
+def remote_newest(url: str) -> str | None:
+    tags = remote_tags(url)
     return max(tags, key=vtuple) if tags else None
 
 
@@ -219,12 +240,23 @@ def check(force: bool = False) -> dict:
         newest = remote_newest(UPSTREAM)
         out["offline"] = False
         out["latest"] = vname(newest) if newest else None
-        newer = bool(newest and here["tag"] and vtuple(here["tag"]) and vtuple(newest) > vtuple(here["tag"]))
+        # F32: a copy that doesn't know its own version is older than any release, not the latest.
+        mine = vtuple(here["tag"]) if here["tag"] else None
+        newer = bool(newest and (mine is None or vtuple(newest) > mine))
         out["available"] = newer
         if newer:
-            git("fetch", "--no-tags", "--quiet", UPSTREAM, f"+refs/tags/{newest}:refs/tags/{newest}", timeout=90, check=True)
             out["tag"] = newest
-            out["new"] = whats_new(newest, here["version"])
+            # What's new is a nice-to-have: a failed fetch (no git history here, a folder git can't write in)
+            # never hides the newer version, as it did before F32 (the look counted as offline).
+            try:
+                if not has_git():
+                    raise RuntimeError("no git history here")
+                git("fetch", "--no-tags", "--quiet", UPSTREAM, f"+refs/tags/{newest}:refs/tags/{newest}", timeout=90, check=True)
+                out["new"] = whats_new(newest, here["version"])
+            except Exception as e:
+                log(f"check: couldn't fetch {newest} for what's new ({str(e)[:120]})")
+                out["new"] = [{"title": vname(newest), "version": vname(newest), "coming": False,
+                               "groups": [{"name": "", "items": [f"HQ {vname(newest)}: tap Update, and the changelog has the rest."]}]}]
     except Exception as e:  # offline, or the repo can't be reached: quiet, try again later
         out.update(offline=True, available=last.get("available", False) and last.get("version") == here["version"],
                    latest=last.get("latest"), why=str(e)[:200])
@@ -254,10 +286,10 @@ def status(background: bool = True) -> dict:
     last = read_json(CHECK_FILE)
     here = local_version()
     due = time.time() - last.get("checked", 0) >= (RETRY if last.get("offline") else EVERY)
-    if background and (due or last.get("version") not in (None, here["version"])):
+    if background and (due or last.get("version") not in (None, here["version"]) or last.get("url", UPSTREAM) != UPSTREAM):
         check_in_background()
-    # A check from before an update says nothing about now.
-    stale = last.get("version") != here["version"]
+    # A check from before an update (or of another repo) says nothing about now.
+    stale = last.get("version") != here["version"] or last.get("url", UPSTREAM) != UPSTREAM
     available = bool(last.get("available")) and not stale
     run = read_json(RUN_FILE)
     if run.get("state") in ("waiting", "updating") and not alive(run.get("pid")):
@@ -338,7 +370,8 @@ def backup(target: str) -> dict:
     files = changed_outside_local()
     if files:
         name = f"hq-backup/{stamp}-before-{target}-changes"
-        git("stash", "push", "--include-untracked", "-m", f"HQ update backup before {target}", timeout=60, check=True)
+        # F32: a stash is a commit, and a fresh computer often has no git name and email yet.
+        git(*IDENTITY, "stash", "push", "--include-untracked", "-m", f"HQ update backup before {target}", timeout=60, check=True)
         git("branch", name, "stash@{0}", timeout=10, check=True)
         git("stash", "drop", timeout=10)
         saved["changes"] = {"branch": name, "files": files[:200]}
@@ -485,6 +518,25 @@ def notes(old: str, new: str, saved: dict, changed: list[str], done: list[str], 
     return os.path.relpath(path, HQ)
 
 
+def ensure_repo(old: str, tag: str) -> str:
+    """F32: HQ came as a download or a copy, without its git history. Makes it a clone in place without
+    touching a single file: the history of the version it says it is (else the new one) is fetched and set as
+    where it stands, so what differs from that version counts as the user's own change and is saved first."""
+    tags = remote_tags(UPSTREAM)
+    base = ("v" + old) if old and ("v" + old) in tags else tag
+    git("init", "-q", timeout=30, check=True)
+    if git("remote", "get-url", "origin", timeout=10).returncode:
+        git("remote", "add", "origin", UPSTREAM, timeout=10, check=True)
+    for t in {base, tag}:
+        git("fetch", "--no-tags", "--quiet", UPSTREAM, f"+refs/tags/{t}:refs/tags/{t}", timeout=300, check=True)
+    commit = git("rev-parse", f"{base}^{{commit}}", timeout=10, check=True).stdout.strip()
+    git("update-ref", "refs/heads/main", commit, timeout=10, check=True)
+    git("symbolic-ref", "HEAD", "refs/heads/main", timeout=10, check=True)
+    git("reset", "-q", timeout=60, check=True)  # the index only; every file stays as it is
+    log(f"update: made HQ a git copy at {base}")
+    return base
+
+
 def run() -> int:
     target = read_json(RUN_FILE).get("to")
     st = status(background=False)
@@ -507,6 +559,10 @@ def run() -> int:
     try:
         was = {"call": listening(int(os.environ.get("HQ_PORT", 7860))),
                "status": listening(int(os.environ.get("HQ_STATUS_PORT", 4748)))}
+        made = None
+        if not has_git():
+            say("updating", "Making HQ a git copy, so it can update")
+            made = ensure_repo(old, tag)
         say("updating", "Saving anything you changed")
         saved = backup(tag)
         say("updating", f"Getting {vname(tag)}", saved=saved)
@@ -520,6 +576,8 @@ def run() -> int:
         else:
             git("checkout", "--quiet", "--detach", tag, timeout=60, check=True)
         changed = [f for f in git("diff", "--name-only", before, "HEAD", timeout=30).stdout.splitlines() if f]
+        if made == tag:  # its own version wasn't on the public repo: everything that differed was set right
+            changed = sorted(set(changed) | set(saved.get("changes", {}).get("files", [])))
         say("updating", "Restarting what needs it")
         done, todo = restart(changed, was)
         note = notes(old, tag, saved, changed, done, todo)
