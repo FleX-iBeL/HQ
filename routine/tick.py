@@ -781,11 +781,11 @@ def jobs_line(q):
 
 
 def job_minutes(job):
-    """H141: the job's estimate in minutes (set when it was added, else made now), for the room it needs under
+    """H141: the job's estimate in minutes (made now, F34), for the room it needs under
     the usage lines; None when it can't be had (the gate then uses its own default)."""
     try:
-        e = estimate._load_state().get(str(job["n"])) or {}
-        m = e.get("est") or estimate.estimate_for(job.get("text", ""))[0]
+        # F34: estimated now, under the kind it was given (here or on the other HQ), from the newest finished jobs
+        m = estimate.job_estimate(job["n"], job.get("text", ""))["est"]
         return max(1, int(round(m))) if m else None
     except Exception as e:
         log(f"estimate for the usage gate: {e!r}")
@@ -955,11 +955,16 @@ def tick():
         heartbeat.tick(routines=routines, incidents=incidents, log=log)
     except Exception as e:
         log(f"heartbeat: {e!r}")
-    # H81: the other HQ's finished jobs, for estimates on both computers (at most every ten minutes). Alone: nothing.
+    # H81: the other HQ's finished jobs, for estimates on both computers (at most every two minutes, F34). Alone: nothing.
     try:
         estimate.pull(log=log)
     except Exception as e:
         log(f"estimates: {e!r}")
+    # F34: once per version of the kinds and tags, this computer's finished jobs get them again (after a pull of dev).
+    try:
+        estimate.retag_if_needed(log=log)
+    except Exception as e:
+        log(f"estimates: retag: {e!r}")
     if r["acting"] == "backup":
         stale_job_here()
         on_backup()

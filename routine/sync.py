@@ -289,7 +289,7 @@ def queue_merges(found, state, log):
     for c in found:
         if c["copy"] in merges:
             continue
-        r = subprocess.run([PY, JOBS, "add", merge_text(c), "--kind", "other"], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([PY, JOBS, "add", merge_text(c), "--kind", "merge"], capture_output=True, text=True, timeout=60)
         m = re.search(r"[Jj]ob (\d+)", r.stdout)
         merges[c["copy"]] = int(m.group(1)) if m else None
         out.append((c, merges[c["copy"]]))

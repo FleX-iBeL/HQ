@@ -168,7 +168,7 @@ the team", "the team's on it", "the team's done". Never "job list", "queue", "jo
 changes. "Put it on the roadmap" means only the roadmap: write it there as its own numbered item, nothing more. \
 "Give it to the team" (or "hand it to the team", "let the team do it") is his clear go: if it isn't on the roadmap \
 yet, put it there first as its own numbered item, then add it for the team with python3 "{HQ}/routine/jobs.py" add \
-"<the work in one self-contained line, with his words where they matter>" --kind <transcribe|big|call|build|other>, \
+"<the work in one self-contained line, with his words where they matter>" --kind <transcribe|big|call|build|release|other>, \
 without asking him again."""
 
 # H8: added to SYSTEM_PROMPT in free mode. Claude's wording.
@@ -290,8 +290,8 @@ it says, so a later change can't change this job. Add --past-the-line only when 
 past the usage line; it only goes past the 5-hour line, the weekly line always counts (F13). \
 Always add --kind with what the job is, for its estimate (H70): transcribe (transcribing recordings), \
 big (runs the whole set of happy flows), call (restarts the call line as its last step), build \
-(building or changing HQ otherwise, a roadmap step like H56.2 too), other (research, moving or \
-checking things). Then tell him the team has it, and whether they have something else first. If the \
+(building or changing HQ otherwise, a roadmap step like H56.2 too), release (releasing a version of HQ), \
+other (research, moving or checking things). Then tell him the team has it, and whether they have something else first. If the \
 work restarts the call line, tell him the call will drop and to call back when the team's done.
 {team}
 - The team's work on a call: "list" says what runs and waits, with each waiting job's place in line \

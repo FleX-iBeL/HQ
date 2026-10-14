@@ -39,6 +39,17 @@ How it works:
     the estimate of a new job with that tag, pulled towards nothing while there are few, at most twice or
     half. [The tags and the thresholds are Claude's choice.]
 
+  - F34 (14 October 2026), after every waiting job showed about a minute. The cause: a computer that didn't hold a
+    job's kind (the backup, or one that took over as main) guessed it from the words, builds worded "Build: ..." or
+    "build a first version" fell into other, and other had become mostly one-minute merge jobs. Now: merges and
+    releases are kinds of their own (the wording says them for sure, also over a kind given by hand), builds are read
+    from more wording (a happy flow to add or run, a push to dev, "fix it so"), the open jobs' kinds go to the other
+    HQ with its finished jobs (share "open", known()), and a waiting job is estimated again every time from the newest
+    finished jobs (job_estimate; the estimate it starts with is the one checked). Only jobs whose time was measured
+    when they finished count (not the seeded ones). Every finished job from job 1 was retagged from its text (the
+    queue, the prompts, the roadmap's saved versions in git; retag), and estimated back from the jobs before it
+    (backtest). What really tells the time is the kind and the computer; the tags move it little.
+
 Files, in HQ's .status (never in the repo): job-estimates.json (each job's estimate, set when added,
 and when it started) and job-estimates-history.jsonl (one line per finished job: estimate and real).
 A test's copy of the roadmap (HQ_ROADMAP) gets its own files next to it, so tests never touch the real ones.
@@ -53,6 +64,8 @@ usage:
   python3 routine/estimate.py pull [--force]   fetch the other HQ's history (the routine does this every minute, at most every ten)
   python3 routine/estimate.py share            this computer's own history as JSON (the status server's GET /api/estimates)
   python3 routine/estimate.py tag              fill in the tags (and this computer) on finished jobs from before H81, from their prompts
+  python3 routine/estimate.py retag            every finished job's kind and tags again, from its text (F34; the routine does it once per RETAG)
+  python3 routine/estimate.py backtest         every measured finished job estimated back from the jobs before it: how close (F34)
 """
 import json, math, os, re, statistics, sys, time
 
@@ -76,25 +89,41 @@ PEER = os.path.join(DIR, "job-estimates-peer.json")  # H81: the other HQ's histo
 SAMPLES = os.environ.get("HQ_ROUTINES_HISTORY") or ("" if _TEST else os.path.join(ROOT, ".status", "routines-history.jsonl"))
 BACKFILL = os.path.join(ROOT, ".status", "jobs-backfill.json")
 PROMPTS = os.path.join(ROOT, "scratch", "routine")
+RETAGS = os.path.join(DIR, "job-estimates-retag.json")  # F34: kinds and tags for the other HQ's lines, until it retags
 
 DEFAULT = 15      # minutes, when nothing has been measured yet
 GAP = 1           # minutes between two jobs: the routine looks every minute
-RECENT = 8        # how many of the last jobs of a kind count
+RECENT = 12       # how many of the last jobs of a kind count (F34: 12, from estimating the finished jobs back)
 MIN_KIND = 3      # fewer than this of a kind: the last jobs of any kind count too
 OWN = 2           # H81: a job run on the computer the estimate is for counts this many times one from the other
 SHRINK = 2        # H81: n compared jobs give a machine factor n/(n+SHRINK) of the way from 1 to what they say
 PATTERN_MIN = 4   # H81: finished jobs with a tag before it moves an estimate
 PATTERN_SHRINK = 4
 PATTERN_CLEAR = 1.2  # H81: a tag moves an estimate only when its jobs took at least this much longer (or shorter)
-PULL_EVERY = 600  # H81: seconds between two pulls of the other HQ's history
+PULL_EVERY = 120  # H81: seconds between two pulls of the other HQ's history (F34: 2 minutes, for the open jobs' kinds)
+RETAG = 1         # F34: the version of the kinds and tags; a finished line with an older one is retagged
 
 KINDS = {
     "transcribe": "transcribing",
     "big": "a big change (whole set of happy flows)",
     "call": "a change to the call (line restarts)",
     "build": "a build",
+    "release": "a release",            # F34: a few minutes, nothing built
+    "merge": "merging a sync conflict",  # F34: a minute or two; kept apart so they don't pull other kinds down
     "other": "other",
 }
+# F34: a kind set by hand (a call's --kind) wins over the guess, except over these two: the routine's own
+# wording says them for sure, and a call has no word for a merge.
+SURE = ("merge", "release")
+
+
+def _sure(t):
+    """F34: the kinds the wording tells for sure: the routine's merge jobs and a release of HQ."""
+    if re.search(r"^sync conflict|\bsync conflict \(h56\.4\), found by the routine\b", t):
+        return "merge"
+    if re.search(r"(^|: )(do |build )?release hq \d|^h\d+ on the (hq )?roadmap: release hq \d", t):
+        return "release"
+    return None
 
 
 def kind_of(text):
@@ -102,6 +131,10 @@ def kind_of(text):
     t = " ".join(text.lower().split())
     t = t.split("follow the hq build notes")[0].split("follow the jarvis va build notes")[0]
     t = re.sub(r"^.*?the job, as agreed on the call: ", "", t)
+    t = re.sub(r"^scheduled item \d+, planned for [^:]*: ", "", t)
+    sure = _sure(t)
+    if sure:
+        return sure
     if re.search(r"^transcrib|\btranscribe (the|four|all|his|\d)", t):
         return "transcribe"
     if re.search(r"(run|runs|running) the whole (happy flow )?set|whole happy flow set|all (the )?\d* ?happy flows (have )?pass", t) \
@@ -118,6 +151,11 @@ def kind_of(text):
     if re.search(r"^build\b|\bbuild [a-z]\d|\bbuild exactly what\b|\bbuild the\b|^[a-z]\d+\.\d+ on the (hq )?roadmap"
                  r"|\b(build|fix) it as it says\b|\bthen fix it\b", tb):
         return "build"
+    # F34: a job that changes HQ's code says so in how it ends: "Build: ...", "build a first version", "fix it
+    # so ...", a happy flow to add or run, a push to dev. Before, these fell into other, next to the merges.
+    if re.search(r"\bbuild(:| a | it\b| this\b| them\b)|\bfix (it|this|that|them) so\b|\badd (a|one|the) (new )?happy flow"
+                 r"|\bhappy flows? for it\b|\brun (happy flow|the affected|flows? \d)|\bpush (to dev|with push\.py)", tb):
+        return "build"
     return "other"
 
 
@@ -127,18 +165,37 @@ def kind_given(kind):
     return k if k in KINDS else None
 
 
+def kind_for(text, kind=None):
+    """F34: the kind a job learns and is estimated under: one set by hand wins over the guess, except when the
+    wording says a merge or a release for sure."""
+    guess = kind_of(text)
+    if guess in SURE:
+        return guess
+    return kind_given(kind) or guess
+
+
 # H81: tags from the words in a job's text, for the patterns. The routine's own wording ("Planned on the call of
 # ...", "Pull dev first ...", "Only the affected happy flows", "Restart what changed as the last step") is the same
 # in every planned item, so it's cut off first; what's left is what the job is about.
 TAGS = {
-    "internet": (r"\b(download\w*|fetch\w*|web|online|internet|youtube|yt-dlp|search\w*|browser|website|api)\b", "need the internet"),
-    "files": (r"\b(transcri\w*|files?|folders?|copy|copies|backup|archive|move them)\b", "work through files"),
-    "flows": (r"\bwhole (happy flow )?set\b|\ball (the )?happy flows\b|\bflow \d+", "run happy flows"),
-    "cause": (r"\bfind the cause\b|\bwhy\b|\bbug\b|\bbroken\b|\bdoesn'?t work\b|\bfix (it|the)\b", "look for a cause"),
-    "research": (r"\bresearch\w*|\blook into\b|\binvestigat\w*|\bcompare\b", "are research"),
-    "machines": (r"\b(vps|servers?|laptops?|machines?|computers?|both computers|two computers|sync\w*|main and backup)\b", "touch both computers"),
-    "status": (r"\bstatus page\b|\bthe page\b", "change the status page"),
-    "call": (r"\b(on a call|call line|voice|calls?)\b", "change the call"),
+    # F34 (14 October 2026): made again from every finished job since job 1. The broad "machines" and "call" tags
+    # were on nearly every job (the VPS and calls are named everywhere), so they told nothing; these are narrower.
+    "internet": (r"\b(download\w*|fetch\w*|web|online|internet|youtube|yt-dlp|website|api|github)\b", "need the internet"),
+    "files": (r"\b(transcri\w*|files?|folders?|copy|copies|archive|move them)\b", "work through files"),
+    "flows": (r"\bwhole (happy flow )?set\b|\ball (the )?happy flows\b", "run the whole set of happy flows"),
+    "newflow": (r"\badd (a|one|the) (new )?happy flow|\bhappy flows? for it\b|\bnew happy flow\b", "add a happy flow"),
+    "cause": (r"\bfind (the cause|why|where|out why)\b|\binvestigat\w*|\bwhy\b|\bbug\b|\bdoesn'?t work\b|\bbroken\b",
+              "look for a cause"),
+    "research": (r"\bresearch\w*|\blook into\b|\bcompare\b", "are research"),
+    "computers": (r"\b(both computers|two computers|main and backup|takes? over|takeover|pairing|heartbeats?|hand(s|ing)? back)\b"
+                  r"|\bthe laptop and the vps\b|\bon the laptop\b", "touch both computers"),
+    "status": (r"\bstatus page\b", "change the status page"),
+    "callpage": (r"\bcall page\b|\bphone version\b|\b(mac|desktop) app\b|\bin settings\b|\bbutton\b|\bsheet\b|\bwidget\b",
+                 "change the call page"),
+    "agents": (r"\b(pepper|donna|moneypenny|agents?)\b", "change what the agents say or do"),
+    "texts": (r"\bdirect line\b|\btexts?\b", "touch Donna's texts"),
+    "calendar": (r"\bcalendar\b", "touch the calendar"),
+    "usage": (r"\busage\b", "touch the usage lines"),
 }
 
 
@@ -242,10 +299,13 @@ def all_history():
         h = {**h, "machine": h.get("machine") or mine}
         out.append(h)
         seen.add((h["machine"], h.get("n")))
+    fix = _retag_map()
     for h in peer.get("lines") or []:
         if not isinstance(h, dict):
             continue
         h = {**h, "machine": h.get("machine") or peer.get("name") or "other"}
+        if h.get("retag") != RETAG and f"{h['machine']}|{h.get('n')}" in fix:  # F34: not retagged there yet
+            h.update(fix[f"{h['machine']}|{h.get('n')}"])
         if (h["machine"], h.get("n")) not in seen and h["machine"] != mine:
             out.append(h)
     out.sort(key=lambda h: h.get("done") or 0)  # stable: lines with the same time keep their order
@@ -256,7 +316,10 @@ def share():
     """What GET /api/estimates answers: this computer's own finished jobs, each with its machine."""
     m = me()
     lines = [{**h, "machine": h.get("machine") or m["name"]} for h in history()]
-    return {**m, "lines": [h for h in lines if h["machine"] == m["name"]], "at": int(time.time())}
+    # F34: the open jobs' kinds too (no text), so the other computer estimates a job by the kind it was given
+    # here, also when it takes over as main, instead of guessing it again from the words.
+    opened = {n: {k: e[k] for k in ("kind", "est", "by_hand", "set") if k in e} for n, e in _load_state().items()}
+    return {**m, "lines": [h for h in lines if h["machine"] == m["name"]], "open": opened, "at": int(time.time())}
 
 
 def pull(force=False, log=None):
@@ -279,7 +342,7 @@ def pull(force=False, log=None):
         ok, d = False, str(e)
     if ok:
         p = {"name": d["name"], "label": d.get("label") or d["name"], "type": d.get("type") or "other",
-             "lines": d["lines"], "at": int(time.time())}
+             "lines": d["lines"], "open": d.get("open") if isinstance(d.get("open"), dict) else {}, "at": int(time.time())}
     else:
         p = {**p, "tried": int(time.time()), "error": str(d)[:200]}
     os.makedirs(DIR, exist_ok=True)
@@ -347,7 +410,9 @@ def _wmedian(pairs):
 
 
 def _real(hist):
-    return [h for h in hist if isinstance(h.get("actual"), (int, float)) and h["actual"] > 0]
+    """The finished jobs the estimates learn from: only the ones whose time to complete was measured when they
+    finished (F34: the jobs seeded once from before H61 have their tags and kind, but don't count)."""
+    return [h for h in hist if isinstance(h.get("actual"), (int, float)) and h["actual"] > 0 and h.get("how") != "seed"]
 
 
 def _ratios(real, a, b, kind=None):
@@ -411,11 +476,12 @@ def patterns(real):
     return out
 
 
-def estimate_detail(text, hist=None, kind=None, machine=None):
+def estimate_detail(text, hist=None, kind=None, machine=None, tags=None):
     """H81: the estimate with how it came about: {"est", "kind", "based", "machine", "own", "other", "scaled",
-    "tags", "pattern"}. hist: all finished jobs (all_history()); machine: the computer it's for (runner())."""
+    "tags", "pattern"}. hist: all finished jobs (all_history()); machine: the computer it's for (runner()).
+    tags: given instead of read from the text (F34: estimating finished jobs back from their lines)."""
     hist = all_history() if hist is None else hist
-    kind = kind_given(kind) or kind_of(text)
+    kind = kind_for(text, kind)
     machine = machine or runner()["name"]
     real = [{**h, "machine": h.get("machine") or machine} for h in _real(hist)]
     scale = {}
@@ -444,7 +510,7 @@ def estimate_detail(text, hist=None, kind=None, machine=None):
         values = [scaled(h, None) for h in real[-RECENT:]] + [scaled(h, None) for h in same] * 2
         est = _weighted_median(values)
         based = len(same) + len(real[-RECENT:])
-    tags = tags_of(text)
+    tags = tags_of(text) if tags is None else tags
     pat = patterns(real)
     hit = [pat[t][0] for t in tags if t in pat and (pat[t][0] >= PATTERN_CLEAR or pat[t][0] <= 1 / PATTERN_CLEAR)]
     mult = math.exp(statistics.mean(math.log(x) for x in hit)) if hit else 1.0
@@ -456,6 +522,21 @@ def estimate_for(text, hist=None, kind=None, machine=None):
     """(minutes, kind, how many past jobs it's based on). A kind given by hand wins over the guess (H70)."""
     d = estimate_detail(text, hist, kind, machine)
     return d["est"], d["kind"], d["based"]
+
+
+def known(n):
+    """F34: what's known of open job n: its line in this computer's job-estimates.json, else the other HQ's (as it
+    last answered), where it was added when that one was main. {} when neither has it."""
+    e = _load_state().get(str(n))
+    if e:
+        return e
+    return dict((_peer().get("open") or {}).get(str(n)) or {})
+
+
+def job_estimate(n, text, hist=None, machine=None):
+    """F34: a waiting job's estimate now, under the kind it was given (set by hand, or guessed when it was added)
+    and from the newest finished jobs, so it follows what the estimates learn while it waits."""
+    return estimate_detail(text, hist, known(n).get("kind"), machine)
 
 
 # ---------- called by jobs.py (inside its lock) ----------
@@ -475,9 +556,18 @@ def on_add(n, text, kind=None, by_hand=None):
 
 def on_start(n, text=""):
     if str(n) not in _load_state():
-        on_add(n, text)  # a job from before H61, or added by hand: its estimate now
+        # A job from before H61, added by hand, or added on the other HQ when that one was main: its estimate now,
+        # under the kind the other one gave it (F34).
+        k = known(n)
+        on_add(n, text, k.get("kind"), True if k.get("by_hand") else False)
     st = _load_state()
     e = st[str(n)]
+    # F34: the estimate it starts with is made now, from the newest finished jobs; that's the one that's checked
+    # against how long it really takes.
+    try:
+        e["est"] = estimate_detail(text, kind=e.get("kind"))["est"] if text else e.get("est")
+    except Exception:
+        pass
     e["started"] = int(time.time())
     st[str(n)] = e
     _save_state(st)
@@ -486,9 +576,9 @@ def on_start(n, text=""):
 def on_done(n, text="", started_hhmm=None):
     """Write the job's estimate next to how long it really took. Returns the record."""
     st = _load_state()
-    e = st.get(str(n))
-    if not e:
-        e = {"est": None, "kind": kind_of(text)}
+    e = st.get(str(n)) or known(n)
+    if not e.get("kind"):
+        e = {**e, "kind": kind_of(text)}
     now = time.time()
     seen = _minutes_seen(n)
     started = e.get("started") or _from_hhmm(started_hhmm, now)
@@ -497,9 +587,9 @@ def on_done(n, text="", started_hhmm=None):
     if actual is None:
         return None
     m = me()  # H81: the computer that ran it, and the tags from its words for the patterns
-    rec = {"n": n, "kind": e.get("kind") or kind_of(text), "est": e.get("est"), "actual": max(1, actual),
-           "done": int(now), "how": "seen" if seen else "clock", "machine": m["name"], "label": m["label"],
-           "type": m["type"], "tags": tags_of(text)}
+    rec = {"n": n, "kind": kind_for(text, e.get("kind")), "est": e.get("est"),
+           "actual": max(1, actual), "done": int(now), "how": "seen" if seen else "clock", "machine": m["name"],
+           "label": m["label"], "type": m["type"], "tags": tags_of(text), "retag": RETAG}
     _append(rec)
     st.pop(str(n), None)
     _save_state(st)
@@ -604,8 +694,8 @@ def plan(now=None):
     cursor, left_total, waits = now, 0, not on
     running = [j for j in js if j["state"].startswith(("running", "stop asked"))]
     for j in running:
-        e = st.get(str(j["n"])) or {}
-        est = e.get("est") or estimate_for(j["text"], hist, machine=run["name"])[0]
+        e = st.get(str(j["n"])) or known(j["n"])
+        est = e.get("est") or job_estimate(j["n"], j["text"], hist, run["name"])["est"]
         samples = _samples() if samples is None else samples
         seen = _minutes_seen(j["n"], samples)
         m = re.match(r"running since (\d\d:\d\d)", j["state"])
@@ -618,16 +708,15 @@ def plan(now=None):
         nxt = left if left > 0 else 2  # running longer than estimated: a couple of minutes more, at least
         cursor += nxt * 60
         left_total += nxt
-        out["jobs"][str(j["n"])] = {"est": est, "kind": e.get("kind") or kind_of(j["text"]), "so_far": done_min,
+        out["jobs"][str(j["n"])] = {"est": est, "kind": kind_for(j["text"], e.get("kind")), "so_far": done_min,
                                     "left": left, "over": over, "eta": None if waits else int(cursor)}
     run_end = cursor  # H99: when the running job should be done; a priority item can start from there
     line = [j for j in js if j["state"] == "ready" or j["state"].startswith("held")]
     for j in line:
-        e = st.get(str(j["n"])) or {}
-        est = e.get("est")
-        kind = e.get("kind")
-        if not est:
-            est, kind, _ = estimate_for(j["text"], hist, machine=run["name"])
+        # F34: a waiting job is estimated again every time, under the kind it was given, so it follows the
+        # newest finished jobs (and the right computer) instead of the number it got when it was added.
+        d = job_estimate(j["n"], j["text"], hist, run["name"])
+        est, kind = d["est"], d["kind"]
         if j["state"].startswith("held"):
             waits = True
         if running or j is not line[0] or cursor > now:
@@ -917,22 +1006,159 @@ def tag():
     print(f"{sum(1 for h in lines if 'tags' in h)} of {len(lines)} finished jobs have tags; all have their computer.")
 
 
+# ---------- retag (F34) ----------
+
+_QUEUE_LINE = re.compile(r"^- Job (\d+) · [^·]*? · (?:agreed [^·]*? · )?(.*)$")
+
+
+def _roadmap_texts():
+    """F34: every job's text as the roadmap's saved versions (its git history, every roadmap.md it was ever
+    called) wrote it: {n: text}, the longest one for each number. {} when the roadmap isn't in git."""
+    import subprocess
+    try:
+        import jobs as q
+        repo = os.path.dirname(os.path.realpath(q.ROADMAP))
+        top = subprocess.run(["git", "-C", repo, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                             timeout=20).stdout.strip()
+        if not top:
+            return {}
+        log = subprocess.run(["git", "-C", top, "log", "--all", "--format=@%H", "--name-only", "--", "*roadmap.md"],
+                             capture_output=True, text=True, timeout=120).stdout
+    except Exception:
+        return {}
+    pairs, commit = [], None
+    for l in log.splitlines():
+        if l.startswith("@"):
+            commit = l[1:]
+        elif l.strip() and commit:
+            pairs.append((commit, l.strip()))
+    out = {}
+    for c, f in pairs:
+        try:
+            t = subprocess.run(["git", "-C", top, "show", f"{c}:{f}"], capture_output=True, text=True, timeout=20).stdout
+        except Exception:
+            continue
+        for l in t.splitlines():
+            m = _QUEUE_LINE.match(l)
+            if m and len(m.group(2)) > len(out.get(int(m.group(1)), "")):
+                out[int(m.group(1))] = m.group(2)
+    return out
+
+
+def job_texts(from_git=True):
+    """F34: every job's text that can be found: the queue now, the prompts the routine saved, and the roadmap's
+    saved versions in git (jobs from day 1, also the ones the queue has long dropped)."""
+    out = _roadmap_texts() if from_git else {}
+    try:
+        js, _ = _queue()
+        out.update({j["n"]: j["text"] for j in js})
+    except Exception:
+        pass
+    try:
+        for f in os.listdir(PROMPTS):
+            m = re.match(r"job-(\d+)\.prompt$", f)
+            if m:
+                text = open(os.path.join(PROMPTS, f), encoding="utf8").read()
+                i = text.find("The job, as agreed on the call:")
+                out[int(m.group(1))] = text[i:] if i >= 0 else text
+    except OSError:
+        pass
+    return out
+
+
+def _retag_map():
+    try:
+        return json.load(open(RETAGS)).get("lines") or {}
+    except Exception:
+        return {}
+
+
+def new_kind(text, old):
+    """F34: a finished job's kind with today's rules: what the wording says for sure (a merge, a release) wins; a
+    kind it learned under that says more than the guess (build, call, big, transcribe, often set by hand on a
+    call) stays; other is guessed again (merges and builds were hiding there)."""
+    return kind_for(text, None if old in (None, "other") else old)
+
+
+def retag(texts=None, quiet=False):
+    """F34: every finished job gets its kind and tags again, from its text (job_texts): this computer's lines in
+    the history file (marked with RETAG), and the other HQ's lines in job-estimates-retag.json, used until that
+    one has retagged its own. Only kind and tags change; how long it took and its estimate stay."""
+    texts = job_texts() if texts is None else texts
+    lines, changed, kinds = history(), 0, {}
+    for h in lines:
+        t = texts.get(h.get("n"))
+        if t:
+            k, tg = new_kind(t, h.get("kind")), tags_of(t)
+            if k != h.get("kind"):
+                kinds[(h.get("kind"), k)] = kinds.get((h.get("kind"), k), 0) + 1
+            if (k, tg) != (h.get("kind"), h.get("tags")):
+                changed += 1
+            h.update(kind=k, tags=tg)
+        h["retag"] = RETAG
+    if lines:
+        os.makedirs(DIR, exist_ok=True)
+        tmp = HISTORY + ".tmp"
+        with open(tmp, "w", encoding="utf8") as f:
+            f.writelines(json.dumps(h) + "\n" for h in lines)
+        os.replace(tmp, HISTORY)
+    peer, fix = _peer(), {}
+    for h in peer.get("lines") or []:
+        t = texts.get(h.get("n")) if isinstance(h, dict) else None
+        if t:
+            fix[f"{h.get('machine') or peer.get('name')}|{h['n']}"] = {"kind": new_kind(t, h.get("kind")), "tags": tags_of(t)}
+    tmp = RETAGS + ".tmp"
+    json.dump({"retag": RETAG, "at": int(time.time()), "lines": fix}, open(tmp, "w"))
+    os.replace(tmp, RETAGS)
+    if not quiet:
+        print(f"Retagged {len(lines)} finished jobs here ({changed} changed"
+              + "".join(f"; {n} {a} -> {b}" for (a, b), n in sorted(kinds.items(), key=str)) + f"), "
+              f"and {len(fix)} of the other HQ's.")
+    return changed
+
+
+def retag_if_needed(log=None):
+    """F34: once per version of the kinds and tags, by itself (tick.py): a computer that pulls this code retags
+    its own finished jobs, so the other one learns from the new kinds too."""
+    lines = history()
+    if not lines or all(h.get("retag") == RETAG for h in lines):
+        return None
+    c = retag(quiet=True)
+    if log:
+        log(f"estimates: retagged {len(lines)} finished jobs ({c} changed), kinds and tags version {RETAG}")
+    return c
+
+
+def backtest(hist=None, last=None):
+    """F34: every measured finished job estimated back from only the jobs finished before it, on its own computer,
+    with its kind and tags: how close the estimates come. {"count", "avg_off", "median_off", "within"}."""
+    hist = all_history() if hist is None else hist
+    offs, within = [], 0
+    for i, h in enumerate(hist):
+        if h not in _real([h]) or not _real(hist[:i]):
+            continue
+        d = estimate_detail("", hist[:i], h.get("kind"), h["machine"], h.get("tags") or [])
+        off = abs(d["est"] - h["actual"])
+        offs.append(off)
+        within += off <= max(3, 0.25 * d["est"])
+    if last:
+        offs = offs[-last:]
+    if not offs:
+        return {"count": 0}
+    return {"count": len(offs), "avg_off": round(statistics.mean(offs), 1), "median_off": statistics.median(offs),
+            "within": within}
+
+
 def check_kinds():
     """H70: today's kind_of on every finished job's text next to the kind it learned under, so a change
     to the guess can be checked against the earlier jobs. Hand-set kinds say so."""
-    js, _ = _queue()
-    texts = {j["n"]: j["text"] for j in js}
+    texts = job_texts()
     for h in history():
         n = h["n"]
         text = texts.get(n, "")
-        p = os.path.join(PROMPTS, f"job-{n}.prompt")
-        if not text and os.path.exists(p):
-            text = open(p, encoding="utf8").read()
-            i = text.find("The job, as agreed on the call:")
-            text = text[i:] if i >= 0 else text
         if not text:
             continue
-        now = kind_of(text)
+        now = new_kind(text, h.get("kind"))  # F34: the kind a retag gives it
         print(f"job {n}: learned {h.get('kind')}, guessed now {now}" + ("" if now == h.get("kind") else "  <- differs"))
 
 
@@ -967,6 +1193,14 @@ def main(argv):
                False: "The other HQ couldn't be asked; what it said last stays."}[r])
     elif cmd == "tag":
         tag()
+    elif cmd == "retag":
+        retag()
+    elif cmd == "backtest":
+        for name, n in (("All", None), ("Last 30", 30)):
+            b = backtest(last=n)
+            if b.get("count"):
+                print(f"{name}: {b['count']} measured jobs estimated back from the jobs before them: off by {b['avg_off']:g} min "
+                      f"on average (median {b['median_off']:g})" + (f"; {b['within']} close." if not n else "."))
     else:
         print(__doc__)
 

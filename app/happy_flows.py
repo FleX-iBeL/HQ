@@ -5402,8 +5402,10 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
             need(est("kind", text).strip() == kind, f"H70: {text!r} isn't seen as {kind}")
         # Made-up past jobs: calls took 10 to 16 minutes, builds 5 to 7.
         est_dir.mkdir(parents=True, exist_ok=True)
-        hist = [{"n": 900 + i, "kind": k, "est": None, "actual": a, "done": 1, "how": "seed"}
+        # F34: only jobs whose time was measured when they finished count; a seeded line (from before H61) doesn't.
+        hist = [{"n": 900 + i, "kind": k, "est": None, "actual": a, "done": 1, "how": "seen"}
                 for i, (k, a) in enumerate([("call", 10), ("build", 5), ("call", 12), ("build", 6), ("call", 14), ("build", 7), ("call", 16)])]
+        hist.insert(0, {"n": 899, "kind": "call", "est": None, "actual": 90, "done": 1, "how": "seed"})
         (est_dir / "job-estimates-history.jsonl").write_text("".join(json.dumps(h) + "\n" for h in hist))
         for j in json.loads(jobs("next"))["waiting"] + json.loads(jobs("next"))["running"]:
             jobs("mark", str(j["n"]), "cancelled 12:00")
@@ -8190,6 +8192,40 @@ out["share"] = E.share()
 E.on_add(500, "Build H5: search the web for prices")
 out["done"] = E.on_done(500, "Build H5: search the web for prices", "00:01")
 out["last"] = json.loads(open(E.HISTORY).read().splitlines()[-1])
+# F34: the kinds.
+SC = "Sync conflict (H56.4), found by the routine: both HQs changed the same file in the workspace at once"
+out["kinds"] = {"merge": E.kind_of(SC), "release": E.kind_of("H93 on the HQ roadmap: release HQ 0.4, on his say-so"),
+                "notrelease": E.kind_of("F32 on the roadmap: fix the update button. Fix it so it works. Not a release: main stays."),
+                "buildcolon": E.kind_of("H141 on the HQ roadmap: the gap. Build: the gate takes the estimate"),
+                "firstversion": E.kind_of("H74 on the HQ roadmap: a tutorial. Build a first version: an animated click-through"),
+                "fixso": E.kind_of("F33 on the HQ roadmap: a typed line is sent twice. Fix it so a new line only carries itself"),
+                "research": E.kind_of("H68 on the roadmap: research only. Nothing built"),
+                "mergehand": E.kind_for(SC, "build"), "callhand": E.kind_for("Build H7", "call")}
+# F34: a seeded line doesn't count; only measured times do.
+s = [{"n": 1, "kind": "build", "actual": 90, "done": 1, "machine": "vps", "how": "seed"}] + \
+    [{"n": i, "kind": "build", "actual": 5, "done": i, "machine": "vps", "how": "seen"} for i in range(2, 6)]
+out["seed"] = E.estimate_detail("Build H1", s, machine="vps")
+# F34: a job the other HQ added, with its kind there; and a waiting job follows the newest finished jobs.
+E._load_state = lambda: {}
+cs = [{"n": 10 + i, "kind": "call", "actual": 9, "done": 10 + i, "machine": "vps", "how": "seen"} for i in range(4)]
+E._peer = lambda: {"name": "vps", "label": "VPS", "type": "server", "lines": [], "open": {"77": {"kind": "call", "est": 9}}}
+d77 = E.job_estimate(77, "Measure the token cost of one run", s + cs, "vps")
+out["peer_kind"], out["peer_est"] = d77["kind"], d77["est"]
+E._peer = lambda: {"name": "vps", "label": "VPS", "type": "server", "lines": []}
+later = s + [{"n": 20 + i, "kind": "build", "actual": 20, "done": 20 + i, "machine": "vps", "how": "seen"} for i in range(12)]
+out["follows"] = [E.job_estimate(78, "Build H8", s, "vps")["est"], E.job_estimate(78, "Build H8", later, "vps")["est"]]
+# F34: retag: every finished line here gets its kind and tags from its text, the other HQ's lines too (kept apart).
+E.me = lambda: B
+open(E.HISTORY, "w").write("".join(json.dumps(x) + "\n" for x in [
+    {"n": 1, "kind": "other", "actual": 1, "done": 1, "how": "seen"}, {"n": 2, "kind": "other", "actual": 6, "done": 2, "how": "seen"},
+    {"n": 3, "kind": "other", "actual": 3, "done": 3, "how": "seen"}, {"n": 4, "kind": "call", "actual": 4, "done": 4, "how": "seen"}]))
+E._peer = lambda: {"name": "lap", "label": "Laptop", "type": "laptop", "lines": [{"n": 9, "kind": "other", "actual": 2, "done": 9, "machine": "lap"}]}
+E.retag(texts={1: SC, 2: "H74: Build a first version", 3: "H93 on the HQ roadmap: release HQ 0.4", 4: "Build H4", 9: SC}, quiet=True)
+lines = E.history()
+out["retag"] = {"kinds": [x["kind"] for x in lines], "marked": all(x.get("retag") == E.RETAG for x in lines),
+                "peer": json.load(open(E.RETAGS))["lines"].get("lap|9")}
+E.me = lambda: A
+out["back"] = E.backtest(h)
 print("H81OUT " + json.dumps(out))
 """
         r = sp.run([sys.executable, "-c", script, str(ROOT / "routine")], capture_output=True, text=True, env=env, timeout=60)
@@ -8205,7 +8241,19 @@ print("H81OUT " + json.dumps(out))
         need("internet" in o["pat"] and o["pat"]["internet"][0] >= 1.5, f"a slow tag isn't found as a pattern: {o['pat']}")
         need(o["web"]["est"] > o["plain"]["est"] and o["web"]["pattern"] > 1 and o["plain"]["pattern"] == 1,
              f"the pattern doesn't move the estimate of a job with that tag (only): {o['web']} {o['plain']}")
-        need(o["tags"] == ["internet", "status"], f"the tags read the routine's own wording too: {o['tags']}")
+        need(o["tags"] == ["internet"], f"the tags read the routine's own wording too: {o['tags']}")
+        # F34: the kinds the wording tells for sure, builds worded otherwise, a merge stays a merge whatever a call says.
+        k = o["kinds"]
+        need(k["merge"] == "merge" and k["release"] == "release" and k["notrelease"] == "build" and k["buildcolon"] == "build"
+             and k["firstversion"] == "build" and k["fixso"] == "build" and k["research"] == "other" and k["mergehand"] == "merge"
+             and k["callhand"] == "call", f"F34: the kinds are wrong: {k}")
+        need(o["seed"]["est"] == 5, f"F34: a seeded line (no measured time) still counts: {o['seed']}")
+        # F34: a job added on the other HQ (its kind there) is estimated under that kind here, not guessed again.
+        need(o["peer_kind"] == "call" and o["peer_est"] == 9, f"F34: a job from the other HQ loses its kind: {o['peer_kind']} {o['peer_est']}")
+        need(o["follows"][0] == 5 and o["follows"][1] == 20, f"F34: a waiting job's estimate doesn't follow the newest jobs: {o['follows']}")
+        need(o["retag"]["kinds"] == ["merge", "build", "release", "call"] and o["retag"]["marked"] and o["retag"]["peer"] == {"kind": "merge", "tags": ["files"]},
+             f"F34: retag doesn't give every finished job its kind again: {o['retag']}")
+        need(o["back"]["count"] == 8 and o["back"]["avg_off"] >= 0, f"F34: estimating the finished jobs back doesn't work: {o['back']}")
         words = " ".join(o["learned"])
         need("Estimates are for the Laptop, from 3 finished jobs there and 18 on the VPS" in words
              and "The Laptop takes about 1." in words and "times as long as the VPS" in words and "need the internet take about" in words,
