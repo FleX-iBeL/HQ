@@ -4194,6 +4194,15 @@ setTimeout(async () => {
   const b0 = Math.round(box('btn')[0]), s0 = Math.round(box('status')[1]);
   showHistory(true); await wait(300); showHistory(false); scrollTo(0, 60); await wait(500);
   out.push('past:' + (scrollY === 0 && Math.round(box('btn')[0]) === b0 && Math.round(box('status')[1]) === s0 ? 'back' : 'moved'));
+  // H144: the calendar on a call: its button in the dock, clear of the call's buttons; open, the page stays put and
+  // the call's buttons stay clear of the dock and the sheet; closed, the call screen is back where it was.
+  const cb = calBtn.getBoundingClientRect(), dk = document.getElementById('dock').getBoundingClientRect(), hb = btn.getBoundingClientRect();
+  out.push('calbtn:' + (cb.width > 0 && cb.top >= dk.top - 1 && cb.bottom <= dk.bottom + 1 && hb.bottom <= dk.top + 1 ? 'ok' : 'wrong'));
+  calBtn.click(); await wait(300);
+  const sb = calEl.getBoundingClientRect();
+  out.push('cal:' + (calOpen() && (locked() || over() <= 0) && sb.bottom <= box('mute')[0] + 1 && box('btn')[1] <= dk.top + 1 ? 'ok' : 'wrong'));
+  showCal(false); scrollTo(0, 60); await wait(500);
+  out.push('calback:' + (scrollY === 0 && Math.round(box('btn')[0]) === b0 && Math.round(box('status')[1]) === s0 ? 'back' : 'moved'));
   cleanup('Call ended'); await wait(200); out.push('after:' + over()); out.push('afterlock:' + (locked() ? 'locked' : 'free'));
   const pre = document.createElement('pre'); pre.id = 'f16'; pre.textContent = 'F16RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
 }, 1500);
@@ -4225,13 +4234,15 @@ setTimeout(async () => {
                 for when in ("connecting", "live", "back"):
                     need(res[when] == "locked", f"{name}: the page can be scrolled into white space on a call ({when}): {res}")
                 need(res["past"] == "back", f"{name}: after Past calls opened and closed on a call, the call screen isn't back where it was (F20): {res}")
+                need(res["calbtn"] == "ok" and res["cal"] == "ok" and res["calback"] == "back",
+                     f"{name}: the calendar on a call (H144) isn't in the dock, scrolls the page, covers the call's buttons, or doesn't close back to the same place: {res}")
             else:
                 # Off a Mac the fonts are a pixel smaller, so here it may just fit; then it's locked, rightly.
                 need(res["live"] == "free" or res["statusfits"] == "yes", f"{name}: the listening line is off the screen and can't be scrolled to: {res}")
             seen.append(res["sizes"])
         # H140: Modern draws Donna and Pepper a little tighter on a short screen (under 700 high), on purpose; her card stays the same.
         need(len({s.split("/")[1] for s in seen[:2]}) == 1, f"her card looks different between the iPhone 13 sizes: {seen}")
-        return "on a call her orb leads and the picker steps aside (H140), the page can't be scrolled and Past calls closes back to the same place (iPhone 13 Safari and home screen, desktop app); a small phone still scrolls to its listening line"
+        return "on a call her orb leads and the picker steps aside (H140), the page can't be scrolled and Past calls closes back to the same place (iPhone 13 Safari and home screen, desktop app); a small phone still scrolls to its listening line; the calendar opens on a call above the call's buttons and closes back to the same place (H144)"
 
     # 48
     async def flow48(self) -> str:
@@ -4934,10 +4945,29 @@ window.fetch = async (url, opt) => {
   notesBtn.click(); await wait(300);
   out.push("onesheet3:" + (notesOpen() && !calOpen() ? "ok" : "WRONG"));
   showNotes(false); calBtn.click(); await wait(300);
-  calledHere = true; setState("live", "On the call");
-  out.push("live:" + (!shown(calBtn) && !calOpen() ? "ok" : "WRONG"));
-  cleanup("Call ended"); await wait(100);
-  out.push("after:" + (placed() ? "ok" : "MISSING"));
+  // H144: on a call the button stays, next to the call's Mic button, and an open sheet stays open; the call goes on.
+  calledHere = true; setState("live", "On the call"); await wait(200);
+  const tracks = [], stopped = []; stream = { getAudioTracks: () => tracks, getTracks: () => tracks };
+  tracks.push({ enabled: true, stop() { stopped.push(1); } });
+  out.push("live:" + (placed() && shown(devBtn) && calOpen() && appts().length === 3 && document.body.classList.contains("chatting") ? "ok" : "WRONG"));
+  const sb = calEl.getBoundingClientRect(), hb = btn.getBoundingClientRect(), mb = muteBtn.getBoundingClientRect(), db = document.getElementById("dock").getBoundingClientRect();
+  out.push("call-buttons-free:" + (shown(btn) && shown(muteBtn) && sb.bottom <= Math.min(hb.top, mb.top) + 1 && hb.bottom <= db.top + 1 ? "ok" : "WRONG " + [sb.bottom, mb.top, hb.top, hb.bottom, db.top].map(Math.round)));
+  appts()[2].click(); await wait(200);
+  out.push("oncall-one:" + (document.getElementById("calgo").disabled && document.getElementById("calbusy") && calOne.textContent.includes("Bring the card") ? "ok" : "WRONG"));
+  document.getElementById("calgo").click(); await wait(50);
+  out.push("oncall-nocall:" + (CALLED.length === 1 && state === "live" && calOpen() ? "ok" : "WRONG " + CALLED + " " + state));
+  document.getElementById("calback").click(); await wait(200);
+  devBtn.click(); await wait(200);
+  out.push("mic-sheet:" + (setEl.classList.contains("open") && !calOpen() ? "ok" : "WRONG"));
+  calBtn.click(); await wait(300);
+  out.push("cal-again:" + (calOpen() && !setEl.classList.contains("open") ? "ok" : "WRONG"));
+  panel = ["donna", "pepper"]; paintTint(onCall()); setState("live", "On the call"); await wait(200);  // H79: three-way
+  out.push("three-way:" + (calOpen() && placed() && appts().length === 3 ? "ok" : "WRONG"));
+  showCal(false); await wait(100); calBtn.click(); await wait(200); showCal(false);
+  out.push("mic-on:" + (state === "live" && !stopped.length && tracks[0].enabled && pc === null ? "ok" : "WRONG " + state + " " + stopped.length));
+  calBtn.click(); await wait(200); appts()[2].click(); await wait(100);
+  stream = null; panel = []; cleanup("Call ended"); await wait(200);
+  out.push("after:" + (placed() && !shown(devBtn) && calOpen() && !document.getElementById("calgo").disabled && !document.getElementById("calbusy") ? "ok" : "WRONG"));
   document.getElementById("calclose").click();
   const pre = document.createElement("pre"); pre.id = "h101"; pre.textContent = "H101RESULT " + out.join(" | ") + " END";
   document.body.appendChild(pre);
@@ -4958,7 +4988,9 @@ window.fetch = async (url, opt) => {
                 "Claude Code's own file, nothing outside it), cancelled left out, Main, a failed read keeping the last days; hourly in "
                 "the day, again on opening; /api/calendar on its own copy, ?fresh=1 reading again; the call's note, greeting and "
                 "transcript line; the page, phone and app: the button on the right before and after a call, the days, one "
-                "appointment, Back, Call about this sending it to the agenda's agent (F30), off on Free, one sheet at a time")
+                "appointment, Back, Call about this sending it to the agenda's agent (F30), off on Free, one sheet at a time; on a call "
+                "(also three-way) the button and an open sheet stay, the call's buttons free below it, Call about this waits, "
+                "the Mic sheet and the calendar take turns, the call and the mic go on (H144)")
 
     async def flow92(self) -> str:
         """H124, no Claude: Donna texts first. routine/pings.py on its own copies (picking appointments, reminders,
@@ -7750,6 +7782,15 @@ setTimeout(() => {
   out.push("inside:" + (off.length ? off.join(",") : "ok"));
   out.push("label:" + getComputedStyle(document.getElementById("chatbtn"), "::after").content);
   out.push("lookrow:" + (document.querySelector("#settings [data-look]") ? "there" : "gone"));
+  // H144: on a call the dock holds Calendar and Mic as well (and Donna, when her line is on); every name reads whole.
+  document.getElementById("directbtn").classList.add("on"); calledHere = true; setState("live", "On the call");
+  const dl = document.getElementById("dock").getBoundingClientRect(), cv = document.createElement("canvas").getContext("2d");
+  const live = [...document.querySelectorAll("#dock > *")].filter(b => getComputedStyle(b).display !== "none");
+  const outside = live.filter(b => { const r = b.getBoundingClientRect(); return !(r.width > 0 && r.left >= dl.left - 1 && r.right <= dl.right + 1); }).map(b => b.id);
+  const cut = live.filter(b => { const a = getComputedStyle(b, "::after"); cv.font = a.fontWeight + " " + a.fontSize + " " + a.fontFamily;
+    return cv.measureText(b.dataset.dl).width + (b.dataset.dl.length - 1) * (parseFloat(a.letterSpacing) || 0) > b.getBoundingClientRect().width + .5; }).map(b => b.id);
+  out.push("oncall:" + (live.some(b => b.id === "calbtn") && live.some(b => b.id === "devbtn") && !outside.length && !cut.length ? "ok" : "WRONG " + live.length + " out " + outside + " cut " + cut));
+  cleanup("Call ended");
   const pre = document.createElement("pre"); pre.id = "h140"; pre.textContent = "H140RESULT " + out.join(" | ") + " END"; document.body.append(pre);
 }, 1500);
 </script>"""
@@ -7770,8 +7811,9 @@ setTimeout(() => {
             need(res["inside"] == "ok", f"{name}: round buttons outside the dock: {res}")
             need(res["label"] == '"Chat"', f"{name}: the dock's buttons have no names under them: {res}")
             need(res["lookrow"] == "gone", f"{name}: the Look row is still in Settings: {res}")
+            need(res["oncall"] == "ok", f"{name}: on a call (H144) Calendar or Mic isn't in the dock, a button sits outside it, or a name is cut off: {res}")
             seen.append(name)
-        return "Modern only: no Look row, no saved choice, no html.modern; the eight buttons in the dock with their names; Classic saved on a device still shows Modern (" + ", ".join(seen) + ")"
+        return "Modern only: no Look row, no saved choice, no html.modern; the eight buttons in the dock with their names, on a call too with Calendar next to Mic, every name whole (H144); Classic saved on a device still shows Modern (" + ", ".join(seen) + ")"
 
 
     # 98
@@ -9194,6 +9236,9 @@ print("H88OUT " + json.dumps(out))
   pc = { getSenders: () => [sender], close() {} };
   setState("live", "On the call");
   check("devbtn-on-call", getComputedStyle(devBtn).display !== "none", getComputedStyle(devBtn).display);
+  // H144: the calendar stays next to it on a call; the two buttons are apart, and open one sheet at a time.
+  const calB = document.getElementById("calbtn"), r1 = calB.getBoundingClientRect(), r2 = devBtn.getBoundingClientRect();
+  check("calbtn-beside-mic", getComputedStyle(calB).display !== "none" && (r1.right <= r2.left + 1 || r2.right <= r1.left + 1), getComputedStyle(calB).display);
   devBtn.click();
   check("sheet-open", setEl.classList.contains("open") && setEl.classList.contains("incall"), setEl.className);
   const shown = r => r && getComputedStyle(r).display !== "none";
@@ -9234,6 +9279,14 @@ print("H88OUT " + json.dumps(out))
   ONE_MIC = false; IS_IOS = false; errEl.textContent = "";
   await listDevices();
   check("iphone-sound-note", noSinkRow.hidden || /computer/.test(noSinkNote.textContent), noSinkNote.textContent);
+  calB.click(); await new Promise(r => setTimeout(r, 100));
+  check("calendar-then-mic", calOpen() && !setEl.classList.contains("open") && stream && pc, "cal " + calOpen() + " mic sheet " + setEl.className);
+  devBtn.click(); await new Promise(r => setTimeout(r, 100));
+  check("mic-then-calendar", !calOpen() && setEl.classList.contains("open") && setEl.classList.contains("incall"), "cal " + calOpen() + " " + setEl.className);
+  await listDevices(); sent.length = 0; ONE_MIC = false; IS_IOS = false;
+  micSel.value = "air"; micSel.dispatchEvent(new Event("change"));
+  for (let i = 0; i < 100 && !sent.length; i++) await new Promise(r => setTimeout(r, 20));
+  check("switch-after-calendar", sent.length && sent.at(-1).from === "air", sent.length ? sent.at(-1).from : "nothing sent " + micSel.value);
   setState("live", "On the call");
   check("stays-open", setEl.classList.contains("open"), setEl.className);
   setState("idle", "Call ended");
@@ -9707,7 +9760,7 @@ FLOWS = {
     88: ("H113: a job held by the usage line carries on in its own chat, or in a fresh one with a note at which step", False, "flow88"),
     89: ("H118: which computer is main, at a glance: a pill next to the name on the status page, the strip and the call page", False, "flow89"),
     90: ("H120: the weather every three hours: sun, rain coming, a rainy day stays inside; quiet otherwise and at night", False, "flow90"),
-    91: ("H101: my calendar inside HQ, read only from Google; a tap on an appointment starts a call about it", False, "flow91"),
+    91: ("H101, H144: my calendar inside HQ, read only from Google; a tap on an appointment starts a call about it; it opens on a call too", False, "flow91"),
     92: ("H124: Donna texts first: pings for appointments he picked (a bell shows them), reminders, her own notes", False, "flow92"),
     93: ("H125: Donna's watch list: she keeps an eye out for a mail or the weather and texts when it comes", False, "flow93"),
     94: ("H135: the weather in the app: a widget on the main screen, a sheet with warnings (KNMI), UV and the next hours", False, "flow94"),

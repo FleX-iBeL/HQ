@@ -278,11 +278,10 @@
   #dirhead::before { content:""; position:absolute; left:50%; top:10px; width:40px; height:5px; margin-left:-20px; border-radius:3px; background:#5b616c; }
   #dirclose { position:absolute; right:6px; top:2px; border:0; background:transparent; color:#e8e9ec; font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
   #dirframe { flex:1; width:100%; border:0; background:#16181c; }
-  /* H101: his calendar. In the dock, where the call's Mic button sits during a call (only before and after a call, so
-     the two never meet). The appointments come from his Google Calendar, read only (app/agenda.py); a tap opens one,
+  /* H101: his calendar. In the dock, before, during and after a call (H144: on a call too, next to the call's Mic
+     button; the sheet then sits above the call's own buttons, as the chat does). The appointments come from his Google Calendar, read only (app/agenda.py); a tap opens one,
      and "Call about this" starts a call that knows what it's about. */
   #calbtn { display:flex; align-items:center; justify-content:center; cursor:pointer; }
-  #calbtn.hide { display:none; }
   #calsheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
               border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:8px;
               padding:14px 16px calc(220px + env(safe-area-inset-bottom)); text-align:left; user-select:text; -webkit-user-select:text; }
@@ -518,6 +517,11 @@
   #dock > #voicebtn[aria-pressed="true"] { background:color-mix(in srgb, var(--stop) 14%, transparent); color:var(--stop); }
   #dock > #voicebtn[aria-pressed="true"]::after { content:"Voice off"; color:var(--stop); }
   #dock > #directbtn { background:transparent !important; color:var(--her, #6d28d9); }
+  /* H144: on a call the dock holds one more (Calendar next to Mic), so it takes a little more of the width and the
+     names sit a hair tighter; "Calendar" still reads whole on a phone. */
+  #dock.oncall { left:5px; right:5px; padding:6px 4px; gap:0; }
+  #dock.oncall > * { padding-left:0; padding-right:0; }
+  #dock.oncall > *::after { font-size:10px; letter-spacing:-.15px; }
   #chatbtn .badge { top:0; right:calc(50% - 22px); }
   /* Sheets: one shape for all of them, reaching down to the dock, with a handle on top and a soft Close. */
   #chat, #histsheet, #statsheet, #notesheet, #calsheet, #wxsheet, #settings {
@@ -919,6 +923,7 @@ function showSettings(open) {
   setEl.classList.toggle("incall", inCall);
   setTitle.textContent = inCall ? "Microphone and sound" : "Settings";
   setEl.classList.toggle("open", open); shade.classList.toggle("open", open);
+  if (open && typeof calOpen === "function" && calOpen()) showCal(false);  // H144: one sheet at a time, also on a call
   if (open) listDevices();  // H106
   setBtn.setAttribute("aria-expanded", String(open && !inCall));
   devBtn.setAttribute("aria-expanded", String(inCall));
@@ -1882,6 +1887,7 @@ function showAppt(e) {
   const a = agendaAgent();
   go.textContent = "Call " + (a.name || "") + " about this";
   go.disabled = free || state !== "idle";
+  shownAppt = e;
   go.addEventListener("click", () => {
     if (free || state !== "idle") return;
     const who = agendaAgent();  // F30: whoever is picked on the page, an appointment is hers
@@ -1891,7 +1897,11 @@ function showAppt(e) {
   calOne.appendChild(go);
   if (!e.all_day) calOne.appendChild(pingButton(e));
   if (free) { const n = document.createElement("small"); n.className = "line"; n.textContent = "Free is on. Turn it off in Settings to call about an appointment."; calOne.appendChild(n); }
+  else if (state !== "idle") { const n = document.createElement("small"); n.className = "line"; n.id = "calbusy"; n.textContent = "You're on a call: just say what it's about. Call about it after this call."; calOne.appendChild(n); }
 }
+// H144: the call starting or ending while one appointment is open draws it again, so its button and line are right.
+let shownAppt = null;
+calEl.addEventListener("hq-redraw", () => { if (shownAppt) showAppt(shownAppt); });
 async function loadCal(fresh) {
   const ask = ++calAsk;
   if (!calList.querySelector(".appt")) histNote(calList, "Loading…");
@@ -1910,6 +1920,7 @@ function showCal(open) {
     if (notesOpen()) showNotes(false);
     showDirect(false); // F29
     closeWx();         // H135
+    if (setEl.classList.contains("open")) showSettings(false);  // H144: on a call, the Mic sheet
   }
   calEl.classList.toggle("open", open);
   calEl.classList.remove("reading"); calTitle.textContent = "Calendar";
@@ -2120,8 +2131,10 @@ function setState(s, text) {
   soonEl.classList.toggle("hide", s !== "idle");  // H73
   setBtn.classList.toggle("hide", s !== "idle");
   devBtn.classList.toggle("show", s === "live");  // H112
-  calBtn.classList.toggle("hide", s !== "idle");  // H101: before and after a call only
-  if (s !== "idle") showCal(false);
+  document.getElementById("dock").classList.toggle("oncall", s === "live");  // H144
+  // H144: the calendar stays in the dock on a call (any agent, three-way too) and an open sheet stays open; the call
+  // goes on underneath it. Only "Call about this" waits for the call to end.
+  if (calOpen() && calEl.classList.contains("reading")) calEl.dispatchEvent(new Event("hq-redraw"));
   if (s !== "live" ? setEl.classList.contains("incall") || s !== "idle" : !setEl.classList.contains("incall")) showSettings(false);
   if (s !== "live") thinkingSound(false);
   // H34: the bubble is always there; before a call it opens the last call, after one this call.
