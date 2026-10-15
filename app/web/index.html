@@ -293,7 +293,7 @@
   #calback { left:-6px; display:none; }
   #calsheet.reading #calback { display:block; }
   #callist, #calone { flex:1; min-height:60px; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; display:flex; flex-direction:column; }
-  #calone { display:none; gap:10px; }
+  #calone { display:none; gap:10px; touch-action:pan-y; }  /* H147: across is the swipe back */
   #calsheet.reading #callist { display:none; }
   #calsheet.reading #calone { display:flex; }
   #callist .day { color:var(--muted); font-size:13px; font-weight:600; margin:12px 0 4px; }
@@ -1874,7 +1874,7 @@ function agendaAgent() {
 }
 function showAppt(e) {
   calEl.classList.add("reading"); calTitle.textContent = "Appointment";
-  calOne.innerHTML = "";
+  calOne.innerHTML = ""; calOne.style.transform = calOne.style.transition = calOne.style.opacity = "";
   const h = document.createElement("h3"); h.textContent = e.title;
   const when = document.createElement("div"); when.className = "line"; when.textContent = calWhen(e);
   calOne.append(h, when);
@@ -1923,14 +1923,69 @@ function showCal(open) {
     if (setEl.classList.contains("open")) showSettings(false);  // H144: on a call, the Mic sheet
   }
   calEl.classList.toggle("open", open);
-  calEl.classList.remove("reading"); calTitle.textContent = "Calendar";
+  calEl.classList.remove("reading"); calTitle.textContent = "Calendar"; calOne.style.transform = calOne.style.transition = calOne.style.opacity = "";
   calBtn.setAttribute("aria-expanded", String(open));
   if (open) loadCal(true); else { calAsk++; clearTimeout(calTimer); }
   showLayout();
 }
 calBtn.addEventListener("click", () => showCal(!calOpen()));
 document.getElementById("calclose").addEventListener("click", () => showCal(false));
-document.getElementById("calback").addEventListener("click", () => { calEl.classList.remove("reading"); calTitle.textContent = "Calendar"; loadCal(false); });
+function calBack() { calOne.style.transform = calOne.style.transition = calOne.style.opacity = ""; calEl.classList.remove("reading"); calTitle.textContent = "Calendar"; loadCal(false); }
+document.getElementById("calback").addEventListener("click", calBack);
+// H147: with an appointment open, a swipe to the right goes back to the days, as ‹ Days does, with a short slide the
+// way iPhone apps go back: a finger on the phone, two fingers on the Mac's trackpad (its wheel events; the app's web
+// view has the back gesture off). Never from a field being typed in, and never when the move is up or down (scrolling).
+const SWIPE_BACK_PX = 70, SWIPE_WHEEL_PX = 110;  // Claude's choice
+function calTyping(t) {
+  const f = document.activeElement;
+  const field = el => el && el.closest && el.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']");
+  return !!(field(t) || (f && f !== document.body && field(f) && calEl.contains(f)));
+}
+function calSlide(dx) { calOne.style.transition = "none"; calOne.style.transform = "translateX(" + Math.max(0, dx) + "px)"; calOne.style.opacity = String(Math.max(0.4, 1 - dx / 600)); }
+function calSlideEnd(back) {
+  const quick = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  calOne.style.transition = quick ? "none" : "transform .18s ease-out, opacity .18s ease-out";
+  if (!back) { calOne.style.transform = ""; calOne.style.opacity = ""; return; }
+  calOne.style.transform = "translateX(" + calOne.clientWidth + "px)"; calOne.style.opacity = "0.4";
+  setTimeout(calBack, quick ? 0 : 180);
+}
+let calSwipe = null;
+calOne.addEventListener("touchstart", ev => {
+  calSwipe = null;
+  if (!calEl.classList.contains("reading") || ev.touches.length !== 1 || calTyping(ev.target)) return;
+  const t = ev.touches[0]; calSwipe = { x: t.clientX, y: t.clientY, at: Date.now(), dir: "" };
+}, { passive: true });
+calOne.addEventListener("touchmove", ev => {
+  const s = calSwipe; if (!s || ev.touches.length !== 1) return;
+  const t = ev.touches[0], dx = t.clientX - s.x, dy = t.clientY - s.y;
+  if (!s.dir) {
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+    s.dir = dx > 0 && Math.abs(dx) > Math.abs(dy) * 1.5 ? "back" : "other";  // up, down or left: the page's own
+  }
+  if (s.dir !== "back") return;
+  if (ev.cancelable) ev.preventDefault();
+  s.dx = dx; calSlide(dx);
+}, { passive: false });
+function calTouchEnd() {
+  const s = calSwipe; calSwipe = null;
+  if (!s || s.dir !== "back") return;
+  const dx = s.dx || 0, fast = dx > 30 && dx / Math.max(1, Date.now() - s.at) > 0.5;
+  calSlideEnd(dx >= SWIPE_BACK_PX || fast);
+}
+calOne.addEventListener("touchend", calTouchEnd);
+calOne.addEventListener("touchcancel", () => { if (calSwipe && calSwipe.dir === "back") calSlideEnd(false); calSwipe = null; });
+let calWheel = { dx: 0, timer: null, done: false };
+calEl.addEventListener("wheel", ev => {
+  if (!calEl.classList.contains("reading") || calTyping(ev.target)) return;
+  if (Math.abs(ev.deltaX) <= Math.abs(ev.deltaY) * 1.5) return;  // scrolling up or down
+  const w = calWheel;
+  clearTimeout(w.timer);
+  w.timer = setTimeout(() => { if (!w.done && w.dx > 0) calSlideEnd(false); w.dx = 0; w.done = false; }, 220);
+  if (w.done) return;
+  w.dx = Math.max(0, w.dx - ev.deltaX);  // fingers to the right: deltaX below zero
+  if (ev.cancelable) ev.preventDefault();
+  if (w.dx >= SWIPE_WHEEL_PX) { w.done = true; calSlideEnd(true); } else calSlide(w.dx * 0.6);
+}, { passive: false });
 // H135: the weather in the app (app/weather.py through /api/weather). The widget at the bottom, between the round
 // buttons (out of the page's flow, so the call screen keeps its room), before a call and not on Free: sunny or not, degrees, wind, chance of rain, and the warning when there is one. A tap opens the sheet.
 // Read fresh when the page opens, every 15 minutes while it's shown, and when the sheet opens (the server only reads

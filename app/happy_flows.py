@@ -152,7 +152,7 @@ Run them before and after every update; they print a short pass/fail table at th
      again on opening after a quarter of an hour; /api/calendar on the test server's own copy, ?fresh=1
      reading again; the call's note, greeting and transcript line; the real call page in a headless
      browser, phone and app: the round button on the right before and after a call (gone on a call), the
-     days, a tap on one, Back, "Call about this" sending the appointment, off on Free, one sheet at a time
+     days, a tap on one, Back, a swipe right back to the days (H147), "Call about this" sending the appointment, off on Free, one sheet at a time
   73 H92, no Claude: no laptop on a server. The status page in a headless browser, served as a server
      (HQ_LAPTOP=0) and as the laptop (HQ_LAPTOP=1), with a hot laptop and a low battery: on a server no Laptop
      section, no battery in the top line, no laptop lines or bars under Routines, and the Routines light green;
@@ -4975,6 +4975,34 @@ window.fetch = async (url, opt) => {
     && calOne.textContent.includes("Main street 1") && go && !go.disabled && shown(document.getElementById("calback")) ? "ok" : "WRONG"));
   document.getElementById("calback").click(); await wait(300);
   out.push("back:" + (!calEl.classList.contains("reading") && appts().length === 3 ? "ok" : "WRONG"));
+  // H147: a swipe to the right goes back to the days; up and down, to the left, a short slow one or from a field don't.
+  const reading = () => calEl.classList.contains("reading");
+  const touch = (type, x, y, el) => { const t = new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
+    el.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: type === "touchend" ? [] : [t], targetTouches: type === "touchend" ? [] : [t], changedTouches: [t] })); };
+  const swipe = async (dx, dy, ms, el) => { el = el || calOne.querySelector("h3"); touch("touchstart", 60, 300, el);
+    for (let i = 1; i <= 6; i++) { await wait(ms / 6); touch("touchmove", 60 + dx * i / 6, 300 + dy * i / 6, el); } touch("touchend", 60 + dx, 300 + dy, el); await wait(400); };
+  appts()[2].click(); await wait(200);
+  await swipe(5, 160, 120);
+  out.push("swipe-scroll:" + (reading() && !calOne.style.transform ? "ok" : "WRONG"));
+  await swipe(-160, 0, 120);
+  out.push("swipe-left:" + (reading() ? "ok" : "WRONG"));
+  await swipe(40, 0, 600);
+  out.push("swipe-short:" + (reading() && calOne.style.transform === "" ? "ok" : "WRONG " + calOne.style.transform));
+  const field = document.createElement("textarea"); calOne.appendChild(field); field.focus();
+  await swipe(200, 0, 120, field);
+  out.push("swipe-field:" + (reading() ? "ok" : "WRONG")); field.blur(); field.remove();
+  await swipe(160, 8, 120);
+  out.push("swipe-back:" + (!reading() && appts().length === 3 && calTitle.textContent === "Calendar" && !calOne.style.transform ? "ok" : "WRONG"));
+  const wheel = async (dx, dy) => { for (let i = 0; i < 6; i++) { calOne.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaX: dx, deltaY: dy })); await wait(16); } await wait(500); };
+  appts()[2].click(); await wait(200);
+  await wheel(-2, 40);
+  out.push("pad-scroll:" + (reading() ? "ok" : "WRONG"));
+  await wheel(-8, 0);
+  out.push("pad-short:" + (reading() && !calOne.style.transform ? "ok" : "WRONG"));
+  await wheel(-40, 0);
+  out.push("pad-back:" + (!reading() && appts().length === 3 ? "ok" : "WRONG"));
+  await wheel(-40, 0);
+  out.push("pad-days-stay:" + (calOpen() && !reading() ? "ok" : "WRONG"));
   agent = "pepper"; showMode();  // F30: whoever is picked, an appointment is called about with the agenda's agent
   appts()[2].click(); await wait(100);
   out.push("label:" + (document.getElementById("calgo").textContent === "Call Donna about this" ? "ok" : "WRONG " + document.getElementById("calgo").textContent));
@@ -5034,7 +5062,7 @@ window.fetch = async (url, opt) => {
                 "Claude Code's own file, nothing outside it), cancelled left out, Main, a failed read keeping the last days; hourly in "
                 "the day, again on opening; /api/calendar on its own copy, ?fresh=1 reading again; the call's note, greeting and "
                 "transcript line; the page, phone and app: the button on the right before and after a call, the days, one "
-                "appointment, Back, Call about this sending it to the agenda's agent (F30), off on Free, one sheet at a time; on a call "
+                "appointment, Back, a swipe to the right back to the days (finger and trackpad; not up or down, left, short or from a field; H147), Call about this sending it to the agenda's agent (F30), off on Free, one sheet at a time; on a call "
                 "(also three-way) the button and an open sheet stay, the call's buttons free below it, Call about this waits, "
                 "the Mic sheet and the calendar take turns, the call and the mic go on (H144)")
 
