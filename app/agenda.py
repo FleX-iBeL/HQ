@@ -327,6 +327,11 @@ def read(now: float | None = None) -> dict:
         events = planning.attach(events)
     except Exception:
         pass
+    try:  # H146: his quick notes on each appointment
+        import appt_notes
+        events = appt_notes.attach(events)
+    except Exception:
+        pass
     try:  # H124: the bell, on the appointments Donna will ping him for
         import pings
         bell = pings.pinged()

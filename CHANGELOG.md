@@ -7,6 +7,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ### Added
 - Tick off or X your appointments. In the calendar in the app every appointment has a check (done) and an X (didn't happen as planned); tap again to undo. An X greys it out and moves it in your Google Calendar to your calendar named HQ Planning (the name is a setting, HQ_PLANNING_CALENDAR in switches.env); undo moves it back. Appointments with other people in them and birthdays keep their X in HQ only and stay where they are. The past days of this week stay in the calendar, so you can still tick them, and a call can go through the week with you: what's not ticked off, what got an X, and the patterns (H143).
 - Your calendar during a call. The Calendar button stays in the bar at the bottom on a call, with any agent and on a three-way call too, next to the Mic button; the calendar opens above the call's own buttons and the call and your mic carry on. Calling about an appointment waits until the call has ended (H144).
+- A quick note on each appointment. In the calendar in the app every appointment has a note button: one tap and you're typing ("arrived 16:00, left 17:00"). The notes show under the appointment in the list and when you open it, each with its own Clear; they stay with an appointment X'd to HQ Planning. A call and Donna's chat read them, so "look at the haircut and update my calendar" puts its times right in Google Calendar, keeping the old times in its description (H146).
 
 ## 0.4.3 · 14 October 2026
 

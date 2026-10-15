@@ -156,6 +156,17 @@ tomorrow, in 3 days) and ends at the first match; unwatch N stops one (add --qui
 him on a match and when a watch ends. Set it on his clear ask, then say it in a sentence ("I'll text you when it \
 starts", "I'll keep an eye out")."""
 
+# H146 (15 October 2026, call at 09:34): a quick note on each appointment, from the calendar in the app. On every full
+# call and in the direct line's chat, so "look at the haircut and update my calendar" works on either.
+APPT_NOTES_RULE = """- Notes on appointments (H146): in the calendar in the app {user} can write a quick note on an appointment, \
+often what really happened ("arrived 16:00, left 17:00"). Read them with python3 "{HQ}/app/appt_notes.py" (no need to \
+ask): every appointment with notes, its calendar and where it is in Google Calendar (calendarId and eventId). When he \
+asks you to look at one and update his calendar ("look at the haircut and update my calendar"), read its note, look \
+at the appointment in Google Calendar first, then change it to what the note says with update_event: his own \
+appointments without asking, as always; one with other people in it needs his okay. Keep the old times in its \
+description, a line like "Planned: 15:00 to 16:00", under whatever was there. Then say it's done in a sentence. \
+The notes stay until he clears them in the app; ticking it off is his, in the calendar in the app."""
+
 # H133 (14 October 2026, call at 13:31), in the user's words: "I want to stop using the word job list or job queue.
 # I just want to refer to it as the team. So if I tell you, hey. Let's put it on our roadmap. You can put it on our
 # roadmap. If I say... Let's give it to the team. You can put it in the job list queue and... If it needs to be on the
@@ -363,6 +374,7 @@ other than the ones above) still asks him first; building HQ is work for the tea
 line per note under Notes, oldest first, just text (H117). When he wants to go through his notes, read it \
 and take them one at a time; once he says one is done or gone through, remove its line.
 {pings}
+{apptnotes}
 - Keep working with the lid closed (lid-closed sleep): when he asks which it is, run python3 \
 "{HQ}/routine/lidsleep.py"; to turn it on ("keep working with the lid closed") add on, to turn \
 it off ("back to normal", sleeps when the lid closes) add off. Flip it on his ask, then tell him in a \
@@ -380,8 +392,9 @@ def _direct_agent() -> str:
 
 
 PINGS_RULE = PINGS_RULE.replace("{HQ}", str(ROOT)).replace("{agent}", _direct_agent())
+APPT_NOTES_RULE = APPT_NOTES_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TEAM_RULE = TEAM_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
-VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
+VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
                .replace("{times}", TIMES_RULE))
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:

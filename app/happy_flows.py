@@ -8279,6 +8279,193 @@ window.fetch = async (url, opt) => {
                 "/api/calendar/mark; the page, phone and app: two buttons per row, the green check, the X greyed with where it is, "
                 "yesterday under its own day")
 
+    async def flow100(self) -> str:
+        """H146, no Claude: a quick note on each appointment. appt_notes.py on its own copies: add and clear per note,
+        tied to the appointment's mark id so one X'd to HQ Planning keeps its notes, the listing a call reads with the
+        Google ids, the call's and Donna's chat rules and the policy (read only); the test server's /api/calendar/note;
+        and the real call page in a headless browser, phone and app: the note button, one tap to type, the note in the
+        list and the appointment, Clear."""
+        import agenda
+        import appt_notes
+        import planning
+        import direct_line
+        from policy import Policy, ALLOW, DENY
+        d = self.tmp / "h146"
+        d.mkdir(parents=True, exist_ok=True)
+        real = Path(os.path.join(agenda.hqpaths.DATA, "calendar-notes.json"))
+        real_before = real.read_bytes() if real.exists() else None
+        keep = {k: os.environ.get(k) for k in ("HQ_CALENDAR_FILE", "HQ_CALENDAR_MARKS", "HQ_CALENDAR_NOTES", "HQ_PLANNING_FAKE", "HQ_CALENDAR")}
+        os.environ.update({"HQ_CALENDAR_FILE": str(d / "calendar.json"), "HQ_PLANNING_FAKE": str(d / "fake"), "HQ_CALENDAR": "0"})
+        for k in ("HQ_CALENDAR_MARKS", "HQ_CALENDAR_NOTES"):
+            os.environ.pop(k, None)
+        try:
+            now = datetime.now()
+            at = lambda h: now.replace(hour=h, minute=0, second=0, microsecond=0).astimezone().isoformat()
+            ev = lambda cal, gid, title, h, **kw: {"id": agenda._event_id(cal, gid), "gid": gid, "cal": cal, "title": title,
+                                                   "start": at(h), "end": at(h + 1), "all_day": False, "where": "", "notes": "",
+                                                   "calendar": "Main", "free": False, "type": "DEFAULT", **kw}
+            cals = [{"id": "me@example.com", "name": "Main"}, {"id": "plan-id", "name": "HQ Planning"}]
+            a1, a2 = ev("me@example.com", "g1", "Haircut", 15), ev("me@example.com", "g2", "Dinner with friends", 19, others=True)
+            (d / "calendar.json").write_text(json.dumps({"looked": time.time(), "calendars": cals, "events": [a1, a2]}))
+            need(appt_notes.notes_file() == d / "calendar-notes.json", "the notes aren't next to the calendar copy")
+            need(all(e["appt_notes"] == [] for e in agenda.read()["events"]) and "No notes" in appt_notes.text(),
+                 "an appointment has notes before any was written")
+            n = appt_notes.add(a1["id"], "  arrived 16:00\r\nleft 17:00  ")
+            need(n["title"] == "Haircut" and n["items"][0]["text"] == "arrived 16:00\nleft 17:00", f"the note isn't saved as typed: {n}")
+            appt_notes.add(a1["id"], "nice and short")
+            got = {e["id"]: e for e in agenda.read()["events"]}
+            need([x["text"] for x in got[a1["id"]]["appt_notes"]] == ["arrived 16:00\nleft 17:00", "nice and short"]
+                 and got[a2["id"]]["appt_notes"] == [], f"the notes don't show on their own appointment only: {got}")
+            for bad, err in (("", ValueError), ("   ", ValueError)):
+                try:
+                    appt_notes.add(a1["id"], bad); need(False, "an empty note was taken")
+                except err:
+                    pass
+            try:
+                appt_notes.add("nope", "x"); need(False, "a note on an unknown appointment was taken")
+            except KeyError:
+                pass
+            txt = appt_notes.text()
+            need("Haircut" in txt and "calendarId me@example.com, eventId g1" in txt and "arrived 16:00 / left 17:00" in txt
+                 and "Dinner" not in txt, f"the listing a call reads isn't right: {txt}")
+            appt_notes.add(a2["id"], "ran late")
+            need("has other people in it" in appt_notes.text(), "the listing doesn't say an appointment has others in it")
+            # X'd and moved to HQ Planning: the copy carries the notes, and the listing points at the copy
+            planning.set_mark(a1["id"], "x")
+            s = planning._read(); m = s["marks"][a1["id"]]
+            m["also"] = [agenda._event_id("plan-id", "c1")]; m["move"] = {"state": "moved", "copy": {"cal": "plan-id", "gid": "c1"}, "removed": True}
+            planning._write(s)
+            cp = {**a1, "id": agenda._event_id("plan-id", "c1"), "gid": "c1", "cal": "plan-id", "calendar": "HQ Planning"}
+            (d / "calendar.json").write_text(json.dumps({"looked": time.time(), "calendars": cals, "events": [cp, a2]}))
+            e1 = next(e for e in agenda.read()["events"] if e["title"] == "Haircut")
+            need(len(e1["appt_notes"]) == 2 and "calendarId plan-id, eventId c1" in appt_notes.text(),
+                 f"the copy in HQ Planning lost its notes, or the listing points at the old one: {e1}")
+            appt_notes.add(cp["id"], "via the copy")
+            need(len(appt_notes._read()["notes"][a1["id"]]["items"]) == 3 and cp["id"] not in appt_notes._read()["notes"],
+                 "a note on the copy didn't go to the same appointment")
+            # gone from the calendar: still listed with its saved title
+            (d / "calendar.json").write_text(json.dumps({"looked": time.time(), "calendars": cals, "events": [a2]}))
+            need("Haircut" in appt_notes.text() and "not in the last read" in appt_notes.text(), "a note whose appointment is gone isn't listed")
+            # clear per note; the last one takes the entry with it
+            ids = [i["id"] for i in appt_notes._read()["notes"][a1["id"]]["items"]]
+            need(appt_notes.clear(a1["id"], ids[0]) and not appt_notes.clear(a1["id"], ids[0]), "a note wasn't cleared once")
+            for i in ids[1:]:
+                appt_notes.clear(a1["id"], i)
+            need(a1["id"] not in appt_notes._read()["notes"], "the last cleared note left its appointment behind")
+            # the rules and the policy
+            need('appt_notes.py' in config.VOICE_RULES and "Planned: 15:00 to 16:00" in config.VOICE_RULES
+                 and 'appt_notes.py' in direct_line._text_rules(), "the call rules or Donna's chat rules don't say where the notes are")
+            pol = Policy(config.FOLDER)
+            py = str(ROOT / "app" / "appt_notes.py")
+            need(pol.decide("Bash", {"command": f'python3 "{py}"'}).verdict == ALLOW
+                 and pol.decide("Bash", {"command": f'python3 "{py}" json'}).verdict == ALLOW
+                 and pol.decide("Bash", {"command": f'python3 "{py}" clear x y'}).verdict == DENY, "a call can't read the notes, or can change them")
+            src = (APP / "appt_notes.py").read_text()
+            need("mcp__" not in src and "claude" not in src.split('"""', 2)[2].lower(), "the notes script writes Google Calendar or runs Claude")
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        need((real.read_bytes() if real.exists() else None) == real_before, "the workspace's own notes were touched")
+
+        await self.ensure_server()
+        sfile = Path(self.server.env["HQ_CALENDAR_FILE"])
+        sfile.parent.mkdir(parents=True, exist_ok=True)
+        t = time.time()
+        sfile.write_text(json.dumps({"looked": t, "calendars": [], "events": [
+            {"id": "s1", "title": "Soon", "start": datetime.fromtimestamp(t + 3600).astimezone().isoformat(), "end": "", "all_day": False}]}))
+        def post(body, hq):
+            req = urllib.request.Request(TEST_URL + "/api/calendar/note", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read() or b"{}")
+            except urllib.error.HTTPError as e:
+                return e.code, {}
+        need(post({"id": "s1", "add": "x"}, "")[0] == 403, "a note could be added without the page's header")
+        code, got = post({"id": "s1", "add": "left at 5"}, "calendar")
+        notes_ = got.get("events", [{}])[0].get("appt_notes") or []
+        need(code == 200 and [x["text"] for x in notes_] == ["left at 5"], f"the server didn't add the note ({code} {got})")
+        need(post({"id": "nope", "add": "x"}, "calendar")[0] == 404 and post({"id": "s1", "add": "  "}, "calendar")[0] == 400
+             and post({"id": "s1"}, "calendar")[0] == 400 and post({"id": "s1", "clear": "nope"}, "calendar")[0] == 404,
+             "an unknown appointment, an empty note or an unknown note was taken")
+        code, got = post({"id": "s1", "clear": notes_[0]["id"]}, "calendar")
+        need(code == 200 and got["events"][0]["appt_notes"] == [], "the server didn't clear the note")
+
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        stub = r"""<script>
+var POSTS = [], N = 0, T = new Date(); T.setHours(0, 0, 0, 0);
+function at(days, h, m) { const d = new Date(T); d.setDate(d.getDate() + days); d.setHours(h, m || 0); return d.toISOString(); }
+var EVENTS = [
+  { id: "e1", mark_id: "e1", title: "Haircut", start: at(0, 23, 0), end: at(0, 23, 45), all_day: false, where: "", notes: "", calendar: "Main", free: false, mark: "", move: "", move_note: "", appt_notes: [] },
+  { id: "e2", mark_id: "e2", title: "Gym", start: at(1, 9, 0), end: at(1, 10, 0), all_day: false, where: "", notes: "", calendar: "Main", free: false, mark: "", move: "", move_note: "", appt_notes: [] }];
+const ANSWER = () => ({ ok: true, json: async () => ({ on: true, looked: Date.now() / 1000 - 60, looking: false, error: "", events: EVENTS }) });
+window.fetch = async (url, opt) => {
+  url = String(url);
+  if (url === "api/calendar/note") {
+    const b = JSON.parse(opt.body); POSTS.push(b.id + ":" + (b.add !== undefined ? "add=" + b.add : "clear=" + b.clear) + ":" + (opt.headers || {})["x-hq"]);
+    EVENTS = EVENTS.map(e => e.mark_id !== b.id ? e : { ...e, appt_notes: b.add !== undefined ? [...e.appt_notes, { id: "n" + (++N), when: "2026-10-15 16:00", text: b.add }] : e.appt_notes.filter(n => n.id !== b.clear) });
+    return ANSWER();
+  }
+  if (url.startsWith("api/calendar")) return ANSWER();
+  return { ok: true, json: async () => ({ lines: [], calls: [], items: [] }) };
+};</script>"""
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  await wait(300); calBtn.click(); await wait(400);
+  const rows = () => calList.querySelectorAll(".arow"), nb = i => rows()[i].querySelector(".mk.nt");
+  out.push("button:" + (rows().length === 2 && nb(0) && nb(1) && rows()[0].querySelectorAll(".mk").length === 3 ? "ok" : "WRONG " + rows().length));
+  const r = nb(0).getBoundingClientRect();
+  out.push("fits:" + (r.width >= 30 && r.height >= 30 && rows()[0].getBoundingClientRect().right <= innerWidth + 1
+    && rows()[0].querySelector(".appt").getBoundingClientRect().width > 120 ? "ok" : "WRONG"));
+  nb(0).click(); await wait(300);
+  const inp = () => document.getElementById("calnotein");
+  out.push("onetap:" + (calEl.classList.contains("reading") && inp() && document.activeElement === inp() ? "ok" : "WRONG"));
+  inp().value = "arrived 16:00, left 17:00"; inp().dispatchEvent(new Event("input"));
+  document.getElementById("calnoteadd").click(); await wait(300);
+  const shown = [...calOne.querySelectorAll("#calnotes .an .txt")].map(x => x.firstChild.textContent);
+  out.push("added:" + (POSTS[0] === "e1:add=arrived 16:00, left 17:00:calendar" && shown.join() === "arrived 16:00, left 17:00"
+    && inp().value === "" && calOne.querySelector("h3").textContent === "Haircut" ? "ok" : "WRONG " + POSTS + " " + shown));
+  calBack(); await wait(300);
+  const sub = rows()[0].querySelector(".appt small.an");
+  out.push("inlist:" + (sub && sub.textContent === "arrived 16:00, left 17:00" && nb(0).dataset.n === "1" && !rows()[1].querySelector("small.an") ? "ok" : "WRONG"));
+  rows()[0].querySelector(".appt").click(); await wait(300);
+  out.push("view:" + (calOne.querySelectorAll("#calnotes .an").length === 1 && document.activeElement !== inp() ? "ok" : "WRONG"));
+  calOne.querySelector("#calnotes .clr").click(); await wait(300);
+  out.push("clear:" + (POSTS[1] === "e1:clear=n1:calendar" && !calOne.querySelector("#calnotes .an") ? "ok" : "WRONG " + POSTS));
+  inp().value = "half typed"; inp().dispatchEvent(new Event("input")); calEl.dispatchEvent(new Event("hq-redraw")); await wait(100);
+  out.push("redraw:" + (inp().value === "half typed" && !document.getElementById("calnoteadd").disabled ? "ok" : "WRONG"));
+  document.getElementById("calclose").click();
+  const pre = document.createElement("pre"); pre.id = "h146"; pre.textContent = "H146RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f2 = self.tmp / "h146.html"
+        f2.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
+        for where, q, size in (("phone", "", "390,844"), ("small phone", "", "320,640"), ("app", "?app=1", "390,844")):
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--window-size={size}",
+                                              f"--user-data-dir={self.tmp / ('h146-' + where.replace(' ', '-'))}", "--virtual-time-budget=20000", "--dump-dom", f2.as_uri() + q], timeout=120)
+            m = re.search(r'<pre id="h146">H146RESULT (.*?) END</pre>', r.stdout)
+            need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
+            res = m.group(1)
+            say(f"   {where}: {res}")
+            need(all(part.endswith(":ok") for part in res.split(" | ")), f"the appointment notes aren't right ({where}): {res}")
+        return ("notes next to the calendar copy; added as typed, on their own appointment only, empty and unknown refused; "
+                "the listing a call reads with the Google ids and others-in-it; an X'd appointment's copy in HQ Planning "
+                "keeping its notes and taking new ones; a gone appointment still listed; clear per note; the call's and "
+                "Donna's chat rules and a read-only policy; /api/calendar/note; the page on a phone, a small phone and the "
+                "app: the note button in each row, one tap to type, the note in the list and the appointment, Clear, a "
+                "half-typed note kept through a redraw")
+
     async def flow97(self) -> str:
         """F31, no Claude, no network: a refused pull or push from a job never passes silently. push.py --pull and a
         plain push against a throwaway HQ copy whose GitHub is a throwaway folder: a pull that works says so; a remote
@@ -9843,6 +10030,7 @@ FLOWS = {
     97: ("F31: a refused pull or push from a job shows up: the github incident, Donna texts at once, closed by the next one through", False, "flow97"),
     98: ("F32: a fresh install on an old release (a download, a shallow clone) sees the newer one and updates with one tap", False, "flow98"),
     99: ("H143: tick off or X the appointments; an X moves it to the Google calendar HQ Planning, undo moves it back; the week's look back", False, "flow99"),
+    100: ("H146: a quick note on each appointment, one tap to type; a call and Donna's chat read it to put the calendar right", False, "flow100"),
 }
 
 

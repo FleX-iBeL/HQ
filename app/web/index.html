@@ -317,6 +317,21 @@
   #callist .mk:disabled { opacity:.5; cursor:default; }
   #callist .arow.x .appt .w, #callist .arow.x .appt .t { opacity:.45; text-decoration:line-through; }
   #callist .arow.x .appt small { text-decoration:none; }
+  /* H146: a quick note on each appointment: the note button in the row opens it ready to type; the notes show under
+     the title in the list and in the appointment, each with its own Clear */
+  #callist .mk.nt[data-n]:not([data-n="0"]) { border-color:var(--accent); color:var(--accent); }
+  #callist .appt small.an { color:var(--fg); opacity:.8; white-space:pre-wrap; overflow-wrap:anywhere; }
+  #calnotes { display:flex; flex-direction:column; gap:6px; }
+  #calnotes .an { display:flex; align-items:flex-start; gap:8px; padding:8px 4px 8px 12px; border-radius:12px; background:color-mix(in srgb, var(--fg) 7%, var(--bg)); }
+  #calnotes .txt { flex:1; white-space:pre-wrap; overflow-wrap:anywhere; font-size:15px; line-height:1.35; }
+  #calnotes .when { display:block; color:var(--muted); font-size:12px; margin-top:3px; }
+  #calnotes .clr { flex-shrink:0; border:0; background:transparent; color:var(--muted); font:600 14px/1 -apple-system,sans-serif; padding:6px 8px; cursor:pointer; }
+  #calnoteform { display:flex; gap:8px; align-items:flex-end; }
+  #calnotein { flex:1; min-width:0; resize:none; overflow-y:hidden; height:46px; max-height:min(180px, 28vh); box-sizing:border-box; display:block;
+               border:2px solid var(--muted); border-radius:22px; padding:10px 14px; background:transparent; color:var(--fg); font:16px/1.3 -apple-system,sans-serif; }
+  #calnotein:focus { outline:none; border-color:var(--accent); }
+  #calnoteadd { flex-shrink:0; border:0; border-radius:999px; height:46px; background:var(--accent); color:#04120f; font:600 16px/1 -apple-system,sans-serif; padding:0 18px; cursor:pointer; }
+  #calnoteadd:disabled { opacity:.45; cursor:default; }
   #calping { border:1px solid var(--muted); border-radius:14px; background:transparent; color:var(--fg); font:600 16px/1 -apple-system,sans-serif;
              padding:13px 12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
   #calping svg { width:18px; height:18px; }
@@ -1812,8 +1827,9 @@ function showCalList(d) {
     if (e.ping) { b.insertAdjacentHTML("beforeend", BELL.replace("<svg", '<svg class="bell" aria-label="Ping on"')); b.classList.add("ping"); }  // H124
     b.addEventListener("click", () => showAppt(e));
     if (e.move_note && e.mark === "x") { const s = document.createElement("small"); s.className = "mv"; s.textContent = e.move_note; w.appendChild(s); }
+    for (const n of e.appt_notes || []) { const s = document.createElement("small"); s.className = "an"; s.textContent = n.text; w.appendChild(s); }  // H146
     const row = document.createElement("div"); row.className = "arow" + (e.mark ? " " + e.mark : "");
-    row.append(b, markButton(e, "done"), markButton(e, "x"));
+    row.append(b, noteButton(e), markButton(e, "done"), markButton(e, "x"));
     calList.appendChild(row);
     if (e.move === "to_move" || e.move === "to_back") moving = true;
   }
@@ -1842,6 +1858,62 @@ function markButton(e, kind) {
     } catch (err) { calNote.textContent = "Couldn't mark that. Try again."; calList.querySelectorAll(".mk").forEach(x => x.disabled = false); }
   });
   return m;
+}
+// H146: a quick note on each appointment (app/appt_notes.py through /api/calendar/note), tied to it by its mark id, so
+// one X'd to HQ Planning keeps its notes. The note button opens the appointment with the field ready to type; a call
+// and Donna's chat read the notes, so "look at the haircut and update my calendar" puts the times right.
+const NOTE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+function noteButton(e) {
+  const n = (e.appt_notes || []).length;
+  const m = document.createElement("button"); m.type = "button"; m.className = "mk nt"; m.innerHTML = NOTE_ICON;
+  m.dataset.n = String(n);
+  m.setAttribute("aria-label", n ? "Notes (" + n + "), add a note" : "Add a note");
+  m.addEventListener("click", () => showAppt(e, true));
+  return m;
+}
+async function calNoteSend(body) {
+  try {
+    const r = await fetch("api/calendar/note", { method: "POST", cache: "no-store",
+      headers: { "x-hq": "calendar", "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (r.ok) return await r.json();
+  } catch (err) {}
+  calNote.textContent = "Couldn't save the note. Try again.";
+  return null;
+}
+function apptNotes(e, focus) {
+  const box = document.createElement("div"); box.id = "calnotes";
+  const key = e.mark_id || e.id;
+  const fresh = d => {  // the same appointment from the new answer, drawn again with its notes
+    const n = d && Array.isArray(d.events) ? d.events.find(x => (x.mark_id || x.id) === key) : null;
+    if (d) calNote.textContent = calLooked(d);
+    if (n) { e.appt_notes = n.appt_notes || []; showAppt(n, false); }
+  };
+  for (const it of e.appt_notes || []) {
+    const row = document.createElement("div"); row.className = "an";
+    const t = document.createElement("div"); t.className = "txt"; t.textContent = it.text;
+    if (it.when) { const w = document.createElement("small"); w.className = "when"; w.textContent = it.when.slice(0, 16); t.appendChild(w); }
+    const c = document.createElement("button"); c.type = "button"; c.className = "clr"; c.textContent = "Clear";
+    c.setAttribute("aria-label", "Clear this note");
+    c.addEventListener("click", async () => { c.disabled = true; const d = await calNoteSend({ id: key, clear: it.id }); if (d) fresh(d); else c.disabled = false; });
+    row.append(t, c); box.appendChild(row);
+  }
+  const f = document.createElement("form"); f.id = "calnoteform"; f.autocomplete = "off";
+  const inp = document.createElement("textarea"); inp.id = "calnotein"; inp.rows = 1; inp.maxLength = 1000;
+  inp.placeholder = "A quick note on this"; inp.setAttribute("aria-label", "A quick note on this appointment");
+  const add = document.createElement("button"); add.type = "submit"; add.id = "calnoteadd"; add.textContent = "Add"; add.disabled = true;
+  const grow = () => { inp.style.height = "46px"; inp.style.height = Math.min(inp.scrollHeight + 4, 180) + "px"; inp.style.overflowY = inp.scrollHeight > 180 ? "auto" : "hidden"; };
+  inp.addEventListener("input", () => { add.disabled = !inp.value.trim(); grow(); });
+  inp.addEventListener("keydown", ev => { if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && matchMedia("(hover: hover)").matches) { ev.preventDefault(); f.requestSubmit(); } });
+  f.addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const text = inp.value.trim(); if (!text) return;
+    add.disabled = inp.disabled = true;
+    const d = await calNoteSend({ id: key, add: text });
+    if (d) fresh(d); else { add.disabled = inp.disabled = false; }
+  });
+  f.append(inp, add); box.appendChild(f);
+  if (focus) setTimeout(() => { inp.focus({ preventScroll: false }); inp.scrollIntoView({ block: "nearest" }); }, 60);
+  return box;
 }
 // H124: the bell. Donna texts him when an appointment he picked starts (none by default); a call or her chat can pick
 // one, and so can the button in the appointment here. Only HQ's own list changes; Google Calendar never does.
@@ -1872,7 +1944,7 @@ function agendaAgent() {
   const all = Object.values(AGENTS);
   return all.find(a => /\bagenda\b|\bcalendar\b/i.test(a.speciality || "")) || AGENTS.donna || AGENTS[agent] || {};
 }
-function showAppt(e) {
+function showAppt(e, noteNow) {
   calEl.classList.add("reading"); calTitle.textContent = "Appointment";
   calOne.innerHTML = ""; calOne.style.transform = calOne.style.transition = calOne.style.opacity = "";
   const h = document.createElement("h3"); h.textContent = e.title;
@@ -1883,6 +1955,7 @@ function showAppt(e) {
     if (!x) continue; const l = document.createElement("div"); l.className = "line"; l.textContent = x; calOne.appendChild(l);
   }
   if (e.notes) { const n = document.createElement("div"); n.className = "notes"; n.textContent = e.notes; calOne.appendChild(n); }
+  calOne.appendChild(apptNotes(e, noteNow));  // H146
   const go = document.createElement("button"); go.type = "button"; go.id = "calgo";
   const a = agendaAgent();
   go.textContent = "Call " + (a.name || "") + " about this";
@@ -1901,7 +1974,13 @@ function showAppt(e) {
 }
 // H144: the call starting or ending while one appointment is open draws it again, so its button and line are right.
 let shownAppt = null;
-calEl.addEventListener("hq-redraw", () => { if (shownAppt) showAppt(shownAppt); });
+calEl.addEventListener("hq-redraw", () => {
+  if (!shownAppt) return;
+  const was = document.getElementById("calnotein"), typed = was ? was.value : "", had = was && document.activeElement === was;  // H146: a half-typed note stays
+  showAppt(shownAppt);
+  const now = document.getElementById("calnotein");
+  if (now && typed) { now.value = typed; now.dispatchEvent(new Event("input")); if (had) now.focus(); }
+});
 async function loadCal(fresh) {
   const ask = ++calAsk;
   if (!calList.querySelector(".appt")) histNote(calList, "Loading…");

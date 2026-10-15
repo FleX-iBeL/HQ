@@ -560,6 +560,31 @@ if __name__ == "__main__":
         await asyncio.to_thread(_planning.start)
         return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
 
+    # H146: a quick note on an appointment (appt_notes.py): {id, add: text} or {id, clear: note id}. Only HQ's own file in
+    # the workspace changes; Google Calendar never does. Only from the page itself (x-hq: calendar).
+    @app.post("/api/calendar/note", include_in_schema=False)
+    async def calendar_note(request: Request):
+        if request.headers.get("x-hq") != "calendar":
+            return JSONResponse({"error": "Only the HQ page can change the notes"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict) or not isinstance(ask.get("id"), str) or not (
+                isinstance(ask.get("add"), str) or isinstance(ask.get("clear"), str)):
+            return JSONResponse({"error": "which appointment, and which note?"}, status_code=400)
+        import appt_notes as _appt_notes
+        if isinstance(ask.get("add"), str):
+            try:
+                await asyncio.to_thread(_appt_notes.add, ask["id"], ask["add"])
+            except KeyError:
+                return JSONResponse({"error": "no such appointment"}, status_code=404)
+            except ValueError:
+                return JSONResponse({"error": "nothing to add"}, status_code=400)
+        elif not await asyncio.to_thread(_appt_notes.clear, ask["id"], ask["clear"]):
+            return JSONResponse({"error": "no such note"}, status_code=404)
+        return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
+
     @app.get("/api/busy", include_in_schema=False)
     async def busy():
         return JSONResponse({"calls": _calls_on}, headers=_NO_CACHE)
