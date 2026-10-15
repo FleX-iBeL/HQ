@@ -57,6 +57,10 @@
     document.querySelector('header a').remove();
     document.body.style.paddingTop = '0';
   }
+  // H145: inside the Mac app (?app), on its own tab: the app has the tabs and shows her texts as Mac notifications
+  // itself, so no back arrow and no notification button.
+  const APP = new URLSearchParams(location.search).has('app');
+  if (APP) document.querySelector('header a').remove();
   if (CALL && !SHEET) document.querySelector('header a').href = '/';
   if (CALL) {
     document.querySelector('link[rel=manifest]').href = '/manifest.webmanifest';
@@ -176,7 +180,7 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
   try { localStorage.setItem('hq-direct-seen', String(Date.now() / 1000)); } catch {}
   load();
-  if (!SHEET) bellState();
+  if (!SHEET && !APP) bellState();
   setInterval(load, 3000);
 })();
 </script>

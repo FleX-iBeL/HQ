@@ -3844,7 +3844,10 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
     async def flow46(self) -> str:
         """H27: the Mac desktop app. No Claude turns. The watchdog part on made-up routine lines, its turning-on
         plan with everything faked off, the strip in a headless browser, then the real app built and its window
-        (never shown) loaded once with --selftest."""
+        (never shown) loaded once with --selftest. H145: her texts in the app: the strip's third tab with her name and
+        a red dot, each of her texts a notification once (never his own, never while he looks at her chat, nothing
+        old on the first look), her chat inside the app without the phone's back arrow or notification button.
+        Off a Mac the app itself isn't built; the rest runs."""
         import importlib.util
         spec = importlib.util.spec_from_file_location("hq_control_t", ROOT / "desktop/hq_control.py")
         hc = importlib.util.module_from_spec(spec)
@@ -3905,7 +3908,8 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
         need(all(f.get("ok") is None for f in dry["fixed"]), "fix --dry did something")
         # The strip in a headless browser: each mood, the light, the tabs, the button only when something is off.
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
-        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         need(Path(chrome).exists(), "no headless browser found to run the strip in")
         page = (ROOT / "desktop/shell.html").read_text()
         harness = r"""<script>
@@ -3925,6 +3929,27 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
   document.getElementById('tab-status').click();
   document.getElementById('dog').dispatchEvent(new MouseEvent('click', { bubbles: true }));
   out.push('panel:' + hq.state().open + '/' + document.querySelectorAll('#rows .row').length);
+  // H145: her tab. The first look takes everything there as read; a new text of hers is a notification once and
+  // the dot; his own text never; looking at her chat clears the dot and shows nothing.
+  const th = (...m) => ({ agent: { name: 'Ann', colour: '#123456' }, messages: m.map(([from, at, text]) => ({ from, at, text })) });
+  const a = [['agent', 100, 'old one'], ['me', 110, 'mine']];
+  const i1 = hq.inbox(th(...a), null, null, false);
+  out.push('first:' + i1.unread + '/' + i1.notify.length + '/' + i1.seen + '/' + i1.told + '/' + document.getElementById('direct-name').textContent + '/' + hq.state().dot);
+  const b = [...a, ['agent', 120, 'new one']];
+  const i2 = hq.inbox(th(...b), i1.seen, i1.told, false);
+  out.push('new:' + i2.unread + '/' + i2.notify.map((m) => m.text).join('+') + '/' + i2.told + '/' + hq.state().dot);
+  const i3 = hq.inbox(th(...b), i2.seen, i2.told, false);
+  out.push('again:' + i3.notify.length + '/' + i3.unread);
+  const c = [...b, ['me', 130, 'answer']];
+  const i4 = hq.inbox(th(...c), i3.seen, i3.told, false);
+  out.push('his:' + i4.notify.length + '/' + i4.unread);
+  const i5 = hq.inbox(th(...c), i4.seen, i4.told, true);
+  out.push('looking:' + i5.unread + '/' + hq.state().dot + '/' + i5.seen);
+  const i6 = hq.inbox(th(...c, ['agent', 140, 'while looking']), i5.seen, i5.told, true);
+  out.push('whilelooking:' + i6.notify.length + '/' + i6.unread);
+  document.getElementById('tab-direct').click();
+  out.push('directtab:' + hq.state().tab + '/' + getComputedStyle(document.getElementById('dog')).display);
+  document.getElementById('tab-status').click();
   out.push('anim:' + ['happy', 'alert', 'bark', 'run', 'sleep'].map((m) => { document.getElementById('dog').setAttribute('class', 'dog ' + m);
     return [...document.querySelectorAll('#dog *')].some((e) => getComputedStyle(e).animationName !== 'none') ? 1 : 0; }).join(''));
   const pre = document.createElement('pre'); pre.id = 'h27'; pre.textContent = 'H27RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
@@ -3932,7 +3957,7 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
 </script>"""
         f = self.tmp / "h27-shell.html"
         f.write_text(page.replace("</body>", harness + "</body>", 1))
-        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h27-profile'}",
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--user-data-dir={self.tmp / 'h27-profile'}",
                                           "--virtual-time-budget=3000", "--dump-dom", f.as_uri()], timeout=60)
         m = re.search(r'<pre id="h27">H27RESULT (.*?) END</pre>', r.stdout)
         need(m, f"the strip test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -3944,6 +3969,25 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
         need(res["tab"] == "call" and res["panel"] == "true/0", f"the tabs or the dog's panel don't work: {res}")
         need(res["calldog"] == "none/none", f"the dog or Turn everything on still show on Call (H46): {res}")
         need(res["anim"] == "11111", f"not every mood moves: {res['anim']}")
+        need(res["first"] == "0/0/110/110/Ann/false", f"her first look shows old texts as new (H145): {res['first']}")
+        need(res["new"] == "1/new one/120/true", f"her new text isn't a notification with a dot (H145): {res['new']}")
+        need(res["again"] == "0/1", f"her text would be shown twice (H145): {res['again']}")
+        need(res["his"] == "0/1", f"his own text is a notification (H145): {res['his']}")
+        need(res["looking"] == "0/false/130", f"looking at her chat doesn't clear the dot (H145): {res['looking']}")
+        need(res["whilelooking"] == "0/0", f"a text while he looks at her chat still pops up (H145): {res['whilelooking']}")
+        need(res["directtab"] == "direct/none", f"her tab doesn't open, or the dog shows on it (H145): {res['directtab']}")
+        swift = (ROOT / "desktop/HQ.swift").read_text()
+        need("UNUserNotificationCenter.current()" in swift and 'self.show("direct")' in swift and '"directTold"' in swift
+             and "hq.inbox(" in swift and "/direct?app=1" in swift and "/direct.json" in swift,
+             "the app doesn't show her texts as Mac notifications that open her chat (H145)")
+        need("push(" not in swift and "/direct/send" not in swift, "the app sends or pushes her texts itself (H145)")
+        dh = (ROOT / "status/direct.html").read_text()
+        need("has('app')" in dh and "if (APP) document.querySelector('header a').remove();" in dh and "if (!SHEET && !APP) bellState();" in dh,
+             "her chat in the app still shows the phone's back arrow or notification button (H145)")
+        if sys.platform != "darwin":
+            return ("seven made-up states judged like the status page; turning on starts only what's off, stops nothing; the strip's five "
+                    "moods move; her tab: a dot and a notification once per text of hers, none for old ones, his own or while he looks; "
+                    "off a Mac the app itself isn't built (run this flow on the laptop for that)")
         # The real app: built with swiftc, its own files found, its window (never shown) loads the strip and the status page.
         b = await asyncio.to_thread(run, [str(ROOT / "desktop/build.sh")], timeout=300)
         need(b.returncode == 0, f"the app didn't build: {(b.stderr or b.stdout)[-400:]}")
@@ -3960,11 +4004,13 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
              f"the app's strip got no reading: {got['strip']}")
         if live["mood"] != "sleep":
             need(got["status_loaded"] and "HQ" in got["status_title"][0], f"the app didn't load the status page: {got}")
+        if got["status_loaded"]:
+            need(got.get("direct", {}).get("read") is True and got["strip"].get("direct") not in ("", "Texts", None),
+                 f"the app didn't read her thread or name her tab (H145): {got.get('direct')} {got['strip'].get('direct')}")
         # F15: the strip's empty space moves the window like a normal Mac app; its buttons don't.
         d = got.get("drag") or {}
         need(d.get("bar", 0) >= 80 and d.get("buttons", 0) >= 1 and d.get("empty_moves") is True and d.get("button_moves") is False,
              f"the window can't be dragged from the strip's top bar, or a button drags it (F15): {d}")
-        swift = (ROOT / "desktop/HQ.swift").read_text()
         need("status.pageZoom = next" in swift and 'item("Smaller", #selector(zoomOut), "-"' in swift and 'id="zoom-in"' in page,
              "the status page can't be made bigger or smaller (H47)")
         need('var tab = "call"' in swift and "_setICECandidateFilteringEnabled:" in swift and "7860/?app=1" in swift,
@@ -7331,7 +7377,7 @@ setTimeout(() => {
                  "the call line doesn't pass her chat on to the status page")
             dh = (ROOT / "status/direct.html").read_text()
             need("location.port === '8443'" in dh and "'/manifest.webmanifest'" in dh, "the chat doesn't know it's opened through the call line")
-            need("has('sheet')" in dh and "if (!SHEET) bellState();" in dh, "her chat in the sheet still shows its back arrow or signs the phone up")
+            need("has('sheet')" in dh and "if (!SHEET && !APP) bellState();" in dh, "her chat in the sheet still shows its back arrow or signs the phone up")
         finally:
             for key, v in saved.items():
                 if v is None:

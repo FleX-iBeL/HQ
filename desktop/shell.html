@@ -66,6 +66,13 @@
   .zoom button:hover { background: var(--card); }
   .zoom span { min-width: 40px; text-align: center; color: var(--soft); font-size: 12px; cursor: pointer; }
   body.call .zoom { display: none; }
+  /* H145 (15 October 2026), in the user's words: "and i do miss donna's texts here on the laptop so i want those as
+     well." A third tab with her chat (the same thread as the phone), a red dot on a new text; the app shows her
+     texts as Mac notifications. The strip on her tab is as on Call: only the tabs. */
+  .tabs button { position: relative; }
+  .tabs .dot { position: absolute; top: 2px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+    box-shadow: 0 0 0 2px var(--tint); display: none; }
+  .tabs .dot.show { display: block; }
 
   /* The dog. Claude's choice: a small drawn dog, its mood follows the light. */
   .dog .tail { transform-origin: 22px 40px; }
@@ -180,6 +187,7 @@
     <div class="tabs" role="tablist">
       <button id="tab-call" aria-pressed="true" data-tab="call">Call</button>
       <button id="tab-status" aria-pressed="false" data-tab="status">Status</button>
+      <button id="tab-direct" aria-pressed="false" data-tab="direct" title="Her direct line: the same chat as on the phone"><span id="direct-name">Texts</span><i class="dot" id="direct-dot"></i></button>
     </div>
     <div class="zoom" role="group" aria-label="Status page size">
       <button id="zoom-out" type="button" aria-label="Smaller (Cmd -)" title="Smaller (⌘−)">−</button>
@@ -200,7 +208,7 @@
   let last = null;
   let lastDrag = '';
   const hq = window.hq = {
-    state: () => ({ mood: $('dog').getAttribute('class').replace('dog ', ''), light: $('light').className.replace('light ', ''), head: $('head').textContent, tab: document.querySelector('.tabs [aria-pressed="true"]').dataset.tab, open: document.body.classList.contains('open'), fix: !$('fix').disabled }),
+    state: () => ({ mood: $('dog').getAttribute('class').replace('dog ', ''), light: $('light').className.replace('light ', ''), head: $('head').textContent, tab: document.querySelector('.tabs [aria-pressed="true"]').dataset.tab, open: document.body.classList.contains('open'), fix: !$('fix').disabled, direct: $('direct-name').textContent, dot: $('direct-dot').classList.contains('show') }),
     update(h) {
       last = h;
       const u = h.update || {};
@@ -251,10 +259,30 @@
       if (key !== lastDrag) { lastDrag = key; send(m); }
       return m;
     },
+    // H145: the app hands over her thread (/direct.json) and what it remembers: `seen`, the newest text he had in
+    // front of him, `told`, the newest text a notification was shown for (null the first time: everything already
+    // there counts as read). Back: her name, how many of her texts are unread (the dot), the new ones to show as a
+    // notification (each text once, never while he's looking at her chat) and the two marks to keep.
+    inbox(d, seen, told, looking) {
+      const msgs = (d && d.messages) || [];
+      const agent = (d && d.agent) || {};
+      const newest = msgs.reduce((a, m) => Math.max(a, +m.at || 0), 0);
+      if (seen == null || told == null) { seen = told = newest; }
+      if (looking) seen = Math.max(seen, newest);
+      const hers = msgs.filter((m) => m.from !== 'me');
+      const notify = looking ? [] : hers.filter((m) => (+m.at || 0) > told).slice(-3).map((m) => ({ at: m.at, text: m.text }));
+      told = Math.max(told, newest);
+      const unread = hers.filter((m) => (+m.at || 0) > seen).length;
+      if (agent.name) $('direct-name').textContent = agent.name;
+      $('direct-dot').classList.toggle('show', unread > 0);
+      $('tab-direct').title = unread ? `${unread} new from ${agent.name || 'her'}` : `${agent.name || 'Her'} direct line: the same chat as on the phone`;
+      hq.dragMap();
+      return { name: agent.name || '', unread, notify, seen, told };
+    },
     zoom(pct) { $('zoom-level').textContent = `${pct}%`; hq.dragMap(); },
     tab(t) {
       for (const b of document.querySelectorAll('.tabs button')) b.setAttribute('aria-pressed', String(b.dataset.tab === t));
-      document.body.classList.toggle('call', t === 'call');
+      document.body.classList.toggle('call', t !== 'status');  // H145: her tab, like Call, shows only the tabs
       if (t === 'call' && document.body.classList.contains('open')) { document.body.classList.remove('open'); send({ do: 'height', px: 89 }); }
       hq.dragMap();
     },

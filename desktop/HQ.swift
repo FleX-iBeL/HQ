@@ -10,11 +10,15 @@
 // Built by desktop/build.sh with swiftc (no Xcode project needed).
 import Cocoa
 import WebKit
+import UserNotifications
 
 let SHELL_HEIGHT: CGFloat = 89
 let STATUS_URL = URL(string: "http://127.0.0.1:4748/")!
 // H46: ?app tells the call page it's inside the app, which has its own Status tab, so it leaves out its status button.
 let CALL_URL = URL(string: "http://127.0.0.1:7860/?app=1")!
+// H145: her direct line (H80), the same chat and thread as on the phone, from this MacBook's status server.
+let DIRECT_URL = URL(string: "http://127.0.0.1:4748/direct?app=1")!
+let DIRECT_JSON = URL(string: "http://127.0.0.1:4748/direct.json")!
 
 func hqFolder() -> String {
     if let env = ProcessInfo.processInfo.environment["HQ_HOME"], !env.isEmpty { return env }
@@ -55,11 +59,16 @@ final class ShellView: WKWebView {
     }
 }
 
-final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
+final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate,
+                        UNUserNotificationCenterDelegate {
     var window: NSWindow!
     var shell: ShellView!
     var status: WKWebView!
     var call: WKWebView!
+    var direct: WKWebView!
+    var directLoaded = false
+    var directBusy = false
+    var directRead = false  // the selftest: her thread was read once
     var shellHeight: NSLayoutConstraint!
     var timer: Timer?
     var shellReady = false
@@ -98,8 +107,10 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         let saved = UserDefaults.standard.double(forKey: "statusZoom")
         if saved >= 0.5 && saved <= 2.0 { status.pageZoom = CGFloat(saved) }
         call = page(call: true)
+        direct = page()
         status.isHidden = true
-        for v in [status!, call!, shell!] {
+        direct.isHidden = true
+        for v in [status!, call!, direct!, shell!] {
             v.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(v)
         }
@@ -110,7 +121,7 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
             shell.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             shellHeight,
         ])
-        for v in [status!, call!] {
+        for v in [status!, call!, direct!] {
             NSLayoutConstraint.activate([
                 v.topAnchor.constraint(equalTo: content.topAnchor, constant: SHELL_HEIGHT),
                 v.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -125,6 +136,11 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         callLoaded = true  // the microphone is only asked for when a call starts, not when the page loads
         call.load(URLRequest(url: CALL_URL))
 
+        if !selftest {  // H145: her texts as Mac notifications; macOS asks once
+            let nc = UNUserNotificationCenter.current()
+            nc.delegate = self
+            nc.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+        }
         if selftest {
             DispatchQueue.main.asyncAfter(deadline: .now() + 40) { print("{\"selftest\": \"timed out\"}"); exit(1) }
         } else {
@@ -132,7 +148,7 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
             NSApp.activate(ignoringOtherApps: true)
             window.makeFirstResponder(call)  // H49: the space bar reaches the call page from the start
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.poll() }
+        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.poll(); self?.pollDirect() }
     }
 
     func page(call: Bool = false) -> WKWebView {
@@ -219,9 +235,78 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         }
     }
 
+    // MARK: her texts (H145)
+
+    // Every 5 seconds: her thread from the status server, handed to the strip (hq.inbox), which says how many are
+    // unread (the red dot) and which are new for a notification. The two marks are kept, so each text is shown
+    // once, also after a restart; the first time everything already there counts as read. Nothing is sent from
+    // here: the phone gets its push from the routine as before.
+    var looking: Bool {
+        tab == "direct" && NSApp.isActive && window.isVisible && !window.isMiniaturized
+    }
+
+    func pollDirect() {
+        guard shellReady, !directBusy else { return }
+        directBusy = true
+        var req = URLRequest(url: DIRECT_JSON)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.timeoutInterval = 4
+        URLSession.shared.dataTask(with: req) { [weak self] data, resp, _ in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.directBusy = false
+                guard let data = data, (resp as? HTTPURLResponse)?.statusCode == 200,
+                      let body = String(data: data, encoding: .utf8), body.hasPrefix("{") else { return }
+                self.directRead = true
+                let d = UserDefaults.standard
+                let seen = d.object(forKey: "directSeen") == nil ? "null" : String(d.double(forKey: "directSeen"))
+                let told = d.object(forKey: "directTold") == nil ? "null" : String(d.double(forKey: "directTold"))
+                self.shell.evaluateJavaScript("JSON.stringify(hq.inbox(\(body), \(seen), \(told), \(self.looking)))") { out, _ in
+                    guard let text = out as? String, let o = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return }
+                    if self.selftest { return }  // the selftest reads, never marks or notifies
+                    if let v = o["seen"] as? NSNumber { d.set(v.doubleValue, forKey: "directSeen") }
+                    if let v = o["told"] as? NSNumber { d.set(v.doubleValue, forKey: "directTold") }
+                    let unread = (o["unread"] as? NSNumber)?.intValue ?? 0
+                    NSApp.dockTile.badgeLabel = unread > 0 ? String(unread) : nil
+                    let name = (o["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "HQ"
+                    for m in (o["notify"] as? [[String: Any]]) ?? [] { self.notify(name, m["text"] as? String ?? "", at: (m["at"] as? NSNumber)?.doubleValue ?? 0) }
+                }
+            }
+        }.resume()
+    }
+
+    func notify(_ name: String, _ text: String, at: Double) {
+        let c = UNMutableNotificationContent()
+        c.title = name
+        c.body = text
+        c.sound = .default
+        c.userInfo = ["open": "direct"]
+        // One id per text: the same text is never shown twice, even if asked again.
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "direct-\(at)", content: c, trigger: nil))
+    }
+
+    // Shown also while the app is in front, unless he's already looking at her chat.
+    func userNotificationCenter(_ c: UNUserNotificationCenter, willPresent n: UNNotification,
+                                withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
+        DispatchQueue.main.async { done(self.looking ? [] : [.banner, .sound, .list]) }
+    }
+
+    // A click on her text opens her chat.
+    func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse,
+                                withCompletionHandler done: @escaping () -> Void) {
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            self.window.makeKeyAndOrderFront(nil)
+            self.show("direct")
+            done()
+        }
+    }
+
+    func applicationDidBecomeActive(_ note: Notification) { if tab == "direct" { pollDirect() } }
+
     func report() {
         guard !reported else { return }
-        if !statusLoaded && !statusFailed {  // wait for the status page a little longer
+        if (!statusLoaded && !statusFailed) || (statusLoaded && !directRead) {  // wait for the status page (and her thread) a little longer
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.report() }
             return
         }
@@ -233,7 +318,9 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
                 // F15: an empty spot of the bar moves the window, a button doesn't.
                 let button = self.shell.noDrag.first.map { NSPoint(x: $0.midX, y: $0.midY) } ?? NSPoint(x: -1, y: -1)
                 let drag = "{\"bar\": \(Int(self.shell.barHeight)), \"buttons\": \(self.shell.noDrag.count), \"empty_moves\": \(self.shell.draggable(NSPoint(x: 20, y: 44))), \"button_moves\": \(self.shell.draggable(button))}"
-                print("{\"strip\": \(s), \"status_loaded\": \(self.statusLoaded), \"status_title\": \(t), \"drag\": \(drag)}")
+                // H145: her tab, its name from her thread, and whether the thread was read.
+                let dir = "{\"read\": \(self.directRead), \"view\": \(self.direct != nil)}"
+                print("{\"strip\": \(s), \"status_loaded\": \(self.statusLoaded), \"status_title\": \(t), \"drag\": \(drag), \"direct\": \(dir)}")
                 fflush(stdout)
                 exit(0)
             }
@@ -271,12 +358,17 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         tab = which
         status.isHidden = which != "status"
         call.isHidden = which != "call"
+        direct.isHidden = which != "direct"
+        if which == "direct" {
+            if !directLoaded { directLoaded = true; direct.load(URLRequest(url: DIRECT_URL)) }
+            pollDirect()  // the dot goes as soon as her chat is open
+        }
         if which == "call" && !callLoaded {
             callLoaded = true  // only now, so the microphone isn't asked for before he wants to call
             call.load(URLRequest(url: CALL_URL))
         }
         shell.evaluateJavaScript("hq.tab('\(which)')", completionHandler: nil)
-        window.makeFirstResponder(which == "call" ? call : status)
+        window.makeFirstResponder(which == "call" ? call : which == "direct" ? direct : status)
     }
 
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -287,6 +379,7 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
             shell.evaluateJavaScript("hq.tab('\(tab)')", completionHandler: nil)
             showZoom()
             poll()
+            pollDirect()
         case "tab":
             show(m["tab"] as? String ?? "status")
         case "fix":
@@ -318,7 +411,7 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
             <html><body style="font:15px -apple-system;color:#888;display:flex;align-items:center;justify-content:center;height:90vh;background:transparent">
             <div style="text-align:center"><p>\(words)</p><p>On Status, the dog can turn it on: Turn everything on.</p></div></body></html>
             """, baseURL: nil)
-        if v === status { statusFailed = true } else { callLoaded = false }
+        if v === status { statusFailed = true } else if v === direct { directLoaded = false } else { callLoaded = false }
     }
 
     // The call page asks for the microphone; only the call line on this MacBook gets it.
@@ -357,8 +450,11 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
 
     @objc func showStatus() { show("status") }
     @objc func showCall() { show("call") }
+    @objc func showDirect() { show("direct") }
     @objc func reloadPage() {
-        if tab == "call" { call.load(URLRequest(url: CALL_URL)); callLoaded = true } else { status.load(URLRequest(url: STATUS_URL)) }
+        if tab == "call" { call.load(URLRequest(url: CALL_URL)); callLoaded = true }
+        else if tab == "direct" { direct.load(URLRequest(url: DIRECT_URL)); directLoaded = true }
+        else { status.load(URLRequest(url: STATUS_URL)) }
     }
     @objc func fixAll() {
         shell.evaluateJavaScript("hq.fixing(true, 'Turning on what\\u2019s off…')", completionHandler: nil)
@@ -389,7 +485,8 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         sub("Edit", [item("Undo", Selector(("undo:")), "z"), item("Redo", Selector(("redo:")), "Z"), .separator(),
                      item("Cut", #selector(NSText.cut(_:)), "x"), item("Copy", #selector(NSText.copy(_:)), "c"),
                      item("Paste", #selector(NSText.paste(_:)), "v"), item("Select All", #selector(NSText.selectAll(_:)), "a")])
-        sub("View", [item("Status", #selector(showStatus), "1", self), item("Call", #selector(showCall), "2", self), .separator(),
+        sub("View", [item("Status", #selector(showStatus), "1", self), item("Call", #selector(showCall), "2", self),
+                     item("Texts", #selector(showDirect), "3", self), .separator(),
                      item("Bigger", #selector(zoomIn), "+", self), hidden(item("Bigger", #selector(zoomIn), "=", self)),
                      item("Smaller", #selector(zoomOut), "-", self), item("Actual Size", #selector(zoomReset), "0", self), .separator(),
                      item("Reload", #selector(reloadPage), "r", self), item("Turn everything on", #selector(fixAll), "t", self)])

@@ -80,7 +80,8 @@
       health();
       clearInterval(timer);
       timer = setInterval(health, EVERY);
-    } else if (m.do === 'tab') tab(m.tab);
+    } else if (m.do === 'tab' && m.tab === 'direct') location.href = '/direct';  // H145: the strip's third tab, her chat
+    else if (m.do === 'tab') tab(m.tab);
     else if (m.do === 'fix') fix();
     else if (m.do === 'update' || m.do === 'changelog') {
       // H59: as in the Mac app: the status page's own sheet, Update or the changelog.
