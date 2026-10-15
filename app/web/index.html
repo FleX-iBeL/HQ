@@ -307,6 +307,17 @@
   #callist .appt small { display:block; color:var(--muted); font-size:12px; margin-top:2px; }
   #callist .appt.free .w { color:var(--muted); }
   #callist .appt .bell { flex-shrink:0; width:16px; height:16px; color:var(--accent); align-self:center; }
+  /* H143: the check (done) and the X (didn't happen as planned) on every appointment; an X greys it out */
+  #callist .arow { display:flex; align-items:center; gap:2px; }
+  #callist .arow .appt { flex:1; min-width:0; }
+  #callist .mk { flex-shrink:0; width:36px; height:36px; border:1px solid color-mix(in srgb, var(--muted) 55%, transparent); border-radius:50%;
+                 background:transparent; color:var(--muted); display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0; }
+  #callist .mk svg { width:18px; height:18px; }
+  #callist .mk.done[aria-pressed="true"] { background:#16a34a; border-color:#16a34a; color:#fff; }
+  #callist .mk.x[aria-pressed="true"] { background:var(--muted); border-color:var(--muted); color:var(--bg); }
+  #callist .mk:disabled { opacity:.5; cursor:default; }
+  #callist .arow.x .appt .w, #callist .arow.x .appt .t { opacity:.45; text-decoration:line-through; }
+  #callist .arow.x .appt small { text-decoration:none; }
   #calping { border:1px solid var(--muted); border-radius:14px; background:transparent; color:var(--fg); font:600 16px/1 -apple-system,sans-serif;
              padding:13px 12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
   #calping svg { width:18px; height:18px; }
@@ -1779,11 +1790,12 @@ function showCalList(d) {
   if (calEl.classList.contains("reading")) return;
   if (!d || !Array.isArray(d.events)) { histNote(calList, "Couldn't load the calendar. Try again."); return; }
   calList.innerHTML = "";
-  let day = "";
+  let day = "", moving = false;
   for (const e of d.events) {
     const a = calDate(e.start); if (!a) continue;
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const shown = e.all_day || a >= today ? a : today;  // a running appointment that started earlier counts for today
+    const z = e.end ? calDate(e.end) : a;  // H143: the week's past days stay; one still running counts for today
+    const shown = e.all_day || a >= today || !z || z < new Date() ? a : today;
     const k = calDayKey(shown);
     if (k !== day) { day = k; const h = document.createElement("div"); h.className = "day"; h.textContent = calDayName(shown); calList.appendChild(h); }
     const b = document.createElement("button"); b.type = "button"; b.className = "appt" + (e.free ? " free" : "");
@@ -1794,9 +1806,37 @@ function showCalList(d) {
     b.append(t, w);
     if (e.ping) { b.insertAdjacentHTML("beforeend", BELL.replace("<svg", '<svg class="bell" aria-label="Ping on"')); b.classList.add("ping"); }  // H124
     b.addEventListener("click", () => showAppt(e));
-    calList.appendChild(b);
+    if (e.move_note && e.mark === "x") { const s = document.createElement("small"); s.className = "mv"; s.textContent = e.move_note; w.appendChild(s); }
+    const row = document.createElement("div"); row.className = "arow" + (e.mark ? " " + e.mark : "");
+    row.append(b, markButton(e, "done"), markButton(e, "x"));
+    calList.appendChild(row);
+    if (e.move === "to_move" || e.move === "to_back") moving = true;
   }
+  clearTimeout(calMoveTimer);
+  if (moving) calMoveTimer = setTimeout(() => { if (calOpen() && !calEl.classList.contains("reading")) loadCal(false); }, 4000);
   if (!calList.children.length) histNote(calList, d.looking ? "Reading your calendar…" : d.looked ? "Nothing in the next two weeks" : "Not read yet");
+}
+// H143: the check (done) and the X (didn't happen as planned). A tap marks it, a second tap undoes it; an X moves the
+// appointment in his Google Calendar to the calendar HQ Planning (app/planning.py), and undoing it moves it back.
+let calMoveTimer = null;
+const MARK_ICON = { done: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+                    x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>' };
+function markButton(e, kind) {
+  const m = document.createElement("button"); m.type = "button"; m.className = "mk " + kind; m.innerHTML = MARK_ICON[kind];
+  m.setAttribute("aria-label", kind === "done" ? "Done" : "Didn't happen as planned");
+  m.setAttribute("aria-pressed", String(e.mark === kind));
+  m.disabled = !e.mark_id || ((e.move === "to_move" || e.move === "to_back") && kind === "x" && e.mark !== "x");
+  m.addEventListener("click", async () => {
+    const want = e.mark === kind ? "" : kind;
+    calList.querySelectorAll(".mk").forEach(x => x.disabled = true);
+    try {
+      const r = await fetch("api/calendar/mark", { method: "POST", cache: "no-store",
+        headers: { "x-hq": "calendar", "content-type": "application/json" }, body: JSON.stringify({ id: e.mark_id, mark: want }) });
+      if (r.ok) showCalList(await r.json());
+      else { calNote.textContent = "Couldn't mark that. Try again."; calList.querySelectorAll(".mk").forEach(x => x.disabled = false); }
+    } catch (err) { calNote.textContent = "Couldn't mark that. Try again."; calList.querySelectorAll(".mk").forEach(x => x.disabled = false); }
+  });
+  return m;
 }
 // H124: the bell. Donna texts him when an appointment he picked starts (none by default); a call or her chat can pick
 // one, and so can the button in the appointment here. Only HQ's own list changes; Google Calendar never does.
@@ -1833,7 +1873,8 @@ function showAppt(e) {
   const h = document.createElement("h3"); h.textContent = e.title;
   const when = document.createElement("div"); when.className = "line"; when.textContent = calWhen(e);
   calOne.append(h, when);
-  for (const x of [e.where, e.calendar !== "Main" ? e.calendar + " calendar" : "", e.free ? "Shown as free" : ""]) {
+  const mk = e.mark === "done" ? "Ticked off: done" : e.mark === "x" ? "X: didn't happen as planned" + (e.move_note ? " · " + e.move_note : "") : "";
+  for (const x of [e.where, e.calendar !== "Main" ? e.calendar + " calendar" : "", e.free ? "Shown as free" : "", mk]) {
     if (!x) continue; const l = document.createElement("div"); l.className = "line"; l.textContent = x; calOne.appendChild(l);
   }
   if (e.notes) { const n = document.createElement("div"); n.className = "notes"; n.textContent = e.notes; calOne.appendChild(n); }

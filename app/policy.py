@@ -311,6 +311,11 @@ class Policy:
             if len(args) == 1 or args[1] in ("list", "add"):
                 return Decision(ALLOW, "her own list of what she has said about herself")
             return Decision(DENY, "the about-herself script takes list or add")
+        # H143: the week's ticks and X in his calendar, read only, to look back with him.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "planning.py"):
+            if len(args) == 1 or (args[1] == "week" and len(args) <= 3):
+                return Decision(ALLOW, "the week's ticks and X in his calendar")
+            return Decision(DENY, "from a call, the planning script only reads a week (week, or week with a date)")
         # H56.3: main and backup. Asking which one is main, and making one the main on his ask.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "role.py"):
             if len(args) == 1 or (len(args) == 3 and args[1] == "main"):

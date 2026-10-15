@@ -346,6 +346,8 @@ class Server:
             "HQ_CALENDAR_FAKE": str(tmp / "calendar-server" / "stream.txt"),
             # H124: never the workspace's own pings or her notes
             "HQ_DIRECT_DIR": str(tmp / "direct-server"), "HQ_AGENT_NOTES": str(tmp / "direct-server" / "notes-donna.md"),
+            # H143: an X never reaches Google from a test
+            "HQ_PLANNING_FAKE": str(tmp / "planning-server"),
         }
 
     @property
@@ -4816,8 +4818,10 @@ window.fetch = async (url, opt) => {
             need(st2.get("error") and [e["title"] for e in st2.get("events") or []] == ["Birthday", "Her lecture", "Dentist"]
                  and st2.get("looked") == st["looked"], f"a failed read didn't keep the last days with the error: {st2}")
             need(agenda.read(now=t0)["error"] and len(agenda.read(now=t0)["events"]) == 3, "the page doesn't get the last days and the error")
-            need(len(agenda.read(now=datetime(2099, 1, 2, 12, 0).timestamp())["events"]) == 0,
-                 "appointments that are over aren't left out")
+            need(len(agenda.read(now=datetime(2099, 1, 5, 12, 0).timestamp())["events"]) == 0,
+                 "appointments from before this week aren't left out")
+            need(len(agenda.read(now=datetime(2099, 1, 4, 12, 0).timestamp())["events"]) == 3,
+                 "this week's past days aren't kept (H143)")
             s0 = {"looked": t0}
             need(not agenda.due(datetime(2099, 1, 1, 12, 30).timestamp(), s0) and agenda.due(datetime(2099, 1, 1, 13, 1).timestamp(), s0)
                  and not agenda.due(datetime(2099, 1, 2, 3, 0).timestamp(), s0) and not agenda.due(datetime(2099, 1, 1, 23, 30).timestamp(), s0),
@@ -7908,6 +7912,257 @@ setTimeout(() => {
         shutil.rmtree(base, ignore_errors=True)
         return "; ".join(notes)
 
+    async def flow99(self) -> str:
+        """H143, no Claude: the check and the X in the calendar. planning.py on its own copies with a stand-in for the
+        connector (HQ_PLANNING_FAKE: every call checked by the same guard the real runs have): marks, an X copied to
+        HQ Planning and only then the original removed, undo the other way, what's never moved, a failing copy never
+        removing anything, the week's look back, the call's rule and policy; the test server's /api/calendar/mark;
+        and the real call page in a headless browser, phone and app: the two buttons, the X greyed, the week's past days."""
+        import agenda
+        import planning
+        from policy import Policy, ALLOW, DENY
+        d = self.tmp / "h143"
+        d.mkdir(parents=True, exist_ok=True)
+        real = agenda.data_file().with_name("calendar-marks.json") if not os.environ.get("HQ_CALENDAR_FILE") else None
+        real = real or Path(os.path.join(agenda.hqpaths.DATA, "calendar-marks.json"))
+        real_before = real.read_bytes() if real.exists() else None
+        keep = {k: os.environ.get(k) for k in ("HQ_CALENDAR_FILE", "HQ_CALENDAR_MARKS", "HQ_PLANNING_FAKE", "HQ_CALENDAR",
+                                               "HQ_PLANNING_CALENDAR", "HQ_CALENDAR_FAKE")}
+        fake = d / "fake"
+        fake.mkdir(exist_ok=True)
+        os.environ.update({"HQ_CALENDAR_FILE": str(d / "calendar.json"), "HQ_PLANNING_FAKE": str(fake), "HQ_CALENDAR": "0"})
+        for k in ("HQ_CALENDAR_MARKS", "HQ_PLANNING_CALENDAR", "HQ_CALENDAR_FAKE"):
+            os.environ.pop(k, None)
+        calls, answers = fake / "calls.jsonl", fake / "answers.jsonl"
+        def answer(*items):
+            answers.write_text("".join(json.dumps({"tool": t, "result": r}) + "\n" for t, r in items))
+            calls.write_text("")
+        def made():
+            return [json.loads(l) for l in calls.read_text().splitlines()] if calls.exists() else []
+        try:
+            now = datetime.now()
+            mon = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            iso = lambda day, h: (mon + timedelta(days=day, hours=h)).astimezone().isoformat()
+            ev = lambda i, cal, gid, title, day, h, **kw: {"id": agenda._event_id(cal, gid), "gid": gid, "cal": cal, "title": title,
+                                                          "start": iso(day, h), "end": iso(day, h + 1), "all_day": False, "where": "",
+                                                          "notes": "", "calendar": "Main", "free": False, "type": "DEFAULT", **kw}
+            cals = [{"id": "me@example.com", "name": "Main"}, {"id": "plan-id", "name": "HQ Planning"}]
+            a1 = ev(1, "me@example.com", "g1", "Deep work", 0, 9, where="Desk", notes="The big one")
+            a2 = ev(2, "me@example.com", "g2", "Lunch with a friend", 0, 12, others=True)
+            a3 = {**ev(3, "me@example.com", "g3", "A birthday", 0, 0), "all_day": True, "type": "BIRTHDAY",
+                  "start": mon.strftime("%Y-%m-%d"), "end": (mon + timedelta(days=1)).strftime("%Y-%m-%d")}
+            a4 = ev(4, "me@example.com", "g4", "Gym", 1, 18)
+            a5 = ev(5, "work-id", "g5", "Read", 2, 20)
+            a6 = ev(6, "me@example.com", "g6", "Next week", 8, 9)
+            evs = [a1, a2, a3, a4, a5, a6]
+            (d / "calendar.json").write_text(json.dumps({"looked": time.time(), "calendars": cals, "events": evs}))
+            need(planning.marks_file() == d / "calendar-marks.json" and planning.calendar_name() == "HQ Planning",
+                 "the marks aren't next to the calendar copy, or the calendar's name isn't HQ Planning by default")
+            os.environ["HQ_PLANNING_CALENDAR"] = "Other plans"
+            need(planning.calendar_name() == "Other plans", "the calendar's name isn't a setting")
+            os.environ.pop("HQ_PLANNING_CALENDAR")
+            got = {e["id"]: e for e in agenda.read()["events"]}
+            need(a1["id"] in got and a6["id"] in got and all(e["mark"] == "" for e in got.values()),
+                 "this week's past days aren't in the calendar, or something is marked before a tap")
+            need(agenda.prompt(now).count(mon.strftime("%Y-%m-%dT00:00:00")) == 1, "the calendar isn't read from this week's Monday")
+            # done, and undo
+            planning.set_mark(a1["id"], "done")
+            need(agenda.read()["events"][0]["mark"] == "done" and not planning.pending(), "the check didn't mark it, or asked for a move")
+            planning.set_mark(a1["id"], "")
+            need(not planning._read().get("marks"), "a second tap didn't undo the check")
+            # X: the copy in HQ Planning, and only then the original removed
+            planning.set_mark(a1["id"], "x")
+            e1 = next(e for e in agenda.read()["events"] if e["id"] == a1["id"])
+            need(e1["mark"] == "x" and e1["move"] == "to_move" and "Moving to HQ Planning" in e1["move_note"], f"the X isn't waiting to move: {e1}")
+            answer(("create_event", {"id": "c1", "summary": "Deep work"}), ("delete_event", {}))
+            need(planning.work() == 1, "the waiting move wasn't done")
+            c = made()
+            need([x["tool_name"] for x in c] == [planning.TOOL + "create_event", planning.TOOL + "delete_event"] and all(x["passed"] for x in c),
+                 f"the move wasn't a guarded copy and then a removal: {c}")
+            ci, di = c[0]["tool_input"], c[1]["tool_input"]
+            need(ci["calendarId"] == "plan-id" and ci["summary"] == "Deep work" and ci["location"] == "Desk" and ci["description"] == "The big one"
+                 and ci["notificationLevel"] == "NONE" and ci["startTime"].endswith("T09:00:00") and "+" not in ci["startTime"],
+                 f"the copy isn't the same appointment in HQ Planning: {ci}")
+            need(di == {"calendarId": "me@example.com", "eventId": "g1", "notificationLevel": "NONE"}, f"something else was removed: {di}")
+            m1 = planning._read()["marks"][a1["id"]]
+            need(m1["move"]["state"] == "moved" and m1["move"]["copy"] == {"cal": "plan-id", "gid": "c1"}, f"the move isn't saved: {m1}")
+            need(next(e for e in agenda.read()["events"] if e["id"] == a1["id"])["move_note"] == "In HQ Planning", "the sheet doesn't say it's in HQ Planning")
+            # the next read: the original gone, the copy in HQ Planning carries the X
+            cp = {**a1, "id": agenda._event_id("plan-id", "c1"), "gid": "c1", "cal": "plan-id", "calendar": "HQ Planning"}
+            (d / "calendar.json").write_text(json.dumps({"looked": time.time(), "calendars": cals, "events": [cp] + evs[1:]}))
+            e1 = next(e for e in agenda.read()["events"] if e["title"] == "Deep work")
+            need(e1["mark_id"] == a1["id"] and e1["mark"] == "x", f"the copy in HQ Planning doesn't carry the X: {e1}")
+            need(planning.why_not(cp).startswith("Already in"), "an appointment already in HQ Planning would be moved again")
+            # undo: put back where it came from, then the copy removed
+            planning.set_mark(a1["id"], "")
+            answer(("create_event", {"id": "b1", "summary": "Deep work"}), ("delete_event", {}))
+            planning.work()
+            c = made()
+            need([x["tool_input"].get("calendarId") for x in c] == ["me@example.com", "plan-id"] and c[1]["tool_input"]["eventId"] == "c1"
+                 and all(x["passed"] for x in c), f"undo didn't put it back and then remove the copy: {c}")
+            need(not any(e["title"] == "Deep work" for e in agenda.read()["events"]),
+                 "the removed copy still shows before the next read")
+            need(planning._read()["marks"][a1["id"]].get("mark") == "", "undo left a mark")
+            # never moved: other people in it, a birthday
+            for e in (a2, a3):
+                planning.set_mark(e["id"], "x")
+            calls.write_text("")
+            planning.work()
+            st = {e["id"]: e for e in agenda.read()["events"]}
+            need(not made() and st[a2["id"]]["move"] == "kept" and "other people" in st[a2["id"]]["move_note"]
+                 and st[a3["id"]]["move"] == "kept" and st[a2["id"]]["mark"] == "x", "an appointment with others in it or a birthday was moved")
+            # a copy that fails: tried TRIES times, and nothing is ever removed
+            planning.set_mark(a4["id"], "x")
+            answer()
+            for _ in range(planning.TRIES):
+                planning.work()
+            c = made()
+            m4 = planning._read()["marks"][a4["id"]]["move"]
+            need(m4["state"] == "failed" and not any(x["tool_name"].endswith("delete_event") for x in c)
+                 and len([x for x in c if x["tool_name"].endswith("create_event")]) == planning.TRIES,
+                 f"a failing copy wasn't tried {planning.TRIES} times, stopped, and nothing removed: {m4} {c}")
+            need("Couldn't move it" in next(e for e in agenda.read()["events"] if e["id"] == a4["id"])["move_note"], "the sheet doesn't say the move failed")
+            planning.set_mark(a4["id"], "")
+            need(a4["id"] not in planning._read()["marks"], "undoing a failed X left something")
+            # copied, but the original couldn't be removed: undo only removes the copy, nothing put back twice
+            planning.set_mark(a5["id"], "x")
+            answer(("create_event", {"id": "c5", "summary": "Read"}), ("delete_event", {"error": "forbidden"}))
+            planning.work()
+            m5 = planning._read()["marks"][a5["id"]]["move"]
+            need(m5["state"] == "to_move" and m5["copy"]["gid"] == "c5" and not m5.get("removed"), f"a failed removal isn't kept: {m5}")
+            planning.set_mark(a5["id"], "")
+            answer(("delete_event", {}))
+            planning.work()
+            c = made()
+            need([x["tool_name"] for x in c] == [planning.TOOL + "delete_event"] and c[0]["tool_input"]["eventId"] == "c5"
+                 and c[0]["tool_input"]["calendarId"] == "plan-id", f"undo after a failed removal wasn't only the copy's removal: {c}")
+            # no HQ Planning calendar: said, nothing made
+            (d / "calendar.json").write_text(json.dumps({"looked": time.time(), "calendars": cals[:1], "events": evs}))
+            planning.set_mark(a6["id"], "x")
+            calls.write_text("")
+            planning.work()
+            need(not made() and "no calendar named HQ Planning" in planning._read()["marks"][a6["id"]]["move"].get("error", ""),
+                 "a missing HQ Planning calendar isn't said")
+            planning.set_mark(a6["id"], "")
+            (d / "calendar.json").write_text(json.dumps({"looked": time.time(), "calendars": cals, "events": evs}))
+            # the guard: the one call asked for, once; nothing else
+            exp = d / "expect.json"
+            exp.write_text(json.dumps({"tool": planning.TOOL + "delete_event", "input": {"calendarId": "a", "eventId": "b"}}))
+            g = lambda name, inp: planning.guard(json.dumps({"tool_name": planning.TOOL + name, "tool_input": inp}), str(exp))
+            need(g("delete_event", {"calendarId": "a", "eventId": "other"}) == 2 and planning.guard(json.dumps({"tool_name": "ToolSearch", "tool_input": {}}), str(exp)) == 0 and g("update_event", {"calendarId": "a", "eventId": "b"}) == 2
+                 and g("delete_event", {"calendarId": "a", "eventId": "b"}) == 0 and g("delete_event", {"calendarId": "a", "eventId": "b"}) == 2
+                 and planning.guard("{}", str(d / "none.json")) == 2, "the guard lets another call through, or the same one twice")
+            src = (APP / "planning.py").read_text()
+            need('"--permission-mode", "dontAsk"' in src and '"--allowedTools", TOOL + tool' in src and '"PreToolUse"' in src,
+                 "a move run isn't a dontAsk run with only its one tool and the guard")
+            # the look back
+            planning.set_mark(a2["id"], "done")
+            wk = planning.week()
+            need("Week of Monday" in wk and "- done: Lunch with a friend" in wk and "- X: A birthday" in wk and "Next week" not in wk
+                 and "HQ Planning" in wk, f"the week's look back isn't right: {wk}")
+            # the call's rule and policy
+            need('planning.py" week' in config.VOICE_RULES and '"HQ Planning"' in config.VOICE_RULES, "the call rules don't say where the marks are")
+            pol = Policy(config.FOLDER)
+            py = str(ROOT / "app" / "planning.py")
+            need(pol.decide("Bash", {"command": f'python3 "{py}" week'}).verdict == ALLOW
+                 and pol.decide("Bash", {"command": f'python3 "{py}" work'}).verdict == DENY, "a call can't read the week, or can run the moves")
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        need((real.read_bytes() if real.exists() else None) == real_before, "the workspace's own marks were touched")
+
+        await self.ensure_server()
+        sfile = Path(self.server.env["HQ_CALENDAR_FILE"])
+        sfile.parent.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        sfile.write_text(json.dumps({"looked": now, "calendars": [], "events": [
+            {"id": "s1", "title": "Soon", "start": datetime.fromtimestamp(now + 3600).astimezone().isoformat(), "end": "", "all_day": False}]}))
+        def post(body, hq):
+            req = urllib.request.Request(TEST_URL + "/api/calendar/mark", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read() or b"{}")
+            except urllib.error.HTTPError as e:
+                return e.code, {}
+        need(post({"id": "s1", "mark": "done"}, "")[0] == 403, "an appointment could be marked without the page's header")
+        code, got = post({"id": "s1", "mark": "done"}, "calendar")
+        need(code == 200 and [e.get("mark") for e in got.get("events", [])] == ["done"], f"the server didn't mark it ({code} {got})")
+        need(post({"id": "nope", "mark": "done"}, "calendar")[0] == 404 and post({"id": "s1", "mark": "maybe"}, "calendar")[0] == 400,
+             "an unknown appointment or mark was taken")
+        code, got = post({"id": "s1", "mark": ""}, "calendar")
+        need(code == 200 and got["events"][0]["mark"] == "", "the server didn't undo the mark")
+
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        stub = r"""<script>
+var POSTS = [], T = new Date(); T.setHours(0, 0, 0, 0);
+function at(days, h, m) { const d = new Date(T); d.setDate(d.getDate() + days); d.setHours(h, m || 0); return d.toISOString(); }
+var EVENTS = [
+  { id: "e0", mark_id: "e0", title: "Yesterday's block", start: at(-1, 9), end: at(-1, 10), all_day: false, where: "", notes: "", calendar: "Main", free: false, mark: "", move: "", move_note: "" },
+  { id: "e1", mark_id: "e1", title: "Gym", start: at(0, 23, 0), end: at(0, 23, 45), all_day: false, where: "", notes: "", calendar: "Main", free: false, mark: "", move: "", move_note: "" }];
+window.fetch = async (url, opt) => {
+  url = String(url);
+  if (url === "api/calendar/mark") {
+    const b = JSON.parse(opt.body); POSTS.push(b.id + ":" + (b.mark || "-") + ":" + (opt.headers || {})["x-hq"]);
+    EVENTS = EVENTS.map(e => e.mark_id !== b.id ? e : { ...e, mark: b.mark, move: b.mark === "x" ? "moved" : "", move_note: b.mark === "x" ? "In HQ Planning" : "" });
+    return { ok: true, json: async () => ({ on: true, looked: Date.now() / 1000 - 60, looking: false, error: "", events: EVENTS }) };
+  }
+  if (url.startsWith("api/calendar")) return { ok: true, json: async () => ({ on: true, looked: Date.now() / 1000 - 60, looking: false, error: "", events: EVENTS }) };
+  return { ok: true, json: async () => ({ lines: [], calls: [], items: [] }) };
+};</script>"""
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  await wait(300); calBtn.click(); await wait(400);
+  const rows = () => calList.querySelectorAll(".arow"), days = () => [...calList.querySelectorAll(".day")].map(x => x.textContent);
+  const mk = (i, k) => rows()[i].querySelector(".mk." + k);
+  out.push("rows:" + (rows().length === 2 && calList.querySelectorAll(".appt").length === 2 && mk(0, "done") && mk(0, "x") ? "ok" : "WRONG " + rows().length));
+  out.push("pastday:" + (days().length === 2 && !days()[0].startsWith("Today") && days()[1].startsWith("Today") ? "ok" : "WRONG " + days()));
+  const size = mk(1, "x").getBoundingClientRect();
+  out.push("tappable:" + (size.width >= 30 && size.height >= 30 && rows()[1].getBoundingClientRect().right <= innerWidth + 1 ? "ok" : "WRONG"));
+  mk(1, "done").click(); await wait(300);
+  out.push("done:" + (POSTS.join() === "e1:done:calendar" && mk(1, "done").getAttribute("aria-pressed") === "true"
+    && getComputedStyle(mk(1, "done")).backgroundColor === "rgb(22, 163, 74)" && !rows()[1].classList.contains("x") ? "ok" : "WRONG " + POSTS));
+  mk(1, "done").click(); await wait(300);
+  out.push("undo:" + (POSTS[1] === "e1:-:calendar" && mk(1, "done").getAttribute("aria-pressed") === "false" ? "ok" : "WRONG " + POSTS));
+  mk(0, "x").click(); await wait(300);
+  const w = rows()[0].querySelector(".appt .w");
+  out.push("x:" + (POSTS[2] === "e0:x:calendar" && rows()[0].classList.contains("x") && parseFloat(getComputedStyle(w).opacity) < 0.6
+    && w.textContent.includes("In HQ Planning") && mk(0, "x").getAttribute("aria-pressed") === "true" ? "ok" : "WRONG " + POSTS));
+  rows()[0].querySelector(".appt").click(); await wait(200);
+  out.push("one:" + (calOne.textContent.includes("didn't happen as planned") && calOne.textContent.includes("In HQ Planning") ? "ok" : "WRONG"));
+  document.getElementById("calclose").click();
+  const pre = document.createElement("pre"); pre.id = "h143"; pre.textContent = "H143RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f2 = self.tmp / "h143.html"
+        f2.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
+        for where, q in (("phone", ""), ("app", "?app=1")):
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=390,844",
+                                              f"--user-data-dir={self.tmp / ('h143-' + where)}", "--virtual-time-budget=20000", "--dump-dom", f2.as_uri() + q], timeout=120)
+            m = re.search(r'<pre id="h143">H143RESULT (.*?) END</pre>', r.stdout)
+            need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
+            res = m.group(1)
+            say(f"   {where}: {res}")
+            need(all(part.endswith(":ok") for part in res.split(" | ")), f"the check or the X isn't right ({where}): {res}")
+        return ("marks next to the calendar copy (the name a setting, HQ Planning by default), the week from Monday; a check and "
+                "its undo; an X copied to HQ Planning through the guarded stand-in and only then the original removed, nobody "
+                "notified; the next read's copy carrying the X; undo putting it back and removing the copy; others in it or a "
+                "birthday never moved; a failing copy tried three times and nothing removed; a failed removal undone by removing "
+                "only the copy; no HQ Planning said; the guard one call once; the week's look back, the call's rule and policy; "
+                "/api/calendar/mark; the page, phone and app: two buttons per row, the green check, the X greyed with where it is, "
+                "yesterday under its own day")
+
     async def flow97(self) -> str:
         """F31, no Claude, no network: a refused pull or push from a job never passes silently. push.py --pull and a
         plain push against a throwaway HQ copy whose GitHub is a throwaway folder: a pull that works says so; a remote
@@ -9460,6 +9715,7 @@ FLOWS = {
     96: ("H137, H140: Modern is the only look: no Look switch, no saved choice, the round buttons in one dock", False, "flow96"),
     97: ("F31: a refused pull or push from a job shows up: the github incident, Donna texts at once, closed by the next one through", False, "flow97"),
     98: ("F32: a fresh install on an old release (a download, a shallow clone) sees the newer one and updates with one tap", False, "flow98"),
+    99: ("H143: tick off or X the appointments; an X moves it to the Google calendar HQ Planning, undo moves it back; the week's look back", False, "flow99"),
 }
 
 

@@ -539,6 +539,27 @@ if __name__ == "__main__":
             _pings.appt_off(ask["id"])
         return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
 
+    # H143: the check and the X on an appointment. A tap marks it (done or x), a second tap undoes it ("");
+    # an X moves it in Google Calendar to HQ Planning and undo moves it back (planning.py, after the answer, on the
+    # main HQ). Only from the page itself (x-hq: calendar).
+    @app.post("/api/calendar/mark", include_in_schema=False)
+    async def calendar_mark(request: Request):
+        if request.headers.get("x-hq") != "calendar":
+            return JSONResponse({"error": "Only the HQ page can mark appointments"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict) or not isinstance(ask.get("id"), str) or ask.get("mark") not in ("done", "x", ""):
+            return JSONResponse({"error": "which appointment, and which mark?"}, status_code=400)
+        import planning as _planning
+        try:
+            await asyncio.to_thread(_planning.set_mark, ask["id"], ask["mark"])
+        except KeyError:
+            return JSONResponse({"error": "no such appointment"}, status_code=404)
+        await asyncio.to_thread(_planning.start)
+        return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
+
     @app.get("/api/busy", include_in_schema=False)
     async def busy():
         return JSONResponse({"calls": _calls_on}, headers=_NO_CACHE)

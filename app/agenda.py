@@ -3,13 +3,15 @@
 13 October 2026 (call at 19:53, Pepper), in the user's words: "Should be in good calendar. We just need to have
 that. We just have... The information in the app as well." and "Maybe through API or something, I don't know."
 
-The appointments stay in Google Calendar, the one place. HQ only reads them: never writes, moves or deletes.
+The appointments stay in Google Calendar, the one place. HQ only reads them here: never writes, moves or deletes.
+(H143: the one write is planning.py's, moving an appointment the user X'd to the calendar HQ Planning and back.)
 The read goes through the Google Calendar connector of the user's own Claude (claude.ai), the same way the
 hourly mail check reads Gmail, so no Google key or sign-in is needed in HQ: a short `claude -p` run (Haiku)
 that may only call list_calendars and list_events (everything that writes is refused), streamed, and the tool
 results are read straight from the stream, word for word as Google gave them, so Claude retypes nothing.
 
-What it reads: every calendar the connector lists, from today 00:00 for DAYS days. Kept in the workspace as
+What it reads: every calendar the connector lists, from this week's Monday 00:00 (H143: the past days of the week stay,
+so they can still be ticked off) to DAYS days from today. Kept in the workspace as
 HQ/calendar.json (HQ_CALENDAR_FILE; synced to the other computer, off GitHub). The look runs on the main, from
 tick.py (start()): every hour from 07:00 to 23:00, and when the call page opens the calendar and the last look
 is older than FRESH seconds (refresh()). The call page shows the days; a tap on an appointment shows it with
@@ -87,8 +89,9 @@ def timezone() -> str:
 # -- the look ----------------------------------------------------------------------------------
 
 def prompt(now: datetime) -> str:
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=DAYS)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = today - timedelta(days=today.weekday())  # H143: from Monday
+    end = today + timedelta(days=DAYS)
     tz = timezone()
     extra = f', "timeZone": "{tz}"' if tz else ""
     return (
@@ -218,6 +221,9 @@ def events_from(results: list[tuple[str, dict, object]]) -> tuple[list[dict], li
                 "free": e.get("transparency") == "transparent",
                 "type": str(e.get("eventType") or "DEFAULT"),
                 "link": str(e.get("htmlLink") or ""),
+                # H143: where it is in Google, for planning.py's move to HQ Planning; with others in it, never moved
+                "gid": str(e["id"]), "cal": cal,
+                "others": any(isinstance(a, dict) and not a.get("self") for a in e.get("attendees") or []),
             })
     events.sort(key=lambda x: (_sort_key(x["start"]), x["title"]))
     return [{"id": k, "name": v} for k, v in cals.items()], events
@@ -309,11 +315,18 @@ def refresh(now: float | None = None) -> bool:
 # -- for the page and the call -------------------------------------------------------------------
 
 def read(now: float | None = None) -> dict:
-    """What the call page shows: the appointments from today on, the time of the last look, any error."""
+    """What the call page shows: the appointments from this week's Monday on (H143: the past days stay for the
+    ticks), each with its mark, the time of the last look, any error."""
     s = _read()
     t = now or time.time()
-    today = datetime.fromtimestamp(t).strftime("%Y-%m-%d")
-    events = [e for e in s.get("events") or [] if not _over(e, today, t)]
+    d = datetime.fromtimestamp(t)
+    monday = (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
+    events = [e for e in s.get("events") or [] if not _over(e, monday, t, week=True)]
+    try:  # H143: done, or X (moved to HQ Planning)
+        import planning
+        events = planning.attach(events)
+    except Exception:
+        pass
     try:  # H124: the bell, on the appointments Donna will ping him for
         import pings
         bell = pings.pinged()
@@ -324,8 +337,11 @@ def read(now: float | None = None) -> dict:
             "events": events}
 
 
-def _over(e: dict, today: str, t: float) -> bool:
-    """Over: a whole day before today (Google's end date is the day after), or a timed one that ended over an hour ago."""
+def _over(e: dict, today: str, t: float, week: bool = False) -> bool:
+    """Over: a whole day before today (Google's end date is the day after), or a timed one that ended over an hour ago.
+    With week (H143), today is this week's Monday and anything from Monday on stays."""
+    if week:
+        return (e.get("start") or "")[:10] < today and not (e.get("all_day") and (e.get("end") or "")[:10] > today)
     if e.get("all_day"):
         return (e.get("end") or "")[:10] <= today if e.get("end") else e.get("start", "")[:10] < today
     end = e.get("end") or e.get("start", "")
