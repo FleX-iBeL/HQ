@@ -5285,6 +5285,19 @@ window.fetch = async (url, opt) => {
   call = realCall;
   const c2 = CALLED[0] || {};
   out.push("chatcall:" + (CALLED.length === 1 && c2.cont === "__NAME__" && c2.agent === "pepper" && c2.mode === "deep" && c2.free === false ? "ok" : "WRONG " + JSON.stringify(CALLED)));
+  // F36: the desktop app is never reloaded: after a call made there, coming back to it brings Call back again,
+  // but only once that call is saved (a newer last call than the chat showed before it).
+  showChat(false); calledHere = true; lastCallName = "__NAME__"; clearChat(); setState("idle", "Tap to call");
+  window.dispatchEvent(new Event("focus")); await wait(300);
+  out.push("backunsaved:" + (calledHere && !shown(cfoot) ? "ok" : "WRONG"));
+  lastCallName = "an older call"; window.dispatchEvent(new Event("focus")); await wait(300);
+  chatBtn.click(); await wait(400);
+  out.push("backsaved:" + (!calledHere && chatOpen() && shown(cfoot) && ccont.textContent === "Call back and continue with Pepper"
+    && chatLog.querySelectorAll(".msg").length > 0 ? "ok" : "WRONG " + calledHere + " " + ccont.textContent));
+  showChat(false); calledHere = true; lastCallName = "an older call"; clearChat(); setState("idle", "Tap to call");
+  chatBtn.click(); await wait(400);
+  out.push("backchat:" + (!calledHere && shown(cfoot) ? "ok" : "WRONG"));
+  showChat(false);
   continueFrom = null; histShown = null;
   const pre = document.createElement("pre"); pre.id = "h60"; pre.textContent = "H60RESULT " + out.join(" | ") + " END";
   document.body.appendChild(pre);

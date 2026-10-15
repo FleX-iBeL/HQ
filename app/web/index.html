@@ -1280,6 +1280,19 @@ async function loadLastCall() {
   }
   chatLog.scrollTop = chatLog.scrollHeight;
 }
+// F36 (15 October 2026): the desktop app's page is never reloaded, so after a call made there the chat stayed
+// that call's for good and Call back never came (the phone's app is reloaded by iOS, so there it did). Now coming
+// back to the app, or opening the chat, after a call has ended counts as reopening it: once that call is saved
+// (the last saved call is a newer one than the chat showed before it), the chat shows it again with Call back.
+async function freshChat() {
+  if (state !== "idle") return;
+  if (!calledHere) return loadLastCall();
+  let data = null;
+  try { const r = await fetch("api/last-call", { cache: "no-store" }); if (r.ok) data = await r.json(); } catch (e) {}
+  if (!calledHere || state !== "idle" || !data || !data.name || data.name === lastCallName) return;  // not saved yet
+  calledHere = false; lastCallName = null;
+  return loadLastCall();
+}
 // H82: her lines show formatted: **bold**, *italics*, lines starting with "- ", "* " or "1. " as a list,
 // line breaks kept. Built from text nodes only, so nothing she writes can become HTML on the page.
 // H116: as in an AI chat app: an indented item is a list inside the item above (two levels deep at most),
@@ -1357,7 +1370,7 @@ function showChat(open) {
   if (open) showCal(false);     // H101
   if (open) showDirect(false);  // F29
   if (open) closeWx();          // H135
-  if (open) loadLastCall();     // H34: before a call, fresh each time it opens
+  if (open) freshChat();       // H34: before a call, fresh each time it opens; F36: also after one
   chatEl.classList.toggle("open", open);
   chatBtn.setAttribute("aria-expanded", String(open));
   if (open) { unread = 0; chatLog.scrollTop = chatLog.scrollHeight; }
@@ -2316,8 +2329,9 @@ btn.addEventListener("click", () => { if (state === "idle") call(); else if (sta
 clearChat(); showMode(); showVoices(); showSound(); applyVoice(); loadLastCall();
 // Closing the page or locking away from it also counts as hanging up.
 window.addEventListener("pagehide", ev => { if (ev.persisted) return; try { if (dc && dc.readyState === "open") dc.send(JSON.stringify({ type: "hangup" })); } catch (e) {} });
+window.addEventListener("focus", () => { if (state === "idle") freshChat(); });  // F36: the desktop app brought to the front
 document.addEventListener("visibilitychange", async () => {
-  if (document.visibilityState === "visible" && state === "idle") loadLastCall();  // H34: a call may have ended elsewhere
+  if (document.visibilityState === "visible" && state === "idle") freshChat();  // H34: a call may have ended elsewhere; F36
   if (document.visibilityState === "visible" && state === "live") { try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {} }
 });
 </script>
