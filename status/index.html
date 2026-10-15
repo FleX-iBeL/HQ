@@ -726,7 +726,7 @@
         ['sync', 'Two-way sync', 'Only with a second HQ: the workspace and Claude\'s memory, both ways'],
         ['helper', 'Routine helper', 'Runs everything below, every minute'],
         ['watchdog', 'Watchdog', 'Checks the helper every 5 minutes, apart from it'],
-        ['mail', 'Mail check', 'Every hour'],
+        ['mail', 'Mail check', Date.now() >= 1792069200000 && Date.now() < 1792094400000 ? 'Every 15 minutes until 22:00 (H148 test), then every hour' : 'Every hour'],
         ['jobs', 'Jobs from calls', 'One at a time'],
         ['schedule', 'Scheduler', 'Planned work; only when no job runs or waits'],
         ['usage', 'Usage check', 'Every minute, free'],

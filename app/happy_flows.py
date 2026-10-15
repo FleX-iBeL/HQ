@@ -1650,6 +1650,12 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         routines.FILE = str(self.tmp / "routines.json")
         started = []
         tick.start_mail = lambda: started.append(time.time())
+        # H148: every 15 minutes in its test window, on the quarter; hourly before and after it, by itself.
+        f0, f1 = tick.MAIL_FAST_FROM, tick.MAIL_FAST_UNTIL
+        need(tick.mail_next(f0 - 3600) == f0 and tick.mail_next(f0) == f0 + 900 and tick.mail_next(f1 - 900) == f1
+             and tick.mail_next(f1) == f1 + 3600 and tick.mail_every(f1) == 3600,
+             "the H148 test window doesn't go every 15 minutes, or doesn't go back to hourly by itself")
+        tick.MAIL_FAST_UNTIL = 0  # the rest of this flow counts in hours, whatever the time it runs
         now = time.time()
         open(tick.MAIL_LAST, "w").write(str(int(now // 3600 * 3600 - 3600 + 30)))  # last ran just after the previous hour
         incidents.past("helper", now // 3600 * 3600 - 120, now - 30, "The MacBook was asleep", [])

@@ -64,6 +64,9 @@ MAIL_RETRY = os.path.join(RUN, "mail-retry")  # H30: {"at", "n"}: a failed mail 
 MAIL_RUNS = os.path.join(RUN, "mail-runs")  # H42: each mail check's own output, one file per run
 MAIL_RUNS_KEEP = 72
 MAIL_EVERY = 3600
+# H148: a usage test, every 15 minutes from 15:00 to 22:00 Europe/Amsterdam on 15 October 2026, then hourly again
+# by itself. To remove: these lines, mail_every() (MAIL_EVERY back where it is used) and the label in status/index.html.
+MAIL_FAST, MAIL_FAST_FROM, MAIL_FAST_UNTIL = 900, 1792069200, 1792094400
 MAIL_LATE = 300  # H30: a mail check that started over 5 minutes after its hour was missed
 MAIL_RETRIES = 2
 MAIL_RETRY_AFTER = 600
@@ -445,9 +448,17 @@ def _last_run_file():
     return os.path.join("scratch", "routine", "mail-runs", names[-1]) if names else ""
 
 
+def mail_every(at=None):
+    """H148: seconds between mail checks at `at` (default now): 15 minutes during the test, else an hour."""
+    at = time.time() if at is None else at
+    return MAIL_FAST if MAIL_FAST_FROM <= at < MAIL_FAST_UNTIL else MAIL_EVERY
+
+
 def mail_next(last):
-    """H22: the mail check runs on the full hour (14:00, 15:00, …): the first full hour after its last start."""
-    return (int(last) // MAIL_EVERY + 1) * MAIL_EVERY
+    """H22: the mail check runs on the full hour (14:00, 15:00, …): the first full hour after its last start.
+    H148: during the test, the first quarter (:00, :15, :30, :45) after it."""
+    every = mail_every(last)
+    return (int(last) // every + 1) * every
 
 
 def mail_last():
@@ -512,7 +523,8 @@ def mail(q, start_new=True):
     r = _retry()
     nxt = r["at"] if r and not r.get("started") else mail_next(last)
     routines.beat("mail", last=last, next=nxt, every=60, **({} if routines.read().get("mail", {}).get("state") in ("ok", "down")
-                                                          else {"state": "ok", "text": "Waiting for its next hour"}))
+                                                          else {"state": "ok", "text": "Waiting for its next hour" if mail_every() == MAIL_EVERY
+                                                                    else "Waiting for its next quarter hour (H148 test)"}))
 
 
 def start_mail():
@@ -863,7 +875,7 @@ def became_main():
     except Exception as e:
         log(f"sync align: {e!r}")
     last = mail_last() or 0
-    hour = int(time.time()) // MAIL_EVERY * MAIL_EVERY
+    hour = int(time.time()) // mail_every() * mail_every()
     if last < hour:
         os.makedirs(RUN, exist_ok=True)
         open(MAIL_LAST, "w").write(str(hour))
