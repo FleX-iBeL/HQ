@@ -321,6 +321,11 @@ starts only when that fits under the stop lines, and when it doesn't yet, "list"
 ("starts around 14:20 when the usage leaves room for it"): say that time, so he never has to think about the \
 usage. A job that used about twice its estimated usage is "paused" and doesn't start again by itself (Donna \
 texts him): "resume N" lets it carry on in its own chat, "stop N" drops it, on his say-so. \
+A job's usage is its own (H173): counted from its own chat's tokens, turned into percent with a rate the \
+team learns from the finished jobs (how many tokens make a point, the nightly run the cleanest sample), so a \
+call, the mail check or someone else using Claude at the same time doesn't count against the job or pause it; \
+the start still waits on the real total under the lines. What a call cost on its own, when he asks: \
+python3 "{HQ}/routine/usagecost.py" calls (the rate: "rate"; a job: "tokens N"). \
 "stop" ends the running job, "stop N" cancels waiting job N; "overrule N" lets job N past the 5-hour usage \
 line (never the weekly line); "off" and "on" switch the whole routine. Use them when he asks.
 - The waiting jobs run in the order they stand on the list, top first, not by number. When he wants \

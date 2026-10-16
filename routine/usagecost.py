@@ -46,6 +46,10 @@ usage:
   python3 routine/usagecost.py when "TEXT" [MIN]   when a job like that would fit, with nothing else running
   python3 routine/usagecost.py backfill            fill the finished jobs' cost from the saved readings (once is enough)
   python3 routine/usagecost.py costs [N]           the last N finished jobs with their time and cost
+  python3 routine/usagecost.py rate                H173: learn the rate (weighted tokens a point) and show it
+  python3 routine/usagecost.py tokens N            H173: job N's own tokens and cost, from its own chats
+  python3 routine/usagecost.py calls [N]           H173: what the last N calls cost on their own
+  python3 routine/usagecost.py fill                H173: the finished jobs' own tokens from their chats (by itself once)
 """
 import json, math, os, re, sys, time
 from datetime import datetime
@@ -283,38 +287,77 @@ def _est():
     return estimate
 
 
+def _pick(pool, about, kind):
+    """The finished jobs an estimate learns from, each with its weight: the most alike (H166), else the last of its
+    kind, else the last of any kind; ([], "fallback", 0) with too few."""
+    E = _est()
+    near = E.similar(about, kind, pool) if about and pool else []
+    if len(near) >= COST_MIN:
+        return [(a ** E.SIM_POW, h) for a, h in near], "similar", len(near)
+    same = [h for h in pool if h.get("kind") == kind][-RECENT:]
+    if len(same) >= COST_MIN:
+        return [(1, h) for h in same], "kind", len(same)
+    anyk = pool[-RECENT:]
+    if len(anyk) >= COST_MIN:
+        return [(1, h) for h in anyk], "all", len(anyk)
+    return [], "fallback", 0
+
+
+def _quantile(pairs, q):
+    """The weighted q-quantile of [(value, weight)]."""
+    pairs = sorted(pairs)
+    tot = sum(w for _, w in pairs) or 1
+    acc = 0
+    for v, w in pairs:
+        acc += w
+        if acc >= q * tot:
+            return v
+    return pairs[-1][0] if pairs else 0
+
+
 def rates(text="", kind=None, hist=None, about=None):
-    """Percent per minute on each line for work like this: {"five", "weekly", "how", "based"}."""
+    """Percent per minute on each line for work like this: {"five", "weekly", "how", "based"}. H173: from the finished
+    jobs' own tokens once there's a rate ("tokens": weighted tokens per minute, "lo" and "hi" the range: the middle
+    half of the jobs it's based on); else from the rise in the readings (H172); else START_ROOM's rates."""
     E = _est()
     hist = E.all_history() if hist is None else hist
     kind = E.kind_for(text, kind) if text or kind else kind
-    withc = [h for h in E._real(hist) if isinstance(h.get("cost"), dict) and h.get("actual")]
     about = E._about(text) if about is None else about
-
-    def ratio(pairs):
-        mins = sum(w * h["actual"] for w, h in pairs)
-        return {k: (sum(w * float(h["cost"].get(k) or 0) for w, h in pairs) / mins) if mins else FALLBACK[k] for k in KEYS}
-
-    near = E.similar(about, kind, withc) if about and withc else []
-    if len(near) >= COST_MIN:
-        r, how, based = ratio([(a ** E.SIM_POW, h) for a, h in near]), "similar", len(near)
-    else:
-        same = [h for h in withc if h.get("kind") == kind][-RECENT:]
-        anyk = withc[-RECENT:]
-        if len(same) >= COST_MIN:
-            r, how, based = ratio([(1, h) for h in same]), "kind", len(same)
-        elif len(anyk) >= COST_MIN:
-            r, how, based = ratio([(1, h) for h in anyk]), "all", len(anyk)
-        else:
-            r, how, based = dict(FALLBACK), "fallback", 0
-    return {**{k: r[k] for k in KEYS}, "how": how, "based": based}
+    real = E._real(hist)
+    model = load_rate()
+    if model:
+        tok = [h for h in real if isinstance(h.get("tokens"), dict) and h["tokens"] and h.get("actual")]
+        pairs, how, based = _pick(tok, about, kind)
+        if pairs:
+            per = [(weighted(h["tokens"], model) / h["actual"], w) for w, h in pairs]
+            mins = sum(w * h["actual"] for w, h in pairs)
+            wpm = sum(w * weighted(h["tokens"], model) for w, h in pairs) / mins
+            r = {k: wpm / model["rate"][k] if model["rate"].get(k) else FALLBACK[k] for k in KEYS}
+            return {**r, "how": how, "based": based, "tokens": wpm, "lo": _quantile(per, 0.25), "hi": _quantile(per, 0.75)}
+    withc = [h for h in real if isinstance(h.get("cost"), dict) and h.get("actual")]
+    pairs, how, based = _pick(withc, about, kind)
+    if not pairs:
+        return {**FALLBACK, "how": "fallback", "based": 0}
+    mins = sum(w * h["actual"] for w, h in pairs)
+    return {**{k: (sum(w * float(h["cost"].get(k) or 0) for w, h in pairs) / mins) if mins else FALLBACK[k] for k in KEYS},
+            "how": how, "based": based}
 
 
 def cost_for(minutes, text="", kind=None, hist=None, about=None):
-    """The estimated usage of work of so many minutes: {"five", "weekly", "how", "based"} (points of each line)."""
+    """The estimated usage of work of so many minutes: {"five", "weekly", "how", "based"} (points of each line).
+    H173: with a rate, also "tokens" (weighted) with its range "range" [low, high], and each line's "range" in points
+    ("five_range", "weekly_range")."""
     r = rates(text, kind, hist, about)
     m = max(1, minutes or 1)
-    return {**{k: round(r[k] * m, 1) for k in KEYS}, "how": r["how"], "based": r["based"]}
+    out = {**{k: round(r[k] * m, 1) for k in KEYS}, "how": r["how"], "based": r["based"]}
+    if r.get("tokens"):
+        model = load_rate() or {}
+        lo, hi = min(r["lo"], r["tokens"]) * m, max(r["hi"], r["tokens"]) * m
+        out["tokens"], out["range"] = round(r["tokens"] * m), [round(lo), round(hi)]
+        for k in KEYS:
+            if (model.get("rate") or {}).get(k):
+                out[k + "_range"] = [round(lo / model["rate"][k], 1), round(hi / model["rate"][k], 1)]
+    return out
 
 
 def job_cost(n, text, hist=None):
@@ -346,6 +389,13 @@ def _snap(now=None):
 
 
 def _so_far(rec):
+    """What a job has used so far: its own tokens over the rate (H173), else the rise in the readings (H172)."""
+    if isinstance(rec.get("own"), dict) and rec["own"]:
+        return rec["own"]
+    return _read_so_far(rec)
+
+
+def _read_so_far(rec):
     return {k: round(rec["spent"].get(k, 0) + max(0.0, rec["last"][k][0] - rec["seg"][k][0]), 1)
             for k in KEYS if k in rec.get("seg", {}) and k in rec.get("last", {})}
 
@@ -381,7 +431,8 @@ def start(n, text="", now=None):
             minutes, cost = None, None
         rec = {"n": n, "started": int(now), "running": True, "spent": {k: 0 for k in KEYS},
                "seg": {k: list(v) for k, v in snap.items()}, "last": {k: list(v) for k, v in snap.items()},
-               "est": ({**{k: cost[k] for k in KEYS}, "minutes": minutes, "how": cost["how"]} if cost else None)}
+               "est": ({**{k: cost[k] for k in KEYS}, "minutes": minutes, "how": cost["how"],
+                        **{k: cost[k] for k in ("tokens", "range") if k in cost}} if cost else None)}
     d[str(n)] = rec
     _save(d)
     return rec
@@ -398,9 +449,23 @@ def track(n, text="", now=None):
         d = _load()
     elif rec.get("running", True):
         _step(rec, _snap(now))
+    if rec.get("running", True):  # H173: its own tokens, from its own chats
+        _own(rec, n)
     d[str(n)] = rec
     _save(d)
     return {**rec, "so_far": _so_far(rec)}
+
+
+def _own(rec, n):
+    try:
+        t = job_tokens(n, rec.get("started"))
+    except Exception:
+        t = None
+    if t:
+        rec["tokens"] = t
+        c = own_cost(t)
+        if c:
+            rec["own"] = c
 
 
 def hold(n, now=None):
@@ -410,7 +475,7 @@ def hold(n, now=None):
     if rec:
         if rec.get("running", True):
             _step(rec, _snap(now))
-        rec["spent"] = _so_far(rec) or rec["spent"]
+        rec["spent"] = _read_so_far(rec) or rec["spent"]
         rec["seg"] = {k: list(v) for k, v in rec["last"].items()}
         rec["running"] = False
         _save(d)
@@ -427,15 +492,22 @@ def finish(n, now=None):
     if rec.get("running", True):
         _step(rec, _snap(now))
     _save(d)
-    cost = _so_far(rec) if rec.get("running", True) else {k: rec["spent"].get(k, 0) for k in KEYS if k in rec["spent"]}
-    if not cost:
+    read = _read_so_far(rec) if rec.get("running", True) else {k: rec["spent"].get(k, 0) for k in KEYS if k in rec["spent"]}
+    # H173: its own tokens, all of its chats from its start to now; the cost is those over the rate.
+    try:
+        t = job_tokens(n, rec.get("started"), now)
+    except Exception:
+        t = None
+    own = own_cost(t) if t else None
+    if not read and not t:
         return None
-    return {"cost": cost, "est_cost": rec.get("est"), "late": bool(rec.get("late"))}
+    return {"cost": own or read, "how": "tokens" if own else "read", "cost_read": read or None, "tokens": t,
+            "est_cost": rec.get("est"), "late": bool(rec.get("late"))}
 
 
 def overrun(rec):
     """None, or {"line", "used", "est"} when the running job has used about twice its estimated cost on a line."""
-    if not rec or rec.get("late") or rec.get("allowed") or not rec.get("est"):
+    if not rec or (rec.get("late") and not rec.get("own")) or rec.get("allowed") or not rec.get("est"):
         return None
     so_far = rec.get("so_far") or _so_far(rec)
     for k in KEYS:
@@ -581,6 +653,386 @@ def backfill_once(log=None):
     return filled, left
 
 
+# ---------- H173: a job's own tokens, and how many make a point ----------
+#
+# The user, 16 October 2026 (call at 13:37): "Isn't it possible that right now they would run it in isolation? They
+# track how many tokens are used and what percentage is used. They can therefore conclude over time how many tokens
+# correspond to what percentage." and "when we run the nightly checks nobody is using it so we know those numbers are
+# more accurate as well."
+#
+# Every job runs as its own Claude Code chat, and Claude Code writes each chat to a session file (one JSON line per
+# message, the assistant's with its usage: input, output, cache read, cache write, and the model). The chat of job N
+# is the one whose first prompt says "This is job N from the queue" (a crash rerun or a carry-on is another chat with
+# the same first words: they all count); the helpers it starts write theirs under <session>/subagents/. A message
+# split over several lines carries the same usage on each: counted once, by its id.
+#
+# The rate: weighted tokens = for each model, its weight times (input, output, cache read and cache write tokens, each
+# with its weight). How many weighted tokens make one point of the 5-hour and of the weekly is learned from the
+# finished jobs: their own tokens against the rise in the saved readings while they ran (H172's count, now kept as
+# "cost_read"). The weights start from the API's price ratios (PRIOR, MODEL_PRIOR) and move with the data, a ridge
+# fit that counts the prior as PRIOR_N jobs. A reading that rose far more than the job's tokens explain (OUT_RATIO
+# times and OUT_MIN points more: a call, the mail check or someone else on the plan at the same time) is left out;
+# the nightly run counts NIGHTLY times, nobody else is on the plan at 2 at night. Kept in usage-rate.json, learned
+# again when a job is done.
+#
+# A job's real cost is then its own tokens divided by the rate: what others use at the same time no longer counts
+# against it, nor towards the pause at twice its estimate. The gate before a start still reads the real total.
+# [The priors, PRIOR_N 10, OUT_RATIO 2.5 with OUT_MIN 2, NIGHTLY 3 and RATE_MIN 5 are Claude's choice.]
+
+TOKEN_KINDS = ("in", "out", "cr", "cw")  # input, output, cache read, cache write
+PRIOR = {"in": 1.0, "out": 5.0, "cr": 0.1, "cw": 1.6}  # the API's price ratios (cache write between 5 min and 1 h)
+MODEL_PRIOR = {"opus": 1.0, "fable": 1.0, "sonnet": 0.6, "haiku": 0.2, "other": 1.0}
+PRIOR_N = 10      # the prior counts as this many jobs
+OUT_RATIO = 2.5   # a reading that rose this many times more than the tokens explain ...
+OUT_MIN = 2.0     # ... and at least this many points more is someone else on the plan: left out
+NIGHTLY = 3       # the nightly run's weight as a sample
+RATE_MIN = 5      # finished jobs with tokens and a reading before there's a rate
+RATE_FILE = os.path.join(DIR, "usage-rate.json")
+SESSIONS = os.path.join(DIR, "job-sessions.json")
+if os.environ.get("HQ_CLAUDE_PROJECTS") is not None:
+    PROJECTS = os.environ["HQ_CLAUDE_PROJECTS"]
+elif _TEST:
+    PROJECTS = ""
+else:
+    PROJECTS = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "projects")
+_JOB = re.compile(r"\bThis is job (\d+) from the queue")
+
+
+def family(model):
+    m = (model or "").lower()
+    for f in ("opus", "fable", "sonnet", "haiku"):
+        if f in m:
+            return f
+    return "other"
+
+
+def _first_prompt(path):
+    """(text, time) of a session's first prompt, or (None, None) when it has none yet."""
+    try:
+        with open(path, encoding="utf8", errors="replace") as f:
+            for i, l in enumerate(f):
+                if i > 400:
+                    break
+                if '"type":"user"' not in l.replace(" ", ""):
+                    continue
+                try:
+                    d = json.loads(l)
+                except ValueError:
+                    continue
+                if d.get("type") != "user" or d.get("isMeta"):
+                    continue
+                c = (d.get("message") or {}).get("content")
+                if not isinstance(c, str):
+                    c = " ".join(x.get("text", "") for x in c or [] if isinstance(x, dict))
+                if c.strip():
+                    return c, _iso(d.get("timestamp"))
+    except OSError:
+        pass
+    return None, None
+
+
+def sessions(projects=None):
+    """Every Claude Code session on this computer with what it was: {path: {"job": N | None, "call": bool, "at": t}}.
+    A session's first prompt never changes, so each one is read once (job-sessions.json)."""
+    projects = PROJECTS if projects is None else projects
+    if not projects or not os.path.isdir(projects):
+        return {}
+    try:
+        idx = json.load(open(SESSIONS))
+    except (OSError, ValueError):
+        idx = {}
+    changed = False
+    for d in os.listdir(projects):
+        full = os.path.join(projects, d)
+        if not os.path.isdir(full):
+            continue
+        for name in os.listdir(full):
+            p = os.path.join(full, name)
+            if not name.endswith(".jsonl") or p in idx:
+                continue
+            text, at = _first_prompt(p)
+            if text is None:
+                continue
+            m = _JOB.search(text[:400])
+            idx[p] = {"job": int(m.group(1)) if m else None, "call": text.startswith("[Call system:"), "at": at}
+            changed = True
+    if changed:
+        os.makedirs(DIR, exist_ok=True)
+        tmp = SESSIONS + ".tmp"
+        json.dump(idx, open(tmp, "w"))
+        os.replace(tmp, SESSIONS)
+    return {p: v for p, v in idx.items() if os.path.exists(p)}
+
+
+def _with_helpers(path):
+    """A session and the sessions of the helpers it started (the Agent tool's, under <session>/subagents/)."""
+    sub = os.path.join(os.path.splitext(path)[0], "subagents")
+    try:
+        return [path] + sorted(os.path.join(sub, n) for n in os.listdir(sub) if n.endswith(".jsonl"))
+    except OSError:
+        return [path]
+
+
+def job_sessions(n, since=None, until=None, idx=None):
+    """The session files of job n's chats (with their helpers), first prompt from since on (an hour of slack: the
+    clock of a carry-on) and before until."""
+    idx = sessions() if idx is None else idx
+    out = []
+    for p, v in sorted(idx.items(), key=lambda x: x[1].get("at") or 0):
+        if v.get("job") != n:
+            continue
+        at = v.get("at") or 0
+        if (since and at < since - 3600) or (until and at > until + 300):
+            continue
+        out += _with_helpers(p)
+    return out
+
+
+def tokens_of(paths, since=None, until=None):
+    """The tokens in these session files: {family: [input, output, cache read, cache write]}, each message once."""
+    seen, out = set(), {}
+    for p in paths:
+        try:
+            f = open(p, encoding="utf8", errors="replace")
+        except OSError:
+            continue
+        with f:
+            for l in f:
+                if '"usage"' not in l or '"assistant"' not in l:
+                    continue
+                try:
+                    d = json.loads(l)
+                except ValueError:
+                    continue
+                msg = d.get("message") or {}
+                u = msg.get("usage")
+                if d.get("type") != "assistant" or not isinstance(u, dict):
+                    continue
+                key = msg.get("id") or d.get("requestId") or d.get("uuid")
+                if key in seen or msg.get("model") == "<synthetic>":
+                    continue
+                t = _iso(d.get("timestamp"))
+                if t is not None and ((since and t < since) or (until and t > until)):
+                    continue
+                seen.add(key)
+                v = out.setdefault(family(msg.get("model")), [0, 0, 0, 0])
+                v[0] += int(u.get("input_tokens") or 0)
+                v[1] += int(u.get("output_tokens") or 0)
+                v[2] += int(u.get("cache_read_input_tokens") or 0)
+                v[3] += int(u.get("cache_creation_input_tokens") or 0)
+    return out
+
+
+def job_tokens(n, since=None, until=None):
+    """Job n's own tokens, from its chats; None when none of its chats is on this computer."""
+    paths = job_sessions(n, since, until)
+    if not paths:
+        return None
+    t = tokens_of(paths, (since - 120) if since else None, until)
+    return t or None
+
+
+def weighted(tokens, model=None):
+    """Weighted tokens: each model's weight times its tokens, each kind with its weight."""
+    model = model or load_rate() or {}
+    kw, mw = model.get("weights") or PRIOR, model.get("models") or MODEL_PRIOR
+    return sum(mw.get(f, mw.get("other", 1.0)) * sum(kw[k] * v[i] for i, k in enumerate(TOKEN_KINDS))
+               for f, v in (tokens or {}).items())
+
+
+def own_cost(tokens, model=None):
+    """A job's own cost, {"five", "weekly"}: its weighted tokens over the learned rate; None without a rate."""
+    model = model or load_rate()
+    if not tokens or not model or not model.get("rate"):
+        return None
+    w = weighted(tokens, model)
+    return {k: round(w / model["rate"][k], 2) for k in KEYS if model["rate"].get(k)}
+
+
+def load_rate():
+    try:
+        r = json.load(open(RATE_FILE))
+        return r if r.get("rate") else None
+    except (OSError, ValueError):
+        return None
+
+
+def _solve(A, b):
+    """A small linear system by Gaussian elimination with pivoting; None when it's singular."""
+    n = len(b)
+    M = [list(A[i]) + [b[i]] for i in range(n)]
+    for c in range(n):
+        p = max(range(c, n), key=lambda r: abs(M[r][c]))
+        if abs(M[p][c]) < 1e-12:
+            return None
+        M[c], M[p] = M[p], M[c]
+        for r in range(n):
+            if r != c:
+                f = M[r][c] / M[c][c]
+                M[r] = [x - f * y for x, y in zip(M[r], M[c])]
+    return [M[i][n] / M[i][i] for i in range(n)]
+
+
+def _ridge(rows, ys, wts):
+    """Multipliers g (prior 1) with y ~ sum(g_j * row_j): the prior counts as PRIOR_N jobs."""
+    m = len(rows[0])
+    sw = sum(wts) or 1
+    lam = PRIOR_N * sum(w * sum(r) ** 2 for r, w in zip(rows, wts)) / sw / max(m, 1)
+    A = [[sum(w * r[i] * r[j] for r, w in zip(rows, wts)) + (lam if i == j else 0) for j in range(m)] for i in range(m)]
+    b = [sum(w * r[i] * y for r, y, w in zip(rows, ys, wts)) + lam for i in range(m)]
+    g = _solve(A, b) or [1.0] * m
+    return [min(20.0, max(0.05, x)) for x in g]
+
+
+def read_cost(h):
+    """The rise in the saved readings while a finished job ran (H172), or None."""
+    c = h.get("cost_read")
+    if isinstance(c, dict):
+        return c
+    if isinstance(h.get("cost"), dict) and h.get("cost_how") in ("read", "log"):
+        return h["cost"]
+    return None
+
+
+def is_nightly(h):
+    """The nightly run (H169): its planned item's words, as the job's text carries them."""
+    return "h169, the nightly run" in (h.get("about") or "").lower()
+
+
+def learn(hist=None, write=True):
+    """The rate from the finished jobs with their own tokens and a reading: the weights per kind of token and per
+    model, how many weighted tokens make one point of each line, and which jobs were left out as outliers."""
+    E = _est()
+    hist = E.all_history() if hist is None else hist
+    samples = [h for h in hist if isinstance(h.get("tokens"), dict) and h["tokens"] and read_cost(h)
+               and all(k in read_cost(h) for k in KEYS)]
+    if len(samples) < RATE_MIN:
+        return None
+    wt = [NIGHTLY if is_nightly(h) else 1 for h in samples]
+    ys = [float(read_cost(h)["five"]) for h in samples]
+    kw, mw = dict(PRIOR), dict(MODEL_PRIOR)
+    fams = sorted({f for h in samples for f in h["tokens"]})
+    keep = [True] * len(samples)
+    for _ in range(3):
+        idx = [i for i in range(len(samples)) if keep[i]]
+        if len(idx) < RATE_MIN:
+            break
+        # The kinds of token: each kind's share at the prior weights, a multiplier per kind.
+        rows = [[sum(mw.get(f, 1.0) * PRIOR[k] * samples[i]["tokens"][f][j] for f in samples[i]["tokens"]) / 1e6
+                 for j, k in enumerate(TOKEN_KINDS)] for i in idx]
+        r0 = sum(ys[i] * wt[i] for i in idx) / (sum(sum(r) * wt[i] for r, i in zip(rows, idx)) or 1)
+        g = _ridge([[x * r0 for x in r] for r in rows], [ys[i] for i in idx], [wt[i] for i in idx])
+        tot = [sum(r[j] for r in rows) for j in range(len(TOKEN_KINDS))]
+        G = sum(gj * t for gj, t in zip(g, tot)) / (sum(tot) or 1)
+        kw = {k: PRIOR[k] * g[j] / (G or 1) for j, k in enumerate(TOKEN_KINDS)}
+        # The models: a multiplier per model, the main one (the most tokens) staying at its prior.
+        rows = [[MODEL_PRIOR.get(f, 1.0) * sum(kw[k] * samples[i]["tokens"].get(f, [0] * 4)[j]
+                                                for j, k in enumerate(TOKEN_KINDS)) / 1e6 for f in fams] for i in idx]
+        r0 = sum(ys[i] * wt[i] for i in idx) / (sum(sum(r) * wt[i] for r, i in zip(rows, idx)) or 1)
+        g = _ridge([[x * r0 for x in r] for r in rows], [ys[i] for i in idx], [wt[i] for i in idx])
+        main = max(range(len(fams)), key=lambda j: sum(r[j] for r in rows))
+        mw = {**MODEL_PRIOR, **{f: MODEL_PRIOR.get(f, 1.0) * g[j] / g[main] for j, f in enumerate(fams)}}
+        # The outliers: the reading rose far more than the tokens explain.
+        W = [weighted(h["tokens"], {"weights": kw, "models": mw}) for h in samples]
+        rate5 = sum(W[i] * wt[i] for i in idx) / (sum(ys[i] * wt[i] for i in idx) or 1)
+        new = [not (ys[i] > OUT_RATIO * W[i] / rate5 and ys[i] - W[i] / rate5 >= OUT_MIN) for i in range(len(samples))]
+        if new == keep:
+            break
+        keep = new
+    idx = [i for i in range(len(samples)) if keep[i]]
+    W = [weighted(h["tokens"], {"weights": kw, "models": mw}) for h in samples]
+    rate = {}
+    for k in KEYS:
+        pts = sum(float(read_cost(samples[i])[k]) * wt[i] for i in idx)
+        rate[k] = round(sum(W[i] * wt[i] for i in idx) / pts) if pts > 0 else None
+    model = {"weights": {k: round(v, 4) for k, v in kw.items()}, "models": {k: round(v, 4) for k, v in mw.items()},
+             "rate": rate, "based": len(idx), "nightly": sum(1 for i in idx if is_nightly(samples[i])),
+             "left_out": [samples[i].get("n") for i in range(len(samples)) if not keep[i]], "at": int(_now())}
+    if write:
+        os.makedirs(DIR, exist_ok=True)
+        tmp = RATE_FILE + ".tmp"
+        json.dump(model, open(tmp, "w"), indent=1)
+        os.replace(tmp, RATE_FILE)
+    return model
+
+
+def backfill_tokens(write=True):
+    """The finished jobs' own tokens from their session files, where those are still on this computer, and their
+    cost from them once there's a rate. Returns (filled, left)."""
+    E = _est()
+    lines = E.history()
+    idx = sessions()
+    filled = left = 0
+    for h in lines:
+        if isinstance(h.get("tokens"), dict) or not h.get("done") or not h.get("actual") or h.get("how") == "seed":
+            continue
+        start = h["done"] - h["actual"] * 60
+        paths = job_sessions(h.get("n"), start - 1800, h["done"], idx)
+        t = tokens_of(paths, start - 1800, h["done"] + 300) if paths else None
+        if t:
+            h["tokens"] = t
+            filled += 1
+        else:
+            left += 1
+    model = learn(lines + [h for h in E.all_history() if h.get("machine") != E.me()["name"]], write=write)
+    for h in lines:
+        if isinstance(h.get("tokens"), dict) and read_cost(h) and "cost_read" not in h:
+            h["cost_read"] = read_cost(h)
+        c = own_cost(h.get("tokens"), model)
+        if c:
+            h["cost"], h["cost_how"] = c, "tokens"
+    if write:
+        os.makedirs(DIR, exist_ok=True)
+        tmp = E.HISTORY + ".tmp"
+        with open(tmp, "w", encoding="utf8") as f:
+            f.writelines(json.dumps(h) + "\n" for h in lines)
+        os.replace(tmp, E.HISTORY)
+    return filled, left
+
+
+TOKENS_FILLED = os.path.join(DIR, "job-usage-tokens")
+
+
+def tokens_once(log=None):
+    """By itself, once on each computer (tick.py): its past jobs get their own tokens and the rate is learned."""
+    if os.path.exists(TOKENS_FILLED) or not PROJECTS:
+        return None
+    filled, left = backfill_tokens()
+    open(TOKENS_FILLED, "w").write(f"{int(_now())} {filled} {left}\n")
+    if log:
+        log(f"usage: the own tokens of {filled} finished jobs read from their chats ({left} not on this computer); "
+            f"rate: {rate_words(load_rate())}")
+    return filled, left
+
+
+def calls(n=10):
+    """H173: what the last n calls cost on their own: [{"at", "tokens", "cost"}], newest first."""
+    idx = sessions()
+    out = []
+    for p, v in sorted(idx.items(), key=lambda x: -(x[1].get("at") or 0)):
+        if not v.get("call"):
+            continue
+        t = tokens_of(_with_helpers(p))
+        if t:
+            out.append({"at": v.get("at"), "tokens": t, "weighted": round(weighted(t)), "cost": own_cost(t)})
+        if len(out) >= n:
+            break
+    return out
+
+
+def mtok(w):
+    w = float(w or 0)
+    return f"{w / 1e6:.1f}M" if w >= 1e6 else f"{w / 1e3:.0f}k"
+
+
+def rate_words(model):
+    if not model:
+        return "no rate yet (too few finished jobs with their own tokens and a reading)"
+    r = model["rate"]
+    return (f"{mtok(r.get('five'))} weighted tokens a point of the 5-hour, {mtok(r.get('weekly'))} a point of the week, "
+            f"from {model['based']} jobs ({model.get('nightly', 0)} nightly), {len(model.get('left_out') or [])} left out")
+
+
 # ---------- in words ----------
 
 def pct(x):
@@ -620,11 +1072,43 @@ def main(argv):
         minutes = int(argv[2]) if len(argv) > 2 else E.estimate_detail(text)["est"]
         c = cost_for(minutes, text)
         print(f"About {minutes} min, {cost_words(c)} (from {c['how']}, {c['based']} jobs).")
+        if c.get("tokens"):
+            print(f"In tokens: about {mtok(c['tokens'])} weighted ({mtok(c['range'][0])} to {mtok(c['range'][1])}), "
+                  f"{pct(c['five_range'][0])} to {pct(c['five_range'][1])} of the 5-hour.")
         if cmd == "when":
             p = Projection.here()
             t = p.fits_at(c, _now()) if p else None
             print("Fits now." if t and t - _now() < 60 else f"Fits around {time.strftime('%a %H:%M', time.localtime(t))}."
                   if t else "No time: no reading, no stop lines, or it never fits.")
+        return 0
+    if cmd == "rate":  # H173
+        m = learn()
+        print("Rate: " + rate_words(m) + ".")
+        if m:
+            print("Weights per kind of token (input 1 at the API's prices): " + ", ".join(f"{k} {v:g}" for k, v in m["weights"].items())
+                  + "; per model: " + ", ".join(f"{k} {v:g}" for k, v in m["models"].items()) + ".")
+            if m["left_out"]:
+                print("Left out (the readings rose far more than their own tokens explain): jobs " + ", ".join(map(str, m["left_out"])) + ".")
+        return 0
+    if cmd == "tokens" and len(argv) > 1:  # H173: a job's own tokens and cost, running or finished
+        n = int(argv[1])
+        rec = _load().get(str(n)) or {}
+        h = next((h for h in reversed(_est().history()) if h.get("n") == n), {})
+        t = job_tokens(n, rec.get("started") or ((h["done"] - h["actual"] * 60) if h.get("done") else None), h.get("done"))
+        if not t:
+            print(f"Job {n}: no chat of it on this computer.")
+            return 1
+        print(f"Job {n}: " + "; ".join(f"{f}: {v[0]} in, {v[1]} out, {v[2]} cache read, {v[3]} cache write" for f, v in t.items())
+              + f"; {mtok(weighted(t))} weighted" + (f", {used_words(own_cost(t))}" if own_cost(t) else "") + ".")
+        return 0
+    if cmd == "calls":  # H173: what the calls cost on their own
+        for c in calls(int(argv[1]) if len(argv) > 1 else 10):
+            when = time.strftime("%a %d %b %H:%M", time.localtime(c["at"])) if c["at"] else "?"
+            print(f"call {when}: {mtok(c['weighted'])} weighted tokens" + (f", {used_words(c['cost'])}" if c["cost"] else ""))
+        return 0
+    if cmd == "fill":  # H173
+        filled, left = backfill_tokens()
+        print(f"Read the own tokens of {filled} finished jobs from their chats; {left} aren't on this computer. Rate: {rate_words(load_rate())}.")
         return 0
     if cmd == "backfill":
         filled, left = backfill()

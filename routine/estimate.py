@@ -1010,12 +1010,18 @@ def on_done(n, text="", started_hhmm=None):
     try:  # H172: its real usage next to its time, and the usage it was estimated to take
         import usagecost
         u = usagecost.finish(n, now)
-        if u and not u["late"]:
-            rec["cost"], rec["cost_how"] = u["cost"], "read"
-        else:  # its start wasn't counted (it ran before this was built): from the saved readings, as a past job
+        read = u.get("cost_read") if u and not u["late"] else None
+        if not read:  # its start wasn't counted (it ran before this was built): from the saved readings, as a past job
             c = usagecost.cost_between(usagecost.log_readings(), now - rec["actual"] * 60, now)
-            if c and all(k in c for k in usagecost.KEYS):
-                rec["cost"], rec["cost_how"] = c, "log"
+            read = c if c and all(k in c for k in usagecost.KEYS) else None
+        if read:
+            rec["cost"], rec["cost_how"] = read, ("read" if u and not u["late"] and u.get("cost_read") else "log")
+        if u and u.get("tokens"):  # H173: its own tokens; its cost is those over the rate, the readings kept next to it
+            rec["tokens"] = u["tokens"]
+            if read:
+                rec["cost_read"] = read
+            if u.get("how") == "tokens":
+                rec["cost"], rec["cost_how"] = u["cost"], "tokens"
         if u and u.get("est_cost"):
             rec["est_cost"] = u["est_cost"]
     except Exception as ex:
@@ -1023,6 +1029,12 @@ def on_done(n, text="", started_hhmm=None):
     _append(rec)
     st.pop(str(n), None)
     _save_state(st)
+    if rec.get("tokens"):  # H173: the rate learns from every finished job with its own tokens
+        try:
+            import usagecost
+            usagecost.learn()
+        except Exception as ex:
+            print(f"(the usage rate couldn't be learned: {ex!r})", file=sys.stderr)
     return rec
 
 

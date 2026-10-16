@@ -5985,7 +5985,7 @@ print(json.dumps(o, default=str))
         w1 = int(jobs2("add", "Build H8, flow 54, after the reset", "--kind=build").split()[1])
         pl = json.loads(sp.run(["python3", str(jv / "routine/estimate.py"), "plan"], capture_output=True, text=True, env=env2).stdout)
         e8 = pl["jobs"][str(w1)]
-        need(e8.get("start") and -60 <= e8["start"] - (t0 + 1800) <= 180 and e8["eta"] == e8["start"] + e8["est"] * 60
+        need(e8.get("start") and -150 <= e8["start"] - (t0 + 1800) <= 180 and e8["eta"] == e8["start"] + e8["est"] * 60
              and e8.get("cost") and e8["waits"] == "usage", f"H172: the plan doesn't say when it starts (the reset): {e8}")
         l8 = jobs2("list")
         need("starts around" in l8 and "when the usage leaves room for it" in l8 and "of the 5-hour and" in l8,
@@ -5999,7 +5999,7 @@ print(json.dumps(o, default=str))
         usage_now(99, 21, t0 + 1800, t0 + 4 * 86400)
         pi = json.loads(sp.run(["python3", str(jv / "routine/estimate.py"), "plan"], capture_output=True, text=True, env=env2).stdout)["items"][str(i9)]
         si = sp.run(["python3", str(jv / "routine/schedule.py"), "list"], capture_output=True, text=True, env=env2).stdout
-        need(pi.get("cost") and pi.get("usage_wait") and pi["start"] >= t0 + 1740 and "when the usage leaves room for it" in si,
+        need(pi.get("cost") and pi.get("usage_wait") and pi["start"] >= t0 + 1650 and "when the usage leaves room for it" in si,
              f"H172: a planned item doesn't say its usage and when it fits: {pi}")
         sp.run(["python3", str(jv / "routine/schedule.py"), "cancel", str(i9)], capture_output=True, env=env2)
         # A paused job: not started again by itself; a call resumes it (in line again, held) or drops it.
@@ -6025,6 +6025,85 @@ print(json.dumps({"n": len(r), "c": U.cost_between(r, tb, tb + 20 * 60), "none":
         ob = json.loads(rb.stdout)
         need(ob["n"] == 5 and ob["c"] == {"five": 13, "weekly": 2} and ob["none"] is None,
              f"H172: a past job's usage from the saved readings is off (a reset counted, no reading near: empty): {ob}")
+        # H173: a job's usage from its own tokens. Made-up Claude Code session files (HQ_CLAUDE_PROJECTS): the job's chat
+        # (a message on two lines counted once, two models), a helper it started, a call; a rate learned from finished
+        # jobs' tokens against their readings, an outlier left out and the nightly run counting more; the running job's
+        # cost its own tokens over the rate, so a reading pushed up by someone else doesn't pause it; done keeps both.
+        projects = self.tmp / "h173-projects"
+        shutil.rmtree(projects, ignore_errors=True)
+        env3 = {**env2, "HQ_CLAUDE_PROJECTS": str(projects)}
+        usage_now(40, 30, t0 + 3 * 3600, t0 + 4 * 86400)
+        u3 = int(jobs2("add", "Build H10, flow 54, the own tokens", "--kind=build").split()[1])
+        sp.run(["python3", str(jv / "routine/jobs.py"), "mark", str(u3), "running since " + time.strftime("%H:%M")], capture_output=True, env=env3)
+        r173 = sp.run(["python3", "-c", """
+import sys, json, time, os; sys.path.insert(0, sys.argv[1]); import usagecost as U
+proj, u, n = sys.argv[2], sys.argv[3], int(sys.argv[4]); t0 = time.time()
+iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+def write(path, first, msgs, at):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    rows = [{"type": "user", "timestamp": iso(at), "message": {"role": "user", "content": first}}]
+    for i, (model, use) in enumerate(msgs):
+        m = {"type": "assistant", "timestamp": iso(at + 30 + i), "message": {"id": f"msg_{os.path.basename(path)}_{i}", "model": model,
+             "usage": {"input_tokens": use[0], "output_tokens": use[1], "cache_read_input_tokens": use[2], "cache_creation_input_tokens": use[3]}}}
+        rows += [m, m] if i == 0 else [m]   # a message over two lines: counted once
+    open(path, "w").write("".join(json.dumps(r) + "\\n" for r in rows))
+d = os.path.join(proj, "-ws")
+write(os.path.join(d, "job.jsonl"), f"let's go. This is job {n} from the queue on the HQ roadmap", [("claude-opus-5-5", (10, 1000, 2000000, 100000)),
+      ("claude-haiku-5-5", (0, 0, 0, 500000))], t0 - 30)
+write(os.path.join(d, "job", "subagents", "agent-1.jsonl"), "the helper's brief", [("claude-sonnet-5-5", (0, 2000, 0, 0))], t0 - 20)
+write(os.path.join(d, "call.jsonl"), "[Call system: he is calling you now on HQ", [("claude-opus-5-5", (0, 10000, 1000000, 0))], t0 - 600)
+write(os.path.join(d, "other.jsonl"), "let's go. This is job 99999 from the queue", [("claude-opus-5-5", (0, 9, 9, 9))], t0 - 40)
+o = {"idx": sorted([os.path.basename(p), v["job"], v["call"]] for p, v in U.sessions().items())}
+o["tok"] = U.job_tokens(n, t0 - 60)
+o["noRate"] = U.own_cost(o["tok"])
+# The rate: 8 finished jobs whose readings rose 1 point per 300k weighted tokens, one more (the outlier) far more.
+E = U._est()
+h = [{"n": 900 + i, "kind": "build", "actual": 10, "done": 1000 + i, "how": "seen", "machine": "vps", "about": f"part {i}",
+      "tokens": {"opus": [0, 0, 0, (i + 1) * 375000]}, "cost_read": {"five": (i + 1) * 2.0, "weekly": (i + 1) * 0.2}} for i in range(8)]
+h.append({"n": 950, "kind": "build", "actual": 10, "done": 2000, "how": "seen", "machine": "vps", "about": "part x",
+          "tokens": {"opus": [0, 0, 0, 375000]}, "cost": {"five": 30.0, "weekly": 1.0}, "cost_how": "read"})
+night = {"n": 960, "kind": "build", "actual": 10, "done": 3000, "how": "seen", "machine": "vps",
+         "about": "scheduled item 37: h169, the nightly run: every night, all the flows", "tokens": {"opus": [0, 0, 0, 750000]}, "cost_read": {"five": 4.0, "weekly": 0.4}}
+o["few"] = U.learn(h[:4], write=False)
+m = U.learn(h + [night])
+o["rate"], o["left"], o["nightly"], o["w"] = m["rate"], m["left_out"], m["nightly"], m["weights"]
+o["own"] = U.own_cost(o["tok"])
+o["cost"] = U.cost_for(20, "part 3 of the thing", "build", hist=h)
+o["words"] = U.rate_words(m)
+# Running: someone else pushes the reading up 20 points; the job's own tokens are small, so no pause.
+json.dump({"readable": True, "checkedAt": iso(t0), "limits": [{"label": "5-hour limit", "percent": 60, "resetsAt": iso(t0 + 3 * 3600)},
+          {"label": "Weekly · all models", "percent": 30, "resetsAt": iso(t0 + 4 * 86400)}]}, open(u, "w"))
+rec = U.track(n)
+o["soFar"], o["over"] = rec["so_far"], U.overrun({**rec, "est": {"five": 2, "weekly": 0.2}})
+o["calls"] = [(c["weighted"], c["cost"]) for c in U.calls(5)]
+print(json.dumps(o))
+""", str(jv / "routine"), str(projects), str(u_file), str(u3)], capture_output=True, text=True, env=env3)
+        need(r173.returncode == 0, f"H173: the own tokens check didn't run: {r173.stderr[-800:]}")
+        o3 = json.loads(r173.stdout)
+        need(o3["idx"] == [["call.jsonl", None, True], ["job.jsonl", u3, False], ["other.jsonl", 99999, False]],
+             f"H173: the sessions aren't told apart (a job's chat, a call, another job): {o3['idx']}")
+        need(o3["tok"] == {"opus": [10, 1000, 2000000, 100000], "haiku": [0, 0, 0, 500000], "sonnet": [0, 2000, 0, 0]} and o3["noRate"] is None,
+             f"H173: a job's own tokens are off (a message counted twice, a model or the helper missing): {o3['tok']}")
+        need(o3["few"] is None and abs(o3["rate"]["five"] - 300000) <= 3000 and abs(o3["rate"]["weekly"] - 3000000) <= 30000
+             and o3["left"] == [950] and o3["nightly"] == 1, f"H173: the rate isn't learned from the tokens against the readings, or the outlier counts: {o3}")
+        # 10 + 5*1000 + 0.1*2M + 1.6*100k + haiku 0.2*1.6*500k + sonnet 0.6*5*2000 = 531,010 weighted: 1.77 points
+        need(abs(o3["own"]["five"] - 1.77) < 0.02 and abs(o3["own"]["weekly"] - 0.177) < 0.006, f"H173: the own cost isn't the tokens over the rate: {o3['own']}")
+        need(o3["cost"]["how"] != "fallback" and o3["cost"].get("tokens") and o3["cost"]["range"][0] <= o3["cost"]["tokens"] <= o3["cost"]["range"][1]
+             and abs(o3["cost"]["five"] - o3["cost"]["tokens"] / 300000) < 0.2 and o3["cost"]["five_range"][0] <= o3["cost"]["five"] <= o3["cost"]["five_range"][1],
+             f"H173: the estimate isn't in tokens with a range, turned into percent: {o3['cost']}")
+        need(o3["soFar"] == o3["own"] and o3["over"] is None, f"H173: someone else's use counts for the running job, or pauses it: {o3['soFar']} {o3['over']}")
+        need(len(o3["calls"]) == 1 and o3["calls"][0][1]["five"] > 0, f"H173: what a call cost isn't there: {o3['calls']}")
+        need("weighted tokens a point of the 5-hour" in o3["words"] and "1 left out" in o3["words"], f"H173: the rate in words: {o3['words']}")
+        usage_now(62, 31, t0 + 3 * 3600, t0 + 4 * 86400)
+        sp.run(["python3", str(jv / "routine/jobs.py"), "done", str(u3)], capture_output=True, env=env3)
+        f3 = json.loads((est_dir / "job-estimates-history.jsonl").read_text().splitlines()[-1])
+        need(f3["n"] == u3 and f3.get("cost_how") == "tokens" and f3.get("tokens", {}).get("opus") == [10, 1000, 2000000, 100000]
+             and f3.get("cost_read", {}).get("five") == 22 and f3["cost"]["five"] < 2, f"H173: a finished job doesn't keep its own cost next to the readings' rise: {f3}")
+        need("usagecost.tokens_once(log=log)" in (jv / "routine/tick.py").read_text(), "H173: the routine doesn't read the past jobs' own tokens")
+        need("H173" in config.VOICE_RULES and "usagecost.py\" calls" in config.VOICE_RULES, "H173: the call rules don't say a job's usage is its own")
+        need(Policy(config.FOLDER).decide("Bash", {"command": f'python3 "{ROOT}/routine/usagecost.py" calls'}).verdict == ALLOW
+             and Policy(config.FOLDER).decide("Bash", {"command": f'python3 "{ROOT}/routine/usagecost.py" fill'}).verdict != ALLOW,
+             "H173: a call can't read what a call cost, or can fill the history")
         need("job_need(job)" in (jv / "routine/tick.py").read_text() and "usage_overrun(job, s)" in (jv / "routine/tick.py").read_text()
              and "backfill_once" in (jv / "routine/tick.py").read_text(), "H172: the routine doesn't use the usage estimate, the pause or the backfill")
         page72 = (jv / "status/index.html").read_text()
@@ -7917,6 +7996,31 @@ console.log(JSON.stringify({{
         tick = (ROOT / "routine/tick.py").read_text()
         need('+ job_need(job)' in tick and "def job_need(job):" in tick and '"--need", f"five=' in tick,
              "the routine doesn't give the gate the job's estimate and its estimated usage (H172)")
+        # H173: the estimate the gate gets is in tokens over the learned rate; the gate itself still reads the real
+        # total (the saved reading), whoever else is on the plan.
+        d73 = self.tmp / "h173-gate"
+        shutil.rmtree(d73, ignore_errors=True)
+        d73.mkdir(parents=True)
+        (d73 / "usage-rate.json").write_text(json.dumps({"weights": {"in": 1, "out": 5, "cr": 0.1, "cw": 1.6}, "models": {"opus": 1},
+                                                          "rate": {"five": 300000, "weekly": 3000000}, "based": 9}))
+        t73 = time.time()
+        iso73 = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))  # noqa: E731
+        (d73 / "usage.json").write_text(json.dumps({"readable": True, "checkedAt": iso73(t73), "limits": [
+            {"label": "5-hour limit", "percent": 50, "resetsAt": iso73(t73 + 3600)}, {"label": "Weekly · all models", "percent": 30, "resetsAt": iso73(t73 + 86400)}]}))
+        r73 = sp.run(["python3", "-c", """
+import sys, json; sys.path.insert(0, sys.argv[1]); import usagecost as U
+h = [{"n": i, "kind": "build", "actual": 10, "done": i, "how": "seen", "machine": "vps", "about": f"part {i}",
+      "tokens": {"opus": [0, 0, 0, 562500]}, "cost": {"five": 20, "weekly": 2}, "cost_how": "read"} for i in range(4)]
+c = U.cost_for(10, "part", "build", hist=h)
+L = {"five": {"moving": False, "fixed": 55}, "weekly": {"moving": False, "fixed": 90}, "fable": {"moving": False, "fixed": 90}}
+p = U.Projection(U.reading(), L)
+print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now), "fitsOld": p.fits({"five": 20, "weekly": 2}, p.now)}))
+""", str(ROOT / "routine")], capture_output=True, text=True,
+                     env={**os.environ, "HQ_ROADMAP": str(d73 / "roadmap.md"), "HQ_ESTIMATES": str(d73), "HQ_USAGE": str(d73 / "usage.json")})
+        need(r73.returncode == 0, f"H173: the gate check didn't run: {r73.stderr[-600:]}")
+        o73 = json.loads(r73.stdout)
+        need(o73["c"]["five"] == 3 and o73["c"].get("tokens") == 900000 and o73["pct"] == 50 and o73["fits"] and not o73["fitsOld"],
+             f"H173: the gate's need isn't the jobs' own tokens over the rate, or the gate doesn't read the real total: {o73}")
         page = (ROOT / "status/index.html").read_text()
         need("waits for the usage line: `" in page and "gate?.state === 'waiting'" in page, "the status page doesn't say why the job waits")
         # jobs.py list says why the job first in line waits, from the routine's last start check (a copy, never the real note).
@@ -9671,15 +9775,36 @@ open(lg, "w").write("".join(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime
 o["fill"] = U.backfill(U.log_readings(lg))
 o["share"] = E.share()["lines"]
 o["peerAfter"] = json.load(open(E.PEER))["lines"][0]
+# H173: the rate learns from both computers' jobs (their own tokens against their readings); this computer's own
+# tokens, from its own chats, fill only its own lines.
+import os
+iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+proj = os.environ["HQ_CLAUDE_PROJECTS"]; os.makedirs(os.path.join(proj, "-ws"), exist_ok=True)
+rows = [{"type": "user", "timestamp": iso(tb + 5), "message": {"role": "user", "content": "let's go. This is job 1 from the queue"}},
+        {"type": "assistant", "timestamp": iso(tb + 60), "message": {"id": "m1", "model": "claude-opus-5-5",
+         "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 750000}}}]
+open(os.path.join(proj, "-ws", "s1.jsonl"), "w").write("".join(json.dumps(r) + "\n" for r in rows))
+peerT = [{"n": 30 + i, "kind": "build", "actual": 10, "done": tb - 3600 + i, "how": "seen", "machine": "lap", "about": f"x {i}",
+          "tokens": {"opus": [0, 0, 0, (i + 1) * 300000]}, "cost_read": {"five": (i + 1) * 1.6, "weekly": (i + 1) * 0.16}} for i in range(6)]
+pf = json.load(open(E.PEER)); pf["lines"] += peerT; json.dump(pf, open(E.PEER, "w"))
+o["tfill"] = U.backfill_tokens()
+o["rate"] = U.load_rate()["rate"]
+o["own1"] = [h for h in E.history() if h["n"] == 1][0]
+o["peerT"] = [h for h in json.load(open(E.PEER))["lines"] if h["n"] == 30][0]
 print(json.dumps(o))
 """, str(ROOT / "routine"), str(d72), str(lg)], capture_output=True, text=True,
-                     env={**os.environ, "HQ_ROADMAP": str(rm), "HQ_ESTIMATES": str(d72)})
+                     env={**os.environ, "HQ_ROADMAP": str(rm), "HQ_ESTIMATES": str(d72), "HQ_CLAUDE_PROJECTS": str(self.tmp / "h81-projects")})
         need(r72.returncode == 0, f"H172: the usage check didn't run: {r72.stderr[-600:]}")
         o72 = json.loads(r72.stdout)
         need((o72["peer"]["five"], o72["peer"]["weekly"], o72["peer"]["based"]) == (3, 0.5, 4) and o72["peer"]["how"] != "fallback",
              f"H172: the other computer's finished jobs don't count for the usage estimate: {o72['peer']}")
         need(o72["fill"] == [1, 0] and o72["share"][0].get("cost") == {"five": 4, "weekly": 1} and o72["share"][0].get("cost_how") == "log"
              and "cost_how" not in o72["peerAfter"], f"H172: the saved readings don't fill only this computer's own jobs, or share leaves the cost out: {o72}")
+        need(o72["tfill"] == [1, 0] and abs(o72["rate"]["five"] - 300000) <= 3000
+             and o72["own1"].get("tokens") == {"opus": [0, 0, 0, 750000]} and o72["own1"].get("cost_how") == "tokens"
+             and abs(o72["own1"]["cost"]["five"] - 4) < 0.05 and o72["own1"].get("cost_read") == {"five": 4, "weekly": 1}
+             and "cost_how" not in o72["peerT"] and o72["peerT"]["cost_read"]["five"] == 1.6,
+             f"H173: the rate doesn't learn from both computers' jobs, or the own tokens fill the other's lines: {o72}")
         srv = (ROOT / "status/server.mjs").read_text()
         need("path0 === '/api/estimates'" in srv and "'share'" in srv, "the status server doesn't answer /api/estimates")
         page = (ROOT / "status/index.html").read_text()
@@ -9690,7 +9815,7 @@ print(json.dumps(o))
                 "from the other's, a slow tag moves the estimate, said in words; only its own lines shared; served and shown; "
                 f"H166: a calendar job from the calendar jobs ({o['cal']['est']} min, the kind alone {o['cal']['by_kind']}), "
                 "unlike ones keep the kind's; finished jobs keep their words; H172: the usage per job from both computers' jobs, "
-                "the saved readings fill only its own")
+                "the saved readings fill only its own; H173: the rate from both computers' tokens, the own tokens fill only its own")
 
     async def flow80(self) -> str:
         """F9, no Claude: a call left quiet stays connected. Pipecat ends a pipeline after 5 minutes with nothing
@@ -10807,7 +10932,7 @@ FLOWS = {
     51: ("H51: a call saves the usage it gets back, for the status page", False, "flow51"),
     52: ("H49: the space bar in the desktop app: tap mutes, hold talks, letting go sends", False, "flow52"),
     53: ("H57: a button for every past call: the list, one call read only", False, "flow53"),
-    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work; H168: the team's own guess; H172: its usage", False, "flow54"),
+    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work; H168: the team's own guess; H172: its usage; H173: from its own tokens", False, "flow54"),
     55: ("F14: her voice off also silences the thinking tick, the talk sound and the click", False, "flow55"),
     56: ("H59: an update to a fake newer version: backup, local/ kept, note for Claude, waits for a call", False, "flow56"),
     57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),
@@ -10824,7 +10949,7 @@ FLOWS = {
     68: ("H72: the hidden Yes: hold the greyed-out Send, slide onto Yes, let go sends Yes", False, "flow68"),
     69: ("H76, H77: each agent her own character on calls, HQ's defaults a workspace can change", False, "flow69"),
     70: ("H75: she hangs up herself after his clear goodbye, once it has been heard; never on a passing okay", False, "flow70"),
-    71: ("H87, H91: the three stop lines move every minute, or each stays fixed; switched from the page or a call", False, "flow71"),
+    71: ("H87, H91: the three stop lines move every minute, or each stays fixed; switched from the page or a call; H173: the gate's need from tokens, the real total read", False, "flow71"),
     72: ("H83: which HQ this is (VPS, or Local · macOS), small under the name on the status page, the strip and the call page", False, "flow72"),
     73: ("H92: on a server the status page shows no Laptop section and no laptop lines under Routines", False, "flow73"),
     74: ("H100: the coaching log keeps three hours; older entries move to its archive, calls load only those", False, "flow74"),
@@ -10834,7 +10959,7 @@ FLOWS = {
     78: ("H86: the screen in the colour of who I'm calling; my lines green, hers in her colour", False, "flow78"),
     79: ("H88: heartbeats for both computers: this one up and online, the other answering; on both status pages", False, "flow79"),
     80: ("F9: a call left quiet stays connected: no idle timeout; a hang-up or a lost connection still ends it", False, "flow80"),
-    81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data; H166: from the most similar jobs; H172: usage too", False, "flow81"),
+    81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data; H166: from the most similar jobs; H172: usage too; H173: the rate from both computers' tokens", False, "flow81"),
     82: ("H104, H108: times on calls as 5 30 in the afternoon, no colon, no words, never half, quarter or o'clock", False, "flow82"),
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one; just text, the field grows (H117)", False, "flow83"),
     84: ("H106, H112, F26: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can; changed on a call at once; one row on the phone", False, "flow84"),

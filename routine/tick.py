@@ -1027,6 +1027,7 @@ def tick():
     try:
         import usagecost
         usagecost.backfill_once(log=log)
+        usagecost.tokens_once(log=log)  # H173: the past jobs' own tokens, and the rate
     except Exception as e:
         log(f"usage: backfill: {e!r}")
     if r["acting"] == "backup":

@@ -307,6 +307,12 @@ class Policy:
             if sub in ("add", "list", "cancel", "move", "priority", "every"):  # H171: every
                 return Decision(ALLOW, "the schedule for the computer")
             return Decision(DENY, "that part of the schedule is only for the computer itself")
+        # H173: the usage counts, read only: what a job or a call cost on its own tokens, the rate, the room now.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "usagecost.py"):
+            sub = args[1] if len(args) > 1 else ""
+            if sub in ("now", "cost", "when", "costs", "rate", "tokens", "calls"):
+                return Decision(ALLOW, "the usage counts")
+            return Decision(DENY, "from a call, the usage script only reads (now, cost, when, costs, rate, tokens, calls)")
         # H124: Donna texts first. Picking appointments to ping, reminders and her own notes only writes HQ's own list
         # in the workspace (direct-line/pings.json, her notes file); Google Calendar is never touched by it.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "pings.py"):
