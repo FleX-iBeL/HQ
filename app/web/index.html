@@ -1787,6 +1787,9 @@ const calBtn = document.getElementById("calbtn"), calEl = document.getElementByI
       calList = document.getElementById("callist"), calOne = document.getElementById("calone"),
       calTitle = document.getElementById("caltitle"), calNote = document.getElementById("calnote");
 let calAsk = 0, calTimer = null, aboutNext = null;
+// H156: opening the calendar puts today at the top of the list; the week's past days stay above it, a scroll up away.
+// Once he scrolls or taps, the list keeps his place: a fresh read coming in and Back from an appointment don't move it.
+let calToToday = false, calScroll = 0;
 function calOpen() { return calEl.classList.contains("open"); }
 function calDate(iso) { const d = new Date(iso.length === 10 ? iso + "T00:00:00" : iso); return isNaN(d) ? null : d; }
 function calHM(d) { return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); }
@@ -1814,6 +1817,7 @@ function showCalList(d) {
   calNote.textContent = d ? calLooked(d) : "";
   if (calEl.classList.contains("reading")) return;
   if (!d || !Array.isArray(d.events)) { histNote(calList, "Couldn't load the calendar. Try again."); return; }
+  calKeep();
   calList.innerHTML = "";
   let day = "", moving = false;
   for (const e of d.events) {
@@ -1822,7 +1826,7 @@ function showCalList(d) {
     const z = e.end ? calDate(e.end) : a;  // H143: the week's past days stay; one still running counts for today
     const shown = e.all_day || a >= today || !z || z < new Date() ? a : today;
     const k = calDayKey(shown);
-    if (k !== day) { day = k; const h = document.createElement("div"); h.className = "day"; h.textContent = calDayName(shown); calList.appendChild(h); }
+    if (k !== day) { day = k; const h = document.createElement("div"); h.className = "day"; h.dataset.t = new Date(shown.getFullYear(), shown.getMonth(), shown.getDate()).getTime(); h.textContent = calDayName(shown); calList.appendChild(h); }
     const b = document.createElement("button"); b.type = "button"; b.className = "appt" + (e.free ? " free" : "");
     const t = document.createElement("span"); t.className = "t"; t.textContent = e.all_day ? "Day" : calHM(a);
     const w = document.createElement("span"); w.className = "w"; w.textContent = e.title;
@@ -1841,7 +1845,19 @@ function showCalList(d) {
   clearTimeout(calMoveTimer);
   if (moving) calMoveTimer = setTimeout(() => { if (calOpen() && !calEl.classList.contains("reading")) loadCal(false); }, 4000);
   if (!calList.children.length) histNote(calList, d.looking ? "Reading your calendar…" : d.looked ? "Nothing in the next two weeks" : "Not read yet");
+  calPlace();
 }
+function calKeep() { if (calOpen() && !calEl.classList.contains("reading") && calList.querySelector(".day")) calScroll = calList.scrollTop; }  // H156
+function calPlace() {  // H156
+  const heads = [...calList.querySelectorAll(".day")];
+  if (!calToToday || !heads.length) { calList.scrollTop = calScroll; return; }
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const h = heads.find(x => +x.dataset.t >= t.getTime());
+  calList.scrollTop = h ? calList.scrollTop + h.getBoundingClientRect().top - calList.getBoundingClientRect().top : calList.scrollHeight;
+  calScroll = calList.scrollTop;
+}
+calList.addEventListener("scroll", calKeep, { passive: true });
+for (const ev of ["wheel", "touchstart", "pointerdown", "keydown"]) calList.addEventListener(ev, () => { calToToday = false; }, { passive: true });
 // H143: the check (done) and the X (didn't happen as planned). A tap marks it, a second tap undoes it; an X moves the
 // appointment in his Google Calendar to the calendar HQ Planning (app/planning.py), and undoing it moves it back.
 let calMoveTimer = null;
@@ -1950,6 +1966,7 @@ function agendaAgent() {
   return all.find(a => /\bagenda\b|\bcalendar\b/i.test(a.speciality || "")) || AGENTS.donna || AGENTS[agent] || {};
 }
 function showAppt(e, noteNow) {
+  calKeep();  // H156: Back comes back to this place
   calEl.classList.add("reading"); calTitle.textContent = "Appointment";
   calOne.innerHTML = ""; calOne.style.transform = calOne.style.transition = calOne.style.opacity = "";
   const h = document.createElement("h3"); h.textContent = e.title;
@@ -2005,6 +2022,7 @@ function showCal(open) {
     showDirect(false); // F29
     closeWx();         // H135
     if (setEl.classList.contains("open")) showSettings(false);  // H144: on a call, the Mic sheet
+    calToToday = true;  // H156
   }
   calEl.classList.toggle("open", open);
   calEl.classList.remove("reading"); calTitle.textContent = "Calendar"; calOne.style.transform = calOne.style.transition = calOne.style.opacity = "";

@@ -152,7 +152,8 @@ Run them before and after every update; they print a short pass/fail table at th
      again on opening after a quarter of an hour; /api/calendar on the test server's own copy, ?fresh=1
      reading again; the call's note, greeting and transcript line; the real call page in a headless
      browser, phone and app: the round button on the right before and after a call (gone on a call), the
-     days, a tap on one, Back, a swipe right back to the days (H147), "Call about this" sending the appointment, off on Free, one sheet at a time
+     days, a tap on one, Back, a swipe right back to the days (H147), "Call about this" sending the appointment, off on Free, one sheet at a time;
+     H156: it opens on today, the past days a scroll up away, his place kept once he scrolls
   73 H92, no Claude: no laptop on a server. The status page in a headless browser, served as a server
      (HQ_LAPTOP=0) and as the laptop (HQ_LAPTOP=1), with a hot laptop and a low battery: on a server no Laptop
      section, no battery in the top line, no laptop lines or bars under Routines, and the Routines light green;
@@ -5258,6 +5259,24 @@ window.fetch = async (url, opt) => {
   calBtn.click(); await wait(200); appts()[2].click(); await wait(100);
   stream = null; panel = []; cleanup("Call ended"); await wait(200);
   out.push("after:" + (placed() && !shown(devBtn) && calOpen() && !document.getElementById("calgo").disabled && !document.getElementById("calbusy") ? "ok" : "WRONG"));
+  // H156: with the week's past days in the list it opens on today, and scrolling back up still shows them; once he
+  // scrolls, a read coming in and Back from an appointment keep his place; opening again puts today on top again.
+  showCal(false); EVENTS = [];
+  for (let dd = -4; dd <= 2; dd++) for (const h of [8, 10, 13, 16, 19]) EVENTS.push({ id: "p" + dd + "-" + h, title: "Block " + dd + " " + h,
+    start: at(dd, h), end: at(dd, h, 30), all_day: false, where: "", notes: "", calendar: "Main", free: false });
+  const todayHead = () => [...days()].find(x => x.textContent.startsWith("Today"));
+  const atTop = el => el && Math.abs(el.getBoundingClientRect().top - calList.getBoundingClientRect().top) <= 2;
+  calBtn.click(); await wait(400);
+  out.push("opens-today:" + (calList.scrollTop > 0 && atTop(todayHead()) && days().length === 7 && calList.scrollHeight > calList.clientHeight ? "ok" : "WRONG " + calList.scrollTop + " " + days().length));
+  calList.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -100 })); calList.scrollTop = 0; await wait(100);
+  out.push("scroll-back:" + (calList.scrollTop === 0 && days()[0].getBoundingClientRect().top >= calList.getBoundingClientRect().top - 1 && !days()[0].textContent.startsWith("Today") ? "ok" : "WRONG " + calList.scrollTop));
+  calList.scrollTop = 120; await wait(100); loadCal(false); await wait(300);
+  out.push("keeps-place:" + (Math.abs(calList.scrollTop - 120) <= 1 ? "ok" : "WRONG " + calList.scrollTop));
+  appts()[3].dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); appts()[3].click(); await wait(200);
+  document.getElementById("calback").click(); await wait(300);
+  out.push("back-keeps-place:" + (!reading() && Math.abs(calList.scrollTop - 120) <= 1 ? "ok" : "WRONG " + calList.scrollTop));
+  showCal(false); await wait(100); calBtn.click(); await wait(400);
+  out.push("reopens-today:" + (atTop(todayHead()) ? "ok" : "WRONG " + calList.scrollTop));
   document.getElementById("calclose").click();
   const pre = document.createElement("pre"); pre.id = "h101"; pre.textContent = "H101RESULT " + out.join(" | ") + " END";
   document.body.appendChild(pre);
@@ -5282,7 +5301,8 @@ window.fetch = async (url, opt) => {
                 "transcript line; the page, phone and app: the button on the right before and after a call, the days, one "
                 "appointment, Back, a swipe to the right back to the days (finger and trackpad; not up or down, left, short or from a field; H147), Call about this sending it to the agenda's agent (F30), off on Free, one sheet at a time; on a call "
                 "(also three-way) the button and an open sheet stay, the call's buttons free below it, Call about this waits, "
-                "the Mic sheet and the calendar take turns, the call and the mic go on (H144)")
+                "the Mic sheet and the calendar take turns, the call and the mic go on (H144); H156: it opens on today with the "
+                "past days a scroll up away, keeps his place after a scroll (a new read, Back), and opens on today again")
 
     async def flow92(self) -> str:
         """H124, no Claude: Donna texts first. routine/pings.py on its own copies (picking appointments, reminders,
