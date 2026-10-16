@@ -500,6 +500,18 @@ GREETINGS = {k: [g.replace("{n}", f", {_N}" if _N else "").replace("{s}", f" {_N
              for k, v in _GREETINGS.items()}
 
 
+# H164 (15 and 16 October 2026), in the user's words: "make a couple of first time of the day openers, and make sure
+# they are split up correctly" and "You could not say I just got in when we were already talking." The greetings
+# above open only the first call of the day; a later call that day gets one of these.
+_BACK_GREETINGS = {
+    "morning": ["Hey again{s}. What can I do for you?", "Back again{s}! What's up?"],
+    "afternoon": ["Hey again{s}, what can I do for you?", "Back again{s}! What's up?"],
+    "evening": ["Hey again{s}. What can I do for you?", "Back again{s}! What's up?"],
+    "night": ["Hey again{s}, still up? What can I do for you?", "Back again{s}. What can I do for you?"],
+}
+BACK_GREETINGS = {k: [g.replace("{s}", f" {_N}" if _N else "") for g in v] for k, v in _BACK_GREETINGS.items()}
+
+
 # H60 (11 October 2026), in the user's words: "instead of saying something like 'hey <name> what's up' you say
 # something like 'Hey <name>, let's continue from where we left off'". The greeting when a call continues an earlier one.
 _CONTINUE_GREETINGS = ["Hey{s}, let's continue from where we left off.", "Hey{s}, let's pick up where we left off.",
@@ -516,13 +528,15 @@ def day_part() -> str:
             else "evening")
 
 
-def greetings_now(agent: dict | None = None) -> list[str]:
-    """H76: the agent's own greetings for this part of the day (her character), else the call system's."""
+def greetings_now(agent: dict | None = None, first: bool = True) -> list[str]:
+    """H76: the agent's own greetings for this part of the day (her character), else the call system's.
+    H164: `first` is the first call of the day (transcript.first_call_today); a later one gets her back greetings."""
+    part = day_part()
     if agent:
-        mine = _agents.greetings(agent, _N or None, day_part())
+        mine = (_agents.greetings if first else _agents.back_greetings)(agent, _N or None, part)
         if mine:
             return mine
-    return GREETINGS[day_part()]
+    return (GREETINGS if first else BACK_GREETINGS)[part]
 
 
 def continue_greetings(agent: dict | None = None) -> list[str]:

@@ -5505,7 +5505,7 @@ window.fetch = async (url, opt) => {
         for g in config.CONTINUE_GREETINGS + config.continue_greetings(agents.find(config.FOLDER, "pepper")):
             need(not config.ME["name"] or config.ME["name"] in g, f"the name from me.md isn't in the greeting: {g}")
         cf = Call(model="sonnet", free=True, continues=name)
-        need(cf.continued is None and cf.fillers._texts["greeting"] == config.greetings_now(cf.agent) and cf.transcript.path is None,
+        need(cf.continued is None and cf.fillers._texts["greeting"] == config.greetings_now(cf.agent, first=cf.first_today) and cf.transcript.path is None,
              "a Free call continued an earlier call")
         t = transcript.CallTranscript(self.tmp / "h60-calls", model="test", agent="Pepper", continues=c)
         t.user("Test.")
@@ -6778,7 +6778,8 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         need(not name or name not in src, "the user's name is written in HQ's agents.py")
         # H131: no "honestly" in any agent's own lines, and the human rules tell every agent not to say it.
         for a in base.values():
-            lines = [a["character"], a["pushback"]] + [g for v in agents._greetings(a["greetings"]).values() for g in v] + a["continue_greetings"]
+            lines = ([a["character"], a["pushback"]] + [g for k in ("greetings", "back_greetings") for v in agents._greetings(a[k]).values() for g in v]
+                     + a["continue_greetings"])
             need(not any(re.search(r"(?i)\bhonestly\b|\bmm\b", x) for x in lines), f"{a['id']} still says honestly or Mm: {lines}")
         need('never "honestly"' in agents.HUMAN, "the human rules don't drop honestly")
         need('never says "honestly"' in base["pepper"]["personality"] and "no one-liners" in base["pepper"]["personality"],
@@ -6808,20 +6809,64 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
                 c.transcript.path.unlink(missing_ok=True)
         need(config.greetings_now({"id": "x", "greetings": {}}) == config.GREETINGS[config.day_part()],
              "an agent without greetings doesn't get the call system's")
+        # H164: only the first call of the day (any agent, from the saved calls) opens like the first one; a later call
+        # that day gets her back-again greeting. The day starts at 5 in the morning.
+        for aid in agreed:
+            a = base[aid]
+            first, back = (agents._greetings(a[k]) for k in ("greetings", "back_greetings"))
+            need(set(back) == set(agents.PARTS), f"{aid}: no back-again greetings for every part of the day (H164): {back}")
+            for p in agents.PARTS:
+                need(not set(back[p]) & set(first[p]), f"{aid}: a back-again greeting is also a first-of-the-day one ({p})")
+                need(not any(re.search(r"(?i)just got in|how did you sleep|morning\b|starting", g) for g in back[p]),
+                     f"{aid}: a back-again greeting sounds like the day's first call: {back[p]}")
+        backs = [set(g for p in agents.PARTS for g in agents.back_greetings(base[i] | {"back_greetings": agents._greetings(base[i]["back_greetings"])}, "Sam", p)) for i in agreed]
+        need(not (backs[0] & backs[1] or backs[0] & backs[2] or backs[1] & backs[2]), "two agents share a back-again greeting")
+        from transcript import first_call_today, TZ, now as tnow
+        import datetime as _dt
+        day = self.tmp / "calls69-day"
+        day.mkdir(parents=True, exist_ok=True)
+        nine = _dt.datetime(2026, 10, 16, 9, 30, tzinfo=TZ)
+        need(first_call_today(day, nine), "with no saved calls the call isn't the first of the day")
+        (day / "2026-10-15-2300.md").write_text("# Call\n")
+        (day / "2026-10-16-0310.md").write_text("# Call\n")
+        need(first_call_today(day, nine), "a call last night (before 5 in the morning) counts for today")
+        need(not first_call_today(day, _dt.datetime(2026, 10, 16, 4, 0, tzinfo=TZ)), "at 4 at night, the call at 3 10 doesn't count for the same day")
+        (day / "2026-10-16-0910.md").write_text("# Call\n")
+        need(not first_call_today(day, nine), "a call at 9 10 today still leaves 9 30 the first of the day")
+        need(first_call_today(day, _dt.datetime(2026, 10, 17, 8, 0, tzinfo=TZ)), "the next morning isn't the first call of the day again")
+        later = self.tmp / "calls69-later"
+        later.mkdir(parents=True, exist_ok=True)
+        (later / tnow().strftime("%Y-%m-%d-%H%M.md")).write_text("# Call\n")
+        for aid in ("donna", "pepper"):
+            c = Call(model="sonnet", calls_dir=later, wrap_up="dry", test_mode=True, agent=aid)
+            want = agents.back_greetings(every[aid], name, config.day_part())
+            g = c.fillers._texts["greeting"]
+            first_now = config.greetings_now(c.agent, first=True)
+            if tnow().hour >= 5:  # only the same day once the day has started
+                need(c.first_today is False and g == want and want and not set(g) & set(first_now),
+                     f"{aid}'s later call of the day still opens like the first one (H164): {g}")
+            if c.transcript.path:
+                c.transcript.path.unlink(missing_ok=True)
+        need(config.greetings_now({"id": "x", "back_greetings": {}}, first=False) == config.BACK_GREETINGS[config.day_part()]
+             and not set(config.BACK_GREETINGS[config.day_part()]) & set(config.GREETINGS[config.day_part()]),
+             "an agent without back-again greetings doesn't get the call system's")
         # H77: a workspace's own character wins, only what it gives; marked as its own.
         ws = self.tmp / "agents69"
         (ws / "HQ" / "agents").mkdir(parents=True)
         (ws / "HQ" / "agents" / "agents.json").write_text(json.dumps([
-            {"id": "donna", "character": "Soft and slow", "pushback": "Are you sure?", "greetings": ["Hello{s}."]},
-            {"id": "pepper", "greetings": 42, "continue_greetings": [1, ""]},
+            {"id": "donna", "character": "Soft and slow", "pushback": "Are you sure?", "greetings": ["Hello{s}."],
+             "back_greetings": ["Hello again{s}."]},
+            {"id": "pepper", "greetings": 42, "back_greetings": {"evening": [7]}, "continue_greetings": [1, ""]},
             {"id": "coach", "name": "Coach", "load": "deep"}]))
         mine = {a["id"]: a for a in agents.load(ws)}
         d = mine["donna"]
         need(d["character"] == "Soft and slow" and d["pushback"] == "Are you sure?" and d["personality"] == base["donna"]["personality"]
-             and all(agents.greetings(d, "Sam", p) == ["Hello Sam."] for p in agents.PARTS),
+             and all(agents.greetings(d, "Sam", p) == ["Hello Sam."] and agents.back_greetings(d, "Sam", p) == ["Hello again Sam."]
+                     for p in agents.PARTS),
              f"the workspace's own character isn't applied, or not only what it gives: {d}")
         need(not agents.is_default(d), "a changed character still counts as HQ's default")
-        need(mine["pepper"]["greetings"] == {} and mine["pepper"]["continue_greetings"] == [] and not agents.is_default(mine["pepper"]),
+        need(mine["pepper"]["greetings"] == {} and mine["pepper"]["back_greetings"] == {} and mine["pepper"]["continue_greetings"] == []
+             and not agents.is_default(mine["pepper"]),
              "bad greetings in agents.json aren't dropped")
         need(config.greetings_now(mine["coach"]) == config.GREETINGS[config.day_part()] and not agents.is_default(mine["coach"]),
              "a new agent without greetings doesn't get the call system's")

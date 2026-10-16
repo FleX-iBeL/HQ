@@ -148,6 +148,23 @@ def _sort_key(path: Path) -> tuple[str, int]:
     return (m.group(1), int(m.group(2) or 1)) if m else ("", 0)
 
 
+# H164: the day starts at 5 in the morning (where config.day_part's night ends), so a call at 1 at night still
+# counts for the day before. Claude's choice.
+DAY_STARTS = 5
+
+
+def first_call_today(folder: Path | None = None, at: datetime | None = None) -> bool:
+    """H164: is this the first call of the day? True when no call (any agent) was saved yet since the day
+    started. Read before this call's own transcript exists."""
+    from datetime import timedelta
+    at = at or now()
+    start = at.replace(hour=DAY_STARTS, minute=0, second=0, microsecond=0)
+    if at < start:
+        start -= timedelta(days=1)
+    since, until = start.strftime("%Y-%m-%d-%H%M"), at.strftime("%Y-%m-%d-%H%M")
+    return not any(since <= _sort_key(p)[0] <= until for p in _calls(folder or config.CALLS))
+
+
 def read_lines(path: Path) -> list[dict]:
     """H34: what was said on a saved call, the way the chat on the call page shows it:
     his lines, her lines and her waiting lines. Tool lines and call notes are left out."""

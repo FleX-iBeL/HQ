@@ -74,6 +74,9 @@ class Call:
         # H60: the earlier call this one continues (read before this call's own transcript exists)
         # H79: handover: the earlier call's agent just put her on (he asked for her); she picks up the phone
         self.handover = bool(handover)
+        # H164: the first call of the day (any agent, from the saved calls) gets a first-of-the-day hello; read
+        # before this call's own transcript exists. A free call isn't saved, so it doesn't count.
+        self.first_today = transcript.first_call_today(calls_dir)
         self.continued = None if free or not continues else transcript.continue_from(continues, calls_dir,
                                                                                      me=self.agent["name"])
         self.transcript = CallTranscript(calls_dir, model=self.model, keep=not free, agent=self.agent["name"],
@@ -96,7 +99,8 @@ class Call:
                                     # H76: her own greetings, in her character
                                     greetings=agenda.greetings(self.about, config.ME["name"]) if self.about
                                     else config.continue_greetings(self.agent)
-                                    if self.continued and not self.handover else config.greetings_now(self.agent))
+                                    if self.continued and not self.handover
+                                    else config.greetings_now(self.agent, first=self.first_today))
         self.llm = ClaudeSessionLLMService(
             self.brain, stop_brain_on_end=False, fillers=self.fillers,
             policy=self.policy, transcript=self.transcript,

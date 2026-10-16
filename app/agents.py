@@ -25,7 +25,8 @@ Where they come from:
 - H76 (12 October 2026): each agent has her own character on calls: `character` (one line, shown in
   Settings), `personality` (how she is and how she talks), `pushback` (a line that sounds like her when she
   pushes back), `greetings` (per part of the day: morning, afternoon, evening, night; or one list for all)
-  and `continue_greetings` (when a call picks up an earlier one). In the greetings `{s}` is " Name", `{n}` is
+  and `continue_greetings` (when a call picks up an earlier one). H164: `back_greetings` (same shape as
+  `greetings`) for a later call the same day; `greetings` only open the first call of the day. In the greetings `{s}` is " Name", `{n}` is
   ", Name" and `{N}` is "Name. " (each nothing without a name), the name from the user's me.md.
 - H77: the three below are HQ's defaults, the same for everyone and nothing personal. A workspace changes any
   of these keys in its agents.json; `is_default` says whether an agent's character is still HQ's own, and
@@ -103,11 +104,21 @@ DEFAULTS: list[dict] = [
             "morning": ["Hey you. What do you need?", "Morning. What do you need?", "Morning. Coffee first, or straight in?",
                         "Hey, early bird. What's up?", "Morning. Hit me."],
             "afternoon": ["Hey you. What do you need?", "There you are. What do you need?", "Hey. What've you got for me?",
-                          "You again. What's up?", "Afternoon. Go on, hit me."],
+                          "Hey, stranger. What's up?", "Afternoon. Go on, hit me."],
             "evening": ["Hey you. What do you need?", "Evening. What do you need?", "Hey. Still at it? What's up?",
                         "Evening. Quick one or a long one?"],
             "night": ["Hey you. What do you need?", "Hey you. Still up? What do you need?", "Late one. What's up?",
                       "Can't sleep either? Go on."],
+        },
+        # H164: a later call the same day; her first-of-the-day lines above only open the day's first call.
+        "back_greetings": {
+            "morning": ["Hey you, again. What do you need?", "Back already? What's up?", "You again. Go on, hit me.",
+                        "Round two. What've you got?"],
+            "afternoon": ["Hey you, again. What do you need?", "You again. What's up?", "Back already? Go on.",
+                          "Round two. What've you got for me?"],
+            "evening": ["Hey you, again. What do you need?", "You again. Still at it? What's up?",
+                        "Back for one more? Go on."],
+            "night": ["Hey you, again. What do you need?", "Still up? What do you need?", "One more before bed? Go on."],
         },
         "continue_greetings": ["Back again. Where were we?", "Hey you. Picking up where we left off.",
                                "Miss me already? Go on.", "That was quick. Where were we?", "Back for more. Go on."],
@@ -158,6 +169,18 @@ DEFAULTS: list[dict] = [
             "night": ["Hey{s}. What's on your mind?", "Hey{s}. Late one. What's keeping you up?",
                       "Hi{s}. It's late. Everything okay?", "Hey{s}. Can't switch off? Talk to me."],
         },
+        # H164: a later call the same day. In the user's words (16 October 2026): "You could not say I just got
+        # in when we were already talking." Her morning lines above only open the day's first call.
+        "back_greetings": {
+            "morning": ["Hey{s}, again. What's on your mind?", "Oh, hey{s}. Back already. What's up?",
+                        "Hi again{n}. Something come up?", "Hey{s}. Good, I'm still at my desk. What's going on?"],
+            "afternoon": ["Hey{s}, again. What's on your mind?", "Hi again{n}. How's it been since we talked?",
+                          "Oh, hey{s}. Back again. What's up?", "Hey{s}. Good timing, I'm still here. What's going on?"],
+            "evening": ["Hey{s}, again. What's on your mind?", "Hi again{n}. How did the rest of the day go?",
+                        "Oh, hey{s}. Back again. Tell me."],
+            "night": ["Hey{s}, again. What's on your mind?", "Hi again{n}. Still up? What's keeping you?",
+                      "Hey{s}. Back again, this late. Everything okay?"],
+        },
         "continue_greetings": ["Hey{s}. Okay, where were we?", "Hey{s}. Right, let's pick it back up.",
                                "Hi again{n}. I still had my notes open. Go on.",
                                "Hey{s}. Oh, I was still thinking about that. Where were we?",
@@ -194,16 +217,17 @@ DEFAULTS: list[dict] = [
         ),
         "pushback": "Noted. It'll be done. Just not tonight.",
         "greetings": ["{N}Go ahead.", "{N}I'm listening.", "{N}Yes?", "{N}You have my attention.", "{N}Moneypenny."],
+        "back_greetings": ["{N}Again. Go ahead.", "{N}Back so soon.", "{N}Once more. I'm listening."],
         "continue_greetings": ["{N}Where we left off. Go ahead.", "{N}Back so soon. Go ahead.", "{N}As you were."],
     },
 ]
 
 PARTS = ("morning", "afternoon", "evening", "night")
 # The keys that make up an agent's character (H76); is_default compares these with HQ's own.
-CHARACTER_KEYS = ("character", "personality", "pushback", "greetings", "continue_greetings")
+CHARACTER_KEYS = ("character", "personality", "pushback", "greetings", "back_greetings", "continue_greetings")
 
 _KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", "personality", "hidden", "coming_soon",
-         "character", "pushback", "greetings", "continue_greetings", "own_goodbye")
+         "character", "pushback", "greetings", "back_greetings", "continue_greetings", "own_goodbye")
 
 
 def _lines(v, most: int = 8) -> list[str]:
@@ -250,6 +274,7 @@ def _clean(a: dict) -> dict | None:
         "character": str(a.get("character", "")).strip()[:160],
         "pushback": str(a.get("pushback", "")).strip()[:200],
         "greetings": _greetings(a.get("greetings")),
+        "back_greetings": _greetings(a.get("back_greetings")),
         "continue_greetings": _lines(a.get("continue_greetings")),
         "own_goodbye": a.get("own_goodbye") is True,
     }
@@ -347,6 +372,13 @@ def greetings(agent: dict, user: str | None, part: str) -> list[str]:
     """H76: her greetings for this part of the day, with the name filled in; [] when she has none
     (then the call system's own greetings play)."""
     g = agent.get("greetings") or {}
+    return [fill(x, user) for x in (g.get(part) or next((v for v in g.values() if v), []))]
+
+
+def back_greetings(agent: dict, user: str | None, part: str) -> list[str]:
+    """H164: her greetings for a later call the same day ("back again"), for this part of the day; [] when she
+    has none (then the call system's own back greetings play)."""
+    g = agent.get("back_greetings") or {}
     return [fill(x, user) for x in (g.get(part) or next((v for v in g.values() if v), []))]
 
 
