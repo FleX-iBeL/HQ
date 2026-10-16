@@ -9647,9 +9647,12 @@ window.fetch = async (url, opt) => {
         ask = brain.refusal_text(type("D", (), {"verdict": "ask", "question": "a test", "retry": False, "why": ""})())
         own = config.ME["on_calls"] or ""  # the user's own notes (me.md) may quote the old style; only HQ's rules count
         tools = config.VOICE_RULES[config.VOICE_RULES.find("When is a day and a time"):][:400]  # the scheduler's syntax
+        _r = config.VOICE_RULES.find("- Repeating items (H171)")
+        repeat = config.VOICE_RULES[_r:config.VOICE_RULES.find("\n- ", _r + 1)] if _r >= 0 else ""  # H171's --every syntax ("2:00")
         for name, text in {**rules, "the ask-first note": ask}.items():
             text = text.replace(own, "") if own else text
-            text = text.replace(tools, "").replace(config.PINGS_RULE, "")  # H124's command syntax (pings.py), not speech
+            text = (text.replace(tools, "").replace(repeat, "").replace(config.PINGS_RULE, "")  # H124's command syntax (pings.py), not speech
+                    .replace(config.APPT_NOTES_RULE, ""))  # H146: his notes and the calendar's description, written, not spoken
             hit = old.search(text)
             need(not hit, f"{name} still says a time another way: {hit and hit.group(0)!r}")
         need('Saturday at 6 30 in the evening?' in ask, "the ask-first note's example isn't in the new style")
