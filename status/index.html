@@ -851,7 +851,7 @@
         ['sync', 'Two-way sync', 'Only with a second HQ: the workspace and Claude\'s memory, both ways'],
         ['helper', 'Routine helper', 'Runs everything below, every minute'],
         ['watchdog', 'Watchdog', 'Checks the helper every 5 minutes, apart from it'],
-        ['mail', 'Mail check', Date.now() >= 1792069200000 && Date.now() < 1792094400000 ? 'Every 15 minutes until 22:00 (H148 test), then every hour' : 'Every hour'],
+        ['mail', 'Mail check', 'Every hour'],  // H149: while he asked for it, the routine's own line says every 15 minutes until when
         ['jobs', 'Jobs from calls', 'One at a time'],
         ['schedule', 'Scheduler', 'Planned work; only when no job runs or waits'],
         ['usage', 'Usage check', 'Every minute, free'],
@@ -910,7 +910,7 @@
           const when = el('span', 'soft when');
           if (x?.last) when.append(el('small', '', `Last ${clock(new Date(x.last * 1000))}`));
           if (x?.next && state !== 'down' && state !== 'off' && !(state === 'waiting' && x.next < now)) when.append(el('small', '', `Next ${clock(new Date(x.next * 1000))}`));
-          row.title = about + (state === 'down' && x?.detail?.length ? `\n\nWhat it said last:\n${x.detail.join('\n')}` : '');  // H42
+          row.title = (x?.about ?? about) + (state === 'down' && x?.detail?.length ? `\n\nWhat it said last:\n${x.detail.join('\n')}` : '');  // H42
           row.append(el('i'), what, el('span', 'text', text), when);
           card.append(row);
         }

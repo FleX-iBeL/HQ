@@ -1691,12 +1691,13 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         routines.FILE = str(self.tmp / "routines.json")
         started = []
         tick.start_mail = lambda: started.append(time.time())
-        # H148: every 15 minutes in its test window, on the quarter; hourly before and after it, by itself.
-        f0, f1 = tick.MAIL_FAST_FROM, tick.MAIL_FAST_UNTIL
+        # H148, H149: every 15 minutes in a window he named, on the quarter; hourly before and after it, by itself.
+        f0, f1 = 1792069200, 1792094400
+        tick.FAST_WINDOW = (f0, f1)
         need(tick.mail_next(f0 - 3600) == f0 and tick.mail_next(f0) == f0 + 900 and tick.mail_next(f1 - 900) == f1
              and tick.mail_next(f1) == f1 + 3600 and tick.mail_every(f1) == 3600,
-             "the H148 test window doesn't go every 15 minutes, or doesn't go back to hourly by itself")
-        tick.MAIL_FAST_UNTIL = 0  # the rest of this flow counts in hours, whatever the time it runs
+             "a quick window doesn't go every 15 minutes, or doesn't go back to hourly by itself")
+        tick.FAST_WINDOW = ()  # the rest of this flow counts in hours, whatever the roadmap says
         now = time.time()
         open(tick.MAIL_LAST, "w").write(str(int(now // 3600 * 3600 - 3600 + 30)))  # last ran just after the previous hour
         incidents.past("helper", now // 3600 * 3600 - 120, now - 30, "The MacBook was asleep", [])
@@ -9439,6 +9440,108 @@ window.fetch = async (url, opt) => {
         need("Is it raining?" in sent and sent.endswith("Hello?"), f"the unanswered line didn't go again: {sent!r}")
         return "answered or thinking: a new typed line carries only itself; the same line twice goes; an unanswered one goes again"
 
+    async def flow105(self) -> str:
+        """H149, no Claude: mail more often for a while he names. His plain words read as an end time (a stretch, a
+        clock time, tonight, a day, end of the week; nonsense, too soon or more than a week refused in plain words);
+        jobs.py mail-fast on a copy of the roadmap writes it on the Mail check line, reads back, list says it, a new
+        until replaces the old one, mail-hourly ends it; the routine runs every quarter in the window, the first
+        quarter after he asked is never counted as missed, and it's hourly again by itself after the end; a call may
+        run both, the call and Donna's chat rules say how; the status page still reads the queue clean."""
+        import importlib
+        import subprocess as sp
+        from datetime import datetime
+        from policy import Policy, ALLOW
+        sys.path.insert(0, str(ROOT / "routine"))
+        import mailfast as mf
+        import tick
+        importlib.reload(mf)
+        # his words
+        now = datetime(2026, 10, 16, 15, 20).timestamp()  # a Friday afternoon
+        at = lambda *a: datetime(*a).timestamp()
+        for words, want in (("for the next 6 hours", now + 6 * 3600), ("6h", now + 6 * 3600), ("90 minutes", now + 5400),
+                            ("an hour", now + 3600), ("tonight", at(2026, 10, 16, 22)), ("until 20:00", at(2026, 10, 16, 20)),
+                            ("8pm", at(2026, 10, 16, 20)), ("9am", at(2026, 10, 17, 9)), ("tomorrow", at(2026, 10, 17, 22)),
+                            ("tomorrow 9:00", at(2026, 10, 17, 9)), ("until Tuesday", at(2026, 10, 20, 22)),
+                            ("Friday 18:00", at(2026, 10, 16, 18)), ("until the end of the week", at(2026, 10, 18, 22)),
+                            ("2 days", now + 2 * 86400), ("2026-10-19 14:00", at(2026, 10, 19, 14))):
+            need(mf.parse(words, now) == int(want), f"'{words}' reads as {mf.stamp(mf.parse(words, now))}, not {mf.stamp(want)}")
+        need(mf.parse("Friday", at(2026, 10, 16, 23)) == int(at(2026, 10, 23, 22)), "'Friday' late on a Friday isn't the next one")
+        for words in ("banana", "5 minutes", "3 weeks", "until 99:00"):
+            try:
+                mf.parse(words, now)
+                need(False, f"'{words}' was taken")
+            except ValueError as e:
+                need(str(e) and "Traceback" not in str(e), f"'{words}' isn't refused in plain words")
+        need(mf.said(at(2026, 10, 16, 22), now) == "today at 22:00" and mf.said(at(2026, 10, 18, 22), now) == "Sunday 18 October at 22:00",
+             "the end isn't said back in plain words")
+        # the switch, on a copy of the roadmap
+        rm = self.tmp / "roadmap-H149.md"
+        rm.write_text(ROADMAP.read_text())
+        env = {**os.environ, "HQ_ROADMAP": str(rm)}
+        def jobs(*a, ok=True):
+            r = sp.run(["python3", str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
+            need((r.returncode == 0) == ok, f"jobs.py {a}: {r.stdout}{r.stderr}")
+            return r.stdout + r.stderr
+        jobs("mail-hourly")
+        need(json.loads(jobs("next"))["mail_fast"] is None, "the copy starts in a quick window")
+        out = jobs("mail-fast", "for the next 6 hours")
+        need("every 15 minutes until" in out and "every hour again by itself" in out, f"mail-fast doesn't say until when: {out}")
+        q = json.loads(jobs("next"))
+        f, u = q["mail_fast"]
+        need(abs(f - time.time()) < 90 and abs(u - (time.time() + 6 * 3600)) < 90 and q["mail"] is True, f"the window reads back as {q}")
+        line = next(l for l in rm.read_text().splitlines() if l.startswith("**Mail check:**"))
+        need("every 15 minutes from" in line and "then every hour by itself" in line, f"the Mail check line: {line}")
+        need("Mail check: on (every 15 minutes" in jobs("list"), "list doesn't say the mail check runs quicker")
+        jobs("mail-fast", "2 hours")
+        f2, u2 = json.loads(jobs("next"))["mail_fast"]
+        need(f2 == f and abs(u2 - (time.time() + 7200)) < 90, "a new until doesn't replace the old one")
+        need("too soon" in jobs("mail-fast", "5 minutes", ok=False), "a too-short window isn't refused")
+        jobs("mail-hourly")
+        q = json.loads(jobs("next"))
+        need(q["mail_fast"] is None and "(every hour, hidden" in rm.read_text(), "mail-hourly doesn't end it")
+        # a window whose end has passed reads as hourly
+        rm.write_text(rm.read_text().replace("(every hour, hidden", "(every 15 minutes from 2026-10-15 15:00 until 2026-10-15 22:00, then every hour by itself, hidden"))
+        need(json.loads(jobs("next"))["mail_fast"] is None, "an ended window still counts")
+        # the routine's minute
+        keep = tick.FAST_WINDOW
+        try:
+            t0 = at(2026, 10, 16, 15, 40)  # he asks at 15:40; the last check was 15:00
+            tick.FAST_WINDOW = (int(t0), int(at(2026, 10, 16, 22)))
+            need(tick.mail_next(at(2026, 10, 16, 15)) == at(2026, 10, 16, 15, 45), "the first quarter after he asked isn't next")
+            need(tick.mail_next(at(2026, 10, 16, 16, 15)) == at(2026, 10, 16, 16, 30), "it doesn't go every quarter in the window")
+            need(tick.mail_next(at(2026, 10, 16, 21, 45)) == at(2026, 10, 16, 22) and tick.mail_next(at(2026, 10, 16, 22)) == at(2026, 10, 16, 23),
+                 "it doesn't go back to hourly by itself at the end")
+            need(tick.mail_every(at(2026, 10, 16, 18)) == 900 and tick.mail_every(at(2026, 10, 16, 22)) == 3600, "mail_every doesn't follow the window")
+            tick.FAST_WINDOW = (int(t0), int(at(2026, 10, 16, 21, 37)))  # an end off the quarter: the full hour after it
+            need(tick.mail_next(at(2026, 10, 16, 21, 30)) == at(2026, 10, 16, 22), "an end off the quarter isn't followed by the hour")
+            tick.FAST_WINDOW = ()
+            need(tick.mail_next(at(2026, 10, 16, 15, 10)) == at(2026, 10, 16, 16) and tick.mail_words() == "Every hour",
+                 "without a window it isn't hourly")
+            tick.FAST_WINDOW = (int(time.time()) - 60, int(time.time()) + 3600)
+            need(tick.mail_words().startswith("Every 15 minutes until"), f"the status page's words: {tick.mail_words()}")
+        finally:
+            tick.FAST_WINDOW = keep
+        # a call may run it, and the rules say how
+        pol = Policy(config.FOLDER)
+        for sub in ('mail-fast "until tonight"', "mail-hourly"):
+            d = pol.decide("Bash", {"command": f'python3 "{ROOT}/routine/jobs.py" {sub}'})
+            need(d.verdict == ALLOW, f"a call may not run jobs.py {sub}: {d}")
+        import direct_line as dl
+        for name, text in (("the call rules", config.VOICE_RULES), ("Donna's chat rules", dl._text_rules())):
+            need("mail-fast" in text and "mail-hourly" in text and "{mailfast}" not in text and "back to every hour by itself" in text,
+                 f"{name} don't say how to mail more often")
+        import role
+        need("mail-fast" in role.WRITES["jobs"] and "mail-hourly" in role.WRITES["jobs"], "the backup doesn't hand it to the main")
+        # the status page still reads the queue
+        jobs("mail-fast", "tonight" if datetime.now().hour < 21 else "tomorrow")
+        js = f"""import {{ parseRoadmap }} from {json.dumps(str(ROOT / 'status/parse.mjs'))};
+import {{ readFileSync }} from 'node:fs';
+const r = parseRoadmap(readFileSync({json.dumps(str(rm))}, 'utf8'));
+console.log(JSON.stringify({{problems: r.problems}}));"""
+        r = sp.run(["node", "--input-type=module", "-e", js], capture_output=True, text=True)
+        need(r.returncode == 0 and not json.loads(r.stdout)["problems"], f"the status page reads the queue wrong: {r.stdout}{r.stderr}")
+        return "his words read as an end time; every quarter until then, hourly again by itself; a call and Donna can set it"
+
     async def flow101(self) -> str:
         """H152, no Claude, no Syncthing, no network: after a crash or a restart the two computers come back in step
         by themselves. Her pings file is only written when something changed (it was written every minute, so it
@@ -11210,6 +11313,7 @@ FLOWS = {
     102: ("H165: the whole turn heard again before she answers, behind a switch; the pieces stay as the fallback", False, "flow102"),
     103: ("H169: the nightly run: the right flows for this computer, one line when all pass, a plain morning text from Donna", False, "flow103"),
     104: ("F33: a typed line sent while she talks or thinks carries only itself; an unanswered one goes again", False, "flow104"),
+    105: ("H149: mail more often for a while he names: his words as an end time, every quarter until then, hourly again by itself", False, "flow105"),
 }
 
 

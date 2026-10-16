@@ -297,7 +297,9 @@ class Policy:
         # uses them on his clear go. The job's own steps (done, held, mark, next) are not for calls.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "jobs.py"):
             sub = args[1] if len(args) > 1 else ""
-            if sub in ("add", "list", "stop", "overrule", "move", "on", "off", "resume"):  # H172: resume a paused job
+            if sub in ("add", "list", "stop", "overrule", "move", "on", "off", "resume",  # H172: resume a paused job
+                       "mail-fast", "mail-hourly"):  # H149: the mail check every 15 minutes for a while he names
+
                 return Decision(ALLOW, "the queue for the computer")
             return Decision(DENY, "that part of the queue is only for the computer itself")
         # H43: the scheduler. Adding, listing, moving and cancelling planned items only writes the schedule on

@@ -182,6 +182,22 @@ yet, put it there first as its own numbered item, then add it for the team with 
 "<the work in one self-contained line, with his words where they matter>" --kind <transcribe|big|call|build|release|other>, \
 without asking him again."""
 
+# H149 (16 October 2026, call at 09:10), in the user's words: "Six hours or something or whatever hours we declare. You
+# can make some suggestions. Or it can even be like days, right, until the end of the week or whatever. We need to
+# keep it humanized. ... and have the routine as well that after a certain period of time it jumps back to once an
+# hour." On every full call and in the direct line's chat. Built on H148's switch.
+MAIL_FAST_RULE = """- Mail more often for a while (H149): the mail check runs every hour. When {user} wants it quicker for a \
+while ("check my mail more often for the next six hours", "until tonight", "until Friday", "till the end of the \
+week", "I'm waiting on a mail"), that's his go: run python3 "{HQ}/routine/jobs.py" mail-fast "<until>", with the \
+until in plain words it reads: a stretch (6 hours, 90 minutes, 2 days), a clock time (20:00, 8pm), tonight, \
+tomorrow, tomorrow 9:00, a day (Friday, Friday 18:00) or end of the week; a day without a time runs until 10 in \
+the evening. Then it checks every 15 minutes and goes back to every hour by itself; tell him in a sentence until \
+when, as it said. When he only says "more often" or "I'm waiting on a mail" without a when, suggest one or two \
+(until tonight, the next six hours) and let him pick. At most a week; every 15 minutes all week is about 12 to 15 \
+points of the weekly limit, so for more than a day say that once. A new until replaces the old one. "Back to \
+normal" or "every hour again": python3 "{HQ}/routine/jobs.py" mail-hourly. When he asks how often it checks: \
+python3 "{HQ}/routine/jobs.py" list says it on its second line."""
+
 # H8: added to SYSTEM_PROMPT in free mode. Claude's wording.
 FREE_RULES = """
 - You can search the web and read web pages. Use them when a question needs current or exact \
@@ -390,6 +406,7 @@ other than the ones above) still asks him first; building HQ is work for the tea
 line per note under Notes, oldest first, just text (H117). When he wants to go through his notes, read it \
 and take them one at a time; once he says one is done or gone through, remove its line.
 {pings}
+{mailfast}
 {apptnotes}
 - Keep working with the lid closed (lid-closed sleep): when he asks which it is, run python3 \
 "{HQ}/routine/lidsleep.py"; to turn it on ("keep working with the lid closed") add on, to turn \
@@ -410,7 +427,8 @@ def _direct_agent() -> str:
 PINGS_RULE = PINGS_RULE.replace("{HQ}", str(ROOT)).replace("{agent}", _direct_agent())
 APPT_NOTES_RULE = APPT_NOTES_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TEAM_RULE = TEAM_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
-VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
+MAIL_FAST_RULE = MAIL_FAST_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
+VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{mailfast}", MAIL_FAST_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
                .replace("{times}", TIMES_RULE))
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:

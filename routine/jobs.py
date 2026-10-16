@@ -32,6 +32,10 @@ usage (from the workspace):
                                                            carries on, in its own chat (H172); stop N drops it
   python3 "routine/jobs.py" off | on                       jobs from calls off or on
   python3 "routine/jobs.py" mail-off | mail-on             the hourly mail check off or on (L8)
+  python3 "routine/jobs.py" mail-fast "UNTIL"              the mail check every 15 minutes until UNTIL, his words
+                                                           as routine/mailfast.py reads them (6 hours, 20:00,
+                                                           tonight, Friday, end of the week), then hourly by itself (H149)
+  python3 "routine/jobs.py" mail-hourly                    back to every hour now (H149)
 Used by the routine itself: next, mark N STATE, crashed N "HOW" (H62: job N ended by a crash; its rerun
 goes to the top of the line, once only).
 """
@@ -59,6 +63,10 @@ FINISHED = ("done", "stopped", "ended", "cancelled")
 KEEP_FINISHED = 5
 PAST = ", past the line"
 MAIL = True  # the hourly mail check through the routine (L8); its own switch, so jobs off leaves it running
+# H149: (from, until) epoch seconds while the mail check runs every 15 minutes for a while he named, else None.
+# Kept on the Mail check line; once `until` has passed it counts as hourly and the next write drops it.
+MAIL_FAST = None
+FAST_RE = re.compile(r"every 15 minutes from (\d{4}-\d\d-\d\d \d\d:\d\d) until (\d{4}-\d\d-\d\d \d\d:\d\d)")
 
 
 @contextmanager
@@ -71,7 +79,8 @@ def locked():
 
 def read():
     """(text, jobs, routine_on). jobs: list of dicts n, state, past, agreed, text."""
-    global MAIL
+    global MAIL, MAIL_FAST
+    MAIL_FAST = None
     text = open(ROADMAP, encoding="utf8").read()
     jobs, on = [], True
     sec = section(text)
@@ -86,7 +95,12 @@ def read():
             elif l.startswith("**Routine:**"):
                 on = "off" not in l.lower()
             elif l.startswith("**Mail check:**"):
-                MAIL = "off" not in l.lower()
+                MAIL = "off" not in l.split("(")[0].lower()
+                m = FAST_RE.search(l)
+                if m:
+                    import mailfast
+                    f, u = mailfast.from_stamp(m.group(1)), mailfast.from_stamp(m.group(2))
+                    MAIL_FAST = (f, u) if u > time.time() else None
     return text, jobs, on
 
 
@@ -111,7 +125,7 @@ def write(text, jobs, on):
     lines = [f"- Job {j['n']} · {j['state']}{PAST if j['past'] else ''} · agreed {j['agreed']} · {j['text']}"
              for j in order if j["n"] not in drop]
     body = (f"{HEADING}\n\n{INTRO}\n\n**Routine:** {'on' if on else 'off'}\n\n"
-            f"**Mail check:** {'on' if MAIL else 'off'} (every hour, hidden, also while a job runs; commits take turns)\n\n"
+            f"**Mail check:** {'on' if MAIL else 'off'} ({mail_words()}, hidden, also while a job runs; commits take turns)\n\n"
             + ("\n".join(lines) if lines else "No jobs yet.") + "\n\n")
     sec = section(text)
     if sec:
@@ -124,6 +138,15 @@ def write(text, jobs, on):
     tmp = ROADMAP + ".tmp"
     open(tmp, "w", encoding="utf8").write(text)
     os.replace(tmp, ROADMAP)
+
+
+def mail_words():
+    """H149: how often, on the Mail check line."""
+    if MAIL_FAST and MAIL_FAST[1] > time.time():
+        import mailfast
+        return (f"every 15 minutes from {mailfast.stamp(MAIL_FAST[0])} until {mailfast.stamp(MAIL_FAST[1])}, "
+                "then every hour by itself")
+    return "every hour"
 
 
 def waiting(j):
@@ -231,7 +254,7 @@ def move(jobs, n, where, other=None):
 
 
 def main(argv):
-    global MAIL
+    global MAIL, MAIL_FAST
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
         return
@@ -246,13 +269,14 @@ def main(argv):
         text, jobs, on = read()
         if cmd == "list":
             print(f"Routine: {'on' if on else 'off'}")
+            print(f"Mail check: {'on' if MAIL else 'off'} ({mail_words()})")  # H149
             print(with_estimates(jobs))
             return
         if cmd == "next":
             ready = [j for j in jobs if j["state"] == "ready"]
             running = [j for j in jobs if j["state"].startswith(("running", "stop asked"))]
             # H39: "waiting" is the line itself, ready and held together, top first; the routine takes its first.
-            print(json.dumps({"on": on, "mail": MAIL, "running": running, "ready": ready,
+            print(json.dumps({"on": on, "mail": MAIL, "mail_fast": list(MAIL_FAST) if MAIL_FAST else None, "running": running, "ready": ready,
                               "held": [j for j in jobs if j["state"].startswith("held")], "waiting": line_up(jobs)}))
             return
         if cmd == "add":
@@ -293,6 +317,23 @@ def main(argv):
             MAIL = cmd == "mail-on"
             write(text, jobs, on)
             print(f"The hourly mail check is {cmd[5:]}.")
+            return
+        if cmd == "mail-fast":
+            import mailfast
+            try:
+                until = mailfast.parse(" ".join(args))
+            except ValueError as e:
+                sys.exit(str(e))
+            MAIL_FAST = (MAIL_FAST[0] if MAIL_FAST else int(time.time()), until)
+            write(text, jobs, on)
+            print(f"The mail check runs every 15 minutes until {mailfast.said(until)} ({mailfast.stamp(until)}), "
+                  f"then every hour again by itself." + ("" if MAIL else " It's switched off now, though: mail-on starts it."))
+            return
+        if cmd == "mail-hourly":
+            was = MAIL_FAST
+            MAIL_FAST = None
+            write(text, jobs, on)
+            print("The mail check runs every hour again." if was else "The mail check already runs every hour.")
             return
         if cmd in ("on", "off"):
             write(text, jobs, cmd == "on")

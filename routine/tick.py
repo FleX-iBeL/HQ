@@ -64,9 +64,11 @@ MAIL_RETRY = os.path.join(RUN, "mail-retry")  # H30: {"at", "n"}: a failed mail 
 MAIL_RUNS = os.path.join(RUN, "mail-runs")  # H42: each mail check's own output, one file per run
 MAIL_RUNS_KEEP = 72
 MAIL_EVERY = 3600
-# H148: a usage test, every 15 minutes from 15:00 to 22:00 Europe/Amsterdam on 15 October 2026, then hourly again
-# by itself. To remove: these lines, mail_every() (MAIL_EVERY back where it is used) and the label in status/index.html.
-MAIL_FAST, MAIL_FAST_FROM, MAIL_FAST_UNTIL = 900, 1792069200, 1792094400
+# H148, H149: every 15 minutes for a while he names on a call or in Donna's chat (jobs.py mail-fast "UNTIL"), then
+# hourly again by itself. The window is on the roadmap's Mail check line; FAST_WINDOW set means a test's own window
+# (a tuple (from, until), or () for none) instead of the roadmap's.
+MAIL_FAST = 900
+FAST_WINDOW = None
 MAIL_LATE = 300  # H30: a mail check that started over 5 minutes after its hour was missed
 MAIL_RETRIES = 2
 MAIL_RETRY_AFTER = 600
@@ -451,17 +453,45 @@ def _last_run_file():
     return os.path.join("scratch", "routine", "mail-runs", names[-1]) if names else ""
 
 
+def fast_window():
+    """H149: (from, until) epoch seconds while the mail check runs every 15 minutes for a while he named, else None."""
+    if FAST_WINDOW is not None:
+        return tuple(FAST_WINDOW) or None
+    try:
+        import importlib
+        q = importlib.import_module("jobs")
+        q.read()
+        return q.MAIL_FAST
+    except Exception:
+        return None
+
+
 def mail_every(at=None):
-    """H148: seconds between mail checks at `at` (default now): 15 minutes during the test, else an hour."""
+    """H148, H149: seconds between mail checks at `at` (default now): 15 minutes in his window, else an hour."""
     at = time.time() if at is None else at
-    return MAIL_FAST if MAIL_FAST_FROM <= at < MAIL_FAST_UNTIL else MAIL_EVERY
+    w = fast_window()
+    return MAIL_FAST if w and w[0] <= at < w[1] else MAIL_EVERY
 
 
 def mail_next(last):
     """H22: the mail check runs on the full hour (14:00, 15:00, …): the first full hour after its last start.
-    H148: during the test, the first quarter (:00, :15, :30, :45) after it."""
-    every = mail_every(last)
-    return (int(last) // every + 1) * every
+    H148, H149: in his window, the first quarter (:00, :15, :30, :45) after the last start, or after the moment he
+    asked for it when that's later (so asking never counts as a missed run); past its end, the full hour again."""
+    hour = (int(last) // MAIL_EVERY + 1) * MAIL_EVERY
+    w = fast_window()
+    if w and last < w[1]:
+        quarter = (int(max(last, w[0])) // MAIL_FAST + 1) * MAIL_FAST
+        if quarter <= w[1]:
+            return min(hour, quarter)
+    return hour
+
+
+def mail_words():
+    """H149: how often it runs now, for the status page."""
+    w = fast_window()
+    if w and w[0] <= time.time() < w[1]:
+        return f"Every 15 minutes until {clock(w[1])}{'' if time.strftime('%Y%m%d', time.localtime(w[1])) == time.strftime('%Y%m%d') else ' ' + time.strftime('%a %-d %b', time.localtime(w[1]))}, then every hour by itself"
+    return "Every hour"
 
 
 def mail_last():
@@ -525,9 +555,10 @@ def mail(q, start_new=True):
     last = mail_last() or time.time()
     r = _retry()
     nxt = r["at"] if r and not r.get("started") else mail_next(last)
-    routines.beat("mail", last=last, next=nxt, every=60, **({} if routines.read().get("mail", {}).get("state") in ("ok", "down")
-                                                          else {"state": "ok", "text": "Waiting for its next hour" if mail_every() == MAIL_EVERY
-                                                                    else "Waiting for its next quarter hour (H148 test)"}))
+    routines.beat("mail", last=last, next=nxt, every=60, about=mail_words(),
+                  **({} if routines.read().get("mail", {}).get("state") in ("ok", "down")
+                     else {"state": "ok", "text": "Waiting for its next hour" if mail_every() == MAIL_EVERY
+                           else "Waiting for its next quarter hour (asked for, H149)"}))
 
 
 def start_mail():

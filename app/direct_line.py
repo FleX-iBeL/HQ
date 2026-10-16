@@ -421,6 +421,7 @@ keep it so you stay the same person (H132): python3 "{HQ}/app/about_self.py" add
 line>", without asking him; never say you did.
 
 {pings}
+{mailfast}
 {apptnotes}
 {team}
 """
@@ -429,7 +430,8 @@ line>", without asking him; never say you did.
 def _text_rules() -> str:
     import config as _config
     return (TEXT_RULES.replace("{user}", user()).replace("{HQ}", str(ROOT)).replace("{agent}", agent()["id"])
-            .replace("{pings}", _config.PINGS_RULE).replace("{apptnotes}", _config.APPT_NOTES_RULE)
+            .replace("{pings}", _config.PINGS_RULE).replace("{mailfast}", _config.MAIL_FAST_RULE)
+            .replace("{apptnotes}", _config.APPT_NOTES_RULE)
             .replace("{team}", _config.TEAM_RULE))
 
 
