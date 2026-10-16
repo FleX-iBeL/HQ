@@ -9295,6 +9295,84 @@ window.fetch = async (url, opt) => {
                     os.environ[k] = v
             shutil.rmtree(tmp, ignore_errors=True)
 
+    async def flow104(self) -> str:
+        """F33, no Claude: a typed line sent while she's talking or thinking carries only itself. Her reply to
+        his first line was written but he typed again before hearing any of it (the call's context then still
+        holds the first line next to the new one): only the new line goes to Claude, with the cut-in note.
+        The same while she's still thinking (the reply stopped). The very same line sent twice still goes.
+        A turn that got no answer at all (an error) is sent again with the next one."""
+        from claude_llm import ClaudeSessionLLMService
+        from pipecat.processors.aggregators.llm_context import LLMContext
+
+        class Stand:  # stands in for the Claude session: records what it's sent
+            model = "stand-in"
+            def __init__(self): self.sent, self.mode = [], "answer"
+            async def start(self): pass
+            async def stop(self): pass
+            def cancel_turn(self): pass
+            async def ask(self, text):
+                self.sent.append(text)
+                if self.mode == "fail":
+                    raise RuntimeError("no answer")
+                if self.mode == "think":
+                    await asyncio.sleep(30)
+                yield "Okay."
+
+        class Script:
+            def user(self, *a, **k): pass
+            def note(self, *a, **k): pass
+            def reply(self, *a, **k): pass
+
+        brain = Stand()
+        llm = ClaudeSessionLLMService(brain, transcript=Script())
+        async def nothing(*a, **k): pass
+        llm.push_frame = llm._push_llm_text = nothing
+        llm.push_error = nothing
+        llm.start_processing_metrics = llm.stop_processing_metrics = nothing
+        llm.start_ttfb_metrics = llm.stop_ttfb_metrics = nothing
+        msgs: list[dict] = []
+        async def send(words, typed=True):
+            msgs.append({"role": "user", "content": words})
+            if typed:
+                llm.mark_typed(words)
+            await llm._process_context(LLMContext(messages=list(msgs)))
+            return brain.sent[-1]
+        first, second = "Put the bike on the list.", "And the charger too."
+        # 1. Answered in full, but he typed again before hearing any of it: no assistant line in the context.
+        await send(first)
+        llm._cut_off, llm._cut_reply, llm._worked_on = True, "Okay.", False  # he cut in on her voice
+        sent = await send(second)
+        need(first not in sent and sent.endswith(second), f"the earlier line went again: {sent!r}")
+        need("cut in before he heard any" in sent, f"the cut-in wasn't told: {sent!r}")
+        need(llm.turns[-1]["words"] == second, f"the turn's words: {llm.turns[-1]['words']!r}")
+        msgs.append({"role": "assistant", "content": "Okay."})
+        # 2. While she's still thinking: the reply is stopped, the new line goes on its own.
+        brain.mode = "think"
+        task = asyncio.create_task(send("What's next?"))
+        await asyncio.sleep(0.2)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        brain.mode = "answer"
+        llm._cut_off, llm._cut_reply, llm._worked_on = True, "", True
+        sent = await send("Never mind, the weather.")
+        need("What's next?" not in sent and sent.endswith("Never mind, the weather."), f"the thinking line went again: {sent!r}")
+        msgs.append({"role": "assistant", "content": "Okay."})
+        # 3. The very same line twice: the second one still goes.
+        await send(first)
+        sent = await send(first)
+        need(sent.endswith(first) and sent.count(first) == 1, f"the same line sent twice didn't go once: {sent!r}")
+        msgs.append({"role": "assistant", "content": "Okay."})
+        # 4. Never answered (an error): the next turn carries it too.
+        brain.mode = "fail"
+        await send("Is it raining?")
+        brain.mode = "answer"
+        sent = await send("Hello?")
+        need("Is it raining?" in sent and sent.endswith("Hello?"), f"the unanswered line didn't go again: {sent!r}")
+        return "answered or thinking: a new typed line carries only itself; the same line twice goes; an unanswered one goes again"
+
     async def flow101(self) -> str:
         """H152, no Claude, no Syncthing, no network: after a crash or a restart the two computers come back in step
         by themselves. Her pings file is only written when something changed (it was written every minute, so it
@@ -11065,6 +11143,7 @@ FLOWS = {
     101: ("H152: after a crash or restart both computers come back in step: no every-minute pings write, locks stay home, needless conflict copies cleared, missed call transcripts committed", False, "flow101"),
     102: ("H165: the whole turn heard again before she answers, behind a switch; the pieces stay as the fallback", False, "flow102"),
     103: ("H169: the nightly run: the right flows for this computer, one line when all pass, a plain morning text from Donna", False, "flow103"),
+    104: ("F33: a typed line sent while she talks or thinks carries only itself; an unanswered one goes again", False, "flow104"),
 }
 
 

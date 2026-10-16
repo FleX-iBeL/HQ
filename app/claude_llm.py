@@ -97,7 +97,11 @@ class ClaudeSessionLLMService(LLMService):
         self._cut_off = False
         self._cut_reply = ""  # the reply text that was running when he cut in
         self._worked_on = False  # he cut in while Claude was still working (a tool, thinking)
-        self._last_sent_block = ""  # the trailing user words already sent to Claude
+        # F33: how far into the call's context his words have already gone to Claude (the number of
+        # messages, and the last one's text to be sure it's the same context), so a new line carries
+        # only itself; reset only when a turn really got no answer (an error)
+        self._sent_upto = 0
+        self._sent_last = ""
         self._typed: list[str] = []  # H18: messages he typed on the call page, not yet answered
         self._cancel_asked = False  # H31: he tapped Cancel; the interruption that follows isn't a cut-in
         self._cancel_note = ""  # H31: told to Claude with the next turn
@@ -408,6 +412,7 @@ class ClaudeSessionLLMService(LLMService):
                 logger.info("The user cut in: stopping Claude's reply")
             raise
         except Exception as e:
+            self._sent_upto, self._sent_last = 0, ""  # F33: never answered, so his words go again
             await self.push_error(error_msg=f"Claude session error: {e}", exception=e)
         finally:
             self._replying = False
@@ -416,8 +421,6 @@ class ClaudeSessionLLMService(LLMService):
                 self._cancel_asked = False
             if watch:
                 await self.cancel_task(watch)
-            if not turn["interrupted"]:
-                self._last_sent_block = ""  # answered: the next words are all new
             # Closing the generator interrupts the CLI if the reply wasn't finished.
             await reply.aclose()
             if self.policy:
@@ -496,25 +499,30 @@ class ClaudeSessionLLMService(LLMService):
         """The user's words since the last reply; call-system notes if he cut that reply
         off; and whether he did."""
         messages = context.get_messages()
-        user_parts: list[str] = []
+        start = len(messages)
         last_assistant = None
-        for msg in reversed(messages):
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
             if not isinstance(msg, dict):
                 break
             role = msg.get("role")
             if role == "user":
-                user_parts.insert(0, _content_text(msg.get("content")))
+                start = i
             else:
                 if role == "assistant":
                     last_assistant = _content_text(msg.get("content"))
                 break
+        # F33: if her reply was stopped before he heard any of it (or was written but not yet spoken),
+        # the context keeps his earlier line next to the new one; Claude already has the earlier one,
+        # so only what came after it goes (counted by message, so a line he sends twice still goes).
+        upto = self._sent_upto
+        if (start < upto <= len(messages) and isinstance(messages[upto - 1], dict)
+                and _content_text(messages[upto - 1].get("content")) == self._sent_last):
+            start = upto
+        user_parts = [_content_text(m.get("content")) for m in messages[start:]]
         text = " ".join(p.strip() for p in user_parts if p and p.strip())
-        # If the previous reply was cut off before Claude said anything, the aggregator
-        # keeps those words and adds the new ones; Claude already has the first part.
-        block = text
-        if self._last_sent_block and text.startswith(self._last_sent_block):
-            text = text[len(self._last_sent_block):].strip()
-        self._last_sent_block = block
+        if messages and isinstance(messages[-1], dict):
+            self._sent_upto, self._sent_last = len(messages), _content_text(messages[-1].get("content"))
         notes: list[str] = []
         cut_in = False
         if text and self._cut_off:
