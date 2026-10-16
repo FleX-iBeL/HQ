@@ -153,7 +153,9 @@ Run them before and after every update; they print a short pass/fail table at th
      reading again; the call's note, greeting and transcript line; the real call page in a headless
      browser, phone and app: the round button on the right before and after a call (gone on a call), the
      days, a tap on one, Back, a swipe right back to the days (H147), "Call about this" sending the appointment, off on Free, one sheet at a time;
-     H156: it opens on today, the past days a scroll up away, his place kept once he scrolls
+     H156: it opens on today, the past days a scroll up away, his place kept once he scrolls;
+     H157: each calendar's colour (the connector's, else the workspace's own setting, else one of Google's),
+     birthdays as Birthdays, and a row of chips turning each calendar on or off, per device, Google untouched
   73 H92, no Claude: no laptop on a server. The status page in a headless browser, served as a server
      (HQ_LAPTOP=0) and as the laptop (HQ_LAPTOP=1), with a hot laptop and a low battery: on a server no Laptop
      section, no battery in the top line, no laptop lines or bars under Routines, and the Routines light green;
@@ -5068,6 +5070,37 @@ window.fetch = async (url, opt) => {
             rd3 = agenda.read(now=t0)["events"]
             need([e["title"] for e in rd3] == ["A whole day", "Sleep", "Night call", "Late"] and rd3[0]["start"] == "2099-01-02",
                  f"the page doesn't get the saved list in time order (H153): {[(e['title'], e['start']) for e in rd3]}")
+            # H157: each calendar in its colour: the connector's when it gives one, else the workspace's own setting (a
+            # Google colour name or a hex, by name or id), else one of Google's; birthdays shown as Birthdays; the
+            # calendars for the on/off row, Main first
+            cf = self.tmp / "h157-colours.json"
+            os.environ["HQ_CALENDAR_COLOURS"] = str(cf)
+            cf.write_text(json.dumps({"Family": "beetroot", "Birthdays": "peacock", "Main": "#F1F1F1", "work-cal": "mango", "Bad": "nope"}))
+            cals7, ev7 = agenda.events_from([
+                (agenda.TOOL + "list_calendars", {}, {"calendars": [
+                    {"id": "fam-cal", "summary": "Family"}, {"id": "me@example.com", "summary": "me@example.com"},
+                    {"id": "work-cal", "summary": "Work"}, {"id": "own-cal", "summary": "Own", "backgroundColor": "#123456"}]}),
+                (agenda.TOOL + "list_events", {"calendarId": "me@example.com"}, {"events": [
+                    {"id": "k1", "summary": "A birthday", "eventType": "birthday", "start": {"date": "2099-01-01"}, "end": {"date": "2099-01-02"}},
+                    {"id": "k2", "summary": "Mine", "start": {"dateTime": "2099-01-01T10:00:00+01:00"}}]}),
+                (agenda.TOOL + "list_events", {"calendarId": "fam-cal"}, {"events": [
+                    {"id": "k3", "summary": "Hers", "start": {"dateTime": "2099-01-01T11:00:00+01:00"}}]}),
+                (agenda.TOOL + "list_events", {"calendarId": "own-cal"}, {"events": [
+                    {"id": "k4", "summary": "Owned", "start": {"dateTime": "2099-01-01T12:00:00+01:00"}}]})])
+            need([c.get("color") for c in cals7] == [None, None, None, "#123456"], f"the connector's own colour isn't kept (H157): {cals7}")
+            agenda._write({"looked": t0, "calendars": cals7, "events": ev7})
+            rd7 = agenda.read(now=t0)
+            col7 = {e["title"]: (e["view"], e["color"]) for e in rd7["events"]}
+            need(col7 == {"A birthday": ("Birthdays", "#039be5"), "Mine": ("Main", "#f1f1f1"), "Hers": ("Family", "#ad1457"),
+                          "Owned": ("Own", "#123456")}, f"an appointment isn't in its calendar's colour (H157): {col7}")
+            names7 = [c["name"] for c in rd7["calendars"]]
+            need(names7 == ["Main", "Family", "Work", "Own", "Birthdays"] and rd7["calendars"][2]["color"] == "#f09300",
+                 f"the calendars for the on/off row aren't right (H157): {rd7['calendars']}")
+            need(agenda.colour("Bad", own=agenda.own_colours()) in agenda.GOOGLE_COLOURS.values()
+                 and agenda.colour("Bad", own={}) == agenda.colour("Bad", own={}), "a calendar without a colour doesn't get one of Google's (H157)")
+            cf.write_text("not json")
+            need(agenda.own_colours() == {} and agenda.read(now=t0)["events"][0]["color"].startswith("#"), "a broken colour file isn't passed over (H157)")
+            os.environ.pop("HQ_CALENDAR_COLOURS")
             # H153: a write in the calendar (a call, Donna, planning) reads it again within the minute, at any hour,
             # once; a look that started after the write is enough, one that was running during it isn't
             import role as _role
@@ -5157,7 +5190,7 @@ window.fetch = async (url, opt) => {
         page = (APP / "web/index.html").read_text()
         need("...(appt && !free ? { about: appt.id } : {})" in page, "the call's offer doesn't carry the appointment")
         stub = r"""<script>
-var ASKED = [], T = new Date(); T.setHours(0, 0, 0, 0);
+var ASKED = [], CALS, T = new Date(); T.setHours(0, 0, 0, 0);
 function at(days, h, m) { const d = new Date(T); d.setDate(d.getDate() + days); d.setHours(h, m || 0); return d.toISOString(); }
 var EVENTS = [
   { id: "e1", title: "Shower and yoga", start: at(0, 23, 0), end: at(0, 23, 45), all_day: false, where: "", notes: "", calendar: "Main", free: false },
@@ -5165,7 +5198,7 @@ var EVENTS = [
   { id: "e3", title: "Dentist", start: at(2, 10), end: at(2, 10, 30), all_day: false, where: "Main street 1", notes: "Bring the card", calendar: "Main", free: false }];
 window.fetch = async (url, opt) => {
   url = String(url);
-  if (url.startsWith("api/calendar")) { ASKED.push(url); return { ok: true, json: async () => ({ on: true, looked: Date.now() / 1000 - 120, looking: false, error: "", events: EVENTS }) }; }
+  if (url.startsWith("api/calendar")) { ASKED.push(url); return { ok: true, json: async () => ({ on: true, looked: Date.now() / 1000 - 120, looking: false, error: "", events: EVENTS, ...(CALS ? { calendars: CALS } : {}) }) }; }
   return { ok: true, json: async () => ({ lines: [], calls: [], items: [] }) };
 };</script>"""
         harness = r"""
@@ -5259,6 +5292,39 @@ window.fetch = async (url, opt) => {
   calBtn.click(); await wait(200); appts()[2].click(); await wait(100);
   stream = null; panel = []; cleanup("Call ended"); await wait(200);
   out.push("after:" + (placed() && !shown(devBtn) && calOpen() && !document.getElementById("calgo").disabled && !document.getElementById("calbusy") ? "ok" : "WRONG"));
+  // H157: each appointment shows its calendar's colour; a row of chips turns each calendar on or off for the view
+  // only, remembered on this device (also after closing and opening again), never asking anything of the server.
+  showCal(false); try { localStorage.removeItem("hq-cal-off"); } catch (_) {}
+  EVENTS = [
+    { id: "c1", title: "Mine", start: at(0, 22, 0), end: at(0, 22, 30), all_day: false, where: "", notes: "", calendar: "Main", view: "Main", color: "#f1f1f1", free: false },
+    { id: "c2", title: "Hers", start: at(1, 11), end: at(1, 12), all_day: false, where: "", notes: "", calendar: "Family", view: "Family", color: "#ad1457", free: true },
+    { id: "c3", title: "A birthday", start: ((d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"))(new Date(at(1, 12))), end: "", all_day: true, where: "", notes: "", calendar: "Main", view: "Birthdays", color: "#039be5", free: true }];
+  const chips = () => [...document.querySelectorAll("#calcals button")];
+  const chip = n => chips().find(b => b.dataset.cal === n);
+  const dotOf = el => el && getComputedStyle(el.querySelector(".cd")).backgroundColor;
+  calBtn.click(); await wait(400);
+  out.push("chips-from-events:" + (chips().map(b => b.dataset.cal).join() === "Main,Family,Birthdays" && appts().length === 3 ? "ok" : "WRONG " + chips().map(b => b.dataset.cal)));
+  showCal(false); CALS = [{ name: "Main", color: "#f1f1f1" }, { name: "Family", color: "#ad1457" }, { name: "Work", color: "#f09300" }, { name: "Birthdays", color: "#039be5" }];
+  calBtn.click(); await wait(400);
+  const hers = [...appts()].find(b => b.textContent.includes("Hers"));
+  out.push("colours:" + (chips().length === 4 && dotOf(hers) === "rgb(173, 20, 87)" && dotOf(chip("Work")) === "rgb(240, 147, 0)"
+    && [...appts()].find(b => b.textContent.includes("A birthday")).textContent.includes("Birthdays") && chips().every(b => b.getAttribute("aria-pressed") === "true") ? "ok" : "WRONG " + dotOf(hers)));
+  const asked = ASKED.length;
+  chip("Family").click(); await wait(100);
+  out.push("off:" + (appts().length === 2 && ![...appts()].some(b => b.textContent.includes("Hers")) && chip("Family").getAttribute("aria-pressed") === "false"
+    && days().length === 2 && ASKED.length === asked && JSON.parse(localStorage.getItem("hq-cal-off")).join() === "Family" ? "ok" : "WRONG " + appts().length + " " + ASKED.length));
+  chip("Birthdays").click(); await wait(100);
+  showCal(false); await wait(100); calBtn.click(); await wait(400);
+  out.push("remembered:" + (appts().length === 1 && chip("Family").getAttribute("aria-pressed") === "false" && chip("Birthdays").getAttribute("aria-pressed") === "false" ? "ok" : "WRONG " + appts().length));
+  appts()[0].click(); await wait(200);
+  out.push("chips-hide-reading:" + (!shown(document.getElementById("calcals")) ? "ok" : "WRONG"));
+  document.getElementById("calback").click(); await wait(300);
+  chip("Main").click(); await wait(100);
+  out.push("all-off:" + (appts().length === 0 && calList.textContent.includes("switched off") && shown(document.getElementById("calcals")) ? "ok" : "WRONG " + calList.textContent));
+  for (const n of ["Main", "Family", "Birthdays"]) chip(n).click();
+  await wait(100);
+  out.push("on-again:" + (appts().length === 3 && JSON.parse(localStorage.getItem("hq-cal-off")).length === 0 ? "ok" : "WRONG " + appts().length));
+  CALS = undefined;
   // H156: with the week's past days in the list it opens on today, and scrolling back up still shows them; once he
   // scrolls, a read coming in and Back from an appointment keep his place; opening again puts today on top again.
   showCal(false); EVENTS = [];

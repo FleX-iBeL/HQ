@@ -24,6 +24,11 @@ Off: HQ_CALENDAR=0. Tests: HQ_CALENDAR_FAKE=<a file with the stream lines a run 
     python3 app/agenda.py               the saved days, as the page gets them (JSON)
     python3 app/agenda.py look          read the calendar now (a Claude run, a few cents of usage)
     python3 app/agenda.py status        when it last looked, whether a look is due
+
+H157: each calendar's colour, as in Google. The connector's own colour (backgroundColor) when it gives one; else the
+workspace's HQ/calendar-colours.json (HQ_CALENDAR_COLOURS): a calendar's name as HQ shows it (Main for the main one,
+Birthdays for the birthdays) or its id, to one of Google's colour names (mango, peacock, ...) or a hex colour;
+else one of Google's colours picked from the name. Turning a calendar off is the page's, per device, never Google's.
 """
 from __future__ import annotations
 
@@ -55,6 +60,16 @@ ALLOW = [TOOL + "list_calendars", TOOL + "list_events"]
 DENY = [TOOL + t for t in ("create_event", "update_event", "delete_event", "respond_to_event", "suggest_time")] + [
     "Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Read", "Grep", "Glob"]
 EVENT_TYPES = ["DEFAULT", "OUT_OF_OFFICE", "FOCUS_TIME", "BIRTHDAY", "FROM_GMAIL"]
+BIRTHDAYS = "Birthdays"  # H157: Google shows the birthdays (eventType BIRTHDAY) as a calendar of their own
+# H157: Google Calendar's own colours for calendars, by the names its colour picker gives them
+GOOGLE_COLOURS = {
+    "tomato": "#d50000", "flamingo": "#e67c73", "tangerine": "#f4511e", "banana": "#f6bf26", "sage": "#33b679",
+    "basil": "#0b8043", "peacock": "#039be5", "blueberry": "#3f51b5", "lavender": "#7986cb", "grape": "#8e24aa",
+    "graphite": "#616161", "radicchio": "#ad1457", "beetroot": "#ad1457", "cherry blossom": "#d81b60",
+    "pumpkin": "#ef6c00", "mango": "#f09300", "citron": "#e4c441", "avocado": "#c0ca33", "pistachio": "#7cb342",
+    "eucalyptus": "#009688", "cobalt": "#4285f4", "wisteria": "#b39ddb", "amethyst": "#9e69af", "birch": "#a79b8e",
+    "cocoa": "#795548"}
+FALLBACK = ["peacock", "sage", "tangerine", "grape", "banana", "cobalt", "flamingo", "basil", "lavender", "cocoa"]
 
 
 def on() -> bool:
@@ -63,6 +78,67 @@ def on() -> bool:
 
 def data_file() -> Path:
     return Path(os.environ.get("HQ_CALENDAR_FILE") or os.path.join(hqpaths.DATA, "calendar.json"))
+
+
+def colours_file() -> Path:
+    return Path(os.environ.get("HQ_CALENDAR_COLOURS") or data_file().with_name("calendar-colours.json"))
+
+
+def _hex(v) -> str:
+    """A colour as #rrggbb: a hex colour, or one of Google's colour names; else empty."""
+    v = str(v or "").strip().lower()
+    v = GOOGLE_COLOURS.get(v, v)
+    if re.fullmatch(r"#[0-9a-f]{3}", v):
+        v = "#" + "".join(c * 2 for c in v[1:])
+    return v if re.fullmatch(r"#[0-9a-f]{6}", v) else ""
+
+
+def own_colours() -> dict:
+    """H157: the workspace's own colours: name or id to #rrggbb."""
+    try:
+        d = json.loads(colours_file().read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return {}
+    return {str(k): _hex(v) for k, v in d.items() if _hex(v)} if isinstance(d, dict) else {}
+
+
+def colour(name: str, cal_id: str = "", given: str = "", own: dict | None = None) -> str:
+    """H157: a calendar's colour: the connector's, else the workspace's (by name, then id), else one of Google's."""
+    own = own_colours() if own is None else own
+    c = _hex(given) or own.get(name) or own.get(cal_id) or ""
+    if c:
+        return c
+    import hashlib
+    return GOOGLE_COLOURS[FALLBACK[int(hashlib.sha1(name.encode()).hexdigest(), 16) % len(FALLBACK)]]
+
+
+def view_of(e: dict) -> str:
+    """H157: the calendar an appointment shows under: Birthdays for a birthday, else its own calendar."""
+    return BIRTHDAYS if str(e.get("type") or "").upper() == "BIRTHDAY" else str(e.get("calendar") or "Main")
+
+
+def calendars(s: dict, events: list[dict], own: dict | None = None) -> list[dict]:
+    """H157: the calendars for the page's on/off row, each with its colour: every calendar the connector listed
+    (Main first), Birthdays when there are birthdays, and any other an appointment names."""
+    own = own_colours() if own is None else own
+    out, seen = [], set()
+    listed = [c for c in s.get("calendars") or [] if isinstance(c, dict) and c.get("name")]
+    listed.sort(key=lambda c: 0 if c["name"] == "Main" else 1)
+    by_name = {c["name"]: c for c in listed}
+
+    def put(name: str) -> None:
+        if name in seen:
+            return
+        seen.add(name)
+        c = by_name.get(name, {})
+        out.append({"name": name, "color": colour(name, str(c.get("id") or ""), str(c.get("color") or ""), own)})
+    for c in listed:
+        put(c["name"])
+    if any(view_of(e) == BIRTHDAYS for e in events):
+        put(BIRTHDAYS)
+    for e in events:
+        put(view_of(e))
+    return out
 
 
 def _read() -> dict:
@@ -192,6 +268,7 @@ def _when(t: dict) -> tuple[str, bool]:
 def events_from(results: list[tuple[str, dict, object]]) -> tuple[list[dict], list[dict]]:
     """The calendars and the appointments in them, from a run's tool results."""
     cals: dict[str, str] = {}
+    colors: dict[str, str] = {}
     for name, _, res in results:
         if name.endswith("list_calendars") and isinstance(res, dict):
             for c in res.get("calendars") or []:
@@ -199,6 +276,8 @@ def events_from(results: list[tuple[str, dict, object]]) -> tuple[list[dict], li
                     name = str(c.get("summary") or c["id"])
                     # the main calendar is named after the account's address: "Main" reads better
                     cals[c["id"]] = "Main" if "@" in name and "calendar.google.com" not in name else name
+                    if _hex(c.get("backgroundColor")):  # H157: the connector's own colour, when it gives one
+                        colors[c["id"]] = _hex(c.get("backgroundColor"))
     seen, events = set(), []
     for name, inp, res in results:
         if not name.endswith("list_events") or not isinstance(res, dict):
@@ -230,7 +309,7 @@ def events_from(results: list[tuple[str, dict, object]]) -> tuple[list[dict], li
                 "others": any(isinstance(a, dict) and not a.get("self") for a in e.get("attendees") or []),
             })
     events.sort(key=_order)
-    return [{"id": k, "name": v} for k, v in cals.items()], events
+    return [{"id": k, "name": v, **({"color": colors[k]} if k in colors else {})} for k, v in cals.items()], events
 
 
 def _event_id(cal: str, eid: str) -> str:
@@ -397,8 +476,12 @@ def read(now: float | None = None) -> dict:
         events = [{**e, "ping": e.get("id") in bell} for e in events]
     except Exception:
         pass
+    own = own_colours()  # H157: each appointment in its calendar's colour, and the calendars for the on/off row
+    cals = calendars(s, events, own)
+    col = {c["name"]: c["color"] for c in cals}
+    events = [{**e, "view": view_of(e), "color": col.get(view_of(e)) or colour(view_of(e), own=own)} for e in events]
     return {"on": on(), "looked": s.get("looked"), "looking": running(s, t), "error": s.get("error", ""),
-            "events": events}
+            "events": events, "calendars": cals}
 
 
 def _over(e: dict, today: str, t: float, week: bool = False) -> bool:

@@ -297,6 +297,17 @@
   #calsheet.reading #callist { display:none; }
   #calsheet.reading #calone { display:flex; }
   #callist .day { color:var(--muted); font-size:13px; font-weight:600; margin:12px 0 4px; }
+  /* H157: each calendar's colour, as in Google, and a row of chips that turns each one on or off for this view only */
+  #calcals { display:flex; gap:6px; overflow-x:auto; flex-shrink:0; padding:2px 0 8px; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+  #calcals::-webkit-scrollbar { display:none; }
+  #calcals:empty, #calsheet.reading #calcals { display:none; }
+  #calcals button { flex-shrink:0; display:flex; align-items:center; gap:6px; min-height:32px; padding:4px 12px 4px 9px; border-radius:16px;
+    border:1px solid color-mix(in srgb, var(--muted) 55%, transparent); background:transparent; color:var(--fg); font:inherit; font-size:13px; cursor:pointer; }
+  #calcals button[aria-pressed="false"] { color:var(--muted); border-style:dashed; }
+  #calcals button[aria-pressed="false"] .cd { background:transparent; }
+  .cd { flex-shrink:0; width:10px; height:10px; border-radius:50%; background:var(--cc, var(--muted)); border:1.5px solid var(--cc, var(--muted));
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--muted) 45%, transparent); box-sizing:border-box; }
+  #callist .appt .cd { align-self:center; margin-right:-4px; }
   #callist .day:first-child { margin-top:0; }
   #callist .appt { display:flex; gap:12px; align-items:baseline; width:100%; border:0; background:transparent; color:var(--fg); text-align:left;
                    padding:9px 8px; border-radius:12px; cursor:pointer; font:16px/1.3 -apple-system,sans-serif; }
@@ -670,7 +681,7 @@
   <form id="notesform" autocomplete="off"><textarea id="notesin" rows="1" placeholder="A quick note" aria-label="A quick note" maxlength="2000"></textarea><button id="notesadd" type="submit" disabled>Add</button></form>
   <small id="notesnote"></small></div>
 <div id="calsheet" role="dialog" aria-label="Calendar"><div id="calhead"><button id="calback" type="button">‹ Days</button><h2 id="caltitle">Calendar</h2><button id="calclose" type="button">Close</button></div>
-  <div id="callist"></div><div id="calone"></div><small id="calnote"></small></div>
+  <div id="calcals" role="group" aria-label="Calendars shown"></div><div id="callist"></div><div id="calone"></div><small id="calnote"></small></div>
 <button id="wx" type="button" aria-label="Weather" aria-expanded="false"></button>
 <div id="wxsheet" role="dialog" aria-label="Weather"><div id="wxhead"><h2 id="wxtitle">Weather</h2><button id="wxclose" type="button">Close</button></div>
   <div id="wxbody"></div></div>
@@ -1813,14 +1824,41 @@ function calLooked(d) {
   const m = Math.round((Date.now() / 1000 - d.looked) / 60);
   return "From Google Calendar, " + (m < 1 ? "just now" : m < 60 ? m + " min ago" : Math.round(m / 60) + " h ago");
 }
+// H157: which calendars are off, remembered on this device only; Google is never changed
+const CAL_OFF = "hq-cal-off";
+function calOff() { try { const v = JSON.parse(localStorage.getItem(CAL_OFF) || "[]"); return new Set(Array.isArray(v) ? v : []); } catch (_) { return new Set(); } }
+function calSetOff(off) { try { localStorage.setItem(CAL_OFF, JSON.stringify([...off])); } catch (_) {} }
+function calView(e) { return e.view || e.calendar || "Main"; }
+let calLast = null;
+function showCalChips(d) {
+  const el = document.getElementById("calcals"), off = calOff();
+  const cals = Array.isArray(d.calendars) && d.calendars.length ? d.calendars
+    : [...new Set(d.events.map(calView))].map(name => ({ name, color: (d.events.find(e => calView(e) === name) || {}).color }));
+  el.innerHTML = "";
+  if (cals.length < 2 && !off.size) return;
+  for (const c of cals) {
+    const b = document.createElement("button"); b.type = "button"; b.dataset.cal = c.name;
+    b.setAttribute("aria-pressed", String(!off.has(c.name)));
+    const dot = document.createElement("span"); dot.className = "cd"; if (c.color) dot.style.setProperty("--cc", c.color);
+    b.append(dot, document.createTextNode(c.name));
+    b.addEventListener("click", () => {
+      const o = calOff(); o.has(c.name) ? o.delete(c.name) : o.add(c.name); calSetOff(o);
+      calKeep(); if (calLast) showCalList(calLast);
+    });
+    el.appendChild(b);
+  }
+}
 function showCalList(d) {
   calNote.textContent = d ? calLooked(d) : "";
   if (calEl.classList.contains("reading")) return;
   if (!d || !Array.isArray(d.events)) { histNote(calList, "Couldn't load the calendar. Try again."); return; }
   calKeep();
+  calLast = d; showCalChips(d);  // H157
+  const off = calOff();
   calList.innerHTML = "";
-  let day = "", moving = false;
+  let day = "", moving = false, hidden = 0;
   for (const e of d.events) {
+    if (off.has(calView(e))) { hidden++; continue; }  // H157: that calendar is off in this view
     const a = calDate(e.start); if (!a) continue;
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const z = e.end ? calDate(e.end) : a;  // H143: the week's past days stay; one still running counts for today
@@ -1830,9 +1868,10 @@ function showCalList(d) {
     const b = document.createElement("button"); b.type = "button"; b.className = "appt" + (e.free ? " free" : "");
     const t = document.createElement("span"); t.className = "t"; t.textContent = e.all_day ? "Day" : calHM(a);
     const w = document.createElement("span"); w.className = "w"; w.textContent = e.title;
-    const sub = [e.calendar !== "Main" ? e.calendar : "", e.where].filter(Boolean).join(" · ");
+    const sub = [calView(e) !== "Main" ? calView(e) : "", e.where].filter(Boolean).join(" · ");
     if (sub) { const s = document.createElement("small"); s.textContent = sub; w.appendChild(s); }
-    b.append(t, w);
+    const cd = document.createElement("span"); cd.className = "cd"; if (e.color) cd.style.setProperty("--cc", e.color);  // H157
+    b.append(cd, t, w);
     if (e.ping) { b.insertAdjacentHTML("beforeend", BELL.replace("<svg", '<svg class="bell" aria-label="Ping on"')); b.classList.add("ping"); }  // H124
     b.addEventListener("click", () => showAppt(e));
     if (e.move_note && (e.mark === "x" || e.move === "to_back")) { const s = document.createElement("small"); s.className = "mv"; s.textContent = e.move_note; w.appendChild(s); }
@@ -1844,7 +1883,7 @@ function showCalList(d) {
   }
   clearTimeout(calMoveTimer);
   if (moving) calMoveTimer = setTimeout(() => { if (calOpen() && !calEl.classList.contains("reading")) loadCal(false); }, 4000);
-  if (!calList.children.length) histNote(calList, d.looking ? "Reading your calendar…" : d.looked ? "Nothing in the next two weeks" : "Not read yet");
+  if (!calList.children.length) histNote(calList, hidden ? "Every calendar with appointments is switched off" : d.looking ? "Reading your calendar…" : d.looked ? "Nothing in the next two weeks" : "Not read yet");
   calPlace();
 }
 function calKeep() { if (calOpen() && !calEl.classList.contains("reading") && calList.querySelector(".day")) calScroll = calList.scrollTop; }  // H156
@@ -1973,7 +2012,7 @@ function showAppt(e, noteNow) {
   const when = document.createElement("div"); when.className = "line"; when.textContent = calWhen(e);
   calOne.append(h, when);
   const mk = e.mark === "done" ? "Ticked off: done" : e.mark === "x" ? "X: didn't happen as planned" + (e.move_note ? " · " + e.move_note : "") : "";
-  for (const x of [e.where, e.calendar !== "Main" ? e.calendar + " calendar" : "", e.free ? "Shown as free" : "", mk]) {
+  for (const x of [e.where, calView(e) !== "Main" ? calView(e) + " calendar" : "", e.free ? "Shown as free" : "", mk]) {
     if (!x) continue; const l = document.createElement("div"); l.className = "line"; l.textContent = x; calOne.appendChild(l);
   }
   if (e.notes) { const n = document.createElement("div"); n.className = "notes"; n.textContent = e.notes; calOne.appendChild(n); }
