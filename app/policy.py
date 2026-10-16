@@ -208,6 +208,15 @@ class Policy:
         """H78: after a calendar read, remember each event it showed: whether others are in it, and what it was,
         so a move or delete can be put back (the line goes into the transcript with the change). Never raises."""
         server, name = _mcp_parts(tool)
+        if "calendar" in server.lower() and name in CALENDAR_ADD | CALENDAR_CHANGE | {"respond_to_event"}:
+            # H153: a write in the calendar (a call, Donna's chat, an appointment's note): HQ's calendar reads it again
+            if not self.dry_run:
+                try:
+                    import agenda
+                    agenda.changed(name)
+                except Exception:
+                    pass
+            return
         if "calendar" not in server.lower() or name not in CALENDAR_READ:
             return
         try:

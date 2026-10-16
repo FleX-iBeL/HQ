@@ -10,6 +10,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - A quick note on each appointment. In the calendar in the app every appointment has a note button: one tap and you're typing ("arrived 16:00, left 17:00"). The notes show under the appointment in the list and when you open it, each with its own Clear; they stay with an appointment X'd to HQ Planning. A call and Donna's chat read them, so "look at the haircut and update my calendar" puts its times right in Google Calendar, keeping the old times in its description (H146).
 
 ### Fixed
+- The calendar in the app shows a change right away. When a call or Donna adds, moves or changes an appointment in your Google Calendar, or an X moves one, HQ reads your calendar again within the minute, at any hour, also when the change was made on the other computer; before, it only read it once an hour. Whole-day appointments sit at the top of their day instead of between the night's appointments, and the list is always in time order (H153).
 - Two computers come back in step by themselves after a crash or restart. Donna's pings file is only saved when something in it changed (it was saved every minute, so a crash nearly always caught it on its way over), lock and half-written files stay on their own computer, a conflict copy that is the same as the file is cleared without a merge job, and a call's transcript that its own commit missed is committed by the main computer half an hour later.
 
 ## 0.4.3 · 14 October 2026

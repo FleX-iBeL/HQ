@@ -4894,6 +4894,57 @@ window.fetch = async (url, opt) => {
             os.environ["HQ_CALENDAR"] = "0"
             need(not agenda.due(datetime(2099, 1, 1, 14, 0).timestamp(), s0) and not agenda.refresh(), "HQ_CALENDAR=0 doesn't switch it off")
             os.environ.pop("HQ_CALENDAR")
+            # H153: a whole day as the connector gives it (midnight UTC) is its date, first on its day, and the list
+            # is in time order, also a copy saved before the fix
+            _, ev3 = agenda.events_from([(agenda.TOOL + "list_events", {"calendarId": "primary"}, {"events": [
+                {"id": "a", "summary": "Late", "start": {"dateTime": "2099-01-02T21:00:00+01:00"}},
+                {"id": "b", "summary": "A whole day", "start": {"date": "2099-01-02T00:00:00Z"}, "end": {"date": "2099-01-03T00:00:00Z"}},
+                {"id": "c", "summary": "Sleep", "start": {"dateTime": "2099-01-02T00:00:00+01:00"}},
+                {"id": "d", "summary": "Night call", "start": {"dateTime": "2099-01-02T01:00:00+01:00"}}]})])
+            need([e["title"] for e in ev3] == ["A whole day", "Sleep", "Night call", "Late"] and ev3[0]["start"] == "2099-01-02"
+                 and ev3[0]["end"] == "2099-01-03", f"a whole day or the order isn't right (H153): {[(e['title'], e['start']) for e in ev3]}")
+            old = [{**ev3[3]}, {**ev3[0], "start": "2099-01-02T00:00:00Z", "end": "2099-01-03T00:00:00Z"}, {**ev3[2]}, {**ev3[1]}]
+            agenda._write({"looked": t0, "events": old})
+            rd3 = agenda.read(now=t0)["events"]
+            need([e["title"] for e in rd3] == ["A whole day", "Sleep", "Night call", "Late"] and rd3[0]["start"] == "2099-01-02",
+                 f"the page doesn't get the saved list in time order (H153): {[(e['title'], e['start']) for e in rd3]}")
+            # H153: a write in the calendar (a call, Donna, planning) reads it again within the minute, at any hour,
+            # once; a look that started after the write is enough, one that was running during it isn't
+            import role as _role
+            started, real_start, real_acting = [], agenda.start, _role.acting
+            agenda.start = lambda t=None: started.append(t) or True
+            try:
+                night = datetime(2099, 1, 2, 3, 0).timestamp()
+                agenda._write({"looked": night - 600})
+                _role.acting = lambda: "backup"
+                need(not agenda.changed("update_event", now=night - 5) and started == [] and agenda.changed_at() == night - 5,
+                     "a write on the backup didn't leave the mark for the main, or read here")
+                _role.acting = lambda: "main"
+                need(agenda.changed("update_event", now=night) and started == [night] and agenda.changed_at() == night
+                     and agenda.changed_file().parent == d, f"a write didn't ask for a read right away on the main: {started}")
+                need(agenda.due(night + 30, {"looked": night - 600}), "a write in the calendar doesn't make a read due at night")
+                need(not agenda.due(night + 90, {"looked": night - 600, "asked": night + 60}), "a read after the write isn't enough")
+                need(not agenda.due(night + 30, {"looked": night - 600, "running": night - 10}), "a read was started while one runs")
+                need(agenda.due(night + 120, {"looked": night - 10}), "a write while a read ran didn't ask for one more")
+                import policy as _pol
+                calls, real_changed = [], agenda.changed
+                agenda.changed = lambda why="", now=None: calls.append(why) or True
+                try:
+                    pl = _pol.Policy(self.tmp)
+                    pl.seen("mcp__claude_ai_Google_Calendar__update_event", {"id": "x"})
+                    pl.seen("mcp__claude_ai_Google_Calendar__create_event", {"id": "y"})
+                    pl.seen("mcp__claude_ai_Google_Calendar__list_events", {"events": []})
+                    pl.seen("mcp__claude_ai_Gmail__create_draft", {})
+                    _pol.Policy(self.tmp, dry_run=True).seen("mcp__claude_ai_Google_Calendar__delete_event", {})
+                    need(calls == ["update_event", "create_event"], f"a call's or Donna's calendar write doesn't ask for a read: {calls}")
+                finally:
+                    agenda.changed = real_changed
+                need('agenda.changed("planning")' in (APP / "planning.py").read_text(),
+                     "an X's move doesn't ask for a read right away")
+            finally:
+                agenda.start, _role.acting = real_start, real_acting
+                agenda.changed_file().unlink(missing_ok=True)
+            agenda._write(st2)
             note = agenda.call_note(dn, "Sam")
             need("<appointment>" in note and "Dentist" in note and "Main street 1" in note and "Bring the card" in note
                  and "read only" in note, f"the call's note isn't right: {note!r}")
@@ -5066,7 +5117,9 @@ window.fetch = async (url, opt) => {
             need(all(part.endswith(":ok") for part in res.split(" | ")), f"the calendar button or sheet isn't right ({where}): {res}")
         return ("read only through a stand-in run (only the two reading tools), the tool results word for word (a big answer from "
                 "Claude Code's own file, nothing outside it), cancelled left out, Main, a failed read keeping the last days; hourly in "
-                "the day, again on opening; /api/calendar on its own copy, ?fresh=1 reading again; the call's note, greeting and "
+                "the day, again on opening; H153: a whole day as its date and first on its day, the list in time order (also a copy "
+                "saved before), a write by a call, Donna or an X read again within the minute at any hour (right away on the main, "
+                "through the synced mark from the backup; a dry run never); /api/calendar on its own copy, ?fresh=1 reading again; the call's note, greeting and "
                 "transcript line; the page, phone and app: the button on the right before and after a call, the days, one "
                 "appointment, Back, a swipe to the right back to the days (finger and trackpad; not up or down, left, short or from a field; H147), Call about this sending it to the agenda's agent (F30), off on Free, one sheet at a time; on a call "
                 "(also three-way) the button and an open sheet stay, the call's buttons free below it, Call about this waits, "
@@ -8089,7 +8142,7 @@ setTimeout(() => {
             need(agenda.prompt(now).count(mon.strftime("%Y-%m-%dT00:00:00")) == 1, "the calendar isn't read from this week's Monday")
             # done, and undo
             planning.set_mark(a1["id"], "done")
-            need(agenda.read()["events"][0]["mark"] == "done" and not planning.pending(), "the check didn't mark it, or asked for a move")
+            need(next(e for e in agenda.read()["events"] if e["id"] == a1["id"])["mark"] == "done" and not planning.pending(), "the check didn't mark it, or asked for a move")
             planning.set_mark(a1["id"], "")
             need(not planning._read().get("marks"), "a second tap didn't undo the check")
             # X: the copy in HQ Planning, and only then the original removed
@@ -10129,7 +10182,7 @@ FLOWS = {
     88: ("H113: a job held by the usage line carries on in its own chat, or in a fresh one with a note at which step", False, "flow88"),
     89: ("H118: which computer is main, at a glance: a pill next to the name on the status page, the strip and the call page", False, "flow89"),
     90: ("H120: the weather every three hours: sun, rain coming, a rainy day stays inside; quiet otherwise and at night", False, "flow90"),
-    91: ("H101, H144: my calendar inside HQ, read only from Google; a tap on an appointment starts a call about it; it opens on a call too", False, "flow91"),
+    91: ("H101, H144, H153: my calendar inside HQ, read only from Google, read again right after a change, in time order; a tap on an appointment starts a call about it; it opens on a call too", False, "flow91"),
     92: ("H124: Donna texts first: pings for appointments he picked (a bell shows them), reminders, her own notes", False, "flow92"),
     93: ("H125: Donna's watch list: she keeps an eye out for a mail or the weather and texts when it comes", False, "flow93"),
     94: ("H135: the weather in the app: a widget on the main screen, a sheet with warnings (KNMI), UV and the next hours", False, "flow94"),

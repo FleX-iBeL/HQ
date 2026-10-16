@@ -500,7 +500,7 @@ def work() -> int:
             if not progressed:
                 break
         if done:
-            agenda.refresh()
+            agenda.changed("planning")  # H153: right away, not only when the last read is a quarter of an hour old
     finally:
         _lock().unlink(missing_ok=True)
     return done

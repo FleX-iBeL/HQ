@@ -14,7 +14,9 @@ What it reads: every calendar the connector lists, from this week's Monday 00:00
 so they can still be ticked off) to DAYS days from today. Kept in the workspace as
 HQ/calendar.json (HQ_CALENDAR_FILE; synced to the other computer, off GitHub). The look runs on the main, from
 tick.py (start()): every hour from 07:00 to 23:00, and when the call page opens the calendar and the last look
-is older than FRESH seconds (refresh()). The call page shows the days; a tap on an appointment shows it with
+is older than FRESH seconds (refresh()). H153: and within the minute after anything wrote in the calendar (a call,
+Donna's chat, planning.py's moves): changed() leaves a mark in calendar-changed.json (synced, so a write on the backup
+reaches the main), and the main reads again when the mark is newer than its last look (due()). The call page shows the days; a tap on an appointment shows it with
 "Call about this", and the call's Claude gets the appointment (about()) in its warm-up note.
 
 Off: HQ_CALENDAR=0. Tests: HQ_CALENDAR_FAKE=<a file with the stream lines a run would give> stands in for Claude.
@@ -182,7 +184,9 @@ def _when(t: dict) -> tuple[str, bool]:
         return "", False
     if t.get("dateTime"):
         return str(t["dateTime"]), False
-    return str(t.get("date", "")), True
+    # H153: the connector gives a whole day's date as midnight UTC ("2026-10-19T00:00:00Z"), which is 02:00 here and
+    # the day before west of Greenwich: a whole day is its date only
+    return str(t.get("date", ""))[:10], True
 
 
 def events_from(results: list[tuple[str, dict, object]]) -> tuple[list[dict], list[dict]]:
@@ -225,13 +229,25 @@ def events_from(results: list[tuple[str, dict, object]]) -> tuple[list[dict], li
                 "gid": str(e["id"]), "cal": cal,
                 "others": any(isinstance(a, dict) and not a.get("self") for a in e.get("attendees") or []),
             })
-    events.sort(key=lambda x: (_sort_key(x["start"]), x["title"]))
+    events.sort(key=_order)
     return [{"id": k, "name": v} for k, v in cals.items()], events
 
 
 def _event_id(cal: str, eid: str) -> str:
     import hashlib
     return hashlib.sha1(f"{cal}\n{eid}".encode()).hexdigest()[:16]
+
+
+def _order(e: dict) -> tuple:
+    """H153: in time order; a whole day first on its day, then the timed ones, then by title."""
+    return (_sort_key(e.get("start") or ""), 0 if e.get("all_day") else 1, e.get("title") or "")
+
+
+def _day_only(e: dict) -> dict:
+    """H153: a whole day saved before the fix (midnight UTC) as its date only."""
+    if not e.get("all_day"):
+        return e
+    return {**e, "start": (e.get("start") or "")[:10], "end": (e.get("end") or "")[:10]}
 
 
 def _sort_key(start: str) -> float:
@@ -261,19 +277,59 @@ def look(now: float | None = None) -> dict:
     return s
 
 
+def changed_file() -> Path:
+    return data_file().with_name(data_file().stem + "-changed.json")
+
+
+def changed_at() -> float:
+    try:
+        return float(json.loads(changed_file().read_text(encoding="utf8")).get("at") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0.0
+
+
+def changed(why: str = "", now: float | None = None) -> bool:
+    """H153: something just wrote in the calendar (a call, Donna, planning.py): read it again within the minute, so
+    the page shows the change and not the last hourly read. The mark is a file of its own (only a writer writes it,
+    the main only reads it), synced, so a write on the backup reaches the main; on the main the read starts right
+    away. True when a read was started here. Never raises."""
+    if not on():
+        return False
+    t = now or time.time()
+    try:
+        p = changed_file()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"at": t, "why": str(why)[:80]}) + "\n", encoding="utf8")
+    except OSError:
+        return False
+    try:
+        import role
+        if role.acting() != "main":
+            return False  # the main's tick picks the mark up
+    except Exception:
+        pass
+    try:
+        return start(t)
+    except Exception:
+        return False
+
+
 def running(s: dict | None = None, now: float | None = None) -> bool:
     s = _read() if s is None else s
     return bool(s.get("running")) and (now or time.time()) - s["running"] < RUN_MAX
 
 
 def due(now: float | None = None, s: dict | None = None) -> bool:
-    """An hourly look: on, from 07:00 to 23:00, an hour since the last one (or its last try)."""
+    """An hourly look: on, from 07:00 to 23:00, an hour since the last one (or its last try). H153: or, at any hour,
+    a write in the calendar since the last look started."""
     if not on():
         return False
     s = _read() if s is None else s
     t = now or time.time()
     if running(s, t):
         return False
+    if changed_at() > max(s.get("asked") or 0, s.get("looked") or 0, s.get("failed") or 0):
+        return True
     if not DAY[0] <= datetime.fromtimestamp(t).hour < DAY[1]:
         return False
     last = max(s.get("looked") or 0, s.get("failed") or 0, s.get("asked") or 0)
@@ -321,7 +377,7 @@ def read(now: float | None = None) -> dict:
     t = now or time.time()
     d = datetime.fromtimestamp(t)
     monday = (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
-    events = [e for e in s.get("events") or [] if not _over(e, monday, t, week=True)]
+    events = sorted((_day_only(e) for e in s.get("events") or [] if not _over(e, monday, t, week=True)), key=_order)
     try:  # H143: done, or X (moved to HQ Planning)
         import planning
         events = planning.attach(events)
