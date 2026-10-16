@@ -72,7 +72,7 @@ PY = sys.executable or "/usr/bin/python3"
 
 # What a call may ask of the queue and the schedule, and so what the backup hands to the main.
 WRITES = {"jobs": {"add", "stop", "overrule", "move", "on", "off", "mail-on", "mail-off", "resume"},
-          "schedule": {"add", "cancel", "move", "priority"}}
+          "schedule": {"add", "cancel", "move", "priority", "every"}}
 
 
 def _load(path, default):

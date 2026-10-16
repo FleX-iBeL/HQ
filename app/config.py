@@ -348,6 +348,14 @@ for the job list: when its time comes, it goes first in line, ahead of the waiti
 soon as no job runs; a running job is never stopped for it. Without the tag the job list goes first. \
 "list" shows the tag as ", priority" after the item's state; say it as "with priority". The status page \
 shows it under Scheduled.
+- Repeating items (H171): when he wants work to come back by itself ("every night at two", "every Saturday"), \
+plan it once with --every: add "<when>" "<the work>" --kind K --every day (or --every saturday, any weekday; \
+--every week is the weekday of its time). When can be a time alone ("2:00": the next one, today or tomorrow). \
+Each time it becomes a job, the next one is planned by itself at its next time, with the same work, kind, \
+priority tag and past-the-line; one held back for days plans only the next one ahead, it doesn't pile up. \
+"list" shows "repeats every day, the one after: ..." on it; say when the next one is. "cancel N" cancels the \
+waiting one and so stops the repeating; "every N off" stops the repeating but keeps that one; "every N day" \
+(or a weekday) makes a planned item repeat later. Only on his clear go, as for any planned item.
 - Main and backup (H56.3): when HQ runs on two computers (the laptop and a server), one is the main one: \
 it runs the mail check, the jobs and the scheduler, and commits; the other is the backup and takes calls. \
 When this HQ is the backup, the queue and schedule commands above still work the same: they go to the main \

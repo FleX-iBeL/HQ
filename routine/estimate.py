@@ -1074,6 +1074,19 @@ def item_on_job(n, text, job_n, job_text):
     return e
 
 
+def item_repeat(n, k, text):
+    """H171: repeating item n became a job and planned its next one, item k: the same kind (also set by hand)
+    and size go with it, so the next one's estimate is the same work's."""
+    d = _load_items()
+    e = dict(d.get(str(n)) or {})
+    if not e:
+        return item_on_add(k, text)
+    e["set"] = int(time.time())
+    d[str(k)] = e
+    _save_items(d)
+    return e
+
+
 def item_forget(n):
     d = _load_items()
     if d.pop(str(n), None) is not None:
@@ -1257,6 +1270,8 @@ def _plan_items(cursor, waits, on, hist, run, run_end=None, proj=None, U=None):
             e["by_hand"] = True
         if i.get("priority"):
             e["priority"] = True
+        if i.get("every"):  # H171: it repeats; the next one is planned when this one becomes a job
+            e["every"] = i["every"]
         if waits or not on:
             e["waits"] = "off" if not on else "usage"
         cost = U.cost_for(est, i["text"], kind, hist) if U else None
@@ -1386,6 +1401,8 @@ def item_words(n, p):
         s += ", when it's done waits on the usage"
     elif e.get("waits") == "off":
         s += ", the routine is off"
+    if e.get("every"):  # H171
+        s += f", each time again, {'every day' if e['every'] == 'day' else 'every ' + e['every'].capitalize()}"
     return s + " (estimate)"
 
 

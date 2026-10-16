@@ -304,7 +304,7 @@ class Policy:
         # the roadmap, like the queue; promote and status are the routine's own.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "schedule.py"):
             sub = args[1] if len(args) > 1 else ""
-            if sub in ("add", "list", "cancel", "move", "priority"):
+            if sub in ("add", "list", "cancel", "move", "priority", "every"):  # H171: every
                 return Decision(ALLOW, "the schedule for the computer")
             return Decision(DENY, "that part of the schedule is only for the computer itself")
         # H124: Donna texts first. Picking appointments to ping, reminders and her own notes only writes HQ's own list

@@ -3811,6 +3811,79 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         need(all(f"Item {past[x]} " in lst.split("Looking back")[1] for x in past)
              and not any(f"Item {past[x]} " in lst.split("Looking back")[0] for x in past),
              f"a passed item got lost or is still planned: {lst}")
+        # H171: planned items that repeat. Every day (from a time alone) and every Saturday (with the tag and
+        # past the line); when one becomes a job, the next one is planned by itself with all it carried.
+        import datetime as dt
+        sys.path.insert(0, str(jv / "routine"))
+        import schedule as sc_
+        base = dt.datetime(2026, 10, 16, 13, 0)
+        need(sc_.next_at("2026-10-16 02:00", "day", base) == dt.datetime(2026, 10, 17, 2, 0)
+             and sc_.next_at("2026-10-13 02:00", "day", base) == dt.datetime(2026, 10, 17, 2, 0)
+             and sc_.next_at("2026-10-16 23:00", "saturday", base) == dt.datetime(2026, 10, 17, 23, 0)
+             and sc_.next_at("2026-10-17 23:00", "saturday", dt.datetime(2026, 10, 17, 23, 1)) == dt.datetime(2026, 10, 24, 23, 0),
+             "the next time of a repeating item is wrong (or a held-back one piles up)")
+        need(sc_.when(["2:00"], base) == dt.datetime(2026, 10, 17, 2, 0) and sc_.when(["14:30"], base) == dt.datetime(2026, 10, 16, 14, 30),
+             "a time alone isn't the next one")
+        sched("add", "2:00", "x", "--every", "fortnight", ok=False)
+        daily_out = sched("add", "2:00", "flow 45 nightly", "--every", "day", "--kind", "build")
+        need("repeats every day" in daily_out, f"planning with --every doesn't say it repeats: {daily_out}")
+        daily = int(daily_out.split()[1])
+        sat = int(sched("add", "today 9:00", "flow 45 weekly sweep", "--every", "saturday", "--priority", "--past-the-line").split()[1])
+        lst = sched("list").split("Looking back")[0]
+        need(f"Item {sat} · Saturday" in lst and "repeats every Saturday, the one after: Saturday" in lst
+             and "repeats every day, the one after:" in lst and "each time again, every day" in lst,
+             f"list doesn't show it repeats, when the one after is, or the estimate doesn't: {lst}")
+        need(", every saturday, priority, past the line" in rm.read_text(), "the repeat isn't written with the tags")
+        need("Next: item" in json.loads(sched("status"))["text"] and "repeats" in json.loads(sched("status"))["text"],
+             "the routine line doesn't say the next item repeats")
+        need("every Sunday from there" in sched("move", str(sat), "sunday 9:00") and "every Sunday" in sched("list"), "a moved weekly one doesn't follow its day")
+        sched("move", str(sat), "saturday 9:00")
+        ep = sp.run(["python3", "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); import estimate; "
+                     "print(json.dumps(estimate.plan()['items']))", str(jv / "routine")], capture_output=True, text=True, env=env)
+        need(json.loads(ep.stdout or "{}").get(str(daily), {}).get("every") == "day", f"the estimate doesn't know it repeats: {ep.stdout} {ep.stderr}")
+        # Its time comes (made due on the copy, a day back): it becomes a job and plans the next one, ahead.
+        yday = time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400))
+        for k in (daily, sat):
+            rm.write_text(re.sub(rf"^(- Item {k} · waiting[^·]* · at )\S+ (\S+)", rf"\g<1>{yday} \g<2>", rm.read_text(), flags=re.M))
+        did = sched("promote")
+        need(f"item {sat} became job" in did and "first in line" in did and "the next one" in did, f"the repeating tagged item didn't go in, or plan its next: {did}")
+        sat2 = int(re.search(r"item (\d+) is the next one", did).group(1))
+        w = q()["waiting"]
+        need(len(w) == 1 and w[0]["past"] and "flow 45 weekly sweep" in w[0]["text"], f"the repeat's job is wrong: {w}")
+        items = {i["n"]: i for i in sc_.read(rm.read_text())}
+        nx = items[sat2]
+        need(nx["state"] == "waiting" and nx["every"] == "saturday" and nx["priority"] and nx["past"]
+             and nx["text"] == "flow 45 weekly sweep" and dt.datetime.strptime(nx["at"], sc_.FMT) > dt.datetime.now()
+             and dt.datetime.strptime(nx["at"], sc_.FMT).weekday() == 5 and nx["at"].endswith("09:00"),
+             f"the next one doesn't carry the tag, past the line, the work or its time: {nx}")
+        need(not items[sat]["every"], f"the one that became a job still repeats: {items[sat]}")
+        jobs("done", str(w[0]["n"]))
+        did = sched("promote")
+        need(f"item {daily} became job" in did and "the next one" in did, f"the daily one didn't go in: {did}")
+        d2 = int(re.search(r"item (\d+) is the next one", did).group(1))
+        items = {i["n"]: i for i in sc_.read(rm.read_text())}
+        need(items[d2]["every"] == "day" and not items[d2]["priority"] and not items[d2]["past"]
+             and dt.datetime.strptime(items[d2]["at"], sc_.FMT) > dt.datetime.now()
+             and dt.datetime.strptime(items[d2]["at"], sc_.FMT) - dt.datetime.now() <= dt.timedelta(days=1)
+             and items[d2]["at"].endswith("02:00"), f"the daily one's next isn't the next 2:00 (held back a day, no pile-up): {items[d2]}")
+        need(len([i for i in items.values() if i["text"] == "flow 45 nightly" and i["state"] == "waiting"]) == 1,
+             "a held-back daily one piled up")
+        ek2 = sp.run(["python3", "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); import estimate; "
+                      "print(json.dumps(estimate.item_kind(int(sys.argv[2]))))", str(jv / "routine"), str(d2)],
+                     capture_output=True, text=True, env=env)
+        need(json.loads(ek2.stdout or "[]") == ["build", True], f"the kind given by hand didn't go with the repeat: {ek2.stdout} {ek2.stderr}")
+        for x in q()["waiting"]:
+            jobs("done", str(x["n"]))
+        # Stopping: every N off keeps this one, without the repeat; cancel stops it altogether.
+        need("doesn't repeat any more" in sched("every", str(d2), "off") and "repeats" not in sched("list").split("Looking back")[0].split(f"Item {d2} ")[1].split("\n")[0],
+             "every N off doesn't stop the repeating")
+        need("every Wednesday" in sched("every", str(d2), "wednesday") and "Wednesday" in sched("list"), "every N doesn't make it repeat")
+        need("repeating stops" in sched("cancel", str(d2)) and "repeat" in sched("cancel", str(sat2)), "cancel doesn't stop the repeating")
+        need("flow 45 nightly" not in sched("list").split("Looking back")[0] and "flow 45 weekly" not in sched("list").split("Looking back")[0],
+             "a cancelled repeating item is still planned")
+        sched("every", str(d2), "day", ok=False)  # cancelled: not waiting
+        sched("promote")
+        need("Nothing to start" in sched("promote"), "a cancelled repeating item still went in")
         # The queue keeps working with the schedule under it, and the schedule survives the queue's writes.
         text = rm.read_text()
         need(text.count("## The schedule") == 1 and text.count("## The queue") == 1
@@ -3845,7 +3918,12 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
              "the call rules or the status page don't know the priority tag (H99)")
         need("H111" in config.VOICE_RULES and "earliest first" in config.VOICE_RULES,
              "the call rules don't say passed items still run, earliest first (H111)")
-        return "plans by day and time; waits while a job runs, waits or the routine is off; then becomes one job, past the line kept; looking back, move, cancel; priority tag goes first in line, never stops a running job (H99); passed items all run after the job list, earliest first, none lost (H111); page, routine line, call rules"
+        need("H171" in config.VOICE_RULES and "--every" in config.VOICE_RULES and '"every N off"' in config.VOICE_RULES,
+             "the call rules don't say how to plan a repeating item (H171)")
+        need("everyOf" in page and "'prio rep'" in page, "the status page doesn't show a repeating item (H171)")
+        for sub in ("every 3 day", "every 3 off"):
+            need(pol.decide("Bash", {"command": f"{s_} {sub}"}).verdict == ALLOW, f"a call can't {sub}")
+        return "plans by day and time; waits while a job runs, waits or the routine is off; then becomes one job, past the line kept; looking back, move, cancel; priority tag goes first in line, never stops a running job (H99); passed items all run after the job list, earliest first, none lost (H111); repeats every day or every weekday, the next planned by itself with tag, past the line and kind, no pile-up, every N off, cancel stops it (H171); page, routine line, call rules"
 
     async def flow46(self) -> str:
         """H27: the Mac desktop app. No Claude turns. The watchdog part on made-up routine lines, its turning-on
