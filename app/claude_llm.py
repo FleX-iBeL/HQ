@@ -608,18 +608,42 @@ class SpeechFilter:
     line ("- ", "* ", "1. ", "## ") is dropped, also when it streams in pieces (a possible start of one
     is held back); a line break becomes a sentence end when the line didn't end in one, so each list
     item is said as its own phrase. H108: a colon between digits (5:30) becomes a space, so the voice
-    doesn't pause in a time. feed() returns what may be spoken now; flush() what was held."""
+    doesn't pause in a time. H170: a web address is never said ("https://…", "www.…"), and of a link
+    written [words](https://…) only the words are; a word that could still become one is held back until
+    it ends. feed() returns what may be spoken now; flush() what was held."""
 
     _MARK = re.compile(r"[ \t]*(?:[-*+\u2022]|\d{1,3}[.)]|#{1,6})[ \t]+")
     _MAYBE = re.compile(r"[ \t]*(?:[-*+\u2022]|\d{1,3}[.)]?|#{1,6})?")
     _ENDS = ".!?:;,"
 
+    _URL = r"(?:https?://|\bwww\.)[^\s<>\"]*[^\s<>\".,;:!?)\]'*]"
+    _LINK = re.compile(r"\]\((?:https?://)[^\s)]*\)|\(?" + _URL + r"\)?", re.I)
+    _OPEN = ("https://", "http://", "www.")
+
     def __init__(self):
         self.buf = ""
+        self.word = ""  # H170: the end of the text so far, held while it could still be a link
         self.line_start = True
         self.last = ""  # the last character spoken that wasn't a space
 
+    def _unlinked(self, piece: str, end: bool = False) -> str:
+        """H170: the text without its web addresses. The last word is held back while it could still
+        become one (or the end of a [words](…) link), and let go at the next space or at the end."""
+        s, self.word = self.word + piece, ""
+        if not end:
+            cut = max(s.rfind(c) for c in " \t\n")
+            tail = s[cut + 1:]
+            bare = tail.lstrip("([<*\"'").lower()
+            if tail and ("[" in tail or "]" in tail or bare.startswith(self._OPEN)
+                         or any(o.startswith(bare) for o in self._OPEN)):
+                s, self.word = s[:cut + 1], tail
+        s = self._LINK.sub("", s)
+        return s.replace("[", "").replace("]", "")
+
     def feed(self, piece: str) -> str:
+        return self._marks(self._unlinked(piece))
+
+    def _marks(self, piece: str) -> str:
         s, self.buf = self.buf + piece, ""
         out = []
         i = 0
@@ -661,7 +685,9 @@ class SpeechFilter:
         return "".join(out)
 
     def flush(self) -> str:
-        b, self.buf = self.buf, ""
+        rest = self._unlinked("", end=True)
+        b = (self._marks(rest) if rest else "") + self.buf
+        self.buf = ""
         self.line_start = True
         self.last = ""
         return b.replace("*", "").replace("`", "")

@@ -640,6 +640,8 @@
     body { gap:10px; }
     #modehint { margin-top:-6px; } #soon { margin-top:-4px; } #freetag { margin-top:-6px; }
   }
+  /* H170: a link in the chat is underlined in the bubble's own colour, and a long one wraps. */
+  #chatlog .msg a, #histlog .msg a { color:inherit; text-decoration:underline; text-underline-offset:2px; overflow-wrap:anywhere; }
 </style>
 </head>
 <body>
@@ -1358,12 +1360,29 @@ async function freshChat() {
 // H116: as in an AI chat app: an indented item is a list inside the item above (two levels deep at most),
 // an indented plain line goes on with that item, a list stays one list across empty lines (1. … 2. …),
 // a line like --- is only a break, and a heading she shouldn't have written shows as a bold line.
+// H170: a web address becomes a link to tap, and [words](https://…) shows the words. Only http and https
+// (www. gets https://); the text is a text node, so nothing becomes HTML. It opens outside the page: a new
+// tab on the phone, the browser from the Mac app, so a call goes on.
+const LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|((?:https?:\/\/|\bwww\.)[^\s<>"]*[^\s<>".,;:!?)\]'*])/gi;
+function linked(el, s) {
+  let at = 0;
+  for (const m of s.matchAll(LINK_RE)) {
+    if (m.index > at) el.appendChild(document.createTextNode(s.slice(at, m.index)));
+    const url = m[2] || m[3], a = document.createElement("a");
+    a.href = /^www\./i.test(url) ? "https://" + url : url;
+    a.target = "_blank"; a.rel = "noopener noreferrer";
+    a.textContent = m[1] || url;
+    el.appendChild(a);
+    at = m.index + m[0].length;
+  }
+  if (at < s.length) el.appendChild(document.createTextNode(s.slice(at)));
+}
 function inlineMarks(el, s) {
   const parts = s.split(/\*\*(.+?)\*\*|\*([^*\s](?:[^*]*[^*\s])?)\*/g);
   for (let i = 0; i < parts.length; i += 3) {
-    if (parts[i]) el.appendChild(document.createTextNode(parts[i].replace(/\*\*/g, "")));
+    if (parts[i]) linked(el, parts[i].replace(/\*\*/g, ""));
     const b = parts[i + 1], it = parts[i + 2];
-    if (b || it) { const e = document.createElement(b ? "strong" : "em"); e.textContent = b || it; el.appendChild(e); }
+    if (b || it) { const e = document.createElement(b ? "strong" : "em"); linked(e, b || it); el.appendChild(e); }
   }
 }
 function formatted(el, text) {
@@ -1418,7 +1437,7 @@ function addChat(who, text, old, her) {
   // M5: the user's own lines are anything that isn't HQ or a filler ("user", or the older name servers before M5 sent).
   const mine = who !== "hq" && who !== "filler";
   div.className = "msg " + (mine ? "me" : who);
-  if (who === "hq") { formatted(div, text); herColour(div, her); } else div.textContent = text;
+  if (who === "hq") { formatted(div, text); herColour(div, her); } else linked(div, text);  // H170: his links too
   chatLog.appendChild(div);
   if (atEnd || mine) chatLog.scrollTop = chatLog.scrollHeight;
   if (!chatOpen() && who !== "filler" && !old) { unread++; showBadge(); }
@@ -1590,7 +1609,7 @@ async function readCall(name) {
     if (!l.text) continue;
     const div = document.createElement("div");
     div.className = "msg " + (l.who === "hq" || l.who === "filler" ? l.who : "me") + (l.cancelled ? " cancelled" : "");
-    if (l.who === "hq") { formatted(div, l.text); herColour(div, l.agent || data.agent); } else div.textContent = l.text;
+    if (l.who === "hq") { formatted(div, l.text); herColour(div, l.agent || data.agent); } else linked(div, l.text);
     histLog.appendChild(div);
   }
   if (!histLog.querySelector(".msg")) histNote(histLog, "Nothing said");

@@ -131,7 +131,9 @@ for a word that matters, and when you name several things, a short list: each it
 with "- " or "1. ". The marks are never spoken, so write each item as a short phrase that also sounds right \
 read out loud. Lay a longer answer out for reading, as in a chat app: short paragraphs with an empty line \
 between them, a short lead-in line before a list, "1. " for steps or an order, an item may start with a **bold** \
-word or two. Nothing else: no headings, tables, links, code, emojis or single-asterisk italics."""
+word or two. A link (H170): when he asks for one, or a web address is the answer (a map, a page, a booking), put \
+it in your text whole, starting with https://, or as [a few words](https://…); it shows as a link to tap and is \
+never read out, so say in words what it is. Nothing else: no headings, tables, code, emojis or single-asterisk italics."""
 
 # H104, then H108 (13 October 2026, call at 15:10): times as 12-hour digits with a space for the colon,
 # then the part of the day. Kokoro reads "5 30" as five thirty; a colon makes it pause. Both kinds of call.
@@ -272,8 +274,8 @@ don't end every reply with a question; on the phone a plain "Done." is fine.
 How to talk on the call:
 - Follow rules.md as a person on the phone would: short spoken sentences, usually one to \
 three per reply. Keep the first sentence especially short, so he hears you right away.
-- Never write anything that can't be said out loud: no headings, tables, links, file names, \
-paths, code, commands or emojis. Say dates, times and numbers the way you'd say them.
+- Never write anything that can't be said out loud: no headings, tables, file names, \
+paths, code, commands or emojis (a link only as below: it's never read out). Say dates, times and numbers the way you'd say them.
 {format}
 - Don't announce a tool or say you're thinking (H76; the thinking sound is in who you are, below). Never say you're doing or have done something \
 that may still need his yes. When you're done, say the result plainly. Don't narrate each step.

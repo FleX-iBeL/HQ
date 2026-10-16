@@ -7981,7 +7981,7 @@ setTimeout(() => {
         first, then texts when the job list is finished, for a new very important mail (not for its status changing),
         when something stays down and when it's back. A throwaway status server serves the chat and its service
         worker, refuses a send without the HQ header, signs a phone up, and his text gets her (canned) reply. Off a
-        Mac her reply finds Claude on PATH (F27)."""
+        Mac her reply finds Claude on PATH (F27). H170: a web address in a text is a link to tap, only http and https."""
         import base64
         import urllib.request
         sys.path.insert(0, str(ROOT / "routine"))
@@ -8209,6 +8209,26 @@ console.log(JSON.stringify([day(at(16, 0, 5), now), day(at(15, 23, 59), now), da
             need(isinstance(got, list) and got[:3] == ["Today", "Yesterday", "Tuesday"] and "2" in got[3] and "Oct" in got[3]
                  and "2025" in got[4] and "2025" not in got[3] and re.fullmatch(r"09[:.]05", got[5]) and re.fullmatch(r"21[:.]40", got[6])
                  and got[7] is True and got[8] is False, f"her chat's day pills or times are wrong: {got}")
+            # H170: a web address in a text is a link to tap (bare, www., or [words](…)), only http and https, opening
+            # outside the chat; the rest stays text nodes. The page's own code, run on a stand-in document.
+            need("linked(d, m.text || '');" in dh and "d.textContent = m.text" not in dh and ".m a {" in dh,
+                 "her chat doesn't make links of the web addresses in a text")
+            links = re.search(r"// H170 begin[^\n]*(.*?)// H170 end", dh, re.S).group(1)
+            js = """
+const document = {
+  createTextNode: t => ({ text: t }),
+  createElement: tag => ({ tag, append(...k) { (this.kids = this.kids || []).push(...k); } }) };
+""" + links + """
+const d = document.createElement('div');
+linked(d, 'Map: https://maps.google.com/?q=Station. Or [the store](https://bikeshop.example/stores), www.example.net/help! [x](javascript:alert(1)) <b>hi</b>');
+console.log(JSON.stringify(d.kids.map(k => k.tag ? ['a', k.href, k.textContent, k.target, k.rel] : k.text)));
+"""
+            r = subprocess.run([shutil.which("node") or "/opt/homebrew/bin/node", "-e", js], capture_output=True, text=True)
+            got = json.loads(r.stdout or "null") if r.returncode == 0 else r.stderr[-300:]
+            need(got == ["Map: ", ["a", "https://maps.google.com/?q=Station", "https://maps.google.com/?q=Station", "_blank", "noopener noreferrer"],
+                         ". Or ", ["a", "https://bikeshop.example/stores", "the store", "_blank", "noopener noreferrer"], ", ",
+                         ["a", "https://www.example.net/help", "www.example.net/help", "_blank", "noopener noreferrer"],
+                         "! [x](javascript:alert(1)) <b>hi</b>"], f"her chat's links are wrong: {got}")
         finally:
             for key, v in saved.items():
                 if v is None:
@@ -8218,7 +8238,7 @@ console.log(JSON.stringify([day(at(16, 0, 5), now), day(at(15, 23, 59), now), da
         return ("push messages encrypt for the phone and carry a valid VAPID token, a gone phone is dropped; she texts once when the "
                 "job list is finished, for a new very important mail, when something stays down (a takeover at once) and when it's back; "
                 "the chat, its service worker, a phone signing up and texting her back work through the status server; each text shows its "
-                "time, with a day pill between days")
+                "time, with a day pill between days; a web address in a text is a link to tap")
 
     async def flow71(self) -> str:
         """H87, H91, no Claude: the three stop lines (5-hour, weekly all models, weekly Fable) each move every minute,
@@ -10842,7 +10862,9 @@ print("H88OUT " + json.dumps(out))
         pieces, and keeps numbers like 1.5 and 2026; the real call service driven by a stand-in speaks it plain
         while the transcript gets it with its line breaks; the saved call keeps them (<br>) and gives them back
         for the chat, and a continued call gets one line; the real call page in a headless browser shows bold
-        and lists for her, and his lines and anything like HTML stay plain text."""
+        and lists for her, and his lines and anything like HTML stay plain text. H170: a web address (bare, www.
+        or [words](…)) opens with a tap in the chat and in a past call, his too, only http and https; the voice
+        never says one, also when it streams in pieces."""
         from claude_llm import ClaudeSessionLLMService, SpeechFilter
         from pipecat.processors.aggregators.llm_context import LLMContext
         import transcript as tr
@@ -10863,6 +10885,16 @@ print("H88OUT " + json.dumps(out))
         # H116: a nested item and a bold lead-in are said plain too
         laid = spoken(["Plan:\n1. **Call** the bank\n   - ", "the bill\n\n2. Book"])
         need(not re.search(r"[*#]|(^|\s)-\s|\d\.\s", laid) and "Call the bank." in laid and "the bill." in laid, f"a laid-out reply isn't said plain: {laid!r}")
+        # H170: a link is in her text for the chat, never in the voice, also when it streams in pieces
+        need("https://" in rule and "never read out" in rule and "links," not in rule, "the calls aren't told how to give a link")
+        linky = ("Here it is: https://maps.google.com/?q=Station+Square. Or [Google Maps](https://maps.app.goo.gl/abc) "
+                 "and www.example.net/help, done.\n- [Bike shop](https://bikeshop.example/stores)\n- www.w3.org\nThe web was wide. Http is a word. ht")
+        said_link = spoken([linky])
+        need(said_link == "Here it is: . Or Google Maps and , done. Bike shop.  The web was wide. Http is a word. ht",
+             f"a link is said out loud: {said_link!r}")
+        for n in range(1, len(linky)):
+            need(spoken([linky[:n], linky[n:]]) == said_link, f"cut at {n} a link is said: {spoken([linky[:n], linky[n:]])!r}")
+        need(spoken(list(linky)) == said_link, "a link streamed a letter at a time is said")
 
         class Stand:
             model = "stand-in"
@@ -10942,6 +10974,29 @@ print("H88OUT " + json.dumps(out))
   check("paras", lay.querySelectorAll(":scope > p").length === 3, lay.innerHTML);
   const cs = getComputedStyle(lay), lh = parseFloat(cs.lineHeight) / parseFloat(cs.fontSize);
   check("air", lh >= 1.45 && parseFloat(getComputedStyle(ol).marginTop) > 6, cs.lineHeight + " " + getComputedStyle(ol).marginTop);
+  // H170: a link in her text (bare, www., or [words](…)), in bold too, opens with a tap outside the page; his too; nothing else is a link
+  send("hq", "The map: https://maps.google.com/?q=Station. Or [Bike shop store](https://bikeshop.example/stores) and **www.example.net/help**, done.\n- javascript:alert(1) and [x](javascript:alert(2))");
+  send("user", "See https://example.com/a?b=1, thanks");
+  await wait(100);
+  const all = [...chatLog.querySelectorAll(".msg")], lk = all[all.length - 2], hisLk = all[all.length - 1];
+  const as = [...lk.querySelectorAll("a")];
+  check("links", as.length === 3 && as[0].href === "https://maps.google.com/?q=Station" && as[0].textContent === "https://maps.google.com/?q=Station"
+    && as[1].href === "https://bikeshop.example/stores" && as[1].textContent === "Bike shop store"
+    && as[2].href === "https://www.example.net/help" && as[2].parentNode.tagName === "STRONG", lk.innerHTML);
+  check("link-tab", as.every(a => a.target === "_blank" && a.rel.includes("noopener")), lk.innerHTML);
+  check("link-text", lk.textContent.includes("Station. Or Bike shop store and") && !lk.textContent.includes("](https") && lk.textContent.includes("javascript:alert(1)"), lk.textContent);
+  check("no-js-link", !lk.querySelector("a[href^='javascript']"), lk.innerHTML);
+  const hisA = hisLk.querySelector("a");
+  check("his-link", hisA && hisA.href === "https://example.com/a?b=1" && hisLk.textContent === "See https://example.com/a?b=1, thanks", hisLk.innerHTML);
+  check("link-look", getComputedStyle(as[0]).textDecorationLine.includes("underline"), getComputedStyle(as[0]).textDecorationLine);
+  // in a past call too
+  histGet = async () => ({ agent: "Pepper", started: "16 October", lines: [{ who: "hq", text: "Tap https://example.org/x." }, { who: "user", text: "ok www.example.net" }] });
+  histEl.classList.add("open");
+  await readCall("x");
+  const pa = document.querySelector("#histlog .msg.hq a");
+  const pm = document.querySelector("#histlog .msg.me a");
+  check("past-link", pa && pa.href === "https://example.org/x" && pa.target === "_blank" && pm && pm.href === "https://www.example.net/", histLog.innerHTML.slice(0, 300));
+  histEl.classList.remove("open");
   const pre = document.createElement("pre"); pre.id = "h82"; pre.textContent = "H82RESULT " + out.join(" | ") + " END";
   document.body.appendChild(pre);
 })();
@@ -10959,7 +11014,8 @@ print("H88OUT " + json.dumps(out))
         need(all(part.endswith(":ok") for part in m.group(1).split(" | ")), f"the chat isn't formatted right: {m.group(1)}")
         return ("both calls may use bold and short lists; the voice gets them plain (also in pieces, numbers kept); "
                 "the chat and the saved call keep her lines; the call page shows bold, italics and lists, his lines and HTML stay text; "
-                "H116: laid out like an AI chat app (paragraphs, nested and numbered lists, lead-in bold, more air)")
+                "H116: laid out like an AI chat app (paragraphs, nested and numbered lists, lead-in bold, more air); "
+                "H170: links open with a tap in the chat and past calls, only http and https, never said out loud")
 
     async def flow78(self) -> str:
         """H86, no Claude: the real call page in a headless browser. Before a call the screen is plain; on a call
@@ -11619,7 +11675,7 @@ FLOWS = {
     74: ("H100: the coaching log keeps three hours; older entries move to its archive, calls load only those", False, "flow74"),
     75: ("F18: the status page on the phone never gets wider than the screen; it only scrolls up and down", False, "flow75"),
     76: ("H78: his own calendar changes go without asking; with other people in it, or not looked at first, they don't", False, "flow76"),
-    77: ("H82, H116: her text shows formatted in the call's chat, laid out like an AI chat app, while the voice stays plain", False, "flow77"),
+    77: ("H82, H116: her text shows formatted in the call's chat, laid out like an AI chat app, while the voice stays plain; H170: links to tap", False, "flow77"),
     78: ("H86: the screen in the colour of who I'm calling; my lines green, hers in her colour", False, "flow78"),
     79: ("H88: heartbeats for both computers: this one up and online, the other answering; on both status pages", False, "flow79"),
     80: ("F9: a call left quiet stays connected: no idle timeout; a hang-up or a lost connection still ends it", False, "flow80"),
@@ -11628,7 +11684,7 @@ FLOWS = {
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one; just text, the field grows (H117)", False, "flow83"),
     84: ("H106, H112, F26: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can; changed on a call at once; one row on the phone", False, "flow84"),
     85: ("H79, H121, H130: ask for another agent by name: she hands over, or brings her in on a three-way or four-way call and she says hi", False, "flow85"),
-    86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back; H158: each text's time, day pills", False, "flow86"),
+    86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back; H158: each text's time, day pills; H170: links to tap", False, "flow86"),
     87: ("H98: the dog sits by its empty bowl and says Update! in green when a newer version is out", False, "flow87"),
     88: ("H113: a job held by the usage line carries on in its own chat, or in a fresh one with a note at which step", False, "flow88"),
     89: ("H118: which computer is main, at a glance: a pill next to the name on the status page, the strip and the call page", False, "flow89"),
