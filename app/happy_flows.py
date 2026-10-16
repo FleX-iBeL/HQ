@@ -3595,6 +3595,8 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         hq.mkdir(parents=True)
         shutil.copytree(ROOT / "install", hq / "install")
         shutil.copytree(ROOT / "template", hq / "template", symlinks=True)
+        (hq / "routine").mkdir()
+        shutil.copy2(ROOT / "routine" / "flowsets.py", hq / "routine")  # H169: the Linux set lives there
         env = dict(os.environ, HQ_INSTALL_FAKE="1", HQ_INSTALL_PORT="4793")
         env.pop("HQ_WORKSPACE", None)
         inst = [ "/usr/bin/python3", str(hq / "install" / "install.py"), "--yes", "--no-wait", "--no-browser"]
@@ -9019,6 +9021,96 @@ window.fetch = async (url, opt) => {
         return (f"three pieces heard, the whole turn back in one go ({text!r}; the pass {waited:.2f} s); fallbacks, one piece, typed and off all keep the pieces; wired in the pipeline; "
                 f"the switch is {'on' if config.STT_WHOLE_TURN else 'off'} here")
 
+    async def flow103(self) -> str:
+        """H169, no Claude: the nightly run (routine/nightly.py). The set is the right one for this computer (the Mac:
+        every quick flow; Linux: the Linux nightly set, every number a real flow, the installer's set inside it); a run
+        where all pass writes one line in the H169 row's nights on a copy of the roadmap, newest first, seven kept,
+        nothing else on the roadmap changed; a failed flow is named and the run says so (exit 1); on the backup it
+        does nothing; the line for the morning is Donna's at 08:00, as her own kind of text (not a reminder he asked
+        for), in everyday words."""
+        import importlib
+        sys.path.insert(0, str(ROOT / "routine"))
+        import flowsets as fs
+        import nightly as ni
+        import pings as pg
+        import direct_line as dl
+        importlib.reload(fs), importlib.reload(ni), importlib.reload(pg)
+        tmp = Path(tempfile.mkdtemp(prefix="hq-flow103-"))
+        keep_env = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_CALENDAR_FILE", "HQ_AGENT_NOTES")}
+        keep = (ni.flow_args, ni.is_main, ni.OUT, ni.hqpaths.ROADMAP)
+        try:
+            # the set
+            for name in ("LINUX_FLOWS", "LINUX_NIGHTLY"):
+                nums = [int(x) for x in getattr(fs, name).split(",")]
+                need(all(n in FLOWS and not FLOWS[n][1] for n in nums), f"{name} names a flow that isn't a quick flow")
+            need(set(fs.LINUX_FLOWS.split(",")) <= set(fs.LINUX_NIGHTLY.split(",")),
+                 "the nightly leaves out a flow the installer runs on Linux")
+            want = ["--quick"] if sys.platform == "darwin" else ["--quick", "--only", fs.LINUX_NIGHTLY]
+            need(ni.flow_args() == want, f"the nightly runs {ni.flow_args()} here, not {want}")
+            # reading a run's result
+            out = ("\n== Result\n  8  waiting lines   PASS  1 s\n 45  scheduler  FAIL  3 s\n       8: ok\n"
+                   "      45: FAILED - the repeat wasn't planned\n\n1 of 2 passed · 0 Claude turns · 4 s\n")
+            need(ni.failures(out) == ["45: FAILED - the repeat wasn't planned"], f"failures read as {ni.failures(out)}")
+            need(ni.summary(out) == (1, 2), "the pass count isn't read")
+            # the nights, on a copy of the roadmap
+            rm = tmp / "roadmap.md"
+            shutil.copy2(ROADMAP, rm)
+            before = rm.read_text()
+            for k in range(9):
+                need(ni.add_night(f"night {k} | all pass", str(rm)), "no H169 row found on the roadmap copy")
+            row = next(ln for ln in rm.read_text().splitlines() if re.match(r"^\| [^|]* \| H169 ", ln))
+            need(row.endswith("Nights: night 8 / all pass; night 7 / all pass; night 6 / all pass; night 5 / all pass; "
+                              "night 4 / all pass; night 3 / all pass; night 2 / all pass |"), f"the nights read: {row[-200:]}")
+            need(row.count(" | ") == before.splitlines()[[i for i, ln in enumerate(before.splitlines())
+                                                           if re.match(r"^\| [^|]* \| H169 ", ln)][0]].count(" | "),
+                 "the row has a different number of cells")
+            others = lambda t: [ln for ln in t.splitlines() if not re.match(r"^\| [^|]* \| H169 ", ln)]
+            need(others(rm.read_text()) == others(before), "the nights changed something else on the roadmap")
+            # a run: all pass -> one line, exit 0; a failure -> named, exit 1; the backup does nothing
+            ni.hqpaths.ROADMAP = str(rm)
+            ni.OUT = str(tmp / "nightly")
+            ni.is_main = lambda: True
+            ni.flow_args = lambda: ["--only", "8"]
+            got = await asyncio.to_thread(ni.run)
+            need(got == 0, "a run where all pass didn't end with 0")
+            need(re.search(r"Nights: \d+ \w+ \d\d:\d\d all 1 flows pass", rm.read_text()), "an all-pass night wasn't written")
+            last = json.loads((tmp / "nightly" / "last.json").read_text())
+            need(last["ran"] == 1 and not last["failed"] and os.path.exists(last["log"]), f"last.json: {last}")
+            ni.flow_args = lambda: ["--only", "999"]
+            mid = rm.read_text()
+            got = await asyncio.to_thread(ni.run)
+            need(got == 1 and rm.read_text() == mid, "a run that didn't pass still said all pass, or wrote a night")
+            ni.is_main = lambda: False
+            n_logs = len(list((tmp / "nightly").glob("*.log")))
+            need(await asyncio.to_thread(ni.run) == 0 and len(list((tmp / "nightly").glob("*.log"))) == n_logs,
+                 "the backup ran the flows")
+            # the morning line: Donna, at 08:00, her own kind of text
+            os.environ["HQ_DIRECT_DIR"] = str(tmp / "dl")
+            os.environ["HQ_CALENDAR_FILE"] = str(tmp / "calendar.json")
+            os.environ["HQ_AGENT_NOTES"] = str(tmp / "notes.md")
+            (tmp / "dl").mkdir()
+            night = datetime(2026, 10, 17, 2, 30)
+            r = ni.morning("the calendar in the app was showing yesterday; sorted", now=night)
+            need(r["at"] == "2026-10-17 08:00" and r.get("why") == "nightly", f"the morning line: {r}")
+            need(ni.morning("x", now=datetime(2026, 10, 17, 9, 0))["at"] == "2026-10-18 08:00", "after 8 it isn't the next morning")
+            sent = []
+            t = time.mktime(night.replace(hour=8, minute=1).timetuple())
+            pg.watch(now=t, spawn=lambda why, facts: sent.append((why, facts)))
+            need(sent and sent[0][0] == "nightly" and "calendar in the app" in sent[0][1]
+                 and "asked for" not in sent[0][1], f"Donna's morning text: {sent}")
+            need("nightly" in dl.PLAIN and "no technical details" in dl.compose_prompt("nightly", "x").lower(),
+                 "Donna has no everyday-words text for the nightly")
+            return ("the right set here; nights kept on the H169 row, seven; a failure named, exit 1; the backup "
+                    "does nothing; the morning line is Donna's at 08:00, in everyday words")
+        finally:
+            ni.flow_args, ni.is_main, ni.OUT, ni.hqpaths.ROADMAP = keep
+            for k, v in keep_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            shutil.rmtree(tmp, ignore_errors=True)
+
     async def flow101(self) -> str:
         """H152, no Claude, no Syncthing, no network: after a crash or a restart the two computers come back in step
         by themselves. Her pings file is only written when something changed (it was written every minute, so it
@@ -10764,6 +10856,7 @@ FLOWS = {
     100: ("H146: a quick note on each appointment, one tap to type; a call and Donna's chat read it to put the calendar right", False, "flow100"),
     101: ("H152: after a crash or restart both computers come back in step: no every-minute pings write, locks stay home, needless conflict copies cleared, missed call transcripts committed", False, "flow101"),
     102: ("H165: the whole turn heard again before she answers, behind a switch; the pieces stay as the fallback", False, "flow102"),
+    103: ("H169: the nightly run: the right flows for this computer, one line when all pass, a plain morning text from Donna", False, "flow103"),
 }
 
 

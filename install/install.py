@@ -106,9 +106,10 @@ UNIT = os.environ.get("HQ_UNIT", "hq")
 MAC_ONLY_PACKAGES = {"mlx", "mlx-metal", "mlx-whisper", "more-itertools", "networkx", "regex", "scipy",
                      "setuptools", "tiktoken", "torch"}
 LISTEN_MODULE = "mlx_whisper" if IS_MAC else "faster_whisper"
-# H56.5: the quick happy flows that hold on a Linux server today (the rest are written for the Mac and get their
-# Linux side when HQ on a server is made the main one, H56.7).
-LINUX_FLOWS = "8,15,16,20,23,26,34,41,42,44,45,51,54,56,60,61,63,65,66,67,70,71,72,73,79,84,85,86,87,88,89,91,92,93,95,101"
+# H56.5: the quick happy flows that hold on a Linux server today (the rest are written for the Mac). Since H169 in
+# one place, routine/flowsets.py, which the nightly run reads too.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "routine"))
+from flowsets import LINUX_FLOWS  # noqa: E402
 VOICE_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 VOICE_FILES = {"kokoro-v1.0.onnx": 300_000_000, "voices-v1.0.bin": 25_000_000}  # minimum sizes
 

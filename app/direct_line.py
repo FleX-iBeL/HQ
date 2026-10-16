@@ -352,6 +352,9 @@ PLAIN = {
     "watch": ["That thing you asked me to watch: {facts}",
               "Got something for you: {facts}",
               "News on what you asked me to keep an eye out for: {facts}"],
+    "nightly": ["Morning! {facts}",
+                "Quick one from last night: {facts}",
+                "Morning. Heads up from the night shift: {facts}"],
     "watch-end": ["Stopped watching that one. {facts}",
                   "I'm done keeping an eye on that. {facts}"],
 }
@@ -458,6 +461,10 @@ def compose_prompt(why: str, facts: str) -> str:
         "watch": "He asked you to keep an eye out for this, and it came (the facts say what). A quick text with "
                  "what came, plainly (a mail: who from and what it says about what he's waiting for; the weather: "
                  "what and when). Whether you keep watching only in passing, as the facts say.",
+        "nightly": "Every night the team checks that all of HQ still works. Last night something didn't, and the "
+                   "facts say what they found and whether it's fixed. A quick morning text in everyday words: what "
+                   "was off, said the way he'd notice it, and that it's sorted (or still being looked at). No "
+                   "technical details, no names of files or flows, no alarm.",
         "watch-end": "Something he asked you to watch has stopped (the facts say what and why). One quick line that "
                      "you've stopped keeping an eye on it, and why in a few words (time's up and nothing came, or he "
                      "asked).",

@@ -244,7 +244,8 @@ def when(words: str, now: dt.datetime | None = None) -> dt.datetime:
     return base + dt.timedelta(days=ahead)
 
 
-def remind(at: dt.datetime, text: str, by: str = "") -> dict:
+def remind(at: dt.datetime, text: str, by: str = "", why: str = "remind") -> dict:
+    """why: remind (he asked for it), or nightly (H169: the nightly run's line for the morning)."""
     text = " ".join(str(text).split())[:500]
     if not text:
         raise ValueError("What should she remind him of?")
@@ -252,6 +253,8 @@ def remind(at: dt.datetime, text: str, by: str = "") -> dict:
         s = read()
         n = max([int(r.get("n") or 0) for r in s["reminders"]] + [int(s.get("last_n") or 0)]) + 1
         r = {"n": n, "at": at.strftime(FMT), "text": text, "added": time.strftime(FMT), "by": by}
+        if why != "remind":
+            r["why"] = why
         s["reminders"].append(r)
         s["last_n"] = n
         _write(s)
@@ -522,6 +525,10 @@ def due(now: float | None = None, s: dict | None = None, evs: list[dict] | None 
             continue
         if at <= t:
             late = t - at
+            why = r.get("why") or "remind"
+            if why == "nightly":  # H169: not a reminder he asked for; late doesn't matter
+                out.append((why, str(r.get("n")), f"From last night's check: {r.get('text', '')}"))
+                continue
             facts = f"Reminder he asked for: {r.get('text', '')}\nAsked for: {r['at'][11:]}"
             if late > 10 * 60:
                 facts += f" (it's {int(late // 60)} minutes late: HQ couldn't send it on time; say so)"
