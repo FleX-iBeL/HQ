@@ -231,6 +231,15 @@
       .late { color: color-mix(in srgb, var(--red) 65%, var(--soft)); }
       .row.eta-sum { display: block; font-size: 13px; }
       /* H174: the team's own guess, quieter than the computed estimate, so it doesn't read as a second estimate */
+      /* H160: the team's work from the page: the add field, and per waiting job up, down and cancel (or a swipe left). */
+      .team-add { display: flex; flex-direction: column; gap: 8px; padding: 14px 20px; border-bottom: 1px solid var(--rule); }
+      .team-add textarea { font: inherit; font-size: 15px; width: 100%; box-sizing: border-box; min-height: 52px; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); color: var(--ink); resize: vertical; }
+      .team-add .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      .team-add select { font: inherit; font-size: 14px; padding: 4px 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); color: var(--ink); }
+      .team-add .said { font-size: 13px; color: var(--soft); }
+      .team-acts { display: flex; gap: 6px; flex: none; }
+      .team-acts .chip { padding: 2px 9px; }
+      .team-acts .chip.cancel[data-armed="yes"] { border-color: var(--red); color: var(--red); font-weight: 600; }
       .eta-guess { display: block; font-size: 12px; color: var(--soft); opacity: 0.75; font-style: italic; }
       /* H174: what a total counts, right under its heading */
       .eta-counts { font-size: 13px; margin: 2px 0 8px; }
@@ -433,6 +442,96 @@
       let openedCurrent = '';
       // H14/H15/H16: every part folds open and closed with its arrow; the choice is remembered on this device.
       const shownJobs = new Set();
+      // H160: the add field is made once and kept across redraws, so what's typed survives; armed: a cancel waiting for its second tap.
+      const teamArmed = new Map();
+      let teamBox = null;
+      async function teamPost(body) {
+        try {
+          const r = await fetch('/api/team', { method: 'POST', headers: { 'x-hq': 'team', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+          const out = await r.json().catch(() => ({ ok: false, said: `The status server said ${r.status}` }));
+          return out;
+        } catch {
+          return { ok: false, said: 'The status server is not answering.' };
+        } finally {
+          redraw();
+        }
+      }
+      function teamAdd() {
+        if (teamBox) return teamBox;
+        const box = el('form', 'team-add');
+        const area = el('textarea');
+        area.placeholder = 'Give the team something to do';
+        area.setAttribute('aria-label', 'Work for the team');
+        const kind = el('select');
+        kind.setAttribute('aria-label', 'Kind');
+        for (const [v, t] of [['feature', 'Feature'], ['bug', 'Bug'], ['big', 'Big change'], ['call', 'Call change'], ['transcribe', 'Transcribe'], ['other', 'Other']]) {
+          const o = el('option', '', t);
+          o.value = v;
+          kind.append(o);
+        }
+        const go = el('button', 'chip range', 'Give it to the team');
+        go.type = 'submit';
+        const said = el('span', 'said');
+        const row = el('div', 'controls');
+        row.append(kind, go, said);
+        box.append(area, row);
+        box.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const text = area.value.trim();
+          if (!text || go.disabled) return;
+          go.disabled = true;
+          said.textContent = 'Putting it on the roadmap…';
+          const k = kind.value;
+          const out = await teamPost({ do: 'add', text, bug: k === 'bug', kind: k === 'feature' || k === 'bug' ? 'build' : k });
+          go.disabled = false;
+          said.textContent = out.said.split('\n').join(' ');
+          if (out.ok) area.value = '';
+        });
+        teamBox = box;
+        return box;
+      }
+      function teamActs(j, first, lastOne, parkedJob) {
+        const acts = el('div', 'team-acts');
+        const chip = (text, label, fn) => {
+          const b = el('button', 'chip', text);
+          b.type = 'button';
+          b.title = label;
+          b.setAttribute('aria-label', label);
+          b.addEventListener('click', (e) => { e.stopPropagation(); fn(b); });
+          return b;
+        };
+        if (!parkedJob) {
+          if (!first) acts.append(chip('↑', `Move job ${j.n} up`, () => teamPost({ do: 'move', n: j.n, to: 'up' })));
+          if (!lastOne) acts.append(chip('↓', `Move job ${j.n} down`, () => teamPost({ do: 'move', n: j.n, to: 'down' })));
+        }
+        const armed = (teamArmed.get(j.n) ?? 0) > Date.now();
+        const cancel = chip(armed ? 'Cancel?' : '✕', `Cancel job ${j.n}`, () => {
+          if ((teamArmed.get(j.n) ?? 0) > Date.now()) {
+            teamArmed.delete(j.n);
+            teamPost({ do: 'cancel', n: j.n });
+          } else teamArm(j.n);
+        });
+        cancel.classList.add('cancel');
+        cancel.dataset.armed = armed ? 'yes' : 'no';
+        acts.append(cancel);
+        return acts;
+      }
+      // A first tap (or a swipe left) arms the cancel for five seconds; a second tap cancels.
+      function teamArm(n) {
+        teamArmed.set(n, Date.now() + 5000);
+        redraw();
+        setTimeout(redraw, 5100);
+      }
+      function teamSwipe(row, n) {
+        let x0 = null, y0 = null;
+        row.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+        row.addEventListener('touchend', (e) => {
+          if (x0 == null) return;
+          const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+          x0 = null;
+          if (dx < -60 && Math.abs(dy) < 40) teamArm(n);
+        }, { passive: true });
+      }
       const folds = new Map();
       // 12 October 2026, the user's pick: these start the same every time the page opens, whatever was left last time.
       const fixedStart = {
@@ -910,7 +1009,7 @@
           const when = el('span', 'soft when');
           if (x?.last) when.append(el('small', '', `Last ${clock(new Date(x.last * 1000))}`));
           if (x?.next && state !== 'down' && state !== 'off' && !(state === 'waiting' && x.next < now)) when.append(el('small', '', `Next ${clock(new Date(x.next * 1000))}`));
-          row.title = (x?.about ?? about) + (state === 'down' && x?.detail?.length ? `\n\nWhat it said last:\n${x.detail.join('\n')}` : '');  // H42
+          row.title = (x?.about ?? about) + (state === 'down' && x?.detail?.length ? `\n\nWhat it said last:\n${[].concat(x.detail).join('\n')}` : '');  // H42
           row.append(el('i'), what, el('span', 'text', text), when);
           card.append(row);
         }
@@ -952,7 +1051,7 @@
           if (i.detail?.length) {
             // H42: what the run itself said last, so the reason can be read, not only "failed".
             const said = el('details', 'said soft');
-            said.append(el('summary', '', 'What it said last'), el('pre', '', i.detail.join('\n')));
+            said.append(el('summary', '', 'What it said last'), el('pre', '', [].concat(i.detail).join('\n')));
             if (i.run) said.title = `Its whole output: ${i.run}`;
             row.append(said);
           }
@@ -1476,8 +1575,8 @@
 
         // Phase L: what the routine runs and what waits, in the order it will run.
         // H16: split into running, waiting and finished, each with its own arrow; finished starts folded.
-        const q = s.queue;
-        if (q && (q.jobs.length || !q.on)) {
+        const q = s.queue ?? { on: true, jobs: [] };  // H160: always shown, for the add field (a fresh roadmap has no queue yet)
+        {
           const box = el('section');
           // F37: a job paused for its usage (H172) is parked: neither running nor waiting, it holds nothing up and waits for a call.
           const group = (j) => (/^(running|stop asked)/.test(j.state) ? 'running' : /^(ready|held)/.test(j.state) ? 'waiting' : /^paused/.test(j.state) ? 'parked' : 'finished');
@@ -1489,6 +1588,9 @@
           const fold = foldPart('jobs', true, 'Jobs from calls', counts, false, q.on && total ? lateNote(E?.total) : '');
           const parts = el('div', 'parts');
           if (q.on && E?.total?.counts) parts.append(el('p', 'soft eta-counts', E.total.counts));  // H174: what the total counts
+          const addCard = el('div', 'card');
+          addCard.append(teamAdd());
+          parts.append(addCard);  // H160
           for (const [g, title, st, start] of [['running', 'Running', 'doing', true], ['waiting', 'Waiting', 'todo', true], ['parked', 'Parked for a call', 'todo', true], ['finished', 'Finished', 'done', false]]) {
             if (g === 'parked' && !of(g).length) continue;  // F37: only shown when a job is parked
             // H39: waiting jobs keep their place in line (the order they will run), not their number.
@@ -1516,6 +1618,12 @@
               const gate = routines?.routines?.jobs;
               const gateText = gate?.state === 'waiting' && g === 'waiting' ? (gate.text ?? '') : '';
               if (gateText.startsWith(`Job ${j.n} waits for the usage line: `)) left.append(el('span', 'eta over', gateText.slice(`Job ${j.n} waits for the usage line: `.length).replace(/^./, (c) => c.toUpperCase())));
+              // H160: a waiting or parked job can be moved or cancelled from here (a swipe left arms the cancel).
+              if (g === 'waiting' || g === 'parked') {
+                const i = jobs.indexOf(j);
+                mark.prepend(teamActs(j, i === 0, i === jobs.length - 1, g === 'parked'));
+                teamSwipe(row, j.n);
+              }
               row.append(left, mark);
               card.append(row);
             }
@@ -1711,6 +1819,8 @@
           const key = `${text}\n${usageText}\n${lines}\n${Math.floor(Date.now() / 60000)}`;
           // H23: the graph's history, once a minute (and when the time span or a routine is switched).
           if (key !== last) { await loadUptime(); await loadTemp(); }
+          // H160: no redraw while he types in the add field; it catches up once he leaves it.
+          if (key !== last && teamBox?.contains(document.activeElement) && teamBox.querySelector('textarea').value) return;
           if (key !== last) {
             last = key;
             let usage = null;

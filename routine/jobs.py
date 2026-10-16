@@ -17,6 +17,8 @@ usage (from the workspace):
   python3 "routine/jobs.py" add "TEXT" [--past-the-line] [--kind K]   a call's let's go: the job is ready;
                                                            K (transcribe, big, call, build, other) sets the
                                                            kind for its estimate instead of the guess (H70)
+  python3 "routine/jobs.py" add-row "TEXT" [--bug] [--kind K]   the status page (H160): a numbered roadmap row first
+                                                           (F with --bug, else H), then a job that reads that row
   python3 "routine/jobs.py" list                           the queue, as on the roadmap, with each job's estimate (H61)
   python3 "routine/jobs.py" stop [N]                       stop the running job (or cancel ready job N)
   python3 "routine/jobs.py" overrule N                     job N may go past the 5-hour line (the weekly line still counts)
@@ -138,6 +140,44 @@ def write(text, jobs, on):
     tmp = ROADMAP + ".tmp"
     open(tmp, "w", encoding="utf8").write(text)
     os.replace(tmp, ROADMAP)
+
+
+ROW_NUM = re.compile(r"^\| [^|]* \| ([A-Z])(\d+)\b", re.M)
+
+
+def roadmap_row(text, said, bug=False):
+    """H160: a numbered row for work added on the status page, in Phase F (a bug) or Phase H (everything else),
+    right after that phase's highest number, in the roadmap's own shape. Returns (text, label)."""
+    letter = "F" if bug else "H"
+    head = text.find(f"\n## Phase {letter} · ")
+    if head < 0:  # a fresh install's roadmap has only Phase A: the phase is made, at the end
+        text = text.rstrip("\n") + (f"\n\n## Phase {letter} · {'Bugs' if bug else 'Features'}\n\n"
+                                    "| | Step | What you get | Model |\n|---|---|---|---|\n")
+        head = text.find(f"\n## Phase {letter} · ")
+    end = text.find("\n## ", head + 1)
+    end = len(text) if end < 0 else end
+    lines = text[head:end].split("\n")
+    rows = [i for i, l in enumerate(lines) if l.startswith("| ")]
+    if not rows:
+        sys.exit(f"The roadmap's Phase {letter} has no table; nothing was added.")
+    # The next number counts every row with the letter (also parked ones), so a number is never used twice.
+    n = max([int(m.group(2)) for m in ROW_NUM.finditer(text) if m.group(1) == letter] + [0]) + 1
+    first = rows[0]
+    table = [first]
+    for i in range(first + 1, len(lines)):
+        if not lines[i].startswith("|"):
+            break
+        table.append(i)
+    nums = {i: int(m.group(2)) for i in table for m in [ROW_NUM.match(lines[i])] if m and m.group(1) == letter}
+    at = max(nums, key=nums.get) if nums else table[-1]
+    title = said.split(". ")[0].rstrip(".")
+    if len(title) > 80:
+        title = title[:80].rsplit(" ", 1)[0] + "…"
+    when = time.strftime("%-d %B %Y") + f" (status page, {time.strftime('%H:%M')})"
+    label = f"{letter}{n}"
+    lines.insert(at + 1, f"| ⬜ | {label} {title} | {when}, typed: \"{said}\" [Added on the status page, no call; "
+                         f"the title is the first sentence.] | {said} | |")
+    return text[:head] + "\n".join(lines) + text[end:], label
 
 
 def mail_words():
@@ -291,6 +331,28 @@ def main(argv):
                               "held": [j for j in jobs if j["state"].startswith("held")], "waiting": line_up(jobs),
                               "parked": [j for j in jobs if parked(j)]}))  # F37
             return
+        if cmd == "add-row":
+            # H160: work added on the status page, without a call. Roadmap first stays the rule (rules 13): it gets its own
+            # numbered row (F for a bug, else H) before it goes to the team, and the job says to read that row.
+            bug = "--bug" in args
+            words, extra = [], []
+            it = iter(a for a in args if a != "--bug")
+            for a in it:
+                if a == "--kind":
+                    extra += [a, next(it, "")]
+                elif a.startswith("--kind="):
+                    extra.append(a)
+                else:
+                    words.append(a)
+            said = one_line(" ".join(words)).replace("|", "/")
+            if not said:
+                sys.exit("What should the team do? Write it in a line or two.")
+            text, label = roadmap_row(text, said, bug)
+            cmd = "add"
+            args = [f"{label} on the HQ roadmap, added on the status page: {said.replace('·', '-').rstrip('.')}. "
+                    f"Read the {label} row. Pull dev first, privacy check, push to dev with push.py, "
+                    f"write the result in the {label} row."] + extra
+            print(f"{label} is on the roadmap.")
         if cmd == "add":
             past = "--past-the-line" in args
             words = [a for a in args if a != "--past-the-line"]

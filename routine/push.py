@@ -38,7 +38,7 @@ def refused(what: str, out: str) -> None:
     last = next((l for l in reversed(out.strip().splitlines()) if l.strip()), "no answer")
     try:
         import incidents
-        incidents.down("github", f"{what} refused: {last[:200]}", detail=out.strip()[-1500:])
+        incidents.down("github", f"{what} refused: {last[:200]}", detail=out.strip()[-1500:].splitlines())  # a list of lines, like every other incident (H42)
     except Exception:
         pass
     print("Logged as an incident (github): it shows on the status page and Donna texts about it.")

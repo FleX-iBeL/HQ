@@ -9756,6 +9756,125 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need(r.returncode == 0 and not json.loads(r.stdout)["problems"], f"the status page reads the queue wrong: {r.stdout}{r.stderr}")
         return "his words read as an end time; every quarter until then, hourly again by itself; a call and Donna can set it"
 
+    async def flow106(self) -> str:
+        """H160, no Claude: the team's work from the status page, without a call. jobs.py add-row on a copy of the
+        roadmap puts a numbered row first (H, or F for a bug, the next free number, right after that phase's highest;
+        a fresh roadmap gets the phase), then the job that reads that row, with its kind; nothing written when the text
+        is empty or the kind unknown; never the real roadmap under a test; the backup hands it to the main. The status
+        server's /api/team on a copy of HQ: refused without the page's header, add, move and cancel through jobs.py, a
+        wrong ask refused. The page in a headless browser: the add field with its kinds, up, down and cancel on the
+        waiting jobs, a cancel on the parked one, and it still draws with an incident whose detail is one text."""
+        import subprocess as sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        import role
+        need("add-row" in role.WRITES["jobs"], "the backup doesn't hand add-row to the main")
+        rm = self.tmp / "roadmap-H160.md"
+        rm.write_text(ROADMAP.read_text())
+        env = {**os.environ, "HQ_ROADMAP": str(rm)}
+
+        def jobs(*a, ok=True, e=None):
+            r = sp.run(["python3", str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=e or env)
+            need((r.returncode == 0) == ok, f"jobs.py {a}: {r.stdout}{r.stderr}")
+            return r.stdout + r.stderr
+
+        def top(text, letter):
+            return max(int(m.group(2)) for m in re.finditer(r"^\| [^|]* \| ([A-Z])(\d+)\b", text, re.M) if m.group(1) == letter)
+        before = rm.read_text()
+        h, f = top(before, "H"), top(before, "F")
+        out = jobs("add-row", "Make the dog wag. And bark too.", "--kind", "big")
+        t = rm.read_text()
+        need(f"H{h + 1} is on the roadmap." in out and "is ready" in out, f"add-row said: {out}")
+        row = next((l for l in t.splitlines() if l.startswith(f"| ⬜ | H{h + 1} Make the dog wag |")), None)
+        need(row and 'typed: "Make the dog wag. And bark too."' in row and "status page" in row, f"the H row: {row}")
+        lines = t.splitlines()
+        need(lines.index(row) == next(i for i, l in enumerate(lines) if re.match(rf"^\| [^|]* \| H{h} ", l)) + 1,
+             "the new row isn't right after the highest H row")
+        q = json.loads(jobs("next"))
+        job = next(j for j in q["waiting"] if f"H{h + 1} on the HQ roadmap" in j["text"])
+        need(f"Read the H{h + 1} row." in job["text"] and "push.py" in job["text"], f"the job: {job['text']}")
+        out = jobs("add-row", "The clock is wrong", "--bug")
+        need(f"F{f + 1} is on the roadmap." in out and f"| ⬜ | F{f + 1} The clock is wrong |" in rm.read_text(), f"the bug: {out}")
+        same = rm.read_text()
+        jobs("add-row", "   ", ok=False)
+        jobs("add-row", "Something", "--kind", "nope", ok=False)
+        need(rm.read_text() == same, "a refused add still changed the roadmap")
+        real = os.environ.get("HQ_REAL_ROADMAP", str(ROADMAP))
+        jobs("add-row", "Never on the real one", ok=False, e={**os.environ, "HQ_ROADMAP": real})
+        fresh = self.tmp / "roadmap-H160-fresh.md"
+        fresh.write_text((ROOT / "template/HQ/roadmap.md").read_text())
+        jobs("add-row", "First wish", e={**os.environ, "HQ_ROADMAP": str(fresh)})
+        need("## Phase H · Features" in fresh.read_text() and "| ⬜ | H1 First wish |" in fresh.read_text(),
+             "a fresh roadmap doesn't get Phase H with H1")
+
+        # The status server's /api/team, on a copy of HQ.
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        site = self.tmp / "h160"
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        shutil.copytree(ROOT / "routine", site / "routine", ignore=shutil.ignore_patterns("__pycache__", "*.o"))
+        (site / ".status").mkdir()
+        # F31's github incident kept its detail as one text: the page must still draw.
+        (site / ".status/incidents.json").write_text(json.dumps({"incidents": [
+            {"key": "github", "down": time.time() - 600, "back": time.time() - 60, "why": "push refused", "detail": "one text"}]}))
+        road = site_roadmap(site)
+        road.write_text((ROOT / "template/HQ/roadmap.md").read_text())
+        port = 4794
+        senv = {**os.environ, "HQ_STATUS_PORT": str(port), "HQ_ROADMAP": str(road)}
+        proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=senv,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            base = f"http://127.0.0.1:{port}"
+            for _ in range(50):
+                if http_get("/roadmap.md", base)[0] == 200:
+                    break
+                await asyncio.sleep(0.2)
+
+            def post(body: dict, header: str | None = "team") -> tuple[int, dict]:
+                req = urllib.request.Request(f"{base}/api/team", data=json.dumps(body).encode(), method="POST",
+                                             headers={"content-type": "application/json", **({"x-hq": header} if header else {})})
+                try:
+                    with urllib.request.urlopen(req, timeout=30) as r_:
+                        return r_.status, json.loads(r_.read() or b"null")
+                except urllib.error.HTTPError as e:
+                    return e.code, {}
+            code, _ = await asyncio.to_thread(post, {"do": "add", "text": "Sneaky"}, None)
+            need(code == 403 and "Sneaky" not in road.read_text(), "the page's add works without the page's header")
+            for text in ("One for the team", "Two for the team", "Three for the team"):
+                code, ans = await asyncio.to_thread(post, {"do": "add", "text": text, "kind": "other"})
+                need(code == 200 and ans.get("ok") and "is on the roadmap" in ans.get("said", ""), f"the page's add: {code} {ans}")
+            code, ans = await asyncio.to_thread(post, {"do": "add", "text": "A bug from the page", "bug": True})
+            need(code == 200 and "| ⬜ | F1 A bug from the page |" in road.read_text(), f"the page's bug: {code} {ans}")
+            code, ans = await asyncio.to_thread(post, {"do": "move", "n": 3, "to": "top"})
+            need(code == 200 and "number 1 in line" in ans.get("said", ""), f"the page's move: {code} {ans}")
+            code, ans = await asyncio.to_thread(post, {"do": "cancel", "n": 2})
+            need(code == 200 and "cancelled" in ans.get("said", ""), f"the page's cancel: {code} {ans}")
+            q = json.loads(jobs("next", e={**os.environ, "HQ_ROADMAP": str(road)}))
+            need([j["n"] for j in q["waiting"]] == [3, 1, 4], f"the line after move and cancel: {[j['n'] for j in q['waiting']]}")
+            for bad in ({"do": "cancel", "n": "x"}, {"do": "move", "n": 1, "to": "sideways"}, {"do": "add", "text": " "}, {"do": "wipe"}):
+                code, _ = await asyncio.to_thread(post, bad)
+                need(code == 400, f"the page's {bad} wasn't refused")
+            # One job parked (H172), for the page.
+            road.write_text(road.read_text().replace("- Job 4 · ready ·", "- Job 4 · paused: used about twice its estimated usage ·"))
+            # The page, in a headless browser.
+            cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+            cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+            chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+            need(Path(chrome).exists(), "no headless browser found to run the status page in")
+            r = await asyncio.to_thread(sp.run, [chrome, "--headless", "--no-sandbox", "--disable-gpu", "--virtual-time-budget=8000",
+                                                 f"--user-data-dir={self.tmp / 'h160-chrome'}", "--dump-dom", base + "/"],
+                                        capture_output=True, text=True, timeout=90)
+            dom = r.stdout
+            need("<p>The status server is not answering" not in dom, "the status page doesn't draw (an incident with one text as its detail?)")
+            need('class="team-add"' in dom and 'value="bug"' in dom and 'value="transcribe"' in dom and "Give it to the team" in dom,
+                 "the page has no add field with its kinds")
+            need('aria-label="Cancel job 3"' in dom and 'aria-label="Move job 3 down"' in dom and 'aria-label="Move job 3 up"' not in dom
+                 and 'aria-label="Move job 1 up"' in dom and 'aria-label="Cancel job 4"' in dom and 'aria-label="Move job 4 up"' not in dom
+                 and 'aria-label="Cancel job 2"' not in dom, "the waiting and parked jobs don't have the right move and cancel buttons")
+            page = (ROOT / "status/index.html").read_text()
+            need("'x-hq': 'team'" in page and "teamSwipe(row, j.n)" in page, "the page doesn't send the header or doesn't swipe")
+        finally:
+            proc.terminate()
+        return "a numbered roadmap row first, then the job; add, move and cancel from the page through jobs.py, header-guarded"
+
     async def flow101(self) -> str:
         """H152, no Claude, no Syncthing, no network: after a crash or a restart the two computers come back in step
         by themselves. Her pings file is only written when something changed (it was written every minute, so it
@@ -11529,6 +11648,7 @@ FLOWS = {
     103: ("H169: the nightly run: the right flows for this computer, one line when all pass, a plain morning text from Donna", False, "flow103"),
     104: ("F33: a typed line sent while she talks or thinks carries only itself; an unanswered one goes again", False, "flow104"),
     105: ("H149: mail more often for a while he names: his words as an end time, every quarter until then, hourly again by itself", False, "flow105"),
+    106: ("H160: the team's work from the status page: add (a numbered roadmap row first), move and cancel, without a call", False, "flow106"),
 }
 
 

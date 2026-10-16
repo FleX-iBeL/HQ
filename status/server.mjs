@@ -434,6 +434,36 @@ const server = createServer(async (req, res) => {
     });
     return;
   }
+  // H160: the team's work from the page, without a call: add (a numbered roadmap row first, then the job), cancel a
+  // waiting job, or move it in the line. All through routine/jobs.py (which hands it to the main HQ when this is the
+  // backup). Needs the x-hq header, so a page from elsewhere can't press it.
+  if (path0 === '/api/team') {
+    if (req.method !== 'POST' || req.headers['x-hq'] !== 'team') {
+      res.writeHead(403).end('Only the HQ page can change the team\'s work');
+      return;
+    }
+    let body = {};
+    try { body = JSON.parse(await readBody(req)); } catch {}
+    const n = Number.isInteger(body.n) && body.n > 0 ? String(body.n) : null;
+    const KINDS = ['build', 'big', 'call', 'transcribe', 'other'];
+    let args = null;
+    if (body.do === 'add' && typeof body.text === 'string' && body.text.trim() && body.text.length <= 4000) {
+      args = ['add-row', body.text.trim()].concat(body.bug ? ['--bug'] : []).concat(KINDS.includes(body.kind) ? ['--kind', body.kind] : []);
+    } else if (body.do === 'cancel' && n) {
+      args = ['stop', n];
+    } else if (body.do === 'move' && n && ['top', 'up', 'down', 'bottom'].includes(body.to)) {
+      args = ['move', n, body.to];
+    }
+    if (!args) {
+      res.writeHead(400).end('do is add (with text), cancel (with n) or move (with n and to: top, up, down or bottom)');
+      return;
+    }
+    execFile('/usr/bin/python3', [join(root, 'routine/jobs.py'), ...args], { timeout: 30000 }, (err, out, errOut) => {
+      const said = String(err ? errOut || out : out).trim();
+      res.writeHead(err ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ ok: !err, said }));
+    });
+    return;
+  }
   // H83: which HQ this is, for the call page (another port, so it may read only this, nothing else).
   // H118: and which computer is main (role.py's badge, with its routine line; none when this HQ is on its own).
   if (path0 === '/where.json') {
