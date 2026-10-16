@@ -34,6 +34,8 @@
         --land-team: #d9730d;
         --land-planned: #e8c547;
         --land-repeat: #4fae6a;
+        /* H177: the dotted line for where a moving stop line will be when the work lands. */
+        --then: #7a3fd1;
         /* H33: running is a good thing, not a warning: green with stripes, "working, and busy right now". */
         --running: repeating-linear-gradient(135deg, var(--green) 0 4px, color-mix(in srgb, var(--green) 55%, var(--card)) 4px 8px);
       }
@@ -56,6 +58,7 @@
           --land-team: #e8913a;
           --land-planned: #f0d77a;
           --land-repeat: #5fbf7d;
+          --then: #c4a2ff;
         }
       }
       * { box-sizing: border-box; }
@@ -117,7 +120,14 @@
       .land.repeat, .swatch.repeat { background: var(--land-repeat); }
       .bar i.land.priority { box-shadow: inset 0 0 0 1.5px var(--ink); }
       .meter .land-note .crosses { color: var(--red); }
-      .bar s.then { background: transparent; border-left: 2px dotted var(--soft); width: 0; }
+      /* H177: where a moving stop line will be when the work lands: a tall dotted line in its own colour, with its time
+         and percent always shown under the bar, plainly apart from the solid dark line for where it is now. */
+      .bar.has-then { margin-bottom: 22px; }
+      .bar s.then { z-index: 2; top: -8px; height: 24px; width: 0; background: transparent; border-left: 3px dotted var(--then); }
+      .bar s.then::after { opacity: 1; top: calc(100% + 1px); bottom: auto; background: transparent; color: var(--then); padding: 0; font-size: 13px; }
+      .bar s.then.near-start::after { left: -3px; transform: none; }
+      .bar s.then.near-end::after { left: auto; right: -3px; transform: none; }
+      .land-legend .swatch.then { width: 0; height: 14px; border-radius: 0; background: transparent; border-left: 3px dotted var(--then); }
       .usage > .land-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; }
       .land-legend span { display: inline-flex; align-items: center; gap: 6px; }
       .swatch { display: inline-block; width: 14px; height: 8px; border-radius: 2px; }
@@ -562,11 +572,14 @@
           i.title = r.items.map((p) => `${p.what}${p.priority ? ' (priority)' : ''}: about ${p.add}%, at ${p.to}% around ${clock(p.lands * 1000)}`).join('\n');
           box.insertBefore(i, box.querySelector('s'));  // under the stop line, which stays on top
         }
-        // A moving line: where it will stand when the last piece lands, a softer mark.
+        // H177: a moving line: where it will stand when the last piece lands, a dotted line with its time and percent.
         if (L.lineThen !== null && L.lineThen !== undefined) {
-          const t = el('s', 'then');
-          t.style.left = `${Math.min(100, L.lineThen)}%`;
-          t.dataset.pct = `Stop line around ${clock(L.lands * 1000)}: ${Math.round(L.lineThen * 10) / 10}%`;
+          const x = Math.min(100, Math.max(0, L.lineThen));
+          const t = el('s', `then${x < 12 ? ' near-start' : x > 88 ? ' near-end' : ''}`);
+          t.style.left = `${x}%`;
+          t.dataset.pct = `${clock(L.lands * 1000)} · ${Math.round(L.lineThen * 10) / 10}%`;
+          t.title = `Where the stop line will be around ${clock(L.lands * 1000)}, when the work should land: ${Math.round(L.lineThen * 10) / 10}%`;
+          box.classList.add('has-then');
           box.append(t);
         }
         // The used part keeps its round end only where nothing follows it.
@@ -587,9 +600,7 @@
         pr.append(sw, 'Outlined: priority, where it cuts in');
         p.append(pr);
         const th = el('span');
-        const dot = el('i', 'swatch');
-        dot.style.cssText = 'width: 0; border-left: 2px dotted var(--soft); border-radius: 0; height: 14px;';
-        th.append(dot, 'Dotted: where a moving stop line will be when it lands');
+        th.append(el('i', 'swatch then'), 'Dotted: where the moving stop line will be when the work lands');
         p.append(th);
         return p;
       }

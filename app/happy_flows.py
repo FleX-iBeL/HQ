@@ -982,6 +982,11 @@ const E76 = {{ jobs: {{ 1: {{ finished: true, cost: {{ five: 9 }} }}, 2: {{ left
     8: {{ start: n76 + 50 * M, eta: n76 + 70 * M, every: 'day', cost: {{ five: 4, weekly: 0.4 }} }}, 9: {{ cost: {{ five: 1, weekly: 0.1 }} }} }} }};
 const L76 = landing({{ label: '5-hour limit', percent: 40, resetsAt: new Date((n76 + 60 * M) * 1000).toISOString() }},
   {{ five: {{ moving: false, fixed: 50 }}, weekly: {{ moving: true, fixed: 90 }}, fable: {{ moving: true, fixed: 90 }} }}, E76, new Date(n76 * 1000));
+// H177: the same work with the weekly line moving: where it will be when the last piece lands, a week from its reset.
+const wk77 = {{ label: 'Weekly · all models', percent: 30, resetsAt: new Date((n76 + 3 * 864e2) * 1000).toISOString() }};
+const mv77 = {{ five: {{ moving: false, fixed: 50 }}, weekly: {{ moving: true, fixed: 90 }}, fable: {{ moving: true, fixed: 90 }} }};
+const L77 = landing(wk77, mv77, E76, new Date(n76 * 1000));
+const at77 = stopLine(wk77, mv77, new Date(L77.lands * 1000)).line;
 const r = parseRoadmap(readFileSync({json.dumps(str(ROADMAP))}, 'utf8'));
 const reset = new Date('2026-10-13T12:00:00Z');
 const week = {{ label: 'Weekly · all models', resetsAt: reset.toISOString() }};
@@ -997,6 +1002,7 @@ console.log(JSON.stringify({{
   lines: Object.keys(L).sort().join(','),
   rising: steps.every((v, i) => i === 0 || v >= steps[i - 1]), distinct: new Set(steps).size,
   land: {{ ...L76, words: landingWords(L76, (t) => `T${{(t - n76) / M}}`) }},
+  land77: {{ ...L77, at77, words: landingWords(L77, (t) => `T${{(t - n76) / M}}`) }},
 }}));
 """
         r = await asyncio.to_thread(run, ["node", "--input-type=module", "-e", js])
@@ -1025,7 +1031,16 @@ console.log(JSON.stringify({{
         need("it lands at 52% around T60" in L["words"] and "before its reset at T60" in L["words"] and "Planned item 8 takes it to 52% while the line is at 50%" in L["words"]
              and "2% more lands after the reset, in the next 5-hour window" in L["words"] and "One more piece of work has no time yet" in L["words"],
              f"H176: the words under the bar: {L['words']}")
+        # H177: a fixed line gets no dotted line; a moving one says where it will be when the last piece lands.
+        need(L["lineThen"] is None and L["thenAt"] is None and "dotted line" not in L["words"], f"H177: a fixed 5-hour line got a dotted line: {L['lineThen']}")
+        L7 = d["land77"]
+        need(L7["moving"] and L7["lineThen"] == L7["at77"] and L7["lineThen"] > L7["line"] and L7["thenAt"] == L7["lands"] == L7["pieces"][-1]["lands"]
+             and f"By then the stop line will be at {L7['lineThen']}% (the dotted line)." in L7["words"],
+             f"H177: the moving weekly line's place when the work lands is off: {L7}")
         page10 = (status / "index.html").read_text()
+        need("box.classList.add('has-then')" in page10 and "border-left: 3px dotted var(--then)" in page10 and page10.count("--then:") == 2
+             and ".bar s.then::after { opacity: 1;" in page10 and "el('i', 'swatch then')" in page10,
+             "H177: the status page doesn't draw the dotted line with its time and percent, in light and dark")
         need("landing(l, lines, E, new Date())" in page10 and "drawUsage(usage, s.usageLines, routines?.estimate" in page10,
              "H176: the status page doesn't put the landing on its bars")
         # the page itself, when its server is running (it is only on this MacBook)
@@ -1034,7 +1049,7 @@ console.log(JSON.stringify({{
         if code == 200:
             need(body.decode("utf8", "replace").startswith("#"), "the status page serves a roadmap that does not start with the state")
             extra = ", page on 4748 serves it"
-        return f"roadmap reads clean; weekly line {d['start']}% -> {d['mid']}% -> {d['end']}%, 5-hour {d['five']}%; where the usage will land (H176){extra}"
+        return f"roadmap reads clean; weekly line {d['start']}% -> {d['mid']}% -> {d['end']}%, 5-hour {d['five']}%; where the usage will land (H176), the moving line then (H177){extra}"
 
     # 11
     async def flow11(self) -> str:
@@ -6073,6 +6088,12 @@ console.log(JSON.stringify(o));
         p9 = [x for x in o76["weekly"]["pieces"] if x["what"] == f"Planned item {i9}"]
         need(p9 and p9[0]["kind"] == "planned" and p9[0]["lands"] == pl76["items"][str(i9)]["eta"] and abs(p9[0]["add"] - round(c9["weekly"], 1)) <= 0.1
              and o76["weekly"]["now"] == 21, f"H176: the planned item isn't on the weekly bar where it lands: {o76['weekly']}")
+        # H177: the weekly line moves here, so its bar says where the line will be when that work lands; the 5-hour one
+        # (when it has pieces before its reset) is read at its last one, a minute before the reset at the latest.
+        w77 = o76["weekly"]
+        need(w77["moving"] and w77["lineThen"] is not None and w77["lineThen"] >= w77["line"] and w77["thenAt"] == w77["lands"]
+             and "(the dotted line)" in w77["words"], f"H177: the weekly bar doesn't say where its moving line will be: {w77}")
+        need(f9["thenAt"] is None or f9["thenAt"] <= f9["reset"] - 60, f"H177: the 5-hour bar's dotted line is read past its reset: {f9}")
         sp.run(["python3", str(jv / "routine/schedule.py"), "cancel", str(i9)], capture_output=True, env=env2)
         # A paused job: not started again by itself; a call resumes it (in line again, held) or drops it.
         nx = json.loads(jobs2("next"))
@@ -11049,7 +11070,7 @@ FLOWS = {
     7: ("Hanging up saves the transcript, git unchanged", True, "flow7"),
     8: ("The waiting lines: no Mm, no repeats", False, "flow8"),
     9: ("A restart really restarts", False, "flow9"),
-    10: ("The status page reads the roadmap; weekly lines move; H176: where the usage will land, on the bars", False, "flow10"),
+    10: ("The status page reads the roadmap; weekly lines move; H176: where the usage will land, on the bars; H177: where the moving line will be then", False, "flow10"),
     11: ("Free mode: plain Claude with internet, chat log, nothing kept", True, "flow11"),
     12: ("Holding the talk button keeps the turn through a long pause", True, "flow12"),
     13: ("Letting go keeps the last words; the page shows transcribing", True, "flow13"),
@@ -11093,7 +11114,7 @@ FLOWS = {
     51: ("H51: a call saves the usage it gets back, for the status page", False, "flow51"),
     52: ("H49: the space bar in the desktop app: tap mutes, hold talks, letting go sends", False, "flow52"),
     53: ("H57: a button for every past call: the list, one call read only", False, "flow53"),
-    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work; H168: the team's own guess; H172: its usage; H173: from its own tokens; H174: the totals say what they count; H176: where the usage will land", False, "flow54"),
+    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work; H168: the team's own guess; H172: its usage; H173: from its own tokens; H174: the totals say what they count; H176: where the usage will land; H177: the moving line then", False, "flow54"),
     55: ("F14: her voice off also silences the thinking tick, the talk sound and the click", False, "flow55"),
     56: ("H59: an update to a fake newer version: backup, local/ kept, note for Claude, waits for a call", False, "flow56"),
     57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),

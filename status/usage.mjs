@@ -265,11 +265,13 @@ export function landing(l, lines, E, now = new Date()) {
   const line = stopLine(l, lines, now);
   // Where a moving line will stand when the last piece lands (before the reset), so the bar shows whether it fits then.
   const last = pieces.length ? pieces[pieces.length - 1].lands : null;
-  const then = last && line?.moving ? stopLine(l, lines, new Date(1000 * (reset === null ? last : Math.min(last, reset - 60)))) : null;
+  // H177: the time it's read at is the last piece's landing (the 5-hour bar: before its reset); a fixed line gets none.
+  const thenAt = last ? (reset === null ? last : Math.min(last, reset - 60)) : null;
+  const then = thenAt && line?.moving ? stopLine(l, lines, new Date(1000 * thenAt)) : null;
   for (const k of Object.keys(kinds)) kinds[k] = r1(kinds[k]);
   return {
     key, now: Number(l.percent), to: r1(at), lands: pieces.length ? pieces[pieces.length - 1].lands : null, reset,
-    line: line ? line.line : null, moving: !!line?.moving, lineThen: then && then.line !== line.line ? then.line : null, pieces, kinds, next: r1(next), untimed, cross,
+    line: line ? line.line : null, moving: !!line?.moving, lineThen: then && then.line !== line.line ? then.line : null, thenAt: then && then.line !== line.line ? thenAt : null, pieces, kinds, next: r1(next), untimed, cross,
   };
 }
 
@@ -281,6 +283,8 @@ export function landingWords(L, clock) {
   if (L.pieces.length) {
     const parts = Object.entries(L.kinds).filter(([, v]) => v > 0).map(([k, v]) => `${LAND_KINDS[k]} ${v}%`);
     s.push(`If the work goes as estimated, it lands at ${L.to}% around ${clock(L.lands)} (${parts.join(', ')})${five && L.reset ? `, before its reset at ${clock(L.reset)}` : ''}.`);
+    // H177: where the moving stop line will be by then, the dotted line on the bar.
+    if (L.lineThen !== null && L.lineThen !== undefined) s.push(`By then the stop line will be at ${L.lineThen}% (the dotted line).`);
     if (L.cross) s.push(`That goes past the stop line: around ${clock(L.cross.at)}, ${L.cross.what} takes it to ${L.cross.pct}% while the line is at ${L.cross.line}%.`);
     else if (L.line !== null) s.push(L.moving ? 'It stays under the stop line as the line climbs.' : 'It stays under the stop line.');
   } else if (five && L.next) s.push('Nothing lands before its reset.');
