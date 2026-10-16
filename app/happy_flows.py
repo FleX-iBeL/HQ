@@ -8577,6 +8577,114 @@ window.fetch = async (url, opt) => {
                 "app: the note button in each row, one tap to type, the note in the list and the appointment, Clear, a "
                 "half-typed note kept through a redraw")
 
+    async def flow102(self) -> str:
+        """H165, no Claude: the whole turn heard again before she answers. The real listener hears a sentence
+        spoken in three pieces (HQ's own voice, pauses between); with the switch on, the pieces with words are
+        kept, the pass starts when the turn looks finished, and the text it gives has the whole sentence; the
+        Claude service then answers that text and writes it in the transcript, instead of the pieces joined.
+        The pieces stay when the pass fails, hears nothing, or is turned off; one piece is never heard twice;
+        a typed line stays as typed. The pipeline wires the turn logic and the Claude service to it."""
+        from types import SimpleNamespace
+
+        import numpy as np
+        import soxr
+        from kokoro_onnx import Kokoro
+        from pipecat.frames.frames import TranscriptionFrame as TF
+        from pipecat.processors.aggregators.llm_context import LLMContext as Ctx
+        from pipecat.processors.frame_processor import FrameProcessor as FP
+
+        import pipeline as pl
+        from claude_llm import ClaudeSessionLLMService
+
+        # the real listener, three pieces
+        kokoro = Kokoro(str(config.KOKORO_MODEL), str(config.KOKORO_VOICES))
+        parts = ["Can you move the dentist appointment", "to Thursday afternoon", "and remind me at nine?"]
+        stt = pl.make_stt(quiet=True)
+        if hasattr(stt, "warm_up"):
+            await asyncio.to_thread(stt.warm_up)
+        stt.whole.on = True
+        heard = []
+        for part in parts:
+            a, sr = await asyncio.to_thread(kokoro.create, part, voice=config.VOICE, speed=1.0, lang="en-us")
+            a = soxr.resample(np.asarray(a, np.float32), sr, 16000)
+            pcm = (np.clip(np.concatenate([np.zeros(8000, np.float32), a, np.zeros(8000, np.float32)]), -1, 1)
+                   * 32767).astype(np.int16).tobytes()
+            async for f in stt.run_stt(pcm):
+                if isinstance(f, TF):
+                    heard.append(f.text)
+        need(len(heard) == 3, f"the listener didn't hear the three pieces: {heard}")
+        need(stt.whole._pieces == 3, f"the pieces with words weren't kept ({stt.whole._pieces} of 3)")
+        stt.whole.start()
+        need(stt.whole._task is not None, "the pass didn't start when the turn looked finished")
+        text = await stt.whole.take()
+        low = (text or "").lower()
+        need(text and "dentist" in low and "thursday" in low and ("nine" in low or "9" in low),
+             f"the whole turn didn't come back whole: {text!r}")
+        need(stt.whole._pieces == 0 and not stt.whole._pcm, "the turn's pieces were kept after it was heard")
+        waited = stt.whole.last["waited"]
+
+        # the fallbacks
+        calls = []
+
+        def boom(audio):
+            calls.append(len(audio))
+            raise RuntimeError("test")
+        w = pl.WholeTurn(boom, on=True, quiet=True)
+        w.add(bytes(3200)); w.add(bytes(3200))
+        need(await w.take() is None and calls, "a failed pass didn't fall back to the pieces")
+        w = pl.WholeTurn(lambda a: "  ", on=True, quiet=True)
+        w.add(bytes(3200)); w.add(bytes(3200))
+        need(await w.take() is None, "a pass that heard nothing didn't fall back to the pieces")
+        calls.clear()
+        w = pl.WholeTurn(boom, on=True, quiet=True)
+        w.add(bytes(3200))
+        w.start()
+        need(await w.take() is None and not calls, "a turn of one piece was heard twice")
+        w = pl.WholeTurn(boom, on=False, quiet=True)
+        w.add(bytes(3200)); w.add(bytes(3200))
+        need(not w._pcm and await w.take() is None and not calls, "with the switch off, pieces were kept or heard")
+        w = pl.WholeTurn(boom, on=True, quiet=True)
+        w.add(bytes(3200)); w.add(bytes(3200))
+        need(await w.take(use=False) is None and not w._pcm and not calls, "a typed turn was heard again")
+
+        # the Claude service answers the whole turn and writes it in the transcript
+        class Llm(ClaudeSessionLLMService):
+            async def _answer(self, text, words, **kw):
+                self.got = (text, words)
+        lines = []
+        llm = Llm(SimpleNamespace(model="test"), transcript=SimpleNamespace(user=lambda w, **k: lines.append(w)))
+
+        async def whole_text(use=True):
+            return "the whole sentence" if use else None
+        llm.hear_whole = whole_text
+        ctx = Ctx()
+        ctx.add_message({"role": "user", "content": "the whole. sentence"})
+        await llm._process_context(ctx)
+        need(llm.got[1] == "the whole sentence" and lines[-1] == "the whole sentence",
+             f"Claude or the transcript didn't get the whole turn: {llm.got}, {lines}")
+        llm.mark_typed("typed words")
+        ctx.add_message({"role": "assistant", "content": "ok"})
+        ctx.add_message({"role": "user", "content": "typed words"})
+        await llm._process_context(ctx)
+        need(llm.got[1] == "typed words", f"a typed line was replaced: {llm.got}")
+
+        async def nothing(use=True):
+            return None
+        llm.hear_whole = nothing
+        ctx.add_message({"role": "assistant", "content": "ok"})
+        ctx.add_message({"role": "user", "content": "the pieces joined"})
+        await llm._process_context(ctx)
+        need(llm.got[1] == "the pieces joined", f"without a whole turn the pieces didn't stay: {llm.got}")
+
+        # the pipeline wires both ends
+        llm2 = Llm(SimpleNamespace(model="test"))
+        ptt = pl.PushToTalk()
+        pl.build_pipeline(source=FP(), sink=FP(), stt=stt, llm=llm2, tts=FP(), ptt=ptt)
+        need(llm2.hear_whole == stt.whole.take, "the pipeline didn't give the Claude service the whole turn")
+        need(ptt.strategy.on_turn_looks_done == stt.whole.start, "the turn logic doesn't start the pass")
+        return (f"three pieces heard, the whole turn back in one go ({text!r}; the pass {waited:.2f} s); fallbacks, one piece, typed and off all keep the pieces; wired in the pipeline; "
+                f"the switch is {'on' if config.STT_WHOLE_TURN else 'off'} here")
+
     async def flow101(self) -> str:
         """H152, no Claude, no Syncthing, no network: after a crash or a restart the two computers come back in step
         by themselves. Her pings file is only written when something changed (it was written every minute, so it
@@ -10245,6 +10353,7 @@ FLOWS = {
     99: ("H143: tick off or X the appointments; an X moves it to the Google calendar HQ Planning, undo moves it back; the week's look back", False, "flow99"),
     100: ("H146: a quick note on each appointment, one tap to type; a call and Donna's chat read it to put the calendar right", False, "flow100"),
     101: ("H152: after a crash or restart both computers come back in step: no every-minute pings write, locks stay home, needless conflict copies cleared, missed call transcripts committed", False, "flow101"),
+    102: ("H165: the whole turn heard again before she answers, behind a switch; the pieces stay as the fallback", False, "flow102"),
 }
 
 

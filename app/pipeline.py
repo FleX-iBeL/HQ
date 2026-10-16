@@ -66,6 +66,63 @@ class DropSegmentDone(FrameProcessor):
             await self.push_frame(frame, direction)
 
 
+class WholeTurn:
+    """H165: the pieces of this turn that had words, heard again in one go once the turn looks finished.
+
+    The listener adds each piece (add); the turn logic starts the pass the moment the turn looks finished
+    (start: the start of her wait, or letting go), so it runs while she waits anyway; the Claude service
+    takes the text before it answers (take). None means: use the pieces joined, as before. A turn of one
+    piece is already whole, so it isn't heard twice. hear(audio) is blocking: float32, 16 kHz, to text."""
+
+    def __init__(self, hear, *, on: bool | None = None, quiet: bool = False):
+        self._hear = hear
+        self.on = config.STT_WHOLE_TURN if on is None else on
+        self._quiet = quiet
+        self._pcm = bytearray()
+        self._pieces = 0
+        self._task: asyncio.Future | None = None
+        self._task_for = 0  # how many pieces the running pass hears
+        self.last: dict = {}  # the last turn, for logs and the happy flow: pieces, secs, waited, used, text
+
+    def add(self, pcm: bytes) -> None:
+        if self.on:
+            self._pcm += pcm
+            self._pieces += 1
+
+    def _worth_it(self) -> bool:
+        return self.on and self._pieces >= 2 and len(self._pcm) / 32000 <= config.WHOLE_TURN_MAX_AUDIO_SECS
+
+    def start(self) -> None:
+        if not self._worth_it() or (self._task is not None and self._task_for == self._pieces):
+            return  # nothing to gain, or this turn is already being heard again
+        audio = np.frombuffer(bytes(self._pcm), dtype=np.int16).astype(np.float32) / 32768.0
+        self._task_for = self._pieces
+        self._task = asyncio.ensure_future(asyncio.to_thread(self._hear, audio))
+
+    async def take(self, use: bool = True) -> str | None:
+        pieces, secs = self._pieces, len(self._pcm) / 32000
+        self.last = {"pieces": pieces, "secs": round(secs, 1), "waited": 0.0, "used": False, "text": ""}
+        try:
+            if not use or not self._worth_it():
+                return None
+            self.start()  # he talked on after it started: hear all of it
+            t = time.perf_counter()
+            text = (await asyncio.wait_for(asyncio.shield(self._task), config.TRANSCRIBING_MAX_SECS) or "").strip()
+            self.last.update(waited=round(time.perf_counter() - t, 2), used=bool(text), text=text)
+            logger.info(f"H165: the whole turn heard again ({pieces} pieces, {secs:.1f} s), "
+                        f"{self.last['waited']:.2f} s more wait" + ("" if text else "; nothing heard, the pieces stay"))
+            if text and not self._quiet:
+                logger.debug(f"Whole turn: [{text}]")
+            return text or None
+        except Exception as e:
+            logger.warning(f"H165: hearing the whole turn again failed ({e!r}); the pieces stay")
+            return None
+        finally:
+            self._pcm = bytearray()
+            self._pieces = 0
+            self._task, self._task_for = None, 0
+
+
 class HQWhisperSTT(WhisperSTTServiceMLX):
     """Pipecat's MLX Whisper, plus a word list (initial prompt) and a warm-up.
 
@@ -74,10 +131,34 @@ class HQWhisperSTT(WhisperSTTServiceMLX):
     every piece (H11).
     """
 
+    _LOCK = __import__("threading").Lock()  # H165: a piece and the whole turn never at once
+
     def __init__(self, *, initial_prompt: str | None = None, quiet: bool = False, **kwargs):
         super().__init__(**kwargs)
         self._initial_prompt = initial_prompt or None
         self._quiet = quiet  # H7, free mode: what was said stays out of the server log
+        self.whole = WholeTurn(self._text, quiet=quiet)  # H165
+
+    def _text(self, audio_float: np.ndarray) -> str:
+        """Blocking: the words in this audio (float32, 16 kHz)."""
+        import mlx_whisper
+
+        with self._LOCK:
+            chunk = mlx_whisper.transcribe(
+                audio_float,
+                path_or_hf_repo=self._settings.model,
+                temperature=self._settings.temperature,
+                language=cast("Language | None", self._settings.language),
+                initial_prompt=self._initial_prompt,
+            )
+        text = ""
+        threshold = self._settings.no_speech_prob
+        for segment in cast("list[dict[str, Any]]", chunk.get("segments", [])):
+            if segment.get("compression_ratio", None) == 0.5555555555555556:
+                continue  # likely hallucination
+            if threshold is not None and segment.get("no_speech_prob", 0.0) < threshold:
+                text += f"{segment.get('text', '')} "
+        return text.strip()
 
     def warm_up(self) -> float:
         """Load the model and run it once (blocking), so the first turn isn't slow."""
@@ -90,29 +171,13 @@ class HQWhisperSTT(WhisperSTTServiceMLX):
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         try:
-            import mlx_whisper
-
             await self.start_processing_metrics()
             audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
             language = cast("Language | None", self._settings.language)
-            chunk = await asyncio.to_thread(
-                mlx_whisper.transcribe,
-                audio_float,
-                path_or_hf_repo=self._settings.model,
-                temperature=self._settings.temperature,
-                language=language,
-                initial_prompt=self._initial_prompt,
-            )
-            text = ""
-            threshold = self._settings.no_speech_prob
-            for segment in cast("list[dict[str, Any]]", chunk.get("segments", [])):
-                if segment.get("compression_ratio", None) == 0.5555555555555556:
-                    continue  # likely hallucination
-                if threshold is not None and segment.get("no_speech_prob", 0.0) < threshold:
-                    text += f"{segment.get('text', '')} "
+            text = await asyncio.to_thread(self._text, audio_float)
             await self.stop_processing_metrics()
-            text = text.strip()
             if text:
+                self.whole.add(audio)  # H165
                 if not self._quiet:
                     logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(text, self._user_id, time_now_iso8601(), language)
@@ -136,27 +201,48 @@ class HQFasterWhisperSTT(WhisperSTTService):
     _MODELS: dict[str, Any] = {}
     _LOCK = __import__("threading").Lock()
 
-    def __init__(self, *, initial_prompt: str | None = None, quiet: bool = False, **kwargs):
+    def __init__(self, *, initial_prompt: str | None = None, quiet: bool = False,
+                 pieces_model: str | None = None, **kwargs):
+        self._pieces_name = pieces_model  # H165: a lighter listener for the pieces (None: the same one)
         super().__init__(device="cpu", compute_type="int8", **kwargs)
         self._initial_prompt = initial_prompt or None
         self._quiet = quiet
+        self.whole = WholeTurn(lambda a: self._text(a, self._model), quiet=quiet)  # H165: the main listener
 
-    def _load(self):
+    def _get(self, name: str):
         from faster_whisper import WhisperModel
 
-        name = str(self._settings.model)
         with self._LOCK:
             if name not in self._MODELS:
                 self._MODELS[name] = WhisperModel(name, device="cpu", compute_type="int8",
                                                   cpu_threads=__import__("os").cpu_count() or 4)
-            self._model = self._MODELS[name]
+            return self._MODELS[name]
+
+    def _load(self):
+        self._model = self._get(str(self._settings.model))
+        name = getattr(self, "_pieces_name", None)
+        self._pieces_model = self._get(name) if name and name != str(self._settings.model) else self._model
 
     def warm_up(self) -> float:
         t = time.perf_counter()
-        if self._model is not None:
+        for model in {id(m): m for m in (self._model, getattr(self, "_pieces_model", None)) if m}.values():
             with self._LOCK:
-                list(self._model.transcribe(np.zeros(16000, dtype=np.float32), language="en", beam_size=1)[0])
+                list(model.transcribe(np.zeros(16000, dtype=np.float32), language="en", beam_size=1)[0])
         return time.perf_counter() - t
+
+    def _text(self, audio_float: np.ndarray, model) -> str:
+        """Blocking: the words in this audio (float32, 16 kHz), heard by this model."""
+        language = cast("Language | None", self._settings.language)
+        with self._LOCK:
+            segments, _ = model.transcribe(audio_float, language=language, beam_size=1,
+                                           initial_prompt=self._initial_prompt)
+            segments = list(segments)
+        text = ""
+        threshold = self._settings.no_speech_prob
+        for segment in segments:
+            if threshold is None or segment.no_speech_prob < threshold:
+                text += f"{segment.text} "
+        return text.strip()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         try:
@@ -165,22 +251,10 @@ class HQFasterWhisperSTT(WhisperSTTService):
             await self.start_processing_metrics()
             audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
             language = cast("Language | None", self._settings.language)
-
-            def transcribe():
-                with self._LOCK:
-                    segments, _ = self._model.transcribe(audio_float, language=language, beam_size=1,
-                                                         initial_prompt=self._initial_prompt)
-                    return list(segments)
-
-            segments = await asyncio.to_thread(transcribe)
-            text = ""
-            threshold = self._settings.no_speech_prob
-            for segment in segments:
-                if threshold is None or segment.no_speech_prob < threshold:
-                    text += f"{segment.text} "
+            text = await asyncio.to_thread(self._text, audio_float, self._pieces_model or self._model)
             await self.stop_processing_metrics()
-            text = text.strip()
             if text:
+                self.whole.add(audio)  # H165
                 if not self._quiet:
                     logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(text, self._user_id, time_now_iso8601(), language)
@@ -199,6 +273,7 @@ def make_stt(quiet: bool = False) -> HQWhisperSTT | HQFasterWhisperSTT:
         return HQFasterWhisperSTT(
             initial_prompt=config.WHISPER_PROMPT,
             quiet=quiet,
+            pieces_model=config.WHISPER_PIECES_MODEL,
             ttfs_p99_latency=config.WHISPER_P99_SECS,
             settings=WhisperSTTService.Settings(model=config.WHISPER_MODEL, language=Language.EN),
         )
@@ -357,6 +432,7 @@ class HoldableTurnStopStrategy(TurnAnalyzerUserTurnStopStrategy):
         self._pieces_sent = 0  # pauses the VAD heard: each sends one piece to Whisper
         self._pieces_done = 0  # SegmentDoneFrames back from Whisper
         self._piece_sent_at = 0.0
+        self.on_turn_looks_done = None  # H165: called when her wait starts (or he lets go): hear it all again
 
     # -- H11: is Whisper still on a piece? --
 
@@ -432,6 +508,11 @@ class HoldableTurnStopStrategy(TurnAnalyzerUserTurnStopStrategy):
             return  # his turn while he holds the button
         if self.transcribing():
             return  # the SegmentDoneFrame brings us back here
+        if self.on_turn_looks_done is not None:
+            try:
+                self.on_turn_looks_done()
+            except Exception as e:
+                logger.warning(f"H165: couldn't start hearing the whole turn again: {e!r}")
         if not self.released and self._grace > 0:
             if self._grace_task is None:
                 self._grace_task = self.task_manager.create_task(
@@ -551,14 +632,17 @@ def build_pipeline(
     def tap(name: str) -> list[FrameProcessor]:
         return [taps[name]] if name in taps else []
 
+    stop = HoldableTurnStopStrategy(ptt, turn_analyzer=LocalSmartTurnAnalyzerV3())
+    whole = getattr(stt, "whole", None)  # H165: the whole turn heard again, when the switch is on
+    if isinstance(whole, WholeTurn):
+        stop.on_turn_looks_done = whole.start
+        llm.hear_whole = whole.take
     context = LLMContext()
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=config.VAD_STOP_SECS)),
-            user_turn_strategies=UserTurnStrategies(
-                stop=[HoldableTurnStopStrategy(ptt, turn_analyzer=LocalSmartTurnAnalyzerV3())]
-            ),
+            user_turn_strategies=UserTurnStrategies(stop=[stop]),
             # A turn with no words (a cough while HQ talks) gets no reply.
             empty_user_turn=None,
         ),

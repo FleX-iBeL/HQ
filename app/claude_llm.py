@@ -115,6 +115,7 @@ class ClaudeSessionLLMService(LLMService):
         # H130: async joined_hi(id) -> notes for her own first line once she's on the call ([] = she says nothing;
         # Call sets it), asked once the line bringing her in has been heard
         self.joined_hi = None
+        self.hear_whole = None  # H165: async (use) -> the whole turn heard again, or None (pipeline sets it)
         self._hangup_task = None
         self._spoke_at = 0.0  # H75: when her voice last started, and stopped
         self._quiet_at = 0.0
@@ -256,6 +257,8 @@ class ClaudeSessionLLMService(LLMService):
     async def _process_context(self, context: LLMContext):
         words, notes, cut_in = self._new_user_text(context)
         if not words:
+            if self.hear_whole is not None:
+                await self.hear_whole(use=False)  # nothing to answer: the kept pieces go
             logger.debug("No new words from the user in this turn; not answering")
             return
         self._drop_hangup("he said more")
@@ -265,6 +268,10 @@ class ClaudeSessionLLMService(LLMService):
         typed = any(t in words for t in self._typed)
         if typed:
             self._typed.clear()
+        if self.hear_whole is not None:  # H165: his whole turn heard again; typed lines stay as typed
+            whole = await self.hear_whole(use=not (typed or button))
+            if whole:
+                words = whole
         if button:
             typed = False  # the Cancel button's own line, marked as such instead
         elif typed:

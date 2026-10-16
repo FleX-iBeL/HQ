@@ -548,6 +548,19 @@ WHISPER_PROMPT = os.environ.get(
                           ME["hear"].rstrip(".")] if w) + ".",
 )
 
+# H165 (16 October 2026): hear the whole turn again before she answers. Every pause of VAD_STOP_SECS
+# sends a piece to Whisper on its own, and a sentence cut in two loses its context ("training here" for
+# TradingView, H150). With the switch on, the pieces that had words are kept, and once the turn looks
+# finished (the start of her wait, TURN_GRACE_SECS, or letting go of the talk button) the whole turn is
+# heard again in one go with the same listener and word list; Claude and the transcript get that text,
+# the pieces joined stay the fallback (an error, nothing heard, or more than WHOLE_TURN_MAX_AUDIO_SECS).
+# HQ_WHISPER_PIECES (off a Mac, only with the switch on): a lighter listener for the pieces, so the
+# whole pass fits in her wait. Measured on the VPS: see H165 on the roadmap. Off unless set to 1.
+STT_WHOLE_TURN = os.environ.get("HQ_STT_WHOLE_TURN", _SWITCHES.get("HQ_STT_WHOLE_TURN", "0")) == "1"
+WHISPER_PIECES_MODEL = (os.environ.get("HQ_WHISPER_PIECES", _SWITCHES.get("HQ_WHISPER_PIECES", ""))
+                        if STT_WHOLE_TURN else "") or WHISPER_MODEL
+WHOLE_TURN_MAX_AUDIO_SECS = 28.0  # Whisper hears 30 s at a time; longer would cost a second window
+
 # Ears. How long a silence must be before the turn may end. Pipecat's default is 0.2 s,
 # but Whisper needs about a second, and in that second the user often goes on talking,
 # which split one question into several Claude turns. 0.5 s kept every test question whole.
