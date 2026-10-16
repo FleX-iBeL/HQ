@@ -40,6 +40,18 @@
   button[type=submit] { background: var(--her); color: #fff; border: 0; border-radius: 20px; padding: 0 16px; font: inherit; }
   #empty { color: var(--dim); text-align: center; margin-top: 30%; }
 </style>
+<!-- H185: opened from the call page in Modern 2 (?look=modern2): the call page's ground and type, rounder bubbles. -->
+<script>try { if (new URLSearchParams(location.search).get("look") === "modern2") document.documentElement.classList.add("m2"); } catch (e) {}</script>
+<style>
+  html.m2 { --bg:#f2f3f6; --panel:#ffffff; --text:#12161e; --dim:#5b6574; }
+  @media (prefers-color-scheme: dark) { html.m2 { --bg:#14181f; --panel:#1a1e26; --text:#eef1f5; --dim:#8c97a8; } }
+  html.m2 body { font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif; }
+  html.m2 header, html.m2 form, html.m2 textarea { border-color:rgba(127,127,127,.2); }
+  html.m2 .agent { box-shadow:0 0 0 1px rgba(127,127,127,.14); }
+  html.m2 .m { border-radius:20px; padding:9px 14px; }
+  html.m2 textarea { border-radius:22px; }
+  html.m2 button[type=submit] { border-radius:22px; }
+</style>
 </head>
 <body>
 <header>

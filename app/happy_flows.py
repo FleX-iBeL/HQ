@@ -8719,16 +8719,24 @@ print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now),
                 "once and queues no merges; one really away still gives way")
 
     async def flow96(self) -> str:
-        """H137, H140, no Claude: Modern is the only look. No Look row in Settings, no saved choice and no html.modern
-        switch: Modern's rules are the page's own (one style block, after the older rules), and the round buttons sit in
-        the dock in the page itself, each with its name. A device that saved Classic before H140 still gets Modern:
-        the real page in a headless browser, phone and desktop app, with "classic" saved on the device."""
+        """H137, H140, H185, no Claude: Modern is the look, and Modern 2 (H185) the one choice next to it. A Look row in
+        Settings with Modern and Modern 2, Modern until Modern 2 is picked (a device that saved Classic before H140 gets
+        Modern); Modern 2 is html.m2, set in the head before the page draws, its rules in their own block after Modern's,
+        and the status page and her chat are told it (look=modern2). The round buttons sit in the dock in the page itself,
+        each with its name, in both looks: the real page in a headless browser, phone and desktop app."""
         page = (APP / "web/index.html").read_text()
-        for gone, what in (('id="lookrow"', "the Look row in Settings"), ("data-look=", "the Classic and Modern buttons"),
-                           ("hq-look", "the saved look"), ("html.modern", "the html.modern switch"), ('classList.toggle("modern"', "the switch in the code"),
-                           ("applyLook", "applyLook"), ("look=", "the look passed to the status page or her chat"), ("hqSpot", "Classic's own spots for the buttons")):
-            need(gone not in page, f"{what} is still on the call page (H140: Modern only)")
+        for gone, what in (('data-look="classic"', "a Classic button"), ("html.modern", "the html.modern switch"), ('classList.toggle("modern"', "the old switch in the code"),
+                           ("hqSpot", "Classic's own spots for the buttons")):
+            need(gone not in page, f"{what} is still on the call page (H140: no Classic)")
         need(page.count('<style id="look">') == 1, "the look's style block is missing")
+        # H185: Modern 2, its own block after Modern's, the Look row, the head script and the look passed on.
+        need(page.count('<style id="look2">') == 1 and page.index('<style id="look2">') > page.index('<style id="look">'), "Modern 2's style block is missing or before Modern's")
+        need('data-look="modern"' in page and 'data-look="modern2"' in page and 'id="lookrow"' in page, "the Look row with Modern and Modern 2 isn't in Settings")
+        need(page.index('localStorage.getItem("hq-look") === "modern2"') < page.index("<body>"), "Modern 2 isn't set in the head before the page draws")
+        need('lookQuery("?")' in page and 'lookQuery("&")' in page, "the status page or her chat isn't told the look")
+        for f_, what in (("status/index.html", "the status page"), ("status/direct.html", "her chat")):
+            t_ = (APP.parent / f_).read_text()
+            need('get("look") === "modern2"' in t_ and "html.m2" in t_, f"{what} has no Modern 2")
         dock = page.split('<nav id="dock" aria-label="HQ">', 1)
         need(len(dock) == 2, "the dock is missing")
         dock = dock[1].split("</nav>", 1)[0]
@@ -8752,7 +8760,8 @@ setTimeout(() => {
     return !(r.width > 0 && r.left >= dk.left - 1 && r.right <= dk.right + 1 && r.top >= dk.top - 1 && r.bottom <= dk.bottom + 1); });
   out.push("inside:" + (off.length ? off.join(",") : "ok"));
   out.push("label:" + getComputedStyle(document.getElementById("chatbtn"), "::after").content);
-  out.push("lookrow:" + (document.querySelector("#settings [data-look]") ? "there" : "gone"));
+  out.push("lookrow:" + [...document.querySelectorAll("#lookrow [data-look]")].map(b => b.dataset.look + (b.getAttribute("aria-pressed") === "true" ? "*" : "")).join("/"));
+  out.push("m2:" + (document.documentElement.classList.contains("m2") ? "yes" : "no"));
   // H144: on a call the dock holds Calendar and Mic as well (and Donna, when her line is on); every name reads whole.
   document.getElementById("directbtn").classList.add("on"); calledHere = true; setState("live", "On the call");
   const dl = document.getElementById("dock").getBoundingClientRect(), cv = document.createElement("canvas").getContext("2d");
@@ -8765,12 +8774,14 @@ setTimeout(() => {
   const pre = document.createElement("pre"); pre.id = "h140"; pre.textContent = "H140RESULT " + out.join(" | ") + " END"; document.body.append(pre);
 }, 1500);
 </script>"""
-        f = self.tmp / "h140.html"
-        f.write_text(page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">' + saved, 1).replace("</body>", harness + "</body>", 1))
-        fa = self.tmp / "h140app.html"  # the desktop app loads the page with ?app
-        fa.write_text(f.read_text().replace('new URLSearchParams(location.search).has("app")', "true", 1))
-        seen = []
-        for name, size, page_file in (("the phone", "390,844", f), ("the desktop app", "1180,780", fa)):
+        seen, runs = [], []
+        for lk in ("classic", "modern2"):
+            f = self.tmp / f"h140-{lk}.html"
+            f.write_text(page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">' + saved.replace('"classic"', f'"{lk}"'), 1).replace("</body>", harness + "</body>", 1))
+            fa = self.tmp / f"h140app-{lk}.html"  # the desktop app loads the page with ?app
+            fa.write_text(f.read_text().replace('new URLSearchParams(location.search).has("app")', "true", 1))
+            runs += [(f"the phone, {lk} saved", "390,844", f, lk), (f"the desktop app, {lk} saved", "1180,780", fa, lk)]
+        for name, size, page_file, lk in runs:
             r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
                                               f"--user-data-dir={self.tmp / 'h140-profile'}", "--disable-web-security", f"--window-size={size}",
                                               "--virtual-time-budget=6000", "--dump-dom", page_file.as_uri()], timeout=60)
@@ -8781,10 +8792,12 @@ setTimeout(() => {
             need(res["dock"] == "ok", f"{name}: with Classic saved on the device, the dock isn't at the bottom: {res}")
             need(res["inside"] == "ok", f"{name}: round buttons outside the dock: {res}")
             need(res["label"] == '"Chat"', f"{name}: the dock's buttons have no names under them: {res}")
-            need(res["lookrow"] == "gone", f"{name}: the Look row is still in Settings: {res}")
+            want = "modern/modern2*" if lk == "modern2" else "modern*/modern2"
+            need(res["lookrow"] == want, f"{name}: the Look row should read {want}: {res}")
+            need(res["m2"] == ("yes" if lk == "modern2" else "no"), f"{name}: Modern 2 is {'off' if lk == 'modern2' else 'on'} with {lk} saved: {res}")
             need(res["oncall"] == "ok", f"{name}: on a call (H144) Calendar or Mic isn't in the dock, a button sits outside it, or a name is cut off: {res}")
             seen.append(name)
-        return "Modern only: no Look row, no saved choice, no html.modern; the eight buttons in the dock with their names, on a call too with Calendar next to Mic, every name whole (H144); Classic saved on a device still shows Modern (" + ", ".join(seen) + ")"
+        return "Modern, with Modern 2 one tap away (H185): a Look row with both, Modern until Modern 2 is picked (Classic saved still shows Modern), Modern 2 set before the page draws and passed to the status page and her chat; in both looks the eight buttons in the dock with their names, on a call too with Calendar next to Mic, every name whole (H144) (" + ", ".join(seen) + ")"
 
 
     # 98
@@ -11862,7 +11875,7 @@ FLOWS = {
     93: ("H125: Donna's watch list: she keeps an eye out for a mail or the weather and texts when it comes", False, "flow93"),
     94: ("H135: the weather in the app: a widget on the main screen, a sheet with warnings (KNMI), UV and the next hours", False, "flow94"),
     95: ("H139: closing and opening the laptop's lid never leaves two mains: a real online check, the main that stayed stays", False, "flow95"),
-    96: ("H137, H140: Modern is the only look: no Look switch, no saved choice, the round buttons in one dock", False, "flow96"),
+    96: ("H137, H140, H185: Modern, and Modern 2 to pick in Settings; the round buttons in one dock in both", False, "flow96"),
     97: ("F31: a refused pull or push from a job shows up: the github incident, Donna texts at once, closed by the next one through", False, "flow97"),
     98: ("F32: a fresh install on an old release (a download, a shallow clone) sees the newer one and updates with one tap", False, "flow98"),
     99: ("H143: tick off or X the appointments; an X moves it to the Google calendar HQ Planning, undo moves it back; the week's look back", False, "flow99"),

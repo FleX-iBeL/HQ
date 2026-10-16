@@ -421,6 +421,17 @@
         body { zoom: 0.75; }
       }
     </style>
+    <!-- H185: opened from the call page in Modern 2 (?look=modern2): rounder cards and banners, a soft grey ground and the same type, so it sits in the app. -->
+    <script>try { if (new URLSearchParams(location.search).get("look") === "modern2") document.documentElement.classList.add("m2"); } catch (e) {}</script>
+    <style>
+      html.m2 { --page:#f2f3f6; --rule:rgba(17,24,39,.09); }
+      @media (prefers-color-scheme: dark) { html.m2 { --page:#14181f; --card:#1a1e26; --tint:#1f242d; --rule:rgba(255,255,255,.08); } }
+      html.m2 body { font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif; letter-spacing:-.005em; }
+      html.m2 .card, html.m2 .problems { border-radius:18px; }
+      html.m2 .banner { border-radius:20px; }
+      html.m2 .bar, html.m2 .bar div { border-radius:999px; }
+      html.m2 :focus-visible { outline:2.5px solid var(--blue); outline-offset:2px; }
+    </style>
   </head>
   <body>
     <!-- H59: the small grey version (a tap shows the changelog) and, when there is one, the new version's bar -->

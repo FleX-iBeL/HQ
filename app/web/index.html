@@ -643,6 +643,111 @@
   /* H170: a link in the chat is underlined in the bubble's own colour, and a long one wraps. */
   #chatlog .msg a, #histlog .msg a { color:inherit; text-decoration:underline; text-underline-offset:2px; overflow-wrap:anywhere; }
 </style>
+<!-- H185: Modern 2, the second look (16 October 2026), picked in Settings next to Modern and remembered on the device
+     (Modern until he picks). Everything below only applies with html.m2, so Modern stays exactly as it is. Claude's
+     design, aimed at ease of use now that everything is in: the Call button low and wide where the thumb is, the
+     picked agent marked with a tick, the dock's open button in a pill like a phone's own tab bar, sheets with a clear
+     title and a round close, lists and Settings as grouped cards on a soft grey, bigger tap targets and a visible
+     focus ring. -->
+<style id="look2">
+  html.m2 { --base:#f2f3f6; --surface:#ffffff; --line:rgba(17,24,39,.08); --soft:rgba(17,24,39,.055); --sheet:#f2f3f6; --r:18px; }
+  @media (prefers-color-scheme: dark) { html.m2 { --base:#0e1116; --surface:#1a1e26; --line:rgba(255,255,255,.07); --soft:rgba(255,255,255,.07); --sheet:#14181f; } }
+  html.m2 body { gap:18px; letter-spacing:-.005em; }
+  html.m2 :focus-visible { outline:2.5px solid var(--accent); outline-offset:2px; }
+  /* Before a call: what to pick on top, the Call button low and wide, right above the dock. */
+  html.m2 body::before { display:none; }
+  html.m2 body::after { order:3; flex:1 1 0; margin:0; }
+  html.m2 body:has(#btn.live)::before, html.m2 body:has(#btn.busy)::before { display:block; order:0; flex:1 1 0; margin:0; }
+  html.m2 #status { order:4; margin-top:0; font-size:14px; }
+  html.m2 body:has(#btn.live) #status, html.m2 body:has(#btn.busy) #status { order:2; }
+  html.m2 #mute, html.m2 #cancel { order:4; } html.m2 #btn, html.m2 body:has(#btn.live) #btn { order:5; } html.m2 #err { order:6; }
+  html.m2 h1 { font-size:22px; letter-spacing:0; }
+  html.m2 #setbtn { background:var(--surface); box-shadow:0 1px 2px rgba(0,0,0,.06), 0 0 0 1px var(--line); padding:9px 14px; font-size:14px; }
+  html.m2 #wx { background:var(--surface); box-shadow:0 0 0 1px var(--line); padding:9px 16px; }
+  html.m2 #wx::after { content:"›"; font-size:18px; line-height:1; color:var(--muted); margin-left:2px; }
+  html.m2 #wx[aria-expanded="true"]::after { color:inherit; }
+  /* The agents: bigger cards, the picked one with a tick in her colour. */
+  html.m2 #modes { max-width:400px; gap:12px; }
+  html.m2 #modes button { position:relative; padding:18px 8px 14px; border-radius:22px; border:2px solid transparent; background:var(--surface);
+                          box-shadow:0 1px 3px rgba(0,0,0,.06), 0 0 0 1px var(--line); font-size:17px; }
+  html.m2 #modes button img { width:60px; height:60px; box-shadow:none; }
+  html.m2 #modes button.on { border-color:var(--her, var(--accent)); background:color-mix(in srgb, var(--her, var(--accent)) 9%, var(--surface)); box-shadow:none; }
+  html.m2 #modes button.on img { box-shadow:none; }
+  html.m2 #modes button.on::after { content:"✓"; position:absolute; top:9px; right:10px; width:22px; height:22px; border-radius:50%;
+                                    background:var(--her, var(--accent)); color:#fff; font:700 13px/22px -apple-system,sans-serif; }
+  html.m2 #modehint { margin-top:-8px; }
+  html.m2 #soon .card { background:var(--surface); border:1px dashed var(--line); }
+  /* Call: a wide pill where the thumb is. */
+  html.m2 #btn:not(.live) { width:100%; max-width:400px; height:62px; border-radius:20px; font:650 19px/1 -apple-system,sans-serif;
+                            box-shadow:0 8px 22px color-mix(in srgb, var(--accent) 32%, transparent); }
+  html.m2 #btn.live { width:100%; max-width:400px; min-width:0; height:58px; padding:0; border-radius:20px; font-size:18px; }
+  html.m2 #mute { width:100%; max-width:400px; min-width:0; border-radius:20px; background:var(--surface); box-shadow:0 0 0 1px var(--line); }
+  html.m2 #mute.on { background:var(--fg); color:var(--bg); box-shadow:none; }
+  html.m2 #mute.talk { background:var(--accent); color:#04120f; box-shadow:none; }
+  html.m2 #mute.transcribing { background:var(--wait); color:#1a1300; box-shadow:none; }
+  html.m2 #cancel { margin-top:-8px; border-radius:16px; }
+  html.m2 #orb { width:128px; height:128px; }
+  /* The dock: the open one in a soft pill behind its icon, the name in the accent. */
+  html.m2 #dock { border-radius:24px; background:color-mix(in srgb, var(--surface) 90%, transparent); box-shadow:0 8px 28px rgba(0,0,0,.12), 0 0 0 1px var(--line); border:0; }
+  html.m2 #dock > * { gap:4px; padding:5px 0 3px; border-radius:14px; }
+  html.m2 #dock > * svg { box-sizing:content-box; width:22px; height:22px; padding:3px 14px; border-radius:999px; transition:background .15s; }
+  html.m2 #dock > [aria-expanded="true"] { background:transparent; }
+  html.m2 #dock > [aria-expanded="true"] svg { background:color-mix(in srgb, var(--accent) 20%, transparent); }
+  html.m2 #dock > #voicebtn[aria-pressed="true"] { background:transparent; }
+  html.m2 #dock > #voicebtn[aria-pressed="true"] svg { background:color-mix(in srgb, var(--stop) 16%, transparent); }
+  html.m2 #dock.oncall > * svg { padding:3px 8px; }
+  html.m2 #chatbtn .badge { top:-2px; right:calc(50% - 26px); }
+  /* Sheets: a soft grey ground with white cards on it, a clear title, a round close. */
+  html.m2 #chat, html.m2 #histsheet, html.m2 #statsheet, html.m2 #notesheet, html.m2 #calsheet, html.m2 #wxsheet, html.m2 #settings {
+    background:var(--sheet); border-radius:28px 28px 0 0; border-top:0; box-shadow:0 -10px 40px rgba(0,0,0,.2); }
+  html.m2 #chat h2, html.m2 #histsheet h2, html.m2 #statsheet h2, html.m2 #notesheet h2, html.m2 #calsheet h2, html.m2 #wxsheet h2,
+  html.m2 #settings h2 { font-size:19px; font-weight:700; letter-spacing:-.01em; }
+  html.m2 #chatclose, html.m2 #histclose, html.m2 #statclose, html.m2 #notesclose, html.m2 #calclose, html.m2 #wxclose {
+    width:34px; height:34px; padding:0; top:-8px; border-radius:50%; background:var(--soft); font-size:0; color:var(--fg); }
+  html.m2 #chatclose::before, html.m2 #histclose::before, html.m2 #statclose::before, html.m2 #notesclose::before,
+  html.m2 #calclose::before, html.m2 #wxclose::before { content:"✕"; font:600 15px/34px -apple-system,sans-serif; }
+  html.m2 #histback, html.m2 #calback, html.m2 #notesall { top:-8px; background:var(--soft); }
+  html.m2 #histlist button, html.m2 #callist .appt, html.m2 #noteslist .note, html.m2 #wxbody .fact, html.m2 #wxbody .hr, html.m2 #calone .notes {
+    background:var(--surface); box-shadow:0 0 0 1px var(--line); border-radius:var(--r); }
+  html.m2 #histlist button { padding:14px 16px; align-items:center; justify-content:flex-start; }
+  html.m2 #histlist button > :first-child { margin-right:auto; }
+  html.m2 #histlist button::after { content:"›"; color:var(--muted); font-size:20px; line-height:1; margin-left:-2px; }
+  html.m2 #callist .appt { padding:12px 14px; margin:3px 0; }
+  html.m2 #histlist .day, html.m2 #callist .day { color:var(--muted); text-transform:uppercase; letter-spacing:.05em; font-size:12px; font-weight:700; }
+  html.m2 #calcals button { background:var(--surface); }
+  html.m2 #calping { background:var(--surface); box-shadow:0 0 0 1px var(--line); }
+  /* Chat: her bubbles white on the grey, his in green; a field and Send like a messaging app. */
+  html.m2 #chatlog .hq, html.m2 #histlog .hq { background:var(--surface); box-shadow:0 0 0 1px var(--line);
+    background:color-mix(in srgb, var(--her, var(--accent)) 8%, var(--surface)); }
+  html.m2 #typein, html.m2 #notesin { border-radius:22px; background:var(--surface); border-color:var(--line); padding-left:16px; }
+  html.m2 #typesend, html.m2 #notesadd { border-radius:22px; }
+  html.m2 #histcont, html.m2 #chatcont, html.m2 #calgo { border-radius:18px; min-height:50px; }
+  /* Settings: each row a white card, the switches easy to hit, Done always in reach. */
+  html.m2 #settings .row { background:var(--surface); border:0; border-radius:16px; padding:13px 14px; margin-top:8px; box-shadow:0 0 0 1px var(--line); }
+  html.m2 #settings .row[hidden] { display:none; }
+  html.m2 #settings select { background:var(--sheet); }
+  html.m2 .sw { min-width:64px; min-height:38px; }
+  html.m2 #setdone { border-radius:18px; min-height:52px; margin-top:14px; box-shadow:0 -10px 18px var(--sheet); }
+  html.m2 #hangask, html.m2 #cxask { border-radius:26px; }
+  html.m2 #dirsheet { background:var(--sheet); border-radius:28px 28px 0 0; }
+  html.m2 #dirframe { background:var(--sheet); }
+  /* With a sheet open on a call: the sheet on top keeps its rounded foot. */
+  html.m2 body.chatting #chat, html.m2 body.chatting #statsheet, html.m2 body.chatting #histsheet,
+  html.m2 body.chatting #notesheet, html.m2 body.chatting #calsheet { border-radius:0 0 28px 28px; }
+  html.m2 body.chatting #btn.live, html.m2 body.chatting #mute { height:auto; padding:13px 20px; }
+  html.m2 body.chatting #orb { width:34px; height:34px; }
+  @media (max-height: 700px) {
+    html.m2 body { gap:12px; }
+    html.m2 #btn:not(.live) { width:100%; height:56px; }
+    html.m2 #modes button { padding:12px 8px 10px; } html.m2 #modes button img { width:46px; height:46px; }
+    html.m2 #orb { width:92px; height:92px; }
+  }
+  /* The look itself, in Settings. */
+  #lookrow .seg { display:inline-flex; gap:4px; flex-shrink:0; }
+  #lookrow .seg .sw { min-width:0; }
+</style>
+<!-- H185: the look this device picked (Modern until Modern 2 is picked), set before anything is drawn. -->
+<script>try { if (localStorage.getItem("hq-look") === "modern2") document.documentElement.classList.add("m2"); } catch (e) {}</script>
 </head>
 <body>
 <!-- H59: the small grey version in the corner (a tap shows the changelog), and a bar when a new version is out -->
@@ -666,6 +771,7 @@
 <div id="shade"></div>
 <div id="settings" role="dialog" aria-label="Settings">
   <h2>Settings</h2>
+  <div class="row" id="lookrow"><span>Look<small>Modern, or the newer Modern 2. Kept on this device</small></span><span class="seg" role="group" aria-label="Look"><button type="button" class="sw" data-look="modern" aria-pressed="true">Modern</button><button type="button" class="sw" data-look="modern2" aria-pressed="false">Modern 2</button></span></div>
   <div class="row"><span>Free<small>Plain Claude, for testing and showing others: no connectors (no mail, no calendar), none of your files, no notes, nothing saved. Only the web</small></span><button id="free" class="sw" type="button" aria-pressed="false">Off</button></div>
   <div id="voices"></div>
   <template id="voiceopts">
@@ -1548,7 +1654,7 @@ function showStatus(open) {
   if (open) closeWx();           // H135
   statEl.classList.toggle("open", open);
   statBtn.setAttribute("aria-expanded", String(open));
-  const want = open ? statusUrl() : "about:blank";
+  const want = open ? statusUrl() + lookQuery("?") : "about:blank";  // H185: the status page follows the look
   if (statFrame.getAttribute("src") !== want) statFrame.setAttribute("src", want);
   showLayout();
 }
@@ -1797,11 +1903,27 @@ function showDirect(open) {
   }
   dirEl.classList.toggle("open", open);
   dirBtn.setAttribute("aria-expanded", String(open));
-  const want = open ? "/direct?sheet" : "about:blank";
+  const want = open ? "/direct?sheet" + lookQuery("&") : "about:blank";  // H185
   if (dirFrame.getAttribute("src") !== want) dirFrame.setAttribute("src", want);
   showLayout();
 }
 document.getElementById("dirclose").addEventListener("click", () => showDirect(false));
+// H185: the look, Modern (the default) or Modern 2, picked in Settings and remembered on this device; html.m2 is set
+// in the head before the page draws. The status page and her chat are told the look when they open.
+let look = document.documentElement.classList.contains("m2") ? "modern2" : "modern";
+function lookQuery(sep) { return look === "modern2" ? sep + "look=modern2" : ""; }
+function applyLook(l, save) {
+  look = l === "modern2" ? "modern2" : "modern";
+  if (save) { try { localStorage.setItem("hq-look", look); } catch (e) {} }
+  document.documentElement.classList.toggle("m2", look === "modern2");
+  document.querySelectorAll("#lookrow [data-look]").forEach(b => {
+    const on = b.dataset.look === look; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on));
+  });
+  if (statOpen()) statFrame.setAttribute("src", statusUrl() + lookQuery("?"));
+  if (dirOpen()) document.getElementById("dirframe").setAttribute("src", "/direct?sheet" + lookQuery("&"));
+}
+document.getElementById("lookrow").addEventListener("click", ev => { const b = ev.target.closest("[data-look]"); if (b) applyLook(b.dataset.look, true); });
+applyLook(look);
 (() => {
   let y0 = 0, h0 = 0, moved = false;
   dirHead.addEventListener("pointerdown", (e) => {
