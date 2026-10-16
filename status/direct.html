@@ -27,7 +27,11 @@
   .m { max-width: 80%; padding: 8px 12px; border-radius: 18px; white-space: pre-wrap; word-wrap: break-word; }
   .agent { align-self: flex-start; background: var(--panel); border-bottom-left-radius: 6px; border-left: 3px solid var(--her); }
   .me { align-self: flex-end; background: var(--me); color: #fff; border-bottom-right-radius: 6px; }
-  .t { color: var(--dim); font-size: 11px; text-align: center; margin: 8px 0 2px; }
+  /* H158: a day pill between days, and each text's time in its bubble's corner, like a chat app. */
+  .t { align-self: center; color: var(--dim); background: var(--panel); font-size: 12px; padding: 3px 10px;
+    border-radius: 10px; margin: 10px 0 4px; }
+  .m .at { float: right; color: var(--dim); font-size: 11px; margin: 6px 0 -4px 10px; white-space: nowrap; }
+  .me .at { color: rgba(255, 255, 255, .75); }
   #typing { color: var(--dim); font-size: 13px; padding: 0 16px 6px; min-height: 18px; }
   form { display: flex; gap: 8px; padding: 8px 12px 12px; border-top: 1px solid #2a2e36; }
   textarea { flex: 1; resize: none; background: var(--panel); color: var(--text); border: 1px solid #2a2e36;
@@ -71,26 +75,44 @@
   const input = document.getElementById('in');
   const bell = document.getElementById('bell');
   let shown = 0, info = null, waiting = false;
-  const day = (t) => new Date(t * 1000).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
-  const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // H158 begin: the day pill (Today, Yesterday, the weekday within a week, else the date) and each text's time.
+  const dayKey = (t) => new Date(t * 1000).toDateString();
+  const day = (t, now = Date.now() / 1000) => {
+    const d = new Date(t * 1000), n = new Date(now * 1000);
+    const days = Math.round((new Date(n.getFullYear(), n.getMonth(), n.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 864e5);
+    if (days === 0) return 'Today';
+    if (days === 1) return 'Yesterday';
+    if (days > 1 && days < 7) return d.toLocaleDateString([], { weekday: 'long' });
+    return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() === n.getFullYear() ? undefined : 'numeric' });
+  };
+  const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  // H158 end
+  let drawnOn = '';
 
   function draw(msgs) {
-    if (msgs.length === shown) return;
+    // Drawn again past midnight too, so Today becomes Yesterday.
+    const today = new Date().toDateString();
+    if (msgs.length === shown && today === drawnOn) return;
+    drawnOn = today;
     const atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
     list.innerHTML = '';
-    let lastDay = '', lastT = 0;
+    let lastDay = '';
     for (const m of msgs) {
-      if (day(m.at) !== lastDay || m.at - lastT > 3600) {
+      if (dayKey(m.at) !== lastDay) {
         const t = document.createElement('div');
         t.className = 't';
-        t.textContent = (day(m.at) !== lastDay ? day(m.at) + ' ' : '') + clock(m.at);
+        t.textContent = day(m.at);
         list.append(t);
-        lastDay = day(m.at);
+        lastDay = dayKey(m.at);
       }
-      lastT = m.at;
       const d = document.createElement('div');
       d.className = 'm ' + (m.from === 'me' ? 'me' : 'agent');
       d.textContent = m.text;
+      const at = document.createElement('span');
+      at.className = 'at';
+      at.textContent = clock(m.at);
+      at.title = new Date(m.at * 1000).toLocaleString();
+      d.append(at);
       list.append(d);
     }
     if (!msgs.length) list.innerHTML = '<div id="empty">No texts yet.</div>';

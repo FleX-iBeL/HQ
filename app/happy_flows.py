@@ -8057,6 +8057,23 @@ setTimeout(() => {
             dh = (ROOT / "status/direct.html").read_text()
             need("location.port === '8443'" in dh and "'/manifest.webmanifest'" in dh, "the chat doesn't know it's opened through the call line")
             need("has('sheet')" in dh and "if (!SHEET && !APP) bellState();" in dh, "her chat in the sheet still shows its back arrow or signs the phone up")
+            # H158: like a chat app, a day pill between days (Today, Yesterday, the weekday, else the date) and each
+            # text's time in its bubble; drawn again past midnight. The page's own label code, run on fixed times.
+            need("at.className = 'at'" in dh and "today === drawnOn" in dh and "t.textContent = day(m.at);" in dh,
+                 "her chat doesn't show each text's time and a day pill between days")
+            labels = re.search(r"// H158 begin[^\n]*(.*?)// H158 end", dh, re.S).group(1)
+            js = labels + """
+const now = new Date(2026, 9, 16, 16, 30) / 1000, at = (d, h, mi) => new Date(2026, 9, d, h, mi) / 1000;
+console.log(JSON.stringify([day(at(16, 0, 5), now), day(at(15, 23, 59), now), day(at(13, 9, 0), now),
+  day(at(2, 9, 0), now), day(new Date(2025, 11, 31, 9, 0) / 1000, now), clock(at(16, 9, 5)), clock(at(16, 21, 40)),
+  dayKey(at(16, 0, 5)) === dayKey(at(16, 23, 59)), dayKey(at(15, 23, 59)) === dayKey(at(16, 0, 5))]));
+"""
+            r = subprocess.run([shutil.which("node") or "/opt/homebrew/bin/node", "-e", js], capture_output=True, text=True,
+                               env={**os.environ, "TZ": "Europe/Amsterdam", "LANG": "en_GB.UTF-8"})
+            got = json.loads(r.stdout or "null") if r.returncode == 0 else r.stderr[-300:]
+            need(isinstance(got, list) and got[:3] == ["Today", "Yesterday", "Tuesday"] and "2" in got[3] and "Oct" in got[3]
+                 and "2025" in got[4] and "2025" not in got[3] and re.fullmatch(r"09[:.]05", got[5]) and re.fullmatch(r"21[:.]40", got[6])
+                 and got[7] is True and got[8] is False, f"her chat's day pills or times are wrong: {got}")
         finally:
             for key, v in saved.items():
                 if v is None:
@@ -8065,7 +8082,8 @@ setTimeout(() => {
                     os.environ[key] = v
         return ("push messages encrypt for the phone and carry a valid VAPID token, a gone phone is dropped; she texts once when the "
                 "job list is finished, for a new very important mail, when something stays down (a takeover at once) and when it's back; "
-                "the chat, its service worker, a phone signing up and texting her back work through the status server")
+                "the chat, its service worker, a phone signing up and texting her back work through the status server; each text shows its "
+                "time, with a day pill between days")
 
     async def flow71(self) -> str:
         """H87, H91, no Claude: the three stop lines (5-hour, weekly all models, weekly Fable) each move every minute,
@@ -11356,7 +11374,7 @@ FLOWS = {
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one; just text, the field grows (H117)", False, "flow83"),
     84: ("H106, H112, F26: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can; changed on a call at once; one row on the phone", False, "flow84"),
     85: ("H79, H121, H130: ask for another agent by name: she hands over, or brings her in on a three-way or four-way call and she says hi", False, "flow85"),
-    86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back", False, "flow86"),
+    86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back; H158: each text's time, day pills", False, "flow86"),
     87: ("H98: the dog sits by its empty bowl and says Update! in green when a newer version is out", False, "flow87"),
     88: ("H113: a job held by the usage line carries on in its own chat, or in a fresh one with a note at which step", False, "flow88"),
     89: ("H118: which computer is main, at a glance: a pill next to the name on the status page, the strip and the call page", False, "flow89"),
