@@ -9983,6 +9983,85 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             proc.terminate()
         return "add-row for calls; an open roadmap item sent from the page (never twice, never parked or done), move and cancel through jobs.py, header-guarded"
 
+    async def flow107(self) -> str:
+        """H184, no Claude: the laptop shows the server's usage. Two throwaway status pages from scratch copies of HQ
+        (4783 the laptop, paired with 4784 the server through its own role.json; the server on its own): the laptop's
+        /usage.json gives the server's reading when it's newer (marked from the server's name), its own when that's
+        newer, the server's when it has none itself, and its own again once the server is gone; ?own=1 is always its own
+        file; the server, unpaired, only ever gives its own. The page says where a reading came from."""
+        import subprocess as sp
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        procs, sites = [], {}
+        for name in ("laptop", "server"):
+            site = self.tmp / f"h184-{name}"
+            shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+            (site / ".status").mkdir()
+            (site / "state").mkdir()
+            site_roadmap(site).write_text(ROADMAP.read_text())
+            sites[name] = site
+        (sites["laptop"] / "state/role.json").write_text(json.dumps({"peer": "http://127.0.0.1:4784", "peer_name": "VPS"}))
+
+        def reading(name, minutes_ago, five):
+            at = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - minutes_ago * 60))
+            body = {"checkedAt": at, "by": f"{name} test", "readable": True, "limits": [{"label": "5-hour limit", "percent": five}]}
+            (sites[name] / ".status/usage.json").write_text(json.dumps(body))
+
+        def start(name, port):
+            env = {**os.environ, "HQ_STATUS_PORT": str(port), "HQ_SUPPORT": str(sites[name] / "state"),
+                   "HQ_PEER_USAGE_CACHE": "0", "HQ_ROADMAP": str(site_roadmap(sites[name]))}
+            env.pop("HQ_ROLE_INSECURE", None)
+            pr = sp.Popen([node, str(sites[name] / "status/server.mjs"), "--quiet"], env=env, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+            procs.append(pr)
+            return pr
+
+        async def up(port):
+            for _ in range(50):
+                if http_get("/usage.json", f"http://127.0.0.1:{port}")[0] == 200:
+                    return
+                await asyncio.sleep(0.2)
+            need(False, f"the status page on {port} didn't start")
+
+        def usage(port, q=""):
+            code, body, _ = http_get(f"/usage.json{q}", f"http://127.0.0.1:{port}")
+            need(code == 200, f"/usage.json{q} on {port} answered {code}")
+            return json.loads(body)
+        try:
+            start("laptop", 4783)
+            server = start("server", 4784)
+            await up(4783)
+            await up(4784)
+            reading("laptop", 30, 11)
+            reading("server", 2, 42)
+            u = usage(4783)
+            need(u and u["limits"][0]["percent"] == 42 and u.get("from") == "VPS", f"the laptop didn't show the server's newer reading: {u}")
+            need(usage(4783, "?own=1")["limits"][0]["percent"] == 11, "?own=1 on the laptop isn't its own file")
+            s = usage(4784)
+            need(s["limits"][0]["percent"] == 42 and "from" not in s, f"the unpaired server didn't give its own: {s}")
+            reading("laptop", 1, 12)
+            reading("server", 5, 43)
+            u = usage(4783)
+            need(u["limits"][0]["percent"] == 12 and "from" not in u, f"the laptop's own newer reading didn't win: {u}")
+            need(usage(4784)["limits"][0]["percent"] == 43, "the server took the laptop's reading; only the paired one pulls")
+            (sites["laptop"] / ".status/usage.json").unlink()
+            u = usage(4783)
+            need(u and u["limits"][0]["percent"] == 43 and u.get("from") == "VPS", f"the laptop without a reading didn't show the server's: {u}")
+            reading("laptop", 30, 13)
+            server.terminate()
+            server.wait(5)
+            u = usage(4783)
+            need(u["limits"][0]["percent"] == 13 and "from" not in u, f"with the server gone the laptop didn't show its own: {u}")
+            page = (ROOT / "status/index.html").read_text()
+            need("${u.from ? `, on ${u.from}` : ''}" in page, "the page doesn't say where the reading came from")
+        finally:
+            for pr in procs:
+                if pr.poll() is None:
+                    pr.terminate()
+                    try:
+                        pr.wait(5)
+                    except Exception:
+                        pr.kill()
+        return "the laptop shows the newest of the server's and its own usage, its own when the server is gone; ?own=1 and an unpaired server give their own"
+
     async def flow101(self) -> str:
         """H152, no Claude, no Syncthing, no network: after a crash or a restart the two computers come back in step
         by themselves. Her pings file is only written when something changed (it was written every minute, so it
@@ -11686,6 +11765,7 @@ echo "OK remove stops it and leaves the files"
 echo "ALL OK"
 """
 
+
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
     2: ("The greeting plays first, on Quick and Deep", True, "flow2"),
@@ -11793,6 +11873,7 @@ FLOWS = {
     104: ("F33: a typed line sent while she talks or thinks carries only itself; an unanswered one goes again", False, "flow104"),
     105: ("H149: mail more often for a while he names: his words as an end time, every quarter until then, hourly again by itself", False, "flow105"),
     106: ("H160, H182, H183: the team's work from the status page: an open roadmap item sent to the team, move and cancel, without a call; add-row for calls; the repeating rows in Maintenance", False, "flow106"),
+    107: ("H184: the laptop's status page shows the server's usage when it's newer, its own when the server can't be reached", False, "flow107"),
 }
 
 

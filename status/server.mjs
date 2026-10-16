@@ -10,7 +10,8 @@
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, openSync } from 'node:fs';
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -131,6 +132,52 @@ function estimates() {
       resolve(data);
     });
   });
+}
+
+// H184: the usage from the other HQ. Paired (role.json with a peer), this page asks the other's own reading
+// (GET /usage.json?own=1, its saved file only, so two pages never ask each other in a loop) and shows whichever
+// was read last; when the other can't be reached, or has no reading, its own. Only the usage: everything else on
+// the page stays this computer's. role.py's peer_ip pins the address, like its own requests; HQ_ROLE_INSECURE
+// (a test against a self-made certificate) too. A look is kept 20 seconds (HQ_PEER_USAGE_CACHE, in ms, for a test), and gives
+// up after 3.
+let peerUsage = { at: 0, data: null };
+async function otherUsage() {
+  if (Date.now() - peerUsage.at < Number(process.env.HQ_PEER_USAGE_CACHE ?? 20000)) return peerUsage.data;
+  let c = null;
+  try { c = JSON.parse(await readFile(join(SUPPORT, 'role.json'), 'utf8')); } catch {}
+  if (!c?.peer) { peerUsage = { at: Date.now(), data: null }; return null; }
+  const data = await new Promise((resolve) => {
+    let url;
+    try { url = new URL(`${c.peer.replace(/\/+$/, '')}/usage.json?own=1`); } catch { resolve(null); return; }
+    const secure = url.protocol === 'https:';
+    const opts = { method: 'GET', timeout: 3000, headers: { accept: 'application/json' } };
+    if (secure && process.env.HQ_ROLE_INSECURE) opts.rejectUnauthorized = false;
+    if (c.peer_ip) opts.lookup = (host, o, cb) => (o?.all ? cb(null, [{ address: c.peer_ip, family: c.peer_ip.includes(':') ? 6 : 4 }]) : cb(null, c.peer_ip, c.peer_ip.includes(':') ? 6 : 4));
+    const req = (secure ? httpsRequest : httpRequest)(url, opts, (r) => {
+      let b = '';
+      r.on('data', (d) => { b += d; if (b.length > 200000) req.destroy(); });
+      r.on('end', () => {
+        try { resolve(r.statusCode === 200 ? JSON.parse(b) : null); } catch { resolve(null); }
+      });
+      r.on('error', () => resolve(null));
+    });
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+  const ok = data && typeof data === 'object' && !Number.isNaN(Date.parse(data.checkedAt));
+  peerUsage = { at: Date.now(), data: ok ? { ...data, from: c.peer_name || 'the other HQ' } : null };
+  return peerUsage.data;
+}
+async function usage(own) {
+  let mine = null;
+  try { mine = JSON.parse(await readFile(join(root, '.status/usage.json'), 'utf8')); } catch {}
+  if (own) return mine;
+  const other = await otherUsage();
+  if (!other) return mine;
+  if (!mine || Number.isNaN(Date.parse(mine?.checkedAt))) return other;
+  // The newest reading wins; a tie goes to the other (the main's).
+  return Date.parse(other.checkedAt) >= Date.parse(mine.checkedAt) ? other : mine;
 }
 
 // H56.3: main and backup. The other HQ asks this one's role (GET /api/role), tells it a newer choice of main (POST
@@ -514,6 +561,12 @@ const server = createServer(async (req, res) => {
   }
   if ((req.url ?? '/').split('?')[0] === '/routines.json') {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(await routines()));
+    return;
+  }
+  if ((req.url ?? '/').split('?')[0] === '/usage.json') {
+    const own = new URL(req.url, 'http://x').searchParams.has('own');
+    const u = await usage(own);
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(u ? `${JSON.stringify(u, null, 2)}\n` : 'null');
     return;
   }
   const entry = FILES[(req.url ?? '/').split('?')[0]];

@@ -753,7 +753,7 @@
         const head = el('div', 'head');
         head.append(
           el('h2', '', 'Usage'),
-          el('span', 'soft', u ? `Read ${ago(age)}${u.by ? ` by ${u.by}` : ''}` : 'No reading yet'),
+          el('span', 'soft', u ? `Read ${ago(age)}${u.by ? ` by ${u.by}` : ''}${u.from ? `, on ${u.from}` : ''}` : 'No reading yet'),
         );
         box.append(head);
         if (u && !u.readable) box.append(el('p', 'alarm', 'The last attempt to read the usage failed. Work stops until it can be read. The numbers below are the last known ones.'));
