@@ -1479,17 +1479,18 @@
         const q = s.queue;
         if (q && (q.jobs.length || !q.on)) {
           const box = el('section');
-          // H172: a job paused for its usage waits for a call, so it stands with the waiting ones (without a place in line).
-          const group = (j) => (/^(running|stop asked)/.test(j.state) ? 'running' : /^(ready|held|paused)/.test(j.state) ? 'waiting' : 'finished');
+          // F37: a job paused for its usage (H172) is parked: neither running nor waiting, it holds nothing up and waits for a call.
+          const group = (j) => (/^(running|stop asked)/.test(j.state) ? 'running' : /^(ready|held)/.test(j.state) ? 'waiting' : /^paused/.test(j.state) ? 'parked' : 'finished');
           const of = (g) => q.jobs.filter((j) => group(j) === g);
           // H61: the estimates, learned from how long earlier jobs really took (routine/estimate.py).
           const E = routines?.estimate ?? null;
           const total = etaTotal(E);
-          const counts = q.on ? `${of('running').length} running · ${of('waiting').length} waiting${total ? ` · ${total}` : ' · the routine looks every minute'}` : 'The routine is off';
+          const counts = q.on ? `${of('running').length} running · ${of('waiting').length} waiting${of('parked').length ? ` · ${of('parked').length} parked` : ''}${total ? ` · ${total}` : ' · the routine looks every minute'}` : 'The routine is off';
           const fold = foldPart('jobs', true, 'Jobs from calls', counts, false, q.on && total ? lateNote(E?.total) : '');
           const parts = el('div', 'parts');
           if (q.on && E?.total?.counts) parts.append(el('p', 'soft eta-counts', E.total.counts));  // H174: what the total counts
-          for (const [g, title, st, start] of [['running', 'Running', 'doing', true], ['waiting', 'Waiting', 'todo', true], ['finished', 'Finished', 'done', false]]) {
+          for (const [g, title, st, start] of [['running', 'Running', 'doing', true], ['waiting', 'Waiting', 'todo', true], ['parked', 'Parked for a call', 'todo', true], ['finished', 'Finished', 'done', false]]) {
+            if (g === 'parked' && !of(g).length) continue;  // F37: only shown when a job is parked
             // H39: waiting jobs keep their place in line (the order they will run), not their number.
             const jobs = g === 'waiting' ? of(g).sort((a, b) => (a.place ?? 0) - (b.place ?? 0)) : of(g).sort((a, b) => (g === 'finished' ? b.n - a.n : a.n - b.n));
             const part = foldPart(`jobs-${g}`, start, title, `${jobs.length}`, true);

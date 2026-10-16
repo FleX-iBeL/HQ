@@ -1300,7 +1300,7 @@ def total_counts(t, with_cost=True):
     if t.get("usage_wait"):
         s += " The time a job waits for the usage is in the done-around time, not in the minutes."
     if t.get("paused"):
-        s += f" {'A paused job waits' if t['paused'] == 1 else str(t['paused']) + ' paused jobs wait'} for a call and {'isn' if t['paused'] == 1 else 'aren'}'t counted."
+        s += f" {'A paused job is' if t['paused'] == 1 else str(t['paused']) + ' paused jobs are'} parked for a call, {'isn' if t['paused'] == 1 else 'aren'}'t counted and hold nothing up."  # F37
     s += (" It's the computed estimate, from how long jobs like these took, with the team's own guess taken in for the running job"
           " as far as its guesses have been right." if t.get("guess_in") else
           " It's the computed estimate, from how long jobs like these took; the team's own guesses aren't in it.")

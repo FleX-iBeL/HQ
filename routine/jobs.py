@@ -153,6 +153,17 @@ def waiting(j):
     return j["state"] == "ready" or j["state"].startswith("held")
 
 
+def parked(j):
+    """F37: a job paused for its usage (H172) is parked: neither running nor waiting, never started by itself,
+    on the list until a call resumes it (resume N) or drops it (stop N). Nothing waits on it."""
+    return j["state"].startswith("paused")
+
+
+def open_job(j):
+    """F37: running or waiting, the jobs a start has to wait for: not finished and not parked."""
+    return not j["state"].startswith(FINISHED) and not parked(j)
+
+
 def line_up(jobs):
     """H39: the waiting jobs, in the order they will run (top of the list first)."""
     return [j for j in jobs if waiting(j)]
@@ -277,7 +288,8 @@ def main(argv):
             running = [j for j in jobs if j["state"].startswith(("running", "stop asked"))]
             # H39: "waiting" is the line itself, ready and held together, top first; the routine takes its first.
             print(json.dumps({"on": on, "mail": MAIL, "mail_fast": list(MAIL_FAST) if MAIL_FAST else None, "running": running, "ready": ready,
-                              "held": [j for j in jobs if j["state"].startswith("held")], "waiting": line_up(jobs)}))
+                              "held": [j for j in jobs if j["state"].startswith("held")], "waiting": line_up(jobs),
+                              "parked": [j for j in jobs if parked(j)]}))  # F37
             return
         if cmd == "add":
             past = "--past-the-line" in args

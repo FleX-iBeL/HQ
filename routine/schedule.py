@@ -288,8 +288,9 @@ def promote():
         text, queue, on = jobs.read()
         items = read(text)
         changed = sync(items, queue)
-        running = any(not j["state"].startswith(JOB_FINISHED) and not jobs.waiting(j) for j in queue)
-        busy = any(not j["state"].startswith(JOB_FINISHED) for j in queue)
+        # F37: a parked job (paused for its usage) is neither running nor waiting, so nothing waits on it.
+        running = any(jobs.open_job(j) and not jobs.waiting(j) for j in queue)
+        busy = any(jobs.open_job(j) for j in queue)
         now = dt.datetime.now()
         ready = passed(items, now)  # H111: every item whose time has passed, not only this minute's
         did = ""
@@ -428,7 +429,7 @@ def main(argv):
             items.append(item)
             write(text, items)
             estimate("item_on_add", n, item["text"], kind)
-            busy = any(not j["state"].startswith(JOB_FINISHED) for j in queue)
+            busy = any(jobs.open_job(j) for j in queue)  # F37: a parked job doesn't count
             after = (" Its time has come; it starts once the job list is empty." if due(item)
                      else " It starts then, once the job list is empty.")
             if prio:  # H99

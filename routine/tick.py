@@ -823,6 +823,9 @@ def jobs_line(q):
     else:
         text = f"{waiting} waiting" if waiting else "Nothing waiting; looks every minute"
         state = "ok"
+    parked = q.get("parked") or []  # F37: parked jobs wait for a call, not in line
+    if parked and q.get("on", True):
+        text += f"; {'job ' + str(parked[0]['n']) + ' is' if len(parked) == 1 else str(len(parked)) + ' jobs are'} parked for a call"
     routines.beat("jobs", state=state, text=text, every=60)
 
 

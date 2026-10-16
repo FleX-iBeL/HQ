@@ -3770,7 +3770,14 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         jobs("off")
         need("Nothing to start" in sched("promote"), "a due item started while the routine was off")
         jobs("on")
-        # Empty and on: the due item becomes a job at the bottom of the queue, past the line as planned.
+        # F37: a job paused for its usage is parked: neither running nor waiting, so it holds up no planned item,
+        # and it's never started by itself; it stays on the list until a call resumes or drops it.
+        parked = int(jobs("add", "flow 45 parked").split()[1])
+        jobs("mark", str(parked), "paused: used about twice its estimated usage")
+        nx = q()
+        need(all(j["n"] != parked for j in nx["waiting"] + nx["running"] + nx["ready"] + nx["held"])
+             and parked in [j["n"] for j in nx.get("parked") or []], f"F37: a paused job isn't parked: {nx}")
+        # Empty and on (the parked job aside): the due item becomes a job at the bottom of the queue, past the line as planned.
         did = sched("promote")
         need(f"item {n_now} became job" in did, f"the due item didn't become a job: {did}")
         job = q()["waiting"]
@@ -3824,6 +3831,9 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
              "taking the tag off doesn't work")
         sched("priority", str(p1), ok=False)  # it's a job now, not waiting
         sched("cancel", str(p3))
+        # F37: the parked job held up none of it, and it's still parked, untouched; a call drops it.
+        need(any(j["n"] == parked and j["state"].startswith("paused") for j in q()["parked"]), "F37: the parked job moved by itself")
+        need("cancelled" in jobs("stop", str(parked)), "F37: a parked job can't be dropped")
         for x in q()["waiting"]:
             jobs("done", str(x["n"]))
         sched("promote")
@@ -3994,7 +4004,7 @@ console.log(JSON.stringify({{ problems: r.problems, current: r.current }}));"""
         st("Phase F|F35 ✅")
         d = phase_row()
         need(not d["problems"] and d["current"]["steps"][0]["status"] == "done", f"a new phase row doesn't put it back: {d}")
-        return "plans by day and time; waits while a job runs, waits or the routine is off; then becomes one job, past the line kept; looking back, move, cancel; priority tag goes first in line, never stops a running job (H99); passed items all run after the job list, earliest first, none lost (H111); the status block keeps its phase row, an empty or bad one refused or kept (F35); repeats every day or every weekday, the next planned by itself with tag, past the line and kind, no pile-up, every N off, cancel stops it (H171); page, routine line, call rules"
+        return "plans by day and time; waits while a job runs, waits or the routine is off; a paused job is parked and holds nothing up (F37); then becomes one job, past the line kept; looking back, move, cancel; priority tag goes first in line, never stops a running job (H99); passed items all run after the job list, earliest first, none lost (H111); the status block keeps its phase row, an empty or bad one refused or kept (F35); repeats every day or every weekday, the next planned by itself with tag, past the line and kind, no pile-up, every N off, cancel stops it (H171); page, routine line, call rules"
 
     async def flow46(self) -> str:
         """H27: the Mac desktop app. No Claude turns. The watchdog part on made-up routine lines, its turning-on
@@ -6126,6 +6136,10 @@ console.log(JSON.stringify(o));
         # A paused job: not started again by itself; a call resumes it (in line again, held) or drops it.
         nx = json.loads(jobs2("next"))
         need(all(j["n"] != w1 for j in nx["waiting"] + nx["ready"] + nx["held"] + nx["running"]), "H172: a paused job is still in line")
+        need(w1 in [j["n"] for j in nx.get("parked") or []], f"F37: a paused job isn't parked: {nx.get('parked')}")
+        t37 = json.loads(sp.run(["python3", str(jv / "routine/estimate.py"), "plan"], capture_output=True, text=True, env=env2).stdout).get("total") or {}
+        need(not t37 or (t37.get("paused", 0) >= 1 and "parked for a call" in (t37.get("counts") or "")),
+             f"F37: the plan's total doesn't say the paused job is parked: {t37}")
         jobs2("resume", "999", ok=False)
         r9 = jobs2("resume", str(w1))
         need("carries on" in r9 and any(j["n"] == w1 and j["state"].startswith("held") for j in json.loads(jobs2("next"))["waiting"])
@@ -6228,7 +6242,7 @@ print(json.dumps(o))
         need("job_need(job)" in (jv / "routine/tick.py").read_text() and "usage_overrun(job, s)" in (jv / "routine/tick.py").read_text()
              and "backfill_once" in (jv / "routine/tick.py").read_text(), "H172: the routine doesn't use the usage estimate, the pause or the backfill")
         page72 = (jv / "status/index.html").read_text()
-        need("etaCost(e.cost)" in page72 and "USAGE_START" in page72 and "ready|held|paused" in page72,
+        need("etaCost(e.cost)" in page72 and "USAGE_START" in page72 and "/^paused/.test(j.state) ? 'parked'" in page72,
              "H172: the status page doesn't show the usage next to the time, when it starts, or a paused job")
         need("H172" in config.VOICE_RULES and "resume N" in config.VOICE_RULES, "H172: the call rules don't say the usage estimate or resume")
         pol72 = Policy(config.FOLDER)
