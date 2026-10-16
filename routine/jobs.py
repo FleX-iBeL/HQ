@@ -6,7 +6,8 @@ all read the same place. One line per job:
     - Job 3 · ready · agreed 2026-10-09 21:30 · <what to do, self-contained>
 
 States: ready · running since 21:31 · stop asked · stopped 21:40 · done 21:45 ·
-held: usage over the line · ended 21:45 without a done mark · cancelled 21:33.
+held: usage over the line · ended 21:45 without a done mark · cancelled 21:33 ·
+paused: used about twice its estimated usage (H172: not started again by itself; resume N or stop N from a call).
 ", past the line" after the state: the user's say-so on a call to go past the 5-hour usage line, for that job only.
 The weekly line always counts, also for such a job (F13, 10 October 2026).
 The waiting jobs (ready or held) run in the order they stand on the list, top first (H39, 10 October 2026):
@@ -24,6 +25,8 @@ usage (from the workspace):
   python3 "routine/jobs.py" done N                         the job's own chat, when it's finished
   python3 "routine/jobs.py" held N                         the job's own chat, when the usage says STOP; the
                                                            next start carries on from there (H113)
+  python3 "routine/jobs.py" resume N                       a job paused for using about twice its estimated usage
+                                                           carries on, in its own chat (H172); stop N drops it
   python3 "routine/jobs.py" off | on                       jobs from calls off or on
   python3 "routine/jobs.py" mail-off | mail-on             the hourly mail check off or on (L8)
 Used by the routine itself: next, mark N STATE, crashed N "HOW" (H62: job N ended by a crash; its rerun
@@ -301,9 +304,14 @@ def main(argv):
             if j["state"].startswith("running"):
                 j["state"] = "stop asked"
                 msg = f"Job {j['n']}: stop asked; the routine ends it within about a minute."
-            elif j["state"] in ("ready",) or j["state"].startswith("held"):
+            elif j["state"] in ("ready",) or j["state"].startswith(("held", "paused")):
                 j["state"] = f"cancelled {now}"
                 msg = f"Job {j['n']} cancelled; it won't start."
+                try:  # H172: a held or paused job's usage count goes with it
+                    import usagecost
+                    usagecost.forget(j["n"])
+                except Exception:
+                    pass
             else:
                 sys.exit(f"Job {j['n']} is {j['state']}; nothing to stop.")
             write(text, jobs, on)
@@ -327,6 +335,24 @@ def main(argv):
             write(text, jobs, on)
             print(f"Job {j['n']} may go past the 5-hour usage line; the weekly line still counts.")
             return
+        if cmd == "resume":
+            # H172: he lets a job paused for its usage carry on: it waits in line again like a held job (its own
+            # chat, H113) and isn't paused for its usage again.
+            if not args or not args[0].isdigit():
+                sys.exit("Usage: resume N")
+            j = find(jobs, int(args[0]))
+            if not j["state"].startswith("paused"):
+                sys.exit(f"Job {j['n']} is {j['state']}; only a paused job can be resumed.")
+            j["state"] = "held: usage over the line"
+            write(text, jobs, on)
+            try:
+                import usagecost
+                usagecost.allow(j["n"])
+            except Exception as e:
+                print(f"(couldn't note it may go on: {e!r})", file=sys.stderr)
+            place = [x["n"] for x in line_up(jobs)].index(j["n"]) + 1
+            print(f"Job {j['n']} carries on: number {place} in line, in its own chat, when the usage leaves room.")
+            return
         if cmd in ("done", "held"):
             j = find(jobs, int(args[0]))
             was = j["state"]
@@ -340,6 +366,11 @@ def main(argv):
                     carryon.on_held(j["n"], text)
                 except Exception as e:
                     print(f"(couldn't note the step for the carry-on: {e!r})", file=sys.stderr)
+                try:  # H172: the usage the hold doesn't count
+                    import usagecost
+                    usagecost.hold(j["n"])
+                except Exception as e:
+                    print(f"(couldn't stop its usage count: {e!r})", file=sys.stderr)
             if cmd == "done" and not was.startswith("done"):
                 # H61: its estimate next to how long it really took, so the next estimates learn.
                 m = re.match(r"running since (\d\d:\d\d)", was)

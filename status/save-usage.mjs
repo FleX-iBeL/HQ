@@ -22,6 +22,8 @@ const by = flag >= 0 ? (process.argv[flag + 1] ?? '') : 'HQ session';
 // --gate: the routine's check before it starts a job, on the last saved reading (nothing is
 // written; a window whose reset has passed counts as empty). H141: --minutes N, the job's estimate; it needs
 // room under each line that grows with it (roomNeeded in usage.mjs; without it, the room of 10 minutes).
+// H172: --need five=X,weekly=Y, the job's estimated usage in points (from the finished jobs like it); it needs that much
+// room under each line instead (Weekly Fable takes the weekly one). --minutes then only says how long it is.
 // F13: --weekly-only (with --gate or --statusline) for a job let past the line: it only goes past
 // the 5-hour line; the weekly lines still count, so it waits at the weekly line like any other job.
 // L10: --any takes the saved numbers whatever their age (the routine's usage check, every minute);
@@ -62,7 +64,12 @@ if (process.argv.includes('--gate')) {
   // H141: a new job needs room under each line for its own estimate.
   const mf = process.argv.indexOf('--minutes');
   const minutes = mf >= 0 ? Number(process.argv[mf + 1]) : undefined;
-  const v = usageVerdict(saved, lines, now, { weeklyOnly, start: true, minutes });
+  // H172: --need five=X,weekly=Y, the job's estimated usage from the finished jobs like it (routine/usagecost.py).
+  const nf = process.argv.indexOf('--need');
+  const need = nf >= 0
+    ? Object.fromEntries(String(process.argv[nf + 1] ?? '').split(',').map((p) => p.split('=')).filter(([k, v]) => k && Number.isFinite(Number(v))).map(([k, v]) => [k, Number(v)]))
+    : undefined;
+  const v = usageVerdict(saved, lines, now, { weeklyOnly, start: true, minutes, need: need && Object.keys(need).length ? need : undefined });
   console.log(v.stop ? `STOP. ${v.reason}` : weeklyOnly ? 'OK to go on (past the 5-hour line; the weekly lines are under).' : 'OK to go on.');
   process.exit(v.stop ? 2 : 0);
 }

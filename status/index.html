@@ -640,21 +640,30 @@
       const etaTime = (t) => new Date(t * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
       /** H109: a time the usage line holds back: still shown, with this note next to it in soft red. */
       const USAGE_LATE = 'later, because the usage limit holds the jobs';
-      const etaLate = (e) => !!(e?.eta && e.waits === 'usage');
+      const etaLate = (e) => !!(e?.eta && e.waits === 'usage' && !e.start && !e.usage_wait);  // H172: a start the usage moved says so itself
       const lateNote = (e) => (etaLate(e) ? USAGE_LATE.charAt(0).toUpperCase() + USAGE_LATE.slice(1) : '');
       function etaSpan(cls, w, e) {
         const n = el('span', cls, w);
         if (etaLate(e)) n.append(el('span', 'late', ` · ${USAGE_LATE}`));
         return n;
       }
+      /** H172: the usage a job should take (and has used) next to its time, the same words as routine/usagecost.py. */
+      const etaPct = (x) => `${Math.round(Number(x) * 10) / 10}%`;
+      const etaCost = (c) => (c ? `about ${etaPct(c.five ?? 0)} of the 5-hour and ${etaPct(c.weekly ?? 0)} of the week` : '');
+      const etaUsed = (c) => (c ? `used ${etaPct(c.five ?? 0)} of the 5-hour and ${etaPct(c.weekly ?? 0)} of the week` : '');
+      const etaAt = (t) => `${new Date(t * 1000).toDateString() === new Date().toDateString() ? '' : `${new Date(t * 1000).toLocaleDateString('en-GB', { weekday: 'short' })} `}${etaTime(t)}`;
+      const USAGE_START = 'when the usage leaves room for it';
       function etaWords(E, n) {
         const e = E?.jobs?.[n];
         if (!e) return '';
-        if (e.finished) return e.est ? `Estimated ${etaDur(e.est)}, took ${etaDur(e.actual)}` : `Took ${etaDur(e.actual)}`;
+        if (e.finished) return (e.est ? `Estimated ${etaDur(e.est)}, took ${etaDur(e.actual)}` : `Took ${etaDur(e.actual)}`) + (e.cost ? ` · ${etaUsed(e.cost)}` : '');
         let s = 'left' in e
           ? (e.over ? `Estimated ${etaDur(e.est)}, running ${etaDur(e.so_far)}: taking longer than estimated` : `About ${etaDur(e.left)} left of ${etaDur(e.est)}`)
           : `About ${etaDur(e.est)}`;
-        if (e.eta) s += ` · done around ${etaTime(e.eta)}`;
+        if (e.cost) s += ` · ${etaCost(e.cost)}${e.used ? ` (${etaUsed(e.used)} so far)` : ''}`;
+        if (e.start) s += ` · starts around ${etaAt(e.start)} ${USAGE_START}`;
+        if (e.never) s += ' · it doesn\'t fit under the usage lines as they\'re set (a fixed line), so no time';
+        else if (e.eta) s += ` · done around ${etaAt(e.eta)}`;
         else if (e.waits === 'usage') s += ' · when it\'s done waits on the usage';
         else if (e.waits === 'off') s += ' · the routine is off';
         return `${s} (estimate)`;
@@ -665,8 +674,9 @@
         if (!e) return '';
         const today = new Date().toDateString();
         const at = (t) => `${new Date(t * 1000).toDateString() === today ? '' : `${new Date(t * 1000).toLocaleDateString('en-GB', { weekday: 'short' })} `}${etaTime(t)}`;
-        let s = `About ${etaDur(e.est)}`;
-        if (e.eta) s += `${e.later ? ` · starts around ${at(e.start)}, after the work before it` : ''} · done around ${at(e.eta)}`;
+        let s = `About ${etaDur(e.est)}${e.cost ? ` · ${etaCost(e.cost)}` : ''}`;
+        if (e.never) s += ' · it doesn\'t fit under the usage lines as they\'re set (a fixed line), so no time';
+        else if (e.eta) s += `${e.usage_wait ? ` · starts around ${at(e.start)} ${USAGE_START}` : e.later ? ` · starts around ${at(e.start)}, after the work before it` : ''} · done around ${at(e.eta)}`;
         else if (e.waits === 'usage') s += ' · when it\'s done waits on the usage';
         else if (e.waits === 'off') s += ' · the routine is off';
         return `${s} (estimate)`;
@@ -1354,7 +1364,8 @@
         const q = s.queue;
         if (q && (q.jobs.length || !q.on)) {
           const box = el('section');
-          const group = (j) => (/^(running|stop asked)/.test(j.state) ? 'running' : /^(ready|held)/.test(j.state) ? 'waiting' : 'finished');
+          // H172: a job paused for its usage waits for a call, so it stands with the waiting ones (without a place in line).
+          const group = (j) => (/^(running|stop asked)/.test(j.state) ? 'running' : /^(ready|held|paused)/.test(j.state) ? 'waiting' : 'finished');
           const of = (g) => q.jobs.filter((j) => group(j) === g);
           // H61: the estimates, learned from how long earlier jobs really took (routine/estimate.py).
           const E = routines?.estimate ?? null;

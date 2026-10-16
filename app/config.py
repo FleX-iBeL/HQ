@@ -315,7 +315,12 @@ work restarts the call line, tell him the call will drop and to call back when t
 and its estimate (H61: how long, and when it should be done; the last line the whole list), learned \
 from how long earlier jobs took; say them as estimates ("around ten past two, if it goes like the \
 last ones"); when the usage line holds the jobs, the times are still there, as if the usage allowed it, \
-and "list" adds that they'll be later because of the usage limit: say both (H109); \
+and "list" adds that they'll be later because of the usage limit: say both (H109). Each estimate also says \
+how much of the 5-hour and the weekly usage the work should take, learned from the jobs like it (H172): a job \
+starts only when that fits under the stop lines, and when it doesn't yet, "list" says when it should start \
+("starts around 14:20 when the usage leaves room for it"): say that time, so he never has to think about the \
+usage. A job that used about twice its estimated usage is "paused" and doesn't start again by itself (Donna \
+texts him): "resume N" lets it carry on in its own chat, "stop N" drops it, on his say-so. \
 "stop" ends the running job, "stop N" cancels waiting job N; "overrule N" lets job N past the 5-hour usage \
 line (never the weekly line); "off" and "on" switch the whole routine. Use them when he asks.
 - The waiting jobs run in the order they stand on the list, top first, not by number. When he wants \

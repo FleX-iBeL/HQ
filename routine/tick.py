@@ -792,16 +792,52 @@ def jobs_line(q):
     routines.beat("jobs", state=state, text=text, every=60)
 
 
-def job_minutes(job):
-    """H141: the job's estimate in minutes (made now, F34), for the room it needs under
-    the usage lines; None when it can't be had (the gate then uses its own default)."""
+def job_need(job):
+    """H172: the job's estimated minutes and usage (made now, F34, from the finished jobs like it), as the gate's
+    arguments: it starts only when that usage fits under each stop line. [] when it can't be had (the gate then uses
+    H141's room for 10 minutes)."""
     try:
-        # F34: estimated now, under the kind it was given (here or on the other HQ), from the newest finished jobs
-        m = estimate.job_estimate(job["n"], job.get("text", ""))["est"]
-        return max(1, int(round(m))) if m else None
+        import usagecost
+        m, c = usagecost.job_cost(job["n"], job.get("text", ""))
+        return ["--minutes", str(max(1, int(round(m)))), "--need", f"five={c['five']},weekly={c['weekly']}"]
     except Exception as e:
         log(f"estimate for the usage gate: {e!r}")
-        return None
+        return []
+
+
+def usage_overrun(job, s):
+    """H172: every minute while a job runs, its usage so far from the newest reading. At about twice its estimate it's
+    paused for good: its chat ends, it isn't started again by itself (a call resumes or drops it), and Donna texts him.
+    True when it paused it. The stop at the line itself stays the job's own (H113)."""
+    import usagecost
+    n = job["n"]
+    rec = usagecost.track(n, job.get("text", ""))
+    o = usagecost.overrun(rec)
+    if not o:
+        return False
+    end_chat(s.get("pid"))
+    jobs("mark", str(n), "paused: used about twice its estimated usage")
+    try:
+        import carryon
+        carryon.on_held(n, open(hqpaths.ROADMAP, encoding="utf8").read())  # a resume carries on in its own chat
+    except Exception as e:
+        log(f"carry-on note for the paused job: {e!r}")
+    usagecost.hold(n)
+    clear()
+    quiet.clear_request()
+    line = "5-hour" if o["line"] == "five" else "weekly"
+    why = (f"used {o['used']:g}% of the {line} usage, about twice its estimate of {o['est']:g}%; paused for good: "
+           f"a call resumes it (jobs.py resume {n}) or drops it (jobs.py stop {n})")
+    status("STOPPED", f"Job {n} paused: it used about twice its estimated usage", f"job {n} {why}")
+    incidents.past("jobs", time.time(), time.time(), f"Job {n} {why}",
+                   [(time.time(), "Ended its chat; it waits for a call, and Donna told him")])
+    log(f"job {n} paused: {why}")
+    try:
+        import pings
+        pings._spawn("paused", usagecost.paused_words(n, job.get("text", ""), o))
+    except Exception as e:
+        log(f"the text about the paused job: {e!r}")
+    return True
 
 
 def schedule_promote():
@@ -984,6 +1020,12 @@ def tick():
         estimate.retag_if_needed(log=log)
     except Exception as e:
         log(f"estimates: retag: {e!r}")
+    # H172: once on each computer, its past jobs' usage from the saved readings.
+    try:
+        import usagecost
+        usagecost.backfill_once(log=log)
+    except Exception as e:
+        log(f"usage: backfill: {e!r}")
     if r["acting"] == "backup":
         stale_job_here()
         on_backup()
@@ -1044,6 +1086,12 @@ def tick():
             log(f"job {n} ended without a done mark")
             return
         try:
+            # H172: about twice its estimated usage: paused for good.
+            if usage_overrun(job, s):
+                return
+        except Exception as e:
+            log(f"usage count: {e!r}")
+        try:
             # H36: gone quiet? Then continue is typed into its own window, and a stuck job shows as stuck.
             quiet.check(n, s, lambda x: json.dump(x, open(STATE, "w")), status,
                         lambda **f: routines.beat("jobs", every=60, **f), incidents, log)
@@ -1100,10 +1148,10 @@ def tick():
     clear(TRUST_NOTE)
     # F13: a job let past the line only skips the 5-hour line; the weekly line always counts, so a
     # past-the-line job held at the weekly line waits here quietly instead of being started every minute.
-    # H141: the room it needs under each line grows with its estimate (the rates are in status/usage.mjs).
+    # H172: it starts when its estimated usage (from the finished jobs like it) fits under each stop line; H141's
+    # rates only for work with too little history (routine/usagecost.py).
     g = subprocess.run([NODE, os.path.join(JV, "status", "save-usage.mjs"), "--gate"]
-                       + (["--weekly-only"] if job["past"] else [])
-                       + (["--minutes", str(m)] if (m := job_minutes(job)) else []),
+                       + (["--weekly-only"] if job["past"] else []) + job_need(job),
                        capture_output=True, text=True)
     if g.returncode:
         note = f"{job['n']} {g.stdout.strip()}"

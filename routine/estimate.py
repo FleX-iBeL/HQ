@@ -893,6 +893,11 @@ def on_start(n, text=""):
     e["started"] = int(time.time())
     st[str(n)] = e
     _save_state(st)
+    try:  # H172: its usage counted from now, next to its time
+        import usagecost
+        usagecost.start(n, text)
+    except Exception as ex:
+        print(f"(the usage count couldn't start: {ex!r})", file=sys.stderr)
 
 
 def on_done(n, text="", started_hhmm=None):
@@ -915,6 +920,19 @@ def on_done(n, text="", started_hhmm=None):
            "size": e.get("size") if isinstance(e.get("size"), dict) else look(_about(text))}  # H167
     if _about(text):
         rec["about"] = _about(text)[:ABOUT_MAX]  # H166: its words, so later jobs can find it as similar
+    try:  # H172: its real usage next to its time, and the usage it was estimated to take
+        import usagecost
+        u = usagecost.finish(n, now)
+        if u and not u["late"]:
+            rec["cost"], rec["cost_how"] = u["cost"], "read"
+        else:  # its start wasn't counted (it ran before this was built): from the saved readings, as a past job
+            c = usagecost.cost_between(usagecost.log_readings(), now - rec["actual"] * 60, now)
+            if c and all(k in c for k in usagecost.KEYS):
+                rec["cost"], rec["cost_how"] = c, "log"
+        if u and u.get("est_cost"):
+            rec["est_cost"] = u["est_cost"]
+    except Exception as ex:
+        print(f"(the usage count couldn't be read: {ex!r})", file=sys.stderr)
     _append(rec)
     st.pop(str(n), None)
     _save_state(st)
@@ -1020,9 +1038,20 @@ def plan(now=None):
     out = {"now": int(now), "on": on, "jobs": {}, "total": None, "accuracy": accuracy(history()), "kinds": KINDS,
            "machine": run["label"], "learned": learned(hist, run)}
     for h in hist[-30:]:
-        out["jobs"][str(h["n"])] = {"finished": True, "est": h.get("est"), "actual": h["actual"], "kind": h.get("kind")}
+        out["jobs"][str(h["n"])] = {"finished": True, "est": h.get("est"), "actual": h["actual"], "kind": h.get("kind"),
+                                    **({"cost": h["cost"]} if isinstance(h.get("cost"), dict) else {})}  # H172
     samples = None
     cursor, left_total, waits = now, 0, not on
+    # H172: the usage each piece of work should take, and when it fits under the stop lines (the reading now, the
+    # moving lines, the resets and the work before it). No reading or no stop lines: the times as before.
+    proj, U = None, None
+    try:
+        import usagecost as U
+        proj = U.Projection.here(now) if on else None
+        counts = U._load()
+    except Exception:
+        counts = {}
+    held_wait = False
     running = [j for j in js if j["state"].startswith(("running", "stop asked"))]
     for j in running:
         e = st.get(str(j["n"])) or known(j["n"])
@@ -1041,6 +1070,15 @@ def plan(now=None):
         left_total += nxt
         out["jobs"][str(j["n"])] = {"est": est, "kind": kind_for(j["text"], e.get("kind")), "so_far": done_min,
                                     "left": left, "over": over, "eta": None if waits else int(cursor)}
+        if U:  # H172: its estimated usage, what it has used so far, and what's left of it before the next can start
+            rec = counts.get(str(j["n"])) or {}
+            c = rec.get("est") or U.cost_for(est, j["text"], e.get("kind"), hist)
+            used = U._so_far(rec) if rec.get("seg") else {}
+            out["jobs"][str(j["n"])]["cost"] = {k: c.get(k, 0) for k in U.KEYS}
+            if used:
+                out["jobs"][str(j["n"])]["used"] = used
+            if proj:
+                proj.add({k: max(0.0, c.get(k, 0) - used.get(k, 0)) for k in U.KEYS}, now)
     run_end = cursor  # H99: when the running job should be done; a priority item can start from there
     line = [j for j in js if j["state"] == "ready" or j["state"].startswith("held")]
     for j in line:
@@ -1048,19 +1086,37 @@ def plan(now=None):
         # newest finished jobs (and the right computer) instead of the number it got when it was added.
         d = job_estimate(j["n"], j["text"], hist, run["name"])
         est, kind = d["est"], d["kind"]
-        if j["state"].startswith("held"):
+        if j["state"].startswith("held") and not proj:
             waits = True
         if running or j is not line[0] or cursor > now:
             cursor += GAP * 60
             left_total += GAP
+        cost = U.cost_for(est, j["text"], kind, hist) if U else None
+        fits = proj.fits_at(cost, cursor, weekly_only=j.get("past")) if proj else None
+        start = None
+        if proj and fits is None:
+            waits = True  # it never fits as the lines stand (a fixed line without a reset time): no time from here on
+        elif proj and fits > cursor + 59:
+            start = cursor = fits  # H172: it waits until the usage leaves room for it
+            held_wait = True
+        if proj and fits is not None:
+            proj.add(cost, cursor)
         cursor += est * 60
         left_total += est
-        out["jobs"][str(j["n"])] = {"est": est, "kind": kind, "eta": int(cursor) if on else None,
-                                    "waits": "usage" if waits and on else ("off" if not on else None)}
+        out["jobs"][str(j["n"])] = {"est": est, "kind": kind, "eta": int(cursor) if on and not (proj and waits) else None,
+                                    "waits": "usage" if (waits or start) and on else ("off" if not on else None)}
+        if cost:
+            out["jobs"][str(j["n"])]["cost"] = {k: cost[k] for k in U.KEYS}
+            out["jobs"][str(j["n"])]["cost_how"] = cost["how"]
+        if start:
+            out["jobs"][str(j["n"])]["start"] = int(start)
+        if proj and waits:
+            out["jobs"][str(j["n"])]["never"] = True
     if running or line:
         out["total"] = {"jobs": len(running) + len(line), "minutes": round(left_total),
-                        "eta": int(cursor) if on else None, "waits": ("usage" if on else "off") if waits else None}
-    out["items"] = _plan_items(cursor, waits, on, hist, run, run_end)
+                        "eta": int(cursor) if on and not (proj and waits) else None,
+                        "waits": ("usage" if on else "off") if waits or held_wait else None}
+    out["items"] = _plan_items(cursor, waits, on, hist, run, run_end, proj, U)
     out["items_total"] = _items_total(out["items"], waits, on)
     return out
 
@@ -1071,7 +1127,7 @@ def _items_total(items, waits, on):
     if not items:
         return None
     t = {"items": len(items), "minutes": round(sum(e["est"] for e in items.values())), "eta": None, "waits": None}
-    if waits or not on:
+    if waits or not on or any(e.get("usage_wait") for e in items.values()):
         t["waits"] = "off" if not on else "usage"
     if on and all(e.get("eta") for e in items.values()):  # H109: held by the usage, still a time, later
         t["eta"] = max(e["eta"] for e in items.values())
@@ -1087,7 +1143,7 @@ def _schedule():
         return []
 
 
-def _plan_items(cursor, waits, on, hist, run, run_end=None):
+def _plan_items(cursor, waits, on, hist, run, run_end=None, proj=None, U=None):
     """H95: each waiting planned item, soonest first: how long, and when it should start and be done. It
     starts at its time, or once the job list and the items before it are done (the job list goes first);
     the routine looks every minute. The routine off: no times, only how long. Waiting on the usage (H109):
@@ -1110,16 +1166,39 @@ def _plan_items(cursor, waits, on, hist, run, run_end=None):
             e["priority"] = True
         if waits or not on:
             e["waits"] = "off" if not on else "usage"
+        cost = U.cost_for(est, i["text"], kind, hist) if U else None
+        if cost:
+            e["cost"], e["cost_how"] = {k: cost[k] for k in U.KEYS}, cost["how"]
+
+        def fit(start):
+            """H172: the first minute from start when its usage fits; it counts for the work after it."""
+            if not proj:
+                return start
+            t = proj.fits_at(cost, start)
+            if t is None:
+                e["never"] = True
+                return None
+            if t > start + 59:
+                e["usage_wait"] = True
+                e["waits"] = "usage"
+            proj.add(cost, max(start, t))
+            return max(start, t)
         if on:
             at = dt.datetime.strptime(i["at"], "%Y-%m-%d %H:%M").timestamp()
             if i.get("priority"):  # H99: from when the running job is done, not the whole job list
-                start = max(at, pcursor) + GAP * 60
+                start = fit(max(at, pcursor) + GAP * 60)
+                if start is None:
+                    out[str(i["n"])] = e
+                    continue
                 pcursor = start + est * 60
                 if start < cursor:  # it cuts in ahead of the waiting jobs
                     cursor += (est + GAP) * 60
                 e["start"], e["eta"] = int(start), int(pcursor)
             else:
-                start = max(at, cursor) + GAP * 60  # cursor: now, or when the job list should be done
+                start = fit(max(at, cursor) + GAP * 60)  # cursor: now, or when the job list should be done
+                if start is None:
+                    out[str(i["n"])] = e
+                    continue
                 cursor = start + est * 60
                 e["start"], e["eta"] = int(start), int(cursor)
             e["later"] = start - at > 5 * 60  # starts later than planned: the job list or earlier items first
@@ -1137,13 +1216,36 @@ def dur(m):
     return f"{m // 60} h {m % 60:02d}" if m % 60 else f"{m // 60} h"
 
 
+def _cost_words(e):
+    """H172: a job's estimated usage next to its time, and what it used so far or in all."""
+    try:
+        import usagecost as U
+    except Exception:
+        return ""
+    if e.get("finished"):
+        return f"; {U.used_words(e['cost'])}" if e.get("cost") else ""
+    s = f"; {U.cost_words(e['cost'])}" if e.get("cost") else ""
+    if e.get("used"):
+        s += f" ({U.used_words(e['used'])} so far)"
+    return s
+
+
+def _day(t, now):
+    return "" if time.strftime("%Y-%m-%d", time.localtime(t)) == time.strftime("%Y-%m-%d", time.localtime(now)) \
+        else time.strftime("%A ", time.localtime(t))
+
+
+USAGE_START = "when the usage leaves room for it"  # H172: said next to a start the usage holds back
+
+
 def words(n, p):
     """One job's estimate in words, for jobs.py list and a call."""
     e = p["jobs"].get(str(n))
     if not e:
         return ""
     if e.get("finished"):
-        return f"estimated {dur(e['est'])}, took {dur(e['actual'])}" if e.get("est") else f"took {dur(e['actual'])}"
+        return (f"estimated {dur(e['est'])}, took {dur(e['actual'])}" if e.get("est") else f"took {dur(e['actual'])}") \
+            + _cost_words(e)
     if "left" in e:
         if e.get("over"):
             s = f"estimated {dur(e['est'])}, running {dur(e['so_far'])}: taking longer than estimated"
@@ -1151,9 +1253,14 @@ def words(n, p):
             s = f"about {dur(e['left'])} left of {dur(e['est'])}"
     else:
         s = f"about {dur(e['est'])}"
-    if e.get("eta"):
-        s += f", done around {hhmm(e['eta'])}"
-        if e.get("waits") == "usage":
+    s += _cost_words(e)
+    if e.get("start"):  # H172: when the usage should leave room for it
+        s += f", starts around {_day(e['start'], p['now'])}{hhmm(e['start'])} {USAGE_START}"
+    if e.get("never"):
+        s += ", it doesn't fit under the usage lines as they're set (a fixed line), so no time"
+    elif e.get("eta"):
+        s += f", done around {_day(e['eta'], p['now'])}{hhmm(e['eta'])}"
+        if e.get("waits") == "usage" and not e.get("start"):
             s += f", but {USAGE_LATE}"
     elif e.get("waits") == "usage":
         s += ", when it's done waits on the usage"
@@ -1167,14 +1274,17 @@ def item_words(n, p):
     e = (p.get("items") or {}).get(str(n))
     if not e:
         return ""
-    s = f"about {dur(e['est'])}"
-    if e.get("eta"):
-        day = lambda t: "" if time.strftime("%Y-%m-%d", time.localtime(t)) == time.strftime("%Y-%m-%d", time.localtime(p["now"])) \
-            else time.strftime("%A ", time.localtime(t))
-        if e.get("later"):
+    s = f"about {dur(e['est'])}" + _cost_words(e)
+    if e.get("never"):
+        s += ", it doesn't fit under the usage lines as they're set (a fixed line), so no time"
+    elif e.get("eta"):
+        day = lambda t: _day(t, p["now"])  # noqa: E731
+        if e.get("usage_wait"):  # H172
+            s += f", starts around {day(e['start'])}{hhmm(e['start'])} {USAGE_START}"
+        elif e.get("later"):
             s += f", starts around {day(e['start'])}{hhmm(e['start'])} (after the work before it)"
         s += f", done around {day(e['eta'])}{hhmm(e['eta'])}"
-        if e.get("waits") == "usage":
+        if e.get("waits") == "usage" and not e.get("usage_wait"):
             s += f", but {USAGE_LATE}"
     elif e.get("waits") == "usage":
         s += ", when it's done waits on the usage"

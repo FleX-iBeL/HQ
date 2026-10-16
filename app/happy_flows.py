@@ -5606,7 +5606,7 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need(p["total"]["jobs"] == 2 and p["total"]["minutes"] == 14 + 1 + 6 and p["total"]["eta"] == p["jobs"][str(b)]["eta"],
              f"the total for the whole list is wrong: {p['total']}")
         lst = jobs("list")
-        need("Estimate: about 14 min, done around" in lst and "All 2 jobs: about 21 min, all done around" in lst and "(estimate)" in lst,
+        need("Estimate: about 14 min; about 7% of the 5-hour and 1.4% of the week, done around" in lst and "All 2 jobs: about 21 min, all done around" in lst and "(estimate)" in lst,
              f"list doesn't say the estimates: {lst}")
         need("No estimate has been checked" in lst, f"list doesn't say how close the estimates have been: {lst}")
         # A held job, and everything after it, waits on the usage. H109: the times stay, as if the usage
@@ -5772,6 +5772,147 @@ print(json.dumps(o, default=str))
         need((est_dir / "job-estimates-backs.json").exists(), "H167: the estimates from the jobs before them aren't kept")
         need(real.exists() == (before is not None) and (before is None or real.read_text() == before),
              "the test touched the real estimates history")
+        # H172: usage that keeps itself in check. Each job's real usage (start, every minute, done; a reset in between
+        # counted, a hold not), past jobs' from the saved readings, an estimate from the finished jobs like it (START_ROOM's
+        # rates only the fallback), when it fits under the stop lines, and a pause at about twice its estimate.
+        # Made-up readings and a made-up log (HQ_USAGE, HQ_USAGE_LOG); without them a test copy reads no usage at all.
+        u_file, u_log = self.tmp / "h172-usage.json", self.tmp / "h172-usage.log"
+        env2 = {**env, "HQ_USAGE": str(u_file), "HQ_USAGE_LOG": str(u_log)}
+        iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))  # noqa: E731
+        def usage_now(five, week, r5, rw):
+            u_file.write_text(json.dumps({"readable": True, "checkedAt": iso(time.time()), "limits": [
+                {"label": "5-hour limit", "percent": five, "resetsAt": iso(r5)},
+                {"label": "Weekly · all models", "percent": week, "resetsAt": iso(rw)}]}))
+        def jobs2(*a, ok=True):
+            r = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=env2)
+            need((r.returncode == 0) == ok, f"jobs.py {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
+            return r.stdout + r.stderr
+        for j in json.loads(jobs2("next"))["waiting"]:
+            jobs2("mark", str(j["n"]), "cancelled 12:00")
+        t0 = time.time()
+        usage_now(10, 20, t0 + 3 * 3600, t0 + 4 * 86400)
+        u1 = int(jobs2("add", "Build H7, flow 54, the usage count", "--kind=build").split()[1])
+        jobs2("mark", str(u1), "running since " + time.strftime("%H:%M"))
+        cnt = json.loads((est_dir / "job-usage.json").read_text())[str(u1)]
+        need(cnt["running"] and cnt["seg"]["five"][0] == 10 and cnt["est"] and cnt["est"]["how"] == "fallback"
+             and cnt["est"]["five"] == round(0.5 * cnt["est"]["minutes"], 1), f"H172: a job's start doesn't start its usage count: {cnt}")
+        r172 = sp.run(["python3", "-c", """
+import sys, json, time; sys.path.insert(0, sys.argv[1]); import usagecost as U
+u, n, t0 = sys.argv[2], int(sys.argv[3]), time.time()
+iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+def at(five, week, r5):
+    json.dump({"readable": True, "checkedAt": iso(time.time()), "limits": [{"label": "5-hour limit", "percent": five, "resetsAt": iso(r5)},
+              {"label": "Weekly · all models", "percent": week, "resetsAt": iso(t0 + 4 * 86400)}]}, open(u, "w"))
+o = {}
+at(13, 21, t0 + 3 * 3600); o["a"] = U.track(n)["so_far"]
+at(2, 21, t0 + 8 * 3600); o["reset"] = U.track(n)["so_far"]          # the 5-hour window reset: 3 before it, 2 after
+U.hold(n); at(30, 25, t0 + 8 * 3600); o["held"] = U.track(n)["so_far"]  # held: what others use doesn't count
+U.start(n); at(31, 25, t0 + 8 * 3600); o["back"] = U.track(n)["so_far"]
+o["over"] = [U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 5, "weekly": 0.2}}),
+             U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 4, "weekly": 0.2}}),
+             U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 2, "weekly": 1.2}}),
+             U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 9, "weekly": 0}, "allowed": True}),
+             U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 9, "weekly": 0}, "late": True})]
+o["words"] = U.paused_words(7, "H7 on the HQ roadmap: the usage count. Read the H7 row", {"line": "five", "used": 5, "est": 2})
+o["fb"] = U.cost_for(10, "zzz nothing alike", "other", hist=[])
+h = [{"n": 800 + i, "kind": "build", "actual": 10, "done": i + 1, "how": "seen", "machine": "vps",
+      "about": f"the calendar colours sheet from google, part {w}", "cost": {"five": 2, "weekly": 0.4}} for i, w in enumerate("abcd")]
+h += [{"n": 810 + i, "kind": "build", "actual": 10, "done": 10 + i, "how": "seen", "machine": "vps",
+       "about": f"weather forecast rain text {w}", "cost": {"five": 10, "weekly": 2}} for i, w in enumerate("efgh")]
+o["sim"] = U.cost_for(20, "the calendar colours in the sheet from google", "build", hist=h)
+o["kind"] = U.cost_for(20, "qqzz", "build", hist=h)
+o["few"] = U.cost_for(20, "the calendar colours in the sheet from google", "build", hist=h[:2])
+L = {"five": {"moving": False, "fixed": 60}, "weekly": {"moving": False, "fixed": 90}, "fable": {"moving": False, "fixed": 90}}
+M = {"five": {"moving": True, "fixed": 60}, "weekly": {"moving": True, "fixed": 90}, "fable": {"moving": True, "fixed": 90}}
+R = lambda f, w, r5=t0 + 3600, rw=t0 + 5 * 86400: {"five": {"pct": f, "reset": r5}, "weekly": {"pct": w, "reset": rw}}
+need = {"five": 4, "weekly": 0.5}
+t0 = int(t0)
+o["fixed"] = U.Projection(R(58, 20), L, t0).fits_at(need, t0) - t0
+o["now"] = U.Projection(R(50, 20), L, t0).fits_at(need, t0) - t0
+o["past"] = U.Projection(R(58, 20), L, t0).fits_at(need, t0, weekly_only=True) - t0
+o["never"] = U.Projection(R(58, 20, None), L, t0).fits_at(need, t0)
+p = U.Projection(R(38, 20, t0 + 3 * 3600), M, t0)   # moving: 2 h into the window the line is at 40%
+o["moving"] = p.fits_at(need, t0) - t0
+p.add({"five": 10, "weekly": 0}, t0)
+o["after"] = p.fits_at(need, t0) - t0
+o["weekBig"] = U.Projection(R(5, 89.8), L, t0).fits_at(need, t0) - t0  # the weekly line holds it until the week resets
+print(json.dumps(o, default=str))
+""", str(jv / "routine"), str(u_file), str(u1)], capture_output=True, text=True, env=env2)
+        need(r172.returncode == 0, f"H172: the usage check didn't run: {r172.stderr[-800:]}")
+        o2 = json.loads(r172.stdout)
+        need(o2["a"] == {"five": 3, "weekly": 1} and o2["reset"]["five"] == 5, f"H172: the usage so far is wrong, or a reset isn't counted: {o2}")
+        need(o2["held"]["five"] == 5 and o2["back"]["five"] == 6, f"H172: the usage while held counts, or it doesn't count on after: {o2}")
+        need(o2["over"][0]["line"] == "five" and o2["over"][1] is None and o2["over"][2]["line"] == "weekly"
+             and o2["over"][3] is None and o2["over"][4] is None, f"H172: the pause at about twice the estimate is off: {o2['over']}")
+        need("twice" in o2["words"] and "the usage count" in o2["words"] and "H7" not in o2["words"] and "won't start again by itself" in o2["words"],
+             f"H172: Donna's words for a paused job aren't plain: {o2['words']}")
+        need((o2["fb"]["five"], o2["fb"]["weekly"], o2["fb"]["how"]) == (5, 1, "fallback"), f"H172: the fallback isn't START_ROOM's rates: {o2['fb']}")
+        need((o2["sim"]["five"], o2["sim"]["weekly"], o2["sim"]["how"]) == (4, 0.8, "similar")
+             and (o2["kind"]["five"], o2["kind"]["how"]) == (12, "kind") and o2["few"]["how"] == "fallback",
+             f"H172: the estimate doesn't come from the finished jobs like it: {o2}")
+        need(o2["fixed"] == 3600 and o2["now"] == 0 and o2["past"] == 0 and o2["never"] is None,
+             f"H172: when it fits under a fixed line (reset, room now, past the line, never) is off: {o2}")
+        need(300 <= o2["moving"] <= 480 and 2000 <= o2["after"] <= 2300, f"H172: when it fits under the moving line, or after the work before it, is off: {o2}")
+        need(abs(o2["weekBig"] - 5 * 86400) <= 60, f"H172: the weekly line doesn't hold it until the week resets: {o2['weekBig']}")
+        usage_now(31, 25, t0 + 8 * 3600, t0 + 4 * 86400)
+        jobs2("done", str(u1))
+        fin = json.loads((est_dir / "job-estimates-history.jsonl").read_text().splitlines()[-1])
+        need(fin["n"] == u1 and fin.get("cost", {}).get("five") == 6 and fin.get("cost_how") == "read" and fin.get("est_cost"),
+             f"H172: a finished job doesn't keep its real usage next to its time: {fin}")
+        need(str(u1) not in json.loads((est_dir / "job-usage.json").read_text()), "H172: a finished job's count stays")
+        # When it fits, in the plan, jobs.py list and the page: the 5-hour line full until its reset in 30 minutes.
+        usage_now(99, 21, t0 + 1800, t0 + 4 * 86400)
+        w1 = int(jobs2("add", "Build H8, flow 54, after the reset", "--kind=build").split()[1])
+        pl = json.loads(sp.run(["python3", str(jv / "routine/estimate.py"), "plan"], capture_output=True, text=True, env=env2).stdout)
+        e8 = pl["jobs"][str(w1)]
+        need(e8.get("start") and -60 <= e8["start"] - (t0 + 1800) <= 180 and e8["eta"] == e8["start"] + e8["est"] * 60
+             and e8.get("cost") and e8["waits"] == "usage", f"H172: the plan doesn't say when it starts (the reset): {e8}")
+        l8 = jobs2("list")
+        need("starts around" in l8 and "when the usage leaves room for it" in l8 and "of the 5-hour and" in l8,
+             f"H172: jobs.py list doesn't say the usage and when it starts: {l8}")
+        usage_now(1, 21, t0 + 4 * 3600, t0 + 4 * 86400)
+        e8 = json.loads(sp.run(["python3", str(jv / "routine/estimate.py"), "plan"], capture_output=True, text=True, env=env2).stdout)["jobs"][str(w1)]
+        need(not e8.get("start") and not e8.get("waits"), f"H172: with room, a job still waits: {e8}")
+        jobs2("mark", str(w1), "paused: used about twice its estimated usage")  # out of line: the item goes first
+        i9 = int(sp.run(["python3", str(jv / "routine/schedule.py"), "add", "now", "Build H9, flow 54, a planned item"], capture_output=True,
+                        text=True, env=env2).stdout.split()[1])
+        usage_now(99, 21, t0 + 1800, t0 + 4 * 86400)
+        pi = json.loads(sp.run(["python3", str(jv / "routine/estimate.py"), "plan"], capture_output=True, text=True, env=env2).stdout)["items"][str(i9)]
+        si = sp.run(["python3", str(jv / "routine/schedule.py"), "list"], capture_output=True, text=True, env=env2).stdout
+        need(pi.get("cost") and pi.get("usage_wait") and pi["start"] >= t0 + 1740 and "when the usage leaves room for it" in si,
+             f"H172: a planned item doesn't say its usage and when it fits: {pi}")
+        sp.run(["python3", str(jv / "routine/schedule.py"), "cancel", str(i9)], capture_output=True, env=env2)
+        # A paused job: not started again by itself; a call resumes it (in line again, held) or drops it.
+        nx = json.loads(jobs2("next"))
+        need(all(j["n"] != w1 for j in nx["waiting"] + nx["ready"] + nx["held"] + nx["running"]), "H172: a paused job is still in line")
+        jobs2("resume", "999", ok=False)
+        r9 = jobs2("resume", str(w1))
+        need("carries on" in r9 and any(j["n"] == w1 and j["state"].startswith("held") for j in json.loads(jobs2("next"))["waiting"])
+             and json.loads((est_dir / "job-usage.json").read_text())[str(w1)].get("allowed"), f"H172: resume doesn't put it back in line: {r9}")
+        jobs2("mark", str(w1), "paused: used about twice its estimated usage")
+        need("cancelled" in jobs2("stop", str(w1)), "H172: a paused job can't be dropped")
+        # Past jobs: their usage from the saved readings, where a reading is close enough to both ends.
+        tb = time.mktime(time.strptime("2026-10-14 12:00:00", "%Y-%m-%d %H:%M:%S"))
+        u_log.write_text("".join(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(tb + m * 60))} usage check · from a job's status line, "
+                                 f"read just now: {f}%  5-hour limit  (stop line 60%) / {w}%  Weekly · all models  (stop line 40%)\n"
+                                 for m, f, w in ((0, 40, 20), (5, 44, 20), (10, 47, 21), (12, 3, 21), (20, 6, 22))))
+        rb = sp.run(["python3", "-c", """
+import sys, json; sys.path.insert(0, sys.argv[1]); import usagecost as U
+r = U.log_readings(); tb = float(sys.argv[2])
+print(json.dumps({"n": len(r), "c": U.cost_between(r, tb, tb + 20 * 60), "none": U.cost_between(r, tb + 3 * 3600, tb + 4 * 3600)}))
+""", str(jv / "routine"), str(tb)], capture_output=True, text=True, env=env2)
+        need(rb.returncode == 0, f"H172: the backfill check didn't run: {rb.stderr[-500:]}")
+        ob = json.loads(rb.stdout)
+        need(ob["n"] == 5 and ob["c"] == {"five": 13, "weekly": 2} and ob["none"] is None,
+             f"H172: a past job's usage from the saved readings is off (a reset counted, no reading near: empty): {ob}")
+        need("job_need(job)" in (jv / "routine/tick.py").read_text() and "usage_overrun(job, s)" in (jv / "routine/tick.py").read_text()
+             and "backfill_once" in (jv / "routine/tick.py").read_text(), "H172: the routine doesn't use the usage estimate, the pause or the backfill")
+        page72 = (jv / "status/index.html").read_text()
+        need("etaCost(e.cost)" in page72 and "USAGE_START" in page72 and "ready|held|paused" in page72,
+             "H172: the status page doesn't show the usage next to the time, when it starts, or a paused job")
+        need("H172" in config.VOICE_RULES and "resume N" in config.VOICE_RULES, "H172: the call rules don't say the usage estimate or resume")
+        pol72 = Policy(config.FOLDER)
+        need(pol72.decide("Bash", {"command": f'python3 "{ROOT}/routine/jobs.py" resume 7'}).verdict == ALLOW, "H172: a call can't resume a paused job")
         # The status page: the server serves the plan, the page shows it in words.
         srv = (jv / "status/server.mjs").read_text()
         page = (jv / "status/index.html").read_text()
@@ -5796,7 +5937,8 @@ print(json.dumps(o, default=str))
         return ("kinds from the job's words; estimate set when added; per job and total with done-around; held waits on the usage; "
                 "done writes estimate next to real time and the next estimate learns; page and list show them; "
                 "planned items too, after the job list and the items before them, their kind going with them (H95), and their total (H107); held by the usage, the times stay with a soft red note (H109); "
-                "a quick look gives each job and item a size that moves its estimate (H167)")
+                "a quick look gives each job and item a size that moves its estimate (H167); "
+                "each job's real usage counted (a reset in, a hold out), its estimate from the jobs like it, when it fits, the pause at twice (H172)")
 
     # 55
     async def flow55(self) -> str:
@@ -7576,6 +7718,13 @@ console.log(JSON.stringify({{
   bFable: [84, 83].map((p) => usageVerdict({{ readable: true, limits: [{{ ...fable, percent: p }}] }}, F, when, {{ start: true }}).stop),
   bPast: [usageVerdict(r(95, 94), F, when, {{ weeklyOnly: true, start: true }}).stop, usageVerdict(r(95, 93), F, when, {{ weeklyOnly: true, start: true }}).stop],
   bReason: usageVerdict(r(66), F, when, {{ start: true }}).reason,
+  // H172: the room is the job's estimated usage from the jobs like it (Weekly Fable takes the weekly one); the rates only without it.
+  n5: [64, 65].map((p) => usageVerdict(r(p), F, when, {{ start: true, minutes: 12, need: {{ five: 5, weekly: 0.3 }} }}).stop),
+  nWeek: [94, 95].map((p) => usageVerdict(r(5, p), F, when, {{ start: true, minutes: 12, need: {{ five: 1, weekly: 0.5 }} }}).stop),
+  nFable: [84, 85].map((p) => usageVerdict({{ readable: true, limits: [{{ ...fable, percent: p }}] }}, F, when, {{ start: true, need: {{ five: 1, weekly: 0.5 }} }}).stop),
+  nPast: usageVerdict(r(99, 5), F, when, {{ weeklyOnly: true, start: true, need: {{ five: 30, weekly: 0.5 }} }}).stop,
+  nReason: usageVerdict(r(66), F, when, {{ start: true, minutes: 12, need: {{ five: 4.5, weekly: 0.3 }} }}).reason,
+  pyMoving: [0, 29, 30, 60, 150, 299].map((m) => at(m).line), pyWeek: [0, 4000, 5040, 10079].map((m) => wk(m).line),
   none: lineSettings('# x'), dflt: parseRoadmap(base).usageLines,
   set: lineSettings(base + '- **5-hour line: fixed.** z\\n- **Weekly line: fixed at 95%.** z\\n- **Fable line: moving; fixed at 80% when switched.** z\\n'),
   flat: lineSettings(base + '- **Weekly limit: 60%.** z\\n'),
@@ -7616,13 +7765,37 @@ console.log(JSON.stringify({{
         need(d["bPast"] == [True, False], f"a job past the line skips the weekly buffer: {d['bPast']}")
         need("about 10 min of work needs 5% of room under its stop line of 70%, there's 4% (at 66%)" in d["bReason"]
              and "buffer" not in d["bReason"].lower(), f"the waiting reason is off: {d['bReason']}")
+        # H172: the room is the job's estimated usage (from the finished jobs like it), H141's rates only the fallback.
+        need(d["n5"] == [False, True] and d["nWeek"] == [False, True] and d["nFable"] == [False, True] and not d["nPast"],
+             f"H172: the start check doesn't use the job's estimated usage: {d['n5']}, {d['nWeek']}, {d['nFable']}, {d['nPast']}")
+        need("about 12 min of work, estimated to use 4.5% of it, doesn't fit under its stop line of 70%: there's 4% of room (at 66%)" in d["nReason"],
+             f"H172: the waiting reason doesn't say the estimated usage and the room: {d['nReason']}")
+        # The Python side (routine/usagecost.py, for when it fits) reads the lines as status/usage.mjs does.
+        sys.path.insert(0, str(ROOT / "routine"))
+        import usagecost as U
+        from datetime import timezone as _tz
+        R = datetime(2026, 10, 12, 20, 0, tzinfo=_tz.utc).timestamp()
+        need([U.moving_line("five", R, R - 5 * 3600 + m * 60 + 1) for m in (0, 29, 30, 60, 150, 299)] == d["pyMoving"]
+             and [U.moving_line("weekly", R + 3 * 86400, R + 3 * 86400 - 7 * 86400 + m * 60 + 1) for m in (0, 4000, 5040, 10079)] == d["pyWeek"],
+             f"H172: the Python moving lines aren't usage.mjs's: {d['pyMoving']} {d['pyWeek']}")
+        base_md = "# x\n\n- **Usage limit: 70%.** y\n"
+        for md, js_ in ((base_md, d["dflt"]), (base_md + "- **5-hour line: fixed.** z\n- **Weekly line: fixed at 95%.** z\n- **Fable line: moving; fixed at 80% when switched.** z\n", d["set"]),
+                        (base_md + "- **Weekly limit: 60%.** z\n", d["flat"]), ("# x", d["none"])):
+            need(U.line_settings(md) == js_, f"H172: the Python line settings aren't usage.mjs's: {U.line_settings(md)} vs {js_}")
+        need(U.line_settings(ROADMAP.read_text()) == json.loads(sp.run([node, "--input-type=module", "-e",
+             f"import {{ lineSettings }} from {json.dumps((ROOT / 'status/usage.mjs').as_uri())}; import {{ readFileSync }} from 'node:fs'; "
+             f"console.log(JSON.stringify(lineSettings(readFileSync({json.dumps(str(ROADMAP))}, 'utf8'))))"], capture_output=True, text=True).stdout),
+             "H172: the Python line settings differ from usage.mjs's on the roadmap itself")
+        need(U.FALLBACK == {"five": d["rates"]["five"] / d["rates"]["per"], "weekly": d["rates"]["weekly"] / d["rates"]["per"]},
+             f"H172: the fallback rates aren't START_ROOM's: {U.FALLBACK}")
         gate = (ROOT / "status/save-usage.mjs").read_text()
-        need("{ weeklyOnly, start: true, minutes }" in gate and "'--minutes'" in gate, "the routine's start check doesn't take the job's estimate")
+        need("{ weeklyOnly, start: true, minutes, need:" in gate and "'--minutes'" in gate and "'--need'" in gate,
+             "the routine's start check doesn't take the job's estimate and its estimated usage")
         need(gate.count("start: true") == 1, "the running job's own check keeps the room too")
         need("START_BUFFER" not in gate + (ROOT / "status/usage.mjs").read_text(), "H114's fixed buffer is still there")
         tick = (ROOT / "routine/tick.py").read_text()
-        need('["--minutes", str(m)] if (m := job_minutes(job))' in tick and "def job_minutes(job):" in tick,
-             "the routine doesn't give the gate the job's estimate")
+        need('+ job_need(job)' in tick and "def job_need(job):" in tick and '"--need", f"five=' in tick,
+             "the routine doesn't give the gate the job's estimate and its estimated usage (H172)")
         page = (ROOT / "status/index.html").read_text()
         need("waits for the usage line: `" in page and "gate?.state === 'waiting'" in page, "the status page doesn't say why the job waits")
         # jobs.py list says why the job first in line waits, from the routine's last start check (a copy, never the real note).
@@ -9264,6 +9437,38 @@ print("H81OUT " + json.dumps(out))
         last = o["last"]
         need(last["n"] == 500 and last.get("machine") and last.get("type") in ("laptop", "server") and "internet" in last["tags"],
              f"a finished job doesn't note its computer and tags: {last}")
+        # H172: the usage per job from both computers: the other's finished jobs with a cost count (the plan's usage is
+        # the same account), its own lines go out with their cost, and the saved readings only fill this computer's own.
+        d72 = self.tmp / "roadmap-H81-usage"
+        d72.mkdir(parents=True, exist_ok=True)
+        lg = self.tmp / "h81-usage.log"
+        r72 = sp.run(["python3", "-c", r"""
+import json, sys, time
+sys.path.insert(0, sys.argv[1])
+d, lg = sys.argv[2], sys.argv[3]
+import estimate as E, usagecost as U
+E.me = lambda: {"name": "vps", "label": "VPS", "type": "server"}
+tb = time.mktime(time.strptime("2026-10-14 12:00:00", "%Y-%m-%d %H:%M:%S"))
+peer = [{"n": 10 + i, "kind": "build", "actual": 10, "done": tb - 86400 + i, "how": "seen", "machine": "lap",
+         "about": f"calendar colours google {w}", "cost": {"five": 3, "weekly": 0.5}} for i, w in enumerate("abcd")]
+json.dump({"name": "lap", "label": "Laptop", "type": "laptop", "lines": peer, "at": int(time.time())}, open(E.PEER, "w"))
+own = [{"n": 1, "kind": "build", "actual": 20, "done": int(tb + 20 * 60), "how": "seen", "machine": "vps", "about": "weather rain"}]
+open(E.HISTORY, "w").write("".join(json.dumps(h) + "\n" for h in own))
+o = {"peer": U.cost_for(10, "calendar colours from google", "build")}
+open(lg, "w").write("".join(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(tb + m * 60))} usage check · from a call, read just now: "
+                            f"{f}%  5-hour limit  (stop line 60%) / {w}%  Weekly · all models  (stop line 40%)\n" for m, f, w in ((-1, 5, 30), (21, 9, 31))))
+o["fill"] = U.backfill(U.log_readings(lg))
+o["share"] = E.share()["lines"]
+o["peerAfter"] = json.load(open(E.PEER))["lines"][0]
+print(json.dumps(o))
+""", str(ROOT / "routine"), str(d72), str(lg)], capture_output=True, text=True,
+                     env={**os.environ, "HQ_ROADMAP": str(rm), "HQ_ESTIMATES": str(d72)})
+        need(r72.returncode == 0, f"H172: the usage check didn't run: {r72.stderr[-600:]}")
+        o72 = json.loads(r72.stdout)
+        need((o72["peer"]["five"], o72["peer"]["weekly"], o72["peer"]["based"]) == (3, 0.5, 4) and o72["peer"]["how"] != "fallback",
+             f"H172: the other computer's finished jobs don't count for the usage estimate: {o72['peer']}")
+        need(o72["fill"] == [1, 0] and o72["share"][0].get("cost") == {"five": 4, "weekly": 1} and o72["share"][0].get("cost_how") == "log"
+             and "cost_how" not in o72["peerAfter"], f"H172: the saved readings don't fill only this computer's own jobs, or share leaves the cost out: {o72}")
         srv = (ROOT / "status/server.mjs").read_text()
         need("path0 === '/api/estimates'" in srv and "'share'" in srv, "the status server doesn't answer /api/estimates")
         page = (ROOT / "status/index.html").read_text()
@@ -9273,7 +9478,8 @@ print("H81OUT " + json.dumps(out))
         return ("each computer's own jobs first, the other's scaled (laptop about 2 times the VPS), a new computer starts "
                 "from the other's, a slow tag moves the estimate, said in words; only its own lines shared; served and shown; "
                 f"H166: a calendar job from the calendar jobs ({o['cal']['est']} min, the kind alone {o['cal']['by_kind']}), "
-                "unlike ones keep the kind's; finished jobs keep their words")
+                "unlike ones keep the kind's; finished jobs keep their words; H172: the usage per job from both computers' jobs, "
+                "the saved readings fill only its own")
 
     async def flow80(self) -> str:
         """F9, no Claude: a call left quiet stays connected. Pipecat ends a pipeline after 5 minutes with nothing
@@ -10390,7 +10596,7 @@ FLOWS = {
     51: ("H51: a call saves the usage it gets back, for the status page", False, "flow51"),
     52: ("H49: the space bar in the desktop app: tap mutes, hold talks, letting go sends", False, "flow52"),
     53: ("H57: a button for every past call: the list, one call read only", False, "flow53"),
-    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work", False, "flow54"),
+    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work; H172: its usage", False, "flow54"),
     55: ("F14: her voice off also silences the thinking tick, the talk sound and the click", False, "flow55"),
     56: ("H59: an update to a fake newer version: backup, local/ kept, note for Claude, waits for a call", False, "flow56"),
     57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),
@@ -10417,7 +10623,7 @@ FLOWS = {
     78: ("H86: the screen in the colour of who I'm calling; my lines green, hers in her colour", False, "flow78"),
     79: ("H88: heartbeats for both computers: this one up and online, the other answering; on both status pages", False, "flow79"),
     80: ("F9: a call left quiet stays connected: no idle timeout; a hang-up or a lost connection still ends it", False, "flow80"),
-    81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data; H166: from the most similar jobs", False, "flow81"),
+    81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data; H166: from the most similar jobs; H172: usage too", False, "flow81"),
     82: ("H104, H108: times on calls as 5 30 in the afternoon, no colon, no words, never half, quarter or o'clock", False, "flow82"),
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one; just text, the field grows (H117)", False, "flow83"),
     84: ("H106, H112, F26: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can; changed on a call at once; one row on the phone", False, "flow84"),

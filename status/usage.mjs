@@ -146,7 +146,9 @@ export function stopLine(l, lines, now = new Date()) {
  * estimated work?" and "so then its 0.2% for every 2 minutes for weekly?". A new job only starts when the room under
  * each stop line is bigger than its own estimate needs; a job already running still goes on until the line itself.
  * The two rates live here and only here: percent of room for every START_ROOM.per minutes of estimated work.
- * Only the routine's start check (save-usage.mjs --gate --minutes N) uses them.
+ * H172 (16 October 2026): the routine's start check now gets the job's estimated usage from the finished jobs like it
+ * (routine/usagecost.py, save-usage.mjs --gate --need five=X,weekly=Y); these rates are only the fallback, for work with
+ * too little history (usagecost.py's FALLBACK says the same per minute).
  */
 export const START_ROOM = { per: 2, five: 1, weekly: 0.2, fable: 0.2 };
 
@@ -166,11 +168,12 @@ export function roomNeeded(key, minutes = START_MINUTES) {
  * @param {ReturnType<typeof usageReading> | null} reading
  * @param {ReturnType<typeof lineSettings>} lines null: the roadmap names no usage limit, nothing stops
  * @param {Date} [now]
- * @param {{ weeklyOnly?: boolean, start?: boolean, minutes?: number }} [opts] weeklyOnly: only the weekly limits
- *   count (F13: a job past the line); start: the check before a new job starts, which needs room under each line for
- *   the job's estimate of `minutes` (H141, roomNeeded)
+ * @param {{ weeklyOnly?: boolean, start?: boolean, minutes?: number, need?: { five?: number, weekly?: number, fable?: number } }} [opts]
+ *   weeklyOnly: only the weekly limits count (F13: a job past the line); start: the check before a new job starts, which
+ *   needs room under each line for the job's estimated usage `need` in points (H172; Weekly Fable takes the weekly
+ *   one), else for its estimate of `minutes` at START_ROOM's rates (H141, roomNeeded)
  */
-export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = false, start = false, minutes } = {}) {
+export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = false, start = false, minutes, need } = {}) {
   if (!reading?.readable) return { stop: true, reason: 'The usage could not be read.' };
   if (!lines) return { stop: false, reason: '' };
   // A kept reading (F6) is old and from another session: shown, but never a stop.
@@ -180,8 +183,10 @@ export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = fa
     .filter((l) => !weeklyOnly || /^weekly/i.test(l.label))
     .map((l) => {
       const line = stopLine(l, lines, now).line;
-      const need = start ? roomNeeded(lineKey(l.label) ?? 'five', minutes) : 0;
-      return { ...l, line, need, room: Math.round(10 * (line - l.percent)) / 10 };
+      const key = lineKey(l.label) ?? 'five';
+      const est = need ? Number(need[key] ?? need.weekly ?? 0) : null;
+      const room = Math.round(10 * (line - l.percent)) / 10;
+      return { ...l, line, est, need: !start ? 0 : est !== null && Number.isFinite(est) ? est : roomNeeded(key, minutes), room };
     })
     .filter((l) => l.room <= l.need);
   if (over.length === 0) return { stop: false, reason: '' };
@@ -191,7 +196,9 @@ export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = fa
       .map((l) =>
         l.percent >= l.line
           ? `${l.label} is at ${l.percent}%, its stop line is ${l.line}%`
-          : `${l.label}: about ${Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes) : START_MINUTES} min of work needs ${l.need}% of room under its stop line of ${l.line}%, there's ${l.room}% (at ${l.percent}%)`,
+          : l.est !== null && Number.isFinite(l.est)
+            ? `${l.label}: about ${Number.isFinite(minutes) && minutes > 0 ? `${Math.round(minutes)} min of work, estimated to use ` : ''}${l.need}% of it, doesn't fit under its stop line of ${l.line}%: there's ${l.room}% of room (at ${l.percent}%)`
+            : `${l.label}: about ${Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes) : START_MINUTES} min of work needs ${l.need}% of room under its stop line of ${l.line}%, there's ${l.room}% (at ${l.percent}%)`,
       )
       .join('; ')}.`,
   };
