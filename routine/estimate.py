@@ -537,8 +537,7 @@ def me():
         import role
         name = role.my_name(role.config())
     except Exception:
-        import socket
-        name = socket.gethostname().split(".")[0]
+        name = hqpaths.host_name()
     return {"name": name, "label": hqpaths.short_name(), "type": "laptop" if hqpaths.IS_MAC else "server"}
 
 

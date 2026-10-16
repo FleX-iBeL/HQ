@@ -24,7 +24,8 @@ for line in sys.stdin:
     elif d.get("type") == "result":
         answer = d.get("result") or d.get("subtype")
         if d.get("is_error"):  # H42: say so, so the reason can be read afterwards
-            print(f"(the run ended with an error: {d.get('subtype') or 'error'})")
+            kind = d.get("subtype")  # H162: a hit limit comes back as subtype "success"; say the result instead
+            print(f"(the run ended with an error: {kind if kind and kind != 'success' else (d.get('result') or 'error')})")
 
 if answer:
     print(answer)

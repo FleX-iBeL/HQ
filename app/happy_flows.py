@@ -3374,7 +3374,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         # 6. Each mail check keeps its own output file (the window's script tees into it); nothing is opened.
         calls = []
         real_run = tick.subprocess.run
-        tick.subprocess.run = lambda *a, **k: calls.append(a)
+        tick.subprocess.run = lambda *a, **k: calls.append(a) or sp.CompletedProcess(a, 0, "", "")  # H162: off a Mac the tmux path reads returncode
         try:
             tick.start_mail()
         finally:
@@ -4483,11 +4483,11 @@ setTimeout(async () => {
         p_ = agents.find(config.FOLDER, "pepper"); d_ = agents.find(config.FOLDER, "donna")
         q = make_brain(config.MODEL_ALIASES[p_["model"]], pol, load=p_["load"], persona=agents.persona(p_, config.USER))._options
         d = make_brain(config.MODEL_ALIASES[d_["model"]], pol, load=d_["load"], persona=agents.persona(d_, config.USER))._options
-        need("You are Pepper" in q.system_prompt["append"] and "This is a Quick call" not in q.system_prompt["append"]
+        need("Who you are on this call: Pepper" in q.system_prompt["append"] and "This is a Quick call" not in q.system_prompt["append"]
              and q.model == config.MODEL_ALIASES["opus"], "Pepper's session isn't Deep's load on Opus with her personality (H46)")
-        need("You are Donna" in d.system_prompt["append"] and "This is a Quick call" in d.system_prompt["append"]
+        need("Who you are on this call: Donna" in d.system_prompt["append"] and "This is a Quick call" in d.system_prompt["append"]
              and d.model == config.MODEL_ALIASES["sonnet"], "Donna's session isn't Quick's load on Sonnet with her personality (H46)")
-        need(d.system_prompt["append"].index("# This chat is a live voice call") < d.system_prompt["append"].index("You are Donna"),
+        need(d.system_prompt["append"].index("# This chat is a live voice call") < d.system_prompt["append"].index("Who you are on this call: Donna"),
              "her personality doesn't come after the call rules")
         need("Pepper" in config.WHISPER_PROMPT and "Donna" in config.WHISPER_PROMPT, "speech recognition doesn't know the agents' names")
         # The test server: the list for the page (no personality text), the headshots, the page itself.
@@ -9926,7 +9926,8 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         for name, text in {**rules, "the ask-first note": ask}.items():
             text = text.replace(own, "") if own else text
             text = (text.replace(tools, "").replace(repeat, "").replace(config.PINGS_RULE, "")  # H124's command syntax (pings.py), not speech
-                    .replace(config.APPT_NOTES_RULE, ""))  # H146: his notes and the calendar's description, written, not spoken
+                    .replace(config.APPT_NOTES_RULE, "")  # H146: his notes and the calendar's description, written, not spoken
+                    .replace(getattr(config, "MAIL_FAST_RULE", "") or "\0", ""))  # H149's mail-fast "until" syntax (H162)
             hit = old.search(text)
             need(not hit, f"{name} still says a time another way: {hit and hit.group(0)!r}")
         need('Saturday at 6 30 in the evening?' in ask, "the ask-first note's example isn't in the new style")

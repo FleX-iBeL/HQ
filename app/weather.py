@@ -630,8 +630,12 @@ if __name__ == "__main__":
                           "due": due(s=s), "watches": [w["what"] for w in watches()], "told": s.get("told")},
                          ensure_ascii=False))
     elif cmd == "look":
-        print(json.dumps(look(dry="--dry" in args, general=True if "--general" in args else False if "--watches" in args else None),
-                         ensure_ascii=False))
+        try:
+            print(json.dumps(look(dry="--dry" in args, general=True if "--general" in args else False if "--watches" in args else None),
+                             ensure_ascii=False))
+        except (OSError, ValueError) as e:  # H162: the weather service busy (a 503) is one line, not a traceback
+            print(time.strftime("%Y-%m-%d %H:%M:%S"), f"weather: the look couldn't read the weather ({e}); the next one as planned")
+            sys.exit(1)
     elif cmd == "view":
         print(json.dumps(view(fresh="--fresh" in args), ensure_ascii=False, indent=1))
     else:

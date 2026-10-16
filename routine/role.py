@@ -142,7 +142,7 @@ def config() -> dict:
 
 def my_name(c=None) -> str:
     c = c if c is not None else config()
-    return c.get("name") or socket.gethostname().split(".")[0]
+    return c.get("name") or hqpaths.host_name()  # H162: not the network's name (a hotspot renames it)
 
 
 def chosen_main(c=None) -> str:

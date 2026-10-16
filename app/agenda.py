@@ -340,7 +340,8 @@ def _start(s: dict, t: float) -> None:
     s["asked"] = t
     _write(s)
     py = ROOT / ".venv" / "bin" / "python"
-    log = ROOT / "scratch" / "calendar.log"
+    # H162: a test's look logs next to its own calendar file, not in the real scratch/calendar.log
+    log = data_file().parent / "calendar.log" if os.environ.get("HQ_CALENDAR_FILE") else ROOT / "scratch" / "calendar.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     subprocess.Popen([str(py) if py.exists() else sys.executable, str(Path(__file__).resolve()), "look"],
                      cwd=str(ROOT), stdout=open(log, "a"), stderr=subprocess.STDOUT, start_new_session=True)

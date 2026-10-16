@@ -79,13 +79,36 @@ def where() -> str:
     return "Local · " + ("macOS" if IS_MAC else "Linux" if IS_LINUX else "Windows" if os.name == "nt" else sys.platform)
 
 
+_HOST = None
+
+
+def host_name() -> str:
+    """This computer's own short name, the one that doesn't move with the network (H162, 16 October 2026). On a
+    Mac the network's name (gethostname) follows the network it's on: on his phone's hotspot it became the phone's
+    ("iPhone-van-P took over" in the incident log of 14 October), so main and backup lost track of who is who.
+    There, scutil's LocalHostName (the name set in Sharing, e.g. Patricks-MacBook-Air) comes first."""
+    global _HOST
+    if _HOST:
+        return _HOST
+    name = ""
+    if IS_MAC:
+        try:
+            import subprocess
+            name = subprocess.run(["/usr/sbin/scutil", "--get", "LocalHostName"], capture_output=True,
+                                  text=True, timeout=3).stdout.strip()
+        except Exception:
+            name = ""
+    _HOST = name or socket.gethostname().split(".")[0]
+    return _HOST
+
+
 def short_name() -> str:
     """H88 (13 October 2026): this computer's short name for its heartbeat line on both status pages: HQ_LABEL
     when set (the server's, VPS), "Laptop" on a Mac, else the computer's own name (Claude's choice)."""
     label = os.environ.get("HQ_LABEL", "").strip()
     if label:
         return label
-    return "Laptop" if IS_MAC else socket.gethostname().split(".")[0]
+    return "Laptop" if IS_MAC else host_name()
 
 
 def support_dir() -> str:
@@ -208,7 +231,7 @@ def session(name: str) -> str:
 def ssh_host() -> str:
     """H56.2: the name to reach this server by from the laptop, for the watch line on the status page:
     HQ_SSH_HOST, else this computer's own name."""
-    return os.environ.get("HQ_SSH_HOST") or socket.gethostname().split(".")[0]
+    return os.environ.get("HQ_SSH_HOST") or host_name()
 
 
 def watch_cmd(name: str) -> str:
