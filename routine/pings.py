@@ -110,7 +110,9 @@ def _read_json(path: Path, default):
 class _Lock:
     def __enter__(self):
         folder().mkdir(parents=True, exist_ok=True)
-        self.f = open(folder() / ".pings.lock", "w")
+        # H152: "a", not "w": opening with "w" empties the file, which counts as a change, so the sync sent the
+        # lock over every minute. The lock file is also left out of the sync (sync.IGNORE_WORKSPACE).
+        self.f = open(folder() / ".pings.lock", "a")
         fcntl.flock(self.f, fcntl.LOCK_EX)
         return self
 
@@ -552,6 +554,7 @@ def watch(now: float | None = None, spawn=None, dry: bool = False) -> list[tuple
     out: list[tuple[str, str]] = []
     with _Lock():
         s = read()
+        before = json.dumps(s, sort_keys=True)
         evs = events()
         for why, key, facts in due(t, s, evs):
             if why == "appt":
@@ -577,7 +580,9 @@ def watch(now: float | None = None, spawn=None, dry: bool = False) -> list[tuple
         if initiative_due(t, s):
             s["initiative"] = {**(s.get("initiative") or {}), "looked": t}
             out.append(("initiative", ""))
-        if not dry:
+        # H152: written only when something changed. It was written every minute, so the file was nearly always
+        # on its way to the other computer, and a crash or a write there in between made a conflict copy.
+        if not dry and json.dumps(s, sort_keys=True) != before:
             _write(s)
     if not dry:
         for why, facts in out:

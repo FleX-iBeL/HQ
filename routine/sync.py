@@ -18,6 +18,11 @@ what came over from the other side is committed by the main one, through the sha
 file by file, only files git doesn't ignore. When an HQ becomes the main one (`align`, from tick.became_main),
 it first lines its git up with GitHub, keeping the files as they are.
 
+H152 (16 October 2026, after the laptop came back from a crash with a conflict copy): lock and .tmp files never
+go over, and every minute both HQs bring their .stignore block up to date (`keep_ignores`); on the main a conflict
+copy that is the same as its file, or of a lock or .tmp, is removed without a merge job (`settle`), and a call
+transcript git doesn't have that hasn't changed for half an hour is committed (`commit_calls`).
+
 Kept in HQ's own memory on this computer (hqpaths.SUPPORT), never in the workspace:
     sync.json        the setup: {"peer", "peer_name", "folders": [{"id", "what", "path"}], "set_at"}
     sync-state.json  what the routine last saw: {"since" (Syncthing's last event read), "seen_peer", "merges"}
@@ -52,11 +57,14 @@ TIMEOUT = 8
 GONE_AFTER = 600  # the other side unreachable this long before the line turns yellow (Claude's choice)
 MARK = "// HQ two-way sync (H56.4): written by routine/sync.py; lines below this block are your own"
 MEDIA = ("mp4", "mov", "m4v", "mkv", "webm", "avi", "m4a", "mp3", "wav", "aac", "flac", "ogg", "opus", "aiff")
+# H152: a lock file belongs to the computer that holds it (a pid in it means nothing on the other one), and a
+# .tmp is a write half done; both went over and made conflict copies.
 IGNORE_WORKSPACE = [".git", ".claude/settings.local.json", *[f"(?i)*.{x}" for x in MEDIA], "(?d).DS_Store",
-                    "(?d)Thumbs.db"]
+                    "(?d)Thumbs.db", "(?d).*.lock", "(?d)*.tmp"]
 IGNORE_MEMORY = ["(?d).DS_Store"]
 GIT_EXCLUDE = [".stfolder", ".stignore", "*.sync-conflict-*"]  # Syncthing's own files stay out of git
 CONFLICT = re.compile(r"\.sync-conflict-\d{8}-\d{6}-[A-Z0-9]{7}")
+CALLS_AFTER = 1800  # H152: a call transcript nobody committed, this long after its last change, is committed by the main
 
 
 # --- small helpers -----------------------------------------------------------------------------------------
@@ -149,16 +157,35 @@ def find_device(peer):
 def write_ignores(path, patterns):
     """Our patterns at the top of .stignore; whatever the user had below them is kept."""
     f = os.path.join(path, ".stignore")
-    own = []
+    own, old = [], None
     try:
-        old = open(f).read().splitlines()
-        if MARK in old:
-            own = old[old.index(MARK) + len(patterns) + 2:]  # mark, patterns, blank line
+        old = open(f).read()
+        lines = old.splitlines()
+        if MARK in lines:
+            # H152: our block runs from the mark to its blank line, whatever its length was when it was written
+            i = lines.index(MARK)
+            end = lines.index("", i) if "" in lines[i:] else len(lines)
+            own = lines[:i] + lines[end + 1:]
         else:
-            own = old
+            own = lines
     except OSError:
         pass
-    open(f, "w").write("\n".join([MARK, *patterns, "", *own]).rstrip("\n") + "\n")
+    new = "\n".join([MARK, *patterns, "", *own]).rstrip("\n") + "\n"
+    if new != old:
+        open(f, "w").write(new)
+        return True
+    return False
+
+
+def keep_ignores():
+    """H152: both HQs keep their .stignore block as this version of HQ writes it, so a pattern added later (the
+    lock files) reaches an HQ set up before it. Returns the folders whose block changed."""
+    out = []
+    for f in config().get("folders", []):
+        if os.path.isdir(f["path"]):
+            if write_ignores(f["path"], IGNORE_WORKSPACE if f["what"] == "workspace" else IGNORE_MEMORY):
+                out.append(f["what"])
+    return out
 
 
 def git_exclude(path):
@@ -279,6 +306,65 @@ def merge_text(c):
             f"tell which is right, keep both, marked). If it isn't a text file, keep the newer one as the file and "
             f"leave the other next to it, renamed to end in '(other version)'. Then delete the conflict copy, commit "
             f"the file through the lock, and say in the log what was merged. Nothing else.")
+
+
+def settle(found, log):
+    """H152: conflict copies that need no merge are cleared here, without a job: one that is the same as the file
+    (byte for byte), and one of a lock or a half-written .tmp (this computer's own, never worth keeping). Returns
+    the ones still to merge."""
+    left = []
+    for c in found:
+        name = os.path.basename(c["file"])
+        same = False
+        try:
+            with open(c["copy"], "rb") as a, open(c["file"], "rb") as b:
+                same = a.read() == b.read()
+        except OSError:
+            pass
+        if same or name.endswith((".lock", ".tmp")):
+            try:
+                os.remove(c["copy"])
+                log(f"sync: conflict copy {c['copy']} removed: " + ("the same as the file" if same else "a lock or .tmp file"))
+                continue
+            except OSError as e:
+                log(f"sync: couldn't remove {c['copy']}: {e}")
+        left.append(c)
+    return left
+
+
+def left_calls(now=None):
+    """H152: call transcripts (HQ/calls/*.md) that git doesn't have yet and that haven't changed for CALLS_AFTER
+    seconds: the call's own commit missed them (its wrap-up ran on the other computer, was cut off, or forgot).
+    Relative paths, oldest first."""
+    folder = next((f["path"] for f in config().get("folders", []) if f["what"] == "workspace"), None) or hqpaths.FOLDER
+    calls = os.path.join(folder, "HQ", "calls")
+    if not os.path.isdir(os.path.join(folder, ".git")) or not os.path.isdir(calls):
+        return []
+    r = subprocess.run(["git", "-C", folder, "ls-files", "--others", "--exclude-standard", "--", "HQ/calls"],
+                       capture_output=True, text=True, timeout=60)
+    now = now or time.time()
+    out = []
+    for p in r.stdout.splitlines():
+        full = os.path.join(folder, p)
+        if p.endswith(".md") and not CONFLICT.search(p) and os.path.isfile(full) and now - os.path.getmtime(full) >= CALLS_AFTER:
+            out.append(p)
+    return sorted(out)
+
+
+def commit_calls(log, now=None):
+    """H152: on the main, the transcripts left_calls finds are committed through the lock."""
+    if os.environ.get("HQ_SYNC_GIT") == "0":
+        return 0
+    left = left_calls(now)
+    if not left:
+        return 0
+    folder = next((f["path"] for f in config().get("folders", []) if f["what"] == "workspace"), None) or hqpaths.FOLDER
+    env = {**os.environ, "HQ_WORKSPACE": folder}
+    r = subprocess.run([PY, GITLOCK, "commit", f"Calls: {len(left)} transcript{'s' * (len(left) != 1)} the call's own commit missed",
+                        *left], capture_output=True, text=True, timeout=400, env=env)
+    log(f"sync: committed call transcripts nobody had: {', '.join(left)[:300]}" if r.returncode == 0
+        else f"sync: committing call transcripts failed ({r.returncode}): {(r.stderr or r.stdout).strip()[:200]}")
+    return len(left) if r.returncode == 0 else 0
 
 
 def queue_merges(found, state, log):
@@ -416,11 +502,23 @@ def tick(main=True, log=print, routines=None, incidents=None):
     seen = look()
     if seen.get("peer_up"):
         state["seen_peer"] = time.time()
+    try:
+        for what in keep_ignores():
+            log(f"sync: the {what}'s .stignore block brought up to date")
+    except OSError as e:
+        log(f"sync: .stignore: {e}")
     found = conflicts()
+    if main and found:
+        found = settle(found, log)
     queued = queue_merges(found, state, log) if main and found else []
     paths = came_over(state, main) if not seen.get("error") else []
     _save(STATE, state)
     committed = commit(paths, peer, log) if main else 0
+    if main:
+        try:
+            committed += commit_calls(log)
+        except Exception as e:
+            log(f"sync: call transcripts: {e!r}")
     st, text, why = judge(seen, found, state, main, peer)
     if routines:
         routines.beat("sync", state=st, text=text, last=time.time(), next=time.time() + 60, every=60)

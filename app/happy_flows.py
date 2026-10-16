@@ -8472,6 +8472,108 @@ window.fetch = async (url, opt) => {
                 "app: the note button in each row, one tap to type, the note in the list and the appointment, Clear, a "
                 "half-typed note kept through a redraw")
 
+    async def flow101(self) -> str:
+        """H152, no Claude, no Syncthing, no network: after a crash or a restart the two computers come back in step
+        by themselves. Her pings file is only written when something changed (it was written every minute, so it
+        was nearly always on its way over, and a crash in between made a conflict copy and a merge job), and taking
+        its lock changes nothing; the sync's ignore block leaves lock and .tmp files out and is brought up to date
+        on an HQ set up before, the user's own lines kept; a conflict copy that is the same as the file, or of a
+        lock, is cleared without a merge job, a real one is left to merge; a call transcript nobody committed is
+        committed by the main after half an hour, a fresh one is left alone. All in a throwaway folder."""
+        import importlib
+        sys.path.insert(0, str(ROOT / "routine"))
+        import pings as pg
+        import sync as sy
+        importlib.reload(sy)
+        tmp = Path(tempfile.mkdtemp(prefix="hq-flow101-"))
+        keep_env = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_CALENDAR_FILE", "HQ_AGENT_NOTES")}
+        real_cfg = sy.CONFIG
+        try:
+            # her pings: a minute with nothing to do leaves the file and the lock as they were
+            os.environ["HQ_DIRECT_DIR"] = str(tmp / "dl")
+            os.environ["HQ_CALENDAR_FILE"] = str(tmp / "calendar.json")
+            os.environ["HQ_AGENT_NOTES"] = str(tmp / "notes.md")
+            (tmp / "dl").mkdir()
+            t = time.time()
+            pf, lf = tmp / "dl" / "pings.json", tmp / "dl" / ".pings.lock"
+            pf.write_text(json.dumps({"reminders": [{"n": 1, "at": time.strftime(pg.FMT, time.localtime(t + 7200)),
+                                                     "text": "flow 101"}]}))
+            pg.watch(now=t, spawn=lambda *a: None)
+            need(lf.exists(), "her pings lock wasn't taken")
+            os.utime(pf, (t - 3600, t - 3600))
+            os.utime(lf, (t - 3600, t - 3600))
+            before = pf.read_text()
+            for k in range(3):
+                pg.watch(now=t + 1 + k, spawn=lambda *a: None)
+            need(pf.stat().st_mtime < t - 3000, "her pings file was written again on a minute where nothing changed")
+            need(lf.stat().st_mtime < t - 3000, "taking her pings lock still changes the lock file (so the sync sends it)")
+            need(pf.read_text() == before, "her pings file changed on a minute where nothing happened")
+            # the ignore block: lock and .tmp files stay home; an old, shorter block is replaced, his own lines kept
+            ws = tmp / "ws"
+            (ws / "HQ" / "calls").mkdir(parents=True)
+            mem = tmp / "mem"
+            mem.mkdir()
+            old = [sy.MARK, ".git", ".claude/settings.local.json", "(?i)*.mp4", "(?d).DS_Store", "", "my-own-line", "// mine"]
+            (ws / ".stignore").write_text("\n".join(old) + "\n")
+            sy.CONFIG = str(tmp / "sync.json")
+            (tmp / "sync.json").write_text(json.dumps({"peer": "X", "peer_name": "other", "folders": [
+                {"id": "w", "what": "workspace", "path": str(ws)}, {"id": "m", "what": "memory", "path": str(mem)}]}))
+            need(sorted(sy.keep_ignores()) == ["memory", "workspace"], "the ignore blocks weren't brought up to date")
+            lines = (ws / ".stignore").read_text().splitlines()
+            need("(?d).*.lock" in lines and "(?d)*.tmp" in lines, f"lock and .tmp files still go over: {lines}")
+            need(lines[-2:] == ["my-own-line", "// mine"] and lines.count(sy.MARK) == 1 and "(?i)*.mp4" not in lines[len(sy.IGNORE_WORKSPACE) + 1:],
+                 f"his own .stignore lines weren't kept as they were: {lines}")
+            need(sy.keep_ignores() == [], "an up-to-date ignore block was written again")
+            # conflict copies: the same as the file, or a lock: cleared; a real one: left for the merge job
+            (ws / "HQ" / "pings.json").write_text('{"a": 1}\n')
+            same = ws / "HQ" / "pings.sync-conflict-20261016-092834-ABCDEFG.json"
+            same.write_text('{"a": 1}\n')
+            lock = ws / "HQ" / ".pings.sync-conflict-20261016-092834-ABCDEFG.lock"
+            lock.write_text("")
+            (ws / "HQ" / ".pings.lock").write_text("")
+            (ws / "notes.md").write_text("one\n")
+            real = ws / "notes.sync-conflict-20261016-092834-ABCDEFG.md"
+            real.write_text("two\n")
+            said = []
+            left = sy.settle(sy.conflicts(), said.append)
+            need(not same.exists() and not lock.exists(), f"a copy that needs no merge is still there: {said}")
+            need([c["copy"] for c in left] == [str(real)] and real.exists(), f"a real conflict wasn't left for its merge job: {left}")
+            real.unlink()
+            # call transcripts nobody committed: the main commits them after half an hour, a fresh one waits
+            def g(*a, cwd=ws):
+                return subprocess.run(["git", *a], cwd=cwd, text=True, capture_output=True, check=True)
+            g("init", "-q", "--bare", "-b", "main", str(tmp / "origin.git"), cwd=tmp)
+            g("init", "-q", "-b", "main")
+            g("config", "user.name", "hq-test")
+            g("config", "user.email", "hq-test@example.invalid")
+            (ws / "HQ" / "calls" / "2026-10-15-1200.md").write_text("tracked\n")
+            g("add", "HQ/calls/2026-10-15-1200.md")
+            g("commit", "-q", "-m", "start")
+            g("remote", "add", "origin", str(tmp / "origin.git"))
+            g("push", "-q", "-u", "origin", "main")
+            lost = ws / "HQ" / "calls" / "2026-10-15-1450.md"
+            lost.write_text("a call whose own commit was missed\n")
+            os.utime(lost, (t - 7200, t - 7200))
+            fresh = ws / "HQ" / "calls" / "2026-10-16-1030.md"
+            fresh.write_text("a call just over\n")
+            need(sy.left_calls(t) == ["HQ/calls/2026-10-15-1450.md"], f"the transcripts left over aren't the right ones: {sy.left_calls(t)}")
+            said = []
+            need(sy.commit_calls(said.append, t) == 1, f"the transcript nobody committed wasn't committed: {said}")
+            need(g("ls-files", "HQ/calls").stdout.split() == ["HQ/calls/2026-10-15-1200.md", "HQ/calls/2026-10-15-1450.md"],
+                 "the wrong transcripts are in git")
+            need("2026-10-15-1450.md" in g("ls-tree", "-r", "--name-only", "main", cwd=tmp / "origin.git").stdout,
+                 "the committed transcript didn't reach GitHub (the throwaway origin)")
+            need(sy.left_calls(t) == [] and sy.commit_calls(said.append, t) == 0, "a committed transcript came up again")
+            return "pings written only on a change, lock untouched; lock/.tmp out of the sync, old ignore block updated with his lines kept; same/lock conflict copies cleared, a real one left; a missed transcript committed and pushed, a fresh one left"
+        finally:
+            sy.CONFIG = real_cfg
+            for k, v in keep_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            shutil.rmtree(tmp, ignore_errors=True)
+
     async def flow97(self) -> str:
         """F31, no Claude, no network: a refused pull or push from a job never passes silently. push.py --pull and a
         plain push against a throwaway HQ copy whose GitHub is a throwaway folder: a pull that works says so; a remote
@@ -10037,6 +10139,7 @@ FLOWS = {
     98: ("F32: a fresh install on an old release (a download, a shallow clone) sees the newer one and updates with one tap", False, "flow98"),
     99: ("H143: tick off or X the appointments; an X moves it to the Google calendar HQ Planning, undo moves it back; the week's look back", False, "flow99"),
     100: ("H146: a quick note on each appointment, one tap to type; a call and Donna's chat read it to put the calendar right", False, "flow100"),
+    101: ("H152: after a crash or restart both computers come back in step: no every-minute pings write, locks stay home, needless conflict copies cleared, missed call transcripts committed", False, "flow101"),
 }
 
 

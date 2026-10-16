@@ -9,6 +9,9 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - Your calendar during a call. The Calendar button stays in the bar at the bottom on a call, with any agent and on a three-way call too, next to the Mic button; the calendar opens above the call's own buttons and the call and your mic carry on. Calling about an appointment waits until the call has ended (H144).
 - A quick note on each appointment. In the calendar in the app every appointment has a note button: one tap and you're typing ("arrived 16:00, left 17:00"). The notes show under the appointment in the list and when you open it, each with its own Clear; they stay with an appointment X'd to HQ Planning. A call and Donna's chat read them, so "look at the haircut and update my calendar" puts its times right in Google Calendar, keeping the old times in its description (H146).
 
+### Fixed
+- Two computers come back in step by themselves after a crash or restart. Donna's pings file is only saved when something in it changed (it was saved every minute, so a crash nearly always caught it on its way over), lock and half-written files stay on their own computer, a conflict copy that is the same as the file is cleared without a merge job, and a call's transcript that its own commit missed is committed by the main computer half an hour later.
+
 ## 0.4.3 · 14 October 2026
 
 ### Added

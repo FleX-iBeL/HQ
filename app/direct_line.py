@@ -115,7 +115,7 @@ class _Lock:
 
     def __init__(self, name: str = "thread"):
         folder().mkdir(parents=True, exist_ok=True)
-        self.f = open(folder() / f".{name}.lock", "w")
+        self.f = open(folder() / f".{name}.lock", "a")  # H152: "a", so taking the lock is no change for the sync
 
     def __enter__(self):
         fcntl.flock(self.f, fcntl.LOCK_EX)
@@ -549,7 +549,7 @@ def initiative() -> dict | None:
 def reply() -> str | None:
     """Answer his newest texts as her, with the workspace and the call's limits. One reply at a time; texts that
     came in meanwhile are answered right after."""
-    lock = open(folder() / ".reply.lock", "w")
+    lock = open(folder() / ".reply.lock", "a")  # H152
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
