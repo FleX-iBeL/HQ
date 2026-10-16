@@ -9797,14 +9797,18 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         """H160, no Claude: the team's work from the status page, without a call. jobs.py add-row on a copy of the
         roadmap puts a numbered row first (H, or F for a bug, the next free number, right after that phase's highest;
         a fresh roadmap gets the phase), then the job that reads that row, with its kind; nothing written when the text
-        is empty or the kind unknown; never the real roadmap under a test; the backup hands it to the main. The status
-        server's /api/team on a copy of HQ: refused without the page's header, add, move and cancel through jobs.py, a
-        wrong ask refused. The page in a headless browser: the add field with its kinds, up, down and cancel on the
-        waiting jobs, a cancel on the parked one, and it still draws with an incident whose detail is one text."""
+        is empty or the kind unknown; never the real roadmap under a test; the backup hands it to the main (add-row stays
+        for calls). H182: jobs.py send-row sends an open roadmap item (⬜, not in Phase P) to the team as a job that
+        reads its row, with its kind guessed from the row; refused for a done, a parked or a missing item, and for one a
+        waiting job already names. The status server's /api/team on a copy of HQ: refused without the page's header, no
+        add of new text any more, send, move and cancel through jobs.py, a wrong ask refused. The page in a headless
+        browser: no add field, a send on each open item but not the parked or done ones, "With the team" on one already
+        sent, up, down and cancel on the waiting jobs, a cancel on the parked one, and it still draws with an incident
+        whose detail is one text."""
         import subprocess as sp
         sys.path.insert(0, str(ROOT / "routine"))
         import role
-        need("add-row" in role.WRITES["jobs"], "the backup doesn't hand add-row to the main")
+        need("add-row" in role.WRITES["jobs"] and "send-row" in role.WRITES["jobs"], "the backup doesn't hand add-row and send-row to the main")
         rm = self.tmp / "roadmap-H160.md"
         rm.write_text(ROADMAP.read_text())
         env = {**os.environ, "HQ_ROADMAP": str(rm)}
@@ -9843,6 +9847,32 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("## Phase H · Features" in fresh.read_text() and "| ⬜ | H1 First wish |" in fresh.read_text(),
              "a fresh roadmap doesn't get Phase H with H1")
 
+        # H182: send-row, an open roadmap item to the team.
+        sr = self.tmp / "roadmap-H182.md"
+        sr.write_text((ROOT / "template/HQ/roadmap.md").read_text().rstrip("\n") + "\n\n## Phase H · Features\n\n"
+                      "| | Step | What you get | Model |\n|---|---|---|---|\n"
+                      "| ⬜ | H7 Make the clock tick | Build the clock and add a happy flow for it | It ticks | |\n"
+                      "| ⬜ | H8 Spar on the colours | Talk it through | Colours | |\n"
+                      "| ✅ | H9 Already there | Done | Done | |\n"
+                      "\n## Phase P · Parked: decided not to do now\n\n"
+                      "| | Step | What you get | Model |\n|---|---|---|---|\n"
+                      "| ⬜ | H10 Not now | Parked | Nothing | |\n")
+        se = {**os.environ, "HQ_ROADMAP": str(sr)}
+        h182 = sr.read_text()
+        out = jobs("send-row", "h7", e=se)
+        q = json.loads(jobs("next", e=se))
+        job = next((j for j in q["waiting"] if j["text"].startswith("H7 on the HQ roadmap")), None)
+        need("is ready" in out and job and "Read the H7 row and do what it says." in job["text"] and "push.py" in job["text"]
+             and "Make the clock tick" in job["text"], f"send-row H7: {out} {job}")
+        same = sr.read_text()
+        need("already with the team: job" in jobs("send-row", "H7", ok=False, e=se), "an item already with the team was sent twice")
+        for bad in ("H9", "H10", "H99", "nope"):
+            jobs("send-row", bad, ok=False, e=se)
+        need(sr.read_text() == same, "a refused send still changed the roadmap")
+        jobs("send-row", "H8", e=se)
+        import estimate as est
+        need(est.kind_of(next(l for l in same.splitlines() if l.startswith("| ⬜ | H7 "))) == "build", "the H7 row isn't guessed as build")
+
         # The status server's /api/team, on a copy of HQ.
         node = shutil.which("node") or "/opt/homebrew/bin/node"
         site = self.tmp / "h160"
@@ -9872,21 +9902,32 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                     with urllib.request.urlopen(req, timeout=30) as r_:
                         return r_.status, json.loads(r_.read() or b"null")
                 except urllib.error.HTTPError as e:
-                    return e.code, {}
-            code, _ = await asyncio.to_thread(post, {"do": "add", "text": "Sneaky"}, None)
-            need(code == 403 and "Sneaky" not in road.read_text(), "the page's add works without the page's header")
-            for text in ("One for the team", "Two for the team", "Three for the team"):
-                code, ans = await asyncio.to_thread(post, {"do": "add", "text": text, "kind": "other"})
-                need(code == 200 and ans.get("ok") and "is on the roadmap" in ans.get("said", ""), f"the page's add: {code} {ans}")
-            code, ans = await asyncio.to_thread(post, {"do": "add", "text": "A bug from the page", "bug": True})
-            need(code == 200 and "| ⬜ | F1 A bug from the page |" in road.read_text(), f"the page's bug: {code} {ans}")
+                    try:
+                        return e.code, json.loads(e.read() or b"null") or {}
+                    except ValueError:
+                        return e.code, {}
+            road.write_text(h182)
+            code, _ = await asyncio.to_thread(post, {"do": "send", "row": "H7"}, None)
+            need(code == 403 and "H7 on the HQ roadmap" not in road.read_text(), "the page's send works without the page's header")
+            code, _ = await asyncio.to_thread(post, {"do": "add", "text": "No new work from the page"})
+            need(code == 400 and "No new work from the page" not in road.read_text(), "the page can still add new work")
+            for label in ("H7", "H8"):
+                code, ans = await asyncio.to_thread(post, {"do": "send", "row": label})
+                need(code == 200 and ans.get("ok") and "is ready" in ans.get("said", ""), f"the page's send {label}: {code} {ans}")
+            code, ans = await asyncio.to_thread(post, {"do": "send", "row": "H7"})
+            need(code == 400 and not ans.get("ok") and "already with the team" in ans.get("said", ""), f"the page sent H7 twice: {code} {ans}")
+            for label in ("H9", "H10"):
+                code, ans = await asyncio.to_thread(post, {"do": "send", "row": label})
+                need(code == 400, f"the page sent {label} (done or parked): {code} {ans}")
+            jobs("add", "Four for the team", e={**os.environ, "HQ_ROADMAP": str(road)})
+            jobs("add", "Five for the team", e={**os.environ, "HQ_ROADMAP": str(road)})
             code, ans = await asyncio.to_thread(post, {"do": "move", "n": 3, "to": "top"})
             need(code == 200 and "number 1 in line" in ans.get("said", ""), f"the page's move: {code} {ans}")
             code, ans = await asyncio.to_thread(post, {"do": "cancel", "n": 2})
             need(code == 200 and "cancelled" in ans.get("said", ""), f"the page's cancel: {code} {ans}")
             q = json.loads(jobs("next", e={**os.environ, "HQ_ROADMAP": str(road)}))
             need([j["n"] for j in q["waiting"]] == [3, 1, 4], f"the line after move and cancel: {[j['n'] for j in q['waiting']]}")
-            for bad in ({"do": "cancel", "n": "x"}, {"do": "move", "n": 1, "to": "sideways"}, {"do": "add", "text": " "}, {"do": "wipe"}):
+            for bad in ({"do": "cancel", "n": "x"}, {"do": "move", "n": 1, "to": "sideways"}, {"do": "send", "row": "H7; rm"}, {"do": "wipe"}):
                 code, _ = await asyncio.to_thread(post, bad)
                 need(code == 400, f"the page's {bad} wasn't refused")
             # One job parked (H172), for the page.
@@ -9901,8 +9942,11 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                                         capture_output=True, text=True, timeout=90)
             dom = r.stdout
             need("<p>The status server is not answering" not in dom, "the status page doesn't draw (an incident with one text as its detail?)")
-            need('class="team-add"' in dom and 'value="bug"' in dom and 'value="transcribe"' in dom and "Give it to the team" in dom,
-                 "the page has no add field with its kinds")
+            need('class="team-add"' not in dom and "Give it to the team" not in dom and 'value="transcribe"' not in dom,
+                 "the page still has the add field")
+            need('aria-label="Send H8 to the team"' in dom and "With the team: job 1" in dom and "With the team: job 2" not in dom
+                 and 'aria-label="Send H9 to the team"' not in dom and 'aria-label="Send H10 to the team"' not in dom,
+                 "the open, done and parked items don't have the right send (H7 is job 1, cancelled job 2 was H8)")
             need('aria-label="Cancel job 3"' in dom and 'aria-label="Move job 3 down"' in dom and 'aria-label="Move job 3 up"' not in dom
                  and 'aria-label="Move job 1 up"' in dom and 'aria-label="Cancel job 4"' in dom and 'aria-label="Move job 4 up"' not in dom
                  and 'aria-label="Cancel job 2"' not in dom, "the waiting and parked jobs don't have the right move and cancel buttons")
@@ -9910,7 +9954,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             need("'x-hq': 'team'" in page and "teamSwipe(row, j.n)" in page, "the page doesn't send the header or doesn't swipe")
         finally:
             proc.terminate()
-        return "a numbered roadmap row first, then the job; add, move and cancel from the page through jobs.py, header-guarded"
+        return "add-row for calls; an open roadmap item sent from the page (never twice, never parked or done), move and cancel through jobs.py, header-guarded"
 
     async def flow101(self) -> str:
         """H152, no Claude, no Syncthing, no network: after a crash or a restart the two computers come back in step
@@ -11721,7 +11765,7 @@ FLOWS = {
     103: ("H169: the nightly run: the right flows for this computer, one line when all pass, a plain morning text from Donna", False, "flow103"),
     104: ("F33: a typed line sent while she talks or thinks carries only itself; an unanswered one goes again", False, "flow104"),
     105: ("H149: mail more often for a while he names: his words as an end time, every quarter until then, hourly again by itself", False, "flow105"),
-    106: ("H160: the team's work from the status page: add (a numbered roadmap row first), move and cancel, without a call", False, "flow106"),
+    106: ("H160, H182: the team's work from the status page: an open roadmap item sent to the team, move and cancel, without a call; add-row for calls", False, "flow106"),
 }
 
 

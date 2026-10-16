@@ -19,6 +19,9 @@ usage (from the workspace):
                                                            kind for its estimate instead of the guess (H70)
   python3 "routine/jobs.py" add-row "TEXT" [--bug] [--kind K]   the status page (H160): a numbered roadmap row first
                                                            (F with --bug, else H), then a job that reads that row
+  python3 "routine/jobs.py" send-row LABEL                 the status page (H182): an open roadmap item (⬜, not in
+                                                           Phase P) goes to the team as a job that reads its row; its
+                                                           kind guessed from the row; refused when it's already there
   python3 "routine/jobs.py" list                           the queue, as on the roadmap, with each job's estimate (H61)
   python3 "routine/jobs.py" stop [N]                       stop the running job (or cancel ready job N)
   python3 "routine/jobs.py" overrule N                     job N may go past the 5-hour line (the weekly line still counts)
@@ -178,6 +181,35 @@ def roadmap_row(text, said, bug=False):
     lines.insert(at + 1, f"| ⬜ | {label} {title} | {when}, typed: \"{said}\" [Added on the status page, no call; "
                          f"the title is the first sentence.] | {said} | |")
     return text[:head] + "\n".join(lines) + text[end:], label
+
+
+def open_row(text, label):
+    """H182: the open roadmap row for LABEL (⬜, not in Phase P), as (title, the whole line); exits with why when it isn't."""
+    phase = ""
+    for line in text.split("\n"):
+        if line.startswith("## "):
+            phase = line
+            continue
+        cells = [c.strip() for c in line.split("|")[1:-1]] if line.startswith("|") else []
+        if not phase.startswith("## Phase ") or len(cells) < 2 or cells[1].split(" ", 1)[0] != label:
+            continue
+        if phase.startswith("## Phase P "):
+            sys.exit(f"{label} is parked, so it doesn't go to the team.")
+        if cells[0] != "⬜":
+            sys.exit(f"{label} isn't open (it's {cells[0] or 'without a mark'}), so it doesn't go to the team.")
+        return cells[1].split(" ", 1)[1].strip() if " " in cells[1] else label, line
+    sys.exit(f"{label} isn't on the roadmap.")
+
+
+def with_team(jobs, label):
+    """H182: the waiting, running or parked job that already names roadmap item LABEL ("LABEL on the HQ roadmap",
+    "the LABEL row"), or None. Another item only mentioned in passing doesn't count."""
+    l = re.escape(label)
+    pat = re.compile(rf"(?<![\w.]){l} on the (hq )?roadmap\b|\bthe {l} row\b", re.I)
+    for j in jobs:
+        if (waiting(j) or parked(j) or j["state"].startswith(("running", "stop asked"))) and pat.search(j["text"]):
+            return j
+    return None
 
 
 def mail_words():
@@ -353,6 +385,22 @@ def main(argv):
                     f"Read the {label} row. Pull dev first, privacy check, push to dev with push.py, "
                     f"write the result in the {label} row."] + extra
             print(f"{label} is on the roadmap.")
+        if cmd == "send-row":
+            # H182: an item on the roadmap, sparred on a call before, goes to the team from the status page. Only an open
+            # one, never a parked one, and never twice: a waiting or running job that names it already has it.
+            label = (args[0] if args else "").strip().upper()
+            if not re.fullmatch(r"[A-Z]\d+(\.\d+)*", label):
+                sys.exit("Which roadmap item? Give its number, like H182.")
+            title, line = open_row(text, label)
+            j = with_team(jobs, label)
+            if j:
+                sys.exit(f"{label} is already with the team: job {j['n']} ({j['state']}).")
+            import estimate as est_
+            title = one_line(title).replace("·", "-").rstrip(".")
+            cmd = "add"
+            args = [f"{label} on the HQ roadmap, sent to the team from the status page: {title}. Read the {label} row "
+                    f"and do what it says. Pull dev first, privacy check, push to dev with push.py, "
+                    f"write the result in the {label} row.", "--kind", est_.kind_of(line)]
         if cmd == "add":
             past = "--past-the-line" in args
             words = [a for a in args if a != "--past-the-line"]

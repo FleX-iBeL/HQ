@@ -242,15 +242,13 @@
       .late { color: color-mix(in srgb, var(--red) 65%, var(--soft)); }
       .row.eta-sum { display: block; font-size: 13px; }
       /* H174: the team's own guess, quieter than the computed estimate, so it doesn't read as a second estimate */
-      /* H160: the team's work from the page: the add field, and per waiting job up, down and cancel (or a swipe left). */
-      .team-add { display: flex; flex-direction: column; gap: 8px; padding: 14px 20px; border-bottom: 1px solid var(--rule); }
-      .team-add textarea { font: inherit; font-size: 15px; width: 100%; box-sizing: border-box; min-height: 52px; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); color: var(--ink); resize: vertical; }
-      .team-add .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-      .team-add select { font: inherit; font-size: 14px; padding: 4px 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); color: var(--ink); }
-      .team-add .said { font-size: 13px; color: var(--soft); }
+      /* H160, H182: the team's work from the page: per waiting job up, down and cancel (or a swipe left); per open roadmap item a send. */
       .team-acts { display: flex; gap: 6px; flex: none; }
       .team-acts .chip { padding: 2px 9px; }
       .team-acts .chip.cancel[data-armed="yes"] { border-color: var(--red); color: var(--red); font-weight: 600; }
+      .team-send { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+      .team-send .chip[data-armed="yes"] { border-color: var(--accent, var(--ink)); font-weight: 600; }
+      .team-send .said { font-size: 13px; color: var(--soft); }
       .eta-guess { display: block; font-size: 12px; color: var(--soft); opacity: 0.75; font-style: italic; }
       /* H174: what a total counts, right under its heading */
       .eta-counts { font-size: 13px; margin: 2px 0 8px; }
@@ -453,9 +451,8 @@
       let openedCurrent = '';
       // H14/H15/H16: every part folds open and closed with its arrow; the choice is remembered on this device.
       const shownJobs = new Set();
-      // H160: the add field is made once and kept across redraws, so what's typed survives; armed: a cancel waiting for its second tap.
+      // H160: armed: a cancel (or, H182, a send) waiting for its second tap.
       const teamArmed = new Map();
-      let teamBox = null;
       async function teamPost(body) {
         try {
           const r = await fetch('/api/team', { method: 'POST', headers: { 'x-hq': 'team', 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -467,38 +464,43 @@
           redraw();
         }
       }
-      function teamAdd() {
-        if (teamBox) return teamBox;
-        const box = el('form', 'team-add');
-        const area = el('textarea');
-        area.placeholder = 'Give the team something to do';
-        area.setAttribute('aria-label', 'Work for the team');
-        const kind = el('select');
-        kind.setAttribute('aria-label', 'Kind');
-        for (const [v, t] of [['feature', 'Feature'], ['bug', 'Bug'], ['big', 'Big change'], ['call', 'Call change'], ['transcribe', 'Transcribe'], ['other', 'Other']]) {
-          const o = el('option', '', t);
-          o.value = v;
-          kind.append(o);
+      // H182: an open roadmap item (not parked) goes to the team from here, as a job that reads its row. The first tap
+      // (or a swipe left) asks once more, like the cancel; an item a waiting or running job already names says so instead.
+      const teamSaid = new Map();
+      function withTeam(jobs, label) {
+        const l = label.replace(/\./g, '\\.');
+        const re = new RegExp(`(^|[^\\w.])${l} on the (HQ )?roadmap\\b|\\bthe ${l} row\\b`, 'i');
+        return jobs.find((j) => /^(ready|held|running|stop asked|paused)/.test(j.state) && re.test(j.text));
+      }
+      function teamSend(label, jobs, li) {
+        const box = el('div', 'team-send');
+        const has = withTeam(jobs, label);
+        if (has) {
+          box.append(el('span', 'said', `With the team: job ${has.n}, ${has.state}`));
+          return box;
         }
-        const go = el('button', 'chip range', 'Give it to the team');
-        go.type = 'submit';
-        const said = el('span', 'said');
-        const row = el('div', 'controls');
-        row.append(kind, go, said);
-        box.append(area, row);
-        box.addEventListener('submit', async (e) => {
-          e.preventDefault();
-          const text = area.value.trim();
-          if (!text || go.disabled) return;
-          go.disabled = true;
-          said.textContent = 'Putting it on the roadmap…';
-          const k = kind.value;
-          const out = await teamPost({ do: 'add', text, bug: k === 'bug', kind: k === 'feature' || k === 'bug' ? 'build' : k });
-          go.disabled = false;
-          said.textContent = out.said.split('\n').join(' ');
-          if (out.ok) area.value = '';
+        const key = `row:${label}`;
+        const armed = (teamArmed.get(key) ?? 0) > Date.now();
+        const b = el('button', 'chip', armed ? 'Send it?' : 'Send to the team');
+        b.type = 'button';
+        b.title = `Send ${label} to the team`;
+        b.setAttribute('aria-label', `Send ${label} to the team`);
+        b.dataset.armed = armed ? 'yes' : 'no';
+        b.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if ((teamArmed.get(key) ?? 0) > Date.now()) {
+            teamArmed.delete(key);
+            teamSaid.set(label, { at: Date.now() + 8000, said: 'Sending…' });
+            const out = await teamPost({ do: 'send', row: label });
+            teamSaid.set(label, { at: Date.now() + 8000, said: out.said.split('\n').join(' ') });
+            redraw();
+            setTimeout(redraw, 8100);
+          } else teamArm(key);
         });
-        teamBox = box;
+        box.append(b);
+        const said = teamSaid.get(label);
+        if (said && said.at > Date.now()) box.append(el('span', 'said', said.said));
+        teamSwipe(li, key);
         return box;
       }
       function teamActs(j, first, lastOne, parkedJob) {
@@ -527,7 +529,7 @@
         acts.append(cancel);
         return acts;
       }
-      // A first tap (or a swipe left) arms the cancel for five seconds; a second tap cancels.
+      // A first tap (or a swipe left) arms the cancel (or the send, H182) for five seconds; a second tap does it.
       function teamArm(n) {
         teamArmed.set(n, Date.now() + 5000);
         redraw();
@@ -1603,7 +1605,7 @@
 
         // Phase L: what the routine runs and what waits, in the order it will run.
         // H16: split into running, waiting and finished, each with its own arrow; finished starts folded.
-        const q = s.queue ?? { on: true, jobs: [] };  // H160: always shown, for the add field (a fresh roadmap has no queue yet)
+        const q = s.queue ?? { on: true, jobs: [] };  // always shown (a fresh roadmap has no queue yet)
         {
           const box = el('section');
           // F37: a job paused for its usage (H172) is parked: neither running nor waiting, it holds nothing up and waits for a call.
@@ -1616,9 +1618,6 @@
           const fold = foldPart('jobs', true, 'Jobs from calls', counts, false, q.on && total ? lateNote(E?.total) : '');
           const parts = el('div', 'parts');
           if (q.on && E?.total?.counts) parts.append(el('p', 'soft eta-counts', E.total.counts));  // H174: what the total counts
-          const addCard = el('div', 'card');
-          addCard.append(teamAdd());
-          parts.append(addCard);  // H160
           for (const [g, title, st, start] of [['running', 'Running', 'doing', true], ['waiting', 'Waiting', 'todo', true], ['parked', 'Parked for a call', 'todo', true], ['finished', 'Finished', 'done', false]]) {
             if (g === 'parked' && !of(g).length) continue;  // F37: only shown when a job is parked
             // H39: waiting jobs keep their place in line (the order they will run), not their number.
@@ -1757,7 +1756,8 @@
           box.append(el('h2', '', 'Roadmap'));
           // Every phase starts closed and opens on a click (12 October 2026, the user's pick).
           const complete = (p) => p.steps.length > 0 && p.steps.every((x) => x.status === 'done');
-          const stepItem = (st) => {
+          const teamJobs = s.queue?.jobs ?? [];
+          const stepItem = (st, p) => {
             const li = el('li', st.status);
             const text = el('div');
             text.append(el('strong', '', `${st.name} · ${STEP_WORD[st.status]}`));
@@ -1765,6 +1765,9 @@
             if (what) text.append(inline(el('p'), what.text));
             const rest = st.details.filter((d) => d !== what);
             if (rest.length) text.append(inline(el('p', 'soft'), rest.map((d) => `${d.label}: ${d.text}`).join(' · ')));
+            // H182: an open item, not parked, can go to the team from here.
+            const label = st.name.split(' ')[0];
+            if (st.status === 'todo' && p.id !== 'P' && /^[A-Z]\d+(\.\d+)*$/.test(label)) text.append(teamSend(label, teamJobs, li));
             li.append(el('i'), text);
             return li;
           };
@@ -1790,18 +1793,18 @@
             const finished = p.steps.filter((x) => x.status === 'done');
             if (open.length) {
               const steps = el('ul', 'substeps');
-              for (const st of open) steps.append(stepItem(st));
+              for (const st of open) steps.append(stepItem(st, p));
               detail.append(steps);
             }
             if (finished.length && open.length) {
               const part = foldPart(`steps-done-${p.id}`, false, 'Finished steps', `${finished.length}`, true);
               const steps = el('ul', 'substeps');
-              for (const st of finished) steps.append(stepItem(st));
+              for (const st of finished) steps.append(stepItem(st, p));
               part.append(steps);
               detail.append(part);
             } else if (finished.length) {
               const steps = el('ul', 'substeps');
-              for (const st of finished) steps.append(stepItem(st));
+              for (const st of finished) steps.append(stepItem(st, p));
               detail.append(steps);
             }
             if (p.body.length) detail.append(prose(p.body));
@@ -1847,8 +1850,6 @@
           const key = `${text}\n${usageText}\n${lines}\n${Math.floor(Date.now() / 60000)}`;
           // H23: the graph's history, once a minute (and when the time span or a routine is switched).
           if (key !== last) { await loadUptime(); await loadTemp(); }
-          // H160: no redraw while he types in the add field; it catches up once he leaves it.
-          if (key !== last && teamBox?.contains(document.activeElement) && teamBox.querySelector('textarea').value) return;
           if (key !== last) {
             last = key;
             let usage = null;
