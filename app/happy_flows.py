@@ -972,7 +972,16 @@ class Run:
         js = f"""
 import {{ readFileSync }} from 'node:fs';
 import {{ parseRoadmap }} from '{(status / "parse.mjs").as_uri()}';
-import {{ stopLine }} from '{(status / "usage.mjs").as_uri()}';
+import {{ stopLine, landing, landingWords }} from '{(status / "usage.mjs").as_uri()}';
+// H176: where the usage will land, made up: a running job, a priority item cutting in before a waiting job, a
+// repeating item half past the 5-hour reset, one without a time; the 5-hour line fixed at 50%.
+const n76 = Date.parse('2026-10-13T11:00:00Z') / 1000, M = 60;
+const E76 = {{ jobs: {{ 1: {{ finished: true, cost: {{ five: 9 }} }}, 2: {{ left: 10, est: 15, eta: n76 + 10 * M, cost: {{ five: 4, weekly: 0.4 }}, used: {{ five: 1, weekly: 0.1 }} }},
+  3: {{ est: 20, eta: n76 + 40 * M, cost: {{ five: 5, weekly: 0.5 }} }} }},
+  items: {{ 7: {{ start: n76 + 12 * M, eta: n76 + 18 * M, priority: true, cost: {{ five: 2, weekly: 0.2 }} }},
+    8: {{ start: n76 + 50 * M, eta: n76 + 70 * M, every: 'day', cost: {{ five: 4, weekly: 0.4 }} }}, 9: {{ cost: {{ five: 1, weekly: 0.1 }} }} }} }};
+const L76 = landing({{ label: '5-hour limit', percent: 40, resetsAt: new Date((n76 + 60 * M) * 1000).toISOString() }},
+  {{ five: {{ moving: false, fixed: 50 }}, weekly: {{ moving: true, fixed: 90 }}, fable: {{ moving: true, fixed: 90 }} }}, E76, new Date(n76 * 1000));
 const r = parseRoadmap(readFileSync({json.dumps(str(ROADMAP))}, 'utf8'));
 const reset = new Date('2026-10-13T12:00:00Z');
 const week = {{ label: 'Weekly · all models', resetsAt: reset.toISOString() }};
@@ -987,6 +996,7 @@ console.log(JSON.stringify({{
   five: stopLine({{ label: '5-hour limit', resetsAt: reset.toISOString() }}, {{ ...mv, five: {{ moving: false, fixed: r.usageLimit }} }}).line,
   lines: Object.keys(L).sort().join(','),
   rising: steps.every((v, i) => i === 0 || v >= steps[i - 1]), distinct: new Set(steps).size,
+  land: {{ ...L76, words: landingWords(L76, (t) => `T${{(t - n76) / M}}`) }},
 }}));
 """
         r = await asyncio.to_thread(run, ["node", "--input-type=module", "-e", js])
@@ -994,21 +1004,37 @@ console.log(JSON.stringify({{
         d = json.loads(r.stdout.strip().splitlines()[-1])
         need(not d["problems"], f"the status page cannot read the roadmap: {d['problems']}")
         need(d["state"] and "G" in d["phases"], f"the roadmap's state or phases are off: {d['state']}, {d['phases']}")
-        need(d["usageLimit"] == 70, f"the 5-hour stop line is {d['usageLimit']}, not 70")
+        # The fixed number is his to change (H91: the page's − and +, or a call), so any step of 5 is right; it was 70 for long.
+        need(isinstance(d["usageLimit"], int) and 5 <= d["usageLimit"] <= 100 and d["usageLimit"] % 5 == 0, f"the 5-hour stop line is {d['usageLimit']}")
         need(d["weeklyLimit"] is None, f"a flat weekly line ({d['weeklyLimit']}%) is set in the roadmap: the weekly lines won't move")
-        need(d["five"] == 70, f"the fixed 5-hour line moved: {d['five']}")
+        need(d["five"] == d["usageLimit"], f"the fixed 5-hour line moved: {d['five']}, the roadmap says {d['usageLimit']}")
         need(d["lines"] == "fable,five,weekly", f"the roadmap's three stop lines aren't read: {d['lines']}")
         need(d["start"] == 20, f"a weekly line starts at {d['start']}, not 20")
         need(d["end"] == 100, f"a weekly line ends at {d['end']}, not 100")
         need(45 <= d["mid"] <= 60, f"a weekly line halfway is {d['mid']}")
         need(d["rising"] and d["distinct"] > 20, "the weekly line does not rise through the week")
+        # H176: the pieces in the order they'd run, a priority item where it cuts in, the part after the reset for the
+        # next window, one without a time not on the bar, and where it would go past the stop line, in plain words.
+        L = d["land"]
+        need([(x["what"], x["kind"], x["add"]) for x in L["pieces"]] == [("Job 2", "team", 3), ("Planned item 7", "planned", 2), ("Job 3", "team", 5), ("Planned item 8", "repeat", 2)]
+             and L["pieces"][1]["priority"], f"H176: the pieces aren't in the order they'd run, or a kind is off: {L['pieces']}")
+        need(L["to"] == 52 and L["next"] == 2 and L["untimed"] == 1 and L["kinds"] == {"team": 8, "planned": 2, "repeat": 2},
+             f"H176: where it lands, the next window or the work without a time is off: {L}")
+        need(L["cross"] == {"what": "Planned item 8", "at": L["pieces"][3]["lands"], "pct": 52, "line": 50} and L["pieces"][3]["lands"] == L["reset"],
+             f"H176: where it would go past the stop line is off: {L['cross']}")
+        need("it lands at 52% around T60" in L["words"] and "before its reset at T60" in L["words"] and "Planned item 8 takes it to 52% while the line is at 50%" in L["words"]
+             and "2% more lands after the reset, in the next 5-hour window" in L["words"] and "One more piece of work has no time yet" in L["words"],
+             f"H176: the words under the bar: {L['words']}")
+        page10 = (status / "index.html").read_text()
+        need("landing(l, lines, E, new Date())" in page10 and "drawUsage(usage, s.usageLines, routines?.estimate" in page10,
+             "H176: the status page doesn't put the landing on its bars")
         # the page itself, when its server is running (it is only on this MacBook)
         code, body, _ = http_get("/roadmap.md", "http://127.0.0.1:4748", timeout=3)
         extra = ""
         if code == 200:
             need(body.decode("utf8", "replace").startswith("#"), "the status page serves a roadmap that does not start with the state")
             extra = ", page on 4748 serves it"
-        return f"roadmap reads clean; weekly line {d['start']}% -> {d['mid']}% -> {d['end']}%, 5-hour {d['five']}%{extra}"
+        return f"roadmap reads clean; weekly line {d['start']}% -> {d['mid']}% -> {d['end']}%, 5-hour {d['five']}%; where the usage will land (H176){extra}"
 
     # 11
     async def flow11(self) -> str:
@@ -6023,6 +6049,30 @@ print(json.dumps(o, default=str))
         si = sp.run(["python3", str(jv / "routine/schedule.py"), "list"], capture_output=True, text=True, env=env2).stdout
         need(pi.get("cost") and pi.get("usage_wait") and pi["start"] >= t0 + 1650 and "when the usage leaves room for it" in si,
              f"H172: a planned item doesn't say its usage and when it fits: {pi}")
+        # H176: where the usage will land, on the page's bars, from this same plan: the item waits for the 5-hour reset,
+        # so on the 5-hour bar it's all the next window's; on the weekly bar it's a planned piece, landing when it's done.
+        pl76 = json.loads(sp.run(["python3", str(jv / "routine/estimate.py"), "plan"], capture_output=True, text=True, env=env2).stdout)
+        r176 = sp.run(["node", "--input-type=module", "-e", f"""
+import {{ readFileSync }} from 'node:fs';
+import {{ landing, landingWords, lineSettings }} from '{(jv / "status/usage.mjs").as_uri()}';
+const u = JSON.parse(readFileSync({json.dumps(str(u_file))}, 'utf8'));
+const lines = lineSettings(readFileSync({json.dumps(env2["HQ_ROADMAP"])}, 'utf8'));
+const E = JSON.parse(readFileSync(0, 'utf8'));
+const o = {{}};
+for (const l of u.limits) {{ const L = landing(l, lines, E); o[L.key] = {{ ...L, words: landingWords(L, (t) => String(t)) }}; }}
+console.log(JSON.stringify(o));
+"""], input=json.dumps(pl76), capture_output=True, text=True)
+        need(r176.returncode == 0, f"H176: the landing check didn't run: {r176.stderr[-600:]}")
+        o76 = json.loads(r176.stdout)
+        c9 = pl76["items"][str(i9)]["cost"]
+        # (Depending on the second it runs, the item may start in the last minutes before the reset, when the moving line
+        # is at 100%: then the part before the reset is on the bar and only the rest is the next window's.)
+        f9 = o76["five"]
+        need(abs(sum(x["add"] for x in f9["pieces"]) + f9["next"] - c9["five"]) <= 0.15 and all(x["lands"] <= f9["reset"] for x in f9["pieces"])
+             and (f9["next"] < 0.05 or "in the next 5-hour window" in f9["words"]), f"H176: the 5-hour bar doesn't split the work at its reset: {f9}")
+        p9 = [x for x in o76["weekly"]["pieces"] if x["what"] == f"Planned item {i9}"]
+        need(p9 and p9[0]["kind"] == "planned" and p9[0]["lands"] == pl76["items"][str(i9)]["eta"] and abs(p9[0]["add"] - round(c9["weekly"], 1)) <= 0.1
+             and o76["weekly"]["now"] == 21, f"H176: the planned item isn't on the weekly bar where it lands: {o76['weekly']}")
         sp.run(["python3", str(jv / "routine/schedule.py"), "cancel", str(i9)], capture_output=True, env=env2)
         # A paused job: not started again by itself; a call resumes it (in line again, held) or drops it.
         nx = json.loads(jobs2("next"))
@@ -6135,6 +6185,8 @@ print(json.dumps(o))
         pol72 = Policy(config.FOLDER)
         need(pol72.decide("Bash", {"command": f'python3 "{ROOT}/routine/jobs.py" resume 7'}).verdict == ALLOW, "H172: a call can't resume a paused job")
         # The status page: the server serves the plan, the page shows it in words.
+        need("drawLanding(row.querySelector('.bar'), L)" in page72 and "function landLegend" in page72 and "--land-team" in page72
+             and "--land-planned" in page72 and "--land-repeat" in page72, "H176: the status page doesn't draw where the usage will land")
         srv = (jv / "status/server.mjs").read_text()
         page = (jv / "status/index.html").read_text()
         need("routine/estimate.py" in srv and "estimate };" in srv, "the status server doesn't serve the estimates")
@@ -6165,6 +6217,7 @@ print(json.dumps(o))
                 "a quick look gives each job and item a size that moves its estimate (H167); "
                 "the team's own guess at the start, next to the computed estimate and the real time, taken in once the guesses have a record (H168); "
                 "the totals say what they count, add up with the lines under them, a repeating item once, the team's guess apart and quieter (H174); "
+                "where the usage will land on the bars, the next 5-hour window apart (H176); "
                 "each job's real usage counted (a reset in, a hold out), its estimate from the jobs like it, when it fits, the pause at twice (H172)")
 
     # 55
@@ -10915,7 +10968,7 @@ FLOWS = {
     7: ("Hanging up saves the transcript, git unchanged", True, "flow7"),
     8: ("The waiting lines: no Mm, no repeats", False, "flow8"),
     9: ("A restart really restarts", False, "flow9"),
-    10: ("The status page reads the roadmap; weekly lines move", False, "flow10"),
+    10: ("The status page reads the roadmap; weekly lines move; H176: where the usage will land, on the bars", False, "flow10"),
     11: ("Free mode: plain Claude with internet, chat log, nothing kept", True, "flow11"),
     12: ("Holding the talk button keeps the turn through a long pause", True, "flow12"),
     13: ("Letting go keeps the last words; the page shows transcribing", True, "flow13"),
@@ -10959,7 +11012,7 @@ FLOWS = {
     51: ("H51: a call saves the usage it gets back, for the status page", False, "flow51"),
     52: ("H49: the space bar in the desktop app: tap mutes, hold talks, letting go sends", False, "flow52"),
     53: ("H57: a button for every past call: the list, one call read only", False, "flow53"),
-    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work; H168: the team's own guess; H172: its usage; H173: from its own tokens; H174: the totals say what they count", False, "flow54"),
+    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work; H168: the team's own guess; H172: its usage; H173: from its own tokens; H174: the totals say what they count; H176: where the usage will land", False, "flow54"),
     55: ("F14: her voice off also silences the thinking tick, the talk sound and the click", False, "flow55"),
     56: ("H59: an update to a fake newer version: backup, local/ kept, note for Claude, waits for a call", False, "flow56"),
     57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),

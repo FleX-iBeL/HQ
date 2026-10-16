@@ -203,3 +203,88 @@ export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = fa
       .join('; ')}.`,
   };
 }
+
+/**
+ * H176 (16 October 2026, call at 13:37): "Maybe we can make that a yellow bar so we can visually see where it's going
+ * to end up and know, if things go as estimated, where it would land and in what time." Where one plan limit's use
+ * should land if the work goes as estimated, from the same estimates as the totals (routine/estimate.py plan): a piece
+ * per job and planned item, in the order they'd run (a priority item where it cuts in). Kinds: 'team' (what's still to
+ * come of the running job, and the waiting jobs), 'planned' (a one-time planned item), 'repeat' (a repeating one, its
+ * next time). Work that runs past the limit's reset counts, by its minutes, for the next window (`next`). Work without a
+ * time (the routine off, a line it never fits under) isn't placed; `untimed` counts it. `cross`: the first piece that
+ * would take it past the stop line as it stands when that piece is done.
+ * @returns {null | { key: string, now: number, to: number, lands: number | null, reset: number | null, line: number | null,
+ *   pieces: Array<{ kind: string, what: string, add: number, from: number, to: number, start: number, lands: number, priority: boolean }>,
+ *   kinds: Record<string, number>, next: number, untimed: number, cross: null | { what: string, at: number, pct: number, line: number } }}
+ */
+export const LAND_KINDS = { team: "the team's work", planned: 'planned once', repeat: 'repeating' };
+export function landing(l, lines, E, now = new Date()) {
+  const key = lineKey(l?.label);
+  if (!key || key === 'fable' || !E || !Number.isFinite(Number(l.percent))) return null;
+  const t = now.getTime() / 1000;
+  const reset = l.resetsAt ? new Date(l.resetsAt).getTime() / 1000 : null;
+  const work = [];
+  let untimed = 0;
+  const put = (w) => (w.end && w.start !== null ? work.push(w) : (untimed += w.add > 0 ? 1 : 0));
+  for (const [n, e] of Object.entries(E.jobs ?? {})) {
+    if (e.finished || !e.cost) continue;
+    const running = 'left' in e;
+    const add = Math.max(0, Number(e.cost[key] ?? 0) - (running ? Number(e.used?.[key] ?? 0) : 0));
+    const end = e.eta ?? null;
+    const start = running ? t : (e.start ?? (end ? end - (e.est ?? 0) * 60 : null));
+    put({ kind: 'team', what: `Job ${n}`, add, start, end, priority: false, running });
+  }
+  for (const [n, e] of Object.entries(E.items ?? {})) {
+    if (!e.cost) continue;
+    put({ kind: e.every ? 'repeat' : 'planned', what: `Planned item ${n}`, add: Math.max(0, Number(e.cost[key] ?? 0)), start: e.start ?? null, end: e.eta ?? null, priority: !!e.priority });
+  }
+  // The order they'd run: the running job first, then by when each starts.
+  work.sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0) || a.start - b.start || a.end - b.end);
+  const r1 = (x) => Math.round(x * 10) / 10;
+  let at = Number(l.percent);
+  let next = 0;
+  let cross = null;
+  const pieces = [];
+  const kinds = { team: 0, planned: 0, repeat: 0 };
+  for (const w of work) {
+    if (!(w.add > 0)) continue;
+    // The part of it that runs before the reset, by its minutes; the rest is the next window's.
+    const span = Math.max(1, w.end - w.start);
+    const frac = reset === null || w.end <= reset ? 1 : w.start >= reset ? 0 : (reset - w.start) / span;
+    const here = w.add * frac;
+    next += w.add - here;
+    if (here < 0.05) continue;
+    const from = at;
+    at += here;
+    const lands = reset === null ? w.end : Math.min(w.end, reset);
+    pieces.push({ kind: w.kind, what: w.what, add: r1(here), from: r1(from), to: r1(at), start: w.start, lands, priority: w.priority });
+    kinds[w.kind] += here;
+    const sl = stopLine(l, lines, new Date(1000 * (reset === null ? lands : Math.min(lands, reset - 60))));
+    if (!cross && sl && r1(at) > sl.line) cross = { what: w.what, at: lands, pct: r1(at), line: sl.line };
+  }
+  const line = stopLine(l, lines, now);
+  // Where a moving line will stand when the last piece lands (before the reset), so the bar shows whether it fits then.
+  const last = pieces.length ? pieces[pieces.length - 1].lands : null;
+  const then = last && line?.moving ? stopLine(l, lines, new Date(1000 * (reset === null ? last : Math.min(last, reset - 60)))) : null;
+  for (const k of Object.keys(kinds)) kinds[k] = r1(kinds[k]);
+  return {
+    key, now: Number(l.percent), to: r1(at), lands: pieces.length ? pieces[pieces.length - 1].lands : null, reset,
+    line: line ? line.line : null, moving: !!line?.moving, lineThen: then && then.line !== line.line ? then.line : null, pieces, kinds, next: r1(next), untimed, cross,
+  };
+}
+
+/** H176: the landing in plain words, under its bar. `clock` turns epoch seconds into a time (with the day when it isn't today). */
+export function landingWords(L, clock) {
+  if (!L || (!L.pieces.length && !L.next && !L.untimed)) return '';
+  const five = L.key === 'five';
+  const s = [];
+  if (L.pieces.length) {
+    const parts = Object.entries(L.kinds).filter(([, v]) => v > 0).map(([k, v]) => `${LAND_KINDS[k]} ${v}%`);
+    s.push(`If the work goes as estimated, it lands at ${L.to}% around ${clock(L.lands)} (${parts.join(', ')})${five && L.reset ? `, before its reset at ${clock(L.reset)}` : ''}.`);
+    if (L.cross) s.push(`That goes past the stop line: around ${clock(L.cross.at)}, ${L.cross.what} takes it to ${L.cross.pct}% while the line is at ${L.cross.line}%.`);
+    else if (L.line !== null) s.push(L.moving ? 'It stays under the stop line as the line climbs.' : 'It stays under the stop line.');
+  } else if (five && L.next) s.push('Nothing lands before its reset.');
+  if (L.next) s.push(`${L.next}% more lands after ${five ? 'the reset, in the next 5-hour window' : 'the weekly reset, in the next week'}.`);
+  if (L.untimed) s.push(`${L.untimed === 1 ? 'One more piece of work has' : `${L.untimed} more pieces of work have`} no time yet, so ${L.untimed === 1 ? "it isn't" : "they aren't"} on the bar.`);
+  return s.join(' ');
+}

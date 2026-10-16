@@ -30,6 +30,10 @@
         --amber-ink: #8a5a00;
         --red: #b42318;
         --grey: #6b7785;
+        /* H176: where the usage will land: the team's work darker, planned once lighter, repeating green. */
+        --land-team: #d9730d;
+        --land-planned: #e8c547;
+        --land-repeat: #4fae6a;
         /* H33: running is a good thing, not a warning: green with stripes, "working, and busy right now". */
         --running: repeating-linear-gradient(135deg, var(--green) 0 4px, color-mix(in srgb, var(--green) 55%, var(--card)) 4px 8px);
       }
@@ -49,6 +53,9 @@
           --amber-ink: #e0b040;
           --red: #f0766a;
           --grey: #8a94a0;
+          --land-team: #e8913a;
+          --land-planned: #f0d77a;
+          --land-repeat: #5fbf7d;
         }
       }
       * { box-sizing: border-box; }
@@ -102,7 +109,19 @@
       .card > * + * { border-top: 1px solid var(--rule); }
       .bar { height: 8px; border-radius: 4px; background: var(--track); position: relative; }
       .bar div { height: 100%; border-radius: 4px; background: var(--blue); }
-      .bar s { position: absolute; top: -5px; width: 2px; height: 18px; background: var(--ink); text-decoration: none; }
+      /* H176: the pieces of work after the used part, each where it should land if it goes as estimated. */
+      .bar i.land { position: absolute; top: 0; height: 100%; min-width: 3px; border-left: 1px solid var(--card); }
+      .bar i.land:last-of-type { border-radius: 0 4px 4px 0; }
+      .land.team, .swatch.team { background: var(--land-team); }
+      .land.planned, .swatch.planned { background: var(--land-planned); }
+      .land.repeat, .swatch.repeat { background: var(--land-repeat); }
+      .bar i.land.priority { box-shadow: inset 0 0 0 1.5px var(--ink); }
+      .meter .land-note .crosses { color: var(--red); }
+      .bar s.then { background: transparent; border-left: 2px dotted var(--soft); width: 0; }
+      .usage > .land-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; }
+      .land-legend span { display: inline-flex; align-items: center; gap: 6px; }
+      .swatch { display: inline-block; width: 14px; height: 8px; border-radius: 2px; }
+      .bar s { z-index: 1; position: absolute; top: -5px; width: 2px; height: 18px; background: var(--ink); text-decoration: none; }
       /* The stop line's own number, shown while the mouse is on the line (a wider band to aim at). */
       .bar s::before { content: ''; position: absolute; left: -7px; right: -7px; top: -4px; bottom: -4px; }
       .bar s::after { content: attr(data-pct); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); padding: 2px 7px; border-radius: 4px; background: var(--ink); color: var(--card); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.12s; }
@@ -383,7 +402,7 @@
     <script>HQUpdate.mount({ line: document.getElementById('hqu-line'), banner: document.getElementById('hqu-banner') });</script>
     <script type="module">
       import { parseRoadmap } from './parse.mjs';
-      import { stopLine, usageVerdict } from './usage.mjs';
+      import { stopLine, usageVerdict, landing, landingWords, LAND_KINDS } from './usage.mjs';
 
       const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped' };
       const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision' };
@@ -523,6 +542,58 @@
         return row;
       }
 
+      /** H176: the pieces of work on a usage bar, after the used part, in the order they'd run. */
+      function drawLanding(box, L) {
+        const fill = box.querySelector('div');
+        // Pieces next to each other of the same kind make one stretch; a priority item or another kind breaks it.
+        const runs = [];
+        for (const p of L.pieces) {
+          const r = runs[runs.length - 1];
+          if (r && r.kind === p.kind && r.priority === p.priority) { r.to = p.to; r.lands = p.lands; r.items.push(p); }
+          else runs.push({ kind: p.kind, priority: p.priority, from: p.from, to: p.to, lands: p.lands, items: [p] });
+        }
+        for (const r of runs) {
+          const from = Math.min(100, Math.max(0, r.from));
+          const to = Math.min(100, Math.max(0, r.to));
+          if (to <= from) continue;
+          const i = el('i', `land ${r.kind}${r.priority ? ' priority' : ''}`);
+          i.style.left = `${from}%`;
+          i.style.width = `${to - from}%`;
+          i.title = r.items.map((p) => `${p.what}${p.priority ? ' (priority)' : ''}: about ${p.add}%, at ${p.to}% around ${clock(p.lands * 1000)}`).join('\n');
+          box.insertBefore(i, box.querySelector('s'));  // under the stop line, which stays on top
+        }
+        // A moving line: where it will stand when the last piece lands, a softer mark.
+        if (L.lineThen !== null && L.lineThen !== undefined) {
+          const t = el('s', 'then');
+          t.style.left = `${Math.min(100, L.lineThen)}%`;
+          t.dataset.pct = `Stop line around ${clock(L.lands * 1000)}: ${Math.round(L.lineThen * 10) / 10}%`;
+          box.append(t);
+        }
+        // The used part keeps its round end only where nothing follows it.
+        if (L.pieces.length) fill.style.borderRadius = '4px 0 0 4px';
+      }
+      /** H176: what the colours on the usage bars mean. */
+      function landLegend() {
+        const p = el('p', 'soft land-legend');
+        p.append(el('span', '', 'Where it should land:'));
+        for (const [k, w] of Object.entries(LAND_KINDS)) {
+          const s = el('span');
+          s.append(el('i', `swatch ${k}`), w.charAt(0).toUpperCase() + w.slice(1));
+          p.append(s);
+        }
+        const pr = el('span');
+        const sw = el('i', 'swatch planned');
+        sw.style.boxShadow = 'inset 0 0 0 1.5px var(--ink)';
+        pr.append(sw, 'Outlined: priority, where it cuts in');
+        p.append(pr);
+        const th = el('span');
+        const dot = el('i', 'swatch');
+        dot.style.cssText = 'width: 0; border-left: 2px dotted var(--soft); border-radius: 0; height: 14px;';
+        th.append(dot, 'Dotted: where a moving stop line will be when it lands');
+        p.append(th);
+        return p;
+      }
+
       /** F7: the three plan limits that always show, in this order, even without a number. */
       const ALWAYS = [
         { label: '5-hour limit', test: /5-hour/i },
@@ -531,7 +602,7 @@
       ];
 
       /** The last usage reading a session saved. The page cannot take one itself. */
-      function drawUsage(u, lines) {
+      function drawUsage(u, lines, E = null) {
         const age = u ? Date.now() - new Date(u.checkedAt).getTime() : 0;
         const verdict = usageVerdict(u, lines, new Date());
         // An old reading is shown dimmed: usage may have moved on since.
@@ -550,6 +621,7 @@
           card.append(meter('Context window', 'This session only', u.context.percent, `${k(u.context.tokens)} of ${k(u.context.window)}`, null, 'context'));
         }
         const limits = Array.isArray(u?.limits) ? u.limits : [];
+        let landed = false;
         // F7: all three always show; the known ones in the order above, anything else after them.
         const rows = ALWAYS.map((a) => ({ a, l: limits.find((l) => a.test.test(l.label)) ?? null }));
         for (const l of limits) if (!rows.some((r) => r.l === l)) rows.push({ a: null, l });
@@ -576,9 +648,26 @@
           }
           const at = stopLine(l, lines, new Date());
           const fiveHour = /5-hour/i.test(l.label) && l.resetsAt ? new Date(l.resetsAt) : null;
-          card.append(meter(l.label.replace(' · ', ', '), u.plan && l === limits[0] ? `${u.plan} plan` : '', l.percent, l.resetsAt ? until(l.resetsAt) : '', at ? at.line : null, '', at ? at.next : null, fiveHour, at?.perHour ?? 0));
+          const row = meter(l.label.replace(' · ', ', '), u.plan && l === limits[0] ? `${u.plan} plan` : '', l.percent, l.resetsAt ? until(l.resetsAt) : '', at ? at.line : null, '', at ? at.next : null, fiveHour, at?.perHour ?? 0);
+          // H176: after the used part, a piece per job and planned item, where it should land if it goes as estimated.
+          const L = u.readable ? landing(l, lines, E, new Date()) : null;
+          if (L) {
+            drawLanding(row.querySelector('.bar'), L);
+            const words = landingWords(L, (t) => clock(t * 1000));
+            if (words) {
+              const note = el('p', 'soft note land-note');
+              if (L.cross) {
+                const [a, b] = words.split(' That goes past the stop line');
+                note.append(a + ' ', el('span', 'crosses', `That goes past the stop line${b}`));
+              } else note.textContent = words;
+              row.append(note);
+            }
+            if (L.pieces.length) landed = true;
+          }
+          card.append(row);
         }
         box.append(card);
+        if (landed) box.append(landLegend());
         if (u?.readable && verdict.stop) box.append(el('p', 'alarm', `Stop line reached. ${verdict.reason}`));
         if (lines) for (const key of ['five', 'weekly', 'fable']) box.append(lineSwitch(key, lines[key]));
         box.append(
@@ -1356,7 +1445,7 @@
 
         app.append(drawRoutines(routines));
         if (LAPTOP) app.append(drawTemperature(routines));  // H92: no Laptop section on a server
-        app.append(drawUsage(usage, s.usageLines));
+        app.append(drawUsage(usage, s.usageLines, routines?.estimate ?? null));  // H176: with where the work should land
 
         if (s.current) {
           const box = el('section');
