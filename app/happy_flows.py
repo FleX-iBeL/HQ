@@ -5689,6 +5689,16 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need("Estimate: about 14 min; about 7% of the 5-hour and 1.4% of the week, done around" in lst and "All 2 jobs: about 21 min, all done around" in lst and "(estimate)" in lst,
              f"list doesn't say the estimates: {lst}")
         need("No estimate has been checked" in lst, f"list doesn't say how close the estimates have been: {lst}")
+        # H174: the total says what it counts, part by part, and the parts add up with the per-job lines.
+        t174 = p["total"]
+        need(t174["running"] == 0 and t174["waiting"] == 2 and t174["waiting_min"] == 14 + 6 and t174["gaps"] == 1
+             and t174["running_min"] + t174["waiting_min"] + t174["gaps"] == t174["minutes"], f"H174: the total's parts don't add up: {t174}")
+        need(abs(t174["five"] - sum(round(p["jobs"][str(x)]["cost"]["five"], 1) for x in (a, b))) < 0.05
+             and abs(t174["weekly"] - sum(round(p["jobs"][str(x)]["cost"]["weekly"], 1) for x in (a, b))) < 0.05,
+             f"H174: the total's usage isn't the jobs' usage together: {t174} {p['jobs']}")
+        need("The total counts the 2 waiting jobs (20 min) and 1 min between jobs: 21 min in all, using about" in lst
+             and "It's the computed estimate" in lst and "the team's own guesses aren't in it" in lst,
+             f"H174: the list doesn't say what the total counts: {lst}")
         # A held job, and everything after it, waits on the usage. H109: the times stay, as if the usage
         # allowed it, and the words say they'll be later because of the usage limit.
         jobs("held", str(a))
@@ -5697,6 +5707,7 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
              f"a held job doesn't wait on the usage: {p['jobs']} {p['total']}")
         need(p["jobs"][str(a)]["eta"] and p["jobs"][str(b)]["eta"] - p["jobs"][str(a)]["eta"] == (6 + 1) * 60
              and p["total"]["eta"] == p["jobs"][str(b)]["eta"], f"H109: held by the usage, the times are gone: {p['jobs']} {p['total']}")
+        need(p["total"]["held"] == 1 and "1 of them held by the usage" in p["total"]["counts"], f"H174: the total doesn't say a held job is in it: {p['total']}")
         lst = jobs("list")
         need("done around" in lst and "later, because the usage limit holds the jobs" in lst and "all done around" in lst,
              f"H109: list doesn't keep the times with the usage note: {lst}")
@@ -5774,6 +5785,17 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need(tot["items"] == 3 and tot["minutes"] == sum(it[k]["est"] for k in it) and tot["eta"] == max(it[k]["eta"] for k in it),
              f"H107: the planned items' total is wrong: {tot} {it}")
         need("All 3 planned items: about" in lst and "all done around" in lst, f"H107: the scheduler's list doesn't say the total: {lst}")
+        # H174: the planned items' total says what it counts; its usage is theirs together; a repeating item counts once.
+        need(abs(tot["weekly"] - sum(round(it[k]["cost"]["weekly"], 1) for k in it)) < 0.05 and tot["repeating"] == 0
+             and "The total counts each of the 3 planned items once:" in tot["counts"] and "of work in all" in tot["counts"]
+             and "The total counts each of the 3 planned items once" in lst, f"H174: the planned items' total doesn't say what it counts: {tot} {lst}")
+        i4 = int(sched("add", "tomorrow 16:00", "Measure the token cost of one run again, flow 54", "--kind", "call", "--every", "day").split()[1])
+        p4 = json.loads(est("plan"))
+        need(p4["items_total"]["items"] == 4 and p4["items_total"]["repeating"] == 1
+             and p4["items_total"]["minutes"] == sum(e["est"] for e in p4["items"].values())
+             and "the repeating one only its next time" in p4["items_total"]["counts"],
+             f"H174: a repeating item isn't counted once, its next time: {p4['items_total']}")
+        sched("cancel", str(i4))
         # H109: a job held by the usage: the planned items keep their times, with the usage note.
         h_ = int(jobs("add", "Build H6, flow 54", "--kind=build").split()[1])
         jobs("held", str(h_))
@@ -5871,7 +5893,7 @@ print(json.dumps(o, default=str))
         need("the team guessed 20 min, took" in jobs("list"), "H168: a finished job's line doesn't show its guess")
         need("guess {n} MINUTES (H168)" in (jv / "routine/tick.py").read_text(), "H168: the job prompt doesn't ask for the team's guess")
         page = (jv / "status/index.html").read_text()
-        need("the team guessed" in page and "E?.guesses?.words" in page, "H168: the status page doesn't show the team's guess")
+        need("The team's own guess" in page and "E?.guesses?.words" in page, "H168: the status page doesn't show the team's guess")
         r168 = sp.run(["python3", "-c", """
 import sys, json; sys.path.insert(0, sys.argv[1]); import estimate as E
 line = lambda i, est, guess, actual: {"n": i, "kind": "build", "est": est, "guess": guess, "actual": actual, "done": i, "how": "seen", "machine": "vps"}
@@ -6118,6 +6140,10 @@ print(json.dumps(o))
         need("routine/estimate.py" in srv and "estimate };" in srv, "the status server doesn't serve the estimates")
         need("function etaWords" in page and "etaTotal(E)" in page and "etaAccuracy(E.accuracy)" in page and "(estimate)" in page,
              "the status page doesn't show the estimates")
+        # H174: under each heading what its total counts; the total says it's the computed estimate; the team's guess on its own quiet line.
+        need("E.total.counts" in page and "items_total.counts" in page and "(computed estimate)" in page
+             and "function etaGuess" in page and ".eta-guess {" in page and "the team guessed" not in page.split("function etaWords")[1].split("function etaItem")[0],
+             "H174: the status page doesn't say what the totals count, or the team's guess isn't apart")
         code, body, _ = await asyncio.to_thread(http_get, "/routines.json", "http://127.0.0.1:4748")
         live = json.loads(body) if code == 200 else {}
         need("estimate" in live and "accuracy" in (live["estimate"] or {}), f"the live status server has no estimates: {code}")
@@ -6138,6 +6164,7 @@ print(json.dumps(o))
                 "planned items too, after the job list and the items before them, their kind going with them (H95), and their total (H107); held by the usage, the times stay with a soft red note (H109); "
                 "a quick look gives each job and item a size that moves its estimate (H167); "
                 "the team's own guess at the start, next to the computed estimate and the real time, taken in once the guesses have a record (H168); "
+                "the totals say what they count, add up with the lines under them, a repeating item once, the team's guess apart and quieter (H174); "
                 "each job's real usage counted (a reset in, a hold out), its estimate from the jobs like it, when it fits, the pause at twice (H172)")
 
     # 55
@@ -10932,7 +10959,7 @@ FLOWS = {
     51: ("H51: a call saves the usage it gets back, for the status page", False, "flow51"),
     52: ("H49: the space bar in the desktop app: tap mutes, hold talks, letting go sends", False, "flow52"),
     53: ("H57: a button for every past call: the list, one call read only", False, "flow53"),
-    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work; H168: the team's own guess; H172: its usage; H173: from its own tokens", False, "flow54"),
+    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work; H168: the team's own guess; H172: its usage; H173: from its own tokens; H174: the totals say what they count", False, "flow54"),
     55: ("F14: her voice off also silences the thinking tick, the talk sound and the click", False, "flow55"),
     56: ("H59: an update to a fake newer version: backup, local/ kept, note for Claude, waits for a call", False, "flow56"),
     57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),

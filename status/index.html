@@ -201,6 +201,10 @@
       /* H109: held by the usage line, the times still show, with a soft red note that they'll be later */
       .late { color: color-mix(in srgb, var(--red) 65%, var(--soft)); }
       .row.eta-sum { display: block; font-size: 13px; }
+      /* H174: the team's own guess, quieter than the computed estimate, so it doesn't read as a second estimate */
+      .eta-guess { display: block; font-size: 12px; color: var(--soft); opacity: 0.75; font-style: italic; }
+      /* H174: what a total counts, right under its heading */
+      .eta-counts { font-size: 13px; margin: 2px 0 8px; }
 
       /* H19: every routine, its state, when it last ran and runs next. */
       .routine { display: grid; grid-template-columns: 14px 170px minmax(0, 1fr) 150px; align-items: baseline; gap: 12px; padding: 12px 20px; }
@@ -657,12 +661,10 @@
       function etaWords(E, n) {
         const e = E?.jobs?.[n];
         if (!e) return '';
-        // H168: the team's own guess next to the computed estimate (and, once the guesses have a record, taken into it).
-        let g = e.guess ? `, the team guessed ${etaDur(e.guess)}` : '';
-        if (e.finished) return (e.est ? `Estimated ${etaDur(e.est)}${g}, took ${etaDur(e.actual)}` : `Took ${etaDur(e.actual)}${g}`) + (e.cost ? ` · ${etaUsed(e.cost)}` : '');
-        if (e.guess && e.computed !== e.est) g = ` (computed ${etaDur(e.computed)}, the team guessed ${etaDur(e.guess)})`;
+        // H168: the team's own guess goes on its own quiet line (etaGuess, H174), not in the estimate's sentence.
+        if (e.finished) return (e.est ? `Estimated ${etaDur(e.est)}, took ${etaDur(e.actual)}` : `Took ${etaDur(e.actual)}`) + (e.cost ? ` · ${etaUsed(e.cost)}` : '');
         let s = 'left' in e
-          ? (e.over ? `Estimated ${etaDur(e.est)}${g}, running ${etaDur(e.so_far)}: taking longer than estimated` : `About ${etaDur(e.left)} left of ${etaDur(e.est)}${g}`)
+          ? (e.over ? `Estimated ${etaDur(e.est)}, running ${etaDur(e.so_far)}: taking longer than estimated` : `About ${etaDur(e.left)} left of ${etaDur(e.est)}`)
           : `About ${etaDur(e.est)}`;
         if (e.cost) s += ` · ${etaCost(e.cost)}${e.used ? ` (${etaUsed(e.used)} so far)` : ''}`;
         if (e.start) s += ` · starts around ${etaAt(e.start)} ${USAGE_START}`;
@@ -671,6 +673,13 @@
         else if (e.waits === 'usage') s += ' · when it\'s done waits on the usage';
         else if (e.waits === 'off') s += ' · the routine is off';
         return `${s} (estimate)`;
+      }
+      /** H174 (H168): the team's own guess for a job, said quietly under the estimate; when it's taken in, says so. */
+      function etaGuess(E, n) {
+        const e = E?.jobs?.[n];
+        if (!e?.guess) return '';
+        if (!e.finished && e.computed && e.computed !== e.est) return `The team's own guess: ${etaDur(e.guess)}, taken into the estimate (computed alone ${etaDur(e.computed)})`;
+        return `The team's own guess: ${etaDur(e.guess)}`;
       }
       /** H95: a planned item's estimate in words, the same as routine/estimate.py says it to a call. */
       function etaItem(E, n) {
@@ -688,8 +697,10 @@
       function etaTotal(E) {
         const t = E?.total;
         if (!t) return '';
-        if (t.eta) return `all done around ${etaTime(t.eta)} (estimate, about ${etaDur(t.minutes)})`;
-        return `about ${etaDur(t.minutes)} (estimate; ${t.waits === 'usage' ? 'waits on the usage' : 'the routine is off'})`;
+        // H174: the time and the 5-hour usage everything still takes, then when it's all done; what it counts is under the heading.
+        const use = 'five' in t ? ` and ${etaPct(t.five)} of the 5-hour` : '';
+        if (t.eta) return `about ${etaDur(t.minutes)}${use}, all done around ${etaTime(t.eta)} (computed estimate)`;
+        return `about ${etaDur(t.minutes)}${use} (computed estimate; ${t.waits === 'usage' ? 'waits on the usage' : 'the routine is off'})`;
       }
       /** H107: all planned items together, the same way etaTotal does it for the job list. */
       function etaItemsTotal(E) {
@@ -698,9 +709,9 @@
         if (t.eta) {
           const x = new Date(t.eta * 1000);
           const d = x.toDateString() === new Date().toDateString() ? '' : `${x.toLocaleDateString('en-GB', { weekday: 'short' })} `;
-          return `all done around ${d}${etaTime(t.eta)} (estimate, about ${etaDur(t.minutes)})`;
+          return `about ${etaDur(t.minutes)} of work${t.has_cost ? ` and ${etaPct(t.weekly)} of the week` : ''}, the last done around ${d}${etaTime(t.eta)} (computed estimate)`;
         }
-        return `about ${etaDur(t.minutes)} (estimate; ${t.waits === 'usage' ? 'waits on the usage' : 'the routine is off'})`;
+        return `about ${etaDur(t.minutes)} of work (computed estimate; ${t.waits === 'usage' ? 'waits on the usage' : 'the routine is off'})`;
       }
       function etaAccuracy(a) {
         if (!a?.count) return 'Estimates: none checked against a finished job yet. Each job that finishes teaches the next estimates.';
@@ -1377,6 +1388,7 @@
           const counts = q.on ? `${of('running').length} running · ${of('waiting').length} waiting${total ? ` · ${total}` : ' · the routine looks every minute'}` : 'The routine is off';
           const fold = foldPart('jobs', true, 'Jobs from calls', counts, false, q.on && total ? lateNote(E?.total) : '');
           const parts = el('div', 'parts');
+          if (q.on && E?.total?.counts) parts.append(el('p', 'soft eta-counts', E.total.counts));  // H174: what the total counts
           for (const [g, title, st, start] of [['running', 'Running', 'doing', true], ['waiting', 'Waiting', 'todo', true], ['finished', 'Finished', 'done', false]]) {
             // H39: waiting jobs keep their place in line (the order they will run), not their number.
             const jobs = g === 'waiting' ? of(g).sort((a, b) => (a.place ?? 0) - (b.place ?? 0)) : of(g).sort((a, b) => (g === 'finished' ? b.n - a.n : a.n - b.n));
@@ -1397,6 +1409,8 @@
               left.append(text);
               const w = etaWords(E, j.n);
               if (w) left.append(etaSpan(`eta${E.jobs[j.n].over ? ' over' : ''}`, w, E.jobs[j.n]));
+              const gw = etaGuess(E, j.n);
+              if (gw) left.append(el('span', 'eta-guess', gw));  // H174: quieter, on its own line
               // H141: why the job first in line waits (how much room it needs under the usage line, how much there is).
               const gate = routines?.routines?.jobs;
               const gateText = gate?.state === 'waiting' && g === 'waiting' ? (gate.text ?? '') : '';
@@ -1450,6 +1464,7 @@
           const itemsLate = itemsTotal ? lateNote(routines?.estimate?.items_total) : '';  // H109
           const fold = foldPart('schedule', true, 'Scheduled', `${coming.length} planned${due ? ` · ${due} due` : ''}${itemsTotal ? ` · ${itemsTotal}` : ''} · the job list goes first, except for priority`, false, itemsLate);
           const parts = el('div', 'parts');
+          if (itemsTotal && routines?.estimate?.items_total?.counts) parts.append(el('p', 'soft eta-counts', routines.estimate.items_total.counts));  // H174
           for (const [key, title, list, st, start] of [['coming', 'Planned', coming, 'todo', true], ['back', 'Looking back', back, 'done', false]]) {
             const part = foldPart(`schedule-${key}`, start, title, `${list.length}${key === 'coming' && itemsTotal ? ` · ${itemsTotal}` : ''}`, true, key === 'coming' ? itemsLate : '');
             const card = el('div', 'card');

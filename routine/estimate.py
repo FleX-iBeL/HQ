@@ -1166,6 +1166,8 @@ def plan(now=None):
     except Exception:
         counts = {}
     held_wait = False
+    # H174: what the total counts, part by part, so it adds up with the per-job lines.
+    parts = {"running_min": 0, "waiting_min": 0, "gaps": 0, "held": 0, "guess_in": False, "five": 0.0, "weekly": 0.0}
     running = [j for j in js if j["state"].startswith(("running", "stop asked"))]
     for j in running:
         e = st.get(str(j["n"])) or known(j["n"])
@@ -1184,6 +1186,8 @@ def plan(now=None):
         nxt = left if left > 0 else 2  # running longer than estimated: a couple of minutes more, at least
         cursor += nxt * 60
         left_total += nxt
+        parts["running_min"] += nxt
+        parts["guess_in"] |= bool(guess) and est != computed
         out["jobs"][str(j["n"])] = {"est": est, "kind": kind_for(j["text"], e.get("kind")), "so_far": done_min,
                                     "left": left, "over": over, "eta": None if waits else int(cursor)}
         if guess:  # H168
@@ -1195,6 +1199,8 @@ def plan(now=None):
             out["jobs"][str(j["n"])]["cost"] = {k: c.get(k, 0) for k in U.KEYS}
             if used:
                 out["jobs"][str(j["n"])]["used"] = used
+            for k, w in (("five", "five"), ("weekly", "weekly")):  # H174: what's still to come of it, as the lines show it
+                parts[w] += max(0.0, round(c.get(k, 0), 1) - round(used.get(k, 0), 1))
             if proj:
                 proj.add({k: max(0.0, c.get(k, 0) - used.get(k, 0)) for k in U.KEYS}, now)
     run_end = cursor  # H99: when the running job should be done; a priority item can start from there
@@ -1209,7 +1215,13 @@ def plan(now=None):
         if running or j is not line[0] or cursor > now:
             cursor += GAP * 60
             left_total += GAP
+            parts["gaps"] += GAP
+        parts["waiting_min"] += est
+        parts["held"] += j["state"].startswith("held")
         cost = U.cost_for(est, j["text"], kind, hist) if U else None
+        if cost:
+            parts["five"] += round(cost.get("five", 0), 1)
+            parts["weekly"] += round(cost.get("weekly", 0), 1)
         fits = proj.fits_at(cost, cursor, weekly_only=j.get("past")) if proj else None
         start = None
         if proj and fits is None:
@@ -1233,7 +1245,12 @@ def plan(now=None):
     if running or line:
         out["total"] = {"jobs": len(running) + len(line), "minutes": round(left_total),
                         "eta": int(cursor) if on and not (proj and waits) else None,
-                        "waits": ("usage" if on else "off") if waits or held_wait else None}
+                        "waits": ("usage" if on else "off") if waits or held_wait else None,
+                        "running": len(running), "waiting": len(line), **parts,
+                        "five": round(parts["five"], 1), "weekly": round(parts["weekly"], 1),
+                        "usage_wait": held_wait,
+                        "paused": sum(1 for j in js if j["state"].startswith("paused"))}
+        out["total"]["counts"] = total_counts(out["total"], bool(U))
     out["items"] = _plan_items(cursor, waits, on, hist, run, run_end, proj, U)
     out["items_total"] = _items_total(out["items"], waits, on)
     return out
@@ -1244,12 +1261,65 @@ def _items_total(items, waits, on):
     the last one should be done (the job list goes first, so its time is already in each item's)."""
     if not items:
         return None
-    t = {"items": len(items), "minutes": round(sum(e["est"] for e in items.values())), "eta": None, "waits": None}
+    t = {"items": len(items), "minutes": round(sum(e["est"] for e in items.values())), "eta": None, "waits": None,
+         # H174: their usage together (each as its line shows it), and the repeating ones, counted once: their next time.
+         "five": round(sum(round((e.get("cost") or {}).get("five", 0), 1) for e in items.values()), 1),
+         "weekly": round(sum(round((e.get("cost") or {}).get("weekly", 0), 1) for e in items.values()), 1),
+         "repeating": sum(1 for e in items.values() if e.get("every")),
+         "has_cost": any(e.get("cost") for e in items.values())}
     if waits or not on or any(e.get("usage_wait") for e in items.values()):
         t["waits"] = "off" if not on else "usage"
     if on and all(e.get("eta") for e in items.values()):  # H109: held by the usage, still a time, later
         t["eta"] = max(e["eta"] for e in items.values())
+    t["counts"] = items_counts(t)
     return t
+
+
+def _pct(x):
+    x = round(float(x), 1)
+    return f"{x:g}%"
+
+
+def total_counts(t, with_cost=True):
+    """H174: what the job list's total counts, in plain words, part by part, so it adds up with the lines under it.
+    The same sentence on the status page (under the Jobs from calls heading), in jobs.py list and on a call."""
+    bits = []
+    if t.get("running"):
+        bits.append(f"the running job's time left ({dur(t['running_min'])})" if t["running"] == 1
+                    else f"the {t['running']} running jobs' time left ({dur(t['running_min'])})")
+    if t.get("waiting"):
+        held = f", {t['held']} of them held by the usage" if t.get("held") and t["waiting"] > 1 else (" (held by the usage)" if t.get("held") else "")
+        bits.append(f"{'the waiting job' if t['waiting'] == 1 else 'the ' + str(t['waiting']) + ' waiting jobs'} ({dur(t['waiting_min'])}{held})")
+    if t.get("gaps"):
+        bits.append(f"{dur(t['gaps'])} between jobs")
+    s = "The total counts " + (", ".join(bits[:-1]) + " and " + bits[-1] if len(bits) > 1 else bits[0]) + f": {dur(t['minutes'])} in all"
+    if with_cost:
+        s += f", using about {_pct(t.get('five', 0))} of the 5-hour and {_pct(t.get('weekly', 0))} of the week"
+        if t.get("running"):
+            s += " (of the running job, only what's still to come)"
+    s += "."
+    if t.get("usage_wait"):
+        s += " The time a job waits for the usage is in the done-around time, not in the minutes."
+    if t.get("paused"):
+        s += f" {'A paused job waits' if t['paused'] == 1 else str(t['paused']) + ' paused jobs wait'} for a call and {'isn' if t['paused'] == 1 else 'aren'}'t counted."
+    s += (" It's the computed estimate, from how long jobs like these took, with the team's own guess taken in for the running job"
+          " as far as its guesses have been right." if t.get("guess_in") else
+          " It's the computed estimate, from how long jobs like these took; the team's own guesses aren't in it.")
+    return s
+
+
+def items_counts(t):
+    """H174: what the planned items' total counts, in plain words."""
+    n = t["items"]
+    s = f"The total counts {'the planned item' if n == 1 else 'each of the ' + str(n) + ' planned items'} once"
+    if t.get("repeating"):
+        s += (", the repeating one only its next time" if t["repeating"] == 1 else ", a repeating one only its next time")
+    s += f": {dur(t['minutes'])} of work in all"
+    if t.get("has_cost"):
+        s += f", using about {_pct(t.get('weekly', 0))} of the week"
+    s += (". The job list goes first and the items wait for their own time, so that's in the done-around time, not in the minutes."
+          " It's the computed estimate, from how long work like this took.")
+    return s
 
 
 def _schedule():
@@ -1425,13 +1495,13 @@ def total_words(p):
     s = f"All {t['jobs']} job{'s' if t['jobs'] != 1 else ''}: about {dur(t['minutes'])}"
     if t.get("eta"):
         s += f", all done around {hhmm(t['eta'])}"
-        if t.get("waits") == "usage":
+        if t.get("waits") == "usage" and not t.get("usage_wait"):
             s += f", but {USAGE_LATE}"
     elif t.get("waits") == "usage":
         s += "; when it's done waits on the usage"
     elif t.get("waits") == "off":
         s += "; the routine is off"
-    return s + " (estimate)."
+    return s + " (estimate)." + (f" {t['counts']}" if t.get("counts") else "")
 
 
 def items_total_words(p):
@@ -1450,7 +1520,7 @@ def items_total_words(p):
         s += "; when it's done waits on the usage"
     elif t.get("waits") == "off":
         s += "; the routine is off"
-    return s + " (estimate)."
+    return s + " (estimate)." + (f" {t['counts']}" if t.get("counts") else "")
 
 
 def accuracy_words(a):
