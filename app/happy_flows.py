@@ -3967,7 +3967,34 @@ console.log(JSON.stringify({{problems: r.problems, items: r.schedule.items.map((
         need("everyOf" in page and "'prio rep'" in page, "the status page doesn't show a repeating item (H171)")
         for sub in ("every 3 day", "every 3 off"):
             need(pol.decide("Bash", {"command": f"{s_} {sub}"}).verdict == ALLOW, f"a call can't {sub}")
-        return "plans by day and time; waits while a job runs, waits or the routine is off; then becomes one job, past the line kept; looking back, move, cancel; priority tag goes first in line, never stops a running job (H99); passed items all run after the job list, earliest first, none lost (H111); repeats every day or every weekday, the next planned by itself with tag, past the line and kind, no pile-up, every N off, cancel stops it (H171); page, routine line, call rules"
+        # F35: set-status.py never writes the block without its one-row phase table: an empty row keeps
+        # the one that was there, a row without "Phase " is refused, and with no row to keep so is an empty one.
+        st = lambda row, ok=True: run("../status/set-status.py", "BUILDING", "flow 45", "", "", row, f"flow 45 {row!r}", ok=ok)
+        def phase_row():
+            js = f"""import {{ parseRoadmap }} from '{(ROOT / "status/parse.mjs").as_uri()}';
+import {{ readFileSync }} from 'node:fs';
+const r = parseRoadmap(readFileSync({json.dumps(str(rm))}, 'utf8'));
+console.log(JSON.stringify({{ problems: r.problems, current: r.current }}));"""
+            return json.loads(sp.run(["node", "--input-type=module", "-e", js], capture_output=True, text=True, check=True).stdout)
+        st("Phase F|F35 🔨|F36 ⬜")
+        for row in ("", "   "):
+            st(row)
+            d = phase_row()
+            need(not d["problems"] and d["current"]["phase"] == "F" and [x["name"] for x in d["current"]["steps"]] == ["F35", "F36"],
+                 f"an empty phase row didn't keep the one that was there: {d}")
+        before = rm.read_text()
+        for row in ("F35 🔨", "|"):
+            st(row, ok=False)
+            need(rm.read_text() == before, f"a phase row without 'Phase ' ({row!r}) changed the roadmap")
+        rm.write_text(re.sub(r"^\|\s*Phase .*\|\n\|(?:-+\|)+\n", "", before, count=1, flags=re.M))
+        bare = rm.read_text()
+        need(bare != before, "the flow couldn't take the phase row out of its copy")
+        st("", ok=False)
+        need(rm.read_text() == bare, "an empty phase row with none to keep changed the roadmap")
+        st("Phase F|F35 ✅")
+        d = phase_row()
+        need(not d["problems"] and d["current"]["steps"][0]["status"] == "done", f"a new phase row doesn't put it back: {d}")
+        return "plans by day and time; waits while a job runs, waits or the routine is off; then becomes one job, past the line kept; looking back, move, cancel; priority tag goes first in line, never stops a running job (H99); passed items all run after the job list, earliest first, none lost (H111); the status block keeps its phase row, an empty or bad one refused or kept (F35); repeats every day or every weekday, the next planned by itself with tag, past the line and kind, no pile-up, every N off, cancel stops it (H171); page, routine line, call rules"
 
     async def flow46(self) -> str:
         """H27: the Mac desktop app. No Claude turns. The watchdog part on made-up routine lines, its turning-on
