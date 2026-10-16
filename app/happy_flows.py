@@ -8170,14 +8170,53 @@ setTimeout(() => {
             need(planning.why_not(cp).startswith("Already in"), "an appointment already in HQ Planning would be moved again")
             # undo: put back where it came from, then the copy removed
             planning.set_mark(a1["id"], "")
+            e1 = next(e for e in agenda.read()["events"] if e["title"] == "Deep work")  # H154: says it's on its way back
+            need(e1["mark"] == "" and e1["move"] == "to_back" and e1["move_note"] == "Moving back…", f"undo doesn't say it's moving back: {e1}")
             answer(("create_event", {"id": "b1", "summary": "Deep work"}), ("delete_event", {}))
             planning.work()
             c = made()
             need([x["tool_input"].get("calendarId") for x in c] == ["me@example.com", "plan-id"] and c[1]["tool_input"]["eventId"] == "c1"
                  and all(x["passed"] for x in c), f"undo didn't put it back and then remove the copy: {c}")
-            need(not any(e["title"] == "Deep work" for e in agenda.read()["events"]),
-                 "the removed copy still shows before the next read")
             need(planning._read()["marks"][a1["id"]].get("mark") == "", "undo left a mark")
+            # H154 (16 October 2026, the piano): back in Google but not read yet, it stays in the list, unmarked, not
+            # greyed, in Main, with its time; once, not as the removed copy too
+            dw = [e for e in agenda.read()["events"] if e["title"] == "Deep work"]
+            need(len(dw) == 1 and dw[0]["mark"] == "" and dw[0]["move"] == "" and dw[0]["calendar"] == "Main"
+                 and dw[0]["start"] == a1["start"] and dw[0]["mark_id"] == a1["id"] and dw[0]["id"] == a1["id"],
+                 f"undoing an X lost the appointment from the list before the next read: {dw}")
+            need("Deep work" in planning.week(), "the look back lost the appointment put back")
+            # an X again before the read: it moves the one put back (b1), not "already in HQ Planning"
+            planning.set_mark(a1["id"], "x")
+            m1 = planning._read()["marks"][a1["id"]]["move"]
+            need(m1["state"] == "to_move" and m1["from"]["gid"] == "b1" and m1["from"]["cal"] == "me@example.com",
+                 f"an X after an undo doesn't move the one put back: {m1}")
+            answer(("create_event", {"id": "c1b", "summary": "Deep work"}), ("delete_event", {}))
+            planning.work()
+            c = made()
+            need(c[1]["tool_input"] == {"calendarId": "me@example.com", "eventId": "b1", "notificationLevel": "NONE"},
+                 f"the second X removed something else: {c}")
+            dw = [e for e in agenda.read()["events"] if e["title"] == "Deep work"]
+            need(len(dw) == 1 and dw[0]["mark"] == "x" and dw[0]["calendar"] == "HQ Planning", f"the second X doesn't show in HQ Planning: {dw}")
+            planning.set_mark(a1["id"], "")
+            answer(("create_event", {"id": "b2", "summary": "Deep work"}), ("delete_event", {}))
+            planning.work()
+            # a calendar read in between that doesn't have it yet (read before the move back finished): still there
+            (d / "calendar.json").write_text(json.dumps({"looked": time.time() - 30, "calendars": cals, "events": [cp] + evs[1:]}))
+            dw = [e for e in agenda.read()["events"] if e["title"] == "Deep work"]
+            need(len(dw) == 1 and dw[0]["mark"] == "" and dw[0]["calendar"] == "Main", f"a read from before the move back hid it: {dw}")
+            # the marks synced over from the other computer (written again as they are): the same
+            mk = planning.marks_file()
+            mk.write_text(mk.read_text())
+            need(len([e for e in agenda.read()["events"] if e["title"] == "Deep work"]) == 1, "after a sync of the marks it's gone or twice")
+            # the next read shows the one put back: once, carrying its mark id; a read after that without it is the truth
+            bk = {**a1, "id": agenda._event_id("me@example.com", "b2"), "gid": "b2"}
+            (d / "calendar.json").write_text(json.dumps({"looked": time.time() + 1, "calendars": cals, "events": [cp, bk] + evs[1:]}))
+            dw = [e for e in agenda.read()["events"] if e["title"] == "Deep work"]
+            need(len(dw) == 1 and dw[0]["id"] == bk["id"] and dw[0]["mark_id"] == a1["id"] and dw[0]["mark"] == "",
+                 f"after the read the one put back isn't shown once with its mark id: {dw}")
+            (d / "calendar.json").write_text(json.dumps({"looked": time.time() + 2, "calendars": cals, "events": evs[1:]}))
+            need(not any(e["title"] == "Deep work" for e in agenda.read()["events"]), "a read without it still shows a stand-in")
+            (d / "calendar.json").write_text(json.dumps({"looked": time.time(), "calendars": cals, "events": evs}))
             # never moved: other people in it, a birthday
             for e in (a2, a3):
                 planning.set_mark(e["id"], "x")
@@ -8286,7 +8325,8 @@ window.fetch = async (url, opt) => {
   url = String(url);
   if (url === "api/calendar/mark") {
     const b = JSON.parse(opt.body); POSTS.push(b.id + ":" + (b.mark || "-") + ":" + (opt.headers || {})["x-hq"]);
-    EVENTS = EVENTS.map(e => e.mark_id !== b.id ? e : { ...e, mark: b.mark, move: b.mark === "x" ? "moved" : "", move_note: b.mark === "x" ? "In HQ Planning" : "" });
+    EVENTS = EVENTS.map(e => e.mark_id !== b.id ? e : { ...e, mark: b.mark, move: b.mark === "x" ? "moved" : e.move === "moved" ? "to_back" : "",
+                                                         move_note: b.mark === "x" ? "In HQ Planning" : e.move === "moved" ? "Moving back…" : "" });
     return { ok: true, json: async () => ({ on: true, looked: Date.now() / 1000 - 60, looking: false, error: "", events: EVENTS }) };
   }
   if (url.startsWith("api/calendar")) return { ok: true, json: async () => ({ on: true, looked: Date.now() / 1000 - 60, looking: false, error: "", events: EVENTS }) };
@@ -8303,6 +8343,11 @@ window.fetch = async (url, opt) => {
   out.push("pastday:" + (days().length === 2 && !days()[0].startsWith("Today") && days()[1].startsWith("Today") ? "ok" : "WRONG " + days()));
   const size = mk(1, "x").getBoundingClientRect();
   out.push("tappable:" + (size.width >= 30 && size.height >= 30 && rows()[1].getBoundingClientRect().right <= innerWidth + 1 ? "ok" : "WRONG"));
+  // H154: room: 40px buttons, 6px or more apart, and the X well clear of where the list's scrollbar is (or floats)
+  const nb = rows()[1].querySelector(".mk.nt").getBoundingClientRect(), db = mk(1, "done").getBoundingClientRect(), lb = calList.getBoundingClientRect();
+  out.push("room:" + (size.width >= 40 && size.height >= 40 && db.left - nb.right >= 6 && size.left - db.right >= 6
+    && size.right <= lb.left + calList.clientWidth - 8 && getComputedStyle(calList).scrollbarGutter.includes("stable") ? "ok"
+    : "WRONG " + [nb.right, db.left, db.right, size.left, size.right, lb.left + calList.clientWidth, size.width].map(Math.round)));
   mk(1, "done").click(); await wait(300);
   out.push("done:" + (POSTS.join() === "e1:done:calendar" && mk(1, "done").getAttribute("aria-pressed") === "true"
     && getComputedStyle(mk(1, "done")).backgroundColor === "rgb(22, 163, 74)" && !rows()[1].classList.contains("x") ? "ok" : "WRONG " + POSTS));
@@ -8314,6 +8359,11 @@ window.fetch = async (url, opt) => {
     && w.textContent.includes("In HQ Planning") && mk(0, "x").getAttribute("aria-pressed") === "true" ? "ok" : "WRONG " + POSTS));
   rows()[0].querySelector(".appt").click(); await wait(200);
   out.push("one:" + (calOne.textContent.includes("didn't happen as planned") && calOne.textContent.includes("In HQ Planning") ? "ok" : "WRONG"));
+  document.getElementById("calback").click(); await wait(300);
+  mk(0, "x").click(); await wait(300);  // H154: undoing the X: not greyed, and says it's on its way back
+  const w0 = rows()[0].querySelector(".appt .w");
+  out.push("back:" + (POSTS[3] === "e0:-:calendar" && rows().length === 2 && !rows()[0].classList.contains("x")
+    && parseFloat(getComputedStyle(w0).opacity) > 0.9 && w0.textContent.includes("Moving back") ? "ok" : "WRONG " + POSTS));
   document.getElementById("calclose").click();
   const pre = document.createElement("pre"); pre.id = "h143"; pre.textContent = "H143RESULT " + out.join(" | ") + " END";
   document.body.appendChild(pre);
@@ -8336,7 +8386,9 @@ window.fetch = async (url, opt) => {
                 "birthday never moved; a failing copy tried three times and nothing removed; a failed removal undone by removing "
                 "only the copy; no HQ Planning said; the guard one call once; the week's look back, the call's rule and policy; "
                 "/api/calendar/mark; the page, phone and app: two buttons per row, the green check, the X greyed with where it is, "
-                "yesterday under its own day")
+                "yesterday under its own day; H154: undoing an X keeps it in the list until the next read (also with a read "
+                "from before the move back and the marks synced over), an X after an undo moves the one put back, the "
+                "buttons 40px and apart, clear of the scrollbar, and an undone X not greyed, moving back")
 
     async def flow100(self) -> str:
         """H146, no Claude: a quick note on each appointment. appt_notes.py on its own copies: add and clear per note,

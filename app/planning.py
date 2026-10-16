@@ -112,6 +112,37 @@ def _index(marks: dict) -> tuple[dict, set]:
     return by, gone
 
 
+def _shown(src: dict, where: dict, calendar: str) -> dict:
+    """H154: where an appointment is in Google right after HQ moved it (to HQ Planning, or back), with its details
+    and the time, so the page can show it until the next read of the calendar brings it."""
+    keep = ("title", "start", "end", "all_day", "where", "notes", "free")
+    return {**{k: src.get(k) for k in keep}, "cal": where.get("cal", ""), "gid": where.get("gid", ""),
+            "calendar": calendar, "at": time.time()}
+
+
+def standins(events: list[dict], looked: float | None) -> list[dict]:
+    """H154: the appointments HQ moved (an X to HQ Planning, or undoing one) that the last read of the calendar
+    doesn't show yet: made from what the move saved, so a row never vanishes between the move and the next read
+    (16 October 2026: the piano undone from its X was put back in Google, but the page hid the copy it removed
+    and hadn't read the one put back, so it was gone from the list). Only until a read after the move: a read
+    that then doesn't show it is the truth. Their id is the mark's key, so a tap works on them as on any row."""
+    marks = _marks(_read())
+    seen = {e.get("id") for e in events}
+    out = []
+    for key, m in marks.items():
+        sh = m.get("shown") if isinstance(m, dict) else None
+        if not isinstance(sh, dict) or not sh.get("start") or float(sh.get("at") or 0) <= float(looked or 0):
+            continue
+        gone = set(m.get("gone") or [])
+        if key in seen or any(i in seen and i not in gone for i in m.get("also") or []):
+            continue  # the read shows it (attach keeps the mark's own id in view, hides a removed copy)
+        out.append({"id": key, "title": sh.get("title") or m.get("title") or "", "start": sh["start"],
+                    "end": sh.get("end") or sh["start"], "all_day": bool(sh.get("all_day")), "where": sh.get("where") or "",
+                    "notes": sh.get("notes") or "", "free": bool(sh.get("free")), "calendar": sh.get("calendar") or "",
+                    "cal": sh.get("cal", ""), "gid": sh.get("gid", ""), "standin": True})
+    return out
+
+
 def attach(events: list[dict]) -> list[dict]:
     """The page's appointments with their marks: mark (done, x or ""), mark_id (what a tap sends), and for an X
     where it is in Google (move: moving, moved, back, kept, failed) with a plain line (move_note)."""
@@ -145,11 +176,21 @@ def _move_note(mv: dict) -> str:
 
 
 def _event(key: str) -> dict | None:
-    """The saved appointment a mark is about: by its own id, or one of the ids it had since."""
+    """The saved appointment a mark is about, where it is now: the newest of the ids it had since that HQ didn't
+    remove, else its own id, else (H154) where HQ's last move put it when no read shows that yet, else any of its
+    ids the last read still has. (Before H154 a removed copy could win, so a new X after an undo said "already in
+    HQ Planning".)"""
     events = agenda._read().get("events") or []
-    marks = _marks(_read())
-    ids = {key, *((marks.get(key) or {}).get("also") or [])}
-    return next((e for e in events if e.get("id") == key), None) or next((e for e in events if e.get("id") in ids), None)
+    m = _marks(_read()).get(key) or {}
+    gone = set(m.get("gone") or [])
+    by = {e.get("id"): e for e in events}
+    for i in [*reversed(m.get("also") or []), key]:
+        if i in by and i not in gone:
+            return by[i]
+    sh = next((e for e in standins(events, agenda._read().get("looked")) if e["id"] == key), None)
+    if sh:
+        return sh
+    return next((by[i] for i in [key, *(m.get("also") or [])] if i in by), None)
 
 
 def _planning_id(cal: dict | None = None) -> str:
@@ -400,6 +441,7 @@ def _step(key: str, m: dict) -> bool:
         if not _remove(src["cal"], src["gid"]):
             return _failed(mv, "the copy is in place, but the original couldn't be removed")
         m.setdefault("gone", []).append(agenda._event_id(src["cal"], src["gid"]))
+        m["shown"] = _shown(src, mv["copy"], calendar_name())
         mv["removed"] = True
         mv.update(state="moved", moved=time.time(), tries=0, error="")
         return True
@@ -420,6 +462,9 @@ def _step(key: str, m: dict) -> bool:
         m.setdefault("gone", []).append(agenda._event_id(cp["cal"], cp["gid"]))
         # back where it was (the original, or the one put back in its place)
         b = mv.get("back") or {}
+        m["shown"] = _shown(src, b or {"cal": src.get("cal"), "gid": src.get("gid")}, src.get("calendar") or "")
+        if src.get("calendar"):
+            m["calendar"] = src["calendar"]
         m["move"] = {} if m.get("mark") != "x" else {"state": "to_move", "tries": 0, "from": {**src, **b}}
         return True
     return False
@@ -439,6 +484,9 @@ def _save_one(key: str, m: dict) -> None:
     s = _read()
     cur = _marks(s).get(key) or {}
     cur["move"], cur["also"], cur["gone"] = m.get("move"), m.get("also", []), m.get("gone", [])
+    for k in ("shown", "calendar"):
+        if m.get(k):
+            cur[k] = m[k]
     _marks(s)[key] = cur
     _write(s)
 
@@ -488,6 +536,9 @@ def work() -> int:
                     cur = _marks(s).get(key) or {}
                     # the user may have tapped meanwhile: keep the tap, keep what the work did
                     cur["move"], cur["also"], cur["gone"] = m.get("move"), m.get("also", []), m.get("gone", [])
+                    for k in ("shown", "calendar"):
+                        if m.get(k):
+                            cur[k] = m[k]
                     if cur.get("mark") != "x" and (cur["move"] or {}).get("state") == "moved":
                         cur["move"]["state"] = "to_back"
                     if not cur.get("mark") and not cur["move"] and not cur["gone"]:

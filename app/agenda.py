@@ -377,12 +377,14 @@ def read(now: float | None = None) -> dict:
     t = now or time.time()
     d = datetime.fromtimestamp(t)
     monday = (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
-    events = sorted((_day_only(e) for e in s.get("events") or [] if not _over(e, monday, t, week=True)), key=_order)
-    try:  # H143: done, or X (moved to HQ Planning)
+    events = [_day_only(e) for e in s.get("events") or [] if not _over(e, monday, t, week=True)]
+    try:  # H143: done, or X (moved to HQ Planning); H154: a moved one the last read doesn't show yet stays in view
         import planning
-        events = planning.attach(events)
+        events += [_day_only(e) for e in planning.standins(s.get("events") or [], s.get("looked"))
+                   if not _over(e, monday, t, week=True)]
+        events = planning.attach(sorted(events, key=_order))
     except Exception:
-        pass
+        events = sorted(events, key=_order)
     try:  # H146: his quick notes on each appointment
         import appt_notes
         events = appt_notes.attach(events)

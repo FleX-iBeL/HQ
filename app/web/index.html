@@ -307,9 +307,14 @@
   #callist .appt.free .w { color:var(--muted); }
   #callist .appt .bell { flex-shrink:0; width:16px; height:16px; color:var(--accent); align-self:center; }
   /* H143: the check (done) and the X (didn't happen as planned) on every appointment; an X greys it out */
-  #callist .arow { display:flex; align-items:center; gap:2px; }
+  /* H154: room for the three buttons (40px each, 8px apart, easy to tap), and the list keeps a gutter on the right so
+     a scrollbar, also one that floats over the content on the phone and the Mac, never covers the X */
+  #callist { scrollbar-gutter:stable; padding-right:12px; }
+  #callist .arow { display:flex; align-items:center; gap:8px; }
   #callist .arow .appt { flex:1; min-width:0; }
-  #callist .mk { flex-shrink:0; width:36px; height:36px; border:1px solid color-mix(in srgb, var(--muted) 55%, transparent); border-radius:50%;
+  #callist .arow .mk.nt { margin-right:4px; }
+  @media (max-width:360px) { #callist .arow { gap:6px; } #callist .arow .mk.nt { margin-right:0; } #callist .arow .mk { width:36px; height:36px; } }
+  #callist .mk { flex-shrink:0; width:40px; height:40px; border:1px solid color-mix(in srgb, var(--muted) 55%, transparent); border-radius:50%;
                  background:transparent; color:var(--muted); display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0; }
   #callist .mk svg { width:18px; height:18px; }
   #callist .mk.done[aria-pressed="true"] { background:#16a34a; border-color:#16a34a; color:#fff; }
@@ -1826,7 +1831,7 @@ function showCalList(d) {
     b.append(t, w);
     if (e.ping) { b.insertAdjacentHTML("beforeend", BELL.replace("<svg", '<svg class="bell" aria-label="Ping on"')); b.classList.add("ping"); }  // H124
     b.addEventListener("click", () => showAppt(e));
-    if (e.move_note && e.mark === "x") { const s = document.createElement("small"); s.className = "mv"; s.textContent = e.move_note; w.appendChild(s); }
+    if (e.move_note && (e.mark === "x" || e.move === "to_back")) { const s = document.createElement("small"); s.className = "mv"; s.textContent = e.move_note; w.appendChild(s); }
     for (const n of e.appt_notes || []) { const s = document.createElement("small"); s.className = "an"; s.textContent = n.text; w.appendChild(s); }  // H146
     const row = document.createElement("div"); row.className = "arow" + (e.mark ? " " + e.mark : "");
     row.append(b, noteButton(e), markButton(e, "done"), markButton(e, "x"));
