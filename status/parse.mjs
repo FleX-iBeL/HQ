@@ -19,7 +19,8 @@
 
 import { lineSettings } from './usage.mjs';
 
-const MARKS = { '✅': 'done', '🔨': 'doing', '⬜': 'todo', '❓': 'ask' };
+// H183: 🔁 marks the team's repeating work (Phase Maintenance): never open, never done.
+const MARKS = { '✅': 'done', '🔨': 'doing', '⬜': 'todo', '❓': 'ask', '🔁': 'repeat' };
 const STATES = ['BUILDING', 'TESTING', 'RELEASING', 'WAITING', 'DONE', 'STOPPED'];
 
 const plain = (text) =>

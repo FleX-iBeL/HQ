@@ -195,6 +195,8 @@ def open_row(text, label):
             continue
         if phase.startswith("## Phase P "):
             sys.exit(f"{label} is parked, so it doesn't go to the team.")
+        if cells[0] == "🔁":
+            sys.exit(f"{label} repeats by itself (Maintenance), so it isn't sent to the team.")
         if cells[0] != "⬜":
             sys.exit(f"{label} isn't open (it's {cells[0] or 'without a mark'}), so it doesn't go to the team.")
         return cells[1].split(" ", 1)[1].strip() if " " in cells[1] else label, line

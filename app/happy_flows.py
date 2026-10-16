@@ -9804,7 +9804,9 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         add of new text any more, send, move and cancel through jobs.py, a wrong ask refused. The page in a headless
         browser: no add field, a send on each open item but not the parked or done ones, "With the team" on one already
         sent, up, down and cancel on the waiting jobs, a cancel on the parked one, and it still draws with an incident
-        whose detail is one text."""
+        whose detail is one text. H183: a repeating row (🔁, Phase R · Maintenance) is never sent, the nightly still
+        finds its row there, parse.mjs reads the mark, the page shows the phase in its own group with its rows not
+        counted as open, the user's roadmap has the four repeating rows there, the call rules say a new one goes there."""
         import subprocess as sp
         sys.path.insert(0, str(ROOT / "routine"))
         import role
@@ -9854,6 +9856,9 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                       "| ⬜ | H7 Make the clock tick | Build the clock and add a happy flow for it | It ticks | |\n"
                       "| ⬜ | H8 Spar on the colours | Talk it through | Colours | |\n"
                       "| ✅ | H9 Already there | Done | Done | |\n"
+                      "\n## Phase R · Maintenance\n\n"
+                      "| | Step | What you get | Model |\n|---|---|---|---|\n"
+                      "| 🔁 | H169 Every night, all the flows | The nightly run | Bugs found at night | Built. |\n"
                       "\n## Phase P · Parked: decided not to do now\n\n"
                       "| | Step | What you get | Model |\n|---|---|---|---|\n"
                       "| ⬜ | H10 Not now | Parked | Nothing | |\n")
@@ -9868,13 +9873,32 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("already with the team: job" in jobs("send-row", "H7", ok=False, e=se), "an item already with the team was sent twice")
         for bad in ("H9", "H10", "H99", "nope"):
             jobs("send-row", bad, ok=False, e=se)
+        # H183: a repeating row (🔁, Phase R · Maintenance) isn't open, so it isn't sent; the nightly still finds its row.
+        need("repeats by itself" in jobs("send-row", "H169", ok=False, e=se), "a repeating row was sent to the team")
         need(sr.read_text() == same, "a refused send still changed the roadmap")
+        import nightly
+        need(nightly.add_night("16 Oct 02:10 62 of 62 passed", roadmap=str(sr)) and "Nights: 16 Oct 02:10 62 of 62 passed" in sr.read_text()
+             and "| 🔁 | H169 " in sr.read_text(), "the nightly doesn't find its row in Maintenance")
+        sr.write_text(same)
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        r = sp.run([node, "-e", "import(process.argv[1]).then((m) => { const r = m.parseRoadmap(require('fs').readFileSync(process.argv[2], 'utf8'));"
+                    " console.log(JSON.stringify(r.phases.map((p) => [p.id, p.title, p.steps.map((s) => s.status)]))); })",
+                    str(ROOT / "status/parse.mjs"), str(sr)], capture_output=True, text=True)
+        need('["R","Maintenance",["repeat"]]' in r.stdout, f"parse.mjs doesn't read the repeat mark: {r.stdout}{r.stderr}")
+        real = ROADMAP.read_text()
+        if "## Phase R · Maintenance" in real:  # the user's own roadmap, since H183
+            part = real.split("## Phase R · Maintenance", 1)[1].split("\n## ", 1)[0]
+            feats = real.split("## Phase H · Features", 1)[1].split("\n## ", 1)[0] if "## Phase H · Features" in real else ""
+            for h in ("H169", "H162", "H178", "H180"):
+                need(f"| 🔁 | {h} " in part and f"| {h} " not in feats, f"{h} isn't in Maintenance with its repeat mark")
+        sys.path.insert(0, str(ROOT / "app"))
+        import config as cfg
+        need("Phase R, Maintenance" in cfg.VOICE_RULES and "🔁" in cfg.VOICE_RULES, "the call rules don't say a new repeating item goes in Maintenance")
         jobs("send-row", "H8", e=se)
         import estimate as est
         need(est.kind_of(next(l for l in same.splitlines() if l.startswith("| ⬜ | H7 "))) == "build", "the H7 row isn't guessed as build")
 
         # The status server's /api/team, on a copy of HQ.
-        node = shutil.which("node") or "/opt/homebrew/bin/node"
         site = self.tmp / "h160"
         shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
         shutil.copytree(ROOT / "routine", site / "routine", ignore=shutil.ignore_patterns("__pycache__", "*.o"))
@@ -9947,6 +9971,9 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             need('aria-label="Send H8 to the team"' in dom and "With the team: job 1" in dom and "With the team: job 2" not in dom
                  and 'aria-label="Send H9 to the team"' not in dom and 'aria-label="Send H10 to the team"' not in dom,
                  "the open, done and parked items don't have the right send (H7 is job 1, cancelled job 2 was H8)")
+            need('aria-label="Send H169 to the team"' not in dom and "1 repeating" in dom and "1 of 3 done" in dom
+                 and "Repeating" in dom and "H169 Every night, all the flows · Repeats" in dom,
+                 "Maintenance isn't shown as repeating (its own group, not counted as open, no send)")
             need('aria-label="Cancel job 3"' in dom and 'aria-label="Move job 3 down"' in dom and 'aria-label="Move job 3 up"' not in dom
                  and 'aria-label="Move job 1 up"' in dom and 'aria-label="Cancel job 4"' in dom and 'aria-label="Move job 4 up"' not in dom
                  and 'aria-label="Cancel job 2"' not in dom, "the waiting and parked jobs don't have the right move and cancel buttons")
@@ -11765,7 +11792,7 @@ FLOWS = {
     103: ("H169: the nightly run: the right flows for this computer, one line when all pass, a plain morning text from Donna", False, "flow103"),
     104: ("F33: a typed line sent while she talks or thinks carries only itself; an unanswered one goes again", False, "flow104"),
     105: ("H149: mail more often for a while he names: his words as an end time, every quarter until then, hourly again by itself", False, "flow105"),
-    106: ("H160, H182: the team's work from the status page: an open roadmap item sent to the team, move and cancel, without a call; add-row for calls", False, "flow106"),
+    106: ("H160, H182, H183: the team's work from the status page: an open roadmap item sent to the team, move and cancel, without a call; add-row for calls; the repeating rows in Maintenance", False, "flow106"),
 }
 
 

@@ -181,6 +181,9 @@
       .done i { background: var(--green); border-color: var(--green); }
       .doing i { background: var(--amber); border-color: var(--amber); }
       .ask i { border-color: var(--blue); }
+      /* H183: a repeating item of the team's upkeep (🔁), never open, never done. */
+      .repeat .mark { color: var(--land-repeat); }
+      .repeat i { border-style: dashed; border-color: var(--land-repeat); }
 
       /* The log: time on the left, what happened on the right. */
       .log { margin: 0; padding: 0 4px; list-style: none; }
@@ -433,7 +436,7 @@
       import { stopLine, usageVerdict, landing, landingWords, LAND_KINDS } from './usage.mjs';
 
       const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped' };
-      const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision' };
+      const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision', repeat: 'Repeats' };
       const app = document.getElementById('app');
       const WHERE = document.querySelector('meta[name="hq-where"]')?.content ?? '';  // H83, filled in by the server
       // H92: on a server (not a Mac) there is no laptop to read: no Laptop section, no battery in the top line,
@@ -1756,6 +1759,9 @@
           box.append(el('h2', '', 'Roadmap'));
           // Every phase starts closed and opens on a click (12 October 2026, the user's pick).
           const complete = (p) => p.steps.length > 0 && p.steps.every((x) => x.status === 'done');
+          // H183: the repeating rows (🔁, Phase Maintenance) are never open and never done.
+          const isOpen = (x) => x.status !== 'done' && x.status !== 'repeat';
+          const repeating = (p) => !complete(p) && p.steps.some((x) => x.status === 'repeat') && !p.steps.some(isOpen);
           const teamJobs = s.queue?.jobs ?? [];
           const stepItem = (st, p) => {
             const li = el('li', st.status);
@@ -1773,6 +1779,8 @@
           };
           const phaseRow = (p) => {
             const done = p.steps.filter((x) => x.status === 'done').length;
+            const repeats = p.steps.filter((x) => x.status === 'repeat');
+            const counted = p.steps.length - repeats.length;
             const fold = el('details');
             fold.open = opened.has(p.id);
             fold.addEventListener('toggle', () => {
@@ -1783,17 +1791,23 @@
             const row = el('div', `phase${s.current && s.current.phase === p.id ? ' now' : ''}`);
             const progress = el('div', 'bar');
             const fill = el('div');
-            fill.style.width = `${p.steps.length ? (done / p.steps.length) * 100 : 0}%`;
+            fill.style.width = `${counted ? (done / counted) * 100 : 0}%`;
             progress.append(fill);
-            row.append(chevron(), el('span', 'id', p.id), el('span', 'title', p.title), progress, el('span', 'count', `${done} of ${p.steps.length} done`));
+            const counts = [counted ? `${done} of ${counted} done` : '', repeats.length ? `${repeats.length} repeating` : ''].filter(Boolean).join(' · ');
+            row.append(chevron(), el('span', 'id', p.id), el('span', 'title', p.title), progress, el('span', 'count', counts || '0 of 0 done'));
             summary.append(row);
             const detail = el('div', 'detail');
             if (p.target) detail.append(el('p', 'soft', `Becomes ${p.target}`));
-            const open = p.steps.filter((x) => x.status !== 'done');
+            const open = p.steps.filter(isOpen);
             const finished = p.steps.filter((x) => x.status === 'done');
             if (open.length) {
               const steps = el('ul', 'substeps');
               for (const st of open) steps.append(stepItem(st, p));
+              detail.append(steps);
+            }
+            if (repeats.length) {
+              const steps = el('ul', 'substeps');
+              for (const st of repeats) steps.append(stepItem(st, p));
               detail.append(steps);
             }
             if (finished.length && open.length) {
@@ -1812,7 +1826,8 @@
             return fold;
           };
           for (const [key, title, list, start] of [
-            ['roadmap-open', 'Not finished', s.phases.filter((p) => !complete(p)), true],
+            ['roadmap-open', 'Not finished', s.phases.filter((p) => !complete(p) && !repeating(p)), true],
+            ['roadmap-repeat', 'Repeating', s.phases.filter(repeating), false],
             ['roadmap-done', 'Finished', s.phases.filter(complete), false],
           ]) {
             const part = foldPart(key, start, title, `${list.length} ${list.length === 1 ? 'phase' : 'phases'} · click a phase to read its steps`, true);

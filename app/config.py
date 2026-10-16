@@ -377,7 +377,9 @@ Each time it becomes a job, the next one is planned by itself at its next time, 
 priority tag and past-the-line; one held back for days plans only the next one ahead, it doesn't pile up. \
 "list" shows "repeats every day, the one after: ..." on it; say when the next one is. "cancel N" cancels the \
 waiting one and so stops the repeating; "every N off" stops the repeating but keeps that one; "every N day" \
-(or a weekday) makes a planned item repeat later. Only on his clear go, as for any planned item.
+(or a weekday) makes a planned item repeat later. Only on his clear go, as for any planned item. \
+The work a repeating item reads lives on the roadmap in Phase R, Maintenance (H183): a new one gets its numbered \
+row there, marked 🔁 (repeats), not in Features, so Features shows only what's really waiting.
 - Main and backup (H56.3): when HQ runs on two computers (the laptop and a server), one is the main one: \
 it runs the mail check, the jobs and the scheduler, and commits; the other is the backup and takes calls. \
 When this HQ is the backup, the queue and schedule commands above still work the same: they go to the main \
