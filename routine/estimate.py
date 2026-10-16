@@ -70,6 +70,16 @@ How it works:
     only, no Claude: Haiku (claude -p, no tools) was tried on all 141 finished jobs and wasn't closer (about $0.0004 and
     4 seconds a job); look --haiku keeps that comparison at hand. [The features and numbers are Claude's choice.]
 
+  - H168 (16 October 2026), same call: "put all three of them on the roadmap and give it to the team". At its start, after
+    reading its row, each job writes down its own guess of how many minutes it will take (jobs.py guess N MINUTES; the
+    job prompt and the build notes say to). It's kept with the job (job-estimates.json: guess, guess_at) and, at done,
+    next to the computed estimate and the real time on its finished line. The page and jobs.py list show the team's
+    guess next to the computed estimate. Once GUESS_MIN finished jobs have a guess (guess_fit), how far the guesses and
+    the computed estimates were off decides how much a running job's estimate takes the guess in: the guess corrected
+    by how long or short the guesses run (their median ratio, at most three times), weighed against the computed one
+    by how close each was (in log minutes), pulled towards the computed one while there are few. The computed estimate
+    on the finished line stays what it was, so the backtest compares like with like; with_guess is kept next to it.
+
 Files, in HQ's .status (never in the repo): job-estimates.json (each job's estimate, set when added,
 and when it started) and job-estimates-history.jsonl (one line per finished job: estimate and real).
 A test's copy of the roadmap (HQ_ROADMAP) gets its own files next to it, so tests never touch the real ones.
@@ -89,6 +99,8 @@ usage:
                                                from the most similar jobs (H166) next to the kind alone (before H166)
   python3 routine/estimate.py reestimate       every waiting job's stored estimate made again now (H166)
   python3 routine/estimate.py similar TEXT     the finished jobs most like a text, and the estimate they give (H166)
+  python3 routine/estimate.py guesses          the team's own guesses (H168): how far off they were, next to the computed
+                                               estimates, and how much a running job's estimate takes the guess in
   python3 routine/estimate.py look TEXT [--haiku]  the quick look at a job's size (H167); --haiku asks Haiku as well, with
                                                what that costs (only to compare: the estimates use the look without Claude)
 """
@@ -136,6 +148,9 @@ ABOUT_MAX = 1500  # H166: characters of a job's words kept with its finished lin
 SIZE_MIN = 20     # H167: finished jobs (with an estimate from the jobs before them) before the size moves an estimate
 SIZE_RIDGE = 2    # H167: how hard the size's weights are pulled towards nothing (ridge), from estimating the jobs back
 BACKS = os.path.join(DIR, "job-estimates-backs.json")  # H167: each finished job's estimate from the jobs before it
+GUESS_MIN = 5     # H168: finished jobs with the team's own guess before the guesses move a running job's estimate
+GUESS_SHRINK = 5  # H168: n guessed jobs trust the guess n/(n+GUESS_SHRINK) of the way its record says
+GUESS_MAX = 600   # H168: minutes; a guess above this is a slip
 
 KINDS = {
     "transcribe": "transcribing",
@@ -616,7 +631,7 @@ def share():
     lines = [{**h, "machine": h.get("machine") or m["name"]} for h in history()]
     # F34: the open jobs' kinds too (no text), so the other computer estimates a job by the kind it was given
     # here, also when it takes over as main, instead of guessing it again from the words.
-    opened = {n: {k: e[k] for k in ("kind", "est", "by_hand", "set") if k in e} for n, e in _load_state().items()}
+    opened = {n: {k: e[k] for k in ("kind", "est", "by_hand", "set", "guess") if k in e} for n, e in _load_state().items()}
     return {**m, "lines": [h for h in lines if h["machine"] == m["name"]], "open": opened, "at": int(time.time())}
 
 
@@ -900,6 +915,70 @@ def on_start(n, text=""):
         print(f"(the usage count couldn't start: {ex!r})", file=sys.stderr)
 
 
+def on_guess(n, minutes, text=""):
+    """H168: the team's own guess of how many minutes job n takes, written by the job itself at its start. Kept with
+    the job's estimate; a second guess replaces the first. Returns the job's line, with the computed estimate now."""
+    st = _load_state()
+    if str(n) not in st:
+        k = known(n)
+        on_add(n, text, k.get("kind"), True if k.get("by_hand") else False)
+        st = _load_state()
+    e = st[str(n)]
+    e["guess"], e["guess_at"] = int(minutes), int(time.time())
+    st[str(n)] = e
+    _save_state(st)
+    return e
+
+
+def guess_fit(hist=None):
+    """H168: how far the team's own guesses were off, next to the computed estimates, on the finished jobs that had
+    both. {"count", "need", "ready", "guess_off", "est_off", "bias", "weight"}: bias, how many times as long the jobs
+    took as guessed (median, at most three times or a third); weight, how much a running job's estimate takes the
+    corrected guess in (0 to 1), from how close each was, pulled towards none while there are few."""
+    hist = all_history() if hist is None else hist
+    pairs = [h for h in _real(hist) if isinstance(h.get("guess"), (int, float)) and h["guess"] > 0
+             and isinstance(h.get("est"), (int, float)) and h["est"] > 0]
+    out = {"count": len(pairs), "need": GUESS_MIN, "ready": len(pairs) >= GUESS_MIN}
+    if not pairs:
+        return out
+    out["guess_off"] = round(statistics.mean(abs(h["actual"] - h["guess"]) for h in pairs), 1)
+    out["est_off"] = round(statistics.mean(abs(h["actual"] - h["est"]) for h in pairs), 1)
+    out["longer"] = sum(1 for h in pairs if h["actual"] > h["guess"])
+    out["recent"] = [{"n": h.get("n"), "guess": h["guess"], "est": h["est"], "actual": h["actual"]} for h in pairs[-10:]]
+    if not out["ready"]:
+        return out
+    bias = statistics.median(math.log(h["actual"] / h["guess"]) for h in pairs)
+    bias = max(-math.log(3), min(math.log(3), bias))
+    eg = statistics.mean((math.log(h["actual"]) - math.log(h["guess"]) - bias) ** 2 for h in pairs)
+    ec = statistics.mean((math.log(h["actual"]) - math.log(h["est"])) ** 2 for h in pairs)
+    w = ec / (ec + eg) if ec + eg > 0 else 0.5
+    out["bias"] = round(math.exp(bias), 2)
+    out["weight"] = round(w * len(pairs) / (len(pairs) + GUESS_SHRINK), 2)
+    return out
+
+
+def with_guess(est, guess, fit):
+    """H168: a running job's estimate with the team's guess taken in, as far as the guesses' record lets it; the
+    computed one as it is while there are fewer than GUESS_MIN guessed jobs, or no guess."""
+    if not guess or not est or not (fit or {}).get("ready"):
+        return est
+    w = fit["weight"]
+    return max(1, round(math.exp(w * (math.log(guess) + math.log(fit["bias"])) + (1 - w) * math.log(est))))
+
+
+def guess_words(fit):
+    """H168: the team's own guesses in a sentence, for the status page, jobs.py list and a call."""
+    if not fit.get("count"):
+        return "The team's own guesses: none checked against a finished job yet."
+    s = (f"The team's own guesses (last {fit['count']} job{'s' if fit['count'] != 1 else ''} with one) were off by "
+         f"{fit['guess_off']:g} min on average; the computed estimates by {fit['est_off']:g}.")
+    if not fit["ready"]:
+        return s + f" From {fit['need']} guessed jobs on, a running job's estimate takes the guess in."
+    pct = round(fit["weight"] * 100)
+    corr = "" if abs(fit["bias"] - 1) < 0.05 else f", the guess times {times(fit['bias'])} (the jobs take that much {'longer' if fit['bias'] > 1 else 'less'} than guessed)"
+    return s + f" A running job's estimate takes the guess in for {pct}%{corr}."
+
+
 def on_done(n, text="", started_hhmm=None):
     """Write the job's estimate next to how long it really took. Returns the record."""
     st = _load_state()
@@ -918,6 +997,14 @@ def on_done(n, text="", started_hhmm=None):
            "actual": max(1, actual), "done": int(now), "how": "seen" if seen else "clock", "machine": m["name"],
            "label": m["label"], "type": m["type"], "tags": tags_of(text), "retag": RETAG,
            "size": e.get("size") if isinstance(e.get("size"), dict) else look(_about(text))}  # H167
+    if isinstance(e.get("guess"), (int, float)):  # H168: the team's own guess, next to the computed estimate
+        rec["guess"] = e["guess"]
+        try:
+            w = with_guess(rec["est"], e["guess"], guess_fit())
+            if w != rec["est"]:
+                rec["with_guess"] = w
+        except Exception:
+            pass
     if _about(text):
         rec["about"] = _about(text)[:ABOUT_MAX]  # H166: its words, so later jobs can find it as similar
     try:  # H172: its real usage next to its time, and the usage it was estimated to take
@@ -1035,11 +1122,13 @@ def plan(now=None):
     st = _load_state()
     hist = all_history()
     run = runner()
+    gfit = guess_fit(hist)  # H168
     out = {"now": int(now), "on": on, "jobs": {}, "total": None, "accuracy": accuracy(history()), "kinds": KINDS,
-           "machine": run["label"], "learned": learned(hist, run)}
+           "machine": run["label"], "learned": learned(hist, run), "guesses": {**gfit, "words": guess_words(gfit)}}
     for h in hist[-30:]:
         out["jobs"][str(h["n"])] = {"finished": True, "est": h.get("est"), "actual": h["actual"], "kind": h.get("kind"),
-                                    **({"cost": h["cost"]} if isinstance(h.get("cost"), dict) else {})}  # H172
+                                    **({"cost": h["cost"]} if isinstance(h.get("cost"), dict) else {}),  # H172
+                                    **({"guess": h["guess"]} if isinstance(h.get("guess"), (int, float)) else {})}  # H168
     samples = None
     cursor, left_total, waits = now, 0, not on
     # H172: the usage each piece of work should take, and when it fits under the stop lines (the reading now, the
@@ -1056,6 +1145,8 @@ def plan(now=None):
     for j in running:
         e = st.get(str(j["n"])) or known(j["n"])
         est = e.get("est") or job_estimate(j["n"], j["text"], hist, run["name"])["est"]
+        computed, guess = est, e.get("guess")
+        est = with_guess(est, guess, gfit)  # H168: the team's own guess taken in, once the guesses have a record
         samples = _samples() if samples is None else samples
         seen = _minutes_seen(j["n"], samples)
         m = re.match(r"running since (\d\d:\d\d)", j["state"])
@@ -1070,6 +1161,8 @@ def plan(now=None):
         left_total += nxt
         out["jobs"][str(j["n"])] = {"est": est, "kind": kind_for(j["text"], e.get("kind")), "so_far": done_min,
                                     "left": left, "over": over, "eta": None if waits else int(cursor)}
+        if guess:  # H168
+            out["jobs"][str(j["n"])].update({"guess": guess, "computed": computed})
         if U:  # H172: its estimated usage, what it has used so far, and what's left of it before the next can start
             rec = counts.get(str(j["n"])) or {}
             c = rec.get("est") or U.cost_for(est, j["text"], e.get("kind"), hist)
@@ -1243,14 +1336,17 @@ def words(n, p):
     e = p["jobs"].get(str(n))
     if not e:
         return ""
+    g = f", the team guessed {dur(e['guess'])}" if e.get("guess") else ""  # H168
     if e.get("finished"):
-        return (f"estimated {dur(e['est'])}, took {dur(e['actual'])}" if e.get("est") else f"took {dur(e['actual'])}") \
+        return (f"estimated {dur(e['est'])}{g}, took {dur(e['actual'])}" if e.get("est") else f"took {dur(e['actual'])}{g}") \
             + _cost_words(e)
+    if e.get("guess") and e.get("computed") != e["est"]:
+        g = f" (computed {dur(e['computed'])}, the team guessed {dur(e['guess'])})"
     if "left" in e:
         if e.get("over"):
-            s = f"estimated {dur(e['est'])}, running {dur(e['so_far'])}: taking longer than estimated"
+            s = f"estimated {dur(e['est'])}{g}, running {dur(e['so_far'])}: taking longer than estimated"
         else:
-            s = f"about {dur(e['left'])} left of {dur(e['est'])}"
+            s = f"about {dur(e['left'])} left of {dur(e['est'])}{g}"
     else:
         s = f"about {dur(e['est'])}"
     s += _cost_words(e)
@@ -1647,6 +1743,7 @@ def main(argv):
                 print(f"Job {j['n']} · {w}")
         print(total_words(p))
         print(accuracy_words(p["accuracy"]))
+        print(p["guesses"]["words"])  # H168
         for l in p.get("learned") or []:
             print(l)
     elif cmd == "seed":
@@ -1679,6 +1776,11 @@ def main(argv):
                           f"on average (median {b['median_off']:g})" + (f"; {b['within']} close." if not n else "."))
     elif cmd == "reestimate":
         print(reestimate())
+    elif cmd == "guesses":
+        f = guess_fit()
+        print(guess_words(f))
+        for x in f.get("recent") or []:
+            print(f"  job {x['n']}: the team guessed {dur(x['guess'])}, computed {dur(x['est'])}, took {dur(x['actual'])}")
     elif cmd == "look":
         text = " ".join(a for a in argv[1:] if a != "--haiku")
         t0 = time.time()

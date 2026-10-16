@@ -23,6 +23,9 @@ usage (from the workspace):
   python3 "routine/jobs.py" move N top|up|down|bottom      move waiting job N in the line (H39)
   python3 "routine/jobs.py" move N before|after M          put waiting job N just before or after job M
   python3 "routine/jobs.py" done N                         the job's own chat, when it's finished
+  python3 "routine/jobs.py" guess N MINUTES                the job's own chat, at its start after reading its row: its
+                                                           own guess of how many minutes it takes (H168), kept next to
+                                                           the computed estimate and, at done, the real time
   python3 "routine/jobs.py" held N                         the job's own chat, when the usage says STOP; the
                                                            next start carries on from there (H113)
   python3 "routine/jobs.py" resume N                       a job paused for using about twice its estimated usage
@@ -190,6 +193,8 @@ def with_estimates(jobs):
                      + (f"\n    Waits for the usage line: {why}" if j["n"] == gn and waiting(j) and p.get("on") else ""))
     lines.append(est.total_words(p))
     lines.append(est.accuracy_words(p["accuracy"]))
+    if p.get("guesses"):
+        lines.append(p["guesses"]["words"])  # H168: the team's own guesses, next to the computed estimates
     lines.extend(p.get("learned") or [])  # H81: which computer, how the two compare, the patterns
     return "\n".join(lines) if jobs else "No jobs yet."
 
@@ -334,6 +339,29 @@ def main(argv):
                 j["state"] = "ready"
             write(text, jobs, on)
             print(f"Job {j['n']} may go past the 5-hour usage line; the weekly line still counts.")
+            return
+        if cmd == "guess":
+            # H168: the team estimates itself. The job writes down its own guess at its start; at done it's kept next to
+            # the computed estimate and the real time, and once there are enough, the running job's estimate takes it in.
+            if len(args) < 2 or not args[0].isdigit() or not re.fullmatch(r"\d+", args[1].strip()):
+                sys.exit("Usage: guess N MINUTES (whole minutes, for example: guess 198 35)")
+            j = find(jobs, int(args[0]))
+            if j["state"].startswith(FINISHED):
+                sys.exit(f"Job {j['n']} is {j['state']}; a guess is for a job that hasn't finished.")
+            m = int(args[1])
+            import estimate as est_
+            if not 1 <= m <= est_.GUESS_MAX:
+                sys.exit(f"A guess is between 1 and {est_.GUESS_MAX} minutes.")
+            e = estimate("on_guess", j["n"], m, j["text"])
+            if e is None:
+                sys.exit("The guess couldn't be written.")
+            try:
+                p = est_.plan()
+                w = est_.words(j["n"], p)
+            except Exception:
+                w = ""
+            print(f"Job {j['n']}: the team's guess is {m} min; the computed estimate is {e.get('est')} min."
+                  + (f" Now: {w}" if w else ""))
             return
         if cmd == "resume":
             # H172: he lets a job paused for its usage carry on: it waits in line again like a held job (its own

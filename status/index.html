@@ -656,9 +656,12 @@
       function etaWords(E, n) {
         const e = E?.jobs?.[n];
         if (!e) return '';
-        if (e.finished) return (e.est ? `Estimated ${etaDur(e.est)}, took ${etaDur(e.actual)}` : `Took ${etaDur(e.actual)}`) + (e.cost ? ` · ${etaUsed(e.cost)}` : '');
+        // H168: the team's own guess next to the computed estimate (and, once the guesses have a record, taken into it).
+        let g = e.guess ? `, the team guessed ${etaDur(e.guess)}` : '';
+        if (e.finished) return (e.est ? `Estimated ${etaDur(e.est)}${g}, took ${etaDur(e.actual)}` : `Took ${etaDur(e.actual)}${g}`) + (e.cost ? ` · ${etaUsed(e.cost)}` : '');
+        if (e.guess && e.computed !== e.est) g = ` (computed ${etaDur(e.computed)}, the team guessed ${etaDur(e.guess)})`;
         let s = 'left' in e
-          ? (e.over ? `Estimated ${etaDur(e.est)}, running ${etaDur(e.so_far)}: taking longer than estimated` : `About ${etaDur(e.left)} left of ${etaDur(e.est)}`)
+          ? (e.over ? `Estimated ${etaDur(e.est)}${g}, running ${etaDur(e.so_far)}: taking longer than estimated` : `About ${etaDur(e.left)} left of ${etaDur(e.est)}${g}`)
           : `About ${etaDur(e.est)}`;
         if (e.cost) s += ` · ${etaCost(e.cost)}${e.used ? ` (${etaUsed(e.used)} so far)` : ''}`;
         if (e.start) s += ` · starts around ${etaAt(e.start)} ${USAGE_START}`;
@@ -1402,12 +1405,14 @@
             }
             if (!jobs.length) card.append(el('div', 'row soft', g === 'finished' ? 'None kept.' : `Nothing ${g}.`));
             if (g === 'finished' && E) card.append(el('div', 'row soft eta-sum', etaAccuracy(E.accuracy)));
+            if (g === 'finished' && E?.guesses?.words) card.append(el('div', 'row soft eta-sum', E.guesses.words));  // H168
             if (g === 'finished' && etaLearned(E)) card.append(el('div', 'row soft eta-sum', etaLearned(E)));
             part.append(card);
             parts.append(part);
           }
           // H61: how close the estimates have been lately, always in view under the job list.
           if (E) parts.append(el('p', 'soft eta', etaAccuracy(E.accuracy)));
+          if (E?.guesses?.words) parts.append(el('p', 'soft eta', E.guesses.words));  // H168
           if (etaLearned(E)) parts.append(el('p', 'soft eta', etaLearned(E)));
           fold.append(parts);
           box.append(fold);

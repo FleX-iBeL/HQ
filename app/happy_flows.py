@@ -5770,6 +5770,46 @@ print(json.dumps(o, default=str))
              f"H167: estimating back, the size isn't closer on work only the size tells apart: {o7['bt']}")
         need(o7["d"]["est"] > o7["d"]["by_similar"] and "size" in o7["d"] and "size_mult" in o7["d"] and "by_similar" in o7["d"], f"H167: the estimate doesn't say the size: {o7['d']}")
         need((est_dir / "job-estimates-backs.json").exists(), "H167: the estimates from the jobs before them aren't kept")
+        # H168: the team estimates itself: the job's own guess at its start, kept next to the computed estimate and, at
+        # done, the real time; the page and the list show it; from GUESS_MIN guessed jobs on it moves a running job's estimate.
+        g1 = int(jobs("add", "Build H8, flow 54, the team's guess", "--kind=build").split()[1])
+        jobs("guess", str(g1), "soon", ok=False)
+        jobs("guess", str(g1), "0", ok=False)
+        jobs("guess", "99999", "10", ok=False)
+        jobs("mark", str(g1), "running since " + time.strftime("%H:%M"))
+        g_out = jobs("guess", str(g1), "20")
+        need(f"Job {g1}: the team's guess is 20 min; the computed estimate is" in g_out, f"H168: guess doesn't say it: {g_out}")
+        need(json.loads((est_dir / "job-estimates.json").read_text())[str(g1)].get("guess") == 20, "H168: the guess isn't kept with the job")
+        pg = json.loads(est("plan"))
+        need(pg["jobs"][str(g1)].get("guess") == 20 and "guesses" in pg and pg["guesses"]["words"], f"H168: the plan doesn't carry the guess: {pg['jobs'][str(g1)]}")
+        lst = jobs("list")
+        need("the team guessed 20 min" in lst and "The team's own guesses" in lst, f"H168: list doesn't show the team's guess: {lst}")
+        jobs("done", str(g1))
+        jobs("guess", str(g1), "20", ok=False)
+        last = json.loads((est_dir / "job-estimates-history.jsonl").read_text().splitlines()[-1])
+        need(last["n"] == g1 and last.get("guess") == 20 and last.get("est"), f"H168: the finished line doesn't keep the guess next to the estimate: {last}")
+        need("the team guessed 20 min, took" in jobs("list"), "H168: a finished job's line doesn't show its guess")
+        need("guess {n} MINUTES (H168)" in (jv / "routine/tick.py").read_text(), "H168: the job prompt doesn't ask for the team's guess")
+        page = (jv / "status/index.html").read_text()
+        need("the team guessed" in page and "E?.guesses?.words" in page, "H168: the status page doesn't show the team's guess")
+        r168 = sp.run(["python3", "-c", """
+import sys, json; sys.path.insert(0, sys.argv[1]); import estimate as E
+line = lambda i, est, guess, actual: {"n": i, "kind": "build", "est": est, "guess": guess, "actual": actual, "done": i, "how": "seen", "machine": "vps"}
+few = [line(i, 10, 20, 20) for i in range(E.GUESS_MIN - 1)]
+good = [line(i, 10, 20, 20 + (i % 3) - 1) for i in range(12)]     # the guesses right, the computed ones half
+short = [line(i, 20, 10, 20 + (i % 3) - 1) for i in range(12)]    # the guesses always half, the computed ones right
+o = {"few": E.guess_fit(few), "good": E.guess_fit(good), "short": E.guess_fit(short)}
+o["few_w"] = E.with_guess(10, 20, o["few"]); o["good_w"] = E.with_guess(10, 20, o["good"]); o["short_w"] = E.with_guess(20, 10, o["short"])
+o["none"] = E.with_guess(10, None, o["good"]); o["words"] = [E.guess_words(o[k]) for k in ("few", "good")]
+print(json.dumps(o))
+""", str(jv / "routine")], capture_output=True, text=True, env=env)
+        need(r168.returncode == 0, f"H168: the guess check didn't run: {r168.stderr[-600:]}")
+        o8 = json.loads(r168.stdout)
+        need(not o8["few"]["ready"] and o8["few_w"] == 10, f"H168: the guesses move an estimate with fewer than GUESS_MIN: {o8['few']}")
+        need(o8["good"]["ready"] and o8["good"]["weight"] > 0.6 and 16 <= o8["good_w"] <= 20, f"H168: right guesses aren't taken in: {o8['good']} {o8['good_w']}")
+        need(abs(o8["short"]["bias"] - 2) < 0.15 and 18 <= o8["short_w"] <= 21, f"H168: guesses that run short aren't corrected: {o8['short']} {o8['short_w']}")
+        need(o8["none"] == 10, "H168: a job without a guess doesn't keep its computed estimate")
+        need("From 5 guessed jobs on" in o8["words"][0] and "takes the guess in for" in o8["words"][1], f"H168: the guesses' words: {o8['words']}")
         need(real.exists() == (before is not None) and (before is None or real.read_text() == before),
              "the test touched the real estimates history")
         # H172: usage that keeps itself in check. Each job's real usage (start, every minute, done; a reset in between
@@ -5938,6 +5978,7 @@ print(json.dumps({"n": len(r), "c": U.cost_between(r, tb, tb + 20 * 60), "none":
                 "done writes estimate next to real time and the next estimate learns; page and list show them; "
                 "planned items too, after the job list and the items before them, their kind going with them (H95), and their total (H107); held by the usage, the times stay with a soft red note (H109); "
                 "a quick look gives each job and item a size that moves its estimate (H167); "
+                "the team's own guess at the start, next to the computed estimate and the real time, taken in once the guesses have a record (H168); "
                 "each job's real usage counted (a reset in, a hold out), its estimate from the jobs like it, when it fits, the pause at twice (H172)")
 
     # 55
@@ -10596,7 +10637,7 @@ FLOWS = {
     51: ("H51: a call saves the usage it gets back, for the status page", False, "flow51"),
     52: ("H49: the space bar in the desktop app: tap mutes, hold talks, letting go sends", False, "flow52"),
     53: ("H57: a button for every past call: the list, one call read only", False, "flow53"),
-    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work; H172: its usage", False, "flow54"),
+    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work; H168: the team's own guess; H172: its usage", False, "flow54"),
     55: ("F14: her voice off also silences the thinking tick, the talk sound and the click", False, "flow55"),
     56: ("H59: an update to a fake newer version: backup, local/ kept, note for Claude, waits for a call", False, "flow56"),
     57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),

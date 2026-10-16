@@ -269,6 +269,9 @@ def start(job):
             "routine/push.py --pull; when done, push HQ's commits to dev with routine/push.py, after its privacy check. "
             "A refused pull or push is never passed over: say so in the status block's log and the coaching log (F31). "
             "Never main, never the version tags. "
+            # H168: the team estimates itself: its own guess at the start, kept next to the computed one and the real time.
+            f"After reading the job's row, before building, write down your own guess of how many minutes this job will "
+            f"take: python3 {json.dumps(os.path.join(HERE, 'jobs.py'))} guess {n} MINUTES (H168). "
             + past_note
         )
     chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")
