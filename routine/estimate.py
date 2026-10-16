@@ -50,6 +50,17 @@ How it works:
     queue, the prompts, the roadmap's saved versions in git; retag), and estimated back from the jobs before it
     (backtest). What really tells the time is the kind and the computer; the tags move it little.
 
+  - H166 (16 October 2026), after F34 showed builds vary from 2 to 23 minutes, all estimated alike. In the user's words:
+    "Okay, so is there a better way to make these estimations?" A job is now also estimated from the finished jobs
+    most like it in what the work is: its words (without the routine's own wording and the quotes), the H/F row it
+    builds, and the parts of HQ it names (PARTS: the calendar, the call page, the status page, the weather, the sync,
+    Donna's line ...). Each finished line keeps its words ("about"); TF-IDF over the measured finished jobs, cosine
+    alike, the SIMILAR most alike above SIM_MIN, same kind counting SIM_KIND times, the other computer's scaled as
+    before. Their weighted median (by alike^SIM_POW, in log minutes) pulls the kind's estimate towards it, as far as
+    their weight lets it (SIM_TRUST); fewer than two similar jobs, or no words: the kind's estimate as before. Only jobs
+    with a measured time count. Checked with backtest against the kind's estimate alone. [The numbers are Claude's
+    choice, from estimating the finished jobs back.]
+
 Files, in HQ's .status (never in the repo): job-estimates.json (each job's estimate, set when added,
 and when it started) and job-estimates-history.jsonl (one line per finished job: estimate and real).
 A test's copy of the roadmap (HQ_ROADMAP) gets its own files next to it, so tests never touch the real ones.
@@ -65,9 +76,12 @@ usage:
   python3 routine/estimate.py share            this computer's own history as JSON (the status server's GET /api/estimates)
   python3 routine/estimate.py tag              fill in the tags (and this computer) on finished jobs from before H81, from their prompts
   python3 routine/estimate.py retag            every finished job's kind and tags again, from its text (F34; the routine does it once per RETAG)
-  python3 routine/estimate.py backtest         every measured finished job estimated back from the jobs before it: how close (F34)
+  python3 routine/estimate.py backtest         every measured finished job estimated back from the jobs before it: how close (F34),
+                                               from the most similar jobs (H166) next to the kind alone (before H166)
+  python3 routine/estimate.py reestimate       every waiting job's stored estimate made again now (H166)
+  python3 routine/estimate.py similar TEXT     the finished jobs most like a text, and the estimate they give (H166)
 """
-import json, math, os, re, statistics, sys, time
+import functools, json, math, os, re, statistics, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -101,7 +115,13 @@ PATTERN_MIN = 4   # H81: finished jobs with a tag before it moves an estimate
 PATTERN_SHRINK = 4
 PATTERN_CLEAR = 1.2  # H81: a tag moves an estimate only when its jobs took at least this much longer (or shorter)
 PULL_EVERY = 120  # H81: seconds between two pulls of the other HQ's history (F34: 2 minutes, for the open jobs' kinds)
-RETAG = 1         # F34: the version of the kinds and tags; a finished line with an older one is retagged
+RETAG = 2         # F34: the version of the kinds and tags; a finished line with an older one is retagged (2: H166's words)
+SIMILAR = 8       # H166: how many of the most similar finished jobs count
+SIM_MIN = 0.1     # H166: less alike than this (0 to 1) doesn't count as similar
+SIM_POW = 2       # H166: a job twice as alike counts four times as much
+SIM_KIND = 2      # H166: a similar job of the same kind counts this many times as alike
+SIM_TRUST = 0.5   # H166: how far the similar jobs pull away from the kind's estimate: their weight / (weight + this)
+ABOUT_MAX = 1500  # H166: characters of a job's words kept with its finished line
 
 KINDS = {
     "transcribe": "transcribing",
@@ -214,6 +234,81 @@ def _about(text):
 def tags_of(text):
     t = _about(text)
     return sorted(k for k, (rx, _) in TAGS.items() if re.search(rx, t))
+
+
+# ---------- similar jobs (H166) ----------
+
+# The parts of HQ a job can name, for finding the jobs most like it (only for that: the patterns keep TAGS).
+PARTS = {
+    **{k: rx for k, (rx, _) in TAGS.items()},
+    "weather": r"\bweather\b|\bforecast\b|\brain\b",
+    "sync": r"\bsync\w*\b|\bmain and backup\b|\bthe other hq\b",
+    "queue": r"\bqueue\b|\bthe team\b|\bjobs?\.py\b|\bscheduler?\b|\bplanned items?\b|\bestimat\w*",
+    "mail": r"\bmail\b|\bgmail\b|\binbox\b",
+    "listen": r"\blisten\w*|\bwhisper\b|\btranscription\b|\bvoice\b|\bkokoro\b|\bspeech\b",
+    "install": r"\binstall\w*|\brelease\b|\bupdate button\b",
+}
+_STOP = set("""a an the and or of to in on at for with from by as is are be it its this that these those not no do does did
+done so then than when what which who how if else but into out up down over about after before only also just all any each
+every one two three first last new more most other same such very can could would should will may might must he she they we
+you i me my our his her them their there here was were has have had been being yes call october read row rows pepper hq
+roadmap job words quote said asked typed""".split())
+
+
+@functools.lru_cache(maxsize=4096)
+def _words_cached(about):
+    return tuple(_count(about).items())
+
+
+def _words(about):
+    return dict(_words_cached(about or ""))
+
+
+def _count(about):
+    """H166: what a job is about, as counts: its words (cut to six letters, so builds and building meet), the rows it
+    names (#h154), and the parts of HQ it names (@calendar). Quotes are left out: they say the same thing loosely."""
+    about = (about or "").lower()
+    t = re.sub(r"'[^']*'|\"[^\"]*\"", " ", about)
+    out = {}
+    for w in re.findall(r"[a-z][a-z0-9]+", t):
+        if len(w) > 2 and w not in _STOP and not re.match(r"[hfmlj]\d+$", w):
+            out[w[:6]] = out.get(w[:6], 0) + 1
+    for r in set(re.findall(r"\b([hfmlj]\d+)(?:\.\d+)?\b", t)):
+        out["#" + r] = out.get("#" + r, 0) + 2
+    for k, rx in PARTS.items():
+        if re.search(rx, about):
+            out["@" + k] = out.get("@" + k, 0) + 2
+    return out
+
+
+def _vector(counts, df, n):
+    v = {w: (1 + math.log(c)) * math.log((n + 1) / (df.get(w, 0) + 1)) for w, c in counts.items()}
+    size = math.sqrt(sum(x * x for x in v.values())) or 1
+    return {w: x / size for w, x in v.items()}
+
+
+def similar(about, kind, real, scaled=None):
+    """H166: the finished jobs most like a job's words: [(alike 0..1, line)], most alike first, at most SIMILAR, only
+    from SIM_MIN; a line of the same kind counts SIM_KIND times as alike. real: measured finished lines (with "about")."""
+    q = _words(about)
+    docs = [(h, _words(h.get("about"))) for h in real if h.get("about")]
+    if not q or not docs:
+        return []
+    df = {}
+    for _, d in docs + [(None, q)]:
+        for w in d:
+            df[w] = df.get(w, 0) + 1
+    n = len(docs) + 1
+    qv = _vector(q, df, n)
+    out = []
+    for h, d in docs:
+        dv = _vector(d, df, n)
+        a = sum(x * dv.get(w, 0) for w, x in qv.items())
+        if h.get("kind") == kind:
+            a *= SIM_KIND
+        out.append((a, h))
+    out.sort(key=lambda x: -x[0])
+    return [(a, h) for a, h in out[:SIMILAR] if a >= SIM_MIN]
 
 
 # ---------- the computers (H81) ----------
@@ -476,10 +571,11 @@ def patterns(real):
     return out
 
 
-def estimate_detail(text, hist=None, kind=None, machine=None, tags=None):
+def estimate_detail(text, hist=None, kind=None, machine=None, tags=None, about=None, alike=True):
     """H81: the estimate with how it came about: {"est", "kind", "based", "machine", "own", "other", "scaled",
-    "tags", "pattern"}. hist: all finished jobs (all_history()); machine: the computer it's for (runner()).
-    tags: given instead of read from the text (F34: estimating finished jobs back from their lines)."""
+    "tags", "pattern", "by_kind", "similar"}. hist: all finished jobs (all_history()); machine: the computer it's for
+    (runner()). tags, about: given instead of read from the text (F34, H166: estimating finished jobs back from their
+    lines). alike: False gives the kind's estimate alone, as before H166 (backtest)."""
     hist = all_history() if hist is None else hist
     kind = kind_for(text, kind)
     machine = machine or runner()["name"]
@@ -514,8 +610,18 @@ def estimate_detail(text, hist=None, kind=None, machine=None, tags=None):
     pat = patterns(real)
     hit = [pat[t][0] for t in tags if t in pat and (pat[t][0] >= PATTERN_CLEAR or pat[t][0] <= 1 / PATTERN_CLEAR)]
     mult = math.exp(statistics.mean(math.log(x) for x in hit)) if hit else 1.0
-    return {"est": max(1, round(est * mult)), "kind": kind, "based": based, "machine": machine,
-            "own": len(own), "other": len(other), "tags": tags, "pattern": round(mult, 2)}
+    by_kind = max(1, round(est * mult))
+    out = {"est": by_kind, "kind": kind, "based": based, "machine": machine, "own": len(own), "other": len(other),
+           "tags": tags, "pattern": round(mult, 2), "by_kind": by_kind, "similar": []}
+    # H166: the finished jobs most like this one pull the kind's estimate towards how long they took.
+    near = similar(_about(text) if about is None else about, kind, real) if alike else []
+    if len(near) >= 2:
+        pairs = [(math.log(scaled(h, h.get("kind"))), a ** SIM_POW) for a, h in near]
+        weight = sum(w for _, w in pairs)
+        trust = weight / (weight + SIM_TRUST)
+        out["est"] = max(1, round(math.exp(trust * _wmedian(pairs) + (1 - trust) * math.log(by_kind))))
+        out["similar"] = [{"n": h.get("n"), "alike": round(a, 2), "actual": h["actual"]} for a, h in near]
+    return out
 
 
 def estimate_for(text, hist=None, kind=None, machine=None):
@@ -590,6 +696,8 @@ def on_done(n, text="", started_hhmm=None):
     rec = {"n": n, "kind": kind_for(text, e.get("kind")), "est": e.get("est"),
            "actual": max(1, actual), "done": int(now), "how": "seen" if seen else "clock", "machine": m["name"],
            "label": m["label"], "type": m["type"], "tags": tags_of(text), "retag": RETAG}
+    if _about(text):
+        rec["about"] = _about(text)[:ABOUT_MAX]  # H166: its words, so later jobs can find it as similar
     _append(rec)
     st.pop(str(n), None)
     _save_state(st)
@@ -1083,18 +1191,18 @@ def new_kind(text, old):
 def retag(texts=None, quiet=False):
     """F34: every finished job gets its kind and tags again, from its text (job_texts): this computer's lines in
     the history file (marked with RETAG), and the other HQ's lines in job-estimates-retag.json, used until that
-    one has retagged its own. Only kind and tags change; how long it took and its estimate stay."""
+    one has retagged its own. Only kind, tags and its words (H166) change; how long it took and its estimate stay."""
     texts = job_texts() if texts is None else texts
     lines, changed, kinds = history(), 0, {}
     for h in lines:
         t = texts.get(h.get("n"))
         if t:
-            k, tg = new_kind(t, h.get("kind")), tags_of(t)
+            k, tg, ab = new_kind(t, h.get("kind")), tags_of(t), _about(t)[:ABOUT_MAX]
             if k != h.get("kind"):
                 kinds[(h.get("kind"), k)] = kinds.get((h.get("kind"), k), 0) + 1
-            if (k, tg) != (h.get("kind"), h.get("tags")):
+            if (k, tg, ab) != (h.get("kind"), h.get("tags"), h.get("about")):
                 changed += 1
-            h.update(kind=k, tags=tg)
+            h.update(kind=k, tags=tg, about=ab)  # H166: its words too
         h["retag"] = RETAG
     if lines:
         os.makedirs(DIR, exist_ok=True)
@@ -1106,7 +1214,8 @@ def retag(texts=None, quiet=False):
     for h in peer.get("lines") or []:
         t = texts.get(h.get("n")) if isinstance(h, dict) else None
         if t:
-            fix[f"{h.get('machine') or peer.get('name')}|{h['n']}"] = {"kind": new_kind(t, h.get("kind")), "tags": tags_of(t)}
+            fix[f"{h.get('machine') or peer.get('name')}|{h['n']}"] = {"kind": new_kind(t, h.get("kind")), "tags": tags_of(t),
+                                                                     "about": _about(t)[:ABOUT_MAX]}
     tmp = RETAGS + ".tmp"
     json.dump({"retag": RETAG, "at": int(time.time()), "lines": fix}, open(tmp, "w"))
     os.replace(tmp, RETAGS)
@@ -1129,15 +1238,16 @@ def retag_if_needed(log=None):
     return c
 
 
-def backtest(hist=None, last=None):
+def backtest(hist=None, last=None, alike=True):
     """F34: every measured finished job estimated back from only the jobs finished before it, on its own computer,
-    with its kind and tags: how close the estimates come. {"count", "avg_off", "median_off", "within"}."""
+    with its kind, tags and words: how close the estimates come. {"count", "avg_off", "median_off", "within"}.
+    alike=False: the kind's estimate alone, as before H166, to compare."""
     hist = all_history() if hist is None else hist
     offs, within = [], 0
     for i, h in enumerate(hist):
         if h not in _real([h]) or not _real(hist[:i]):
             continue
-        d = estimate_detail("", hist[:i], h.get("kind"), h["machine"], h.get("tags") or [])
+        d = estimate_detail("", hist[:i], h.get("kind"), h["machine"], h.get("tags") or [], h.get("about") or "", alike)
         off = abs(d["est"] - h["actual"])
         offs.append(off)
         within += off <= max(3, 0.25 * d["est"])
@@ -1147,6 +1257,29 @@ def backtest(hist=None, last=None):
         return {"count": 0}
     return {"count": len(offs), "avg_off": round(statistics.mean(offs), 1), "median_off": statistics.median(offs),
             "within": within}
+
+
+def reestimate():
+    """H166: every waiting job's stored estimate made again now, under its kind, from the newest finished jobs and the
+    ones most like it (a waiting job and a planned item are estimated again on every plan() anyway; this keeps the
+    stored number, said when it was added, the same)."""
+    st, hist = _load_state(), all_history()
+    try:
+        js, _ = _queue()
+    except Exception:
+        js = []
+    texts = {str(j["n"]): j["text"] for j in js}
+    changed = []
+    for n, e in st.items():
+        if e.get("started") or n not in texts:
+            continue
+        new = estimate_detail(texts[n], hist, e.get("kind"))["est"]
+        if new != e.get("est"):
+            changed.append(f"job {n}: {e.get('est')} -> {new} min")
+            e["est"] = new
+    if changed:
+        _save_state(st)
+    return "Estimated again: " + ("; ".join(changed) if changed else "nothing changed") + "."
 
 
 def check_kinds():
@@ -1196,11 +1329,24 @@ def main(argv):
     elif cmd == "retag":
         retag()
     elif cmd == "backtest":
-        for name, n in (("All", None), ("Last 30", 30)):
-            b = backtest(last=n)
-            if b.get("count"):
-                print(f"{name}: {b['count']} measured jobs estimated back from the jobs before them: off by {b['avg_off']:g} min "
-                      f"on average (median {b['median_off']:g})" + (f"; {b['within']} close." if not n else "."))
+        hist = all_history()
+        for how, alike in (("From the most similar jobs (H166)", True), ("From the kind alone (before H166)", False)):
+            print(how + ":")
+            for name, n in (("All", None), ("Last 30", 30)):
+                b = backtest(hist, last=n, alike=alike)
+                if b.get("count"):
+                    print(f"  {name}: {b['count']} measured jobs estimated back from the jobs before them: off by {b['avg_off']:g} min "
+                          f"on average (median {b['median_off']:g})" + (f"; {b['within']} close." if not n else "."))
+    elif cmd == "reestimate":
+        print(reestimate())
+    elif cmd == "similar":
+        text = " ".join(argv[1:])
+        d = estimate_detail(text)
+        print(f"About {dur(d['est'])} ({d['kind']}; the kind alone: {dur(d['by_kind'])}).")
+        for x in d["similar"]:
+            print(f"  job {x['n']}: {x['alike']:g} alike, took {dur(x['actual'])}")
+        if not d["similar"]:
+            print("  No finished job is enough like it; the kind's estimate stands.")
     else:
         print(__doc__)
 

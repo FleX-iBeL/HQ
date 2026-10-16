@@ -5633,6 +5633,10 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need("Took 30 min; the estimate was 14 min" in done, f"done doesn't write the real time next to the estimate: {done}")
         last = json.loads((est_dir / "job-estimates-history.jsonl").read_text().splitlines()[-1])
         need(last["n"] == a and last["est"] == 14 and last["actual"] == 30 and last["kind"] == "call", f"the history line is wrong: {last}")
+        need(last.get("about", "").startswith("build h2, flow 54"), f"H166: the finished job doesn't keep its words: {last}")
+        sim = est("similar", "Build H2 again, flow 54. Restart the call line as the very last step")
+        need("About " in sim and "the kind alone" in sim, f"H166: estimate.py similar doesn't say the estimate: {sim}")
+        need("Estimated again" in est("reestimate"), "H166: estimate.py reestimate doesn't run")
         p = json.loads(est("plan"))
         need(p["accuracy"]["count"] == 1 and p["accuracy"]["avg_off"] == 16 and p["accuracy"]["longer"] == 1,
              f"how close the estimates have been is wrong: {p['accuracy']}")
@@ -9145,6 +9149,25 @@ out["retag"] = {"kinds": [x["kind"] for x in lines], "marked": all(x.get("retag"
                 "peer": json.load(open(E.RETAGS))["lines"].get("lap|9")}
 E.me = lambda: A
 out["back"] = E.backtest(h)
+# H166: the finished jobs most like a job's words pull its estimate: calendar jobs took 20, the rest 5.
+cal = "h%d on the hq roadmap: the calendar in hq, the week view and its appointments, colours on the call page. build it as it says."
+oth = "h%d on the hq roadmap: the mail check on the server, its marker and the inbox lines. build it as it says."
+w = [{"n": 300 + i, "kind": "build", "actual": (20 if i % 3 == 0 else 5), "done": 300 + i, "machine": "vps", "how": "seen",
+      "about": (cal if i % 3 == 0 else oth) % (200 + i)} for i in range(18)]
+out["cal"] = E.estimate_detail("H230 on the HQ roadmap: the calendar's week view, appointments in colours. Build it as it says.", w, machine="vps")
+out["mailj"] = E.estimate_detail("H231 on the HQ roadmap: the mail check's marker on the server. Build it as it says.", w, machine="vps")
+out["unlike"] = E.estimate_detail("H232 on the HQ roadmap: a tutorial video. Build it as it says.", w, machine="vps")
+out["nowords"] = E.estimate_detail("Build H233", [{k: v for k, v in x.items() if k != "about"} for x in w], machine="vps")
+out["words"] = E._words("H154 on the HQ roadmap: the calendar buttons on the call page, 'too cramped'. Build it")
+out["back166"] = [E.backtest(w, alike=True), E.backtest(w, alike=False)]
+E.me = lambda: B
+E._peer = lambda: {"name": "lap", "label": "Laptop", "type": "laptop", "lines": []}
+open(E.HISTORY, "w").write("")
+E.on_add(501, "H230 on the HQ roadmap: the calendar's week view. Build it. Pull dev first, push to dev with push.py")
+out["done166"] = E.on_done(501, "H230 on the HQ roadmap: the calendar's week view. Build it. Pull dev first, push to dev with push.py", "00:01")
+open(E.HISTORY, "w").write(json.dumps({"n": 7, "kind": "build", "actual": 5, "done": 7, "how": "seen", "retag": 1}) + "\n")
+E.retag(texts={7: "H7 on the HQ roadmap: the weather on the call page. Build it."}, quiet=True)
+out["retag166"] = E.history()[0]
 print("H81OUT " + json.dumps(out))
 """
         r = sp.run([sys.executable, "-c", script, str(ROOT / "routine")], capture_output=True, text=True, env=env, timeout=60)
@@ -9170,9 +9193,31 @@ print("H81OUT " + json.dumps(out))
         # F34: a job added on the other HQ (its kind there) is estimated under that kind here, not guessed again.
         need(o["peer_kind"] == "call" and o["peer_est"] == 9, f"F34: a job from the other HQ loses its kind: {o['peer_kind']} {o['peer_est']}")
         need(o["follows"][0] == 5 and o["follows"][1] == 20, f"F34: a waiting job's estimate doesn't follow the newest jobs: {o['follows']}")
-        need(o["retag"]["kinds"] == ["merge", "build", "release", "call"] and o["retag"]["marked"] and o["retag"]["peer"] == {"kind": "merge", "tags": ["files"]},
+        need(o["retag"]["kinds"] == ["merge", "build", "release", "call"] and o["retag"]["marked"]
+             and {k: v for k, v in (o["retag"]["peer"] or {}).items() if k != "about"} == {"kind": "merge", "tags": ["files"]}
+             and (o["retag"]["peer"] or {}).get("about", "").startswith("sync conflict"),
              f"F34: retag doesn't give every finished job its kind again: {o['retag']}")
         need(o["back"]["count"] == 8 and o["back"]["avg_off"] >= 0, f"F34: estimating the finished jobs back doesn't work: {o['back']}")
+        # H166: the jobs most like it in what the work is (its words, its row, the parts of HQ it names) pull the estimate.
+        need(o["cal"]["by_kind"] == 5 and o["cal"]["est"] >= 12 and o["cal"]["similar"]
+             and all(x["actual"] == 20 for x in o["cal"]["similar"][:3]),
+             f"H166: a calendar job isn't estimated from the earlier calendar jobs: {o['cal']}")
+        need(o["mailj"]["est"] == 5 and o["mailj"]["similar"] and o["mailj"]["similar"][0]["actual"] == 5,
+             f"H166: a mail check job isn't estimated from the earlier mail check jobs: {o['mailj']}")
+        need(o["unlike"]["est"] == o["unlike"]["by_kind"] and not o["unlike"]["similar"],
+             f"H166: a job like none of the finished ones doesn't keep the kind's estimate: {o['unlike']}")
+        need(o["nowords"]["est"] == o["nowords"]["by_kind"] and not o["nowords"]["similar"],
+             f"H166: finished lines without their words still count as similar: {o['nowords']}")
+        ws = o["words"]
+        need("#h154" in ws and "@calendar" in ws and "@callpage" in ws and "calend" in ws and "cramped" not in ws and "the" not in ws,
+             f"H166: a job's words aren't read as its words, its row and its parts of HQ (quotes left out): {ws}")
+        b1, b0 = o["back166"]
+        need(b1["count"] == b0["count"] > 0 and b1["avg_off"] < b0["avg_off"],
+             f"H166: estimating back, the similar jobs aren't closer than the kind alone: {b1} {b0}")
+        need(o["done166"].get("about", "").startswith("h230 on the hq roadmap: the calendar") and "pull dev first" not in o["done166"]["about"],
+             f"H166: a finished job doesn't keep its words (without the routine's own): {o['done166']}")
+        need(o["retag166"].get("about", "").startswith("h7 on the hq roadmap: the weather") and o["retag166"]["retag"] == 2,
+             f"H166: retag doesn't give a finished job its words: {o['retag166']}")
         words = " ".join(o["learned"])
         need("Estimates are for the Laptop, from 3 finished jobs there and 18 on the VPS" in words
              and "The Laptop takes about 1." in words and "times as long as the VPS" in words and "need the internet take about" in words,
@@ -9188,7 +9233,9 @@ print("H81OUT " + json.dumps(out))
         need("p.get(\"learned\")" in (ROOT / "routine/jobs.py").read_text(), "the job list on calls doesn't say what was learned")
         need("estimate.pull(log=log)" in (ROOT / "routine/tick.py").read_text(), "the routine doesn't pull the other HQ's finished jobs")
         return ("each computer's own jobs first, the other's scaled (laptop about 2 times the VPS), a new computer starts "
-                "from the other's, a slow tag moves the estimate, said in words; only its own lines shared; served and shown")
+                "from the other's, a slow tag moves the estimate, said in words; only its own lines shared; served and shown; "
+                f"H166: a calendar job from the calendar jobs ({o['cal']['est']} min, the kind alone {o['cal']['by_kind']}), "
+                "unlike ones keep the kind's; finished jobs keep their words")
 
     async def flow80(self) -> str:
         """F9, no Claude: a call left quiet stays connected. Pipecat ends a pipeline after 5 minutes with nothing
@@ -10332,7 +10379,7 @@ FLOWS = {
     78: ("H86: the screen in the colour of who I'm calling; my lines green, hers in her colour", False, "flow78"),
     79: ("H88: heartbeats for both computers: this one up and online, the other answering; on both status pages", False, "flow79"),
     80: ("F9: a call left quiet stays connected: no idle timeout; a hang-up or a lost connection still ends it", False, "flow80"),
-    81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data", False, "flow81"),
+    81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data; H166: from the most similar jobs", False, "flow81"),
     82: ("H104, H108: times on calls as 5 30 in the afternoon, no colon, no words, never half, quarter or o'clock", False, "flow82"),
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one; just text, the field grows (H117)", False, "flow83"),
     84: ("H106, H112, F26: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can; changed on a call at once; one row on the phone", False, "flow84"),
