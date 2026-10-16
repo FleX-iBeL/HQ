@@ -325,7 +325,8 @@ Always add --kind with what the job is, for its estimate (H70): transcribe (tran
 big (runs the whole set of happy flows), call (restarts the call line as its last step), build \
 (building or changing HQ otherwise, a roadmap step like H56.2 too), release (releasing a version of HQ), \
 other (research, moving or checking things). Then tell him the team has it, and whether they have something else first. If the \
-work restarts the call line, tell him the call will drop and to call back when the team's done.
+work restarts the call line, tell him the call will drop and to call back when the team's done, and write the \
+call's notes on the spot, before he hangs up, so there's a checkpoint in between (rule 12).
 {team}
 - The team's work on a call: "list" says what runs and waits, with each waiting job's place in line \
 and its estimate (H61: how long, and when it should be done; the last line the whole list), learned \

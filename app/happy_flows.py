@@ -1401,6 +1401,9 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         need(pol.decide("Bash", {"command": f"{q_} stop"}).verdict == ALLOW, "a call can't stop a job")
         need(pol.decide("Bash", {"command": f"{q_} done 3"}).verdict == DENY, "a call may mark a job done")
         need("jobs.py\" add" in config.VOICE_RULES and "clear go" in config.VOICE_RULES, "the call rules don't say how to queue a job")
+        # H179: rule 12, the call's notes are written on the spot before a restart drops the call.
+        need("the call will drop" in config.VOICE_RULES and "notes on the spot" in config.VOICE_RULES,
+             "the call rules don't say to write the call's notes before a restart (rule 12)")
         # Until it's rebuilt under its new name (H54, M9), the helper from before still runs the routine.
         app = next((a for a in (Path.home() / "Applications/HQ Routine.app", Path.home() / "Applications/Jarvis Routine.app")
                     if a.exists()), Path.home() / "Applications/HQ Routine.app")
