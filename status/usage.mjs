@@ -215,7 +215,8 @@ export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = fa
  * would take it past the stop line as it stands when that piece is done.
  * @returns {null | { key: string, now: number, to: number, lands: number | null, reset: number | null, line: number | null,
  *   pieces: Array<{ kind: string, what: string, add: number, from: number, to: number, start: number, lands: number, priority: boolean }>,
- *   kinds: Record<string, number>, next: number, untimed: number, cross: null | { what: string, at: number, pct: number, line: number } }}
+ *   kinds: Record<string, number>, next: number, untimed: number, cross: null | { what: string, at: number, pct: number, line: number },
+ *   lineThen, thenAt, thenLands: the moving line when the one-off work lands (H177, H181); lineAll, allAt, allLands: when everything does }}
  */
 export const LAND_KINDS = { team: "the team's work", planned: 'planned once', repeat: 'repeating' };
 export function landing(l, lines, E, now = new Date()) {
@@ -264,14 +265,26 @@ export function landing(l, lines, E, now = new Date()) {
   }
   const line = stopLine(l, lines, now);
   // Where a moving line will stand when the last piece lands (before the reset), so the bar shows whether it fits then.
-  const last = pieces.length ? pieces[pieces.length - 1].lands : null;
-  // H177: the time it's read at is the last piece's landing (the 5-hour bar: before its reset); a fixed line gets none.
-  const thenAt = last ? (reset === null ? last : Math.min(last, reset - 60)) : null;
-  const then = thenAt && line?.moving ? stopLine(l, lines, new Date(1000 * thenAt)) : null;
+  // H177: the time it's read at is a landing (the 5-hour bar: before its reset); a fixed line gets none.
+  const readAt = (last) => (last ? (reset === null ? last : Math.min(last, reset - 60)) : null);
+  const lineAt = (when) => (when && line?.moving ? stopLine(l, lines, new Date(1000 * when)) : null);
+  // H181: the purple line counts only the one-off work (the team's and planned once), so a repeating item every
+  // night doesn't push it to the end; the green one counts everything, repeating included, and only when it's later.
+  const oneOff = pieces.filter((p) => p.kind !== 'repeat');
+  const thenLands = oneOff.length ? oneOff[oneOff.length - 1].lands : null;
+  const thenAt = readAt(thenLands);
+  const then = lineAt(thenAt);
+  const allLands = pieces.length ? pieces[pieces.length - 1].lands : null;
+  const allAt = readAt(allLands);
+  const all = allAt !== thenAt ? lineAt(allAt) : null;
+  const moves = (x) => !!x && x.line !== line.line;
   for (const k of Object.keys(kinds)) kinds[k] = r1(kinds[k]);
   return {
-    key, now: Number(l.percent), to: r1(at), lands: pieces.length ? pieces[pieces.length - 1].lands : null, reset,
-    line: line ? line.line : null, moving: !!line?.moving, lineThen: then && then.line !== line.line ? then.line : null, thenAt: then && then.line !== line.line ? thenAt : null, pieces, kinds, next: r1(next), untimed, cross,
+    key, now: Number(l.percent), to: r1(at), lands: allLands, reset,
+    line: line ? line.line : null, moving: !!line?.moving,
+    lineThen: moves(then) ? then.line : null, thenAt: moves(then) ? thenAt : null, thenLands: moves(then) ? thenLands : null,
+    lineAll: moves(all) ? all.line : null, allAt: moves(all) ? allAt : null, allLands: moves(all) ? allLands : null,
+    pieces, kinds, next: r1(next), untimed, cross,
   };
 }
 
@@ -283,8 +296,13 @@ export function landingWords(L, clock) {
   if (L.pieces.length) {
     const parts = Object.entries(L.kinds).filter(([, v]) => v > 0).map(([k, v]) => `${LAND_KINDS[k]} ${v}%`);
     s.push(`If the work goes as estimated, it lands at ${L.to}% around ${clock(L.lands)} (${parts.join(', ')})${five && L.reset ? `, before its reset at ${clock(L.reset)}` : ''}.`);
-    // H177: where the moving stop line will be by then, the dotted line on the bar.
-    if (L.lineThen !== null && L.lineThen !== undefined) s.push(`By then the stop line will be at ${L.lineThen}% (the dotted line).`);
+    // H177: where the moving stop line will be by then, the dotted line on the bar; H181: by when the one-off work lands
+    // (the green line, with the repeating work, says nothing here: a tap or the mouse on it shows it).
+    if (L.lineThen !== null && L.lineThen !== undefined) {
+      s.push(L.thenLands && L.thenLands !== L.lands
+        ? `The one-off work lands around ${clock(L.thenLands)}; by then the stop line will be at ${L.lineThen}% (the dotted line).`
+        : `By then the stop line will be at ${L.lineThen}% (the dotted line).`);
+    }
     if (L.cross) s.push(`That goes past the stop line: around ${clock(L.cross.at)}, ${L.cross.what} takes it to ${L.cross.pct}% while the line is at ${L.cross.line}%.`);
     else if (L.line !== null) s.push(L.moving ? 'It stays under the stop line as the line climbs.' : 'It stays under the stop line.');
   } else if (five && L.next) s.push('Nothing lands before its reset.');
