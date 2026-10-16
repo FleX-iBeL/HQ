@@ -5733,6 +5733,43 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need("H107" in config.VOICE_RULES, "H107: the call rules don't say the scheduler's list has a total")
         need("H95" in config.VOICE_RULES and "each item with its estimate" in config.VOICE_RULES,
              "H95: the call rules don't say planned items have estimates")
+        # H167: a quick look at the work when it's added or planned gives it a size, kept with it and its finished line.
+        sa = json.loads((est_dir / "job-estimates.json").read_text())
+        szs = [v.get("size") for v in sa.values()]
+        need(szs and all(isinstance(z, dict) and {"parts", "flows", "restart", "research", "fix", "words"} <= set(z) for z in szs)
+             and all("look_ms" in v for v in sa.values()), f"H167: a job added has no size: {sa}")
+        fin = [json.loads(l) for l in (est_dir / "job-estimates-history.jsonl").read_text().splitlines()]
+        need(isinstance(fin[-1].get("size"), dict) and fin[-1]["size"]["flows"] == 1, f"H167: a finished job doesn't keep its size: {fin[-1]}")
+        i4 = int(sched("add", "tomorrow 16:00", "Fix the calendar's colours, flow 54").split()[1])
+        need((json.loads((est_dir / "schedule-kinds.json").read_text())[str(i4)].get("size") or {}).get("fix"),
+             "H167: a planned item has no size")
+        sched("cancel", str(i4))
+        lk = est("look", "H9 on the HQ roadmap: the calendar and the status page, extend happy flows 54 and 81. Restarts the call line at the end")
+        need("The look (no Claude" in lk and "parts of HQ" in lk and "2 happy flows" in lk and "restarts the call line" in lk
+             and "the size moves it" in lk, f"H167: estimate.py look doesn't say the size: {lk}")
+        need("restarts" not in est("look", "Find out whether it restarts the call line"), "H167: a question about a restart is read as one")
+        r167 = sp.run(["python3", "-c", """
+import sys, json, math; sys.path.insert(0, sys.argv[1]); import estimate as E
+big = {"parts": 5, "flows": 4, "restart": True, "research": False, "fix": False, "words": 200}
+small = {"parts": 1, "flows": 0, "restart": False, "research": False, "fix": True, "words": 20}
+pairs = [(big, math.log(2)), (small, math.log(0.6))] * 12
+o = {"none": E._size_fit(pairs[:E.SIZE_MIN - 1]), "big": E._size_mult(E._size_fit(pairs), big),
+     "small": E._size_mult(E._size_fit(pairs), small), "cap": E._size_mult(E._size_fit([(big, 3.0), (small, -3.0)] * 12), big)}
+h = [{"n": i, "kind": "build", "actual": 20 if i % 2 else 4, "done": i, "how": "seen", "machine": "vps", "about": f"zq{i}x",
+      "size": big if i % 2 else small} for i in range(40)]  # nothing alike in their words: only the size tells them apart
+o["bt"] = [E.backtest(h, sized=True), E.backtest(h, sized=False)]
+o["d"] = E.estimate_detail("zq", h, machine="vps", size=big)
+print(json.dumps(o, default=str))
+""", str(jv / "routine")], capture_output=True, text=True, env=env)
+        need(r167.returncode == 0, f"H167: the size check didn't run: {r167.stderr[-600:]}")
+        o7 = json.loads(r167.stdout)
+        need(o7["none"] is None, f"H167: the size moves estimates with fewer than SIZE_MIN finished jobs: {o7['none']}")
+        need(o7["big"] > 1.3 and o7["small"] < 0.85, f"H167: big work isn't estimated longer and small work shorter: {o7}")
+        need(abs(o7["cap"] - 2) < 0.01, f"H167: the size moves an estimate more than twice: {o7['cap']}")
+        need(o7["bt"][0]["count"] == o7["bt"][1]["count"] and o7["bt"][0]["avg_off"] < o7["bt"][1]["avg_off"],
+             f"H167: estimating back, the size isn't closer on work only the size tells apart: {o7['bt']}")
+        need(o7["d"]["est"] > o7["d"]["by_similar"] and "size" in o7["d"] and "size_mult" in o7["d"] and "by_similar" in o7["d"], f"H167: the estimate doesn't say the size: {o7['d']}")
+        need((est_dir / "job-estimates-backs.json").exists(), "H167: the estimates from the jobs before them aren't kept")
         need(real.exists() == (before is not None) and (before is None or real.read_text() == before),
              "the test touched the real estimates history")
         # The status page: the server serves the plan, the page shows it in words.
@@ -5758,7 +5795,8 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need("H61" in config.VOICE_RULES and "estimate" in config.VOICE_RULES, "the call rules don't say the list has estimates")
         return ("kinds from the job's words; estimate set when added; per job and total with done-around; held waits on the usage; "
                 "done writes estimate next to real time and the next estimate learns; page and list show them; "
-                "planned items too, after the job list and the items before them, their kind going with them (H95), and their total (H107); held by the usage, the times stay with a soft red note (H109)")
+                "planned items too, after the job list and the items before them, their kind going with them (H95), and their total (H107); held by the usage, the times stay with a soft red note (H109); "
+                "a quick look gives each job and item a size that moves its estimate (H167)")
 
     # 55
     async def flow55(self) -> str:
@@ -10352,7 +10390,7 @@ FLOWS = {
     51: ("H51: a call saves the usage it gets back, for the status page", False, "flow51"),
     52: ("H49: the space bar in the desktop app: tap mutes, hold talks, letting go sends", False, "flow52"),
     53: ("H57: a button for every past call: the list, one call read only", False, "flow53"),
-    54: ("H61: estimated time to completion for each job and the whole list, learning from real times", False, "flow54"),
+    54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work", False, "flow54"),
     55: ("F14: her voice off also silences the thinking tick, the talk sound and the click", False, "flow55"),
     56: ("H59: an update to a fake newer version: backup, local/ kept, note for Claude, waits for a call", False, "flow56"),
     57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),

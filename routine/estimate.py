@@ -61,6 +61,15 @@ How it works:
     with a measured time count. Checked with backtest against the kind's estimate alone. [The numbers are Claude's
     choice, from estimating the finished jobs back.]
 
+  - H167 (16 October 2026), same call: "put all three of them on the roadmap and give it to the team". A quick look at
+    the work when it's added or planned gives it a size (look): how many parts of HQ it and its roadmap row name, how
+    many happy flows it names or adds, whether it restarts the call line, research or a clear fix, and how many words.
+    Each finished job is estimated back once from the jobs before it (kept in job-estimates-backs.json); how far each
+    was off, against its size, gives weights (ridge regression, SIZE_RIDGE), and a new job's estimate moves by what
+    its size says, at most twice or half, once SIZE_MIN finished jobs have a back estimate. The look reads the words
+    only, no Claude: Haiku (claude -p, no tools) was tried on all 141 finished jobs and wasn't closer (about $0.0004 and
+    4 seconds a job); look --haiku keeps that comparison at hand. [The features and numbers are Claude's choice.]
+
 Files, in HQ's .status (never in the repo): job-estimates.json (each job's estimate, set when added,
 and when it started) and job-estimates-history.jsonl (one line per finished job: estimate and real).
 A test's copy of the roadmap (HQ_ROADMAP) gets its own files next to it, so tests never touch the real ones.
@@ -80,6 +89,8 @@ usage:
                                                from the most similar jobs (H166) next to the kind alone (before H166)
   python3 routine/estimate.py reestimate       every waiting job's stored estimate made again now (H166)
   python3 routine/estimate.py similar TEXT     the finished jobs most like a text, and the estimate they give (H166)
+  python3 routine/estimate.py look TEXT [--haiku]  the quick look at a job's size (H167); --haiku asks Haiku as well, with
+                                               what that costs (only to compare: the estimates use the look without Claude)
 """
 import functools, json, math, os, re, statistics, sys, time
 
@@ -122,6 +133,9 @@ SIM_POW = 2       # H166: a job twice as alike counts four times as much
 SIM_KIND = 2      # H166: a similar job of the same kind counts this many times as alike
 SIM_TRUST = 0.5   # H166: how far the similar jobs pull away from the kind's estimate: their weight / (weight + this)
 ABOUT_MAX = 1500  # H166: characters of a job's words kept with its finished line
+SIZE_MIN = 20     # H167: finished jobs (with an estimate from the jobs before them) before the size moves an estimate
+SIZE_RIDGE = 2    # H167: how hard the size's weights are pulled towards nothing (ridge), from estimating the jobs back
+BACKS = os.path.join(DIR, "job-estimates-backs.json")  # H167: each finished job's estimate from the jobs before it
 
 KINDS = {
     "transcribe": "transcribing",
@@ -309,6 +323,195 @@ def similar(about, kind, real, scaled=None):
         out.append((a, h))
     out.sort(key=lambda x: -x[0])
     return [(a, h) for a, h in out[:SIMILAR] if a >= SIM_MIN]
+
+
+# ---------- the size of the work: a quick look before it starts (H167) ----------
+
+_ROW = re.compile(r"^\| [^|]* \| ([HFMLJ]\d+(?:\.\d+)?) ([^|]*)\|([^|]*)\|([^|]*)\|")
+_ROWS = {}
+
+
+def _rows():
+    """{"h167": its title, his words and the goal, lowercased}: the roadmap's rows, without what came of them (the
+    last column, written once it's done, would tell the look what it can't know beforehand)."""
+    try:
+        import jobs as q
+        path = q.ROADMAP
+        key = (path, os.path.getmtime(path))
+    except Exception:
+        return {}
+    if _ROWS.get("key") != key:
+        rows = {}
+        try:
+            for l in open(path, encoding="utf8"):
+                m = _ROW.match(l)
+                if m:
+                    rows[m.group(1).lower()] = " ".join((m.group(2) + " " + m.group(3) + " " + m.group(4)).lower().split())
+        except Exception:
+            pass
+        _ROWS.clear()
+        _ROWS.update(key=key, rows=rows)
+    return _ROWS["rows"]
+
+
+_FLOWS = re.compile(r"happy flows? ((?:\d+(?:,? (?:and )?|\s*))+)|\bflows? ((?:\d+(?:,? (?:and )?|\s*))+)")
+
+
+def look(about):
+    return dict(_look(about or "", _rows_key()))
+
+
+def _rows_key():
+    _rows()
+    return _ROWS.get("key")
+
+
+@functools.lru_cache(maxsize=4096)
+def _look(about, _key):
+    return tuple(_look_now(about).items())
+
+
+def _look_now(about):
+    """H167: a job's size from its words and its roadmap row, no Claude: {"parts", "flows", "restart", "research", "fix",
+    "words"}. parts: the parts of HQ named (PARTS) in either; flows: the happy flows it names, plus one it adds."""
+    t = about or ""
+    r = re.search(r"\b([hfmlj]\d+(?:\.\d+)?) on the (?:hq )?roadmap|\bread the ([hfmlj]\d+(?:\.\d+)?) row", t)
+    row = _rows().get(r.group(1) or r.group(2), "") if r else ""
+    both = t + " " + row
+    asks = re.sub(r"\b(whether|if) it restarts the call line", " ", both)  # a question about it isn't a restart
+    flows = set()
+    for m in _FLOWS.finditer(t):
+        flows |= set(re.findall(r"\d+", m.group(1) or m.group(2) or ""))
+    research = bool(re.search(r"\bresearch|\bmeasure|\bcompare|\btest\b|backtest|\bfind (out|the cause|why)|\binvestigat", t))
+    return {"parts": sum(1 for rx in PARTS.values() if re.search(rx, both)),
+            "flows": len(flows) + bool(re.search(r"\badd (a|one|the) (new )?happy flow|new happy flow|happy flows? for it", t)),
+            "restart": bool(re.search(r"restart\w* (the )?call line", asks)), "research": research,
+            "fix": bool(re.search(r"\bfix\b|\bbug\b", t)) and not research, "words": len(t.split())}
+
+
+def _features(size):
+    return [math.log(1 + size.get("parts", 0)), math.log(1 + size.get("flows", 0)), float(bool(size.get("restart"))),
+            float(bool(size.get("research"))), float(bool(size.get("fix"))), math.log(1 + size.get("words", 0))]
+
+
+def _ridge(X, y, lam):
+    """Weights w with X·w close to y, pulled towards 0 by lam (X and y centred)."""
+    k = len(X[0])
+    m = [[sum(x[a] * x[b] for x in X) + (lam if a == b else 0) for b in range(k)] + [sum(x[a] * v for x, v in zip(X, y))]
+         for a in range(k)]
+    for c in range(k):
+        p = max(range(c, k), key=lambda r: abs(m[r][c]))
+        m[c], m[p] = m[p], m[c]
+        for r in range(k):
+            if r != c and m[c][c]:
+                f = m[r][c] / m[c][c]
+                m[r] = [a - f * b for a, b in zip(m[r], m[c])]
+    return [m[i][k] / m[i][i] if m[i][i] else 0.0 for i in range(k)]
+
+
+def _size_fit(pairs):
+    """H167: from (size, how far off its estimate from the jobs before it was, as log(real/estimate)) of finished jobs,
+    what a size says: (weights, mean features, mean off), or None with fewer than SIZE_MIN."""
+    if len(pairs) < SIZE_MIN:
+        return None
+    X = [_features(s) for s, _ in pairs]
+    mu = [statistics.mean(c) for c in zip(*X)]
+    ym = statistics.mean(r for _, r in pairs)
+    w = _ridge([[a - b for a, b in zip(x, mu)] for x in X], [r - ym for _, r in pairs], SIZE_RIDGE)
+    return w, mu, ym
+
+
+def _size_mult(fit, size):
+    """How many times the estimate a job of this size takes, by the fit: at most twice or half."""
+    if not fit:
+        return 1.0
+    w, mu = fit[0], fit[1]
+    x = sum(a * (b - m) for a, b, m in zip(w, _features(size), mu))
+    return math.exp(max(-math.log(2), min(math.log(2), x)))
+
+
+def _size_of(h):
+    return h["size"] if isinstance(h.get("size"), dict) else look(h.get("about") or "")
+
+
+_FIT = {}
+
+
+def _size_pairs(hist):
+    """H167: (size, log(real / its estimate from the jobs before it)) for every measured finished job. The estimate from
+    the jobs before it is made once per job and kept in BACKS (made again when the jobs before it changed: the other
+    HQ's lines came in, or a retag)."""
+    try:
+        backs = json.load(open(BACKS))
+    except Exception:
+        backs = {}
+    changed, out, before = False, [], 0
+    for i, h in enumerate(hist):
+        if not _real([h]):
+            continue
+        before += 1
+        if before == 1:
+            continue
+        key = f"{h['machine']}|{h.get('n')}|{h.get('done')}"
+        b = backs.get(key)
+        if not b or b.get("before") != before - 1 or b.get("retag") != RETAG or "size" not in b:
+            d = estimate_detail("", hist[:i], h.get("kind"), h["machine"], h.get("tags") or [], h.get("about") or "",
+                                sized=False)
+            b = backs[key] = {"est": d["est"], "before": before - 1, "retag": RETAG, "size": _size_of(h)}
+            changed = True
+        out.append((b["size"], math.log(h["actual"] / b["est"])))
+    if changed:
+        try:
+            os.makedirs(DIR, exist_ok=True)
+            json.dump(backs, open(BACKS + ".tmp", "w"))
+            os.replace(BACKS + ".tmp", BACKS)
+        except Exception:
+            pass
+    return out
+
+
+def size_fit(hist):
+    """The fit for these finished jobs, made once per set of them."""
+    key = (len(hist), hist[-1].get("done") if hist else None, hist[-1].get("machine") if hist else None)
+    if _FIT.get("key") != key:
+        _FIT.clear()
+        _FIT.update(key=key, fit=_size_fit(_size_pairs(hist)))
+    return _FIT["fit"]
+
+
+def look_haiku(about):
+    """H167, only to compare: Haiku's look at the same job (claude -p, no tools, no settings): (size or None, cost in
+    dollars, seconds)."""
+    import subprocess
+    t = about or ""
+    r = re.search(r"\b([hfmlj]\d+(?:\.\d+)?) on the (?:hq )?roadmap|\bread the ([hfmlj]\d+(?:\.\d+)?) row", t)
+    row = _rows().get(r.group(1) or r.group(2), "") if r else ""
+    system = ("You size software jobs for an app (a voice call line, a job queue, a status page, a calendar, sync between "
+              "two computers). Read the job and its roadmap row. Answer only one line of JSON: {\"parts\": <how many "
+              "separate parts of the app it touches>, \"flows\": <how many happy flows (tests) it names, runs or adds>, "
+              "\"restart\": <true if it restarts the call line>, \"work\": \"research\"|\"fix\"|\"build\"}")
+    t0 = time.time()
+    try:
+        p = subprocess.run(["claude", "-p", "--model", "haiku", "--output-format", "json", "--tools", "", "--strict-mcp-config",
+                            "--setting-sources", "", "--effort", "low", "--system-prompt", system],
+                           input="Job: " + t + ("\n\nRoadmap row: " + row[:1500] if row else ""), capture_output=True,
+                           text=True, timeout=120, cwd=DIR if os.path.isdir(DIR) else "/")
+        d = json.loads(p.stdout)
+        a = json.loads(re.search(r"\{.*\}", d.get("result") or "", re.S).group(0))
+        size = {"parts": int(a.get("parts") or 0), "flows": int(a.get("flows") or 0), "restart": bool(a.get("restart")),
+                "research": a.get("work") == "research", "fix": a.get("work") == "fix", "words": len(t.split())}
+        return size, d.get("total_cost_usd"), round(time.time() - t0, 1)
+    except Exception:
+        return None, None, round(time.time() - t0, 1)
+
+
+def size_words(size):
+    bits = [f"{size['parts']} part{'s' if size['parts'] != 1 else ''} of HQ",
+            f"{size['flows']} happy flow{'s' if size['flows'] != 1 else ''}"]
+    if size.get("restart"):
+        bits.append("restarts the call line")
+    bits.append("research" if size.get("research") else "a clear fix" if size.get("fix") else "a build or other")
+    return ", ".join(bits) + f", {size['words']} words"
 
 
 # ---------- the computers (H81) ----------
@@ -571,11 +774,12 @@ def patterns(real):
     return out
 
 
-def estimate_detail(text, hist=None, kind=None, machine=None, tags=None, about=None, alike=True):
+def estimate_detail(text, hist=None, kind=None, machine=None, tags=None, about=None, alike=True, sized=True, size=None):
     """H81: the estimate with how it came about: {"est", "kind", "based", "machine", "own", "other", "scaled",
     "tags", "pattern", "by_kind", "similar"}. hist: all finished jobs (all_history()); machine: the computer it's for
     (runner()). tags, about: given instead of read from the text (F34, H166: estimating finished jobs back from their
-    lines). alike: False gives the kind's estimate alone, as before H166 (backtest)."""
+    lines). alike: False gives the kind's estimate alone, as before H166 (backtest). sized: False leaves out the size
+    (H167); size: the look given (stored when it was added) instead of made now."""
     hist = all_history() if hist is None else hist
     kind = kind_for(text, kind)
     machine = machine or runner()["name"]
@@ -621,12 +825,19 @@ def estimate_detail(text, hist=None, kind=None, machine=None, tags=None, about=N
         trust = weight / (weight + SIM_TRUST)
         out["est"] = max(1, round(math.exp(trust * _wmedian(pairs) + (1 - trust) * math.log(by_kind))))
         out["similar"] = [{"n": h.get("n"), "alike": round(a, 2), "actual": h["actual"]} for a, h in near]
+    # H167: the size of the work moves it by how far jobs of a size like it were off before.
+    if sized and alike:
+        size = size if isinstance(size, dict) else look(_about(text) if about is None else about)
+        mult = _size_mult(size_fit(hist), size)
+        out["by_similar"] = out["est"]
+        out["est"] = max(1, round(out["est"] * mult))
+        out["size"], out["size_mult"] = size, round(mult, 2)
     return out
 
 
-def estimate_for(text, hist=None, kind=None, machine=None):
+def estimate_for(text, hist=None, kind=None, machine=None, size=None):
     """(minutes, kind, how many past jobs it's based on). A kind given by hand wins over the guess (H70)."""
-    d = estimate_detail(text, hist, kind, machine)
+    d = estimate_detail(text, hist, kind, machine, size=size)
     return d["est"], d["kind"], d["based"]
 
 
@@ -642,7 +853,8 @@ def known(n):
 def job_estimate(n, text, hist=None, machine=None):
     """F34: a waiting job's estimate now, under the kind it was given (set by hand, or guessed when it was added)
     and from the newest finished jobs, so it follows what the estimates learn while it waits."""
-    return estimate_detail(text, hist, known(n).get("kind"), machine)
+    k = known(n)
+    return estimate_detail(text, hist, k.get("kind"), machine, size=k.get("size"))
 
 
 # ---------- called by jobs.py (inside its lock) ----------
@@ -652,8 +864,12 @@ def on_add(n, text, kind=None, by_hand=None):
     finishes, so a hand-set kind learns in the right pile (H70). by_hand: False for a kind that was a
     guess made earlier (a planned item's, H95), so it isn't marked as set by hand."""
     st = _load_state()
-    d = estimate_detail(text, kind=kind)
-    st[str(n)] = {"est": d["est"], "kind": d["kind"], "based": d["based"], "set": int(time.time()), "machine": d["machine"]}
+    t0 = time.time()
+    size = look(_about(text))  # H167: the quick look at the work, kept with it (and how long it took, in ms)
+    look_ms = round((time.time() - t0) * 1000)
+    d = estimate_detail(text, kind=kind, size=size)
+    st[str(n)] = {"est": d["est"], "kind": d["kind"], "based": d["based"], "set": int(time.time()), "machine": d["machine"],
+                  "size": size, "look_ms": look_ms}
     if kind_given(kind) and by_hand is not False:
         st[str(n)]["by_hand"] = True
     _save_state(st)
@@ -671,7 +887,7 @@ def on_start(n, text=""):
     # F34: the estimate it starts with is made now, from the newest finished jobs; that's the one that's checked
     # against how long it really takes.
     try:
-        e["est"] = estimate_detail(text, kind=e.get("kind"))["est"] if text else e.get("est")
+        e["est"] = estimate_detail(text, kind=e.get("kind"), size=e.get("size"))["est"] if text else e.get("est")
     except Exception:
         pass
     e["started"] = int(time.time())
@@ -695,7 +911,8 @@ def on_done(n, text="", started_hhmm=None):
     m = me()  # H81: the computer that ran it, and the tags from its words for the patterns
     rec = {"n": n, "kind": kind_for(text, e.get("kind")), "est": e.get("est"),
            "actual": max(1, actual), "done": int(now), "how": "seen" if seen else "clock", "machine": m["name"],
-           "label": m["label"], "type": m["type"], "tags": tags_of(text), "retag": RETAG}
+           "label": m["label"], "type": m["type"], "tags": tags_of(text), "retag": RETAG,
+           "size": e.get("size") if isinstance(e.get("size"), dict) else look(_about(text))}  # H167
     if _about(text):
         rec["about"] = _about(text)[:ABOUT_MAX]  # H166: its words, so later jobs can find it as similar
     _append(rec)
@@ -730,7 +947,7 @@ def item_kind(n, text=""):
 def item_on_add(n, text, kind=None):
     """A planned item's kind, set when it's planned: given by the call (schedule.py add --kind), else guessed."""
     d = _load_items()
-    d[str(n)] = {"kind": kind_given(kind) or kind_of(text), "set": int(time.time())}
+    d[str(n)] = {"kind": kind_given(kind) or kind_of(text), "set": int(time.time()), "size": look(_about(text))}  # H167
     if kind_given(kind):
         d[str(n)]["by_hand"] = True
     _save_items(d)
@@ -742,6 +959,12 @@ def item_on_job(n, text, job_n, job_text):
     which would spoil the guess), and the item's line here is no longer needed."""
     kind, by_hand = item_kind(n, text)
     e = on_add(job_n, job_text, kind, by_hand)
+    size = (_load_items().get(str(n)) or {}).get("size") or look(_about(text))  # H167: the item's own words, not "Scheduled item ..."
+    st = _load_state()
+    if str(job_n) in st:
+        st[str(job_n)]["size"] = size
+        _save_state(st)
+        e = st[str(job_n)]
     item_forget(n)
     return e
 
@@ -879,7 +1102,7 @@ def _plan_items(cursor, waits, on, hist, run, run_end=None):
     pcursor = cursor if run_end is None else run_end
     for i in items:
         kind, by_hand = item_kind(i["n"], i["text"])
-        est, kind, _ = estimate_for(i["text"], hist, kind, run["name"])
+        est, kind, _ = estimate_for(i["text"], hist, kind, run["name"], (_load_items().get(str(i["n"])) or {}).get("size"))
         e = {"est": est, "kind": kind, "start": None, "eta": None, "waits": None}
         if by_hand:
             e["by_hand"] = True
@@ -1238,19 +1461,25 @@ def retag_if_needed(log=None):
     return c
 
 
-def backtest(hist=None, last=None, alike=True):
+def backtest(hist=None, last=None, alike=True, sized=False):
     """F34: every measured finished job estimated back from only the jobs finished before it, on its own computer,
     with its kind, tags and words: how close the estimates come. {"count", "avg_off", "median_off", "within"}.
-    alike=False: the kind's estimate alone, as before H166, to compare."""
+    alike=False: the kind's estimate alone, as before H166, to compare. sized: with the size of the work (H167), its
+    weights made only from the jobs before it, each of those estimated back the same way."""
     hist = all_history() if hist is None else hist
-    offs, within = [], 0
+    offs, within, pairs = [], 0, []
     for i, h in enumerate(hist):
         if h not in _real([h]) or not _real(hist[:i]):
             continue
-        d = estimate_detail("", hist[:i], h.get("kind"), h["machine"], h.get("tags") or [], h.get("about") or "", alike)
-        off = abs(d["est"] - h["actual"])
+        d = estimate_detail("", hist[:i], h.get("kind"), h["machine"], h.get("tags") or [], h.get("about") or "", alike,
+                            sized=False)
+        est = d["est"]
+        if sized:
+            est = max(1, round(est * _size_mult(_size_fit(pairs), _size_of(h))))
+            pairs.append((_size_of(h), math.log(h["actual"] / d["est"])))
+        off = abs(est - h["actual"])
         offs.append(off)
-        within += off <= max(3, 0.25 * d["est"])
+        within += off <= max(3, 0.25 * est)
     if last:
         offs = offs[-last:]
     if not offs:
@@ -1330,15 +1559,27 @@ def main(argv):
         retag()
     elif cmd == "backtest":
         hist = all_history()
-        for how, alike in (("From the most similar jobs (H166)", True), ("From the kind alone (before H166)", False)):
+        for how, alike, sized in (("With the size of the work (H167)", True, True), ("From the most similar jobs (H166)", True, False),
+                                  ("From the kind alone (before H166)", False, False)):
             print(how + ":")
             for name, n in (("All", None), ("Last 30", 30)):
-                b = backtest(hist, last=n, alike=alike)
+                b = backtest(hist, last=n, alike=alike, sized=sized)
                 if b.get("count"):
                     print(f"  {name}: {b['count']} measured jobs estimated back from the jobs before them: off by {b['avg_off']:g} min "
                           f"on average (median {b['median_off']:g})" + (f"; {b['within']} close." if not n else "."))
     elif cmd == "reestimate":
         print(reestimate())
+    elif cmd == "look":
+        text = " ".join(a for a in argv[1:] if a != "--haiku")
+        t0 = time.time()
+        size = look(_about(text))
+        ms = (time.time() - t0) * 1000
+        d = estimate_detail(text, size=size)
+        print(f"The look (no Claude, {ms:.0f} ms): {size_words(size)}.")
+        print(f"About {dur(d['est'])}: the similar jobs say {dur(d.get('by_similar', d['est']))}, the size moves it x{d.get('size_mult', 1):g}.")
+        if "--haiku" in argv:
+            hs, cost, secs = look_haiku(_about(text))
+            print(f"Haiku's look ({secs:g} s, ${cost or 0:.5f}): " + (size_words(hs) if hs else "no answer") + ".")
     elif cmd == "similar":
         text = " ".join(argv[1:])
         d = estimate_detail(text)
