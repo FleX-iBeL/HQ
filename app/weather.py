@@ -26,6 +26,15 @@ wind, chance of rain), today and the next hours, UV, the rain radar's two hours,
 for his area (code yellow and up; MeteoAlarm's feed, which carries KNMI's for the Netherlands). Read when the page
 asks and the last read is over 15 minutes old (APP_EVERY), kept in weather.json under "app".
 
+H161 (15 October 2026, his quick note: "is it possible to have it check with gps for more accuracy? and if possible,
+a button to toggle to get alerts if rain is coming up?"). Where: the phone's location when he allows it (the page
+sends it rounded to two decimals, about a kilometre; view(gps=…)), named once per spot through OpenStreetMap's
+reverse geocoding (here_place); without it, the place in me.md as before. The last spot is kept (`here`) and the
+looks above use it while it's under HERE_FRESH old, so her texts and watches follow him too. The rain alert: a
+switch in the weather sheet (rain_alert) that opens or ends a lasting weather watch for rain on her list
+(pings.watch_add(..., alert=True)): every look checks only the next ALERT_AHEAD hours, never while it's raining
+already, and at most one text per ALERT_QUIET hours.
+
 Kept in the direct line's folder (synced, off GitHub): weather.json, the last look, the place's coordinates and
 what she already said today. Off: HQ_WEATHER=0. HQ_WEATHER_PLACE overrides the place (tests).
 
@@ -33,6 +42,7 @@ what she already said today. Off: HQ_WEATHER=0. HQ_WEATHER_PLACE overrides the p
   .venv/bin/python app/weather.py look     look now and text if there's something worth saying
   python3 app/weather.py look --dry        what she would text now, without texting
   python3 app/weather.py view [--fresh]    what the app shows (H135)
+  python3 app/weather.py alert [on|off]    the rain alert switch (H161)
 """
 from __future__ import annotations
 
@@ -60,6 +70,10 @@ SUN_CODES = {0, 1, 2}  # WMO: clear, mainly clear, partly cloudy
 WATCH_EVERY = 30 * 60  # H125: a look every 30 minutes while a weather watch is open
 WATCH_DAY = (7, 23)  # and watches are looked at a little longer into the evening
 UA = {"User-Agent": "HQ (https://github.com/FleX-iBeL/HQ)"}
+HERE_FRESH = 6 * 3600  # H161: the phone's last spot stands in for me.md's place in the looks while it's this new
+HERE_KEEP = 20  # named spots kept
+ALERT_AHEAD = 3  # H161: the rain alert looks this many hours ahead
+ALERT_QUIET = 3 * 3600  # and texts at most once in this long
 
 
 def on() -> bool:
@@ -122,6 +136,58 @@ def where(s: dict | None = None, region: bool = False) -> dict | None:
     return got
 
 
+def _gps(gps) -> tuple[float, float] | None:
+    """(lat, lon) rounded to two decimals (about a kilometre), or None when it isn't a real spot."""
+    try:
+        lat, lon = float(gps[0]), float(gps[1])
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180) or lat != lat or lon != lon:
+        return None
+    return round(lat, 2), round(lon, 2)
+
+
+def gps_key(g: tuple[float, float]) -> str:
+    return f"gps:{g[0]:.2f},{g[1]:.2f}"
+
+
+def reverse(lat: float, lon: float) -> dict:
+    """H161: the spot's town, region and country, from OpenStreetMap's reverse geocoding (no key), in the local
+    language, so the region matches the warnings' own names."""
+    q = urllib.parse.urlencode({"lat": lat, "lon": lon, "format": "jsonv2", "zoom": 10})
+    a = json.loads(_get(f"https://nominatim.openstreetmap.org/reverse?{q}", timeout=10)).get("address") or {}
+    return {"name": a.get("city") or a.get("town") or a.get("village") or a.get("municipality") or a.get("county") or "",
+            "region": a.get("state") or a.get("province") or "", "country": (a.get("country_code") or "").upper()}
+
+
+def here_place(g: tuple[float, float], s: dict, now: float, name=None) -> dict:
+    """H161: the where-dict for the phone's spot G, named once (kept under `spots`), and marked as his last spot
+    (`here`). The time zone is filled in from the forecast (Open-Meteo's own). NAME stands in for reverse (tests)."""
+    key = gps_key(g)
+    spots = s.get("spots") if isinstance(s.get("spots"), dict) else {}
+    got = spots.pop(key, None) or {"place": key, "lat": g[0], "lon": g[1], "tz": "", "gps": True}
+    if not got.get("named"):
+        try:
+            got |= (name or reverse)(g[0], g[1]) | {"named": True}
+        except Exception:  # unnamed for now; the warnings fall back on me.md's region and country
+            home = s.get("where") or {}
+            got |= {"name": got.get("name") or "", "region": home.get("region", ""), "country": home.get("country", "")}
+    spots[key] = got
+    s["spots"] = dict(list(spots.items())[-HERE_KEEP:])
+    s["here"] = {"key": key, "at": now}
+    return got
+
+
+def here(s: dict, now: float | None = None) -> dict | None:
+    """H161: his last spot from the phone, while it's under HERE_FRESH old and its time zone is known; else None
+    (the looks use me.md's place)."""
+    h = s.get("here") or {}
+    got = (s.get("spots") or {}).get(h.get("key")) if isinstance(s.get("spots"), dict) else None
+    if not got or not got.get("tz") or (now or time.time()) - float(h.get("at") or 0) > HERE_FRESH:
+        return None
+    return got
+
+
 def local_now(tz: str, now: float | None = None) -> datetime:
     from zoneinfo import ZoneInfo
     try:
@@ -131,19 +197,25 @@ def local_now(tz: str, now: float | None = None) -> datetime:
 
 
 def _hour(now: float, s: dict) -> int:
-    w = s.get("where") or {}
-    return local_now(w.get("tz") or "", now).hour if w.get("place") == place() else datetime.fromtimestamp(now).hour
+    w = here(s, now) or s.get("where") or {}
+    return local_now(w.get("tz") or "", now).hour if w.get("gps") or w.get("place") == place() \
+        else datetime.fromtimestamp(now).hour
+
+
+def _somewhere(s: dict, now: float) -> bool:
+    """A place to look at: me.md's, or the phone's last spot (H161)."""
+    return bool(place() or here(s, now))
 
 
 def general_due(now: float | None = None, s: dict | None = None) -> bool:
     """The three-hourly look (its sun, rain and cosy texts): in the day where the user is, three hours since the
     last one. Cheap and offline (the time zone comes from the kept coordinates; before the first look, this
     computer's)."""
-    if not on() or not place():
+    if not on():
         return False
     now = now or time.time()
     s = _read() if s is None else s
-    if not (DAY[0] <= _hour(now, s) < DAY[1]):
+    if not _somewhere(s, now) or not (DAY[0] <= _hour(now, s) < DAY[1]):
         return False
     return now - float(s.get("general", s.get("looked")) or 0) >= EVERY - 60
 
@@ -159,11 +231,11 @@ def watches(now: float | None = None) -> list[dict]:
 
 def watch_due(now: float | None = None, s: dict | None = None) -> bool:
     """H125: a weather watch is open and 30 minutes have passed since the last look (07:00 to 23:00)."""
-    if not on() or not place():
+    if not on():
         return False
     now = now or time.time()
     s = _read() if s is None else s
-    if not (WATCH_DAY[0] <= _hour(now, s) < WATCH_DAY[1]) or not watches(now):
+    if not _somewhere(s, now) or not (WATCH_DAY[0] <= _hour(now, s) < WATCH_DAY[1]) or not watches(now):
         return False
     return now - float(s.get("looked") or 0) >= WATCH_EVERY - 60
 
@@ -340,19 +412,26 @@ def check_watch(look_for: str, fc: dict, minutes: list[tuple[str, float]], now: 
 
 
 def check_watches(fc: dict, minutes: list[tuple[str, float]], loc: datetime, name: str = "",
-                  ws: list[dict] | None = None, keep=None) -> list[tuple[int, str]]:
+                  ws: list[dict] | None = None, keep=None, now: float | None = None) -> list[tuple[int, str]]:
     """Each open weather watch against this look; a match is kept for her to text (pings.match). Returns
-    [(watch n, facts)] of the new ones."""
+    [(watch n, facts)] of the new ones. The rain alert (H161, `alert`): only the next ALERT_AHEAD hours, not while
+    it's raining already, and not within ALERT_QUIET of its last match."""
     import pings
     ws = watches() if ws is None else ws
+    now = now or time.time()
     out = []
     for w in ws:
         try:
             until = datetime.strptime(w["until"], pings.FMT)
         except (KeyError, ValueError):
             continue
+        if w.get("alert"):
+            last = max([pings._local_ts(m.get("at", "")) for m in w.get("matches") or []] or [0])
+            if now - last < ALERT_QUIET:
+                continue
+            until = min(until, loc + timedelta(hours=ALERT_AHEAD))
         got = check_watch(w.get("what", ""), fc, minutes, loc, until)
-        if not got:
+        if not got or (w.get("alert") and got[0] == "rain-now"):
             continue
         facts = (f"Where: {name}. " if name else "") + got[1]
         if (keep or pings.match)(int(w["n"]), facts, key=got[0], answers=bool(w.get("once"))) == "new":
@@ -372,7 +451,7 @@ def look(dry: bool = False, now: float | None = None, general: bool | None = Non
         s["looked"] = now
         if general:
             s["general"] = now
-    w = where(s)
+    w = here(s, now) or where(s)  # H161: the phone's last spot while it's fresh
     if not w:
         if not dry:
             _write(s)
@@ -381,9 +460,9 @@ def look(dry: bool = False, now: float | None = None, general: bool | None = Non
     today = loc.strftime("%Y-%m-%d")
     told = (s.get("told") or {}).get(today) or []
     fc, minutes = forecast(w), rain_text(w)
-    name = w.get("name") or w["place"]
+    name = w.get("name") or ("" if w.get("gps") else w["place"])
     if not dry:
-        for n, facts in check_watches(fc, minutes, loc.replace(tzinfo=None), name):
+        for n, facts in check_watches(fc, minutes, loc.replace(tzinfo=None), name, now=now):
             print(time.strftime("%Y-%m-%d %H:%M:%S"), f"weather: a match for watch {n}: {facts}")
     got = decide(fc, minutes, loc.replace(tzinfo=None), told, name) if general else None
     if dry:
@@ -585,26 +664,31 @@ def build_view(fc: dict, minutes: list[tuple[str, float]], warns: list[dict], no
         "minutes": [{"at": hm, "mm": mm} for hm, mm in minutes], "warnings": warns, "warn_source": warn_source}
 
 
-def view(fresh: bool = False, now: float | None = None) -> dict:
+def view(fresh: bool = False, now: float | None = None, gps=None) -> dict:
     """What the app shows (H135): the last read, read again first when FRESH and it's over 15 minutes old. Says so
-    plainly when HQ has no place for him, or the weather is off."""
+    plainly when HQ has no place for him, or the weather is off. GPS (H161): the phone's (lat, lon) when he allows
+    it; then that spot, else me.md's place. `alert` says whether the rain alert is on, `home` is me.md's place."""
     if not on():
         return {"off": "The weather is off on this HQ."}
-    name = place()
-    if not name:
-        return {"off": "No place set yet. Tell me where you are (Where I am, in me.md) and the weather shows here."}
+    name, g = place(), _gps(gps) if gps else None
+    if not name and not g:
+        return {"off": "No place set yet. Tell me where you are (Where I am, in me.md), or allow your location, "
+                       "and the weather shows here.", "alert": alert_state()}
+    key = gps_key(g) if g else name
     s = _read()
     got = s.get("app") or {}
     now = now or time.time()
-    if got.get("for") != name:
+    if got.get("for") != key:
         got = {}
     if fresh and (not got or now - float(got.get("looked") or 0) >= APP_EVERY - 30):
         try:
-            w = where(s, region=True)
+            w = here_place(g, s, now) if g else where(s, region=True)
             if not w:
                 raise ValueError(f"couldn't find {name}")
-            loc = local_now(w["tz"], now).replace(tzinfo=None)
             fc = app_forecast(w)
+            if g:
+                w["tz"] = fc.get("timezone") or w.get("tz") or "UTC"
+            loc = local_now(w["tz"], now).replace(tzinfo=None)
             try:
                 minutes = rain_text(w)
             except Exception:
@@ -613,12 +697,44 @@ def view(fresh: bool = False, now: float | None = None) -> dict:
                 warns, source = warnings(w, loc)
             except Exception:
                 warns, source = [], "the warnings couldn't be read just now"
-            got = build_view(fc, minutes, warns, loc, w.get("name") or name, source) | {"looked": now, "for": name}
-            s = _read() | {"where": s.get("where"), "app": got}  # the look may have written meanwhile
+            got = build_view(fc, minutes, warns, loc, w.get("name") or ("Your location" if g else name), source) \
+                | {"looked": now, "for": key, "gps": bool(g)}
+            # the look may have written meanwhile
+            s = _read() | {k: s.get(k) for k in ("where", "spots", "here") if s.get(k)} | {"app": got}
             _write(s)
         except Exception as e:
             got = dict(got) | {"error": str(e)[:200]}
-    return got | {"for": name} if got else {"for": name, "looked": None}
+    elif g and got:  # the same spot read a moment ago: it's still where he is
+        s["here"] = {"key": key, "at": now}
+        _write(_read() | {"here": s["here"]})
+    out = got | {"for": key} if got else {"for": key, "looked": None, "gps": bool(g)}
+    return out | {"home": name, "alert": alert_state()}
+
+
+# -- H161: the rain alert switch -------------------------------------------------------------------------------
+
+def alert_state() -> dict:
+    """Whether the rain alert is on: an open weather watch for rain marked `alert` on her list."""
+    try:
+        import pings
+        w = next((w for w in pings.open_watches("weather") if w.get("alert")), None)
+    except Exception:
+        return {"on": False}
+    return {"on": bool(w), "n": int(w["n"]) if w else None}
+
+
+def rain_alert(want: bool) -> dict:
+    """The switch in the weather sheet: on opens a lasting rain watch (a year, every match, texted at most once in
+    ALERT_QUIET), off ends it without a text (he switched it himself)."""
+    import pings
+    cur = [w for w in pings.open_watches("weather") if w.get("alert")]
+    if want and not cur:
+        pings.watch_add("weather", "rain", until=datetime.now().replace(second=0, microsecond=0) + timedelta(days=365),
+                        once=False, by="the rain alert in the app", alert=True)
+    elif not want:
+        for w in cur:
+            pings.unwatch(int(w["n"]), quiet=True)
+    return alert_state()
 
 
 if __name__ == "__main__":
@@ -638,6 +754,8 @@ if __name__ == "__main__":
             sys.exit(1)
     elif cmd == "view":
         print(json.dumps(view(fresh="--fresh" in args), ensure_ascii=False, indent=1))
+    elif cmd == "alert":
+        print(json.dumps(rain_alert(args[1] == "on") if args[1:2] in (["on"], ["off"]) else alert_state()))
     else:
         print(__doc__)
         sys.exit(2)

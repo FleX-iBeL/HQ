@@ -7632,7 +7632,7 @@ setTimeout(() => {
         # view(): a blank place said plainly; the read kept for 15 minutes; a failed read keeps the last one
         folder = self.tmp / "weather-H135"
         keep = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_WEATHER_PLACE", "HQ_WEATHER")}
-        real = (w.app_forecast, w.rain_text, w.warnings, w.place)
+        real = (w.app_forecast, w.rain_text, w.warnings, w.place, w.reverse)
         calls = []
         try:
             os.environ.update({"HQ_DIRECT_DIR": str(folder)})
@@ -7656,18 +7656,58 @@ setTimeout(() => {
             w.app_forecast = lambda _w: (_ for _ in ()).throw(OSError("offline"))
             v3 = w.view(fresh=True, now=t0 + 3600)
             need(v3.get("error") and v3["looked"] == t0 and v3["now"]["temp"] == 17.4, "a failed read didn't keep the last one")
+            # H161: the phone's spot when he allows it, named once and kept for the looks; me.md's place otherwise
+            w.app_forecast = lambda _w: calls.append(2) or fc() | {"timezone": "Europe/Amsterdam"}
+            named = []
+            w.reverse = lambda la, lo: named.append((la, lo)) or {"name": "Gpstown", "region": "Zeeland", "country": "NL"}
+            g1 = w.view(fresh=True, now=t0 + 4000, gps=("52.3123", "4.9567"))
+            need(g1.get("gps") and g1["for"] == "gps:52.31,4.96" and g1.get("place") == "Gpstown" and g1["home"] == "Testtown"
+                 and g1.get("warnings") and named == [(52.31, 4.96)], f"the phone's spot: {g1.get('for')} {g1.get('place')} {g1.get('error')} {named}")
+            st = w._read()
+            need(st["here"]["key"] == "gps:52.31,4.96" and st["spots"]["gps:52.31,4.96"]["tz"] == "Europe/Amsterdam"
+                 and st["where"]["place"] == "Testtown", "the spot isn't kept with its time zone, or me.md's place was lost")
+            need((w.here(st, t0 + 4100) or {}).get("name") == "Gpstown" and w.here(st, t0 + 4000 + w.HERE_FRESH + 60) is None,
+                 "the looks don't follow the phone's spot, or keep an old one")
+            w.view(fresh=True, now=t0 + 4000 + 2 * w.APP_EVERY, gps=(52.31, 4.96))
+            need(len(named) == 1, "the same spot was named again")
+            need(w.view(now=t0 + 4100, gps=(91, 4))["for"] == "Testtown", "a spot that isn't real wasn't left for me.md's place")
+            w.reverse = lambda la, lo: (_ for _ in ()).throw(OSError("offline"))
+            g2 = w.view(fresh=True, now=t0 + 9000, gps=(51.5, 3.6))
+            need(g2.get("place") == "Your location" and w._read()["spots"]["gps:51.50,3.60"]["region"] == "Zeeland",
+                 f"an unnamed spot: {g2.get('place')} {g2.get('error')}")
+            w.place = lambda: ""
+            need(w.view(fresh=True, now=t0 + 9100, gps=(51.5, 3.6)).get("now") and w.view().get("off"),
+                 "the phone's spot without a place in me.md, or no place at all")
+            w.place = real[3]
+            # H161: the rain alert switch: one lasting rain watch on her list, off again without a text
+            import pings
+            need(not w.alert_state()["on"], "the rain alert is on by itself")
+            a = w.rain_alert(True)
+            need(a["on"] and w.rain_alert(True)["n"] == a["n"] and len(pings.open_watches("weather")) == 1,
+                 "switching the rain alert on twice made two watches")
+            aw = pings.open_watches("weather")[0]
+            need(aw.get("alert") and aw["what"] == "rain" and not aw["once"] and int(aw["until"][:4]) > datetime.now().year - 1
+                 and aw["until"] > (datetime.now() + timedelta(days=300)).strftime(pings.FMT), f"the rain alert's watch: {aw}")
+            need(w.view()["alert"]["on"] and pings.watch_items()[0]["text"] == "Rain alerts on", "the view or her list doesn't say the rain alert is on")
+            need(not w.rain_alert(False)["on"] and not pings.open_watches("weather")
+                 and [x for x in pings.read()["watches"] if x["n"] == a["n"]][0]["ended"]["texted"] == "quiet",
+                 "switching the rain alert off didn't end it, or would text")
             os.environ["HQ_WEATHER_PLACE"] = "Othertown"
             need(not w.view().get("now"), "another place's weather was shown")
             os.environ["HQ_WEATHER"] = "0"
             need(w.view().get("off"), "HQ_WEATHER=0 doesn't switch it off")
         finally:
-            w.app_forecast, w.rain_text, w.warnings, w.place = real
+            w.app_forecast, w.rain_text, w.warnings, w.place, w.reverse = real
             for k, v in keep.items():
                 os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
         # the call server and the page
         bot = (ROOT / "app/bot.py").read_text()
         ep = bot.split('@app.get("/api/weather"')[1].split("@app.")[0] if '@app.get("/api/weather"' in bot else ""
-        need("FREE_ONLY" in ep and "_weather.view" in ep and 'get("fresh") == "1"' in ep, "the call server has no /api/weather, or it's on Free")
+        need("FREE_ONLY" in ep and "_weather.view" in ep and 'get("fresh") == "1"' in ep and 'q.get("lat")' in ep,
+             "the call server has no /api/weather, it's on Free, or it doesn't pass the phone's spot")
+        ep = bot.split('@app.post("/api/weather/alert"')[1].split("@app.")[0] if '@app.post("/api/weather/alert"' in bot else ""
+        need('"x-hq") != "weather"' in ep and "FREE_ONLY" in ep and "_weather.rain_alert" in ep,
+             "the call server has no rain alert switch, or anyone can switch it")
         page = (ROOT / "app/web/index.html").read_text()
         for x in ('id="wx"', 'id="wxsheet"', '"api/weather"', "function paintWx", "function showWx", "body.chatting #wx"):
             need(x in page, f"the call page misses {x}")
@@ -7680,7 +7720,12 @@ setTimeout(() => {
              "the sheet misses the warnings, UV, the next hours, tomorrow, rain or wind")
         need(re.search(r"#wx \{ position:fixed;", page), "the widget takes room in the page's flow (the call screen moves)")
         need("var wxData" in page, "the pill's data isn't hoisted: showMode() paints it before the line runs")
-        return "the view (sun, degrees, Bft, rain, UV, hours, today, tomorrow), the warnings that count, a blank place said, kept 15 minutes, the endpoint off on Free, the pill and the sheet"
+        need("wxWhere(d), wxAlert(d)" in sb, "the sheet misses where the weather is for, or the rain alert switch")
+        lw = page.split("async function loadWx")[1].split("\nfunction ")[0]
+        need("wxGpsOk()" in lw and '"lat=" + pos.lat' in lw and "toFixed(2)" in page and '"hq-wx-gps"' in page
+             and '"api/weather/alert"' in page and '"x-hq": "weather"' in page and 'setAttribute("role", "switch")' in page,
+             "the page doesn't send the phone's spot (rounded), or has no rain alert switch")
+        return "the view (sun, degrees, Bft, rain, UV, hours, today, tomorrow), the warnings that count, a blank place said, kept 15 minutes, the phone's spot (named once, me.md's place otherwise), the rain alert switch, the endpoints off on Free, the pill and the sheet"
 
     async def flow90(self) -> str:
         """H120, no Claude, no network: the weather every three hours. What's worth a text from a made-up forecast
@@ -7733,12 +7778,36 @@ setTimeout(() => {
             need(got and got[0] == "cosy" and sent == [got], f"the look didn't text the rainy day: {got} {sent}")
             need(not w.due(noon + 3600) and w.due(noon + 3 * 3600), "not every three hours after a look")
             need(w.look(now=noon + 3 * 3600) is None and len(sent) == 1, "the rainy day was texted again")
+            # H161: the looks follow the phone's last spot (its own time zone) while it's fresh
+            st = w._read()
+            early = dt(2026, 10, 14, 3, 30).timestamp()
+            spot = {"place": "gps:7.88,98.39", "lat": 7.88, "lon": 98.39, "tz": "Asia/Bangkok", "gps": True, "name": "Faraway"}
+            w._write(st | {"spots": {spot["place"]: spot}, "here": {"key": spot["place"], "at": early - 600}, "general": 0, "looked": 0})
+            need(w.due(early) and (w.here(w._read(), early) or {}).get("name") == "Faraway", "the looks don't follow the phone's spot")
+            w._write(st | {"spots": {spot["place"]: spot}, "here": {"key": spot["place"], "at": early - w.HERE_FRESH - 600},
+                           "general": 0, "looked": 0})
+            need(not w.due(early), "an old spot from the phone still steers the looks")
+            w._write(st)
             os.environ["HQ_WEATHER"] = "0"
             need(not w.due(noon + 9 * 3600), "HQ_WEATHER=0 doesn't switch it off")
         finally:
             w.forecast, w.rain_text, dl.text = real
             for k, v in keep.items():
                 os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        # H161: the rain alert: only the next few hours, never while it's raining already, at most once in three hours
+        kept = []
+        keep_fn = lambda n, facts, key="", answers=False: kept.append((key, answers)) or "new"
+        al = {"n": 7, "what": "rain", "until": "2099-01-01 00:00", "alert": True, "once": False, "matches": []}
+        def wet_from(h):
+            f = fc()
+            f["hourly"]["precipitation_probability"] = [5] * h + [80] * (24 - h)
+            return f
+        need(not w.check_watches(wet_from(18), [], day, ws=[al], keep=keep_fn), "rain seven hours ahead set the rain alert off")
+        need(w.check_watches(wet_from(13), [], day, ws=[al], keep=keep_fn) and kept == [("rain-1413", False)], f"rain in two hours: {kept}")
+        need(not w.check_watches(wet_from(13), [("11:05", 1.5)] * 24, day, ws=[al], keep=keep_fn),
+             "the rain alert went off while it's raining already")
+        al["matches"] = [{"at": time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time() - 3600))}]
+        need(not w.check_watches(wet_from(13), [], day, ws=[al], keep=keep_fn), "the rain alert texted twice within three hours")
         # The place from me.md; the template asks for it, blank.
         import me as _me
         need(_me.load(ROOT / "template")["place"] == "", "the template's place isn't blank")
@@ -7753,7 +7822,7 @@ setTimeout(() => {
         gi = (Path(config.FOLDER) / ".gitignore")
         if gi.exists():
             need("HQ/direct-line/weather.json" in gi.read_text(), "the weather state isn't kept off GitHub")
-        return "sun, rain by the minute and by the hour, a rainy day (never outside), quiet at night and on grey days; due every three hours in the day; me.md's place; texted once"
+        return "sun, rain by the minute and by the hour, a rainy day (never outside), quiet at night and on grey days; due every three hours in the day; the phone's spot while fresh; the rain alert a few hours ahead, quiet while raining and for three hours; me.md's place; texted once"
 
     async def flow93(self) -> str:
         """H125, no Claude, no network: Donna's watch list. routine/pings.py on its own copies: a mail watch and a

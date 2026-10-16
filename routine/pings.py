@@ -341,7 +341,9 @@ def weather_look(words: str) -> str:
 
 
 def watch_add(kind: str, what: str, until: dt.datetime | None = None, once: bool | None = None, by: str = "",
-              now: dt.datetime | None = None) -> dict:
+              now: dt.datetime | None = None, alert: bool = False) -> dict:
+    """ALERT (H161): the rain alert switch in the app's weather (weather.rain_alert); the weather look checks it only
+    a few hours ahead and texts it at most every few hours."""
     if kind not in KINDS:
         raise ValueError(f"A watch looks in {' or '.join(KINDS)}.")
     now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
@@ -357,7 +359,7 @@ def watch_add(kind: str, what: str, until: dt.datetime | None = None, once: bool
         n = max([int(w.get("n") or 0) for w in s["watches"]] + [int(s.get("last_watch") or 0)]) + 1
         w = {"n": n, "kind": kind, "what": what, "until": until.strftime(FMT),
              "once": (kind == "weather") if once is None else bool(once), "added": now.strftime(FMT), "by": by,
-             "matches": []}
+             "matches": []} | ({"alert": True} if alert else {})
         s["watches"].append(w)
         s["last_watch"] = n
         _write(s)
@@ -420,6 +422,8 @@ def unwatch(n: int, quiet: bool = False, now: float | None = None) -> dict | Non
 
 
 def _watch_says(w: dict) -> str:
+    if w.get("alert"):
+        return "rain coming up (the rain alert he switched on in the app)"
     return (f"a mail about {w['what']}" if w["kind"] == "mail" else
             {"rain": "rain", "dry": "dry weather", "sun": "sun"}.get(w["what"], f"the temperature {w['what']} °C")
             if w["kind"] == "weather" else w["what"])
@@ -442,6 +446,8 @@ def _watch_due(s: dict, t: float) -> list[tuple[str, str]]:
             if m.get("answers"):
                 w["ended"] = {"at": stamp, "why": "answered", "texted": stamp}
                 facts += "\nThis answers it: you stop watching for it now; say so in passing."
+            elif w.get("alert"):
+                facts += "\nThe rain alert stays on until he switches it off; don't mention the switch."
             else:
                 facts += "\nYou keep watching until then."
             out.append(("watch", facts))
@@ -471,13 +477,15 @@ def mail_watch_text(now: float | None = None) -> str:
 def _watch_line(w: dict) -> str:
     return (f"- watch {w['n']} · {w['kind']} · {w['what']} · until {w['until']}"
             + (" · ends at the first match" if w.get("once") else "")
+            + (" · the rain alert from the app" if w.get("alert") else "")
             + (f" · {len(w['matches'])} match(es)" if w.get("matches") else "")
             + (f" · ended {w['ended']['at']} ({w['ended']['why']})" if w.get("ended") else ""))
 
 
 def watch_items() -> list[dict]:
     """For the notes sheet in the app: the open watches in plain words."""
-    return [{"n": w["n"], "kind": w["kind"], "text": f"Watching for {_watch_says(w)}", "until": w["until"],
+    return [{"n": w["n"], "kind": w["kind"], "text": "Rain alerts on" if w.get("alert") else f"Watching for {_watch_says(w)}",
+             "until": w["until"],
              "matches": len(w.get("matches") or [])} for w in open_watches()]
 
 

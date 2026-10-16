@@ -514,8 +514,27 @@ if __name__ == "__main__":
         if config.FREE_ONLY:
             return JSONResponse({"off": "Free"}, headers=_NO_CACHE)
         import weather as _weather
-        return JSONResponse(await asyncio.to_thread(_weather.view, request.query_params.get("fresh") == "1"),
+        q = request.query_params  # H161: the phone's spot when he allows it (lat, lon), else me.md's place
+        gps = (q.get("lat"), q.get("lon")) if q.get("lat") and q.get("lon") else None
+        return JSONResponse(await asyncio.to_thread(_weather.view, q.get("fresh") == "1", None, gps),
                             headers=_NO_CACHE)
+
+    # H161: the rain alert switch in the weather sheet: on opens a lasting rain watch on Donna's list, off ends it
+    # (pings.py, through weather.rain_alert). Only from the page itself (x-hq: weather), not on a Free-only line.
+    @app.post("/api/weather/alert", include_in_schema=False)
+    async def weather_alert(request: Request):
+        if request.headers.get("x-hq") != "weather":
+            return JSONResponse({"error": "Only the HQ page can switch the rain alert"}, status_code=403)
+        if config.FREE_ONLY:
+            return JSONResponse({"error": "Not on Free"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict) or not isinstance(ask.get("on"), bool):
+            return JSONResponse({"error": "on or off?"}, status_code=400)
+        import weather as _weather
+        return JSONResponse(await asyncio.to_thread(_weather.rain_alert, ask["on"]), headers=_NO_CACHE)
 
     # H124: the bell. A tap in the appointment asks Donna to ping him when it starts (or not any more). Only HQ's own
     # list changes (routine/pings.py); Google Calendar is never written. Only from the page itself (x-hq: calendar).

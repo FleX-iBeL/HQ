@@ -388,6 +388,19 @@
   #wxclose { position:absolute; right:-6px; top:-8px; border:0; background:transparent; color:var(--fg); font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
   #wxbody { flex:1; min-height:60px; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; display:flex; flex-direction:column; gap:12px; }
   #wxbody .empty { color:var(--muted); text-align:center; margin:auto; }
+  /* H161: where the weather is for (the phone's location or the home place), and the rain alert switch. */
+  #wxbody .wxwhere { display:flex; align-items:center; justify-content:space-between; gap:10px; color:var(--muted); font-size:13px; }
+  #wxbody .wxwhere button { flex:none; border:1px solid var(--muted); border-radius:999px; background:transparent; color:var(--fg);
+                            font:600 13px/1 -apple-system,sans-serif; padding:7px 11px; cursor:pointer; }
+  #wxalert { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; text-align:left; cursor:pointer;
+             border:1px solid var(--muted); border-radius:14px; background:transparent; color:var(--fg); padding:10px 12px; font:inherit; }
+  #wxalert b { display:block; font-size:15px; }
+  #wxalert small { display:block; color:var(--muted); font-size:12.5px; margin-top:2px; }
+  #wxalert .sw { flex:none; width:44px; height:26px; border-radius:999px; background:var(--muted); position:relative; transition:background .15s; }
+  #wxalert .sw::after { content:""; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:#fff; transition:left .15s; }
+  #wxalert[aria-checked="true"] { border-color:var(--accent); }
+  #wxalert[aria-checked="true"] .sw { background:var(--accent); }
+  #wxalert[aria-checked="true"] .sw::after { left:21px; }
   #wxbody .warn { border-radius:12px; padding:10px 12px; background:color-mix(in srgb, #facc15 22%, var(--bg)); border-left:4px solid #facc15; }
   #wxbody .warn.orange { background:color-mix(in srgb, #fb923c 22%, var(--bg)); border-left-color:#fb923c; }
   #wxbody .warn.red { background:color-mix(in srgb, #ef4444 22%, var(--bg)); border-left-color:#ef4444; }
@@ -2174,7 +2187,9 @@ function showWxBody() {
   body.innerHTML = "";
   const div = (cls, text) => { const e = document.createElement("div"); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   if (!d) { histNote(body, "Couldn't load the weather. Try again."); return; }
-  if (d.off || !d.now) { histNote(body, d.off || (d.error ? "Couldn't read the weather just now." : "Reading the weather…")); return; }
+  if (d.off || !d.now) { histNote(body, d.off || (d.error ? "Couldn't read the weather just now." : "Reading the weather…"));
+    if (d.off && /^No place/.test(d.off)) body.appendChild(wxWhere(d)); return; }
+  body.append(wxWhere(d), wxAlert(d));
   const src = d.warn_source || "";
   if ((d.warnings || []).length) {
     for (const w of d.warnings) {
@@ -2223,9 +2238,68 @@ function showWxBody() {
   body.appendChild(div("src", "From Open-Meteo" + (d.radar ? ", Buienradar" : "") + (/^(KNMI|MeteoAlarm)$/.test(src) ? " and " + src : "") +
     (m == null ? "" : ", " + (m < 1 ? "just now" : m < 60 ? m + " min ago" : Math.round(m / 60) + " h ago")) + (d.error ? ". Couldn't read it again just now." : "")));
 }
+// H161: the phone's location when he allows it (he taps "Use my location" once, or the browser already allows it),
+// rounded here to two decimals (about a kilometre); else the home place (Where I am, in me.md). Kept per device.
+var wxPos = null, wxPosAt = 0, wxGpsMiss = false;
+function wxGpsWant() { try { return localStorage.getItem("hq-wx-gps"); } catch (e) { return null; } }
+function wxGpsSet(v) { try { localStorage.setItem("hq-wx-gps", v); } catch (e) {} }
+async function wxGpsOk() {
+  if (!navigator.geolocation) return false;
+  const want = wxGpsWant();
+  if (want === "0" || want === "1") return want === "1";
+  try { return (await navigator.permissions.query({ name: "geolocation" })).state === "granted"; } catch (e) { return false; }
+}
+function wxLocate(ask) {
+  return new Promise(done => {
+    if (!navigator.geolocation) return done(null);
+    if (!ask && wxPos && Date.now() - wxPosAt < 10 * 60 * 1000) return done(wxPos);
+    navigator.geolocation.getCurrentPosition(p => {
+      wxPos = { lat: p.coords.latitude.toFixed(2), lon: p.coords.longitude.toFixed(2) }; wxPosAt = Date.now(); done(wxPos);
+    }, () => done(null), { enableHighAccuracy: false, timeout: 10000, maximumAge: 10 * 60 * 1000 });
+  });
+}
+function wxWhere(d) {
+  const row = document.createElement("div"); row.className = "wxwhere";
+  const t = document.createElement("span"), b = document.createElement("button"); b.type = "button";
+  t.textContent = d.gps ? "📍 Your location" + (d.place && d.place !== "Your location" ? " · " + d.place : "")
+    : (wxGpsMiss ? "Couldn't get your location. " : "") + (d.home ? "Home place: " + d.home : "");
+  b.textContent = d.gps ? "Use my home place" : "Use my location";
+  b.hidden = !d.gps && !navigator.geolocation;
+  b.addEventListener("click", async () => {
+    b.disabled = true;
+    if (d.gps) { wxGpsSet("0"); wxPos = null; }
+    else { wxGpsSet("1"); if (!(await wxLocate(true))) { wxGpsMiss = true; wxGpsSet("0"); } }
+    await loadWx(true);
+  });
+  row.append(t, b);
+  return row;
+}
+function wxAlert(d) {
+  const a = d.alert || {}, name = (AGENTS.donna || {}).name || "Donna";
+  const b = document.createElement("button"); b.type = "button"; b.id = "wxalert"; b.setAttribute("role", "switch");
+  b.setAttribute("aria-checked", String(!!a.on));
+  const tx = document.createElement("span"), sw = document.createElement("span"); sw.className = "sw";
+  const h = document.createElement("b"); h.textContent = "Rain alerts";
+  const s = document.createElement("small");
+  s.textContent = a.on ? name + " texts you when rain is coming up" : "Off. On: " + name + " texts you when rain is coming up";
+  tx.append(h, s); b.append(tx, sw);
+  b.addEventListener("click", async () => {
+    b.disabled = true;
+    try {
+      const r = await fetch("api/weather/alert", { method: "POST", cache: "no-store",
+        headers: { "x-hq": "weather", "content-type": "application/json" }, body: JSON.stringify({ on: !a.on }) });
+      if (r.ok) { if (wxData) wxData.alert = await r.json(); showWxBody(); return; }
+    } catch (e) {}
+    s.textContent = "Couldn't switch it. Try again."; b.disabled = false;
+  });
+  return b;
+}
 async function loadWx(fresh) {
   const ask = ++wxAsk;
-  const d = await histGet("api/weather" + (fresh ? "?fresh=1" : ""));
+  const pos = (await wxGpsOk()) ? await wxLocate(false) : null;
+  if (wxGpsWant() === "1") wxGpsMiss = !pos;
+  const q = [fresh ? "fresh=1" : "", pos ? "lat=" + pos.lat + "&lon=" + pos.lon : ""].filter(Boolean).join("&");
+  const d = await histGet("api/weather" + (q ? "?" + q : ""));
   if (ask !== wxAsk) return;
   if (d) wxData = d.off === "Free" ? { off_free: true } : d;
   paintWx();
