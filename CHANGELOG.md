@@ -4,6 +4,9 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+### Added
+- The map, a guided workflow you can turn on: from the life you want three to five years from now down to next week, in five layers (the vision, the year, the ideal week, the real week, looking back). Your agent, Pepper by default, walks you through it on a call, one question at a time, sparring with you and writing your answers into your own map as you go. Each layer says what it is, the questions to go through, what it makes and what it hands to the layer below. Turn it on with `python3 app/workflows.py on map`, then on a call say "let's go through my map".
+
 ### Changed
 - New versions come out steadier. Every night the team tests HQ, fixes what it finds and decides itself: when it's sure, the night's work comes out as a new version; when it hesitates, the work waits on a test line of its own and never reaches your update bar until it's sure. Nothing personal ever goes up.
 

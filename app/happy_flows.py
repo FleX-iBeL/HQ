@@ -10759,6 +10759,71 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need(word in got, f"the Quick session didn't answer with the word from its text: {got!r}")
         return f"a {len(text) // 1024} KB quick text goes by file (largest argument {big} bytes); a real Quick session opened and said {word}"
 
+    async def flow111(self) -> str:
+        """H202: the map as a guided workflow. No Claude turns. HQ ships the map in workflows/map: a guide with
+        the five layers (the vision, the year, the ideal week, the real week, looking back), each with what it
+        is, its questions one at a time, what it makes and what it hands down; how to spar one question per turn
+        and write the answers down as they go; and a blank map. Nothing of the user's and no source named in it
+        (the private words), and not the vision questions word for word when the workspace has them. Turning it
+        on in a throwaway workspace starts the map from the blank one and adds its line to where-things-go.md,
+        never over an existing map; off keeps the file; the call rule names the guide only when it's on."""
+        import workflows as wf
+        w = wf.find("map")
+        need(w, "HQ ships no map workflow")
+        guide = (w["dir"] / w["guide"]).read_text()
+        blank = (w["dir"] / w["blank"]).read_text()
+        layers = ["## 1. The vision", "## 2. The year", "## 3. The ideal week", "## 4. The real week", "## 5. Looking back"]
+        at = [guide.find(h) for h in layers]
+        need(all(i >= 0 for i in at) and at == sorted(at), f"the guide doesn't have the five layers in order: {at}")
+        bodies = [guide[a:b] for a, b in zip(at, at[1:] + [guide.find("## In short")])]
+        for h, body in zip(layers, bodies):
+            need("**What it is.**" in body and "**What it makes.**" in body, f"{h}: no what it is or what it makes")
+            need("hands down" in body or "hands back up" in body, f"{h}: doesn't say what it hands on")
+            need(len(re.findall(r"^\s*\d+\. ", body, re.M)) >= 3, f"{h}: fewer than three questions")
+        vision_qs = len(re.findall(r"^\d+\. ", bodies[0], re.M))
+        need(vision_qs >= 15, f"the vision has only {vision_qs} questions")
+        for must in ("One question at a time", "Write it down as you go", "Never say where it comes from", "their words"):
+            need(must.lower() in guide.lower(), f"the guide doesn't say: {must}")
+        need("put your own things here" in blank.lower() and blank.count("Status: not started") == 5,
+             "the blank map doesn't say put your own things here, with five layers not started")
+        # Nothing of the user's, no source named; not the vision questions word for word.
+        personal = privacy.pattern(privacy.words(config.FOLDER))
+        for name, text in (("guide", guide), ("blank", blank), ("workflow.json", (w["dir"] / "workflow.json").read_text())):
+            hits = [m.group(0) for m in personal.finditer(text)]
+            need(not hits, f"the map's {name} has private words or sources: {hits[:5]}")
+        flat = lambda s: re.sub(r"[^a-z ]", "", s.lower())
+        source = config.FOLDER / "lifestyle-design.md"
+        copied = []
+        if source.exists():
+            qs = re.findall(r"^\d+\. (.+\?)\s*$", source.read_text(), re.M)
+            copied = [q for q in qs if flat(q) in flat(guide)]
+        need(not copied, f"the guide has questions word for word: {copied[:3]}")
+        # Turned on in a throwaway workspace.
+        tmp = self.tmp / "workflows"
+        tmp.mkdir()
+        shutil.copy(ROOT / "template/where-things-go.md", tmp / "where-things-go.md")
+        need(wf.rule(tmp) == "" and wf.turned_on(tmp) == [], "a workspace without any on has a workflow rule")
+        said = wf.turn_on(tmp, "map")
+        need((tmp / "map.md").read_text() == blank and "map" in wf.turned_on(tmp), f"turning it on: {said}")
+        where = (tmp / "where-things-go.md").read_text()
+        need(where.count("`map.md`") == 1 and where.find("`map.md`") < where.find("| Something new"),
+             "its line isn't in where-things-go.md above Something new")
+        (tmp / "map.md").write_text(blank + "\nMine.\n")
+        wf.turn_on(tmp, "map")
+        need((tmp / "map.md").read_text().endswith("Mine.\n") and (tmp / "where-things-go.md").read_text() == where
+             and wf.turned_on(tmp) == ["map"], "turning it on again changed their map or doubled a line")
+        rule = wf.rule(tmp)
+        need(str(w["dir"] / "guide.md") in rule and "one question per turn" in rule and "map.md" in rule,
+             f"the call rule doesn't name the guide and how: {rule}")
+        wf.turn_off(tmp, "map")
+        need(wf.rule(tmp) == "" and (tmp / "map.md").exists(), "off didn't turn it off, or took their map")
+        need(wf.turn_on(tmp, "nothing").startswith("No workflow"), "an unknown workflow was turned on")
+        need("{workflows}" not in config.VOICE_RULES, "the call rules still have the workflows placeholder")
+        need("workflows.py" in (ROOT / "template/CLAUDE.md").read_text(), "the template's CLAUDE.md doesn't mention workflows")
+        return (f"the map ships: five layers, {vision_qs} vision questions, each layer what it is, makes and hands down; "
+                f"nothing private or named; on starts the map from blank and adds its line, never over theirs; off keeps it; "
+                f"the call rule only when on")
+
     async def flow97(self) -> str:
         """F31, no Claude, no network: a refused pull or push from a job never passes silently. push.py --pull and a
         plain push against a throwaway HQ copy whose GitHub is a throwaway folder: a pull that works says so; a remote
@@ -12472,6 +12537,7 @@ FLOWS = {
     108: ("H187: an update ends what runs (a call, a job, the mail check) and restarts every background part, by exact pid, with the new version's rules", False, "flow108"),
     109: ("H186: the nightly line: the night's work always on nightly, on to main as the next version only when sure; a privacy hit pushes nothing", False, "flow109"),
     110: ("F38: a Quick session starts with a text over 200 KB: handed over by file, never on the command line", True, "flow110"),
+    111: ("H202: the map as a guided workflow: five layers with their questions, nothing private or named; turned on, its blank map and line, never over theirs", False, "flow111"),
 }
 
 

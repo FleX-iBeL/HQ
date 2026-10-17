@@ -1,0 +1,11 @@
+{
+  "id": "map",
+  "name": "The map",
+  "what": "From the life you want three to five years out down to next week, one layer at a time, on a call with your agent.",
+  "agent": "pepper",
+  "file": "map.md",
+  "guide": "guide.md",
+  "blank": "blank.md",
+  "start": "let's go through my map",
+  "where": "The map: the vision, the year, the ideal week, the real week and looking back"
+}

@@ -415,6 +415,7 @@ and take them one at a time; once he says one is done or gone through, remove it
 {pings}
 {mailfast}
 {apptnotes}
+{workflows}
 - Keep working with the lid closed (lid-closed sleep): when he asks which it is, run python3 \
 "{HQ}/routine/lidsleep.py"; to turn it on ("keep working with the lid closed") add on, to turn \
 it off ("back to normal", sleeps when the lid closes) add off. Flip it on his ask, then tell him in a \
@@ -435,7 +436,9 @@ PINGS_RULE = PINGS_RULE.replace("{HQ}", str(ROOT)).replace("{agent}", _direct_ag
 APPT_NOTES_RULE = APPT_NOTES_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TEAM_RULE = TEAM_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 MAIL_FAST_RULE = MAIL_FAST_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
-VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{mailfast}", MAIL_FAST_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
+import workflows as _workflows  # H202: the workflows the user turned on
+WORKFLOWS_RULE = _workflows.rule(FOLDER)
+VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
                .replace("{times}", TIMES_RULE))
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:
