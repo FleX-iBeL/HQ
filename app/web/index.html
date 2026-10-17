@@ -127,6 +127,16 @@
   #devbtn { display:none; align-items:center; justify-content:center; cursor:pointer; }
   #devbtn.show { display:flex; }
   #settings.incall .row:not(.devrow), #settings.incall #voices { display:none; }
+  /* H205: What HQ helps you with, a page of its own inside Settings; off takes a button away and the rest moves up. */
+  #settings[data-view="features"] > :not(h2):not(#featpage):not(#setdone) { display:none !important; }
+  #featpage { display:flex; flex-direction:column; }
+  #featpage[hidden], #settings.incall #featpage { display:none; }
+  #featback { align-self:flex-start; background:none; border:0; color:var(--accent); font:600 15px/1 -apple-system,sans-serif; padding:6px 2px; cursor:pointer; }
+  #featintro { margin:2px 2px 4px; font-size:13px; line-height:1.35; color:var(--muted); }
+  #settings .row.waiting > span, #settings .row.fixed > span { opacity:.6; }
+  #settings .sw:disabled { opacity:.5; cursor:default; }
+  #featrow { cursor:pointer; }
+  .featoff { display:none !important; }
   #setdone { margin-top:8px; padding:14px; border-radius:999px; border:0; background:var(--fg); color:var(--bg); font:600 17px/1 -apple-system,sans-serif; cursor:pointer; }
   /* H3: what HQ is doing. Hidden outside a call. */
   #orbwrap { display:none; flex-direction:column; align-items:center; gap:10px; margin:-8px 0; }
@@ -890,7 +900,10 @@
   <div class="row devrow" id="duckrow" hidden><span>Other sound<small id="ducknote">Music and videos turn down while you're on a call</small></span><button id="duck" class="sw" type="button" aria-pressed="false">Lower</button></div>
   <div class="row devrow" id="nosinkrow" hidden><span>Sound<small id="nosinknote">This browser can't choose where her voice plays</small></span></div>
   <div class="row"><span>Thinking sound<small>A soft tick while she thinks</small></span><button id="sound" class="sw" type="button" aria-pressed="true">On</button></div>
-  <div id="wfrows"></div>
+  <div class="row" id="featrow"><span>What HQ helps you with<small id="featcount">Turn on what you want to use</small></span><button id="featopen" class="sw" type="button" aria-controls="featpage" aria-label="What HQ helps you with">Open ›</button></div>
+  <div id="featpage" hidden><button id="featback" type="button">‹ Settings</button>
+    <p id="featintro">Turn on what you want HQ to help you with. Off takes its button away and the rest moves up; turn it back on any time.</p>
+    <div id="wfrows"></div></div>
   <button id="setdone" type="button">Done</button>
 </div>
 <div id="chat" role="dialog" aria-label="Chat log"><div id="chathead"><h2 id="chattitle">What was said</h2><button id="chatclose" type="button">Close</button></div><div id="chatlog"></div>
@@ -1184,29 +1197,51 @@ function showSettings(open) {
   if (open && typeof calOpen === "function" && calOpen()) showCal(false);  // H144: one sheet at a time, also on a call
   if (open && todoOpen()) showTodo(false);  // H200
   if (open) listDevices();  // H106
-  if (open && !inCall) listWorkflows();  // job 257
+  if (open && !inCall) listWorkflows();  // job 257, H205
+  if (!open || inCall) featView(false);  // H205: Settings opens at its top
   setBtn.setAttribute("aria-expanded", String(open && !inCall));
   devBtn.setAttribute("aria-expanded", String(inCall));
 }
-// Job 257 (H202): the switches for HQ's workflows, Life coaching first: on, a few life coaching sessions build their
-// long-term vision into HQ; off, only the short-term things. Read from the server each time Settings opens.
-const wfRows = document.getElementById("wfrows");
+// H205: What HQ helps you with (app/features.py through /api/features): every feature a switch, Life coaching (job
+// 257) among them. Everything starts on. Off takes its button away (the dock's flex moves the rest up); what leans
+// on another says so and waits for it. Read when the page loads and each time Settings opens.
+const wfRows = document.getElementById("wfrows"), featPage = document.getElementById("featpage"),
+      featCount = document.getElementById("featcount");
+let featItems = [];
+function applyFeatures(items) {
+  featItems = items || [];
+  for (const f of featItems)
+    for (const id of f.buttons || []) { const el = document.getElementById(id); if (el) el.classList.toggle("featoff", !f.on); }
+  const on = featItems.filter(f => f.on).length;
+  if (featItems.length) featCount.textContent = `${on} of ${featItems.length} on`;
+}
+function featView(open) {
+  if (open) setEl.dataset.view = "features"; else delete setEl.dataset.view;
+  featPage.hidden = !open;
+  setTitle.textContent = open ? "What HQ helps you with" : (setEl.classList.contains("incall") ? "Microphone and sound" : "Settings");
+  document.getElementById("featopen").setAttribute("aria-expanded", String(open));
+  if (open) setEl.scrollTop = 0;
+}
 function showWorkflows(items) {
-  wfRows.replaceChildren(...(items || []).map(w => {
+  applyFeatures(items);
+  wfRows.replaceChildren(...featItems.map(w => {
     const row = document.createElement("div"), span = document.createElement("span"), small = document.createElement("small"),
           b = document.createElement("button");
-    row.className = "row"; row.dataset.wf = w.id;
+    row.className = "row" + (w.waiting ? " waiting" : "") + (w.fixed ? " fixed" : ""); row.dataset.feature = w.id;
+    if (w.id === "coaching") row.dataset.wf = "map";
     span.textContent = w.name;
-    small.textContent = w.when_on && w.when_off ? `On: ${w.when_on}. Off: ${w.when_off}.` : w.what;
+    small.textContent = w.line + (w.line && !/[.!?]$/.test(w.line) ? "." : "")
+      + (w.fixed ? " " + w.fixed + "." : w.waiting ? ` Needs ${w.needs_name}: turn that on first.` : w.needs ? ` Needs ${w.needs_name}.` : "");
     span.append(small);
     b.type = "button"; b.className = "sw" + (w.on ? " on" : ""); b.textContent = w.on ? "On" : "Off";
+    b.disabled = !!(w.waiting || w.fixed);
     b.setAttribute("aria-pressed", String(!!w.on)); b.setAttribute("aria-label", w.name);
     b.addEventListener("click", async () => {
       if (state !== "idle" || b.disabled) return;
       b.disabled = true;
       try {
-        const r = await fetch("api/workflows", { method: "POST", cache: "no-store",
-          headers: { "x-hq": "workflows", "content-type": "application/json" }, body: JSON.stringify({ id: w.id, on: !w.on }) });
+        const r = await fetch("api/features", { method: "POST", cache: "no-store",
+          headers: { "x-hq": "features", "content-type": "application/json" }, body: JSON.stringify({ id: w.id, on: !w.on }) });
         const d = await r.json();
         if (r.ok) showWorkflows(d.items); else b.disabled = false;
       } catch (e) { b.disabled = false; }
@@ -1217,10 +1252,14 @@ function showWorkflows(items) {
 }
 async function listWorkflows() {
   try {
-    const r = await fetch("api/workflows", { cache: "no-store" });
-    if (r.ok) showWorkflows((await r.json()).items);
+    const r = await fetch("api/features", { cache: "no-store" });
+    if (r.ok) { const d = await r.json(); if (Array.isArray(d.items) && d.items.length) showWorkflows(d.items); }
   } catch (e) {}
 }
+document.getElementById("featrow").addEventListener("click", () => { if (state === "idle") featView(true); });
+document.getElementById("featback").addEventListener("click", () => featView(false));
+listWorkflows();
+document.addEventListener("visibilitychange", () => { if (!document.hidden) listWorkflows(); });  // switched on another device
 setBtn.addEventListener("click", () => { if (state === "idle") showSettings(true); });
 devBtn.addEventListener("click", () => { if (state === "live") showSettings(!setEl.classList.contains("open")); });
 document.getElementById("setdone").addEventListener("click", () => showSettings(false));
@@ -2742,6 +2781,7 @@ function backSwipe(sheet, mover, can, back) {
 backSwipe(calEl, calOne, () => calEl.classList.contains("reading"), calBack);
 backSwipe(histEl, histLog, () => histEl.classList.contains("reading"), () => loadHistory());
 backSwipe(todoEl, todoBody, () => todoEl.dataset.view !== "main", todoBack);
+backSwipe(setEl, featPage, () => setEl.dataset.view === "features", () => featView(false));  // H205
 // H135: the weather in the app (app/weather.py through /api/weather). The widget at the bottom, between the round
 // buttons (out of the page's flow, so the call screen keeps its room), before a call and not on Free: sunny or not, degrees, wind, chance of rain, and the warning when there is one. A tap opens the sheet.
 // Read fresh when the page opens, every 15 minutes while it's shown, and when the sheet opens (the server only reads

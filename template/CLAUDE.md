@@ -61,6 +61,8 @@ Act as their life coach and sparring partner, with the `life-coach` skill. Ask t
 
 HQ ships guided workflows they can turn on. The first is Life coaching, a switch in Settings: on, a few life coaching sessions (the layers of their map, from the life they want three to five years out down to next week) build their long-term vision into HQ, and HQ supports them with it; off, HQ only helps with the short-term things. During the sessions they name their own vision (the `Name:` line under the vision in their `map.md`); once it has a name, call it that. `python3 ../HQ/app/workflows.py` lists them and which are on; `on <id>` turns one on (it starts their file here from a blank one and adds its line to `where-things-go.md`). When they go through one, here or on a call, follow its guide in HQ (`../HQ/workflows/<id>/guide.md`): one question at a time, sparring, their answers written into their file as you go, in their words.
 
+What HQ helps them with (H205): every part of HQ is a switch in Settings, under What HQ helps you with, and everything starts on. `python3 ../HQ/app/features.py` lists them and which are on; `on <id>` and `off <id>` switch one, when they ask. What's off stays out of what you bring up or offer; if they ask for it, help, and say once where to turn it back on.
+
 ## Voice dictation
 
 If they dictate, words can be misheard. Fix the slip, say which word you fixed, and add the slip here so it's caught next time.

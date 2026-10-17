@@ -349,6 +349,8 @@ class Server:
             "HQ_TODO": str(tmp / "todo-server" / "challenges.md"), "HQ_TODO_UNDO": str(tmp / "todo-server" / "undo.json"),
             # job 257: the Life coaching switch in Settings, never the workspace's own
             "HQ_WORKFLOWS_FOLDER": str(tmp / "workflows-server"),
+            # H205: What HQ helps you with, never the workspace's own switches or the real roadmap's mail check
+            "HQ_FEATURES_FOLDER": str(tmp / "features-server"), "HQ_FEATURES_ROADMAP": str(tmp / "features-server" / "roadmap.md"),
             # H101: never the workspace's own calendar copy, and never a real Claude run to read Google
             "HQ_CALENDAR_FILE": str(tmp / "calendar-server" / "calendar.json"),
             "HQ_CALENDAR_FAKE": str(tmp / "calendar-server" / "stream.txt"),
@@ -12960,6 +12962,7 @@ print("H88OUT " + json.dumps(out))
   const until = async (f, ms) => { for (let i = 0; i < ms / 50; i++) { if (f()) return true; await wait(50); } return false; };
   document.getElementById("setbtn").click();
   await until(() => document.querySelector('#wfrows .row[data-wf="map"] .sw'), 4000);
+  document.getElementById("featrow").click();  // H205: Life coaching is on the page What HQ helps you with
   const row = document.querySelector('#wfrows .row[data-wf="map"]');
   out.push("row:" + (row ? row.querySelector("span").firstChild.textContent : "none"));
   out.push("line:" + (row && /^On: .*life coaching sessions.*\. Off: .*short-term things\.$/.test(row.querySelector("small").textContent) ? "ok" : "off"));
@@ -12998,6 +13001,217 @@ print("H88OUT " + json.dumps(out))
                 "names their own vision (suggestions from what they shared) and the call rule uses it; the next call "
                 "follows the switch; in Settings on the phone and the desktop app a tap turns it on, never on a call")
 
+    # 119
+    async def flow119(self) -> str:
+        """H205, no Claude: What HQ helps you with, every feature a switch. Everything starts on (no file); a switch
+        off is written in the workspace's HQ/features.json and the existing switches follow it (agenda, direct_line
+        and weather on(), the roadmap's mail check, the Life coaching workflow); what leans on another says so and
+        waits (weather needs the texts); the computer's own off wins; the next call is told what's off. The server
+        lists and switches them only from the page. On the phone, a small phone and the desktop app: the Settings row
+        opens the page, one line per switch; every one of the 256 combinations leaves the dock tidy (the buttons that
+        are on, in order, inside the dock and the screen, none overlapping or squeezed), before and on a call; real
+        taps take a button away and bring it back; Back goes up to Settings. Screenshots of each state go to
+        HQ_SHOTS_DIR (else the flow's own folder)."""
+        import features as ft
+        import agenda, direct_line, weather
+        tmp = self.tmp / "h205"
+        tmp.mkdir()
+        rm = tmp / "roadmap.md"
+        rm.write_text("# HQ\n\n## The queue\n\nJobs.\n\n**Routine:** on\n\n**Mail check:** on (every hour, hidden)\n\n## The schedule\n\nNothing.\n")
+        keep = {k: os.environ.get(k) for k in ("HQ_FEATURES_FOLDER", "HQ_FEATURES_ROADMAP", "HQ_WORKFLOWS_FOLDER", "HQ_CALENDAR")}
+        try:
+            os.environ.update({"HQ_FEATURES_FOLDER": str(tmp), "HQ_FEATURES_ROADMAP": str(rm), "HQ_WORKFLOWS_FOLDER": str(tmp)})
+            os.environ.pop("HQ_CALENDAR", None)
+            items = ft.listing()
+            ids = [i["id"] for i in items]
+            need(ids == ["calendar", "todo", "texts", "weather", "mail", "notes", "team", "coaching"], f"the switches: {ids}")
+            need(all(i["on"] for i in items if i["id"] != "coaching") and not (tmp / ft.STATE).exists(), "not everything starts on")
+            need(all(i["line"] for i in items) and next(i for i in items if i["id"] == "weather").get("needs_name", "").startswith("Texts with"),
+                 "a switch without its line, or the weather doesn't say it needs the texts")
+            need(agenda.on() and direct_line.on() and weather.on() and ft.rule() == "", "all on, but something reads as off")
+            ft.switch("texts", False)
+            w = next(i for i in ft.listing() if i["id"] == "weather")
+            need(not direct_line.on() and not weather.on() and w.get("waiting") and not w["on"], "texts off, but the weather still runs")
+            need("Texts with" in ft.rule() and "Weather" in ft.rule(), f"the call isn't told: {ft.rule()!r}")
+            ft.switch("texts", True)
+            need(direct_line.on() and weather.on(), "texts back on, the weather didn't come back")
+            ft.switch("calendar", False)
+            need(not agenda.on() and json.loads((tmp / ft.STATE).read_text()) == {"off": ["calendar"]}, "calendar off isn't written or followed")
+            vr = config.voice_rules()
+            need("Turned off in What HQ helps you with" in vr and "Calendar" in vr.split("Turned off in What HQ helps you with", 1)[1][:80],
+                 "the next call isn't told the calendar is off")
+            ft.switch("calendar", True)
+            need("Turned off in What HQ helps you with" not in config.voice_rules(), "all on, the call still hears something's off")
+            ft.switch("mail", False)
+            need("**Mail check:** off" in rm.read_text() and ft.mail_on() is False, "the mail switch isn't the roadmap's mail check")
+            ft.switch("mail", True)
+            need("**Mail check:** on" in rm.read_text(), "the mail check didn't come back on")
+            ft.switch("coaching", True)
+            need((tmp / "map.md").exists() and next(i for i in ft.listing() if i["id"] == "coaching")["on"], "Life coaching isn't the map's switch")
+            ft.switch("coaching", False)
+            need((tmp / "map.md").exists(), "Life coaching off took the map")
+            os.environ["HQ_CALENDAR"] = "0"
+            c = next(i for i in ft.listing() if i["id"] == "calendar")
+            need(not c["on"] and c.get("fixed"), "the computer's own off doesn't win")
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        # the server, on its own folder
+        await self.ensure_server()
+        sf, srm = Path(self.server.env["HQ_FEATURES_FOLDER"]), Path(self.server.env["HQ_FEATURES_ROADMAP"])
+        wff = Path(self.server.env["HQ_WORKFLOWS_FOLDER"])
+        shutil.rmtree(sf, ignore_errors=True)
+        sf.mkdir(parents=True)
+        wff.mkdir(parents=True, exist_ok=True)
+        srm.write_text(rm.read_text())
+        def post(body, hq="features"):
+            req = urllib.request.Request(TEST_URL + "/api/features", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        code, body, _ = http_get("/api/features")
+        got = json.loads(body).get("items", []) if code == 200 else []
+        need(code == 200 and [i["id"] for i in got] == ids, f"/api/features: {code} {[i['id'] for i in got]}")
+        need(post({"id": "calendar", "on": False}, hq="")[0] == 403 and not (sf / ft.STATE).exists(), "a switch without the page's header was let in")
+        need(post({"id": "nope", "on": False})[0] == 404 and post({"id": "calendar"})[0] == 400, "a bad switch wasn't refused")
+        code, d = await asyncio.to_thread(post, {"id": "calendar", "on": False})
+        need(code == 200 and not d["items"][0]["on"], f"calendar off didn't switch ({code})")
+        await asyncio.to_thread(post, {"id": "calendar", "on": True})
+        # the screen: phone, small phone and the desktop app
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms)), $ = id => document.getElementById(id);
+  const until = async (f, ms) => { for (let i = 0; i < ms / 50; i++) { if (f()) return true; await wait(50); } return false; };
+  $("directbtn").classList.add("on");  // as on the phone's own address (8443), where her button shows
+  await until(() => document.querySelector('#wfrows .row[data-feature="calendar"]'), 5000);
+  const real = featItems.map(f => ({ ...f }));
+  out.push("ids:" + real.map(f => f.id).join(","));
+  const dock = $("dock"), order = [...dock.children].map(e => e.id);
+  const tidy = () => {
+    const d = dock.getBoundingClientRect(), shown = [...dock.children].filter(e => e.offsetParent !== null), bad = [];
+    for (const f of featItems) for (const id of f.buttons || []) {  // on: never taken away (the page may not show it here: the
+      if (f.on && $(id).classList.contains("featoff")) bad.push(id + " gone");  // desktop app's own tabs, the weather without a place)
+      if (!f.on && $(id).offsetParent !== null) bad.push(id + " still there");
+    }
+    let last = -1e9;
+    for (const e of shown) {
+      const r = e.getBoundingClientRect();
+      if (r.left < d.left - 1 || r.right > d.right + 1 || r.right > innerWidth + 1 || r.left < -1) bad.push(e.id + " outside");
+      if (r.left < last - 1) bad.push(e.id + " overlaps");
+      if (r.width < 34) bad.push(e.id + " squeezed " + Math.round(r.width));
+      last = r.right;
+    }
+    if (shown.map(e => e.id).join() !== order.filter(id => shown.some(e => e.id === id)).join()) bad.push("order");
+    if (document.documentElement.scrollWidth > innerWidth + 1) bad.push("page scrolls sideways");
+    return bad;
+  };
+  const sw = real.filter(f => !f.fixed);
+  let bad = [], n = 0;
+  for (const oncall of [false, true]) {
+    dock.classList.toggle("oncall", oncall);
+    for (let m = 0; m < 1 << sw.length; m++, n++) {
+      applyFeatures(real.map(f => ({ ...f, on: sw.indexOf(f) < 0 ? f.on : !!(m & (1 << sw.indexOf(f))) })));
+      const b = tidy(); if (b.length && bad.length < 4) bad.push((oncall ? "on a call " : "") + m + ": " + b.join("/"));
+    }
+  }
+  dock.classList.remove("oncall"); applyFeatures(real);
+  out.push("combos:" + n); out.push("dock:" + (bad.length ? bad.join(";") : "ok"));
+  $("setbtn").click(); await wait(50);
+  const fr = $("featrow"); out.push("row:" + (fr.offsetParent !== null && /^\d+ of \d+ on$/.test($("featcount").textContent) ? "ok" : "off " + $("featcount").textContent));
+  fr.click(); await wait(50);
+  out.push("title:" + document.querySelector("#settings h2").textContent);
+  const s = $("settings").getBoundingClientRect();
+  const rows = [...document.querySelectorAll("#wfrows .row")];
+  out.push("page:" + (rows.length === real.length && rows.every(r => { const rr = r.getBoundingClientRect(), b = r.querySelector(".sw").getBoundingClientRect();
+    return rr.width > 0 && rr.right <= s.right + 1 && b.right <= rr.right + 1 && r.querySelector("small").textContent.length > 10; }) && $("free").offsetParent === null ? "ok" : "off"));
+  const tap = async (id, want) => { const b = document.querySelector('#wfrows .row[data-feature="' + id + '"] .sw'); b.click();
+    return until(() => { const x = document.querySelector('#wfrows .row[data-feature="' + id + '"] .sw'); return x && x.textContent === want; }, 8000); };
+  await tap("calendar", "Off"); out.push("calendar off:" + ($("calbtn").offsetParent === null ? "gone" : "there"));
+  await tap("texts", "Off");
+  const wr = document.querySelector('#wfrows .row[data-feature="weather"]');
+  out.push("weather waits:" + (wr.querySelector(".sw").disabled && /Needs Texts with .*turn that on first/.test(wr.textContent) && $("directbtn").offsetParent === null ? "ok" : "off"));
+  out.push("tidy after taps:" + (tidy().join("/") || "ok"));
+  const shot = location.hash.slice(1);
+  if (shot !== "page-texts-off") { await tap("texts", "On"); await tap("calendar", "On"); }
+  out.push("back on:" + ($("calbtn").offsetParent !== null && !$("directbtn").classList.contains("featoff") ? "ok" : "off"));
+  if (!shot.startsWith("page")) { $("featback").click(); out.push("back:" + (document.querySelector("#settings h2").textContent === "Settings" && fr.offsetParent !== null ? "ok" : "off")); }
+  else out.push("back:ok");
+  if (shot.startsWith("dock")) { $("setdone").click(); const off = shot.split("-").slice(1); applyFeatures(real.map(f => ({ ...f, on: off.includes("all") ? !!f.fixed && f.on : !off.includes(f.id) && f.on }))); }
+  if (shot === "settings") { $("featback").click(); }
+  const pre = document.createElement("pre"); pre.id = "h205"; pre.textContent = "H205RESULT " + out.join(" | ") + " END"; pre.style.display = "none"; document.body.append(pre);
+})();
+</script>"""
+        shots = Path(os.environ.get("HQ_SHOTS_DIR") or self.tmp / "h205-shots")
+        shots.mkdir(parents=True, exist_ok=True)
+        def browse(size, app_, tag, mode, shot=None):
+            pf = self.tmp / f"h205-{tag}.html"
+            pg = page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1).replace("</body>", harness + "</body>", 1)
+            if app_:
+                pg = pg.replace('new URLSearchParams(location.search).has("app")', "true", 1)
+            pf.write_text(pg)
+            args = [chrome, "--headless", "--disable-gpu", "--no-first-run", "--hide-scrollbars", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                    f"--user-data-dir={self.tmp / 'h205-profile'}", "--disable-web-security", f"--window-size={size}",
+                    "--virtual-time-budget=30000"]
+            args += [f"--screenshot={shot}"] if shot else ["--dump-dom"]
+            return run(args + [pf.as_uri() + "#" + mode], timeout=120)
+        want = {"combos": "512", "dock": "ok", "row": "ok", "title": "What HQ helps you with", "page": "ok", "calendar off": "gone",
+                "weather waits": "ok", "tidy after taps": "ok", "back on": "ok", "back": "ok"}
+        for name, size, app_ in (("the phone", "390,844", False), ("a small phone", "375,553", False), ("the desktop app", "1180,780", True)):
+            tag = name.split()[-1] if not name.startswith("a small") else "small"
+            r = await asyncio.to_thread(browse, size, app_, tag, "check")
+            mm = re.search(r'<pre id="h205"[^>]*>H205RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{name}: the test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+            say(f"   {name}: {mm.group(1)}")
+            res.pop("ids", None)
+            need(res == want, f"{name}: not right: {mm.group(1)}")
+            need(not json.loads((sf / ft.STATE).read_text()).get("off"), f"{name}: the taps didn't end with everything on again")
+        # the desktop app's strip: its Texts and Status tabs follow the switches too (hq_control.py health's tabs_off)
+        strip = (ROOT / "desktop/shell.html").read_text().replace("</body>", r"""<script>
+const h = { light: "ok", mood: "happy", headline: "All working", routines: [], off: [] }, said = [];
+hq.update({ ...h, tabs_off: ["status", "direct"] });
+said.push("off:" + [...document.querySelectorAll(".tabs button")].filter(b => b.offsetParent !== null).map(b => b.dataset.tab).join(","));
+said.push("at:" + document.querySelector(".tabs [aria-pressed='true']").dataset.tab);
+hq.update({ ...h, tabs_off: [] });
+said.push("on:" + [...document.querySelectorAll(".tabs button")].filter(b => b.offsetParent !== null).map(b => b.dataset.tab).join(","));
+const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "H205STRIP " + said.join(" | ") + " END"; document.body.append(pre);
+</script></body>""", 1)
+        sp = self.tmp / "h205-strip.html"
+        sp.write_text(strip)
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                          f"--user-data-dir={self.tmp / 'h205-profile'}", "--window-size=1180,120", "--virtual-time-budget=3000",
+                                          "--dump-dom", sp.as_uri()], timeout=60)
+        mm = re.search(r'<pre id="h205s">H205STRIP (.*?) END</pre>', r.stdout)
+        need(mm and mm.group(1) == "off:call | at:call | on:call,status,direct", f"the app's strip: {mm and mm.group(1)}")
+        say(f"   the desktop app's strip: {mm.group(1)}")
+        # screenshots of each state, the phone and the desktop app
+        states = ["settings", "page", "page-texts-off", "dock", "dock-calendar", "dock-todo", "dock-texts", "dock-weather", "dock-notes", "dock-team", "dock-all"]
+        made = 0
+        for dev, size, app_ in (("phone", "390,844", False), ("mac", "1180,780", True)):
+            for st in states:
+                out = shots / f"{dev}-{st}.png"
+                out.unlink(missing_ok=True)
+                await asyncio.to_thread(browse, size, app_, f"shot-{dev}", st, out)
+                made += out.exists()
+                await asyncio.to_thread(post, {"id": "texts", "on": True})
+                await asyncio.to_thread(post, {"id": "calendar", "on": True})
+        need(made == 2 * len(states), f"only {made} of {2 * len(states)} screenshots made")
+        say(f"   {made} screenshots in {shots}")
+        shutil.rmtree(sf, ignore_errors=True)
+        return ("every feature is a switch on one page, What HQ helps you with: all on to start, each followed by its part "
+                "of HQ and the next call, the weather waits for the texts; all 256 combinations keep the dock tidy on the "
+                f"phone, a small phone and the desktop app, before and on a call; {made} screenshots")
 
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
@@ -13471,6 +13685,7 @@ FLOWS = {
     117: ("H203: one writer: on the backup a call's change to the roadmap, the log, the mail list, the to-do list and her notes is made by the main; kept when it's down", False, "flow117"),
     116: ("H198: on the Mac, other sound at normal volume during a call (a switch), and Bluetooth headphones stay in high quality (the MacBook's own mic, the sound bounced in the app)", False, "flow116"),
     118: ("Job 257 (H202): the map is the Life coaching switch in Settings; each person names their own vision, and the next call follows the switch", False, "flow118"),
+    119: ("H205: What HQ helps you with, every feature a switch: all on to start, each followed through HQ, every combination keeps the screen tidy, screenshots of each state", False, "flow119"),
 }
 
 

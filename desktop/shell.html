@@ -70,6 +70,7 @@
      well." A third tab with her chat (the same thread as the phone), a red dot on a new text; the app shows her
      texts as Mac notifications. The strip on her tab is as on Call: only the tabs. */
   .tabs button { position: relative; }
+  .tabs button[hidden] { display: none; }  /* H205 */
   .tabs .dot { position: absolute; top: 2px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--red);
     box-shadow: 0 0 0 2px var(--tint); display: none; }
   .tabs .dot.show { display: block; }
@@ -227,6 +228,11 @@
         $('where').append(pill);
       }
       $('fix').disabled = fixing || !(h.off && h.off.length);
+      // H205: a tab whose part of HQ is switched off goes (What HQ helps you with); on it, the app moves to Call.
+      const gone = h.tabs_off || [];
+      for (const b of document.querySelectorAll('.tabs button')) b.hidden = gone.includes(b.dataset.tab);
+      const at = document.querySelector('.tabs [aria-pressed="true"]');
+      if (at && at.hidden) { hq.tab('call'); send({ do: 'tab', tab: 'call' }); }
       // H59: the version from update.py (through hq_control.py health)
       $('ver').textContent = u.version ? `v${u.version}` + (u.updating ? ' · updating…' : u.available ? '' : u.latest && !u.offline ? ' · the latest version' : '') : '';
       $('newver').textContent = u.available ? `v${u.latest} is out · Update` : '';

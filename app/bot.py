@@ -723,6 +723,39 @@ if __name__ == "__main__":
             return JSONResponse({"error": "Couldn't write it"}, status_code=500)
         return JSONResponse({"items": _wf.listing(_wf_folder()), "said": said}, headers=_NO_CACHE)
 
+    # H205: What HQ helps you with, every feature a switch (app/features.py). Everything on until they turn something
+    # off; off takes its button away on the page. Only from the page itself (x-hq: features), never on Free-only.
+    import features as _feat
+
+    def _feat_folder() -> Path:
+        return Path(os.environ.get("HQ_FEATURES_FOLDER") or config.FOLDER)  # the happy flows' own copy
+
+    @app.get("/api/features", include_in_schema=False)
+    async def features_read():
+        if config.FREE_ONLY:
+            return JSONResponse({"off": "Free", "items": []}, headers=_NO_CACHE)
+        return JSONResponse({"items": await asyncio.to_thread(_feat.listing, _feat_folder())}, headers=_NO_CACHE)
+
+    @app.post("/api/features", include_in_schema=False)
+    async def features_change(request: Request):
+        if request.headers.get("x-hq") != "features":
+            return JSONResponse({"error": "Only the HQ page can switch these"}, status_code=403)
+        if config.FREE_ONLY:
+            return JSONResponse({"error": "Not on Free"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict) or not isinstance(ask.get("id"), str) or not isinstance(ask.get("on"), bool):
+            return JSONResponse({"error": "no change asked"}, status_code=400)
+        if ask["id"] not in _feat.IDS:
+            return JSONResponse({"error": "no such switch"}, status_code=404)
+        try:
+            said = await asyncio.to_thread(_feat.switch, ask["id"], ask["on"], _feat_folder())
+        except Exception:  # a file that can't be written, the mail check's jobs.py timing out
+            return JSONResponse({"error": "Couldn't write it"}, status_code=500)
+        return JSONResponse({"items": await asyncio.to_thread(_feat.listing, _feat_folder()), "said": said}, headers=_NO_CACHE)
+
     @app.get("/api/busy", include_in_schema=False)
     async def busy():
         return JSONResponse({"calls": _calls_on}, headers=_NO_CACHE)

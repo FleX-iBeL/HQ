@@ -462,6 +462,7 @@ TEAM_RULE = TEAM_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TODO_RULE = TODO_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 MAIL_FAST_RULE = MAIL_FAST_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 import workflows as _workflows  # H202: the workflows the user turned on
+import features as _features  # H205: what they turned off
 WORKFLOWS_RULE = _workflows.rule(FOLDER)
 VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{todo}", TODO_RULE).replace("{onewriter}", ONE_WRITER_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
                .replace("{times}", TIMES_RULE))
@@ -476,13 +477,19 @@ VOICE_RULES = VOICE_RULES.replace("{user}", USER)
 
 def voice_rules() -> str:
     """The call rules with the workflows as they are now (job 257): Life coaching switched in Settings counts from the
-    next call, no restart of the call line."""
+    next call, no restart of the call line. H205: and what they turned off in What HQ helps you with."""
     now = _workflows.rule(FOLDER)
     if now == WORKFLOWS_RULE:
-        return VOICE_RULES
-    if WORKFLOWS_RULE:
-        return VOICE_RULES.replace(WORKFLOWS_RULE + "\n", now + "\n" if now else "")
-    return VOICE_RULES + ("\n" + now + "\n" if now else "")
+        rules = VOICE_RULES
+    elif WORKFLOWS_RULE:
+        rules = VOICE_RULES.replace(WORKFLOWS_RULE + "\n", now + "\n" if now else "")
+    else:
+        rules = VOICE_RULES + ("\n" + now + "\n" if now else "")
+    try:
+        off = _features.rule(Path(os.environ.get("HQ_FEATURES_FOLDER") or FOLDER))
+    except Exception:
+        off = ""
+    return rules + ("\n" + off + "\n" if off else "")
 
 VOICE_RULES = VOICE_RULES.replace("{planning}", os.environ.get("HQ_PLANNING_CALENDAR") or _SWITCHES.get("HQ_PLANNING_CALENDAR", "").strip('"') or "HQ Planning")
 

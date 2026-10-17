@@ -233,6 +233,13 @@ def main(argv):
                          "offline": u["offline"], "updating": u["run"].get("state") in ("waiting", "updating")}
     except Exception:
         out["update"] = {}
+    # H205: the strip's tabs follow What HQ helps you with: Texts goes with her texts, Status with the team's work.
+    try:
+        sys.path.insert(0, os.path.join(HQ, "app"))
+        import features
+        out["tabs_off"] = [t for t, f in (("direct", "texts"), ("status", "team")) if not features.is_on(f)]
+    except Exception:
+        out["tabs_off"] = []
     print(json.dumps(out))
     return 0
 

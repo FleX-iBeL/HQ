@@ -73,7 +73,17 @@ FALLBACK = ["peacock", "sage", "tangerine", "grape", "banana", "cobalt", "flamin
 
 
 def on() -> bool:
-    return os.environ.get("HQ_CALENDAR", "1") != "0"
+    return os.environ.get("HQ_CALENDAR", "1") != "0" and _feature("calendar")
+
+
+def _feature(fid: str) -> bool:
+    """H205: the user's own switch in Settings, What HQ helps you with (app/features.py); on when it can't be read."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import features
+        return features.is_on(fid)
+    except Exception:
+        return True
 
 
 def data_file() -> Path:
