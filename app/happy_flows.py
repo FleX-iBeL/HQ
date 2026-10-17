@@ -5334,7 +5334,7 @@ window.fetch = async (url, opt) => {
   const swipe = async (dx, dy, ms, el) => { el = el || calOne.querySelector("h3"); touch("touchstart", 60, 300, el);
     for (let i = 1; i <= 6; i++) { await wait(ms / 6); touch("touchmove", 60 + dx * i / 6, 300 + dy * i / 6, el); } touch("touchend", 60 + dx, 300 + dy, el); await wait(400); };
   appts()[2].click(); await wait(200);
-  await swipe(5, 160, 120);
+  await swipe(5, -160, 120);  // H201: up is scrolling; a pull down from the top closes the sheet (flow 96)
   out.push("swipe-scroll:" + (reading() && !calOne.style.transform ? "ok" : "WRONG"));
   await swipe(-160, 0, 120);
   out.push("swipe-left:" + (reading() ? "ok" : "WRONG"));
@@ -8923,24 +8923,23 @@ print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now),
                 "once and queues no merges; one really away still gives way")
 
     async def flow96(self) -> str:
-        """H137, H140, H185, no Claude: Modern is the look, and Modern 2 (H185) the one choice next to it. A Look row in
-        Settings with Modern and Modern 2, Modern until Modern 2 is picked (a device that saved Classic before H140 gets
-        Modern); Modern 2 is html.m2, set in the head before the page draws, its rules in their own block after Modern's,
-        and the status page and her chat are told it (look=modern2). The round buttons sit in the dock in the page itself,
-        each with its name, in both looks: the real page in a headless browser, phone and desktop app."""
+        """H137, H140, H185, H201, no Claude: Modern 3 is the only look (H201): html.m3 in the page itself, its rules in
+        their own block after the base look's, no Look row, nothing chosen or saved (a device that saved Classic or
+        Modern 2 before gets Modern 3 too), and the status page and her chat carry it the same way. The round buttons sit
+        in the dock in the page itself, each with its name. Every sheet follows the finger: a pull down closes it (a
+        short one or scrolling a list doesn't), on a call a pull up on its title; a swipe right goes back a level where
+        there is one and does nothing at the top. The real page in a headless browser, phone and desktop app."""
         page = (APP / "web/index.html").read_text()
-        for gone, what in (('data-look="classic"', "a Classic button"), ("html.modern", "the html.modern switch"), ('classList.toggle("modern"', "the old switch in the code"),
-                           ("hqSpot", "Classic's own spots for the buttons")):
-            need(gone not in page, f"{what} is still on the call page (H140: no Classic)")
-        need(page.count('<style id="look">') == 1, "the look's style block is missing")
-        # H185: Modern 2, its own block after Modern's, the Look row, the head script and the look passed on.
-        need(page.count('<style id="look2">') == 1 and page.index('<style id="look2">') > page.index('<style id="look">'), "Modern 2's style block is missing or before Modern's")
-        need('data-look="modern"' in page and 'data-look="modern2"' in page and 'id="lookrow"' in page, "the Look row with Modern and Modern 2 isn't in Settings")
-        need(page.index('localStorage.getItem("hq-look") === "modern2"') < page.index("<body>"), "Modern 2 isn't set in the head before the page draws")
-        need('lookQuery("?")' in page and 'lookQuery("&")' in page, "the status page or her chat isn't told the look")
+        for gone, what in (('data-look=', "a Look button"), ("html.modern", "the html.modern switch"), ('classList.toggle("modern"', "the old switch in the code"),
+                           ("hqSpot", "Classic's own spots for the buttons"), ('id="lookrow"', "the Look row"), ('<style id="look2">', "Modern 2's block"),
+                           ("html.m2", "a Modern 2 rule"), ("hq-look", "a saved look"), ("lookQuery", "the look passed on")):
+            need(gone not in page, f"{what} is still on the call page (H201: Modern 3 is the only look)")
+        need(page.count('<style id="look">') == 1, "the base look's style block is missing")
+        need(page.count('<style id="look3">') == 1 and page.index('<style id="look3">') > page.index('<style id="look">'), "Modern 3's style block is missing or before the base look's")
+        need('<html lang="en" class="m3">' in page, "Modern 3 isn't set in the page itself")
         for f_, what in (("status/index.html", "the status page"), ("status/direct.html", "her chat")):
             t_ = (APP.parent / f_).read_text()
-            need('get("look") === "modern2"' in t_ and "html.m2" in t_, f"{what} has no Modern 2")
+            need('<html lang="en" class="m3">' in t_ and "html.m3" in t_ and "html.m2" not in t_ and "modern2" not in t_, f"{what} isn't in Modern 3 alone")
         dock = page.split('<nav id="dock" aria-label="HQ">', 1)
         need(len(dock) == 2, "the dock is missing")
         dock = dock[1].split("</nav>", 1)[0]
@@ -8949,6 +8948,10 @@ print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now),
         at = [dock.find(f'id="{bid}" data-dl="{label}"') for bid, label in order]
         need(all(i >= 0 for i in at) and at == sorted(at), f"the dock doesn't hold the nine buttons with their names, in order: {at}")
         need(all(page.count(f'id="{bid}"') == 1 for bid, _ in order), "a dock button is on the page twice")
+        for sheet in ("chatEl", "statEl", "histEl", "notesEl", "calEl", "todoEl", 'document.getElementById("wxsheet")', "setEl"):
+            need(f"sheetPull({sheet}, " in page, f"the sheet {sheet} doesn't close with a pull down")
+        for sheet in ("calEl, calOne", "histEl, histLog", "todoEl, todoBody"):
+            need(f"backSwipe({sheet}, " in page, f"{sheet.split(',')[0]} doesn't go back with a swipe right")
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
         cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
@@ -8956,16 +8959,42 @@ print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now),
         await self.ensure_server()
         saved = '<script>try { localStorage.setItem("hq-look", "classic"); } catch (e) {}</script>'
         harness = r"""<script>
-setTimeout(() => {
-  const out = [], dk = document.getElementById("dock").getBoundingClientRect();
+setTimeout(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms)), dk = document.getElementById("dock").getBoundingClientRect();
   out.push("dock:" + (dk.height > 0 && Math.abs(dk.bottom - innerHeight) < 40 ? "ok" : "off " + Math.round(dk.top) + "/" + Math.round(dk.bottom)));
   const ids = ["chatbtn", "histbtn", "notesbtn", "voicebtn"].concat(document.body.classList.contains("inapp") ? [] : ["statbtn"]);
   const off = ids.filter(id => { const r = document.getElementById(id).getBoundingClientRect();
     return !(r.width > 0 && r.left >= dk.left - 1 && r.right <= dk.right + 1 && r.top >= dk.top - 1 && r.bottom <= dk.bottom + 1); });
   out.push("inside:" + (off.length ? off.join(",") : "ok"));
   out.push("label:" + getComputedStyle(document.getElementById("chatbtn"), "::after").content);
-  out.push("lookrow:" + [...document.querySelectorAll("#lookrow [data-look]")].map(b => b.dataset.look + (b.getAttribute("aria-pressed") === "true" ? "*" : "")).join("/"));
-  out.push("m2:" + (document.documentElement.classList.contains("m2") ? "yes" : "no"));
+  out.push("lookrow:" + (document.getElementById("lookrow") ? "there" : "gone"));
+  out.push("m3:" + (document.documentElement.classList.contains("m3") && !document.documentElement.classList.contains("m2") ? "yes" : "no"));
+  // H201: the sheets follow the finger.
+  const touch = (type, x, y, el) => { const t = new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
+    el.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: type === "touchend" ? [] : [t], targetTouches: type === "touchend" ? [] : [t], changedTouches: [t] })); };
+  const drag = async (el, dx, dy, ms) => { const r = el.getBoundingClientRect(), x = r.left + 30, y = r.top + 12; touch("touchstart", x, y, el);
+    for (let i = 1; i <= 6; i++) { await wait(ms / 6); touch("touchmove", x + dx * i / 6, y + dy * i / 6, el); } touch("touchend", x + dx, y + dy, el); await wait(400); };
+  const nhead = document.getElementById("noteshead"), nlist = document.getElementById("noteslist");
+  showNotes(true); await wait(300);
+  await drag(nhead, 2, 40, 600);
+  out.push("pull-short:" + (notesOpen() && !notesEl.style.transform ? "ok" : "WRONG " + notesEl.style.transform));
+  await drag(nhead, 160, 4, 120);
+  out.push("right-top:" + (notesOpen() ? "ok" : "WRONG"));
+  for (let i = 0; i < 40; i++) { const n = document.createElement("div"); n.className = "note"; n.textContent = "note " + i; nlist.append(n); }
+  nlist.style.overflowY = "auto"; nlist.scrollTop = 200; await wait(50);
+  const scrolled = nlist.scrollTop > 0;
+  await drag(nlist.children[10], 0, 180, 120);
+  out.push("pull-scrolling:" + (!scrolled || notesOpen() ? "ok" : "WRONG"));
+  nlist.innerHTML = ""; nlist.style.overflowY = "";
+  await drag(nhead, 0, 180, 120);
+  out.push("pull-close:" + (!notesOpen() && !notesEl.style.transform ? "ok" : "WRONG " + notesOpen() + " " + notesEl.style.transform));
+  showSettings(true); await wait(300);
+  await drag(setEl.querySelector("h2"), 0, 180, 120);
+  out.push("pull-settings:" + (!setEl.classList.contains("open") ? "ok" : "WRONG"));
+  showHistory(true); await wait(300); histEl.classList.add("reading"); histNote(histLog, "a call");
+  await drag(histLog, 170, 6, 120);
+  out.push("right-back:" + (histOpen() && !histEl.classList.contains("reading") && !histLog.style.transform ? "ok" : "WRONG " + histEl.className));
+  showHistory(false);
   // H144: on a call the dock holds Calendar and Mic as well (and Donna, when her line is on); every name reads whole.
   document.getElementById("directbtn").classList.add("on"); calledHere = true; setState("live", "On the call");
   const dl = document.getElementById("dock").getBoundingClientRect(), cv = document.createElement("canvas").getContext("2d");
@@ -8974,6 +9003,11 @@ setTimeout(() => {
   const cut = live.filter(b => { const a = getComputedStyle(b, "::after"); cv.font = a.fontWeight + " " + a.fontSize + " " + a.fontFamily;
     return cv.measureText(b.dataset.dl).width + (b.dataset.dl.length - 1) * (parseFloat(a.letterSpacing) || 0) > b.getBoundingClientRect().width + .5; }).map(b => b.id);
   out.push("oncall:" + (live.some(b => b.id === "calbtn") && live.some(b => b.id === "devbtn") && !outside.length && !cut.length ? "ok" : "WRONG " + live.length + " out " + outside + " cut " + cut));
+  showNotes(true); await wait(300);
+  await drag(nhead, 0, 180, 120);
+  out.push("oncall-down:" + (notesOpen() ? "ok" : "WRONG"));
+  await drag(nhead, 0, -180, 120);
+  out.push("oncall-up:" + (!notesOpen() && state === "live" ? "ok" : "WRONG"));
   cleanup("Call ended");
   const pre = document.createElement("pre"); pre.id = "h140"; pre.textContent = "H140RESULT " + out.join(" | ") + " END"; document.body.append(pre);
 }, 1500);
@@ -8988,20 +9022,23 @@ setTimeout(() => {
         for name, size, page_file, lk in runs:
             r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
                                               f"--user-data-dir={self.tmp / 'h140-profile'}", "--disable-web-security", f"--window-size={size}",
-                                              "--virtual-time-budget=6000", "--dump-dom", page_file.as_uri()], timeout=60)
+                                              "--virtual-time-budget=15000", "--dump-dom", page_file.as_uri()], timeout=90)
             mm = re.search(r'<pre id="h140">H140RESULT (.*?) END</pre>', r.stdout)
             need(mm, f"{name}: the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
             res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
             say(f"   {name} ({size}): {mm.group(1)}")
-            need(res["dock"] == "ok", f"{name}: with Classic saved on the device, the dock isn't at the bottom: {res}")
+            need(res["dock"] == "ok", f"{name}: with {lk} saved on the device, the dock isn't at the bottom: {res}")
             need(res["inside"] == "ok", f"{name}: round buttons outside the dock: {res}")
             need(res["label"] == '"Chat"', f"{name}: the dock's buttons have no names under them: {res}")
-            want = "modern/modern2*" if lk == "modern2" else "modern*/modern2"
-            need(res["lookrow"] == want, f"{name}: the Look row should read {want}: {res}")
-            need(res["m2"] == ("yes" if lk == "modern2" else "no"), f"{name}: Modern 2 is {'off' if lk == 'modern2' else 'on'} with {lk} saved: {res}")
+            need(res["lookrow"] == "gone" and res["m3"] == "yes", f"{name}: with {lk} saved, it isn't Modern 3 alone without a Look row: {res}")
+            for k, what in (("pull-short", "a short pull closed the sheet or left it moved"), ("right-top", "a swipe right at the top closed the sheet"),
+                            ("pull-scrolling", "pulling down a scrolled list closed the sheet"), ("pull-close", "a pull down didn't close the sheet"),
+                            ("pull-settings", "a pull down didn't close Settings"), ("right-back", "a swipe right didn't go back from a past call"),
+                            ("oncall-down", "on a call a pull down closed the sheet hanging from the top"), ("oncall-up", "on a call a pull up didn't close the sheet")):
+                need(res[k] == "ok", f"{name}: {what}: {res}")
             need(res["oncall"] == "ok", f"{name}: on a call (H144) Calendar or Mic isn't in the dock, a button sits outside it, or a name is cut off: {res}")
             seen.append(name)
-        return "Modern, with Modern 2 one tap away (H185): a Look row with both, Modern until Modern 2 is picked (Classic saved still shows Modern), Modern 2 set before the page draws and passed to the status page and her chat; in both looks the nine buttons in the dock with their names (To-do since H200), on a call too with Calendar next to Mic, every name whole (H144) (" + ", ".join(seen) + ")"
+        return "Modern 3 the only look (H201): set in the page, no Look row, Classic or Modern 2 saved still shows Modern 3, the status page and her chat the same; a pull down closes a sheet (not a short one or a scrolled list; on a call a pull up), a swipe right goes back a level and does nothing at the top; the nine buttons in the dock with their names, on a call too with Calendar next to Mic, every name whole (H144) (" + ", ".join(seen) + ")"
 
 
     # 98
@@ -12729,7 +12766,7 @@ FLOWS = {
     93: ("H125: Donna's watch list: she keeps an eye out for a mail or the weather and texts when it comes", False, "flow93"),
     94: ("H135: the weather in the app: a widget on the main screen, a sheet with warnings (KNMI), UV and the next hours", False, "flow94"),
     95: ("H139: closing and opening the laptop's lid never leaves two mains: a real online check, the main that stayed stays", False, "flow95"),
-    96: ("H137, H140, H185: Modern, and Modern 2 to pick in Settings; the round buttons in one dock in both", False, "flow96"),
+    96: ("H137, H140, H185, H201: Modern 3 the only look, sheets that follow the finger; the round buttons in one dock", False, "flow96"),
     97: ("F31: a refused pull or push from a job shows up: the github incident, Donna texts at once, closed by the next one through", False, "flow97"),
     98: ("F32: a fresh install on an old release (a download, a shallow clone) sees the newer one and updates with one tap", False, "flow98"),
     99: ("H143: tick off or X the appointments; an X moves it to the Google calendar HQ Planning, undo moves it back; the week's look back", False, "flow99"),
