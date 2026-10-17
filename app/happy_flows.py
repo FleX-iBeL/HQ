@@ -3862,7 +3862,8 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         for at, name in (("09:15", "b"), ("08:05", "a"), ("11:40", "c")):
             k = int(sched("add", "now", f"flow 45 passed {name}").split()[1])
             past[name] = k
-            yday = (time.time() - 86400) if name == "a" else time.time()  # one from yesterday too
+            # All in the past at any hour (the nightly runs at 2:00): b and c yesterday, a the day before.
+            yday = time.time() - (2 * 86400 if name == "a" else 86400)
             stamp = time.strftime("%Y-%m-%d", time.localtime(yday)) + " " + at
             rm.write_text(re.sub(rf"^(- Item {k} · waiting · at )\S+ \S+", rf"\g<1>{stamp}", rm.read_text(), flags=re.M))
         need("Nothing to start" in sched("promote"), "a passed item went ahead of a job held by the usage")
@@ -9567,6 +9568,8 @@ window.fetch = async (url, opt) => {
                    "      45: FAILED - the repeat wasn't planned\n\n1 of 2 passed · 0 Claude turns · 4 s\n")
             need(ni.failures(out) == ["45: FAILED - the repeat wasn't planned"], f"failures read as {ni.failures(out)}")
             need(ni.summary(out) == (1, 2), "the pass count isn't read")
+            need(ni.summary("0 of 0 passed · a flow's own stand-in\n" + out) == (1, 2),
+                 "the pass count is read from a flow's own output, not the run's last line")
             # the nights, on a copy of the roadmap
             rm = tmp / "roadmap.md"
             shutil.copy2(ROADMAP, rm)

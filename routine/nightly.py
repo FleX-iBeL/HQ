@@ -67,8 +67,9 @@ def failures(out: str) -> list[str]:
 
 
 def summary(out: str) -> tuple[int, int]:
-    m = re.search(r"^(\d+) of (\d+) passed", out, re.M)
-    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    # The last one: a flow's own output can have such a line too (a stand-in run inside flow 103).
+    m = re.findall(r"^(\d+) of (\d+) passed", out, re.M)
+    return (int(m[-1][0]), int(m[-1][1])) if m else (0, 0)
 
 
 def add_night(line: str, roadmap: str | None = None) -> bool:
