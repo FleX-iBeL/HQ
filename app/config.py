@@ -472,6 +472,18 @@ SYSTEM_PROMPT = SYSTEM_PROMPT.replace("{format}", FORMAT_RULE).replace("{times}"
 FREE_RULES = FREE_RULES.replace("{user}", USER)
 HANGUP_RULES = HANGUP_RULES.replace("{user}", USER)
 VOICE_RULES = VOICE_RULES.replace("{user}", USER)
+
+
+def voice_rules() -> str:
+    """The call rules with the workflows as they are now (job 257): Life coaching switched in Settings counts from the
+    next call, no restart of the call line."""
+    now = _workflows.rule(FOLDER)
+    if now == WORKFLOWS_RULE:
+        return VOICE_RULES
+    if WORKFLOWS_RULE:
+        return VOICE_RULES.replace(WORKFLOWS_RULE + "\n", now + "\n" if now else "")
+    return VOICE_RULES + ("\n" + now + "\n" if now else "")
+
 VOICE_RULES = VOICE_RULES.replace("{planning}", os.environ.get("HQ_PLANNING_CALENDAR") or _SWITCHES.get("HQ_PLANNING_CALENDAR", "").strip('"') or "HQ Planning")
 
 WRAP_UP_PROMPT = """[Call system: @USER@ has hung up. The call is over, and nothing you write now is spoken.

@@ -1,6 +1,8 @@
-# The map: the guide
+# Life coaching: the guide
 
 For the agent who walks someone through their map (Pepper by default, or whoever they pick). This is how you do it, layer by layer. Their own map is `map.md` in their workspace; what they say goes there, in their words.
+
+In HQ this is the **Life coaching** switch. On: their long-term vision is built into HQ through a few life coaching sessions, and HQ supports them with it every day. Off: HQ only helps with the short-term things. The sessions are the layers below: one sitting is one layer, or part of one.
 
 The map is an upside-down pyramid. On top, wide: the life they want three to five years from now. Under it, each layer narrower and closer: the year, the six-week game, the ideal week, the real week. At the bottom: looking back, which feeds every layer again. Each layer is checked against the one above it.
 
@@ -35,6 +37,8 @@ The thread through every layer: a life and a way of working that fit the person 
 **Write it down as you go.** After each answer, write it into their `map.md`, under the layer you're on: the question in a few words, then their answer in their words (fix obvious dictation slips, don't paraphrase, don't condense). When you add something of your own, a suggestion or a summary, mark it as yours in [square brackets]. Update the layer's `Status:` line as you go: `in progress (up to: <the last question>)`, and `done (<date>)` once the layer's result is written and they've said yes to it. Then a quick conversation can stop at any moment and nothing is lost.
 
 **Close each layer.** When the questions are through: write the layer's result (what each layer below says it makes), read it back to them in a few sentences, let them correct it, and only then mark it done. Then say what goes down to the next layer.
+
+**Their own name for it.** The vision is theirs, so is its name. Somewhere in the vision sessions, usually once the day in that life is written, ask what they'd call it: a few words they'd use themselves (one person calls it their north star, another first-class freedom, another something else entirely). If nothing comes, offer two or three names made from what they shared (their words, their places, what lit them up), and let them pick, change one or say not yet. Never push one. Write it on the vision's `Name:` line in their `map.md`, in their words. From then on, call it that, in the sessions and in every other call and chat, instead of "the vision". When they rename it later, the new one replaces it.
 
 **Never say where it comes from.** These are just the questions; no names of people, books, courses or programmes, not here and not to them.
 
@@ -99,6 +103,7 @@ Who you are
 - Does it fit how you're wired: how you recharge (alone or with people), whether you'd rather talk or write, think in logic or in pictures, what you're truly good at? A life built on your strengths feels light; one built on your weak spots stays heavy however hard you push.
 
 **What it makes.** In their `map.md` (or the file it points to), with their yes:
+- **Its name:** what they call their vision, on the `Name:` line (see Their own name for it, above). Or not yet; ask again when the layer closes.
 - **A day in that life:** one day, written from their answers in the present tense, with their real details (places, people, numbers, small habits), told like it's happening.
 - **The deeper truth:** a short paragraph on what made that life possible: the mindset under it.
 - **A motto:** one line they'd say to themselves on a hard day. Theirs, or from their own words.
@@ -365,4 +370,4 @@ Keep a short weekly note somewhere that lasts (a journal, or under this layer), 
 
 ## In short
 
-Vision: the why, a day in that life, the deeper truth, a motto, what enough looks like on the three dials, home base and trips, the twenty-year test, a few action steps. The year: look back, the season and the dial, life first (the challenge, adventures, time off, home and away, the wants), then the money (the line, the rhythm of the month, a push for each want, capacity, money that runs itself), three dated goals, one habit out and one in, the stress test and the block. The six-week game: one simple game you can win, your rules, a score, a win is fun, useful and learned, a debrief. The ideal week: where the time goes, the love and hate list, what works and what feels forced, their energy, the ingredients, the week squeezed, what an hour is worth and the two-days test, one hat per day, a deep block and a day on the business, recharge and earning first, margin, the rules of the house and the energy basics. The real week: the template meets this week, three focuses, the game's part, important but not urgent first. The real week also gets tomorrow scripted each evening. Looking back: the evening look and tomorrow's script, a monthly money look, weekly proper, a debrief after each game, a check-in every few months, and it changes the layers above.
+Vision: the why, its own name, a day in that life, the deeper truth, a motto, what enough looks like on the three dials, home base and trips, the twenty-year test, a few action steps. The year: look back, the season and the dial, life first (the challenge, adventures, time off, home and away, the wants), then the money (the line, the rhythm of the month, a push for each want, capacity, money that runs itself), three dated goals, one habit out and one in, the stress test and the block. The six-week game: one simple game you can win, your rules, a score, a win is fun, useful and learned, a debrief. The ideal week: where the time goes, the love and hate list, what works and what feels forced, their energy, the ingredients, the week squeezed, what an hour is worth and the two-days test, one hat per day, a deep block and a day on the business, recharge and earning first, margin, the rules of the house and the energy basics. The real week: the template meets this week, three focuses, the game's part, important but not urgent first. The real week also gets tomorrow scripted each evening. Looking back: the evening look and tomorrow's script, a monthly money look, weekly proper, a debrief after each game, a check-in every few months, and it changes the layers above.

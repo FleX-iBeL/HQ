@@ -2,12 +2,19 @@
 
 A workflow is guidance HQ ships for the whole of something bigger, which the user's agent walks them
 through on a call, one question at a time, writing their answers into a file in their own workspace.
-The first one is the map: from the life they want three to five years out down to next week.
+The first one is the map: from the life they want three to five years out down to next week. In HQ it's the
+Life coaching switch (job 257, the user's words on the call of 17 October 2026: "Maybe we could call it like if
+someone wants a life coaching module turned on", "If not, they will only do the short-term things, but if you want
+it integrated and embedded, then... You can have a couple of life coaching sessions", "And then in there, people can
+name it themselves"): on, a few sessions (the layers) build their long-term vision into HQ; off, only the short-term
+things. During the sessions they name their own vision; the name sits on the vision's `Name:` line in their file
+and the call rule uses it from then on.
 
 Each lives in HQ's `workflows/<id>/`, the same for everyone and with nothing personal in it:
     workflow.json   id, name, what (one line), agent (who walks them through it), file (theirs, in the
                     workspace), guide (the agent's guide), blank (their file as it starts), start (how they
-                    start it on a call), where (its line in where-things-go.md)
+                    start it on a call), where (its line in where-things-go.md), on and off (what the switch
+                    does each way, for Settings)
     guide.md        the guide the agent follows
     blank.md        their file, as it is before anything is filled in
 
@@ -119,6 +126,29 @@ def active(folder: Path, base: Path = SHIPPED) -> list[dict]:
     return [w for w in shipped(base) if w["id"] in on]
 
 
+NOT_NAMED = ("not named yet", "not yet", "")
+
+
+def own_name(folder: Path, w: dict) -> str:
+    """What they call their vision: the first `Name:` line in their file, empty while it isn't named yet."""
+    try:
+        text = (folder / w["file"]).read_text(encoding="utf8")
+    except OSError:
+        return ""
+    for line in text.splitlines():
+        if line.startswith("Name:"):
+            name = line[5:].split("(", 1)[0].split("[", 1)[0].strip().strip('"\u201c\u201d').strip()
+            return "" if name.lower().rstrip(".") in NOT_NAMED else name[:80]
+    return ""
+
+
+def listing(folder: Path, base: Path = SHIPPED) -> list[dict]:
+    """For Settings: each workflow, whether it's on, and what on and off do."""
+    on = turned_on(folder)
+    return [{"id": w["id"], "name": w["name"], "on": w["id"] in on, "what": w["what"],
+             "when_on": w.get("on", ""), "when_off": w.get("off", ""), "start": w["start"]} for w in shipped(base)]
+
+
 def rule(folder: Path, base: Path = SHIPPED) -> str:
     """The call rule for the workflows that are on; empty when none is."""
     ws = active(folder, base)
@@ -126,9 +156,12 @@ def rule(folder: Path, base: Path = SHIPPED) -> str:
         return ""
     parts = []
     for w in ws:
+        named = own_name(folder, w)
         parts.append(f"{w['name']} ({w['what']} Their file: {w['file']} in the workspace; the guide: "
                      f"{w['dir'] / w['guide']}; started with something like \"{w['start']}\"; best with "
-                     f"{w['agent'].capitalize()})")
+                     f"{w['agent'].capitalize()}"
+                     + (f". They call their vision \"{named}\": use that name for it, not \"the vision\""
+                        if named else ". They haven't named their vision yet; the guide says when to ask") + ")")
     return ("- Workflows they turned on (H202): " + "; ".join(parts) + ". When they want to go through one, read "
             "its guide and their file first, say where they are in it, and go through it the guide's way: one "
             "question per turn, sparring, their answers written into their file as you go, in their words. "

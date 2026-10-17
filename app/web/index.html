@@ -890,6 +890,7 @@
   <div class="row devrow" id="duckrow" hidden><span>Other sound<small id="ducknote">Music and videos turn down while you're on a call</small></span><button id="duck" class="sw" type="button" aria-pressed="false">Lower</button></div>
   <div class="row devrow" id="nosinkrow" hidden><span>Sound<small id="nosinknote">This browser can't choose where her voice plays</small></span></div>
   <div class="row"><span>Thinking sound<small>A soft tick while she thinks</small></span><button id="sound" class="sw" type="button" aria-pressed="true">On</button></div>
+  <div id="wfrows"></div>
   <button id="setdone" type="button">Done</button>
 </div>
 <div id="chat" role="dialog" aria-label="Chat log"><div id="chathead"><h2 id="chattitle">What was said</h2><button id="chatclose" type="button">Close</button></div><div id="chatlog"></div>
@@ -1183,8 +1184,42 @@ function showSettings(open) {
   if (open && typeof calOpen === "function" && calOpen()) showCal(false);  // H144: one sheet at a time, also on a call
   if (open && todoOpen()) showTodo(false);  // H200
   if (open) listDevices();  // H106
+  if (open && !inCall) listWorkflows();  // job 257
   setBtn.setAttribute("aria-expanded", String(open && !inCall));
   devBtn.setAttribute("aria-expanded", String(inCall));
+}
+// Job 257 (H202): the switches for HQ's workflows, Life coaching first: on, a few life coaching sessions build their
+// long-term vision into HQ; off, only the short-term things. Read from the server each time Settings opens.
+const wfRows = document.getElementById("wfrows");
+function showWorkflows(items) {
+  wfRows.replaceChildren(...(items || []).map(w => {
+    const row = document.createElement("div"), span = document.createElement("span"), small = document.createElement("small"),
+          b = document.createElement("button");
+    row.className = "row"; row.dataset.wf = w.id;
+    span.textContent = w.name;
+    small.textContent = w.when_on && w.when_off ? `On: ${w.when_on}. Off: ${w.when_off}.` : w.what;
+    span.append(small);
+    b.type = "button"; b.className = "sw" + (w.on ? " on" : ""); b.textContent = w.on ? "On" : "Off";
+    b.setAttribute("aria-pressed", String(!!w.on)); b.setAttribute("aria-label", w.name);
+    b.addEventListener("click", async () => {
+      if (state !== "idle" || b.disabled) return;
+      b.disabled = true;
+      try {
+        const r = await fetch("api/workflows", { method: "POST", cache: "no-store",
+          headers: { "x-hq": "workflows", "content-type": "application/json" }, body: JSON.stringify({ id: w.id, on: !w.on }) });
+        const d = await r.json();
+        if (r.ok) showWorkflows(d.items); else b.disabled = false;
+      } catch (e) { b.disabled = false; }
+    });
+    row.append(span, b);
+    return row;
+  }));
+}
+async function listWorkflows() {
+  try {
+    const r = await fetch("api/workflows", { cache: "no-store" });
+    if (r.ok) showWorkflows((await r.json()).items);
+  } catch (e) {}
 }
 setBtn.addEventListener("click", () => { if (state === "idle") showSettings(true); });
 devBtn.addEventListener("click", () => { if (state === "live") showSettings(!setEl.classList.contains("open")); });

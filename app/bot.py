@@ -689,6 +689,40 @@ if __name__ == "__main__":
         out["undo"] = bool(said.get("ok")) and ask.get("undo") is not True
         return JSONResponse(out, headers=_NO_CACHE)
 
+    # Job 257 (H202): the workflows the user can switch on in Settings, Life coaching first. On starts their map from
+    # the blank one (never over theirs), off keeps it; the next call follows it (config.voice_rules). Only from the
+    # page itself (x-hq: workflows), never on a Free-only line.
+    import workflows as _wf
+
+    def _wf_folder() -> Path:
+        return Path(os.environ.get("HQ_WORKFLOWS_FOLDER") or config.FOLDER)  # the happy flows' own copy
+
+    @app.get("/api/workflows", include_in_schema=False)
+    async def workflows_read():
+        if config.FREE_ONLY:
+            return JSONResponse({"off": "Free", "items": []}, headers=_NO_CACHE)
+        return JSONResponse({"items": _wf.listing(_wf_folder())}, headers=_NO_CACHE)
+
+    @app.post("/api/workflows", include_in_schema=False)
+    async def workflows_change(request: Request):
+        if request.headers.get("x-hq") != "workflows":
+            return JSONResponse({"error": "Only the HQ page can switch these"}, status_code=403)
+        if config.FREE_ONLY:
+            return JSONResponse({"error": "Not on Free"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict) or not isinstance(ask.get("id"), str) or not isinstance(ask.get("on"), bool):
+            return JSONResponse({"error": "no change asked"}, status_code=400)
+        if not _wf.find(ask["id"]):
+            return JSONResponse({"error": "no such switch"}, status_code=404)
+        try:
+            said = await asyncio.to_thread(_wf.turn_on if ask["on"] else _wf.turn_off, _wf_folder(), ask["id"])
+        except OSError:
+            return JSONResponse({"error": "Couldn't write it"}, status_code=500)
+        return JSONResponse({"items": _wf.listing(_wf_folder()), "said": said}, headers=_NO_CACHE)
+
     @app.get("/api/busy", include_in_schema=False)
     async def busy():
         return JSONResponse({"calls": _calls_on}, headers=_NO_CACHE)

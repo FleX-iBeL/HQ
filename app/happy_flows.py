@@ -347,6 +347,8 @@ class Server:
             "HQ_NOTES": str(self.notes),
             # H200: the to-do list and its undo, never the workspace's own
             "HQ_TODO": str(tmp / "todo-server" / "challenges.md"), "HQ_TODO_UNDO": str(tmp / "todo-server" / "undo.json"),
+            # job 257: the Life coaching switch in Settings, never the workspace's own
+            "HQ_WORKFLOWS_FOLDER": str(tmp / "workflows-server"),
             # H101: never the workspace's own calendar copy, and never a real Claude run to read Google
             "HQ_CALENDAR_FILE": str(tmp / "calendar-server" / "calendar.json"),
             "HQ_CALENDAR_FAKE": str(tmp / "calendar-server" / "stream.txt"),
@@ -12884,6 +12886,118 @@ print("H88OUT " + json.dumps(out))
                 "here; to-do and reminders go over with who asked; with the main down it's kept and goes at the next "
                 "look; on the main it's simply allowed")
 
+    # 118
+    async def flow118(self) -> str:
+        """Job 257 (H202 follow-up), no Claude: the map is the Life coaching switch. Its name and one line for on and
+        off; the guide says the sessions are the layers and has them name their own vision (the agent may suggest
+        names from what they shared), written on the vision's Name: line; the blank map has that line, not named yet.
+        The call rule uses the name once it's there, and the next call follows the switch without a restart
+        (config.voice_rules). The server lists it and switches it only from the page, on its own folder (on starts the
+        map, off keeps it). In Settings on the phone and in the desktop app: the row says Life coaching with on and
+        off, a tap turns it on and writes the map; never shown on a call."""
+        import workflows as wf
+        w = wf.find("map")
+        need(w and w["name"] == "Life coaching" and w.get("on") and w.get("off"), f"the switch isn't Life coaching with on and off: {w and w['name']}")
+        need("short-term" in w["off"] and "life coaching sessions" in w["on"], f"on and off don't say what they do: {w['on']!r} / {w['off']!r}")
+        guide = (w["dir"] / w["guide"]).read_text()
+        blank = (w["dir"] / w["blank"]).read_text()
+        need("**Life coaching**" in guide and "The sessions are the layers" in guide, "the guide doesn't say it's Life coaching, sessions as layers")
+        own = guide.split("**Their own name for it.**", 1)[1].split("\n\n", 1)[0] if "**Their own name for it.**" in guide else ""
+        for must in ("Name:", "offer two or three names", "what they shared", "From then on, call it that"):
+            need(must in own, f"the guide's naming part doesn't say: {must}")
+        need("**Its name:**" in guide.split("## 1. The vision", 1)[1].split("## 2.", 1)[0], "the vision doesn't make its name")
+        need("Name: not named yet" in blank.split("## 1. The vision", 1)[1].split("## 2.", 1)[0], "the blank vision has no Name: line")
+        # the name in the call rule, and the next call following the switch
+        tmp = self.tmp / "h202-name"
+        tmp.mkdir()
+        wf.turn_on(tmp, "map")
+        need(wf.own_name(tmp, w) == "" and "haven't named their vision yet" in wf.rule(tmp), "a blank map reads as named")
+        (tmp / "map.md").write_text(blank.replace("Name: not named yet (you name it yourself during the sessions; from then on it's called that)",
+                                                   "Name: Open road [the agent's suggestion, picked]"))
+        need(wf.own_name(tmp, w) == "Open road" and 'They call their vision "Open road"' in wf.rule(tmp), f"the name isn't used: {wf.own_name(tmp, w)!r}")
+        was = config.FOLDER
+        try:
+            config.FOLDER = tmp
+            vr = config.voice_rules()
+            need('"Open road"' in vr and vr.count("Workflows they turned on") == 1, "the next call doesn't follow the switch")
+            wf.turn_off(tmp, "map")
+            need("Workflows they turned on" not in config.voice_rules(), "switched off, the next call still has it")
+        finally:
+            config.FOLDER = was
+        need("config.voice_rules()" in (APP / "pipeline.py").read_text(), "the call doesn't read the rules fresh")
+        # the server, on its own folder
+        await self.ensure_server()
+        sf = Path(self.server.env["HQ_WORKFLOWS_FOLDER"])
+        shutil.rmtree(sf, ignore_errors=True)
+        sf.mkdir(parents=True)
+        def post(body, hq="workflows"):
+            req = urllib.request.Request(TEST_URL + "/api/workflows", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        code, body, _ = http_get("/api/workflows")
+        items = json.loads(body).get("items", []) if code == 200 else []
+        need([(i["id"], i["name"], i["on"]) for i in items] == [("map", "Life coaching", False)], f"/api/workflows: {code} {items}")
+        need(post({"id": "map", "on": True}, hq="")[0] == 403 and not (sf / "map.md").exists(), "a switch without the page's header was let in")
+        need(post({"id": "nope", "on": True})[0] == 404 and post({"id": "map"})[0] == 400, "a bad switch wasn't refused")
+        code, d = post({"id": "map", "on": True})
+        need(code == 200 and d["items"][0]["on"] and (sf / "map.md").exists(), f"on didn't start the map ({code})")
+        code, d = post({"id": "map", "on": False})
+        need(code == 200 and not d["items"][0]["on"] and (sf / "map.md").exists(), "off took the map, or didn't switch")
+        (sf / "map.md").unlink()
+        # Settings, phone and desktop app
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (f, ms) => { for (let i = 0; i < ms / 50; i++) { if (f()) return true; await wait(50); } return false; };
+  document.getElementById("setbtn").click();
+  await until(() => document.querySelector('#wfrows .row[data-wf="map"] .sw'), 4000);
+  const row = document.querySelector('#wfrows .row[data-wf="map"]');
+  out.push("row:" + (row ? row.querySelector("span").firstChild.textContent : "none"));
+  out.push("line:" + (row && /^On: .*life coaching sessions.*\. Off: .*short-term things\.$/.test(row.querySelector("small").textContent) ? "ok" : "off"));
+  const s = document.getElementById("settings").getBoundingClientRect(), rr = row ? row.getBoundingClientRect() : { width: 0, right: 0 };
+  out.push("fits:" + (rr.width > 0 && rr.right <= s.right + 1 && document.documentElement.scrollWidth <= innerWidth ? "ok" : "off"));
+  const b = row.querySelector(".sw");
+  out.push("was:" + b.textContent);
+  b.click();
+  await until(() => { const x = document.querySelector('#wfrows .row[data-wf="map"] .sw'); return x && x.textContent === "On"; }, 4000);
+  out.push("now:" + document.querySelector('#wfrows .row[data-wf="map"] .sw').textContent);
+  document.getElementById("settings").classList.add("incall");
+  out.push("incall:" + (document.querySelector('#wfrows .row').offsetParent === null ? "hidden" : "shown"));
+  const pre = document.createElement("pre"); pre.id = "h202"; pre.textContent = "H202RESULT " + out.join(" | ") + " END"; document.body.append(pre);
+})();
+</script>"""
+        for name, size, app_ in (("the phone", "390,844", False), ("the desktop app", "1180,780", True)):
+            await asyncio.to_thread(post, {"id": "map", "on": False})
+            (sf / "map.md").unlink(missing_ok=True)
+            pf = self.tmp / f"h202-{'app' if app_ else 'phone'}.html"
+            pg = page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1).replace("</body>", harness + "</body>", 1)
+            if app_:
+                pg = pg.replace('new URLSearchParams(location.search).has("app")', "true", 1)
+            pf.write_text(pg)
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'h202-profile'}", "--disable-web-security", f"--window-size={size}",
+                                              "--virtual-time-budget=10000", "--dump-dom", pf.as_uri()], timeout=90)
+            mm = re.search(r'<pre id="h202">H202RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{name}: the Settings test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+            say(f"   {name}: {mm.group(1)}")
+            need(res == {"row": "Life coaching", "line": "ok", "fits": "ok", "was": "Off", "now": "On", "incall": "hidden"},
+                 f"{name}: Settings isn't right: {mm.group(1)}")
+            need((sf / "map.md").exists(), f"{name}: the tap didn't start the map")
+        shutil.rmtree(sf, ignore_errors=True)
+        return ("the map is the Life coaching switch, with a line for on and off; sessions are the layers, the person "
+                "names their own vision (suggestions from what they shared) and the call rule uses it; the next call "
+                "follows the switch; in Settings on the phone and the desktop app a tap turns it on, never on a call")
+
 
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
@@ -13356,6 +13470,7 @@ FLOWS = {
     115: ("H197: every release sets GitHub's About to the new version, in everyday words; without a token it's an incident, never silent", False, "flow115"),
     117: ("H203: one writer: on the backup a call's change to the roadmap, the log, the mail list, the to-do list and her notes is made by the main; kept when it's down", False, "flow117"),
     116: ("H198: on the Mac, other sound at normal volume during a call (a switch), and Bluetooth headphones stay in high quality (the MacBook's own mic, the sound bounced in the app)", False, "flow116"),
+    118: ("Job 257 (H202): the map is the Life coaching switch in Settings; each person names their own vision, and the next call follows the switch", False, "flow118"),
 }
 
 

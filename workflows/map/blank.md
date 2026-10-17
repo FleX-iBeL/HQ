@@ -4,7 +4,7 @@
 
 How the life you want becomes this week. An upside-down pyramid: the far future on top, wide; each layer below narrower and closer, until it's today. Each layer is checked against the one above it, and looking back feeds every layer again.
 
-Put your own things here: you fill it in together with your agent on a call, one layer at a time, in your words. Start the call with something like "let's go through my map". The guide your agent follows is in HQ (`workflows/map/guide.md`).
+Put your own things here: you fill it in together with your agent in a few life coaching sessions on a call, one layer at a time, in your words. Start the call with something like "let's go through my map". The guide your agent follows is in HQ (`workflows/map/guide.md`).
 
 ## How to use it
 
@@ -15,6 +15,8 @@ Put your own things here: you fill it in together with your agent on a call, one
 ## 1. The vision (3 to 5 years out)
 
 The why. Where it's all going.
+
+Name: not named yet (you name it yourself during the sessions; from then on it's called that)
 
 Status: not started
 

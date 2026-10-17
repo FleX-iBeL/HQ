@@ -328,7 +328,7 @@ def make_brain(model: str | None = None, policy: Policy | None = None, cwd=None,
         options = call_session_options(
             model=model,
             folder=config.FOLDER,
-            voice_rules=config.VOICE_RULES + config.HANGUP_RULES + persona,
+            voice_rules=config.voice_rules() + config.HANGUP_RULES + persona,
             policy=policy,
             cli_path=config.CLAUDE_CLI,
             effort=config.effort_for(model),

@@ -1,11 +1,13 @@
 {
   "id": "map",
-  "name": "The map",
-  "what": "From the life you want three to five years out down to next week, one layer at a time, on a call with your agent.",
+  "name": "Life coaching",
+  "what": "On: your long-term vision is built into HQ through a few life coaching sessions, one layer of your map each, and HQ supports you with it every day. Off: HQ only helps with the short-term things.",
   "agent": "pepper",
   "file": "map.md",
   "guide": "guide.md",
   "blank": "blank.md",
   "start": "let's go through my map",
-  "where": "The map: the vision, the year, the six-week game, the ideal week, the real week and looking back"
+  "where": "Life coaching, the map: the vision (with its own name), the year, the six-week game, the ideal week, the real week and looking back",
+  "on": "Your long-term vision built into HQ, through a few life coaching sessions",
+  "off": "HQ only helps with the short-term things"
 }
