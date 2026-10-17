@@ -511,6 +511,31 @@ const server = createServer(async (req, res) => {
     });
     return;
   }
+  // H191: the lid-closed sleep switch on the page (H45's line under Laptop), without a call: runs routine/lidsleep.py on
+  // or off, which flips only through its one sudo -n command and says the setup line when that isn't done. Only on a
+  // Mac (the laptop's own page; a server has no lid). Needs the x-hq header, so a page from elsewhere can't press it.
+  if (path0 === '/api/lidsleep') {
+    if (req.method !== 'POST' || req.headers['x-hq'] !== 'lidsleep') {
+      res.writeHead(403).end('Only the HQ page can flip the lid-closed sleep');
+      return;
+    }
+    let body = {};
+    try { body = JSON.parse(await readBody(req)); } catch {}
+    const json = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
+    if (!['on', 'off'].includes(body.want)) {
+      res.writeHead(400).end('want is on or off');
+      return;
+    }
+    if (!LAPTOP) {
+      res.writeHead(409, json).end(JSON.stringify({ ok: false, said: 'Only on the laptop: this computer has no lid to switch.' }));
+      return;
+    }
+    execFile('/usr/bin/python3', [join(root, 'routine/lidsleep.py'), body.want], { timeout: 30000 }, (err, out, errOut) => {
+      const said = String(out || errOut || '').trim() || (err ? 'It didn\'t answer.' : 'Done.');
+      res.writeHead(err ? 400 : 200, json).end(JSON.stringify({ ok: !err, said }));
+    });
+    return;
+  }
   // H83: which HQ this is, for the call page (another port, so it may read only this, nothing else).
   // H118: and which computer is main (role.py's badge, with its routine line; none when this HQ is on its own).
   if (path0 === '/where.json') {

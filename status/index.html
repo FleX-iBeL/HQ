@@ -352,6 +352,12 @@
       /* H45: lid-closed sleep, one plain line under the battery; yellow-ish when on, since it drains the battery. */
       .lidsleep { margin: 6px 0 0; font-size: 14px; }
       .lidsleep.on b { color: var(--ink); } .lidsleep.on { background: color-mix(in srgb, var(--yellow) 14%, var(--card)); border-radius: 4px; padding: 2px 6px; display: inline-block; }
+      /* H191: the switch on the lid line. */
+      .lidswitch { font: inherit; font-size: 13px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--card); color: var(--ink); cursor: pointer; vertical-align: 1px; }
+      .lidswitch[aria-checked="true"] { border-color: var(--ink); font-weight: 600; }
+      .lidswitch:disabled { opacity: 0.6; cursor: default; }
+      .lidsleep small { display: block; margin-top: 2px; }
+      .lidsleep .lidsaid.bad { color: var(--red); }
       /* H44: more laptop stats, folded in under Laptop. No alarm colours: just blue, to look at. */
       .stats { padding: 14px 20px; display: grid; gap: 10px; }
       .stat { display: grid; gap: 4px; }
@@ -1352,13 +1358,25 @@
         brow.append(bwhat, bb, el('span', 'deg pct', bt ? `${bt.pct}%` : '–'));
         card.append(brow);
         // H45: lid-closed sleep, on or off, flipped from a call ("keep working with the lid closed" / "back to normal").
+        // H191: and a switch on the line itself, so a tap flips it without a call.
         const ls = r?.lidsleep;
         const lrow = el('p', `lidsleep${ls?.on ? ' on' : ''}`);
         lrow.append(el('b', '', 'Lid closed: '), document.createTextNode(!ls ? 'no reading yet'
           : ls.on ? 'keeps working (sleep off)' : 'sleeps, as normal'));
         if (ls && (now - ls.t) > 300) lrow.append(document.createTextNode(` · read ${ago((now - ls.t) * 1000)}`));
-        if (ls && !ls.setup) lrow.append(el('small', 'soft', ' · a call can flip it after the one-time setup on the roadmap'));
-        lrow.title = 'Keep working with the lid closed (pmset disablesleep). Ask on a call to flip it.';
+        if (ls) {
+          const sw = el('button', 'lidswitch', lidBusy ? '…' : ls.on ? 'Turn off' : 'Turn on');
+          sw.type = 'button';
+          sw.setAttribute('role', 'switch');
+          sw.setAttribute('aria-checked', ls.on ? 'true' : 'false');
+          sw.disabled = lidBusy;
+          sw.title = ls.on ? 'Back to normal: the laptop sleeps when the lid closes' : 'Keep working with the lid closed';
+          sw.addEventListener('click', () => lidFlip(ls.on ? 'off' : 'on'));
+          lrow.append(document.createTextNode(' '), sw);
+        }
+        if (ls && !ls.setup) lrow.append(el('small', 'soft lidsetup', ` · the switch needs the one-time setup first: type this once in Terminal, with your laptop password: ${ls.setup_line ?? 'see the roadmap (H45)'}`));
+        if (lidSaid && lidSaid.at > Date.now()) lrow.append(el('small', `lidsaid${lidSaid.ok ? '' : ' bad'}`, ` · ${lidSaid.said}`));
+        lrow.title = 'Keep working with the lid closed (pmset disablesleep). Tap the switch, or ask on a call to flip it.';
         card.append(lrow);
         // The graph: one column a minute (several minutes in one column on the longer spans, the hottest shows).
         const controls = el('div', 'controls');
@@ -1548,6 +1566,24 @@
         card.append(el('p', 'soft', x ? `Averages over the last minute, like Activity Monitor's totals · read ${clock(new Date(x.t * 1000))}` : 'Nothing written down yet; the routine reads these once a minute and keeps a day.'));
         fold.append(card);
         return fold;
+      }
+      // H191: the lid-closed sleep switch: one tap flips it on the laptop, through the status server.
+      let lidBusy = false;
+      let lidSaid = null;
+      async function lidFlip(want) {
+        if (lidBusy) return;
+        lidBusy = true;
+        redraw();
+        try {
+          const r = await fetch('/api/lidsleep', { method: 'POST', headers: { 'x-hq': 'lidsleep', 'content-type': 'application/json' }, body: JSON.stringify({ want }) });
+          const out = await r.json().catch(() => ({ ok: false, said: `The status server said ${r.status}` }));
+          lidSaid = { at: Date.now() + 15000, ok: !!out.ok, said: String(out.said ?? '').split('\n').join(' ') };
+        } catch {
+          lidSaid = { at: Date.now() + 15000, ok: false, said: 'The status server is not answering.' };
+        } finally {
+          lidBusy = false;
+          redraw();
+        }
       }
       let lastDraw = null;
       function redraw() { if (lastDraw) { last = ''; tick(); } }

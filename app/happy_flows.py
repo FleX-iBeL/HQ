@@ -94,7 +94,8 @@ Run them before and after every update; they print a short pass/fail table at th
      through sudo -n on exactly one pmset command (a fake sudo and pmset, never the real ones); without
      the one-time setup it says the line to type; the setup rule passes visudo and allows only the two
      commands; a call may read it or flip it, nothing else; the routine reads it every minute; the
-     status page shows it under Laptop
+     status page shows it under Laptop, with a switch (H191) that flips it through the status server
+     (header-guarded, says when the setup isn't done, only on a Mac)
   41 the clean template (M2), no Claude: HQ's template/ has every file the app reads from a workspace,
      blank and saying put your own things here; nothing of his in it; the Quick load, the open loops,
      the status block and the queue read it; it's in HQ's repo, workspace isn't; Free is explained
@@ -3433,7 +3434,7 @@ if [ "$1 $2" = "-a disablesleep" ]; then echo "$3" > '{state}'; exit 0; fi
 exit 1
 """)
         (d / "sudo").write_text(f"""#!/bin/sh
-echo "$@" >> '{calls}'
+printf '%s\\n' "$*" >> '{calls}'
 [ "$1" = "-n" ] || exit 9
 [ -f '{allowed}' ] || {{ echo "sudo: a password is required" >&2; exit 1; }}
 shift; exec "$@"
@@ -3486,25 +3487,106 @@ shift; exec "$@"
         shutil.copy(ROADMAP, site_roadmap(site))
         now = int(time.time())
         (site / ".status/lidsleep.json").write_text(json.dumps({"t": now, "on": True, "words": "x", "setup": False, "setup_line": "y"}))
-        port = 4795
-        proc = subprocess.Popen([shutil.which("node") or "/opt/homebrew/bin/node", str(site / "status/server.mjs"), "--quiet"],
-                                env={**os.environ, "HQ_STATUS_PORT": str(port)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        try:
-            base = f"http://127.0.0.1:{port}"
+        # H191: the switch on the page runs the site's own routine/lidsleep.py; here a stand-in that notes what it was
+        # asked and writes the new reading, as the real one does (the real one is tested above, with a fake sudo).
+        (site / "routine").mkdir()
+        asked = d / "asked"
+        (site / "routine/lidsleep.py").write_text(f"""import json, sys, time
+want = sys.argv[1]
+open({str(asked)!r}, "a").write(want + "\\n")
+if not __import__("os").path.exists({str(d / "page-setup")!r}):
+    print("Can't flip it yet: the one-time setup isn't done. Type this once in Terminal, with your laptop password: y")
+    sys.exit(1)
+json.dump({{"t": int(time.time()), "on": want == "on", "words": "x", "setup": True, "setup_line": "y"}},
+          open({str(site / ".status/lidsleep.json")!r}, "w"))
+print("Done. " + ("On" if want == "on" else "Off") + ": ...")
+""")
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+
+        def serve(port: int, laptop: str):
+            return subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"],
+                                    env={**os.environ, "HQ_STATUS_PORT": str(port), "HQ_LAPTOP": laptop},
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        def flip_post(base: str, body: dict, header: str | None = "lidsleep") -> tuple[int, dict]:
+            req = urllib.request.Request(f"{base}/api/lidsleep", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": header} if header else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r_:
+                    return r_.status, json.loads(r_.read() or b"null")
+            except urllib.error.HTTPError as e:
+                try:
+                    return e.code, json.loads(e.read() or b"null") or {}
+                except ValueError:
+                    return e.code, {}
+
+        async def up(base: str):
             for _ in range(50):
                 if http_get("/routines.json", base)[0] == 200:
-                    break
+                    return
                 await asyncio.sleep(0.2)
+
+        import socket
+        with socket.socket() as s_:  # a free port: 4795 may be taken by another HQ on this computer
+            s_.bind(("127.0.0.1", 0))
+            port = s_.getsockname()[1]
+        proc = serve(port, "1")
+        switched = "the switch not drawn (no headless browser here)"
+        try:
+            base = f"http://127.0.0.1:{port}"
+            await up(base)
             _, body, _ = http_get("/routines.json", base)
             need(json.loads(body).get("lidsleep", {}).get("on") is True, "the server doesn't serve the lid-closed sleep")
+            # The page, before any tap: the switch and, without the setup, the line to type.
+            cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+            cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+            chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+            if Path(chrome).exists():
+                r = await asyncio.to_thread(subprocess.run, [chrome, "--headless", "--no-sandbox", "--disable-gpu", "--virtual-time-budget=8000",
+                                                             f"--user-data-dir={self.tmp / 'h191-chrome'}", "--window-size=390,844", "--dump-dom", base + "/"],
+                                            capture_output=True, text=True, timeout=90)
+                dom = r.stdout
+                need('class="lidswitch"' in dom and 'role="switch"' in dom and 'aria-checked="true"' in dom and ">Turn off<" in dom,
+                     "the lid line on the page has no switch, or it doesn't show it's on")
+                need("needs the one-time setup first" in dom, "without the setup the page doesn't say so")
+                switched = "the switch drawn on a phone-wide page, with the setup line"
+            # Without the page's header: refused, nothing run.
+            code, _ = await asyncio.to_thread(flip_post, base, {"want": "off"}, None)
+            need(code == 403 and not asked.exists(), f"the switch works without the page's header: {code}")
+            code, _ = await asyncio.to_thread(flip_post, base, {"want": "sideways"})
+            need(code == 400 and not asked.exists(), f"a wrong want wasn't refused: {code}")
+            # Without the setup: says so, the reading stays.
+            code, ans = await asyncio.to_thread(flip_post, base, {"want": "off"})
+            need(code == 400 and not ans.get("ok") and "one-time setup" in ans.get("said", ""), f"without the setup the switch should say so: {code} {ans}")
+            (d / "page-setup").write_text("x")
+            code, ans = await asyncio.to_thread(flip_post, base, {"want": "off"})
+            need(code == 200 and ans.get("ok") and ans.get("said", "").startswith("Done. Off"), f"the switch didn't turn it off: {code} {ans}")
+            _, body, _ = http_get("/routines.json", base)
+            need(json.loads(body).get("lidsleep", {}).get("on") is False, "after the switch the page doesn't read the new state")
+            code, ans = await asyncio.to_thread(flip_post, base, {"want": "on"})
+            need(code == 200 and ans.get("ok"), f"the switch didn't turn it on: {code} {ans}")
+            need(asked.read_text().split() == ["off", "off", "on"], f"lidsleep.py was asked something else: {asked.read_text().split()}")
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+        # Not on a Mac (the server): no lid, so the switch is refused and lidsleep.py isn't run.
+        proc = serve(port, "0")
+        try:
+            base = f"http://127.0.0.1:{port}"
+            await up(base)
+            code, ans = await asyncio.to_thread(flip_post, base, {"want": "off"})
+            need(code == 409 and not ans.get("ok") and "Only on the laptop" in ans.get("said", "") and len(asked.read_text().split()) == 3,
+                 f"off a Mac the switch should be refused: {code} {ans}")
         finally:
             proc.terminate()
             proc.wait(timeout=5)
         html = (ROOT / "status/index.html").read_text()
         need("'Lid closed: '" in html and "keeps working (sleep off)" in html and "routines.lidsleep" in html,
              "the status page doesn't show the lid-closed sleep under Laptop")
+        need("'x-hq': 'lidsleep'" in html and "lidFlip(" in html, "the page's switch doesn't send the header")
         return (f"read for real ({real}); refuses without the setup and says the line; on, again, off through sudo -n on "
-                "only the two commands; the rule passes visudo; a call may read or flip, nothing else; read every minute; on the page")
+                "only the two commands; the rule passes visudo; a call may read or flip, nothing else; read every minute; on the page; "
+                f"H191: the page's switch flips it through the status server, header-guarded, says the setup, only on a Mac; {switched}")
 
     async def flow40(self) -> str:
         """F13: a job let past the line only skips the 5-hour line. The weekly line always counts, so a
@@ -12318,7 +12400,7 @@ FLOWS = {
     36: ("Typing to HQ: the text field grows; Enter on phone and computer", False, "flow36"),
     37: ("A failed routine run says why; the watchdog sees one that keeps failing", False, "flow37"),
     38: ("More laptop stats folded in under Laptop: CPU, GPU, memory, disk, network", False, "flow38"),
-    39: ("The lid-closed sleep switch: read, flipped from a call, shown under Laptop", False, "flow39"),
+    39: ("The lid-closed sleep switch: read, flipped from a call or from the page's switch (H191), shown under Laptop", False, "flow39"),
     40: ("Past the line skips only the 5-hour line; the weekly line always holds", False, "flow40"),
     41: ("The clean template: blank, nothing of his, readable as a workspace", False, "flow41"),
     42: ("The explanations: the readme and the big picture, nothing of his", False, "flow42"),
