@@ -424,6 +424,7 @@ line>", without asking him; never say you did.
 {mailfast}
 {apptnotes}
 {todo}
+{onewriter}
 {team}
 """
 
@@ -433,6 +434,7 @@ def _text_rules() -> str:
     return (TEXT_RULES.replace("{user}", user()).replace("{HQ}", str(ROOT)).replace("{agent}", agent()["id"])
             .replace("{pings}", _config.PINGS_RULE).replace("{mailfast}", _config.MAIL_FAST_RULE)
             .replace("{apptnotes}", _config.APPT_NOTES_RULE).replace("{todo}", _config.TODO_RULE)
+            .replace("{onewriter}", _config.ONE_WRITER_RULE)
             .replace("{team}", _config.TEAM_RULE))
 
 

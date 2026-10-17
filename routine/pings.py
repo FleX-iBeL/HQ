@@ -671,6 +671,10 @@ def listing() -> str:
 def main(argv: list[str]) -> int:
     by = os.environ.get("HQ_PINGS_BY", "")
     cmd = argv[0] if argv else "list"
+    # H203: on the backup HQ, her reminders and notes are written by the main one (role.WRITES), like the queue.
+    import role
+    if cmd in role.WRITES["pings"] and not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
+        return role.forward("pings", list(argv), {"HQ_PINGS_BY": by} if by else None)
     if cmd == "list":
         print(listing())
     elif cmd == "appt" and len(argv) >= 3 and argv[1] in ("on", "off"):

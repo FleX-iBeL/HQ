@@ -12737,6 +12737,154 @@ print("H88OUT " + json.dumps(out))
                 "the MacBook's own mic, a mic he picked is kept, a call on the headphones' mic moves over and the app "
                 "bounces the sound once; never on the phone or off a Mac")
 
+    async def flow117(self) -> str:
+        """H203, no Claude: one writer. A throwaway main (its own workspace from the blank template, its own memory,
+        on its own, so acting main) behind a stand-in for its status server's /api/role and /api/forward, and a
+        throwaway backup paired with it, its own workspace a copy (the synced one). On the backup a call's Edit to the
+        roadmap, the coaching log, the mail list, the to-do list or an agent's notes is made by the main, never here:
+        the call hears it's done; a text the main's copy doesn't have is a "not yet", nothing written; a Write is a
+        "not yet" (an Edit only); any other file is written here as before; to-do and reminder commands go over the
+        same way, with who asked. With the main down the change is kept and goes over at the backup's next look. On
+        the main itself an Edit is simply allowed. The call rules say it. Nothing of the user's is touched."""
+        import subprocess as sp, shutil, threading, http.server
+        sys.path.insert(0, str(ROOT / "routine"))
+        import role
+        for rel in ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "HQ/notes-donna.md"):
+            need(role.one_writer(rel), f"{rel} isn't one of the files only the main writes")
+        for rel in ("current-situation.md", "HQ/notes.md", "HQ/calls/x.md", "HQ/agents/notes-x.md"):
+            need(not role.one_writer(rel), f"{rel} counts as only the main's")
+        base = self.tmp / "h203"
+        shutil.rmtree(base, ignore_errors=True)
+        ws = {}
+        for side in ("main", "backup"):
+            ws[side] = base / side / "ws"
+            shutil.copytree(ROOT / "template", ws[side])
+            (ws[side] / "HQ" / "notes-donna.md").write_text("# Donna's notes\n\n- one\n")
+            (ws[side] / "plain.md").write_text("plain one\n")
+            (base / side / "support").mkdir(parents=True)
+        def env(side, **extra):
+            e = {k: v for k, v in os.environ.items() if not k.startswith(("HQ_TODO", "HQ_DIRECT", "HQ_FOLDER"))}
+            return {**e, "HQ_WORKSPACE": str(ws[side]), "HQ_ROADMAP": str(ws[side] / "HQ" / "roadmap.md"),
+                    "HQ_SUPPORT": str(base / side / "support"), "HQ_TODO_UNDO": str(base / side / "undo.json"), **extra}
+        seen = []
+
+        class Main(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, code, data):
+                body = json.dumps(data).encode()
+                self.send_response(code)
+                self.send_header("content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                self._send(200, {"name": "main", "main": "main", "chosen_at": 1, "acting": "main", "busy": ""})
+
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("content-length") or 0))
+                seen.append(json.loads(body or b"{}"))
+                r = sp.run([sys.executable, str(ROOT / "routine/role.py"), "serve", "forward"], input=body,
+                           capture_output=True, env=env("main"), timeout=60)
+                data = json.loads(r.stdout.decode().strip().splitlines()[-1])
+                self._send(409 if r.returncode == 3 else 400 if r.returncode == 2 else 200, data)
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Main)
+        port = srv.server_address[1]
+        th = threading.Thread(target=srv.serve_forever, daemon=True)
+        th.start()
+        (base / "backup" / "support" / "role.json").write_text(json.dumps(
+            {"name": "backup", "peer": f"http://127.0.0.1:{port}/", "peer_name": "main", "main": "main", "chosen_at": 1}))
+        (base / "backup" / "support" / "role-state.json").write_text(json.dumps({"acting": "backup"}))
+        decide_py = ("import json, sys; sys.path.insert(0, sys.argv[1]); import policy, brain\n"
+                     "p = policy.Policy(sys.argv[2]); d = p.decide(sys.argv[3], json.loads(sys.argv[4]))\n"
+                     "print(json.dumps({'verdict': d.verdict, 'why': d.why, 'retry': d.retry, 'handed': d.handed,"
+                     " 'text': brain.refusal_text(d) if d.verdict != 'allow' else ''}))")
+
+        def decide(side, tool, inp):
+            r = sp.run([sys.executable, "-c", decide_py, str(ROOT / "app"), str(ws[side]), tool, json.dumps(inp)],
+                       capture_output=True, text=True, env=env(side), timeout=120)
+            need(r.returncode == 0, f"the policy didn't decide: {r.stderr[-400:]}")
+            return json.loads(r.stdout.strip().splitlines()[-1])
+
+        def text(side, rel):
+            return (ws[side] / rel).read_text()
+        try:
+            # an Edit on each of the main's files: made by the main, not here
+            for rel in ("coaching/log.md", "HQ/roadmap.md", "inbox.md", "challenges.md", "HQ/notes-donna.md"):
+                before = text("backup", rel)
+                old = before.splitlines()[0]
+                d = decide("backup", "Edit", {"file_path": str(ws["backup"] / rel), "old_string": old,
+                                              "new_string": old + " (H203 flow)"})
+                need(d["verdict"] == "deny" and d["handed"] and d["text"].startswith("Done"),
+                     f"an Edit to {rel} on the backup wasn't handed over as done: {d}")
+                need(text("backup", rel) == before, f"the backup wrote {rel} itself")
+                need(text("main", rel).startswith(old + " (H203 flow)"), f"the main didn't write {rel}")
+            # MultiEdit too
+            d = decide("backup", "MultiEdit", {"file_path": str(ws["backup"] / "coaching/log.md"), "edits": [
+                {"old_string": "(H203 flow)", "new_string": "(H203 flow, again)"}]})
+            need(d["handed"] and "(H203 flow, again)" in text("main", "coaching/log.md"), f"a MultiEdit wasn't handed over: {d}")
+            # a text the main's copy doesn't have: not yet, nothing written
+            was = text("main", "inbox.md")
+            d = decide("backup", "Edit", {"file_path": str(ws["backup"] / "inbox.md"), "old_string": "nowhere in it 203",
+                                          "new_string": "x"})
+            need(d["verdict"] == "deny" and d["retry"] and not d["handed"] and "differs" in d["why"],
+                 f"an Edit the main's copy can't take wasn't a not yet: {d}")
+            need(text("main", "inbox.md") == was, "the main wrote a change it couldn't make")
+            # a Write: an Edit only
+            d = decide("backup", "Write", {"file_path": str(ws["backup"] / "HQ/roadmap.md"), "content": "gone"})
+            need(d["retry"] and "Edit" in d["why"] and text("backup", "HQ/roadmap.md") != "gone"
+                 and text("main", "HQ/roadmap.md") != "gone", f"a Write on the backup wasn't turned into an Edit: {d}")
+            # any other file: written here, as before
+            d = decide("backup", "Edit", {"file_path": str(ws["backup"] / "plain.md"), "old_string": "one", "new_string": "two"})
+            need(d["verdict"] == "allow", f"an Edit to another file on the backup wasn't allowed: {d}")
+            # on the main itself: allowed, nothing handed
+            n = len(seen)
+            d = decide("main", "Edit", {"file_path": str(ws["main"] / "coaching/log.md"), "old_string": "again", "new_string": "x"})
+            need(d["verdict"] == "allow" and len(seen) == n, f"an Edit on the main wasn't simply allowed: {d}")
+            # the to-do list and her reminders from the backup: the main writes them, with who asked
+            r = sp.run([sys.executable, str(ROOT / "app/todo.py"), "add", "1", "H203 flow item", "--by", "a call"],
+                       capture_output=True, text=True, env=env("backup"), timeout=120)
+            need(r.returncode == 0 and "handed to the main" in r.stdout, f"todo.py add on the backup: {r.stdout}{r.stderr}")
+            need("H203 flow item" in text("main", "challenges.md") and "H203 flow item" not in text("backup", "challenges.md"),
+                 "the to-do item wasn't written by the main only")
+            r = sp.run([sys.executable, str(ROOT / "routine/pings.py"), "remind", "tomorrow 9:00", "H203 flow reminder"],
+                       capture_output=True, text=True, env=env("backup", HQ_PINGS_BY="Pepper"), timeout=120)
+            need(r.returncode == 0 and "handed to the main" in r.stdout, f"pings.py remind on the backup: {r.stdout}{r.stderr}")
+            mp = ws["main"] / "HQ/direct-line/pings.json"
+            need(mp.exists() and "H203 flow reminder" in mp.read_text() and not (ws["backup"] / "HQ/direct-line/pings.json").exists(),
+                 "the reminder wasn't written by the main only")
+            need(seen[-1].get("env") == {"HQ_PINGS_BY": "Pepper"}, f"who asked didn't go over: {seen[-1]}")
+            # the main down: kept, sent on at the next look
+            srv.shutdown()
+            srv.server_close()
+            first = text("backup", "coaching/log.md").splitlines()[0]
+            d = decide("backup", "Edit", {"file_path": str(ws["backup"] / "coaching/log.md"), "old_string": first,
+                                          "new_string": first + " (kept)"})
+            pend = base / "backup" / "support" / "role-pending.jsonl"
+            need(d["handed"] and "kept" in d["why"] and pend.exists() and "(kept)" in pend.read_text(),
+                 f"with the main down the change wasn't kept: {d}")
+            srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), Main)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            r = sp.run([sys.executable, str(ROOT / "routine/role.py"), "tick"], capture_output=True, text=True,
+                       env=env("backup", HQ_ROLE_ONLINE="1"), timeout=120)
+            need(r.returncode == 0 and '"backup"' in r.stdout, f"the backup's look: {r.stdout}{r.stderr}")
+            need("(kept)" in text("main", "coaching/log.md") and not pend.exists(), "the kept change didn't go over at the next look")
+            # the call rules and Donna's say it
+            import direct_line as dl
+            for name, t in (("the call rules", config.VOICE_RULES), ("Donna's chat rules", dl._text_rules())):
+                need("H203" in t and "Done, though not on this computer" in t, f"{name} don't say how one writer works")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            shutil.rmtree(base, ignore_errors=True)
+        return ("on the backup, Edits to the roadmap, the log, the mail list, the to-do list and her notes are made by "
+                "the main and heard as done; a text the main lacks and a Write are a not yet; other files are written "
+                "here; to-do and reminders go over with who asked; with the main down it's kept and goes at the next "
+                "look; on the main it's simply allowed")
+
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -13206,6 +13354,7 @@ FLOWS = {
     113: ("H194: HQ's own icon on a fresh install: every page saved to a home screen or the Dock, and the Mac app's Dock icon", False, "flow113"),
     114: ("H199: the 5-hour bar unfolds into the whole day: four more windows, each its work, reset, moving line and what waits for it", False, "flow114"),
     115: ("H197: every release sets GitHub's About to the new version, in everyday words; without a token it's an incident, never silent", False, "flow115"),
+    117: ("H203: one writer: on the backup a call's change to the roadmap, the log, the mail list, the to-do list and her notes is made by the main; kept when it's down", False, "flow117"),
     116: ("H198: on the Mac, other sound at normal volume during a call (a switch), and Bluetooth headphones stay in high quality (the MacBook's own mic, the sound bounced in the app)", False, "flow116"),
 }
 

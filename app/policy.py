@@ -34,6 +34,18 @@ HQ_ROUTINE = Path(os.path.realpath(Path(__file__).resolve().parent.parent / "rou
 HQ_ROOT = Path(os.path.realpath(Path(__file__).resolve().parent.parent))
 
 
+def one_writer(rel: str) -> bool:
+    """H203: a workspace file only the main writes (role.ONE_WRITER). Never raises."""
+    try:
+        import sys
+        if str(HQ_ROUTINE) not in sys.path:
+            sys.path.insert(0, str(HQ_ROUTINE))
+        import role
+        return role.one_writer(rel)
+    except Exception:
+        return False
+
+
 def is_backup() -> bool:
     """H56.3: this HQ is the backup now (routine/role.py; alone it's always main). Never raises."""
     try:
@@ -59,6 +71,7 @@ class Decision:
     why: str  # one short line, for the log and the transcript
     question: str = ""  # for ASK: what HQ asks, in plain words
     retry: bool = False  # H78: a DENY that's only "not yet": do what `why` says, then make the same call again
+    handed: bool = False  # H203: not made here, but done: the backup handed it to the main, which wrote it (or will)
 
 
 # -- the lists -------------------------------------------------------------------
@@ -174,7 +187,7 @@ class Policy:
                 return Decision(ALLOW, "reading in HQ")
             return _ask(f"read {Path(path).name} outside your workspace", "reading outside the folder")
         if tool in EDIT_TOOLS:
-            return self._edit(inp.get("file_path") or "")
+            return self._edit(inp.get("file_path") or "", tool, inp)
         if tool == "Bash":
             return self._bash(inp.get("command") or "")
         if tool in CALL_UNFRIENDLY:
@@ -225,7 +238,7 @@ class Policy:
         except Exception:
             pass
 
-    def _edit(self, path: str) -> Decision:
+    def _edit(self, path: str, tool: str = "Edit", inp: dict | None = None) -> Decision:
         if not path:
             return Decision(DENY, "no file named")
         if not self.inside(path):
@@ -242,7 +255,47 @@ class Policy:
             return Decision(DENY, "git's own files are not edited")
         if top == ".claude":
             return _ask(f"change the project setup file {rel.name}", "the project setup")
+        if is_backup() and one_writer(rel.as_posix()):
+            return self._hand_over(tool, rel.as_posix(), inp or {})
         return Decision(ALLOW, "writing in the folder")
+
+    def _hand_over(self, tool: str, rel: str, inp: dict) -> Decision:
+        """H203: on the backup, a change to a file only the main writes goes to the main, which makes it on its own
+        copy; the sync brings it back here. Nothing is written here, so the two never make conflict copies."""
+        if tool == "Write":
+            return Decision(DENY, f"this HQ is the backup, and {rel} is written only by the main: make the change as "
+                                  "an Edit (only the part that changes), so the main can make it on its own copy",
+                            retry=True)
+        edits = inp.get("edits") if tool == "MultiEdit" else [inp]
+        edits = [{"old": e.get("old_string") or "", "new": e.get("new_string") or "", "all": bool(e.get("replace_all"))}
+                 for e in edits or [] if isinstance(e, dict)]
+        if len(json.dumps(edits)) > 90_000:  # the main's /api/forward takes up to 100 KB
+            return Decision(DENY, f"this HQ is the backup, so this change to {rel} goes to the main, and it's too big "
+                                  "to send in one go: make it as a few smaller Edits", retry=True)
+        if self.dry_run:
+            return Decision(DENY, f"test run: on the backup this change to {rel} would go to the main")
+        try:
+            import sys
+            if str(HQ_ROUTINE) not in sys.path:
+                sys.path.insert(0, str(HQ_ROUTINE))
+            import role
+            code, out, err, how = role.hand("handover", ["edit", rel, json.dumps({"edits": edits}, ensure_ascii=False)])
+        except Exception as e:
+            code, out, err, how = 3, "", repr(e), "error"
+        said = " ".join((out + " " + err).split())[:300]
+        if how == "kept":
+            return Decision(DENY, f"this HQ is the backup and the main can't be reached right now, so this change to "
+                                  f"{rel} is kept here and goes to the main as soon as it answers; it then comes back "
+                                  "with the sync. Don't make it again", handed=True)
+        if how == "main" and code == 0:
+            return Decision(DENY, f"this HQ is the backup, so the main wrote this change to {rel}; it reaches this "
+                                  "computer with the sync within a minute (a read right now may not show it yet). "
+                                  "Don't make it again", handed=True)
+        if how == "main" and code == 1:
+            return Decision(DENY, f"this HQ is the backup, and the main's copy of {rel} differs from this one ({said}); "
+                                  "read the file again in a moment, when the sync has brought the main's copy, and "
+                                  "make the edit on what's there", retry=True)
+        return Decision(DENY, f"this HQ is the backup, and the main didn't take this change to {rel} ({said or how})")
 
     def _bash(self, command: str) -> Decision:
         cmd = command.strip()

@@ -544,6 +544,12 @@ def _opt(args: list[str], name: str) -> str:
 
 def main(argv: list[str]) -> int:
     args = list(argv)
+    # H203: on the backup HQ, a change to the list goes to the main one, which writes it (role.WRITES), like the queue.
+    if args and args[0] in ("add", "done", "letgo", "move", "undo") and not os.environ.get("HQ_ROLE_HERE"):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "routine"))
+        import role
+        if role.is_backup():
+            return role.forward("todo", list(argv))
     by = _opt(args, "--by")
     cmd = args[0] if args else "summary"
     try:

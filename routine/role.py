@@ -47,7 +47,8 @@ usage (from the workspace):
                                                   pair this HQ with another (not from a call)
   python3 "routine/role.py" alone                 forget the other HQ: this one is main by itself again
 Used by HQ itself: tick (the routine, every minute), acting, json, serve (the status server's /api/role and
-/api/forward), forward SCRIPT ARGS... (jobs.py and schedule.py on the backup).
+/api/forward), forward SCRIPT ARGS... (jobs.py, schedule.py, todo.py and pings.py on the backup; H203: a call's
+edits to the files only the main writes go the same way, through hand()).
 """
 from __future__ import annotations
 
@@ -71,8 +72,30 @@ TELL_TIMEOUT = 30  # telling the other one a choice: it may wait for its own min
 PY = sys.executable or "/usr/bin/python3"
 
 # What a call may ask of the queue and the schedule, and so what the backup hands to the main.
+# H203 (17 October 2026): also the to-do list (todo.py), the agent's reminders and notes (pings.py), and a call's or
+# chat's own edits to the files only the main writes (handover.py edit, see ONE_WRITER).
 WRITES = {"jobs": {"add", "add-row", "send-row", "stop", "overrule", "move", "on", "off", "mail-on", "mail-off", "mail-fast", "mail-hourly", "resume"},
-          "schedule": {"add", "cancel", "move", "priority", "every"}}
+          "schedule": {"add", "cancel", "move", "priority", "every"},
+          "todo": {"add", "done", "letgo", "move", "undo"},
+          "pings": {"appt", "remind", "cancel", "note", "note-clear", "watch", "unwatch"},
+          "handover": {"edit"}}
+SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py")}  # the rest are routine/<script>.py
+PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main (who asked, for her notes)
+
+# H203, in the user's words (call of 17 October 2026, 14:45): "i am even more confused, you give it to the server but
+# then also do it yourself? why?", then "ok, is there also other things you'd be better to hand over while that one
+# is main?" The files the main writes by itself (the team, the mail check, the log's three-hour cycle, the routine's
+# reminders), and so the only one that writes them: on the backup a call or chat hands its change to these to the
+# main, which writes it; the sync brings it back. Paths are relative to the workspace.
+ONE_WRITER = ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md")
+
+
+def one_writer(rel: str) -> bool:
+    """H203: a workspace file only the main writes (the three, the to-do list, and an agent's own notes)."""
+    rel = rel.replace(os.sep, "/").lstrip("./")
+    if rel in ONE_WRITER:
+        return True
+    return rel.startswith("HQ/notes-") and rel.endswith(".md") and "/" not in rel[len("HQ/"):]
 
 
 def _load(path, default):
@@ -631,42 +654,59 @@ def _clock(t):
 
 # -- requests from the backup ----------------------------------------------------------------------------------
 
-def _run_here(script, args):
-    r = subprocess.run([PY, os.path.join(HERE, f"{script}.py"), *args], capture_output=True, text=True, timeout=120,
-                       env={**os.environ, "HQ_ROLE_HERE": "1"})
+def _script_path(script):
+    return SCRIPTS.get(script) or os.path.join(HERE, f"{script}.py")
+
+
+def _env(env):
+    return {k: str(v) for k, v in (env or {}).items() if k in PASS_ENV}
+
+
+def _run_here(script, args, env=None):
+    r = subprocess.run([PY, _script_path(script), *args], capture_output=True, text=True, timeout=120,
+                       env={**os.environ, **_env(env), "HQ_ROLE_HERE": "1"})
     return r.returncode, r.stdout, r.stderr
 
 
-def forward(script: str, args: list[str]) -> int:
-    """jobs.py or schedule.py on the backup: a call's write goes to the main as a request. Prints what the main
-    said. When the main can't be reached, the request is kept here and goes on by itself (or runs here when this
-    one takes over)."""
+def hand(script: str, args: list[str], env: dict | None = None) -> tuple[int, str, str, str]:
+    """H203: hand a write to the main. Returns (code, out, err, how): how is 'main' (the main ran it; code, out and
+    err are its own), 'kept' (the main can't be reached: kept here, it goes on by itself, or runs here when this one
+    takes over), 'refused' (the main said no) or 'alone' (no other HQ, or a test on the real pairing)."""
     if _test_on_real_pairing():
-        sys.stderr.write("Refused (F17): a test may not hand anything to the other HQ through the real pairing.\n")
-        return 3
+        return 3, "", "Refused (F17): a test may not hand anything to the other HQ through the real pairing.\n", "alone"
     c = config()
     if not c:  # nothing to hand it to
-        sys.stderr.write("This HQ isn't paired; nothing to hand it to.\n")
-        return 3
+        return 3, "", "This HQ isn't paired; nothing to hand it to.\n", "alone"
     peer = c.get("peer_name") or "the main HQ"
+    req = {"script": script, "args": args, **({"env": _env(env)} if _env(env) else {})}
     try:
-        code, d = _request(c["peer"].rstrip("/") + "/api/forward", {"script": script, "args": args}, "forward", timeout=90)
+        code, d = _request(c["peer"].rstrip("/") + "/api/forward", req, "forward", timeout=90)
         if code == 200 and isinstance(d, dict):
-            sys.stdout.write(f"(This HQ is the backup; handed to the main one, {peer}.)\n" + (d.get("out") or ""))
-            sys.stderr.write(d.get("err") or "")
-            return int(d.get("code") or 0)
+            return int(d.get("code") or 0), d.get("out") or "", d.get("err") or "", "main"
     except urllib.error.HTTPError as e:
         if e.code not in (409, 503):
-            sys.stderr.write(f"The main one ({peer}) refused it: {e.code}\n")
-            return 1
+            return 1, "", f"The main one ({peer}) refused it: {e.code}\n", "refused"
     except Exception:
         pass
     os.makedirs(SUPPORT, exist_ok=True)
     with open(PENDING, "a") as f:
-        f.write(json.dumps({"script": script, "args": args, "at": time.time()}) + "\n")
-    print(f"This HQ is the backup, and the main one ({peer}) can't be reached right now. The request is kept here: "
-          f"it goes to {peer} as soon as it answers, or runs here if this one takes over as main in the next minutes.")
-    return 0
+        f.write(json.dumps({**req, "at": time.time()}) + "\n")
+    return 0, (f"This HQ is the backup, and the main one ({peer}) can't be reached right now. The request is kept "
+               f"here: it goes to {peer} as soon as it answers, or runs here if this one takes over as main in the "
+               "next minutes.\n"), "", "kept"
+
+
+def forward(script: str, args: list[str], env: dict | None = None) -> int:
+    """jobs.py, schedule.py, todo.py or pings.py on the backup: a call's write goes to the main as a request. Prints
+    what the main said. When the main can't be reached, the request is kept here and goes on by itself (or runs here
+    when this one takes over)."""
+    code, out, err, how = hand(script, args, env)
+    if how == "main":
+        peer = config().get("peer_name") or "the main HQ"
+        out = f"(This HQ is the backup; handed to the main one, {peer}.)\n" + out
+    sys.stdout.write(out)
+    sys.stderr.write(err)
+    return code
 
 
 def _deliver(acting_now, p, c, jobs_cmd, log):
@@ -679,15 +719,17 @@ def _deliver(acting_now, p, c, jobs_cmd, log):
     for r in lines:
         try:
             if acting_now == "main":
-                code, out, err = _run_here(r["script"], r["args"])
+                code, out, err = _run_here(r["script"], r["args"], r.get("env"))
                 if log:
                     log(f"role: ran a kept request here: {r['script']} {' '.join(r['args'])[:80]} -> {code}")
                 continue
             if p and p.get("acting") == "main":
-                code, _ = _request(c["peer"].rstrip("/") + "/api/forward", r, "forward", timeout=90)
+                code, d = _request(c["peer"].rstrip("/") + "/api/forward", r, "forward", timeout=90)
                 if code == 200:
                     if log:
-                        log(f"role: sent a kept request to the main: {r['script']} {' '.join(r['args'])[:80]}")
+                        said = "" if not isinstance(d, dict) or not d.get("code") else \
+                            f" -> {d['code']}: {' '.join(((d.get('out') or '') + (d.get('err') or '')).split())[:120]}"
+                        log(f"role: sent a kept request to the main: {r['script']} {' '.join(r['args'])[:80]}{said}")
                     continue
         except Exception:
             pass
@@ -722,12 +764,13 @@ def serve(kind: str) -> int:
     if kind == "forward":
         script, args = d.get("script"), [str(a) for a in d.get("args") or []]
         if script not in WRITES or not args or args[0] not in WRITES[script]:
-            print(json.dumps({"code": 2, "out": "", "err": "Only a call's own queue and schedule commands are taken.\n"}))
+            print(json.dumps({"code": 2, "out": "", "err": "Only a call's own queue, schedule, to-do, reminder and "
+                                                             "hand-over commands are taken.\n"}))
             return 2
         if acting() != "main":
             print(json.dumps({"code": 3, "out": "", "err": "This HQ isn't the main one right now.\n"}))
             return 3
-        code, out, err = _run_here(script, args)
+        code, out, err = _run_here(script, args, d.get("env"))
         print(json.dumps({"code": code, "out": out, "err": err}))
         return 0
     return 2

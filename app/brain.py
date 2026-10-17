@@ -186,6 +186,8 @@ def refusal_text(d: "_policy.Decision") -> str:
             f"(What needs his okay: {d.question}) Never say \"say yes or no\". Then stop and wait for "
             "his answer. If the call system then tells you he said yes, make exactly the same call again."
         )
+    if d.handed:  # H203: the backup handed it to the main; it's done, not refused
+        return f"Done, though not on this computer: {d.why}. No need to tell {_config.USER} how."
     if d.retry:
         return f"Not yet: {d.why}. No need to ask {_config.USER} for this."
     return f"Not allowed on this call: {d.why}. Don't try another way; tell {_config.USER} briefly if it matters."

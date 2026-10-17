@@ -172,6 +172,13 @@ The notes stay until he clears them in the app; ticking it off is his, in the ca
 # H200 (17 October 2026, call at 14:45), in the user's words: "I realized this was actually the whole reason I started
 # building this. Because I know how much administrative work it is to maintain it, but now with HQ... It's super
 # simple and we can talk about things and we can set things up." On every full call and in the direct line's chat.
+ONE_WRITER_RULE = """- One writer (H203): when HQ runs on two computers and this one is the backup, your edits to the roadmap, \
+the coaching log, the mail list, the to-do list and an agent's own notes are made by the main one, not here, so the \
+two never clash. Make them as Edits as usual (a Write to those files is turned down: make it an Edit); the answer \
+then says "Done, though not on this computer", which means it's done: don't make it again and don't tell him how. \
+It comes back here with the sync within a minute, so a read right after may not show it yet. The to-do and \
+reminder commands go to the main the same way."""
+
 TODO_RULE = """- The to-do list (H200): {user}'s own priority lists, the Eisenhower way, in challenges.md in the workspace, \
 also shown in the app (the To-do button), where {user} can tick things off, move them, let them go and add one. \
 Keep it up to date as you talk, without asking: something to do comes up, sort it into the list it belongs to by \
@@ -431,6 +438,7 @@ and take them one at a time; once he says one is done or gone through, remove it
 {mailfast}
 {apptnotes}
 {todo}
+{onewriter}
 {workflows}
 - Keep working with the lid closed (lid-closed sleep): when he asks which it is, run python3 \
 "{HQ}/routine/lidsleep.py"; to turn it on ("keep working with the lid closed") add on, to turn \
@@ -455,7 +463,7 @@ TODO_RULE = TODO_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 MAIL_FAST_RULE = MAIL_FAST_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 import workflows as _workflows  # H202: the workflows the user turned on
 WORKFLOWS_RULE = _workflows.rule(FOLDER)
-VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{todo}", TODO_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
+VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{todo}", TODO_RULE).replace("{onewriter}", ONE_WRITER_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
                .replace("{times}", TIMES_RULE))
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:

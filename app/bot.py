@@ -638,6 +638,33 @@ if __name__ == "__main__":
         if not isinstance(ask, dict):
             return JSONResponse({"error": "no change asked"}, status_code=400)
         by = "in the app"
+        from policy import is_backup as _is_backup
+        if await asyncio.to_thread(_is_backup):
+            # H203: on the backup the main writes the list; the change comes back here with the sync.
+            if isinstance(ask.get("done"), str):
+                args = ["done", ask["done"], ""]
+            elif isinstance(ask.get("letgo"), str):
+                args = ["letgo", ask["letgo"], str(ask.get("why") or "")[:500]]
+            elif isinstance(ask.get("move"), str) and isinstance(ask.get("to"), str):
+                args = ["move", ask["move"], ask["to"]]
+            elif isinstance(ask.get("add"), str) and isinstance(ask.get("list"), str):
+                args = ["add", ask["list"], ask["add"][:300]]
+            elif ask.get("undo") is True:
+                args = ["undo"]
+            else:
+                return JSONResponse({"error": "no change asked"}, status_code=400)
+            import role as _role
+            code, out_, err_, how = await asyncio.to_thread(_role.hand, "todo", args + ([] if args[0] == "undo" else
+                                                                                         ["--by", by]))
+            if code:
+                return JSONResponse({"error": " ".join((out_ + " " + err_).split())[:300] or "the main didn't take it"},
+                                    status_code=409)
+            out = await asyncio.to_thread(_todo.read)
+            out["said"] = " ".join(out_.split())[:300] + (" It comes back here with the sync in a moment."
+                                                         if how == "main" else "")
+            out["undo"] = args[0] != "undo"
+            out["handed"] = how
+            return JSONResponse(out, headers=_NO_CACHE)
         try:
             if isinstance(ask.get("done"), str):
                 said = await asyncio.to_thread(_todo.done, ask["done"], "", by)
