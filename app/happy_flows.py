@@ -10078,6 +10078,172 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                         pr.kill()
         return "the laptop shows the newest of the server's and its own usage, its own when the server is gone; ?own=1 and an unpaired server give their own"
 
+    # 108
+    async def flow108(self) -> str:
+        """H187: an update restarts every background part whose code changed, by exact pid, so nothing needs a
+        reboot. A made-up HQ in a folder (as flow 56) with a stand-in call line (app/bot.py) and status server
+        (status/server.mjs), both small Python servers on their own ports, and a decoy whose command line also says
+        app/bot.py. A change to the docs restarts nothing; a change to their code restarts both on new pids, the
+        decoy untouched; with a call on, the call line waits until the call ends; the whole update runs the new
+        version's own restart rules; a part that doesn't come back is on the to-do list, not counted as restarted.
+        On a Mac and on Linux (there in their own systemd scopes)."""
+        import subprocess as sp
+        import http.server, socket, socketserver, threading
+        base = self.tmp / "h187"
+        up, me = base / "upstream", base / "mine"
+        if base.exists():
+            shutil.rmtree(base)
+        for d in ("routine", "app", "status"):
+            (up / d).mkdir(parents=True)
+        for f in ("routine/update.py", "routine/hqpaths.py", ".gitignore"):
+            shutil.copy(ROOT / f, up / f)
+        server = ("import http.server, os, socketserver\n"
+                  "class H(http.server.BaseHTTPRequestHandler):\n"
+                  "    def do_GET(self):\n        self.send_response(200); self.end_headers(); self.wfile.write(b'ok')\n"
+                  "    def log_message(self, *a):\n        pass\n"
+                  "socketserver.TCPServer.allow_reuse_address = True\n"
+                  "socketserver.TCPServer(('127.0.0.1', int(os.environ['{port}'])), H).serve_forever()\n")
+        (up / "app/bot.py").write_text("# the call line, flow 108: v0.2\n" + server.replace("{port}", "HQ_PORT"))
+        (up / "status/server.mjs").write_text("# the status server, flow 108: v0.2\n" + server.replace("{port}", "HQ_STATUS_PORT"))
+        starter = ("#!/bin/sh\ncd \"$(dirname \"$0\")/..\" || exit 1\nmkdir -p scratch\n"
+                   "nohup python3 \"$PWD/{file}\" >/dev/null 2>&1 &\necho $! > scratch/{pid}.pid\n"
+                   "i=0; while [ $i -lt 50 ]; do curl -s -o /dev/null \"http://127.0.0.1:${port}/\" && exit 0; sleep 0.2; i=$((i+1)); done\n")
+        stopper = ("#!/bin/sh\ncd \"$(dirname \"$0\")/..\" || exit 1\nP=$(cat scratch/server.pid 2>/dev/null)\n"
+                   "[ -n \"$P\" ] && ps -o command= -p \"$P\" | grep -q app/bot.py && kill \"$P\"\nexit 0\n")
+        for name in ("start.sh", "start-linux.sh"):
+            (up / "app" / name).write_text(starter.replace("{file}", "app/bot.py").replace("{pid}", "server").replace("{port}", "HQ_PORT"))
+        for name in ("stop.sh", "stop-linux.sh"):
+            (up / "app" / name).write_text(stopper)
+        (up / "status/phone.sh").write_text(starter.replace("{file}", "status/server.mjs").replace("{pid}", "status").replace("{port}", "HQ_STATUS_PORT"))
+        for f in ("app/start.sh", "app/start-linux.sh", "app/stop.sh", "app/stop-linux.sh", "status/phone.sh"):
+            os.chmod(up / f, 0o755)
+        (up / "README.md").write_text("A made-up HQ, for flow 108.\n")
+        (up / "CHANGELOG.md").write_text("# Changelog\n\n## 0.2 · 1 January 2026\n\n### New\n- The first version.\n")
+        genv = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid", "GIT_TERMINAL_PROMPT": "0"}
+        def g(where, *a):
+            r = sp.run(["git", "-C", str(where), *a], capture_output=True, text=True, env=genv)
+            need(r.returncode == 0, f"git {' '.join(a)}: {r.stderr.strip()}")
+            return r.stdout.strip()
+        g(up, "init", "-q", "-b", "main"); g(up, "add", "-A"); g(up, "commit", "-qm", "0.2"); g(up, "tag", "-a", "v0.2", "-m", "HQ 0.2")
+        g(base, "clone", "-q", str(up), str(me))
+        def free():
+            with socket.socket() as s:
+                s.bind(("127.0.0.1", 0))
+                return s.getsockname()[1]
+        cport, sport = free(), free()
+        rm = self.tmp / "roadmap-H187.md"
+        rm.write_text("# test\n\n## The queue\n\n**Routine:** on\n")
+        busy = {"calls": 0}
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                b = json.dumps(busy).encode()
+                self.send_response(200); self.send_header("content-type", "application/json"); self.end_headers(); self.wfile.write(b)
+            def log_message(self, *a):
+                pass
+        srv = socketserver.TCPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        env = {**os.environ, "HQ_UPDATE_URL": str(up), "HQ_ROADMAP": str(rm), "HQ_PORT": str(cport),
+               "HQ_STATUS_PORT": str(sport), "HQ_UPDATE_POLL": "0.5", "HQ_UNIT": "hqflow108", "HQ_NO_PHONE": "1",
+               "HQ_CALL_URL": f"http://127.0.0.1:{srv.server_address[1]}"}
+        for k in ("HQ_LOCAL", "HQ_UPDATE_RESTART", "HQ_PLATFORM"):
+            env.pop(k, None)
+        upd_py = str(me / "routine/update.py")
+        def upd(*a, stdin=None):
+            r = sp.run(["python3", upd_py, *a], capture_output=True, text=True, env=env, timeout=300, input=stdin)
+            need(r.returncode == 0, f"update.py {' '.join(a)}: {r.stderr.strip()[-300:]}")
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        def pids():
+            p = upd("parts")
+            return p["call"]["pid"], p["status"]["pid"]
+        def restart(changed):
+            return upd("restart", stdin=json.dumps({"changed": changed, "was": {"call": True, "status": True}}))
+        def wait_run(until, secs=120):
+            end = time.time() + secs
+            while time.time() < end:
+                s = upd("status")
+                if until(s["run"]):
+                    return s
+                time.sleep(0.5)
+            need(False, f"the update didn't get there in time: {upd('status')['run']}")
+        decoy = sp.Popen(["python3", "-c", "import time; time.sleep(600)", str(me / "app/bot.py")], start_new_session=True)
+        try:
+            for f in ("app/start.sh" if sys.platform == "darwin" else "app/start-linux.sh", "status/phone.sh"):
+                need(sp.run([str(me / f)], env=env, capture_output=True, timeout=30).returncode == 0, f"{f} didn't start")
+            c0, s0 = pids()
+            need(c0 and s0 and c0 != decoy.pid, f"the stand-ins aren't found by their exact pid: {c0}, {s0}")
+            # Only the docs changed: nothing restarts.
+            r = restart(["README.md", "CHANGELOG.md"])
+            need(pids() == (c0, s0) and not r["todo"] and any("left running" in d for d in r["done"]),
+                 f"a docs change restarted something: {r}")
+            # Their code changed, with a call on: the call line waits until the call ends.
+            busy["calls"] = 1
+            p = sp.Popen(["python3", upd_py, "restart"], stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, text=True, env=env)
+            p.stdin.write(json.dumps({"changed": ["app/bot.py", "routine/hqpaths.py", "status/server.mjs"],
+                                      "was": {"call": True, "status": True}}))
+            p.stdin.close()
+            time.sleep(3)
+            need(p.poll() is None and pids()[0] == c0, "the call line was restarted during a call")
+            need("call to end" in upd("status")["run"].get("step", ""), "the page doesn't say it waits for the call")
+            busy["calls"] = 0
+            p.wait(180)
+            out, err = p.stdout.read(), p.stderr.read()
+            r = json.loads(out.strip().splitlines()[-1])
+            c1, s1 = pids()
+            need(c1 and s1 and c1 != c0 and s1 != s0, f"not restarted on new pids: {(c0, s0)} → {(c1, s1)}; {r} {err[-300:]}")
+            need(not any(str(me) in sp.run(["ps", "-o", "command=", "-p", str(x)], capture_output=True, text=True).stdout
+                         for x in (c0, s0)), "an old process is still there")
+            need(any(f"{c0} → {c1}" in d for d in r["done"]) and any(f"{s0} → {s1}" in d for d in r["done"]) and not r["todo"],
+                 f"what it did doesn't say the pids: {r}")
+            need(decoy.poll() is None, "the decoy with app/bot.py in its command line was stopped")
+            # The whole update, with the new version's own restart rules (v0.3 marks them).
+            (up / "app/bot.py").write_text((up / "app/bot.py").read_text().replace("v0.2", "v0.3"))
+            u = (up / "routine/update.py").read_text()
+            mark = '    done, todo = [], []\n    if os.environ.get("HQ_UPDATE_RESTART") == "0":\n        return ["nothing restarted (test)"], []\n    env ='
+            need(u.count(mark) == 1, "the restart rules in update.py aren't where flow 108 expects them")
+            (up / "routine/update.py").write_text(u.replace(mark, mark.replace("done, todo = [], []", 'done, todo = ["new rules (flow 108)"], []')))
+            g(up, "commit", "-qam", "0.3"); g(up, "tag", "-a", "v0.3", "-m", "HQ 0.3")
+            need(upd("check", "--force")["available"], "the check doesn't see v0.3")
+            upd("start")
+            s = wait_run(lambda x: x.get("state") in ("done", "failed"))
+            c2, s2 = pids()
+            need(s["run"]["state"] == "done" and "new rules (flow 108)" in s["run"]["done"], f"the update didn't use the new rules: {s['run']}")
+            need(c2 != c1 and s2 == s1 and any(f"{c1} → {c2}" in d for d in s["run"]["done"])
+                 and any("status page's code didn't change" in d for d in s["run"]["done"]),
+                 f"the update didn't restart just the call line: {s['run']}")
+            need("v0.3" in (me / "app/bot.py").read_text(), "HQ isn't on v0.3")
+            # A part that doesn't come back is on the to-do list, never counted as restarted.
+            for name in ("start.sh", "start-linux.sh"):
+                (up / "app" / name).write_text("#!/bin/sh\nexit 0\n")
+            g(up, "commit", "-qam", "0.3.1"); g(up, "tag", "-a", "v0.3.1", "-m", "HQ 0.3.1")
+            need(upd("check", "--force")["available"], "the check doesn't see v0.3.1")
+            upd("start")
+            s = wait_run(lambda x: x.get("state") in ("done", "failed"), 240)
+            need(s["run"]["state"] == "done" and any("didn't come back" in t for t in s["run"]["todo"])
+                 and not any(d.startswith("restarted the call line") for d in s["run"]["done"]),
+                 f"a call line that didn't come back counts as restarted: {s['run']}")
+            note = (me / s["run"]["notes"]).read_text()
+            need("didn't come back" in note, "the note for their Claude doesn't say the call line didn't come back")
+        finally:
+            srv.shutdown()
+            decoy.kill()
+            # Only the stand-ins of this flow, by exact pid (their command line is in this flow's folder).
+            try:
+                left = json.loads(sp.run(["python3", upd_py, "parts"], capture_output=True, text=True, env=env).stdout)
+                left = [left["call"]["pid"], left["status"]["pid"]]
+            except Exception:
+                left = []
+            for pid in left:
+                if pid and str(me) in sp.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout:
+                    try:
+                        os.kill(pid, 9)
+                    except OSError:
+                        pass
+        return ("a docs change restarts nothing; a code change restarts the call line and the status page on new pids "
+                "(the decoy untouched), the call line only after the call; the whole update uses the new version's rules; "
+                "one that doesn't come back is on the to-do list")
+
+
     async def flow101(self) -> str:
         """H152, no Claude, no Syncthing, no network: after a crash or a restart the two computers come back in step
         by themselves. Her pings file is only written when something changed (it was written every minute, so it
@@ -11890,6 +12056,7 @@ FLOWS = {
     105: ("H149: mail more often for a while he names: his words as an end time, every quarter until then, hourly again by itself", False, "flow105"),
     106: ("H160, H182, H183: the team's work from the status page: an open roadmap item sent to the team, move and cancel, without a call; add-row for calls; the repeating rows in Maintenance", False, "flow106"),
     107: ("H184: the laptop's status page shows the server's usage when it's newer, its own when the server can't be reached", False, "flow107"),
+    108: ("H187: an update restarts every background part whose code changed, by exact pid, never during a call, with the new version's rules", False, "flow108"),
 }
 
 

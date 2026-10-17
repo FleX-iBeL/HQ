@@ -17,6 +17,9 @@ changelog what we've added/changed over the versions".
                                 at most every 6 hours, every 30 minutes after a failed look (offline: quiet)
     update.py changelog         one JSON line: CHANGELOG.md as versions, newest first
     update.py start             starts the update in the background (it waits for a call or a job to end)
+    update.py restart           H187: restarts what the files on stdin changed (JSON {"changed": [...],
+                                "was": {"call": bool, "status": bool}}); one JSON line {"done", "todo"}
+    update.py parts             H187: the background parts running now, their exact pids, and what counts as their code
     update.py run               the update itself (what start runs)
 
 The version is the newest version tag HQ's history contains (git describe, v0.2), else the VERSION file (F32: also
@@ -28,20 +31,25 @@ A newer version is a tag vX.Y or vX.Y.Z on the public repo with a higher number.
      hq-backup/..., never sent anywhere (git stash apply <branch> brings the changes back);
   3. fetches only that tag from the public repo and moves HQ to it; workspace, local/, scratch/ and .status/
      are ignored by the repo, so they are never touched;
-  4. restarts what needs it: the call line (when it ran), the status page (when its server changed), the Mac
-     app (when it changed and is installed), the watchdog (when it changed); the Python packages when the
-     requirements changed; on another computer the user's own parts in local/ do that;
+  4. restarts every background part whose code changed (H187), with the new version's own rules (the moved HQ's
+     update.py restart, so a fix to these rules counts from the update that brings it): the call line (app/ and
+     routine/ code, when it ran; again never during a call), the status page (its .mjs files), the Mac's watchdog
+     copy, the Mac app; the Python packages when the requirements changed. By exact pid, on a Mac and on Linux
+     (there in their own systemd scope, so stopping the status server takes nothing else down), and checked:
+     only a part that answers again on a new pid counts as restarted, else it's on the note's to-do list. A
+     user's own parts in local/ go first (restart-call-line, restart-status-page, install-watchdog);
   5. leaves a note for the user's Claude in updates/<version>.md: what changed, what was kept, what to check
      and rebuild in local/.
 State: .status/update.json (the last check) and .status/update-run.json (the update), for the pages.
 Tests: HQ_UPDATE_URL (another repo, e.g. a folder), HQ_PLATFORM (pretend another computer), HQ_CALL_URL,
-HQ_UPDATE_RESTART=0 (restart nothing).
+HQ_UPDATE_RESTART=0 (restart nothing), HQ_UPDATE_POLL (seconds between looks while waiting, 15).
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -349,7 +357,8 @@ def start() -> dict:
         return st
     write_json(RUN_FILE, {"state": "waiting", "step": "Starting the update", "message": "", "at": time.time(),
                           "from": st["version"], "to": vname(st["new_tag"])})
-    p = subprocess.Popen([sys.executable, os.path.abspath(__file__), "run"], cwd=HQ, stdin=subprocess.DEVNULL,
+    # H187: on Linux in its own scope: started from the status server, it would otherwise go down with it.
+    p = subprocess.Popen(scoped([sys.executable, os.path.abspath(__file__), "run"], "update"), cwd=HQ, stdin=subprocess.DEVNULL,
                          stdout=open(LOG, "a"), stderr=subprocess.STDOUT, start_new_session=True)
     run = read_json(RUN_FILE)
     run["pid"] = p.pid
@@ -392,80 +401,223 @@ def listening(port: int) -> bool:
         return False
 
 
+# ---- H187: the background parts, restarted by exact pid --------------------------------------------------------
+# 17 October 2026 (call at 10:42), typed: "now when i update on my macbook, i still need to reboot my whole
+# laptop because only restarting the application isnt enough. do my friends will have the same? because if so then i
+# want that when a new release is installed then all these backend processes get forced rebooted if thats also needed"
+# What keeps running, and so keeps the old code in memory: the call line (app/bot.py, which imports app/ and
+# routine/) and the status server (status/server.mjs and its .mjs). The routine (tick.py), the watchdog, the jobs,
+# the mail check and the small helpers start fresh each time; the Mac's watchdog runs from its own copy; the HQ app
+# and the HQ Routine helper are apps.
+
+POLL = float(os.environ.get("HQ_UPDATE_POLL") or 15)
+CALL_MARK, STATUS_MARK = "app/bot.py", "status/server.mjs"
+
+
+def cmdline(pid: int) -> str:
+    return subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+
+
+def pids_on(port: int) -> list[int]:
+    """This user's pids listening on a port: lsof on a Mac, ss elsewhere."""
+    if platform() == "darwin" or not shutil.which("ss"):
+        r = subprocess.run(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"], capture_output=True, text=True)
+        return sorted({int(p) for p in r.stdout.split() if p.isdigit()})
+    r = subprocess.run(["ss", "-Hltnp", f"sport = :{port}"], capture_output=True, text=True)
+    return sorted({int(p) for p in re.findall(r"pid=(\d+)", r.stdout)})
+
+
 def pid_on(port: int, must: str) -> int | None:
     """The exact pid listening on a port, only when its command line has `must` in it."""
-    r = subprocess.run(["/usr/sbin/lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"], capture_output=True, text=True)
-    for p in r.stdout.split():
-        cmd = subprocess.run(["/bin/ps", "-o", "command=", "-p", p], capture_output=True, text=True).stdout
-        if must in cmd:
-            return int(p)
+    for p in pids_on(port):
+        if must in cmdline(p):
+            return p
     return None
 
 
+def scoped(cmd: list[str], name: str) -> list[str]:
+    """H187: on Linux, a command in its own systemd user scope when there is one (as tick.open_window), so it never
+    belongs to the unit of whoever started it: the status server's, which takes everything in it down when it stops."""
+    if platform() == "darwin" or not os.environ.get("XDG_RUNTIME_DIR") or not shutil.which("systemd-run"):
+        return cmd
+    return ["systemd-run", "--user", "--scope", "--quiet", f"--unit={hqpaths.unit(name)}-{int(time.time())}-{os.getpid()}"] + cmd
+
+
+def gone(pid: int, secs: float) -> bool:
+    end = time.time() + secs
+    while time.time() < end:
+        if not alive(pid) or "<defunct>" in cmdline(pid) or not cmdline(pid):
+            return True
+        time.sleep(0.2)
+    return not alive(pid)
+
+
+def stop_pid(pid: int) -> bool:
+    """Stops one exact pid: TERM, then KILL when it doesn't go."""
+    for sig, secs in ((15, 10), (9, 3)):
+        try:
+            os.kill(pid, sig)
+        except OSError:
+            return True
+        if gone(pid, secs):
+            return True
+    return False
+
+
+def came_back(port: int, must: str, old: int | None, secs: float) -> int | None:
+    """The new pid once the part listens again on a pid other than the old one."""
+    end = time.time() + secs
+    while time.time() < end:
+        p = pid_on(port, must)
+        if p and p != old:
+            return p
+        time.sleep(0.5)
+    return None
+
+
+def code_of(changed: list[str]) -> dict:
+    """Which parts' code the changed files are (H187)."""
+    return {
+        "call": [f for f in changed if (f.startswith("app/") and not os.path.basename(f).startswith(("happy_flows", "test_")))
+                 or (f.startswith("routine/") and f.endswith(".py"))],
+        "status": [f for f in changed if f.startswith("status/") and f.endswith(".mjs")],
+        "watchdog": [f for f in changed if f == "routine/watchdog.py"],
+        "packages": [f for f in changed if f == "app/requirements.txt"],
+        "helper": [f for f in changed if f in ("routine/routine.applescript", "routine/build-app.sh")],
+        "units": [f for f in changed if f == "routine/install-linux.sh"],
+        "app": [f for f in changed if f.startswith("desktop/") and not f.endswith((".html", ".js", ".css", ".py"))],
+        "strip": [f for f in changed if f.startswith("desktop/") and f.endswith((".html", ".js", ".css"))],
+    }
+
+
+def parts() -> dict:
+    """The background parts running now, with their exact pids (H187)."""
+    cp, sp = hqpaths.call_port(), hqpaths.status_port()
+    return {"call": {"port": cp, "pid": pid_on(cp, CALL_MARK), "code": "app/, routine/*.py"},
+            "status": {"port": sp, "pid": pid_on(sp, STATUS_MARK), "code": "status/*.mjs"},
+            "fresh": "the routine (tick.py), the watchdog on Linux, jobs, the mail check, the helpers: started anew each time"}
+
+
+def wait_for_calls(what: str) -> None:
+    """Never restart the call line during a call: wait, and say so (H187)."""
+    while calls_on():
+        say("updating", f"Waiting for the call to end before restarting {what}", "It goes on by itself when the call ends.")
+        time.sleep(POLL)
+
+
+def restart_new(changed: list[str], was_running: dict) -> tuple[list[str], list[str]]:
+    """H187: the restart step with the moved HQ's own update.py, so the new version's rules decide what restarts.
+    Falls back on this one's rules when the new file can't do it."""
+    if os.environ.get("HQ_UPDATE_RESTART") == "0":
+        return ["nothing restarted (test)"], []
+    try:
+        r = subprocess.run([sys.executable, os.path.join(HERE, "update.py"), "restart"], cwd=HQ, capture_output=True,
+                           text=True, timeout=3 * 3600, input=json.dumps({"changed": changed, "was": was_running}))
+        out = json.loads(r.stdout.strip().splitlines()[-1])
+        return list(out["done"]), list(out["todo"])
+    except Exception as e:
+        log(f"update: the new version's restart didn't answer ({str(e)[:120]}); restarting with this one's rules")
+        return restart(changed, was_running)
+
+
 def restart(changed: list[str], was_running: dict) -> tuple[list[str], list[str]]:
-    """Restarts what needs it. Returns (what was done, what the user or their Claude still has to do)."""
+    """Restarts every background part whose code changed, by exact pid, and checks it came back on a new pid.
+    Returns (what was done, what the user or their Claude still has to do)."""
     done, todo = [], []
     if os.environ.get("HQ_UPDATE_RESTART") == "0":
         return ["nothing restarted (test)"], []
     env = {**os.environ, "PATH": os.environ.get("PATH", "") + ":" + PATH}
     mac = platform() == "darwin"
+    code = code_of(changed)
 
-    def ran(cmd, what, detach=False):
+    def ran(cmd, what, detach=False, name="part"):
         try:
             if detach:
-                subprocess.Popen(cmd, cwd=HQ, env=env, stdin=subprocess.DEVNULL, stdout=open(LOG, "a"),
+                subprocess.Popen(scoped(cmd, name), cwd=HQ, env=env, stdin=subprocess.DEVNULL, stdout=open(LOG, "a"),
                                  stderr=subprocess.STDOUT, start_new_session=True)
                 ok = True
             else:
-                ok = subprocess.run(cmd, cwd=HQ, env=env, capture_output=True, timeout=900).returncode == 0
+                ok = subprocess.run(scoped(cmd, name), cwd=HQ, env=env, capture_output=True, timeout=900).returncode == 0
         except Exception:
             ok = False
-        (done if ok else todo).append(what if ok else f"{what}: it didn't work, do it by hand")
+        if not ok:
+            todo.append(f"{what}: it didn't work, do it by hand")
         return ok
 
-    if any(f == "app/requirements.txt" for f in changed):
+    if code["packages"]:
         pip = os.path.join(HQ, ".venv", "bin", "pip")
         if os.path.exists(pip):
-            ran([pip, "install", "-q", "-r", os.path.join(HQ, "app", "requirements.txt")], "installed the new Python packages")
+            ran([pip, "install", "-q", "-r", os.path.join(HQ, "app", "requirements.txt")], "installed the new Python packages") \
+                and done.append("installed the new Python packages")
         else:
             todo.append("install the new Python packages (app/requirements.txt)")
-    # The call line: always restarted when it ran, since it holds the old code in memory.
-    if was_running.get("call"):
-        own = hqpaths.part_cmd("restart-call-line")
-        if own:
-            ran(own, "restarted the call line (your own part)")
-        elif mac:
-            subprocess.run([os.path.join(HQ, "app", "stop.sh")], cwd=HQ, env=env, capture_output=True, timeout=120)
-            ran([os.path.join(HQ, "app", "start.sh")], "restarted the call line")
-        else:
-            todo.append("restart the call line (build local/restart-call-line for next time)")
-    if any(f.startswith("routine/") and ("watchdog" in f) for f in changed):
+    if code["watchdog"]:
         own = hqpaths.part_cmd("install-watchdog")
         if own:
-            ran(own, "installed the new watchdog (your own part)")
+            ran(own, "installed the new watchdog (your own part)") and done.append("installed the new watchdog (your own part)")
         elif mac:
-            ran(["/bin/zsh", os.path.join(HQ, "routine", "install-watchdog.sh")], "installed the new watchdog")
+            ran(["/bin/zsh", os.path.join(HQ, "routine", "install-watchdog.sh")], "installed the new watchdog") \
+                and done.append("installed the new watchdog")
+        elif os.path.exists(os.path.expanduser(f"~/.config/systemd/user/{hqpaths.unit('watchdog.service')}")):
+            done.append("the watchdog runs from HQ itself here: its next look uses the new code")
         else:
             todo.append("the watchdog changed: rebuild yours in local/ (install-watchdog)")
-    if any(f.startswith("routine/routine.applescript") or f.startswith("routine/build-app.sh") for f in changed):
+    if code["helper"]:
         todo.append("the routine helper changed: rebuild it with routine/build-app.sh (macOS asks for one Allow)"
                     if mac else "the routine helper changed: check your own start at login in local/")
-    if any(f.startswith("desktop/") and not f.endswith((".html", ".js", ".css", ".py")) for f in changed):
+    if code["units"] and not mac:
+        todo.append("the Linux units changed: run routine/install-linux.sh again (it keeps the HQ_ settings you give it)")
+    if code["app"]:
         app = os.path.expanduser("~/Applications/HQ.app")
         if mac and os.path.isdir(app):
             if ran(["/bin/zsh", os.path.join(HQ, "desktop", "build.sh"), "--install"], "reinstalled the Mac app"):
+                done.append("reinstalled the Mac app")
                 todo.append("close the HQ app and open it again, to use the new one")
+    elif code["strip"] and mac and os.path.isdir(os.path.expanduser("~/Applications/HQ.app")):
+        todo.append("the HQ app's strip changed: close the HQ app and open it again to see it")
+
+    # The call line: app/bot.py holds app/ and routine/ in memory. Never during a call (one may have started since).
+    cport = hqpaths.call_port()
+    if was_running.get("call") and code["call"]:
+        wait_for_calls("the call line")
+        old = pid_on(cport, CALL_MARK)
+        own = hqpaths.part_cmd("restart-call-line")
+        if own:
+            ran(own, "restarted the call line (your own part)", name="call") and done.append("restarted the call line (your own part)")
+        else:
+            subprocess.run([os.path.join(HQ, "app", "stop.sh" if mac else "stop-linux.sh")], cwd=HQ, env=env,
+                           capture_output=True, timeout=120)
+            if old and not gone(old, 1) and not stop_pid(old):
+                todo.append(f"the call line's old process (pid {old}) wouldn't stop: restart the computer once")
+            else:
+                ran([os.path.join(HQ, "app", "start.sh" if mac else "start-linux.sh")], "restarted the call line", name="call")
+                new = came_back(cport, CALL_MARK, old, 90)
+                if new:
+                    done.append(f"restarted the call line (pid {old} → {new})" if old else f"restarted the call line (pid {new})")
+                elif not any(t.startswith("restarted the call line") for t in todo):
+                    todo.append("restarted the call line: it didn't come back, start it by hand (app/start.sh) or let the routine do it")
+    elif was_running.get("call"):
+        done.append("the call line's code didn't change: left running")
     # The status page last: the pages watching this update are served by it.
-    if was_running.get("status") and any(f.startswith("status/") and f.endswith(".mjs") for f in changed):
+    sport = hqpaths.status_port()
+    if was_running.get("status") and code["status"]:
         own = hqpaths.part_cmd("restart-status-page")
         if own:
-            ran(own, "restarted the status page (your own part)")
+            ran(own, "restarted the status page (your own part)", detach=True, name="status") \
+                and done.append("restarted the status page (your own part)")
         else:
-            pid = pid_on(int(os.environ.get("HQ_STATUS_PORT", 4748)), "status/server.mjs") if mac else None
-            if pid:
-                os.kill(pid, 15)
-                time.sleep(1.5)
-            ran(["node", os.path.join(HQ, "status", "server.mjs"), "--quiet"], "restarted the status page", detach=True)
+            old = pid_on(sport, STATUS_MARK)
+            if old and not stop_pid(old):
+                todo.append(f"the status page's old process (pid {old}) wouldn't stop: restart the computer once")
+            else:
+                ran([hqpaths.shell(), os.path.join(HQ, "status", "phone.sh")], "restarted the status page", name="status")
+                new = came_back(sport, STATUS_MARK, old, 20)
+                if new:
+                    done.append(f"restarted the status page (pid {old} → {new})" if old else f"restarted the status page (pid {new})")
+                elif not any(t.startswith("restarted the status page") for t in todo):
+                    todo.append("restarted the status page: it didn't come back; the routine starts it again within a minute")
+    elif was_running.get("status"):
+        done.append("the status page's code didn't change: left running")
     return done, todo
 
 
@@ -578,8 +730,8 @@ def run() -> int:
         changed = [f for f in git("diff", "--name-only", before, "HEAD", timeout=30).stdout.splitlines() if f]
         if made == tag:  # its own version wasn't on the public repo: everything that differed was set right
             changed = sorted(set(changed) | set(saved.get("changes", {}).get("files", [])))
-        say("updating", "Restarting what needs it")
-        done, todo = restart(changed, was)
+        say("updating", "Restarting what changed")
+        done, todo = restart_new(changed, was)
         note = notes(old, tag, saved, changed, done, todo)
         bits = [f"Updated to {vname(tag)}."]
         if saved:
@@ -610,6 +762,12 @@ def main(argv: list[str]) -> int:
         print(json.dumps(start()))
     elif cmd == "run":
         return run()
+    elif cmd == "restart":
+        req = json.loads(sys.stdin.read() or "{}")
+        done, todo = restart(list(req.get("changed") or []), dict(req.get("was") or {}))
+        print(json.dumps({"done": done, "todo": todo}))
+    elif cmd == "parts":
+        print(json.dumps(parts()))
     elif cmd == "version":
         print(json.dumps(local_version()))
     else:
