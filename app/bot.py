@@ -359,8 +359,16 @@ if __name__ == "__main__":
     # are served with no-cache. The night PNGs are opaque squares to the edges (RGB, no alpha): no border.
     LABEL = os.environ.get("HQ_LABEL", "").strip().replace("<", "").replace(">", "").replace("&", "").replace('"', "")
     NIGHT = Path(__file__).resolve().parent.parent / "status" / "icons"
-    ICONS = {"apple-touch-icon.png": WEB / "apple-touch-icon.png", "icon-192.png": WEB / "icon-192.png",
-             "icon-512.png": WEB / "icon-512.png"}
+    # H194 (17 October 2026): on a laptop the call page has HQ's own house too (status/icons/hq-*.png, the same as
+    # the HQ page), under every name iOS and Safari's Add to Dock may look for, so a friend's fresh install saved to
+    # the home screen or the Dock shows HQ's icon, never a screenshot or the old rings.
+    HOUSE = Path(__file__).resolve().parent.parent / "status" / "icons"
+    ICONS = {"apple-touch-icon.png": HOUSE / "hq-180.png", "icon-192.png": HOUSE / "hq-192.png",
+             "icon-512.png": HOUSE / "hq-512.png",
+             "apple-touch-icon-precomposed.png": HOUSE / "hq-180.png",
+             "apple-touch-icon-180x180.png": HOUSE / "hq-180.png",
+             "apple-touch-icon-180x180-precomposed.png": HOUSE / "hq-180.png",
+             "favicon.png": HOUSE / "hq-192.png"}
     NIGHT_NAMES = {"hq-call-night-180.png": NIGHT / "hq-night-180.png",
                    "hq-call-night-192.png": NIGHT / "hq-night-192.png",
                    "hq-call-night-512.png": NIGHT / "hq-night-512.png"}
@@ -385,10 +393,9 @@ if __name__ == "__main__":
             '<link rel="apple-touch-icon" href="apple-touch-icon.png">', NIGHT_LINKS)
         return Response(html, media_type="text/html; charset=utf-8", headers=_NO_CACHE)
 
-    if LABEL:
-        @app.get("/favicon.ico", include_in_schema=False)
-        async def favicon():
-            return FileResponse(NIGHT / "hq-night-192.png", media_type="image/png", headers=_NO_CACHE)
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        return FileResponse(ICONS["favicon.png"], media_type="image/png", headers=_NO_CACHE)
 
     @app.get("/manifest.webmanifest", include_in_schema=False)
     async def phone_manifest():

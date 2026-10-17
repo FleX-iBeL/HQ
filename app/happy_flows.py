@@ -11068,6 +11068,96 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 "it, undo only over its own change, the rules on calls and in Donna's chat, the mail check hands off; the matrix "
                 "in the app opens a list and an item, a tick reaches the file and Undo takes it back (" + ", ".join(seen) + ")")
 
+    async def flow113(self) -> str:
+        """H194: HQ's own icon on a friend's fresh install. No Claude turns. A status server without HQ_LABEL (a
+        laptop, like a fresh install) serves HQ's house (status/icons/hq-*.png, opaque squares) for every page that
+        can be saved to a home screen or the Dock: the status page, /hq, the direct line and the installer's
+        checklist link it, and every name iOS or Safari looks for at the root (apple-touch-icon, -precomposed, the
+        180x180 ones, favicon.ico) is the house too; the manifests point at it. With HQ_LABEL the night house stays.
+        The call page's icons (bot.py) are the same house, and its page links one. The Mac app ships its Dock icon
+        ready-made (desktop/HQ.icns, transparent corners), and build.sh uses it before drawing anything."""
+        from PIL import Image
+        icons = ROOT / "status" / "icons"
+        house = {n: (icons / f"hq-{n}.png").read_bytes() for n in (180, 192, 512)}
+        night = {n: (icons / f"hq-night-{n}.png").read_bytes() for n in (180, 192, 512)}
+        for n, b in house.items():
+            im = Image.open(icons / f"hq-{n}.png")
+            need(im.size == (n, n) and (im.mode == "RGB" or im.split()[-1].getextrema()[0] == 255),
+                 f"hq-{n}.png isn't an opaque {n} square (iOS fills see-through corners black)")
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        names = {"/apple-touch-icon.png": 180, "/apple-touch-icon-precomposed.png": 180, "/apple-touch-icon-180x180.png": 180,
+                 "/apple-touch-icon-180x180-precomposed.png": 180, "/favicon.ico": 192, "/icon-192.png": 192,
+                 "/icon-512.png": 512, "/hq-icon-180.png": 180, "/hq-icon-192.png": 192, "/hq-icon-512.png": 512}
+
+        async def serve(port, label):
+            env = {k: v for k, v in os.environ.items() if k != "HQ_LABEL"}
+            env.update({"HQ_STATUS_PORT": str(port), "HQ_FIX_DRY": "1"})
+            if label:
+                env["HQ_LABEL"] = label
+            log = open(self.tmp / f"h194-{port}.log", "w")
+            srv = subprocess.Popen([node, str(ROOT / "status/server.mjs"), "--quiet"], cwd=ROOT, env=env,
+                                   stdout=log, stderr=subprocess.STDOUT)
+
+            def get(path):
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}" + path, timeout=60) as r:
+                    return r.read()
+            for _ in range(50):
+                try:
+                    await asyncio.to_thread(get, "/where.json")
+                    break
+                except Exception:
+                    await asyncio.sleep(0.2)
+            return srv, get
+
+        srv, get = await serve(4791, "")
+        try:
+            for path, n in names.items():
+                need(await asyncio.to_thread(get, path) == house[n], f"a fresh install's {path} isn't HQ's house")
+            for page in ("/", "/hq", "/direct", "/install"):
+                html = (await asyncio.to_thread(get, page)).decode()
+                link = re.search(r'rel="apple-touch-icon"\s+href="([^"]+)"', html)
+                need(link, f"{page} has no home-screen icon")
+                need(await asyncio.to_thread(get, "/" + link.group(1).lstrip("./")) == house[180],
+                     f"{page}'s home-screen icon isn't HQ's house")
+            for mf in ("/manifest.webmanifest", "/hq.webmanifest"):
+                m = json.loads(await asyncio.to_thread(get, mf))
+                for ic in m["icons"]:
+                    n = int(ic["sizes"].split("x")[0])
+                    need(await asyncio.to_thread(get, ic["src"]) == house[n], f"{mf} points at an icon that isn't the house")
+        finally:
+            srv.terminate()
+            srv.wait(timeout=10)
+        srv, get = await serve(4792, "VPS")
+        try:
+            for path, n in names.items():
+                need(await asyncio.to_thread(get, path) == night[n], f"a server's {path} isn't the night house")
+        finally:
+            srv.terminate()
+            srv.wait(timeout=10)
+        # The call page (bot.py starts Pipecat, so read here): the same house on a laptop, every name, and the page links one.
+        bot = (ROOT / "app/bot.py").read_text()
+        top = bot[bot.index("HOUSE = "):bot.index("if LABEL:", bot.index("HOUSE = "))]
+        for name in ("apple-touch-icon.png", "apple-touch-icon-precomposed.png", "apple-touch-icon-180x180.png",
+                     "apple-touch-icon-180x180-precomposed.png", "icon-192.png", "icon-512.png", "favicon.png"):
+            need(f'"{name}": HOUSE / "hq-' in top, f"the call page's {name} isn't HQ's house on a laptop")
+        need('@app.get("/favicon.ico"' in bot and 'ICONS["favicon.png"]' in bot, "the call page has no favicon")
+        page = (ROOT / "app/web/index.html").read_text()
+        need('rel="apple-touch-icon" href="apple-touch-icon.png"' in page and 'name="apple-mobile-web-app-title" content="HQ"' in page,
+             "the call page doesn't link its home-screen icon, or isn't called HQ there")
+        callm = json.loads((ROOT / "app/web/manifest.webmanifest").read_text())
+        need({i["src"] for i in callm["icons"]} == {"/icon-192.png", "/icon-512.png"}, "the call page's manifest icons moved")
+        # The Dock: a ready-made icon with transparent corners, used first by build.sh, and the Dock told it's new.
+        icns = Image.open(ROOT / "desktop/HQ.icns")
+        icns.load()
+        rgba = icns.convert("RGBA")
+        need(icns.size[0] >= 512 and rgba.getpixel((0, 0))[3] == 0 and rgba.getpixel((icns.size[0] // 2,) * 2)[3] == 255,
+             "desktop/HQ.icns is missing, small, or its corners aren't transparent")
+        build = (ROOT / "desktop/build.sh").read_text()
+        need(build.index('"$HQ/desktop/HQ.icns"') < build.index("svg2png") and 'if [[ -n "$ICON" ]]; then :' in build
+             and "lsregister" in build, "build.sh doesn't use the shipped Dock icon first, or doesn't tell the Dock")
+        return ("a fresh install's status page, /hq, the direct line, the checklist and every root icon name show HQ's house; "
+                "a server keeps the night house; the call page the same; the Dock icon ships ready-made")
+
     async def flow97(self) -> str:
         """F31, no Claude, no network: a refused pull or push from a job never passes silently. push.py --pull and a
         plain push against a throwaway HQ copy whose GitHub is a throwaway folder: a pull that works says so; a remote
@@ -12783,6 +12873,7 @@ FLOWS = {
     110: ("F38: a Quick session starts with a text over 200 KB: handed over by file, never on the command line", True, "flow110"),
     111: ("H202: the map as a guided workflow: six layers with their questions, nothing private or named; turned on, its blank map and line, never over theirs", False, "flow111"),
     112: ("H200: the to-do list, the Eisenhower way: read, kept by calls and the app, shown as a matrix, a tick and its undo", False, "flow112"),
+    113: ("H194: HQ's own icon on a fresh install: every page saved to a home screen or the Dock, and the Mac app's Dock icon", False, "flow113"),
 }
 
 

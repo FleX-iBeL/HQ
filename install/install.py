@@ -194,7 +194,10 @@ def serve_page() -> http.server.ThreadingHTTPServer | None:
         def do_GET(self):
             path = self.path.split("?")[0]
             src, kind = {"/": (PAGE, "text/html; charset=utf-8"), "/install": (PAGE, "text/html; charset=utf-8"),
-                         "/install.json": (CHECKLIST, "application/json; charset=utf-8")}.get(path, (None, None))
+                         "/install.json": (CHECKLIST, "application/json; charset=utf-8"),
+                         # H194: HQ's own icon, for the page saved to a home screen or the Dock
+                         "/hq-icon-180.png": (os.path.join(HQ, "status", "icons", "hq-180.png"), "image/png"),
+                         "/hq-icon-192.png": (os.path.join(HQ, "status", "icons", "hq-192.png"), "image/png")}.get(path, (None, None))
             if not src:
                 self.send_response(404)
                 self.end_headers()

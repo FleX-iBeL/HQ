@@ -15,14 +15,19 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O -target arm64-apple-macos13 -framework Cocoa -framework WebKit \
   -o "$APP/Contents/MacOS/HQ" "$HQ/desktop/HQ.swift"
 
-# The icon: HQ's house (H48), from icon.svg (Quick Look renders it; without it the app has the plain icon).
+# The icon: HQ's house (H48). H194: drawn once and shipped as desktop/HQ.icns (make_dock_icon.py), so a friend's
+# fresh install has it in the Dock without drawing anything; drawing it from icon.svg is only the fallback.
 ICON=""
+if [[ -f "$HQ/desktop/HQ.icns" ]]; then
+  cp "$HQ/desktop/HQ.icns" "$APP/Contents/Resources/HQ.icns" && ICON="<key>CFBundleIconFile</key><string>HQ</string>"
+fi
 # H48: drawn with svg2png (macOS reads SVG itself), so the corners stay transparent; qlmanage only as a fallback
 # (it gives a white square around the icon in the Dock).
 rm -f "$OUT/icon.svg.png"
-if swiftc -O -o "$OUT/svg2png" "$HQ/desktop/svg2png.swift" >/dev/null 2>&1 && "$OUT/svg2png" "$HQ/desktop/icon.svg" "$OUT/icon.svg.png" 1024; then :
+if [[ -n "$ICON" ]]; then :
+elif swiftc -O -o "$OUT/svg2png" "$HQ/desktop/svg2png.swift" >/dev/null 2>&1 && "$OUT/svg2png" "$HQ/desktop/icon.svg" "$OUT/icon.svg.png" 1024; then :
 else qlmanage -t -s 1024 -o "$OUT" "$HQ/desktop/icon.svg" >/dev/null 2>&1; fi
-if [[ -f "$OUT/icon.svg.png" ]]; then
+if [[ -z "$ICON" && -f "$OUT/icon.svg.png" ]]; then
   SET="$OUT/HQ.iconset"; rm -rf "$SET"; mkdir -p "$SET"
   for s in 16 32 128 256 512; do
     sips -z $s $s "$OUT/icon.svg.png" --out "$SET/icon_${s}x${s}.png" >/dev/null
@@ -59,5 +64,9 @@ if [[ "$1" == "--install" ]]; then
   mkdir -p "$HOME/Applications"
   rm -rf "$HOME/Applications/HQ.app"
   cp -R "$APP" "$HOME/Applications/HQ.app"
+  # H194: the Dock and Finder keep an icon they saw before; tell them this one is new.
+  touch "$HOME/Applications/HQ.app"
+  LSR=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+  [[ -x "$LSR" ]] && "$LSR" -f "$HOME/Applications/HQ.app" >/dev/null 2>&1 || true
   echo "Installed: ~/Applications/HQ.app"
 fi

@@ -27,11 +27,16 @@ const FILES = {
   '/usage.mjs': ['status/usage.mjs', 'text/javascript; charset=utf-8'],
   '/roadmap.md': [ROADMAP, 'text/markdown; charset=utf-8'],  // M1: in the workspace
   '/usage.json': ['.status/usage.json', 'application/json; charset=utf-8'],
-  // H13: its own icon on the phone's home screen
+  // H13: its own icon on the phone's home screen. H194: HQ's house (status/icons/hq-*.png), the same as /hq,
+  // also under every name iOS and Safari's Add to Dock look for at the root, so any page saved shows HQ's icon.
   '/manifest.webmanifest': ['status/manifest.webmanifest', 'application/manifest+json'],
-  '/apple-touch-icon.png': ['status/icons/apple-touch-icon.png', 'image/png'],
-  '/icon-192.png': ['status/icons/icon-192.png', 'image/png'],
-  '/icon-512.png': ['status/icons/icon-512.png', 'image/png'],
+  '/apple-touch-icon.png': ['status/icons/hq-180.png', 'image/png'],
+  '/apple-touch-icon-precomposed.png': ['status/icons/hq-180.png', 'image/png'],
+  '/apple-touch-icon-180x180.png': ['status/icons/hq-180.png', 'image/png'],
+  '/apple-touch-icon-180x180-precomposed.png': ['status/icons/hq-180.png', 'image/png'],
+  '/favicon.ico': ['status/icons/hq-192.png', 'image/png'],
+  '/icon-192.png': ['status/icons/hq-192.png', 'image/png'],
+  '/icon-512.png': ['status/icons/hq-512.png', 'image/png'],
   // M4: the installer's live checklist, also after the installer has ended
   '/install': ['install/checklist.html', 'text/html; charset=utf-8'],
   '/install.json': ['scratch/install/checklist.json', 'application/json; charset=utf-8'],
@@ -55,6 +60,10 @@ const FILES = {
 const LABEL = (process.env.HQ_LABEL ?? '').trim().replace(/[<>&"]/g, '');
 const LABELLED = {
   '/apple-touch-icon.png': 'status/icons/hq-night-180.png',
+  '/apple-touch-icon-precomposed.png': 'status/icons/hq-night-180.png',
+  '/apple-touch-icon-180x180.png': 'status/icons/hq-night-180.png',
+  '/apple-touch-icon-180x180-precomposed.png': 'status/icons/hq-night-180.png',
+  '/favicon.ico': 'status/icons/hq-night-192.png',
   '/icon-192.png': 'status/icons/hq-night-192.png',
   '/icon-512.png': 'status/icons/hq-night-512.png',
   '/hq-icon-180.png': 'status/icons/hq-night-180.png',
