@@ -12620,6 +12620,123 @@ print("H88OUT " + json.dumps(out))
                 "and a mic the iPhone won't switch to is said plainly; F26: on the phone one row, Microphone and sound, "
                 "and the sound follows the mic, on the computer two rows")
 
+    async def flow116(self) -> str:
+        """H198, no Claude: on the real call page in a headless browser with stand-in Mac devices (AirPods Pro, the
+        MacBook's own mic and speakers). On the Mac a switch, off at first, keeps other sound at normal volume: the
+        call's mic then opens without echo cancelling, except when her voice plays through the MacBook's own
+        speakers. With the mic on Default and Bluetooth headphones on, the call asks for the MacBook's own mic; a
+        mic he picked himself is kept. A call that ended up on the headphones' mic moves to the MacBook's own and
+        asks the HQ app to bounce the sound. Never on the phone or off a Mac. The app has the bounce (CoreAudio)."""
+        swift = (ROOT / "desktop/HQ.swift").read_text()
+        need("func bounceSound()" in swift and 'name: "hqAudio"' in swift and "kAudioHardwarePropertyDefaultOutputDevice" in swift,
+             "the Mac app has no sound bounce")
+        need("-framework CoreAudio" in (ROOT / "desktop/build.sh").read_text(), "the app isn't built with CoreAudio")
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        harness = r"""
+<script>
+(async () => {
+  const out = [], check = (name, ok, why) => out.push(name + ":" + (ok ? "ok" : "WRONG " + why));
+  try {
+  ["hq-mic", "hq-out", "hq-keep-sound"].forEach(k => localStorage.removeItem(k));
+  const BTDEVS = [
+    { kind: "audioinput", deviceId: "default", label: "Default - AirPods Pro" },
+    { kind: "audioinput", deviceId: "air", label: "AirPods Pro" },
+    { kind: "audioinput", deviceId: "mac", label: "MacBook Air Microphone (Built-in)" },
+    { kind: "audiooutput", deviceId: "default", label: "Default - AirPods Pro", groupId: "g-air" },
+    { kind: "audiooutput", deviceId: "airout", label: "AirPods Pro", groupId: "g-air" },
+    { kind: "audiooutput", deviceId: "spk", label: "MacBook Air Speakers (Built-in)", groupId: "g-spk" },
+  ];
+  const SPKDEVS = [
+    { kind: "audioinput", deviceId: "default", label: "Default - MacBook Air Microphone (Built-in)" },
+    { kind: "audioinput", deviceId: "mac", label: "MacBook Air Microphone (Built-in)" },
+    { kind: "audiooutput", deviceId: "default", label: "Default - MacBook Air Speakers (Built-in)", groupId: "g-spk" },
+    { kind: "audiooutput", deviceId: "spk", label: "MacBook Air Speakers (Built-in)", groupId: "g-spk" },
+  ];
+  let devs = BTDEVS;
+  const asked = [], posted = [];
+  Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: {
+    enumerateDevices: async () => devs.map(d => ({ ...d })),
+    getUserMedia: async c => { asked.push(JSON.stringify(c.audio));
+      const from = c.audio.deviceId ? c.audio.deviceId.exact : "default", dv = devs.find(d => d.deviceId === from && d.kind === "audioinput");
+      const tr = { kind: "audio", enabled: true, stopped: false, from, label: dv ? dv.label.replace(/^Default - /, "") : "",
+        getSettings() { return { deviceId: from }; }, stop() { this.stopped = true; } };
+      return { getTracks: () => [tr], getAudioTracks: () => [tr] }; },
+    addEventListener: () => {} } });
+  window.webkit = { messageHandlers: { hqAudio: { postMessage: m => posted.push(m.do) } } };
+  audioEl.setSinkId = async () => {};
+  IS_MAC = true; IS_PHONE = false; IS_IOS = false; ONE_MIC = false;
+  showSettings(true); await listDevices();
+  check("row-on-mac", !duckRow.hidden, "hidden");
+  check("off-at-first", duckBtn.textContent === "Lower" && micAudio().echoCancellation === true, duckBtn.textContent);
+  let a = micAudio();
+  check("bt-uses-own-mic", a.deviceId && a.deviceId.exact === "mac", JSON.stringify(a));
+  check("note-says-so", /own mic/.test(micNote.textContent), micNote.textContent);
+  duckBtn.click();
+  a = micAudio();
+  check("switch-on", localStorage.getItem("hq-keep-sound") === "on" && duckBtn.textContent === "Normal" && duckBtn.classList.contains("on"), duckBtn.textContent);
+  check("no-echo-cancel", a.echoCancellation === false && a.noiseSuppression === false && a.autoGainControl === false, JSON.stringify(a));
+  micSel.value = "air"; micSel.dispatchEvent(new Event("change"));
+  a = micAudio();
+  check("own-choice-kept", a.deviceId && a.deviceId.exact === "air" && a.echoCancellation === false, JSON.stringify(a));
+  micSel.value = ""; micSel.dispatchEvent(new Event("change"));
+  // Her voice through the MacBook's speakers: echo cancelling stays on, and no Bluetooth, so no mic in particular.
+  devs = SPKDEVS; await listDevices(); a = micAudio();
+  check("speakers-keep-echo-cancel", a.echoCancellation === true && !a.deviceId, JSON.stringify(a));
+  check("speakers-note", /speakers/.test(duckNote.textContent), duckNote.textContent);
+  // Headphones on, but sound sent to the speakers by the Sound row: echo cancelling stays on there too.
+  devs = BTDEVS; await listDevices();
+  if (CAN_SINK) {
+    outSel.value = "spk"; outSel.dispatchEvent(new Event("change"));
+    check("sound-row-speakers", micAudio().echoCancellation === true, JSON.stringify(micAudio()));
+    outSel.value = ""; outSel.dispatchEvent(new Event("change"));
+  }
+  // A call that opened the headphones' own mic (the first call, no names yet) moves to the MacBook's and bounces.
+  const sent = [], sender = { track: null, replaceTrack: async t => { sent.push(t); sender.track = t; } };
+  stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true } });
+  sender.track = stream.getAudioTracks()[0];
+  pc = { getSenders: () => [sender], close() {} };
+  setState("live", "On the call");
+  await keepHeadphones();
+  check("moved-to-own-mic", sent.length && sent.at(-1).from === "mac" && stream.getAudioTracks()[0].from === "mac", sent.map(t => t.from).join(","));
+  check("bounced", posted.join(",") === "bounce", posted.join(","));
+  posted.length = 0; await keepHeadphones();
+  check("once", posted.length === 0, posted.join(","));
+  // A mic he picked himself is never moved.
+  localStorage.setItem("hq-mic", JSON.stringify({ id: "air", label: "AirPods Pro" }));
+  stream = await openMic(); sent.length = 0; await keepHeadphones();
+  check("own-pick-not-moved", sent.length === 0 && posted.length === 0, sent.length + " " + posted.join(","));
+  localStorage.removeItem("hq-mic");
+  setState("idle", "Call ended"); pc = null; stream = null;
+  // Never on the phone, never off a Mac.
+  IS_PHONE = true; await listDevices(); a = micAudio();
+  check("phone-no-row", duckRow.hidden && a.echoCancellation === true && !a.deviceId, JSON.stringify(a));
+  IS_PHONE = false; IS_MAC = false; await listDevices(); a = micAudio();
+  check("not-mac", duckRow.hidden && a.echoCancellation === true && !a.deviceId, JSON.stringify(a));
+  } catch (e) { out.push("crash:WRONG " + e); }
+  const pre = document.createElement("pre"); pre.id = "h198"; pre.textContent = "H198RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f = self.tmp / "h198.html"
+        f.write_text(page.replace("</body>", harness + "</body>", 1))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run",
+                                          *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                          f"--user-data-dir={self.tmp / 'h198-profile'}", "--window-size=1200,800",
+                                          "--virtual-time-budget=20000", "--dump-dom", f.as_uri()], timeout=90)
+        m = re.search(r'<pre id="h198">H198RESULT (.*?) END</pre>', r.stdout)
+        need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        say(f"   {m.group(1)}")
+        need(all(part.endswith(":ok") for part in m.group(1).split(" | ")), f"the other sound or the headphones aren't right: {m.group(1)}")
+        return ("on the Mac a switch, off at first, keeps other sound at normal volume (no echo cancelling, except "
+                "through the MacBook's own speakers); with Bluetooth headphones and the mic on Default the call uses "
+                "the MacBook's own mic, a mic he picked is kept, a call on the headphones' mic moves over and the app "
+                "bounces the sound once; never on the phone or off a Mac")
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -13089,6 +13206,7 @@ FLOWS = {
     113: ("H194: HQ's own icon on a fresh install: every page saved to a home screen or the Dock, and the Mac app's Dock icon", False, "flow113"),
     114: ("H199: the 5-hour bar unfolds into the whole day: four more windows, each its work, reset, moving line and what waits for it", False, "flow114"),
     115: ("H197: every release sets GitHub's About to the new version, in everyday words; without a token it's an incident, never silent", False, "flow115"),
+    116: ("H198: on the Mac, other sound at normal volume during a call (a switch), and Bluetooth headphones stay in high quality (the MacBook's own mic, the sound bounced in the app)", False, "flow116"),
 }
 
 

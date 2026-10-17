@@ -887,6 +887,7 @@
   <div class="row devrow"><span><b id="micname">Microphone</b><small id="micnote">What she hears you with</small></span><select id="mic" class="dev" aria-label="Microphone"><option value="">Default</option></select></div>
   <div class="row devrow" id="micaskrow" hidden><span>Device names<small>The browser only names them once the page may use the mic</small></span><button id="micask" class="sw" type="button">Show</button></div>
   <div class="row devrow" id="outrow" hidden><span>Sound<small id="outnote">Where her voice plays</small></span><select id="out" class="dev" aria-label="Sound"><option value="">Default</option></select></div>
+  <div class="row devrow" id="duckrow" hidden><span>Other sound<small id="ducknote">Music and videos turn down while you're on a call</small></span><button id="duck" class="sw" type="button" aria-pressed="false">Lower</button></div>
   <div class="row devrow" id="nosinkrow" hidden><span>Sound<small id="nosinknote">This browser can't choose where her voice plays</small></span></div>
   <div class="row"><span>Thinking sound<small>A soft tick while she thinks</small></span><button id="sound" class="sw" type="button" aria-pressed="true">On</button></div>
   <button id="setdone" type="button">Done</button>
@@ -1269,7 +1270,50 @@ async function listDevices() {
     : "This browser can't choose: her voice plays where the computer's own sound goes";
   showOutNote();
   micAskRow.hidden = ins.some(d => d.label) || !navigator.mediaDevices.getUserMedia;
+  // H198: the Mac only (the browser and the HQ app), never the phone.
+  duckRow.hidden = IS_PHONE || !IS_MAC;
+  showDuck();
+  if (IS_MAC && !IS_PHONE && !(devPick("hq-mic") || {}).id && btOn() && ownMic())
+    micNote.textContent = "Default: the MacBook's own mic while Bluetooth headphones are on, so they keep their full sound";
 }
+// H198: on the Mac, music stays at its normal volume during a call (a switch, off at first), and Bluetooth
+// headphones keep their full sound. The Mac turns other sound down, and the headphones drop to call quality,
+// whenever a call opens a mic with its echo cancelling on, or opens the headphones' own mic. So: with the switch
+// on, the call's mic is opened without echo cancelling (but kept where her voice comes out of the MacBook's own
+// speakers, else she'd hear herself); and with the mic on Default and Bluetooth headphones on, the call listens
+// with the MacBook's own mic by itself (his workaround), and in the HQ app the sound is bounced once to the
+// speakers and back when the headphones' mic was opened anyway, so they come back in high quality.
+let IS_MAC = /Macintosh/.test(UA) && !IS_IOS;
+const duckRow = document.getElementById("duckrow"), duckBtn = document.getElementById("duck"), duckNote = document.getElementById("ducknote");
+let keepSound = false;
+try { keepSound = localStorage.getItem("hq-keep-sound") === "on"; } catch (e) {}
+const BT = /AirPods|Bluetooth|Buds|Beats|Headphones|Headset|Hands-?Free|Bose|Sony WH|Sony WF|WH-1000|WF-1000|Jabra|Jaybird|Powerbeats|Sennheiser|Shokz|AfterShokz/i;
+const OWN_MIC = /MacBook.*Microphone|Built-in Microphone|Internal Microphone|iMac Microphone/i;
+const OWN_SPK = /MacBook.*Speakers|Built-in Output|Internal Speakers|iMac Speakers/i;
+function defDev(kind) { return devList.find(d => d.kind === kind && d.deviceId === "default") || devList.find(d => d.kind === kind) || null; }
+function ownMic() { return devOf("audioinput").find(d => OWN_MIC.test(d.label || "") && !BT.test(d.label || "")) || null; }
+// Bluetooth headphones are on: the computer's sound goes to them, or its default mic is theirs.
+function btOn() {
+  const o = defDev("audiooutput"), i = defDev("audioinput");
+  return !!((o && BT.test(o.label || "")) || (i && BT.test(i.label || "")));
+}
+// Where her voice comes out: the MacBook's own speakers (then echo cancelling stays on, whatever the switch says).
+function onSpeakers() {
+  const { d } = sinkFor(), o = d || defDev("audiooutput");
+  return !!(o && OWN_SPK.test(o.label || ""));
+}
+function showDuck() {
+  duckBtn.textContent = keepSound ? "Normal" : "Lower";
+  duckBtn.classList.toggle("on", keepSound);
+  duckBtn.setAttribute("aria-pressed", String(keepSound));
+  duckNote.textContent = !keepSound ? "Music and videos turn down while you're on a call"
+    : onSpeakers() ? "Stays normal with headphones on; through the MacBook's speakers it still turns down, so she doesn't hear herself"
+    : "Music and videos stay at their normal volume during a call";
+}
+duckBtn.addEventListener("click", () => {
+  keepSound = !keepSound; try { localStorage.setItem("hq-keep-sound", keepSound ? "on" : "off"); } catch (e) {}
+  showDuck(); switchMic();  // on a call the mic is opened again, the new way
+});
 function devSave(sel, key, kind) {
   const d = devOf(kind).find(x => x.deviceId === sel.value), old = devPick(key);
   try {
@@ -1283,11 +1327,39 @@ document.getElementById("micask").addEventListener("click", async () => {
   try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach(t => t.stop()); } catch (e) {}
   listDevices();
 });
-if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener("devicechange", () => listDevices());
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener("devicechange", () => listDevices().then(keepHeadphones));
+// H198: the call ended up on the Bluetooth headphones' own mic (the first call, before the browser named the
+// devices, or headphones put on during a call): move it to the MacBook's own mic, and in the HQ app bounce the
+// sound to the speakers and back, so the headphones come back in high quality (his workaround, done for him).
+let btFixing = false;
+async function keepHeadphones() {
+  if (btFixing || !IS_MAC || IS_PHONE || !stream || state === "idle" || (devPick("hq-mic") || {}).id) return;
+  const t = stream.getAudioTracks()[0], own = ownMic();
+  if (!t || !own || !BT.test(t.label || "") || OWN_MIC.test(t.label || "")) return;
+  btFixing = true;
+  try {
+    for (let i = 0; i < 60 && state === "connecting"; i++) await sleep(250);  // the swap needs the call up
+    if (!pc || state !== "live") return;
+    await switchMic();
+    const now = stream && stream.getAudioTracks()[0];
+    if (now && !BT.test(now.label || "")) bounceSound();
+  } catch (e) {} finally { btFixing = false; }
+}
+function bounceSound() {
+  try { window.webkit.messageHandlers.hqAudio.postMessage({ do: "bounce" }); } catch (e) {}
+}
 // What the call's getUserMedia asks for: the chosen mic, exactly, else the default.
+// H198: on the Mac with the switch on, no echo cancelling (that's what turns the other sound down), unless her
+// voice plays through the MacBook's own speakers; with the mic on Default and Bluetooth headphones on, the
+// MacBook's own mic, so the headphones never switch to call quality.
 function micAudio(chosen = true) {
-  const a = { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, p = chosen && devPick("hq-mic");
-  if (!p || !p.id) return a;
+  const raw = IS_MAC && !IS_PHONE && keepSound && !onSpeakers();
+  const a = raw ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    : { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, p = chosen && devPick("hq-mic");
+  if (!p || !p.id) {
+    const own = chosen && IS_MAC && !IS_PHONE && btOn() ? ownMic() : null;
+    return own ? { ...a, deviceId: { exact: own.deviceId } } : a;
+  }
   const d = devFind(devOf("audioinput"), p);
   return { ...a, deviceId: { exact: d ? d.deviceId : p.id } };
 }
@@ -3081,7 +3153,7 @@ async function call() {
   try {
     if (!window.isSecureContext || !navigator.mediaDevices) throw new Error("Open this page through the https address.");
     stream = await openMic();  // H106: the mic chosen in Settings
-    listDevices().then(applySink);  // the names are known now; her voice goes where it was chosen
+    listDevices().then(applySink).then(keepHeadphones);  // the names are known now; her voice goes where it was chosen
     pc = new RTCPeerConnection({ iceServers: [] });
     stream.getAudioTracks().forEach(t => pc.addTrack(t, stream));
     dc = pc.createDataChannel("chat", { ordered: true });

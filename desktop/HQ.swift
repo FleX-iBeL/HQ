@@ -10,6 +10,7 @@
 // Built by desktop/build.sh with swiftc (no Xcode project needed).
 import Cocoa
 import WebKit
+import CoreAudio
 import UserNotifications
 
 let SHELL_HEIGHT: CGFloat = 89
@@ -154,12 +155,56 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
     func page(call: Bool = false) -> WKWebView {
         let conf = WKWebViewConfiguration()
         conf.mediaTypesRequiringUserActionForPlayback = []  // her voice plays without an extra click
-        if call { showRealAddress(conf.preferences) }
+        if call {
+            showRealAddress(conf.preferences)
+            conf.userContentController.add(self, name: "hqAudio")  // H198: the call page asks for the sound bounce
+        }
         let v = WKWebView(frame: .zero, configuration: conf)
         v.navigationDelegate = self
         v.uiDelegate = self
         v.allowsBackForwardNavigationGestures = false
         return v
+    }
+
+    // H198: Bluetooth headphones whose own mic was opened stay in call quality (low) until the Mac's sound output
+    // is chosen again. His workaround, done for him: once the call listens with the MacBook's own mic, the sound
+    // goes to the MacBook's speakers for a moment and straight back to the headphones, and they come back in
+    // high quality. Only when the sound is on Bluetooth and the MacBook has speakers of its own.
+    func bounceSound() {
+        func prop(_ sel: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
+            AudioObjectPropertyAddress(mSelector: sel, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+        }
+        func getDefault() -> AudioDeviceID? {
+            var id = AudioDeviceID(0), size = UInt32(MemoryLayout<AudioDeviceID>.size)
+            var a = prop(kAudioHardwarePropertyDefaultOutputDevice)
+            return AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &size, &id) == noErr ? id : nil
+        }
+        func setDefault(_ dev: AudioDeviceID) {
+            var id = dev
+            var a = prop(kAudioHardwarePropertyDefaultOutputDevice)
+            _ = AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &id)
+        }
+        func transport(_ dev: AudioDeviceID) -> UInt32 {
+            var t = UInt32(0), size = UInt32(MemoryLayout<UInt32>.size)
+            var a = prop(kAudioDevicePropertyTransportType)
+            return AudioObjectGetPropertyData(dev, &a, 0, nil, &size, &t) == noErr ? t : 0
+        }
+        func hasOutput(_ dev: AudioDeviceID) -> Bool {
+            var size = UInt32(0)
+            var a = prop(kAudioDevicePropertyStreams, kAudioObjectPropertyScopeOutput)
+            return AudioObjectGetPropertyDataSize(dev, &a, 0, nil, &size) == noErr && size > 0
+        }
+        var size = UInt32(0)
+        var all = prop(kAudioHardwarePropertyDevices)
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &all, 0, nil, &size) == noErr, size > 0 else { return }
+        var devs = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &all, 0, nil, &size, &devs) == noErr else { return }
+        guard let now = getDefault() else { return }
+        let bt = transport(now)
+        guard bt == kAudioDeviceTransportTypeBluetooth || bt == kAudioDeviceTransportTypeBluetoothLE else { return }
+        guard let own = devs.first(where: { transport($0) == kAudioDeviceTransportTypeBuiltIn && hasOutput($0) }) else { return }
+        setDefault(own)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { setDefault(now) }
     }
 
     // H46: calls from the app never connected. Inside an app, WebKit hides this MacBook's network address from
@@ -373,6 +418,10 @@ final class Controller: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
 
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let m = message.body as? [String: Any], let what = m["do"] as? String else { return }
+        if message.name == "hqAudio" {
+            if what == "bounce" { bounceSound() }
+            return
+        }
         switch what {
         case "ready":
             shellReady = true

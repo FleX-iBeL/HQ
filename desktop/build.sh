@@ -12,7 +12,7 @@ OUT="$HQ/scratch/desktop"
 APP="$OUT/HQ.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-swiftc -O -target arm64-apple-macos13 -framework Cocoa -framework WebKit \
+swiftc -O -target arm64-apple-macos13 -framework Cocoa -framework WebKit -framework CoreAudio \
   -o "$APP/Contents/MacOS/HQ" "$HQ/desktop/HQ.swift"
 
 # The icon: HQ's house (H48). H194: drawn once and shipped as desktop/HQ.icns (make_dock_icon.py), so a friend's
