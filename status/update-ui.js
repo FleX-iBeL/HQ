@@ -10,7 +10,7 @@
 //
 //   HQUpdate.mount({ line, banner, busy })   line: where the small grey version goes; banner: where the
 //                                            "a new version" bar goes; busy(): true while on a call (the bar
-//                                            hides then; the update itself waits for the call to end anyway)
+//                                            hides then: an installed update ends a call, H187)
 //   window.hqUpdate.open()                   the changelog
 //   window.hqUpdate.ask()                    Update (on another computer than a Mac: the warning first)
 //   window.hqUpdate.render()                 draw again (the call page calls it when a call starts or ends)

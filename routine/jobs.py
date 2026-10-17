@@ -32,7 +32,8 @@ usage (from the workspace):
                                                            own guess of how many minutes it takes (H168), kept next to
                                                            the computed estimate and, at done, the real time
   python3 "routine/jobs.py" held N                         the job's own chat, when the usage says STOP; the
-                                                           next start carries on from there (H113)
+                                                           next start carries on from there (H113); held N WHY
+                                                           holds it for another reason (H187: an update ended it)
   python3 "routine/jobs.py" resume N                       a job paused for using about twice its estimated usage
                                                            carries on, in its own chat (H172); stop N drops it
   python3 "routine/jobs.py" off | on                       jobs from calls off or on
@@ -549,7 +550,9 @@ def main(argv):
         if cmd in ("done", "held"):
             j = find(jobs, int(args[0]))
             was = j["state"]
-            j["state"] = f"done {now}" if cmd == "done" else "held: usage over the line"
+            # H187: an update that ended the job's chat holds it with its own reason (held N an update ...).
+            why = one_line(" ".join(args[1:])).replace("·", "-") if cmd == "held" else ""
+            j["state"] = f"done {now}" if cmd == "done" else f"held: {why or 'usage over the line'}"
             write(text, jobs, on)
             print(show(j))
             if cmd == "held":

@@ -1026,6 +1026,16 @@ def direct_watch():
             log(f"pings: {e!r}")
 
 
+def updating():
+    """H187: True while update.py installs an update (its run file says updating, its pid lives, under 30 minutes):
+    it ended the job, the mail check and the call, and the routine starts none of them until it's done."""
+    try:
+        u = json.load(open(os.path.join(JV, ".status", "update-run.json")))
+    except (OSError, ValueError):
+        return False
+    return u.get("state") == "updating" and alive(u.get("pid")) and time.time() - u.get("at", 0) < 1800
+
+
 def tick():
     # H56.3: main or backup first. Alone (no other HQ set up) this is main at once, with no network and no line.
     try:
@@ -1085,6 +1095,10 @@ def tick():
         why = "Not on this computer yet: HQ has no window here to run it in (install tmux)"
         routines.beat("mail", state="off", text=why, every=60)
         routines.beat("jobs", state="off", text=why, every=60)
+        return
+    if updating():
+        # H187: an update is being installed; it ended what ran and starts nothing until the new code is in.
+        routines.beat("jobs", state="waiting", text="Waiting for the update to finish", every=60)
         return
     try:
         mail(q, start_new=not handing_back)  # H30: on its own, also while a job runs

@@ -6538,22 +6538,21 @@ print(json.dumps(o))
             s = upd("status")
             need(s["version"] == "0.3" and not s["available"] and s["latest"] == "0.3", f"after the update it isn't the latest: {s}")
             need("updating" not in s["run"]["state"], "the update still says it's running")
-            # A call on: the next update waits, says so, and starts by itself when the call ends.
+            # A call on: since H187 the update doesn't wait for it (flow 108 ends the call and restarts everything).
             (up / "app/hello.txt").write_text("new in 0.3.1\n")
             g(up, "commit", "-qam", "0.3.1"); g(up, "tag", "-a", "v0.3.1", "-m", "HQ 0.3.1")
             need(upd("check", "--force")["available"], "the check doesn't see v0.3.1")
             busy["calls"] = 1
             upd("start")
-            s = wait_run(lambda r: "call to end" in (r.get("step") or ""), 30)
-            need(g(me, "describe", "--tags") == "v0.3", "the update went ahead during a call")
-            busy["calls"] = 0
             s = wait_run(lambda r: r.get("state") in ("done", "failed"), 60)
-            need(s["run"]["state"] == "done" and g(me, "describe", "--tags") == "v0.3.1", f"it didn't update once the call ended: {s['run']}")
+            need(s["run"]["state"] == "done" and g(me, "describe", "--tags") == "v0.3.1", f"it didn't update with a call on: {s['run']}")
+            need(not any("call to end" in str(v) for v in s["run"].values()), "the update still waited for the call")
+            busy["calls"] = 0
             need((me / "local/open-window.ps1").exists(), "local/ didn't survive the second update")
         finally:
             srv.shutdown()
         return ("sees v0.3 and what's new; offline quiet; Update saves changes on a backup branch, moves to v0.3, "
-                "local/ and workspace kept, note for their Claude (not a Mac); waits for a call to end, then updates")
+                "local/ and workspace kept, note for their Claude (not a Mac); with a call on it doesn't wait (H187)")
 
     # 57
     async def flow57(self) -> str:
@@ -10080,13 +10079,16 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
 
     # 108
     async def flow108(self) -> str:
-        """H187: an update restarts every background part whose code changed, by exact pid, so nothing needs a
-        reboot. A made-up HQ in a folder (as flow 56) with a stand-in call line (app/bot.py) and status server
-        (status/server.mjs), both small Python servers on their own ports, and a decoy whose command line also says
-        app/bot.py. A change to the docs restarts nothing; a change to their code restarts both on new pids, the
-        decoy untouched; with a call on, the call line waits until the call ends; the whole update runs the new
-        version's own restart rules; a part that doesn't come back is on the to-do list, not counted as restarted.
-        On a Mac and on Linux (there in their own systemd scopes)."""
+        """H187: an installed update forces everything out and restarts every background part, so nothing needs a
+        reboot ("no if they update they must be forced out of everything and then get the reboot"). A made-up HQ in
+        a folder (as flow 56) with a stand-in call line (app/bot.py) and status server (status/server.mjs), both
+        small Python servers on their own ports, a decoy whose command line also says app/bot.py, and stand-in job
+        and mail check windows (a script with a child, as the routine's). Even a docs change restarts both on new
+        pids, the decoy untouched; with a call on and a job and a mail check running, it doesn't wait: their whole
+        trees are ended by exact pid, the job is held to carry on by itself, the mail check comes again within a
+        minute; the whole update runs the new version's own rules; a part that doesn't come back is on the to-do
+        list, not counted as restarted. On Linux also the routine's and the watchdog's timers (stand-ins of this
+        flow's own), in their own systemd scopes; on a Mac the real helper and watchdog are left alone."""
         import subprocess as sp
         import http.server, socket, socketserver, threading
         base = self.tmp / "h187"
@@ -10095,8 +10097,10 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             shutil.rmtree(base)
         for d in ("routine", "app", "status"):
             (up / d).mkdir(parents=True)
-        for f in ("routine/update.py", "routine/hqpaths.py", ".gitignore"):
-            shutil.copy(ROOT / f, up / f)
+        # The whole routine folder: jobs.py holds the stand-in job, with what it imports.
+        shutil.rmtree(up / "routine")
+        shutil.copytree(ROOT / "routine", up / "routine", ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copy(ROOT / ".gitignore", up / ".gitignore")
         server = ("import http.server, os, socketserver\n"
                   "class H(http.server.BaseHTTPRequestHandler):\n"
                   "    def do_GET(self):\n        self.send_response(200); self.end_headers(); self.wfile.write(b'ok')\n"
@@ -10133,7 +10137,8 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 return s.getsockname()[1]
         cport, sport = free(), free()
         rm = self.tmp / "roadmap-H187.md"
-        rm.write_text("# test\n\n## The queue\n\n**Routine:** on\n")
+        rm.write_text("# test\n\n## The queue\n\n**Routine:** on\n\n"
+                      "- Job 7 · running since 11:00 · agreed 2026-10-17 10:59 · A stand-in job, for flow 108.\n")
         busy = {"calls": 0}
         class H(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
@@ -10144,10 +10149,45 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         srv = socketserver.TCPServer(("127.0.0.1", 0), H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         env = {**os.environ, "HQ_UPDATE_URL": str(up), "HQ_ROADMAP": str(rm), "HQ_PORT": str(cport),
-               "HQ_STATUS_PORT": str(sport), "HQ_UPDATE_POLL": "0.5", "HQ_UNIT": "hqflow108", "HQ_NO_PHONE": "1",
+               "HQ_STATUS_PORT": str(sport), "HQ_UNIT": "hqflow108", "HQ_NO_PHONE": "1", "HQ_ROLE_HERE": "1",
                "HQ_CALL_URL": f"http://127.0.0.1:{srv.server_address[1]}"}
-        for k in ("HQ_LOCAL", "HQ_UPDATE_RESTART", "HQ_PLATFORM"):
+        for k in ("HQ_LOCAL", "HQ_UPDATE_RESTART", "HQ_PLATFORM", "HQ_UPDATE_ROUTINE"):
             env.pop(k, None)
+        mac = sys.platform == "darwin"
+        udir = Path.home() / ".config/systemd/user"
+        timers = ["hqflow108-routine.timer", "hqflow108-watchdog.timer"]
+        linux_units = not mac and bool(os.environ.get("XDG_RUNTIME_DIR")) and bool(shutil.which("systemctl"))
+        if not linux_units:
+            env["HQ_UPDATE_ROUTINE"] = "0"  # never the real helper and watchdog of the computer running the flow
+        else:
+            udir.mkdir(parents=True, exist_ok=True)
+            for t in timers:
+                svc = t.replace(".timer", ".service")
+                (udir / svc).write_text("[Service]\nType=oneshot\nExecStart=/bin/true\n")
+                (udir / t).write_text(f"[Timer]\nOnCalendar=*-*-* 03:33:00\nUnit={svc}\n")
+            sp.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+            sp.run(["systemctl", "--user", "start", *timers], capture_output=True)
+        def since(t):
+            return sp.run(["systemctl", "--user", "show", "-p", "ActiveEnterTimestampMonotonic", "--value", t],
+                          capture_output=True, text=True).stdout.strip()
+        run_dir = me / "scratch/routine"
+        def window(name):
+            """A stand-in window: a script whose child sleeps, as a job's chat under its window's script."""
+            run_dir.mkdir(parents=True, exist_ok=True)
+            w = sp.Popen(["sh", "-c", "sleep 600 & wait"], start_new_session=True)
+            (run_dir / f"{name}.json").write_text(json.dumps({"n": 7, "pid": w.pid, "started": time.time() - 300}))
+            end = time.time() + 5
+            while time.time() < end and not sp.run(["pgrep", "-P", str(w.pid)], capture_output=True).stdout.strip():
+                time.sleep(0.1)
+            kid = int(sp.run(["pgrep", "-P", str(w.pid)], capture_output=True, text=True).stdout.split()[0])
+            return w, kid
+        def alive(pid):
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return False
+            st = sp.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+            return bool(st) and not st.startswith("Z")
         upd_py = str(me / "routine/update.py")
         def upd(*a, stdin=None):
             r = sp.run(["python3", upd_py, *a], capture_output=True, text=True, env=env, timeout=300, input=stdin)
@@ -10172,30 +10212,34 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 need(sp.run([str(me / f)], env=env, capture_output=True, timeout=30).returncode == 0, f"{f} didn't start")
             c0, s0 = pids()
             need(c0 and s0 and c0 != decoy.pid, f"the stand-ins aren't found by their exact pid: {c0}, {s0}")
-            # Only the docs changed: nothing restarts.
-            r = restart(["README.md", "CHANGELOG.md"])
-            need(pids() == (c0, s0) and not r["todo"] and any("left running" in d for d in r["done"]),
-                 f"a docs change restarted something: {r}")
-            # Their code changed, with a call on: the call line waits until the call ends.
+            # Only the docs changed, with a call on, a job and a mail check running: no waiting, everything out,
+            # everything restarted on new pids.
             busy["calls"] = 1
-            p = sp.Popen(["python3", upd_py, "restart"], stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, text=True, env=env)
-            p.stdin.write(json.dumps({"changed": ["app/bot.py", "routine/hqpaths.py", "status/server.mjs"],
-                                      "was": {"call": True, "status": True}}))
-            p.stdin.close()
-            time.sleep(3)
-            need(p.poll() is None and pids()[0] == c0, "the call line was restarted during a call")
-            need("call to end" in upd("status")["run"].get("step", ""), "the page doesn't say it waits for the call")
-            busy["calls"] = 0
-            p.wait(180)
-            out, err = p.stdout.read(), p.stderr.read()
-            r = json.loads(out.strip().splitlines()[-1])
+            jw, jkid = window("job")
+            mw, mkid = window("mail")
+            t0 = [since(t) for t in timers] if linux_units else []
+            began = time.time()
+            r = restart(["README.md", "CHANGELOG.md"])
+            need(time.time() - began < 60, f"the restart waited ({time.time() - began:.0f} s)")
+            jw.wait(5); mw.wait(5)
+            need(not alive(jkid) and not alive(mkid), "the job's or the mail check's chat (the window's child) still runs")
+            need(not (run_dir / "job.json").exists() and not (run_dir / "mail.json").exists(), "the routine's files of what ran are still there")
+            need(json.loads((run_dir / "mail-retry").read_text()).get("n") == 0, "the mail check isn't asked to run again")
+            need("held: an update was installed" in rm.read_text(), f"the job isn't held to carry on: {rm.read_text()[-200:]}")
+            need(any("ended job 7's chat" in d for d in r["done"]) and any("ended the mail check" in d for d in r["done"]),
+                 f"what it did doesn't say it ended the job and the mail check: {r}")
             c1, s1 = pids()
-            need(c1 and s1 and c1 != c0 and s1 != s0, f"not restarted on new pids: {(c0, s0)} → {(c1, s1)}; {r} {err[-300:]}")
+            need(c1 and s1 and c1 != c0 and s1 != s0, f"not restarted on new pids: {(c0, s0)} → {(c1, s1)}; {r}")
             need(not any(str(me) in sp.run(["ps", "-o", "command=", "-p", str(x)], capture_output=True, text=True).stdout
                          for x in (c0, s0)), "an old process is still there")
             need(any(f"{c0} → {c1}" in d for d in r["done"]) and any(f"{s0} → {s1}" in d for d in r["done"]) and not r["todo"],
                  f"what it did doesn't say the pids: {r}")
             need(decoy.poll() is None, "the decoy with app/bot.py in its command line was stopped")
+            if linux_units:
+                need(all(b and a != b for a, b in zip(t0, [since(t) for t in timers]))
+                     and any("hqflow108-routine.timer" in d for d in r["done"]),
+                     f"the routine's and the watchdog's timers weren't restarted: {r}")
+            busy["calls"] = 0
             # The whole update, with the new version's own restart rules (v0.3 marks them).
             (up / "app/bot.py").write_text((up / "app/bot.py").read_text().replace("v0.2", "v0.3"))
             u = (up / "routine/update.py").read_text()
@@ -10208,9 +10252,9 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             s = wait_run(lambda x: x.get("state") in ("done", "failed"))
             c2, s2 = pids()
             need(s["run"]["state"] == "done" and "new rules (flow 108)" in s["run"]["done"], f"the update didn't use the new rules: {s['run']}")
-            need(c2 != c1 and s2 == s1 and any(f"{c1} → {c2}" in d for d in s["run"]["done"])
-                 and any("status page's code didn't change" in d for d in s["run"]["done"]),
-                 f"the update didn't restart just the call line: {s['run']}")
+            need(c2 != c1 and s2 != s1 and any(f"{c1} → {c2}" in d for d in s["run"]["done"])
+                 and any(f"{s1} → {s2}" in d for d in s["run"]["done"]),
+                 f"the update didn't restart the call line and the status page: {s['run']}")
             need("v0.3" in (me / "app/bot.py").read_text(), "HQ isn't on v0.3")
             # A part that doesn't come back is on the to-do list, never counted as restarted.
             for name in ("start.sh", "start-linux.sh"):
@@ -10227,6 +10271,12 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         finally:
             srv.shutdown()
             decoy.kill()
+            if linux_units:
+                sp.run(["systemctl", "--user", "stop", *timers], capture_output=True)
+                for t in timers:
+                    for f in (t, t.replace(".timer", ".service")):
+                        (udir / f).unlink(missing_ok=True)
+                sp.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
             # Only the stand-ins of this flow, by exact pid (their command line is in this flow's folder).
             try:
                 left = json.loads(sp.run(["python3", upd_py, "parts"], capture_output=True, text=True, env=env).stdout)
@@ -10239,9 +10289,10 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                         os.kill(pid, 9)
                     except OSError:
                         pass
-        return ("a docs change restarts nothing; a code change restarts the call line and the status page on new pids "
-                "(the decoy untouched), the call line only after the call; the whole update uses the new version's rules; "
-                "one that doesn't come back is on the to-do list")
+        return ("an update doesn't wait: a call, a job and a mail check are ended by exact pid (the job held to carry on), "
+                "the call line and the status page restart on new pids even for a docs change (the decoy untouched)"
+                + (", the routine's and the watchdog's timers too" if linux_units else "")
+                + "; the whole update uses the new version's rules; one that doesn't come back is on the to-do list")
 
 
     async def flow101(self) -> str:
@@ -12004,7 +12055,7 @@ FLOWS = {
     53: ("H57: a button for every past call: the list, one call read only", False, "flow53"),
     54: ("H61: estimated time to completion for each job and the whole list, learning from real times; H167: the size of the work; H168: the team's own guess; H172: its usage; H173: from its own tokens; H174: the totals say what they count; H176: where the usage will land; H177: the moving line then; H181: one-off and with the repeating work", False, "flow54"),
     55: ("F14: her voice off also silences the thinking tick, the talk sound and the click", False, "flow55"),
-    56: ("H59: an update to a fake newer version: backup, local/ kept, note for Claude, waits for a call", False, "flow56"),
+    56: ("H59: an update to a fake newer version: backup, local/ kept, note for Claude, no waiting for a call (H187)", False, "flow56"),
     57: ("H59: the version, the new-version bar, the changelog and the warning off a Mac, on every page", False, "flow57"),
     58: ("H60: continue an earlier call: Continue in Past calls, the greeting, the earlier call as context", True, "flow58"),
     59: ("H62: after a crash the job runs again, first in line, picking up where it left off", False, "flow59"),
@@ -12056,7 +12107,7 @@ FLOWS = {
     105: ("H149: mail more often for a while he names: his words as an end time, every quarter until then, hourly again by itself", False, "flow105"),
     106: ("H160, H182, H183: the team's work from the status page: an open roadmap item sent to the team, move and cancel, without a call; add-row for calls; the repeating rows in Maintenance", False, "flow106"),
     107: ("H184: the laptop's status page shows the server's usage when it's newer, its own when the server can't be reached", False, "flow107"),
-    108: ("H187: an update restarts every background part whose code changed, by exact pid, never during a call, with the new version's rules", False, "flow108"),
+    108: ("H187: an update ends what runs (a call, a job, the mail check) and restarts every background part, by exact pid, with the new version's rules", False, "flow108"),
 }
 
 
