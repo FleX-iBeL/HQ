@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 0.4.4 · 17 October 2026
+
 ### Added
 - Modern 2, a second look to pick in Settings (Look: Modern or Modern 2, kept on the device; Modern stays until you pick). Made for ease of use: the Call button wide and low, right above the bar at the bottom where your thumb is; Mute above Hang up on a call; the picked agent marked with a tick; the open button in the bar in a soft pill; every sheet with a clear title and a round close; past calls, the calendar, notes, the weather and Settings as white cards on a soft grey, with bigger buttons and a visible focus ring for the keyboard. The status page and Donna's chat follow it when opened from the app (H185).
 - Links you can tap. A web address in her text opens with one tap in the call's chat, in past calls and in Donna's chat, on the phone, the phone version and in the Mac app (a new tab, or your browser from the app, so the call goes on); she can also give it as a few words that are the link. Your own links work too. Only web links (https and http), and the voice never reads one out (H170).
