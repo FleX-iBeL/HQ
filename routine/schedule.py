@@ -42,7 +42,8 @@ was held back for days doesn't pile up: only the next time ahead is planned. Can
 repeating; "every N off" stops it but keeps that one.
 
 usage (from the workspace):
-  python3 "routine/schedule.py" add "WHEN" "TEXT" [--past-the-line] [--kind K] [--priority] [--every R]   plan an item
+  python3 "routine/schedule.py" add "WHEN" "TEXT" [--past-the-line] [--kind K] [--priority] [--every R] [--guess MINUTES]   plan an item
+        --guess MINUTES (H190): the call's own guess, kept apart from the first look's (started in the background)
         --priority: the priority tag (H99): at its time it goes ahead of the waiting jobs
         --every R (H171): it repeats: R is day (daily) or a weekday (saturday), or week (the weekday of WHEN)
         WHEN: 2026-10-13 15:00 · today 15:00 · tomorrow 9:30 · tuesday 15:00 (the next one) · 2:00 (the next
@@ -396,12 +397,15 @@ def main(argv):
             return
         if cmd == "add":
             past = "--past-the-line" in args
-            rest, kind, every, skip = [], None, None, False
+            rest, kind, every, skip, guess = [], None, None, False, None
             for k, a in enumerate(args):  # H95: --kind for its estimate, as for a job (H70)
                 if skip:
                     skip = False
                 elif a == "--kind" or a.startswith("--kind="):
                     kind = a.split("=", 1)[1] if "=" in a else (args[k + 1] if k + 1 < len(args) else "")
+                    skip = "=" not in a
+                elif a == "--guess" or a.startswith("--guess="):  # H190: the call's own guess
+                    guess = a.split("=", 1)[1] if "=" in a else (args[k + 1] if k + 1 < len(args) else "")
                     skip = "=" not in a
                 elif a == "--every" or a.startswith("--every="):  # H171
                     every = a.split("=", 1)[1] if "=" in a else (args[k + 1] if k + 1 < len(args) else "")
@@ -413,6 +417,11 @@ def main(argv):
                 import estimate as est_
                 if kind not in est_.KINDS:
                     sys.exit(f"--kind is one of: {', '.join(est_.KINDS)}.")
+            if guess is not None:
+                import estimate as est_
+                if not re.fullmatch(r"\d+", guess.strip()) or not 1 <= int(guess) <= est_.GUESS_MAX:
+                    sys.exit(f"--guess is whole minutes, between 1 and {est_.GUESS_MAX}.")
+                guess = int(guess)
             if len(rest) < 2 or not jobs.one_line(" ".join(rest[1:])):
                 sys.exit('Usage: add "WHEN" "TEXT" [--past-the-line] [--kind K] [--priority] [--every R], for example: add "tuesday 15:00" "Build ..." --kind build')
             at = when(rest[0].split())
@@ -428,7 +437,8 @@ def main(argv):
                     "added": time.strftime(FMT), "text": jobs.one_line(" ".join(rest[1:])).replace("·", "-")}
             items.append(item)
             write(text, items)
-            estimate("item_on_add", n, item["text"], kind)
+            estimate("item_on_add", n, item["text"], kind, guess)
+            looks = estimate("look_later", "item", n, item["text"])  # H190: the first look, in the background
             busy = any(jobs.open_job(j) for j in queue)  # F37: a parked job doesn't count
             after = (" Its time has come; it starts once the job list is empty." if due(item)
                      else " It starts then, once the job list is empty.")
@@ -445,7 +455,8 @@ def main(argv):
             except Exception:
                 w = ""
             rp = f" It repeats {say_every(every)}: each time it becomes a job, the next one is planned by itself." if every else ""
-            print(f"Item {n} is planned for {say_when(item['at'])}.{after}{rp}" + (f"\nEstimate: {w}" if w else ""))
+            lk = " A first look at it is on its way." if looks else ""
+            print(f"Item {n} is planned for {say_when(item['at'])}.{after}{rp}{lk}" + (f"\nEstimate: {w}" if w else ""))
             return
         if cmd in ("cancel", "move", "priority", "every"):
             if not args or not args[0].isdigit():

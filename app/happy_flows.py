@@ -6092,6 +6092,107 @@ print(json.dumps(o))
         need(abs(o8["short"]["bias"] - 2) < 0.15 and 18 <= o8["short_w"] <= 21, f"H168: guesses that run short aren't corrected: {o8['short']} {o8['short_w']}")
         need(o8["none"] == 10, "H168: a job without a guess doesn't keep its computed estimate")
         need("From 5 guessed jobs on" in o8["words"][0] and "takes the guess in for" in o8["words"][1], f"H168: the guesses' words: {o8['words']}")
+        # H190: the team's guess from the start. A first look (made up here: HQ_LOOK_FAKE) when a job is added or an item
+        # planned, in the background; a call's own --guess; a new look when the words change, never on a move or a new time;
+        # the team's guess at its start still counts; each kept apart, each with its own record.
+        envL = {**env, "HQ_LOOK_FAKE": "12"}
+        def jobsL(*a, ok=True, look="12"):
+            r = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env={**envL, "HQ_LOOK_FAKE": look})
+            need((r.returncode == 0) == ok, f"jobs.py {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
+            return r.stdout + r.stderr
+        def estL(*a, look="12"):
+            r = sp.run(["python3", str(jv / "routine/estimate.py"), *a], capture_output=True, text=True, env={**envL, "HQ_LOOK_FAKE": look})
+            need(r.returncode == 0, f"estimate.py {' '.join(a)}: {r.stderr.strip()}")
+            return r.stdout
+        def kept(n, key, want, store="job-estimates.json"):
+            for _ in range(60):
+                try:
+                    e = json.loads((est_dir / store).read_text()).get(str(n)) or {}
+                except ValueError:
+                    e = {}
+                if e.get(key) == want and not e.get("look_pending"):
+                    return e
+                time.sleep(0.25)
+            need(False, f"H190: {store} {n} doesn't get {key} {want}: {e}")
+        nl = jobs("add", "Build H9, flow 54, no look in a test copy")
+        need("first look" not in nl, "H190: a test copy starts a real look")
+        jobs("mark", nl.split()[1], "cancelled 12:00")
+        jobsL("add", "Build H9, flow 54, the first look", "--guess", "0", ok=False)
+        jobsL("add", "Build H9, flow 54, the first look", "--guess=soon", ok=False)
+        t0 = time.time()
+        a9 = jobsL("add", "Build H9, flow 54, the first look", "--kind=build", "--guess", "30")
+        need(time.time() - t0 < 5 and "the call guessed 30 min" in a9 and "A first look at it is on its way" in a9, f"H190: add with --guess: {a9}")
+        n9 = int(a9.split()[1])
+        e9 = kept(n9, "guess_look", 12)
+        need(e9.get("guess_call") == 30 and "guess" not in e9 and e9.get("look_fp"), f"H190: the call's and the look's guesses aren't kept apart: {e9}")
+        lst = jobsL("list")
+        need("the first look guessed 12 min, the call guessed 30 min" in lst, f"H190: list doesn't show the guesses: {lst[-1500:]}")
+        p9 = json.loads(estL("plan"))["jobs"][str(n9)]
+        need(p9.get("guess_look") == 12 and p9.get("guess_call") == 30, f"H190: the plan doesn't carry a waiting job's guesses: {p9}")
+        jobsL("move", str(n9), "top")
+        need("Nothing to look at again" in estL("relook", look="40"), "H190: a move starts a new look")
+        rmt = rm.read_text()
+        rm.write_text(rmt.replace("Build H9, flow 54, the first look", "Build H9, flow 54, the first look, other words"))
+        need(f"job {n9}" in estL("relook", look="25"), "H190: changed words don't start a new look")
+        need("Nothing to look at again" in estL("relook", look="40"), "H190: a look on its way is started twice")
+        kept(n9, "guess_look", 25)
+        need("Nothing to look at again" in estL("relook", look="40"), "H190: the same words are looked at again")
+        a10 = jobsL("add-row", "flow 54 an added row, H190", "--guess", "9")
+        n10 = int(re.search(r"Job (\d+) is ready", a10).group(1))
+        need(json.loads((est_dir / "job-estimates.json").read_text())[str(n10)].get("guess_call") == 9, f"H190: add-row doesn't pass --guess: {a10}")
+        kept(n10, "guess_look", 12)
+        def schedL(*a, ok=True):
+            r = sp.run(["python3", str(jv / "routine/schedule.py"), *a], capture_output=True, text=True, env=envL)
+            need((r.returncode == 0) == ok, f"schedule.py {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
+            return r.stdout + r.stderr
+        schedL("add", "tomorrow 9:00", "Build H9 item, flow 54", "--guess", "0", ok=False)
+        s9 = schedL("add", "tomorrow 9:00", "Build H9 item, flow 54", "--kind", "build", "--guess", "7", "--every", "day")
+        need("A first look at it is on its way" in s9 and "the call guessed 7 min" in s9, f"H190: schedule add with --guess: {s9}")
+        i9 = int(s9.split()[1])
+        ie = kept(i9, "guess_look", 12, "schedule-kinds.json")
+        need(ie.get("guess_call") == 7, f"H190: the item's call guess isn't kept: {ie}")
+        schedL("move", str(i9), "tomorrow 10:00")
+        need("Nothing to look at again" in estL("relook", look="40"), "H190: another time starts a new look")
+        r190 = sp.run(["python3", "-c", """
+import sys, json; sys.path.insert(0, sys.argv[1]); import estimate as E
+i, txt = int(sys.argv[2]), "Build H9 item, flow 54"
+E.item_repeat(i, 9001, txt)                                   # the next one of a repeating item: the same guesses
+nxt = E._load_items().get("9001") or {}
+e = E.item_on_job(i, txt, 9002, "Scheduled item %d, planned for tomorrow: %s" % (i, txt))   # the item becomes a job
+st = E._load_state().get("9002") or {}
+E.item_forget(9001); s = E._load_state(); s.pop("9002", None); E._save_state(s)
+line = lambda i, est, actual, **g: {"n": i, "kind": "build", "est": est, "actual": actual, "done": i, "how": "seen", "machine": "vps", **g}
+hist = [line(k, 10, 20, guess_look=20, guess=40) for k in range(8)]
+fits = E.guess_fits(hist)
+o = {"next": nxt, "job": st, "fp_same": st.get("look_fp") == E.fingerprint("Scheduled item %d, planned for tomorrow: %s" % (i, txt)),
+     "look_ready": fits["guess_look"]["ready"], "look_bias": fits["guess_look"].get("bias"), "team_bias": fits["guess"].get("bias"),
+     "pick_team": E.pick_guess({"guess": 40, "guess_look": 20}, fits)[1], "pick_look": E.pick_guess({"guess_look": 20, "guess_call": 5}, fits)[1],
+     "pick_none": E.pick_guess({"guess_call": 5}, fits)[0], "words": E.guesses_words(fits)}
+print(json.dumps(o))
+""", str(jv / "routine"), str(i9)], capture_output=True, text=True, env=env)
+        need(r190.returncode == 0, f"H190: the guesses check didn't run: {r190.stderr[-600:]}")
+        o9 = json.loads(r190.stdout)
+        need(o9["next"].get("guess_look") == 12 and o9["next"].get("guess_call") == 7, f"H190: a repeating item's next one doesn't keep the guesses: {o9['next']}")
+        need(o9["job"].get("guess_look") == 12 and o9["job"].get("guess_call") == 7 and o9["fp_same"], f"H190: an item's guesses don't go with its job: {o9['job']}")
+        need(o9["look_ready"] and abs(o9["look_bias"] - 1) < 0.01 and abs(o9["team_bias"] - 0.5) < 0.01, f"H190: each guess doesn't learn on its own: {o9}")
+        need(o9["pick_team"] == "guess" and o9["pick_look"] == "guess_look" and o9["pick_none"] is None, f"H190: the guess taken in: {o9}")
+        need("The first looks (last 8 jobs" in o9["words"] and "The team's own guesses (last 8" in o9["words"], f"H190: the guesses' words: {o9['words']}")
+        jobsL("mark", str(n9), "running since " + time.strftime("%H:%M"))
+        jobsL("guess", str(n9), "40")
+        e9 = json.loads((est_dir / "job-estimates.json").read_text())[str(n9)]
+        need(e9.get("guess") == 40 and e9.get("guess_look") == 25 and e9.get("guess_call") == 30, f"H190: the team's guess doesn't stay apart: {e9}")
+        jobsL("done", str(n9))
+        last = json.loads((est_dir / "job-estimates-history.jsonl").read_text().splitlines()[-1])
+        need(last["n"] == n9 and last.get("guess") == 40 and last.get("guess_look") == 25 and last.get("guess_call") == 30,
+             f"H190: the finished line doesn't keep the three guesses apart: {last}")
+        need("the first look guessed 25 min, the call guessed 30 min, the team guessed 40 min" in jobsL("list"), "H190: a finished job's line doesn't show its guesses")
+        need((est_dir / "job-estimates-looks.jsonl").exists() and "looks, 0.0000 dollars" in estL("looks"), "H190: the looks aren't kept with their cost")
+        jobsL("mark", str(n10), "cancelled 12:00")
+        schedL("cancel", str(i9))
+        need("estimate.relook(log=log)" in (jv / "routine/tick.py").read_text(), "H190: the routine doesn't look again on changed words")
+        cfg = (jv / "app/config.py").read_text()
+        need(cfg.count("--guess") >= 3, "H190: the call rules don't pass the call's own guess")
+        need("GUESS_WHO" in page and "First look" in page and "guessLine(routines?.estimate?.items" in page, "H190: the status page doesn't show the guesses")
         need(real.exists() == (before is not None) and (before is None or real.read_text() == before),
              "the test touched the real estimates history")
         # H172: usage that keeps itself in check. Each job's real usage (start, every minute, done; a reset in between

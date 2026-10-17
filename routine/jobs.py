@@ -14,9 +14,12 @@ The waiting jobs (ready or held) run in the order they stand on the list, top fi
 a new job goes at the bottom, and "move" changes its place. The job numbers never change.
 
 usage (from the workspace):
-  python3 "routine/jobs.py" add "TEXT" [--past-the-line] [--kind K]   a call's let's go: the job is ready;
-                                                           K (transcribe, big, call, build, other) sets the
-                                                           kind for its estimate instead of the guess (H70)
+  python3 "routine/jobs.py" add "TEXT" [--past-the-line] [--kind K] [--guess MINUTES]   a call's let's go: the
+                                                           job is ready; K (transcribe, big, call, build, other) sets
+                                                           the kind for its estimate instead of the guess (H70);
+                                                           MINUTES is the call's own guess (H190), kept apart from the
+                                                           first look's (a small Claude look, started in the
+                                                           background) and the team's at its start
   python3 "routine/jobs.py" add-row "TEXT" [--bug] [--kind K]   the status page (H160): a numbered roadmap row first
                                                            (F with --bug, else H), then a job that reads that row
   python3 "routine/jobs.py" send-row LABEL                 the status page (H182): an open roadmap item (⬜, not in
@@ -292,7 +295,8 @@ def with_estimates(jobs):
     try:
         import estimate as est
         p = est.plan()
-    except Exception:
+    except Exception as e:
+        print(f"(The estimates couldn't be read: {e!r})", file=sys.stderr)
         return show_all(jobs)
     lines = []
     gn, why = gate_words()
@@ -373,9 +377,9 @@ def main(argv):
             words, extra = [], []
             it = iter(a for a in args if a != "--bug")
             for a in it:
-                if a == "--kind":
+                if a in ("--kind", "--guess"):  # H190: --guess goes on to add
                     extra += [a, next(it, "")]
-                elif a.startswith("--kind="):
+                elif a.startswith(("--kind=", "--guess=")):
                     extra.append(a)
                 else:
                     words.append(a)
@@ -407,6 +411,16 @@ def main(argv):
         if cmd == "add":
             past = "--past-the-line" in args
             words = [a for a in args if a != "--past-the-line"]
+            guess = None  # H190: the call's own guess in minutes, kept apart from the look's and the team's
+            for i, a in enumerate(words):
+                if a == "--guess" or a.startswith("--guess="):
+                    g = a.split("=", 1)[1] if "=" in a else (words[i + 1] if i + 1 < len(words) else "")
+                    words = words[:i] + words[i + (1 if "=" in a else 2):]
+                    import estimate as est_
+                    if not re.fullmatch(r"\d+", g.strip()) or not 1 <= int(g) <= est_.GUESS_MAX:
+                        sys.exit(f"--guess is whole minutes, between 1 and {est_.GUESS_MAX}.")
+                    guess = int(g)
+                    break
             kind = None  # H70: the kind for its estimate, given by the call; wins over the guess
             for i, a in enumerate(words):
                 if a == "--kind" or a.startswith("--kind="):
@@ -425,7 +439,8 @@ def main(argv):
                  "text": one_line(" ".join(words)).replace("·", "-")}
             jobs.append(j)
             write(text, jobs, on)
-            e = estimate("on_add", n, j["text"], kind)
+            e = estimate("on_add", n, j["text"], kind, None, guess)
+            looks = estimate("look_later", "job", n, j["text"])  # H190: the first look, in the background
             waiting = [x for x in line_up(jobs) if x["n"] != n]
             busy = any(x["state"].startswith(("running", "stop asked")) for x in jobs)
             if not on:
@@ -435,7 +450,9 @@ def main(argv):
             else:
                 after = " The routine starts it within about a minute."
             if e:
-                after += f" Estimate: about {e['est']} min."
+                after += f" Estimate: about {e['est']} min" + (f", the call guessed {guess} min" if guess else "") + "."
+            if looks:
+                after += " A first look at it is on its way."
             print(f"Job {n} is ready.{after}")
             return
         if cmd in ("mail-on", "mail-off"):

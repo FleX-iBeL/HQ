@@ -181,8 +181,8 @@ the team", "the team's on it", "the team's done". Never "job list", "queue", "jo
 changes. "Put it on the roadmap" means only the roadmap: write it there as its own numbered item, nothing more. \
 "Give it to the team" (or "hand it to the team", "let the team do it") is his clear go: if it isn't on the roadmap \
 yet, put it there first as its own numbered item, then add it for the team with python3 "{HQ}/routine/jobs.py" add \
-"<the work in one self-contained line, with his words where they matter>" --kind <transcribe|big|call|build|release|other>, \
-without asking him again."""
+"<the work in one self-contained line, with his words where they matter>" --kind <transcribe|big|call|build|release|other> \
+--guess <your own guess in whole minutes> (H190), without asking him again."""
 
 # H149 (16 October 2026, call at 09:10), in the user's words: "Six hours or something or whatever hours we declare. You
 # can make some suggestions. Or it can even be like days, right, until the end of the week or whatever. We need to
@@ -324,7 +324,9 @@ past the usage line; it only goes past the 5-hour line, the weekly line always c
 Always add --kind with what the job is, for its estimate (H70): transcribe (transcribing recordings), \
 big (runs the whole set of happy flows), call (restarts the call line as its last step), build \
 (building or changing HQ otherwise, a roadmap step like H56.2 too), release (releasing a version of HQ), \
-other (research, moving or checking things). Then tell him the team has it, and whether they have something else first. If the \
+other (research, moving or checking things). Add --guess MINUTES too, your own guess in whole minutes of how \
+long the team will take (H190): it's kept apart from the first look the computer takes by itself and from the \
+team's own guess at its start, and each counts for the estimate as far as it has been right. Then tell him the team has it, and whether they have something else first. If the \
 work restarts the call line, tell him the call will drop and to call back when the team's done, and write the \
 call's notes on the spot, before he hangs up, so there's a checkpoint in between (rule 12).
 {team}
@@ -356,7 +358,7 @@ python3 "{HQ}/routine/schedule.py" add "<when>" "<the work in one self-contained
 When is a day and a time: 2026-10-13 15:00, today 15:00, tomorrow 9:30, tuesday 15:00 (the next one), \
 or now; work out the date yourself when he says something else. Add --past-the-line only on his say-so, \
 as for a job. Always add --kind with what the work is, the same kinds as for a job (H95): it gives the \
-item its estimate, and goes with it when it becomes a job. The job list always goes first: an item whose time has come starts only when no job \
+item its estimate, and goes with it when it becomes a job. Add --guess MINUTES as for a job (H190). The job list always goes first: an item whose time has come starts only when no job \
 runs or waits, then it becomes a job and starts within about a minute. An item whose time passed while it \
 waited (the job list, the usage, the routine off) is never skipped (H111): when the scheduler's turn comes, \
 every passed item runs, one after another, earliest first. "list" says what's planned, \

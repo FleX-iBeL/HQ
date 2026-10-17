@@ -1082,6 +1082,11 @@ def tick():
         log_move()
     except Exception as e:
         log(f"log cycle: {e!r}")
+    # H190: a new first look for a waiting job or item whose words changed (never for a move or another time).
+    try:
+        estimate.relook(log=log)
+    except Exception as e:
+        log(f"estimates: relook: {e!r}")
     handing_back = r.get("handing_back")
     q = json.loads(jobs("next"))
     jobs_line(q)

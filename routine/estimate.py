@@ -80,6 +80,16 @@ How it works:
     by how close each was (in log minutes), pulled towards the computed one while there are few. The computed estimate
     on the finished line stays what it was, so the backtest compares like with like; with_guess is kept next to it.
 
+  - H190 (17 October 2026, call at 12:44): "if this makes it more accurate from the start, yeah, it's perfect". When a
+    job is added (jobs.py add, add-row, send-row) or an item planned (schedule.py add; a repeating one's next one keeps
+    the guesses), a small Claude look (look_guess: Haiku, Read/Grep/Glob in the HQ folder, low effort, at most
+    LOOK_BUDGET dollars) reads the job, its row and the finished jobs like it, and guesses its minutes, in the
+    background (look_later, look-run), so adding stays quick. A call can pass its own (--guess MINUTES). The team's
+    guess at the start (H168) stays. Each is kept apart (guess_look, guess_call, guess), at done too, each with its
+    own record (guess_fit with its key); an estimate, waiting or running, takes in the team's, else the call's, else
+    the look's, the first whose record is ready (pick_guess). relook, every minute on the main, looks again when the
+    words (fingerprint: the job's own words and its row's) change, never on a move or another time.
+
 Files, in HQ's .status (never in the repo): job-estimates.json (each job's estimate, set when added,
 and when it started) and job-estimates-history.jsonl (one line per finished job: estimate and real).
 A test's copy of the roadmap (HQ_ROADMAP) gets its own files next to it, so tests never touch the real ones.
@@ -103,6 +113,11 @@ usage:
                                                estimates, and how much a running job's estimate takes the guess in
   python3 routine/estimate.py look TEXT [--haiku]  the quick look at a job's size (H167); --haiku asks Haiku as well, with
                                                what that costs (only to compare: the estimates use the look without Claude)
+  python3 routine/estimate.py looks            the first looks (H190): each one's guess, cost and time, and how far each
+                                               kind of guess (the look's, the call's, the team's) was off
+  python3 routine/estimate.py relook           start a look for every waiting job or item whose words changed (the routine
+                                               does it every minute on the main)
+Used by the background look itself: look-run job|item N (H190).
 """
 import functools, json, math, os, re, statistics, sys, time
 
@@ -873,10 +888,11 @@ def job_estimate(n, text, hist=None, machine=None):
 
 # ---------- called by jobs.py (inside its lock) ----------
 
-def on_add(n, text, kind=None, by_hand=None):
+def on_add(n, text, kind=None, by_hand=None, guess=None):
     """kind: set by hand (jobs.py add --kind); it's stored here and goes into the history when the job
     finishes, so a hand-set kind learns in the right pile (H70). by_hand: False for a kind that was a
-    guess made earlier (a planned item's, H95), so it isn't marked as set by hand."""
+    guess made earlier (a planned item's, H95), so it isn't marked as set by hand. guess: the call's own
+    guess in minutes (jobs.py add --guess, H190), kept apart from the look's and the team's."""
     st = _load_state()
     t0 = time.time()
     size = look(_about(text))  # H167: the quick look at the work, kept with it (and how long it took, in ms)
@@ -886,6 +902,8 @@ def on_add(n, text, kind=None, by_hand=None):
                   "size": size, "look_ms": look_ms}
     if kind_given(kind) and by_hand is not False:
         st[str(n)]["by_hand"] = True
+    if guess:
+        st[str(n)]["guess_call"], st[str(n)]["guess_call_at"] = int(guess), int(time.time())
     _save_state(st)
     return st[str(n)]
 
@@ -929,13 +947,14 @@ def on_guess(n, minutes, text=""):
     return e
 
 
-def guess_fit(hist=None):
+def guess_fit(hist=None, key="guess"):
     """H168: how far the team's own guesses were off, next to the computed estimates, on the finished jobs that had
     both. {"count", "need", "ready", "guess_off", "est_off", "bias", "weight"}: bias, how many times as long the jobs
     took as guessed (median, at most three times or a third); weight, how much a running job's estimate takes the
-    corrected guess in (0 to 1), from how close each was, pulled towards none while there are few."""
+    corrected guess in (0 to 1), from how close each was, pulled towards none while there are few. H190: key is
+    which guess: guess (the team's at its start), guess_look (the first look) or guess_call (the call's), each its own."""
     hist = all_history() if hist is None else hist
-    pairs = [h for h in _real(hist) if isinstance(h.get("guess"), (int, float)) and h["guess"] > 0
+    pairs = [{**h, "guess": h[key]} for h in _real(hist) if isinstance(h.get(key), (int, float)) and h[key] > 0
              and isinstance(h.get("est"), (int, float)) and h["est"] > 0]
     out = {"count": len(pairs), "need": GUESS_MIN, "ready": len(pairs) >= GUESS_MIN}
     if not pairs:
@@ -965,17 +984,267 @@ def with_guess(est, guess, fit):
     return max(1, round(math.exp(w * (math.log(guess) + math.log(fit["bias"])) + (1 - w) * math.log(est))))
 
 
-def guess_words(fit):
-    """H168: the team's own guesses in a sentence, for the status page, jobs.py list and a call."""
+def guess_words(fit, who="The team's own guesses", whose="a running job's"):
+    """H168: the team's own guesses in a sentence, for the status page, jobs.py list and a call. H190: who and whose
+    say it for the first looks and the calls' guesses too."""
     if not fit.get("count"):
-        return "The team's own guesses: none checked against a finished job yet."
-    s = (f"The team's own guesses (last {fit['count']} job{'s' if fit['count'] != 1 else ''} with one) were off by "
+        return f"{who}: none checked against a finished job yet."
+    s = (f"{who} (last {fit['count']} job{'s' if fit['count'] != 1 else ''} with one) were off by "
          f"{fit['guess_off']:g} min on average; the computed estimates by {fit['est_off']:g}.")
     if not fit["ready"]:
-        return s + f" From {fit['need']} guessed jobs on, a running job's estimate takes the guess in."
+        return s + f" From {fit['need']} guessed jobs on, {whose} estimate takes the guess in."
     pct = round(fit["weight"] * 100)
     corr = "" if abs(fit["bias"] - 1) < 0.05 else f", the guess times {times(fit['bias'])} (the jobs take that much {'longer' if fit['bias'] > 1 else 'less'} than guessed)"
-    return s + f" A running job's estimate takes the guess in for {pct}%{corr}."
+    return s + f" {whose[0].upper() + whose[1:]} estimate takes the guess in for {pct}%{corr}."
+
+
+# ---------- H190: the team's guess from the start ----------
+# The user, 17 October 2026 (call at 12:44): "if this makes it more accurate from the start, yeah, it's perfect. The
+# maintenance ones. And on top of that, if we change things... It must also trigger that it does a new estimation,
+# right? ... But if we move the priority order... That of course not because context-wise nothing changes."
+# Three guesses, each kept apart so the learning can tell which was closest: guess_look (a small Claude look when a
+# job is added or an item planned, in the background), guess_call (a call's own, jobs.py add --guess, schedule.py add
+# --guess) and guess (the team's at the job's start, H168). Each has its own record (guess_fit with its key); an
+# estimate takes in the first of the team's, the call's and the look's whose record is ready (GUESS_MIN finished jobs).
+# A new look when the job's or item's text (or its roadmap row's words) changes, never on a move or another time.
+
+GUESSES = (("guess", "The team's own guesses at a job's start"), ("guess_call", "The calls' guesses"),
+           ("guess_look", "The first looks"))
+LOOK_MODEL = "haiku"   # H190: the small look (Claude's choice: Haiku with Read, Grep and Glob, low effort)
+LOOK_BUDGET = 0.10     # dollars at most for one look (--max-budget-usd); they cost about a few cents
+LOOK_TIMEOUT = 240     # seconds
+LOOK_TRIES = 2         # a look that fails is tried again once for the same text, then left
+LOOK_PENDING = LOOK_TIMEOUT + 120  # seconds a started look counts as on its way
+LOOK_SIMILAR = 8       # finished jobs like it, with how long they took, shown to the look
+LOOKS = os.path.join(DIR, "job-estimates-looks.jsonl")  # one line per look: what, minutes, cost, seconds
+LOOK_LOG = os.path.join(DIR, "looks.log")
+
+
+def _label(text):
+    r = re.search(r"\b([hfmlj]\d+(?:\.\d+)?) on the (?:hq )?roadmap|\bread the ([hfmlj]\d+(?:\.\d+)?) row", (text or "").lower())
+    return (r.group(1) or r.group(2)) if r else None
+
+
+def fingerprint(text):
+    """H190: what the look read: the job's own words and its roadmap row's (not what came of it). Moving a job or
+    giving an item another time doesn't change it; changing the words does."""
+    import hashlib
+    label = _label(text)
+    row = _rows().get(label, "") if label else ""
+    return hashlib.sha1((_about(text) + "\n" + row).encode()).hexdigest()[:12]
+
+
+def look_on():
+    """H190: whether a look may run here: not with HQ_LOOK=0, and a test copy only with a made-up one (HQ_LOOK_FAKE)."""
+    if os.environ.get("HQ_LOOK", "1") == "0":
+        return False
+    return bool(os.environ.get("HQ_LOOK_FAKE")) or not _TEST
+
+
+def _look_input(text, kind=None):
+    label = _label(text)
+    row = _rows().get(label, "") if label else ""
+    lines = ["The job, as it was handed to the team:", text.strip()]
+    if row:
+        lines += ["", f"Its roadmap row ({label.upper()}):", row[:2500]]
+    try:
+        real = _real(all_history())
+        about = _about(text)
+        past = [h for _, h in (similar(about, kind or kind_of(text), real) if about else [])][:LOOK_SIMILAR]
+        if not past:
+            past = [h for h in real if h.get("about")][-LOOK_SIMILAR:]
+        if past:
+            lines += ["", "Finished jobs like it, and how long each really took (the team runs them on its own):"]
+            lines += [f"- {h.get('actual')} min: {(h.get('about') or '')[:300]}" for h in past]
+    except Exception:
+        pass
+    return "\n".join(lines)
+
+
+LOOK_SYSTEM = (
+    "You guess how many minutes a job for HQ will take. HQ is an app in the current folder (app/ the call line, routine/ "
+    "the queue and the routine, status/ the status page, install/ the installer); another Claude Code chat does the "
+    "job on its own: it reads the row, builds, runs the happy flows it names (app/happy_flows.py), commits and pushes. "
+    "Have a quick look at the code the job touches (a few Grep or Read calls at most; never the workspace/ folder), "
+    "then answer with one line of JSON only: {\"minutes\": <whole minutes>, \"why\": \"<a few words>\"}. Use the "
+    "finished jobs' real times to judge the scale: most take 3 to 30 minutes.")
+
+
+def look_guess(text, kind=None):
+    """H190: the small look: Claude (Haiku, read-only tools, the HQ folder) reads the job, its row and the code it
+    touches, and guesses its minutes. {"min", "why", "cost" (dollars), "s"} or None. HQ_LOOK_FAKE=MINUTES gives a
+    made-up one (tests)."""
+    fake = os.environ.get("HQ_LOOK_FAKE")
+    if fake:
+        return {"min": int(fake), "why": "made up for a test", "cost": 0.0, "s": 0.0}
+    import subprocess
+    try:
+        import hqpaths
+        claude = hqpaths.tool("claude", "/opt/homebrew/bin/claude")
+    except Exception:
+        claude = "claude"
+    t0 = time.time()
+    try:
+        p = subprocess.run([claude, "-p", "--model", LOOK_MODEL, "--output-format", "json", "--tools", "Read,Grep,Glob",
+                            "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config", "--setting-sources", "",
+                            "--effort", "low", "--max-budget-usd", str(LOOK_BUDGET), "--no-session-persistence",
+                            "--system-prompt", LOOK_SYSTEM],
+                           input=_look_input(text, kind), capture_output=True, text=True, timeout=LOOK_TIMEOUT, cwd=ROOT)
+        d = json.loads(p.stdout)
+        a = json.loads(re.findall(r"\{[^{}]*\"minutes\"[^{}]*\}", d.get("result") or "", re.S)[-1])
+        m = int(round(float(a["minutes"])))
+        if not 1 <= m <= GUESS_MAX:
+            return None
+        return {"min": m, "why": str(a.get("why") or "")[:200], "cost": d.get("total_cost_usd"),
+                "s": round(time.time() - t0, 1)}
+    except Exception:
+        return None
+
+
+def _store(what):
+    return (_load_state, _save_state) if what == "job" else (_load_items, _save_items)
+
+
+def look_later(what, n, text):
+    """H190: start the look for job or item n in the background, so adding stays quick (called inside the queue's
+    lock, which the look takes itself only to write its guess). False when no look runs here."""
+    if not look_on():
+        return False
+    load, save = _store(what)
+    d = load()
+    e = d.get(str(n))
+    if e is None:
+        return False
+    fp = fingerprint(text)
+    tried = e.get("look_try") or [None, 0]
+    e["look_try"] = [fp, (tried[1] if tried[0] == fp else 0) + 1]
+    e["look_pending"] = int(time.time())
+    d[str(n)] = e
+    save(d)
+    import subprocess
+    try:
+        os.makedirs(DIR, exist_ok=True)
+        out = open(LOOK_LOG, "a")
+        subprocess.Popen([sys.executable, os.path.abspath(__file__), "look-run", what, str(n)], cwd=ROOT,
+                         stdin=subprocess.DEVNULL, stdout=out, stderr=out, start_new_session=True)
+        return True
+    except Exception as ex:
+        print(f"(the look couldn't start: {ex!r})", file=sys.stderr)
+        return False
+
+
+def _current(what, n):
+    """The text of open job n (ready, held or running) or waiting item n now; None when it's no longer open."""
+    import jobs as q
+    text, js, _ = q.read()
+    if what == "job":
+        j = next((j for j in js if j["n"] == n), None)
+        return j["text"] if j and q.open_job(j) else None
+    import schedule as sc
+    i = next((i for i in sc.read(text) if i["n"] == n), None)
+    return i["text"] if i and i["state"] == "waiting" else None
+
+
+def look_run(what, n):
+    """H190, in the background: the look itself, outside the queue's lock; its guess is written only when the text
+    is still the one it read (changed in between: the next look, started by relook, has it)."""
+    import jobs as q
+    with q.locked():
+        text = _current(what, n)
+    if text is None:
+        return None
+    fp = fingerprint(text)
+    load, save = _store(what)
+    kind = (load().get(str(n)) or {}).get("kind")
+    g = look_guess(text, kind)
+    with q.locked():
+        d = load()
+        e = d.get(str(n))
+        if e is None:
+            return None
+        e.pop("look_pending", None)
+        now_text = _current(what, n)
+        if g and now_text is not None and fingerprint(now_text) == fp:
+            e.update({"guess_look": g["min"], "look_at": int(time.time()), "look_fp": fp, "look_cost": g.get("cost"),
+                      "look_s": g.get("s"), "look_why": g.get("why")})
+        d[str(n)] = e
+        save(d)
+    rec = {"what": what, "n": n, "at": int(time.time()), "fp": fp, **({"min": g["min"], "cost": g.get("cost"),
+           "s": g.get("s"), "why": g.get("why")} if g else {"failed": True})}
+    _append_look(rec)
+    print(f"{time.strftime('%Y-%m-%d %H:%M')} look {what} {n}: " + (f"{g['min']} min ({g.get('cost')} dollars, {g.get('s')} s)" if g else "failed"))
+    return rec
+
+
+def _append_look(rec):
+    try:
+        with open(LOOKS, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+    except OSError:
+        pass
+
+
+def relook(log=None):
+    """H190, every minute on the main: a new look for a waiting job or item whose words changed since its look (or
+    that has none yet, a failed one tried once more), never for a move or another time. Returns what it started."""
+    if not look_on():
+        return []
+    import jobs as q
+    import schedule as sc
+    started = []
+    with q.locked():
+        text, js, _ = q.read()
+        todo = [("job", j["n"], j["text"]) for j in js if q.waiting(j)]
+        todo += [("item", i["n"], i["text"]) for i in sc.read(text) if i["state"] == "waiting"]
+        stores = {"job": _load_state(), "item": _load_items()}
+        for what, n, t in todo:
+            e = stores[what].get(str(n))
+            if e is None:
+                continue
+            fp = fingerprint(t)
+            if e.get("look_fp") == fp or time.time() - (e.get("look_pending") or 0) < LOOK_PENDING:
+                continue
+            tried = e.get("look_try") or [None, 0]
+            if tried[0] == fp and tried[1] >= LOOK_TRIES:
+                continue
+            if look_later(what, n, t):
+                started.append(f"{what} {n}")
+    if started and log:
+        log(f"estimates: a new look for {', '.join(started)} (H190)")
+    return started
+
+
+def pick_guess(e, fits):
+    """H190: the guess an estimate takes in: the team's (at its start), else the call's, else the look's, the first
+    whose record is ready. (minutes, key, fit), or (None, None, None)."""
+    for key, _ in GUESSES:
+        g = e.get(key)
+        if isinstance(g, (int, float)) and g > 0 and (fits.get(key) or {}).get("ready"):
+            return g, key, fits[key]
+    return None, None, None
+
+
+def guess_fits(hist):
+    return {key: guess_fit(hist, key) for key, _ in GUESSES}
+
+
+def guesses_words(fits):
+    """H190: the three records in a few sentences, the team's first (H168's words), for the page and jobs.py list."""
+    out = []
+    for key, who in GUESSES:
+        f = fits.get(key) or {}
+        if key != "guess" and not f.get("count"):
+            continue
+        out.append(guess_words(f, "The team's own guesses" if key == "guess" else who,
+                               "a running job's" if key == "guess" else "a job's"))
+    if not (fits.get("guess_look") or {}).get("count"):
+        out.append("The first looks (a small Claude look when work is added or planned): none checked against a finished job yet.")
+    return " ".join(out)
+
+
+def guess_detail(e):
+    """H190: the guesses kept with a job or item, for the plan: guess (the team's), guess_call, guess_look."""
+    return {k: e[k] for k, _ in GUESSES if isinstance(e.get(k), (int, float)) and e[k] > 0}
 
 
 def on_done(n, text="", started_hhmm=None):
@@ -998,12 +1267,16 @@ def on_done(n, text="", started_hhmm=None):
            "size": e.get("size") if isinstance(e.get("size"), dict) else look(_about(text))}  # H167
     if isinstance(e.get("guess"), (int, float)):  # H168: the team's own guess, next to the computed estimate
         rec["guess"] = e["guess"]
-        try:
-            w = with_guess(rec["est"], e["guess"], guess_fit())
-            if w != rec["est"]:
-                rec["with_guess"] = w
-        except Exception:
-            pass
+    rec.update({k: v for k, v in guess_detail(e).items() if k != "guess"})  # H190: the call's and the look's, apart
+    if e.get("look_cost") is not None:
+        rec["look_cost"] = e["look_cost"]
+    try:
+        g, key, fit = pick_guess(e, guess_fits(all_history()))
+        w = with_guess(rec["est"], g, fit)
+        if g and w != rec["est"]:
+            rec["with_guess"], rec["guess_used"] = w, key
+    except Exception:
+        pass
     if _about(text):
         rec["about"] = _about(text)[:ABOUT_MAX]  # H166: its words, so later jobs can find it as similar
     try:  # H172: its real usage next to its time, and the usage it was estimated to take
@@ -1060,12 +1333,15 @@ def item_kind(n, text=""):
     return (k, bool(e.get("by_hand"))) if k else (kind_of(text), False)
 
 
-def item_on_add(n, text, kind=None):
-    """A planned item's kind, set when it's planned: given by the call (schedule.py add --kind), else guessed."""
+def item_on_add(n, text, kind=None, guess=None):
+    """A planned item's kind, set when it's planned: given by the call (schedule.py add --kind), else guessed.
+    guess: the call's own guess in minutes (schedule.py add --guess, H190)."""
     d = _load_items()
     d[str(n)] = {"kind": kind_given(kind) or kind_of(text), "set": int(time.time()), "size": look(_about(text))}  # H167
     if kind_given(kind):
         d[str(n)]["by_hand"] = True
+    if guess:
+        d[str(n)]["guess_call"], d[str(n)]["guess_call_at"] = int(guess), int(time.time())
     _save_items(d)
     return d[str(n)]
 
@@ -1075,10 +1351,14 @@ def item_on_job(n, text, job_n, job_text):
     which would spoil the guess), and the item's line here is no longer needed."""
     kind, by_hand = item_kind(n, text)
     e = on_add(job_n, job_text, kind, by_hand)
-    size = (_load_items().get(str(n)) or {}).get("size") or look(_about(text))  # H167: the item's own words, not "Scheduled item ..."
+    it = _load_items().get(str(n)) or {}
+    size = it.get("size") or look(_about(text))  # H167: the item's own words, not "Scheduled item ..."
     st = _load_state()
     if str(job_n) in st:
         st[str(job_n)]["size"] = size
+        # H190: the item's guesses (the call's, the look's) go with it; the job's words are the item's, so its look holds
+        st[str(job_n)].update({k: it[k] for k in ("guess_call", "guess_call_at", "guess_look", "look_at", "look_fp",
+                                                   "look_cost", "look_s", "look_why") if k in it})
         _save_state(st)
         e = st[str(job_n)]
     item_forget(n)
@@ -1093,6 +1373,7 @@ def item_repeat(n, k, text):
     if not e:
         return item_on_add(k, text)
     e["set"] = int(time.time())
+    e.pop("look_pending", None)  # H190: its guesses go with it (the same words); a look still on its way was this one's
     d[str(k)] = e
     _save_items(d)
     return e
@@ -1146,13 +1427,16 @@ def plan(now=None):
     st = _load_state()
     hist = all_history()
     run = runner()
-    gfit = guess_fit(hist)  # H168
+    gfits = guess_fits(hist)  # H168, H190: each guess its own record
+    gfit = gfits["guess"]
     out = {"now": int(now), "on": on, "jobs": {}, "total": None, "accuracy": accuracy(history()), "kinds": KINDS,
-           "machine": run["label"], "learned": learned(hist, run), "guesses": {**gfit, "words": guess_words(gfit)}}
+           "machine": run["label"], "learned": learned(hist, run),
+           "guesses": {**gfit, "words": guesses_words(gfits), "team": guess_words(gfit),
+                       "looks": gfits["guess_look"], "calls": gfits["guess_call"]}}
     for h in hist[-30:]:
         out["jobs"][str(h["n"])] = {"finished": True, "est": h.get("est"), "actual": h["actual"], "kind": h.get("kind"),
                                     **({"cost": h["cost"]} if isinstance(h.get("cost"), dict) else {}),  # H172
-                                    **({"guess": h["guess"]} if isinstance(h.get("guess"), (int, float)) else {})}  # H168
+                                    **guess_detail(h)}  # H168, H190: the team's, the call's and the look's
     samples = None
     cursor, left_total, waits = now, 0, not on
     # H172: the usage each piece of work should take, and when it fits under the stop lines (the reading now, the
@@ -1171,8 +1455,9 @@ def plan(now=None):
     for j in running:
         e = st.get(str(j["n"])) or known(j["n"])
         est = e.get("est") or job_estimate(j["n"], j["text"], hist, run["name"])["est"]
-        computed, guess = est, e.get("guess")
-        est = with_guess(est, guess, gfit)  # H168: the team's own guess taken in, once the guesses have a record
+        computed = est
+        guess, gkey, gf = pick_guess(e, gfits)  # H168, H190: the team's, else the call's, else the look's, once it has a record
+        est = with_guess(est, guess, gf)
         samples = _samples() if samples is None else samples
         seen = _minutes_seen(j["n"], samples)
         m = re.match(r"running since (\d\d:\d\d)", j["state"])
@@ -1189,8 +1474,9 @@ def plan(now=None):
         parts["guess_in"] |= bool(guess) and est != computed
         out["jobs"][str(j["n"])] = {"est": est, "kind": kind_for(j["text"], e.get("kind")), "so_far": done_min,
                                     "left": left, "over": over, "eta": None if waits else int(cursor)}
-        if guess:  # H168
-            out["jobs"][str(j["n"])].update({"guess": guess, "computed": computed})
+        out["jobs"][str(j["n"])].update(guess_detail(e))  # H168, H190
+        if guess and est != computed:
+            out["jobs"][str(j["n"])].update({"computed": computed, "guess_used": gkey})
         if U:  # H172: its estimated usage, what it has used so far, and what's left of it before the next can start
             rec = counts.get(str(j["n"])) or {}
             c = rec.get("est") or U.cost_for(est, j["text"], e.get("kind"), hist)
@@ -1209,6 +1495,10 @@ def plan(now=None):
         # newest finished jobs (and the right computer) instead of the number it got when it was added.
         d = job_estimate(j["n"], j["text"], hist, run["name"])
         est, kind = d["est"], d["kind"]
+        ke = known(j["n"])
+        guess, gkey, gf = pick_guess(ke, gfits)  # H190: a waiting job's guesses are in its estimate from the start
+        computed, est = est, with_guess(est, guess, gf)
+        parts["guess_in"] |= bool(guess) and est != computed
         if j["state"].startswith("held") and not proj:
             waits = True
         if running or j is not line[0] or cursor > now:
@@ -1233,7 +1523,12 @@ def plan(now=None):
         cursor += est * 60
         left_total += est
         out["jobs"][str(j["n"])] = {"est": est, "kind": kind, "eta": int(cursor) if on and not (proj and waits) else None,
-                                    "waits": "usage" if (waits or start) and on else ("off" if not on else None)}
+                                    "waits": "usage" if (waits or start) and on else ("off" if not on else None),
+                                    **guess_detail(ke)}  # H190
+        if est != computed:
+            out["jobs"][str(j["n"])].update({"computed": computed, "guess_used": gkey})
+        if ke.get("look_pending") and time.time() - ke["look_pending"] < LOOK_PENDING:
+            out["jobs"][str(j["n"])]["looking"] = True
         if cost:
             out["jobs"][str(j["n"])]["cost"] = {k: cost[k] for k in U.KEYS}
             out["jobs"][str(j["n"])]["cost_how"] = cost["how"]
@@ -1250,7 +1545,7 @@ def plan(now=None):
                         "usage_wait": held_wait,
                         "paused": sum(1 for j in js if j["state"].startswith("paused"))}
         out["total"]["counts"] = total_counts(out["total"], bool(U))
-    out["items"] = _plan_items(cursor, waits, on, hist, run, run_end, proj, U)
+    out["items"] = _plan_items(cursor, waits, on, hist, run, run_end, proj, U, gfits)
     out["items_total"] = _items_total(out["items"], waits, on)
     return out
 
@@ -1301,8 +1596,8 @@ def total_counts(t, with_cost=True):
         s += " The time a job waits for the usage is in the done-around time, not in the minutes."
     if t.get("paused"):
         s += f" {'A paused job is' if t['paused'] == 1 else str(t['paused']) + ' paused jobs are'} parked for a call, {'isn' if t['paused'] == 1 else 'aren'}'t counted and hold nothing up."  # F37
-    s += (" It's the computed estimate, from how long jobs like these took, with the team's own guess taken in for the running job"
-          " as far as its guesses have been right." if t.get("guess_in") else
+    s += (" It's the computed estimate, from how long jobs like these took, with the guesses taken in (the team's,"
+          " the call's or the first look's) as far as each has been right." if t.get("guess_in") else
           " It's the computed estimate, from how long jobs like these took; the team's own guesses aren't in it.")
     return s
 
@@ -1330,7 +1625,7 @@ def _schedule():
         return []
 
 
-def _plan_items(cursor, waits, on, hist, run, run_end=None, proj=None, U=None):
+def _plan_items(cursor, waits, on, hist, run, run_end=None, proj=None, U=None, fits=None):
     """H95: each waiting planned item, soonest first: how long, and when it should start and be done. It
     starts at its time, or once the job list and the items before it are done (the job list goes first);
     the routine looks every minute. The routine off: no times, only how long. Waiting on the usage (H109):
@@ -1345,8 +1640,15 @@ def _plan_items(cursor, waits, on, hist, run, run_end=None, proj=None, U=None):
     pcursor = cursor if run_end is None else run_end
     for i in items:
         kind, by_hand = item_kind(i["n"], i["text"])
-        est, kind, _ = estimate_for(i["text"], hist, kind, run["name"], (_load_items().get(str(i["n"])) or {}).get("size"))
-        e = {"est": est, "kind": kind, "start": None, "eta": None, "waits": None}
+        ie = _load_items().get(str(i["n"])) or {}
+        est, kind, _ = estimate_for(i["text"], hist, kind, run["name"], ie.get("size"))
+        guess, gkey, gf = pick_guess(ie, fits or {})  # H190: its guesses in its estimate from the start
+        computed, est = est, with_guess(est, guess, gf)
+        e = {"est": est, "kind": kind, "start": None, "eta": None, "waits": None, **guess_detail(ie)}
+        if est != computed:
+            e.update({"computed": computed, "guess_used": gkey})
+        if ie.get("look_pending") and time.time() - ie["look_pending"] < LOOK_PENDING:
+            e["looking"] = True
         if by_hand:
             e["by_hand"] = True
         if i.get("priority"):
@@ -1427,24 +1729,39 @@ def _day(t, now):
 USAGE_START = "when the usage leaves room for it"  # H172: said next to a start the usage holds back
 
 
+def guessed_words(e):
+    """H190: the guesses kept with a job or item in a few words: the first look's, the call's, the team's (H168)."""
+    out = []
+    if e.get("guess_look"):
+        out.append(f"the first look guessed {dur(e['guess_look'])}")
+    if e.get("guess_call"):
+        out.append(f"the call guessed {dur(e['guess_call'])}")
+    if e.get("guess"):
+        out.append(f"the team guessed {dur(e['guess'])}")
+    return ", ".join(out)
+
+
 def words(n, p):
     """One job's estimate in words, for jobs.py list and a call."""
     e = p["jobs"].get(str(n))
     if not e:
         return ""
-    g = f", the team guessed {dur(e['guess'])}" if e.get("guess") else ""  # H168
+    gw = guessed_words(e)  # H168, H190
+    g = f", {gw}" if gw else ""
     if e.get("finished"):
         return (f"estimated {dur(e['est'])}{g}, took {dur(e['actual'])}" if e.get("est") else f"took {dur(e['actual'])}{g}") \
             + _cost_words(e)
-    if e.get("guess") and e.get("computed") != e["est"]:
-        g = f" (computed {dur(e['computed'])}, the team guessed {dur(e['guess'])})"
+    if gw and e.get("computed") and e.get("computed") != e["est"]:
+        g = f" (computed {dur(e['computed'])}, {gw})"
+    elif e.get("looking"):
+        g += ", a first look is on its way"
     if "left" in e:
         if e.get("over"):
             s = f"estimated {dur(e['est'])}{g}, running {dur(e['so_far'])}: taking longer than estimated"
         else:
             s = f"about {dur(e['left'])} left of {dur(e['est'])}{g}"
     else:
-        s = f"about {dur(e['est'])}"
+        s = f"about {dur(e['est'])}{g}"  # H190: a waiting job's guesses too
     s += _cost_words(e)
     if e.get("start"):  # H172: when the usage should leave room for it
         s += f", starts around {_day(e['start'], p['now'])}{hhmm(e['start'])} {USAGE_START}"
@@ -1466,7 +1783,9 @@ def item_words(n, p):
     e = (p.get("items") or {}).get(str(n))
     if not e:
         return ""
-    s = f"about {dur(e['est'])}" + _cost_words(e)
+    gw = guessed_words(e)  # H190
+    s = f"about {dur(e['est'])}" + (f" (computed {dur(e['computed'])}, {gw})" if gw and e.get("computed") else
+                                     f", {gw}" if gw else ", a first look is on its way" if e.get("looking") else "") + _cost_words(e)
     if e.get("never"):
         s += ", it doesn't fit under the usage lines as they're set (a fixed line), so no time"
     elif e.get("eta"):
@@ -1844,6 +2163,23 @@ def main(argv):
         print(p["guesses"]["words"])  # H168
         for l in p.get("learned") or []:
             print(l)
+    elif cmd == "look-run":  # H190: the background look
+        look_run(argv[1], int(argv[2]))
+    elif cmd == "relook":
+        print(", ".join(relook()) or "Nothing to look at again.")
+    elif cmd == "looks":
+        try:
+            ls = [json.loads(l) for l in open(LOOKS)]
+        except OSError:
+            ls = []
+        for l in ls[-20:]:
+            print(f"{hhmm(l['at'])} {l['what']} {l['n']}: " + ("failed" if l.get("failed") else
+                  f"{l['min']} min, {l.get('cost') or 0:.4f} dollars, {l.get('s')} s ({l.get('why', '')})"))
+        ok = [l for l in ls if not l.get("failed")]
+        if ok:
+            print(f"{len(ok)} looks, {sum(l.get('cost') or 0 for l in ok) / len(ok):.4f} dollars and "
+                  f"{statistics.mean(l.get('s') or 0 for l in ok):.1f} s each on average.")
+        print(guesses_words(guess_fits(all_history())))
     elif cmd == "seed":
         seed()
     elif cmd == "kind":

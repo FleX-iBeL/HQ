@@ -917,12 +917,19 @@
         else if (e.waits === 'off') s += ' · the routine is off';
         return `${s} (estimate)`;
       }
-      /** H174 (H168): the team's own guess for a job, said quietly under the estimate; when it's taken in, says so. */
+      /** H174 (H168): the team's own guess for a job, said quietly under the estimate; when it's taken in, says so.
+       *  H190: the first look's and the call's guesses too, each apart; the one taken in is said. Items as well. */
+      const GUESS_WHO = { guess_look: 'First look', guess_call: "The call's guess", guess: "The team's own guess" };
+      function guessLine(e) {
+        if (!e) return '';
+        const parts = Object.keys(GUESS_WHO).filter((k) => e[k]).map((k) => `${GUESS_WHO[k]}: ${etaDur(e[k])}`);
+        if (!parts.length) return e.looking ? 'A first look is on its way' : '';
+        let s = parts.join(' · ');
+        if (!e.finished && e.computed && e.computed !== e.est) s += ` · ${e.guess_used ? `the ${{ guess_look: "first look's", guess_call: "call's", guess: "team's" }[e.guess_used]}` : 'the guess'} taken into the estimate (computed alone ${etaDur(e.computed)})`;
+        return s;
+      }
       function etaGuess(E, n) {
-        const e = E?.jobs?.[n];
-        if (!e?.guess) return '';
-        if (!e.finished && e.computed && e.computed !== e.est) return `The team's own guess: ${etaDur(e.guess)}, taken into the estimate (computed alone ${etaDur(e.computed)})`;
-        return `The team's own guess: ${etaDur(e.guess)}`;
+        return guessLine(E?.jobs?.[n]);
       }
       /** H95: a planned item's estimate in words, the same as routine/estimate.py says it to a call. */
       function etaItem(E, n) {
@@ -1736,6 +1743,8 @@
               left.append(text);
               const w = key === 'coming' ? etaItem(routines?.estimate, i.n) : '';
               if (w) left.append(etaSpan('eta', w, routines.estimate.items[i.n]));
+              const gi = key === 'coming' ? guessLine(routines?.estimate?.items?.[i.n]) : '';
+              if (gi) left.append(el('span', 'eta-guess', gi));  // H190: an item's guesses, quiet, as for a job
               row.append(left, mark);
               card.append(row);
             }
