@@ -23,6 +23,7 @@ Design:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import time
 from collections.abc import AsyncIterator
@@ -64,6 +65,40 @@ for _var in list(os.environ):
         os.environ.pop(_var, None)
 
 
+# F38 (17 October 2026): the text a session adds to Claude's own goes to the CLI as a file, never as one
+# command-line argument: Linux caps a single argument at 128 KB, and a Quick call's text grew past it
+# ("Argument list too long", so Donna never answered). Named by its contents, so a restarted session finds it.
+PROMPT_DIR = _config.SCRATCH / "prompts"
+PROMPT_KEEP_S = 2 * 86400
+
+
+def append_file(text: str) -> Path:
+    """TEXT in a file the CLI reads with --append-system-prompt-file; old ones are cleared."""
+    PROMPT_DIR.mkdir(parents=True, exist_ok=True)
+    path = PROMPT_DIR / f"append-{hashlib.sha256(text.encode('utf8')).hexdigest()[:24]}.md"
+    if not path.exists() or path.read_text(encoding="utf8") != text:
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(text, encoding="utf8")
+        tmp.replace(path)
+    now = time.time()
+    for old in PROMPT_DIR.glob("append-*"):
+        try:
+            if old != path and now - old.stat().st_mtime > PROMPT_KEEP_S:
+                old.unlink()
+        except OSError:
+            pass
+    os.utime(path)
+    return path
+
+
+def prompt_text(options: ClaudeAgentOptions) -> str:
+    """The text a session adds (or its whole system prompt, for a plain one), read back from its file."""
+    extra = (options.extra_args or {}).get("append-system-prompt-file")
+    sp = options.system_prompt
+    path = extra or (sp.get("path") if isinstance(sp, dict) and sp.get("type") == "file" else None)
+    return Path(path).read_text(encoding="utf8") if path else (sp if isinstance(sp, str) else "")
+
+
 @dataclass
 class ToolStarted:
     """Yielded by ask() when Claude starts a tool call mid-reply (for a filler)."""
@@ -89,6 +124,7 @@ def call_session_options(
 
     B1: with quick_context (a Quick call), no CLAUDE.md is loaded by the CLI; that text, the
     lighter version built by quick_context.py, goes in front of the voice rules instead.
+    F38: both go to the CLI in a file (append_file), however long they get.
     Settings, hooks, the deny list and the connectors load the same.
     """
 
@@ -115,8 +151,10 @@ def call_session_options(
         model=model,
         cwd=str(folder),
         cli_path=cli_path,
-        system_prompt={"type": "preset", "preset": "claude_code",
-                       "append": f"{quick_context}\n\n{voice_rules}" if quick_context else voice_rules},
+        system_prompt={"type": "preset", "preset": "claude_code"},
+        # F38: the quick context and the voice rules through a file, not the command line.
+        extra_args={"append-system-prompt-file": str(append_file(
+            f"{quick_context}\n\n{voice_rules}" if quick_context else voice_rules))},
         setting_sources=["user", "project", "local"],
         # K2: no Claude Docs on calls (the whole server, so its tools aren't loaded at all).
         disallowed_tools=_policy.CALL_UNFRIENDLY + _policy.gmail_never_tool_names()
@@ -187,7 +225,8 @@ class ClaudeBrain:
         # H8: free mode passes tools=config.FREE_TOOLS (web search and fetching pages only).
         self._options = options or ClaudeAgentOptions(
             model=model,
-            system_prompt=system_prompt,
+            # F38: through a file too, so its length never matters.
+            system_prompt={"type": "file", "path": str(append_file(system_prompt))} if system_prompt else system_prompt,
             cwd=str(cwd),
             cli_path=cli_path,
             tools=list(tools or []),

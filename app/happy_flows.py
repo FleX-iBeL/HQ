@@ -1283,11 +1283,12 @@ console.log(JSON.stringify({{
         need(not any(f"\n{h}\n" in text for h in old), "Quick has log entries older than it should")
         # The sessions: Quick switches the CLI's CLAUDE.md off and brings its own text; Deep doesn't.
         pol = Policy(folder, dry_run=True)
+        import brain as brain_  # F38: the session's text is in a file
         q = make_brain(config.MODEL_ALIASES["sonnet"], pol, load="quick")._options
         d = make_brain(config.MODEL_ALIASES["opus"], pol, load="deep")._options
-        need(q.env.get("CLAUDE_CODE_DISABLE_CLAUDE_MDS") == "1" and "This is a Quick call" in q.system_prompt["append"],
+        need(q.env.get("CLAUDE_CODE_DISABLE_CLAUDE_MDS") == "1" and "This is a Quick call" in brain_.prompt_text(q),
              "the Quick session still loads CLAUDE.md, or misses its own text")
-        need("CLAUDE_CODE_DISABLE_CLAUDE_MDS" not in d.env and "This is a Quick call" not in d.system_prompt["append"],
+        need("CLAUDE_CODE_DISABLE_CLAUDE_MDS" not in d.env and "This is a Quick call" not in brain_.prompt_text(d),
              "the Deep session doesn't load everything")
         for opts in (q, d):
             need(opts.setting_sources == ["user", "project", "local"], "settings (deny list, rules hook) don't load")
@@ -4509,13 +4510,14 @@ setTimeout(async () => {
         # The sessions: her personality after the call rules, on her model and load.
         pol = Policy(config.FOLDER, dry_run=True)
         p_ = agents.find(config.FOLDER, "pepper"); d_ = agents.find(config.FOLDER, "donna")
+        import brain as brain_  # F38: the session's text is in a file
         q = make_brain(config.MODEL_ALIASES[p_["model"]], pol, load=p_["load"], persona=agents.persona(p_, config.USER))._options
         d = make_brain(config.MODEL_ALIASES[d_["model"]], pol, load=d_["load"], persona=agents.persona(d_, config.USER))._options
-        need("Who you are on this call: Pepper" in q.system_prompt["append"] and "This is a Quick call" not in q.system_prompt["append"]
+        need("Who you are on this call: Pepper" in brain_.prompt_text(q) and "This is a Quick call" not in brain_.prompt_text(q)
              and q.model == config.MODEL_ALIASES["opus"], "Pepper's session isn't Deep's load on Opus with her personality (H46)")
-        need("Who you are on this call: Donna" in d.system_prompt["append"] and "This is a Quick call" in d.system_prompt["append"]
+        need("Who you are on this call: Donna" in brain_.prompt_text(d) and "This is a Quick call" in brain_.prompt_text(d)
              and d.model == config.MODEL_ALIASES["sonnet"], "Donna's session isn't Quick's load on Sonnet with her personality (H46)")
-        need(d.system_prompt["append"].index("# This chat is a live voice call") < d.system_prompt["append"].index("Who you are on this call: Donna"),
+        need(brain_.prompt_text(d).index("# This chat is a live voice call") < brain_.prompt_text(d).index("Who you are on this call: Donna"),
              "her personality doesn't come after the call rules")
         need("Pepper" in config.WHISPER_PROMPT and "Donna" in config.WHISPER_PROMPT, "speech recognition doesn't know the agents' names")
         # The test server: the list for the page (no personality text), the headshots, the page itself.
@@ -7215,10 +7217,11 @@ setTimeout(() => {
             need(ph in rules and ph in config.GOODBYE_PHRASES, f"the starting phrase {ph!r} is missing")
         need("a passing okay" in rules and "a pause or silence" in rules and "When you are not sure" in rules,
              "the rule doesn't say when not to hang up")
+        import brain as brain_  # F38: the session's text is in a file
         free = make_brain(config.MODEL, None, cwd=self.tmp / "free70", free=True)
-        need(rules in free._options.system_prompt, "a Free call doesn't get the hang-up rule")
+        need(rules in brain_.prompt_text(free._options), "a Free call doesn't get the hang-up rule")
         full = make_brain(config.MODEL, Policy(config.FOLDER, dry_run=True), load="deep")
-        need(rules in full._options.system_prompt["append"], "a full call doesn't get the hang-up rule")
+        need(rules in brain_.prompt_text(full._options), "a full call doesn't get the hang-up rule")
         need("{user}" not in rules, "the name in the rule isn't filled in from me.md")
         # H129: the goodbye comments on what he's doing right now: the appointment on now or soon in HQ's own saved
         # calendar, else his to-do list; Moneypenny keeps her own goodbye. Read from the saved days, no Claude run.
@@ -10635,6 +10638,45 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 "its tag, back on dev; an empty Coming next or a refused main releases nothing and is put back; friends see "
                 "only the version tags; the suggestion and the Releases line as agreed")
 
+    async def flow110(self) -> str:
+        """F38: a Quick session starts however big its text gets. A quick context over 200 KB (past Linux's
+        128 KB for one argument) goes to the CLI in a file, never on the command line; a real Quick session
+        opens with it and reads a word from its far end. Donna's direct line builds the same options."""
+        import quick_context
+        import brain as brain_
+        from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+        from policy import Policy
+
+        word = "MARMALADE-110"
+        text = quick_context.build(config.FOLDER)
+        text += "\n\n# Filler for the test\n" + ("A line of filler so this text is long. " * 6000)
+        text += f"\n\nThe codeword for this test is {word}. When asked for the codeword, say only it.\n"
+        need(len(text.encode("utf8")) > 200_000, f"the test text is only {len(text)} bytes")
+        opts = brain_.call_session_options(model=config.MODEL_ALIASES["haiku"], folder=config.FOLDER,
+                                           voice_rules=config.VOICE_RULES, policy=Policy(config.FOLDER, dry_run=True),
+                                           cli_path=config.CLAUDE_CLI, effort="low", quick_context=text)
+        need(brain_.prompt_text(opts) == f"{text}\n\n{config.VOICE_RULES}", "the file doesn't hold the quick text and the voice rules")
+        def command(o):
+            t = SubprocessCLITransport("", o)
+            t._cli_path = t._cli_path or "claude"
+            return t._build_command()
+        cmd = command(opts)
+        big = max(len(a.encode("utf8")) for a in cmd)
+        need(big < 32_000, f"an argument on the command line is still {big} bytes")
+        need("--append-system-prompt" not in cmd and "--append-system-prompt-file" in cmd, f"not handed over by file: {cmd[:6]}")
+        plain = brain_.ClaudeBrain(model="haiku", system_prompt=text, cwd=self.tmp / "plain110")._options
+        need(max(len(a) for a in command(plain)) < 32_000 and brain_.prompt_text(plain) == text,
+             "a plain session's long system prompt still goes on the command line")
+        b = brain_.ClaudeBrain(model=opts.model, system_prompt="", cwd=config.FOLDER, options=opts)
+        try:
+            await asyncio.wait_for(b.start(), timeout=90)
+            got = "".join([p async for p in b.ask("What is the codeword for this test?") if isinstance(p, str)])
+            self.turns += 1
+        finally:
+            await b.stop()
+        need(word in got, f"the Quick session didn't answer with the word from its text: {got!r}")
+        return f"a {len(text) // 1024} KB quick text goes by file (largest argument {big} bytes); a real Quick session opened and said {word}"
+
     async def flow97(self) -> str:
         """F31, no Claude, no network: a refused pull or push from a job never passes silently. push.py --pull and a
         plain push against a throwaway HQ copy whose GitHub is a throwaway folder: a pull that works says so; a remote
@@ -12347,6 +12389,7 @@ FLOWS = {
     107: ("H184: the laptop's status page shows the server's usage when it's newer, its own when the server can't be reached", False, "flow107"),
     108: ("H187: an update ends what runs (a call, a job, the mail check) and restarts every background part, by exact pid, with the new version's rules", False, "flow108"),
     109: ("H186: the nightly line: the night's work always on nightly, on to main as the next version only when sure; a privacy hit pushes nothing", False, "flow109"),
+    110: ("F38: a Quick session starts with a text over 200 KB: handed over by file, never on the command line", True, "flow110"),
 }
 
 
