@@ -11158,6 +11158,68 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         return ("a fresh install's status page, /hq, the direct line, the checklist and every root icon name show HQ's house; "
                 "a server keeps the night house; the call page the same; the Dock icon ships ready-made")
 
+    async def flow114(self) -> str:
+        """H199: the 5-hour bar unfolds into the whole day. No Claude turns. Made-up work: the current window resets in
+        4 h 30; a job before it; a planned item in the next window that waits for the stop line; one across the next
+        window's reset (half in each); a repeating item every day counted again the day after, in the last window.
+        windowsAhead gives four windows back to back from the reset, each from 0% with only its own work, its reset,
+        the moving line from 10% to 100% and what waits for it, in plain words; a fixed line stays put. The current bar's
+        words say what lands in the very next window and what only later. The page has the button and its rows."""
+        status = ROOT / "status"
+        js = f"""
+import {{ landing, landingWords, windowsAhead, windowWords }} from '{(status / "usage.mjs").as_uri()}';
+const n = Date.parse('2026-10-17T22:00:00Z') / 1000, M = 60, H = 3600;
+const reset = n + 4 * H + 30 * M;
+const E = {{ jobs: {{ 5: {{ left: 20, est: 30, eta: n + 20 * M, cost: {{ five: 3, weekly: 0.3 }}, used: {{ five: 1 }} }} }},
+  items: {{ 10: {{ start: reset + 40 * M, eta: reset + 60 * M, usage_wait: true, waits: 'usage', cost: {{ five: 6, weekly: 0.6 }} }},
+    11: {{ start: reset + 4 * H + 30 * M, eta: reset + 5 * H + 30 * M, cost: {{ five: 4, weekly: 0.4 }} }},
+    12: {{ start: n + 10 * M, eta: n + 20 * M, every: 'day', cost: {{ five: 1, weekly: 0.1 }} }},
+    13: {{ start: n + 3 * 864e2, eta: n + 3 * 864e2 + 600, cost: {{ five: 2, weekly: 0.2 }} }} }} }};
+const l = {{ label: '5-hour limit', percent: 5, resetsAt: new Date(reset * 1000).toISOString() }};
+const mv = {{ five: {{ moving: true, fixed: 50 }}, weekly: {{ moving: true, fixed: 90 }}, fable: {{ moving: true, fixed: 90 }} }};
+const fx = {{ ...mv, five: {{ moving: false, fixed: 50 }} }};
+const T = (t) => `T${{Math.round((t - n) / M)}}`;
+const now = new Date(n * 1000);
+const W = windowsAhead(l, mv, E, now).map((w) => ({{ ...w, words: windowWords(w, T) }}));
+const F = windowsAhead(l, fx, E, now).map((w) => ({{ ...w, words: windowWords(w, T) }}));
+const L = landing(l, mv, E, now);
+console.log(JSON.stringify({{ W, F, L: {{ ...L, words: landingWords(L, T) }}, week: windowsAhead({{ ...l, label: 'Weekly · all models' }}, mv, E, now).length }}));
+"""
+        r = await asyncio.to_thread(run, ["node", "--input-type=module", "-e", js])
+        need(r.returncode == 0, f"node failed: {r.stderr.strip()[-300:]}")
+        d = json.loads(r.stdout.strip().splitlines()[-1])
+        W, F, L = d["W"], d["F"], d["L"]
+        H, M, reset = 3600, 60, 270 * 60
+        need(len(W) == 4 and [w["n"] for w in W] == [1, 2, 3, 4] and d["week"] == 0, f"not four 5-hour windows (or a weekly bar got them): {len(W)}, {d['week']}")
+        need(all(W[k]["reset"] - W[k]["from"] == 5 * H and (k == 0 or W[k]["from"] == W[k - 1]["reset"]) for k in range(4)),
+             f"the windows aren't back to back, five hours each: {[(w['from'], w['reset']) for w in W]}")
+        need(all(w["moving"] and w["lineFrom"] == 10 and w["lineTo"] >= 99.5 for w in W), f"the moving stop line doesn't climb from 10% to 100% in each window: {[(w['lineFrom'], w['lineTo']) for w in W]}")
+        what = lambda w: [(p["what"], p["add"]) for p in (w["L"] or {}).get("pieces", [])]
+        need(what(W[0]) == [("Planned item 10", 6), ("Planned item 11", 2)] and W[0]["L"]["to"] == 8 and W[0]["L"]["now"] == 0,
+             f"window 2 doesn't have its own work from 0% (item 10, half of item 11): {what(W[0])}")
+        need(what(W[1]) == [("Planned item 11", 2)], f"window 3 doesn't get the other half of item 11: {what(W[1])}")
+        need(what(W[2]) == [], f"window 4 should be empty: {what(W[2])}")
+        need(what(W[3]) == [("Planned item 12 (the day after)", 1)] and W[3]["L"]["pieces"][0]["kind"] == "repeat",
+             f"the daily item isn't counted again the day after in the last window: {what(W[3])}")
+        need(W[0]["waits"] == [{"what": "Planned item 10", "start": W[0]["L"]["pieces"][0]["start"]}]
+             and "Waits for the stop line to climb, so it starts later than it could: Planned item 10 around T310." in W[0]["words"],
+             f"what waits for the line isn't said: {W[0]['waits']}, {W[0]['words']}")
+        need(W[0]["words"].startswith("The stop line climbs from 10% at T270 to ") and "it uses about 8% here, done around T570" in W[0]["words"]
+             and "By then the stop line will be at" in W[0]["words"] and W[0]["L"]["lineThen"] is not None,
+             f"window 2's words or its dotted line are off: {W[0]['words']}")
+        need(W[2]["words"].endswith("Nothing lands in this window.") and not W[2]["waits"], f"an empty window's words: {W[2]['words']}")
+        need(all(f["lineFrom"] == f["lineTo"] == 50 and not f["moving"] and "The stop line stays at 50%." in f["words"] for f in F),
+             f"a fixed 5-hour line doesn't stay put in the windows: {[f['words'] for f in F]}")
+        # The current bar: item 10 and half of item 11 in the very next window, the rest (half of 11, the day-after
+        # item isn't on the current bar, item 13 days later) only later; the old sentence stays when it's all next.
+        need(L["next"] == 12 and L["nextSoon"] == 8 and "8% more lands after the reset, in the next 5-hour window, and 4% later than that." in L["words"],
+             f"the current bar's words don't split the next window from later: {L['next']}, {L.get('nextSoon')}, {L['words']}")
+        page = (status / "index.html").read_text()
+        need("windowsAhead(l, lines, E, new Date())" in page and "localStorage.setItem('ahead5'" in page and "Show the next 20 hours" in page
+             and "function aheadRow(w)" in page and ".meter.ahead {" in page and "aria-expanded" in page,
+             "H199: the status page has no button that unfolds the next 5-hour windows")
+        return "four 5-hour windows back to back, each its own work, reset, moving line and what waits; the current bar says next vs later"
+
     async def flow97(self) -> str:
         """F31, no Claude, no network: a refused pull or push from a job never passes silently. push.py --pull and a
         plain push against a throwaway HQ copy whose GitHub is a throwaway folder: a pull that works says so; a remote
@@ -12874,6 +12936,7 @@ FLOWS = {
     111: ("H202: the map as a guided workflow: six layers with their questions, nothing private or named; turned on, its blank map and line, never over theirs", False, "flow111"),
     112: ("H200: the to-do list, the Eisenhower way: read, kept by calls and the app, shown as a matrix, a tick and its undo", False, "flow112"),
     113: ("H194: HQ's own icon on a fresh install: every page saved to a home screen or the Dock, and the Mac app's Dock icon", False, "flow113"),
+    114: ("H199: the 5-hour bar unfolds into the whole day: four more windows, each its work, reset, moving line and what waits for it", False, "flow114"),
 }
 
 

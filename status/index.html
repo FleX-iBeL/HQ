@@ -166,6 +166,11 @@
       .meter.over .pct { color: var(--red); }
       .alarm { margin: 0; padding: 0 4px; color: var(--red); font-weight: 600; }
       .usage > .soft, .plain { margin: 0; padding: 0 4px; }
+      /* H199: the next 5-hour windows, unfolded under the 5-hour bar: quieter than the live bars above them. */
+      .card > .ahead-fold { padding: 10px 20px; border-top-style: dashed; }
+      .meter.ahead { background: var(--tint); padding-top: 12px; padding-bottom: 12px; }
+      .meter.ahead .what { font-weight: 500; }
+      .meter.ahead .pct { color: var(--soft); }
       .usage > .fiveline { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 0 4px; }
       .usage > .fiveline > .soft { margin-right: 4px; }
       .card > .plain { padding: 16px 20px; }
@@ -449,7 +454,7 @@
     <script>HQUpdate.mount({ line: document.getElementById('hqu-line'), banner: document.getElementById('hqu-banner') });</script>
     <script type="module">
       import { parseRoadmap } from './parse.mjs';
-      import { stopLine, usageVerdict, landing, landingWords, LAND_KINDS } from './usage.mjs';
+      import { stopLine, usageVerdict, landing, landingWords, LAND_KINDS, windowsAhead, windowWords, WINDOWS_AHEAD } from './usage.mjs';
 
       const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped' };
       const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision', repeat: 'Repeats' };
@@ -730,6 +735,28 @@
         // The used part keeps its round end only where nothing follows it.
         if (L.pieces.length) fill.style.borderRadius = '4px 0 0 4px';
       }
+      // H199: whether the next 5-hour windows are unfolded, remembered on this device.
+      let aheadOpen = false;
+      try { aheadOpen = localStorage.getItem('ahead5') === 'yes'; } catch {}
+      /** H199: one later 5-hour window: its bar with the work landing in it, its reset and its moving stop line. */
+      function aheadRow(w) {
+        const L = w.L;
+        const fixed = !w.moving && w.lineFrom !== null ? w.lineFrom : null;
+        const row = meter(`5-hour window ${w.n + 1}`, `${clock(w.from * 1000)} to ${clock(w.reset * 1000)}`, 0, `Resets at ${clock(w.reset * 1000)}`, fixed, 'ahead');
+        row.querySelector('.pct').textContent = L && L.pieces.length ? `~${L.to}%` : '0%';
+        const times = row.querySelector('.when');
+        if (w.moving && w.lineFrom !== null) times.append(el('small', '', `Stop line ${w.lineFrom}% to ${w.lineTo}%, climbing`));
+        if (L) drawLanding(row.querySelector('.bar'), { ...L, key: `ahead${w.n}`, lineAll: null });
+        const words = windowWords(w, (t) => clock(t * 1000));
+        const note = el('p', 'soft note land-note');
+        if (L?.cross) {
+          const [a, c] = words.split(' That goes past the stop line');
+          note.append(a + ' ', el('span', 'crosses', `That goes past the stop line${c}`));
+        } else note.textContent = words;
+        if (w.waits.length) note.classList.add('waits');
+        row.append(note);
+        return row;
+      }
       /** H176: what the colours on the usage bars mean. */
       function landLegend() {
         const p = el('p', 'soft land-legend');
@@ -824,6 +851,32 @@
             if (L.pieces.length) landed = true;
           }
           card.append(row);
+          // H199: under the 5-hour bar, a button unfolds the next four 5-hour windows (with this one, about a day).
+          if (fiveHour && u.readable && E) {
+            const ws = windowsAhead(l, lines, E, new Date());
+            if (ws.length) {
+              const fold = el('div', 'ahead-fold');
+              const b = el('button', 'chip range ahead-toggle');
+              const rows = [];
+              // Unfolded at once on a click, without waiting for the page's next redraw.
+              const show = () => {
+                b.textContent = aheadOpen ? 'Hide the next 20 hours' : `Show the next 20 hours (${WINDOWS_AHEAD} more 5-hour windows)`;
+                b.setAttribute('aria-expanded', String(aheadOpen));
+                for (const r of rows.splice(0)) r.remove();
+                if (aheadOpen) rows.push(...ws.map(aheadRow));
+                fold.after(...rows);
+              };
+              b.addEventListener('click', () => {
+                aheadOpen = !aheadOpen;
+                try { localStorage.setItem('ahead5', aheadOpen ? 'yes' : 'no'); } catch {}
+                show();
+              });
+              fold.append(b);
+              card.append(fold);
+              show();
+              if (aheadOpen && ws.some((w) => w.L?.pieces.length)) landed = true;
+            }
+          }
         }
         box.append(card);
         if (landed) box.append(landLegend());

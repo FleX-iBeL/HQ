@@ -219,11 +219,13 @@ export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = fa
  *   lineThen, thenAt, thenLands: the moving line when the one-off work lands (H177, H181); lineAll, allAt, allLands: when everything does }}
  */
 export const LAND_KINDS = { team: "the team's work", planned: 'planned once', repeat: 'repeating' };
-export function landing(l, lines, E, now = new Date()) {
+export function landing(l, lines, E, now = new Date(), { from = null } = {}) {
   const key = lineKey(l?.label);
   if (!key || key === 'fable' || !E || !Number.isFinite(Number(l.percent))) return null;
   const t = now.getTime() / 1000;
   const reset = l.resetsAt ? new Date(l.resetsAt).getTime() / 1000 : null;
+  // H199: a later window (`from`, epoch seconds) counts only the work from its start; the current one counts all of it.
+  const lo = from ?? -Infinity;
   const work = [];
   let untimed = 0;
   const put = (w) => (w.end && w.start !== null ? work.push(w) : (untimed += w.add > 0 ? 1 : 0));
@@ -233,37 +235,42 @@ export function landing(l, lines, E, now = new Date()) {
     const add = Math.max(0, Number(e.cost[key] ?? 0) - (running ? Number(e.used?.[key] ?? 0) : 0));
     const end = e.eta ?? null;
     const start = running ? t : (e.start ?? (end ? end - (e.est ?? 0) * 60 : null));
-    put({ kind: 'team', what: `Job ${n}`, add, start, end, priority: false, running });
+    put({ kind: 'team', what: `Job ${n}`, add, start, end, priority: false, running, waits: e.waits === 'usage' && !running });
   }
   for (const [n, e] of Object.entries(E.items ?? {})) {
     if (!e.cost) continue;
-    put({ kind: e.every ? 'repeat' : 'planned', what: `Planned item ${n}`, add: Math.max(0, Number(e.cost[key] ?? 0)), start: e.start ?? null, end: e.eta ?? null, priority: !!e.priority });
+    put({ kind: e.every ? 'repeat' : 'planned', what: e.what ?? `Planned item ${n}`, add: Math.max(0, Number(e.cost[key] ?? 0)), start: e.start ?? null, end: e.eta ?? null, priority: !!e.priority, waits: !!e.usage_wait });
   }
   // The order they'd run: the running job first, then by when each starts.
   work.sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0) || a.start - b.start || a.end - b.end);
   const r1 = (x) => Math.round(x * 10) / 10;
   let at = Number(l.percent);
   let next = 0;
+  let nextSoon = 0;
   let cross = null;
   const pieces = [];
   const kinds = { team: 0, planned: 0, repeat: 0 };
   for (const w of work) {
     if (!(w.add > 0)) continue;
-    // The part of it that runs before the reset, by its minutes; the rest is the next window's.
+    // The part of it that runs before the reset, by its minutes; the rest is the next window's (H199: and what ran
+    // before a later window's start was an earlier window's).
     const span = Math.max(1, w.end - w.start);
-    const frac = reset === null || w.end <= reset ? 1 : w.start >= reset ? 0 : (reset - w.start) / span;
+    const part = (a, b) => Math.max(0, Math.min(b, w.end) - Math.max(a, w.start)) / span;
+    const frac = w.end <= lo ? 0 : reset === null || w.end <= reset ? (w.start >= lo ? 1 : part(lo, w.end)) : part(lo, reset);
     const here = w.add * frac;
-    next += w.add - here;
+    next += reset === null ? 0 : w.add * (w.start >= reset ? 1 : part(reset, w.end));
+    // H199: of that, what falls in the 5-hour window right after the reset (the rest lands later still).
+    if (key === 'five' && reset !== null) nextSoon += w.add * part(reset, reset + LINES.five.windowMs / 1000);
     if (here < 0.05) continue;
-    const from = at;
+    const start = at;
     at += here;
     const lands = reset === null ? w.end : Math.min(w.end, reset);
-    pieces.push({ kind: w.kind, what: w.what, add: r1(here), from: r1(from), to: r1(at), start: w.start, lands, priority: w.priority });
+    pieces.push({ kind: w.kind, what: w.what, add: r1(here), from: r1(start), to: r1(at), start: w.start, lands, priority: w.priority, waits: !!w.waits });
     kinds[w.kind] += here;
     const sl = stopLine(l, lines, new Date(1000 * (reset === null ? lands : Math.min(lands, reset - 60))));
     if (!cross && sl && r1(at) > sl.line) cross = { what: w.what, at: lands, pct: r1(at), line: sl.line };
   }
-  const line = stopLine(l, lines, now);
+  const line = stopLine(l, lines, from !== null && from * 1000 > now.getTime() ? new Date(from * 1000) : now);
   // Where a moving line will stand when the last piece lands (before the reset), so the bar shows whether it fits then.
   // H177: the time it's read at is a landing (the 5-hour bar: before its reset); a fixed line gets none.
   const readAt = (last) => (last ? (reset === null ? last : Math.min(last, reset - 60)) : null);
@@ -284,7 +291,7 @@ export function landing(l, lines, E, now = new Date()) {
     line: line ? line.line : null, moving: !!line?.moving,
     lineThen: moves(then) ? then.line : null, thenAt: moves(then) ? thenAt : null, thenLands: moves(then) ? thenLands : null,
     lineAll: moves(all) ? all.line : null, allAt: moves(all) ? allAt : null, allLands: moves(all) ? allLands : null,
-    pieces, kinds, next: r1(next), untimed, cross,
+    pieces, kinds, next: r1(next), nextSoon: r1(nextSoon), untimed, cross,
   };
 }
 
@@ -306,7 +313,74 @@ export function landingWords(L, clock) {
     if (L.cross) s.push(`That goes past the stop line: around ${clock(L.cross.at)}, ${L.cross.what} takes it to ${L.cross.pct}% while the line is at ${L.cross.line}%.`);
     else if (L.line !== null) s.push(L.moving ? 'It stays under the stop line as the line climbs.' : 'It stays under the stop line.');
   } else if (five && L.next) s.push('Nothing lands before its reset.');
-  if (L.next) s.push(`${L.next}% more lands after ${five ? 'the reset, in the next 5-hour window' : 'the weekly reset, in the next week'}.`);
+  // H199: the 5-hour bar says which part lands in the very next window and which part only later (the unfolded windows show where).
+  const soon = L.nextSoon ?? L.next;
+  if (L.next && five && soon < L.next - 0.05) {
+    const later = Math.round((L.next - soon) * 10) / 10;
+    s.push(soon >= 0.05
+      ? `${soon}% more lands after the reset, in the next 5-hour window, and ${later}% later than that.`
+      : `${L.next}% more lands later, after the next 5-hour window.`);
+  } else if (L.next) s.push(`${L.next}% more lands after ${five ? 'the reset, in the next 5-hour window' : 'the weekly reset, in the next week'}.`);
   if (L.untimed) s.push(`${L.untimed === 1 ? 'One more piece of work has' : `${L.untimed} more pieces of work have`} no time yet, so ${L.untimed === 1 ? "it isn't" : "they aren't"} on the bar.`);
+  return s.join(' ');
+}
+
+/**
+ * H199 (17 October 2026, call at 14:45): "maybe we can have for fun the 5 hour session have an unfolding button so you
+ * can see 4 more (making it 25 hours aka 1 day), and then you can see when we have things scheduled out and how much of
+ * the estimated usage it will take", and on the same day: "because i am confused why it would be stuck tonight". The
+ * 5-hour windows after the current one, back to back from its reset, each with the work landing in it the same way as
+ * the current bar (landing, from 0%), its reset, its moving stop line and what waits for that line in it. A repeating
+ * item every day is counted again a day later when that still falls inside. (A real window starts with the first use
+ * after a reset, so with nothing running the times can shift.)
+ * @returns {Array<{ n: number, from: number, reset: number, L: ReturnType<typeof landing>, lineFrom: number | null,
+ *   lineTo: number | null, waits: Array<{ what: string, start: number }> }>}
+ */
+export const WINDOWS_AHEAD = 4;
+export function windowsAhead(l, lines, E, now = new Date(), count = WINDOWS_AHEAD) {
+  if (lineKey(l?.label) !== 'five' || !l.resetsAt || !E) return [];
+  const win = LINES.five.windowMs / 1000;
+  const first = Math.round(new Date(l.resetsAt).getTime() / 60000) * 60;
+  if (!Number.isFinite(first)) return [];
+  const end = first + count * win;
+  const items = { ...(E.items ?? {}) };
+  for (const [n, e] of Object.entries(E.items ?? {})) {
+    if (e.every === 'day' && e.start && e.eta && e.start + 86400 < end) {
+      items[`${n}+1`] = { ...e, what: `Planned item ${n} (the day after)`, start: e.start + 86400, eta: e.eta + 86400, usage_wait: false };
+    }
+  }
+  const E2 = { ...E, items };
+  const out = [];
+  for (let k = 0; k < count; k++) {
+    const from = first + k * win;
+    const reset = from + win;
+    const lw = { label: l.label, percent: 0, resetsAt: new Date(reset * 1000).toISOString() };
+    const L = landing(lw, lines, E2, now, { from });
+    const a = stopLine(lw, lines, new Date(from * 1000));
+    const b = stopLine(lw, lines, new Date((reset - 60) * 1000));
+    const waits = L ? L.pieces.filter((p) => p.waits && p.start >= from && p.start < reset).map((p) => ({ what: p.what, start: p.start })) : [];
+    out.push({ n: k + 1, from, reset, L, lineFrom: a ? a.line : null, lineTo: b ? b.line : null, moving: !!a?.moving, waits });
+  }
+  return out;
+}
+
+/** H199: one later window in plain words, under its bar. */
+export function windowWords(w, clock) {
+  const L = w.L;
+  const s = [];
+  if (w.moving && w.lineFrom !== null) s.push(`The stop line climbs from ${w.lineFrom}% at ${clock(w.from)} to ${w.lineTo}% at ${clock(w.reset)}.`);
+  else if (w.lineFrom !== null) s.push(`The stop line stays at ${w.lineFrom}%.`);
+  if (!L || !L.pieces.length) {
+    s.push('Nothing lands in this window.');
+    return s.join(' ');
+  }
+  const parts = Object.entries(L.kinds).filter(([, v]) => v > 0).map(([k, v]) => `${LAND_KINDS[k]} ${v}%`);
+  s.push(`If the work goes as estimated, it uses about ${L.to}% here, done around ${clock(L.lands)} (${parts.join(', ')}).`);
+  if (L.lineThen !== null && L.lineThen !== undefined) s.push(`By then the stop line will be at ${L.lineThen}% (the dotted line).`);
+  if (w.waits.length) {
+    const names = w.waits.map((x) => `${x.what} around ${clock(x.start)}`);
+    s.push(`Waits for the stop line to climb, so it starts later than it could: ${names.join(', ')}.`);
+  }
+  if (L.cross) s.push(`That goes past the stop line: around ${clock(L.cross.at)}, ${L.cross.what} takes it to ${L.cross.pct}% while the line is at ${L.cross.line}%.`);
   return s.join(' ');
 }
