@@ -345,6 +345,8 @@ class Server:
             "HQ_PORT": str(TEST_PORT), "HQ_NO_PHONE": "1", "HQ_WRAP_UP": "dry",
             "HQ_CALLS": str(self.calls), "HQ_LOG": str(self.log), "HQ_PID_FILE": str(self.pidfile),
             "HQ_NOTES": str(self.notes),
+            # H200: the to-do list and its undo, never the workspace's own
+            "HQ_TODO": str(tmp / "todo-server" / "challenges.md"), "HQ_TODO_UNDO": str(tmp / "todo-server" / "undo.json"),
             # H101: never the workspace's own calendar copy, and never a real Claude run to read Google
             "HQ_CALENDAR_FILE": str(tmp / "calendar-server" / "calendar.json"),
             "HQ_CALENDAR_FAKE": str(tmp / "calendar-server" / "stream.txt"),
@@ -5248,7 +5250,8 @@ window.fetch = async (url, opt) => {
             need("About the appointment: Dentist (" in head and transcript.read_call(tr.path.stem, d / "calls") is not None,
                  f"the transcript doesn't say which appointment, or can't be read back: {head!r}")
             csrc, bsrc = (APP / "call.py").read_text(), (APP / "bot.py").read_text()
-            need("agenda.call_note(self.about" in csrc and "None if free or not isinstance(about, dict)" in csrc
+            need('_about(self.about, "note")' in csrc and "mod = todo if e.get(\"kind\") == \"todo\" else agenda" in csrc  # H200: an item or an appointment
+                 and "None if free or not isinstance(about, dict)" in csrc
                  and "None if free else _agenda.about(" in bsrc, "the call doesn't get the appointment, or gets it on Free")
         finally:
             for k, v in env_before.items():
@@ -8941,10 +8944,10 @@ print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now),
         dock = page.split('<nav id="dock" aria-label="HQ">', 1)
         need(len(dock) == 2, "the dock is missing")
         dock = dock[1].split("</nav>", 1)[0]
-        order = [("directbtn", "Donna"), ("chatbtn", "Chat"), ("calbtn", "Calendar"), ("devbtn", "Mic"), ("notesbtn", "Notes"),
-                 ("histbtn", "Calls"), ("statbtn", "Status"), ("voicebtn", "Voice")]
+        order = [("directbtn", "Donna"), ("chatbtn", "Chat"), ("calbtn", "Calendar"), ("todobtn", "To-do"), ("devbtn", "Mic"),
+                 ("notesbtn", "Notes"), ("histbtn", "Calls"), ("statbtn", "Status"), ("voicebtn", "Voice")]  # H200: To-do
         at = [dock.find(f'id="{bid}" data-dl="{label}"') for bid, label in order]
-        need(all(i >= 0 for i in at) and at == sorted(at), f"the dock doesn't hold the eight buttons with their names, in order: {at}")
+        need(all(i >= 0 for i in at) and at == sorted(at), f"the dock doesn't hold the nine buttons with their names, in order: {at}")
         need(all(page.count(f'id="{bid}"') == 1 for bid, _ in order), "a dock button is on the page twice")
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
         cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
@@ -8998,7 +9001,7 @@ setTimeout(() => {
             need(res["m2"] == ("yes" if lk == "modern2" else "no"), f"{name}: Modern 2 is {'off' if lk == 'modern2' else 'on'} with {lk} saved: {res}")
             need(res["oncall"] == "ok", f"{name}: on a call (H144) Calendar or Mic isn't in the dock, a button sits outside it, or a name is cut off: {res}")
             seen.append(name)
-        return "Modern, with Modern 2 one tap away (H185): a Look row with both, Modern until Modern 2 is picked (Classic saved still shows Modern), Modern 2 set before the page draws and passed to the status page and her chat; in both looks the eight buttons in the dock with their names, on a call too with Calendar next to Mic, every name whole (H144) (" + ", ".join(seen) + ")"
+        return "Modern, with Modern 2 one tap away (H185): a Look row with both, Modern until Modern 2 is picked (Classic saved still shows Modern), Modern 2 set before the page draws and passed to the status page and her chat; in both looks the nine buttons in the dock with their names (To-do since H200), on a call too with Calendar next to Mic, every name whole (H144) (" + ", ".join(seen) + ")"
 
 
     # 98
@@ -10840,6 +10843,194 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 f"nothing private or named; on starts the map from blank and adds its line, never over theirs; off keeps it; "
                 f"the call rule only when on")
 
+    # 112
+    async def flow112(self) -> str:
+        """H200: the to-do list, the Eisenhower way. No Claude turns. The template's list reads as its lists with
+        nothing on them, each in its place (0 commitments, 1 to 4 the matrix by their names, 5 let go, 7 done, the
+        wishlist, groceries); a list with its own name still finds its square. On a throwaway copy with made-up items:
+        add, done, let go, move (a column the other list lacks goes into its notes, nothing lost), a log line each,
+        newest first; an unclear item is refused with the matches; undo puts the last change back, and not after the
+        file changed since. The very important mail reads from the mail list. The call rules, Donna's chat and the
+        policy know it; the mail check never changes it. The server serves it from the test server's own copy, a
+        change only from the page. On the call page in a headless browser (phone and desktop app): the To-do button
+        in the dock, the matrix with its counts, a square opens its list, a tick moves the item to done in the file,
+        Undo puts it back, an item opens with its fields and its own words, and Back goes up a level."""
+        import todo as td
+        tdir = self.tmp / "h200"
+        tdir.mkdir(parents=True, exist_ok=True)
+        tpl = (APP.parent / "template" / "challenges.md").read_text()
+        d = td.read(APP.parent / "template" / "challenges.md")
+        kinds = {l["key"]: l["kind"] for l in d["lists"]}
+        need(kinds == {"0": "commit", "1": "q2", "2": "q1", "3": "q3", "4": "q4", "5": "letgo", "7": "done",
+                       "shopping-wishlist": "wish", "groceries": "groceries"} and not any(l["items"] for l in d["lists"]),
+             f"the template's list doesn't read as its empty lists in their places: {kinds}")
+        for name, want in (("Big rocks (important, not urgent)", "q2"), ("Fires: important and urgent", "q1"),
+                           ("Urgent but not important", "q3"), ("Not urgent and not important", "q4"), ("Promises", "other")):
+            need(td.kind_of("9", name) == want, f"a list called {name!r} isn't placed as {want}")
+        f = tdir / "challenges.md"
+        rows = {"## 0. Commitments towards other people": "| Call the plumber back | passive | A neighbour | Friday | open | | 2026-01-02 | |",
+                "## 1. Important, not urgent": "| Learn the guitar | active | | open | | 2026-01-02 | See details. |\n| Plan the garden | active | | open | | 2026-01-03 | |",
+                "## 2. Important and urgent": "| Pay the water bill | passive | 2026-01-20 | open | | 2026-01-02 | Forty euros. |",
+                "## 4. Not urgent, not important": "| Sort the photos | active | | open | | 2026-01-02 | |"}
+        text = tpl
+        for head, row in rows.items():
+            at = text.index(head)
+            sep = text.index("|---", at)
+            eol = text.index("\n", sep)
+            text = text[:eol + 1] + row + "\n" + text[eol + 1:]
+        text = text.replace("## Details in my own words\n", "## Details in my own words\n\n**Guitar.** I want to play by the summer, ten minutes a day.\n")
+        f.write_text(text)
+        env_was = {k: os.environ.get(k) for k in ("HQ_TODO_UNDO", "HQ_NOW")}
+        os.environ["HQ_TODO_UNDO"] = str(tdir / "undo.json")
+        os.environ["HQ_NOW"] = "2026-01-05T10:00:00"
+        try:
+            d = td.read(f)
+            by = {l["key"]: l for l in d["lists"]}
+            need([i["title"] for i in by["1"]["items"]] == ["Learn the guitar", "Plan the garden"], f"list 1 reads wrong: {by['1']['items']}")
+            g = by["1"]["items"][0]
+            need(g["details"] and "ten minutes a day" in g["details"][0], f"the item's own words aren't with it: {g['details']}")
+            need(by["2"]["items"][0]["deadline"] == "2026-01-20", "the deadline column doesn't read")
+            before = f.read_text()
+            r = td.done("water bill", by="a test", p=f)
+            t = f.read_text()
+            need("Pay the water bill" not in t.split("## 2.")[1].split("## 3.")[0] and "| Pay the water bill | 2026-01-05 10:00 | Forty euros. |" in t,
+                 f"done didn't move the row to 7 with the time: {r}")
+            need("- 2026-01-05 10:00: Pay the water bill: done, moved to 7 (done) (a test)." in t, "done wrote no log line")
+            need(td.undo()["ok"] and f.read_text() == before, "undo didn't put the list back exactly")
+            need(not td.undo()["ok"], "a second undo did something")
+            td.move("plumber", "important not urgent", p=f)
+            t = f.read_text()
+            need("| Call the plumber back | passive | Friday | open |  | 2026-01-02 | For: A neighbour. |" in t,
+                 "moving from 0 to 1 lost who it's for, or the columns")
+            td.letgo("photos", "Not now", p=f)
+            need("| Sort the photos | 2026-01-05 10:00 | Not now |" in f.read_text(), "let go didn't write the why")
+            td.add("groceries", "Oat milk", p=f)
+            td.add("1", "Book the dentist", notes="Before March", deadline="February", p=f)
+            t = f.read_text()
+            need("| Oat milk |  |  |  |" in t and "| Book the dentist |  | February | open |  | 2026-01-05 | Before March |" in t,
+                 "add didn't fill the list's own columns only")
+            log = t.split("## Log")[1]
+            need(log.index("added Book the dentist") < log.index("added Oat milk") < log.index("Sort the photos: let go"), "the log isn't newest first")
+            f.write_text(f.read_text() + "\n")
+            need(not td.undo()["ok"] and f.read_text().endswith("\n\n"), "undo ran over a change made since")
+            try:
+                td.move("the", "4", p=f)
+                need(False, "an unclear item was moved")
+            except KeyError as e:
+                need("More than one" in str(e), f"an unclear item wasn't refused with the matches: {e}")
+            inbox = tdir / "inbox.md"
+            inbox.write_text("# Mail\n\n## Very important\n\n- 3 Jan 2026 · bank · Your card · A new card is ready · Why: money · Status: new · [Gmail](https://example.com)\n\n## To check\n\n- 4 Jan · shop · Sale · nothing\n")
+            mail = td.very_important(tdir)
+            need(len(mail) == 1 and mail[0]["from"] == "bank" and mail[0]["status"] == "new", f"the very important mail doesn't read: {mail}")
+            need(re.search(r"Call the plumber back \[Friday\] #[0-9a-f]{10}", td.summary(f)), "the summary doesn't give the items with their ids")
+        finally:
+            for k, v in env_was.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        # the rules: calls, Donna's chat, the policy, the mail check, a friend's chat
+        import direct_line
+        from policy import Policy
+        need(config.TODO_RULE in config.VOICE_RULES and config.TODO_RULE in direct_line._text_rules() and "{" not in config.TODO_RULE,
+             "the to-do rule isn't on every call and in Donna's chat")
+        pol = Policy(config.FOLDER, dry_run=True)
+        script = APP / "todo.py"
+        need(pol.decide("Bash", {"command": f'python3 "{script}" done "x" --by "a call"'}).verdict == "allow"
+             and pol.decide("Bash", {"command": f'python3 "{script}" wipe'}).verdict == "deny", "a call can't keep the list, or can do more")
+        mc = (APP.parent / "routine" / "mail-check.md").read_text()
+        need("Never change the to-do list yourself" in mc, "the mail check isn't told to leave the list alone")
+        need("app/todo.py" in (APP.parent / "template" / "CLAUDE.md").read_text(), "a friend's chat isn't told about the to-do list")
+        # the server, on its own copy
+        await self.ensure_server()
+        sf = Path(self.server.env["HQ_TODO"])
+        sf.parent.mkdir(parents=True, exist_ok=True)
+        sf.write_text(text)
+        Path(self.server.env["HQ_TODO_UNDO"]).unlink(missing_ok=True)
+        def post(body, hq="todo"):
+            req = urllib.request.Request(TEST_URL + "/api/todo", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        code, body, _ = http_get("/api/todo")
+        got = json.loads(body) if code == 200 else {}
+        need(code == 200 and [i["title"] for l in got.get("lists", []) if l["key"] == "1" for i in l["items"]] == ["Learn the guitar", "Plan the garden"],
+             f"/api/todo doesn't serve the test server's own list ({code})")
+        need(post({"done": "whatever"}, hq="")[0] == 403 and sf.read_text() == text, "a change without the page's header was let in")
+        need(post({"done": "nothing like it"})[0] == 404, "an unknown item wasn't refused")
+        # the call page, phone and desktop app
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        dock = page.split('<nav id="dock"', 1)[1].split("</nav>", 1)[0]
+        need('id="todobtn" data-dl="To-do"' in dock, "the To-do button isn't in the dock")
+        harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (f, ms) => { for (let i = 0; i < ms / 50; i++) { if (f()) return true; await wait(50); } return false; };
+  const dk = document.getElementById("dock").getBoundingClientRect(), tb = document.getElementById("todobtn").getBoundingClientRect();
+  out.push("button:" + (tb.width > 0 && tb.left >= dk.left - 1 && tb.right <= dk.right + 1 ? "ok" : "off"));
+  document.getElementById("todobtn").click();
+  await until(() => document.querySelector(".tdq.q2 .n"), 4000);
+  const n = q => (document.querySelector(".tdq." + q + " .n") || {}).textContent;
+  out.push("matrix:" + ["q1", "q2", "q3", "q4"].map(n).join("/"));
+  out.push("commit:" + (/Call the plumber back/.test(document.querySelector("#todobody .card") ? document.querySelector("#todobody .card").textContent : "") ? "ok" : "no"));
+  const sh = document.getElementById("todosheet").getBoundingClientRect();
+  out.push("sheet:" + (sh.height > 200 && sh.bottom <= innerHeight + 1 ? "ok" : "off"));
+  document.querySelector(".tdq.q2").click(); await wait(100);
+  out.push("list:" + document.getElementById("todotitle").textContent + "=" + document.querySelectorAll(".tdrow").length);
+  document.querySelector(".tdrow .ck").click();
+  await until(() => /Undo/.test(document.getElementById("todonote").textContent), 4000);
+  out.push("ticked:" + document.querySelectorAll(".tdrow").length);
+  await fetch("api/todo", { cache: "no-store" });
+  const und = [...document.querySelectorAll("#todonote button")].find(b => b.textContent === "Undo");
+  if (und) und.click();
+  await until(() => document.querySelectorAll(".tdrow").length === 2, 4000);
+  out.push("undone:" + document.querySelectorAll(".tdrow").length);
+  document.querySelector(".tdrow .it").click(); await wait(100);
+  out.push("item:" + (document.querySelector("#todobody h3") || {}).textContent + "/" + (/ten minutes a day/.test(document.getElementById("todobody").textContent) ? "words" : "none")
+           + "/" + (document.getElementById("todogo") ? "call" : "nocall"));
+  document.getElementById("todoback").click(); await wait(50);
+  out.push("back:" + document.getElementById("todosheet").dataset.view);
+  document.getElementById("todoback").click(); await wait(50);
+  out.push("top:" + document.getElementById("todosheet").dataset.view);
+  document.getElementById("calbtn").click(); await wait(50);
+  out.push("onesheet:" + (document.getElementById("todosheet").classList.contains("open") ? "both" : "ok"));
+  const pre = document.createElement("pre"); pre.id = "h200"; pre.textContent = "H200RESULT " + out.join(" | ") + " END"; document.body.append(pre);
+})();
+</script>"""
+        seen = []
+        for name, size, app_ in (("the phone", "390,844", False), ("the desktop app", "1180,780", True)):
+            sf.write_text(text)
+            Path(self.server.env["HQ_TODO_UNDO"]).unlink(missing_ok=True)
+            pf = self.tmp / f"h200-{'app' if app_ else 'phone'}.html"
+            pg = page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1).replace("</body>", harness + "</body>", 1)
+            if app_:
+                pg = pg.replace('new URLSearchParams(location.search).has("app")', "true", 1)
+            pf.write_text(pg)
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'h200-profile'}", "--disable-web-security", f"--window-size={size}",
+                                              "--virtual-time-budget=10000", "--dump-dom", pf.as_uri()], timeout=90)
+            mm = re.search(r'<pre id="h200">H200RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{name}: the to-do test on the call page didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+            say(f"   {name} ({size}): {mm.group(1)}")
+            need(res["button"] == "ok", f"{name}: the To-do button isn't in the dock: {res}")
+            need(res["matrix"] == "1/2/0/1" and res["commit"] == "ok" and res["sheet"] == "ok", f"{name}: the matrix or what's promised doesn't show right: {res}")
+            need(res["list"] == "1. Important, not urgent=2", f"{name}: a square doesn't open its list: {res}")
+            need(res["ticked"] == "1" and res["undone"] == "2" and sf.read_text() == text, f"{name}: the tick or its Undo didn't reach the file: {res}")
+            need(res["item"] == "Learn the guitar/words/call", f"{name}: the item doesn't open with its own words and the call button: {res}")
+            need(res["back"] == "list" and res["top"] == "main" and res["onesheet"] == "ok", f"{name}: Back or one sheet at a time is wrong: {res}")
+            seen.append(name)
+        return ("the to-do list the Eisenhower way: the template's lists in their places, a change keeps every column and logs "
+                "it, undo only over its own change, the rules on calls and in Donna's chat, the mail check hands off; the matrix "
+                "in the app opens a list and an item, a tick reaches the file and Undo takes it back (" + ", ".join(seen) + ")")
+
     async def flow97(self) -> str:
         """F31, no Claude, no network: a refused pull or push from a job never passes silently. push.py --pull and a
         plain push against a throwaway HQ copy whose GitHub is a throwaway folder: a pull that works says so; a remote
@@ -12554,6 +12745,7 @@ FLOWS = {
     109: ("H186: the nightly line: the night's work always on nightly, on to main as the next version only when sure; a privacy hit pushes nothing", False, "flow109"),
     110: ("F38: a Quick session starts with a text over 200 KB: handed over by file, never on the command line", True, "flow110"),
     111: ("H202: the map as a guided workflow: six layers with their questions, nothing private or named; turned on, its blank map and line, never over theirs", False, "flow111"),
+    112: ("H200: the to-do list, the Eisenhower way: read, kept by calls and the app, shown as a matrix, a tick and its undo", False, "flow112"),
 }
 
 

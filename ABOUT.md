@@ -51,6 +51,12 @@ After a call, the transcript is saved and the call's notes go into your log, in 
 
 Your workspace is a folder of plain text (Markdown) files that Claude reads at the start of every chat and every call: your rules for how Claude talks to you, who you are and what matters to you (`me.md`), your north star (`vision.md`), where you stand now, everything to do in your own priority lists, the log of every conversation, and the mail list. `where-things-go.md` says where each kind of update goes, so nothing gets written down in five places. A life-coach skill helps you plan your days from your north star.
 
+### The to-do list, the Eisenhower way
+
+The heart of HQ. Everything you have to do lives in one list in your workspace (`challenges.md`), in your own priority lists: what you promised other people, then the four squares of the Eisenhower matrix (important or not, urgent or not), with important but not urgent first, because that's where the needle movers are; then what you decided to let go, what's done (never deleted), a wishlist and groceries. Keeping a list like that is a lot of admin; in HQ you just talk. Something comes up on a call or in Donna's chat, and it's sorted into the right list in your words; something's done or let go, and it moves, with a line in the list's log so you can look back. The hourly mail check says when a mail is about something already on your list, and a new mail only goes on it after your yes.
+
+In the app, the To-do button shows it as the matrix: each square with how many and the first few, what's promised to other people and very important mail above it, the other lists under it. Tap a square for its list, an item for everything about it and your own words on it. Tick it off, move it, let it go or add one by hand (Undo puts the last change back), or call about it. A new install starts with the lists empty, ready for yours.
+
 ### The routine and the job queue
 
 A small helper runs every minute, without Claude, so it costs nothing while waiting. It looks at the job queue on your roadmap (`workspace/HQ/roadmap.md`). A job is work you agreed on a call ("build this", "sort that out"). When nothing is running, it starts the highest job on the list in a Terminal window, as a normal Claude chat, minimized so it doesn't take over your screen. One job at a time; the rest wait their turn. From a call you can add jobs, move them up or down, stop one, or switch the whole thing off.

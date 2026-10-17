@@ -169,6 +169,21 @@ appointments without asking, as always; one with other people in it needs his ok
 description, a line like "Planned: 15:00 to 16:00", under whatever was there. Then say it's done in a sentence. \
 The notes stay until he clears them in the app; ticking it off is his, in the calendar in the app."""
 
+# H200 (17 October 2026, call at 14:45), in the user's words: "I realized this was actually the whole reason I started
+# building this. Because I know how much administrative work it is to maintain it, but now with HQ... It's super
+# simple and we can talk about things and we can set things up." On every full call and in the direct line's chat.
+TODO_RULE = """- The to-do list (H200): {user}'s own priority lists, the Eisenhower way, in challenges.md in the workspace, \
+also shown in the app (the To-do button), where {user} can tick things off, move them, let them go and add one. \
+Keep it up to date as you talk, without asking: something to do comes up, sort it into the list it belongs to by \
+their own system (how they prioritise, at the top of the file) and say which, in a few words; something is done or \
+let go, move it there. Use the list's commands, so every change keeps its columns and gets its line in the list's \
+log: python3 "{HQ}/app/todo.py" (the list in a few lines, each item with its id), add LIST "WHAT" [--notes "their \
+words"] [--deadline "…"] [--type active|passive] [--for "who"], done ITEM ["note"], letgo ITEM "why", move ITEM LIST, \
+undo; add --by "<who you are>, on a call" (or "in the chat"). LIST is a number, a few words of a list's name, or \
+important urgent, important not urgent, urgent, neither, wishlist, groceries; ITEM is an id or a few words of it. A \
+longer story in their own words goes under the details in the file, as where-things-go.md says. The mail check \
+never puts anything on it by itself: a mail becomes an item only after {user}'s yes."""
+
 # H133 (14 October 2026, call at 13:31), in the user's words: "I want to stop using the word job list or job queue.
 # I just want to refer to it as the team. So if I tell you, hey. Let's put it on our roadmap. You can put it on our
 # roadmap. If I say... Let's give it to the team. You can put it in the job list queue and... If it needs to be on the
@@ -415,6 +430,7 @@ and take them one at a time; once he says one is done or gone through, remove it
 {pings}
 {mailfast}
 {apptnotes}
+{todo}
 {workflows}
 - Keep working with the lid closed (lid-closed sleep): when he asks which it is, run python3 \
 "{HQ}/routine/lidsleep.py"; to turn it on ("keep working with the lid closed") add on, to turn \
@@ -435,10 +451,11 @@ def _direct_agent() -> str:
 PINGS_RULE = PINGS_RULE.replace("{HQ}", str(ROOT)).replace("{agent}", _direct_agent())
 APPT_NOTES_RULE = APPT_NOTES_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TEAM_RULE = TEAM_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
+TODO_RULE = TODO_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 MAIL_FAST_RULE = MAIL_FAST_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 import workflows as _workflows  # H202: the workflows the user turned on
 WORKFLOWS_RULE = _workflows.rule(FOLDER)
-VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
+VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{todo}", TODO_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
                .replace("{times}", TIMES_RULE))
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:

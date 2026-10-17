@@ -61,7 +61,7 @@ class CallTranscript:
             # H60: a call that continues an earlier one says which, so it can be found back
             + (f"Continues the call of {continues['started']} ({continues['name']})\n\n" if continues else "")
             # H101: a call started from an appointment in the calendar says which
-            + (f"About the appointment: {about}\n\n" if about else "")
+            + (f"About the {'to-do item' if '(to-do, ' in about else 'appointment'}: {about}\n\n" if about else "")  # H200
         )
 
     @property

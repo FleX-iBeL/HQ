@@ -360,6 +360,81 @@
   #calgo { border:0; border-radius:14px; background:var(--accent); color:#04120f; font:600 17px/1 -apple-system,sans-serif; padding:15px 12px; cursor:pointer; margin-top:4px; }
   #calgo:disabled { opacity:.45; cursor:default; }
   #calnote { color:var(--muted); font-size:12px; text-align:center; min-height:1em; }
+  /* H200: the to-do list, the Eisenhower way (app/todo.py through /api/todo), from the workspace's own list. First the
+     matrix: important or not down the side, urgent or not across, each square with how many and the first few; the
+     needle movers (important, not urgent) marked. Above it what's promised to other people and very important mail,
+     under it the lists outside the matrix. A tap opens a list, a tap there one item: tick it off, move it, let it go,
+     or call about it. Kept up to date by talking; the page only does the small things by hand. */
+  #todobtn { display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  #todosheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
+              border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:8px;
+              padding:14px 16px calc(220px + env(safe-area-inset-bottom)); text-align:left; }
+  #todosheet.open { display:flex; }
+  #todohead { position:relative; flex-shrink:0; }
+  #todosheet h2 { margin:0; font-size:15px; font-weight:600; color:var(--muted); text-align:center; padding:0 74px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #todoclose, #todoback { position:absolute; top:-8px; border:0; background:transparent; color:var(--fg); font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
+  #todoclose { right:-6px; }
+  #todoback { left:-6px; display:none; }
+  #todosheet[data-view="list"] #todoback, #todosheet[data-view="item"] #todoback { display:block; }
+  #todobody { flex:1; min-height:60px; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; display:flex; flex-direction:column; gap:10px;
+              scrollbar-gutter:stable; padding:2px 2px 6px; }
+  #todobody > * { flex-shrink:0; }
+  #todobody .empty { color:var(--muted); text-align:center; margin:auto; padding:16px; line-height:1.4; }
+  #todobody .card { border:0; border-radius:14px; background:var(--soft); color:var(--fg); text-align:left; padding:11px 13px; font:15px/1.3 -apple-system,sans-serif; cursor:pointer; width:100%; }
+  #todobody .card b { display:block; font-size:13px; color:var(--muted); font-weight:600; margin-bottom:4px; }
+  #todobody .card .few { color:var(--fg); font-size:14px; overflow-wrap:anywhere; }
+  #todobody .card.mail { background:color-mix(in srgb, var(--stop) 10%, var(--soft)); cursor:default; }
+  #todobody .card.mail b { color:var(--stop); }
+  .tdmx { display:grid; grid-template-columns:auto 1fr 1fr; grid-template-rows:auto 1fr 1fr; gap:6px; }
+  .tdmx .ax { color:var(--muted); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; text-align:center; align-self:end; }
+  .tdmx .ax.side { writing-mode:vertical-rl; transform:rotate(180deg); align-self:center; justify-self:center; padding:0 1px; }
+  .tdq { position:relative; display:flex; flex-direction:column; gap:4px; min-height:118px; min-width:0; border:0; border-radius:16px; padding:10px 11px;
+         background:var(--soft); color:var(--fg); text-align:left; font:14px/1.25 -apple-system,sans-serif; cursor:pointer; }
+  .tdq .nm { font-size:12px; font-weight:700; color:var(--muted); }
+  .tdq .n { font-size:26px; font-weight:700; line-height:1.05; font-variant-numeric:tabular-nums; }
+  .tdq .t { font-size:13px; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tdq .t.more { color:var(--muted); }
+  .tdq.q2 { background:color-mix(in srgb, var(--accent) 14%, var(--soft)); box-shadow:inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
+  .tdq.q2 .nm { color:var(--accent); }
+  .tdq.q1 .n { color:var(--stop); }
+  .tdq.q4 { opacity:.82; }
+  .tdq:disabled { cursor:default; }
+  .tdmore { display:flex; flex-wrap:wrap; gap:6px; }
+  .tdmore button { display:flex; align-items:center; gap:6px; min-height:36px; padding:4px 13px; border-radius:18px; border:1px solid color-mix(in srgb, var(--muted) 45%, transparent);
+                   background:transparent; color:var(--fg); font:14px/1 -apple-system,sans-serif; cursor:pointer; }
+  .tdmore button span { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .tdhint { color:var(--muted); font-size:12px; text-align:center; line-height:1.35; padding:2px 8px; }
+  .tdrow { display:flex; align-items:center; gap:8px; }
+  .tdrow .it { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; border:0; border-radius:14px; background:var(--soft); color:var(--fg);
+               text-align:left; padding:11px 13px; font:16px/1.3 -apple-system,sans-serif; cursor:pointer; overflow-wrap:anywhere; }
+  .tdrow .it small { color:var(--muted); font-size:12px; }
+  .tdrow .it small.due { color:var(--stop); }
+  .tdrow .ck { flex-shrink:0; width:40px; height:40px; border-radius:50%; border:1.5px solid color-mix(in srgb, var(--muted) 60%, transparent); background:transparent;
+               color:var(--muted); display:flex; align-items:center; justify-content:center; padding:0; cursor:pointer; }
+  .tdrow .ck svg { width:18px; height:18px; }
+  .tdrow .ck:hover, .tdrow .ck:focus-visible { border-color:var(--accent); color:var(--accent); }
+  .tdrow.gone .it { color:var(--muted); text-decoration:line-through; }
+  #todoadd { display:flex; gap:8px; align-items:center; margin-top:4px; }
+  #todoaddin { flex:1; min-width:0; height:44px; box-sizing:border-box; border:1.5px solid var(--line, var(--muted)); border-radius:22px; padding:0 15px;
+               background:var(--soft); color:var(--fg); font:16px/1 -apple-system,sans-serif; }
+  #todoaddin:focus { outline:none; border-color:var(--accent); }
+  #todoaddgo { flex-shrink:0; height:44px; border:0; border-radius:22px; padding:0 18px; background:var(--accent); color:#04120f; font:600 16px/1 -apple-system,sans-serif; cursor:pointer; }
+  #todoaddgo:disabled { opacity:.45; cursor:default; }
+  #todobody h3 { margin:0; font-size:20px; line-height:1.3; overflow-wrap:anywhere; }
+  #todobody .line { color:var(--muted); font-size:14px; }
+  #todobody .fld { display:flex; gap:10px; font-size:15px; line-height:1.35; }
+  #todobody .fld span:first-child { flex-shrink:0; width:6.5em; color:var(--muted); }
+  #todobody .fld span:last-child { flex:1; min-width:0; overflow-wrap:anywhere; }
+  #todobody .words { white-space:pre-wrap; overflow-wrap:anywhere; font-size:15px; line-height:1.4; padding:10px 12px; border-radius:14px; background:var(--soft); }
+  #todobody .words b { display:block; color:var(--muted); font-size:12px; font-weight:700; margin-bottom:4px; }
+  .tdacts { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; margin-top:2px; }
+  .tdacts button, .tdacts select { min-height:48px; border:0; border-radius:14px; background:var(--soft); color:var(--fg); font:600 15px/1.2 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
+  .tdacts select { width:100%; min-width:0; appearance:none; -webkit-appearance:none; text-align:center; text-align-last:center; }
+  .tdacts .ok { background:var(--accent); color:#04120f; }
+  #todogo { border:0; border-radius:16px; background:var(--accent); color:#04120f; font:600 17px/1 -apple-system,sans-serif; padding:15px 12px; cursor:pointer; margin-top:2px; }
+  #todogo:disabled { opacity:.45; cursor:default; }
+  #todonote { display:flex; align-items:center; justify-content:center; gap:10px; color:var(--muted); font-size:13px; min-height:1.2em; text-align:center; flex-shrink:0; }
+  #todonote button { border:0; background:var(--soft); color:var(--fg); border-radius:999px; padding:6px 12px; font:600 13px/1 -apple-system,sans-serif; cursor:pointer; }
   /* H135: the weather at a glance at the bottom between the round buttons, before a call (app/weather.py through /api/weather): sunny or
      not, degrees, wind, chance of rain, and a warning when there is one. A tap opens its sheet with more: the
      warnings (KNMI's, through MeteoAlarm), now, the radar's two hours, the next hours, UV, today and tomorrow. */
@@ -462,7 +537,7 @@
   body.chatting::after { display:none; }
   body.chatting h1, body.chatting #modes, body.chatting #modehint, body.chatting #setbtn,
   body.chatting #freetag { display:none; }
-  body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet, body.chatting #notesheet, body.chatting #calsheet { top:0; height:auto; bottom:calc(318px + env(safe-area-inset-bottom));
+  body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet, body.chatting #notesheet, body.chatting #calsheet, body.chatting #todosheet { top:0; height:auto; bottom:calc(318px + env(safe-area-inset-bottom));
                         border-top:0; border-bottom:1px solid var(--muted); border-radius:0 0 18px 18px;
                         padding:calc(14px + env(safe-area-inset-top)) 16px 12px; }
   body.chatting #orbwrap { order:1; flex-direction:row; }
@@ -566,22 +641,26 @@
   #dock.oncall { left:5px; right:5px; padding:6px 4px; gap:0; }
   #dock.oncall > * { padding-left:0; padding-right:0; }
   #dock.oncall > *::after { font-size:10px; letter-spacing:-.15px; }
+  /* H200: with the To-do button the dock holds eight before a call and nine on one; on a phone the names sit tighter
+     still, so "Calendar" reads whole (Modern 3, H201, looks at the dock as a whole). */
+  @media (max-width:430px) { #dock { left:6px; right:6px; padding:6px 3px; gap:0; } #dock > * { padding-left:0; padding-right:0; }
+    #dock > *::after { font-size:9.5px; letter-spacing:-.3px; } #dock.oncall { left:4px; right:4px; padding:6px 2px; } #dock.oncall > *::after { font-size:9px; letter-spacing:-.35px; } }
   #chatbtn .badge { top:0; right:calc(50% - 22px); }
   /* Sheets: one shape for all of them, reaching down to the dock, with a handle on top and a soft Close. */
-  #chat, #histsheet, #statsheet, #notesheet, #calsheet, #wxsheet, #settings {
+  #chat, #histsheet, #statsheet, #notesheet, #calsheet, #todosheet, #wxsheet, #settings {
     max-width:640px; margin:0 auto; border:0; border-top:1px solid var(--line); border-radius:26px 26px 0 0; box-shadow:0 -12px 40px rgba(0,0,0,.18);
     padding:24px 18px calc(var(--dockh) + 22px + env(safe-area-inset-bottom)); }
   #settings { padding-bottom:calc(18px + env(safe-area-inset-bottom)); max-height:calc(100dvh - 24px); overflow-y:auto; overscroll-behavior:contain; }
   #chat::before, #histsheet::before, #statsheet::before, #notesheet::before,
-  #calsheet::before, #wxsheet::before, #settings::before {
+  #calsheet::before, #todosheet::before, #wxsheet::before, #settings::before {
     content:""; position:absolute; left:50%; top:8px; width:38px; height:5px; margin-left:-19px; border-radius:3px; background:var(--line); }
   #settings::before { position:sticky; display:block; flex-shrink:0; margin:-14px auto 6px; left:auto; top:0; }
-  #chat h2, #histsheet h2, #statsheet h2, #notesheet h2, #calsheet h2, #wxsheet h2,
+  #chat h2, #histsheet h2, #statsheet h2, #notesheet h2, #calsheet h2, #todosheet h2, #wxsheet h2,
   #settings h2 { color:var(--fg); font-size:17px; font-weight:700; }
-  #chatclose, #histclose, #statclose, #notesclose, #calclose, #wxclose {
+  #chatclose, #histclose, #statclose, #notesclose, #calclose, #todoclose, #wxclose {
     top:-6px; right:-2px; padding:7px 12px; border-radius:999px; background:var(--soft); font-size:14px; }
-  #histback, #calback, #notesall { top:-6px; left:-2px; padding:7px 12px; border-radius:999px; font-size:14px; }
-  #histback, #calback { background:var(--soft); }
+  #histback, #calback, #todoback, #notesall { top:-6px; left:-2px; padding:7px 12px; border-radius:999px; font-size:14px; }
+  #histback, #calback, #todoback { background:var(--soft); }
   #histfoot { padding-left:0; } #chatfoot { padding:12px 0 0; }
   #histcont, #chatcont, #calgo { border-radius:16px; }
   #statframe { border-radius:16px; }
@@ -613,11 +692,11 @@
   /* With a sheet open on a call: the sheet on top, the call's controls in a short row above the dock. */
   body.chatting { gap:12px; padding-bottom:calc(var(--dockh) + 22px + env(safe-area-inset-bottom)); }
   body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet,
-  body.chatting #notesheet, body.chatting #calsheet {
+  body.chatting #notesheet, body.chatting #calsheet, body.chatting #todosheet {
     top:0; bottom:calc(var(--dockh) + 262px + env(safe-area-inset-bottom)); border-top:0; border-bottom:1px solid var(--line); border-radius:0 0 26px 26px;
     padding:calc(14px + env(safe-area-inset-top)) 16px 12px; }
   body.chatting #chat::before, body.chatting #statsheet::before, body.chatting #histsheet::before,
-  body.chatting #notesheet::before, body.chatting #calsheet::before { display:none; }
+  body.chatting #notesheet::before, body.chatting #calsheet::before, body.chatting #todosheet::before { display:none; }
   body.chatting #orb { width:34px; height:34px; border-width:3px; }
   body.chatting #orblabel { font-size:16px; }
   body.chatting #mute { padding:14px 24px; }
@@ -698,16 +777,17 @@
   html.m2 #dock.oncall > * svg { padding:3px 8px; }
   html.m2 #chatbtn .badge { top:-2px; right:calc(50% - 26px); }
   /* Sheets: a soft grey ground with white cards on it, a clear title, a round close. */
-  html.m2 #chat, html.m2 #histsheet, html.m2 #statsheet, html.m2 #notesheet, html.m2 #calsheet, html.m2 #wxsheet, html.m2 #settings {
+  html.m2 #chat, html.m2 #histsheet, html.m2 #statsheet, html.m2 #notesheet, html.m2 #calsheet, html.m2 #todosheet, html.m2 #wxsheet, html.m2 #settings {
     background:var(--sheet); border-radius:28px 28px 0 0; border-top:0; box-shadow:0 -10px 40px rgba(0,0,0,.2); }
-  html.m2 #chat h2, html.m2 #histsheet h2, html.m2 #statsheet h2, html.m2 #notesheet h2, html.m2 #calsheet h2, html.m2 #wxsheet h2,
+  html.m2 #chat h2, html.m2 #histsheet h2, html.m2 #statsheet h2, html.m2 #notesheet h2, html.m2 #calsheet h2, html.m2 #todosheet h2, html.m2 #wxsheet h2,
   html.m2 #settings h2 { font-size:19px; font-weight:700; letter-spacing:-.01em; }
-  html.m2 #chatclose, html.m2 #histclose, html.m2 #statclose, html.m2 #notesclose, html.m2 #calclose, html.m2 #wxclose {
+  html.m2 #chatclose, html.m2 #histclose, html.m2 #statclose, html.m2 #notesclose, html.m2 #calclose, html.m2 #todoclose, html.m2 #wxclose {
     width:34px; height:34px; padding:0; top:-8px; border-radius:50%; background:var(--soft); font-size:0; color:var(--fg); }
   html.m2 #chatclose::before, html.m2 #histclose::before, html.m2 #statclose::before, html.m2 #notesclose::before,
-  html.m2 #calclose::before, html.m2 #wxclose::before { content:"✕"; font:600 15px/34px -apple-system,sans-serif; }
-  html.m2 #histback, html.m2 #calback, html.m2 #notesall { top:-8px; background:var(--soft); }
-  html.m2 #histlist button, html.m2 #callist .appt, html.m2 #noteslist .note, html.m2 #wxbody .fact, html.m2 #wxbody .hr, html.m2 #calone .notes {
+  html.m2 #calclose::before, html.m2 #todoclose::before, html.m2 #wxclose::before { content:"✕"; font:600 15px/34px -apple-system,sans-serif; }
+  html.m2 #histback, html.m2 #calback, html.m2 #todoback, html.m2 #notesall { top:-8px; background:var(--soft); }
+  html.m2 #histlist button, html.m2 #callist .appt, html.m2 #noteslist .note, html.m2 #wxbody .fact, html.m2 #wxbody .hr, html.m2 #calone .notes,
+  html.m2 .tdq, html.m2 .tdrow .it, html.m2 #todobody .card, html.m2 #todobody .words, html.m2 .tdacts button, html.m2 .tdacts select {
     background:var(--surface); box-shadow:0 0 0 1px var(--line); border-radius:var(--r); }
   html.m2 #histlist button { padding:14px 16px; align-items:center; justify-content:flex-start; }
   html.m2 #histlist button > :first-child { margin-right:auto; }
@@ -733,7 +813,7 @@
   html.m2 #dirframe { background:var(--sheet); }
   /* With a sheet open on a call: the sheet on top keeps its rounded foot. */
   html.m2 body.chatting #chat, html.m2 body.chatting #statsheet, html.m2 body.chatting #histsheet,
-  html.m2 body.chatting #notesheet, html.m2 body.chatting #calsheet { border-radius:0 0 28px 28px; }
+  html.m2 body.chatting #notesheet, html.m2 body.chatting #calsheet, html.m2 body.chatting #todosheet { border-radius:0 0 28px 28px; }
   html.m2 body.chatting #btn.live, html.m2 body.chatting #mute { height:auto; padding:13px 20px; }
   html.m2 body.chatting #orb { width:34px; height:34px; }
   @media (max-height: 700px) {
@@ -803,6 +883,8 @@
   <small id="notesnote"></small></div>
 <div id="calsheet" role="dialog" aria-label="Calendar"><div id="calhead"><button id="calback" type="button">‹ Days</button><h2 id="caltitle">Calendar</h2><button id="calclose" type="button">Close</button></div>
   <div id="calcals" role="group" aria-label="Calendars shown"></div><div id="callist"></div><div id="calone"></div><small id="calnote"></small></div>
+<div id="todosheet" role="dialog" aria-label="To-do" data-view="main"><div id="todohead"><button id="todoback" type="button">‹ To-do</button><h2 id="todotitle">To-do</h2><button id="todoclose" type="button">Close</button></div>
+  <div id="todobody"></div><div id="todonote" aria-live="polite"></div></div>
 <button id="wx" type="button" aria-label="Weather" aria-expanded="false"></button>
 <div id="wxsheet" role="dialog" aria-label="Weather"><div id="wxhead"><h2 id="wxtitle">Weather</h2><button id="wxclose" type="button">Close</button></div>
   <div id="wxbody"></div></div>
@@ -817,6 +899,9 @@
 </button>
 <button id="calbtn" data-dl="Calendar" type="button" aria-label="Calendar" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 14h2M14 14h2M8 18h2"/></svg>
+</button>
+<button id="todobtn" data-dl="To-do" type="button" aria-label="To-do list" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M12 3v18M3 12h18"/><path d="m5.5 7.5 1.5 1.5 2.5-3"/></svg>
 </button>
 <button id="devbtn" data-dl="Mic" type="button" aria-label="Microphone and sound" aria-expanded="false" aria-controls="settings">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>
@@ -1076,6 +1161,7 @@ function showSettings(open) {
   setTitle.textContent = inCall ? "Microphone and sound" : "Settings";
   setEl.classList.toggle("open", open); shade.classList.toggle("open", open);
   if (open && typeof calOpen === "function" && calOpen()) showCal(false);  // H144: one sheet at a time, also on a call
+  if (open && todoOpen()) showTodo(false);  // H200
   if (open) listDevices();  // H106
   setBtn.setAttribute("aria-expanded", String(open && !inCall));
   devBtn.setAttribute("aria-expanded", String(inCall));
@@ -1396,7 +1482,7 @@ function chatOpen() { return chatEl.classList.contains("open"); }
 // phone has settled its own scrolling (the iPhone finishes a swipe or a layout change a moment later).
 let sheetWasOpen = false;
 function showLayout() {
-  const open = chatOpen() || statOpen() || histOpen() || notesOpen() || calOpen() || wxOpen();
+  const open = chatOpen() || statOpen() || histOpen() || notesOpen() || calOpen() || todoOpen() || wxOpen();
   document.body.classList.toggle("chatting", open && state === "live"); fitCall();
   if (sheetWasOpen && !open && state !== "idle") { requestAnimationFrame(() => fitCall()); setTimeout(fitCall, 350); }
   sheetWasOpen = open;
@@ -1553,6 +1639,7 @@ function showChat(open) {
   if (open) showHistory(false); // H57
   if (open) showNotes(false);   // H105
   if (open) showCal(false);     // H101
+  if (open && todoOpen()) showTodo(false);  // H200
   if (open) showDirect(false);  // F29
   if (open) closeWx();          // H135
   if (open) freshChat();       // H34: before a call, fresh each time it opens; F36: also after one
@@ -1650,6 +1737,7 @@ function showStatus(open) {
   if (open) showHistory(false);  // H57: one sheet at a time
   if (open) showNotes(false);    // H105
   if (open) showCal(false);      // H101
+  if (open && todoOpen()) showTodo(false);  // H200
   if (open) showDirect(false);   // F29
   if (open) closeWx();           // H135
   statEl.classList.toggle("open", open);
@@ -1787,6 +1875,7 @@ function showHistory(open) {
     if (statOpen()) showStatus(false);
     showNotes(false);  // H105
     showCal(false);    // H101
+    if (todoOpen()) showTodo(false);  // H200
     showDirect(false); // F29
     closeWx();         // H135
   }
@@ -1874,6 +1963,7 @@ function showNotes(open) {
     if (statOpen()) showStatus(false);
     if (histOpen()) showHistory(false);
     showCal(false);  // H101
+    if (todoOpen()) showTodo(false);  // H200
     showDirect(false); // F29
     closeWx();         // H135
   }
@@ -1898,6 +1988,7 @@ function showDirect(open) {
     if (histOpen()) showHistory(false);
     if (notesOpen()) showNotes(false);
     if (calOpen()) showCal(false);
+    if (todoOpen()) showTodo(false);  // H200
     closeWx(); // H135
     dirEl.style.removeProperty("--dirh");
   }
@@ -2196,6 +2287,265 @@ calEl.addEventListener("hq-redraw", () => {
   const now = document.getElementById("calnotein");
   if (now && typed) { now.value = typed; now.dispatchEvent(new Event("input")); if (had) now.focus(); }
 });
+// H200: the to-do list, the Eisenhower way (app/todo.py through /api/todo), from the workspace's own list. Three
+// views in one sheet: the matrix (with what's promised to other people and very important mail above it, the other
+// lists under it), one list, and one item. A change by hand (tick off, move, let go, add) goes to the server, which
+// writes the list and its log the same way a call does; Undo puts the last one back. The rest is said on a call or
+// to Donna. The list's own names and numbers are the user's; the matrix places them by their names.
+const todoEl = document.getElementById("todosheet"), todoBtn = document.getElementById("todobtn"),
+      todoBody = document.getElementById("todobody"), todoTitle = document.getElementById("todotitle"),
+      todoNote = document.getElementById("todonote");
+let todoAsk = 0, todoData = null, todoView = { list: null, item: null, from: "main" }, todoKeep = {};
+const TODO_Q = { q1: ["Important", "Urgent"], q2: ["Important", "Not urgent"], q3: ["Not important", "Urgent"], q4: ["Not important", "Not urgent"] };
+const TODO_TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+function todoOpen() { return document.getElementById("todosheet").classList.contains("open"); }  // safe before the line above has run
+function todoLists(kind) { return ((todoData && todoData.lists) || []).filter(l => l.kind === kind); }
+function todoListBy(key) { return ((todoData && todoData.lists) || []).find(l => l.key === key) || null; }
+function todoLabel(l) { return l.num != null ? l.num + ". " + l.name : l.name; }
+function todoItem(id) {
+  for (const l of (todoData && todoData.lists) || []) { const it = l.items.find(x => x.id === id); if (it) return [l, it]; }
+  return [null, null];
+}
+function todoSoon(d) {  // a deadline date within the next week, in red
+  const m = /(\d{4}-\d\d-\d\d)/.exec(d || ""); if (!m) return false;
+  const t = Date.parse(m[1] + "T23:59:00"); return t - Date.now() < 7 * 864e5;
+}
+function todoMeta(it) {
+  return [it.for ? "For " + it.for : "", it.deadline, it.status && it.status !== "open" ? it.status : "", it.calendar ? "In the calendar: " + it.calendar : "",
+          it.at, it.often].filter(Boolean).join(" · ");
+}
+function todoSay(text, undo) {
+  todoNote.innerHTML = "";
+  if (!text) return;
+  const t = document.createElement("span"); t.textContent = text; todoNote.appendChild(t);
+  if (undo) {
+    const u = document.createElement("button"); u.type = "button"; u.textContent = "Undo";
+    u.addEventListener("click", async () => { u.disabled = true; const d = await todoSend({ undo: true }); if (d) todoDraw(); });
+    todoNote.appendChild(u);
+  }
+}
+async function todoSend(body) {
+  try {
+    const r = await fetch("api/todo", { method: "POST", cache: "no-store", headers: { "x-hq": "todo", "content-type": "application/json" },
+                                        body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) { todoData = d; todoSay(d.said || "", d.undo); return d; }
+    todoSay(d.error || "Couldn't change the list. Try again.");
+  } catch (e) { todoSay("Couldn't reach HQ. Try again."); }
+  return null;
+}
+function todoGo(view) {
+  todoKeep[todoView.item ? "item" : todoView.list ? "list:" + todoView.list : "main"] = todoBody.scrollTop;
+  todoView = view; todoSay(""); todoDraw();
+  const k = view.item ? "item" : view.list ? "list:" + view.list : "main";
+  todoBody.scrollTop = view.item ? 0 : (todoKeep[k] || 0);
+}
+function todoBack() {
+  if (todoView.item) todoGo({ list: todoView.from === "list" ? todoView.list : null, item: null, from: "main" });
+  else todoGo({ list: null, item: null, from: "main" });
+}
+function todoDraw() {
+  const v = todoView.item ? "item" : todoView.list ? "list" : "main";
+  todoEl.dataset.view = v;
+  if (!todoData) { histNote(todoBody, "Loading…"); return; }
+  if (todoData.off === "Free") { todoTitle.textContent = "To-do"; histNote(todoBody, "Free is on: none of your files. Turn it off in Settings to see your to-do list."); return; }
+  if (todoData.missing) { todoTitle.textContent = "To-do"; histNote(todoBody, "No to-do list yet. Tell " + (agendaAgent().name || "your agent") + " what's on your mind on a call, and it gets sorted in."); return; }
+  if (v === "item") return todoDrawItem();
+  if (v === "list") return todoDrawList();
+  todoTitle.textContent = "To-do";
+  todoBody.innerHTML = "";
+  const mail = Array.isArray(todoData.mail) ? todoData.mail.filter(m => !/resolved/i.test(m.status || "")) : [];
+  if (mail.length) {
+    const c = document.createElement("div"); c.className = "card mail";
+    const b = document.createElement("b"); b.textContent = "Very important mail · " + mail.length; c.appendChild(b);
+    const f = document.createElement("div"); f.className = "few"; f.textContent = mail.map(m => m.from + ": " + m.subject).join(" · "); c.appendChild(f);
+    todoBody.appendChild(c);
+  }
+  for (const l of todoLists("commit")) {
+    const c = document.createElement("button"); c.type = "button"; c.className = "card";
+    const b = document.createElement("b"); b.textContent = l.name + " · " + l.items.length; c.appendChild(b);
+    const f = document.createElement("div"); f.className = "few";
+    f.textContent = l.items.length ? l.items.slice(0, 3).map(i => i.title).join(" · ") + (l.items.length > 3 ? " …" : "") : "Nothing promised right now";
+    c.appendChild(f); c.addEventListener("click", () => todoGo({ list: l.key, item: null, from: "main" }));
+    todoBody.appendChild(c);
+  }
+  const quads = ["q1", "q2", "q3", "q4"].map(q => [q, todoLists(q)]);
+  if (quads.some(([, ls]) => ls.length)) {
+    const mx = document.createElement("div"); mx.className = "tdmx"; mx.setAttribute("role", "group"); mx.setAttribute("aria-label", "The matrix");
+    const ax = (t, side) => { const d = document.createElement("div"); d.className = "ax" + (side ? " side" : ""); d.textContent = t; return d; };
+    mx.append(document.createElement("div"), ax("Urgent"), ax("Not urgent"));
+    for (const [row, qs] of [["Important", ["q1", "q2"]], ["Not important", ["q3", "q4"]]]) {
+      mx.appendChild(ax(row, true));
+      for (const q of qs) {
+        const ls = todoLists(q), items = ls.flatMap(l => l.items);
+        const cell = document.createElement("button"); cell.type = "button"; cell.className = "tdq " + q;
+        const nm = document.createElement("span"); nm.className = "nm";
+        nm.textContent = ls.length ? ls.map(todoLabel).join(" + ") : TODO_Q[q].join(", ");
+        const n = document.createElement("span"); n.className = "n"; n.textContent = String(items.length);
+        cell.append(nm, n);
+        for (const it of items.slice(0, 3)) { const t = document.createElement("span"); t.className = "t"; t.textContent = it.title; cell.appendChild(t); }
+        if (items.length > 3) { const t = document.createElement("span"); t.className = "t more"; t.textContent = "+ " + (items.length - 3) + " more"; cell.appendChild(t); }
+        cell.setAttribute("aria-label", TODO_Q[q].join(" and ") + ": " + items.length);
+        if (ls.length) cell.addEventListener("click", () => todoGo({ list: ls[0].key, item: null, from: "main" })); else cell.disabled = true;
+        mx.appendChild(cell);
+      }
+    }
+    todoBody.appendChild(mx);
+  }
+  const rest = (todoData.lists || []).filter(l => !["commit", "q1", "q2", "q3", "q4"].includes(l.kind));
+  if (rest.length) {
+    const m = document.createElement("div"); m.className = "tdmore";
+    for (const l of rest) {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = l.kind === "letgo" ? "Let go" : l.kind === "done" ? "Done" : l.name;
+      const n = document.createElement("span"); n.textContent = String(l.items.length); b.appendChild(n);
+      b.setAttribute("aria-label", l.name + ": " + l.items.length);
+      b.addEventListener("click", () => todoGo({ list: l.key, item: null, from: "main" }));
+      m.appendChild(b);
+    }
+    todoBody.appendChild(m);
+  }
+  if (!(todoData.lists || []).some(l => l.items.length) && !mail.length) {
+    const e = document.createElement("div"); e.className = "empty";
+    e.textContent = "Nothing on your list yet. Say what's on your mind on a call or to " + (agendaAgent().name || "your agent") + ", and it gets sorted in here.";
+    todoBody.appendChild(e);
+  }
+  const h = document.createElement("div"); h.className = "tdhint";
+  h.textContent = "Important but not urgent first: that's where the needle movers are. Keep it up to date by talking, or tick things off here.";
+  todoBody.appendChild(h);
+}
+function todoDrawList() {
+  const l = todoListBy(todoView.list);
+  if (!l) { todoView = { list: null, item: null, from: "main" }; return todoDraw(); }
+  todoTitle.textContent = todoLabel(l);
+  todoBody.innerHTML = "";
+  const closed = l.kind === "done" || l.kind === "letgo";
+  if (!l.items.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "Nothing here right now"; todoBody.appendChild(e); }
+  for (const it of l.items) {
+    const row = document.createElement("div"); row.className = "tdrow";
+    const b = document.createElement("button"); b.type = "button"; b.className = "it"; b.textContent = it.title;
+    const meta = todoMeta(it);
+    if (meta) { const m = document.createElement("small"); m.textContent = meta; if (!closed && todoSoon(it.deadline)) m.className = "due"; b.appendChild(m); }
+    b.addEventListener("click", () => todoGo({ list: l.key, item: it.id, from: "list" }));
+    row.appendChild(b);
+    if (!closed && l.kind !== "groceries") {
+      const ck = document.createElement("button"); ck.type = "button"; ck.className = "ck"; ck.innerHTML = TODO_TICK;
+      ck.setAttribute("aria-label", "Tick off: " + it.title);
+      ck.addEventListener("click", async () => {
+        ck.disabled = true; row.classList.add("gone");
+        if (await todoSend({ done: it.id })) todoDraw(); else { ck.disabled = false; row.classList.remove("gone"); }
+      });
+      row.appendChild(ck);
+    }
+    todoBody.appendChild(row);
+  }
+  if (!closed) {
+    const f = document.createElement("form"); f.id = "todoadd"; f.autocomplete = "off";
+    const i = document.createElement("input"); i.id = "todoaddin"; i.type = "text"; i.maxLength = 300; i.placeholder = "Add to this list"; i.setAttribute("aria-label", "Add to " + l.name);
+    const g = document.createElement("button"); g.id = "todoaddgo"; g.type = "submit"; g.textContent = "Add"; g.disabled = true;
+    i.addEventListener("input", () => { g.disabled = !i.value.trim(); });
+    f.addEventListener("submit", async ev => {
+      ev.preventDefault(); const t = i.value.trim(); if (!t) return;
+      g.disabled = true; if (await todoSend({ add: t, list: l.key })) { todoDraw(); todoBody.scrollTop = todoBody.scrollHeight; } else g.disabled = false;
+    });
+    f.append(i, g); todoBody.appendChild(f);
+  }
+}
+function todoDrawItem() {
+  const [l, it] = todoItem(todoView.item);
+  if (!it) { todoView = { list: todoView.list, item: null, from: "main" }; return todoDraw(); }
+  todoTitle.textContent = todoLabel(l);
+  todoBody.innerHTML = "";
+  const h = document.createElement("h3"); h.textContent = it.title; todoBody.appendChild(h);
+  for (const [k, val] of it.fields || []) {
+    const f = document.createElement("div"); f.className = "fld";
+    const a = document.createElement("span"); a.textContent = k; const b = document.createElement("span"); b.textContent = val;
+    f.append(a, b); todoBody.appendChild(f);
+  }
+  for (const d of it.details || []) {
+    const w = document.createElement("div"); w.className = "words";
+    const b = document.createElement("b"); b.textContent = "In your own words"; w.append(b, document.createTextNode(d)); todoBody.appendChild(w);
+  }
+  const closed = l.kind === "done" || l.kind === "letgo";
+  const acts = document.createElement("div"); acts.className = "tdacts";
+  if (!closed && l.kind !== "groceries") {
+    const d = document.createElement("button"); d.type = "button"; d.className = "ok"; d.textContent = "Tick off";
+    d.addEventListener("click", async () => { d.disabled = true; if (await todoSend({ done: it.id })) todoGo({ list: l.key, item: null, from: "main" }); else d.disabled = false; });
+    acts.appendChild(d);
+  }
+  const mv = document.createElement("select"); mv.setAttribute("aria-label", "Move to another list");
+  const o0 = document.createElement("option"); o0.value = ""; o0.textContent = closed ? "Back on a list…" : "Move to…"; mv.appendChild(o0);
+  for (const x of todoData.lists || []) {
+    if (x.key === l.key || x.kind === "done" || x.kind === "letgo") continue;
+    const o = document.createElement("option"); o.value = x.key; o.textContent = todoLabel(x); mv.appendChild(o);
+  }
+  mv.addEventListener("change", async () => {
+    if (!mv.value) return; const to = mv.value; mv.disabled = true;
+    if (await todoSend({ move: it.id, to })) todoGo({ list: to, item: it.id, from: "list" }); else { mv.disabled = false; mv.value = ""; }
+  });
+  acts.appendChild(mv);
+  if (!closed && todoLists("letgo").length) {
+    const g = document.createElement("button"); g.type = "button"; g.textContent = "Let it go";
+    g.addEventListener("click", async () => { g.disabled = true; if (await todoSend({ letgo: it.id, why: "" })) todoGo({ list: l.key, item: null, from: "main" }); else g.disabled = false; });
+    acts.appendChild(g);
+  }
+  todoBody.appendChild(acts);
+  if (!closed) {
+    const go = document.createElement("button"); go.type = "button"; go.id = "todogo";
+    go.textContent = "Call " + (agendaAgent().name || "") + " about this"; go.disabled = free || state !== "idle";
+    go.addEventListener("click", () => {
+      if (free || state !== "idle") return;
+      const who = agendaAgent();
+      if (who.id && who.id !== agent) { agent = who.id; mode = who.load; showMode(); }
+      aboutTodoNext = it.id; showTodo(false); call();
+    });
+    todoBody.appendChild(go);
+    if (state !== "idle") { const n = document.createElement("small"); n.className = "line"; n.textContent = "You're on a call: just say what it's about."; todoBody.appendChild(n); }
+  }
+}
+let aboutTodoNext = null;
+async function loadTodo() {
+  const ask = ++todoAsk;
+  if (!todoData) todoDraw();
+  const d = await histGet("api/todo");
+  if (ask !== todoAsk || !todoOpen()) return;
+  if (!d) { if (!todoData) histNote(todoBody, "Couldn't load the to-do list. Try again."); return; }
+  const at = todoBody.scrollTop; todoData = d; todoDraw(); todoBody.scrollTop = at;
+}
+function showTodo(open) {
+  if (open === todoOpen()) { if (open) loadTodo(); return; }
+  if (open) {
+    if (chatOpen()) { chatEl.classList.remove("open"); chatBtn.setAttribute("aria-expanded", "false"); showBadge(); }
+    if (statOpen()) showStatus(false);
+    if (histOpen()) showHistory(false);
+    if (notesOpen()) showNotes(false);
+    if (calOpen()) showCal(false);
+    showDirect(false);
+    closeWx();
+    if (setEl.classList.contains("open")) showSettings(false);
+    todoView = { list: null, item: null, from: "main" }; todoKeep = {}; todoSay("");
+  }
+  todoEl.classList.toggle("open", open);
+  todoBtn.setAttribute("aria-expanded", String(open));
+  if (open) { todoDraw(); loadTodo(); } else todoAsk++;
+  showLayout();
+}
+todoBtn.addEventListener("click", () => showTodo(!todoOpen()));
+document.getElementById("todoclose").addEventListener("click", () => showTodo(false));
+document.getElementById("todoback").addEventListener("click", todoBack);
+// A swipe to the right goes back a level, as in the calendar (H147): a finger on the phone, never while typing.
+(() => {
+  let sw = null;
+  todoBody.addEventListener("touchstart", ev => {
+    sw = null; if (todoEl.dataset.view === "main" || ev.touches.length !== 1 || calTyping(ev.target)) return;
+    const t = ev.touches[0]; sw = { x: t.clientX, y: t.clientY, dir: "" };
+  }, { passive: true });
+  todoBody.addEventListener("touchmove", ev => {
+    const s = sw; if (!s || ev.touches.length !== 1) return;
+    const t = ev.touches[0], dx = t.clientX - s.x, dy = t.clientY - s.y;
+    if (!s.dir && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) s.dir = dx > 0 && Math.abs(dx) > Math.abs(dy) * 1.5 ? "back" : "other";
+    if (s.dir === "back" && dx > SWIPE_BACK_PX) { sw = null; todoBack(); }
+  }, { passive: true });
+})();
 async function loadCal(fresh) {
   const ask = ++calAsk;
   if (!calList.querySelector(".appt")) histNote(calList, "Loading…");
@@ -2215,6 +2565,7 @@ function showCal(open) {
     showDirect(false); // F29
     closeWx();         // H135
     if (setEl.classList.contains("open")) showSettings(false);  // H144: on a call, the Mic sheet
+    if (todoOpen()) showTodo(false);  // H200
     calToToday = true;  // H156
   }
   calEl.classList.toggle("open", open);
@@ -2455,6 +2806,7 @@ function showWx(open) {
     if (histOpen()) showHistory(false);
     if (notesOpen()) showNotes(false);
     if (calOpen()) showCal(false);
+    if (todoOpen()) showTodo(false);  // H200
     showDirect(false);
   }
   el.classList.toggle("open", open);
@@ -2546,6 +2898,7 @@ function setState(s, text) {
   // H144: the calendar stays in the dock on a call (any agent, three-way too) and an open sheet stays open; the call
   // goes on underneath it. Only "Call about this" waits for the call to end.
   if (calOpen() && calEl.classList.contains("reading")) calEl.dispatchEvent(new Event("hq-redraw"));
+  if (todoOpen() && todoView.item) todoDraw();  // H200: its Call button and line follow the call
   if (s !== "live" ? setEl.classList.contains("incall") || s !== "idle" : !setEl.classList.contains("incall")) showSettings(false);
   if (s !== "live") thinkingSound(false);
   // H34: the bubble is always there; before a call it opens the last call, after one this call.
@@ -2713,6 +3066,7 @@ async function call() {
   // H60: a continued call starts with the earlier call's lines in the chat, then a line where this one begins.
   const cont = continueFrom; continueFrom = null; contLabel = "";
   const appt = aboutNext; aboutNext = null;  // H101: started from an appointment in the calendar
+  const todoAbout = appt ? null : aboutTodoNext; aboutTodoNext = null;  // H200: started from an item on the to-do list
   const handover = handoverNext && !!cont; handoverNext = false;  // H79
   if (cont && !free) {
     contLabel = handover ? "from " + cont.agent : "continuing " + cont.started;
@@ -2740,7 +3094,7 @@ async function call() {
     const r = await fetch("api/offer", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, agent, free, voice: voiceFor(agent),
         voices: Object.fromEntries(Object.keys(AGENTS).map(id => [id, voiceFor(id)])),  // H79: a three-way call speaks in both
-        ...(cont && !free ? { continue: cont.name } : {}), ...(appt && !free ? { about: appt.id } : {}), ...(handover && !free ? { handover: true } : {}) } }) });
+        ...(cont && !free ? { continue: cont.name } : {}), ...(appt && !free ? { about: appt.id } : {}), ...(todoAbout && !free ? { about_todo: todoAbout } : {}), ...(handover && !free ? { handover: true } : {}) } }) });
     if (!r.ok) throw new Error("The call server said " + r.status);
     const answer = await r.json();
     await pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });

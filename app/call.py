@@ -39,8 +39,19 @@ from fillers import FillerPlayer
 from pipeline import make_brain, make_stt, make_tts, warm_up_tts
 from policy import SESSION_TOOLS, Policy
 import agenda
+import todo
 import transcript
 from transcript import CallTranscript, now
+
+
+def _about(e: dict, what: str):
+    """H101, H200: what a call started from something in the app gets: an appointment (agenda) or a to-do item (todo)."""
+    mod = todo if e.get("kind") == "todo" else agenda
+    if what == "line":
+        return mod.when_line(e)
+    if what == "greetings":
+        return mod.greetings(e, config.ME["name"])
+    return mod.call_note(e, config.USER)
 
 
 class Call:
@@ -81,7 +92,7 @@ class Call:
                                                                                      me=self.agent["name"])
         self.transcript = CallTranscript(calls_dir, model=self.model, keep=not free, agent=self.agent["name"],
                                          continues=self.continued,
-                                         about=agenda.when_line(self.about) if self.about else "")
+                                         about=_about(self.about, "line") if self.about else "")
         if free:
             config.FREE_DIR.mkdir(parents=True, exist_ok=True)
             self.policy = None
@@ -97,7 +108,7 @@ class Call:
         self.fillers = FillerPlayer(self.tts._kokoro, voice=self.voice, on_play=self.transcript.filler,
                                     waiting_lines=waiting_lines,
                                     # H76: her own greetings, in her character
-                                    greetings=agenda.greetings(self.about, config.ME["name"]) if self.about
+                                    greetings=_about(self.about, "greetings") if self.about
                                     else config.continue_greetings(self.agent)
                                     if self.continued and not self.handover
                                     else config.greetings_now(self.agent, first=self.first_today))
@@ -236,7 +247,7 @@ class Call:
                 f"[Call system: {config.USER} is calling you now on HQ, the voice call. It is {stamp}. "
                 + (f"{note}\n" if note else "")
                 + (self._continue_note() if self.continued else "")
-                + (agenda.call_note(self.about, config.USER) if self.about else "")
+                + (_about(self.about, "note") if self.about else "")
                 + "Don't do anything yet and use no tools. Reply with only the word: ready]"
             )
             async for _ in self.brain.ask(text):

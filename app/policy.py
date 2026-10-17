@@ -338,6 +338,12 @@ class Policy:
             if len(args) == 1 or (len(args) == 2 and args[1] in ("list", "json")):
                 return Decision(ALLOW, "his notes on the appointments")
             return Decision(DENY, "from a call, the appointment notes script only reads them")
+        # H200: the to-do list, the user's own file in the workspace: read, add, done, let go, move, undo. Each change is
+        # one table row and its log line, the same as editing the file by hand, which a call may do anyway.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "todo.py"):
+            if len(args) == 1 or args[1] in ("summary", "json", "add", "done", "letgo", "move", "undo"):
+                return Decision(ALLOW, "the to-do list")
+            return Decision(DENY, "the to-do script takes summary, json, add, done, letgo, move or undo")
         # H56.3: main and backup. Asking which one is main, and making one the main on his ask.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "role.py"):
             if len(args) == 1 or (len(args) == 3 and args[1] == "main"):

@@ -170,7 +170,7 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
     logger.info(f"Call started on {call.model} with {call.agent['name']}, voice {call.voice}, {'free' if free else call.load + ' load'}; "
                 + ("free mode, nothing kept" if free else f"transcript: {call.transcript.path.name}")
                 + (f"; continues {call.continued['name']}" if call.continued else "")
-                + (f"; about an appointment ({call.about['title']})" if call.about else ""))
+                + (f"; about {'a to-do item' if call.about.get('kind') == 'todo' else 'an appointment'} ({call.about['title']})" if call.about else ""))
 
     # Warm everything up in the background while the browser finishes connecting: open and
     # prime the Claude session, load Whisper, run Kokoro once. The pipeline starts right away.
@@ -328,6 +328,9 @@ async def bot(runner_args: RunnerArguments):
     # H101: a call started from an appointment in the calendar sends its id; the saved appointment goes in. Never on Free.
     import agenda as _agenda
     about = None if free else _agenda.about(str(body.get("about") or ""))
+    if about is None and not free and body.get("about_todo"):  # H200: a call started from an item on the to-do list
+        import todo as _todo_call
+        about = _todo_call.about(str(body.get("about_todo") or ""))
     await run_call(transport, runner_args.handle_sigint, runner_args.webrtc_connection,
                    model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent["id"],
                    continues=None if free else continues, handover=handover and not free, voices=voices, about=about)
@@ -603,6 +606,54 @@ if __name__ == "__main__":
         elif not await asyncio.to_thread(_appt_notes.clear, ask["id"], ask["clear"]):
             return JSONResponse({"error": "no such note"}, status_code=404)
         return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
+
+    # H200: the to-do list, the Eisenhower way (todo.py), from the workspace's own file. The page reads it and can tick
+    # one off, let it go, move it, add one, and undo its last change; calls and Donna keep it the same way. Only from
+    # the page itself (x-hq: todo), never on a Free-only line.
+    import todo as _todo
+
+    @app.get("/api/todo", include_in_schema=False)
+    async def todo_read():
+        if config.FREE_ONLY:
+            return JSONResponse({"off": "Free"}, headers=_NO_CACHE)
+        return JSONResponse(await asyncio.to_thread(_todo.read), headers=_NO_CACHE)
+
+    @app.post("/api/todo", include_in_schema=False)
+    async def todo_change(request: Request):
+        if request.headers.get("x-hq") != "todo":
+            return JSONResponse({"error": "Only the HQ page can change the to-do list"}, status_code=403)
+        if config.FREE_ONLY:
+            return JSONResponse({"error": "Not on Free"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict):
+            return JSONResponse({"error": "no change asked"}, status_code=400)
+        by = "in the app"
+        try:
+            if isinstance(ask.get("done"), str):
+                said = await asyncio.to_thread(_todo.done, ask["done"], "", by)
+            elif isinstance(ask.get("letgo"), str):
+                said = await asyncio.to_thread(_todo.letgo, ask["letgo"], str(ask.get("why") or "")[:500], by)
+            elif isinstance(ask.get("move"), str) and isinstance(ask.get("to"), str):
+                said = await asyncio.to_thread(_todo.move, ask["move"], ask["to"], by)
+            elif isinstance(ask.get("add"), str) and isinstance(ask.get("list"), str):
+                said = await asyncio.to_thread(_todo.add, ask["list"], ask["add"][:300], "", "", "", "", by)
+            elif ask.get("undo") is True:
+                said = await asyncio.to_thread(_todo.undo)
+            else:
+                return JSONResponse({"error": "no change asked"}, status_code=400)
+        except KeyError as e:
+            return JSONResponse({"error": str(e).strip("'\"")}, status_code=404)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except OSError:
+            return JSONResponse({"error": "Couldn't read or write the list"}, status_code=500)
+        out = await asyncio.to_thread(_todo.read)
+        out["said"] = said.get("said", "")
+        out["undo"] = bool(said.get("ok")) and ask.get("undo") is not True
+        return JSONResponse(out, headers=_NO_CACHE)
 
     @app.get("/api/busy", include_in_schema=False)
     async def busy():
