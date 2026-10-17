@@ -33,7 +33,15 @@ reverse geocoding (here_place); without it, the place in me.md as before. The la
 looks above use it while it's under HERE_FRESH old, so her texts and watches follow him too. The rain alert: a
 switch in the weather sheet (rain_alert) that opens or ends a lasting weather watch for rain on her list
 (pings.watch_add(..., alert=True)): every look checks only the next ALERT_AHEAD hours, never while it's raining
-already, and at most one text per ALERT_QUIET hours.
+already.
+
+H196 (17 October 2026, on the call: "ok so lets have her check every 5 minutes", and about the three quiet hours
+after a text: "sometimes the rain moves faster or slower or dissapears"). While the rain alert is on the look comes
+every five minutes (ALERT_EVERY). Instead of three quiet hours after a text she follows that one shower (`follow`
+in weather.json, by watch): she texts again only when it comes SHIFT minutes or more earlier or later than she said,
+when it's gone (two looks in a row without it, GONE_LOOKS), or when it stops (dry by the radar for the next
+quarter of an hour). Otherwise she stays quiet. A shower not looked at for FOLLOW_STALE (the night) is let go
+without a text.
 
 Kept in the direct line's folder (synced, off GitHub): weather.json, the last look, the place's coordinates and
 what she already said today. Off: HQ_WEATHER=0. HQ_WEATHER_PLACE overrides the place (tests).
@@ -74,7 +82,10 @@ HERE_FRESH = 6 * 3600  # H161: the phone's last spot stands in for me.md's place
 HERE_KEEP = 20  # named spots kept
 ALERT_AHEAD = 3  # H161: the rain alert looks this many hours ahead
 ALERT_YEARS = 100  # H188: the rain alert stays on until he switches it off, so it never shows an end
-ALERT_QUIET = 3 * 3600  # and texts at most once in this long
+ALERT_EVERY = 5 * 60  # H196: a look every five minutes while the rain alert is on
+SHIFT = 15 * 60  # H196: she texts again when the shower comes this much earlier or later than she said
+GONE_LOOKS = 2  # H196: looks in a row without the shower before she says it's gone
+FOLLOW_STALE = 3600  # H196: a shower not looked at for this long (the night) is let go quietly
 
 
 def on() -> bool:
@@ -231,18 +242,22 @@ def watches(now: float | None = None) -> list[dict]:
 
 
 def watch_due(now: float | None = None, s: dict | None = None) -> bool:
-    """H125: a weather watch is open and 30 minutes have passed since the last look (07:00 to 23:00)."""
+    """H125: a weather watch is open and 30 minutes have passed since the last look (07:00 to 23:00); five minutes
+    while the rain alert is on (H196)."""
     if not on():
         return False
     now = now or time.time()
     s = _read() if s is None else s
-    if not _somewhere(s, now) or not (WATCH_DAY[0] <= _hour(now, s) < WATCH_DAY[1]) or not watches(now):
+    ws = watches(now)
+    if not _somewhere(s, now) or not (WATCH_DAY[0] <= _hour(now, s) < WATCH_DAY[1]) or not ws:
         return False
-    return now - float(s.get("looked") or 0) >= WATCH_EVERY - 60
+    every = ALERT_EVERY - 30 if any(w.get("alert") for w in ws) else WATCH_EVERY - 60
+    return now - float(s.get("looked") or 0) >= every
 
 
 def due(now: float | None = None, s: dict | None = None) -> bool:
-    """A look is due: the three-hourly one, or the 30-minute one while a weather watch is open."""
+    """A look is due: the three-hourly one, or the 30-minute one while a weather watch is open (five minutes while
+    the rain alert is on)."""
     s = _read() if s is None else s
     return general_due(now, s) or watch_due(now, s)
 
@@ -412,14 +427,89 @@ def check_watch(look_for: str, fc: dict, minutes: list[tuple[str, float]], now: 
     return None
 
 
+def _hm(at: datetime, now: datetime) -> str:
+    return f"{at:%H:%M}" + ("" if at.date() == now.date() else " tomorrow")
+
+
+def _shower(fc: dict, minutes: list[tuple[str, float]], now: datetime,
+            until: datetime) -> tuple[str, datetime | None, str]:
+    """H196: where the rain stands up to UNTIL: ("now", None, ""), ("coming", when, how it's known) or
+    ("dry", None, "")."""
+    hours = _window(fc, now, until)
+    cur = fc.get("current") or {}
+    if minutes:
+        if minutes[0][1] >= 0.1:
+            return "now", None, ""
+    elif hours and (_wet(hours[0]) or (cur.get("precipitation") or 0) >= WET_MM):
+        return "now", None, ""
+    start = next((hm for hm, mm in minutes if mm >= 0.1), "")
+    if start and _radar_at(start, now) <= until:
+        return "coming", _radar_at(start, now), "by the minute from the rain radar"
+    x = next((x for x in hours[1:] if _wet(x)), None)
+    if x:
+        return "coming", x["at"], f"{x.get('precipitation_probability') or 0}% chance"
+    return "dry", None, ""
+
+
+def _stopped(fc: dict, minutes: list[tuple[str, float]], now: datetime) -> bool:
+    """H196: dry now and for the next quarter of an hour by the radar (by the hour without it)."""
+    if minutes:
+        return all(mm < 0.1 for _, mm in minutes[:3])
+    hours = _window(fc, now, now)
+    return bool(hours) and not _wet(hours[0]) and ((fc.get("current") or {}).get("precipitation") or 0) < WET_MM
+
+
+def follow_shower(f: dict | None, fc: dict, minutes: list[tuple[str, float]], now: datetime, first: datetime,
+                  until: datetime) -> tuple[dict | None, tuple[str, str] | None]:
+    """H196: the rain alert follows one shower. F is what she said about it (None before she said anything);
+    FIRST is how far ahead a new shower counts, UNTIL how far a followed one may move. Returns the new F and
+    (key, facts) when there's something to text: the shower coming, coming SHIFT or more earlier or later than
+    she said, gone, started well before she said, or stopped."""
+    stamp = now.isoformat(timespec="minutes")
+    if f and (now - datetime.fromisoformat(f.get("seen") or f["at"])).total_seconds() > FOLLOW_STALE:
+        f = None  # the night in between: let it go quietly
+    if not f:
+        kind, at, how = _shower(fc, minutes, now, first)
+        if kind != "coming":
+            return None, None  # nothing coming, or raining already: never set it off then
+        return ({"phase": "coming", "at": at.isoformat(timespec="minutes"), "seen": stamp, "miss": 0},
+                (f"rain-{at:%d%H%M}", f"Rain from about {_hm(at, now)} ({how})."))
+    f = dict(f, seen=stamp)
+    said = datetime.fromisoformat(f["at"])
+    if f.get("phase") == "raining":
+        if _stopped(fc, minutes, now):
+            return None, (f"stop-{now:%d%H%M}", "Update on the rain you texted about: it's stopped, dry now"
+                          + (" (by the minute from the rain radar)." if minutes else "."))
+        return f, None
+    upd = f"Update on the rain you said would come from about {_hm(said, now)}:"
+    kind, at, how = _shower(fc, minutes, now, until)
+    if kind == "now":
+        f.update(phase="raining", miss=0)
+        if (said - now).total_seconds() >= SHIFT:
+            return f, (f"early-{now:%d%H%M}", f"{upd} it's raining already, earlier than you said.")
+        return f, None
+    if kind == "coming":
+        f["miss"] = 0
+        if abs((at - said).total_seconds()) >= SHIFT:
+            f["at"] = at.isoformat(timespec="minutes")
+            return f, (f"shift-{now:%d%H%M}", f"{upd} it now comes from about {_hm(at, now)} ({how}), "
+                       f"{'earlier' if at < said else 'later'} than you said.")
+        return f, None
+    f["miss"] = int(f.get("miss") or 0) + 1
+    if f["miss"] >= GONE_LOOKS:
+        return None, (f"gone-{now:%d%H%M}", f"{upd} it's gone, no rain coming in the next hours after all.")
+    return f, None
+
+
 def check_watches(fc: dict, minutes: list[tuple[str, float]], loc: datetime, name: str = "",
-                  ws: list[dict] | None = None, keep=None, now: float | None = None) -> list[tuple[int, str]]:
+                  ws: list[dict] | None = None, keep=None, follow: dict | None = None) -> list[tuple[int, str]]:
     """Each open weather watch against this look; a match is kept for her to text (pings.match). Returns
-    [(watch n, facts)] of the new ones. The rain alert (H161, `alert`): only the next ALERT_AHEAD hours, not while
-    it's raining already, and not within ALERT_QUIET of its last match."""
+    [(watch n, facts)] of the new ones. The rain alert (H161, `alert`): a new shower only in the next ALERT_AHEAD
+    hours and not while it's raining already; then she follows it (H196, follow_shower; FOLLOW is weather.json's
+    `follow`, by watch, changed in place)."""
     import pings
     ws = watches() if ws is None else ws
-    now = now or time.time()
+    follow = {} if follow is None else follow
     out = []
     for w in ws:
         try:
@@ -427,12 +517,16 @@ def check_watches(fc: dict, minutes: list[tuple[str, float]], loc: datetime, nam
         except (KeyError, ValueError):
             continue
         if w.get("alert"):
-            last = max([pings._local_ts(m.get("at", "")) for m in w.get("matches") or []] or [0])
-            if now - last < ALERT_QUIET:
-                continue
-            until = min(until, loc + timedelta(hours=ALERT_AHEAD))
-        got = check_watch(w.get("what", ""), fc, minutes, loc, until)
-        if not got or (w.get("alert") and got[0] == "rain-now"):
+            f, got = follow_shower(follow.get(str(w["n"])), fc, minutes, loc,
+                                   min(until, loc + timedelta(hours=ALERT_AHEAD)),
+                                   min(until, loc + timedelta(hours=2 * ALERT_AHEAD)))
+            if f:
+                follow[str(w["n"])] = f
+            else:
+                follow.pop(str(w["n"]), None)
+        else:
+            got = check_watch(w.get("what", ""), fc, minutes, loc, until)
+        if not got:
             continue
         facts = (f"Where: {name}. " if name else "") + got[1]
         if (keep or pings.match)(int(w["n"]), facts, key=got[0], answers=bool(w.get("once"))) == "new":
@@ -463,13 +557,17 @@ def look(dry: bool = False, now: float | None = None, general: bool | None = Non
     fc, minutes = forecast(w), rain_text(w)
     name = w.get("name") or ("" if w.get("gps") else w["place"])
     if not dry:
-        for n, facts in check_watches(fc, minutes, loc.replace(tzinfo=None), name, now=now):
+        ws = watches(now)
+        alerts = {str(x["n"]) for x in ws if x.get("alert")}
+        follow = {k: v for k, v in (s.get("follow") or {}).items() if k in alerts}
+        for n, facts in check_watches(fc, minutes, loc.replace(tzinfo=None), name, ws=ws, follow=follow):
             print(time.strftime("%Y-%m-%d %H:%M:%S"), f"weather: a match for watch {n}: {facts}")
     got = decide(fc, minutes, loc.replace(tzinfo=None), told, name) if general else None
     if dry:
         return got
     if got:
         s["told"] = {today: told + [got[0]]}
+    s["follow"] = follow
     _write(s)
     if got:
         import direct_line
@@ -726,7 +824,7 @@ def alert_state() -> dict:
 
 def rain_alert(want: bool) -> dict:
     """The switch in the weather sheet: on opens a lasting rain watch (ALERT_YEARS, so it's simply on, H188; every
-    match, texted at most once in ALERT_QUIET), off ends it without a text (he switched it himself)."""
+    match texted as she follows the shower, H196), off ends it without a text (he switched it himself)."""
     import pings
     cur = [w for w in pings.open_watches("weather") if w.get("alert")]
     if want and not cur:

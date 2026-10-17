@@ -7783,7 +7783,7 @@ setTimeout(() => {
         the call server's endpoint (not on Free) and the call page's widget and sheet (the widget out of the page's flow,
         so the call screen keeps its room, flow 64)."""
         import importlib
-        from datetime import datetime as dt
+        from datetime import datetime as dt, timedelta
         sys.path.insert(0, str(ROOT / "app"))
         import weather as w
         importlib.reload(w)
@@ -7938,7 +7938,8 @@ setTimeout(() => {
         """H120, no Claude, no network: the weather every three hours. What's worth a text from a made-up forecast
         and rain radar (sun, rain coming by the minute, a rainy day never saying go outside, quiet at night and
         when nothing changed), when a look is due, the place from me.md (blank in the template), a look that texts
-        through the direct line in a throwaway folder, and the routine's wiring."""
+        through the direct line in a throwaway folder, and the routine's wiring. H196: the rain alert looks every
+        five minutes and follows one shower (a shift of a quarter of an hour, gone, early, stopped; quiet otherwise)."""
         import importlib
         from datetime import datetime as dt
         sys.path.insert(0, str(ROOT / "app"))
@@ -8010,11 +8011,72 @@ setTimeout(() => {
             f["hourly"]["precipitation_probability"] = [5] * h + [80] * (24 - h)
             return f
         need(not w.check_watches(wet_from(18), [], day, ws=[al], keep=keep_fn), "rain seven hours ahead set the rain alert off")
-        need(w.check_watches(wet_from(13), [], day, ws=[al], keep=keep_fn) and kept == [("rain-1413", False)], f"rain in two hours: {kept}")
         need(not w.check_watches(wet_from(13), [("11:05", 1.5)] * 24, day, ws=[al], keep=keep_fn),
              "the rain alert went off while it's raining already")
-        al["matches"] = [{"at": time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time() - 3600))}]
-        need(not w.check_watches(wet_from(13), [], day, ws=[al], keep=keep_fn), "the rain alert texted twice within three hours")
+        fol = {}
+        need(w.check_watches(wet_from(13), [], day, ws=[al], keep=keep_fn, follow=fol) and kept == [("rain-141300", False)]
+             and fol.get("7", {}).get("at") == "2026-10-14T13:00", f"rain in two hours: {kept} {fol}")
+        need(not w.check_watches(wet_from(13), [], day, ws=[al], keep=keep_fn, follow=fol), "the rain alert texted the same shower twice")
+        # H196: every five minutes while it's on, and she follows that one shower
+        def radar(at, start, wet=24):
+            """Buienradar's two hours from AT by five minutes, rain from START (minutes from now) for WET slots."""
+            return [((at + timedelta(minutes=5 * i)).strftime("%H:%M"), 1.2 if start is not None and start <= 5 * i < start + 5 * wet else 0.0)
+                    for i in range(24)]
+        def step(f, at, mins, f_c=None):
+            return w.follow_shower(f, f_c or fc(), mins, at, at + timedelta(hours=3), at + timedelta(hours=6))
+        t0 = dt(2026, 10, 14, 14, 0)
+        f, got = step(None, t0, radar(t0, 30))
+        need(got and got[0] == "rain-141430" and "14:30" in got[1] and f["phase"] == "coming", f"a shower by the radar: {got} {f}")
+        t1 = t0 + timedelta(minutes=5)
+        f, got = step(f, t1, radar(t1, 35))  # 14:40, ten minutes later: not enough to say so
+        need(got is None and f["at"] == "2026-10-14T14:30", f"a shift under a quarter of an hour was texted: {got}")
+        t2 = t1 + timedelta(minutes=5)
+        f, got = step(f, t2, radar(t2, 40))  # 14:50, twenty minutes later
+        need(got and got[0].startswith("shift-") and "14:50" in got[1] and "later" in got[1] and f["at"] == "2026-10-14T14:50",
+             f"a shower twenty minutes later wasn't texted: {got} {f}")
+        t3 = t2 + timedelta(minutes=5)
+        f, got = step(f, t3, radar(t3, 10))  # 14:25, earlier again
+        need(got and "earlier" in got[1] and "14:25" in got[1], f"a shower coming earlier wasn't texted: {got}")
+        t4 = t3 + timedelta(minutes=5)
+        f, got = step(f, t4, radar(t4, None))
+        need(got is None and f and f["miss"] == 1, f"one look without the shower already said it's gone: {got} {f}")
+        f, got = step(f, t4 + timedelta(minutes=5), radar(t4 + timedelta(minutes=5), 0))
+        need(got is None and f["phase"] == "raining", f"the shower arriving about on time was texted: {got} {f}")
+        t5 = t4 + timedelta(minutes=10)
+        f, got = step(f, t5, radar(t5, 10, wet=6))  # a short gap: not stopped yet
+        need(got is None and f, f"a five-minute gap in the rain was called stopped: {got}")
+        t6 = t5 + timedelta(minutes=5)
+        f, got = step(f, t6, radar(t6, None))
+        need(got and got[0].startswith("stop-") and "stopped" in got[1] and f is None, f"the rain stopping wasn't texted: {got} {f}")
+        f, got = step(None, t6, radar(t6, 60))
+        f, got = step(f, t6 + timedelta(minutes=5), radar(t6 + timedelta(minutes=5), None))
+        f, got = step(f, t6 + timedelta(minutes=10), radar(t6 + timedelta(minutes=10), None))
+        need(got and got[0].startswith("gone-") and "gone" in got[1] and f is None, f"a shower that disappeared: {got} {f}")
+        f, got = step(None, t0, radar(t0, 60))
+        f, got = step(f, t0 + timedelta(minutes=5), radar(t0 + timedelta(minutes=5), 0))
+        need(got and got[0].startswith("early-") and "already" in got[1] and f["phase"] == "raining", f"rain well before she said: {got}")
+        f, _ = step(None, t0, radar(t0, 60))
+        f, got = step(f, t0 + timedelta(hours=10), radar(t0 + timedelta(hours=10), None))
+        need(got is None and f is None, f"a shower from before the night was still followed: {got} {f}")
+        f, got = step(None, t0, [], wet_from(16))  # no radar (outside NL and BE): by the hour
+        f2, got2 = step(f, t0 + timedelta(minutes=5), [], wet_from(17))
+        need(got and "16:00" in got[1] and got2 and "17:00" in got2[1] and "later" in got2[1], f"by the hour: {got} {got2}")
+        real_ws = w.watches
+        keep = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_WEATHER_PLACE", "HQ_WEATHER")}
+        try:
+            os.environ.update({"HQ_DIRECT_DIR": str(folder), "HQ_WEATHER_PLACE": "Testtown"})
+            os.environ.pop("HQ_WEATHER", None)
+            w._write({"where": {"place": "Testtown", "lat": 52.0, "lon": 5.0, "tz": "Europe/Amsterdam", "country": "NL", "name": "Testtown"},
+                      "looked": noon, "general": noon})
+            w.watches = lambda now=None: [al]
+            need(not w.due(noon + 200) and w.watch_due(noon + 5 * 60) and w.due(noon + 5 * 60),
+                 "the rain alert doesn't look every five minutes")
+            w.watches = lambda now=None: [al | {"alert": False}]
+            need(not w.watch_due(noon + 5 * 60) and w.watch_due(noon + 30 * 60), "a plain weather watch looks every five minutes")
+        finally:
+            w.watches = real_ws
+            for k, v in keep.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
         # The place from me.md; the template asks for it, blank.
         import me as _me
         need(_me.load(ROOT / "template")["place"] == "", "the template's place isn't blank")
@@ -8029,7 +8091,7 @@ setTimeout(() => {
         gi = (Path(config.FOLDER) / ".gitignore")
         if gi.exists():
             need("HQ/direct-line/weather.json" in gi.read_text(), "the weather state isn't kept off GitHub")
-        return "sun, rain by the minute and by the hour, a rainy day (never outside), quiet at night and on grey days; due every three hours in the day; the phone's spot while fresh; the rain alert a few hours ahead, quiet while raining and for three hours; me.md's place; texted once"
+        return "sun, rain by the minute and by the hour, a rainy day (never outside), quiet at night and on grey days; due every three hours in the day; the phone's spot while fresh; the rain alert a few hours ahead and not while raining, every five minutes, following one shower (a shift of a quarter of an hour, gone, early, stopped; quiet otherwise, let go after the night); me.md's place; texted once"
 
     async def flow93(self) -> str:
         """H125, no Claude, no network: Donna's watch list. routine/pings.py on its own copies: a mail watch and a

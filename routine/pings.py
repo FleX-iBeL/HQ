@@ -37,7 +37,7 @@ the second solution would be better fitted". One list in pings.json (`watches`):
 (KINDS: mail, weather; a new kind is a new name here plus the check that reads it), what to look for, until when.
 No routine of its own: the checks that already run read the list. The hourly mail check gets the open mail watches
 in its instructions and runs `match N` on a mail that fits; the weather look (H120, weather.py) checks the open
-weather watches, every 30 minutes while one is open. A match is texted by the next minute's watch(). A watch ends
+weather watches, every 30 minutes while one is open (five while the rain alert is on, H196). A match is texted by the next minute's watch(). A watch ends
 when it's answered (weather: the first match; mail: a match that answers it, like "delivered"), when its time is
 up, or when he says so (unwatch); she texts each end.
 
@@ -343,7 +343,7 @@ def weather_look(words: str) -> str:
 def watch_add(kind: str, what: str, until: dt.datetime | None = None, once: bool | None = None, by: str = "",
               now: dt.datetime | None = None, alert: bool = False) -> dict:
     """ALERT (H161): the rain alert switch in the app's weather (weather.rain_alert); the weather look checks it only
-    a few hours ahead and texts it at most every few hours."""
+    a few hours ahead, every five minutes, and follows that one shower (H196)."""
     if kind not in KINDS:
         raise ValueError(f"A watch looks in {' or '.join(KINDS)}.")
     now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
