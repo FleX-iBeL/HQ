@@ -4,6 +4,9 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+### Changed
+- New versions come out steadier. Every night the team tests HQ, fixes what it finds and decides itself: when it's sure, the night's work comes out as a new version; when it hesitates, the work waits on a test line of its own and never reaches your update bar until it's sure. Nothing personal ever goes up.
+
 ## 0.4.4 · 17 October 2026
 
 ### Added

@@ -10412,6 +10412,128 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                     os.environ[k] = v
             shutil.rmtree(tmp, ignore_errors=True)
 
+    async def flow109(self) -> str:
+        """H186, no Claude, no network: the nightly line. release.py against a throwaway HQ whose GitHub is a throwaway
+        folder: a privacy hit pushes nothing, to nightly or main; hesitating puts the night's work on nightly only, main
+        and the tags stay; sure puts it on nightly, then main as the next small version (Coming next becomes it, VERSION,
+        the tag), back on dev; an empty Coming next still goes to nightly but isn't released; a refused main is put back
+        as it was. Friends' update bar sees only the version tags. The suggestion: all green or only a test fixed is
+        sure, a fix in HQ itself or no run tonight is hesitate. One line in the H178 row's Releases, newest first."""
+        import datetime as _dt
+        import importlib
+        sys.path.insert(0, str(ROOT / "routine"))
+        import incidents as inc
+        import push as pu
+        import release as rl
+        import update as up
+        importlib.reload(pu)
+        importlib.reload(rl)
+        tmp = Path(tempfile.mkdtemp(prefix="hq-flow109-"))
+        real = (inc.FILE, pu.ROOT, rl.ROOT, rl.is_main)
+        try:
+            def g(*a, cwd=tmp):
+                return subprocess.run(["git", *a], cwd=cwd, text=True, capture_output=True, check=True)
+            hub = tmp / "hub.git"
+            g("init", "-q", "--bare", "-b", "dev", str(hub))
+            g("clone", "-q", str(hub), str(tmp / "hq"))
+            hq = tmp / "hq"
+            g("checkout", "-q", "-b", "dev", cwd=hq)
+            g("config", "user.name", "t", cwd=hq)
+            g("config", "user.email", "t@example.com", cwd=hq)
+            (hq / "app").mkdir()
+            flag = tmp / "hit"
+            (hq / "app" / "privacy.py").write_text(
+                "import os, sys\n"
+                f"if os.path.exists({str(flag)!r}):\n    print('Found: a private word'); sys.exit(1)\n"
+                "print('Nothing personal found.')\n")
+            (hq / "CHANGELOG.md").write_text("# Changelog\n\n## Coming next\n\n## 0.4.4 · 17 October 2026\n\n- old\n")
+            (hq / "VERSION").write_text("0.4.4\n")
+            g("add", ".", cwd=hq)
+            g("commit", "-q", "-m", "0.4.4", cwd=hq)
+            g("tag", "-a", "v0.4.4", "-m", "HQ 0.4.4", cwd=hq)
+            g("branch", "main", cwd=hq)
+            g("push", "-q", "origin", "dev", "main", "--tags", cwd=hq)
+            inc.FILE = str(tmp / "incidents.json")
+            rl.ROOT = hq
+            rl.is_main = lambda: True
+            remote = lambda ref: subprocess.run(["git", "-C", str(hub), "rev-parse", "-q", "--verify", ref],
+                                                text=True, capture_output=True).stdout.strip()
+            head = lambda: g("rev-parse", "HEAD", cwd=hq).stdout.strip()
+
+            # The night's work: a fix in HQ itself, with what's new for friends.
+            (hq / "a.py").write_text("x = 1\n")
+            (hq / "CHANGELOG.md").write_text((hq / "CHANGELOG.md").read_text().replace(
+                "## Coming next\n", "## Coming next\n\n- A fix.\n"))
+            g("add", ".", cwd=hq)
+            g("commit", "-q", "-m", "fix", cwd=hq)
+            main_before = remote("refs/heads/main")
+
+            flag.write_text("x")
+            need(rl.cmd_nightly("unsure") == 1 and rl.cmd_main() == 1, "a privacy hit didn't stop both pushes")
+            need(not remote("refs/heads/nightly") and remote("refs/heads/main") == main_before
+                 and remote("refs/heads/dev") != head(), "something went up despite the privacy hit")
+            flag.unlink()
+
+            need(rl.cmd_nightly("a fix in HQ itself") == 0, "hesitating didn't put the night's work on nightly")
+            need(remote("refs/heads/nightly") == head() == remote("refs/heads/dev"), "nightly isn't the night's dev")
+            need(remote("refs/heads/main") == main_before, "hesitating moved main")
+            need(up.remote_tags(str(hub)) == ["v0.4.4"], f"hesitating changed what friends see: {up.remote_tags(str(hub))}")
+
+            need(rl.cmd_main(_dt.date(2026, 10, 18)) == 0, "sure didn't release")
+            need((hq / "VERSION").read_text().strip() == "0.4.5", "VERSION isn't the next small version")
+            log = (hq / "CHANGELOG.md").read_text()
+            need("## Coming next\n\n## 0.4.5 · 18 October 2026\n\n- A fix.\n" in log, f"Coming next didn't become 0.4.5: {log!r}")
+            need(remote("refs/heads/main") == head() == remote("refs/heads/nightly") == remote("refs/heads/dev"),
+                 "main, nightly and dev aren't all on the release")
+            need(remote("refs/tags/v0.4.5^{commit}") == head(), "the tag isn't on the release")
+            need(g("branch", "--show-current", cwd=hq).stdout.strip() == "dev", "not back on dev")
+            need(up.remote_newest(str(hub)) == "v0.4.5" and "nightly" not in " ".join(up.remote_tags(str(hub))),
+                 "friends' update bar doesn't see just the new version tag")
+
+            # Nothing new for friends in the changelog: still on nightly, no release.
+            (hq / "b.py").write_text("y = 2\n")
+            g("add", "b.py", cwd=hq)
+            g("commit", "-q", "-m", "b", cwd=hq)
+            need(rl.cmd_main() == 2 and remote("refs/heads/nightly") == head() and not remote("refs/tags/v0.4.6"),
+                 "an empty Coming next didn't go to nightly only")
+
+            # GitHub refuses main: nothing released, main, the tag and dev put back as they were.
+            (hq / "CHANGELOG.md").write_text((hq / "CHANGELOG.md").read_text().replace(
+                "## Coming next\n", "## Coming next\n\n- B.\n", 1))
+            g("commit", "-q", "-am", "b notes", cwd=hq)
+            hook = hub / "hooks" / "pre-receive"
+            hook.write_text("#!/bin/sh\nwhile read o n r; do [ \"$r\" = refs/heads/main ] && exit 1; done; exit 0\n")
+            hook.chmod(0o755)
+            mine, main_local = head(), g("rev-parse", "main", cwd=hq).stdout.strip()
+            need(rl.cmd_main() == 2, "a refused main counted as released")
+            need(head() == mine and g("rev-parse", "main", cwd=hq).stdout.strip() == main_local
+                 and subprocess.run(["git", "-C", str(hq), "rev-parse", "-q", "--verify", "refs/tags/v0.4.6"]).returncode
+                 and (hq / "VERSION").read_text().strip() == "0.4.5", "a refused main wasn't put back as it was")
+            need(remote("refs/heads/nightly") == mine, "a refused main kept the night's work off nightly")
+            hook.unlink()
+
+            # The suggestion.
+            run = {"ran": 70, "passed": 70, "failed": []}
+            bad = {"ran": 70, "passed": 69, "failed": ["45: FAILED - x"]}
+            none, tests, hqc = {"tests": [], "hq": []}, {"tests": ["app/happy_flows.py"], "hq": []}, {"tests": [], "hq": ["routine/pings.py"]}
+            need(rl.suggest(run, none, True)[0] == "sure" and rl.suggest(bad, tests, True)[0] == "sure"
+                 and rl.suggest(bad, hqc, True)[0] == "hesitate" and rl.suggest(run, none, False)[0] == "hesitate"
+                 and rl.suggest(bad, none, True)[0] == "hesitate", "the suggestion isn't sure/hesitate as agreed")
+
+            # One line in the H178 row's Releases.
+            road = tmp / "roadmap.md"
+            road.write_text("| Phase R |\n|---|\n| 🔁 | H178 A daily release | x | y | Releases: 17 October 2026 (job 232): released 0.4.4. |\n")
+            need(rl.add_line("18 October 2026 (job 240): released 0.4.5", str(road)), "no H178 row found")
+            row = road.read_text().splitlines()[2]
+            need(row.endswith("| Releases: 18 October 2026 (job 240): released 0.4.5. 17 October 2026 (job 232): released 0.4.4. |"),
+                 f"the release line isn't newest first: {row}")
+        finally:
+            inc.FILE, pu.ROOT, rl.ROOT, rl.is_main = real
+            shutil.rmtree(tmp, ignore_errors=True)
+        return ("a privacy hit pushes nothing; hesitating goes to nightly only; sure goes to nightly, then main as 0.4.5 with "
+                "its tag, back on dev; an empty Coming next or a refused main releases nothing and is put back; friends see "
+                "only the version tags; the suggestion and the Releases line as agreed")
+
     async def flow97(self) -> str:
         """F31, no Claude, no network: a refused pull or push from a job never passes silently. push.py --pull and a
         plain push against a throwaway HQ copy whose GitHub is a throwaway folder: a pull that works says so; a remote
@@ -12123,6 +12245,7 @@ FLOWS = {
     106: ("H160, H182, H183: the team's work from the status page: an open roadmap item sent to the team, move and cancel, without a call; add-row for calls; the repeating rows in Maintenance", False, "flow106"),
     107: ("H184: the laptop's status page shows the server's usage when it's newer, its own when the server can't be reached", False, "flow107"),
     108: ("H187: an update ends what runs (a call, a job, the mail check) and restarts every background part, by exact pid, with the new version's rules", False, "flow108"),
+    109: ("H186: the nightly line: the night's work always on nightly, on to main as the next version only when sure; a privacy hit pushes nothing", False, "flow109"),
 }
 
 

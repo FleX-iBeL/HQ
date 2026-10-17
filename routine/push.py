@@ -7,6 +7,8 @@ anything goes up, `app/privacy.py --history` must say nothing personal; one hit 
     python3 routine/push.py            privacy check, then push the current branch (the working branch, dev)
     python3 routine/push.py --release  privacy check, then push main and the version tags (only on a release,
                                        on the user's say-so; H90)
+    python3 routine/push.py --nightly  privacy check, then dev to the branch nightly (H186: the night's work, every night;
+                                       no tags, so friends' update bars never see it)
     python3 routine/push.py --dry-run  the same, but git only shows what it would push
     python3 routine/push.py --check    only checks that GitHub accepts HQ's key; pushes nothing
     python3 routine/push.py --pull     brings HQ up to date with dev from GitHub (fast-forward only), at a job's start
@@ -27,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 REMOTE = "origin"
 WORK_BRANCH = "dev"      # H90: every job's commits go here
 RELEASE_BRANCH = "main"  # H90: only on a release, with the version tags
+NIGHTLY_BRANCH = "nightly"  # H186: the night's work, always; main only when the team is sure
 
 
 def git(*args: str) -> subprocess.CompletedProcess:
@@ -97,13 +100,8 @@ def check_key() -> int:
     return 2
 
 
-def main() -> int:
-    if "--check" in sys.argv:
-        return check_key()
-    if "--pull" in sys.argv:
-        return pull()
-    dry = ["--dry-run"] if "--dry-run" in sys.argv else []
-
+def privacy_ok(dry: bool = False) -> bool:
+    """The privacy check over HQ and its whole history; a hit means nothing goes up, to any branch (H58, H186)."""
     print("Privacy check of HQ and its whole history…")
     p = subprocess.run([sys.executable, str(ROOT / "app" / "privacy.py"), "--history"],
                        text=True, capture_output=True)
@@ -112,12 +110,45 @@ def main() -> int:
         print("Not pushed: the privacy check found something personal. Take it out first.")
         if not dry:
             refused("pushing (the privacy check found something personal)", p.stdout)
+        return False
+    return True
+
+
+def push_nightly(branch: str, dry: list[str]) -> int:
+    """H186: the working branch as it is now goes to nightly, on GitHub and here. Fast-forward only, never tags."""
+    if branch != WORK_BRANCH:
+        print(f"Not pushed: {NIGHTLY_BRANCH} only takes {WORK_BRANCH}, and HQ is on {branch}.")
+        return 2
+    r = git("push", *dry, REMOTE, f"refs/heads/{WORK_BRANCH}:refs/heads/{NIGHTLY_BRANCH}")
+    out = (r.stdout + r.stderr).strip()
+    if r.returncode != 0:
+        print(f"Pushing {WORK_BRANCH} to {NIGHTLY_BRANCH} failed:\n{out}")
+        if not dry:
+            refused(f"pushing {WORK_BRANCH} to {NIGHTLY_BRANCH}", out)
+        return 2
+    if not dry:
+        git("branch", "-f", NIGHTLY_BRANCH, WORK_BRANCH)
+        went_through(f"pushing {WORK_BRANCH} to {NIGHTLY_BRANCH}")
+    print(f"Pushed {WORK_BRANCH} to {NIGHTLY_BRANCH}{' (dry run)' if dry else ''}." + (f"\n{out}" if out else ""))
+    return 0
+
+
+def main() -> int:
+    if "--check" in sys.argv:
+        return check_key()
+    if "--pull" in sys.argv:
+        return pull()
+    dry = ["--dry-run"] if "--dry-run" in sys.argv else []
+
+    if not privacy_ok(bool(dry)):
         return 1
 
     branch = git("branch", "--show-current").stdout.strip()
     if not branch:
         print("Not pushed: HQ isn't on a branch.")
         return 2
+    if "--nightly" in sys.argv:
+        return push_nightly(branch, dry)
     # H90: day-to-day work goes to the working branch; main and the tags only move on a release.
     release = "--release" in sys.argv
     if branch == RELEASE_BRANCH and not release:
@@ -126,7 +157,12 @@ def main() -> int:
         return 2
     if git("status", "--porcelain").stdout.strip():
         print("Note: HQ has changes that aren't committed; only what's committed goes up.")
+    return push_branch(branch, release, dry)
 
+
+def push_branch(branch: str, release: bool = False, dry: list[str] | None = None) -> int:
+    """The branch to GitHub, and on a release the version tags too. Only after privacy_ok()."""
+    dry = dry or []
     steps = [(f"branch {branch}", ["push", *dry, REMOTE, branch])]
     if release:
         steps.append(("tags", ["push", *dry, REMOTE, "--tags"]))
@@ -142,7 +178,6 @@ def main() -> int:
         if not dry:
             went_through(f"pushing the {what}")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
