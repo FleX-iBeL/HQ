@@ -10761,7 +10761,8 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
 
     async def flow111(self) -> str:
         """H202: the map as a guided workflow. No Claude turns. HQ ships the map in workflows/map: a guide with
-        the five layers (the vision, the year, the ideal week, the real week, looking back), each with what it
+        the six layers (the vision, the year, the six-week game, the ideal week, the real week, looking back; the
+        game since job 244, with the lifestyle pieces in their layers, checked below), each with what it
         is, its questions one at a time, what it makes and what it hands down; how to spar one question per turn
         and write the answers down as they go; and a blank map. Nothing of the user's and no source named in it
         (the private words), and not the vision questions word for word when the workspace has them. Turning it
@@ -10772,9 +10773,10 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need(w, "HQ ships no map workflow")
         guide = (w["dir"] / w["guide"]).read_text()
         blank = (w["dir"] / w["blank"]).read_text()
-        layers = ["## 1. The vision", "## 2. The year", "## 3. The ideal week", "## 4. The real week", "## 5. Looking back"]
+        layers = ["## 1. The vision", "## 2. The year", "## 3. The six-week game", "## 4. The ideal week",
+                  "## 5. The real week", "## 6. Looking back"]
         at = [guide.find(h) for h in layers]
-        need(all(i >= 0 for i in at) and at == sorted(at), f"the guide doesn't have the five layers in order: {at}")
+        need(all(i >= 0 for i in at) and at == sorted(at), f"the guide doesn't have the six layers in order: {at}")
         bodies = [guide[a:b] for a, b in zip(at, at[1:] + [guide.find("## In short")])]
         for h, body in zip(layers, bodies):
             need("**What it is.**" in body and "**What it makes.**" in body, f"{h}: no what it is or what it makes")
@@ -10784,8 +10786,22 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need(vision_qs >= 15, f"the vision has only {vision_qs} questions")
         for must in ("One question at a time", "Write it down as you go", "Never say where it comes from", "their words"):
             need(must.lower() in guide.lower(), f"the guide doesn't say: {must}")
-        need("put your own things here" in blank.lower() and blank.count("Status: not started") == 5,
-             "the blank map doesn't say put your own things here, with five layers not started")
+        # H202 follow-up (job 244): each piece in its own layer.
+        pieces = {0: ("money, meaning", "home base", "twenty years", "things, experiences, places"),
+                  1: ("simplify", "multiply", "draw a line", "what's the block", "one week where you", "runs itself"),
+                  2: ("fun", "useful", "learn", "debrief", "simple"),
+                  3: ("love list", "hate list", "easy or forced", "cross out the days", "two-days test",
+                      "one hat per day", "working on it"),
+                  5: ("so what", "now what", "every three to six months", "three best things", "script tomorrow")}
+        for i, words in pieces.items():
+            missing = [x for x in words if x not in bodies[i].lower()]
+            need(not missing, f"{layers[i]}: missing {missing}")
+        named = [x for x in ("spanx", "parkinson", "misogi", "ferriss", "covey", "hormozi", "propeller", "fun tickets",
+                             "swimming pool", "363", "graham") if x in guide.lower()]
+        need(not named, f"the guide names a source or its words: {named}")
+        need("put your own things here" in blank.lower() and blank.count("Status: not started") == 6
+             and "## 3. The six-week game" in blank,
+             "the blank map doesn't say put your own things here, with six layers not started")
         # Nothing of the user's, no source named; not the vision questions word for word.
         personal = privacy.pattern(privacy.words(config.FOLDER))
         for name, text in (("guide", guide), ("blank", blank), ("workflow.json", (w["dir"] / "workflow.json").read_text())):
@@ -10820,7 +10836,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need(wf.turn_on(tmp, "nothing").startswith("No workflow"), "an unknown workflow was turned on")
         need("{workflows}" not in config.VOICE_RULES, "the call rules still have the workflows placeholder")
         need("workflows.py" in (ROOT / "template/CLAUDE.md").read_text(), "the template's CLAUDE.md doesn't mention workflows")
-        return (f"the map ships: five layers, {vision_qs} vision questions, each layer what it is, makes and hands down; "
+        return (f"the map ships: six layers with the six-week game, {vision_qs} vision questions, each layer what it is, makes and hands down; "
                 f"nothing private or named; on starts the map from blank and adds its line, never over theirs; off keeps it; "
                 f"the call rule only when on")
 
@@ -12537,7 +12553,7 @@ FLOWS = {
     108: ("H187: an update ends what runs (a call, a job, the mail check) and restarts every background part, by exact pid, with the new version's rules", False, "flow108"),
     109: ("H186: the nightly line: the night's work always on nightly, on to main as the next version only when sure; a privacy hit pushes nothing", False, "flow109"),
     110: ("F38: a Quick session starts with a text over 200 KB: handed over by file, never on the command line", True, "flow110"),
-    111: ("H202: the map as a guided workflow: five layers with their questions, nothing private or named; turned on, its blank map and line, never over theirs", False, "flow111"),
+    111: ("H202: the map as a guided workflow: six layers with their questions, nothing private or named; turned on, its blank map and line, never over theirs", False, "flow111"),
 }
 
 

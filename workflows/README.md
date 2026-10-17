@@ -4,4 +4,4 @@ Guided workflows a user turns on (H202). Each folder is one: `workflow.json` (it
 
 Turn one on: `python3 app/workflows.py on <id>` (list them with no arguments; `off <id>` turns one off, their file stays). Turning on copies the blank file into the workspace when there's none yet, never over an existing one, and adds its line to `where-things-go.md`. The call rules name the ones that are on from the next start of the call line.
 
-- `map/`: the map, from the life you want three to five years out down to next week, in five layers: the vision, the year, the ideal week, the real week, looking back.
+- `map/`: the map, from the life you want three to five years out down to next week, in six layers: the vision, the year, the six-week game, the ideal week, the real week, looking back.
