@@ -22,6 +22,7 @@ The daily release (H178, a repeating planned item at 2:05) runs after the nightl
 Sure and low risk: tonight's run passed every flow, or what failed was only a test (the fix touched only the flows)
 and the rerun is green. Hesitating: a fix in HQ itself, or anything not green after the fix; the next night's run
 then tests the fix in full, and a green night releases it. The privacy check is a hard no for both branches.
+A release also sets GitHub's About to the new version (H197, routine/about.py, through push.py).
 Only the main computer releases. Exits 0 when done, 1 on a privacy hit (nothing pushed), 2 when git refused or a
 check doesn't hold (nothing forced).
 """

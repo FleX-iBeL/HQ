@@ -177,7 +177,19 @@ def push_branch(branch: str, release: bool = False, dry: list[str] | None = None
         print(f"Pushed the {what}{' (dry run)' if dry else ''}." + (f"\n{out}" if out else ""))
         if not dry:
             went_through(f"pushing the {what}")
+    if release and not dry:
+        about_after_release()
     return 0
+
+
+def about_after_release() -> None:
+    """H197: a release also sets GitHub's About to the new version. A refusal doesn't undo the release; about.py
+    opens its own incident, so it's seen."""
+    try:
+        import about
+        print(about.set_about(root=ROOT)[1])
+    except Exception as e:
+        print(f"GitHub's About not set: {e}")
 
 if __name__ == "__main__":
     sys.exit(main())

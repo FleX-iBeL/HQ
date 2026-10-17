@@ -11282,6 +11282,95 @@ console.log(JSON.stringify({{ W, F, L: {{ ...L, words: landingWords(L, T) }}, we
              "H199: the status page has no button that unfolds the next 5-hour windows")
         return "four 5-hour windows back to back, each its own work, reset, moving line and what waits; the current bar says next vs later"
 
+    async def flow115(self) -> str:
+        """H197, no Claude, no network: GitHub's About says the version that's out. about.py against a throwaway GitHub
+        API on this computer: the description is everyday words with the version, under GitHub's 350; a release pushed
+        through push.py (release=True, which release.py main uses too) sets it to the new VERSION on the repo origin
+        points at; no token, or GitHub saying no, still leaves the release done but opens the incident "about" with the
+        reason; the next About that goes through closes it. A dev push leaves the About alone."""
+        import importlib
+        import http.server
+        import threading
+        sys.path.insert(0, str(ROOT / "routine"))
+        import about as ab
+        import incidents as inc
+        import push as pu
+        importlib.reload(ab)
+        importlib.reload(pu)
+        tmp = Path(tempfile.mkdtemp(prefix="hq-flow115-"))
+        got, answer = [], {"code": 200}
+
+        class Fake(http.server.BaseHTTPRequestHandler):
+            def do_PATCH(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                got.append((self.path, self.headers.get("Authorization"), body))
+                self.send_response(answer["code"])
+                self.end_headers()
+                self.wfile.write(json.dumps(body if answer["code"] == 200 else {"message": "no"}).encode())
+
+            def log_message(self, *a):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), Fake)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        real = (inc.FILE, pu.ROOT, ab.API, ab.token)
+        try:
+            inc.FILE = str(tmp / "incidents.json")
+            ab.API = f"http://127.0.0.1:{srv.server_port}"
+            d = ab.text("9.9.9")
+            need(d.startswith("HQ 9.9.9: ") and len(d) <= 350 and "Still in development" in d and "0.3" not in d,
+                 f"the description isn't everyday words with the version: {d}")
+
+            def g(*a, cwd=tmp):
+                return subprocess.run(["git", *a], cwd=cwd, text=True, capture_output=True, check=True)
+            hub = tmp / "github.com-hq" / "someone" / "HQ.git"
+            hub.parent.mkdir(parents=True)
+            g("init", "-q", "--bare", "-b", "main", str(hub))
+            g("clone", "-q", str(hub), str(tmp / "hq"))
+            hq = tmp / "hq"
+            g("checkout", "-q", "-b", "main", cwd=hq)
+            g("config", "user.name", "t", cwd=hq)
+            g("config", "user.email", "t@example.com", cwd=hq)
+            (hq / "VERSION").write_text("0.4.5\n")
+            g("add", ".", cwd=hq)
+            g("commit", "-q", "-m", "0.4.5", cwd=hq)
+            g("tag", "-a", "v0.4.5", "-m", "HQ 0.4.5", cwd=hq)
+            pu.ROOT = hq
+            need(ab.slug(hq) == "someone/HQ", f"origin's repo isn't read: {ab.slug(hq)}")
+
+            # No token: the release still goes up, the About isn't set, and the incident says why.
+            ab.token = lambda: None
+            need(pu.push_branch("main", release=True) == 0, "no token undid the release")
+            need(not got and inc.is_down("about") and "no GitHub token" in json.dumps(inc.read()),
+                 f"no token didn't open the incident about: {inc.read()}")
+
+            # With a token: the release sets the About to the new version, and the incident closes.
+            ab.token = lambda: "t0k"
+            (hq / "VERSION").write_text("0.4.6\n")
+            g("commit", "-q", "-am", "0.4.6", cwd=hq)
+            g("tag", "-a", "v0.4.6", "-m", "HQ 0.4.6", cwd=hq)
+            need(pu.push_branch("main", release=True) == 0, "the release didn't go up")
+            need(got and got[-1] == ("/repos/someone/HQ", "Bearer t0k", {"description": ab.text("0.4.6")}),
+                 f"the release didn't set the About to 0.4.6: {got}")
+            need(not inc.is_down("about"), "a set About didn't close the incident")
+
+            # GitHub says no: told, incident open with GitHub's answer.
+            answer["code"] = 403
+            ok, why = ab.set_about("0.4.6", hq)
+            need(not ok and "403" in why and inc.is_down("about"), f"a refused About passed silently: {why}")
+            answer["code"] = 200
+
+            # A dev push leaves the About alone.
+            n = len(got)
+            g("checkout", "-q", "-b", "dev", cwd=hq)
+            need(pu.push_branch("dev") == 0 and len(got) == n, "a dev push touched the About")
+        finally:
+            inc.FILE, pu.ROOT, ab.API, ab.token = real
+            srv.shutdown()
+            shutil.rmtree(tmp, ignore_errors=True)
+        return ("every release sets GitHub's About to the new version in everyday words; no token or a refusal keeps the "
+                "release but opens the incident about; a dev push leaves it alone")
+
     async def flow97(self) -> str:
         """F31, no Claude, no network: a refused pull or push from a job never passes silently. push.py --pull and a
         plain push against a throwaway HQ copy whose GitHub is a throwaway folder: a pull that works says so; a remote
@@ -12999,6 +13088,7 @@ FLOWS = {
     112: ("H200: the to-do list, the Eisenhower way: read, kept by calls and the app, shown as a matrix, a tick and its undo", False, "flow112"),
     113: ("H194: HQ's own icon on a fresh install: every page saved to a home screen or the Dock, and the Mac app's Dock icon", False, "flow113"),
     114: ("H199: the 5-hour bar unfolds into the whole day: four more windows, each its work, reset, moving line and what waits for it", False, "flow114"),
+    115: ("H197: every release sets GitHub's About to the new version, in everyday words; without a token it's an incident, never silent", False, "flow115"),
 }
 
 
