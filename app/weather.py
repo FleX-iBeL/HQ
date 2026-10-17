@@ -73,6 +73,7 @@ UA = {"User-Agent": "HQ (https://github.com/FleX-iBeL/HQ)"}
 HERE_FRESH = 6 * 3600  # H161: the phone's last spot stands in for me.md's place in the looks while it's this new
 HERE_KEEP = 20  # named spots kept
 ALERT_AHEAD = 3  # H161: the rain alert looks this many hours ahead
+ALERT_YEARS = 100  # H188: the rain alert stays on until he switches it off, so it never shows an end
 ALERT_QUIET = 3 * 3600  # and texts at most once in this long
 
 
@@ -724,12 +725,12 @@ def alert_state() -> dict:
 
 
 def rain_alert(want: bool) -> dict:
-    """The switch in the weather sheet: on opens a lasting rain watch (a year, every match, texted at most once in
-    ALERT_QUIET), off ends it without a text (he switched it himself)."""
+    """The switch in the weather sheet: on opens a lasting rain watch (ALERT_YEARS, so it's simply on, H188; every
+    match, texted at most once in ALERT_QUIET), off ends it without a text (he switched it himself)."""
     import pings
     cur = [w for w in pings.open_watches("weather") if w.get("alert")]
     if want and not cur:
-        pings.watch_add("weather", "rain", until=datetime.now().replace(second=0, microsecond=0) + timedelta(days=365),
+        pings.watch_add("weather", "rain", until=datetime.now().replace(second=0, microsecond=0) + timedelta(days=round(365.25 * ALERT_YEARS)),
                         once=False, by="the rain alert in the app", alert=True)
     elif not want:
         for w in cur:

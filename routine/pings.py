@@ -437,7 +437,8 @@ def _watch_due(s: dict, t: float) -> list[tuple[str, str]]:
     for w in s["watches"]:
         if w.get("ended") and w["ended"].get("texted"):
             continue
-        asked = f"He asked you to let him know about {_watch_says(w)} (watch {w['n']}, open until {w['until']})."
+        asked = (f"He asked you to let him know about {_watch_says(w)} (watch {w['n']}, "
+                 + ("on until he switches it off)." if w.get("alert") else f"open until {w['until']})."))
         for m in w["matches"]:
             if m.get("texted") or w.get("ended"):
                 continue
@@ -475,7 +476,8 @@ def mail_watch_text(now: float | None = None) -> str:
 
 
 def _watch_line(w: dict) -> str:
-    return (f"- watch {w['n']} · {w['kind']} · {w['what']} · until {w['until']}"
+    return (f"- watch {w['n']} · {w['kind']} · {w['what']} · "
+            + ("on until he switches it off" if w.get("alert") else f"until {w['until']}")
             + (" · ends at the first match" if w.get("once") else "")
             + (" · the rain alert from the app" if w.get("alert") else "")
             + (f" · {len(w['matches'])} match(es)" if w.get("matches") else "")
@@ -483,9 +485,9 @@ def _watch_line(w: dict) -> str:
 
 
 def watch_items() -> list[dict]:
-    """For the notes sheet in the app: the open watches in plain words."""
+    """For the notes sheet in the app: the open watches in plain words. The rain alert has no until (H188): it's on."""
     return [{"n": w["n"], "kind": w["kind"], "text": "Rain alerts on" if w.get("alert") else f"Watching for {_watch_says(w)}",
-             "until": w["until"],
+             "until": "" if w.get("alert") else w["until"],
              "matches": len(w.get("matches") or [])} for w in open_watches()]
 
 

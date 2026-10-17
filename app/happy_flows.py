@@ -7703,9 +7703,10 @@ setTimeout(() => {
             need(a["on"] and w.rain_alert(True)["n"] == a["n"] and len(pings.open_watches("weather")) == 1,
                  "switching the rain alert on twice made two watches")
             aw = pings.open_watches("weather")[0]
-            need(aw.get("alert") and aw["what"] == "rain" and not aw["once"] and int(aw["until"][:4]) > datetime.now().year - 1
-                 and aw["until"] > (datetime.now() + timedelta(days=300)).strftime(pings.FMT), f"the rain alert's watch: {aw}")
-            need(w.view()["alert"]["on"] and pings.watch_items()[0]["text"] == "Rain alerts on", "the view or her list doesn't say the rain alert is on")
+            need(aw.get("alert") and aw["what"] == "rain" and not aw["once"]
+                 and int(aw["until"][:4]) >= datetime.now().year + w.ALERT_YEARS - 1, f"the rain alert's watch isn't 100 years (H188): {aw}")
+            need(w.view()["alert"]["on"] and pings.watch_items()[0]["text"] == "Rain alerts on" and pings.watch_items()[0]["until"] == "",
+                 "the view or her list doesn't say the rain alert is on, or shows an end (H188)")
             need(not w.rain_alert(False)["on"] and not pings.open_watches("weather")
                  and [x for x in pings.read()["watches"] if x["n"] == a["n"]][0]["ended"]["texted"] == "quiet",
                  "switching the rain alert off didn't end it, or would text")
@@ -7885,6 +7886,20 @@ setTimeout(() => {
                     pass
             need(pings.when("in 3 days", now) == datetime(2099, 1, 4, 12) and pings.when("tomorrow", now) == datetime(2099, 1, 2, 23),
                  "a watch's until isn't read")
+            # H188: the rain alert has no end to show: her list, the listing and her text just say it's on; others keep it
+            ra = pings.watch_add("weather", "rain", until=datetime(2199, 1, 1, 12), once=False, now=now, alert=True)
+            items = {i["n"]: i for i in pings.watch_items()}
+            need(items[ra["n"]]["until"] == "" and items[m1["n"]]["until"] == "2099-01-08 12:00",
+                 f"her list shows the rain alert's end, or lost another watch's: {items}")
+            lst = pings.listing()
+            need("on until he switches it off" in lst and "2199" not in lst and "until 2099-01-08 12:00" in lst,
+                 f"the listing shows the rain alert's end, or lost another watch's: {lst}")
+            pings.match(ra["n"], "rain from 14:00", key="R1", now=t(12, 1))
+            got = [x for x in pings.watch(t(12, 2), spawn=spawn) if f"watch {ra['n']}," in x[1]]
+            need(got and "on until he switches it off" in got[0][1] and "2199" not in got[0][1] and pings.open_watches("weather", now=t(12, 3)),
+                 f"her rain alert text says an end, or ended it: {got}")
+            pings.unwatch(ra["n"], quiet=True)
+            texts.clear()
             # the mail check: its lines and its match
             lines = pings.mail_watch_text(now=t(12))
             need(f"Watch {m1['n']}: the package from Nedgame" in lines and "rain" not in lines, f"the mail check's lines: {lines}")

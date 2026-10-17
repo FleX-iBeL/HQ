@@ -1854,7 +1854,7 @@ function showNoteItems(data) {
       if ((AGENTS.donna || {}).colour) row.style.borderLeftColor = AGENTS.donna.colour;
       const t = document.createElement("div"); t.className = "txt"; t.textContent = w.text;
       const u = document.createElement("small"); u.className = "when";
-      u.textContent = "until " + String(w.until || "").slice(0, 16) + (w.matches ? " · " + w.matches + (w.matches === 1 ? " update" : " updates") : "");
+      u.textContent = [w.until ? "until " + String(w.until).slice(0, 16) : "", w.matches ? w.matches + (w.matches === 1 ? " update" : " updates") : ""].filter(Boolean).join(" · ");
       t.appendChild(u); row.append(t); notesList.appendChild(row);
     }
   }
