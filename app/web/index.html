@@ -427,6 +427,14 @@
   #todoadd { display:flex; gap:8px; align-items:center; margin-top:4px; }
   #todoaddin { flex:1; min-width:0; height:44px; box-sizing:border-box; border:1.5px solid var(--line, var(--muted)); border-radius:22px; padding:0 15px;
                background:var(--soft); color:var(--fg); font:16px/1 -apple-system,sans-serif; }
+  /* F40: the add field takes several at once (one per line, or commas on the groceries), so it grows with its lines */
+  textarea#todoaddin { display:block; resize:none; overflow:hidden; padding:11px 15px; font-size:16px; line-height:20px; max-height:140px; }
+  #todoadd { align-items:flex-end; }
+  /* F40: the groceries' ticked-off list, inside the groceries, A to Z; a tap puts one back on */
+  .tdoffh { display:flex; justify-content:space-between; align-items:baseline; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase;
+            letter-spacing:.05em; margin-top:10px; padding:0 4px; }
+  .tdoffh span { font-variant-numeric:tabular-nums; }
+  .tdrow.off .ck { background:color-mix(in srgb, var(--accent) 22%, transparent); border-color:var(--accent); color:var(--accent); }
   #todoaddin:focus { outline:none; border-color:var(--accent); }
   #todoaddgo { flex-shrink:0; height:44px; border:0; border-radius:22px; padding:0 18px; background:var(--accent); color:#04120f; font:600 16px/1 -apple-system,sans-serif; cursor:pointer; }
   #todoaddgo:disabled { opacity:.45; cursor:default; }
@@ -2630,7 +2638,7 @@ function todoDraw() {
     }
     todoBody.appendChild(mx);
   }
-  const rest = (todoData.lists || []).filter(l => !["commit", "q1", "q2", "q3", "q4"].includes(l.kind));
+  const rest = (todoData.lists || []).filter(l => !["commit", "q1", "q2", "q3", "q4", "grocoff"].includes(l.kind));
   if (rest.length) {
     const m = document.createElement("div"); m.className = "tdmore";
     for (const l of rest) {
@@ -2665,12 +2673,15 @@ function todoDrawList() {
     if (meta) { const m = document.createElement("small"); m.textContent = meta; if (!closed && todoSoon(it.deadline)) m.className = "due"; b.appendChild(m); }
     b.addEventListener("click", () => todoGo({ list: l.key, item: it.id, from: "list" }));
     row.appendChild(b);
-    if (!closed && l.kind !== "groceries") {
+    if (!closed) {
+      // F40: a grocery ticked off goes to the ticked-off list below, not to Done
+      const ask = l.kind === "groceries" ? { tick: it.id } : { done: it.id };
       const ck = document.createElement("button"); ck.type = "button"; ck.className = "ck"; ck.innerHTML = TODO_TICK;
       ck.setAttribute("aria-label", "Tick off: " + it.title);
       ck.addEventListener("click", async () => {
         ck.disabled = true; row.classList.add("gone");
-        if (await todoSend({ done: it.id })) todoDraw(); else { ck.disabled = false; row.classList.remove("gone"); }
+        const at = todoBody.scrollTop;
+        if (await todoSend(ask)) { todoDraw(); todoBody.scrollTop = at; } else { ck.disabled = false; row.classList.remove("gone"); }
       });
       row.appendChild(ck);
     }
@@ -2678,14 +2689,46 @@ function todoDrawList() {
   }
   if (!closed) {
     const f = document.createElement("form"); f.id = "todoadd"; f.autocomplete = "off";
-    const i = document.createElement("input"); i.id = "todoaddin"; i.type = "text"; i.maxLength = 300; i.placeholder = "Add to this list"; i.setAttribute("aria-label", "Add to " + l.name);
+    // F40: several at once give one item each (one per line; on the groceries commas too), so a textarea that grows
+    const i = document.createElement("textarea"); i.id = "todoaddin"; i.rows = 1; i.maxLength = 2000; i.enterKeyHint = "done";
+    i.placeholder = l.kind === "groceries" ? "Add: milk, eggs, bread" : "Add to this list"; i.setAttribute("aria-label", "Add to " + l.name);
     const g = document.createElement("button"); g.id = "todoaddgo"; g.type = "submit"; g.textContent = "Add"; g.disabled = true;
-    i.addEventListener("input", () => { g.disabled = !i.value.trim(); });
+    const fit = () => { i.style.height = "auto"; i.style.height = Math.min(i.scrollHeight + 3, 140) + "px"; };
+    i.addEventListener("input", () => { g.disabled = !i.value.trim(); fit(); });
+    i.addEventListener("keydown", ev => {  // Enter adds; Shift+Enter (or a paste) keeps a new line
+      if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); f.requestSubmit ? f.requestSubmit() : g.click(); }
+    });
     f.addEventListener("submit", async ev => {
       ev.preventDefault(); const t = i.value.trim(); if (!t) return;
-      g.disabled = true; if (await todoSend({ add: t, list: l.key })) { todoDraw(); todoBody.scrollTop = todoBody.scrollHeight; } else g.disabled = false;
+      g.disabled = true;
+      if (await todoSend({ add: t, list: l.key })) { todoDraw(); const a = document.getElementById("todoadd"); if (a) a.scrollIntoView({ block: "nearest" }); }
+      else g.disabled = false;
     });
     f.append(i, g); todoBody.appendChild(f);
+  }
+  if (l.kind === "groceries") todoDrawTicked();
+}
+// F40: the groceries' ticked-off list, under the groceries, A to Z; a tap on one puts it back on the list.
+function todoDrawTicked() {
+  const off = todoLists("grocoff")[0];
+  const items = off ? off.items.slice().sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" })) : [];
+  const h = document.createElement("div"); h.className = "tdoffh"; h.id = "tdoffh";
+  const n = document.createElement("span"); n.textContent = String(items.length);
+  h.append(document.createTextNode("Ticked off"), n); todoBody.appendChild(h);
+  if (!items.length) { const e = document.createElement("div"); e.className = "tdhint"; e.textContent = "What you tick off lands here, A to Z. Tap one to put it back on the list."; todoBody.appendChild(e); return; }
+  for (const it of items) {
+    const row = document.createElement("div"); row.className = "tdrow gone off";
+    const b = document.createElement("button"); b.type = "button"; b.className = "it"; b.textContent = it.title;
+    if (it.at) { const m = document.createElement("small"); m.textContent = "Last bought " + it.at; b.appendChild(m); }
+    const ck = document.createElement("button"); ck.type = "button"; ck.className = "ck"; ck.innerHTML = TODO_TICK;
+    ck.setAttribute("aria-label", "Put back on the list: " + it.title); b.setAttribute("aria-label", "Put back on the list: " + it.title);
+    const back = async () => {
+      b.disabled = ck.disabled = true; row.classList.remove("gone");
+      const at = todoBody.scrollTop;
+      if (await todoSend({ untick: it.id })) { todoDraw(); todoBody.scrollTop = at; } else { b.disabled = ck.disabled = false; row.classList.add("gone"); }
+    };
+    b.addEventListener("click", back); ck.addEventListener("click", back);
+    row.append(b, ck); todoBody.appendChild(row);
   }
 }
 function todoDrawItem() {
@@ -2705,15 +2748,16 @@ function todoDrawItem() {
   }
   const closed = l.kind === "done" || l.kind === "letgo";
   const acts = document.createElement("div"); acts.className = "tdacts";
-  if (!closed && l.kind !== "groceries") {
+  if (!closed && l.kind !== "grocoff") {
     const d = document.createElement("button"); d.type = "button"; d.className = "ok"; d.textContent = "Tick off";
-    d.addEventListener("click", async () => { d.disabled = true; if (await todoSend({ done: it.id })) todoGo({ list: l.key, item: null, from: "main" }); else d.disabled = false; });
+    const ask = l.kind === "groceries" ? { tick: it.id } : { done: it.id };  // F40
+    d.addEventListener("click", async () => { d.disabled = true; if (await todoSend(ask)) todoGo({ list: l.key, item: null, from: "main" }); else d.disabled = false; });
     acts.appendChild(d);
   }
   const mv = document.createElement("select"); mv.setAttribute("aria-label", "Move to another list");
   const o0 = document.createElement("option"); o0.value = ""; o0.textContent = closed ? "Back on a list…" : "Move to…"; mv.appendChild(o0);
   for (const x of todoData.lists || []) {
-    if (x.key === l.key || x.kind === "done" || x.kind === "letgo") continue;
+    if (x.key === l.key || x.kind === "done" || x.kind === "letgo" || x.kind === "grocoff") continue;
     const o = document.createElement("option"); o.value = x.key; o.textContent = todoLabel(x); mv.appendChild(o);
   }
   mv.addEventListener("change", async () => {

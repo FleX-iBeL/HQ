@@ -186,7 +186,8 @@ their own system (how they prioritise, at the top of the file) and say which, in
 let go, move it there. Use the list's commands, so every change keeps its columns and gets its line in the list's \
 log: python3 "{HQ}/app/todo.py" (the list in a few lines, each item with its id), add LIST "WHAT" [--notes "their \
 words"] [--deadline "…"] [--type active|passive] [--for "who"], done ITEM ["note"], letgo ITEM "why", move ITEM LIST, \
-undo; add --by "<who you are>, on a call" (or "in the chat"). LIST is a number, a few words of a list's name, or \
+undo; a grocery that's bought is tick ITEM (onto the groceries' own ticked-off list, not done), and untick ITEM puts \
+it back; several at once in one add give one item each (one per line, or commas on the groceries); add --by "<who you are>, on a call" (or "in the chat"). LIST is a number, a few words of a list's name, or \
 important urgent, important not urgent, urgent, neither, wishlist, groceries; ITEM is an id or a few words of it. A \
 longer story in their own words goes under the details in the file, as where-things-go.md says. The mail check \
 never puts anything on it by itself: a mail becomes an item only after {user}'s yes."""

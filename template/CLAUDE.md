@@ -55,7 +55,7 @@ Act as their life coach and sparring partner, with the `life-coach` skill. Ask t
 
 ## The to-do list
 
-`challenges.md` is their to-do list, the Eisenhower way, in their own lists and words; the HQ app shows it as a matrix (the To-do button), where they can tick things off, move them, let them go and add one. Keep it up to date as you talk: something to do comes up, sort it in by their system and say where; something is done or let go, move it. `python3 ../HQ/app/todo.py` shows it with each item's id; `add`, `done`, `letgo`, `move` and `undo` change it the same way the app and the calls do (every column kept, one line in its log). A mail only becomes an item after their yes.
+`challenges.md` is their to-do list, the Eisenhower way, in their own lists and words; the HQ app shows it as a matrix (the To-do button), where they can tick things off, move them, let them go and add one. Keep it up to date as you talk: something to do comes up, sort it in by their system and say where; something is done or let go, move it. `python3 ../HQ/app/todo.py` shows it with each item's id; `add`, `done`, `letgo`, `move` and `undo` change it the same way the app and the calls do (every column kept, one line in its log); a bought grocery is `tick` (onto the groceries' own ticked-off list) and `untick` puts it back; several at once in one `add` give one item each. A mail only becomes an item after their yes.
 
 ## Workflows
 

@@ -626,8 +626,9 @@ if __name__ == "__main__":
         return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
 
     # H200: the to-do list, the Eisenhower way (todo.py), from the workspace's own file. The page reads it and can tick
-    # one off, let it go, move it, add one, and undo its last change; calls and Donna keep it the same way. Only from
-    # the page itself (x-hq: todo), never on a Free-only line.
+    # one off, let it go, move it, add one (several at once, F40), tick a grocery off and back on (F40), and undo its
+    # last change; calls and Donna keep it the same way. Only from the page itself (x-hq: todo), never on a Free-only
+    # line.
     import todo as _todo
 
     @app.get("/api/todo", include_in_schema=False)
@@ -658,8 +659,12 @@ if __name__ == "__main__":
                 args = ["letgo", ask["letgo"], str(ask.get("why") or "")[:500]]
             elif isinstance(ask.get("move"), str) and isinstance(ask.get("to"), str):
                 args = ["move", ask["move"], ask["to"]]
+            elif isinstance(ask.get("tick"), str):
+                args = ["tick", ask["tick"]]
+            elif isinstance(ask.get("untick"), str):
+                args = ["untick", ask["untick"]]
             elif isinstance(ask.get("add"), str) and isinstance(ask.get("list"), str):
-                args = ["add", ask["list"], ask["add"][:300]]
+                args = ["add", ask["list"], ask["add"][:2000]]
             elif ask.get("undo") is True:
                 args = ["undo"]
             else:
@@ -683,8 +688,12 @@ if __name__ == "__main__":
                 said = await asyncio.to_thread(_todo.letgo, ask["letgo"], str(ask.get("why") or "")[:500], by)
             elif isinstance(ask.get("move"), str) and isinstance(ask.get("to"), str):
                 said = await asyncio.to_thread(_todo.move, ask["move"], ask["to"], by)
+            elif isinstance(ask.get("tick"), str):
+                said = await asyncio.to_thread(_todo.tick, ask["tick"], by)
+            elif isinstance(ask.get("untick"), str):
+                said = await asyncio.to_thread(_todo.untick, ask["untick"], by)
             elif isinstance(ask.get("add"), str) and isinstance(ask.get("list"), str):
-                said = await asyncio.to_thread(_todo.add, ask["list"], ask["add"][:300], "", "", "", "", by)
+                said = await asyncio.to_thread(_todo.add, ask["list"], ask["add"][:2000], "", "", "", "", by)
             elif ask.get("undo") is True:
                 said = await asyncio.to_thread(_todo.undo)
             else:

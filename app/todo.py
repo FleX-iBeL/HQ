@@ -15,11 +15,19 @@ column the other list doesn't have goes into its Notes), and writes one line in 
     python3 app/todo.py done "ITEM" ["NOTE"]    to the done list, with the date and time
     python3 app/todo.py letgo "ITEM" "WHY"      to the let-go list
     python3 app/todo.py move "ITEM" LIST        to another list
+    python3 app/todo.py tick "ITEM"             groceries: ticked off, onto the ticked-off list (not done)
+    python3 app/todo.py untick "ITEM"           groceries: from the ticked-off list back onto the list
     python3 app/todo.py undo                    puts back the last change made here, if nothing changed since
 
 LIST is a list's number (0, 1, 2 …), a few words of its name, or matrix words: "important urgent", "important not
 urgent", "urgent", "neither", "wishlist", "groceries". ITEM is the item's id or a few words of it; more than one
-match is refused with the matches listed.
+match is refused with the matches listed. Adding several things at once (one per line, or with commas on the
+groceries) adds one item each.
+
+F40 (18 October 2026), in the user's words: "maybe it should get it's own list that's ticked off, so i can also scroll
+through it and tick it back on (can put it on alphabetical order), can be inside once you open groceries button". A
+ticked grocery goes to its own list, "## Groceries ticked off" (made under the groceries when it's first needed, with
+the groceries' own columns), its Last bought set to the day; untick puts it back. The app shows it A to Z.
 """
 from __future__ import annotations
 
@@ -58,7 +66,7 @@ def kind_of(num: str | None, name: str) -> str:
     commit, letgo, done, wish, groceries, or other. From its name first, the number only for the lists outside."""
     n = name.lower()
     if "grocer" in n:
-        return "groceries"
+        return "grocoff" if re.search(r"ticked|\boff\b|\bgot\b|bought", n) else "groceries"
     if "wish" in n or "shopping" in n:
         return "wish"
     if re.search(r"\bdone\b|\bfinished\b|\bcompleted\b", n) or (num == "7" and "urgent" not in n):
@@ -364,7 +372,8 @@ def _move(p: Path, want_item: str, to: dict | str, at_value: str = "", note: str
             v = _field(r, name)
             if v:
                 vals[name] = v
-        vals.pop("at", None)
+        if not (src["kind"] in ("groceries", "grocoff") and dst["kind"] in ("groceries", "grocoff")):
+            vals.pop("at", None)
         extra = []
         if dst["kind"] in ("done", "letgo"):
             vals["at"] = at_value or _now().strftime("%Y-%m-%d %H:%M")
@@ -373,6 +382,8 @@ def _move(p: Path, want_item: str, to: dict | str, at_value: str = "", note: str
             for k in ("type", "for", "deadline", "calendar", "added", "often"):
                 vals.pop(k, None)
             vals.pop("status", None)
+        elif dst["kind"] == "grocoff":
+            vals["at"] = _now().strftime("%Y-%m-%d")
         else:
             if src["kind"] in ("done", "letgo"):
                 vals["status"] = "open"
@@ -401,12 +412,34 @@ def _move(p: Path, want_item: str, to: dict | str, at_value: str = "", note: str
     return {"ok": True, "said": f"{it['title']}: {what}.", "id": it["id"], "list": dst["key"]}
 
 
+def split_items(text: str, kind: str) -> list[str]:
+    """F40: several things at once give one item each: one per line on any list, and with commas on the groceries
+    (outside brackets, so "beef (150 gram, lean)" stays one). A list marker at the start of a line is dropped."""
+    parts = [re.sub(r"^\s*(?:[-*\u2022]|\d+[.)])\s+", "", x) for x in re.split(r"[\r\n]+", text or "")]
+    if kind == "groceries":
+        out = []
+        for x in parts:
+            out += re.split(r"[,;](?![^()]*\))", x)
+        parts = out
+    seen, items = set(), []
+    for x in parts:
+        x = re.sub(r"\s+", " ", x).strip()
+        if x and x.lower() not in seen:
+            seen.add(x.lower())
+            items.append(x)
+    return items
+
+
 def add(lst_want: str, title: str, notes: str = "", deadline: str = "", type_: str = "", for_: str = "",
         by: str = "", p: Path | None = None) -> dict:
+    p = p or path()
+    dst = find_list(parse(p.read_text(encoding="utf8")), lst_want)
+    many = split_items(title, dst["kind"])
+    if len(many) > 1 or (many and dst["kind"] == "groceries"):
+        return _add_many(dst, many, notes, deadline, type_, for_, by, p)
     title = re.sub(r"\s+", " ", title).strip()
     if not title:
         raise ValueError("nothing to add")
-    p = p or path()
     with _lock:
         before = p.read_text(encoding="utf8")
         doc = parse(before)
@@ -427,6 +460,112 @@ def add(lst_want: str, title: str, notes: str = "", deadline: str = "", type_: s
         lines = _insert_log(lines, f"- {stamp}: added {title} to {_list_label(dst)}{_by(by)}.")
         _write(p, before, lines, f"added {title}")
     return {"ok": True, "said": f"Added {title} to {_list_label(dst)}.", "list": dst["key"]}
+
+
+def _add_many(dst: dict, titles: list[str], notes: str, deadline: str, type_: str, for_: str, by: str, p: Path) -> dict:
+    """Several items in one change (one undo, one log line). On the groceries, one that's already on the list stays
+    as it is, and one on the ticked-off list goes back on instead of twice."""
+    with _lock:
+        before = p.read_text(encoding="utf8")
+        doc = parse(before)
+        dst = next(x for x in doc["lists"] if x["head"] == dst["head"])
+        on = {it["title"].lower() for it in dst["items"]}
+        off = next((x for x in doc["lists"] if x["kind"] == "grocoff"), None) if dst["kind"] == "groceries" else None
+        back = {it["title"].lower(): it for it in (off["items"] if off else [])}
+        lines = list(doc["lines"])
+        added, again, had, rows = [], [], [], []
+        for title in titles:
+            if title.lower() in on:
+                had.append(title)
+                continue
+            if title.lower() in back:
+                it = back.pop(title.lower())
+                vals = {"title": it["title"]}
+                for name in _FIELDS:
+                    v = _field(it["row"], name)
+                    if v:
+                        vals[name] = v
+                rows.append(_row_for(dst, vals, []))
+                lines[it["line"]] = None
+                again.append(it["title"])
+                continue
+            vals = {"title": title, "notes": notes, "deadline": deadline, "type": type_, "for": for_,
+                    "status": "open" if dst["kind"] not in ("done", "letgo", "groceries") else "",
+                    "added": _now().strftime("%Y-%m-%d")}
+            if dst["kind"] in ("done", "letgo"):
+                vals["at"] = _now().strftime("%Y-%m-%d %H:%M")
+            has = {name for name in _FIELDS for c in dst["columns"][1:]
+                   if any(c.lower() == w or c.lower().startswith(w + " ") or c.lower().startswith(w + "(") for w in _FIELDS[name])}
+            vals = {k: v for k, v in vals.items() if v and (k in ("title", "notes", "deadline", "type", "for") or k in has)}
+            rows.append(_row_for(dst, vals, []))
+            on.add(title.lower())
+            added.append(title)
+        if not rows:
+            return {"ok": True, "said": f"Already on {_list_label(dst)}: {', '.join(had)}.", "list": dst["key"]}
+        at = dst["table"][1]
+        lines = lines[:at] + [_row_line(c) for c in rows] + lines[at:]
+        lines = [l for l in lines if l is not None]
+        stamp = _now().strftime("%Y-%m-%d %H:%M")
+        bits = ([f"added {', '.join(added)}"] if added else []) + ([f"back on: {', '.join(again)}"] if again else [])
+        what = "; ".join(bits)
+        lines = _insert_log(lines, f"- {stamp}: {what} ({_list_label(dst)}){_by(by)}.")
+        _write(p, before, lines, what)
+    said = f"{what[0].upper()}{what[1:]} ({_list_label(dst)})." + (f" Already there: {', '.join(had)}." if had else "")
+    return {"ok": True, "said": said, "list": dst["key"], "count": len(rows)}
+
+
+def _ensure_ticked_list(p: Path) -> dict:
+    """The groceries' ticked-off list, made right under the groceries with their columns when there's none yet."""
+    with _lock:
+        before = p.read_text(encoding="utf8")
+        doc = parse(before)
+        off = next((x for x in doc["lists"] if x["kind"] == "grocoff"), None)
+        if off:
+            return off
+        gro = next((x for x in doc["lists"] if x["kind"] == "groceries"), None)
+        if not gro:
+            raise KeyError("There's no groceries list in the file.")
+        lines = list(doc["lines"])
+        at = gro["table"][1]
+        block = ["", "## Groceries ticked off", "",
+                 "Ticked off in the app or on a call; tick one back on to put it on the groceries again.", "",
+                 _row_line(gro["columns"]), "|" + "|".join("---" for _ in gro["columns"]) + "|"]
+        lines = lines[:at] + block + lines[at:]
+        text = "\n".join(lines) + ("\n" if before.endswith("\n") else "")
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp.write_text(text, encoding="utf8")
+        os.replace(tmp, p)
+        return next(x for x in parse(text)["lists"] if x["kind"] == "grocoff")
+
+
+def tick(item: str, by: str = "", p: Path | None = None) -> dict:
+    """F40: a grocery ticked off goes to the groceries' own ticked-off list, not to done."""
+    p = p or path()
+    doc = parse(p.read_text(encoding="utf8"))
+    gro = [x for x in doc["lists"] if x["kind"] == "groceries"]
+    want = item
+    try:
+        src, it = find_item({"lists": gro}, item)
+        want = it["id"]
+    except KeyError:
+        src, it = find_item(doc, item)
+        if src["kind"] == "grocoff":
+            return {"ok": True, "said": f"{it['title']} is already ticked off.", "id": it["id"]}
+        raise KeyError(f"{it['title']} isn't on the groceries.")
+    dst = _ensure_ticked_list(p)
+    return _move(p, want, dst, by=by, log_what="ticked off (groceries)")
+
+
+def untick(item: str, by: str = "", p: Path | None = None) -> dict:
+    """F40: back from the ticked-off list onto the groceries."""
+    p = p or path()
+    doc = parse(p.read_text(encoding="utf8"))
+    off = [x for x in doc["lists"] if x["kind"] == "grocoff"]
+    gro = next((x for x in doc["lists"] if x["kind"] == "groceries"), None)
+    if not off or not gro:
+        raise KeyError("Nothing is ticked off on the groceries.")
+    src, it = find_item({"lists": off}, item)
+    return _move(p, it["id"], gro, by=by, log_what="back on the groceries")
 
 
 def done(item: str, note: str = "", by: str = "", p: Path | None = None) -> dict:
@@ -517,11 +656,15 @@ def summary(p: Path | None = None) -> str:
     d = read(p)
     if d.get("missing"):
         return f"There's no to-do list yet ({d['file']} in the workspace)."
-    order = {"commit": 0, "q2": 1, "q1": 2, "q3": 3, "q4": 4, "other": 5, "wish": 6, "groceries": 7, "letgo": 8, "done": 9}
+    order = {"commit": 0, "q2": 1, "q1": 2, "q3": 3, "q4": 4, "other": 5, "wish": 6, "groceries": 7, "grocoff": 8, "letgo": 9, "done": 10}
     out = []
     for lst in sorted(d["lists"], key=lambda x: order.get(x["kind"], 5)):
         items = lst["items"]
         label = (f"{lst['num']}. " if lst["num"] is not None else "") + lst["name"]
+        if lst["kind"] == "grocoff":
+            out.append(f"{label}: {len(items)}" + ("" if not items else ": " + "; ".join(
+                f"{it['title']} #{it['id']}" for it in sorted(items, key=lambda x: x["title"].lower()))))
+            continue
         if lst["kind"] in ("done", "letgo"):
             out.append(f"{label}: {len(items)}" + (f", latest {items[0]['title']}" if items else ""))
             continue
@@ -545,7 +688,7 @@ def _opt(args: list[str], name: str) -> str:
 def main(argv: list[str]) -> int:
     args = list(argv)
     # H203: on the backup HQ, a change to the list goes to the main one, which writes it (role.WRITES), like the queue.
-    if args and args[0] in ("add", "done", "letgo", "move", "undo") and not os.environ.get("HQ_ROLE_HERE"):
+    if args and args[0] in ("add", "done", "letgo", "move", "tick", "untick", "undo") and not os.environ.get("HQ_ROLE_HERE"):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "routine"))
         import role
         if role.is_backup():
@@ -567,6 +710,10 @@ def main(argv: list[str]) -> int:
             print(letgo(args[1], args[2] if len(args) > 2 else "", by=by)["said"])
         elif cmd == "move" and len(args) >= 3:
             print(move(args[1], args[2], by=by)["said"])
+        elif cmd == "tick" and len(args) >= 2:
+            print(tick(args[1], by=by)["said"])
+        elif cmd == "untick" and len(args) >= 2:
+            print(untick(args[1], by=by)["said"])
         elif cmd == "undo":
             print(undo()["said"])
         else:

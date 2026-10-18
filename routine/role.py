@@ -76,7 +76,7 @@ PY = sys.executable or "/usr/bin/python3"
 # chat's own edits to the files only the main writes (handover.py edit, see ONE_WRITER).
 WRITES = {"jobs": {"add", "add-row", "send-row", "stop", "overrule", "move", "on", "off", "mail-on", "mail-off", "mail-fast", "mail-hourly", "resume"},
           "schedule": {"add", "cancel", "move", "priority", "every"},
-          "todo": {"add", "done", "letgo", "move", "undo"},
+          "todo": {"add", "done", "letgo", "move", "tick", "untick", "undo"},
           "pings": {"appt", "remind", "cancel", "note", "note-clear", "watch", "unwatch"},
           "handover": {"edit"}}
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py")}  # the rest are routine/<script>.py

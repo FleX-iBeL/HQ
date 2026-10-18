@@ -11238,6 +11238,176 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 "it, undo only over its own change, the rules on calls and in Donna's chat, the mail check hands off; the matrix "
                 "in the app opens a list and an item, a tick reaches the file and Undo takes it back (" + ", ".join(seen) + ")")
 
+    # 124
+    async def flow124(self) -> str:
+        """F40: groceries ticked off in the app, and ticked back on. No Claude turns. On a throwaway copy of the
+        template's list: tick moves a grocery to the groceries' own ticked-off list (made under the groceries the
+        first time, with their columns, Last bought the day), never to done; untick puts it back with its Last bought;
+        several at once in one add give one item each (one per line on any list, commas on the groceries, a comma
+        inside brackets kept); one already on the list isn't added twice and one ticked off goes back on instead; a
+        comma on another list stays one item. The calls' rules, the policy and the backup's hand-over know tick and
+        untick. The server takes tick, untick and a many-line add from the page only. On the call page in a headless
+        browser (the phone, a small phone, the desktop app): the groceries open from their pill (the ticked-off list
+        has no pill of its own), every grocery has a tick, a tick lands it under Ticked off (A to Z) and in the file,
+        a tap on a ticked one puts it back, an add with commas gives one row each, and nothing is wider than the
+        screen."""
+        import todo as td
+        tdir = self.tmp / "f40"
+        tdir.mkdir(parents=True, exist_ok=True)
+        tpl = (APP.parent / "template" / "challenges.md").read_text()
+        at = tpl.index("## Groceries")
+        eol = tpl.index("\n", tpl.index("|---", at))
+        text = tpl[:eol + 1] + "| pasta |  |  |  |\n| Milk |  |  |  |\n| eggs |  |  |  |\n" + tpl[eol + 1:]
+        at = text.index("## 1. ")
+        eol = text.index("\n", text.index("|---", at))
+        text = text[:eol + 1] + "| Plan the garden | active | | open | | 2026-01-03 | |\n" + text[eol + 1:]
+        f = tdir / "challenges.md"
+        f.write_text(text)
+        env_was = {k: os.environ.get(k) for k in ("HQ_TODO_UNDO", "HQ_NOW")}
+        os.environ["HQ_TODO_UNDO"] = str(tdir / "undo.json")
+        os.environ["HQ_NOW"] = "2026-01-05T10:00:00"
+        try:
+            need(td.kind_of(None, "Groceries ticked off") == "grocoff" and td.kind_of(None, "Groceries") == "groceries",
+                 "the ticked-off list isn't told apart from the groceries")
+            td.tick("milk", by="a test", p=f)
+            t = f.read_text()
+            gro = t.split("## Groceries\n")[1].split("## ")[0]
+            off = t.split("## Groceries ticked off\n")[1].split("## ")[0] if "## Groceries ticked off\n" in t else ""
+            need("Milk" not in gro and "| Milk |  | 2026-01-05 |  |" in off and "| Item | How often | Last bought | Notes |" in off,
+                 f"tick didn't move the grocery to its own ticked-off list with the groceries' columns: {off!r}")
+            need(t.index("## Groceries ticked off") < t.index("## Details"), "the ticked-off list isn't under the groceries")
+            need("| Milk |" not in t.split("## 7.")[1].split("## ")[0], "a ticked grocery went to done")
+            need("- 2026-01-05 10:00: Milk: ticked off (groceries) (a test)." in t, "tick wrote no log line")
+            td.tick("pasta", p=f)
+            d = td.read(f)
+            offl = next(l for l in d["lists"] if l["kind"] == "grocoff")
+            need(sorted(i["title"] for i in offl["items"]) == ["Milk", "pasta"], f"the ticked-off list reads wrong: {offl}")
+            need(td.undo()["ok"] and "| pasta |  |  |  |" in f.read_text().split("## Groceries\n")[1].split("## ")[0], "undo didn't take a tick back")
+            td.untick("milk", p=f)
+            t = f.read_text()
+            need("| Milk |  | 2026-01-05 |  |" in t.split("## Groceries\n")[1].split("## ")[0]
+                 and "Milk" not in t.split("## Groceries ticked off\n")[1].split("## ")[0], "untick didn't put it back with its Last bought")
+            td.tick("milk", p=f)
+            r = td.add("groceries", "tomatoes, bread\nmilk\n- beef (150 gram, lean)\neggs", p=f)
+            t = f.read_text()
+            gro = t.split("## Groceries\n")[1].split("## ")[0]
+            for want in ("| tomatoes |", "| bread |", "| Milk |", "| beef (150 gram, lean) |"):
+                need(gro.count(want) == 1, f"a many-line add didn't give {want} once: {r}")
+            need(gro.count("eggs") == 1 and "Milk" not in t.split("## Groceries ticked off\n")[1].split("## ")[0],
+                 f"one already there was added twice, or a ticked one wasn't put back: {r}")
+            need("Already there: eggs" in r["said"] and "back on: Milk" in r["said"], f"the add doesn't say what it did: {r['said']}")
+            td.add("1", "Call the bank, then the shop", p=f)
+            need("| Call the bank, then the shop |" in f.read_text(), "a comma on another list split the item")
+            td.add("1", "Water the plants\nFix the bike", p=f)
+            need("| Water the plants |" in f.read_text() and "| Fix the bike |" in f.read_text(), "one per line didn't give one item each")
+            need(re.search(r"Groceries ticked off: \d", td.summary(f)), "the summary doesn't give the ticked-off list")
+        finally:
+            for k, v in env_was.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        from policy import Policy
+        import role as _role
+        pol = Policy(config.FOLDER, dry_run=True)
+        script = APP / "todo.py"
+        need(all(pol.decide("Bash", {"command": f'python3 "{script}" {c} "milk" --by "a call"'}).verdict == "allow" for c in ("tick", "untick")),
+             "a call can't tick a grocery off or back on")
+        need({"tick", "untick"} <= _role.WRITES["todo"], "the backup doesn't hand a tick to the main")
+        need("tick ITEM" in config.TODO_RULE and "untick ITEM" in config.TODO_RULE and "untick" in (APP.parent / "template" / "CLAUDE.md").read_text(),
+             "the call rules or a friend's chat don't know tick and untick")
+        # the server, on its own copy
+        await self.ensure_server()
+        sf = Path(self.server.env["HQ_TODO"])
+        sf.parent.mkdir(parents=True, exist_ok=True)
+        sf.write_text(text)
+        Path(self.server.env["HQ_TODO_UNDO"]).unlink(missing_ok=True)
+
+        def post(body, hq="todo"):
+            req = urllib.request.Request(TEST_URL + "/api/todo", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        need(post({"tick": "milk"}, hq="")[0] == 403 and sf.read_text() == text, "a tick without the page's header was let in")
+        code, got = post({"tick": "milk"})
+        need(code == 200 and any(l["kind"] == "grocoff" and [i["title"] for i in l["items"]] == ["Milk"] for l in got["lists"]),
+             f"the server didn't tick it off ({code})")
+        code, got = post({"untick": "milk"})
+        need(code == 200 and "## Groceries ticked off" in sf.read_text() and "Milk" not in sf.read_text().split("## Groceries ticked off\n")[1].split("## ")[0],
+             f"the server didn't put it back ({code})")
+        code, got = post({"add": "kiwi\nlemons, limes", "list": "groceries"})
+        need(code == 200 and all(f"| {x} |" in sf.read_text() for x in ("kiwi", "lemons", "limes")), f"the server's add didn't give one each ({code})")
+        need(post({"untick": "nothing like it"})[0] == 404, "an unknown ticked item wasn't refused")
+        # the call page
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (f, ms) => { for (let i = 0; i < ms / 50; i++) { if (f()) return true; await wait(50); } return false; };
+  const rows = sel => [...document.querySelectorAll(sel)].map(r => r.querySelector(".it").firstChild.textContent);
+  const wide = () => [...document.querySelectorAll("#todosheet *")].some(e => { const b = e.getBoundingClientRect(); return b.width && b.right > innerWidth + 1; });
+  document.getElementById("todobtn").click();
+  await until(() => document.querySelector(".tdmore button"), 4000);
+  const pills = [...document.querySelectorAll(".tdmore button")].map(b => b.firstChild.textContent);
+  out.push("pills:" + (pills.includes("Groceries") && !pills.some(p => /ticked/i.test(p)) ? "ok" : pills.join("/")));
+  [...document.querySelectorAll(".tdmore button")].find(b => b.firstChild.textContent === "Groceries").click(); await wait(100);
+  out.push("list:" + rows(".tdrow:not(.off)").join("/") + "=" + document.querySelectorAll(".tdrow:not(.off) .ck").length);
+  out.push("offhead:" + (document.getElementById("tdoffh") ? document.getElementById("tdoffh").textContent : "none"));
+  const tickOf = name => [...document.querySelectorAll(".tdrow:not(.off)")].find(r => r.querySelector(".it").firstChild.textContent === name).querySelector(".ck");
+  tickOf("pasta").click();
+  await until(() => rows(".tdrow.off").length === 1, 4000);
+  tickOf("Milk").click();
+  await until(() => rows(".tdrow.off").length === 2, 4000);
+  out.push("ticked:" + rows(".tdrow.off").join("/") + "|" + rows(".tdrow:not(.off)").join("/"));
+  out.push("view:" + document.getElementById("todosheet").dataset.view);
+  out.push("wide:" + (wide() ? "yes" : "no"));
+  document.querySelector(".tdrow.off .it").click();
+  await until(() => rows(".tdrow.off").length === 1, 4000);
+  out.push("back:" + rows(".tdrow.off").join("/") + "|" + rows(".tdrow:not(.off)").join("/"));
+  const i = document.getElementById("todoaddin");
+  out.push("field:" + i.tagName.toLowerCase());
+  i.value = "kiwi, lemons"; i.dispatchEvent(new Event("input"));
+  i.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await until(() => rows(".tdrow:not(.off)").length === 4, 4000);
+  out.push("added:" + rows(".tdrow:not(.off)").join("/"));
+  const pre = document.createElement("pre"); pre.id = "f40"; pre.textContent = "F40RESULT " + out.join(" | ") + " END"; document.body.append(pre);
+})();
+</script>"""
+        seen = []
+        for name, size, app_ in (("the phone", "390,844", False), ("a small phone", "320,568", False), ("the desktop app", "1180,780", True)):
+            sf.write_text(text)
+            Path(self.server.env["HQ_TODO_UNDO"]).unlink(missing_ok=True)
+            pf = self.tmp / f"f40-{size.replace(',', 'x')}.html"
+            pg = page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1).replace("</body>", harness + "</body>", 1)
+            if app_:
+                pg = pg.replace('new URLSearchParams(location.search).has("app")', "true", 1)
+            pf.write_text(pg)
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'f40-profile'}", "--disable-web-security", f"--window-size={size}",
+                                              "--virtual-time-budget=12000", "--dump-dom", pf.as_uri()], timeout=90)
+            mm = re.search(r'<pre id="f40">F40RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{name}: the groceries test on the call page didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+            say(f"   {name} ({size}): {mm.group(1)}")
+            need(res["pills"] == "ok", f"{name}: the groceries pill is missing, or the ticked-off list has its own: {res}")
+            need(res["list"] == "pasta/Milk/eggs=3" and res["offhead"] == "Ticked off0", f"{name}: the groceries don't open with a tick each: {res}")
+            need(res["ticked"] == "Milk/pasta|eggs" and res["view"] == "list", f"{name}: ticked groceries aren't under Ticked off, A to Z: {res}")
+            need(res["wide"] == "no", f"{name}: something in the groceries is wider than the screen: {res}")
+            need(res["back"] == "pasta|eggs/Milk", f"{name}: a tap on a ticked one didn't put it back: {res}")
+            need(res["field"] == "textarea" and res["added"] == "eggs/Milk/kiwi/lemons", f"{name}: an add with commas didn't give one row each: {res}")
+            t = sf.read_text()
+            need("| pasta |  | " in t.split("## Groceries ticked off\n")[1].split("## ")[0], f"{name}: the tick didn't reach the file")
+            seen.append(name)
+        return ("groceries tick off to their own ticked-off list (not done), A to Z, and a tap puts one back; Last bought kept; "
+                "several at once give one item each; calls, the backup and the server know it (" + ", ".join(seen) + ")")
+
     async def flow113(self) -> str:
         """H194: HQ's own icon on a friend's fresh install. No Claude turns. A status server without HQ_LABEL (a
         laptop, like a fresh install) serves HQ's house (status/icons/hq-*.png, opaque squares) for every page that
@@ -14064,6 +14234,7 @@ FLOWS = {
     120: ("H74: the get-started tutorial behind the question mark: short pieces on the real screen with demo content, the closing part, and a safe demo call (Free, Opus, no tools, nothing saved)", False, "flow120"),
     121: ("H74: a demo call's Claude answers a question about HQ from the tutorial, on Opus, without a tool", True, "flow121"),
     123: ("F39: every sheet and menu closes (its close, a tap beside it, a pull down), Hang up ends the call; phone, small phone, desktop app", False, "flow123"),
+    124: ("F40: groceries tick off in the app to their own ticked-off list (A to Z, a tap puts one back), and several at once give one item each; phone, small phone, desktop app", False, "flow124"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 
