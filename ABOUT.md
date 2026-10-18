@@ -43,6 +43,8 @@ Each agent's headshot is a drawn placeholder until you put a picture in your wor
 
 - **Free:** plain Claude. No connectors, none of your files, no notes, nothing saved, only the web. For testing, and for showing HQ to other people without showing your life.
 
+**New to HQ?** The question mark next to Settings opens the get-started tutorial: short pieces that walk over the real screen with a highlight and a caption, on made-up demo content, and a demo call with Donna or Pepper (both on Opus, no tools, nothing saved) to ask anything about HQ.
+
 After a call, the transcript is saved and the call's notes go into your log, in your own words, then committed (Free calls are never saved).
 
 **Things that need your yes** (a calendar appointment with other people in it, anything in your mail) are checked with you in one sentence first. Your own calendar she just changes: adding, moving, deleting, and what it was is kept in the call's transcript so it can be put back. **Mail is never sent**: drafts at the most.

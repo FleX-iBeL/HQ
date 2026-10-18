@@ -40,6 +40,7 @@ from pipeline import make_brain, make_stt, make_tts, warm_up_tts
 from policy import SESSION_TOOLS, Policy
 import agenda
 import todo
+import tour
 import transcript
 from transcript import CallTranscript, now
 
@@ -59,8 +60,12 @@ class Call:
                  wrap_up: str = config.WRAP_UP, test_mode: bool = False, waiting_lines: bool = True,
                  free: bool = False, load: str | None = None, loops: "open_loops.OpenLoops | None" = None,
                  agent: str | None = None, continues: str | None = None, handover: bool = False,
-                 voices: dict | None = None, about: dict | None = None):
+                 voices: dict | None = None, about: dict | None = None, demo: bool = False, demo_topic: str = ""):
         self._loops = loops
+        # H74: a demo call from the tutorial is a Free call (nothing of his, nothing saved) on Opus, with no tools
+        self.demo = bool(demo)
+        if self.demo:
+            free, model = True, tour.MODEL
         # H101: the appointment in his calendar this call was started from (agenda.about); never on Free
         self.about = None if free or not isinstance(about, dict) else about
         self.model = config.MODEL_ALIASES.get(agents.runs_on(model), model) if model else config.MODEL
@@ -77,6 +82,8 @@ class Call:
         self.others = [] if free else [a for a in agents.visible(config.FOLDER) + agents.soon(config.FOLDER)
                                        if a["id"] != self.agent["id"]]
         persona += agents.switch_rules(self.agent, self.others, config.USER)
+        if self.demo:
+            persona += tour.rules(demo_topic, self.agent["name"], {a["id"]: a["name"] for a in agents.visible(config.FOLDER)})
         self.panel: list[dict] = [self.agent]  # H79: who's on the call; two on a three-way call, three on a four-way (H121)
         self.speaker = self.agent  # H79: who answers now
         self.voices: dict[str, str] = {k: str(v) for k, v in (voices or {}).items()}  # H79: each agent's voice from the page
@@ -96,7 +103,7 @@ class Call:
         if free:
             config.FREE_DIR.mkdir(parents=True, exist_ok=True)
             self.policy = None
-            self.brain = make_brain(self.model, None, cwd=config.FREE_DIR, free=True, persona=persona)
+            self.brain = make_brain(self.model, None, cwd=config.FREE_DIR, free=True, persona=persona, demo=self.demo)
         else:
             # In tests, nothing may change: no file edits, no git, even during the call.
             self.policy = Policy(config.FOLDER, dry_run=test_mode, listener=self._on_decision)
@@ -108,7 +115,8 @@ class Call:
         self.fillers = FillerPlayer(self.tts._kokoro, voice=self.voice, on_play=self.transcript.filler,
                                     waiting_lines=waiting_lines,
                                     # H76: her own greetings, in her character
-                                    greetings=_about(self.about, "greetings") if self.about
+                                    greetings=tour.greetings(self.agent["name"]) if self.demo
+                                    else _about(self.about, "greetings") if self.about
                                     else config.continue_greetings(self.agent)
                                     if self.continued and not self.handover
                                     else config.greetings_now(self.agent, first=self.first_today))

@@ -5294,7 +5294,7 @@ window.fetch = async (url, opt) => {
         chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         page = (APP / "web/index.html").read_text()
-        need("...(appt && !free ? { about: appt.id } : {})" in page, "the call's offer doesn't carry the appointment")
+        need("...(appt && !plain ? { about: appt.id } : {})" in page, "the call's offer doesn't carry the appointment")
         stub = r"""<script>
 var ASKED = [], CALS, T = new Date(); T.setHours(0, 0, 0, 0);
 function at(days, h, m) { const d = new Date(T); d.setDate(d.getDate() + days); d.setHours(h, m || 0); return d.toISOString(); }
@@ -13212,6 +13212,182 @@ const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "
         return ("every feature is a switch on one page, What HQ helps you with: all on to start, each followed by its part "
                 "of HQ and the next call, the weather waits for the texts; all 256 combinations keep the dock tidy on the "
                 f"phone, a small phone and the desktop app, before and on a call; {made} screenshots")
+    # 120
+    async def flow120(self) -> str:
+        """H74, no Claude: the get-started tutorial. tour.json is whole (every piece has steps, every spotlight is a real
+        button of the call page, the closing part says HQ is built to be expanded, with best practices coming soon); the
+        demo content is made up. A demo call is a Free call on Opus for every agent, with no tools at all, nothing saved
+        and no after-call work, its rules made from the same tour, its greeting saying it's a demo; the page sends it only
+        from the tutorial. The server serves tour.json. On the phone, a small phone and the desktop app: the question mark
+        sits at the top left without touching anything, opens the tutorial (the demo note, a demo call button per agent,
+        one line per piece); every step of every piece keeps its card inside the screen and off the spotlight; a tap
+        beside the card presses nothing underneath; a finished piece is ticked; Ask starts a demo call about that piece.
+        Screenshots go to HQ_SHOTS_DIR (else the flow's own folder)."""
+        import brain as _brain  # noqa: F401
+        import agents
+        import tour
+        from call import Call
+        t = tour.load()
+        page = (APP / "web/index.html").read_text()
+        ids = [p["id"] for p in t["pieces"]]
+        need(len(ids) >= 10 and len(set(ids)) == len(ids) and all(p["steps"] and p["title"] and p["line"] for p in t["pieces"]),
+             f"the pieces aren't whole: {ids}")
+        for want in ("call", "todo", "team", "calendar", "texts", "settings", "yours"):
+            need(want in ids, f"no piece about {want}")
+        targets = {s["target"] for p in t["pieces"] for s in p["steps"] if s["target"]}
+        need(all(f'id="{x}"' in page for x in targets), f"a spotlight on a button the page doesn't have: {sorted(x for x in targets if f'id={chr(34)}{x}{chr(34)}' not in page)}")
+        last = t["pieces"][-1]
+        need(last.get("closing") and any(s.get("soon") for s in last["steps"]) and "own headquarters" in json.dumps(last),
+             "the closing part (built to be expanded, best practices coming soon) is missing")
+        need("nothing" in t["demo_note"].lower() and "demo" in t["demo_note"].lower(), "the screen doesn't say it's demo content")
+        # the demo call
+        names = {a["id"]: a["name"] for a in agents.visible(config.FOLDER)}
+        for ag in names:
+            c = Call(model="sonnet", agent=ag, demo=True, demo_topic="todo")
+            o = c.brain._options
+            need(c.demo and c.free and c.policy is None and c.transcript.path is None and c.wrap_up_mode == "off" and c.others == [],
+                 f"{ag}: a demo call has a policy, a transcript, after-call work or others to bring in")
+            need(c.brain.model == config.MODEL_ALIASES["opus"], f"{ag}: a demo call isn't on Opus: {c.brain.model}")
+            need(o.tools == [] and o.allowed_tools == [] and o.setting_sources == [] and o.strict_mcp_config and not o.mcp_servers,
+                 f"{ag}: the demo Claude has tools or connectors: {o.tools}")
+            need(Path(o.cwd).resolve() == config.FREE_DIR.resolve(), f"{ag}: the demo Claude works elsewhere: {o.cwd}")
+            sp = Path(o.system_prompt["path"]).read_text()
+            need("demo call" in sp and "<hq-guide>" in sp and t["pieces"][2]["steps"][0]["text"][:40] in sp
+                 and "Eisenhower" in sp and "search the web" not in sp, f"{ag}: her rules aren't the tour's")
+            need(all("demo" in x.lower() and c.agent["name"] in x for x in tour.greetings(c.agent["name"])), "the greeting doesn't say it's a demo")
+        plain = Call(model="sonnet", free=True)
+        need("demo call" not in Path(plain.brain._options.system_prompt["path"]).read_text() and plain.brain._options.tools == config.FREE_TOOLS,
+             "an ordinary Free call got the demo's rules or lost the web")
+        bot_src = (APP / "bot.py").read_text()
+        need('demo = body.get("demo") is True' in bot_src and "free = free or demo" in bot_src, "the server doesn't make a demo call a Free call")
+        need("demo: true, demo_topic: demo" in page and "free: plain" in page, "the page doesn't send the demo call as Free")
+        await self.ensure_server()
+        code, body, ctype = http_get("/tour.json")
+        need(code == 200 and json.loads(body)["pieces"][0]["id"] == ids[0], f"/tour.json: {code}")
+        # the screen
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms)), $ = id => document.getElementById(id);
+  const until = async (f, ms) => { for (let i = 0; i < ms / 50; i++) { if (f()) return true; await wait(50); } return false; };
+  try { localStorage.clear(); } catch (e) {}
+  $("directbtn").classList.add("on");
+  await until(() => document.querySelectorAll("#modes button").length >= 2, 5000);
+  const inside = r => r.left >= -1 && r.top >= -1 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1;
+  const meets = (a, b) => !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
+  placeHelp(); const h = $("helpbtn").getBoundingClientRect();
+  const near = ["hqu-call-line", "modes", "btn", "setbtn", "wx"].map(id => $(id)).filter(e => e && e.offsetParent !== null && e.getBoundingClientRect().width);
+  $("tourspot").style.transition = "none";  // measured right away, not half-way through its glide
+  out.push("help:" + (getComputedStyle($("helpbtn")).display !== "none" && inside(h) && h.left < innerWidth / 3 && h.top < 60 && !near.some(e => meets(h, e.getBoundingClientRect())) ? "ok" : "off " + JSON.stringify([h.left, h.top, h.width, near.filter(e => meets(h, e.getBoundingClientRect())).map(e => e.id)])));
+  $("helpbtn").click();
+  await until(() => $("tour").classList.contains("open") && document.querySelectorAll("#tourlist button").length, 5000);
+  const pieces = [...document.querySelectorAll("#tourlist button")];
+  out.push("list:" + pieces.length);
+  out.push("demo note:" + (/nothing/i.test($("tournote").textContent) && $("tournote").offsetParent !== null ? "ok" : "off"));
+  out.push("call buttons:" + document.querySelectorAll("#tourcallbtns button").length + "/" + Object.keys(AGENTS).length);
+  const tr = $("tour").getBoundingClientRect();
+  out.push("sheet:" + (tr.width > 0 && tr.right <= innerWidth + 1 && tr.top >= 0 && document.documentElement.scrollWidth <= innerWidth + 1 ? "ok" : "off"));
+  const shot = location.hash.slice(1);
+  if (shot === "list") return done();
+  let steps = 0, bad = [];
+  for (let i = 0; i < pieces.length; i++) {
+    tourStart(i); await wait(10);
+    const n = TOUR.pieces[i].steps.length;
+    for (let s = 0; s < n; s++) {
+      if (shot === "step-" + TOUR.pieces[i].id + "-" + s) return done();
+      steps++;
+      const c = $("tourcard").getBoundingClientRect(), spot = $("tourlayer").classList.contains("nospot") ? null : $("tourspot").getBoundingClientRect();
+      if (!inside(c)) bad.push(TOUR.pieces[i].id + s + " card outside");
+      if (spot && meets(c, spot)) bad.push(TOUR.pieces[i].id + s + " covers the spot " + JSON.stringify([Math.round(c.top), Math.round(c.bottom), Math.round(spot.top), Math.round(spot.bottom)]));
+      if (!$("tourtitle").textContent || $("tourtext").textContent.length < 30) bad.push(TOUR.pieces[i].id + s + " no text");
+      if (/\{(donna|pepper)\}/.test($("tourcard").textContent)) bad.push(TOUR.pieces[i].id + s + " a name placeholder");
+      const want = TOUR.pieces[i].steps[s].target, el = want && $(want);
+      if (el && el.offsetParent !== null && !el.classList.contains("featoff") && !spot) bad.push(TOUR.pieces[i].id + s + " no spot on " + want);
+      if (document.documentElement.scrollWidth > innerWidth + 1) bad.push("sideways");
+      $("tournext").click(); await wait(10);
+    }
+    if (!$("tour").classList.contains("open")) bad.push(TOUR.pieces[i].id + " didn't go back to the list");
+  }
+  out.push("steps:" + steps); out.push("walk:" + (bad.slice(0, 4).join(";") || "ok"));
+  out.push("ticked:" + document.querySelectorAll("#tourlist button.seen").length);
+  // a tap beside the card presses nothing underneath
+  tourStart(0); await wait(10);
+  const sb = $("setbtn").getBoundingClientRect(), under = document.elementFromPoint(sb.left + sb.width / 2, sb.top + sb.height / 2);
+  if (under) under.click();
+  out.push("nothing pressed:" + (!$("settings").classList.contains("open") && !$("tourlayer").hidden ? "ok" : "off"));
+  // Ask: a demo call about this piece, with the agent picked
+  let asked = null; call = () => { asked = { topic: demoNext, agent }; };
+  $("tourask").click();
+  out.push("ask:" + (asked && asked.topic === TOUR.pieces[0].id && $("tourlayer").hidden ? "ok" : JSON.stringify(asked)));
+  demoNext = null; $("helpbtn").click(); await wait(10);
+  const other = [...document.querySelectorAll("#tourcallbtns button")].pop(); other.click();
+  out.push("demo button:" + (asked && asked.topic === "" && asked.agent === other.dataset.agent && !$("tour").classList.contains("open") ? "ok" : JSON.stringify(asked)));
+  demoNext = null;
+  return done();
+  function done() { const pre = document.createElement("pre"); pre.id = "h74"; pre.textContent = "H74RESULT " + out.join(" | ") + " END"; pre.style.display = "none"; document.body.append(pre); }
+})();
+</script>"""
+        shots = Path(os.environ.get("HQ_SHOTS_DIR") or self.tmp / "h74-shots")
+        shots.mkdir(parents=True, exist_ok=True)
+        def browse(size, app_, tag, mode, shot=None):
+            pf = self.tmp / f"h74-{tag}.html"
+            pg = page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1).replace("</body>", harness + "</body>", 1)
+            if app_:
+                pg = pg.replace('new URLSearchParams(location.search).has("app")', "true", 1)
+            pf.write_text(pg)
+            args = [chrome, "--headless", "--disable-gpu", "--no-first-run", "--hide-scrollbars", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                    f"--user-data-dir={self.tmp / 'h74-profile'}", "--disable-web-security", f"--window-size={size}",
+                    "--virtual-time-budget=30000"]
+            args += [f"--screenshot={shot}"] if shot else ["--dump-dom"]
+            return run(args + [pf.as_uri() + "#" + mode], timeout=120)
+        nsteps = sum(len(p["steps"]) for p in t["pieces"])
+        want = {"help": "ok", "list": str(len(ids)), "demo note": "ok", "call buttons": f"{len(names)}/{len(names)}", "sheet": "ok",
+                "steps": str(nsteps), "walk": "ok", "ticked": str(len(ids)), "nothing pressed": "ok", "ask": "ok", "demo button": "ok"}
+        for name, size, app_ in (("the phone", "390,844", False), ("a small phone", "375,553", False), ("the desktop app", "1180,780", True)):
+            tag = name.split()[-1] if not name.startswith("a small") else "small"
+            r = await asyncio.to_thread(browse, size, app_, tag, "check")
+            mm = re.search(r'<pre id="h74"[^>]*>H74RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{name}: the test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+            say(f"   {name}: {mm.group(1)}")
+            need(res == want, f"{name}: not right: {mm.group(1)}")
+        states = ["list", "step-call-0", "step-todo-1", "step-texts-0", "step-team-1", "step-mail-0", "step-yours-2"]
+        made = 0
+        for dev, size, app_ in (("phone", "390,844", False), ("mac", "1180,780", True)):
+            for st in states:
+                out = shots / f"tour-{dev}-{st}.png"
+                out.unlink(missing_ok=True)
+                await asyncio.to_thread(browse, size, app_, f"shot-{dev}", st, out)
+                made += out.exists()
+        need(made == 2 * len(states), f"only {made} of {2 * len(states)} screenshots made")
+        say(f"   {made} screenshots in {shots}")
+        return (f"the tutorial: {len(ids)} pieces, {nsteps} steps on the real screen, the closing part; the question mark "
+                f"finds it again; every step fits on the phone, a small phone and the desktop app; a demo call is Free, Opus, "
+                f"no tools, nothing saved, for {len(names)} agents; {made} screenshots")
+
+    # 121
+    async def flow121(self) -> str:
+        """H74 with Claude: a demo call's Claude answers a question about HQ from the tutorial, on Opus, without a tool."""
+        import brain as _brain  # noqa: F401
+        from call import Call
+        c = Call(model="sonnet", agent="pepper", demo=True, demo_topic="todo")
+        reply = ""
+        try:
+            await c.brain.start()
+            async for piece in c.brain.ask("How does the to-do list work in HQ? Two sentences."):
+                if isinstance(piece, str):
+                    reply += piece
+            used = list(c.brain.last_turn.tools if c.brain.last_turn else [])
+        finally:
+            await c.brain.stop()
+        self.turns += 1
+        say(f"   reply: {reply.strip()[:160]}")
+        need(not used, f"the demo Claude used a tool: {used}")
+        need(re.search(r"urgent|important|square|matrix", reply, re.I), f"she didn't explain it from the tutorial: {reply[:200]!r}")
+        return f"a demo call answers about HQ from the tutorial on {c.brain.model}, no tools: {reply.strip()[:80]}"
 
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
@@ -13686,6 +13862,8 @@ FLOWS = {
     116: ("H198: on the Mac, other sound at normal volume during a call (a switch), and Bluetooth headphones stay in high quality (the MacBook's own mic, the sound bounced in the app)", False, "flow116"),
     118: ("Job 257 (H202): the map is the Life coaching switch in Settings; each person names their own vision, and the next call follows the switch", False, "flow118"),
     119: ("H205: What HQ helps you with, every feature a switch: all on to start, each followed through HQ, every combination keeps the screen tidy, screenshots of each state", False, "flow119"),
+    120: ("H74: the get-started tutorial behind the question mark: short pieces on the real screen with demo content, the closing part, and a safe demo call (Free, Opus, no tools, nothing saved)", False, "flow120"),
+    121: ("H74: a demo call's Claude answers a question about HQ from the tutorial, on Opus, without a tool", True, "flow121"),
 }
 
 

@@ -1,0 +1,111 @@
+{
+  "_about": "H74: the get-started tutorial. The call page shows these pieces on its real screens (the question mark at the top left); the demo call (app/tour.py) reads the same text, so both say the same. Demo content only: nothing here is anyone's real life. {donna} and {pepper} become the names of this HQ's agents.",
+  "intro": "HQ is your own headquarters. You call your team, and they don't just answer: they write things down, plan your days and do the work. Pick a short piece below to see where everything is, or try a demo call and ask anything.",
+  "demo_note": "Demo: everything in this tutorial is made-up example content. Nothing you tap here changes your HQ, and nothing is saved.",
+  "pieces": [
+    {
+      "id": "call", "title": "Call your team", "line": "Who you call, and how a call works",
+      "steps": [
+        {"target": "modes", "title": "Pick who you call", "text": "{donna} is quick: your day, your list, your mail, quick orders. {pepper} takes her time: planning, sparring, thinking something through. Each has her own voice and character."},
+        {"target": "btn", "title": "Tap to call", "text": "One tap and she picks up. Talk the way you would on the phone. You can cut in at any moment and she stops talking."},
+        {"target": "mute", "title": "Mute, or hold to talk", "text": "On a call this button mutes you with a tap. Hold it down to talk as long as you like, even with long pauses; let go and she answers."},
+        {"target": "status", "title": "What she's doing", "text": "This line says it: listening, thinking, talking. While she thinks you hear a soft tick, never silence.",
+         "demo": {"kind": "chat", "items": [["you", "What's on my plate today?"], ["agent", "Three things. The dentist at ten, a call with Alex at two, and the report you wanted done before Friday."]]}}
+      ]
+    },
+    {
+      "id": "chat", "title": "The chat, and typing instead", "line": "Read back what was said, or type when you can't talk",
+      "steps": [
+        {"target": "chatbtn", "title": "What was said", "text": "The chat shows the whole call as text, as it happens. Lists and bold words show there; she never reads the marks out loud."},
+        {"target": "chatbtn", "title": "Type instead of talking", "text": "On a train or in a library? Type in the chat's box and she answers out loud and in the chat. After a call, Call back and continue picks up right where you were.",
+         "demo": {"kind": "chat", "items": [["you", "Remind me to buy coffee tomorrow"], ["agent", "Done. I'll text you tomorrow morning at nine."]]}},
+        {"target": "voicebtn", "title": "Mute her voice", "text": "Turns her voice off and on, for when you'd rather read. She keeps answering in the chat."}
+      ]
+    },
+    {
+      "id": "todo", "title": "Your to-do list, the Eisenhower way", "line": "Everything to do, sorted by what really matters",
+      "steps": [
+        {"target": "todobtn", "title": "One list for everything", "text": "Everything you have to do lives here, in four squares: important or not, urgent or not. Important but not urgent comes first, because that's where the things that really move your life forward are."},
+        {"target": "todobtn", "title": "You just talk", "text": "Keeping a list like this is usually a lot of admin. In HQ you just say it on a call or in a text: it lands in the right square, in your own words. Done or let go, and it moves, with a line so you can look back.",
+         "demo": {"kind": "matrix", "items": [["Important, not urgent", "Learn to cook three new dishes · Plan the summer trip"], ["Important and urgent", "Pay the tax bill by Friday"], ["Urgent, not important", "Book the boiler check"], ["Not urgent, not important", "Sort the old photos"]]}},
+        {"target": "todobtn", "title": "Tap to work with it", "text": "Tap a square for its list, an item for everything about it. Tick it off, move it, let it go, add one by hand, or start a call about it. Undo puts the last change back."}
+      ]
+    },
+    {
+      "id": "texts", "title": "Texts with {donna}", "line": "Reminders, check-ins, and texting her yourself",
+      "steps": [
+        {"target": "directbtn", "title": "Her own text line", "text": "{donna} texts you reminders at the time you asked, check-ins, and a heads-up when something needs you. You can text her back here like any chat app, and she does what you ask.",
+         "demo": {"kind": "chat", "items": [["agent", "Morning. Dentist at ten, leave by half nine."], ["you", "Thanks! Move my gym to tonight?"], ["agent", "Moved to seven tonight."]]}}
+      ]
+    },
+    {
+      "id": "calendar", "title": "Your calendar", "line": "Your days at a glance, planned on a call",
+      "steps": [
+        {"target": "calbtn", "title": "Your days", "text": "Your Google Calendar inside HQ: today and the days ahead. Ask on a call to plan your week, move something or block time, and she does it.",
+         "demo": {"kind": "list", "items": [["09:00", "A walk outside"], ["10:00", "Dentist"], ["14:00", "Call with Alex"], ["19:00", "Gym"]]}},
+        {"target": "calbtn", "title": "Notes and calls on an appointment", "text": "Tap an appointment for its details, a quick note of your own, or a call about it. Your own calendar she just changes; anything with other people in it, she checks with you first."}
+      ]
+    },
+    {
+      "id": "notes", "title": "Quick notes", "line": "Jot something down for later",
+      "steps": [
+        {"target": "notesbtn", "title": "A quick note", "text": "A thought you don't want to lose? Write it here. The next call reads your notes, so you can say: let's go through my notes.",
+         "demo": {"kind": "list", "items": [["Note", "Ask about the new running shoes"], ["Note", "Idea: a picnic in the park"]]}}
+      ]
+    },
+    {
+      "id": "history", "title": "Past calls", "line": "Every call, kept, to read back or continue",
+      "steps": [
+        {"target": "histbtn", "title": "Every call kept", "text": "Every call is saved as text. Open one to read it back, or tap Continue this call, and she picks up where you left off, knowing what was said."}
+      ]
+    },
+    {
+      "id": "team", "title": "The team works while you're away", "line": "Agree work on a call, hang up, it gets done",
+      "steps": [
+        {"target": "statbtn", "title": "Give it to the team", "text": "On a call you can agree a bigger piece of work: build something, sort something out, research something. Say: give it to the team. You hang up, and the computer does it by itself, one piece at a time."},
+        {"target": "statbtn", "title": "Watch how far it is", "text": "The Status page shows what's being done right now and its step, what's waiting, what's planned for later, and your Claude usage. The team stops at the usage lines you set and carries on when there's room.",
+         "demo": {"kind": "list", "items": [["Now", "Research three summer trips, step 2 of 3"], ["Next", "Clean up the shopping list"], ["Tonight 22:00", "The nightly check"], ["Usage", "5-hour 20%, weekly 47%"]]}},
+        {"target": "statbtn", "title": "The roadmap", "text": "Every bigger idea goes on the roadmap first, with your own words, so nothing gets lost. Then it goes to the team when you're ready, or it gets planned for a time, like tonight at ten."}
+      ]
+    },
+    {
+      "id": "mail", "title": "The mail check", "line": "HQ reads your new mail every hour",
+      "steps": [
+        {"target": "", "title": "Every hour, quietly", "text": "Every hour HQ reads your new mail and keeps only what might need you. Very important things, like a bill with a date or someone waiting for your answer, you hear at the start of every call until you say it's sorted. HQ never sends mail: drafts at the most, you send them yourself.",
+         "demo": {"kind": "list", "items": [["Very important", "Tax office: pay before 30 November"], ["To check", "Your parcel is on its way"]]}}
+      ]
+    },
+    {
+      "id": "weather", "title": "Weather and rain alerts", "line": "The weather at a glance, a text before the rain",
+      "steps": [
+        {"target": "wx", "title": "The weather", "text": "The weather where you are, at a glance. Tap it for the hours ahead, and turn on the rain alert: {donna} texts you before a shower comes and follows it as it moves."}
+      ]
+    },
+    {
+      "id": "settings", "title": "Settings, and what HQ helps you with", "line": "Voices, Free, and switching features on or off",
+      "steps": [
+        {"target": "setbtn", "title": "Voices and sound", "text": "Pick each agent's voice, your microphone and where her voice plays, and the soft thinking sound."},
+        {"target": "setbtn", "title": "What HQ helps you with", "text": "Every feature is a switch: the calendar, the to-do list, texts, the weather, the mail check, notes, the team's work, and Life coaching. Turn off what you don't use: its button goes away and the rest moves up."},
+        {"target": "setbtn", "title": "Life coaching", "text": "With Life coaching on, a few calm sessions with {pepper} build your long-term vision, from three to five years out down to your ideal week, and HQ supports you with it every day. You give your vision its own name."},
+        {"target": "setbtn", "title": "Free", "text": "Free is plain Claude with only the web: none of your files, nothing saved. Handy to show HQ to someone without showing your life."}
+      ]
+    },
+    {
+      "id": "yours", "title": "Make it yours", "line": "HQ is built to be expanded", "closing": true,
+      "steps": [
+        {"target": "", "title": "Your own headquarters", "text": "This is the reason HQ was built in the first place: so everyone can have their own headquarters, with their work supported by their own team. What's in it now are the things its creator thought most people would want. His own HQ has many more, and people testing it have already built their own extensions."},
+        {"target": "", "title": "Customize, tailor, expand", "text": "It's not limited to what you see here. Ask on a call for something new, give it to the team, and they build it into your HQ. Your own builds stay yours: updates never touch them."},
+        {"target": "", "title": "Coming soon: shared best practices", "text": "Ways of working that keep a build stable, like the checks that run every night and fix what broke, written so your own HQ understands them. Turn them on, and your HQ looks out for them and suggests them itself, so you don't have to be a programmer to avoid the classic mistakes.", "soon": true}
+      ]
+    }
+  ],
+  "facts": [
+    "HQ runs on your own computer, on your own Claude plan, through Claude Code. Your voice is turned into text on your computer, and her voice is made there too; only the thinking goes to Anthropic, the same as any Claude chat.",
+    "Your phone reaches your computer privately (through Tailscale), with nothing open to the internet. Add the call page to your phone's home screen and it works like an app. There is also a Mac app.",
+    "Your own files live in your workspace, a folder of plain text files on your computer. They are never uploaded with HQ, and updates never touch them.",
+    "HQ is still in development, built and used daily by one person first, now shared with friends. A small grey version number opens what's new; an Update button appears when a new version is out.",
+    "The routine is a small helper that runs every minute without Claude, so it costs nothing while waiting. A watchdog brings things back when they stop.",
+    "Things that need your yes, like an appointment with other people in it or anything with your mail, are checked with you first. Mail is never sent.",
+    "After a real call, its transcript is saved and the call's notes go into your log, in your own words. Free calls and demo calls are never saved."
+  ]
+}

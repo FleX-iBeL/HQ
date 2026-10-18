@@ -144,8 +144,9 @@ async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connect
                    model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
                    free: bool = False, load: str | None = None, agent: str | None = None,
                    continues: str | None = None, handover: bool = False, voices: dict | None = None,
-                   about: dict | None = None) -> None:
+                   about: dict | None = None, demo: bool = False, demo_topic: str = "") -> None:
     global _free_calls, _calls_on
+    free = free or demo  # H74: a demo call is a Free call
     _filter_the_log()
     if free:
         _free_calls += 1
@@ -153,7 +154,7 @@ async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connect
     try:
         await _run_call(transport, handle_sigint, connection, model=model, voice=voice,
                         waiting_lines=waiting_lines, free=free, load=load, agent=agent, continues=continues,
-                        handover=handover, voices=voices, about=about)
+                        handover=handover, voices=voices, about=about, demo=demo, demo_topic=demo_topic)
     finally:
         _calls_on -= 1
         if free:
@@ -164,11 +165,11 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
                     model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
                     free: bool = False, load: str | None = None, agent: str | None = None,
                     continues: str | None = None, handover: bool = False, voices: dict | None = None,
-                    about: dict | None = None) -> None:
+                    about: dict | None = None, demo: bool = False, demo_topic: str = "") -> None:
     call = Call(model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent,
-                continues=continues, handover=handover, voices=voices, about=about)
+                continues=continues, handover=handover, voices=voices, about=about, demo=demo, demo_topic=demo_topic)
     logger.info(f"Call started on {call.model} with {call.agent['name']}, voice {call.voice}, {'free' if free else call.load + ' load'}; "
-                + ("free mode, nothing kept" if free else f"transcript: {call.transcript.path.name}")
+                + ("demo call from the tutorial, nothing kept" if demo else "free mode, nothing kept" if free else f"transcript: {call.transcript.path.name}")
                 + (f"; continues {call.continued['name']}" if call.continued else "")
                 + (f"; about {'a to-do item' if call.about.get('kind') == 'todo' else 'an appointment'} ({call.about['title']})" if call.about else ""))
 
@@ -308,6 +309,10 @@ async def bot(runner_args: RunnerArguments):
     body = runner_args.body if isinstance(runner_args.body, dict) else {}
     mode = str(body.get("mode", "quick"))
     free = body.get("free") is True or mode == "free" or config.FREE_ONLY
+    # H74: a demo call from the get-started tutorial: Free (nothing of his, nothing saved), Opus, no tools (tour.py)
+    demo = body.get("demo") is True
+    demo_topic = str(body.get("demo_topic") or "")[:40] if demo else ""
+    free = free or demo
     # H29: the page sends the agent (Pepper, Donna, ...); her model and load win over the mode.
     # A page from before H29 sends only the mode: the agent with that load.
     agent = agents.find(config.FOLDER, str(body.get("agent", "")) or None, mode if mode in ("quick", "deep") else None)
@@ -333,7 +338,8 @@ async def bot(runner_args: RunnerArguments):
         about = _todo_call.about(str(body.get("about_todo") or ""))
     await run_call(transport, runner_args.handle_sigint, runner_args.webrtc_connection,
                    model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent["id"],
-                   continues=None if free else continues, handover=handover and not free, voices=voices, about=about)
+                   continues=None if free else continues, handover=handover and not free, voices=voices, about=about,
+                   demo=demo, demo_topic=demo_topic)
 
 
 if __name__ == "__main__":
@@ -392,6 +398,11 @@ if __name__ == "__main__":
         html = (WEB / "index.html").read_text().replace(
             '<link rel="apple-touch-icon" href="apple-touch-icon.png">', NIGHT_LINKS)
         return Response(html, media_type="text/html; charset=utf-8", headers=_NO_CACHE)
+
+    # H74: the get-started tutorial's pieces (the question mark on the page; tour.py makes the demo call from the same)
+    @app.get("/tour.json", include_in_schema=False)
+    async def tour_json():
+        return FileResponse(WEB / "tour.json", media_type="application/json", headers=_NO_CACHE)
 
     @app.get("/favicon.ico", include_in_schema=False)
     async def favicon():
