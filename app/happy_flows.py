@@ -13369,6 +13369,98 @@ const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "
                 f"no tools, nothing saved, for {len(names)} agents; {made} screenshots")
 
     # 121
+    async def flow122(self) -> str:
+        """H204: the estimate counts the material a job has to read. No Claude turns: a made-up workspace with made-up
+        material, a copy of the roadmap; what a job names is counted (by path, by name, by the core of a long name, the
+        closer name inside a folder winning, common words never), kept with its size when it's added, made again by the
+        first look when its words change, told to the look, weighed in by the size's fit, and counted in retrospect for
+        finished jobs kept before H204."""
+        import subprocess as sp
+        jv = ROOT
+        ws = self.tmp / "ws-H204"
+        def put(rel, size):
+            f = ws / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(b"x" * size)
+        put("Course Alpha/Week 3/transcript.md", 120_000)
+        put("Course Alpha/Week 3/talk.mp4", 5_000)
+        put("Course Alpha/Week 4/notes.md", 30_000)
+        put("Course Alpha/Bonus/2. The Long Workshop Name - Jan 2026/slides.pdf", 9_000)
+        put("Course Alpha/.keep", 0)
+        put("coaching/log.md", 50_000)
+        (ws / "HQ").mkdir(parents=True, exist_ok=True)
+        (ws / "HQ" / "secret.md").write_text("never counted")
+        rm = self.tmp / "roadmap-H204.md"
+        rm.write_text(ROADMAP.read_text())
+        est_dir = self.tmp / "roadmap-H204-estimates"
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_WORKSPACE": str(ws)}
+        for k in ("HQ_ESTIMATES", "HQ_ROUTINES_HISTORY", "HQ_LOOK_FAKE"):
+            env.pop(k, None)
+        r = sp.run(["python3", "-c", """
+import sys, json, math; sys.path.insert(0, sys.argv[1]); import estimate as E
+m = E.material
+o = {"all": m("read all of course alpha"), "week": m("go through course alpha week 3"),
+     "path": m("read course alpha/week 3/transcript.md first"), "core": m("the long workshop name, its slides"),
+     "common": m("the coaching notes and the bonus"), "none": m("fix the calendar's colours"),
+     "hq": m("read hq and secret.md")}
+o["words"] = E.material_words(o["all"])
+o["size"] = E.look("H9 on the HQ roadmap: read all of course alpha, flow 122")
+o["size_words"] = E.size_words(o["size"])
+o["feat"] = [len(E._features({})), E._features({"parts": 1})[6:]]
+o["old"] = E._size_of({"about": "read all of course alpha", "size": {"parts": 1, "flows": 0, "words": 5}})
+o["input"] = E._look_input("Build H9: read all of course alpha, flow 122")
+o["input_none"] = E._look_input("Build H9: fix the calendar's colours, flow 122")
+big = {"parts": 1, "flows": 0, "restart": False, "research": False, "fix": False, "words": 30, "material": o["all"]}
+small = {**big, "material": o["none"]}
+fit = E._size_fit([(big, math.log(2)), (small, math.log(0.7))] * 12)
+o["mult"] = [E._size_mult(fit, big), E._size_mult(fit, small)]
+print(json.dumps(o))
+""", str(jv / "routine")], capture_output=True, text=True, env=env)
+        need(r.returncode == 0, f"H204: the material check didn't run: {r.stderr[-800:]}")
+        o = json.loads(r.stdout)
+        a = o["all"]
+        need(a["files"] == 4 and a["kb"] == 150 and a["transcripts"] == 1 and a["videos"] == 1 and a["docs"] == 1
+             and a["names"] == ["course alpha"], f"H204: a named folder isn't counted whole (the .keep left out): {a}")
+        need(o["week"]["files"] == 2 and o["week"]["names"] == ["course alpha/week 3"],
+             f"H204: the closer name inside a folder doesn't win: {o['week']}")
+        need(o["path"]["files"] == 1 and o["path"]["kb"] == 120 and o["path"]["transcripts"] == 1, f"H204: a path isn't counted: {o['path']}")
+        need(o["core"]["docs"] == 1 and o["core"]["files"] == 1, f"H204: a long name's core isn't found: {o['core']}")
+        need(o["common"]["files"] == 0 and o["none"]["files"] == 0 and o["hq"]["files"] == 0,
+             f"H204: common words, nothing named or HQ's own data folder are counted: {o['common']} {o['none']} {o['hq']}")
+        need(o["words"] == "reads 4 files, 150 KB of text, 1 transcript, 1 video, 1 PDF or document", f"H204: its words: {o['words']}")
+        need(o["size"].get("material", {}).get("files") == 4 and "reads 4 files" in o["size_words"], f"H204: the size has no material: {o['size']}")
+        need(o["feat"] == [10, [0.0, 0.0, 0.0, 0.0]], f"H204: a size without material doesn't count as none: {o['feat']}")
+        need(o["old"]["material"]["files"] == 4 and o["old"]["parts"] == 1, f"H204: a finished job kept before H204 isn't counted in retrospect: {o['old']}")
+        need("The material the job and its row name to read, counted: reads 4 files" in o["input"] and "The material" not in o["input_none"],
+             "H204: the look isn't told the material")
+        need(o["mult"][0] > 1.3 and o["mult"][1] < 0.9, f"H204: the size's fit doesn't weigh the material in: {o['mult']}")
+        # Kept with the job when it's added, and made again by the first look when the words change.
+        envL = {**env, "HQ_LOOK_FAKE": "12"}
+        def jobsL(*a):
+            p = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=envL)
+            need(p.returncode == 0, f"jobs.py {' '.join(a)}: {p.stdout.strip()} {p.stderr.strip()}")
+            return p.stdout + p.stderr
+        def state(n):
+            try:
+                return json.loads((est_dir / "job-estimates.json").read_text()).get(str(n)) or {}
+            except (OSError, ValueError):
+                return {}
+        def settled(n, files):
+            for _ in range(80):
+                e = state(n)
+                if (e.get("size") or {}).get("material", {}).get("files") == files and e.get("guess_look") and not e.get("look_pending"):
+                    return e
+                time.sleep(0.25)
+            need(False, f"H204: job {n}'s size doesn't settle on {files} files: {state(n)}")
+        n = int(jobsL("add", "Build H9, flow 122: fix the calendar's colours").split()[1])
+        settled(n, 0)
+        rm.write_text(rm.read_text().replace("Build H9, flow 122: fix the calendar's colours",
+                                             "Build H9, flow 122: read all of course alpha"))
+        p = sp.run(["python3", str(jv / "routine/estimate.py"), "relook"], capture_output=True, text=True, env=envL)
+        need(p.returncode == 0 and f"job {n}" in p.stdout, f"H204: changed words don't start a new look: {p.stdout} {p.stderr}")
+        e = settled(n, 4)
+        return f"a folder, a closer name, a path and a long name's core counted; common words and HQ's data never; the look told; kept and recounted on new words ({e['size']['material']['kb']} KB)"
+
     async def flow121(self) -> str:
         """H74 with Claude: a demo call's Claude answers a question about HQ from the tutorial, on Opus, without a tool."""
         import brain as _brain  # noqa: F401
@@ -13864,6 +13956,7 @@ FLOWS = {
     119: ("H205: What HQ helps you with, every feature a switch: all on to start, each followed through HQ, every combination keeps the screen tidy, screenshots of each state", False, "flow119"),
     120: ("H74: the get-started tutorial behind the question mark: short pieces on the real screen with demo content, the closing part, and a safe demo call (Free, Opus, no tools, nothing saved)", False, "flow120"),
     121: ("H74: a demo call's Claude answers a question about HQ from the tutorial, on Opus, without a tool", True, "flow121"),
+    122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 
 

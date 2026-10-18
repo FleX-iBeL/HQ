@@ -89,6 +89,13 @@ How it works:
     own record (guess_fit with its key); an estimate, waiting or running, takes in the team's, else the call's, else
     the look's, the first whose record is ready (pick_guess). relook, every minute on the main, looks again when the
     words (fingerprint: the job's own words and its row's) change, never on a move or another time.
+  - H204 (17 October 2026, call at 14:45): "counting the material i also want on there, will it do it when it gets on
+    the planners/queues or when will it trigger?" The size (H167), made when work is given to the team or planned and
+    again by the first look when its words change, also counts the material the job and its row name to read
+    (material: the workspace's folders and files, and HQ's workflows, named by path, by name or by a long name's core;
+    how many files, how much text, transcripts, videos and audio, PDFs; only counted, nothing read). The look is told
+    the counts; the size's fit weighs them in, learning from every finished job, those kept before H204 counted in
+    retrospect from their kept words (_size_of, BACKS). [The names it skips and the features are Claude's choice.]
 
 Files, in HQ's .status (never in the repo): job-estimates.json (each job's estimate, set when added,
 and when it started) and job-estimates-history.jsonl (one line per finished job: estimate and real).
@@ -416,12 +423,159 @@ def _look_now(about):
     return {"parts": sum(1 for rx in PARTS.values() if re.search(rx, both)),
             "flows": len(flows) + bool(re.search(r"\badd (a|one|the) (new )?happy flow|new happy flow|happy flows? for it", t)),
             "restart": bool(re.search(r"restart\w* (the )?call line", asks)), "research": research,
-            "fix": bool(re.search(r"\bfix\b|\bbug\b", t)) and not research, "words": len(t.split())}
+            "fix": bool(re.search(r"\bfix\b|\bbug\b", t)) and not research, "words": len(t.split()),
+            "material": material(both)}  # H204
+
+
+# ---------- the material a job has to read (H204) ----------
+
+MAT_TEXT = {".md", ".txt", ".vtt", ".srt", ".csv", ".json", ".html", ".htm", ".tsv"}
+MAT_VIDEO = {".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi"}
+MAT_AUDIO = {".m4a", ".mp3", ".wav", ".aac", ".ogg", ".flac", ".opus"}
+MAT_DOC = {".pdf", ".epub", ".docx", ".doc", ".pptx", ".xlsx"}
+MAT_SKIP = {".keep", ".ds_store"}
+MAT_DEPTH = 4       # H204: folders and files this deep in the workspace can be named
+MAT_FILES = 20000   # H204: at most this many files counted for one job
+MAT_TTL = 300       # H204: seconds the list of names is kept before it's made again
+# Names too common to mean a folder when a job says them (they're still found by their path, a/b). [Claude's choice]
+MAT_COMMON = {"coaching", "bonus", "bonuses", "reviews", "calls", "agents", "index", "example ads", "notes", "week",
+              "assets", "images", "archive", "old", "new", "test", "tests", "data", "docs", "files", "media", "map"}
+_MAT = {}
+
+
+def _mat_core(name):
+    """A long folder or file name's core, the way a job says it: "2. Some Workshop - Jan 2026" -> "some workshop"."""
+    stem = re.sub(r"\.[a-z0-9]{1,5}$", "", name)
+    c = re.sub(r"^\s*(x\s+)?\d+[.)]?\s+", "", stem)
+    c = re.sub(r"^the\s+", "", c.split(" - ")[0]).strip(" .-_")
+    return c if len(c) >= 8 and c != stem else None
+
+
+def _mat_index():
+    """H204: [(rel path, name, core, is dir)], lowercased, for the workspace (not HQ's own data folder, nor hidden ones)
+    and HQ's workflows; made again every MAT_TTL seconds."""
+    if _MAT.get("at", 0) > time.time() - MAT_TTL:
+        return _MAT["index"]
+    out = []
+    roots = [(hqpaths.FOLDER, ""), (os.path.join(ROOT, "workflows"), "workflows/")]
+    data = os.path.realpath(hqpaths.DATA)
+    for base, pre in roots:
+        if not os.path.isdir(base):
+            continue
+        for d, dirs, files in os.walk(base):
+            rel = os.path.relpath(d, base)
+            depth = 0 if rel == "." else rel.count(os.sep) + 1
+            dirs[:] = [x for x in dirs if not x.startswith(".") and os.path.realpath(os.path.join(d, x)) != data
+                       and os.path.realpath(os.path.join(d, x)) != os.path.realpath(ROOT)]
+            if depth >= MAT_DEPTH:
+                dirs[:] = []
+            for x, isdir in [(x, True) for x in dirs] + [(x, False) for x in files if not x.startswith(".")]:
+                r = (pre + ("" if rel == "." else rel.replace(os.sep, "/") + "/") + x).lower()
+                out.append((r, x.lower(), _mat_core(x.lower()), isdir, os.path.join(d, x)))
+    _MAT.clear()
+    _MAT.update(at=time.time(), index=out, counts={})
+    return out
+
+
+def _said(name, t):
+    # Not a piece of a longer path: "a/b/c.md" names c.md, not the folder a/b.
+    return re.search(r"(?<![\w/])" + re.escape(name) + r"(?![\w/])", t) is not None
+
+
+def _mat_count(path):
+    """{"files", "kb" (text), "transcripts", "videos", "audio", "docs", "mb" (everything)} of one file or folder."""
+    c = _MAT.setdefault("counts", {})
+    if path in c:
+        return c[path]
+    n = {"files": 0, "kb": 0.0, "transcripts": 0, "videos": 0, "audio": 0, "docs": 0, "mb": 0.0}
+    walk = [(os.path.dirname(path), [], [os.path.basename(path)])] if os.path.isfile(path) else os.walk(path)
+    for d, dirs, files in walk:
+        dirs[:] = [x for x in dirs if not x.startswith(".")]
+        for f in files:
+            ext = os.path.splitext(f)[1].lower()
+            if f.startswith(".") or ext in MAT_SKIP or f.lower() in MAT_SKIP:
+                continue
+            try:
+                size = os.path.getsize(os.path.join(d, f))
+            except OSError:
+                continue
+            n["files"] += 1
+            n["mb"] += size / 1e6
+            if ext in MAT_TEXT:
+                n["kb"] += size / 1000
+                if ext in (".vtt", ".srt") or "transcri" in (d + "/" + f).lower():
+                    n["transcripts"] += 1
+            elif ext in MAT_VIDEO:
+                n["videos"] += 1
+            elif ext in MAT_AUDIO:
+                n["audio"] += 1
+            elif ext in MAT_DOC:
+                n["docs"] += 1
+            if n["files"] >= MAT_FILES:
+                break
+        if n["files"] >= MAT_FILES:
+            break
+    c[path] = n
+    return n
+
+
+def material(text):
+    """H204: the material a job names to read, from its words (and its roadmap row's): the folders and files of the
+    workspace (and HQ's workflows) it names by path, by name or by the core of a long name, counted: {"files", "kb" of
+    text, "transcripts", "videos", "audio", "docs" (pdf and the like), "mb", "names": what it named}. Nothing named:
+    all zeros. Only counts and names: nothing is read."""
+    t = " " + " ".join((text or "").lower().split()) + " "
+    found = []
+    try:
+        index = _mat_index()
+    except Exception:
+        index = []
+    for rel, name, core, isdir, path in index:
+        hit = ("/" in rel and _said(rel, t)) or (not isdir and "." in name and len(name) >= 6 and _said(name, t))
+        if not hit and name not in MAT_COMMON:
+            if isdir and (len(name) >= 4 or (len(name) >= 3 and name.isalnum() and not name.isdigit())) and _said(name, t):
+                hit = True
+            elif core and core not in MAT_COMMON and _said(core, t):
+                hit = True
+        if hit:
+            found.append((rel, path))
+    # A folder said only by its name, with something in it named more closely ("that one talk in that folder"),
+    # counts only what's named in it; then a folder named counts everything in it once, nothing inside it again.
+    found = [(rel, path) for rel, path in found
+             if not (os.path.isdir(path) and not ("/" in rel and _said(rel, t)) and any(r.startswith(rel + "/") for r, _ in found))]
+    found.sort(key=lambda x: len(x[0]))
+    keep = []
+    for rel, path in found:
+        if not any(rel.startswith(k + "/") or rel == k for k, _ in keep):
+            keep.append((rel, path))
+    out = {"files": 0, "kb": 0.0, "transcripts": 0, "videos": 0, "audio": 0, "docs": 0, "mb": 0.0}
+    for _, path in keep:
+        for k, v in _mat_count(path).items():
+            out[k] += v
+    out["kb"], out["mb"] = round(out["kb"]), round(out["mb"], 1)
+    out["names"] = [k for k, _ in keep][:12]
+    return out
+
+
+def material_words(m):
+    if not m or not m.get("files"):
+        return "no material named to read"
+    bits = [f"{m['files']} file{'s' if m['files'] != 1 else ''}"]
+    if m.get("kb"):
+        bits.append(f"{m['kb']} KB of text")
+    for k, one in (("transcripts", "transcript"), ("videos", "video"), ("audio", "audio file"), ("docs", "PDF or document")):
+        if m.get(k):
+            bits.append(f"{m[k]} {one}{'s' if m[k] != 1 else ''}")
+    return "reads " + ", ".join(bits)
 
 
 def _features(size):
+    m = size.get("material") or {}
     return [math.log(1 + size.get("parts", 0)), math.log(1 + size.get("flows", 0)), float(bool(size.get("restart"))),
-            float(bool(size.get("research"))), float(bool(size.get("fix"))), math.log(1 + size.get("words", 0))]
+            float(bool(size.get("research"))), float(bool(size.get("fix"))), math.log(1 + size.get("words", 0)),
+            # H204: the material it has to read: how many files, how much text, how much to watch, listen to or leaf through
+            math.log(1 + m.get("files", 0)), math.log(1 + m.get("kb", 0)),
+            math.log(1 + m.get("videos", 0) + m.get("audio", 0) + m.get("transcripts", 0)), math.log(1 + m.get("docs", 0))]
 
 
 def _ridge(X, y, lam):
@@ -461,7 +615,13 @@ def _size_mult(fit, size):
 
 
 def _size_of(h):
-    return h["size"] if isinstance(h.get("size"), dict) else look(h.get("about") or "")
+    """A finished job's size: the one kept with it; one kept before H204 gets the material counted now, from its
+    kept words (in retrospect, so the estimate learns from every job)."""
+    if not isinstance(h.get("size"), dict):
+        return look(h.get("about") or "")
+    if "material" not in h["size"]:
+        return {**h["size"], "material": look(h.get("about") or "").get("material")}
+    return h["size"]
 
 
 _FIT = {}
@@ -484,6 +644,9 @@ def _size_pairs(hist):
             continue
         key = f"{h['machine']}|{h.get('n')}|{h.get('done')}"
         b = backs.get(key)
+        if b and "size" in b and "material" not in b["size"]:
+            b["size"] = _size_of(h)  # H204: the material counted in, in retrospect, for the jobs before it too
+            changed = True
         if not b or b.get("before") != before - 1 or b.get("retag") != RETAG or "size" not in b:
             d = estimate_detail("", hist[:i], h.get("kind"), h["machine"], h.get("tags") or [], h.get("about") or "",
                                 sized=False)
@@ -541,6 +704,8 @@ def size_words(size):
     if size.get("restart"):
         bits.append("restarts the call line")
     bits.append("research" if size.get("research") else "a clear fix" if size.get("fix") else "a build or other")
+    if (size.get("material") or {}).get("files"):
+        bits.append(material_words(size["material"]))  # H204
     return ", ".join(bits) + f", {size['words']} words"
 
 
@@ -1047,6 +1212,13 @@ def _look_input(text, kind=None):
     lines = ["The job, as it was handed to the team:", text.strip()]
     if row:
         lines += ["", f"Its roadmap row ({label.upper()}):", row[:2500]]
+    try:  # H204: the material it names to read, counted (not read: the look never opens the workspace)
+        m = material(_about(text) + " " + row)
+        if m.get("files"):
+            lines += ["", "The material the job and its row name to read, counted: " + material_words(m)
+                      + f" ({m['mb']} MB in all). The team reads what it needs of it, and that takes time."]
+    except Exception:
+        pass
     try:
         real = _real(all_history())
         about = _about(text)
@@ -1067,7 +1239,8 @@ LOOK_SYSTEM = (
     "job on its own: it reads the row, builds, runs the happy flows it names (app/happy_flows.py), commits and pushes. "
     "Have a quick look at the code the job touches (a few Grep or Read calls at most; never the workspace/ folder), "
     "then answer with one line of JSON only: {\"minutes\": <whole minutes>, \"why\": \"<a few words>\"}. Use the "
-    "finished jobs' real times to judge the scale: most take 3 to 30 minutes.")
+    "finished jobs' real times to judge the scale: most take 3 to 30 minutes. When material to read is counted for you "
+    "(files, text, transcripts, videos, PDFs), weigh in the reading: a lot of it makes a job take longer.")
 
 
 def look_guess(text, kind=None):
@@ -1167,6 +1340,9 @@ def look_run(what, n):
         if g and now_text is not None and fingerprint(now_text) == fp:
             e.update({"guess_look": g["min"], "look_at": int(time.time()), "look_fp": fp, "look_cost": g.get("cost"),
                       "look_s": g.get("s"), "look_why": g.get("why")})
+        if now_text is not None and fingerprint(now_text) == fp:
+            # H204: the size, with the material it names, made again for the words the look read (they may have changed)
+            e["size"] = look(_about(now_text))
         d[str(n)] = e
         save(d)
     rec = {"what": what, "n": n, "at": int(time.time()), "fp": fp, **({"min": g["min"], "cost": g.get("cost"),
