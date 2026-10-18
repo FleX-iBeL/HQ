@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 0.4.6 · 18 October 2026
+
 ### Changed
 - The README is rewritten for someone new to HQ: what it is in a few lines, everything it helps you with, and how to get it running step by step on a Mac, a server, the phone, two HQs as main and backup, and Windows, plus how updates work. The install in technical detail, for your Claude, moved to its own page, INSTALL.md. Nothing says 0.1 any more.
 
