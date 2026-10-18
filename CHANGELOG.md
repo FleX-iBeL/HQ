@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 0.4.5 · 18 October 2026
+
 ### Added
 - A get-started tutorial, always to find again behind the new question mark next to Settings. Short pieces for what you're looking for (calling your team, the chat and typing, the to-do list, texts with Donna, the calendar, notes, past calls, the team working while you're away, the mail check, the weather, Settings) walk over the real screen with a highlight and a caption, on made-up demo content: nothing you tap there changes your HQ, and it says so. It ends with how HQ is built to be expanded, with shared best practices coming soon. Or try a demo call: call Donna or Pepper on a safe playground, both on Opus, and ask anything about HQ, also straight from the piece you're reading. Nothing on a demo call is saved and nothing changes (H74).
 - Turn on what you want. Settings has a new page, What HQ helps you with: one line per part of HQ (the calendar, the to-do list, texts with Donna, the weather, the mail check, quick notes, the team's work and Life coaching), each with its own switch. Everything starts on. Turn one off and its button goes, the rest moves up, on the phone and in the Mac app, and your calls stop bringing it up unless you ask. What leans on another says so: the weather needs Donna's texts (H205).
