@@ -1,210 +1,148 @@
 # HQ
 
-HQ is a personal headquarters you run on your own computer: a live voice call with Claude from your phone or laptop, where you can interrupt each other and Claude can actually do things (read and update your notes, check your mail and calendar, plan your week); a job queue that the computer works through by itself; a watchdog that keeps it all running; and a status page that shows what's happening, live.
+**Your own headquarters: a small team you call, that doesn't just answer but does the work.**
 
-**HQ is still in development.** Its version is in `VERSION`, and what changed in each one in `CHANGELOG.md`. What it is, how it works, and what's coming next is in [ABOUT.md](ABOUT.md).
+You open HQ on your phone or laptop and call Donna or Pepper. You talk like you would on the phone, and you can cut in any time. They know your notes, your to-do list and your calendar, they write down what you agree, and bigger pieces of work they hand to "the team": your computer does it by itself while you get on with your day. A live status page shows how far it is.
 
-Get it: `git clone https://github.com/FleX-iBeL/HQ.git`, then follow the first install below. Clone it (don't download a ZIP, and don't check out an older tag): the clone is the newest released version, and its git history is what lets HQ update itself later. A copy without its history still updates with one tap (the first update turns it into a clone in place, every file kept), but a clone is the clean start.
+Everything runs on your own computer, with your own Claude plan. Your own files stay yours.
 
----
-
-## For Claude: the first install
-
-If the person you're helping says something like *"read me and install everything and check everything and make sure it works"*, this section is for you. Work through it top to bottom. After each step, check it worked before going on. When something fails, read the log it names, fix it, and say in plain words what you fixed. The person may not be technical: talk to them like a person, short sentences, no jargon, and only ask them for what only they can do (a password, clicking Allow, signing in).
-
-**Tell them first:** the setup will ask for their password, and macOS will ask a few times whether something may have access (the Documents folder, Terminal, the microphone). If they want those features, they should allow it. It's asked once; after that it runs by itself.
-
-### The installer does it for you
-
-```sh
-python3 install/install.py
-```
-
-It runs two rounds and ticks every step off on a live checklist, http://localhost:4749 while it runs and afterwards on the status page at http://localhost:4748/install (also on the phone's status address), so the person, or whoever helps them, can see exactly where it stopped and why. Round one sets everything up: what's needed, the workspace from the template (an existing workspace is never touched), the Python environment, the voice, and every password and macOS permission once (the helper's Documents access, Terminal windows, the watchdog, the lid switch, the status page, the call line). It tells them up front about the password and Allow. Round two is the installer's happy flow: everything again, and nothing may ask any more; a check that would need a password or a click fails instead of waiting.
-
-- `--test-only`: only round two, read only. Run it any time to check an install.
-- `--skip lidsleep,tailscale,flows,helper`: leave optional parts out.
-- `--yes`: no Enter after the heads-up (when you run it for them). The lid switch needs their password typed in Terminal; in a run without a terminal it says how, and goes on.
-- Its output: `scratch/install/install.log`; the checklist's data: `scratch/install/checklist.json`.
-
-When a step fails, its line says why and what to do; fix it and run the installer again (finished steps just say they're already there). The steps below are what it does, for when you need to do one by hand or build it on Windows.
-
-### 0. What you need
-
-| Need | Why | Check |
-|---|---|---|
-| A Mac with an Apple chip (M1 or newer) | Speech recognition runs on the Apple chip (MLX). On Windows, or an Intel Mac, see [Mac-only parts](#mac-only-parts-and-what-to-do-on-windows) | `uname -m` says `arm64` |
-| Claude Code, signed in with a Claude plan (Pro or Max) | The call's brain, the jobs and the mail check are Claude Code, on the person's own plan; no API key | `claude --version`, then `claude` and `/status` |
-| Homebrew | Installs the rest | `brew --version` |
-| Python 3.12 and `uv` | The call line | `brew install python@3.12 uv` |
-| Node.js 20 or newer | The status page | `brew install node` |
-| git | Updates, and the workspace's own backup | `git --version` |
-| Tailscale (optional) | Calling from the phone, privately, without opening anything to the internet | `brew install --cask tailscale`, then sign in |
-| About 4 GB free | The Python environment (~1.6 GB), the voice (~330 MB), speech recognition (~1.6 GB, downloaded on the first call) | `df -h ~` |
-
-Some scripts call Claude Code and Node at Homebrew's place (`/opt/homebrew/bin/claude`, `/opt/homebrew/bin/node`). If `which claude` says something else, either link it there or set `HQ_CLAUDE_CLI` for the call line and change `CLAUDE` and `NODE` at the top of `routine/tick.py`.
-
-### 1. The workspace: the person's own files
-
-HQ is the app; **`workspace/` is theirs.** HQ's repo never uploads it, and updating HQ never touches it.
-
-- Fresh install (no `workspace/` yet): `cp -R template workspace`.
-- **If `workspace/` already exists, never overwrite it.** It holds their notes.
-- Make it its own git repo: `git -C workspace init`, then a first commit. HQ commits and pushes their notes after calls and jobs; a private GitHub repo as `origin` is the backup. Until there is a remote, the push step fails while the commit is kept; set one up with them, or leave it.
-- Then ask them to fill in `workspace/me.md` (their name, what's important, what HQ should manage), or offer to do it together: they talk, you write it down in their words.
-- The call reads a few lines of `me.md` itself: **Name** (how HQ greets them and what their lines in a transcript are called), **Names to hear** (names speech recognition should get right), **Never change** (workspace folders a call never changes or commits), **Private words** (for the privacy check below) and the section **On calls** (their language, how they like times said). All optional; nothing about a person is in HQ's own code.
-
-### 2. The call line's Python environment
-
-```sh
-uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python --only-binary :all: tokenizers faster-whisper==1.2.1
-uv pip install --python .venv/bin/python -r app/requirements.txt
-```
-
-The first line of `app/requirements.txt` explains the faster-whisper exception. Check: `.venv/bin/python -c "import pipecat, mlx_whisper, kokoro_onnx, claude_agent_sdk; print('ok')"`.
-
-### 3. The voice
-
-Kokoro, local and free. Download `kokoro-v1.0.onnx` and `voices-v1.0.bin` from the `model-files-v1.0` release of [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx/releases) into `models/`. All nine voices are in that one file (about 28 MB); Heart (`af_heart`) is the default; Donna starts with Bella (`af_bella`), Pepper with Heart, both changeable in Settings. Speech recognition (Whisper large-v3-turbo, MLX) downloads itself on the first call.
-
-### 4. Mail and calendar: the connectors
-
-HQ reads mail through the **Gmail** connector and the calendar through the **Google Calendar** connector of the person's Claude account (claude.ai → Settings → Connectors). Ask them to connect both, then check in Claude Code that the tools show up (`mcp__claude_ai_Gmail__…`, `mcp__claude_ai_Google_Calendar__…`). HQ never sends mail: sending, replying and forwarding are blocked in `workspace/.claude/settings.json`; drafts at the most.
-
-**Not Gmail or Google Calendar?** Then HQ isn't built for it yet. Find out whether their provider has a Claude connector or an MCP server, and if it has, adapt the mail check (`routine/mail-check.md`, `workspace/inbox.md`) and the tool names in `app/policy.py` and `app/config.py`. If nothing exists, research and build an alternative with them (IMAP for mail, CalDAV or an `.ics` link for a calendar), and write down what you built in `ABOUT.md`.
-
-### 5. The call line
-
-```sh
-app/start.sh                     # with Tailscale: the phone line too
-HQ_NO_PHONE=1 app/start.sh   # without Tailscale: this computer only
-```
-
-Then open http://127.0.0.1:7860 in the browser, allow the microphone, pick Donna, and say hello. Log: `scratch/server.log`. Stop: `app/stop.sh`.
-
-On the phone (Tailscale on, on both): the address `start.sh` prints, `https://<this-mac>.<tailnet>.ts.net:8443`, in Safari, then Share → Add to Home Screen; it gets HQ's own icon, the house (on the Mac too, with Safari's File → Add to Dock).
-
-Who to call (since 0.2, the agents): **Donna** (Sonnet, the basics loaded, fast; was Quick) and **Pepper** (Opus, everything loaded, for planning and thinking; was Deep). Their headshots are placeholders until the user puts pictures in `workspace/HQ/agents/` (`pepper.jpg`, `donna.jpg`); agents can be changed or added there in `agents.json` (see `app/agents.py`). Each agent has her own character on calls (H76): Donna quick and dry, a bit cheeky; Pepper warm, calm and direct; Moneypenny (coming soon) few words, cool, all business; each with her own greetings and her own way of pushing back. These are HQ's defaults. Show the user what each default is (`python3 app/agents.py` prints them, marked HQ's default or changed; Settings on the call page shows each one's character under her voice), and tell them they can change any of it for themselves in `workspace/HQ/agents/agents.json`: `character` (one line), `personality`, `pushback`, `greetings` (per part of the day, `morning`, `afternoon`, `evening`, `night`, or one list; `{s}` is " Name", `{n}` ", Name", `{N}` "Name. ", from their me.md) and `continue_greetings`. Only what they change goes in; the rest stays HQ's default. The call line needs a restart to pick it up (`app/stop.sh` then `app/start.sh`). On top of any agent, **Free**: plain Claude with no connectors, none of their files, no notes and nothing saved, only the web. Free is for testing and showing HQ to others.
-
-### 6. The status page
-
-```sh
-node status/server.mjs
-```
-
-http://localhost:4748, this computer only. It reads `workspace/HQ/roadmap.md` every few seconds; that file is the only place the status is written. On the phone: `status/phone.sh` puts it on `:8444` in the tailnet, with its own home-screen icon.
-
-### 6b. The Mac app (optional)
-
-`desktop/build.sh --install` builds **HQ.app** with `swiftc` (the Command Line Tools are enough) and puts it in `~/Applications`. One window: the watchdog dog on top (its mood follows the status page's light; click it for every routine), the status page or the call page below, and **Turn everything on**, which starts the status page, the helper, the watchdog and the call line when they're off and never stops anything. The routines keep running when the app is closed. The first time, macOS asks once for Documents access and, on the first call, for the microphone. Check: `~/Applications/HQ.app/Contents/MacOS/HQ --check`.
-
-The same on the phone, nothing to build: the status page's phone address with `/hq` behind it (`https://<your-mac>.<tailnet>.ts.net:8444/hq`), in Safari Share, Add to Home Screen. It's the same strip, served by the status server with `desktop/phone.js` and `desktop/phone.css`; the call page below it is the call line's own address. Turn everything on works from there too; it only starts what's off.
-
-### 7. The routine, the start at login and the watchdog (Mac)
-
-These keep HQ running without anyone watching. All three ask macOS for permission once.
-
-- **The helper app** (the routine, every minute, and the start at login): `sh routine/build-app.sh` builds *HQ Routine* into `~/Applications`. Then copy the LaunchAgent (the `.plist` file in `app/`) to `~/Library/LaunchAgents/` and `launchctl load` it there. macOS asks whether it may reach the Documents folder: **Allow**. When it starts a job or the mail check, macOS may ask whether it may control Terminal: **Allow**. Log: `scratch/routine/routine.log`.
-- **The watchdog** (every 5 minutes, brings the helper back): `sh routine/install-watchdog.sh`.
-- **Lid closed, keep working** (optional): `sudo sh routine/install-lidsleep.sh` once, with their password typed by them. After that a call can switch it on and off. Never type or store their password yourself.
-
-Paths inside that `.plist` and `routine/routine.applescript` must point at this HQ folder; fix them if they don't, and rebuild.
-
-### 8. Check everything: the happy flows
-
-The happy flows are HQ's tests: the main things that must work when all goes well.
-
-```sh
-.venv/bin/python app/happy_flows.py --quick   # the ones without Claude, about a minute
-.venv/bin/python app/happy_flows.py           # all of them, about five minutes, a few Claude turns
-.venv/bin/python app/happy_flows.py --only 3,5
-```
-
-They run on their own port and never touch the live call line. **All must pass.** A failed flow says why; fix it and run it again. A flow that needs something they chose not to set up (Tailscale, the lid switch) may fail for that reason: say so plainly instead of hiding it.
-
-Then the real test: a call from the phone or the browser, a question about today's calendar, and hang up. The transcript lands in `workspace/HQ/calls/`, and the notes in `workspace/coaching/log.md`.
-
-### When it breaks
-
-- The status page, under Routines: every routine's state, and the incident log (what went down, when, why, what was done).
-- Logs: `scratch/server.log` (the call line), `scratch/routine/routine.log` (the helper), `scratch/routine/mail.log` (the mail check).
-- `.venv/bin/python app/happy_flows.py --quick` narrows it down.
-- How each part works: [ABOUT.md](ABOUT.md), and the build notes in `CLAUDE.md`.
+HQ is at version **0.4.5** (what's new in each version: [CHANGELOG.md](CHANGELOG.md)). It's still in development: built and used every day by one person first, now shared with friends. Things change, and some parts are rough.
 
 ---
 
-### 7b. On a Linux server: the routine and the watchdog (systemd)
+## What HQ helps you with
 
-On Linux the helper app and the LaunchAgents are systemd user units instead: `sh routine/install-linux.sh` puts in `hq-routine.timer` (the routine, every minute), `hq-watchdog.timer` (every 5 minutes, starts the routine again when it's gone, ends a run that hangs) and `hq-start.service` (the call line, through `app/start-linux.sh`, when the server starts), switches lingering on, and starts them. They start by themselves after a restart. HQ's own memory is `~/.local/state/hq` there. `--dry` shows the units, `--remove` takes them out. Tailscale's serve settings belong to root on Linux, so HQ calls it with `sudo -n` (no password; `HQ_TS_SUDO=0` if the user is Tailscale's operator). Battery, temperature, the laptop stats and the lid switch stay Mac only. Jobs and the hourly mail check don't run on Linux yet: they need a window to run in there (or your own `local/open-window`); until then their lines say so. Happy flow 61 checks all of it on a Linux machine: run it there, or from a Mac with `HQ_TEST_LINUX=<ssh host>`. Since H56.5 the installer does all of this on Linux too: `python3 install/install.py --yes --no-page` on the server installs nothing with sudo (what's missing is named with the line to install it), makes the Python environment without MLX (faster-whisper listens there), puts in the units, checks a tmux session, and checks that Claude trusts the workspace (run `claude` once in it and answer yes, since nobody answers that question for a job). Its test round runs the happy flows that hold on Linux.
+**Call your team.** Pick who you call. **Donna** is quick and dry: your day, your list, your mail, quick orders. **Pepper** takes her time: planning, sparring, thinking something through. Each has her own voice and character, and you can change both. Hold to talk or just talk, read everything back in the chat, or type when you can't talk (on a train, in a library). Bring the other one into the call when you need both.
 
-## Mac-only parts, and what to do on Windows
+**Your to-do list, the Eisenhower way.** One list for everything, in four squares: important or not, urgent or not, with important but not urgent first, because that's where the things that move your life forward are. You don't keep it, you just say it: on a call or in a text it lands in the right square, in your own words. In the app you can tick things off, move them, let them go, or start a call about one.
 
-**HQ 0.1 is built for Claude on a Mac with an Apple chip.** These parts have no Windows version yet, and there's no ready alternative in this repo. On Windows, **Claude builds them itself** for that computer, following how the Mac version works:
+**Texts with Donna.** She texts you reminders at the time you asked, check-ins, and a heads-up when something needs you. Text her back like any chat app and she does what you ask.
 
-| Part | On the Mac | On Windows, build it with |
-|---|---|---|
-| Speech recognition | Whisper through MLX, on the Apple chip | Pipecat's `WhisperSTTService` (faster-whisper) on the CPU or an NVIDIA GPU, in `app/pipeline.py` |
-| Start at login | A LaunchAgent opens the helper app | Task Scheduler, "At log on" |
-| The routine (every minute) | The helper app runs `routine/tick.py` | Task Scheduler, every minute, `python routine\tick.py` |
-| The watchdog | A LaunchAgent every 5 minutes (`routine/watchdog.py`) | Task Scheduler, every 5 minutes |
-| Job and mail check windows | Terminal windows, minimized, closed when done (AppleScript) | Windows Terminal or PowerShell windows, started minimized |
-| Keeping awake during a call | `caffeinate` | `powercfg` or `SetThreadExecutionState` |
-| Lid closed, keep working | `pmset disablesleep`, allowed once through `sudoers` | `powercfg` (lid close action), set once as administrator |
-| Temperature, battery, laptop stats | IOKit, `pmset`, `vm_stat` (`routine/*.py`, `*.m`) | WMI or `psutil` |
-| Paths and shells | zsh scripts, Homebrew paths | PowerShell, the Windows paths |
-| The desktop app | `desktop/HQ.swift` (Swift, WebKit), built by `desktop/build.sh` | A WebView2 window around the same strip (`desktop/shell.html`) and `desktop/hq_control.py`, or just the browser |
+**Your calendar.** Your Google Calendar inside HQ: today and the days ahead. Ask on a call to plan your week, move something or block time, and it's done. Each appointment can have a quick note of your own.
 
-What works the same everywhere: the call page, the voice (Kokoro), Claude Code, the connectors, Tailscale, the status page (Node), the queue and the workspace. Keep the Mac files as they are and build the Windows ones **only in `local/`** (see *Your own parts* below), so an update never erases them; HQ looks there first.
+**The mail check.** Every hour HQ reads your new mail and keeps only what might need you. Very important things, like a bill with a date or someone waiting for your answer, you hear at the start of every call until you say it's sorted. HQ never sends mail: drafts at the most, you send them yourself.
+
+**Quick notes.** A thought you don't want to lose? Write it down in HQ. The next call reads your notes, so you can say "let's go through my notes".
+
+**Every call, kept.** Every call is saved as text. Read one back, or tap Continue this call and she picks up where you left off.
+
+**The team works while you're away.** Agree a bigger piece of work on a call (build something, sort something out, research something), say "give it to the team", and hang up. Your computer does it by itself, one piece at a time, and Donna texts you when it's done. Plan work for later, like tonight at ten, so it doesn't get in your way during the day.
+
+**The status page.** What the team is doing right now, what's waiting and what's planned, your Claude usage against the limits you set (the team stops before it eats your whole plan, and carries on when there's room), and whether every part of HQ is running.
+
+**Weather and rain alerts.** The weather where you are, at a glance. Turn on the rain alert and Donna texts you before a shower comes, and follows it as it moves.
+
+**Life coaching.** A few calm sessions with Pepper build your long-term vision, from three to five years out down to your ideal week, and HQ helps you live towards it every day.
+
+**Turn on only what you want.** Every feature above is a switch in Settings, under What HQ helps you with. Turn off what you don't use: its button goes away and the rest moves up.
+
+**A tutorial and a demo call.** The question mark next to Settings walks you over the real screen, piece by piece, on made-up example content. Or start a demo call and ask Donna or Pepper anything about HQ.
+
+**Free, to show it to others.** Free is plain Claude with only the web: none of your files, nothing saved. Handy to show HQ to someone without showing your life.
+
+**On your phone and your Mac.** HQ works in the browser, as an icon on your phone's home screen, and as a Mac app with a little watchdog that shows at a glance whether everything is running.
+
+**Make it yours.** HQ is built to be expanded. Ask on a call for something new, give it to the team, and they build it into your HQ. Your own builds stay yours: updates never touch them.
 
 ---
 
-## Sharing changes: the privacy check
+## What you need
 
-HQ is public, so nothing of anyone's own may go in it: their notes stay in `workspace/`. Before pushing a change to HQ, run
+- **A Claude plan, Pro or Max.** HQ runs on Claude Code with your own plan. No API key, no extra costs beyond the plan.
+- **A computer that stays on.** A Mac with an Apple chip (M1 or newer) is the easiest: everything works. A Linux server works too. Windows has no ready version yet (see [On Windows](#on-windows) below).
+- **About 4 GB of free disk space**, for the voice and the speech recognition. Both run on your own computer.
+- **Gmail and Google Calendar**, if you want the mail check and the calendar. Something else? Claude can look for a way to connect it; it's not built in yet.
+- **Tailscale (free)**, if you want to call from your phone. It connects your phone to your computer privately, without opening anything to the internet.
 
-```sh
-python3 app/privacy.py --history
-```
+---
 
-It looks through HQ's files and its whole git history for the person's name and **Private words** (from `workspace/me.md`), home folder paths, Tailscale names and addresses, mail addresses, and keys or tokens. Happy flow 44 runs the same check. Paths in the shipped files are written as `/Users/you/HQ`; the installer and `routine/build-app.sh` put the real path in.
+## Get it running
 
-## Updating HQ
+You don't have to do the setup yourself: Claude does it with you. HQ comes with an installer and step-by-step instructions written for Claude.
 
-**The easy way:** when a newer version is out, the call page, the status page and the Mac app show a small bar with what's new and an **Update** button. HQ looks for one on this repo a few times a day (read only, no login; when the computer is offline it just tries again later). When there's nothing newer, the small grey version number says you're on the latest version. Tap the version number any time to see the changelog: what was added and changed in each version, newest first.
+### On a Mac
 
-What **Update** does (`routine/update.py`, which you can also run yourself: `python3 routine/update.py start`):
+1. **Install Claude Code** and sign in with your Claude plan ([how](https://docs.claude.com/en/docs/claude-code/setup)).
+2. **Get HQ.** Open Terminal and type:
 
-1. It waits while a call is on or a job runs, and says so; it starts by itself when they've ended.
-2. Anything changed in HQ's own files (and any commits of your own) is saved first on a backup branch, `hq-backup/<date>-before-<version>-changes` (or `-commits`). Nothing is ever sent anywhere. To get the changes back: `git stash apply <that branch>`.
-3. It fetches that version from this repo and moves HQ to it. `workspace/`, `local/`, `scratch/` and `.status/` are never touched.
-4. It restarts what needs it: the call line (if it ran), the status page (if its server changed), the Mac app (if it changed and is installed: reopen it afterwards), the watchdog (if it changed), and the Python packages if the requirements changed.
-5. It leaves a note for Claude in `updates/<version>.md`: what's new, what was kept, what it restarted, and what to check or rebuild. **Claude: when there's a note in `updates/` that isn't in `updates/done/`, read it, do what it says, tell the person in a sentence or two, then move it into `updates/done/`.**
+   ```sh
+   git clone https://github.com/FleX-iBeL/HQ.git
+   cd HQ
+   claude
+   ```
 
-On a computer that isn't a Mac, tapping Update first explains that their own parts are kept safe and that Claude gets instructions to patch things up locally afterwards.
+   Use `git clone`, not a ZIP download: that's what lets HQ update itself later.
+3. **Ask Claude:** *"read me and install everything and check everything and make sure it works"*.
+4. **Allow what it asks.** Your Mac asks for your password and a few times whether something may have access (the Documents folder, Terminal, the microphone). Say yes to what you want to use. It's asked once; after that it runs by itself.
+5. **Watch it happen.** A checklist opens in your browser (http://localhost:4749) and ticks off every step, so you can see exactly where it is, and where it stopped if something goes wrong. Claude fixes what it can and tells you in plain words.
+6. **Tell HQ who you are.** Claude asks for your name, what's important to you and what HQ should help with. Just talk; it writes it down in your words.
+7. **Connect your mail and calendar** (optional): on claude.ai, Settings, Connectors, connect Gmail and Google Calendar.
+8. **Make your first call.** Open http://127.0.0.1:7860, allow the microphone, pick Donna and say hello. New to it? Tap the question mark for the tutorial.
 
-By hand, for a Claude helping out: don't `git pull` or check out a tag and restart things one by one; that skips the backup, the restarts and the note. Run the same path the button runs: `python3 routine/update.py check --force` (it should say `"available": true`), then `python3 routine/update.py start`, and follow `python3 routine/update.py status` until its `run` says `done`; then read the note in `updates/`. If the check says `"offline": true`, its `why` says what failed.
+The Mac app (optional): ask Claude to build it for you. It puts the call, the status page and Donna's texts in one window.
 
-### Your own parts: local/
+### On a server
 
-Whatever Claude builds for this one computer (the Windows parts above, or anything else of the person's own) goes **only in `local/`**, at the top of HQ. That folder is ignored by HQ's repo: it is never uploaded, and an update never touches it. Where HQ has a part that differs per computer, it looks in `local/` first, by name, with any of the endings `.sh`, `.py`, `.ps1`, `.cmd`, `.bat` (or none):
+HQ runs on a Linux server too (Ubuntu, with about 4 GB of memory or more). A server is always on, so the team keeps working and the mail keeps getting checked while your laptop is closed. Everything works there except what's about a laptop (the battery, the temperature, the lid).
 
-| Name in local/ | Stands in for | Called with |
-|---|---|---|
-| `open-window` | the Terminal window a job or the mail check runs in (`routine/tick.py`) | the path of the script to run |
-| `start-call-line` | `app/start.sh`, when the call line is off ("Turn everything on") | nothing |
-| `restart-call-line` | `app/stop.sh` then `app/start.sh`, after an update | nothing |
-| `start-status-page` | `node status/server.mjs --quiet` | nothing |
-| `restart-status-page` | restarting the status page after an update | nothing |
-| `start-helper` | opening the helper app that runs the routine every minute | nothing |
-| `start-at-login` | the installer's helper app and its LaunchAgent | nothing |
-| `start-watchdog` | loading or waking the watchdog's LaunchAgent | nothing |
-| `install-watchdog` | `routine/install-watchdog.sh` (installer and updates) | nothing |
+The steps are the same as on a Mac: install Claude Code, clone HQ, start `claude` in the HQ folder and ask it to install everything. On a server nothing asks for a password; what's missing is named with the line to install it. You reach it from your phone or laptop through Tailscale.
 
-Something with no name here (the speech recognition, the laptop readings): change HQ's file as little as possible, and keep a copy of the change in `local/` with a line on what it is, so it can be put back after an update (the update saves the change on a backup branch too, and its note says so).
+### On your phone
 
-### Versions
+There's nothing to install on the phone itself. HQ runs on your computer (or server), and the phone calls it.
 
-Versions are git tags on this repo: `v0.2`, `v0.2.1`, `v0.3`. **Fixes get a patch number (0.2.1); bigger features the next minor (0.3).** HQ reads its own version from the newest tag in its history (`git describe`), else (no history, no tags, or only older ones) from the `VERSION` file.
+1. Install **Tailscale** on your computer and on your phone, and sign in on both with the same account.
+2. Open the address Claude gives you after the install, `https://<your-computer>.<your-tailnet>.ts.net:8443`, in Safari.
+3. Tap Share, then **Add to Home Screen**. HQ's icon, the house, lands next to your other apps.
 
-Releasing one (the maintainer): in `CHANGELOG.md`, rename **Coming next** to the version and date (`## 0.3 · 12 October 2026`), put the same number in `VERSION`, commit, tag it with a short message (`git tag -a v0.3 -m "HQ 0.3"`), and push with `python3 routine/push.py`, which runs the privacy check first. Everyone's HQ sees it within a few hours.
+The status page has its own address on the phone (the same, with `:8444`), and `:8444/hq` gives you the same view as the Mac app, watchdog and all.
+
+### Two HQs: main and backup
+
+Want HQ on your laptop and on a server? They can work as one. The **main** does the work: the team, the mail check, the planned jobs. The **backup** takes your calls and shows the status page, and passes anything you agree on to the main. Your files stay the same on both within seconds. If the main goes offline, the backup takes over by itself after five minutes, and hands back when the main returns. You can see which one is main on the status page, and switch it on a call.
+
+Ask Claude to set it up once both are installed. The steps are in [INSTALL.md](INSTALL.md#two-hqs-main-and-backup).
+
+### On Windows
+
+There's no ready Windows version yet. A few parts are built for the Mac (starting at login, the background routine, the watchdog, the speech recognition), and on Windows Claude builds those itself for your computer, in a folder that updates never touch. It's more work and nobody has tested it yet, so expect some back and forth. If you have a choice, a Mac or a small Linux server is the smoother path today. The details for Claude are in [INSTALL.md](INSTALL.md#mac-only-parts-and-what-to-do-on-windows).
+
+---
+
+## Updates
+
+When a new version is out, a small bar shows up on the call page, the status page and the Mac app, with what's new and an **Update** button. One tap:
+
+- waits until you're off a call and the team is between jobs,
+- saves anything you changed in HQ itself, just in case,
+- moves HQ to the new version and restarts what needs it,
+- and leaves your Claude a note on what changed, so it can tell you.
+
+Your own files and your own builds are never touched, and nothing of yours is sent anywhere. HQ looks for updates a few times a day. Tap the small grey version number any time to see what changed in each version.
+
+---
+
+## Your files stay yours
+
+HQ is two halves. **HQ itself** is the same app for everyone, public here on GitHub. **Your workspace** is your own folder of notes: who you are, what matters to you, your to-do list, your calls. It lives in `workspace/` inside HQ, is never uploaded with HQ, and you can back it up as your own private GitHub repo. Before anything goes into HQ's public code, a privacy check looks for anything of yours and stops it.
+
+Only the thinking goes to Anthropic, the same as any Claude chat. The listening and the voice run on your own computer.
+
+---
+
+## When something isn't working
+
+- Look at the status page: under Routines, every part of HQ has a light, and the incident log says what went down, when and why.
+- Ask Claude in the HQ folder: *"something isn't working, can you check?"* It knows where the logs are and how to test everything.
+
+---
+
+## More
+
+- [ABOUT.md](ABOUT.md): the big picture. What HQ is, how each part works, and what's coming.
+- [INSTALL.md](INSTALL.md): the install step by step, in technical detail, for Claude or anyone technical helping out. Also the Linux server, two HQs, Windows, your own builds in `local/`, and how updates and versions work.
+- [CHANGELOG.md](CHANGELOG.md): what changed in each version.
+
+---
+
+**Claude, if you're reading this to install HQ:** the full instructions are in [INSTALL.md](INSTALL.md). Read it top to bottom and follow it.

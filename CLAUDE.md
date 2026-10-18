@@ -1,6 +1,6 @@
 # HQ
 
-HQ is the app: a live voice call with Claude (the call line), a job queue the computer runs by itself (the routine), a watchdog, and a status page. The same code for everyone. Still in development. To install and check it: `README.md` (written for the user's Claude, including what's Mac-only and the mail and calendar connectors). What HQ is, how it works, the agents and what's coming: `ABOUT.md`; use it to explain HQ to whoever asks.
+HQ is the app: a live voice call with Claude (the call line), a job queue the computer runs by itself (the routine), a watchdog, and a status page. The same code for everyone. Still in development. What it does and how to get it running, for a newcomer: `README.md`. To install and check it: `INSTALL.md` (written for the user's Claude, including Linux, two HQs, what's Mac-only and the mail and calendar connectors). What HQ is, how it works, the agents and what's coming: `ABOUT.md`; use it to explain HQ to whoever asks.
 
 ## Layout
 

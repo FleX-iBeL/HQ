@@ -308,10 +308,10 @@ class Installer:
             return self._linux()
         if platform.system() != "Darwin":
             raise Fail(f"this is {platform.system()}, not a Mac",
-                       "HQ 0.1 is built for a Mac; on Windows, Claude builds the Mac-only parts (README, Mac-only parts).")
+                       "HQ is built for a Mac or a Linux server; on Windows, Claude builds the Mac-only parts (INSTALL.md, Mac-only parts).")
         if platform.machine() != "arm64":
             raise Fail(f"this Mac has an {platform.machine()} chip, not an Apple chip",
-                       "Speech recognition runs on the Apple chip (MLX); see the README's Mac-only parts.")
+                       "Speech recognition runs on the Apple chip (MLX); see INSTALL.md, Mac-only parts.")
         return f"macOS {platform.mac_ver()[0]}, Apple chip"
 
     def _linux(self):
@@ -320,7 +320,7 @@ class Installer:
                                                     capture_output=True).returncode != 0:
             raise Fail("this Linux has no systemd for the user (systemctl --user)",
                        "HQ on Linux runs its routine and watchdog as systemd user units; on another system, Claude "
-                       "builds them in local/ (README, platform parts).")
+                       "builds them in local/ (INSTALL.md, Mac-only parts).")
         name = platform.system()
         try:
             name = dict(l.strip().split("=", 1) for l in open("/etc/os-release") if "=" in l).get("PRETTY_NAME", name).strip('"')

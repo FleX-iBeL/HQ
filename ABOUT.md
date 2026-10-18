@@ -1,8 +1,8 @@
 # About HQ: the big picture
 
-This file is for Claude, to search and explain. When someone asks *"What is this app? How does it work? What's coming?"*, the answers are here. Explain it plainly, like a person, and always say that **HQ is still in development**: version 0.1, built and used daily by one person first, now shared with friends. Things change, and some parts are rough.
+This file is for Claude, to search and explain. When someone asks *"What is this app? How does it work? What's coming?"*, the answers are here. Explain it plainly, like a person, and always say that **HQ is still in development**: the version is in `VERSION` (0.4.5 as of this writing), built and used daily by one person first, now shared with friends. Things change, and some parts are rough.
 
-How to install it is in [README.md](README.md). The details of each part are in the build notes in `CLAUDE.md` and in the code.
+What it helps with and how to get it running, for a newcomer: [README.md](README.md). The install in technical detail: [INSTALL.md](INSTALL.md). The details of each part are in the build notes in `CLAUDE.md` and in the code.
 
 ## What HQ is
 
@@ -59,6 +59,17 @@ The heart of HQ. Everything you have to do lives in one list in your workspace (
 
 In the app, the To-do button shows it as the matrix: each square with how many and the first few, what's promised to other people and very important mail above it, the other lists under it. Tap a square for its list, an item for everything about it and your own words on it. Tick it off, move it, let it go or add one by hand (Undo puts the last change back), or call about it. A new install starts with the lists empty, ready for yours.
 
+### Donna's texts, the calendar, notes, weather
+
+- **Texts with Donna:** her own text line. She texts reminders at the time you asked, check-ins and a heads-up when something needs you; you text back and she does it.
+- **The calendar:** your Google Calendar inside HQ, today and the days ahead, with a note of your own on any appointment. Plan it on a call.
+- **Quick notes:** write a thought down in the app; the next call reads them.
+- **Past calls:** every call kept as text, to read back or continue where you left off.
+- **Weather:** at a glance, with a rain alert where Donna texts you before a shower and follows it.
+- **Life coaching:** a few sessions with Pepper build your long-term vision, from three to five years out down to your ideal week (the map, `workflows/map/`), and HQ supports you with it every day. You give your vision its own name.
+
+**What HQ helps you with:** every feature is a switch in Settings (the calendar, the to-do list, texts, the weather, the mail check, notes, the team's work, Life coaching). Off takes its button away, and calls don't bring it up unless asked.
+
 ### The routine and the job queue
 
 A small helper runs every minute, without Claude, so it costs nothing while waiting. It looks at the job queue on your roadmap (`workspace/HQ/roadmap.md`). A job is work you agreed on a call ("build this", "sort that out"). When nothing is running, it starts the highest job on the list in a Terminal window, as a normal Claude chat, minimized so it doesn't take over your screen. One job at a time; the rest wait their turn. From a call you can add jobs, move them up or down, stop one, or switch the whole thing off.
@@ -89,11 +100,11 @@ HQ knows its version and looks a few times a day whether a newer one is out. Whe
 
 ### The happy flows
 
-HQ's tests: over forty checks of the main things that must work when all goes well (the call starts, the greeting plays, a question gets an answer, cutting in stops the voice, the transcript is saved, the queue works, the status page reads the roadmap, the template stays blank...). They run before and after every change, on their own port, without touching the live call.
+HQ's tests: over a hundred checks of the main things that must work when all goes well (the call starts, the greeting plays, a question gets an answer, cutting in stops the voice, the transcript is saved, the queue works, the status page reads the roadmap, the template stays blank...). They run before and after every change, on their own port, without touching the live call.
 
 ## What it runs on
 
-**HQ 0.1 is built for Claude on a Mac with an Apple chip.** The start at login, the routine, the watchdog, the Terminal windows, the lid-closed switch, the laptop readings and the speech recognition (MLX) are Mac-only. On Windows, Claude builds those parts itself, only in the `local/` folder, which updates never touch; the readme has a table of what to build with what, and the names HQ looks for there.
+**HQ runs on a Mac with an Apple chip and on a Linux server.** On a Mac everything works. On a Linux server everything except the laptop parts (battery, temperature, the lid switch): the routine and the watchdog are systemd timers there, jobs and the mail check run in tmux, and speech recognition runs on the CPU. **Two HQs** (say a laptop and a server) can pair as main and backup: the main runs the team and the mail check, the backup takes calls and hands changes to the main, the workspace stays the same on both through Syncthing, and the backup takes over by itself when the main is gone for five minutes. **Windows** has no ready version: Claude builds the Mac-only parts itself, only in the `local/` folder, which updates never touch; INSTALL.md has a table of what to build with what, and the names HQ looks for there.
 
 **Mail is built for Gmail and the calendar for Google Calendar**, through the Claude connectors. With another provider, Claude first researches whether it has a connector or an MCP server, and otherwise builds an alternative (IMAP, CalDAV, an `.ics` link).
 
@@ -101,14 +112,18 @@ Everything runs on your own Claude plan (Pro or Max), through Claude Code; no AP
 
 ## Coming next
 
-HQ is still being built. The order isn't fixed and can change:
+HQ is still being built. The order isn't fixed and can change. What came so far, in short (the full list per version is in [CHANGELOG.md](CHANGELOG.md)):
 
-- **0.1:** the call (Quick, Deep, Free), the workspace and its template, the status page, the hourly mail check, the job queue, the watchdog, the usage check, the happy flows, and an installer with a live checklist page, so you can see exactly where an install broke. Since then: the scheduler, the Mac desktop app, and the phone version that looks like it.
-- **0.2 (now):** the agents. Pepper and Donna replace Quick and Deep, each with her own name, face, personality and speciality. That's why it's called HQ: it's where they all work, like building a small company inside the app.
-- **More agents:** one for creative work, one for life coaching (maybe Moneypenny), each with what it needs to know loaded.
+- **0.1:** the call (then Quick, Deep and Free), the workspace and its template, the status page, the hourly mail check, the job queue, the watchdog, the usage check, the happy flows and the installer.
+- **0.2:** the agents. Pepper and Donna replace Quick and Deep, each with her own name, face, personality and speciality. That's why it's called HQ: it's where they all work.
+- **0.3 and 0.4:** updates with one tap, HQ on a Linux server, two HQs as main and backup, the characters, Donna's texts, the calendar, weather, quick notes, past calls; then the to-do list in the app, What HQ helps you with, Life coaching, the tutorial and the demo call, the look (Modern 3).
 
-Further out, ideas rather than plans: the status page reachable when the laptop is offline, and a simple backup assistant on a server for when the laptop is closed.
+Next, ideas rather than promises:
+
+- **Moneypenny:** a third agent, for the big jobs behind the scenes (shown as coming soon).
+- **Shared best practices:** ways of working that keep a build stable, written so your own HQ understands them and suggests them itself.
+- **More agents**, each with what it needs to know loaded, and a ready Windows version.
 
 ## In one paragraph
 
-HQ is a personal assistant you call and talk to, running on your own Mac, built on Claude Code and your own Claude plan. It knows your notes and your goals, reads your mail and calendar, writes down what you agree, and can do work by itself from a job list while you're away, with a live status page on your phone. Your own files stay in your own workspace and never go into HQ's repo. It's still in development: version 0.1, Mac-first, Gmail and Google Calendar first, with a Mac desktop app and its phone version, and named agents coming next.
+HQ is a personal assistant you call and talk to, running on your own Mac or server, built on Claude Code and your own Claude plan. It knows your notes and your goals, reads your mail and calendar, writes down what you agree, and can do work by itself from a job list while you're away, with a live status page on your phone. Your own files stay in your own workspace and never go into HQ's repo. It's still in development: Mac and Linux, Gmail and Google Calendar first, with a Mac desktop app, its phone version, and two named agents, Donna and Pepper.

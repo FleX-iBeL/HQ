@@ -3719,12 +3719,16 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         ABOUT.md has the big picture: what HQ is, how it works, the agents, what's coming, still in development.
         Nothing of his in either, and both are in HQ's repo."""
         import subprocess as sp
-        readme, about = ROOT / "README.md", ROOT / "ABOUT.md"
-        need(readme.exists() and about.exists(), "HQ has no README.md or ABOUT.md")
-        r, a = readme.read_text(), about.read_text()
+        readme, about, install = ROOT / "README.md", ROOT / "ABOUT.md", ROOT / "INSTALL.md"
+        need(readme.exists() and about.exists() and install.exists(), "HQ has no README.md, INSTALL.md or ABOUT.md")
+        # H209: README.md is for a newcomer, INSTALL.md the install in detail for their Claude; together they cover it
+        r, a = readme.read_text() + "\n" + install.read_text(), about.read_text()
+        version = (ROOT / "VERSION").read_text().strip()
+        need(f"**{version}**" in readme.read_text(), f"the readme doesn't say the current version {version}")
+        need("INSTALL.md" in readme.read_text(), "the readme doesn't point their Claude to INSTALL.md")
         for words, what in ((("install everything and check everything", "cp -R template workspace", "never overwrite",
                               "password", "happy_flows.py"), "the install and check"),
-                            (("Mac-only", "Windows", "Claude builds them itself", "Task Scheduler", "start at login",
+                            (("Mac-only", "Windows", "Claude builds", "Task Scheduler", "start at login",
                               "watchdog", "Terminal", "lid"), "what's Mac-only"),
                             (("Gmail", "Google Calendar", "connector", "research", "alternative"), "mail and calendar"),
                             (("Free", "no connectors", "for testing and showing"), "Free")):
@@ -3735,9 +3739,10 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
             need(w.lower() in a.lower(), f"ABOUT.md doesn't cover {w}")
         personal = privacy.pattern(privacy.words(config.FOLDER))  # M5: the user's private words, from me.md
         hits = [f"{f.name}: {m.group(0)}" for f, t in ((readme, r), (about, a)) for m in personal.finditer(t)]
+        need("0.1 is built" not in r and "0.1 is built" not in a, "the explanations still say HQ is 0.1")
         need(not hits, f"the explanations have something of his: {hits[:6]}")
         ign = lambda rel: sp.run(["git", "-C", str(ROOT), "check-ignore", "-q", rel]).returncode == 0
-        need(not ign("README.md") and not ign("ABOUT.md"), "the explanations are ignored by HQ's repo")
+        need(not ign("README.md") and not ign("ABOUT.md") and not ign("INSTALL.md"), "the explanations are ignored by HQ's repo")
         return "the readme (install, check, Mac-only, mail and calendar, Free) and the big picture, nothing of his"
 
     async def flow43(self) -> str:
@@ -6834,7 +6839,7 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         need("/local/" in (ROOT / ".gitignore").read_text(), "local/ isn't ignored by HQ's repo")
         need((ROOT / "CHANGELOG.md").exists() and "## 0.1" in (ROOT / "CHANGELOG.md").read_text() and "## 0.2" in (ROOT / "CHANGELOG.md").read_text(),
              "there's no changelog with 0.1 and 0.2")
-        need("0.2.1" in (ROOT / "README.md").read_text() and "local/" in (ROOT / "ABOUT.md").read_text(), "the readme or the big picture doesn't say it")
+        need("patch number" in (ROOT / "INSTALL.md").read_text() and "local/" in (ROOT / "ABOUT.md").read_text(), "the install page or the big picture doesn't say it")
         code, body, _ = await asyncio.to_thread(http_get, "/api/update", "http://127.0.0.1:4748")
         live = json.loads(body) if code == 200 else {}
         need(live.get("version") and "available" in live, f"the live status server doesn't answer the version: {code}")
@@ -7262,7 +7267,7 @@ setTimeout(() => {
             shown = rows.get("Voice " + a["full_name"], "none")
             need(shown.startswith(a["character"]) and (("HQ's default" in shown) == a["default"]),
                  f"Settings doesn't show {a['name']}'s character and whether it's the default: {shown}")
-        readme = (ROOT / "README.md").read_text()
+        readme = (ROOT / "INSTALL.md").read_text()  # H209: the install detail moved out of the readme
         tmpl = (ROOT / "template/HQ/agents/README.md").read_text()
         about = (ROOT / "ABOUT.md").read_text()
         need("python3 app/agents.py" in readme and "pushback" in readme and "agents.json" in readme and "HQ's defaults" in readme,

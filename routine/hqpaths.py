@@ -256,7 +256,7 @@ def agent_label(name: str, default_prefix: str = "com.hq") -> str:
 # place for them, local/ at the top of HQ: ignored by HQ's repo, never touched by an update, never uploaded. Where
 # HQ has a part that differs per computer (starting the call line, opening a job's window, the watchdog, starting
 # at login...), it looks there first: local/<name> with any of the endings below. [Claude's choice of the name
-# local/ and of looking by name.] The names HQ looks for are listed in README.md, "Your own parts".
+# local/ and of looking by name.] The names HQ looks for are listed in INSTALL.md, "Your own parts".
 LOCAL = os.environ.get("HQ_LOCAL") or os.path.join(HQ, "local")
 _ENDINGS = ("", ".sh", ".py", ".ps1", ".cmd", ".bat")
 
