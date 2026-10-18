@@ -558,7 +558,8 @@ class Run:
              "the thinking animation, the thinking sound switch or push to talk is missing (H3-H5)")
         need('id="chatbtn"' in page and 'id="chatlog"' in page and "hq-chat" in page,
              "the chat bubble and its log are missing (H6)")
-        need('id="free"' in page and 'data-mode="free"' not in page and "free, voice" in page,
+        need('id="free"' in page and 'data-mode="free"' not in page and "const plain = free || demoCall" in page
+             and "free: plain, voice" in page,
              "Free is not a switch on top of Quick and Deep (H8)")
         need("body.chatting #mute" in page and "body.chatting #orbwrap" in page and "showLayout" in page,
              "the talk button and the thinking circle don't stay on screen with the chat open (H8)")
@@ -1830,6 +1831,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         """F10: the talk button stays green (Talking…) the whole time it's held. No Claude turns: the
         real call page runs in a headless browser, with a fake live call, and its button is held down."""
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         page = (APP / "web/index.html").read_text()
@@ -1871,7 +1873,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
 """
         f = self.tmp / "f10.html"
         f.write_text(page.replace("</body>", harness + "</body>", 1))
-        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--autoplay-policy=no-user-gesture-required",
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--autoplay-policy=no-user-gesture-required",
                                           "--virtual-time-budget=60000", "--dump-dom", f.as_uri()], timeout=120)
         m = re.search(r'<pre id="f10">F10RESULT (.*?) END</pre>', r.stdout)
         need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -1887,6 +1889,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         draws a Jobs row on top, folded closed, with an arrow to one bar per job, in the status band's own
         colours, with its own legend; a running routine is no longer warning yellow."""
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the status page in")
         node = shutil.which("node") or "/opt/homebrew/bin/node"
@@ -1966,7 +1969,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
 """
             idx = site / "status/index.html"
             idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
-            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h33-profile'}",
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--user-data-dir={self.tmp / 'h33-profile'}",
                                               "--virtual-time-budget=20000", "--dump-dom", base + "/"], timeout=120)
             m = re.search(r'<pre id="h33">H33RESULT (.*?) END</pre>', r.stdout)
             need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -2109,6 +2112,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
         need("TEMPERATURE = os.path.join(HERE, \"temperature.py\")" in tick and "(\"temperature\", TEMPERATURE, 150)" in tick and "[PY, script]" in tick,
              "the routine doesn't run the temperature check every minute")
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the status page in")
         node = shutil.which("node") or "/opt/homebrew/bin/node"
@@ -2167,7 +2171,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
 """
             idx = site / "status/index.html"
             idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
-            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h35-profile'}",
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--user-data-dir={self.tmp / 'h35-profile'}",
                                               "--virtual-time-budget=20000", "--dump-dom", base + "/"], timeout=120)
             m = re.search(r'<pre id="h35">H35RESULT (.*?) END</pre>', r.stdout)
             need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -2214,6 +2218,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
         need("BATTERY = os.path.join(HERE, \"battery.py\")" in tick and "(\"battery\", BATTERY, 60)" in tick and "[PY, script]" in tick,
              "the routine doesn't run the battery check every minute")
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the status page in")
         node = shutil.which("node") or "/opt/homebrew/bin/node"
@@ -2279,7 +2284,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
 """
             idx = site / "status/index.html"
             idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
-            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h37-profile'}",
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--user-data-dir={self.tmp / 'h37-profile'}",
                                               "--virtual-time-budget=20000", "--dump-dom", base + "/"], timeout=120)
             m = re.search(r'<pre id="h37">H37RESULT (.*?) END</pre>', r.stdout)
             need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -2337,6 +2342,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
         need('STATS = os.path.join(HERE, "stats.py")' in tick and "(\"stats\", STATS, 150)" in tick and "[PY, script]" in tick, "the routine doesn't run the stats every minute")
         need("routines.beat" not in (ROOT / "routine/stats.py").read_text(), "the stats write a routine line (they shouldn't touch the lights)")
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the status page in")
         node = shutil.which("node") or "/opt/homebrew/bin/node"
@@ -2413,7 +2419,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
             idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
             results = []
             for name, size in (("computer", "1280,1600"), ("phone", "390,3000")):
-                r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / ('h44-' + name)}",
+                r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--user-data-dir={self.tmp / ('h44-' + name)}",
                                                   f"--window-size={size}", "--virtual-time-budget=25000", "--dump-dom", base + "/"], timeout=120)
                 m = re.search(r'<pre id="h44">H44RESULT (.*?) END</pre>', r.stdout)
                 need(m, f"the page test ({name}) didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -2997,7 +3003,8 @@ echo "ALL OK"
         need(state(a).startswith("ended") and f"by a crash; requeued as job {d}" in state(a), f"the crashed job says: {state(a)}")
         rerun = waiting()[d]["text"]
         need(rerun.startswith(f"Rerun of job {a},") and "pick up from there instead of starting over" in rerun
-             and rerun.endswith("Then the job as it was: flow 59 job a") and "panic report" in rerun,
+             and rerun.endswith("Then the job as it was: flow 59 job a")
+             and ("panic report" in rerun or "crash record" in rerun),
              f"the rerun's text: {rerun}")
         need(caught["inc"] and caught["inc"][-1][0] == "jobs" and "crash" in caught["inc"][-1][1]
              and f"job {d}" in caught["inc"][-1][2][0] and "top of the line" in caught["inc"][-1][2][0],
@@ -3042,6 +3049,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         page in a headless browser, with a fake live call whose data channel only records what is sent;
         then on the live test call a long answer is cancelled while she talks (two Claude turns)."""
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         page = (APP / "web/index.html").read_text()
@@ -3105,7 +3113,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
 """
         f = self.tmp / "h38.html"
         f.write_text(page.replace("</body>", harness + "</body>", 1))
-        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--autoplay-policy=no-user-gesture-required",
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--autoplay-policy=no-user-gesture-required",
                                           "--virtual-time-budget=120000", "--dump-dom", f.as_uri()], timeout=180)
         m = re.search(r'<pre id="h38">H38RESULT (.*?) END</pre>', r.stdout)
         need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -3167,6 +3175,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         her lines, the talk button, the low talk sound and Cancel work as before; the second load
         remembers the choice."""
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         page = (APP / "web/index.html").read_text()
@@ -3180,7 +3189,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
   try { localStorage.removeItem("hq-voice-off"); } catch (e) {}
   voiceOff = false; applyVoice();
   const cs = getComputedStyle(voiceBtn);
-  check("there", cs.display !== "none" && cs.position === "fixed" && !on() && !audioEl.muted, cs.display + "/" + cs.position + "/" + on());
+  check("there", cs.display !== "none" && voiceBtn.parentElement.id === "dock" && !on() && !audioEl.muted, cs.display + "/" + voiceBtn.parentElement.id + "/" + on());
   // before a call: off, remembered
   voiceBtn.click(); await wait(50);
   check("idle-off", on() && audioEl.muted && localStorage.getItem("hq-voice-off") === "on", on() + "/" + audioEl.muted);
@@ -3232,7 +3241,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         for name, harness in (("h40a", first), ("h40b", second)):
             f = self.tmp / f"{name}.html"
             f.write_text(page.replace("</body>", harness + "</body>", 1))
-            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--autoplay-policy=no-user-gesture-required",
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--autoplay-policy=no-user-gesture-required",
                                               f"--user-data-dir={prof}", "--virtual-time-budget=20000", "--dump-dom", f.as_uri()], timeout=90)
             m = re.search(r'<pre id="h40">H40RESULT (.*?) END</pre>', r.stdout)
             need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -3255,6 +3264,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         a long text stops at the max and scrolls; on the computer Enter sends and Shift+Enter doesn't,
         on a phone Enter is a new line and Send sends; after sending the box is one line again."""
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         page = (APP / "web/index.html").read_text()
@@ -3306,7 +3316,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
 """
         f = self.tmp / "h41.html"
         f.write_text(page.replace("</body>", harness + "</body>", 1))
-        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--window-size=390,844",
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=390,844",
                                           f"--user-data-dir={self.tmp / 'h41-profile'}", "--virtual-time-budget=20000", "--dump-dom", f.as_uri()], timeout=90)
         m = re.search(r'<pre id="h41">H41RESULT (.*?) END</pre>', r.stdout)
         need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -4346,6 +4356,7 @@ console.log(JSON.stringify({{ problems: r.problems, current: r.current }}));"""
             need(not re.search(r"pkill|killall|process\.kill", js + (ROOT / "status/server.mjs").read_text()), "the phone version can stop processes")
             # At phone width in a headless browser: the strip, the status page below, Call loads the call page only when opened.
             cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+            cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
             chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
             need(Path(chrome).exists(), "no headless browser found")
             harness = r"""<script>
@@ -4369,7 +4380,7 @@ window.addEventListener('load', () => setTimeout(() => {
             # A copy of the page with the test harness, pointed at the test server (its <base>); web security is off
             # in this throwaway browser only, so the copy may read the test server's /hq.json.
             (self.tmp / "h28.html").write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{base}/">', 1))
-            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h28-profile'}",
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--user-data-dir={self.tmp / 'h28-profile'}",
                                               "--disable-web-security", "--window-size=390,844", "--virtual-time-budget=6000", "--dump-dom", (self.tmp / "h28.html").as_uri()], timeout=60)
             m = re.search(r'<pre id="h28">H28RESULT (.*?) END</pre>', r.stdout)
             need(m, f"the phone page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -4676,6 +4687,7 @@ setTimeout(async () => {
         need(not bot.offer_from_this_mac(offer("203.0.113.5")) and not bot.offer_from_this_mac(offer("1a2b.local"))
              and not bot.offer_from_this_mac(b"junk"), "a call from elsewhere counts as this MacBook")
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         harness = r"""<script>
@@ -4693,7 +4705,7 @@ setTimeout(() => {
 </script>"""
         f = self.tmp / "h46.html"
         f.write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1))
-        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h46-profile'}",
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--user-data-dir={self.tmp / 'h46-profile'}",
                                           "--disable-web-security", "--virtual-time-budget=5000", "--dump-dom", f.as_uri() + "?app=1"], timeout=60)
         m = re.search(r'<pre id="h46">H46RESULT (.*?) END</pre>', r.stdout)
         need(m, f"the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -4773,6 +4785,7 @@ setTimeout(() => {
         repeats ignored) and letting go sends (yellow, muted); not before a call, not while typing in the text box,
         not inside the Hang up question. Outside the app (the browser, the phone) space does nothing."""
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         page = (APP / "web/index.html").read_text()
@@ -4812,7 +4825,7 @@ setTimeout(() => {
         f.write_text(page.replace("</body>", harness + "</body>", 1))
         got = {}
         for where, q in (("app", "?app=1"), ("browser", "")):
-            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--autoplay-policy=no-user-gesture-required",
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--autoplay-policy=no-user-gesture-required",
                                               f"--user-data-dir={self.tmp / ('h49-' + where)}", "--virtual-time-budget=20000", "--dump-dom", f.as_uri() + q], timeout=90)
             m = re.search(r'<pre id="h49">H49RESULT (.*?) END</pre>', r.stdout)
             need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
@@ -6563,7 +6576,7 @@ print(json.dumps(o))
         browsers = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
         if (q["running"] or q["waiting"]) and browsers:
             chrome = browsers[-1]
-            r = await asyncio.to_thread(run, [str(chrome), "--headless", "--disable-gpu", "--no-first-run", "--window-size=900,3000",
+            r = await asyncio.to_thread(run, [str(chrome), "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=900,3000",
                                               f"--user-data-dir={self.tmp / 'h61'}", "--virtual-time-budget=8000", "--dump-dom", "http://127.0.0.1:4748/"], timeout=120)
             need("(estimate)" in r.stdout and "Estimates" in r.stdout, "the live status page doesn't show the estimates on the job list")
         # A call may read the list, and the call rules say the estimates are estimates.
@@ -6586,6 +6599,7 @@ print(json.dumps(o))
         thinking-sound switch is on. The switch itself is never changed. No Claude turns: the real
         call page in a headless browser, on a fake live call."""
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         page = (APP / "web/index.html").read_text()
@@ -6625,7 +6639,7 @@ print(json.dumps(o))
 """
         f = self.tmp / "f14.html"
         f.write_text(page.replace("</body>", harness + "</body>", 1))
-        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--autoplay-policy=no-user-gesture-required",
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--autoplay-policy=no-user-gesture-required",
                                           f"--user-data-dir={self.tmp / 'f14-profile'}", "--virtual-time-budget=20000", "--dump-dom", f.as_uri()], timeout=90)
         m = re.search(r'<pre id="f14">F14RESULT (.*?) END</pre>', r.stdout)
         need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -6753,6 +6767,7 @@ print(json.dumps(o))
         browser with made-up answers (no network, no update); then that the status page, the call page, the Mac
         app's strip and the phone version carry it, and the live status server answers."""
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found")
         js = (ROOT / "status/update-ui.js").read_text()
@@ -6800,7 +6815,7 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
 </script></body></html>"""
         f = self.tmp / "h59.html"
         f.write_text(harness.replace("__JS__", js.replace("</script", "<\\/script")))
-        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", f"--user-data-dir={self.tmp / 'h59-profile'}",
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--user-data-dir={self.tmp / 'h59-profile'}",
                                           "--virtual-time-budget=10000", "--dump-dom", f.as_uri()], timeout=90)
         m = re.search(r'<pre id="r">H59RESULT (.*?) END</pre>', r.stdout)
         need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -7002,6 +7017,7 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         call, no Yes ever shows. No hint on the page. On the server a typed "Yes" goes the same way as a
         typed or spoken yes, so it answers a question waiting for his yes."""
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         page = (APP / "web/index.html").read_text()
@@ -7066,7 +7082,7 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
 """
         f = self.tmp / "h72.html"
         f.write_text(page.replace("</body>", harness + "</body>", 1))
-        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--window-size=390,844",
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=390,844",
                                           f"--user-data-dir={self.tmp / 'h72-profile'}", "--virtual-time-budget=30000", "--dump-dom", f.as_uri()], timeout=90)
         m = re.search(r'<pre id="h72">H72RESULT (.*?) END</pre>', r.stdout)
         need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
@@ -11932,7 +11948,7 @@ print(json.dumps(o))
         pairing, a stand-in for the other HQ on a spare port, the lines and incidents caught, nothing real written):
         alone no lines; paired, this computer up and online and the other answering; one missed answer yellow, two
         red with an incident, closed when it answers again; offline, this one red and the other "can't tell"; a
-        new name leaves no old line. Then the status page in a headless browser: Laptop and VPS right after Main
+        new name leaves no old line and no open incident (H162). Then the status page in a headless browser: Laptop and VPS right after Main
         or backup, red when down, with their bars in the graph."""
         import subprocess as sp
         sup = self.tmp / "h88-support"
@@ -11961,6 +11977,7 @@ class I:
     def down(self, k, why, at=None): self.log.append(("down", k, why)); self.open_.add(k)
     def fix(self, k, what, at=None): self.log.append(("fix", k, what))
     def up(self, k, at=None): self.log.append(("up", k)); self.open_.discard(k)
+    def read(self): return {"incidents": [{"key": k} for k in sorted(self.open_)]}
 r, i, out = R(), I(), {}
 r.lines["beat-old"] = {"state": "ok"}
 out["alone"] = [heartbeat.tick(routines=r, incidents=i), sorted(r.lines)]
@@ -11974,7 +11991,7 @@ heartbeat.tick(routines=r, incidents=i, online=True, peer={}); out["miss2"] = sn
 heartbeat.tick(routines=r, incidents=i, online=True); out["back"] = snap(); out["inc3"] = list(i.log)
 heartbeat.tick(routines=r, incidents=i, online=False, peer={}); out["offline"] = snap()
 os.environ["HQ_LABEL"] = "Server"
-heartbeat.tick(routines=r, incidents=i, online=True); out["renamed"] = snap()
+heartbeat.tick(routines=r, incidents=i, online=True); out["renamed"] = snap(); out["inc4"] = [list(i.log), sorted(i.open_)]
 print("H88OUT " + json.dumps(out))
 """)
         env = {**os.environ, "HQ_SUPPORT": str(sup), "HQ_LABEL": "Laptop"}
@@ -11994,6 +12011,8 @@ print("H88OUT " + json.dumps(out))
         need(o["offline"]["beat-laptop"][1] == "down" and o["offline"]["beat-vps"][1] == "waiting" and "Can't tell" in o["offline"]["beat-vps"][2],
              f"offline isn't this one red and the other can't tell: {o['offline']}")
         need(sorted(o["renamed"]) == ["beat-server", "beat-vps"], f"a new name left an old line behind: {sorted(o['renamed'])}")
+        need(o["inc4"][1] == [] and ["up", "beat-laptop"] in o["inc4"][0],
+             f"a new name left the old name's incident open (H162): {o['inc4']}")
         # The status page.
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
         cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
@@ -12059,7 +12078,7 @@ print("H88OUT " + json.dumps(out))
         need("down" in res["vps"], f"the VPS line isn't red when it doesn't answer: {res['vps']}")
         need(res["lanes"] == "Laptop,VPS", f"the graph has no bars for Laptop and VPS: {res['lanes']}")
         return ("alone no lines; paired both green, one miss yellow, two red with an incident, closed when back; offline this "
-                "one red and the other can't tell; a new name leaves no old line; on the page Laptop and VPS right after Main "
+                "one red and the other can't tell; a new name leaves no old line and no open incident; on the page Laptop and VPS right after Main "
                 "or backup, the VPS red, both with bars in the graph")
 
     async def flow76(self) -> str:

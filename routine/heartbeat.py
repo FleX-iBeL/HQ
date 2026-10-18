@@ -116,6 +116,11 @@ def tick(routines=None, incidents=None, log=None, now=None, online=None, peer=No
                     log(f"heartbeat: {line['name']} back")
     if routines:
         routines.drop(PREFIX, keep=keys)  # a computer that got another name leaves no old line behind
+    if incidents:  # nor an open incident under its old name (H162, 18 October 2026)
+        for k in {i["key"] for i in incidents.read()["incidents"]
+                  if i["key"].startswith(PREFIX) and i["key"] not in keys and not i.get("back")}:
+            incidents.fix(k, "It goes by another name now; its old line is gone", at=now)
+            incidents.up(k, at=now)
     return {"here": mine, "other": other}
 
 

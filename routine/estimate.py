@@ -827,6 +827,7 @@ def pull(force=False, log=None):
     p = _peer()
     if not force and time.time() - max(p.get("at", 0), p.get("tried", 0)) < PULL_EVERY:
         return None
+    had = len(p.get("lines") or []) if p.get("at") else None
     try:
         code, d = role._request(c["peer"].rstrip("/") + "/api/estimates")
         ok = code == 200 and isinstance(d, dict) and isinstance(d.get("lines"), list) and d.get("name")
@@ -841,7 +842,7 @@ def pull(force=False, log=None):
     tmp = PEER + ".tmp"
     json.dump(p, open(tmp, "w"))
     os.replace(tmp, PEER)
-    if log and ok:
+    if log and ok and len(p["lines"]) != had:  # only when it changed, not every pull (H162, 18 October 2026)
         log(f"estimates: {len(p['lines'])} finished jobs from {p['label']}")
     return ok
 
