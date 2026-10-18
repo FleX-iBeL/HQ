@@ -40,7 +40,7 @@
   .hqu-shade { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 60; display: none; }
   .hqu-shade.open { display: block; }
   .hqu-sheet { position: fixed; z-index: 61; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 24px));
-    max-height: calc(100vh - 48px); overflow: auto; background: var(--u-card); color: var(--u-ink); border-radius: 16px;
+    max-height: calc(100vh - 48px); max-height: calc(100dvh - 48px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow: auto; overscroll-behavior: contain; background: var(--u-card); color: var(--u-ink); border-radius: 16px;
     box-shadow: 0 12px 40px rgba(0,0,0,.35); padding: 18px 18px 14px; display: none; }
   .hqu-sheet.open { display: block; }
   .hqu-sheet h2 { margin: 0 0 4px; font-size: 18px; }
@@ -227,6 +227,45 @@
     if (opt.banner) opt.banner.append(bar); else document.body.prepend(bar);
     document.body.append(shade, sheet);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sheet.classList.contains('open')) close(); });
+    // F39: on the iPhone a tap on its buttons only made them jump and the sheet stayed; a clean tap presses the button
+    // itself at the end of the touch, and the touch's own late click is cancelled, so it's never pressed twice.
+    let tap = null;
+    const tapOn = (e) => (e.target instanceof Element ? e.target.closest('.hqu-sheet button, .hqu-ver, .hqu-bar button') : null);
+    document.addEventListener('touchstart', (e) => { const b = e.touches.length === 1 ? tapOn(e) : null; tap = b ? { b, x: e.touches[0].clientX, y: e.touches[0].clientY, at: Date.now() } : null; }, { passive: true, capture: true });
+    document.addEventListener('touchmove', (e) => { if (tap && (Math.abs(e.touches[0].clientX - tap.x) > 10 || Math.abs(e.touches[0].clientY - tap.y) > 10)) tap = null; }, { passive: true, capture: true });
+    document.addEventListener('touchend', (e) => {
+      const t = tap; tap = null;
+      if (!t || e.defaultPrevented || Date.now() - t.at > 700 || t.b.disabled || !t.b.isConnected) return;
+      const c = e.changedTouches[0], under = c && document.elementFromPoint(c.clientX, c.clientY);
+      if (!under || !t.b.contains(under)) return;
+      if (e.cancelable) e.preventDefault();
+      t.b.click();
+    }, { passive: false });
+    // F39 (18 October 2026): a pull down closes it too, the way every sheet on the call page closes since Modern 3;
+    // from anywhere while it's scrolled to its top. It follows the finger with translate, so the centring stays.
+    let p = null;
+    const back = (go) => {
+      const quick = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      sheet.style.transition = quick ? 'none' : 'translate .2s ease-out';
+      sheet.style.translate = go ? `0 ${innerHeight}px` : '';
+      setTimeout(() => { if (go) close(); sheet.style.transition = sheet.style.translate = ''; }, quick ? 0 : 200);
+    };
+    sheet.addEventListener('touchstart', (e) => {
+      p = e.touches.length === 1 && sheet.scrollTop <= 0 ? { x: e.touches[0].clientX, y: e.touches[0].clientY, at: Date.now(), dir: '' } : null;
+    }, { passive: true });
+    sheet.addEventListener('touchmove', (e) => {
+      if (!p || e.touches.length !== 1) return;
+      const dx = e.touches[0].clientX - p.x, dy = e.touches[0].clientY - p.y;
+      if (!p.dir) { if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return; p.dir = dy > 0 && Math.abs(dy) > Math.abs(dx) * 1.2 ? 'pull' : 'other'; }
+      if (p.dir !== 'pull') return;
+      if (e.cancelable) e.preventDefault();
+      p.dy = Math.max(0, dy); sheet.style.transition = 'none'; sheet.style.translate = `0 ${p.dy}px`;
+    }, { passive: false });
+    sheet.addEventListener('touchend', () => {
+      const s = p; p = null; if (!s || s.dir !== 'pull') return;
+      const d = s.dy || 0; back(d >= 110 || (d > 40 && d / Math.max(1, Date.now() - s.at) > 0.5));
+    });
+    sheet.addEventListener('touchcancel', () => { if (p && p.dir === 'pull') back(false); p = null; });
     poll();
   }
 

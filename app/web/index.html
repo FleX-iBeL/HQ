@@ -27,7 +27,7 @@
   /* H9: iOS enlarges text when the phone turns sideways and doesn't always shrink it back. */
   html { -webkit-text-size-adjust:100%; text-size-adjust:100%; }
   html,body { margin:0; }
-  html { height:100%; }
+  html { height:100%; overscroll-behavior:none; }  /* F39: a pull on the page itself never bounces it like a reload */
   /* H52: centred when there's room; when there isn't (the phone's HQ page, under its tabs), it starts at
      the top and scrolls, instead of cutting off the heading. The space at the bottom keeps the last line
      clear of the dock (H140). */
@@ -3401,8 +3401,9 @@ document.addEventListener("visibilitychange", async () => {
 // H201 (Modern 3): every sheet follows the finger down and closes past a short pull, the way the phone's own sheets
 // do (his words: swiping "down when you want to go back to certain menus"). From its top (the handle and title) always;
 // from further in only when what's under the finger is scrolled to its top, so scrolling a list never closes it.
-// On a call the sheets hang from the top of the screen, so there it's a pull up on the title that closes them.
-// Never from a field being typed in; Donna's chat keeps its own handle (F29). Claude's numbers.
+// On a call the sheets hang from the top of the screen, so there it's a pull up on the title that closes them, and
+// since F39 a pull down on the title too (the way every other sheet closes; a pull down that did nothing only bounced
+// the page, "almost like refresh"). Never from a field being typed in; Donna's chat keeps its own handle (F29). Claude's numbers.
 const PULL_CLOSE_PX = 110;
 function sheetPull(sheet, close) {
   const head = sheet.querySelector(":scope > [id$='head']") || sheet.querySelector(":scope > h2");
@@ -3419,12 +3420,12 @@ function sheetPull(sheet, close) {
     const quick = matchMedia("(prefers-reduced-motion: reduce)").matches;
     sheet.style.transition = quick ? "none" : "transform .2s ease-out";
     if (!go) { sheet.style.transform = ""; setTimeout(reset, quick ? 0 : 200); return; }
-    sheet.style.transform = "translateY(" + (fromTop() ? -1 : 1) * (sheet.offsetHeight + 40) + "px)";
+    sheet.style.transform = "translateY(" + (fromTop() && !(p0 && p0.dy > 0) ? -1 : 1) * (sheet.offsetHeight + 40) + "px)";
     setTimeout(() => { close(); reset(); }, quick ? 0 : 200);
   };
-  let p = null;
+  let p = null, p0 = null;  // p0: the pull that just ended, so it leaves the way it was pulled
   sheet.addEventListener("touchstart", ev => {
-    p = null;
+    p = p0 = null;
     if (!sheet.classList.contains("open") || ev.touches.length !== 1 || typingIn(ev.target, sheet)) return;
     const t = ev.touches[0], r = sheet.getBoundingClientRect();
     const onHead = (head && head.contains(ev.target)) || t.clientY - r.top < 56;
@@ -3436,20 +3437,20 @@ function sheetPull(sheet, close) {
     if (!s.dir) {
       if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
       const along = Math.abs(dy) > Math.abs(dx) * 1.2;
-      const ok = s.up ? along && dy < 0 && s.onHead
+      const ok = s.up ? along && s.onHead
                       : along && dy > 0 && (s.onHead || !s.sc || s.sc.scrollTop <= 0);
       s.dir = ok ? "pull" : "other";
     }
     if (s.dir !== "pull") return;
     if (ev.cancelable) ev.preventDefault();
-    s.dy = s.up ? Math.min(0, dy) : Math.max(0, dy);
+    s.dy = s.up ? dy : Math.max(0, dy);
     sheet.style.transition = "none"; sheet.style.transform = "translateY(" + s.dy + "px)";
   }, { passive: false });
   sheet.addEventListener("touchend", () => {
     const s = p; p = null;
     if (!s || s.dir !== "pull") return;
     const d = Math.abs(s.dy || 0), fast = d > 40 && d / Math.max(1, Date.now() - s.at) > 0.5;
-    end(d >= PULL_CLOSE_PX || fast);
+    p0 = s; end(d >= PULL_CLOSE_PX || fast);
   });
   sheet.addEventListener("touchcancel", () => { if (p && p.dir === "pull") end(false); p = null; });
 }
@@ -3461,6 +3462,76 @@ sheetPull(calEl, () => showCal(false));
 sheetPull(todoEl, () => showTodo(false));
 sheetPull(document.getElementById("wxsheet"), () => showWx(false));
 sheetPull(setEl, () => showSettings(false));
+
+// F39 (18 October 2026, his words: "i cant close menus like changelog, or hang up, i see the screen almost like refresh
+// and show the same menu again"): the menus in the middle of the screen (the changelog, Are you sure, Cancel what I
+// said) close with a pull down too, the same as the sheets; a pull that did nothing there only bounced the page. Pulled
+// away it means No: Stay on, Keep. The changelog does its own in update-ui.js. They follow the finger with `translate`,
+// so the transform that centres them stays as it is.
+function menuPull(el, close) {
+  let p = null;
+  const back = go => {
+    const quick = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.style.transition = quick ? "none" : "translate .2s ease-out";
+    el.style.translate = go ? "0 " + (innerHeight + 40) + "px" : "";
+    setTimeout(() => { if (go) close(); el.style.transition = el.style.translate = ""; }, quick ? 0 : 200);
+  };
+  el.addEventListener("touchstart", ev => {
+    p = ev.touches.length === 1 && el.classList.contains("open") ? { x: ev.touches[0].clientX, y: ev.touches[0].clientY, at: Date.now(), dir: "" } : null;
+  }, { passive: true });
+  el.addEventListener("touchmove", ev => {
+    const s = p; if (!s || ev.touches.length !== 1) return;
+    const dx = ev.touches[0].clientX - s.x, dy = ev.touches[0].clientY - s.y;
+    if (!s.dir) { if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return; s.dir = dy > 0 && Math.abs(dy) > Math.abs(dx) * 1.2 ? "pull" : "other"; }
+    if (s.dir !== "pull") return;
+    if (ev.cancelable) ev.preventDefault();
+    s.dy = Math.max(0, dy); el.style.transition = "none"; el.style.translate = "0 " + s.dy + "px";
+  }, { passive: false });
+  el.addEventListener("touchend", () => {
+    const s = p; p = null; if (!s || s.dir !== "pull") return;
+    const d = s.dy || 0; back(d >= PULL_CLOSE_PX || (d > 40 && d / Math.max(1, Date.now() - s.at) > 0.5));
+  });
+  el.addEventListener("touchcancel", () => { if (p && p.dir === "pull") back(false); p = null; });
+}
+menuPull(hangAsk, () => askHangup(false));
+menuPull(document.getElementById("cxask"), () => askCancel(false));
+
+// F39: on the iPhone a tap on these buttons only made them jump, and the menu stayed ("show the same menu again",
+// and in the tutorial Next stayed on the same step). So a clean tap (one finger, hardly moved, short) presses the
+// button itself at the end of the touch, and the touch's own late click is cancelled, so it's never pressed twice.
+// Only the menus' and sheets' own buttons; Mute keeps its hold to talk. The changelog's are done in update-ui.js.
+const TAP_BUTTONS = "#hangask button, #cxask button, #tourcard button, #tour button, #tourlist button, #chathead button, #stathead button, " +
+  "#histhead button, #noteshead button, #calhead button, #todohead button, #wxhead button, #dirhead button, #setdone, #helpbtn";
+let tapAt = null;
+document.addEventListener("touchstart", ev => {
+  const b = ev.touches.length === 1 && ev.target instanceof Element ? ev.target.closest(TAP_BUTTONS) : null;
+  tapAt = b ? { b, x: ev.touches[0].clientX, y: ev.touches[0].clientY, at: Date.now() } : null;
+}, { passive: true, capture: true });
+document.addEventListener("touchmove", ev => {
+  if (tapAt && (Math.abs(ev.touches[0].clientX - tapAt.x) > 10 || Math.abs(ev.touches[0].clientY - tapAt.y) > 10)) tapAt = null;
+}, { passive: true, capture: true });
+document.addEventListener("touchend", ev => {
+  const t = tapAt; tapAt = null;
+  if (!t || ev.defaultPrevented || Date.now() - t.at > 700 || t.b.disabled || !t.b.isConnected) return;
+  const c = ev.changedTouches[0], under = c && document.elementFromPoint(c.clientX, c.clientY);
+  if (!under || !t.b.contains(under)) return;
+  if (ev.cancelable) ev.preventDefault();
+  t.b.click();
+}, { passive: false });
+
+// F39: a tap beside an open sheet closes it, as the shade does for Settings, and only closes it: nothing under the
+// finger is pressed. Before a call only: on a call the chat is the screen and the buttons under it must keep working.
+// The dock keeps its own taps (a tap on the open one closes it, another one switches), and so do the menus above.
+document.addEventListener("click", ev => {
+  const t = ev.target;
+  if (state !== "idle" || tourAt || !(t instanceof Element) || !t.isConnected) return;
+  if (t.closest("#dock, #wx, .hqu-sheet, .hqu-shade, #hangask, #cxask, #tour, #tourlayer, #settings, #shade")) return;
+  const open = [[chatEl, () => showChat(false)], [statEl, () => showStatus(false)], [histEl, () => showHistory(false)],
+    [notesEl, () => showNotes(false)], [calEl, () => showCal(false)], [todoEl, () => showTodo(false)],
+    [document.getElementById("wxsheet"), () => showWx(false)], [dirEl, () => showDirect(false)]].find(([el]) => el.classList.contains("open"));
+  if (!open || open[0].contains(t)) return;
+  ev.preventDefault(); ev.stopPropagation(); open[1]();
+}, true);
 
 // H74 (12 to 17 October 2026): the get-started tutorial, always to find again behind the question mark at the top left.
 // His words (call at 12:44, 17 October): "I prefer it's bigger, but still user-friendly. ... Quick short things that people

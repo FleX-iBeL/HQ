@@ -9087,7 +9087,8 @@ setTimeout(async () => {
   out.push("oncall:" + (live.some(b => b.id === "calbtn") && live.some(b => b.id === "devbtn") && !outside.length && !cut.length ? "ok" : "WRONG " + live.length + " out " + outside + " cut " + cut));
   showNotes(true); await wait(300);
   await drag(nhead, 0, 180, 120);
-  out.push("oncall-down:" + (notesOpen() ? "ok" : "WRONG"));
+  out.push("oncall-down:" + (!notesOpen() && !notesEl.style.transform ? "ok" : "WRONG"));  // F39: a pull down on its title closes it too
+  showNotes(true); await wait(300);
   await drag(nhead, 0, -180, 120);
   out.push("oncall-up:" + (!notesOpen() && state === "live" ? "ok" : "WRONG"));
   cleanup("Call ended");
@@ -9116,12 +9117,94 @@ setTimeout(async () => {
             for k, what in (("pull-short", "a short pull closed the sheet or left it moved"), ("right-top", "a swipe right at the top closed the sheet"),
                             ("pull-scrolling", "pulling down a scrolled list closed the sheet"), ("pull-close", "a pull down didn't close the sheet"),
                             ("pull-settings", "a pull down didn't close Settings"), ("right-back", "a swipe right didn't go back from a past call"),
-                            ("oncall-down", "on a call a pull down closed the sheet hanging from the top"), ("oncall-up", "on a call a pull up didn't close the sheet")):
+                            ("oncall-down", "on a call a pull down on the title didn't close the sheet hanging from the top (F39)"), ("oncall-up", "on a call a pull up didn't close the sheet")):
                 need(res[k] == "ok", f"{name}: {what}: {res}")
             need(res["oncall"] == "ok", f"{name}: on a call (H144) Calendar or Mic isn't in the dock, a button sits outside it, or a name is cut off: {res}")
             seen.append(name)
-        return "Modern 3 the only look (H201): set in the page, no Look row, Classic or Modern 2 saved still shows Modern 3, the status page and her chat the same; a pull down closes a sheet (not a short one or a scrolled list; on a call a pull up), a swipe right goes back a level and does nothing at the top; the nine buttons in the dock with their names, on a call too with Calendar next to Mic, every name whole (H144) (" + ", ".join(seen) + ")"
+        return "Modern 3 the only look (H201): set in the page, no Look row, Classic or Modern 2 saved still shows Modern 3, the status page and her chat the same; a pull down closes a sheet (not a short one or a scrolled list; on a call a pull up or down on its title), a swipe right goes back a level and does nothing at the top; the nine buttons in the dock with their names, on a call too with Calendar next to Mic, every name whole (H144) (" + ", ".join(seen) + ")"
 
+
+    # 123
+    async def flow123(self) -> str:
+        """F39, no Claude: every sheet and menu on the call page closes, and Hang up ends the call. His words (18 October
+        2026): "i cant close menus like changelog, or hang up, i see the screen almost like refresh and show the same menu
+        again". The changelog closes with Close, a tap beside it and a pull down (a short pull keeps it); Are you sure
+        closes with a pull down as Stay on, and its Hang up ends the call; every sheet closes with its close, a tap
+        beside it (only that: nothing under the finger is pressed) and a pull down, a tap inside keeps it; on a call the
+        chat stays open when Mute is tapped and closes with a pull down or up on its title. The real page in a headless
+        browser: the phone, a small phone and the desktop app."""
+        page = (APP / "web/index.html").read_text()
+        need("function menuPull(" in page and "menuPull(hangAsk, " in page, "Are you sure doesn't close with a pull down")
+        need("overscroll-behavior:none" in page, "a pull on the page still bounces it")
+        need("F39" in (APP.parent / "status/update-ui.js").read_text(), "the changelog doesn't close with a pull down")
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        await self.ensure_server()
+        harness = r"""<script>
+setTimeout(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const touch = (type, x, y, el) => { const t = new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
+    el.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: type === "touchend" ? [] : [t], targetTouches: type === "touchend" ? [] : [t], changedTouches: [t] })); };
+  const drag = async (el, dy) => { const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + 12; touch("touchstart", x, y, el);
+    for (let i = 1; i <= 6; i++) { await wait(20); touch("touchmove", x, y + dy * i / 6, el); } touch("touchend", x, y + dy, el); await wait(400); };
+  const tapAt = async (x, y) => { const el = document.elementFromPoint(x, y); if (el) el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX: x, clientY: y })); await wait(250); return el; };
+  const on = el => el.classList.contains("open"), ok = (k, v) => out.push(k + ":" + (v ? "ok" : "WRONG"));
+  for (let i = 0; i < 30 && !window.hqUpdate; i++) await wait(100);
+  const hs = () => document.getElementById("hqu-sheet");
+  hqUpdate.open(); await wait(300);
+  ok("log-open", on(hs()));
+  [...hs().querySelectorAll("button")].find(b => b.textContent === "Close").click(); await wait(100);
+  ok("log-close", !on(hs()));
+  hqUpdate.open(); await wait(300); document.querySelector(".hqu-shade").click(); await wait(100);
+  ok("log-beside", !on(hs()));
+  hqUpdate.open(); await wait(300); await drag(hs(), 30);
+  ok("log-short", on(hs()) && !hs().style.translate);
+  await drag(hs(), 200);
+  ok("log-pull", !on(hs()) && !hs().style.translate);
+  const sheets = [["notes", notesEl, showNotes, "notesclose"], ["calendar", calEl, showCal, "calclose"], ["todo", todoEl, showTodo, "todoclose"],
+                  ["calls", histEl, showHistory, "histclose"], ["status", statEl, showStatus, "statclose"]];
+  let pressed = 0; document.getElementById("modes").addEventListener("click", () => pressed++);
+  for (const [n, el, show, cl] of sheets) {
+    if (getComputedStyle(el).display === "none" && !el.classList.contains("open")) { show(true); await wait(250); if (!on(el)) { out.push(n + ":skip"); continue; } } else { show(true); await wait(250); }
+    document.getElementById(cl).click(); await wait(100); const a = !on(el);
+    show(true); await wait(250); el.querySelector("h2").click(); await wait(100); const b = on(el);
+    const r = el.getBoundingClientRect(); await tapAt(innerWidth / 2, Math.max(4, r.top - 20)); const c = !on(el);
+    show(true); await wait(250); await drag(el.querySelector("h2") || el, 200); const d = !on(el) && !el.style.transform;
+    out.push(n + ":" + (a && b && c && d ? "ok" : "WRONG close " + a + " inside " + b + " beside " + c + " pull " + d));
+    show(false); await wait(100);
+  }
+  ok("beside-pressed-nothing", pressed === 0);
+  setState("live", "On the call"); await wait(200);
+  btn.click(); await wait(100); ok("ask-open", on(hangAsk));
+  await drag(hangAsk, 200); ok("ask-pull-stays", !on(hangAsk) && state === "live" && !hangAsk.style.translate);
+  btn.click(); await wait(600); document.getElementById("hangyes").click(); await wait(500);
+  ok("hangup", state === "idle" && !on(hangAsk));
+  setState("live", "On the call"); showChat(true); await wait(300);
+  muteBtn.click(); await wait(100); ok("call-mute-chat", on(chatEl));
+  await drag(document.getElementById("chathead"), 180); ok("call-pull-down", !on(chatEl));
+  showChat(true); await wait(300); await drag(document.getElementById("chathead"), -180); ok("call-pull-up", !on(chatEl) && state === "live");
+  cleanup("Call ended");
+  const pre = document.createElement("pre"); pre.id = "f39"; pre.textContent = "F39RESULT " + out.join(" | ") + " END"; document.body.append(pre);
+}, 1500);
+</script>"""
+        f = self.tmp / "f39.html"
+        f.write_text(page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1).replace("</body>", harness + "</body>", 1))
+        fa = self.tmp / "f39app.html"  # the desktop app loads the page with ?app
+        fa.write_text(f.read_text().replace('new URLSearchParams(location.search).has("app")', "true", 1))
+        seen = []
+        for name, size, page_file in (("the phone", "390,844", f), ("a small phone", "375,667", f), ("the desktop app", "1180,780", fa)):
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'f39-profile'}", "--disable-web-security", f"--window-size={size}",
+                                              "--virtual-time-budget=20000", "--dump-dom", page_file.as_uri()], timeout=90)
+            mm = re.search(r'<pre id="f39">F39RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{name}: the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            say(f"   {name} ({size}): {mm.group(1)}")
+            bad = [part for part in mm.group(1).split(" | ") if not part.endswith(":ok") and not part.endswith(":skip")]
+            need(not bad, f"{name}: a sheet or menu didn't close, or Hang up didn't end the call: {bad}")
+            seen.append(name)
+        return "F39: the changelog closes with Close, a tap beside it and a pull down (a short pull keeps it); Are you sure closes with a pull down and stays on the call, its Hang up ends it; every sheet closes with its close, a tap beside it (nothing under it pressed) and a pull down, a tap inside keeps it; on a call Mute leaves the chat open and a pull down or up on its title closes it (" + ", ".join(seen) + ")"
 
     # 98
     async def flow98(self) -> str:
@@ -13975,6 +14058,7 @@ FLOWS = {
     119: ("H205: What HQ helps you with, every feature a switch: all on to start, each followed through HQ, every combination keeps the screen tidy, screenshots of each state", False, "flow119"),
     120: ("H74: the get-started tutorial behind the question mark: short pieces on the real screen with demo content, the closing part, and a safe demo call (Free, Opus, no tools, nothing saved)", False, "flow120"),
     121: ("H74: a demo call's Claude answers a question about HQ from the tutorial, on Opus, without a tool", True, "flow121"),
+    123: ("F39: every sheet and menu closes (its close, a tap beside it, a pull down), Hang up ends the call; phone, small phone, desktop app", False, "flow123"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 
