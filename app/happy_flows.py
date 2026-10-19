@@ -8292,7 +8292,8 @@ setTimeout(() => {
         first, then texts when the job list is finished, for a new very important mail (not for its status changing),
         when something stays down and when it's back. A throwaway status server serves the chat and its service
         worker, refuses a send without the HQ header, signs a phone up, and his text gets her (canned) reply. Off a
-        Mac her reply finds Claude on PATH (F27). H170: a web address in a text is a link to tap, only http and https."""
+        Mac her reply finds Claude on PATH (F27). H170: a web address in a text is a link to tap, only http and https.
+        F42: in a thread over 200 (the server sends the last 200) a new text still shows in the chat."""
         import base64
         import urllib.request
         sys.path.insert(0, str(ROOT / "routine"))
@@ -8483,9 +8484,41 @@ setTimeout(() => {
                 need(th[-2]["from"] == "me" and th[-2]["text"] == "Is the job list done?" and th[-1]["from"] == "agent",
                      f"texting her back gave {th[-2:]}")
                 need(dl.unanswered() == [], "his text is still unanswered")
+                # F42: a thread over 200. The server sends the last 200, so a new text pushes an old one off and the
+                # count stays 200; the chat's own draw code, run on a stand-in page, still shows the new text.
+                with (dl.folder() / "thread.jsonl").open("a", encoding="utf8") as fh:
+                    for i in range(230):
+                        fh.write(json.dumps({"at": 1792400000 + i * 60, "from": "me" if i % 2 else "agent", "text": f"old {i}"}) + "\n")
+                code, body = await asyncio.to_thread(call, "/direct.json")
+                before = json.loads(body)["messages"]
+                dl.add("me", "Did the long thread draw?")
+                code, body = await asyncio.to_thread(call, "/direct.json")
+                after = json.loads(body)["messages"]
+                need(len(before) == len(after) == 200 and after[-1]["text"] == "Did the long thread draw?",
+                     f"the server's last 200 aren't what the test expects: {len(before)} {len(after)} {after[-1:]}")
             finally:
                 srv.terminate()
                 srv.wait(timeout=10)
+            dh = (ROOT / "status/direct.html").read_text()
+            page = "".join(re.search(rf"// {k} begin[^\n]*(.*?)// {k} end", dh, re.S).group(1) for k in ("H158", "H170", "F42"))
+            js = """
+const el = tag => ({ tag, kids: [], append(...k) { this.kids.push(...k); } });
+const document = { createTextNode: t => ({ text: t }), createElement: el };
+const list = { kids: [], scrollHeight: 9000, scrollTop: 0, clientHeight: 500,
+  set innerHTML(v) { this.kids = []; }, append(...k) { this.kids.push(...k); } };
+let shown = 0;
+""" + page + """
+const texts = () => list.kids.filter(k => k.className && k.className.startsWith('m ')).map(k => k.kids.find(c => 'text' in c).text);
+const [before, after] = JSON.parse(process.argv[1]);
+draw(before); const one = texts(); list.scrollTop = 0;
+draw(after); const two = texts();
+console.log(JSON.stringify({ one: [one.length, one[one.length - 1]], two: [two.length, two[two.length - 1]], scrolled: list.scrollTop }));
+"""
+            r = subprocess.run([shutil.which("node") or "/opt/homebrew/bin/node", "-e", js, json.dumps([before, after])],
+                               capture_output=True, text=True, env={**os.environ, "TZ": "Europe/Amsterdam"})
+            got = json.loads(r.stdout or "null") if r.returncode == 0 else r.stderr[-300:]
+            need(isinstance(got, dict) and got["one"] == [200, before[-1]["text"]] and got["two"] == [200, "Did the long thread draw?"]
+                 and got["scrolled"] == 9000, f"in a thread over 200 her chat doesn't show the new text (F42): {got}")
             # F25: the bubble is in the call page (shown on 8443, whether the phone's icon opens it or the HQ page
             # around it), no longer over the voice button from phone.js; the call line passes her paths on.
             web = (ROOT / "app/web/index.html").read_text()
@@ -8549,7 +8582,7 @@ console.log(JSON.stringify(d.kids.map(k => k.tag ? ['a', k.href, k.textContent, 
         return ("push messages encrypt for the phone and carry a valid VAPID token, a gone phone is dropped; she texts once when the "
                 "job list is finished, for a new very important mail, when something stays down (a takeover at once) and when it's back; "
                 "the chat, its service worker, a phone signing up and texting her back work through the status server; each text shows its "
-                "time, with a day pill between days; a web address in a text is a link to tap")
+                "time, with a day pill between days; a web address in a text is a link to tap; in a thread over 200 a new text still shows")
 
     async def flow71(self) -> str:
         """H87, H91, no Claude: the three stop lines (5-hour, weekly all models, weekly Fable) each move every minute,
@@ -14202,7 +14235,7 @@ FLOWS = {
     83: ("H105: the notes button: his quick notes kept in the workspace, cleared one by one; just text, the field grows (H117)", False, "flow83"),
     84: ("H106, H112, F26: the mic and sound choice in Settings: every mic listed, the chosen one used by the call, sound where the browser can; changed on a call at once; one row on the phone", False, "flow84"),
     85: ("H79, H121, H130: ask for another agent by name: she hands over, or brings her in on a three-way or four-way call and she says hi", False, "flow85"),
-    86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back; H158: each text's time, day pills; H170: links to tap", False, "flow86"),
+    86: ("H80: Donna's direct line: her texts on the lock screen, when she texts, texting her back; H158: each text's time, day pills; H170: links to tap; F42: a thread over 200", False, "flow86"),
     87: ("H98: the dog sits by its empty bowl and says Update! in green when a newer version is out", False, "flow87"),
     88: ("H113: a job held by the usage line carries on in its own chat, or in a fresh one with a note at which step", False, "flow88"),
     89: ("H118: which computer is main, at a glance: a pill next to the name on the status page, the strip and the call page", False, "flow89"),

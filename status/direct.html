@@ -117,12 +117,17 @@
     if (at < s.length) el.append(document.createTextNode(s.slice(at)));
   }
   // H170 end
-  let drawnOn = '';
+  // F42 begin: drawn again when the last text changes too, not only the count: the server sends the last 200,
+  // so in a longer thread each new text pushes an old one off and the count stays the same.
+  let drawnOn = '', drawnLast = '';
 
   function draw(msgs) {
     // Drawn again past midnight too, so Today becomes Yesterday.
     const today = new Date().toDateString();
-    if (msgs.length === shown && today === drawnOn) return;
+    const lastOne = msgs[msgs.length - 1];
+    const last = lastOne ? [lastOne.at, lastOne.from, lastOne.text].join('|') : '';
+    if (msgs.length === shown && last === drawnLast && today === drawnOn) return;
+    const fresh = msgs.length > shown || last !== drawnLast;
     drawnOn = today;
     const atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
     list.innerHTML = '';
@@ -146,9 +151,11 @@
       list.append(d);
     }
     if (!msgs.length) list.innerHTML = '<div id="empty">No texts yet.</div>';
-    if (atEnd || msgs.length > shown) list.scrollTop = list.scrollHeight;
+    if (atEnd || fresh) list.scrollTop = list.scrollHeight;
     shown = msgs.length;
+    drawnLast = last;
   }
+  // F42 end
 
   async function load() {
     try {
