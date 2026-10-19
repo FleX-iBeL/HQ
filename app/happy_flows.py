@@ -8516,6 +8516,123 @@ setTimeout(() => {
                 "little once; a close deadline steps up), never at night (moved to the morning, quietly), no numbers in what she's told; "
                 "later pauses it to the morning, done stops it by words, number or Done in the app; command line, rules, policy, backup, /api/notes")
 
+    async def flow126(self) -> str:
+        """F43, no Claude, no network: something done doesn't come back from the other places it lives. A made-up list,
+        mail list and agent notes: done clears what clearly belongs to the item (a note saying its whole name, a
+        reminder, watch and nudge tied with --item, a To check line naming it in quotes), leaves what only might belong
+        to it and names it once, never touches a Very important line, writes one log line per thing cleared, and undo
+        puts it all back; a short name never clears on a guess; let go does the same; a test list never touches the
+        real pings; the rules, the policy and the mail check's instructions say it."""
+        import pings
+        import todo as td
+        import loose_ends as le
+        from policy import Policy, ALLOW
+        d = self.tmp / "f43"
+        d.mkdir(parents=True, exist_ok=True)
+        names = ("HQ_TODO", "HQ_TODO_UNDO", "HQ_DIRECT_DIR", "HQ_AGENT_NOTES", "HQ_INBOX", "HQ_ROLE_HERE", "HQ_TODO_SWEEP")
+        keep = {k: os.environ.get(k) for k in names}
+        real = Path(os.path.join(pings.hqpaths.DATA, "direct-line", "pings.json"))
+        real_before = real.read_bytes() if real.exists() else None
+        (d / "list.md").write_text(
+            "# List\n\n## 1. Important, not urgent\n\n| Challenge | Type | Deadline | Status | Added | Notes |\n"
+            "|---|---|---|---|---|---|\n| Renew the library card at the town hall | passive | | open | 2099-01-01 | |\n"
+            "| Paint | active | | open | 2099-01-01 | |\n\n## 2. Important and urgent\n\n| Challenge | Type | Deadline | Status | Added | Notes |\n"
+            "|---|---|---|---|---|---|\n\n## 5. Consciously decided not to pursue\n\n"
+            "| Challenge | Decided (date, time) | Why |\n|---|---|---|\n\n## 7. Done\n\n| Challenge | Done (date, time) | Notes |\n"
+            "|---|---|---|\n\n## Log\n\n- 2099-01-01 10:00: started.\n")
+        inbox0 = ("# Mail\n\n## Very important\n\n- 1 Jan · Town hall · Card expiring · The library card renewal is due · "
+                  "Why: a date · Status: new · [Gmail](x)\n\n## To check\n\n### 2 January 2099\n\n- 2 Jan · Library · Your card · "
+                  "A reminder, about the open item \"Renew the library card at the town hall\" · [Gmail](a)\n"
+                  "- 2 Jan · Shop · Paint sale · New paint colours on sale · [Gmail](b)\n")
+        (d / "inbox.md").write_text(inbox0)
+        os.environ.update({"HQ_TODO": str(d / "list.md"), "HQ_TODO_UNDO": str(d / "undo.json"), "HQ_DIRECT_DIR": str(d / "line"),
+                           "HQ_AGENT_NOTES": str(d / "notes-donna.md"), "HQ_INBOX": str(d / "inbox.md"), "HQ_ROLE_HERE": "1"})
+        os.environ.pop("HQ_TODO_SWEEP", None)
+        script = str(ROOT / "routine" / "pings.py")
+        run = lambda *a: subprocess.run([sys.executable, script, *a], capture_output=True, text=True, env=os.environ.copy(), timeout=60)
+        try:
+            # the judging: tied or named whole is clear; shared words only maybe; a short name never clear on words
+            title = "Renew the library card at the town hall"
+            need(le.judge(title, "x", "renew the library card at the town hall") == "clear", "a tied thing isn't clear")
+            need(le.judge(title, "Ask about renew the library card at the town hall today") == "clear", "a whole name isn't clear")
+            need(le.judge(title, "the library card renewal is due") == "unsure", "shared words aren't a maybe")
+            need(le.judge(title, "water the plants") == "", "nothing in common still counts")
+            need(le.judge("Shopfix: close the account, take the money out", "an invoice, the money comes off the account") == ""
+                 and le.judge("Shopfix: close the account, take the money out", "Shopfix: keep your account active") == "unsure",
+                 "a maybe for a name with a subject doesn't need the subject")
+            need(le.judge("Paint", "buy paint brushes") == "unsure" and le.judge("Paint", "x (to-do: Paint)") == "clear",
+                 "a one-word name clears on a guess, or a tied note doesn't clear")
+            # her things, set the way a call sets them
+            for args in (("note", "Renew the library card at the town hall, bring the old one"),
+                         ("note", "Keep nudging until the library card is renewed"),
+                         ("remind", "2099-01-05 9:30", "Bring your passport", "--item", "library card"),
+                         ("nudge", "2099-01-03 9:00", "the card", "--why", "it runs out", "--item", "library card"),
+                         ("watch", "mail", "library card letters", "--until", "2099-01-09 12:00"),
+                         ("note", "buy brushes", "--item", "Paint")):
+                r = run(*args)
+                need(r.returncode == 0, f"pings {args[0]} failed: {r.stdout} {r.stderr}")
+            s = pings.read()
+            need(s["reminders"][0].get("item") == title and s["nudges"][0].get("item") == title,
+                 f"--item doesn't tie a reminder or nudge to its item: {s['reminders']} {s['nudges']}")
+            need(any(n["text"] == "buy brushes (to-do: Paint)" for n in pings.her_notes()), "--item doesn't tie a note")
+            list0 = (d / "list.md").read_text()
+            notes0 = sorted(n["text"] for n in pings.her_notes())
+            out = td.done("library card", by="a test")
+            said = out["said"]
+            need(len(out.get("cleared", [])) == 4, f"done didn't clear the four clear things: {said}")
+            need("Keep nudging" in said and "library card letters" in said and "Card expiring" in said and "Clear it too?" in said,
+                 f"what only might belong to it isn't named: {said}")
+            s = pings.read()
+            need(not s["reminders"] and pings.open_nudges(s) == [] and len(pings.open_watches("mail", s)) == 1,
+                 f"the reminder or nudge stayed, or the maybe watch went: {s}")
+            texts = [n["text"] for n in pings.her_notes()]
+            need("Keep nudging until the library card is renewed" in texts and not any(t.startswith("Renew the") for t in texts),
+                 f"her notes after done: {texts}")
+            inbox = (d / "inbox.md").read_text()
+            need("Your card" not in inbox and "Paint sale" in inbox and "Card expiring" in inbox,
+                 f"the mail list after done: {inbox}")
+            log = (d / "list.md").read_text().split("## Log")[1]
+            need(log.count("cleared with it") == 4 and log.index("cleared with it") < log.index("done, moved"),
+                 f"one log line per thing cleared, on top: {log}")
+            # undo puts every one of them back
+            u = td.undo()
+            need(u["ok"] and "Put back" in u["said"], f"undo: {u}")
+            need((d / "list.md").read_text() == list0, "undo didn't put the list back")
+            s = pings.read()
+            need(len(s["reminders"]) == 1 and len(pings.open_nudges(s)) == 1, f"undo didn't put back the reminder and nudge: {s}")
+            need(sorted(n["text"] for n in pings.her_notes()) == notes0, "undo didn't put back her note")
+            back = (d / "inbox.md").read_text()
+            need("Your card" in back and back.index("Your card") > back.index("### 2 January 2099") > back.index("## To check"),
+                 f"undo didn't put the mail line back under its day: {back}")
+            # let go does the same; a one-word name only clears what's tied to it
+            out = td.letgo("Paint", "not now")
+            need(out.get("cleared") and "Paint sale" in " ".join(out.get("left", [])) and "Paint sale" in (d / "inbox.md").read_text(),
+                 f"let go: {out}")
+            # moving an item between open lists, or one already done, clears nothing
+            need(not td.move("library card", "2").get("cleared"), "a move cleared something")
+            # without its own pings, a test list never touches the real ones
+            os.environ.pop("HQ_DIRECT_DIR")
+            need(not le._pings_ok(), "a test list would clear the real pings")
+            os.environ["HQ_DIRECT_DIR"] = str(d / "line")
+            # the switch for a test that wants none of it
+            os.environ["HQ_TODO_SWEEP"] = "0"
+            need(not td.done("library card").get("cleared"), "HQ_TODO_SWEEP=0 still clears")
+            # the rules, the policy, the mail check
+            import config
+            need("F43" in config.TODO_RULE and "Very important" in config.TODO_RULE and "--item" in config.PINGS_RULE,
+                 "the call and chat rules don't say it")
+            pol = Policy(config.FOLDER)
+            cmd = f'python3 "{script}" remind "tomorrow 9:30" "x" --item "y"'
+            need(pol.decide("Bash", {"command": cmd}).verdict == ALLOW, "a call may not tie a reminder to an item")
+            mc = (ROOT / "routine" / "mail-check.md").read_text()
+            need('about the open item "<its exact name>"' in mc and "done list or the let-go list is skipped" in mc,
+                 "the mail check doesn't name items in quotes, or still adds mail about a done item")
+        finally:
+            for k, v in keep.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        need((real.read_bytes() if real.exists() else None) == real_before, "the workspace's own pings were touched")
+        return "done or let go clears what clearly belongs to the item, names the rest once, undo puts it back"
+
     async def flow86(self) -> str:
         """H80, no Claude: Donna's direct line. A push message encrypted for a stand-in phone decrypts back (RFC 8291)
         and its VAPID token verifies with the shared key; a gone phone is dropped. The routine's look takes stock
@@ -14504,6 +14621,7 @@ FLOWS = {
     123: ("F39: every sheet and menu closes (its close, a tap beside it, a pull down), Hang up ends the call; phone, small phone, desktop app", False, "flow123"),
     124: ("F40: groceries tick off in the app to their own ticked-off list (A to Z, a tap puts one back), and several at once give one item each; phone, small phone, desktop app", False, "flow124"),
     125: ("H211: nudge until done: from its start, again and again in the day by how much it matters, never at night, no numbers; later pauses, done stops it (a call, her chat, Done in the app)", False, "flow125"),
+    126: ("F43: something done doesn't come back: done or let go clears what clearly belongs to it (her notes, reminders, watches, nudges, To check mail lines), names the rest once, undo puts it back", False, "flow126"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 

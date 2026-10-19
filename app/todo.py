@@ -41,6 +41,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent  # HQ
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # loose_ends (F43)
 FILE = "challenges.md"
 _lock = threading.Lock()
 _HEAD = re.compile(r"^##\s+(?:(\d+)\.\s*)?(.+?)\s*$")
@@ -338,7 +339,7 @@ def _insert_log(lines: list[str], line: str) -> list[str]:
     return lines[:first] + [line] + lines[first:]
 
 
-def _write(p: Path, before: str, lines: list[str], what: str) -> None:
+def _write(p: Path, before: str, lines: list[str], what: str, swept: list | None = None) -> None:
     text = "\n".join(lines) + ("\n" if before.endswith("\n") else "")
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(text, encoding="utf8")
@@ -347,7 +348,7 @@ def _write(p: Path, before: str, lines: list[str], what: str) -> None:
         u = _undo_file()
         u.parent.mkdir(parents=True, exist_ok=True)
         u.write_text(json.dumps({"file": str(p), "before": before, "after_sha": hashlib.sha1(text.encode()).hexdigest(),
-                                 "what": what}), encoding="utf8")
+                                 "what": what} | ({"swept": swept} if swept else {})), encoding="utf8")
     except OSError:
         pass
 
@@ -408,8 +409,25 @@ def _move(p: Path, want_item: str, to: dict | str, at_value: str = "", note: str
         stamp = _now().strftime("%Y-%m-%d %H:%M")
         what = log_what or f"moved to {_list_label(dst)}"
         lines = _insert_log(lines, f"- {stamp}: {it['title']}: {what}{_by(by)}.")
-        _write(p, before, lines, f"{it['title']}: {what}")
-    return {"ok": True, "said": f"{it['title']}: {what}.", "id": it["id"], "list": dst["key"]}
+        # F43: done or let go, so what still hangs on to it elsewhere (her notes, reminders, watches, nudges, the
+        # mail list's To check lines) goes with it; what only might belong to it is left and named once.
+        cleared, records, unsure = [], [], []
+        if dst["kind"] in ("done", "letgo") and src["kind"] not in ("done", "letgo") and os.environ.get(
+                "HQ_TODO_SWEEP", "1") != "0":
+            try:
+                import loose_ends
+                cleared, records, unsure = loose_ends.sweep(it["title"], p)
+            except Exception:
+                cleared, records, unsure = [], [], []
+            for c in reversed(cleared):
+                lines = _insert_log(lines, f"- {stamp}: {it['title']}: cleared with it: {c}{_by(by)}.")
+        _write(p, before, lines, f"{it['title']}: {what}", records)
+    out = {"ok": True, "said": f"{it['title']}: {what}.", "id": it["id"], "list": dst["key"]}
+    if cleared or unsure:
+        import loose_ends
+        out["said"] += " " + loose_ends.said(cleared, unsure)
+        out["cleared"], out["left"] = cleared, unsure
+    return out
 
 
 def split_items(text: str, kind: str) -> list[str]:
@@ -608,7 +626,15 @@ def undo() -> dict:
         tmp.write_text(u["before"], encoding="utf8")
         os.replace(tmp, p)
         _undo_file().unlink(missing_ok=True)
-    return {"ok": True, "said": f"Undone: {u.get('what', 'the last change')}."}
+    back = 0
+    if u.get("swept"):
+        try:
+            import loose_ends  # F43: what was cleared with it comes back too
+            back = loose_ends.put_back(u["swept"], p)
+        except Exception:
+            back = 0
+    return {"ok": True, "said": f"Undone: {u.get('what', 'the last change')}." + (
+        f" Put back what was cleared with it ({back})." if back else "")}
 
 
 # ---- for a call ------------------------------------------------------------------------------------------------

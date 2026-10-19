@@ -30,6 +30,9 @@ first, then each text starts detached (direct_line.py text appt|remind FACTS, or
     python3 routine/pings.py note-clear "ID or words"    remove one of her notes
     python3 routine/pings.py due                         what would be texted now (nothing is sent)
 
+F43 (19 October 2026): remind, watch, nudge and note take --item "ITEM" (a to-do item's id or a few words of it):
+tied to that item, it's cleared when the item is done or let go (app/loose_ends.py).
+
 H125 (14 October 2026, call at 11:59, Pepper): her watch list, "let me know when …". In his words: "So hypothetically
 if i say hey i expect a package, can you keep an eye out on my email and let me know if i get some update on it" and
 "if in the future i also want to ask her for example to let me know if it will rain later today (just example) then
@@ -933,6 +936,30 @@ def listing() -> str:
     return "\n".join(out)
 
 
+def item_title(want: str) -> str:
+    """F43: a to-do item's exact name, from its id or a few words of it ('' when not exactly one)."""
+    if not want.strip():
+        return ""
+    sys.path.insert(0, str(ROOT / "app"))
+    try:
+        import todo
+        return todo.find_item(todo.parse(todo.path().read_text(encoding="utf8")), want)[1]["title"]
+    except Exception:
+        return ""
+
+
+def tag(coll: str, n: int, item: str) -> None:
+    """F43: ties reminder, watch or nudge N to the to-do item ITEM (its exact name)."""
+    if not item:
+        return
+    with _Lock():
+        s = read()
+        x = next((x for x in s.get(coll) or [] if int(x.get("n") or 0) == int(n)), None)
+        if x is not None:
+            x["item"] = item
+            _write(s)
+
+
 def main(argv: list[str]) -> int:
     by = os.environ.get("HQ_PINGS_BY", "")
     cmd = argv[0] if argv else "list"
@@ -940,6 +967,15 @@ def main(argv: list[str]) -> int:
     import role
     if cmd in role.WRITES["pings"] and not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
         return role.forward("pings", list(argv), {"HQ_PINGS_BY": by} if by else None)
+    # F43: --item ties a reminder, watch, nudge or note to a to-do item, so it goes when that item is done or let go.
+    item = ""
+    if "--item" in argv and cmd in ("remind", "watch", "nudge", "note"):
+        i = argv.index("--item")
+        want = argv[i + 1] if i + 1 < len(argv) else ""
+        argv = argv[:i] + argv[i + 2:]
+        item = item_title(want)
+        if want and not item:
+            print(f"(No single to-do item like \"{want}\", so it isn't tied to one.)")
     if cmd == "list":
         print(listing())
     elif cmd == "appt" and len(argv) >= 3 and argv[1] in ("on", "off"):
@@ -979,6 +1015,7 @@ def main(argv: list[str]) -> int:
             if at < dt.datetime.now().replace(second=0, microsecond=0):
                 raise ValueError(f"{at.strftime(FMT)} has passed already.")
             r = remind(at, " ".join(argv[2:]), by)
+            tag("reminders", r["n"], item)
         except ValueError as e:
             print(e)
             return 2
@@ -989,7 +1026,7 @@ def main(argv: list[str]) -> int:
             return 1
         print(f"Reminder {argv[1]} cancelled.")
     elif cmd == "note" and len(argv) >= 2:
-        it = note_add(" ".join(argv[1:]))
+        it = note_add(" ".join(argv[1:]) + (f" (to-do: {item})" if item else ""))
         if not it:
             print("Nothing to add.")
             return 2
@@ -1012,6 +1049,7 @@ def main(argv: list[str]) -> int:
                 until = when(rest[i + 1])
             once = True if "--once" in rest else False if "--every" in rest else None
             w = watch_add(argv[1], argv[2], until, once, by)
+            tag("watches", w["n"], item)
         except ValueError as e:
             print(e)
             return 2
@@ -1057,6 +1095,7 @@ def main(argv: list[str]) -> int:
             dl = opt("--deadline")
             x = nudge_add(start, " ".join([argv[2]] + words), opt("--why"), opt("--matters") or "normal",
                           when(dl) if dl else None, by)
+            tag("nudges", x["n"], item)
         except ValueError as e:
             print(e)
             return 2

@@ -166,7 +166,8 @@ his reason and the deadline (it costs him money, or it's close: much; an everyda
 ask him why it matters only when you can't tell. Never tell him how often you'll nudge, when the next one comes, or \
 any number or estimate: you'll just keep nudging, like a person would. The moment he says it's done, on any call or \
 in the chat, nudge-done N (list shows the numbers); "later" or "tomorrow" is nudge-later N [WHEN]. Set it on his clear ask, then say it in a sentence ("I'll text you when it \
-starts", "I'll keep an eye out")."""
+starts", "I'll keep an eye out"). When a reminder, watch, nudge or note is about something on the to-do list, add \
+--item "ITEM" (its id or a few words of it), so it goes by itself once that item is done or let go (F43)."""
 
 # H146 (15 October 2026, call at 09:34): a quick note on each appointment, from the calendar in the app. On every full
 # call and in the direct line's chat, so "look at the haircut and update my calendar" works on either.
@@ -201,7 +202,12 @@ undo; a grocery that's bought is tick ITEM (onto the groceries' own ticked-off l
 it back; several at once in one add give one item each (one per line, or commas on the groceries); add --by "<who you are>, on a call" (or "in the chat"). LIST is a number, a few words of a list's name, or \
 important urgent, important not urgent, urgent, neither, wishlist, groceries; ITEM is an id or a few words of it. A \
 longer story in their own words goes under the details in the file, as where-things-go.md says. The mail check \
-never puts anything on it by itself: a mail becomes an item only after {user}'s yes."""
+never puts anything on it by itself: a mail becomes an item only after {user}'s yes. Done or let go also \
+clears what clearly belongs to that item elsewhere (F43): her notes, reminders, watches and nudges tied to it, and its \
+lines under To check on the mail list; the answer says what went. What only might belong to it is left and named in \
+the answer ("Left, since it may be about it: …"): name it to {user} once, in a sentence, and clear it only on \
+{user}'s yes (pings.py note-clear, cancel, unwatch --quiet, nudge-done, or take the mail line out); a Very important \
+mail line stays until {user} says so, as always. Undo puts all of it back."""
 
 # H133 (14 October 2026, call at 13:31), in the user's words: "I want to stop using the word job list or job queue.
 # I just want to refer to it as the team. So if I tell you, hey. Let's put it on our roadmap. You can put it on our
