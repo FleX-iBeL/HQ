@@ -8105,6 +8105,113 @@ setTimeout(() => {
             w.watches = real_ws
             for k, v in keep.items():
                 os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        # H212: weather texts that fit his day. Asleep nothing, on waking one text, before going out only when it rains.
+        from zoneinfo import ZoneInfo
+        AMS = ZoneInfo("Europe/Amsterdam")
+        def ev(i, title, a, b, where="", free=False, all_day=False):
+            return {"id": f"e{i}", "title": title, "start": f"2026-10-14T{a}:00+02:00", "end": f"2026-10-14T{b}:00+02:00",
+                    "where": where, "free": free, "all_day": all_day, "calendar": "Main"}
+        evs = [{"id": "s0", "title": "Sleep", "start": "2026-10-14T00:00:00+02:00", "end": "2026-10-14T08:00:00+02:00",
+                "where": "", "free": False, "all_day": False},
+               ev(1, "Go outside", "11:30", "12:00"), ev(2, "Sales Coaching", "14:00", "15:00", "https://zoom.us/j/1"),
+               ev(3, "Lecture", "11:00", "12:45", "JK 2-3", free=True), ev(4, "Return the bike", "16:30", "17:00", "Stadionplein 26"),
+               ev(5, "Afspraak telefonisch", "10:00", "10:30"), ev(6, "Shower", "18:30", "19:00")]
+        tz = "Europe/Amsterdam"
+        D = lambda h, m=0: dt(2026, 10, 14, h, m)
+        need(w.asleep(D(2), evs, tz) and not w.asleep(D(8, 5), evs, tz) and w.woke(D(9), evs, tz) == D(8),
+             "H212: his calendar's Sleep block isn't his night")
+        need(w.asleep(D(23, 30), [], tz) and w.asleep(D(7), [], tz) and not w.asleep(D(12), [], tz),
+             "H212: without a Sleep block the night hours aren't quiet")
+        own = [{"n": 1, "from": "20:00", "to": "21:30", "daily": True, "on": ""},
+               {"n": 2, "from": "09:00", "to": "10:00", "daily": False, "on": "2026-10-15"}]
+        outs = w.outings(D(0).date(), evs, own, tz)
+        need([o["what"] for o in outs] == ["Go outside", "Return the bike", "the hours he said he's out"]
+             and outs[0]["start"] == D(11, 30) and outs[2]["end"] == D(21, 30),
+             f"H212: his times out (out of the house, his own times; not online, by phone, someone else's, the shower): {outs}")
+        def wet_at(h, n=1):
+            f = fc()
+            f["hourly"]["precipitation_probability"] = [5] * h + [80] * n + [5] * (24 - h - n)
+            return f
+        need(w.rain_between(fc(), [], D(9), D(11), D(12)) is None and
+             (w.rain_between(wet_at(11), [], D(9), D(11, 10), D(12)) or [None])[0] == D(11, 10),
+             "H212: rain in a span is read wrong")
+        rd = [((D(11) + timedelta(minutes=5 * i)).strftime("%H:%M"), 1.0 if i == 8 else 0.0) for i in range(24)]
+        need((w.rain_between(fc(), rd, D(11), D(11, 30), D(12)) or [None])[0] == D(11, 40), "H212: the radar isn't read for a span")
+        _, mf = w.morning(wet_at(16), [], D(8, 10), outs, "Town")
+        need("yes, from about 16:10" in mf and "Return the bike" in mf and "only weather text" in mf, f"H212: the morning, rain while out: {mf}")
+        _, mf = w.morning(wet_at(13), [], D(8, 10), outs)
+        need("no, it stays dry" in mf, f"H212: rain while he's in counted in the morning: {mf}")
+        _, mf = w.morning(wet_at(13), [], D(8, 10), [])
+        need("Nothing in his day takes him out" in mf and "yes, from about 13:00" in mf, f"H212: the morning without times out: {mf}")
+        go = w.going_out(wet_at(11), [], D(10, 45), outs, {})
+        need(len(go) == 1 and go[0][0]["what"] == "Go outside" and "going out soon" in go[0][1] and "11:10" in go[0][1],
+             f"H212: going out in the rain: {go}")
+        need(w.going_out(fc(), [], D(10, 45), outs, {})[0][1] is None, "H212: going out on a dry day was a text")
+        need(not w.going_out(wet_at(11), [], D(10, 45), outs, {outs[0]["key"]: 1}) and not w.going_out(wet_at(11), [], D(10), outs, {}),
+             "H212: an outing looked at twice, or too early")
+        out_now = lambda at: any(o["start"] - timedelta(seconds=w.TRAVEL) <= at <= o["end"] for o in outs)
+        f, got = w.follow_shower(None, fc(), radar(D(13), 30), D(13), D(16), D(19), out_now)
+        need(f is None and got is None, f"H212: the rain alert texted a shower while he's in: {got}")
+        f, got = w.follow_shower(None, fc(), radar(D(16), 10), D(16), D(19), D(22), out_now)
+        need(got and "16:10" in got[1], f"H212: the rain alert didn't text a shower while he's out: {got}")
+        # The look through his day: a throwaway calendar, list and folder.
+        folder2 = self.tmp / "weather-H212"
+        folder2.mkdir(parents=True, exist_ok=True)
+        (folder2 / "calendar.json").write_text(json.dumps({"events": evs}))
+        keep = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_WEATHER_PLACE", "HQ_WEATHER", "HQ_CALENDAR_FILE")}
+        sent, real = [], (w.forecast, w.rain_text, dl.text, w.watches)
+        try:
+            os.environ.update({"HQ_DIRECT_DIR": str(folder2), "HQ_WEATHER_PLACE": "Testtown",
+                               "HQ_CALENDAR_FILE": str(folder2 / "calendar.json")})
+            os.environ.pop("HQ_WEATHER", None)
+            w._write({"where": {"place": "Testtown", "lat": 52.0, "lon": 5.0, "tz": tz, "country": "NL", "name": "Testtown"}})
+            T = lambda h, m=0: dt(2026, 10, 14, h, m, tzinfo=AMS).timestamp()
+            w.watches = lambda now=None: [al]
+            need(not w.due(T(2)) and not w.due(T(7, 50)) and w.asleep_at(T(3)), "H212: a look is due while he's asleep")
+            need(w.morning_due(T(8, 10)) and not w.morning_due(T(11, 30)), "H212: the morning text isn't due on waking")
+            w.forecast, w.rain_text = (lambda _w: wet_at(11)), (lambda _w: [])
+            dl.text = lambda why, facts: sent.append((why, facts))
+            w.look(now=T(8, 10), general=True)
+            need([x[0] for x in sent] == ["morning"] and "yes, from about 11:10" in sent[0][1],
+                 f"H212: on waking not one text, or not the rain while out: {sent}")
+            need(not w.morning_due(T(8, 30)), "H212: the morning text twice")
+            need(w.out_due(T(10, 40)) and not w.out_due(T(9)), "H212: going out isn't due an hour before")
+            w.look(now=T(10, 40), general=False)
+            need([x[0] for x in sent] == ["morning", "out"] and "Go outside" in sent[1][1], f"H212: going out in the rain: {sent}")
+            need(not w.out_due(T(10, 50)) and w._read()["follow"].get("7", {}).get("at") == "2026-10-14T11:10",
+                 "H212: the outing looked at twice, or the rain alert doesn't follow that shower")
+            w.look(now=T(10, 50), general=False)
+            need(len(sent) == 2, f"H212: the same outing texted again: {sent}")
+            # his own times, on her list
+            import pings as _p
+            importlib.reload(_p)
+            need(_p.out_range("14 to 18") == ("14:00", "18:00") and _p.out_range("9:30-12") == ("09:30", "12:00"), "H212: his times aren't read")
+            o1 = _p.out_add("14:00-18:00", now=dt(2026, 10, 14, 10, 0))
+            o2 = _p.out_add("7-9", daily=True, now=dt(2026, 10, 14, 10, 0))
+            o3 = _p.out_add("7-9", now=dt(2026, 10, 14, 10, 0))
+            need(o1["on"] == "2026-10-14" and o2["daily"] and o3["on"] == "2026-10-15", f"H212: once, every day, or passed today: {o1} {o2} {o3}")
+            need({o["n"] for o in _p.outs_on(dt(2026, 10, 15).date())} == {o2["n"], o3["n"]} and "His own times out" in _p.listing()
+                 and any(i["kind"] == "out" for i in _p.watch_items()), "H212: his times aren't on her list")
+            need(_p.out_stop(str(o3["n"])) and not _p.out_stop("99") and len(_p.read()["outs"]) == 2, "H212: his times can't be changed")
+            _p.out_stop("all")
+            # a weather watch whose time is up at night ends quietly
+            st = {"watches": [{"n": 3, "kind": "weather", "what": "rain", "until": "2026-10-14 01:00", "once": True, "matches": []}]}
+            loc_t = time.mktime(time.strptime("2026-10-14 02:00", "%Y-%m-%d %H:%M"))
+            orig = _p._asleep
+            try:
+                _p._asleep = lambda t: True
+                need(_p._watch_due(st, loc_t) == [] and st["watches"][0]["ended"]["why"] == "time up", "H212: a watch ending at night was texted")
+            finally:
+                _p._asleep = orig
+        finally:
+            w.forecast, w.rain_text, dl.text, w.watches = real
+            for k, v in keep.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        need("out-stop" in config.PINGS_RULE and all(k in dl.PLAIN for k in ("morning", "out"))
+             and "is it going to rain when he's out today" in dl.compose_prompt("morning", "").lower(),
+             "H212: her rules or texts don't know his times out, the morning and going out")
+        need('"out", "out-stop"' in (ROOT / "app/policy.py").read_text() and "out-stop" in (ROOT / "routine/role.py").read_text(),
+             "H212: a call or her chat can't set his times out (or the backup doesn't hand them over)")
         # The place from me.md; the template asks for it, blank.
         import me as _me
         need(_me.load(ROOT / "template")["place"] == "", "the template's place isn't blank")
@@ -8119,7 +8226,7 @@ setTimeout(() => {
         gi = (Path(config.FOLDER) / ".gitignore")
         if gi.exists():
             need("HQ/direct-line/weather.json" in gi.read_text(), "the weather state isn't kept off GitHub")
-        return "sun, rain by the minute and by the hour, a rainy day (never outside), quiet at night and on grey days; due every three hours in the day; the phone's spot while fresh; the rain alert a few hours ahead and not while raining, every five minutes, following one shower (a shift of a quarter of an hour, gone, early, stopped; quiet otherwise, let go after the night); me.md's place; texted once"
+        return "sun, rain by the minute and by the hour, a rainy day (never outside), quiet at night and on grey days; due every three hours in the day; the phone's spot while fresh; the rain alert a few hours ahead and not while raining, every five minutes, following one shower (a shift of a quarter of an hour, gone, early, stopped; quiet otherwise, let go after the night); me.md's place; texted once; H212: his calendar's Sleep block (else the night hours) keeps her quiet, one text on waking (rain while he's out, yes or no), before going out only when it rains then and once, his own times on her list (once or every day, changed), the rain alert only for rain while he's out, a weather watch ending at night ends quietly"
 
     async def flow93(self) -> str:
         """H125, no Claude, no network: Donna's watch list. routine/pings.py on its own copies: a mail watch and a

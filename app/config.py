@@ -155,7 +155,11 @@ hourly mail check look for a mail about WHAT (a package: "the Nedgame package, s
 until WHEN, 7 days if not said; --once ends at the first); watch weather rain|dry|sun|"below N"|"above N" \
 [--until WHEN] has the weather look check the forecast up to WHEN (default the end of today; WHEN also takes today, \
 tomorrow, in 3 days) and ends at the first match; unwatch N stops one (add --quiet in {agent}'s own chat); she texts \
-him on a match and when a watch ends. Set it on his clear ask, then say it in a sentence ("I'll text you when it \
+him on a match and when a watch ends. His own times out for the weather (H212), "let me know between 2 and 6": \
+out "14:00-18:00" [--every-day] [--on tomorrow] (24-hour times; once, today or the day given, or every day until he \
+changes it); out-stop N|all when he changes it. The weather already fits his day by itself: nothing while he's \
+asleep, one text on waking (rain when he's out today, yes or no), and before he goes out (his calendar's \
+appointments away from home and those times) only when it rains then. Set it on his clear ask, then say it in a sentence ("I'll text you when it \
 starts", "I'll keep an eye out")."""
 
 # H146 (15 October 2026, call at 09:34): a quick note on each appointment, from the calendar in the app. On every full

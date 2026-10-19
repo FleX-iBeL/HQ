@@ -49,6 +49,14 @@ up, or when he says so (unwatch); she texts each end.
     python3 routine/pings.py unwatch N [--quiet]     he says so; she texts that it stopped (--quiet: not, when she's
                                                      already answering him in her chat)
     python3 routine/pings.py match N "FACTS" [--key K] [--answers]   the mail check: a mail fits watch N
+
+H212 (19 October 2026, call at 10:57, Pepper): his own times out, for the weather. In his words: "Another way is to
+tell her, hey, from this time to this time, let me know. Whether that's a one-time thing or every day. Until it
+changes, of course." Kept in pings.json (`outs`); weather.py reads them next to his calendar.
+
+    python3 routine/pings.py out "14:00-18:00" [--every-day] [--on WHEN]   he's out then (once: today, or WHEN:
+                                            tomorrow, friday, 2026-10-20; --every-day: until he changes it)
+    python3 routine/pings.py out-stop N|all          he changes it
 """
 from __future__ import annotations
 
@@ -421,6 +429,70 @@ def unwatch(n: int, quiet: bool = False, now: float | None = None) -> dict | Non
     return w
 
 
+# -- H212: his own times out, for the weather --------------------------------------------------------
+
+def out_range(words: str) -> tuple[str, str]:
+    """'14:00-18:00', '14 to 18', '9:30 until 12' to ('14:00', '18:00'); 24-hour times. ValueError otherwise."""
+    s = " ".join(str(words).lower().replace(".", ":").split())
+    m = re.fullmatch(r"(?:from |between )?(\d{1,2})(?::(\d\d))? ?(?:-|to|until|till|and|tot) ?(\d{1,2})(?::(\d\d))?", s)
+    if not m:
+        raise ValueError("Which times? Like 14:00-18:00 (24-hour).")
+    a, b = (int(m.group(1)), int(m.group(2) or 0)), (int(m.group(3)), int(m.group(4) or 0))
+    if a[0] > 23 or b[0] > 24 or a[1] > 59 or b[1] > 59 or b <= a or b > (24, 0):
+        raise ValueError("The times don't make a span in one day; give them as 24-hour times, like 14:00-18:00.")
+    return f"{a[0]:02d}:{a[1]:02d}", f"{b[0]:02d}:{b[1]:02d}"
+
+
+def out_add(span: str, daily: bool = False, on: str = "", by: str = "", now: dt.datetime | None = None) -> dict:
+    """He tells her when he's out ("let me know between 2 and 6"): the weather texts him for those hours (H212).
+    DAILY: every day until he changes it; else once, ON (a day: today, tomorrow, friday, 2026-10-20; default today,
+    or tomorrow when today's span has passed already)."""
+    now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
+    a, b = out_range(span)
+    day = None
+    if not daily:
+        if on:
+            o = " ".join(str(on).lower().split())
+            day = (dt.datetime.strptime(o, "%Y-%m-%d") if re.fullmatch(r"\d{4}-\d\d-\d\d", o)
+                   else when(f"{o} 00:00", now)).date()
+        else:
+            day = now.date() if f"{now:%H:%M}" < b else now.date() + dt.timedelta(days=1)
+        if day < now.date():
+            raise ValueError(f"{day} has passed already.")
+    with _Lock():
+        s = read()
+        outs = s.setdefault("outs", [])
+        n = max([int(o.get("n") or 0) for o in outs] + [int(s.get("last_out") or 0)]) + 1
+        o = {"n": n, "from": a, "to": b, "daily": bool(daily), "on": "" if daily else day.isoformat(),
+             "added": now.strftime(FMT), "by": by}
+        outs.append(o)
+        s["last_out"] = n
+        _write(s)
+    return o
+
+
+def out_stop(which: str) -> list[dict]:
+    """He changes it: N, or all. Returns what was stopped."""
+    with _Lock():
+        s = read()
+        outs = s.get("outs") or []
+        gone = [o for o in outs if which == "all" or str(o.get("n")) == str(which)]
+        if gone:
+            s["outs"] = [o for o in outs if o not in gone]
+            _write(s)
+    return gone
+
+
+def outs_on(day: dt.date, s: dict | None = None) -> list[dict]:
+    """His own times out on DAY (every-day ones and that day's once ones)."""
+    s = read() if s is None else s
+    return [o for o in s.get("outs") or [] if o.get("daily") or o.get("on") == day.isoformat()]
+
+
+def _out_says(o: dict) -> str:
+    return f"{o['from']} to {o['to']}, " + ("every day" if o.get("daily") else f"on {o['on']}")
+
+
 def _watch_says(w: dict) -> str:
     if w.get("alert"):
         return "rain coming up (the rain alert he switched on in the app)"
@@ -458,12 +530,24 @@ def _watch_due(s: dict, t: float) -> list[tuple[str, str]]:
         elif not w.get("ended") and _local_ts(w.get("until", "")) <= t:
             got = len(w["matches"])
             w["ended"] = {"at": stamp, "why": "time up", "texted": stamp}
+            if w.get("kind") == "weather" and _asleep(t):
+                continue  # H212: asleep she says nothing; a weather watch whose time is up at night ends quietly
             out.append(("watch-end", f"{asked}\nIts time is up. "
                         + (f"Nothing came for it." if not got else f"{got} update(s) came, all texted already.")
                         + " Say you've stopped watching for it."))
     ended = [w for w in s["watches"] if w.get("ended")]
     s["watches"] = [w for w in s["watches"] if not w.get("ended")] + ended[-KEEP_ENDED:]
     return out
+
+
+def _asleep(t: float) -> bool:
+    """H212: he's asleep (weather.asleep: his calendar's Sleep block, else the night hours)."""
+    try:
+        sys.path.insert(0, str(ROOT / "app"))
+        import weather as _w
+        return _w.asleep_at(t)
+    except Exception:
+        return False
 
 
 def mail_watch_text(now: float | None = None) -> str:
@@ -485,10 +569,13 @@ def _watch_line(w: dict) -> str:
 
 
 def watch_items() -> list[dict]:
-    """For the notes sheet in the app: the open watches in plain words. The rain alert has no until (H188): it's on."""
+    """For the notes sheet in the app: the open watches in plain words. The rain alert has no until (H188): it's on.
+    H212: his own times out come after them, as the rain for when he's out."""
     return [{"n": w["n"], "kind": w["kind"], "text": "Rain alerts on" if w.get("alert") else f"Watching for {_watch_says(w)}",
              "until": "" if w.get("alert") else w["until"],
-             "matches": len(w.get("matches") or [])} for w in open_watches()]
+             "matches": len(w.get("matches") or [])} for w in open_watches()] + \
+        [{"n": o["n"], "kind": "out", "text": f"The rain for when you're out, {_out_says(o)}", "until": "", "matches": 0}
+         for o in read().get("outs") or []]
 
 
 # -- every minute: what's due ---------------------------------------------------------------------
@@ -592,6 +679,9 @@ def watch(now: float | None = None, spawn=None, dry: bool = False) -> list[tuple
             if at and at < t - 86400:
                 s["appointments"].pop(k)
         out += _watch_due(s, t)  # H125
+        today = time.strftime("%Y-%m-%d", time.localtime(t))
+        if any(not o.get("daily") and o.get("on", "") < today for o in s.get("outs") or []):  # H212: a day gone by
+            s["outs"] = [o for o in s["outs"] if o.get("daily") or o.get("on", "") >= today]
         sent = [r for r in s["reminders"] if r.get("sent")]
         s["reminders"] = [r for r in s["reminders"] if not r.get("sent")] + sent[-KEEP_SENT:]
         if initiative_due(t, s):
@@ -663,6 +753,8 @@ def listing() -> str:
             for r in s["reminders"] if not r.get("dropped")] or ["- none"]
     out += ["", "Watches (\"let me know when …\"):"]
     out += [_watch_line(w) for w in s["watches"]] or ["- none"]
+    out += ["", "His own times out, for the weather (H212):"]
+    out += [f"- out {o['n']} · {_out_says(o)}" for o in s.get("outs") or []] or ["- none"]
     out += ["", f"{agent_name()}'s own notes ({notes_file().relative_to(hqpaths.FOLDER) if str(notes_file()).startswith(hqpaths.FOLDER) else notes_file()}):"]
     out += [f"- {i['when'][:16]} · {i['text']} · id {i['id']}" for i in her_notes()] or ["- none"]
     return "\n".join(out)
@@ -766,6 +858,21 @@ def main(argv: list[str]) -> int:
             print(f"No open watch {argv[1]}.")
             return 1
         print(f"Watch {w['n']} stopped: {_watch_says(w)}.")
+    elif cmd == "out" and len(argv) >= 2:
+        rest = argv[2:]
+        try:
+            on = rest[rest.index("--on") + 1] if "--on" in rest and rest.index("--on") + 1 < len(rest) else ""
+            o = out_add(argv[1], daily="--every-day" in rest, on=on, by=by)
+        except ValueError as e:
+            print(e)
+            return 2
+        print(f"Out {o['n']}: {_out_says(o)}. She checks the rain for then and texts only when it rains.")
+    elif cmd == "out-stop" and len(argv) == 2 and (argv[1].isdigit() or argv[1] == "all"):
+        gone = out_stop(argv[1])
+        if not gone:
+            print(f"No times out {argv[1]}.")
+            return 1
+        print("Stopped: " + "; ".join(_out_says(o) for o in gone) + ".")
     elif cmd == "match" and len(argv) >= 3 and argv[1].isdigit():
         key = argv[argv.index("--key") + 1] if "--key" in argv and argv.index("--key") + 1 < len(argv) else ""
         facts = " ".join(a for i, a in enumerate(argv[2:], 2)

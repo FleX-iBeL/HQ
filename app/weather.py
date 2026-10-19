@@ -43,6 +43,17 @@ when it's gone (two looks in a row without it, GONE_LOOKS), or when it stops (dr
 quarter of an hour). Otherwise she stays quiet. A shower not looked at for FOLLOW_STALE (the night) is let go
 without a text.
 
+H212 (19 October 2026, call at 10:57, Pepper): weather texts that fit his day. In his words: "it rains all night and
+I wake up and HQ has like 45 notifications", "If I'm asleep, then I don't care about that, right? ... All I need to
+know is... When I wake up, is it gonna rain or not? And if I need to go out", "Another way is to tell her, hey, from
+this time to this time, let me know", and "We can make it more humanizing." So:
+  asleep    nothing: no looks, no rain alerts, no summary of the night (his calendar's Sleep block, else NIGHT)
+  morning   on waking, one text only: will it rain when he's out today, yes or no (morning)
+  out       before he goes out (LEAVE ahead: his calendar's appointments away from home, and the hours he gave her,
+            pings.py out "14:00-18:00" [--every-day]) she looks once, and texts only when it rains then (out)
+  the rain alert still looks in the background, but only texts about rain while he's out (MATTERS); the three-
+  hourly "rain coming" text is gone, the sun and cosy nudges stay.
+
 Kept in the direct line's folder (synced, off GitHub): weather.json, the last look, the place's coordinates and
 what she already said today. Off: HQ_WEATHER=0. HQ_WEATHER_PLACE overrides the place (tests).
 
@@ -237,7 +248,7 @@ def general_due(now: float | None = None, s: dict | None = None) -> bool:
         return False
     now = now or time.time()
     s = _read() if s is None else s
-    if not _somewhere(s, now) or not (DAY[0] <= _hour(now, s) < DAY[1]):
+    if not _somewhere(s, now) or not (DAY[0] <= _hour(now, s) < DAY[1]) or asleep_at(now, s):
         return False
     return now - float(s.get("general", s.get("looked")) or 0) >= EVERY - 60
 
@@ -259,8 +270,8 @@ def watch_due(now: float | None = None, s: dict | None = None) -> bool:
     now = now or time.time()
     s = _read() if s is None else s
     ws = watches(now)
-    if not _somewhere(s, now) or not (WATCH_DAY[0] <= _hour(now, s) < WATCH_DAY[1]) or not ws:
-        return False
+    if not _somewhere(s, now) or not (WATCH_DAY[0] <= _hour(now, s) < WATCH_DAY[1]) or not ws or asleep_at(now, s):
+        return False  # H212: asleep she says nothing
     every = ALERT_EVERY - 30 if any(w.get("alert") for w in ws) else WATCH_EVERY - 60
     return now - float(s.get("looked") or 0) >= every
 
@@ -269,7 +280,7 @@ def due(now: float | None = None, s: dict | None = None) -> bool:
     """A look is due: the three-hourly one, or the 30-minute one while a weather watch is open (five minutes while
     the rain alert is on)."""
     s = _read() if s is None else s
-    return general_due(now, s) or watch_due(now, s)
+    return general_due(now, s) or watch_due(now, s) or morning_due(now, s) or out_due(now, s)  # H212
 
 
 # -- the data -----------------------------------------------------------------------------------------
@@ -470,24 +481,28 @@ def _stopped(fc: dict, minutes: list[tuple[str, float]], now: datetime) -> bool:
 
 
 def follow_shower(f: dict | None, fc: dict, minutes: list[tuple[str, float]], now: datetime, first: datetime,
-                  until: datetime) -> tuple[dict | None, tuple[str, str] | None]:
+                  until: datetime, matters=None) -> tuple[dict | None, tuple[str, str] | None]:
     """H196: the rain alert follows one shower. F is what she said about it (None before she said anything);
     FIRST is how far ahead a new shower counts, UNTIL how far a followed one may move. Returns the new F and
     (key, facts) when there's something to text: the shower coming, coming SHIFT or more earlier or later than
-    she said, gone, started well before she said, or stopped."""
+    she said, gone, started well before she said, or stopped. MATTERS (H212): whether rain at a time changes
+    something for him (he's out then); without it, every shower counts as before."""
+    hit = matters or (lambda at: True)
     stamp = now.isoformat(timespec="minutes")
     if f and (now - datetime.fromisoformat(f.get("seen") or f["at"])).total_seconds() > FOLLOW_STALE:
         f = None  # the night in between: let it go quietly
     if not f:
         kind, at, how = _shower(fc, minutes, now, first)
-        if kind != "coming":
-            return None, None  # nothing coming, or raining already: never set it off then
+        if kind != "coming" or not hit(at):
+            return None, None  # nothing coming, raining already, or not while he's out: never set it off then
         return ({"phase": "coming", "at": at.isoformat(timespec="minutes"), "seen": stamp, "miss": 0},
                 (f"rain-{at:%d%H%M}", f"Rain from about {_hm(at, now)} ({how})."))
     f = dict(f, seen=stamp)
     said = datetime.fromisoformat(f["at"])
     if f.get("phase") == "raining":
         if _stopped(fc, minutes, now):
+            if not hit(now):
+                return None, None  # stopped while he's in: nothing changes for him
             return None, (f"stop-{now:%d%H%M}", "Update on the rain you texted about: it's stopped, dry now"
                           + (" (by the minute from the rain radar)." if minutes else "."))
         return f, None
@@ -495,24 +510,29 @@ def follow_shower(f: dict | None, fc: dict, minutes: list[tuple[str, float]], no
     kind, at, how = _shower(fc, minutes, now, until)
     if kind == "now":
         f.update(phase="raining", miss=0)
-        if (said - now).total_seconds() >= SHIFT:
+        if (said - now).total_seconds() >= SHIFT and hit(now):
             return f, (f"early-{now:%d%H%M}", f"{upd} it's raining already, earlier than you said.")
         return f, None
     if kind == "coming":
         f["miss"] = 0
         if abs((at - said).total_seconds()) >= SHIFT:
             f["at"] = at.isoformat(timespec="minutes")
+            if not (hit(said) or hit(at)):
+                return f, None
             return f, (f"shift-{now:%d%H%M}", f"{upd} it now comes from about {_hm(at, now)} ({how}), "
                        f"{'earlier' if at < said else 'later'} than you said.")
         return f, None
     f["miss"] = int(f.get("miss") or 0) + 1
     if f["miss"] >= GONE_LOOKS:
+        if not hit(said):
+            return None, None
         return None, (f"gone-{now:%d%H%M}", f"{upd} it's gone, no rain coming in the next hours after all.")
     return f, None
 
 
 def check_watches(fc: dict, minutes: list[tuple[str, float]], loc: datetime, name: str = "",
-                  ws: list[dict] | None = None, keep=None, follow: dict | None = None) -> list[tuple[int, str]]:
+                  ws: list[dict] | None = None, keep=None, follow: dict | None = None,
+                  matters=None) -> list[tuple[int, str]]:
     """Each open weather watch against this look; a match is kept for her to text (pings.match). Returns
     [(watch n, facts)] of the new ones. The rain alert (H161, `alert`): a new shower only in the next ALERT_AHEAD
     hours and not while it's raining already; then she follows it (H196, follow_shower; FOLLOW is weather.json's
@@ -529,7 +549,7 @@ def check_watches(fc: dict, minutes: list[tuple[str, float]], loc: datetime, nam
         if w.get("alert"):
             f, got = follow_shower(follow.get(str(w["n"])), fc, minutes, loc,
                                    min(until, loc + timedelta(hours=ALERT_AHEAD)),
-                                   min(until, loc + timedelta(hours=2 * ALERT_AHEAD)))
+                                   min(until, loc + timedelta(hours=2 * ALERT_AHEAD)), matters)
             if f:
                 follow[str(w["n"])] = f
             else:
@@ -542,6 +562,243 @@ def check_watches(fc: dict, minutes: list[tuple[str, float]], loc: datetime, nam
         if (keep or pings.match)(int(w["n"]), facts, key=got[0], answers=bool(w.get("once"))) == "new":
             out.append((int(w["n"]), facts))
     return out
+
+
+# -- H212: weather texts that fit his day (no network: the happy flow feeds it) --------------------------------
+
+SLEEP_WORDS = ("sleep", "slapen", "asleep", "bed", "bedtime", "night")  # a calendar block with this title is his night
+NIGHT = (23, 8)  # without a Sleep block around: asleep from 23:00 to 08:00 (Claude's choice)
+LEAVE = 60 * 60  # she looks this long before he goes out
+TRAVEL = 20 * 60  # rain this long before an outing still counts: he's on his way
+MORNING_LATE = 3 * 3600  # the morning text only this long after he wakes up; later the day has started without it
+OUT_LOOK_EVERY = 5 * 60  # a going-out look that failed is tried again after this
+DONE_KEEP = 2 * 86400  # outings she looked at, kept this long
+# An appointment takes him out of the house when it has a place that isn't a link, or a title with one of these
+# words (Claude's choice); not when it says it's by phone or online.
+OUT_WORDS = ("outside", "walk", "gym", "haircut", "kapper", "barber", "dentist", "tandarts", "doctor", "dokter",
+             "huisarts", "afspraak", "library", "bibliotheek", "station", "shop", "shopping", "groceries",
+             "boodschappen", "market", "markt", "pick up", "ophalen", "visit", "bij", "run", "running", "bike",
+             "fietsen", "park", "cafe", "café", "restaurant", "swim", "zwemmen", "train", "trip", "airport", "return")
+HOME_WORDS = ("telefonisch", "phone", "call", "online", "zoom", "bellen", "video", "teams")
+
+
+def _cal(evs: list[dict] | None = None) -> list[dict]:
+    """His calendar as HQ last read it (calendar.json, through pings), no network."""
+    if evs is not None:
+        return evs
+    try:
+        import pings
+        return pings.events()
+    except Exception:
+        return []
+
+
+def _own_outs() -> list[dict]:
+    """His own times out from her list (pings.py out)."""
+    try:
+        import pings
+        return pings.read().get("outs") or []
+    except Exception:
+        return []
+
+
+def _naive(iso: str, tz: str) -> datetime | None:
+    """A calendar time as a plain local time where he is."""
+    try:
+        d = datetime.fromisoformat(iso)
+    except (TypeError, ValueError):
+        return None
+    if d.tzinfo:
+        from zoneinfo import ZoneInfo
+        try:
+            d = d.astimezone(ZoneInfo(tz))
+        except Exception:
+            d = d.astimezone()
+        d = d.replace(tzinfo=None)
+    return d
+
+
+def _is_sleep(e: dict) -> bool:
+    t = (e.get("title") or "").strip().lower()
+    return not e.get("all_day") and (t in SLEEP_WORDS or t.split(" ")[0] in ("sleep", "slapen"))
+
+
+def sleeps(evs: list[dict], tz: str) -> list[tuple[datetime, datetime]]:
+    out = []
+    for e in evs:
+        if _is_sleep(e):
+            a, b = _naive(e.get("start", ""), tz), _naive(e.get("end", ""), tz)
+            if a and b and b > a:
+                out.append((a, b))
+    return out
+
+
+def asleep(loc: datetime, evs: list[dict], tz: str) -> bool:
+    """H212: inside a Sleep block of his calendar; when the calendar has none around this night, the NIGHT hours."""
+    near = [x for x in sleeps(evs, tz) if x[0] - timedelta(hours=18) <= loc <= x[1] + timedelta(hours=18)]
+    if near:
+        return any(a <= loc < b for a, b in near)
+    return loc.hour >= NIGHT[0] or loc.hour < NIGHT[1]
+
+
+def woke(loc: datetime, evs: list[dict], tz: str) -> datetime:
+    """When he wakes up today: the end of the Sleep block that ends today, else NIGHT's end."""
+    ends = [b for a, b in sleeps(evs, tz) if b.date() == loc.date()]
+    return min(ends) if ends else loc.replace(hour=NIGHT[1], minute=0, second=0, microsecond=0)
+
+
+def _out_event(e: dict) -> bool:
+    if e.get("all_day") or e.get("free") or _is_sleep(e):
+        return False
+    title = (e.get("title") or "").lower()
+    if any(re.search(rf"\b{re.escape(w)}\b", title) for w in HOME_WORDS):
+        return False
+    where = (e.get("where") or "").strip().lower()
+    if where and not re.match(r"(https?://|www\.)", where) and not any(w in where for w in ("zoom", "meet.google", "teams")):
+        return True
+    return any(re.search(rf"\b{re.escape(w)}\b", title) for w in OUT_WORDS)
+
+
+def _at(day: datetime, hm: str) -> datetime:
+    h, m = (int(x) for x in hm.split(":"))
+    return day + timedelta(hours=h, minutes=m)
+
+
+def outings(day, evs: list[dict], outs: list[dict], tz: str) -> list[dict]:
+    """H212: his times out on DAY: his calendar's appointments away from home (_out_event) and his own times (her
+    list, pings.py out), each {key, what, start, end, own}, by start."""
+    d0 = datetime.combine(day, datetime.min.time())
+    d1 = d0 + timedelta(days=1)
+    out = []
+    for e in evs:
+        if not _out_event(e):
+            continue
+        a, b = _naive(e.get("start", ""), tz), _naive(e.get("end", ""), tz)
+        if a and b and b > d0 and a < d1:
+            out.append({"key": f"cal-{e.get('id')}-{day:%m%d}", "what": e.get("title") or "an appointment",
+                        "start": max(a, d0), "end": min(b, d1), "own": False})
+    for o in outs:
+        if o.get("daily") or o.get("on") == day.isoformat():
+            try:
+                out.append({"key": f"own-{o['n']}-{day:%m%d}", "what": "the hours he said he's out",
+                            "start": _at(d0, o["from"]), "end": _at(d0, o["to"]), "own": True})
+            except (KeyError, ValueError):
+                continue
+    return sorted(out, key=lambda x: x["start"])
+
+
+def rain_between(fc: dict, minutes: list[tuple[str, float]], now: datetime, a: datetime,
+                 b: datetime) -> tuple[datetime, str] | None:
+    """H212: the first rain between A and B (from now on): by the radar's five minutes as far as it reaches, by the
+    hour after that. (when, how it's known), or None when it stays dry."""
+    a = max(a, now)
+    if b <= a:
+        return None
+    reach = None
+    for hm, mm in minutes:
+        at = _radar_at(hm, now)
+        reach = at
+        if mm >= 0.1 and a - timedelta(minutes=5) < at <= b:
+            return max(at, a), "by the minute from the rain radar"
+    for x in _window(fc, now, b):
+        end = x["at"] + timedelta(hours=1)
+        if reach and end <= reach + timedelta(minutes=5):
+            continue  # the radar already said
+        if end > a and _wet(x):
+            return max(x["at"], a), f"{x.get('precipitation_probability') or 0}% chance"
+    return None
+
+
+def _span(o: dict) -> str:
+    return f"{o['what']} ({o['start']:%H:%M} to {o['end']:%H:%M})"
+
+
+def morning(fc: dict, minutes: list[tuple[str, float]], loc: datetime, outs: list[dict],
+            name: str = "") -> tuple[str, str]:
+    """H212: on waking, one thing only: will it rain when he's out today, yes or no. Without times out, whether it
+    rains in the rest of his day."""
+    head = (f"Where: {name}. " if name else "") + "He just woke up; this is his only weather text this morning. "
+    ahead = [o for o in outs if o["end"] > loc]
+    if ahead:
+        hit = next(((o, r) for o in ahead
+                    if (r := rain_between(fc, minutes, loc, o["start"] - timedelta(seconds=TRAVEL), o["end"]))), None)
+        plan = "; ".join(_span(o) for o in ahead)
+        if hit:
+            o, (at, how) = hit
+            return "morning", f"{head}He's out today: {plan}. Rain while he's out: yes, from about {at:%H:%M} " \
+                              f"({how}), around {o['what']}."
+        return "morning", f"{head}He's out today: {plan}. Rain while he's out: no, it stays dry then."
+    r = rain_between(fc, minutes, loc, loc, loc.replace(hour=DAY[1], minute=0, second=0, microsecond=0))
+    return "morning", f"{head}Nothing in his day takes him out yet. Rain today: " + \
+        (f"yes, from about {r[0]:%H:%M} ({r[1]})." if r else "no, it stays dry.")
+
+
+def going_out(fc: dict, minutes: list[tuple[str, float]], loc: datetime, outs: list[dict],
+              done: dict) -> list[tuple[dict, str | None, tuple[datetime, str] | None]]:
+    """H212: each outing starting within LEAVE (or under way) that she hasn't looked at yet: (outing, facts or None
+    when it stays dry then, the rain). She texts only the ones with facts."""
+    out = []
+    for o in outs:
+        if o["key"] in done or not (o["start"] - timedelta(seconds=LEAVE) <= loc < o["end"]):
+            continue
+        r = rain_between(fc, minutes, loc, o["start"] - timedelta(seconds=TRAVEL), o["end"])
+        facts = None
+        if r:
+            at, how = r
+            now_wet = at <= loc + timedelta(minutes=5)
+            facts = (f"He's {'out now' if o['start'] <= loc else 'going out soon'}: {_span(o)}"
+                     + (" (the hours he gave you)" if o["own"] else " (his calendar)") + ". "
+                     + ("It's raining now." if now_wet else f"Rain from about {at:%H:%M} ({how}), while he's out."))
+        out.append((o, facts, r))
+    return out
+
+
+def _loc(now: float, s: dict) -> tuple[datetime, str]:
+    """Now where he is, as a plain local time, and its time zone."""
+    w = here(s, now) or s.get("where") or {}
+    tz = (w.get("tz") or "") if (w.get("gps") or w.get("place") == place()) else ""
+    return local_now(tz, now).replace(tzinfo=None), tz
+
+
+def asleep_at(now: float | None = None, s: dict | None = None, evs: list[dict] | None = None) -> bool:
+    """H212: he's asleep now (for pings: a weather watch ending at night ends quietly)."""
+    now = now or time.time()
+    s = _read() if s is None else s
+    loc, tz = _loc(now, s)
+    return asleep(loc, _cal(evs), tz)
+
+
+def morning_due(now: float | None = None, s: dict | None = None, evs: list[dict] | None = None) -> bool:
+    """H212: he's up, the morning text hasn't gone yet today, and he woke up under MORNING_LATE ago."""
+    if not on():
+        return False
+    now = now or time.time()
+    s = _read() if s is None else s
+    if not _somewhere(s, now):
+        return False
+    loc, tz = _loc(now, s)
+    evs = _cal(evs)
+    w0 = woke(loc, evs, tz)
+    return (not asleep(loc, evs, tz) and w0 <= loc < w0 + timedelta(seconds=MORNING_LATE)
+            and now - float(s.get("general") or 0) >= OUT_LOOK_EVERY - 30  # a failed look isn't retried every minute
+            and "morning" not in ((s.get("told") or {}).get(f"{loc:%Y-%m-%d}") or []))
+
+
+def out_due(now: float | None = None, s: dict | None = None, evs: list[dict] | None = None) -> bool:
+    """H212: he's about to go out (or is out) and she hasn't looked at that outing yet."""
+    if not on():
+        return False
+    now = now or time.time()
+    s = _read() if s is None else s
+    if not _somewhere(s, now) or now - float(s.get("looked") or 0) < OUT_LOOK_EVERY - 30:
+        return False
+    loc, tz = _loc(now, s)
+    evs = _cal(evs)
+    if asleep(loc, evs, tz):
+        return False
+    done = s.get("outs_done") or {}
+    return any(o["key"] not in done and o["start"] - timedelta(seconds=LEAVE) <= loc < o["end"]
+               for o in outings(loc.date(), evs, _own_outs(), tz))
 
 
 # -- the look ----------------------------------------------------------------------------------------
@@ -566,22 +823,48 @@ def look(dry: bool = False, now: float | None = None, general: bool | None = Non
     told = (s.get("told") or {}).get(today) or []
     fc, minutes = forecast(w), rain_text(w)
     name = w.get("name") or ("" if w.get("gps") else w["place"])
-    if not dry:
-        ws = watches(now)
-        alerts = {str(x["n"]) for x in ws if x.get("alert")}
-        follow = {k: v for k, v in (s.get("follow") or {}).items() if k in alerts}
-        for n, facts in check_watches(fc, minutes, loc.replace(tzinfo=None), name, ws=ws, follow=follow):
-            print(time.strftime("%Y-%m-%d %H:%M:%S"), f"weather: a match for watch {n}: {facts}")
-    got = decide(fc, minutes, loc.replace(tzinfo=None), told, name) if general else None
+    # H212: his day: asleep, waking up, and his times out (his calendar and the times he gave her)
+    ln = loc.replace(tzinfo=None)
+    evs = _cal()
+    outs = outings(ln.date(), evs, _own_outs(), w["tz"])
+    ahead = [o for o in outs if o["end"] > ln]
+    matters = lambda at: any(o["start"] - timedelta(seconds=TRAVEL) <= at <= o["end"] for o in ahead)
+    wake = woke(ln, evs, w["tz"])
+    first = general and "morning" not in told and wake <= ln < wake + timedelta(seconds=MORNING_LATE) \
+        and not asleep(ln, evs, w["tz"])
+    if first:
+        got = morning(fc, minutes, ln, outs, name)
+    else:
+        got = decide(fc, minutes, ln, told, name) if general else None
+        if got and got[0] == "rain":
+            got = None  # H212: rain is said only when it changes something for him: going out, or his own times
     if dry:
         return got
+    texts = [got] if got else []
+    ws = watches(now)
+    alerts = {str(x["n"]) for x in ws if x.get("alert")}
+    follow = {k: v for k, v in (s.get("follow") or {}).items() if k in alerts}
+    done = {k: v for k, v in (s.get("outs_done") or {}).items() if now - float(v) < DONE_KEEP}
+    stamp = ln.isoformat(timespec="minutes")
+    for o, facts, r in going_out(fc, minutes, ln, outs, done):
+        done[o["key"]] = now
+        if facts and not first:  # on waking, the morning text already said it
+            texts.append(("out", (f"Where: {name}. " if name else "") + facts))
+        if r and alerts and not any(follow.get(k) for k in alerts):  # the rain alert follows that shower from here
+            raining = r[0] <= ln + timedelta(minutes=5)
+            follow[sorted(alerts)[0]] = {"phase": "raining" if raining else "coming", "at": r[0].isoformat(timespec="minutes"),
+                                        "seen": stamp, "miss": 0}
+    for n, facts in check_watches(fc, minutes, ln, name, ws=ws, follow=follow, matters=matters):
+        print(time.strftime("%Y-%m-%d %H:%M:%S"), f"weather: a match for watch {n}: {facts}")
     if got:
         s["told"] = {today: told + [got[0]]}
     s["follow"] = follow
+    s["outs_done"] = done
     _write(s)
-    if got:
+    if texts:
         import direct_line
-        direct_line.text(got[0], got[1])
+        for why, facts in texts:
+            direct_line.text(why, facts)
     return got
 
 
@@ -591,7 +874,7 @@ def start(now: float | None = None) -> bool:
     s = _read()
     if not due(now, s):
         return False
-    general = general_due(now, s)
+    general = general_due(now, s) or morning_due(now, s)
     s["looked"] = now or time.time()
     if general:
         s["general"] = s["looked"]

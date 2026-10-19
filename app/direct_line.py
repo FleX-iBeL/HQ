@@ -28,7 +28,8 @@ Her watch list (H125, routine/pings.py): a mail or the weather he asked her to k
 when a watch ends: its time is up, or he stopped it (why watch-end).
 
 The weather (H120, weather.py): every three hours in the day she texts when there's sun, rain coming or a rainy
-day (why sun, rain, cosy), quiet otherwise.
+day (why sun, rain, cosy), quiet otherwise. H212: asleep nothing; on waking one text (why morning): will it rain
+when he's out today; before he goes out, only when it rains then (why out).
 
 She texts (watch(), every minute from tick.py): when the job list is finished (nothing running or waiting, after
 there was), when a very important mail lands in inbox.md, when something stays down (an incident open for three
@@ -353,6 +354,10 @@ PLAIN = {
     "cosy": ["Rainy one today. Book and tea kind of day?",
              "Proper wet day out there. Something cosy inside?",
              "Rain all day, perfect excuse for a slow one indoors."],
+    "morning": ["Morning! {facts}",
+                "Morning. Weather-wise: {facts}"],
+    "out": ["Before you head out: {facts}",
+            "Heads up for when you're out: {facts}"],
     "appt": ["It's time: {facts}",
              "Starting now: {facts}",
              "You wanted a nudge: {facts}"],
@@ -473,6 +478,12 @@ def compose_prompt(why: str, facts: str) -> str:
         "cosy": "It's a rainy day where he is. Suggest something cosy inside: a book, or something nice indoors. "
                 "Never suggest going outside today; in his words: \"Don't prompt me on rainy days to go "
                 "outside because it doesn't make any sense.\"",
+        "morning": "He just woke up. Tell him one thing only: is it going to rain when he's out today, yes or no, "
+                   "with the time when it's yes (the facts say). When nothing takes him out, whether it rains today "
+                   "at all. No forecast beyond that, no temperatures unless it matters, nothing about the night. In "
+                   "his words: \"When I wake up, is it gonna rain or not? And if I need to go out\".",
+        "out": "He's about to go out (or is out; the facts say what and when), and it's going to rain then. A quick "
+               "heads-up the way a friend would text, like \"take your jacket, it starts around 3\". One line.",
         "appt": "He asked you to ping him for this appointment: it starts now (or in the minutes the facts say). "
                 "A quick text that it's on, its name and time in passing; where, only when the facts give a place.",
         "remind": "He asked you to remind him of this, now. A quick reminder in your own words; keep what he wanted "
