@@ -5592,6 +5592,8 @@ window.fetch = async (url, opt) => {
             need("pings.py" in config.VOICE_RULES and "never all by default" in config.VOICE_RULES and "{pings}" not in config.VOICE_RULES,
                  "the call rules don't say how to set her pings")
             need("pings.py" in direct_line._text_rules(), "her chat doesn't know how to set pings")
+            need("One command at a time" in direct_line._text_rules() and "exact same command again" in direct_line._text_rules(),
+                 "her chat doesn't run reminders one at a time, or rewords the command after his yes (F41)")
             pol = Policy(config.FOLDER)
             script = str(ROOT / "routine" / "pings.py")
             for cmd in (f'python3 "{script}" appt on "dentist"', f'python3 "{script}" remind "in 20 minutes" "tea"',
