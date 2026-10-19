@@ -31,7 +31,7 @@ On the call page: hold to talk (or talk freely), a chat that shows what you both
 
 **Who you call: the agents.** Since 0.2 you pick an agent, each with her own name, face, personality and speciality:
 
-- **Donna:** Sonnet, with the basics loaded (your rules, your to-do list, the mail list, the last notes). Quick and dry, a bit cheeky, knows what you need before you finish. For your agenda, your list, mail and quick orders. (This was Quick.) She picks up with "Hey you. What do you need?"
+- **Donna:** Opus (on trial), with the basics loaded (your rules, your to-do list, the mail list, the last notes). Quick and dry, a bit cheeky, knows what you need before you finish. For your agenda, your list, mail and quick orders. (This was Quick.) She picks up with "Hey you. What do you need?"
 - **Pepper:** Opus, with everything loaded, your vision too. Warm, calm and unhurried, talks it through with you like a real phone call. For planning, sparring, thinking things through. (This was Deep.) She picks up with "Hey, <your name>. What's on your mind?"
 - **Moneypenny** (coming soon, Fable): few words, cool, a little mysterious, all business. For the big jobs behind the scenes. "<Your name>. Go ahead." Until then she can be brought into a three-way or four-way call, on Opus.
 

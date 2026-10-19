@@ -2,7 +2,7 @@
 
 Put your own things here.
 
-HQ's agents (since 0.2): **Donna** (Sonnet, the basics loaded: your agenda, your list, mail and quick orders) and **Pepper** (Opus, everything loaded: sparring, planning and the bigger picture), and **Moneypenny** coming soon. The call page shows them with a drawn placeholder until you add a picture.
+HQ's agents (since 0.2): **Donna** (Opus, the basics loaded: your agenda, your list, mail and quick orders) and **Pepper** (Opus, everything loaded: sparring, planning and the bigger picture), and **Moneypenny** coming soon. The call page shows them with a drawn placeholder until you add a picture.
 
 Each has her own character on calls; these are HQ's defaults, yours to change:
 

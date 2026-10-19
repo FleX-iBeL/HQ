@@ -74,12 +74,15 @@ PICTURE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png
 # should have the witty kind of responses. But I would love it if it would feel more like a phone call we are having
 # right now." And "Honestly?" is a pet peeve: honesty without the word, for every agent. So Pepper got her own
 # cadence and small human bits, no witty lines; her agreed first greeting stays, the rest is Claude's.
+# H213 (19 October 2026), in the user's words: "We remove Sonnet and Opus from the main page. ... And we switch her to
+# Opus and we do put it in the changelog. We just test it out. We can always put it back, right, in a new update."
+# So Donna runs on Opus too; her load stays Quick (the light context), and so do her character, rights and voice.
 DEFAULTS: list[dict] = [
     {
         "id": "donna",
         "name": "Donna",
         "load": "quick",
-        "model": "sonnet",
+        "model": "opus",
         "full_name": "Donna Paulsen",
         "voice": "af_bella",
         "colour": "#6d28d9",

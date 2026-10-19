@@ -1087,7 +1087,7 @@ const modeHint = document.getElementById("modehint");
 // H46: Donna (Sonnet) on the left, Pepper (Opus) on the right, each with her own voice
 // (H66: by default Bella for Donna, Heart for Pepper).
 let AGENTS = {
-  donna: { id: "donna", name: "Donna", full_name: "Donna Paulsen", voice: "af_bella", load: "quick", model: "sonnet", colour: "#6d28d9", speciality: "Your agenda, your list, mail and quick orders" },
+  donna: { id: "donna", name: "Donna", full_name: "Donna Paulsen", voice: "af_bella", load: "quick", model: "opus", colour: "#6d28d9", speciality: "Your agenda, your list, mail and quick orders" },
   pepper: { id: "pepper", name: "Pepper", full_name: "Pepper Potts", voice: "af_heart", load: "deep", model: "opus", colour: "#c2410c", speciality: "Sparring, planning and the bigger picture" },
 };
 if (new URLSearchParams(location.search).has("app")) document.body.classList.add("inapp");
@@ -1140,12 +1140,11 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
   look();
   setInterval(look, 15000);
 })();
-const MODEL_NAME = { sonnet: "Sonnet", opus: "Opus", haiku: "Haiku", fable: "Fable" };
-function modelName(a) { return MODEL_NAME[a.model] || a.model; }
 // M2: Free said plainly, for showing others (HQ 0.1): no connectors, no files, no notes, only the web.
+// H213 (19 October 2026): the main page no longer names the model, only what she's for.
 function hintFor(a) {
-  return free ? `Free on ${modelName(a)}: plain Claude, no connectors, no files, no notes, only the web. Nothing saved`
-              : `${modelName(a)}: ${a.speciality}`;
+  return free ? "Free: plain Claude, no connectors, no files, no notes, only the web. Nothing saved"
+              : a.speciality;
 }
 // H86: her colour, by id or name; the screen tinted in the colours of who's on the call (none when idle).
 function agentColour(a) {

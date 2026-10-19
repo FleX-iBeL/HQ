@@ -111,7 +111,7 @@ Run them before and after every update; they print a short pass/fail table at th
      reading is the Mac app's; Turn everything on only answers the HQ page (and only says what it would
      do here); at phone width the strip shows the dog and the status page below, the call page only
      loads when Call is opened, on 127.0.0.1:7860 here and the call line's address on the phone
-  48 the agents (H29): Donna (Quick, Sonnet) and Pepper (Deep, Opus) replace Quick and Deep, with headshots
+  48 the agents (H29): Donna (Quick) and Pepper (Deep), both on Opus since H213, replace Quick and Deep, with headshots
   49 an agent knows who she is: Pepper says her name (one Claude turn)
   50 H46, no Claude: Donna left and Pepper right, Voice Donna Paulsen and Voice Pepper Potts in Settings
      (each her own, sent with the call), no waiting lines (the server turns them off too), and inside the
@@ -4620,7 +4620,7 @@ setTimeout(async () => {
         need("Who you are on this call: Pepper" in brain_.prompt_text(q) and "This is a Quick call" not in brain_.prompt_text(q)
              and q.model == config.MODEL_ALIASES["opus"], "Pepper's session isn't Deep's load on Opus with her personality (H46)")
         need("Who you are on this call: Donna" in brain_.prompt_text(d) and "This is a Quick call" in brain_.prompt_text(d)
-             and d.model == config.MODEL_ALIASES["sonnet"], "Donna's session isn't Quick's load on Sonnet with her personality (H46)")
+             and d.model == config.MODEL_ALIASES["opus"], "Donna's session isn't Quick's load on Opus with her personality (H46, H213)")
         need(brain_.prompt_text(d).index("# This chat is a live voice call") < brain_.prompt_text(d).index("Who you are on this call: Donna"),
              "her personality doesn't come after the call rules")
         need("Pepper" in config.WHISPER_PROMPT and "Donna" in config.WHISPER_PROMPT, "speech recognition doesn't know the agents' names")
@@ -4639,13 +4639,17 @@ setTimeout(async () => {
         need('data-agent="pepper"' in page and 'data-agent="donna"' in page and "/api/agents" in page and "request_data: { mode, agent," in page,
              "the call page doesn't show the agents or doesn't send which one")
         need(">Quick<" not in page and ">Deep<" not in page, "the Quick and Deep buttons are still there")
+        # H213: the main page no longer names the models, only what each agent is for.
+        hint = page[page.index("function hintFor"):page.index("function agentColour")]
+        need(not re.search(r"Sonnet|Opus|Haiku|Fable|modelName|\.model\b", hint) and "a.speciality" in hint,
+             "the main page still says which model an agent runs on")
         # The transcript names her.
         from transcript import CallTranscript
         t = CallTranscript(self.tmp / "calls48", model=config.MODEL_ALIASES["opus"], agent="Donna")
         need("agent Donna · brain" in t.path.read_text(), "the transcript doesn't say which agent")
         src = (ROOT / "app/call.py").read_text() + (ROOT / "app/bot.py").read_text()
         need("agents.find(config.FOLDER, agent, self.load)" in src and 'agent=agent["id"]' in src, "the call doesn't take the agent the page sent")
-        return f"Donna (Quick, Sonnet) left and Pepper (Deep, Opus) right; a workspace's own agents and headshots; {len(listed)} on the page with their pictures"
+        return f"Donna (Quick) left and Pepper (Deep) right, both on Opus, no model names on the main page; a workspace's own agents and headshots; {len(listed)} on the page with their pictures"
 
     # 49
     async def flow49(self) -> str:
@@ -7235,10 +7239,10 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         need(pub["character"] == "Soft and slow" and pub["default"] is False and "personality" not in pub and "pushback" not in pub,
              f"the page gets too much or doesn't know it's her own: {pub}")
         text = agents.describe(ws, "Sam")
-        need("Donna (sonnet): Soft and slow. [changed in your workspace" in text and "Pepper (opus)" in text and "Hello Sam." in text,
+        need("Donna (opus): Soft and slow. [changed in your workspace" in text and "Pepper (opus)" in text and "Hello Sam." in text,
              f"describe doesn't show the workspace's characters: {text[:300]}")
         r = await asyncio.to_thread(run, [sys.executable, str(APP / "agents.py")], timeout=60)
-        need(r.returncode == 0 and "Donna (sonnet)" in r.stdout and "Pepper (opus)" in r.stdout and "Moneypenny (fable, coming soon)" in r.stdout,
+        need(r.returncode == 0 and "Donna (opus)" in r.stdout and "Pepper (opus)" in r.stdout and "Moneypenny (fable, coming soon)" in r.stdout,
              f"python3 app/agents.py doesn't print the agents: {(r.stderr or r.stdout)[-300:]!r}")
         # The page and the docs show the defaults.
         await self.ensure_server()
