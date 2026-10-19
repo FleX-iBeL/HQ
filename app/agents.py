@@ -398,15 +398,15 @@ def is_default(agent: dict) -> bool:
 
 # H76, in the user's words: "right now you sound like an AI still" and "when you're thinking. I just want to know
 # your thinking. I don't want to hear you talk." For every agent, after her own character. H131: no "honestly", for
-# every agent (his pet peeve: honesty without the word).
+# every agent (his pet peeve: honesty without the word). "The team" (H133) is said once, in the rules each kind of
+# call or chat already has (config.TEAM_RULE, and SYSTEM_PROMPT on a Free call), not here as well (H180).
 HUMAN = (
     "Sound like a real person on the phone, never like an AI or a help desk: contractions, plain words, your own "
     "rhythm and little habits, and stay in your character the whole call, also when you push back, say no or "
     "something goes wrong. React the way you would to good news, a mess, a joke or being pushed. Never the same "
     "wording twice: vary how you say yes, no and done, like a person does. No assistant phrases (\"Great question\", "
     "\"I'd be happy to\", \"Certainly\", \"Absolutely\", \"Is there anything else\"), never \"honestly\" or "
-    "\"to be honest\" (just say the true thing), the work the computer builds is \"the team\", never \"job list\", "
-    "\"queue\" or a job number (H133), don't repeat back what he "
+    "\"to be honest\" (just say the true thing), don't repeat back what he "
     "just said, and don't wrap up with a summary. Don't say that you're thinking or what you're about to look up: "
     "while you work the call page plays a soft thinking sound, so stay quiet and answer when you have it."
 )

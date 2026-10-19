@@ -7143,10 +7143,11 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         need('never says "honestly"' in base["pepper"]["personality"] and "no one-liners" in base["pepper"]["personality"],
              "Pepper's character still invites honestly or one-liners (H131)")
         # H133: the job list is "the team" in what's said, on calls and in Donna's chat; "give it to the team" is his go.
+        # H180: said once per kind of call or chat (the team rule, or Free's own prompt), no longer in the human rules too.
         import direct_line
         need(config.TEAM_RULE in config.VOICE_RULES and config.TEAM_RULE in direct_line._text_rules()
              and '"Give it to the team"' in config.TEAM_RULE and '"Put it on the roadmap" means only the roadmap' in config.TEAM_RULE
-             and "{" not in config.TEAM_RULE and '"the team"' in config.SYSTEM_PROMPT and '"the team"' in agents.HUMAN,
+             and "{" not in config.TEAM_RULE and '"the team"' in config.SYSTEM_PROMPT and '"the team"' not in agents.HUMAN,
              "the call rules, Donna's chat or the agents still don't say the team (H133)")
         need("Job 29 is next" not in config.VOICE_RULES and "tell him it's queued" not in config.VOICE_RULES,
              "the call rules still have him hear job numbers or the queue (H133)")
