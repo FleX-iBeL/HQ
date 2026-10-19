@@ -10844,6 +10844,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 "print('Nothing personal found.')\n")
             (hq / "CHANGELOG.md").write_text("# Changelog\n\n## Coming next\n\n## 0.4.4 · 17 October 2026\n\n- old\n")
             (hq / "VERSION").write_text("0.4.4\n")
+            (hq / "README.md").write_text("# HQ\n\nHQ is at version **0.4.4** (what's new).\n")
             g("add", ".", cwd=hq)
             g("commit", "-q", "-m", "0.4.4", cwd=hq)
             g("tag", "-a", "v0.4.4", "-m", "HQ 0.4.4", cwd=hq)
@@ -10877,6 +10878,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
 
             need(rl.cmd_main(_dt.date(2026, 10, 18)) == 0, "sure didn't release")
             need((hq / "VERSION").read_text().strip() == "0.4.5", "VERSION isn't the next small version")
+            need("**0.4.5**" in (hq / "README.md").read_text(), "the README's version didn't move along")
             log = (hq / "CHANGELOG.md").read_text()
             need("## Coming next\n\n## 0.4.5 · 18 October 2026\n\n- A fix.\n" in log, f"Coming next didn't become 0.4.5: {log!r}")
             need(remote("refs/heads/main") == head() == remote("refs/heads/nightly") == remote("refs/heads/dev"),

@@ -6,7 +6,7 @@ You open HQ on your phone or laptop and call Donna or Pepper. You talk like you 
 
 Everything runs on your own computer, with your own Claude plan. Your own files stay yours.
 
-HQ is at version **0.4.5** (what's new in each version: [CHANGELOG.md](CHANGELOG.md)). It's still in development: built and used every day by one person first, now shared with friends. Things change, and some parts are rough.
+HQ is at version **0.4.6** (what's new in each version: [CHANGELOG.md](CHANGELOG.md)). It's still in development: built and used every day by one person first, now shared with friends. Things change, and some parts are rough.
 
 ---
 

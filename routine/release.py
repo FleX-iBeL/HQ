@@ -139,7 +139,7 @@ def coming_next() -> list[str]:
     return [ln for ln in (m.group(1) if m else "").splitlines() if ln.strip().startswith("-")]
 
 
-def _ready(need_clean: tuple[str, ...] = ("CHANGELOG.md", "VERSION")) -> str:
+def _ready(need_clean: tuple[str, ...] = ("CHANGELOG.md", "VERSION", "README.md")) -> str:
     """Why the night's push can't go now, or ''."""
     if not is_main():
         return "this computer isn't the main right now; the main releases"
@@ -189,7 +189,8 @@ def cmd_main(today: dt.date | None = None) -> int:
         return 2
     today = today or dt.date.today()
     old_main = out("rev-parse", push.RELEASE_BRANCH)
-    v = next_version(version())
+    old = version()
+    v = next_version(old)
     tag = f"v{v}"
     if not git("rev-parse", "-q", "--verify", f"refs/tags/{tag}").returncode:
         print(f"No release: the tag {tag} is already here.")
@@ -198,9 +199,14 @@ def cmd_main(today: dt.date | None = None) -> int:
     text = log.read_text(encoding="utf8")
     log.write_text(text.replace("## Coming next\n", f"## Coming next\n\n## {v} · {today.day} {today:%B %Y}\n", 1), encoding="utf8")
     (ROOT / "VERSION").write_text(v + "\n")
-    msg = (f"HQ {v}: the changelog's Coming next becomes {v} ({today.day} {today:%B %Y}), VERSION {v} "
+    files = ["CHANGELOG.md", "VERSION"]
+    readme = ROOT / "README.md"  # its "HQ is at version **X**" line moves along (H209)
+    if readme.exists():
+        files.append("README.md")
+        readme.write_text(readme.read_text(encoding="utf8").replace(f"**{old}**", f"**{v}**", 1), encoding="utf8")
+    msg = (f"HQ {v}: the changelog's Coming next becomes {v} ({today.day} {today:%B %Y}), VERSION {v}, the README's version "
            f"(H186, the nightly line)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
-    steps = [("add", "CHANGELOG.md", "VERSION"), ("commit", "-q", "-m", msg),
+    steps = [("add", *files), ("commit", "-q", "-m", msg),
              ("checkout", "-q", push.RELEASE_BRANCH), ("merge", "-q", "--ff-only", push.WORK_BRANCH),
              ("tag", "-a", tag, "-m", f"HQ {v}")]
     for s in steps:
@@ -225,7 +231,7 @@ def _undo(old_main: str, tag: str, committed: bool) -> int:
     if committed:
         git("reset", "-q", "--keep", "HEAD~1")
     else:
-        git("checkout", "-q", "--", "CHANGELOG.md", "VERSION")
+        git("checkout", "-q", "--", *[f for f in ("CHANGELOG.md", "VERSION", "README.md") if (ROOT / f).exists()])
     return 2
 
 
