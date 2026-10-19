@@ -483,7 +483,8 @@ if __name__ == "__main__":
         try:
             import pings as _pings
             out["hers"] = {"name": _pings.agent_name(), "items": _pings.her_notes(),
-                           "watches": _pings.watch_items()}  # H125: what she keeps an eye out for
+                           "watches": _pings.watch_items(),  # H125: what she keeps an eye out for
+                           "nudges": _pings.nudge_items()}  # H211: what she nudges him about until it's done
         except Exception:
             pass
         return out
@@ -514,6 +515,10 @@ if __name__ == "__main__":
             import pings as _pings
             if not _notes.clear(ask["clear_hers"], _pings.notes_file()):
                 return JSONResponse({"error": "no such note"}, status_code=404)
+        elif isinstance(ask.get("nudge_done"), int):  # H211: Done in the app stops her nudges
+            import pings as _pings
+            if not _pings.nudge_done(str(ask["nudge_done"])):
+                return JSONResponse({"error": "no such nudge"}, status_code=404)
         else:
             return JSONResponse({"error": "no change asked"}, status_code=400)
         return JSONResponse(_notes_both(), headers=_NO_CACHE)

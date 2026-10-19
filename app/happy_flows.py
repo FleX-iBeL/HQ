@@ -8393,6 +8393,129 @@ setTimeout(() => {
                 "one answers it; rain later today, dry, sun and colder than N from a forecast, ending at the first match; time up and "
                 "his stop texted; a look every 30 minutes only while a weather watch is open; rules, policy, mail check, /api/notes")
 
+    async def flow125(self) -> str:
+        """H211, no Claude, no network: nudge until done. routine/pings.py on its own copies: a nudge set with a start,
+        his reason and how much it matters; texted from its start, again and again in the day, more often when it
+        matters more or the deadline is close, never at night (moved to the morning, quietly), never with numbers;
+        later pauses it until the morning, done stops it (by words or its number, and Done in the app); the rules,
+        the policy, the backup's hand-over, her texts, and the nudges with their bell in /api/notes on the test server."""
+        import pings
+        import direct_line
+        from policy import Policy, ALLOW
+        d = self.tmp / "h211"
+        d.mkdir(parents=True, exist_ok=True)
+        keep = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_CALENDAR_FILE", "HQ_AGENT_NOTES", "HQ_DIRECT_DRY", "HQ_INITIATIVE")}
+        real = Path(os.path.join(pings.hqpaths.DATA, "direct-line", "pings.json"))
+        real_before = real.read_bytes() if real.exists() else None
+        os.environ.update({"HQ_DIRECT_DIR": str(d / "line"), "HQ_CALENDAR_FILE": str(d / "calendar.json"),
+                           "HQ_AGENT_NOTES": str(d / "notes-donna.md"), "HQ_DIRECT_DRY": "1", "HQ_INITIATIVE": "0"})
+        orig = pings._asleep
+        pings._asleep = lambda ts: not 8 <= datetime.fromtimestamp(ts).hour < 23  # his night, made up
+        texts = []
+        spawn = lambda why, facts: texts.append((why, facts))
+        t = lambda h, m=0, day=1: datetime(2099, 1, day, h, m).timestamp()
+        try:
+            now = datetime(2099, 1, 1, 7, 0)
+            a = pings.nudge_add(datetime(2099, 1, 1, 9, 0), "water the plants", "they dry out fast", "much", now=now)
+            need(a["next"] == "2099-01-01 09:00" and a["matters"] == "much", f"a nudge doesn't start at its start: {a}")
+            b = pings.nudge_add(datetime(2099, 1, 1, 2, 0), "book the dentist", "", "normal", now=datetime(2099, 1, 1, 2, 0))
+            need(b["next"] == "2099-01-01 09:00", f"a nudge set at night isn't moved to the morning: {b}")
+            for bad in (("", "normal"), ("x", "urgentish")):
+                try:
+                    pings.nudge_add(now, bad[0], "", bad[1], now=now)
+                    need(False, f"an unclear nudge was taken: {bad}")
+                except ValueError:
+                    pass
+            need(not pings.watch(t(8, 59), spawn=spawn), "a nudge came before its start")
+            got = pings.watch(t(9, 0), spawn=spawn)
+            need(sorted(x[0] for x in got) == ["nudge", "nudge"], f"two nudges due at 9 didn't both come: {got}")
+            fa = next(x[1] for x in got if "plants" in x[1])
+            need("they dry out fast" in fa and "first nudge" in fa and not re.search(r"\d", fa.split("\n")[0]),
+                 f"a nudge's facts lack his reason, or carry a number: {fa}")
+            need(not pings.watch(t(9, 1), spawn=spawn), "a nudge was texted twice")
+            s = pings.read()
+            na = {x["n"]: x for x in s["nudges"]}
+            gap_a = pings._local_ts(na[a["n"]]["next"]) - t(9, 0)
+            gap_b = pings._local_ts(na[b["n"]]["next"]) - t(9, 0)
+            need(2 * 3600 <= gap_a <= 4 * 3600 and 5 * 3600 <= gap_b <= 7 * 3600,
+                 f"much isn't about every three hours, or normal about twice a day: {gap_a / 3600:.1f}h, {gap_b / 3600:.1f}h")
+            # little: about once a day; a deadline close steps it up; past it, much
+            x = {"n": 1, "matters": "little", "count": 1}
+            need(20 * 3600 <= pings.nudge_gap(x, t(10)) <= 28 * 3600, "little isn't about once a day")
+            x["deadline"] = "2099-01-01 20:00"
+            need(5 * 3600 <= pings.nudge_gap(x, t(10)) <= 7 * 3600, "a close deadline doesn't step it up")
+            need(pings.nudge_gap(x, t(21)) <= 4 * 3600, "a passed deadline isn't nudged often")
+            # never at night: one due late is moved to the morning, without a text
+            with pings._Lock():
+                s = pings.read()
+                for y in s["nudges"]:
+                    if y["n"] == a["n"]:
+                        y["next"] = "2099-01-01 22:30"
+                pings._write(s)
+            need(not [g for g in pings.watch(t(22, 30), spawn=spawn) if "plants" in g[1]], "a nudge came at night")
+            na = {y["n"]: y for y in pings.read()["nudges"]}
+            need(na[a["n"]]["next"] == "2099-01-02 09:00", f"a nudge at night isn't moved to the morning: {na[a['n']]}")
+            # later: quiet until the morning, shown as paused; done stops it, by words or its number
+            hit = pings.nudge_later("dentist", now=t(12))
+            need(len(hit) == 1 and hit[0]["next"] == "2099-01-02 09:00" and hit[0]["paused"], f"later doesn't pause until the morning: {hit}")
+            items = {i["n"]: i for i in pings.nudge_items()}
+            need(items[b["n"]]["paused"] and not items[a["n"]]["paused"] and "matters" not in items[a["n"]],
+                 f"the app's nudges: {items}")
+            need(len(pings.find_nudges("e")) == 2 and len(pings.nudge_done("e")) == 2 and len(pings.open_nudges()) == 2, "an unclear done stopped a nudge")
+            need(pings.nudge_done("plants", now=t(12)) and not pings.find_nudges(str(a["n"])), "done by words doesn't stop it")
+            need(pings.nudge_done(str(b["n"]), now=t(12)) and not pings.open_nudges(), "done by its number doesn't stop it")
+            need(not pings.watch(t(9, 0, day=2), spawn=spawn), "a nudge came after it was done")
+            lst = pings.listing()
+            need("Nudges until he says it's done" in lst and "- none" in lst.split("Nudges until")[1], f"the listing: {lst}")
+            # the command line, as a call or her chat runs it
+            out = subprocess.run([sys.executable, str(ROOT / "routine/pings.py"), "nudge", "tomorrow 10:00", "renew the library card",
+                                  "--why", "the fine goes up", "--matters", "much"], capture_output=True, text=True,
+                                 env={**os.environ, "HQ_ROLE_HERE": "1"}).stdout
+            need("renew the library card" in out and "until he says it's done" in out, f"nudge from the command line: {out}")
+            n = pings.open_nudges()[0]
+            need(n["reason"] == "the fine goes up" and n["matters"] == "much" and n["text"] == "renew the library card", f"its fields: {n}")
+            out = subprocess.run([sys.executable, str(ROOT / "routine/pings.py"), "nudge-done", "library"], capture_output=True,
+                                 text=True, env={**os.environ, "HQ_ROLE_HERE": "1"}).stdout
+            need("done" in out and not pings.open_nudges(), f"nudge-done from the command line: {out}")
+            # her texts, the rules, the policy, the backup
+            p = direct_line.compose_prompt("nudge", "x")
+            need("nudge" in direct_line.PLAIN and "Never say how often" in p and "number or estimate" in p, "her nudge text's rules")
+            need("nudge-done" in config.PINGS_RULE and "Never tell him how often" in config.PINGS_RULE and "nudge-later" in config.PINGS_RULE,
+                 "the call's and her chat's rules don't know nudges")
+            pol = Policy(config.FOLDER)
+            script = str(ROOT / "routine" / "pings.py")
+            for cmd in (f'python3 "{script}" nudge "wednesday 9:00" "x" --why "y" --matters much', f'python3 "{script}" nudge-done 3',
+                        f'python3 "{script}" nudge-later 3 tomorrow'):
+                need(pol.decide("Bash", {"command": cmd}).verdict == ALLOW, f"a call may not run {cmd}")
+            import role
+            need({"nudge", "nudge-done", "nudge-later"} <= role.WRITES["pings"], "the backup doesn't hand nudges to the main")
+        finally:
+            pings._asleep = orig
+            for k, v in keep.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        need((real.read_bytes() if real.exists() else None) == real_before, "the workspace's own pings were touched")
+        # the test server: the nudges come with her notes, and Done stops one
+        await self.ensure_server()
+        sdir = Path(self.server.env["HQ_DIRECT_DIR"])
+        sdir.mkdir(parents=True, exist_ok=True)
+        (sdir / "pings.json").write_text(json.dumps({"nudges": [
+            {"n": 4, "text": "water the plants", "reason": "", "matters": "normal", "next": "2099-01-01 09:00", "count": 0}]}))
+        code, body, _ = http_get("/api/notes")
+        got = json.loads(body) if code == 200 else {}
+        ns = (got.get("hers") or {}).get("nudges") or []
+        need(code == 200 and [x["text"] for x in ns] == ["water the plants"], f"/api/notes doesn't give her nudges: {got}")
+        req = urllib.request.Request(TEST_URL + "/api/notes", data=json.dumps({"nudge_done": 4}).encode(), method="POST",
+                                     headers={"x-hq": "notes", "content-type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            after = json.loads(r.read())
+        need(not (after.get("hers") or {}).get("nudges") and json.loads((sdir / "pings.json").read_text())["nudges"][0].get("done"),
+             f"Done in the app doesn't stop the nudge: {after}")
+        page = (ROOT / "app" / "web" / "index.html").read_text()
+        need("hers.nudges" in page and "nudge_done" in page and "nudges you until it's done" in page, "the notes sheet doesn't show her nudges with a bell")
+        return ("a nudge from its start with his reason, again and again in the day (much about every three hours, normal twice, "
+                "little once; a close deadline steps up), never at night (moved to the morning, quietly), no numbers in what she's told; "
+                "later pauses it to the morning, done stops it by words, number or Done in the app; command line, rules, policy, backup, /api/notes")
+
     async def flow86(self) -> str:
         """H80, no Claude: Donna's direct line. A push message encrypted for a stand-in phone decrypts back (RFC 8291)
         and its VAPID token verifies with the shared key; a gone phone is dropped. The routine's look takes stock
@@ -14380,6 +14503,7 @@ FLOWS = {
     121: ("H74: a demo call's Claude answers a question about HQ from the tutorial, on Opus, without a tool", True, "flow121"),
     123: ("F39: every sheet and menu closes (its close, a tap beside it, a pull down), Hang up ends the call; phone, small phone, desktop app", False, "flow123"),
     124: ("F40: groceries tick off in the app to their own ticked-off list (A to Z, a tap puts one back), and several at once give one item each; phone, small phone, desktop app", False, "flow124"),
+    125: ("H211: nudge until done: from its start, again and again in the day by how much it matters, never at night, no numbers; later pauses, done stops it (a call, her chat, Done in the app)", False, "flow125"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 

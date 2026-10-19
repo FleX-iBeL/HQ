@@ -373,10 +373,11 @@ class Policy:
         if prog in ("python3", "python") and args and self.hq_script(args[0], "pings.py"):
             sub = args[1] if len(args) > 1 else "list"
             if sub in ("list", "appt", "remind", "cancel", "note", "note-clear", "due", "watch", "unwatch",
-                       "out", "out-stop"):  # H212: his own times out, for the weather
+                       "out", "out-stop",  # H212: his own times out, for the weather
+                       "nudge", "nudge-done", "nudge-later"):  # H211: nudge until done
                 return Decision(ALLOW, "her pings, reminders, notes and watches")
             # H125: match is the mail check's own (it found a mail for a watch)
-            return Decision(DENY, "the pings script takes list, appt, remind, cancel, note, note-clear, watch, unwatch, out or out-stop")
+            return Decision(DENY, "the pings script takes list, appt, remind, cancel, note, note-clear, watch, unwatch, out, out-stop, nudge, nudge-done or nudge-later")
         # H132: what an agent has said about herself, kept in her own list in the workspace (HQ/agents/).
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "about_self.py"):
             if len(args) == 1 or args[1] in ("list", "add"):

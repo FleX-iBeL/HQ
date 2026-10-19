@@ -529,6 +529,7 @@
   #noteslist .when { display:block; color:var(--muted); font-size:12px; margin-top:3px; }
   #noteslist .clr { flex-shrink:0; border:0; background:transparent; color:var(--muted); font:600 14px/1 -apple-system,sans-serif; padding:6px 8px; cursor:pointer; }
   #noteslist .empty { color:var(--muted); text-align:center; margin:auto; }
+  #noteslist .note.nudge .bell { flex-shrink:0; width:16px; height:16px; color:var(--accent); align-self:center; margin-top:2px; }
   #noteslist .hershead { color:var(--muted); font-size:13px; font-weight:600; margin:14px 0 2px 4px; }
   #noteslist .note.hers { border-left:3px solid var(--her, #7c3aed); }
   #noteslist .none { color:var(--muted); font-size:14px; padding:4px; }
@@ -2183,7 +2184,8 @@ function showNoteItems(data) {
   }
   const hers = data.hers && Array.isArray(data.hers.items) ? data.hers : null;  // H124: her own notes, under his
   const watching = hers && Array.isArray(hers.watches) ? hers.watches : [];  // H125: what she keeps an eye out for
-  if (!data.items.length && !(hers && (hers.items.length || watching.length))) histNote(notesList, "No notes yet");
+  const nudging = hers && Array.isArray(hers.nudges) ? hers.nudges : [];  // H211: nudged until he says it's done
+  if (!data.items.length && !(hers && (hers.items.length || watching.length || nudging.length))) histNote(notesList, "No notes yet");
   else if (!data.items.length) { const n = document.createElement("div"); n.className = "none"; n.textContent = "No notes of yours yet"; notesList.appendChild(n); }
   if (hers && hers.items.length) {
     const h = document.createElement("div"); h.className = "hershead"; h.textContent = (hers.name || "Her") + "'s notes"; notesList.appendChild(h);
@@ -2195,6 +2197,20 @@ function showNoteItems(data) {
       const c = document.createElement("button"); c.type = "button"; c.className = "clr"; c.textContent = "Clear";
       c.setAttribute("aria-label", "Clear this note of " + (hers.name || "hers"));
       c.addEventListener("click", async () => { c.disabled = true; const d = await notesSend("api/notes", { clear_hers: it.id }); if (d) showNoteItems(d); else c.disabled = false; });
+      row.append(t, c); notesList.appendChild(row);
+    }
+  }
+  if (nudging.length) {
+    const h = document.createElement("div"); h.className = "hershead"; h.textContent = (hers.name || "She") + " nudges you until it's done"; notesList.appendChild(h);
+    for (const x of nudging) {
+      const row = document.createElement("div"); row.className = "note hers nudge";
+      if ((AGENTS.donna || {}).colour) row.style.borderLeftColor = AGENTS.donna.colour;
+      row.insertAdjacentHTML("afterbegin", BELL.replace("<svg", '<svg class="bell" aria-label="Nudging"'));
+      const t = document.createElement("div"); t.className = "txt"; t.textContent = x.text;
+      if (x.paused) { const u = document.createElement("small"); u.className = "when"; u.textContent = "paused for now"; t.appendChild(u); }
+      const c = document.createElement("button"); c.type = "button"; c.className = "clr"; c.textContent = "Done";
+      c.setAttribute("aria-label", "It's done: stop the nudges");
+      c.addEventListener("click", async () => { c.disabled = true; const d = await notesSend("api/notes", { nudge_done: x.n }); if (d) showNoteItems(d); else c.disabled = false; });
       row.append(t, c); notesList.appendChild(row);
     }
   }

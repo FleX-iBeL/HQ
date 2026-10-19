@@ -57,6 +57,19 @@ changes, of course." Kept in pings.json (`outs`); weather.py reads them next to 
     python3 routine/pings.py out "14:00-18:00" [--every-day] [--on WHEN]   he's out then (once: today, or WHEN:
                                             tomorrow, friday, 2026-10-20; --every-day: until he changes it)
     python3 routine/pings.py out-stop N|all          he changes it
+
+H211 (19 October 2026, call at 10:57, Pepper): nudge until done. In his words: "I only like actually the nudge me
+until I say done." and "I want it to feel humanized. I want the connection to be there. I don't want this to be a
+robot telling me its estimates. ... Just have her guess it and that's it." Kept in pings.json (`nudges`). From its
+start she texts him about it now and then, how often from how much it matters (MATTERS: little about once a day,
+normal about twice, much about every three hours) and stepping up close to the deadline; never at night (his
+Sleep block, and only between NUDGE_DAY's hours). Her texts never say how often or when the next one comes. It
+stops when he says it's done (a call, her chat, or Done in the app); later pauses it.
+
+    python3 routine/pings.py nudge "WHEN" "TEXT" [--why "his reason"] [--matters little|normal|much] [--deadline WHEN]
+                                            WHEN: the first nudge (now, tomorrow 9:00, wednesday 9:00, …)
+    python3 routine/pings.py nudge-done N|"words"    he says it's done
+    python3 routine/pings.py nudge-later N|"words" [WHEN]   quiet until WHEN (default: tomorrow morning)
 """
 from __future__ import annotations
 
@@ -578,6 +591,163 @@ def watch_items() -> list[dict]:
          for o in read().get("outs") or []]
 
 
+# -- H211: nudge until done -------------------------------------------------------------------------
+
+# How often she nudges, by how much it matters: little about once a day, normal about twice, much about every three
+# hours. Close to the deadline it steps up one; past it, much. Never at night, never by the clock: a little give.
+NUDGE_GAP = {"little": 24 * 3600, "normal": 6 * 3600, "much": 3 * 3600}
+NUDGE_LEVELS = ("little", "normal", "much")
+NUDGE_DAY = (9, 21)  # only in the day, also when he has no Sleep block
+NUDGE_CLOSE = 24 * 3600  # a deadline this close steps up one
+KEEP_DONE_NUDGES = 30
+
+
+def nudge_level(words: str) -> str:
+    w = " ".join(str(words or "normal").lower().split())
+    w = {"low": "little", "small": "little", "a little": "little", "medium": "normal", "high": "much", "often": "much",
+         "a lot": "much", "important": "much"}.get(w, w)
+    if w not in NUDGE_LEVELS:
+        raise ValueError("How much it matters: little, normal or much.")
+    return w
+
+
+def nudge_ok(t: float) -> bool:
+    """A moment she may nudge: in the day, and not while he's asleep."""
+    return NUDGE_DAY[0] <= time.localtime(t).tm_hour < NUDGE_DAY[1] and not _asleep(t)
+
+
+def _next_ok(t: float) -> float:
+    """T, or the first moment after it she may nudge (stepping a quarter of an hour, at most two days on)."""
+    for _ in range(2 * 96):
+        if nudge_ok(t):
+            return t
+        t += 900
+    return t
+
+
+def nudge_gap(n: dict, t: float) -> float:
+    lv = NUDGE_LEVELS.index(n.get("matters") or "normal")
+    dl = _local_ts(n.get("deadline") or "")
+    if dl and t >= dl:
+        lv = 2
+    elif dl and dl - t <= NUDGE_CLOSE:
+        lv = min(2, lv + 1)
+    gap = NUDGE_GAP[NUDGE_LEVELS[lv]]
+    give = ((int(n.get("n") or 0) * 7 + int(n.get("count") or 0) * 13) % 41 - 20) * 60  # -20 to +20 minutes
+    return max(3600, gap + give)
+
+
+def nudge_add(start: dt.datetime, text: str, reason: str = "", matters: str = "normal", deadline: dt.datetime | None = None,
+              by: str = "", now: dt.datetime | None = None) -> dict:
+    """START: the first nudge (or the first moment after it she may). REASON: why it matters, in his words."""
+    text = " ".join(str(text).split())[:500]
+    if not text:
+        raise ValueError("What should she nudge him about?")
+    matters = nudge_level(matters)
+    now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
+    if deadline is not None and deadline <= now:
+        raise ValueError(f"{deadline.strftime(FMT)} has passed already.")
+    first = _next_ok(max(start, now).timestamp())
+    with _Lock():
+        s = read()
+        ns = s.setdefault("nudges", [])
+        n = max([int(x.get("n") or 0) for x in ns] + [int(s.get("last_nudge") or 0)]) + 1
+        x = {"n": n, "text": text, "reason": " ".join(str(reason).split())[:600], "matters": matters,
+             "start": start.strftime(FMT), "deadline": deadline.strftime(FMT) if deadline else "",
+             "next": time.strftime(FMT, time.localtime(first)), "count": 0, "added": now.strftime(FMT), "by": by}
+        ns.append(x)
+        s["last_nudge"] = n
+        _write(s)
+    return x
+
+
+def open_nudges(s: dict | None = None) -> list[dict]:
+    s = read() if s is None else s
+    return [x for x in s.get("nudges") or [] if not x.get("done")]
+
+
+def find_nudges(words: str, s: dict | None = None) -> list[dict]:
+    """By its number, else the open nudges that have all the words."""
+    ns = open_nudges(s)
+    w = str(words or "").strip()
+    if w.isdigit():
+        return [x for x in ns if int(x.get("n") or 0) == int(w)]
+    parts = w.lower().split()
+    return [x for x in ns if parts and all(p in (x["text"] + " " + x.get("reason", "")).lower() for p in parts)]
+
+
+def _change_nudge(words: str, change) -> list[dict]:
+    with _Lock():
+        s = read()
+        hit = find_nudges(words, s)
+        if len(hit) == 1:
+            change(hit[0])
+            s["nudges"] = [x for x in s["nudges"] if not x.get("done")] + \
+                [x for x in s["nudges"] if x.get("done")][-KEEP_DONE_NUDGES:]
+            _write(s)
+    return hit
+
+
+def nudge_done(words: str, now: float | None = None) -> list[dict]:
+    """He says it's done (by text, on any call, or in the app): no more nudges. Changes only when exactly one fits."""
+    stamp = time.strftime(FMT, time.localtime(now or time.time()))
+    return _change_nudge(words, lambda x: x.update(done=stamp))
+
+
+def nudge_later(words: str, until: dt.datetime | None = None, now: float | None = None) -> list[dict]:
+    """'Later' or 'tomorrow': quiet until UNTIL (default: the next morning she may nudge)."""
+    t = now or time.time()
+    if until is None:
+        d = dt.datetime.fromtimestamp(t) + dt.timedelta(days=1)
+        at = _next_ok(d.replace(hour=NUDGE_DAY[0], minute=0, second=0, microsecond=0).timestamp())
+    else:
+        at = _next_ok(until.timestamp())
+    return _change_nudge(words, lambda x: x.update(next=time.strftime(FMT, time.localtime(at)), paused=True))
+
+
+def _nudge_due(s: dict, t: float) -> list[tuple[str, str]]:
+    """Marks in S the nudges to text now and returns [(why, facts)]. One at night is moved to the morning, quietly."""
+    out = []
+    stamp = time.strftime(FMT, time.localtime(t))
+    for x in open_nudges(s):
+        at = _local_ts(x.get("next") or "")
+        if not at or at > t:
+            continue
+        if not nudge_ok(t):
+            x["next"] = time.strftime(FMT, time.localtime(_next_ok(t)))
+            continue
+        x["count"] = int(x.get("count") or 0) + 1
+        x["last"] = stamp
+        x.pop("paused", None)
+        x["next"] = time.strftime(FMT, time.localtime(_next_ok(t + nudge_gap(x, t))))
+        days = int((t - _local_ts(x.get("start") or stamp)) // 86400)
+        facts = [f"Nudge him, until he says it's done: {x['text']}"]
+        if x.get("reason"):
+            facts.append(f"Why it matters, in his words: {x['reason']}")
+        dl = _local_ts(x.get("deadline") or "")
+        if dl:
+            facts.append("The deadline has passed." if dl <= t else
+                         f"It has a deadline: {dt.datetime.fromtimestamp(dl):%A %H:%M}" + (" (close now)" if dl - t <= NUDGE_CLOSE else ""))
+        facts.append("This is your first nudge about it." if x["count"] == 1 else
+                     f"You've nudged him about it before; it's still open" + (f", {days} days now." if days >= 2 else "."))
+        out.append(("nudge", "\n".join(facts)))
+    return out
+
+
+def nudge_items() -> list[dict]:
+    """For the app: the open nudges, each with its bell (no numbers of how often: that's hers)."""
+    return [{"n": x["n"], "text": x["text"], "paused": bool(x.get("paused"))} for x in open_nudges()]
+
+
+def _nudge_line(x: dict) -> str:
+    return (f"- nudge {x['n']} · {x['text']} · matters {x.get('matters', 'normal')}"
+            + (f" · deadline {x['deadline']}" if x.get("deadline") else "")
+            + (f" · why: {x['reason']}" if x.get("reason") else "")
+            + (f" · done {x['done']}" if x.get("done") else
+               (" · paused" if x.get("paused") else "") + f" · next {x.get('next', '')}")
+            + (f" · nudged {x['count']}x" if x.get("count") else ""))
+
+
 # -- every minute: what's due ---------------------------------------------------------------------
 
 def _say_at(start: str) -> str:
@@ -679,6 +849,7 @@ def watch(now: float | None = None, spawn=None, dry: bool = False) -> list[tuple
             if at and at < t - 86400:
                 s["appointments"].pop(k)
         out += _watch_due(s, t)  # H125
+        out += _nudge_due(s, t)  # H211
         today = time.strftime("%Y-%m-%d", time.localtime(t))
         if any(not o.get("daily") and o.get("on", "") < today for o in s.get("outs") or []):  # H212: a day gone by
             s["outs"] = [o for o in s["outs"] if o.get("daily") or o.get("on", "") >= today]
@@ -755,6 +926,8 @@ def listing() -> str:
     out += [_watch_line(w) for w in s["watches"]] or ["- none"]
     out += ["", "His own times out, for the weather (H212):"]
     out += [f"- out {o['n']} · {_out_says(o)}" for o in s.get("outs") or []] or ["- none"]
+    out += ["", "Nudges until he says it's done (H211):"]
+    out += [_nudge_line(x) for x in s.get("nudges") or [] if not x.get("done")] or ["- none"]
     out += ["", f"{agent_name()}'s own notes ({notes_file().relative_to(hqpaths.FOLDER) if str(notes_file()).startswith(hqpaths.FOLDER) else notes_file()}):"]
     out += [f"- {i['when'][:16]} · {i['text']} · id {i['id']}" for i in her_notes()] or ["- none"]
     return "\n".join(out)
@@ -873,6 +1046,37 @@ def main(argv: list[str]) -> int:
             print(f"No times out {argv[1]}.")
             return 1
         print("Stopped: " + "; ".join(_out_says(o) for o in gone) + ".")
+    elif cmd == "nudge" and len(argv) >= 3:
+        rest = argv[3:]
+
+        def opt(name: str) -> str:
+            return rest[rest.index(name) + 1] if name in rest and rest.index(name) + 1 < len(rest) else ""
+        words = [a for i, a in enumerate(rest) if not a.startswith("--") and not (i and rest[i - 1].startswith("--"))]
+        try:
+            start = dt.datetime.now() if argv[1].strip().lower() in ("now", "") else when(argv[1])
+            dl = opt("--deadline")
+            x = nudge_add(start, " ".join([argv[2]] + words), opt("--why"), opt("--matters") or "normal",
+                          when(dl) if dl else None, by)
+        except ValueError as e:
+            print(e)
+            return 2
+        print(f"Nudge {x['n']}: {x['text']}; from {x['next']} she nudges him until he says it's done.")
+    elif cmd in ("nudge-done", "nudge-later") and len(argv) >= 2:
+        if cmd == "nudge-done":
+            hit = nudge_done(" ".join(argv[1:]))
+        else:
+            try:
+                hit = nudge_later(argv[1], when(" ".join(argv[2:])) if len(argv) > 2 else None)
+            except ValueError as e:
+                print(e)
+                return 2
+        if len(hit) != 1:
+            print("No open nudge like that." if not hit else "More than one; give the number:\n"
+                  + "\n".join(_nudge_line(x) for x in hit))
+            return 1
+        x = hit[0]
+        print(f"Nudge {x['n']} done: no more nudges about {x['text']}." if cmd == "nudge-done" else
+              f"Nudge {x['n']} paused until {x['next']}.")
     elif cmd == "match" and len(argv) >= 3 and argv[1].isdigit():
         key = argv[argv.index("--key") + 1] if "--key" in argv and argv.index("--key") + 1 < len(argv) else ""
         facts = " ".join(a for i, a in enumerate(argv[2:], 2)

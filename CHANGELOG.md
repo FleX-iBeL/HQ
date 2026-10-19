@@ -4,6 +4,9 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+### Added
+- Donna nudges you until you say it's done. Ask on a call or in her chat ("keep nudging me about this until I say it's done"), say from when and why it matters, and she texts you about it now and then, more often when it matters more or a deadline is close, never at night, in her own words and without numbers or schedules. Tell her it's done, by text or on any call, and she stops; "later" gives you a break until the next morning. While it's open it shows with a bell in Donna's part of the notes, with a Done button (H211).
+
 ## 0.4.7 · 19 October 2026
 
 ### Added

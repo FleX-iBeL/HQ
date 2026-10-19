@@ -370,6 +370,9 @@ PLAIN = {
     "nightly": ["Morning! {facts}",
                 "Quick one from last night: {facts}",
                 "Morning. Heads up from the night shift: {facts}"],
+    "nudge": ["Hey, just a nudge: {facts}",
+              "Still on my list for you: {facts}",
+              "Friendly nudge: {facts}"],
     "watch-end": ["Stopped watching that one. {facts}",
                   "I'm done keeping an eye on that. {facts}"],
 }
@@ -495,6 +498,12 @@ def compose_prompt(why: str, facts: str) -> str:
                    "facts say what they found and whether it's fixed. A quick morning text in everyday words: what "
                    "was off, said the way he'd notice it, and that it's sorted (or still being looked at). No "
                    "technical details, no names of files or flows, no alarm.",
+        "nudge": "He asked you to keep nudging him about this until he tells you it's done (the facts say what, and "
+                 "why it matters to him). A warm, short nudge in your own words, the way a friend who has his back "
+                 "would text: one or two sentences. Never say how often you nudge, when the next one comes, or any "
+                 "number or estimate. His reason only lightly, when it helps. A bit firmer, still kind, when it's been "
+                 "open for days or the deadline is close. Now and then, not every time, that he can just tell you "
+                 "when it's done.",
         "watch-end": "Something he asked you to watch has stopped (the facts say what and why). One quick line that "
                      "you've stopped keeping an eye on it, and why in a few words (time's up and nothing came, or he "
                      "asked).",

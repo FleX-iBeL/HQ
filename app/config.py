@@ -159,7 +159,13 @@ him on a match and when a watch ends. His own times out for the weather (H212), 
 out "14:00-18:00" [--every-day] [--on tomorrow] (24-hour times; once, today or the day given, or every day until he \
 changes it); out-stop N|all when he changes it. The weather already fits his day by itself: nothing while he's \
 asleep, one text on waking (rain when he's out today, yes or no), and before he goes out (his calendar's \
-appointments away from home and those times) only when it rains then. Set it on his clear ask, then say it in a sentence ("I'll text you when it \
+appointments away from home and those times) only when it rains then. Nudge until done (H211), "keep nudging me \
+until I say it's done": nudge "WHEN" "TEXT" --why "his reason, in his words" --matters little|normal|much \
+[--deadline WHEN] (WHEN: when the nudging starts, now or like wednesday 9:00). You judge how much it matters from \
+his reason and the deadline (it costs him money, or it's close: much; an everyday thing: normal; no hurry: little); \
+ask him why it matters only when you can't tell. Never tell him how often you'll nudge, when the next one comes, or \
+any number or estimate: you'll just keep nudging, like a person would. The moment he says it's done, on any call or \
+in the chat, nudge-done N (list shows the numbers); "later" or "tomorrow" is nudge-later N [WHEN]. Set it on his clear ask, then say it in a sentence ("I'll text you when it \
 starts", "I'll keep an eye out")."""
 
 # H146 (15 October 2026, call at 09:34): a quick note on each appointment, from the calendar in the app. On every full
