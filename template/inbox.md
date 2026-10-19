@@ -17,7 +17,7 @@ Runs every hour, started by HQ's routine on the computer, hidden. Only reads mai
    - "Very important" line, exactly this shape, so every chat and call can read it: `- <received date> · <sender> · <subject> · <one plain line on what it is and what it asks of them> · Why: <which rule below, in a few words> · Status: new · [Gmail](<link>)`
 4. Never remove or shorten a line under "Very important": it stays until the user resolves it. A new mail about an item that's already there goes into that same line.
 5. Move the marker to the newest mail seen (also when nothing was kept): epoch seconds plus the readable date and time.
-6. Never send, reply, forward or draft, and never label, archive, trash or mark mail as read.
+6. Never send, reply, forward or draft, and never label, archive, trash or mark mail as read. The one exception: a sorting rule agreed on a call or in the texts (HQ's mail sorting rules, H213) adds its label and archives if it says so, only for new mail that fits it, with a line for each.
 
 ## What counts as very important
 

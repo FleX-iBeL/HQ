@@ -8516,6 +8516,97 @@ setTimeout(() => {
                 "little once; a close deadline steps up), never at night (moved to the morning, quietly), no numbers in what she's told; "
                 "later pauses it to the morning, done stops it by words, number or Done in the app; command line, rules, policy, backup, /api/notes")
 
+    async def flow127(self) -> str:
+        """H213, no Claude, no network: tidying mail on his ask and the mail check sorting by rules he agreed. The
+        policy lets a call and Donna's chat mark read and unread, archive, star, mark important, add and remove labels
+        and create or rename labels without a yes; trash, spam (also as a label) and deleting a label ask; sending,
+        replying and forwarding never; a test run changes nothing. The rule tells them to offer both, the Gmail filter
+        first. A made-up rule (a made-up newsletter, a made-up label) is added, listed, noted per mail, stopped and
+        started; the mail check gets the label tools only while a rule is on, never trash, spam or drafts, and its
+        instructions say what it may do; without rules it stays read-only. The workspace's own rules aren't touched."""
+        import mailsort
+        import config as _cfg
+        import direct_line as _dl
+        from policy import Policy, ALLOW, ASK, DENY
+        sys.path.insert(0, str(ROOT / "routine"))
+        import tick
+        d = self.tmp / "h213"
+        d.mkdir(parents=True, exist_ok=True)
+        real = Path(os.path.join(mailsort.hqpaths.DATA, "mail-sort.json"))
+        real_before = real.read_bytes() if real.exists() else None
+        keep = os.environ.get("HQ_MAIL_SORT")
+        os.environ["HQ_MAIL_SORT"] = str(d / "mail-sort.json")
+        g = "mcp__claude_ai_Gmail__"
+        try:
+            pol = Policy(config.FOLDER)
+            for t, inp in (("label_thread", {"threadId": "t", "labelIds": ["STARRED"]}),
+                           ("unlabel_thread", {"threadId": "t", "labelIds": ["INBOX"]}),
+                           ("unlabel_message", {"messageId": "m", "labelIds": ["UNREAD"]}),
+                           ("label_message", {"messageId": "m", "labelIds": ["IMPORTANT"]}),
+                           ("update_message_labels", {"messageId": "m", "addLabelIds": ["Label_1"], "removeLabelIds": ["INBOX"]}),
+                           ("create_label", {"displayName": "Newsletters"}), ("update_label", {"id": "Label_1", "name": "News"}),
+                           ("untrash_thread", {"threadId": "t"}), ("list_labels", {})):
+                need(pol.decide(g + t, inp).verdict == ALLOW, f"tidying mail ({t}) asks or is refused")
+            for t, inp in (("trash_thread", {"threadId": "t"}), ("mark_message_spam", {"messageId": "m"}),
+                           ("delete_label", {"id": "Label_1"}), ("label_thread", {"threadId": "t", "labelIds": ["TRASH"]}),
+                           ("update_message_labels", {"messageId": "m", "addLabelIds": ["SPAM"]})):
+                need(pol.decide(g + t, inp).verdict == ASK, f"{t} {inp} doesn't ask first")
+            for t in ("send_message", "reply", "forward"):
+                need(pol.decide(g + t, {}).verdict == DENY, f"{t} isn't refused")
+            need(Policy(config.FOLDER, dry_run=True).decide(g + "label_thread", {"threadId": "t", "labelIds": ["STARRED"]}).verdict
+                 == DENY, "a test run may change mail")
+            for rules in (_cfg.VOICE_RULES, _dl._text_rules()):
+                need("Tidying his mail (H213)" in rules and "never on your own" in rules and "suggest archiving instead" in rules
+                     and "the filter first" in rules and "Skip the Inbox" in rules and "mailsort.py\" add" in rules,
+                     "a call or Donna's chat isn't told how to tidy mail, or to offer the filter first")
+            script = str(ROOT / "routine" / "mailsort.py")
+            for cmd in (f'python3 "{script}" list', f'python3 "{script}" add "from the made-up newsletter" --label "News" --archive',
+                        f'python3 "{script}" stop 1', f'python3 "{script}" start 1', f'python3 "{script}" remove 1'):
+                need(pol.decide("Bash", {"command": cmd}).verdict == ALLOW, f"a call may not run {cmd}")
+            need(pol.decide("Bash", {"command": f'python3 "{script}" sorted 1 "x"'}).verdict == DENY, "a call may note a sorted mail")
+            # no rules: the mail check stays read-only
+            need(not mailsort.any_on() and mailsort.text() == "(no sorting rules)", "a fresh install has sorting rules")
+            allow, deny = tick.mail_tools()
+            need(not any(t in allow for t in tick.MAIL_SORT_TOOLS) and "mailsort.py" not in allow
+                 and all(g + t in deny for t in ("label_thread", "unlabel_thread", "trash_thread")),
+                 "without rules the mail check may change mail")
+            # a rule: listed, given to the mail check, one line per mail (the same mail once), stopped and started
+            r = subprocess.run([sys.executable, script, "add", "from the made-up newsletter", "--label", "News", "--archive",
+                                "--words", "keep putting these away"], capture_output=True, text=True, env=os.environ.copy(), timeout=60)
+            need(r.returncode == 0 and "Rule 1 is on" in r.stdout, f"adding a rule failed: {r.stdout} {r.stderr}")
+            need(mailsort.any_on() and 'Rule 1: mail from the made-up newsletter gets the label "News", and is archived' in mailsort.text(),
+                 f"the mail check isn't given the rule: {mailsort.text()}")
+            allow, deny = tick.mail_tools()
+            need(all(t in allow and t not in deny for t in tick.MAIL_SORT_TOOLS)
+                 and "mailsort.py sorted:*)" in allow, "with a rule the mail check can't label, archive or note it")
+            need(all(g + t in deny and g + t not in allow for t in ("send_message", "trash_thread", "mark_thread_spam", "create_draft",
+                                                                       "delete_label", "label_message", "update_message_labels")),
+                 "with a rule the mail check may do more than label and archive")
+            mailsort.sorted_one("1", "1 Jan · the made-up newsletter · Issue 1", "link-a")
+            mailsort.sorted_one("1", "1 Jan · the made-up newsletter · Issue 1", "link-a")
+            listing = mailsort.listing()
+            need(len(mailsort.read()["sorted"]) == 1 and "1 sorted so far" in listing and "Issue 1" in listing,
+                 f"a sorted mail isn't one line: {listing}")
+            mailsort.switch("1", False)
+            need(not mailsort.any_on() and "(stopped)" in mailsort.listing() and not any(t in tick.mail_tools()[0] for t in tick.MAIL_SORT_TOOLS),
+                 "a stopped rule still sorts")
+            mailsort.switch("1", True)
+            need(mailsort.any_on(), "a rule doesn't start again")
+            mailsort.remove("1")
+            need(not mailsort.read()["rules"] and "No sorting rules" in mailsort.listing(), "a removed rule stays")
+            mc = (ROOT / "routine" / "mail-check.md").read_text()
+            need("{SORTING}" in mc and "{MAILSORT} sorted N" in mc and "never any other label" in mc
+                 and "never trash, spam or mark mail as read or unread" in mc, "the mail check's instructions don't say how far sorting goes")
+            tsrc = (ROOT / "routine" / "tick.py").read_text()
+            need('.replace("{SORTING}", mail_sort_text())' in tsrc and tsrc.count("json.dumps(mail_tools()[0])") == 2,
+                 "the mail check doesn't get the rules or this run's tools")
+            for f in (ROOT / "template" / "inbox.md",):
+                need("H213" in f.read_text(), "a friend's mail list still says the mail check never labels")
+        finally:
+            os.environ.pop("HQ_MAIL_SORT", None) if keep is None else os.environ.__setitem__("HQ_MAIL_SORT", keep)
+        need((real.read_bytes() if real.exists() else None) == real_before, "the workspace's own sorting rules were touched")
+        return "tidying on his ask, trash and spam ask, never send; rules added, given to the mail check, noted, stopped; read-only without them"
+
     async def flow126(self) -> str:
         """F43, no Claude, no network: something done doesn't come back from the other places it lives. A made-up list,
         mail list and agent notes: done clears what clearly belongs to the item (a note saying its whole name, a
@@ -14622,6 +14713,7 @@ FLOWS = {
     124: ("F40: groceries tick off in the app to their own ticked-off list (A to Z, a tap puts one back), and several at once give one item each; phone, small phone, desktop app", False, "flow124"),
     125: ("H211: nudge until done: from its start, again and again in the day by how much it matters, never at night, no numbers; later pauses, done stops it (a call, her chat, Done in the app)", False, "flow125"),
     126: ("F43: something done doesn't come back: done or let go clears what clearly belongs to it (her notes, reminders, watches, nudges, To check mail lines), names the rest once, undo puts it back", False, "flow126"),
+    127: ("H213: Donna tidies the mail on his ask (read, archive, star, important, labels), trash and spam ask, never send; offers a Gmail filter first or a sorting rule the mail check applies, read-only without one", False, "flow127"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 

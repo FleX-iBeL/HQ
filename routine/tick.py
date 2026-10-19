@@ -348,6 +348,41 @@ MAIL_DENY = ",".join("mcp__claude_ai_Gmail__" + t for t in (
     "label_thread", "unlabel_message", "unlabel_thread", "update_message_labels", "trash_message", "trash_thread",
     "mark_message_spam", "mark_thread_spam", "apply_sensitive_message_label", "apply_sensitive_thread_label",
     "create_label", "delete_label", "update_label")) + ",Write,NotebookEdit,WebFetch,WebSearch"
+# H213: with sorting rules on, the mail check may also add and remove labels on whole conversations (the label and
+# the archive, which is taking INBOX off) and look up the labels' ids, and note each mail sorted. Nothing else changes:
+# no sending, drafts, trash, spam, read marks or label changes; without rules it stays read-only.
+MAIL_SORT_TOOLS = ("mcp__claude_ai_Gmail__list_labels", "mcp__claude_ai_Gmail__label_thread",
+                   "mcp__claude_ai_Gmail__unlabel_thread")
+
+
+def mail_sorting():
+    try:
+        import mailsort
+        return mailsort.any_on()
+    except Exception as e:
+        log(f"mail sorting rules: {e!r}")
+        return False
+
+
+def mail_tools(sorting=None):
+    """The mail check's allowed and refused tools for this run (H213: the label tools only with sorting rules on)."""
+    sorting = mail_sorting() if sorting is None else sorting
+    if not sorting:
+        return MAIL_ALLOW, MAIL_DENY
+    allow = MAIL_ALLOW + "," + ",".join(MAIL_SORT_TOOLS) + \
+        f",Bash(python3 {os.path.join(JV, 'routine', 'mailsort.py')} sorted:*)"
+    deny = ",".join(t for t in MAIL_DENY.split(",") if t not in MAIL_SORT_TOOLS)
+    return allow, deny
+
+
+def mail_sort_text():
+    """H213: the sorting rules that are on, for the mail check's instructions."""
+    try:
+        import mailsort
+        return mailsort.text()
+    except Exception as e:
+        log(f"mail sorting rules: {e!r}")
+        return "(no sorting rules)"
 
 
 def mail_running():
@@ -573,7 +608,8 @@ def start_mail():
     instructions = os.path.join(RUN, "mail-check.md")
     # H125: with Donna's open mail watches in it, and the one command that keeps a match for her to text.
     open(instructions, "w").write(open(os.path.join(HERE, "mail-check.md")).read().replace("{WORKSPACE}", FOLDER)
-                                  .replace("{WATCHES}", mail_watches()).replace("{PINGS}", os.path.join(JV, "routine", "pings.py")))
+                                  .replace("{WATCHES}", mail_watches()).replace("{PINGS}", os.path.join(JV, "routine", "pings.py"))
+                                  .replace("{SORTING}", mail_sort_text()).replace("{MAILSORT}", os.path.join(JV, "routine", "mailsort.py")))
     open(cmd, "w").write(mail_script_tmux(instructions, run_file) if LINUX_WINDOWS else f"""#!/bin/zsh
 # The hourly mail check, started by the HQ routine (phase L, L8). Hidden: opened in the
 # background, minimized to the Dock, and the window closes itself when it's done (L7).
@@ -587,7 +623,7 @@ echo $$ > {json.dumps(MAIL_PID)}
   # L10: streamed, so the plan limits that come back with the run are saved, for free.
   {CLAUDE} -p --no-chrome --model sonnet --permission-mode dontAsk --no-session-persistence \\
     --output-format stream-json --verbose \\
-    --allowedTools {json.dumps(MAIL_ALLOW)} --disallowedTools {json.dumps(MAIL_DENY)} \\
+    --allowedTools {json.dumps(mail_tools()[0])} --disallowedTools {json.dumps(mail_tools()[1])} \\
     < {json.dumps(instructions)} 2>&1 | /usr/bin/python3 {json.dumps(STREAM)}
   echo "--- exit ${{pipestatus[1]}}"
   /usr/bin/python3 {json.dumps(USAGE)}; }} 2>&1 | tee -a {json.dumps(os.path.join(RUN, 'mail.log'))} {json.dumps(run_file)}
@@ -627,7 +663,7 @@ echo $$ > {json.dumps(MAIL_PID)}
   # L10: streamed, so the plan limits that come back with the run are saved, for free.
   {CLAUDE} -p --no-chrome --model sonnet --permission-mode dontAsk --no-session-persistence \\
     --output-format stream-json --verbose \\
-    --allowedTools {json.dumps(MAIL_ALLOW)} --disallowedTools {json.dumps(MAIL_DENY)} \\
+    --allowedTools {json.dumps(mail_tools()[0])} --disallowedTools {json.dumps(mail_tools()[1])} \\
     < {json.dumps(instructions)} 2>&1 | {json.dumps(PY)} {json.dumps(STREAM)}
   echo "--- exit ${{PIPESTATUS[0]}}"
   {json.dumps(PY)} {json.dumps(USAGE)}; }} 2>&1 | tee -a {json.dumps(os.path.join(RUN, 'mail.log'))} {json.dumps(run_file)}

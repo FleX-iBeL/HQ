@@ -95,6 +95,17 @@ CALENDAR_ADD = {"create_event"}
 CALENDAR_CHANGE = {"update_event", "delete_event"}
 GMAIL_READ = {"search_threads", "get_thread", "get_message", "list_drafts", "get_draft", "list_labels"}
 GMAIL_NEVER = {"send_message", "send", "reply", "forward", "send_draft"}
+# H213 (19 October 2026, call at 10:57, in the user's words): "I think she should be able to make an email unread,
+# read, archived, and put it into certain labels. ... Starring emails, marking them as important or not". All of these
+# are labels in Gmail (UNREAD, INBOX, STARRED, IMPORTANT and their own), so on his ask they go without a yes, like
+# adding to his own calendar; taking a mail out of the trash or spam is the undo and goes too. Never on her own (the
+# rule, config.MAIL_TIDY_RULE). Trash, spam and deleting a label still ask: "She even asked about deleting but I
+# don't think deleting is smart."
+GMAIL_TIDY = {"label_message", "label_thread", "unlabel_message", "unlabel_thread", "update_message_labels",
+              "create_label", "update_label", "untrash_message", "untrash_thread", "unmark_message_spam",
+              "unmark_thread_spam"}
+GMAIL_CAREFUL = {"trash_message", "trash_thread", "mark_message_spam", "mark_thread_spam", "delete_label"}
+GMAIL_BIN = {"TRASH", "SPAM"}  # adding one of these as a label is trashing or spamming it
 
 # Tools that make no sense on a call; they are also removed from the session.
 CALL_UNFRIENDLY = [
@@ -170,6 +181,15 @@ class Policy:
                     return Decision(DENY, "sending, replying and forwarding email is never allowed")
                 if name in GMAIL_READ:
                     return Decision(ALLOW, "reading mail")
+                if name in GMAIL_TIDY:
+                    added = {str(x).upper() for x in (inp.get("labelIds") or []) + (inp.get("addLabelIds") or [])}
+                    if name.startswith(("label_", "update_message")) and added & GMAIL_BIN:
+                        return _ask("move that mail to the trash or spam", "trash or spam in Gmail")
+                    return Decision(ALLOW, "tidying mail on his ask (labels, read, archive, star, important)")
+                if name in GMAIL_CAREFUL:
+                    what = ("delete that label (the mails keep their other labels)" if name == "delete_label"
+                            else "move that mail to the spam" if "spam" in name else "move that mail to the trash")
+                    return _ask(what, "trash, spam or deleting a label in Gmail")
                 return _ask(f"{_plain(name)} in your Gmail", "a Gmail change")
             if "calendar" in s:
                 if name in CALENDAR_READ:
@@ -378,6 +398,12 @@ class Policy:
                 return Decision(ALLOW, "her pings, reminders, notes and watches")
             # H125: match is the mail check's own (it found a mail for a watch)
             return Decision(DENY, "the pings script takes list, appt, remind, cancel, note, note-clear, watch, unwatch, out, out-stop, nudge, nudge-done or nudge-later")
+        # H213: the mail sorting rules he agreed, in the workspace (HQ/mail-sort.json): read, add, stop, start, remove.
+        # `sorted` is the mail check's own line per mail.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "mailsort.py"):
+            if len(args) == 1 or args[1] in ("list", "add", "stop", "start", "remove"):
+                return Decision(ALLOW, "his mail sorting rules")
+            return Decision(DENY, "the mail sorting script takes list, add, stop, start or remove")
         # H132: what an agent has said about herself, kept in her own list in the workspace (HQ/agents/).
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "about_self.py"):
             if len(args) == 1 or args[1] in ("list", "add"):
@@ -660,6 +686,8 @@ def _writes(tool: str, inp: dict) -> bool:
     server, name = _mcp_parts(tool)
     if "calendar" in server.lower() and name not in CALENDAR_READ:
         return True  # H78: a calendar change goes without asking now, so a test run stops it here
+    if "gmail" in server.lower() and name in GMAIL_TIDY:
+        return True  # H213: tidying mail goes without asking, so a test run stops it here
     if tool == "Bash":
         c = inp.get("command") or ""
         return bool(re.search(r"\bgit\s+(add|commit|push)\b", c))

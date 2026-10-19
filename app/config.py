@@ -240,6 +240,29 @@ points of the weekly limit, so for more than a day say that once. A new until re
 normal" or "every hour again": python3 "{HQ}/routine/jobs.py" mail-hourly. When he asks how often it checks: \
 python3 "{HQ}/routine/jobs.py" list says it on its second line."""
 
+# H213 (19 October 2026, call at 10:57), in the user's words: "I think she should be able to make an email unread,
+# read, archived, and put it into certain labels. ... Starring emails, marking them as important or not" and, for mail
+# that keeps coming: "Maybe for every mail check Donna can just put it in that folder. I know it will cost usage so
+# maybe it can advise, "Hey you can set this up as a filter"", then "I like that Donna can offer both." On every full
+# call and in the direct line's chat; the policy lets the label tools go without a yes, and still asks for trash,
+# spam and deleting a label.
+MAIL_TIDY_RULE = """- Tidying his mail (H213): on {user}'s ask you may mark mail read or unread, archive it (take the label \
+INBOX off) or put it back in the inbox, star or unstar it, mark it important or not, add and remove labels, and \
+create or rename labels, with the Gmail connector (list_labels for a label's id; label_thread and unlabel_thread for a \
+whole conversation, the system labels are UNREAD, INBOX, STARRED and IMPORTANT). Only what he asked, never on your own, \
+and say in a sentence what you did. Never send, reply or forward. Trash, spam or deleting a label only when he asks \
+for exactly that (it asks him first); when he wants mail gone, suggest archiving instead: it's out of the inbox and \
+still findable. For mail he wants sorted from now on ("keep putting these in a label"), offer both, the filter first: \
+(1) a real Gmail filter, which works without HQ and costs nothing: walk him through it in everyday words, one step \
+at a time (in Gmail on a computer, search for the mail, the filter button at the end of the search bar, Create \
+filter, Apply the label, tick Skip the Inbox if he wants it archived, and Also apply to matching conversations for \
+the ones already there); or (2) the hourly mail check sorts it: a rule he agrees (which mail, which label, archived \
+or not) that it applies to new mail it already reads, which uses a little usage each hour. On his yes for (2): \
+python3 "{HQ}/routine/mailsort.py" add "<which mail, in his words>" --label "<label>" [--archive] --words "<his \
+words>"; it needs the label to exist in Gmail, so create it first if it doesn't. What it sorted and the rules: \
+python3 "{HQ}/routine/mailsort.py" list; stop one: stop N, again: start N, for good: remove N. Without rules the mail \
+check only reads mail."""
+
 # H8: added to SYSTEM_PROMPT in free mode. Claude's wording.
 FREE_RULES = """
 - You can search the web and read web pages. Use them when a question needs current or exact \
@@ -479,10 +502,11 @@ APPT_NOTES_RULE = APPT_NOTES_RULE.replace("{HQ}", str(ROOT)).replace("{user}", U
 TEAM_RULE = TEAM_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TODO_RULE = TODO_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 MAIL_FAST_RULE = MAIL_FAST_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
+MAIL_TIDY_RULE = MAIL_TIDY_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 import workflows as _workflows  # H202: the workflows the user turned on
 import features as _features  # H205: what they turned off
 WORKFLOWS_RULE = _workflows.rule(FOLDER)
-VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{todo}", TODO_RULE).replace("{onewriter}", ONE_WRITER_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
+VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE + "\n" + MAIL_TIDY_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{todo}", TODO_RULE).replace("{onewriter}", ONE_WRITER_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
                .replace("{times}", TIMES_RULE))
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:
