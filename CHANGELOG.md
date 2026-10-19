@@ -4,6 +4,12 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+### Added
+- Groceries tick off in the app. Each grocery has a tick; a ticked one moves to its own Ticked off list under the groceries, A to Z, and one tap puts it back on the list. Adding a few at once, one per line or with commas, gives one item each, and one that's already there isn't added twice (F40).
+
+### Changed
+- The README's version now moves along with every release, so GitHub's front page always says the version that's out.
+
 ## 0.4.6 · 18 October 2026
 
 ### Changed
