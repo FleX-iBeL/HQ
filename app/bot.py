@@ -562,6 +562,22 @@ if __name__ == "__main__":
         import weather as _weather
         return JSONResponse(await asyncio.to_thread(_weather.rain_alert, ask["on"]), headers=_NO_CACHE)
 
+    # H217: where the phone is, for travel advice (app/travel.py's here.json). The page sends it only when he allows
+    # his location in the app; only from the page itself (x-hq: here), not on a Free-only line.
+    @app.post("/api/here", include_in_schema=False)
+    async def here_post(request: Request):
+        if request.headers.get("x-hq") != "here":
+            return JSONResponse({"error": "Only the HQ page can say where the phone is"}, status_code=403)
+        if config.FREE_ONLY:
+            return JSONResponse({"error": "Not on Free"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        import travel as _travel
+        out = _travel.set_here(ask.get("lat"), ask.get("lon")) if isinstance(ask, dict) else {"ok": False}
+        return JSONResponse(out, status_code=200 if out["ok"] else 400, headers=_NO_CACHE)
+
     # H124: the bell. A tap in the appointment asks Donna to ping him when it starts (or not any more). Only HQ's own
     # list changes (routine/pings.py); Google Calendar is never written. Only from the page itself (x-hq: calendar).
     @app.post("/api/calendar/ping", include_in_schema=False)

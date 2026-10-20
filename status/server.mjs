@@ -408,6 +408,11 @@ async function directRoute(path0, req, res) {
   }
   const text = String(body.text ?? '').trim().slice(0, 4000);
   if (!text) return json(400, { ok: false, said: 'nothing to send' });
+  // H217: where the phone is, sent along only when he allows his location; kept by app/travel.py before she reads it
+  if (body.lat != null && body.lon != null && /^-?[0-9.]+$/.test(String(body.lat)) && /^-?[0-9.]+$/.test(String(body.lon))) {
+    await new Promise((done) => execFile(DIRECT_PY, [join(root, 'app/travel.py'), 'here', String(body.lat), String(body.lon)],
+      { timeout: 10000, cwd: root }, () => done()));
+  }
   await mkdir(DIRECT_DIR, { recursive: true });
   await appendFile(join(DIRECT_DIR, 'thread.jsonl'), JSON.stringify({ at: Date.now() / 1000, from: 'me', text, why: '' }) + '\n');
   const log = openSync(join(root, 'scratch', 'direct-line.log'), 'a');

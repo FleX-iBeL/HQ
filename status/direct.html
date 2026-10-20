@@ -178,14 +178,36 @@
     }
   }
 
+  // H217: travel advice starts where the phone is. Only when he allows his location in the app (the weather's "Use my
+  // location", or the browser already allows it and he didn't pick his home place), a text carries the spot (about
+  // ten metres), read ahead so sending never waits; the server keeps it with app/travel.py. Else it starts at home.
+  let hereSpot = null;
+  async function hereOk() {
+    if (!navigator.geolocation) return false;
+    let want = null;
+    try { want = localStorage.getItem('hq-wx-gps'); } catch {}
+    if (want === '0' || want === '1') return want === '1';
+    try { return (await navigator.permissions.query({ name: 'geolocation' })).state === 'granted'; } catch { return false; }
+  }
+  async function readHere() {
+    if (!(await hereOk())) { hereSpot = null; return; }
+    navigator.geolocation.getCurrentPosition((p) => {
+      hereSpot = { lat: p.coords.latitude.toFixed(4), lon: p.coords.longitude.toFixed(4), at: Date.now() };
+    }, () => {}, { enableHighAccuracy: true, timeout: 15000, maximumAge: 2 * 60 * 1000 });
+  }
+  readHere();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) readHere(); });
+  input.addEventListener('focus', () => { if (!hereSpot || Date.now() - hereSpot.at > 5 * 60 * 1000) readHere(); });
+
   document.getElementById('f').addEventListener('submit', async (e) => {
     e.preventDefault();
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
+    const here = hereSpot && Date.now() - hereSpot.at < 30 * 60 * 1000 ? { lat: hereSpot.lat, lon: hereSpot.lon } : {};
     try {
       await fetch('/direct/send', { method: 'POST', headers: { 'x-hq': 'direct', 'content-type': 'application/json' },
-        body: JSON.stringify({ text }) });
+        body: JSON.stringify({ text, ...here }) });
     } catch { input.value = text; }
     load();
   });

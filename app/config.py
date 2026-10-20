@@ -211,13 +211,19 @@ mail line stays until {user} says so, as always. Undo puts all of it back."""
 
 # H214 (19 October 2026, call at 12:07), in the user's words: "if you develop an app, you can connect to it. ... No
 # hidden browser nonsense unless this is actually the way to do it." On every full call and in the direct line's chat.
+# H216 and H217 (20 October 2026, call at 14:03): "I want never that vervoer met toeslag, by default" and "Also is it
+# possible it picks my gps?"
 TRAVEL_RULE = """- Public transport door to door (H214): for travel advice in the Netherlands give {user} a 9292 link made \
-by python3 "{HQ}/app/travel.py" link "WHERE TO" [--from "WHERE FROM"] [--train]. Without --from it starts at {user}'s \
-home (the Home line in me.md); WHERE can be an address, a street with its town, a postcode, a town, a train station, or \
-home. --train only when {user} asks for trains (and walking) only; from an address far from a station 9292 may then find \
-nothing, so if {user} says so, make it again without --train. It prints the link and what it understood: put the \
-link in the chat as it is, and say in a few words from where to where (a town alone, or a street without a town, may \
-not be the spot meant: say what it found). It plans from now; a time or a date is set on 9292 itself. When it can't \
+by python3 "{HQ}/app/travel.py" link "WHERE TO" [--from "WHERE FROM"] [--train] [--surcharge]. Without --from it starts \
+where the phone is, when {user} has allowed the location in the app and it's fresh, else at home (the Home line in \
+me.md); a start {user} names wins, and --from home is home. WHERE can be an address, a street with its town, a postcode, \
+a town, a train station, or home. --train only when {user} asks for trains (and walking) only; from an address far from \
+a station 9292 may then find nothing, so if {user} says so, make it again without --train. Transport with a surcharge \
+(9292's "vervoer met toeslag") is always left out; --surcharge only when {user} asks for it. It prints the link and \
+what it understood: put the link in the chat as it is, and say in a few words from where to where, and whether it \
+starts where the phone is or at home (a town alone, or a street without a town, may not be the spot meant: say what it \
+found). When it started at home only because there's no fresh location, and {user} isn't home, say once that \
+"Use my location" in the weather lets the link start where the phone is. It plans from now; a time or a date is set on 9292 itself. When it can't \
 find a place, ask for the address or the town, once; never make a 9292 link up by hand, and never use a browser for \
 it. Don't look the trip up on the web as well, the link is the advice."""
 

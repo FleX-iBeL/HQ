@@ -14,11 +14,22 @@ go too), and a place on the map is `@latitude,longitude`, the same as its own "c
 9292 opens on that link with both filled in and plans right away (from now). `--train` limits it to trains and
 walking. Nothing about the user is in here; their home address only comes from their own me.md.
 
-    python3 app/travel.py link "TO" [--from "FROM"] [--train]   the link, and what it understood
-    python3 app/travel.py link "TO" --json                       the same as JSON
-    python3 app/travel.py where "PLACE"                          what a place resolves to (a check)
+H216 (20 October 2026, call at 14:03), the user: "I want never that vervoer met toeslag, by default". Every link says
+`withSurcharge=false`, 9292's own switch for "Vervoer met toeslag" (the planner's search parameter, read from its
+page's code and checked on a real link: the advice it plans carries it); `--surcharge` puts it back on, only when asked.
 
-FROM is home when left out; "home" (or thuis) works for TO too.
+H217 (same call): "Also is it possible it picks my gps?" Without a start named, the link starts where the phone is:
+the spot the call page or Donna's chat sent (`here`, only when he has allowed his location in the app, as the weather
+does: H161), or else the weather's last spot from the phone, while either is under HERE_FRESH old; else home, as
+before. A start he names wins, and "home" is home. The output says which start it used. The spot is kept in the direct
+line's folder (here.json, off GitHub, like weather.json).
+
+    python3 app/travel.py link "TO" [--from "FROM"] [--train] [--surcharge]   the link, and what it understood
+    python3 app/travel.py link "TO" --json                                     the same as JSON
+    python3 app/travel.py where "PLACE"                                        what a place resolves to (a check)
+    python3 app/travel.py here LAT LON                                         keep where the phone is now (the pages)
+
+FROM is where the phone is, else home, when left out; "home" (or thuis) works for TO too.
 """
 import argparse
 import csv
@@ -43,6 +54,8 @@ STATIONS_URL = "https://opendata.rijdendetreinen.nl/public/stations/stations-202
 STATIONS_CACHE = Path(os.environ.get("HQ_TRAVEL_STATIONS", str(ROOT / "scratch" / "stations.csv")))
 STATIONS_DAYS = 60  # the list is read again after this; an older copy still works when the download fails
 HOME_WORDS = {"home", "thuis", "my home", "huis", "naar huis", "my place", "my house"}
+HERE_FRESH = 30 * 60  # H217: the phone's spot stands in for home this long
+PDOK_REVERSE = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/reverse"
 UA = "HQ travel link (open source; https://github.com/FleX-iBeL/HQ)"
 
 
@@ -158,13 +171,88 @@ def where(text: str) -> dict:
     return station(text) or address(text)
 
 
-def link(to: str, frm: str = "", train: bool = False) -> dict:
-    a, b = where(frm), where(to)
+def _direct_dir() -> Path:
+    return Path(os.environ.get("HQ_DIRECT_DIR") or os.path.join(hqpaths.DATA, "direct-line"))
+
+
+def _spot(lat, lon) -> tuple[float, float] | None:
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+    if lat != lat or lon != lon or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    return round(lat, 4), round(lon, 4)  # about ten metres: enough for the door, no more
+
+
+def set_here(lat, lon, now: float | None = None) -> dict:
+    """H217: keep where the phone is now (the call page or Donna's chat sends it, only when he allows his location)."""
+    g = _spot(lat, lon)
+    if not g:
+        return {"ok": False}
+    f = _direct_dir() / "here.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_name(f".here.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps({"lat": g[0], "lon": g[1], "at": now or time.time()}))
+    os.replace(tmp, f)
+    return {"ok": True}
+
+
+def _read_json(f: Path) -> dict:
+    try:
+        d = json.loads(f.read_text(encoding="utf8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def phone_spot(now: float | None = None) -> tuple[float, float] | None:
+    """H217: where the phone is, while it's fresh: the pages' own spot first, else the weather's (H161, rounded to
+    about a kilometre there); None when neither is under HERE_FRESH old."""
+    now = now or time.time()
+    h = _read_json(_direct_dir() / "here.json")
+    if now - float(h.get("at") or 0) <= HERE_FRESH and _spot(h.get("lat"), h.get("lon")):
+        return _spot(h["lat"], h["lon"])
+    w = _read_json(_direct_dir() / "weather.json")
+    last = w.get("here") if isinstance(w.get("here"), dict) else {}
+    got = (w.get("spots") or {}).get(last.get("key")) if isinstance(w.get("spots"), dict) else None
+    if isinstance(got, dict) and now - float(last.get("at") or 0) <= HERE_FRESH:
+        return _spot(got.get("lat"), got.get("lon"))
+    return None
+
+
+def near(g: tuple[float, float]) -> str:
+    """The nearest address to a spot, from the government's address service, for 9292's label ("" when unknown)."""
+    if os.environ.get("HQ_TRAVEL_OFFLINE") or os.environ.get("HQ_TRAVEL_PLACES"):
+        return ""
+    q = {"lat": g[0], "lon": g[1], "rows": "1", "type": "adres", "fl": "weergavenaam"}
+    try:
+        docs = json.loads(_get(PDOK_REVERSE + "?" + urllib.parse.urlencode(q), 6)).get("response", {}).get("docs", [])
+        return docs[0].get("weergavenaam", "") if docs else ""
+    except Exception:
+        return ""
+
+
+def start(frm: str = "", now: float | None = None) -> dict:
+    """Where the trip starts (H217): the place he names; "home" is home; nothing named is where the phone is, while
+    that's fresh, else home. `start` says which: named, home or phone."""
+    if (frm or "").strip() and _norm(frm) not in {_norm(w) for w in HOME_WORDS}:
+        return where(frm) | {"start": "named"}
+    g = None if (frm or "").strip() else phone_spot(now)
+    if g:
+        n = near(g)
+        return {"id": f"@{g[0]},{g[1]}", "label": n or "My location", "near": n, "kind": "location", "start": "phone"}
+    return where("") | {"start": "home"}
+
+
+def link(to: str, frm: str = "", train: bool = False, surcharge: bool = False) -> dict:
+    a, b = start(frm), where(to)
     q = {"van": a["id"], "vanLabel": a["label"], "naar": b["id"], "naarLabel": b["label"]}
     if train:
         q["modalities"] = "Train"  # walking to and from the train stays, as on 9292 itself
+    q["withSurcharge"] = "true" if surcharge else "false"  # H216: never "Vervoer met toeslag" unless asked
     url = PLANNER + "?" + urllib.parse.urlencode(q, quote_via=urllib.parse.quote, safe="@,")
-    return {"url": url, "from": a, "to": b, "train": train}
+    return {"url": url, "from": a, "to": b, "train": train, "surcharge": surcharge}
 
 
 def main(argv: list[str]) -> int:
@@ -174,15 +262,23 @@ def main(argv: list[str]) -> int:
     l.add_argument("to")
     l.add_argument("--from", dest="frm", default="")
     l.add_argument("--train", action="store_true", help="trains and walking only")
+    l.add_argument("--surcharge", action="store_true", help="also transport with a surcharge (off unless asked)")
     l.add_argument("--json", action="store_true")
     w = sub.add_parser("where")
     w.add_argument("place")
+    h = sub.add_parser("here")
+    h.add_argument("lat")
+    h.add_argument("lon")
     a = p.parse_args(argv)
     try:
+        if a.cmd == "here":
+            out = set_here(a.lat, a.lon)
+            print(json.dumps(out))
+            return 0 if out["ok"] else 2
         if a.cmd == "where":
             print(json.dumps(where(a.place), ensure_ascii=False))
             return 0
-        r = link(a.to, a.frm, a.train)
+        r = link(a.to, a.frm, a.train, a.surcharge)
     except NotFound as e:
         print(f"Couldn't find {e}. Ask for the address, a station or a town.")
         return 1
@@ -190,8 +286,12 @@ def main(argv: list[str]) -> int:
         print(json.dumps(r, ensure_ascii=False))
         return 0
     side = lambda x: x["label"] + (" (home)" if x.get("home") else f" ({x['kind']})")
+    f = r["from"]
+    frm = ("where the phone is" + (f", near {f['near']}" if f.get("near") else "") if f.get("start") == "phone"
+           else side(f) + (", as there's no fresh location from the phone" if f.get("start") == "home" else ""))
     print(r["url"])
-    print(f"From {side(r['from'])} to {side(r['to'])}" + (", trains and walking only." if r["train"] else "."))
+    print(f"From {frm} to {side(r['to'])}" + (", trains and walking only" if r["train"] else "")
+          + (", transport with a surcharge included." if r["surcharge"] else ", without transport with a surcharge."))
     print("9 2 9 2 opens with both filled in and plans from now; a time or date is changed there.")
     return 0
 

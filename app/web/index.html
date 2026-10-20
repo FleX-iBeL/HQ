@@ -3116,6 +3116,23 @@ document.getElementById("wx").addEventListener("click", () => showWx(!wxOpen()))
 document.getElementById("wxclose").addEventListener("click", () => showWx(false));
 loadWx(true);
 setInterval(() => { if (!document.hidden) loadWx(true); }, 15 * 60 * 1000);
+// H217: travel advice starts where the phone is. Only when he allows his location in the app (the same switch as the
+// weather's: "Use my location", or the browser already allows it and he didn't pick his home place), the page sends
+// its spot (about ten metres) to app/travel.py's here.json: when a call starts, when the page shows again, and every
+// ten minutes while it shows. Without it the link starts at home, as before.
+var hereAt = 0;
+async function sendHere(force) {
+  if (!force && Date.now() - hereAt < 10 * 60 * 1000) return;
+  if (!(await wxGpsOk())) return;
+  navigator.geolocation.getCurrentPosition(p => {
+    hereAt = Date.now();
+    fetch("api/here", { method: "POST", cache: "no-store", headers: { "x-hq": "here", "content-type": "application/json" },
+      body: JSON.stringify({ lat: p.coords.latitude.toFixed(4), lon: p.coords.longitude.toFixed(4) }) }).catch(() => {});
+  }, () => {}, { enableHighAccuracy: true, timeout: 15000, maximumAge: 2 * 60 * 1000 });
+}
+sendHere(true);
+setInterval(() => { if (!document.hidden) sendHere(false); }, 10 * 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) sendHere(false); });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && (!wxData || !wxData.looked || Date.now() / 1000 - wxData.looked > 15 * 60)) loadWx(true);
 });
@@ -3369,6 +3386,7 @@ async function call() {
   const handover = handoverNext && !!cont; handoverNext = false;  // H79
   const demo = demoNext; demoNext = null; demoCall = demo !== null;  // H74: a demo call from the tutorial
   const plain = free || demoCall;
+  if (!plain) sendHere(true);  // H217
   document.getElementById("demotag").hidden = !demoCall;
   if (cont && !plain) {
     contLabel = handover ? "from " + cont.agent : "continuing " + cont.started;
