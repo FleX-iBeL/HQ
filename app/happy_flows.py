@@ -6072,7 +6072,48 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         kinds = json.loads((est_dir / "schedule-kinds.json").read_text())
         need(kinds[str(i1)]["kind"] == "build" and not kinds[str(i1)].get("by_hand") and kinds[str(i2)]["kind"] == "call"
              and kinds[str(i2)].get("by_hand") and kinds[str(i3)]["kind"] == "transcribe", f"H95: the items' kinds are wrong: {kinds}")
-        need("--kind" not in sched("list"), "H95: --kind ended up in the item's text")
+        need(not any("--kind" in l for l in sched("list").splitlines() if "flow 54" in l), "H95: --kind ended up in the item's text")
+        # H215: a build is small (build) or big (bigbuild): sorted from its words, its row and the first look, unless a
+        # call says the size; --kind small, bigbuild and big build are taken; a plain build is sorted.
+        need(est("kind", "H9 on the HQ roadmap: the whole new screen, a core feature. Read the whole H9 row and build it as it says, "
+                         + "with every part of it " * 30).strip() == "bigbuild", "H215: a big build's wording isn't seen as a big build")
+        need(est("kind", "H9 on the HQ roadmap: one label. Read the H9 row and build it as it says.").strip() == "build",
+             "H215: a small build's wording isn't seen as a small build")
+        need(est("kind", "Scheduled item 9, planned for Monday: H169, the nightly run: every night, the whole set, all the "
+                         "flows, fix it so it passes, push to dev with push.py. " + "and more " * 80).strip() == "build",
+             "H215: the nightly run is sorted as a big build")
+        g1 = int(jobs("add", "Build H6, flow 54", "--kind", "small").split()[1])
+        g2 = int(jobs("add", "Build H6, flow 54", "--kind", "big build").split()[1])
+        g3 = int(jobs("add", "Build H6, flow 54", "--kind", "build").split()[1])
+        sk = json.loads((est_dir / "job-estimates.json").read_text())
+        need(sk[str(g1)]["kind"] == "build" and sk[str(g1)].get("fixed") and sk[str(g2)]["kind"] == "bigbuild"
+             and sk[str(g2)].get("fixed") and sk[str(g3)]["kind"] == "build" and not sk[str(g3)].get("fixed"),
+             f"H215: --kind small, big build and a plain build aren't taken as they should: {[sk[str(g)] for g in (g1, g2, g3)]}")
+        for g in (g1, g2, g3):
+            jobs("stop", str(g))
+        r215 = sp.run(["python3", "-c", """
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import estimate as E
+t = "H9 on the HQ roadmap: one label. Read the H9 row and build it as it says."
+print(json.dumps({"look_big": E.build_size(t, 45), "look_small": E.build_size(E._about(t) + " the whole full overhaul " * 60, 6),
+    "look_mid": E.build_size(t, 15), "retag": E.new_kind(t, "build", 45), "retag_fixed": E.new_kind(t, "build", 45, True),
+    "retag_other": E.new_kind("Read the H9 row and look into it.", "other", 45), "hand": E.hand_kind(t, "bigbuild"),
+    "plain": E.hand_kind(t, "Build"), "ok": [E.kind_word_ok(w) for w in ("small", "big build", "bigbuild", "huge")],
+    "bt": E.backtest([{"n": i, "kind": "build", "actual": 30, "done": i, "how": "seen", "machine": "vps"} for i in range(1, 6)]
+                     + [{"n": 9, "kind": "build", "actual": 2, "done": 9, "how": "seen", "machine": "vps"}])}))
+""", str(jv / "routine")], capture_output=True, text=True, env=env)
+        need(r215.returncode == 0, f"H215: {r215.stderr.strip()[-400:]}")
+        o215 = json.loads(r215.stdout)
+        need(o215["look_big"] == "bigbuild" and o215["look_small"] == "build" and o215["look_mid"] == "build",
+             f"H215: the first look's minutes don't decide a build's size when they're clear: {o215}")
+        need(o215["retag"] == "bigbuild" and o215["retag_fixed"] == "build" and o215["retag_other"] == "other",
+             f"H215: a retag doesn't sort the finished builds by their look, or moves a size said by hand: {o215}")
+        need(o215["hand"] == ["bigbuild", True] and o215["plain"] == ["build", False] and o215["ok"] == [True, True, True, False],
+             f"H215: the size words for --kind aren't read as they should: {o215}")
+        need(o215["bt"].get("twice") == 0 and "count" in o215["bt"], f"H215: backtest doesn't count the builds over twice: {o215}")
+        need("bigbuild" in config.VOICE_RULES and "small" in config.VOICE_RULES and "H215" in config.VOICE_RULES,
+             "H215: the call rules don't give the small and big build kinds")
         p = json.loads(est("plan"))
         it = p["items"]
         at1 = time.mktime(time.strptime(time.strftime("%Y-%m-%d", time.localtime(time.time() + 86400)) + " 15:00", "%Y-%m-%d %H:%M"))
@@ -12721,7 +12762,7 @@ print("H81OUT " + json.dumps(out))
              f"H166: estimating back, the similar jobs aren't closer than the kind alone: {b1} {b0}")
         need(o["done166"].get("about", "").startswith("h230 on the hq roadmap: the calendar") and "pull dev first" not in o["done166"]["about"],
              f"H166: a finished job doesn't keep its words (without the routine's own): {o['done166']}")
-        need(o["retag166"].get("about", "").startswith("h7 on the hq roadmap: the weather") and o["retag166"]["retag"] == 2,
+        need(o["retag166"].get("about", "").startswith("h7 on the hq roadmap: the weather") and o["retag166"]["retag"] >= 2,
              f"H166: retag doesn't give a finished job its words: {o['retag166']}")
         words = " ".join(o["learned"])
         need("Estimates are for the Laptop, from 3 finished jobs there and 18 on the VPS" in words

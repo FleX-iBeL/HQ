@@ -15,7 +15,7 @@ a new job goes at the bottom, and "move" changes its place. The job numbers neve
 
 usage (from the workspace):
   python3 "routine/jobs.py" add "TEXT" [--past-the-line] [--kind K] [--guess MINUTES]   a call's let's go: the
-                                                           job is ready; K (transcribe, big, call, build, other) sets
+                                                           job is ready; K (transcribe, big, call, small, bigbuild, other; H215) sets
                                                            the kind for its estimate instead of the guess (H70);
                                                            MINUTES is the call's own guess (H190), kept apart from the
                                                            first look's (a small Claude look, started in the
@@ -430,8 +430,8 @@ def main(argv):
             if kind is not None:
                 kind = kind.strip().lower()
                 import estimate as est_
-                if kind not in est_.KINDS:
-                    sys.exit(f"--kind is one of: {', '.join(est_.KINDS)}.")
+                if not est_.kind_word_ok(kind):  # H215: a build's size in words too
+                    sys.exit(f"--kind is one of: {est_.kind_words()}.")
             if not words or not one_line(" ".join(words)):
                 sys.exit("What should the job do? Give it as one self-contained line.")
             n = max([j["n"] for j in jobs] + [0]) + 1

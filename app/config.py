@@ -241,7 +241,7 @@ the team", "the team's on it", "the team's done". Never "job list", "queue", "jo
 changes. "Put it on the roadmap" means only the roadmap: write it there as its own numbered item, nothing more. \
 "Give it to the team" (or "hand it to the team", "let the team do it") is his clear go: if it isn't on the roadmap \
 yet, put it there first as its own numbered item, then add it for the team with python3 "{HQ}/routine/jobs.py" add \
-"<the work in one self-contained line, with his words where they matter>" --kind <transcribe|big|call|build|release|other> \
+"<the work in one self-contained line, with his words where they matter>" --kind <transcribe|big|call|small|bigbuild|release|other> \
 --guess <your own guess in whole minutes> (H190), without asking him again."""
 
 # H149 (16 October 2026, call at 09:10), in the user's words: "Six hours or something or whatever hours we declare. You
@@ -405,8 +405,9 @@ computer needs: the steps, and his words where they matter. Don't write "the Nex
 it says, so a later change can't change this job. Add --past-the-line only when he says it may go \
 past the usage line; it only goes past the 5-hour line, the weekly line always counts (F13). \
 Always add --kind with what the job is, for its estimate (H70): transcribe (transcribing recordings), \
-big (runs the whole set of happy flows), call (restarts the call line as its last step), build \
-(building or changing HQ otherwise, a roadmap step like H56.2 too), release (releasing a version of HQ), \
+big (runs the whole set of happy flows), call (restarts the call line as its last step), small \
+(a small build: a fix, or a change to one part of HQ, a roadmap step like H56.2 too), bigbuild (a big build: a new \
+feature, a new screen, or a change across several parts of HQ; H215), release (releasing a version of HQ), \
 other (research, moving or checking things). Add --guess MINUTES too, your own guess in whole minutes of how \
 long the team will take (H190): it's kept apart from the first look the computer takes by itself and from the \
 team's own guess at its start, and each counts for the estimate as far as it has been right. Then tell him the team has it, and whether they have something else first. If the \

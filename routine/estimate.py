@@ -97,6 +97,16 @@ How it works:
     the counts; the size's fit weighs them in, learning from every finished job, those kept before H204 counted in
     retrospect from their kept words (_size_of, BACKS). [The names it skips and the features are Claude's choice.]
 
+  - H215 (20 October 2026, call at 10:11): "I actually think that if you split it up right, it would already fix itself.
+    I don't think it would get hit after two times." Three builds in a row were paused at twice their estimated usage
+    near the end: one kind, build, covered a one-line fix and a whole new feature alike. Now a build is small (build)
+    or big (bigbuild), sorted by build_size from its words and its roadmap row (size_score: a whole, full or complete
+    piece of work, a new feature or an overhaul; a long row; a long text; a bug fix counts down), and by the first look
+    (H190) once its minutes are clear (BIG_LOOK, SMALL_LOOK), unless a call said the size (--kind small, bigbuild or
+    big build: fixed). A plain --kind build is sorted the same way. The finished builds were sorted again in retrospect
+    (RETAG 3, with their look's minutes), so the big ones learn from each other at once; backtest also says how many
+    builds took over twice their estimate. The pause stays at twice. [The cues and numbers are Claude's choice.]
+
 Files, in HQ's .status (never in the repo): job-estimates.json (each job's estimate, set when added,
 and when it started) and job-estimates-history.jsonl (one line per finished job: estimate and real).
 A test's copy of the roadmap (HQ_ROADMAP) gets its own files next to it, so tests never touch the real ones.
@@ -160,7 +170,8 @@ PATTERN_MIN = 4   # H81: finished jobs with a tag before it moves an estimate
 PATTERN_SHRINK = 4
 PATTERN_CLEAR = 1.2  # H81: a tag moves an estimate only when its jobs took at least this much longer (or shorter)
 PULL_EVERY = 120  # H81: seconds between two pulls of the other HQ's history (F34: 2 minutes, for the open jobs' kinds)
-RETAG = 2         # F34: the version of the kinds and tags; a finished line with an older one is retagged (2: H166's words)
+RETAG = 3         # F34: the version of the kinds and tags; a finished line with an older one is retagged (2: H166's words,
+                  # 3: H215's small and big builds)
 SIMILAR = 8       # H166: how many of the most similar finished jobs count
 SIM_MIN = 0.1     # H166: less alike than this (0 to 1) doesn't count as similar
 SIM_POW = 2       # H166: a job twice as alike counts four times as much
@@ -178,7 +189,8 @@ KINDS = {
     "transcribe": "transcribing",
     "big": "a big change (whole set of happy flows)",
     "call": "a change to the call (line restarts)",
-    "build": "a build",
+    "build": "a small build (a fix, or a change to one part of HQ)",
+    "bigbuild": "a big build (a new feature, a new screen, or several parts of HQ)",  # H215
     "release": "a release",            # F34: a few minutes, nothing built
     "merge": "merging a sync conflict",  # F34: a minute or two; kept apart so they don't pull other kinds down
     "other": "other",
@@ -186,6 +198,51 @@ KINDS = {
 # F34: a kind set by hand (a call's --kind) wins over the guess, except over these two: the routine's own
 # wording says them for sure, and a call has no word for a merge.
 SURE = ("merge", "release")
+BUILDS = ("build", "bigbuild")  # H215: the two sizes of a build
+# H215: the words a call can give for a build's size. A plain "build" (the word the call rules used before H215) says
+# a build without its size: it's sorted into small or big like a guess (build_size). Only these say the size for sure.
+SIZE_WORDS = {"small": "build", "small build": "build", "small-build": "build", "smallbuild": "build",
+              "big build": "bigbuild", "big-build": "bigbuild", "bigbuild": "bigbuild"}
+BIG_LOOK = 20     # H215: the first look guessing at least this many minutes makes a build a big one
+SMALL_LOOK = 10   # H215: at most this many, a small one; in between the words decide
+BIG_SCORE = 2     # H215: the words' score (build_size) from which a build is a big one
+# H215: the routine's repeating maintenance runs are never a big build: how long they take is their own thing.
+_MAINT = re.compile(r"\bthe nightly run\b|\bthe weekly sweep\b|\bthe daily release\b|\bthe weekly rules check\b")
+
+
+def build_size(text, look_min=None):
+    """H215: a build's size, "build" (small) or "bigbuild" (big), from its words, its roadmap row and the first look.
+    In the user's words (20 October 2026): "I actually think that if you split it up right, it would already fix
+    itself." The first look's minutes decide when they're clear (BIG_LOOK, SMALL_LOOK); else the words: a whole,
+    full or complete piece of work, a new or core feature, an overhaul (+1); a long roadmap row, his words at length
+    (+1); a long job text (+1); a bug fix (-1). [The cues and numbers are Claude's choice, from sorting the finished
+    builds back: those are the ones that took clearly longer.]"""
+    about = _about(text)
+    if _MAINT.search(about):
+        return "build"
+    if isinstance(look_min, (int, float)) and look_min > 0:
+        if look_min >= BIG_LOOK:
+            return "bigbuild"
+        if look_min <= SMALL_LOOK:
+            return "build"
+    return "bigbuild" if size_score(about) >= BIG_SCORE else "build"
+
+
+def size_score(about):
+    """H215: the words' score for a build's size (build_size)."""
+    labels = re.findall(r"\b([hf]\d+(?:\.\d+)?)\b", about or "")
+    rows = _rows()
+    row = next((rows[l] for l in dict.fromkeys(labels) if rows.get(l)), "")
+    s = 0
+    if re.search(r"\boverhaul\b|\bthe whole\b|\bfull\b|\bcomplete\b|\bcore feature\b|\bnew feature\b", about or ""):
+        s += 1
+    if len(row.split()) >= 350:
+        s += 1
+    if len((about or "").split()) >= 150:
+        s += 1
+    if re.search(r"\bfix it as it says\b|\bthen fix it\b|^f\d+ on the", about or "") or row.startswith("bug:"):
+        s -= 1
+    return s
 
 
 def _sure(t):
@@ -221,19 +278,41 @@ def kind_of(text):
     # H95: the way planned items are worded, "Read the F18 row first and fix it as it says", counts too.
     if re.search(r"^build\b|\bbuild [a-z]\d|\bbuild exactly what\b|\bbuild the\b|^[a-z]\d+\.\d+ on the (hq )?roadmap"
                  r"|\b(build|fix) it as it says\b|\bthen fix it\b", tb):
-        return "build"
+        return build_size(text)
     # F34: a job that changes HQ's code says so in how it ends: "Build: ...", "build a first version", "fix it
     # so ...", a happy flow to add or run, a push to dev. Before, these fell into other, next to the merges.
     if re.search(r"\bbuild(:| a | it\b| this\b| them\b)|\bfix (it|this|that|them) so\b|\badd (a|one|the) (new )?happy flow"
                  r"|\bhappy flows? for it\b|\brun (happy flow|the affected|flows? \d)|\bpush (to dev|with push\.py)", tb):
-        return "build"
+        return build_size(text)
     return "other"
 
 
 def kind_given(kind):
-    """A kind set by hand (jobs.py add --kind), or None. Unknown words are refused by jobs.py."""
-    k = (kind or "").strip().lower()
+    """A kind set by hand (jobs.py add --kind), or None. Unknown words are refused by jobs.py. H215: a build's size
+    in words ("small", "big build") gives its kind."""
+    k = " ".join((kind or "").strip().lower().split())
+    k = SIZE_WORDS.get(k, k)
     return k if k in KINDS else None
+
+
+def kind_word_ok(kind):
+    """H215: a word jobs.py and schedule.py take for --kind: a kind, or a build's size in words."""
+    return kind_given(kind) is not None
+
+
+def kind_words():
+    """H215: the words --kind takes, for the refusal."""
+    return ", ".join(list(KINDS) + ["small", "big build"])
+
+
+def hand_kind(text, kind):
+    """H215: (kind, fixed) for a kind given by hand: a build's size said for sure ("small", "bigbuild", "big build")
+    is fixed, so the first look doesn't move it; a plain "build" is sorted into small or big from its words."""
+    k = " ".join((kind or "").strip().lower().split())
+    g = kind_given(k)
+    if g == "build" and k == "build":
+        return build_size(text), False
+    return g, g in BUILDS
 
 
 def kind_for(text, kind=None):
@@ -1063,11 +1142,14 @@ def on_add(n, text, kind=None, by_hand=None, guess=None):
     t0 = time.time()
     size = look(_about(text))  # H167: the quick look at the work, kept with it (and how long it took, in ms)
     look_ms = round((time.time() - t0) * 1000)
-    d = estimate_detail(text, kind=kind, size=size)
+    given, fixed = (hand_kind(text, kind) if by_hand is not False else (kind_given(kind), False))  # H215
+    d = estimate_detail(text, kind=given, size=size)
     st[str(n)] = {"est": d["est"], "kind": d["kind"], "based": d["based"], "set": int(time.time()), "machine": d["machine"],
                   "size": size, "look_ms": look_ms}
     if kind_given(kind) and by_hand is not False:
         st[str(n)]["by_hand"] = True
+    if fixed:
+        st[str(n)]["fixed"] = True  # H215: a build's size said by hand; the first look doesn't move it
     if guess:
         st[str(n)]["guess_call"], st[str(n)]["guess_call_at"] = int(guess), int(time.time())
     _save_state(st)
@@ -1341,6 +1423,9 @@ def look_run(what, n):
         if g and now_text is not None and fingerprint(now_text) == fp:
             e.update({"guess_look": g["min"], "look_at": int(time.time()), "look_fp": fp, "look_cost": g.get("cost"),
                       "look_s": g.get("s"), "look_why": g.get("why")})
+            # H215: the first look's minutes say a build's size, unless the size was said by hand
+            if e.get("kind") in BUILDS and not e.get("fixed") and not e.get("started"):
+                e["kind"] = build_size(now_text, g["min"])
         if now_text is not None and fingerprint(now_text) == fp:
             # H204: the size, with the material it names, made again for the words the look read (they may have changed)
             e["size"] = look(_about(now_text))
@@ -1442,6 +1527,8 @@ def on_done(n, text="", started_hhmm=None):
            "actual": max(1, actual), "done": int(now), "how": "seen" if seen else "clock", "machine": m["name"],
            "label": m["label"], "type": m["type"], "tags": tags_of(text), "retag": RETAG,
            "size": e.get("size") if isinstance(e.get("size"), dict) else look(_about(text))}  # H167
+    if e.get("fixed"):
+        rec["fixed"] = True  # H215: its size was said by hand, so a retag keeps it
     if isinstance(e.get("guess"), (int, float)):  # H168: the team's own guess, next to the computed estimate
         rec["guess"] = e["guess"]
     rec.update({k: v for k, v in guess_detail(e).items() if k != "guess"})  # H190: the call's and the look's, apart
@@ -1514,9 +1601,12 @@ def item_on_add(n, text, kind=None, guess=None):
     """A planned item's kind, set when it's planned: given by the call (schedule.py add --kind), else guessed.
     guess: the call's own guess in minutes (schedule.py add --guess, H190)."""
     d = _load_items()
-    d[str(n)] = {"kind": kind_given(kind) or kind_of(text), "set": int(time.time()), "size": look(_about(text))}  # H167
+    given, fixed = hand_kind(text, kind) if kind_given(kind) else (None, False)  # H215
+    d[str(n)] = {"kind": given or kind_of(text), "set": int(time.time()), "size": look(_about(text))}  # H167
     if kind_given(kind):
         d[str(n)]["by_hand"] = True
+    if fixed:
+        d[str(n)]["fixed"] = True
     if guess:
         d[str(n)]["guess_call"], d[str(n)]["guess_call_at"] = int(guess), int(time.time())
     _save_items(d)
@@ -1533,6 +1623,9 @@ def item_on_job(n, text, job_n, job_text):
     st = _load_state()
     if str(job_n) in st:
         st[str(job_n)]["size"] = size
+        st[str(job_n)]["kind"] = kind  # H215: the item's kind as it stands, a build sized by its look too
+        if it.get("fixed"):
+            st[str(job_n)]["fixed"] = True
         # H190: the item's guesses (the call's, the look's) go with it; the job's words are the item's, so its look holds
         st[str(job_n)].update({k: it[k] for k in ("guess_call", "guess_call_at", "guess_look", "look_at", "look_fp",
                                                    "look_cost", "look_s", "look_why") if k in it})
@@ -2204,11 +2297,15 @@ def _retag_map():
         return {}
 
 
-def new_kind(text, old):
+def new_kind(text, old, look_min=None, fixed=False):
     """F34: a finished job's kind with today's rules: what the wording says for sure (a merge, a release) wins; a
     kind it learned under that says more than the guess (build, call, big, transcribe, often set by hand on a
-    call) stays; other is guessed again (merges and builds were hiding there)."""
-    return kind_for(text, None if old in (None, "other") else old)
+    call) stays; other is guessed again (merges and builds were hiding there). H215: a build is sorted into small or
+    big again from its words and its first look's minutes (look_min), unless its size was said by hand (fixed)."""
+    k = kind_for(text, None if old in (None, "other") else old)
+    if k in BUILDS and not fixed:
+        k = build_size(text, look_min)
+    return k
 
 
 def retag(texts=None, quiet=False):
@@ -2220,7 +2317,7 @@ def retag(texts=None, quiet=False):
     for h in lines:
         t = texts.get(h.get("n"))
         if t:
-            k, tg, ab = new_kind(t, h.get("kind")), tags_of(t), _about(t)[:ABOUT_MAX]
+            k, tg, ab = new_kind(t, h.get("kind"), h.get("guess_look"), h.get("fixed")), tags_of(t), _about(t)[:ABOUT_MAX]
             if k != h.get("kind"):
                 kinds[(h.get("kind"), k)] = kinds.get((h.get("kind"), k), 0) + 1
             if (k, tg, ab) != (h.get("kind"), h.get("tags"), h.get("about")):
@@ -2237,7 +2334,8 @@ def retag(texts=None, quiet=False):
     for h in peer.get("lines") or []:
         t = texts.get(h.get("n")) if isinstance(h, dict) else None
         if t:
-            fix[f"{h.get('machine') or peer.get('name')}|{h['n']}"] = {"kind": new_kind(t, h.get("kind")), "tags": tags_of(t),
+            fix[f"{h.get('machine') or peer.get('name')}|{h['n']}"] = {"kind": new_kind(t, h.get("kind"), h.get("guess_look"),
+                                                                                 h.get("fixed")), "tags": tags_of(t),
                                                                      "about": _about(t)[:ABOUT_MAX]}
     tmp = RETAGS + ".tmp"
     json.dump({"retag": RETAG, "at": int(time.time()), "lines": fix}, open(tmp, "w"))
@@ -2267,7 +2365,7 @@ def backtest(hist=None, last=None, alike=True, sized=False):
     alike=False: the kind's estimate alone, as before H166, to compare. sized: with the size of the work (H167), its
     weights made only from the jobs before it, each of those estimated back the same way."""
     hist = all_history() if hist is None else hist
-    offs, within, pairs = [], 0, []
+    offs, within, pairs, twice = [], 0, [], []
     for i, h in enumerate(hist):
         if h not in _real([h]) or not _real(hist[:i]):
             continue
@@ -2279,13 +2377,15 @@ def backtest(hist=None, last=None, alike=True, sized=False):
             pairs.append((_size_of(h), math.log(h["actual"] / d["est"])))
         off = abs(est - h["actual"])
         offs.append(off)
+        # H215: builds that took over twice their estimate: the ones the pause at twice would have stopped
+        twice.append(h.get("kind") in BUILDS and h["actual"] > 2 * est)
         within += off <= max(3, 0.25 * est)
     if last:
-        offs = offs[-last:]
+        offs, twice = offs[-last:], twice[-last:]
     if not offs:
         return {"count": 0}
     return {"count": len(offs), "avg_off": round(statistics.mean(offs), 1), "median_off": statistics.median(offs),
-            "within": within}
+            "within": within, "twice": sum(twice)}
 
 
 def reestimate():
@@ -2320,7 +2420,7 @@ def check_kinds():
         text = texts.get(n, "")
         if not text:
             continue
-        now = new_kind(text, h.get("kind"))  # F34: the kind a retag gives it
+        now = new_kind(text, h.get("kind"), h.get("guess_look"), h.get("fixed"))  # F34: the kind a retag gives it
         print(f"job {n}: learned {h.get('kind')}, guessed now {now}" + ("" if now == h.get("kind") else "  <- differs"))
 
 
@@ -2384,7 +2484,8 @@ def main(argv):
                 b = backtest(hist, last=n, alike=alike, sized=sized)
                 if b.get("count"):
                     print(f"  {name}: {b['count']} measured jobs estimated back from the jobs before them: off by {b['avg_off']:g} min "
-                          f"on average (median {b['median_off']:g})" + (f"; {b['within']} close." if not n else "."))
+                          f"on average (median {b['median_off']:g})" + (f"; {b['within']} close" if not n else "")
+                          + f"; {b['twice']} builds took over twice their estimate.")  # H215
     elif cmd == "reestimate":
         print(reestimate())
     elif cmd == "guesses":

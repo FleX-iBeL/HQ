@@ -415,8 +415,8 @@ def main(argv):
             if kind is not None:
                 kind = kind.strip().lower()
                 import estimate as est_
-                if kind not in est_.KINDS:
-                    sys.exit(f"--kind is one of: {', '.join(est_.KINDS)}.")
+                if not est_.kind_word_ok(kind):  # H215: a build's size in words too
+                    sys.exit(f"--kind is one of: {est_.kind_words()}.")
             if guess is not None:
                 import estimate as est_
                 if not re.fullmatch(r"\d+", guess.strip()) or not 1 <= int(guess) <= est_.GUESS_MAX:
