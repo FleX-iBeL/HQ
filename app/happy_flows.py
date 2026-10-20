@@ -2757,14 +2757,23 @@ done
 systemctl --user start $U-routine.timer $U-watchdog.timer
 timeout 80 bash -c "until [ -s $S/heartbeat ]; do sleep 2; done" || fail "the routine didn't run by itself within a minute"
 timeout 80 bash -c "until ss -Hltn 'sport = :$SP' | grep -q .; do sleep 2; done" || fail "the status page didn't start"
-python3 - "$H" <<'PYC' || fail "the routine's lines are wrong"
-import json, sys
-d = json.load(open(sys.argv[1] + "/.status/routines.json"))
-assert d["helper"]["state"] == "ok", d["helper"]
-assert d["jobs"]["state"] in ("ok", "off"), d["jobs"]  # H56.2: with tmux there, jobs can run (nothing waits here)
-assert d["mail"]["state"] == "off", d["mail"]  # switched off for the test: never a real mail check
-assert "temp" not in d and "battery" not in d, "laptop readings on a server"
+WHY=$(python3 - "$H" <<'PYC'
+import json, sys, time
+# the first run's heartbeat can land a moment before its lines do (nightly 20 October 2026): give it 30 seconds
+for _ in range(15):
+    try:
+        d = json.load(open(sys.argv[1] + "/.status/routines.json"))
+        assert d["helper"]["state"] == "ok", d["helper"]
+        assert d["jobs"]["state"] in ("ok", "off"), d["jobs"]  # H56.2: with tmux there, jobs can run (nothing waits here)
+        assert d["mail"]["state"] == "off", d["mail"]  # switched off for the test: never a real mail check
+        assert "temp" not in d and "battery" not in d, "laptop readings on a server"
+        sys.exit(0)
+    except (AssertionError, OSError, ValueError, KeyError) as e:
+        why = repr(e)
+    time.sleep(2)
+print(why[:200]); sys.exit(1)
 PYC
+) || fail "the routine's lines are wrong: $WHY"
 echo "OK the routine runs on the minute; no laptop readings"
 SRV=$(spid)
 systemctl --user stop $U-routine.timer
