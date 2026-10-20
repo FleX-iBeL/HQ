@@ -75,7 +75,7 @@ UPSTREAM = os.environ.get("HQ_UPDATE_URL") or "https://github.com/FleX-iBeL/HQ.g
 CALL_URL = os.environ.get("HQ_CALL_URL") or "http://127.0.0.1:7860"
 EVERY = 6 * 3600       # how often to look (Claude's choice: four times a day)
 RETRY = 30 * 60        # after a failed look (offline)
-PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 # F32: who the update's backup (a stash is a commit) is by, so it works on a computer whose git has no name yet.
 IDENTITY = ("-c", "user.name=HQ update", "-c", "user.email=hq-update@localhost")
 TAG = re.compile(r"^v(\d+)\.(\d+)(?:\.(\d+))?$")
@@ -420,7 +420,9 @@ def cmdline(pid: int) -> str:
 def pids_on(port: int) -> list[int]:
     """This user's pids listening on a port: lsof on a Mac, ss elsewhere."""
     if platform() == "darwin" or not shutil.which("ss"):
-        r = subprocess.run(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"], capture_output=True, text=True)
+        # F44: lsof lives in /usr/sbin on a Mac, which the helper app's bare PATH leaves out.
+        lsof = shutil.which("lsof", path=os.environ.get("PATH", "") + ":" + PATH) or "/usr/sbin/lsof"
+        r = subprocess.run([lsof, "-ti", f"tcp:{port}", "-sTCP:LISTEN"], capture_output=True, text=True)
         return sorted({int(p) for p in r.stdout.split() if p.isdigit()})
     r = subprocess.run(["ss", "-Hltnp", f"sport = :{port}"], capture_output=True, text=True)
     return sorted({int(p) for p in re.findall(r"pid=(\d+)", r.stdout)})

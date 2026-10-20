@@ -8,6 +8,7 @@
 # serve settings belong to root, so it goes through sudo -n (HQ_TS_SUDO=0 leaves that out). HQ_NO_PHONE=1
 # leaves Tailscale alone (a second HQ on one computer, or a test). HQ_NODE / HQ_TAILSCALE override the paths.
 cd "$(dirname "$0")/.." || exit 1
+PATH="$PATH:/usr/sbin:/sbin"   # F44: lsof is in /usr/sbin on a Mac; the helper app's PATH leaves it out
 if [ "$(uname)" = Darwin ]; then
   TS="${HQ_TAILSCALE:-/usr/local/bin/tailscale}"
   NODE="${HQ_NODE:-/opt/homebrew/bin/node}"

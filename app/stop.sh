@@ -3,6 +3,7 @@
 # If a call is still running, hang up first: the after-call work (writing down, commit, push)
 # gets up to a minute to finish before the server is stopped.
 cd "$(dirname "$0")/.." || exit 1
+PATH="$PATH:/usr/sbin:/sbin"   # F44: lsof is in /usr/sbin on a Mac; the helper app's PATH leaves it out
 PORT="${HQ_PORT:-7860}"
 TS=/usr/local/bin/tailscale
 PIDFILE="${HQ_PID_FILE:-$PWD/scratch/server.pid}"

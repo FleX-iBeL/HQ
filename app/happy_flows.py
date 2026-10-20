@@ -8620,6 +8620,21 @@ setTimeout(() => {
         need((real.read_bytes() if real.exists() else None) == real_before, "the workspace's own sorting rules were touched")
         return "tidying on his ask, trash and spam ask, never send; rules added, given to the mail check, noted, stopped; read-only without them"
 
+    async def flow129(self) -> str:
+        """F44, no Claude: an update finds lsof on a Mac with the helper app's bare PATH (lsof is in /usr/sbin there,
+        and the status server the helper starts hands that PATH to the update). The update's own look for the
+        listening pids, run as on a Mac with a PATH that has no lsof on it, doesn't fail; HQ's Mac scripts that call
+        lsof add /usr/sbin to their PATH."""
+        code = ("import update; update.platform = lambda: 'darwin'; "
+                "print(update.pids_on(1)); print('/usr/sbin' in update.PATH)")
+        r = subprocess.run([sys.executable, "-c", code], cwd=str(ROOT / "routine"), capture_output=True, text=True,
+                           timeout=60, env={"PATH": "/nonexistent", "HOME": os.environ.get("HOME", "/tmp")})
+        need(r.returncode == 0, f"the update's look for listening pids failed with a bare PATH: {r.stderr.strip()[-300:]}")
+        need(r.stdout.split()[-1:] == ["True"], "the update's PATH has no /usr/sbin")
+        for f in ("status/phone.sh", "app/start.sh", "app/stop.sh"):
+            need('PATH="$PATH:/usr/sbin:/sbin"' in (ROOT / f).read_text(), f"{f} doesn't add /usr/sbin to its PATH")
+        return "the update finds lsof with a bare PATH; the Mac scripts add /usr/sbin"
+
     async def flow128(self) -> str:
         """H214, no Claude: a 9292 link door to door. Offline, on a made-up station list, made-up places and a made-up
         home: home is the start by default, a station gets 9292's own id, an address its point (@lat,lon) with its
@@ -14867,6 +14882,7 @@ FLOWS = {
     126: ("F43: something done doesn't come back: done or let go clears what clearly belongs to it (her notes, reminders, watches, nudges, To check mail lines), names the rest once, undo puts it back", False, "flow126"),
     127: ("H213: Donna tidies the mail on his ask (read, archive, star, important, labels), trash and spam ask, never send; offers a Gmail filter first or a sorting rule the mail check applies, read-only without one", False, "flow127"),
     128: ("H214, H216, H217, H218: a 9292 link door to door: where the phone is or home by default, never with a surcharge or a reservation unless asked, stations by 9292's own id, addresses by the government's open address service, trains only on ask; opened in 9292 with both ends", False, "flow128"),
+    129: ("F44: an update finds lsof on a Mac with the helper app's bare PATH (/usr/sbin); the Mac scripts add it too", False, "flow129"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 

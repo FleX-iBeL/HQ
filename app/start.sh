@@ -18,6 +18,7 @@ TS_HTTPS_PORT=8443   # 443 is already used on this MacBook by another service
 LOG="${HQ_LOG:-$ROOT/scratch/server.log}"
 PIDFILE="${HQ_PID_FILE:-$ROOT/scratch/server.pid}"
 mkdir -p "$ROOT/scratch"
+PATH="$PATH:/usr/sbin:/sbin"   # F44: lsof is in /usr/sbin on a Mac; the helper app's PATH leaves it out
 
 if lsof -ti "tcp:$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "HQ is already running (port $PORT). Use app/stop.sh first to restart it."
