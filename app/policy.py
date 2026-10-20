@@ -445,6 +445,12 @@ class Policy:
                     or (len(rest) == 2 and rest[0] == "fixed" and rest[1].rstrip("%").isdigit())):
                 return Decision(ALLOW, "the usage stop lines")
             return Decision(DENY, "a usage line takes only moving, or fixed with a number")
+        # H214: a 9292 link door to door. Only looks places up (the government's open address service, the open
+        # station list) and prints a link; it changes nothing.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "travel.py"):
+            if len(args) >= 2 and args[1] in ("link", "where"):
+                return Decision(ALLOW, "a 9292 travel link")
+            return Decision(DENY, "the travel script takes link or where")
         # H45: lid-closed sleep. Reads it, or flips it on or off; the script itself only runs the two exact
         # pmset commands the one-time setup allows without a password, nothing else.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "lidsleep.py"):

@@ -209,6 +209,18 @@ the answer ("Left, since it may be about it: …"): name it to {user} once, in a
 {user}'s yes (pings.py note-clear, cancel, unwatch --quiet, nudge-done, or take the mail line out); a Very important \
 mail line stays until {user} says so, as always. Undo puts all of it back."""
 
+# H214 (19 October 2026, call at 12:07), in the user's words: "if you develop an app, you can connect to it. ... No
+# hidden browser nonsense unless this is actually the way to do it." On every full call and in the direct line's chat.
+TRAVEL_RULE = """- Public transport door to door (H214): for travel advice in the Netherlands give {user} a 9292 link made \
+by python3 "{HQ}/app/travel.py" link "WHERE TO" [--from "WHERE FROM"] [--train]. Without --from it starts at {user}'s \
+home (the Home line in me.md); WHERE can be an address, a street with its town, a postcode, a town, a train station, or \
+home. --train only when {user} asks for trains (and walking) only; from an address far from a station 9292 may then find \
+nothing, so if {user} says so, make it again without --train. It prints the link and what it understood: put the \
+link in the chat as it is, and say in a few words from where to where (a town alone, or a street without a town, may \
+not be the spot meant: say what it found). It plans from now; a time or a date is set on 9292 itself. When it can't \
+find a place, ask for the address or the town, once; never make a 9292 link up by hand, and never use a browser for \
+it. Don't look the trip up on the web as well, the link is the advice."""
+
 # H133 (14 October 2026, call at 13:31), in the user's words: "I want to stop using the word job list or job queue.
 # I just want to refer to it as the team. So if I tell you, hey. Let's put it on our roadmap. You can put it on our
 # roadmap. If I say... Let's give it to the team. You can put it in the job list queue and... If it needs to be on the
@@ -479,6 +491,7 @@ and take them one at a time; once he says one is done or gone through, remove it
 {mailfast}
 {apptnotes}
 {todo}
+{travel}
 {onewriter}
 {workflows}
 - Keep working with the lid closed (lid-closed sleep): when he asks which it is, run python3 \
@@ -501,12 +514,13 @@ PINGS_RULE = PINGS_RULE.replace("{HQ}", str(ROOT)).replace("{agent}", _direct_ag
 APPT_NOTES_RULE = APPT_NOTES_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TEAM_RULE = TEAM_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TODO_RULE = TODO_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
+TRAVEL_RULE = TRAVEL_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 MAIL_FAST_RULE = MAIL_FAST_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 MAIL_TIDY_RULE = MAIL_TIDY_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 import workflows as _workflows  # H202: the workflows the user turned on
 import features as _features  # H205: what they turned off
 WORKFLOWS_RULE = _workflows.rule(FOLDER)
-VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE + "\n" + MAIL_TIDY_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{todo}", TODO_RULE).replace("{onewriter}", ONE_WRITER_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
+VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE + "\n" + MAIL_TIDY_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{todo}", TODO_RULE).replace("{travel}", TRAVEL_RULE).replace("{onewriter}", ONE_WRITER_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
                .replace("{times}", TIMES_RULE))
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:

@@ -4,6 +4,9 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+### Added
+- Public transport advice from your front door. Ask on a call or in Donna's chat how to get somewhere in the Netherlands and you get a 9292 link that opens with both ends filled in and the advice ready: from your home (a new Home line in me.md) or any address, street, postcode, town or train station you name, to wherever you're going, and trains (and walking) only when you ask. Addresses are looked up in the government's open address service and stations in an open station list; no hidden browser, and no 9292 account or key (H214).
+
 ## 0.4.8 · 20 October 2026
 
 ### Added

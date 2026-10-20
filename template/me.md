@@ -24,6 +24,10 @@ Put your own things here. Write it in your own words, as much or as little as yo
 
 [The town you're in (or town, country), for the weather: every three hours in the day HQ looks, and texts you when there's sun, rain coming or a rainy day. Change it when you travel.]
 
+**Home:** 
+
+[Your home address (street and number, postcode and town), where public transport advice starts when you don't say from where: HQ gives you a 9292 link from your front door. Put it on the private words too if you ever share HQ.]
+
 ## What's important to me
 
 [What matters most to you right now, and what you're working towards. People, health, work, money, freedom, whatever it is.]

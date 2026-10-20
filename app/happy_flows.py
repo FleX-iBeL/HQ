@@ -8620,6 +8620,95 @@ setTimeout(() => {
         need((real.read_bytes() if real.exists() else None) == real_before, "the workspace's own sorting rules were touched")
         return "tidying on his ask, trash and spam ask, never send; rules added, given to the mail check, noted, stopped; read-only without them"
 
+    async def flow128(self) -> str:
+        """H214, no Claude: a 9292 link door to door. Offline, on a made-up station list, made-up places and a made-up
+        home: home is the start by default, a station gets 9292's own id, an address its point (@lat,lon) with its
+        label, --train limits it to trains, an unknown place and a missing home say so; a call and Donna's chat may run
+        it (link, where) and nothing else of it; the rules carry it; the template has a blank Home line. Then live, when
+        the network answers: a public address through the government's address service, and the link opened in the
+        headless browser shows 9292's advice with both ends filled in."""
+        from urllib.parse import urlparse, parse_qs
+        import me as _me
+        from policy import Policy, ALLOW, DENY
+        d = self.tmp / "h214"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "stations.csv").write_text(
+            "id,code,uic,name_short,name_medium,name_long,slug,country,type,geo_lat,geo_lng\n"
+            "1,XC,1,Nergensdam C,Nergensdam C.,Nergensdam Centraal,nergensdam-centraal,NL,megastation,52.1,5.1\n"
+            "2,XZ,2,Ergens Zuid,Ergens Zuid,Ergenshoven Zuid,ergenshoven-zuid,NL,stoptreinstation,52.2,5.2\n"
+            "3,XB,3,Buiten,Buiten,Buitenstad,buitenstad,D,station,50.0,7.0\n")
+        (d / "places.json").write_text(json.dumps({"Voorbeeldlaan 12, 9999 ZZ Nergensdam": [52.123456, 5.654321, "Voorbeeldlaan 12, 9999ZZ Nergensdam"],
+                                                   "Proefweg 3 Ergenshoven": [52.2, 5.3, "Proefweg 3, Ergenshoven"]}))
+        (d / "me.md").write_text("# Me\n\n**Home:** Voorbeeldlaan 12, 9999 ZZ Nergensdam\n")
+        script = str(APP / "travel.py")
+        env = {**os.environ, "HQ_TRAVEL_STATIONS": str(d / "stations.csv"), "HQ_TRAVEL_PLACES": str(d / "places.json"),
+               "HQ_TRAVEL_ME": str(d / "me.md"), "HQ_TRAVEL_OFFLINE": "1"}
+        run = lambda *a, e=env: subprocess.run([sys.executable, script, *a], capture_output=True, text=True, env=e, timeout=60)
+        def q(out: str) -> dict:
+            url = out.split()[0]
+            need(url.startswith("https://9292.nl/reisplanner?"), f"not a 9292 planner link: {url}")
+            return {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
+        r = run("link", "Nergensdam Centraal")
+        need(r.returncode == 0, f"a link from home failed: {r.stdout}{r.stderr}")
+        p = q(r.stdout)
+        need(p.get("van") == "@52.123456,5.654321" and p.get("vanLabel") == "Voorbeeldlaan 12, 9999ZZ Nergensdam", f"home isn't the start: {p}")
+        need(p.get("naar") == "station-nergensdam-centraal" and p.get("naarLabel") == "Nergensdam Centraal", f"the station isn't 9292's id: {p}")
+        need("modalities" not in p and "(home)" in r.stdout, "without --train it isn't every kind of transport, or home isn't said")
+        for name in ("station Nergensdam Centraal", "Nergensdam CS", "nergensdam c.", "Ergens Zuid"):
+            need(json.loads(run("where", name).stdout)["kind"] == "station", f"{name!r} isn't found as a station")
+        need('"station"' not in run("where", "Buitenstad").stdout, "a station abroad is taken")
+        r = run("link", "Ergenshoven Zuid", "--from", "Proefweg 3 Ergenshoven", "--train")
+        p = q(r.stdout)
+        need(p.get("van") == "@52.2,5.3" and p.get("modalities") == "Train", f"--from or --train is lost: {p}")
+        need("trains and walking only" in r.stdout, "it doesn't say trains only")
+        r = run("link", "home", "--from", "Ergenshoven Zuid", "--json")
+        need(json.loads(r.stdout)["to"].get("home"), "home as the end isn't home")
+        r = run("link", "Nowhere 1 Nergensdam")
+        need(r.returncode == 1 and "Couldn't find" in r.stdout, f"an unknown place doesn't say so: {r.stdout}")
+        (d / "me2.md").write_text("# Me\n\n**Home:** \n\n[Your home address]\n")
+        r = run("link", "Nergensdam Centraal", e={**env, "HQ_TRAVEL_ME": str(d / "me2.md")})
+        need(r.returncode == 1 and "Home line" in r.stdout, f"a missing home doesn't say so: {r.stdout}")
+        need(_me.load(d)["home"] == "Voorbeeldlaan 12, 9999 ZZ Nergensdam", "me.py doesn't read the Home line")
+        # the policy: a call and Donna's chat may run link and where, nothing else of it
+        pol = Policy(config.FOLDER)
+        for cmd in (f'python3 "{script}" link "Nergensdam Centraal"', f'python3 "{script}" link "x" --from "y" --train',
+                    f'python3 "{script}" where "Nergensdam"'):
+            need(pol.decide("Bash", {"command": cmd}).verdict == ALLOW, f"a call may not run {cmd}")
+        need(pol.decide("Bash", {"command": f'python3 "{script}" stations'}).verdict == DENY, "an unknown part of it isn't refused")
+        # the rules, on calls and in her chat; the template's blank Home line
+        import direct_line
+        need(config.TRAVEL_RULE in config.VOICE_RULES and config.TRAVEL_RULE in direct_line._text_rules() and "{" not in config.TRAVEL_RULE
+             and "travel.py" in config.TRAVEL_RULE and "--train" in config.TRAVEL_RULE, "the rules don't carry the travel link")
+        tpl = (ROOT / "template" / "me.md").read_text()
+        need(re.search(r"^\*\*Home:\*\*[ \t]*$", tpl, re.M), "the template has no blank Home line")
+        # live: the government's address service and 9292 itself, when the network answers
+        live = {k: v for k, v in env.items() if k not in ("HQ_TRAVEL_PLACES", "HQ_TRAVEL_OFFLINE")}
+        r = run("link", "Nergensdam Centraal", "--from", "Museumplein 6, Amsterdam", "--json", e=live)
+        if r.returncode != 0 and "didn't answer" in r.stdout:
+            return "the link from home, stations, addresses, --train, unknown places, the policy and the rules; live part skipped (no network)"
+        need(r.returncode == 0, f"a public address isn't found: {r.stdout}")
+        got = json.loads(r.stdout)
+        need(got["from"]["kind"] == "address" and "Museumplein 6" in got["from"]["label"] and got["from"]["id"].startswith("@52.3"),
+             f"the address service gave the wrong spot: {got['from']}")
+        r = run("link", "Zwolle", "--from", "Museumplein 6, Amsterdam", "--json",
+                e={**live, "HQ_TRAVEL_STATIONS": str(d / "real-stations.csv")})
+        need(r.returncode == 0, f"the real station list isn't read: {r.stdout}")
+        url = json.loads(r.stdout)["url"]
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        if not Path(chrome).exists():
+            return "offline parts pass, and the address service answers; 9292 itself not opened (no headless browser here)"
+        dom = await asyncio.to_thread(subprocess.run, [chrome, "--headless", "--disable-gpu", "--no-first-run",
+                                      *(["--no-sandbox"] if sys.platform != "darwin" else []), "--virtual-time-budget=20000",
+                                      "--window-size=1200,1400", "--dump-dom", url], capture_output=True, text=True, timeout=90)
+        html = dom.stdout
+        need('value="station-zwolle"' in html and "Museumplein 6" in html and 'value="@52.3' in html, "9292 didn't open with both ends filled in")
+        planned = 'data-testid="journey-list"' in html or 'data-testid="journey-details"' in html
+        need(planned or "Geen reisadvies" in html, "9292 didn't plan the link")
+        return ("the link from home, stations, addresses, --train, unknown places, the policy and the rules; live: the address service, "
+                "and 9292 opens with both ends and " + ("its advice" if planned else "its own answer (no advice at this hour)"))
+
     async def flow126(self) -> str:
         """F43, no Claude, no network: something done doesn't come back from the other places it lives. A made-up list,
         mail list and agent notes: done clears what clearly belongs to the item (a note saying its whole name, a
@@ -14727,6 +14816,7 @@ FLOWS = {
     125: ("H211: nudge until done: from its start, again and again in the day by how much it matters, never at night, no numbers; later pauses, done stops it (a call, her chat, Done in the app)", False, "flow125"),
     126: ("F43: something done doesn't come back: done or let go clears what clearly belongs to it (her notes, reminders, watches, nudges, To check mail lines), names the rest once, undo puts it back", False, "flow126"),
     127: ("H213: Donna tidies the mail on his ask (read, archive, star, important, labels), trash and spam ask, never send; offers a Gmail filter first or a sorting rule the mail check applies, read-only without one", False, "flow127"),
+    128: ("H214: a 9292 link door to door: home by default, stations by 9292's own id, addresses by the government's open address service, trains only on ask; opened in 9292 with both ends", False, "flow128"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 
