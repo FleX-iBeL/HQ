@@ -8661,7 +8661,15 @@ setTimeout(() => {
         # H216: never with a surcharge, unless asked
         need(p.get("withSurcharge") == "false" and "without transport with a surcharge" in r.stdout, f"a surcharge isn't left out: {p}")
         p = q(run("link", "Nergensdam Centraal", "--surcharge").stdout)
-        need(p.get("withSurcharge") == "true", f"--surcharge doesn't put it back: {p}")
+        need(p.get("withSurcharge") == "true" and p.get("onDemand") == "false", f"--surcharge doesn't put it back: {p}")
+        # H218: never with a reservation, unless asked
+        p = q(run("link", "Nergensdam Centraal").stdout)
+        need(p.get("onDemand") == "false", f"a reservation isn't left out: {p}")
+        r = run("link", "Nergensdam Centraal", "--train")
+        p = q(r.stdout)
+        need(p.get("onDemand") == "false" and "without transport that needs a reservation" in r.stdout, f"trains only brings reservations back: {p}")
+        p = q(run("link", "Nergensdam Centraal", "--reservation").stdout)
+        need(p.get("onDemand") == "true" and p.get("withSurcharge") == "false", f"--reservation doesn't put it back: {p}")
         # H217: where the phone is, while fresh; a named start and home win; stale or none is home
         need("no fresh location" in run("link", "Nergensdam Centraal").stdout, "home as the fallback isn't said")
         need(run("here", "52.987654321", "5.123456789").returncode == 0, "the phone's spot isn't kept")
@@ -8669,7 +8677,7 @@ setTimeout(() => {
         r = run("link", "Nergensdam Centraal")
         p = q(r.stdout)
         need(p.get("van") == "@52.9877,5.1235" and "where the phone is" in r.stdout, f"the phone's spot isn't the start: {p} {r.stdout}")
-        need(p.get("withSurcharge") == "false", "from the phone's spot the surcharge is back")
+        need(p.get("withSurcharge") == "false" and p.get("onDemand") == "false", "from the phone's spot the surcharge or reservation is back")
         need(q(run("link", "Nergensdam Centraal", "--from", "home").stdout).get("van") == "@52.123456,5.654321", "home isn't home")
         need(q(run("link", "Nergensdam Centraal", "--from", "Proefweg 3 Ergenshoven").stdout).get("van") == "@52.2,5.3", "a named start doesn't win")
         here = d / "direct-line" / "here.json"
@@ -8713,10 +8721,11 @@ setTimeout(() => {
         need(pol.decide("Bash", {"command": f'python3 "{script}" stations'}).verdict == DENY, "an unknown part of it isn't refused")
         need(pol.decide("Bash", {"command": f'python3 "{script}" here 1 2'}).verdict == DENY, "a call may set the phone's spot")
         need(pol.decide("Bash", {"command": f'python3 "{script}" link "x" --surcharge'}).verdict == ALLOW, "a call may not ask for a surcharge")
+        need(pol.decide("Bash", {"command": f'python3 "{script}" link "x" --reservation'}).verdict == ALLOW, "a call may not ask for a reservation")
         # the rules, on calls and in her chat; the template's blank Home line
         import direct_line
         need(config.TRAVEL_RULE in config.VOICE_RULES and config.TRAVEL_RULE in direct_line._text_rules() and "{" not in config.TRAVEL_RULE
-             and "travel.py" in config.TRAVEL_RULE and "--train" in config.TRAVEL_RULE and "--surcharge" in config.TRAVEL_RULE
+             and "travel.py" in config.TRAVEL_RULE and "--train" in config.TRAVEL_RULE and "--surcharge" in config.TRAVEL_RULE and "--reservation" in config.TRAVEL_RULE
              and "where the phone is" in config.TRAVEL_RULE, "the rules don't carry the travel link")
         tpl = (ROOT / "template" / "me.md").read_text()
         need(re.search(r"^\*\*Home:\*\*[ \t]*$", tpl, re.M), "the template has no blank Home line")
@@ -8724,7 +8733,7 @@ setTimeout(() => {
         live = {k: v for k, v in env.items() if k not in ("HQ_TRAVEL_PLACES", "HQ_TRAVEL_OFFLINE")}
         r = run("link", "Nergensdam Centraal", "--from", "Museumplein 6, Amsterdam", "--json", e=live)
         if r.returncode != 0 and "didn't answer" in r.stdout:
-            return "the link from home or the phone's spot, no surcharge unless asked, stations, addresses, --train, unknown places, the policy and the rules; live part skipped (no network)"
+            return "the link from home or the phone's spot, no surcharge or reservation unless asked, stations, addresses, --train, unknown places, the policy and the rules; live part skipped (no network)"
         need(r.returncode == 0, f"a public address isn't found: {r.stdout}")
         got = json.loads(r.stdout)
         need(got["from"]["kind"] == "address" and "Museumplein 6" in got["from"]["label"] and got["from"]["id"].startswith("@52.3"),
@@ -8746,7 +8755,8 @@ setTimeout(() => {
         planned = 'data-testid="journey-list"' in html or 'data-testid="journey-details"' in html
         need(planned or "Geen reisadvies" in html, "9292 didn't plan the link")
         need(not planned or ("withSurcharge=false" in html and "withSurcharge=true" not in html), "9292's advice still has the surcharge on")
-        return ("the link from home or the phone's spot, no surcharge unless asked, stations, addresses, --train, unknown places, the "
+        need(not planned or ("onDemand=false" in html and "onDemand=true" not in html), "9292's advice still has reservations on")
+        return ("the link from home or the phone's spot, no surcharge or reservation unless asked, stations, addresses, --train, unknown places, the "
                 "policy and the rules; live: the address service, and 9292 opens with both ends and " + ("its advice" if planned else "its own answer (no advice at this hour)"))
 
     async def flow126(self) -> str:
@@ -14856,7 +14866,7 @@ FLOWS = {
     125: ("H211: nudge until done: from its start, again and again in the day by how much it matters, never at night, no numbers; later pauses, done stops it (a call, her chat, Done in the app)", False, "flow125"),
     126: ("F43: something done doesn't come back: done or let go clears what clearly belongs to it (her notes, reminders, watches, nudges, To check mail lines), names the rest once, undo puts it back", False, "flow126"),
     127: ("H213: Donna tidies the mail on his ask (read, archive, star, important, labels), trash and spam ask, never send; offers a Gmail filter first or a sorting rule the mail check applies, read-only without one", False, "flow127"),
-    128: ("H214, H216, H217: a 9292 link door to door: where the phone is or home by default, never with a surcharge unless asked, stations by 9292's own id, addresses by the government's open address service, trains only on ask; opened in 9292 with both ends", False, "flow128"),
+    128: ("H214, H216, H217, H218: a 9292 link door to door: where the phone is or home by default, never with a surcharge or a reservation unless asked, stations by 9292's own id, addresses by the government's open address service, trains only on ask; opened in 9292 with both ends", False, "flow128"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 

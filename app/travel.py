@@ -18,13 +18,18 @@ H216 (20 October 2026, call at 14:03), the user: "I want never that vervoer met 
 `withSurcharge=false`, 9292's own switch for "Vervoer met toeslag" (the planner's search parameter, read from its
 page's code and checked on a real link: the advice it plans carries it); `--surcharge` puts it back on, only when asked.
 
+H218 (20 October 2026, call at 14:24), the user: "apparently there is also another one about reservation. I also, by
+default, don't want that one turned on." Every link also says `onDemand=false`, 9292's own switch for "Vervoer met
+reservering" (buses, boats and taxis booked ahead; the planner's search parameter next to the surcharge one, read from
+its page's code); `--reservation` puts it back on, only when asked.
+
 H217 (same call): "Also is it possible it picks my gps?" Without a start named, the link starts where the phone is:
 the spot the call page or Donna's chat sent (`here`, only when he has allowed his location in the app, as the weather
 does: H161), or else the weather's last spot from the phone, while either is under HERE_FRESH old; else home, as
 before. A start he names wins, and "home" is home. The output says which start it used. The spot is kept in the direct
 line's folder (here.json, off GitHub, like weather.json).
 
-    python3 app/travel.py link "TO" [--from "FROM"] [--train] [--surcharge]   the link, and what it understood
+    python3 app/travel.py link "TO" [--from "FROM"] [--train] [--surcharge] [--reservation]   the link, and what it understood
     python3 app/travel.py link "TO" --json                                     the same as JSON
     python3 app/travel.py where "PLACE"                                        what a place resolves to (a check)
     python3 app/travel.py here LAT LON                                         keep where the phone is now (the pages)
@@ -245,14 +250,15 @@ def start(frm: str = "", now: float | None = None) -> dict:
     return where("") | {"start": "home"}
 
 
-def link(to: str, frm: str = "", train: bool = False, surcharge: bool = False) -> dict:
+def link(to: str, frm: str = "", train: bool = False, surcharge: bool = False, reservation: bool = False) -> dict:
     a, b = start(frm), where(to)
     q = {"van": a["id"], "vanLabel": a["label"], "naar": b["id"], "naarLabel": b["label"]}
     if train:
         q["modalities"] = "Train"  # walking to and from the train stays, as on 9292 itself
     q["withSurcharge"] = "true" if surcharge else "false"  # H216: never "Vervoer met toeslag" unless asked
+    q["onDemand"] = "true" if reservation else "false"  # H218: never "Vervoer met reservering" unless asked
     url = PLANNER + "?" + urllib.parse.urlencode(q, quote_via=urllib.parse.quote, safe="@,")
-    return {"url": url, "from": a, "to": b, "train": train, "surcharge": surcharge}
+    return {"url": url, "from": a, "to": b, "train": train, "surcharge": surcharge, "reservation": reservation}
 
 
 def main(argv: list[str]) -> int:
@@ -263,6 +269,7 @@ def main(argv: list[str]) -> int:
     l.add_argument("--from", dest="frm", default="")
     l.add_argument("--train", action="store_true", help="trains and walking only")
     l.add_argument("--surcharge", action="store_true", help="also transport with a surcharge (off unless asked)")
+    l.add_argument("--reservation", action="store_true", help="also transport that needs a reservation (off unless asked)")
     l.add_argument("--json", action="store_true")
     w = sub.add_parser("where")
     w.add_argument("place")
@@ -278,7 +285,7 @@ def main(argv: list[str]) -> int:
         if a.cmd == "where":
             print(json.dumps(where(a.place), ensure_ascii=False))
             return 0
-        r = link(a.to, a.frm, a.train, a.surcharge)
+        r = link(a.to, a.frm, a.train, a.surcharge, a.reservation)
     except NotFound as e:
         print(f"Couldn't find {e}. Ask for the address, a station or a town.")
         return 1
@@ -291,7 +298,9 @@ def main(argv: list[str]) -> int:
            else side(f) + (", as there's no fresh location from the phone" if f.get("start") == "home" else ""))
     print(r["url"])
     print(f"From {frm} to {side(r['to'])}" + (", trains and walking only" if r["train"] else "")
-          + (", transport with a surcharge included." if r["surcharge"] else ", without transport with a surcharge."))
+          + (", with transport with a surcharge" if r["surcharge"] else ", without transport with a surcharge")
+          + (" and with transport that needs a reservation." if r["reservation"]
+             else " and without transport that needs a reservation."))
     print("9 2 9 2 opens with both filled in and plans from now; a time or date is changed there.")
     return 0
 

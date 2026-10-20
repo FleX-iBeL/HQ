@@ -7,6 +7,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ### Added
 - Public transport advice from your front door. Ask on a call or in Donna's chat how to get somewhere in the Netherlands and you get a 9292 link that opens with both ends filled in and the advice ready: from your home (a new Home line in me.md) or any address, street, postcode, town or train station you name, to wherever you're going, and trains (and walking) only when you ask. Addresses are looked up in the government's open address service and stations in an open station list; no hidden browser, and no 9292 account or key (H214).
 - The 9292 link starts where your phone is when you don't say where from, once you've allowed your location in the app (the weather's "Use my location"); otherwise from home, and it tells you which. And it never gives you trips with a surcharge ("vervoer met toeslag") unless you ask for them (H216, H217).
+- The 9292 link also never gives you trips that need a reservation ("vervoer met reservering": buses, boats and taxis you book ahead) unless you ask for them (H218)
 
 ## 0.4.8 · 20 October 2026
 

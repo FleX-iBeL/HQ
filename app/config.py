@@ -212,14 +212,16 @@ mail line stays until {user} says so, as always. Undo puts all of it back."""
 # H214 (19 October 2026, call at 12:07), in the user's words: "if you develop an app, you can connect to it. ... No
 # hidden browser nonsense unless this is actually the way to do it." On every full call and in the direct line's chat.
 # H216 and H217 (20 October 2026, call at 14:03): "I want never that vervoer met toeslag, by default" and "Also is it
-# possible it picks my gps?"
+# possible it picks my gps?" H218 (call at 14:24): "apparently there is also another one about reservation. I also, by
+# default, don't want that one turned on."
 TRAVEL_RULE = """- Public transport door to door (H214): for travel advice in the Netherlands give {user} a 9292 link made \
-by python3 "{HQ}/app/travel.py" link "WHERE TO" [--from "WHERE FROM"] [--train] [--surcharge]. Without --from it starts \
+by python3 "{HQ}/app/travel.py" link "WHERE TO" [--from "WHERE FROM"] [--train] [--surcharge] [--reservation]. Without --from it starts \
 where the phone is, when {user} has allowed the location in the app and it's fresh, else at home (the Home line in \
 me.md); a start {user} names wins, and --from home is home. WHERE can be an address, a street with its town, a postcode, \
 a town, a train station, or home. --train only when {user} asks for trains (and walking) only; from an address far from \
 a station 9292 may then find nothing, so if {user} says so, make it again without --train. Transport with a surcharge \
-(9292's "vervoer met toeslag") is always left out; --surcharge only when {user} asks for it. It prints the link and \
+(9292's "vervoer met toeslag") is always left out; --surcharge only when {user} asks for it. So is transport that needs a reservation (9292's "vervoer met \
+reservering": buses, boats and taxis booked ahead); --reservation only when {user} asks for it. It prints the link and \
 what it understood: put the link in the chat as it is, and say in a few words from where to where, and whether it \
 starts where the phone is or at home (a town alone, or a street without a town, may not be the spot meant: say what it \
 found). When it started at home only because there's no fresh location, and {user} isn't home, say once that \
