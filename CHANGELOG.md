@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 0.4.8 · 20 October 2026
+
 ### Added
 - Donna nudges you until you say it's done. Ask on a call or in her chat ("keep nudging me about this until I say it's done"), say from when and why it matters, and she texts you about it now and then, more often when it matters more or a deadline is close, never at night, in her own words and without numbers or schedules. Tell her it's done, by text or on any call, and she stops; "later" gives you a break until the next morning. While it's open it shows with a bell in Donna's part of the notes, with a Done button (H211).
 - Donna tidies your mail when you ask: mark it read or unread, archive it, star it, mark it important, put it in a label, and make or rename labels, on a call or in her chat. She never sends, replies or forwards; the trash, spam or deleting a label only when you ask for exactly that, and she suggests archiving instead. For mail you want sorted from now on she offers two ways: she walks you through a real Gmail filter, step by step, or the hourly mail check puts new mail in its label for you, by a rule you agreed, with a line for each mail it sorted and rules you can see and stop. Without a rule the mail check only reads (H213).
