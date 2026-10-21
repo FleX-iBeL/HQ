@@ -28,12 +28,12 @@ What it does:
     (after one, the use is 0 and the line starts at its floor again), and the cost of the work before it in line.
     estimate.plan() gives each waiting job and planned item that start ("starts around" on the status page, in
     jobs.py list and schedule.py list).
-  - The stop at the line for a running job stays as it is (H113). New: a job whose real cost reaches about twice its
-    estimate (OVER times, and at least OVER_MIN points more than the estimate, so a rounding of the readings doesn't do
+  - The stop at the line for a running job stays as it is (H113). New: a job whose real cost reaches about four times
+    its estimate (OVER times; twice until H221, and at least OVER_MIN points more than the estimate, so a rounding of the readings doesn't do
     it) is paused for good: its chat ends, it isn't started again by itself, and Donna texts him in plain words. A
     call lets it carry on (jobs.py resume N, in its own chat, H113) or cancels it (jobs.py stop N).
 
-[The numbers are Claude's choice: COST_MIN 3 jobs, OVER 2 with OVER_MIN 3 points on the 5-hour line and 1 on the
+[The numbers are Claude's choice: COST_MIN 3 jobs, OVER 4 (2 until H221) with OVER_MIN 3 points on the 5-hour line and 1 on the
 weekly; the readings are whole percents, so a short job's cost is rough, and it evens out over many jobs.]
 
 Files, in HQ's .status (never in the repo), next to the estimates: job-usage.json (the running and held jobs' count).
@@ -73,7 +73,7 @@ KEYS = ("five", "weekly")  # the lines a job's cost is counted on (Weekly Fable 
 FALLBACK = {"five": 0.5, "weekly": 0.1}
 COST_MIN = 3        # finished jobs with a cost before they decide the rate
 RECENT = 12         # the last jobs of a kind (or of any kind) that count
-OVER = 2            # a running job at this many times its estimated cost pauses for good
+OVER = 4            # a running job at this many times its estimated cost pauses for good (H221: was 2)
 OVER_MIN = {"five": 3, "weekly": 1}  # ... and at least this many points over it (the readings are whole percents)
 SAME_RESET = 5 * 60  # two reset times this close are the same window
 NEAR = {"before": 15 * 60, "after": 10 * 60}  # backfill: a reading this close to a job's start or end counts
@@ -506,7 +506,7 @@ def finish(n, now=None):
 
 
 def overrun(rec):
-    """None, or {"line", "used", "est"} when the running job has used about twice its estimated cost on a line."""
+    """None, or {"line", "used", "est"} when the running job has used about four times its estimated cost on a line."""
     if not rec or (rec.get("late") and not rec.get("own")) or rec.get("allowed") or not rec.get("est"):
         return None
     so_far = rec.get("so_far") or _so_far(rec)
@@ -549,7 +549,7 @@ def paused_words(n, text, o):
     """Donna's facts for a paused job: plain, everyday words (the text is sent as it is when she can't compose)."""
     line = "the five-hour usage" if o["line"] == "five" else "the weekly usage"
     return (f"Heads up: I paused one of the team's jobs, {short_what(text)}. It had used about {o['used']:g}% of "
-            f"{line}, roughly twice what it was expected to take, so I stopped it before it burns more. It won't start "
+            f"{line}, roughly four times what it was expected to take, so I stopped it before it burns more. It won't start "
             f"again by itself; tell me on a call if it should carry on or be dropped.")
 
 
@@ -676,7 +676,7 @@ def backfill_once(log=None):
 # again when a job is done.
 #
 # A job's real cost is then its own tokens divided by the rate: what others use at the same time no longer counts
-# against it, nor towards the pause at twice its estimate. The gate before a start still reads the real total.
+# against it, nor towards the pause at four times its estimate. The gate before a start still reads the real total.
 # [The priors, PRIOR_N 10, OUT_RATIO 2.5 with OUT_MIN 2, NIGHTLY 3 and RATE_MIN 5 are Claude's choice.]
 
 TOKEN_KINDS = ("in", "out", "cr", "cw")  # input, output, cache read, cache write

@@ -422,7 +422,7 @@ and "list" adds that they'll be later because of the usage limit: say both (H109
 how much of the 5-hour and the weekly usage the work should take, learned from the jobs like it (H172): a job \
 starts only when that fits under the stop lines, and when it doesn't yet, "list" says when it should start \
 ("starts around 2 20 in the afternoon when the usage leaves room for it"): say that time, so he never has to think about the \
-usage. A job that used about twice its estimated usage is "paused" and doesn't start again by itself (Donna \
+usage. A job that used about four times its estimated usage (H221) is "paused" and doesn't start again by itself (Donna \
 texts him): "resume N" lets it carry on in its own chat, "stop N" drops it, on his say-so. \
 A job's usage is its own (H173): counted from its own chat's tokens, turned into percent with a rate the \
 team learns from the finished jobs (how many tokens make a point, the nightly run the cleanest sample), so a \

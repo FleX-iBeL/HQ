@@ -105,7 +105,8 @@ How it works:
     (H190) once its minutes are clear (BIG_LOOK, SMALL_LOOK), unless a call said the size (--kind small, bigbuild or
     big build: fixed). A plain --kind build is sorted the same way. The finished builds were sorted again in retrospect
     (RETAG 3, with their look's minutes), so the big ones learn from each other at once; backtest also says how many
-    builds took over twice their estimate. The pause stays at twice. [The cues and numbers are Claude's choice.]
+    builds took over twice their estimate. The pause stays at twice (H221 later moved it to four times, in
+    usagecost.OVER; the backtest still counts over twice). [The cues and numbers are Claude's choice.]
 
 Files, in HQ's .status (never in the repo): job-estimates.json (each job's estimate, set when added,
 and when it started) and job-estimates-history.jsonl (one line per finished job: estimate and real).

@@ -7,7 +7,7 @@ all read the same place. One line per job:
 
 States: ready · running since 21:31 · stop asked · stopped 21:40 · done 21:45 ·
 held: usage over the line · ended 21:45 without a done mark · cancelled 21:33 ·
-paused: used about twice its estimated usage (H172: not started again by itself; resume N or stop N from a call).
+paused: used about four times its estimated usage (H172, H221 (was twice): not started again by itself; resume N or stop N from a call).
 ", past the line" after the state: the user's say-so on a call to go past the 5-hour usage line, for that job only.
 The weekly line always counts, also for such a job (F13, 10 October 2026).
 The waiting jobs (ready or held) run in the order they stand on the list, top first (H39, 10 October 2026):
@@ -37,7 +37,7 @@ usage (from the workspace):
   python3 "routine/jobs.py" held N                         the job's own chat, when the usage says STOP; the
                                                            next start carries on from there (H113); held N WHY
                                                            holds it for another reason (H187: an update ended it)
-  python3 "routine/jobs.py" resume N                       a job paused for using about twice its estimated usage
+  python3 "routine/jobs.py" resume N                       a job paused for using about four times its estimated usage
                                                            carries on, in its own chat (H172); stop N drops it
   python3 "routine/jobs.py" off | on                       jobs from calls off or on
   python3 "routine/jobs.py" mail-off | mail-on             the hourly mail check off or on (L8)

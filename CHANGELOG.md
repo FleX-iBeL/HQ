@@ -4,6 +4,9 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+### Changed
+- A team job is now only paused for its usage once it has used about four times its estimate, not twice, so jobs stop getting paused for using a bit more than guessed. The 5-hour and weekly stop lines stay as they were (H221).
+
 ## 0.4.9 · 21 October 2026
 
 ### Added

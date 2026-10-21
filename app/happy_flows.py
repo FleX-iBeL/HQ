@@ -3903,7 +3903,7 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         # F37: a job paused for its usage is parked: neither running nor waiting, so it holds up no planned item,
         # and it's never started by itself; it stays on the list until a call resumes or drops it.
         parked = int(jobs("add", "flow 45 parked").split()[1])
-        jobs("mark", str(parked), "paused: used about twice its estimated usage")
+        jobs("mark", str(parked), "paused: used about four times its estimated usage")
         nx = q()
         need(all(j["n"] != parked for j in nx["waiting"] + nx["running"] + nx["ready"] + nx["held"])
              and parked in [j["n"] for j in nx.get("parked") or []], f"F37: a paused job isn't parked: {nx}")
@@ -6362,7 +6362,7 @@ print(json.dumps(o))
              "the test touched the real estimates history")
         # H172: usage that keeps itself in check. Each job's real usage (start, every minute, done; a reset in between
         # counted, a hold not), past jobs' from the saved readings, an estimate from the finished jobs like it (START_ROOM's
-        # rates only the fallback), when it fits under the stop lines, and a pause at about twice its estimate.
+        # rates only the fallback), when it fits under the stop lines, and a pause at about four times its estimate (twice until H221).
         # Made-up readings and a made-up log (HQ_USAGE, HQ_USAGE_LOG); without them a test copy reads no usage at all.
         u_file, u_log = self.tmp / "h172-usage.json", self.tmp / "h172-usage.log"
         env2 = {**env, "HQ_USAGE": str(u_file), "HQ_USAGE_LOG": str(u_log)}
@@ -6396,8 +6396,8 @@ at(13, 21, t0 + 3 * 3600); o["a"] = U.track(n)["so_far"]
 at(2, 21, t0 + 8 * 3600); o["reset"] = U.track(n)["so_far"]          # the 5-hour window reset: 3 before it, 2 after
 U.hold(n); at(30, 25, t0 + 8 * 3600); o["held"] = U.track(n)["so_far"]  # held: what others use doesn't count
 U.start(n); at(31, 25, t0 + 8 * 3600); o["back"] = U.track(n)["so_far"]
-o["over"] = [U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 5, "weekly": 0.2}}),
-             U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 4, "weekly": 0.2}}),
+o["over"] = [U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 8, "weekly": 0.2}}),
+             U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 7, "weekly": 0.2}}),  # H221: twice no longer pauses
              U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 2, "weekly": 1.2}}),
              U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 9, "weekly": 0}, "allowed": True}),
              U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 9, "weekly": 0}, "late": True})]
@@ -6431,8 +6431,8 @@ print(json.dumps(o, default=str))
         need(o2["a"] == {"five": 3, "weekly": 1} and o2["reset"]["five"] == 5, f"H172: the usage so far is wrong, or a reset isn't counted: {o2}")
         need(o2["held"]["five"] == 5 and o2["back"]["five"] == 6, f"H172: the usage while held counts, or it doesn't count on after: {o2}")
         need(o2["over"][0]["line"] == "five" and o2["over"][1] is None and o2["over"][2]["line"] == "weekly"
-             and o2["over"][3] is None and o2["over"][4] is None, f"H172: the pause at about twice the estimate is off: {o2['over']}")
-        need("twice" in o2["words"] and "the usage count" in o2["words"] and "H7" not in o2["words"] and "won't start again by itself" in o2["words"],
+             and o2["over"][3] is None and o2["over"][4] is None, f"H172: the pause at about four times the estimate is off (H221): {o2['over']}")
+        need("four times" in o2["words"] and "the usage count" in o2["words"] and "H7" not in o2["words"] and "won't start again by itself" in o2["words"],
              f"H172: Donna's words for a paused job aren't plain: {o2['words']}")
         need((o2["fb"]["five"], o2["fb"]["weekly"], o2["fb"]["how"]) == (5, 1, "fallback"), f"H172: the fallback isn't START_ROOM's rates: {o2['fb']}")
         need((o2["sim"]["five"], o2["sim"]["weekly"], o2["sim"]["how"]) == (4, 0.8, "similar")
@@ -6461,7 +6461,7 @@ print(json.dumps(o, default=str))
         usage_now(1, 21, t0 + 4 * 3600, t0 + 4 * 86400)
         e8 = json.loads(sp.run(["python3", str(jv / "routine/estimate.py"), "plan"], capture_output=True, text=True, env=env2).stdout)["jobs"][str(w1)]
         need(not e8.get("start") and not e8.get("waits"), f"H172: with room, a job still waits: {e8}")
-        jobs2("mark", str(w1), "paused: used about twice its estimated usage")  # out of line: the item goes first
+        jobs2("mark", str(w1), "paused: used about four times its estimated usage")  # out of line: the item goes first
         i9 = int(sp.run(["python3", str(jv / "routine/schedule.py"), "add", "now", "Build H9, flow 54, a planned item"], capture_output=True,
                         text=True, env=env2).stdout.split()[1])
         usage_now(99, 21, t0 + 1800, t0 + 4 * 86400)
@@ -6514,7 +6514,7 @@ console.log(JSON.stringify(o));
         r9 = jobs2("resume", str(w1))
         need("carries on" in r9 and any(j["n"] == w1 and j["state"].startswith("held") for j in json.loads(jobs2("next"))["waiting"])
              and json.loads((est_dir / "job-usage.json").read_text())[str(w1)].get("allowed"), f"H172: resume doesn't put it back in line: {r9}")
-        jobs2("mark", str(w1), "paused: used about twice its estimated usage")
+        jobs2("mark", str(w1), "paused: used about four times its estimated usage")
         need("cancelled" in jobs2("stop", str(w1)), "H172: a paused job can't be dropped")
         # Past jobs: their usage from the saved readings, where a reading is close enough to both ends.
         tb = time.mktime(time.strptime("2026-10-14 12:00:00", "%Y-%m-%d %H:%M:%S"))
@@ -6651,7 +6651,7 @@ print(json.dumps(o))
                 "the team's own guess at the start, next to the computed estimate and the real time, taken in once the guesses have a record (H168); "
                 "the totals say what they count, add up with the lines under them, a repeating item once, the team's guess apart and quieter (H174); "
                 "where the usage will land on the bars, the next 5-hour window apart (H176); "
-                "each job's real usage counted (a reset in, a hold out), its estimate from the jobs like it, when it fits, the pause at twice (H172)")
+                "each job's real usage counted (a reset in, a hold out), its estimate from the jobs like it, when it fits, the pause at four times (H172, H221)")
 
     # 55
     async def flow55(self) -> str:
@@ -11065,7 +11065,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 code, _ = await asyncio.to_thread(post, bad)
                 need(code == 400, f"the page's {bad} wasn't refused")
             # One job parked (H172), for the page.
-            road.write_text(road.read_text().replace("- Job 4 · ready ·", "- Job 4 · paused: used about twice its estimated usage ·"))
+            road.write_text(road.read_text().replace("- Job 4 · ready ·", "- Job 4 · paused: used about four times its estimated usage ·"))
             # The page, in a headless browser.
             cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
             cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
