@@ -42,6 +42,8 @@ The thread through every layer: a life and a way of working that fit the person 
 - `- later · 14 · <the question> · when: <when>`: left for later on purpose, together; say when.
 - `- open · 9 · <the question>`: not asked yet, or not finished.
 
+A question they say doesn't apply to them is answered: write their words on why next to it. Where an answer came from somewhere else (their earlier answers, another layer, a day they told you about), say where on the line, and say "not asked on its own" when it wasn't.
+
 Tick the line the moment it changes, not at the end of the call. An answer that's thin stays open until it's there. Never mark a line answered because the topic came up; only when the question itself got an answer. A new map gets the whole list from the blank one; a map from before the checklist gets it with `python3 <HQ>/app/workflows.py checklist map <layer>`, every line open, and then you go through what's already written and tick honestly.
 
 **Before a layer is done, check it.** Hold the layer against this guide, line by line: `python3 <HQ>/app/workflows.py check map <layer>` says what's not on the checklist, what's still open, and what's parked or left for later without its why or when. Then say plainly what's still open, in a sentence, and ask whether to go through it now or park it. A layer is only done when no line is open and every parked or later line has its reason and its when. Never say a layer is done, or move on to the next one, before that check.

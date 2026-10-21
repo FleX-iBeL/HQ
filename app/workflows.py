@@ -263,7 +263,7 @@ def check_words(rows: list[dict]) -> str:
     for r in rows:
         c = r["counts"]
         head = (f"{r['layer']}. {r['name'] or '(not in their file)'}: {c['answered']} answered, {c['parked']} parked, "
-                f"{c['later']} later, {c['open']} open, of {r['total']}. Status: {r['status'] or 'none'}.")
+                f"{c['later']} later, {c['open']} open, of {r['total']}. Status: {(r['status'] or 'none').rstrip('.')}.")
         bits = []
         if r["missing"]:
             bits.append("not in their checklist: " + ", ".join(r["missing"]))

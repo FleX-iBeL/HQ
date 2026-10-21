@@ -4,6 +4,9 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+### Added
+- Life coaching keeps a checklist. Every question of every layer of your map has its own line in your map, marked answered, parked (with why and when it comes back), left for later (with when) or open. Your agent ticks it as you go, never skips a question without saying so, and before a layer is called done it holds it against the guide line by line and tells you what's still open. A new map starts with the whole list (H224)
+
 ### Changed
 - A team job is now only paused for its usage once it has used about four times its estimate, not twice, so jobs stop getting paused for using a bit more than guessed. The 5-hour and weekly stop lines stay as they were (H221).
 
