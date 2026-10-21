@@ -347,6 +347,8 @@ class Server:
             "HQ_NOTES": str(self.notes),
             # H200: the to-do list and its undo, never the workspace's own
             "HQ_TODO": str(tmp / "todo-server" / "challenges.md"), "HQ_TODO_UNDO": str(tmp / "todo-server" / "undo.json"),
+            # H222: the six-week games and their undo, never the workspace's own
+            "HQ_GAMES": str(tmp / "games-server" / "games.json"), "HQ_GAMES_UNDO": str(tmp / "games-server" / "undo.json"),
             # job 257: the Life coaching switch in Settings, never the workspace's own
             "HQ_WORKFLOWS_FOLDER": str(tmp / "workflows-server"),
             # H205: What HQ helps you with, never the workspace's own switches or the real roadmap's mail check
@@ -12000,6 +12002,268 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 "it, undo only over its own change, the rules on calls and in Donna's chat, the mail check hands off; the matrix "
                 "in the app opens a list and an item, a tick reaches the file and Undo takes it back (" + ", ".join(seen) + ")")
 
+    # 130
+    async def flow130(self) -> str:
+        """H222: the six-week game, part 1: the template and the system. No Claude turns. A fresh install has no games
+        (the template ships none, the app shows no Game button) and nothing personal is in HQ's games code. On a
+        throwaway file with a made-up game: a spec is checked in plain words, made with its dates (setup week, six
+        weeks, look back), and every kind kept: a tick (done, X, clear; never a day that hasn't come or isn't the
+        game's), a count added to several times a day and set, a diary entry with how it felt, a note, a week's look
+        back and the debrief; the score and the win line add up; undo puts back the last change only. A second game:
+        the one being played is the default, a past one stays to open. The call rules, Donna's chat, the Life coaching
+        rule and guide, the policy (a call ticks and notes, never makes a game) and the backup's hand-over know it.
+        The server serves the test server's own file and changes it only from the page. On the call page in a
+        headless browser (the phone, a small phone, the desktop app): the Game button shows once there's a game, the
+        sheet shows where the game is, the win line, today's tick, count and diary, the grid and the graph; a tick
+        and a count reach the file, Undo takes the last back, the list holds the past game, and nothing is wider than
+        the screen."""
+        import games as gm
+        from datetime import date as _date, timedelta as _td
+        # a fresh install: none, and nothing personal in the code
+        need(not (APP.parent / "template" / "HQ" / "games.json").exists(), "the template ships a game")
+        code_text = (APP / "games.py").read_text() + (APP / "web" / "games.js").read_text()
+        for word in ("Ring Fit", "FODMAP"):  # his own games are designed with him first, never shipped
+            need(word.lower() not in code_text.lower(), f"HQ's games code names {word}")
+        gdir = self.tmp / "h222"
+        gdir.mkdir(parents=True, exist_ok=True)
+        env_was = {k: os.environ.get(k) for k in ("HQ_GAMES", "HQ_GAMES_UNDO", "HQ_GAMES_TODAY", "HQ_ROLE_HERE")}
+        os.environ.update({"HQ_GAMES": str(gdir / "games.json"), "HQ_GAMES_UNDO": str(gdir / "undo.json"),
+                           "HQ_GAMES_TODAY": "2026-03-11", "HQ_ROLE_HERE": "1"})
+        spec = {"name": "Walk the dog", "for": "Health", "game": "For six weeks I walk every morning", "start": "2026-03-02",
+                "win": {"track": "walked", "share": 0.9},
+                "tracks": [{"id": "walked", "kind": "tick", "label": "Walked"},
+                           {"id": "km", "kind": "count", "label": "Kilometres", "target": 100, "graph": True},
+                           {"id": "calls", "kind": "count", "label": "Calls", "per_day": 2},
+                           {"id": "mood", "kind": "diary", "label": "How it felt", "feel": ["good", "okay", "bad"]}],
+                "graphs": [{"label": "Both", "tracks": ["km", "calls"]}]}
+        try:
+            need(gm.summary() == "No six-week game yet.", "an empty file doesn't read as no game")
+            need(gm.check_spec({"name": "x", "tracks": [{"id": "a", "kind": "juggle"}]}) and
+                 any("start" in b for b in gm.check_spec({"name": "x"})), "a bad spec isn't refused in plain words")
+            said = gm.new(spec, by="the team")["said"]
+            need("set up from 2026-02-23, played 2026-03-02 to 2026-04-12, looked back on until 2026-04-19" in said, f"the dates are off: {said}")
+            try:
+                gm.new(spec)
+                need(False, "the same game was made twice")
+            except ValueError:
+                pass
+            gm.tick(by="a test")
+            gm.tick("x", day="yesterday")
+            for day in ("2026-03-02", "2026-03-03", "2026-03-04"):
+                gm.tick(day=day)
+            for bad in ({"day": "2026-03-12"}, {"day": "2026-02-27"}):
+                try:
+                    gm.tick(**bad)
+                    need(False, f"a tick on {bad['day']} was taken")
+                except ValueError:
+                    pass
+            gm.count("km", 3)
+            gm.count("km", "2.5")
+            gm.count("calls", 2, day="2026-03-09")
+            gm.count("calls", 1, set_=True)
+            gm.note("Rain all morning")
+            gm.diary("Felt light after", feel="good")
+            try:
+                gm.diary("x", feel="ecstatic")
+                need(False, "a feeling outside the game's words was taken")
+            except ValueError:
+                pass
+            gm.week(None, "The first week went well")
+            v = gm.read()["games"][0]
+            need(v["phase"] == "playing" and v["day"] == 10 and v["length"] == 42, f"where the game is: {v['phase']} {v['day']}")
+            s = v["sums"]
+            need(s["walked"]["done"] == 4 and s["walked"]["x"] == 1 and s["walked"]["played"] == 10, f"the ticks add up wrong: {s['walked']}")
+            need(s["km"]["total"] == 5.5 and s["km"]["share"] == 0.055, f"the count adds up wrong: {s['km']}")
+            need(s["calls"]["days_hit"] == 1 and s["mood"]["entries"] == 1, f"per day or the diary add up wrong: {s}")
+            need(v["win"]["need"] == 38 and v["win"]["have"] == 4 and v["win"]["on_track"] is False and v["win"]["reachable"] is False,
+                 f"the win line is off: {v['win']}")
+            need(v["looks"][0]["look"] == "The first week went well" and not v["looks"][1]["ended"], "the week's look back isn't kept")
+            need(v["days"]["2026-03-11"]["note"] == "Rain all morning", "the note isn't on its day")
+            before = Path(os.environ["HQ_GAMES"]).read_text()
+            gm.tick("clear")
+            need(gm.undo()["ok"] and Path(os.environ["HQ_GAMES"]).read_text() == before, "undo didn't put the game back exactly")
+            need(not gm.undo()["ok"], "a second undo did something")
+            line = gm.summary()
+            need("Walk the dog (playing, day 10 of 42)" in line and "Walked: 4 of 10 days done (40%), today done" in line
+                 and "out of reach now" in line, f"the summary to say out loud is off: {line}")
+            # a past game, and a second one: the one played is the default
+            gm.new({**spec, "name": "Read at night", "start": "2025-11-03", "tracks": [{"id": "read", "kind": "tick"}],
+                    "win": {"text": "Most nights"}, "graphs": []})
+            gm.debrief("Fun, and I read four books", game="read at night")
+            gm.tick("x")
+            names = [(g["name"], g["phase"]) for g in gm.read()["games"]]
+            need(names == [("Walk the dog", "playing"), ("Read at night", "past")], f"the order or phases are off: {names}")
+            code, out = gm.run(["tick", "--game", "nothing like it"])
+            need(code == 1 and "No game called" in out, f"an unknown game wasn't refused: {out}")
+            code, out = gm.run(["kinds"])
+            need(code == 0 and all(k in out for k in ("tick:", "count:", "diary:")), "the kinds aren't listed")
+        finally:
+            for k, val in env_was.items():
+                if val is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = val
+        # the rules, the guide, the policy, the backup
+        import direct_line, workflows
+        from policy import Policy
+        sys.path.insert(0, str(APP.parent / "routine"))
+        import role
+        need(config.GAMES_RULE in config.VOICE_RULES and config.GAMES_RULE in direct_line._text_rules() and "{" not in config.GAMES_RULE,
+             "the game rule isn't on every call and in Donna's chat")
+        wf = self.tmp / "h222-wf"
+        (wf / "HQ").mkdir(parents=True, exist_ok=True)
+        (wf / "HQ" / "workflows.json").write_text(json.dumps({"on": ["map"]}))
+        rule = workflows.rule(wf)
+        need("six-week game (H222)" in rule and "design session" in rule and "Never make or change the game yourself" in rule,
+             f"the Life coaching rule doesn't say how a game is designed and handed to the team: {rule[-300:]}")
+        guide = (APP.parent / "workflows" / "map" / "guide.md").read_text()
+        layer3 = guide.split("## 3. The six-week game", 1)[1].split("## 4.", 1)[0]
+        need("**In HQ.**" in layer3 and "its own design session" in layer3 and "past games" in layer3, "the guide's six-week game layer has no In HQ part")
+        need({k: len(v) for k, v in workflows.questions(workflows.find("map")).items()}[3] == 13, "the guide's game layer changed its questions")
+        pol = Policy(config.FOLDER, dry_run=True)
+        script = APP / "games.py"
+        need(pol.decide("Bash", {"command": f'python3 "{script}" tick done --by "a call"'}).verdict == "allow"
+             and pol.decide("Bash", {"command": f'python3 "{script}" diary "oats" --feel good'}).verdict == "allow"
+             and pol.decide("Bash", {"command": f'python3 "{script}" new spec.json'}).verdict == "deny", "a call can't keep the game, or can make one")
+        need({"tick", "count", "note", "diary", "week", "debrief", "undo", "new"} <= role.WRITES["games"] and "HQ/games.json" in role.ONE_WRITER,
+             "the backup doesn't hand the games to the main")
+        need("games.py" in (APP.parent / "template" / "CLAUDE.md").read_text(), "a friend's chat isn't told about the games")
+        # the server, on its own copy, with a game around today
+        await self.ensure_server()
+        sf = Path(self.server.env["HQ_GAMES"])
+        sf.parent.mkdir(parents=True, exist_ok=True)
+        today = _date.today()
+        start = today - _td(days=9)
+        live = {**spec, "start": start.isoformat()}
+        past = {**spec, "name": "Read at night", "start": (today - _td(days=120)).isoformat(),
+                "tracks": [{"id": "read", "kind": "tick"}], "win": {"text": "Most nights"}, "graphs": []}
+        def fresh() -> str:
+            sf.unlink(missing_ok=True)
+            Path(self.server.env["HQ_GAMES_UNDO"]).unlink(missing_ok=True)
+            env = {**os.environ, "HQ_GAMES": str(sf), "HQ_GAMES_UNDO": self.server.env["HQ_GAMES_UNDO"], "HQ_ROLE_HERE": "1"}
+            env.pop("HQ_GAMES_TODAY", None)
+            for sp in (live, past):
+                r = run([sys.executable, str(script), "new", json.dumps(sp), "--by", "the team"], env=env)
+                need(r.returncode == 0, f"the team couldn't make the test game: {r.stdout}")
+            r = run([sys.executable, str(script), "tick", "--day", (start + _td(days=1)).isoformat(), "--game", "walk"], env=env)
+            need(r.returncode == 0, f"a tick on the command line failed: {r.stdout}")
+            return sf.read_text()
+        def post(body, hq="games"):
+            req = urllib.request.Request(TEST_URL + "/api/games", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        sf.unlink(missing_ok=True)
+        code, body, _ = http_get("/api/games")
+        need(code == 200 and json.loads(body)["games"] == [], f"/api/games doesn't serve an empty list on a fresh install ({code})")
+        text = fresh()
+        code, body, _ = http_get("/api/games")
+        got = json.loads(body) if code == 200 else {}
+        need([g["name"] for g in got.get("games", [])] == ["Walk the dog", "Read at night"], f"/api/games doesn't serve the test server's own file: {got}")
+        need(post({"tick": "done", "game": "walk"}, hq="")[0] == 403 and sf.read_text() == text, "a change without the page's header was let in")
+        need(post({"tick": "done", "game": "nothing like it"})[0] == 400, "an unknown game wasn't refused")
+        c, d = post({"count": "4", "track": "km", "game": "walk"})
+        need(c == 200 and "4 today" in d["said"] and d["undo"], f"a count from the page didn't land: {c} {d and d.get('said')}")
+        c, d = post({"undo": True})
+        need(c == 200 and sf.read_text() == text, "undo from the page didn't put it back")
+        # the call page: the phone, a small phone, the desktop app
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        dock = page.split('<nav id="dock"', 1)[1].split("</nav>", 1)[0]
+        need('id="gamebtn" data-dl="Game"' in dock and '<script src="games.js"></script>' in page, "the Game button or its script isn't on the page")
+        harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms)), $ = id => document.getElementById(id);
+  const until = async (f, ms) => { for (let i = 0; i < ms / 50; i++) { if (f()) return true; await wait(50); } return false; };
+  await until(() => $("gamebtn").classList.contains("on"), 4000);
+  const dk = $("dock").getBoundingClientRect(), gb = $("gamebtn").getBoundingClientRect();
+  out.push("button:" + (gb.width > 30 && gb.left >= dk.left - 1 && gb.right <= dk.right + 1 ? "ok" : "off " + Math.round(gb.width)));
+  $("gamebtn").click();
+  await until(() => document.querySelector("#gamebody .gcard"), 4000);
+  out.push("title:" + $("gametitle").textContent + "/" + $("gamesheet").dataset.view);
+  const body = $("gamebody").textContent;
+  out.push("where:" + (/Day 10 of 42/.test(body) ? "ok" : "no"));
+  out.push("win:" + (/90% of the days/.test(body) && document.querySelector("#gamebody .gbar") ? "ok" : "no"));
+  out.push("grid:" + document.querySelectorAll("#gamebody .ggrid .c").length + "/" + document.querySelectorAll("#gamebody .ggrid .c.done").length);
+  out.push("graphs:" + document.querySelectorAll("#gamebody svg.ggraph").length);
+  out.push("diary:" + (document.querySelector('#gamebody textarea[aria-label="How it felt"]') ? "ok" : "no"));
+  const done = [...document.querySelectorAll("#gamebody .gbtn")].find(b => b.textContent === "Done");
+  done.click();
+  await until(() => document.querySelectorAll("#gamebody .ggrid .c.done").length === 2, 4000);
+  out.push("ticked:" + document.querySelectorAll("#gamebody .ggrid .c.done").length);
+  const plus = [...document.querySelectorAll("#gamebody .gbtn")].find(b => b.textContent === "+");
+  plus.click();
+  await until(() => /Kilometres 1 today/.test($("gamenote").textContent), 4000);
+  out.push("counted:" + (/Kilometres 1 today/.test($("gamenote").textContent) ? "ok" : $("gamenote").textContent));
+  const und = [...document.querySelectorAll("#gamenote button")].find(b => b.textContent === "Undo");
+  if (und) und.click();
+  await until(() => /Undone/.test($("gamenote").textContent), 4000);
+  out.push("undone:" + (/Undone/.test($("gamenote").textContent) ? "ok" : "no"));
+  out.push("wide:" + (document.documentElement.scrollWidth <= innerWidth + 1 && $("gamebody").scrollWidth <= $("gamebody").clientWidth + 1 ? "ok" : "too wide"));
+  $("gameback").click(); await wait(50);
+  out.push("list:" + $("gamesheet").dataset.view + "/" + (/Past games/.test($("gamebody").textContent) && /Read at night/.test($("gamebody").textContent) ? "past" : "nopast"));
+  [...document.querySelectorAll("#gamebody .gcard")].find(c => /Read at night/.test(c.textContent)).click(); await wait(50);
+  out.push("past:" + $("gametitle").textContent + "/" + (/The debrief/.test($("gamebody").textContent) ? "debrief" : "nodebrief"));
+  $("todobtn").click(); await wait(50);
+  out.push("onesheet:" + ($("gamesheet").classList.contains("open") ? "both" : "ok"));
+  const pre = document.createElement("pre"); pre.id = "h222"; pre.textContent = "H222RESULT " + out.join(" | ") + " END"; document.body.append(pre);
+})();
+</script>"""
+        # the Game button goes with Life coaching (H205): on for this part, the server's own switch put back after
+        wfs = Path(self.server.env["HQ_WORKFLOWS_FOLDER"]) / "HQ" / "workflows.json"
+        wfs_was = wfs.read_text() if wfs.exists() else None
+        wfs.parent.mkdir(parents=True, exist_ok=True)
+        wfs.write_text(json.dumps({"on": ["map"]}))
+        seen = []
+        try:
+            seen = await self._h222_page(chrome, page, harness, fresh, sf, today)
+        finally:
+            if wfs_was is None:
+                wfs.unlink(missing_ok=True)
+            else:
+                wfs.write_text(wfs_was)
+        sf.unlink(missing_ok=True)
+        return ("the six-week game template: none on a fresh install; a game made from its spec with its dates, kept by tick, "
+                "count, diary, note, a week's look back and the debrief, the score and win line adding up, undo only over its "
+                "own change, a past game kept; calls and Donna keep it, the Life coaching rule and guide design it and hand it "
+                "to the team, a call never makes one; in the app the Game button (with Life coaching on), where it is, the win "
+                "line, today, the grid and graphs, a tick and a count reach the file and Undo takes it back (" + ", ".join(seen) + ")")
+
+    async def _h222_page(self, chrome, page, harness, fresh, sf, today) -> list:
+        seen = []
+        for name, size, app_ in (("the phone", "390,844", False), ("a small phone", "320,640", False), ("the desktop app", "1180,780", True)):
+            text = fresh()
+            pf = self.tmp / f"h222-{name.replace(' ', '-')}.html"
+            pg = page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1).replace("</body>", harness + "</body>", 1)
+            if app_:
+                pg = pg.replace('new URLSearchParams(location.search).has("app")', "true", 1)
+            pf.write_text(pg)
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'h222-profile'}", "--disable-web-security", f"--window-size={size}",
+                                              "--virtual-time-budget=12000", "--dump-dom", pf.as_uri()], timeout=90)
+            mm = re.search(r'<pre id="h222">H222RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{name}: the game test on the call page didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+            say(f"   {name} ({size}): {mm.group(1)}")
+            need(res["button"] == "ok", f"{name}: the Game button isn't in the dock: {res}")
+            need(res["title"] == "Walk the dog/game" and res["where"] == "ok" and res["win"] == "ok", f"{name}: the game doesn't open where it is: {res}")
+            need(res["grid"] == "42/1" and res["graphs"] == "2" and res["diary"] == "ok", f"{name}: the grid, the graphs or the diary are off: {res}")
+            need(res["ticked"] == "2" and res["counted"] == "ok" and res["undone"] == "ok", f"{name}: a tick, a count or its Undo didn't land: {res}")
+            data_ = json.loads(sf.read_text())["games"][0]["days"]
+            need(data_.get(today.isoformat(), {}).get("walked") == "done" and "km" not in data_.get(today.isoformat(), {}),
+                 f"{name}: the file doesn't have today's tick without the undone count: {data_}")
+            need(res["wide"] == "ok", f"{name}: something is wider than the screen: {res}")
+            need(res["list"] == "list/past" and res["past"] == "Read at night/debrief" and res["onesheet"] == "ok",
+                 f"{name}: the past game or one sheet at a time is off: {res}")
+            seen.append(name)
+        return seen
+
     # 124
     async def flow124(self) -> str:
         """F40: groceries ticked off in the app, and ticked back on. No Claude turns. On a throwaway copy of the
@@ -15002,6 +15266,7 @@ FLOWS = {
     127: ("H213: Donna tidies the mail on his ask (read, archive, star, important, labels), trash and spam ask, never send; offers a Gmail filter first or a sorting rule the mail check applies, read-only without one", False, "flow127"),
     128: ("H214, H216, H217, H218: a 9292 link door to door: where the phone is or home by default, never with a surcharge or a reservation unless asked, stations by 9292's own id, addresses by the government's open address service, trains only on ask; opened in 9292 with both ends", False, "flow128"),
     129: ("F44: an update finds lsof on a Mac with the helper app's bare PATH (/usr/sbin); the Mac scripts add it too", False, "flow129"),
+    130: ("H222: the six-week game, part 1: one template every game gets (dates, win line, weekly look back, debrief, past games kept), its tracks by kind (tick, count, diary, graphs), kept from a call, Donna's chat and the app; designed in Life coaching and handed to the team", False, "flow130"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 

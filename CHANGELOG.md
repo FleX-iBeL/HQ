@@ -5,6 +5,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ## Coming next
 
 ### Added
+- The six-week game. When you want to play one, your agent holds a short design session with you as part of Life coaching: what it's for, the dates (a setup week, six weeks, a week to look back), how you win, and what you keep track of: a tick a day, counts against a target, a diary of how it felt, a graph. It's written in your map and handed to your team, who set it up in HQ. Then a Game button shows up in the app, where you tick the day, add to a count, keep the diary, write a note and look back on each week; your agent and Donna's texts do the same when you tell them. Past games stay there to open again (H222).
 - Life coaching keeps a checklist. Every question of every layer of your map has its own line in your map, marked answered, parked (with why and when it comes back), left for later (with when) or open. Your agent ticks it as you go, never skips a question without saying so, and before a layer is called done it holds it against the guide line by line and tells you what's still open. A new map starts with the whole list (H224)
 
 ### Changed

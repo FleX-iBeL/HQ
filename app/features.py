@@ -50,7 +50,7 @@ FEATURES = [
      "buttons": ["notesbtn"]},
     {"id": "team", "name": "The team's work", "line": "What the computer builds for you, and how far it is: the Status button",
      "buttons": ["statbtn"]},
-    {"id": "coaching", "name": "Life coaching", "line": "", "buttons": [], "workflow": "map"},
+    {"id": "coaching", "name": "Life coaching", "line": "", "buttons": ["gamebtn"], "workflow": "map"},
 ]
 IDS = [f["id"] for f in FEATURES]
 

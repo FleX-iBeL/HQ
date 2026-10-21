@@ -304,7 +304,21 @@ def rule(folder: Path, base: Path = SHIPPED) -> str:
             "later (on purpose, with when) or open; tick each line as you go, never skip one silently (one answered "
             "earlier is ticked answered, not asked again), and never call a layer done before holding it against the "
             f"guide line by line (python3 {ROOT / 'app' / 'workflows.py'} check <id> <layer>) and saying plainly what's "
-            "still open.")
+            "still open." + (GAME_RULE if any(w["id"] == "map" for w in ws) else ""))
+
+
+# H222 (21 October 2026, call at 12:29), in the user's words: "the moment they want to do a 6-week challenge, they need
+# to have a session with you ... You just need to design it and then hand it off to the team so they can tailor it,
+# custom-made for this type of challenge ... They can always open their past history one."
+GAME_RULE = (" A six-week game (H222): when they want one, it gets its own design session, with the agent this "
+             "workflow is best with; if that isn't you, say so once and offer to go on or switch. Go through the "
+             "guide's six-week game layer the usual way, and design with them how it's kept in HQ: what's ticked or "
+             "counted a day, any targets, a diary with how it felt, which graph helps, the win line, and the dates (the "
+             "setup week, the six weeks, the week to look back). Look at their past games first (python3 "
+             f"{ROOT / 'app' / 'games.py'}), and what HQ can keep already (games.py kinds). Write the design under that "
+             "layer in their map.md, as the guide's In HQ part shows, then, on their yes, hand it to the team: "
+             "\"Set up the six-week game <name> from map.md layer 3 on the six-week game template\", kind small, or "
+             "bigbuild when it needs a kind of tracking HQ doesn't have yet. Never make or change the game yourself.")
 
 
 def main(argv: list[str]) -> int:

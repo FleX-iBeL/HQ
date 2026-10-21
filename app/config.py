@@ -209,6 +209,20 @@ the answer ("Left, since it may be about it: …"): name it to {user} once, in a
 {user}'s yes (pings.py note-clear, cancel, unwatch --quiet, nudge-done, or take the mail line out); a Very important \
 mail line stays until {user} says so, as always. Undo puts all of it back."""
 
+# H222 (21 October 2026, call at 12:29), in the user's words: "I can just check whether I did it or I didn't do it, or
+# write a note. Then we know at the end of the week we need to discuss it." On every full call and in the direct line's
+# chat. How a game is designed is the Life coaching rule's (workflows.rule).
+GAMES_RULE = """- The six-week game (H222): {user}'s games, in the workspace's HQ/games.json, shown in the app (the Game \
+button, once there is one). When {user} says they did it, didn't, a count ("sent 5 today"), a note, how a day went for \
+the game's diary, or the look back on a week, keep it without asking: python3 "{HQ}/app/games.py" (the games in a few \
+lines: the day, the score, the win line), tick [done|x|clear], count TRACK N [--set], note "TEXT", diary "TEXT" [--feel \
+WORD], week [N] "TEXT", debrief "TEXT" at the end (fun, useful, learned), undo; --day YYYY-MM-DD|yesterday for another \
+day, --track T when a game keeps more than one, --game "a few words of its name" when more than one game is on, and \
+--by "<who you are>, on a call" (or "in the chat"); their words in the text, dictation slips fixed. Say back in a few \
+words what it says (the score so far). At the end of a game's week, if that week has no look back yet, ask about it \
+once. Making a game or changing its design isn't done from here: it's designed with {user} in the Life coaching \
+session for the six-week game, written in their map.md, and handed to the team."""
+
 # H214 (19 October 2026, call at 12:07), in the user's words: "if you develop an app, you can connect to it. ... No
 # hidden browser nonsense unless this is actually the way to do it." On every full call and in the direct line's chat.
 # H216 and H217 (20 October 2026, call at 14:03): "I want never that vervoer met toeslag, by default" and "Also is it
@@ -501,6 +515,7 @@ and take them one at a time; once he says one is done or gone through, remove it
 {mailfast}
 {apptnotes}
 {todo}
+{games}
 {travel}
 {onewriter}
 {workflows}
@@ -524,13 +539,14 @@ PINGS_RULE = PINGS_RULE.replace("{HQ}", str(ROOT)).replace("{agent}", _direct_ag
 APPT_NOTES_RULE = APPT_NOTES_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TEAM_RULE = TEAM_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TODO_RULE = TODO_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
+GAMES_RULE = GAMES_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TRAVEL_RULE = TRAVEL_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 MAIL_FAST_RULE = MAIL_FAST_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 MAIL_TIDY_RULE = MAIL_TIDY_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 import workflows as _workflows  # H202: the workflows the user turned on
 import features as _features  # H205: what they turned off
 WORKFLOWS_RULE = _workflows.rule(FOLDER)
-VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE + "\n" + MAIL_TIDY_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{todo}", TODO_RULE).replace("{travel}", TRAVEL_RULE).replace("{onewriter}", ONE_WRITER_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
+VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE + "\n" + MAIL_TIDY_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{todo}", TODO_RULE).replace("{games}", GAMES_RULE).replace("{travel}", TRAVEL_RULE).replace("{onewriter}", ONE_WRITER_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{format}", FORMAT_RULE)
                .replace("{times}", TIMES_RULE))
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:

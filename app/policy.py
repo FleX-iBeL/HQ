@@ -425,6 +425,16 @@ class Policy:
             if len(args) == 1 or args[1] in ("summary", "json", "add", "done", "letgo", "move", "tick", "untick", "undo"):
                 return Decision(ALLOW, "the to-do list")
             return Decision(DENY, "the to-do script takes summary, json, add, done, letgo, move, tick, untick or undo")
+        # H222: the six-week games, the workspace's own HQ/games.json: read, tick a day, count, a note, the diary, a
+        # week's look back, the debrief, undo. Making a game or changing its design is the team's (new, spec), from
+        # the design written in their map.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "games.py"):
+            if len(args) == 1 or args[1] in ("summary", "json", "show", "kinds", "check", "tick", "count", "note",
+                                             "diary", "week", "debrief", "undo"):
+                return Decision(ALLOW, "the six-week game")
+            return Decision(DENY, "making a six-week game or changing its design is the team's: write the design in "
+                                  "their map and hand it to the team; from a call the games script reads, ticks, "
+                                  "counts, notes, keeps the diary, the week's look back and the debrief")
         # H224: the workflows, read only: which are on, the call rule, a blank checklist, and their file's checklist
         # held against the guide before a layer is called done. Turning one on or off is Settings'.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "workflows.py"):

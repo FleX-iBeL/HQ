@@ -400,6 +400,10 @@ if __name__ == "__main__":
         return Response(html, media_type="text/html; charset=utf-8", headers=_NO_CACHE)
 
     # H74: the get-started tutorial's pieces (the question mark on the page; tour.py makes the demo call from the same)
+    @app.get("/games.js", include_in_schema=False)
+    async def games_js():  # H222: the six-week game's sheet and its kinds of tracks
+        return FileResponse(WEB / "games.js", media_type="text/javascript", headers=_NO_CACHE)
+
     @app.get("/tour.json", include_in_schema=False)
     async def tour_json():
         return FileResponse(WEB / "tour.json", media_type="application/json", headers=_NO_CACHE)
@@ -728,6 +732,72 @@ if __name__ == "__main__":
         out = await asyncio.to_thread(_todo.read)
         out["said"] = said.get("said", "")
         out["undo"] = bool(said.get("ok")) and ask.get("undo") is not True
+        return JSONResponse(out, headers=_NO_CACHE)
+
+    # H222: the six-week games (games.py), the workspace's own HQ/games.json; a fresh install has none. The page reads
+    # them and can tick a day, add to a count, write a note, a diary entry, a week's look back or the debrief, and undo
+    # its last change; calls and Donna's chat do the same with the script. Making a game is the team's. Only from the
+    # page itself (x-hq: games), never on a Free-only line; on the backup the main writes it (H203).
+    import games as _games
+
+    @app.get("/api/games", include_in_schema=False)
+    async def games_read():
+        if config.FREE_ONLY:
+            return JSONResponse({"off": "Free", "games": []}, headers=_NO_CACHE)
+        return JSONResponse(await asyncio.to_thread(_games.read), headers=_NO_CACHE)
+
+    @app.post("/api/games", include_in_schema=False)
+    async def games_change(request: Request):
+        if request.headers.get("x-hq") != "games":
+            return JSONResponse({"error": "Only the HQ page can change the games"}, status_code=403)
+        if config.FREE_ONLY:
+            return JSONResponse({"error": "Not on Free"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict):
+            return JSONResponse({"error": "no change asked"}, status_code=400)
+        g, day, by = str(ask.get("game") or ""), str(ask.get("day") or ""), "in the app"
+        s = lambda k, n=4000: str(ask.get(k) or "")[:n]
+        if ask.get("undo") is True:
+            args = ["undo"]
+        elif "tick" in ask:
+            args = ["tick", s("tick", 10) or "done", "--track", s("track", 40)]
+        elif "count" in ask:
+            args = ["count", s("track", 40), s("count", 20)] + (["--set"] if ask.get("set") else [])
+        elif "note" in ask:
+            args = ["note", s("note", 2000)]
+        elif "diary" in ask:
+            args = ["diary", s("diary", 2000), "--feel", s("feel", 40), "--track", s("track", 40)]
+        elif "week" in ask:
+            args = ["week", s("week", 4), s("text")]
+        elif "debrief" in ask:
+            args = ["debrief", s("debrief", 6000)]
+        else:
+            return JSONResponse({"error": "no change asked"}, status_code=400)
+        if args[0] != "undo":
+            args += ["--game", g] + (["--day", day] if day and args[0] in ("tick", "count", "note") else []) + ["--by", by]
+        from policy import is_backup as _is_backup
+        if await asyncio.to_thread(_is_backup):
+            import role as _role
+            code, out_, err_, how = await asyncio.to_thread(_role.hand, "games", args)
+            if code:
+                return JSONResponse({"error": " ".join((out_ + " " + err_).split())[:300] or "the main didn't take it"},
+                                    status_code=409)
+            out = await asyncio.to_thread(_games.read)
+            out["said"] = " ".join(out_.split())[:300] + (" It comes back here with the sync in a moment."
+                                                         if how == "main" else "")
+            out["undo"] = args[0] != "undo"
+            out["handed"] = how
+            return JSONResponse(out, headers=_NO_CACHE)
+        code, said = await asyncio.to_thread(_games.run, args)
+        said = " ".join(said.split())[:400]
+        if code:
+            return JSONResponse({"error": said or "Couldn't change the game"}, status_code=400)
+        out = await asyncio.to_thread(_games.read)
+        out["said"] = said
+        out["undo"] = args[0] != "undo"
         return JSONResponse(out, headers=_NO_CACHE)
 
     # Job 257 (H202): the workflows the user can switch on in Settings, Life coaching first. On starts their map from

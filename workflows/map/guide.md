@@ -225,7 +225,7 @@ Picking the game
 3. Is it simple enough? What can you leave out so it's one thing, done well?
 4. What are the rules: what do you do, how often, where, and what's off limits?
 5. What does winning look like at the end of the six weeks? And how do you score a single day or a single try?
-6. What will you keep score of? Something you do (the reps, the hours, the times you showed up) and something that comes out of it (the result). The first you control; the second follows.
+6. What will you keep score of? Something you do (the reps, the hours, the times you showed up) and something that comes out of it (the result). The first you control; the second follows And how do you want to see it day by day: a tick, a count against a target, a few counts, a diary of how it felt, a graph?
 
 Making it yours
 7. Does it feel like play or like homework? If homework, what would make it a game?
@@ -239,6 +239,20 @@ Setting it up
 13. Who plays along or keeps you honest?
 
 **What it makes.** In `map.md`, under this layer, with their yes and the dates: the game in one sentence, the goal it serves, the rules, the score kept, what winning looks like, the fears and what's done about them. When a game ends, its debrief goes under it, and the next game under that.
+
+**In HQ.** Every game gets its own design session; it's never set up in passing. Before it, look at their past games in HQ (what worked, what they never ticked) and at what HQ can keep already. HQ gives every game the same frame: what it's for, the dates (the setup week, the six weeks, the week to look back), the win line and how far along they are, a note per day, a look back at the end of each week, a debrief at the end, and every past game kept to open again. On top of that the game keeps track of what you designed together: a tick a day (done or not), counts (one or several a day, against a target for the six weeks or for each day), a diary (what happened, when, and how it felt, to trace back), and a graph where seeing it day by day helps. Write it under the game in `map.md`, in their words, like this:
+
+```
+In HQ:
+- Name: …   Start: YYYY-MM-DD (the first of the six weeks)   Weeks: 6
+- Track: a tick a day, "…"
+- Track: a count, "…", target … (for the six weeks, or a day)
+- Track: a diary, "…", how it felt: good / okay / bad
+- Graph: … (which counts, day by day or adding up)
+- Win line: … (90% of the days, 60 in total, …)
+```
+
+Then, on their yes, it goes to their team, who set the game up in HQ on the template, tailored to it, and build whatever it needs that HQ can't keep yet. From then on they tick and note it on any call, in the texts, or in the app.
 
 **What it hands down.** To the ideal week: the game's weekly part and the blocks that make room for it. To the real week: what this week's part of the game is. To looking back: the score to look at each week, and the debrief at the end.
 
