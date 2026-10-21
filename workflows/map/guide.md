@@ -13,7 +13,7 @@ The map is an upside-down pyramid. On top, wide: the life they want three to fiv
 5. The real week: this week, poured into that template.
 6. Looking back: every day a little, every week properly, after every game, and a bigger check-in every few months; what changes.
 
-This is a big piece of work and it's worth the time. Never rush it and never skip a layer's questions to get to the end. One sitting is one layer, or part of one; most people need five or six sittings for the first time through, and that's fine.
+This is a big piece of work and it's worth the time. Never rush it and never skip a layer's questions to get to the end: every question below is on a checklist in their map, and none goes unmarked. One sitting is one layer, or part of one; most people need five or six sittings for the first time through, and that's fine.
 
 The thread through every layer: a life and a way of working that fit the person like a glove, not one they push through on willpower. When something in their plan only works if they become someone else, say so; usually it's the plan that should bend, not them.
 
@@ -21,7 +21,7 @@ The thread through every layer: a life and a way of working that fit the person 
 
 **Before the first question.** Read their `map.md` and anything it points to. Find the first layer that isn't done (each layer has a `Status:` line). Tell them in a sentence where they are ("We did the vision last time; the year is next") and ask if they want to carry on there. If they'd rather start somewhere else, go there; if that layer leans on one above it that's still empty, say so once, then follow them.
 
-**One question at a time.** Ask one, wait, listen. Never a list of questions in one go, and on a call never more than one question per turn. The questions under each layer are a route, not a script: say them in your own words, skip one they've already answered, and follow up when an answer is thin.
+**One question at a time.** Ask one, wait, listen. Never a list of questions in one go, and on a call never more than one question per turn. The questions under each layer are a route, not a script: say them in your own words, and follow up when an answer is thin. One they've already answered somewhere else isn't asked again: tick it answered, and say where the answer is. Never skip one silently.
 
 **Spar, don't interview.** You're a sparring partner, not a form.
 - Ask for the gut answer first: "Don't think too hard, what comes up first?" The polish comes later.
@@ -34,9 +34,19 @@ The thread through every layer: a life and a way of working that fit the person 
 - Saying out loud what they don't want is a step forward, not a complaint. Once it's said, what they do want gets clearer.
 - When they're tired or stuck, stop. Write down where you are and pick it up next time.
 
-**Write it down as you go.** After each answer, write it into their `map.md`, under the layer you're on: the question in a few words, then their answer in their words (fix obvious dictation slips, don't paraphrase, don't condense). When you add something of your own, a suggestion or a summary, mark it as yours in [square brackets]. Update the layer's `Status:` line as you go: `in progress (up to: <the last question>)`, and `done (<date>)` once the layer's result is written and they've said yes to it. Then a quick conversation can stop at any moment and nothing is lost.
+**Write it down as you go.** After each answer, write it into their `map.md`, under the layer you're on: the question in a few words, then their answer in their words (fix obvious dictation slips, don't paraphrase, don't condense). When you add something of your own, a suggestion or a summary, mark it as yours in [square brackets]. Update the layer's `Status:` line as you go: `in progress (up to: <the last question>)`, and `done (<date>)` only once the checklist is through (see below), the layer's result is written and they've said yes to it. Then a quick conversation can stop at any moment and nothing is lost.
 
-**Close each layer.** When the questions are through: write the layer's result (what each layer below says it makes), read it back to them in a few sentences, let them correct it, and only then mark it done. Then say what goes down to the next layer.
+**The checklist.** Every question of every layer in this guide (and the vision's checks, and each kind of look back) has its own line in their `map.md`, under its layer, in a list headed `Checklist`. Each line is marked one of four ways, with the guide's own number:
+- `- answered · 5 · <the question, short>`: they answered it, and the answer is written under the layer.
+- `- parked · 23 · <the question> · why: <why> · back: <when it comes back>`: it doesn't fit their life yet; say why, in their words where you can, and when you bring it back up (you, not them).
+- `- later · 14 · <the question> · when: <when>`: left for later on purpose, together; say when.
+- `- open · 9 · <the question>`: not asked yet, or not finished.
+
+Tick the line the moment it changes, not at the end of the call. An answer that's thin stays open until it's there. Never mark a line answered because the topic came up; only when the question itself got an answer. A new map gets the whole list from the blank one; a map from before the checklist gets it with `python3 <HQ>/app/workflows.py checklist map <layer>`, every line open, and then you go through what's already written and tick honestly.
+
+**Before a layer is done, check it.** Hold the layer against this guide, line by line: `python3 <HQ>/app/workflows.py check map <layer>` says what's not on the checklist, what's still open, and what's parked or left for later without its why or when. Then say plainly what's still open, in a sentence, and ask whether to go through it now or park it. A layer is only done when no line is open and every parked or later line has its reason and its when. Never say a layer is done, or move on to the next one, before that check.
+
+**Close each layer.** When the questions are through, check the layer (above) and go through whatever is still open. Then write the layer's result (what each layer below says it makes), read it back to them in a few sentences, let them correct it, and only then mark it done. Then say what goes down to the next layer.
 
 **Their own name for it.** The vision is theirs, so is its name. Somewhere in the vision sessions, usually once the day in that life is written, ask what they'd call it: a few words they'd use themselves (one person calls it their north star, another first-class freedom, another something else entirely). If nothing comes, offer two or three names made from what they shared (their words, their places, what lit them up), and let them pick, change one or say not yet. Never push one. Write it on the vision's `Name:` line in their `map.md`, in their words. From then on, call it that, in the sessions and in every other call and chat, instead of "the vision". When they rename it later, the new one replaces it.
 
@@ -68,7 +78,7 @@ Work and money
 9. Is there a team around you? What's it like for them?
 
 Money, meaning and freedom
-10. Picture three dials: money (what comes in), meaning (work you love, with people you like, that matters to someone) and freedom (being where you want, when you want, with whom you want). For each one: what's enough, in numbers where you can? A monthly amount, the kind of work and people, the days and hours that are yours.
+10. What's enough on each of three dials: money (what comes in), meaning (work you love, with people you like, that matters to someone) and freedom (being where you want, when you want, with whom you want)? For each one: what's enough, in numbers where you can? A monthly amount, the kind of work and people, the days and hours that are yours.
 11. What do you want the money for? Go through it as things, experiences, places, and the people you'd share them with. (Money is the tickets you trade in for the good stuff; the list is what makes earning it fun.)
 
 People
@@ -246,7 +256,7 @@ Where the time goes now
 3. Of what doesn't earn and drains you: what can simply go, what could be automated, what could someone else do? What do you want to keep because it's yours?
 
 Love it or hate it
-4. Two lists. The love list: the parts of your days and your work you love and want more of. The hate list: the parts you hate, find frustrating or just put up with, and want less of.
+4. What goes on your two lists? The love list: the parts of your days and your work you love and want more of. The hate list: the parts you hate, find frustrating or just put up with, and want less of.
 5. A second look at the same things, on two lines: does it work (does it get results) and does it feel easy or forced? What works and feels easy is the heart of the week. What works but feels forced needs a way that's more you. What feels easy but doesn't work is drifting. What's forced and doesn't work can go.
 6. Take the hate list one by one: what's the part that feels wrong, what's the real issue under it, what are a few ideas to change it, and what's the first step? (Often it's not the thing itself but the way it's done, or who does it.)
 7. Roughly, how does your week split now: how much do you love, how much do you put up with, how much do you hate? Where do you want it in one to three months? (Most of the week in the love column, a little in progress, almost nothing hated, is a very good week.)
@@ -370,4 +380,4 @@ Keep a short weekly note somewhere that lasts (a journal, or under this layer), 
 
 ## In short
 
-Vision: the why, its own name, a day in that life, the deeper truth, a motto, what enough looks like on the three dials, home base and trips, the twenty-year test, a few action steps. The year: look back, the season and the dial, life first (the challenge, adventures, time off, home and away, the wants), then the money (the line, the rhythm of the month, a push for each want, capacity, money that runs itself), three dated goals, one habit out and one in, the stress test and the block. The six-week game: one simple game you can win, your rules, a score, a win is fun, useful and learned, a debrief. The ideal week: where the time goes, the love and hate list, what works and what feels forced, their energy, the ingredients, the week squeezed, what an hour is worth and the two-days test, one hat per day, a deep block and a day on the business, recharge and earning first, margin, the rules of the house and the energy basics. The real week: the template meets this week, three focuses, the game's part, important but not urgent first. The real week also gets tomorrow scripted each evening. Looking back: the evening look and tomorrow's script, a monthly money look, weekly proper, a debrief after each game, a check-in every few months, and it changes the layers above.
+Every layer: every question on the checklist, marked answered, parked, later or open, and checked against this guide before it's done. Vision: the why, its own name, a day in that life, the deeper truth, a motto, what enough looks like on the three dials, home base and trips, the twenty-year test, a few action steps. The year: look back, the season and the dial, life first (the challenge, adventures, time off, home and away, the wants), then the money (the line, the rhythm of the month, a push for each want, capacity, money that runs itself), three dated goals, one habit out and one in, the stress test and the block. The six-week game: one simple game you can win, your rules, a score, a win is fun, useful and learned, a debrief. The ideal week: where the time goes, the love and hate list, what works and what feels forced, their energy, the ingredients, the week squeezed, what an hour is worth and the two-days test, one hat per day, a deep block and a day on the business, recharge and earning first, margin, the rules of the house and the energy basics. The real week: the template meets this week, three focuses, the game's part, important but not urgent first. The real week also gets tomorrow scripted each evening. Looking back: the evening look and tomorrow's script, a monthly money look, weekly proper, a debrief after each game, a check-in every few months, and it changes the layers above.

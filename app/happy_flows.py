@@ -11663,7 +11663,9 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         and write the answers down as they go; and a blank map. Nothing of the user's and no source named in it
         (the private words), and not the vision questions word for word when the workspace has them. Turning it
         on in a throwaway workspace starts the map from the blank one and adds its line to where-things-go.md,
-        never over an existing map; off keeps the file; the call rule names the guide only when it's on."""
+        never over an existing map; off keeps the file; the call rule names the guide only when it's on. H224: every
+        question of every layer is a line on the checklist, the blank map has them all open, the check catches what's
+        missing, open, or parked or later without its reason, and a done that can't be yet; a call may check, not switch."""
         import workflows as wf
         w = wf.find("map")
         need(w, "HQ ships no map workflow")
@@ -11727,14 +11729,67 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         rule = wf.rule(tmp)
         need(str(w["dir"] / "guide.md") in rule and "one question per turn" in rule and "map.md" in rule,
              f"the call rule doesn't name the guide and how: {rule}")
+        need("checklist" in rule and "workflows.py check <id> <layer>" in rule and "never skip one silently" in rule, f"the call rule doesn't say about the checklist and the check: {rule}")
         wf.turn_off(tmp, "map")
         need(wf.rule(tmp) == "" and (tmp / "map.md").exists(), "off didn't turn it off, or took their map")
         need(wf.turn_on(tmp, "nothing").startswith("No workflow"), "an unknown workflow was turned on")
         need("{workflows}" not in config.VOICE_RULES, "the call rules still have the workflows placeholder")
+        # H224: the checklist. Every question of every layer is a line; the blank map has them all open; the check
+        # says what's missing, open, or parked or later without its reason, and a Status of done that can't be yet.
+        for must in ("**The checklist.**", "check map <layer>", "Never skip one silently", "Before a layer is done, check it"):
+            need(must in guide, f"the guide doesn't say: {must}")
+        qs = wf.questions(w)
+        need(sorted(qs) == [1, 2, 3, 4, 5, 6] and all(qs[n] for n in qs), f"the checklist doesn't have six layers with lines: {sorted(qs)}")
+        for n, body in zip(range(1, 7), bodies):
+            nums = len(re.findall(r"^\d+\. ", body, re.M))
+            need(len(qs[n]) >= nums and len({k for k, _ in qs[n]}) == len(qs[n]),
+                 f"layer {n}: the checklist has {len(qs[n])} lines for {nums} questions, or a key twice")
+        need([k for k, _ in qs[1] if k.startswith("check ")] == [f"check {i}" for i in range(1, 8)],
+             "the vision's seven checks aren't on its checklist")
+        need({k.rsplit(" ", 1)[0] for k, _ in qs[6]} == {"day", "week", "game", "check-in"}, "looking back's four kinds aren't on its checklist")
+        need(all(len(q) <= 91 and q for _, q in sum(qs.values(), [])), "a checklist line is empty or too long")
+        for n in qs:
+            want = "\n".join(wf.checklist_lines(w, n))
+            need(want in blank, f"the blank map's layer {n} doesn't have its whole checklist, all open")
+        rows = wf.check(tmp, w)
+        need(all(r["total"] == len(qs[r["layer"]]) and len(r["open"]) == r["total"] and not r["missing"] and r["ok"]
+                 and not r["can_close"] for r in rows), "the blank map doesn't check as every line open")
+        t = (tmp / "map.md").read_text()
+        game = "\n".join(wf.checklist_lines(w, 3))
+        ticked = game.replace("- open ·", "- answered ·")
+        (tmp / "map.md").write_text(t.replace(game, ticked, 1))
+        r3 = wf.check(tmp, w, 3)[0]
+        need(r3["can_close"] and not r3["says_done"] and r3["counts"]["answered"] == len(qs[3]), f"a layer all answered can't close: {r3}")
+        lines = ticked.splitlines()
+        lines[0] = lines[0].replace("- answered ·", "- parked ·") + " · why: not yet"
+        lines[1] = lines[1].replace("- answered ·", "- later ·")
+        lines[2] = lines[2].replace("- answered ·", "- open ·")
+        del lines[3]
+        t3 = t.replace(game, "\n".join(lines), 1)
+        at3 = t3.index("## 3. ")
+        t3 = t3[:at3] + t3[at3:].replace("Status: not started", "Status: done (2026-01-05)", 1)
+        (tmp / "map.md").write_text(t3)
+        r3 = wf.check(tmp, w, 3)[0]
+        k = [x for x, _ in qs[3]]
+        need(r3["no_why"] == [k[0]] and r3["no_when"] == [k[1]] and r3["open"] == [k[2]] and r3["missing"] == [k[3]]
+             and r3["says_done"] and not r3["ok"], f"the check doesn't catch a parked line without when it comes back, a later "
+             f"one without when, an open one, a missing one, and done too early: {r3}")
+        words = wf.check_words([r3])
+        need("can't be yet" in words and "still open" in words and "not in their checklist" in words, f"the check's words: {words}")
+        (tmp / "map.md").write_text(t)
+        from policy import Policy
+        pol = Policy(config.FOLDER, dry_run=True)
+        script = APP / "workflows.py"
+        need(pol.decide("Bash", {"command": f'python3 "{script}" check map 2'}).verdict == "allow"
+             and pol.decide("Bash", {"command": f'python3 "{script}" checklist map'}).verdict == "allow"
+             and pol.decide("Bash", {"command": f'python3 "{script}" off map'}).verdict == "deny",
+             "a call can't check the checklist, or can turn a workflow off")
+        need("checklist" in (ROOT / "template/CLAUDE.md").read_text(), "the template's CLAUDE.md doesn't say about the checklist")
         need("workflows.py" in (ROOT / "template/CLAUDE.md").read_text(), "the template's CLAUDE.md doesn't mention workflows")
         return (f"the map ships: six layers with the six-week game, {vision_qs} vision questions, each layer what it is, makes and hands down; "
                 f"nothing private or named; on starts the map from blank and adds its line, never over theirs; off keeps it; "
-                f"the call rule only when on")
+                f"the call rule only when on; every question a checklist line ({sum(len(v) for v in qs.values())}), the blank all open, "
+                f"the check catches open, missing, no why or when, and done too early; a call may check, not switch")
 
     # 112
     async def flow112(self) -> str:

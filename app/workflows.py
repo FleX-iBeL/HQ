@@ -26,11 +26,27 @@ line to where-things-go.md. The call rules (config.py) name the ones that are on
     python3 app/workflows.py on map       turn one on
     python3 app/workflows.py off map      turn one off (their file stays)
     python3 app/workflows.py rule         the call rule for the ones that are on
+    python3 app/workflows.py checklist map [N]   the blank checklist of every layer (or layer N), all open
+    python3 app/workflows.py check map [N]       their file's checklist held against the guide, line by line
+
+The checklist (H224, 21 October 2026, the user's words on the call after questions had been skipped in every
+layer: "Does this mean you also screw up like this for other people that use HQ?" and "do give it to the team so
+they need to make this more of a checklist thing and have it checked out"): every question of every layer of the
+guide has its own line in their file, under its layer, marked answered, parked (why, and when it comes back),
+later (on purpose, and when) or open:
+    - open · 5 · <the question, short>
+    - parked · 23 · <the question> · why: <why> · back: <when it comes back>
+    - later · 14 · <the question> · when: <when>
+    - answered · 1 · <the question>
+The keys are the guide's own numbers, per group: the questions as 1, 2, …; the vision's checks as check 1, …;
+looking back's as day 1, week 1, game 1 and check-in 1. `check` says per layer what's missing, still open or
+without its why or when, and whether the Status line says done while it can't be yet.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -149,6 +165,124 @@ def listing(folder: Path, base: Path = SHIPPED) -> list[dict]:
              "when_on": w.get("on", ""), "when_off": w.get("off", ""), "start": w["start"]} for w in shipped(base)]
 
 
+# H224: the checklist. The guide's layers are its "## N. Name" headings; within one, a bold lead starts a group.
+GROUPS = {"**The questions,**": "", "**Check it with them,**": "check", "**Each day,**": "day", "**Each week,**": "week",
+          "**After every game,**": "game", "**Every three to six months,**": "check-in"}
+MARKS = ("answered", "parked", "later", "open")
+LINE = re.compile(r"^- (answered|parked|later|open) · ((?:check-in|check|day|week|game) )?(\d+) · (.*)$")
+
+
+def _layers(text: str) -> list[tuple[int, str, str]]:
+    """(number, heading, body) for each "## N. Name" in a guide or a map."""
+    heads = [(m.start(), int(m.group(1)), m.group(2).strip()) for m in re.finditer(r"^## (\d+)\. (.+)$", text, re.M)]
+    out = []
+    for i, (at, n, name) in enumerate(heads):
+        end = heads[i + 1][0] if i + 1 < len(heads) else len(text)
+        body = text[at:end]
+        cut = re.search(r"^## (?!\d+\.)", body[3:], re.M)  # a later "## In short" ends the last layer
+        out.append((n, name, body[:cut.start() + 3] if cut else body))
+    return out
+
+
+def _short(q: str) -> str:
+    """The question, short: up to its first question mark (or its first sentence), at most about ninety letters."""
+    q = re.sub(r"\s+", " ", re.sub(r"\*\*|\(.*?\)", "", q)).replace(" ?", "?").replace(" ,", ",").replace(" .", ".").strip()
+    m = re.search(r"\?|\.(\s|$)", q)
+    first = q[:m.start() + 1] if m else q
+    return first if len(first) <= 90 else first[:87].rsplit(" ", 1)[0].rstrip(",:;") + "…"
+
+
+def questions(w: dict) -> dict[int, list[tuple[str, str]]]:
+    """Every question of every layer in the guide, as (key, short text): the checklist's lines."""
+    text = (w["dir"] / w["guide"]).read_text(encoding="utf8")
+    out = {}
+    for n, _name, body in _layers(text):
+        group, items = None, []
+        for line in body.splitlines():
+            lead = next((g for g in GROUPS if line.startswith(g)), None)
+            if lead:
+                group = GROUPS[lead]
+                continue
+            if line.startswith("**"):
+                group = None
+                continue
+            if group is None:
+                continue
+            m = re.match(r"^(\d+)\. (.+)", line)
+            if m and group != "check":
+                items.append(((group + " " if group else "") + m.group(1), _short(m.group(2))))
+            elif group == "check" and line.startswith("- "):
+                items.append((f"check {sum(1 for k, _ in items if k.startswith('check ')) + 1}", _short(line[2:])))
+        out[n] = items
+    return out
+
+
+def checklist_lines(w: dict, layer: int) -> list[str]:
+    return [f"- open · {k} · {q}" for k, q in questions(w).get(layer, [])]
+
+
+CHECKLIST_HEAD = "Checklist (every question of this layer: answered, parked with why and when it comes back, later with when, or open):"
+
+
+def check(folder: Path, w: dict, only: int | None = None) -> list[dict]:
+    """Their file's checklist held against the guide, layer by layer."""
+    try:
+        text = (folder / w["file"]).read_text(encoding="utf8")
+    except OSError:
+        text = ""
+    mine = {n: body for n, _name, body in _layers(text)}
+    out = []
+    for n, items in questions(w).items():
+        if only is not None and n != only:
+            continue
+        body = mine.get(n, "")
+        marks = {}
+        for line in body.splitlines():
+            m = LINE.match(line.strip())
+            if m:
+                marks[(m.group(2) or "") + m.group(3)] = (m.group(1), m.group(4))
+        keys = [k for k, _ in items]
+        status = next((l[7:].strip() for l in body.splitlines() if l.startswith("Status:")), "")
+        r = {"layer": n, "name": next((nm for x, nm, _b in _layers(text) if x == n), ""), "status": status,
+             "total": len(keys), "missing": [k for k in keys if k not in marks],
+             "unknown": [k for k in marks if k not in keys],
+             "counts": {mk: sum(1 for k in keys if marks.get(k, ("",))[0] == mk) for mk in MARKS},
+             "open": [k for k in keys if marks.get(k, ("",))[0] == "open"],
+             "no_why": [k for k in keys if marks.get(k, ("",))[0] == "parked"
+                        and not ("why:" in marks[k][1] and "back:" in marks[k][1])],
+             "no_when": [k for k in keys if marks.get(k, ("",))[0] == "later" and "when:" not in marks[k][1]]}
+        r["can_close"] = not (r["missing"] or r["open"] or r["no_why"] or r["no_when"])
+        r["says_done"] = status.lower().startswith("done")
+        r["ok"] = r["can_close"] or not r["says_done"]
+        out.append(r)
+    return out
+
+
+def check_words(rows: list[dict]) -> str:
+    lines = []
+    for r in rows:
+        c = r["counts"]
+        head = (f"{r['layer']}. {r['name'] or '(not in their file)'}: {c['answered']} answered, {c['parked']} parked, "
+                f"{c['later']} later, {c['open']} open, of {r['total']}. Status: {r['status'] or 'none'}.")
+        bits = []
+        if r["missing"]:
+            bits.append("not in their checklist: " + ", ".join(r["missing"]))
+        if r["open"]:
+            bits.append("still open: " + ", ".join(r["open"]))
+        if r["no_why"]:
+            bits.append("parked without why or back: " + ", ".join(r["no_why"]))
+        if r["no_when"]:
+            bits.append("later without when: " + ", ".join(r["no_when"]))
+        if r["unknown"]:
+            bits.append("not in the guide: " + ", ".join(r["unknown"]))
+        if r["says_done"] and not r["can_close"]:
+            bits.append("its Status says done, but it can't be yet")
+        elif r["can_close"] and not r["says_done"]:
+            bits.append("every line is through: it can be closed once its result is read back and they say yes")
+        lines.append(head + (" " + "; ".join(bits) + "." if bits else ""))
+    return "\n".join(lines)
+
+
 def rule(folder: Path, base: Path = SHIPPED) -> str:
     """The call rule for the workflows that are on; empty when none is."""
     ws = active(folder, base)
@@ -165,7 +299,12 @@ def rule(folder: Path, base: Path = SHIPPED) -> str:
     return ("- Workflows they turned on (H202): " + "; ".join(parts) + ". When they want to go through one, read "
             "its guide and their file first, say where they are in it, and go through it the guide's way: one "
             "question per turn, sparring, their answers written into their file as you go, in their words. "
-            "Never say where the questions come from.")
+            "Never say where the questions come from. The checklist (H224): every question of every layer has its own "
+            "line in their file's checklist under that layer, marked answered, parked (with why and when it comes back), "
+            "later (on purpose, with when) or open; tick each line as you go, never skip one silently (one answered "
+            "earlier is ticked answered, not asked again), and never call a layer done before holding it against the "
+            f"guide line by line (python3 {ROOT / 'app' / 'workflows.py'} check <id> <layer>) and saying plainly what's "
+            "still open.")
 
 
 def main(argv: list[str]) -> int:
@@ -180,6 +319,19 @@ def main(argv: list[str]) -> int:
         return 0
     if argv[0] == "off" and len(argv) == 2:
         print(turn_off(folder, argv[1]))
+        return 0
+    if argv[0] in ("checklist", "check") and len(argv) in (2, 3):
+        w = find(argv[1])
+        if not w:
+            print(f"No workflow {argv[1]}.")
+            return 2
+        only = int(argv[2]) if len(argv) == 3 and argv[2].isdigit() else None
+        if argv[0] == "checklist":
+            for n in questions(w):
+                if only is None or n == only:
+                    print(f"Layer {n}:\n{CHECKLIST_HEAD}\n" + "\n".join(checklist_lines(w, n)) + "\n")
+            return 0
+        print(check_words(check(folder, w, only)))
         return 0
     if argv[0] == "rule":
         print(rule(folder) or "No workflow is on.")

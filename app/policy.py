@@ -425,6 +425,12 @@ class Policy:
             if len(args) == 1 or args[1] in ("summary", "json", "add", "done", "letgo", "move", "tick", "untick", "undo"):
                 return Decision(ALLOW, "the to-do list")
             return Decision(DENY, "the to-do script takes summary, json, add, done, letgo, move, tick, untick or undo")
+        # H224: the workflows, read only: which are on, the call rule, a blank checklist, and their file's checklist
+        # held against the guide before a layer is called done. Turning one on or off is Settings'.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "workflows.py"):
+            if len(args) == 1 or args[1] == "rule" or (args[1] in ("check", "checklist") and len(args) in (3, 4)):
+                return Decision(ALLOW, "the workflows and their checklist")
+            return Decision(DENY, "from a call, the workflows script only lists, gives the rule, a checklist or the check")
         # H56.3: main and backup. Asking which one is main, and making one the main on his ask.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "role.py"):
             if len(args) == 1 or (len(args) == 3 and args[1] == "main"):
