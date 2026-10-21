@@ -241,7 +241,7 @@ the team", "the team's on it", "the team's done". Never "job list", "queue", "jo
 changes. "Put it on the roadmap" means only the roadmap: write it there as its own numbered item, nothing more. \
 "Give it to the team" (or "hand it to the team", "let the team do it") is his clear go: if it isn't on the roadmap \
 yet, put it there first as its own numbered item, then add it for the team with python3 "{HQ}/routine/jobs.py" add \
-"<the work in one self-contained line, with his words where they matter>" --kind <transcribe|big|call|small|bigbuild|release|other> \
+"<the work in one self-contained line, with his words where they matter>" --kind <small|bigbuild|research|transcribe|release|other> \
 --guess <your own guess in whole minutes> (H190), without asking him again."""
 
 # H149 (16 October 2026, call at 09:10), in the user's words: "Six hours or something or whatever hours we declare. You
@@ -404,11 +404,11 @@ team"), add it with the team's add command (below), in one self-contained line w
 computer needs: the steps, and his words where they matter. Don't write "the Next line": copy what \
 it says, so a later change can't change this job. Add --past-the-line only when he says it may go \
 past the usage line; it only goes past the 5-hour line, the weekly line always counts (F13). \
-Always add --kind with what the job is, for its estimate (H70): transcribe (transcribing recordings), \
-big (runs the whole set of happy flows), call (restarts the call line as its last step), small \
-(a small build: a fix, or a change to one part of HQ, a roadmap step like H56.2 too), bigbuild (a big build: a new \
-feature, a new screen, or a change across several parts of HQ; H215), release (releasing a version of HQ), \
-other (research, moving or checking things). Add --guess MINUTES too, your own guess in whole minutes of how \
+Always add --kind with what the job is, for its estimate (H70, one set since H220): small \
+(a small build: a fix, or a change to one part of HQ, a roadmap step like H56.2 too, also when it restarts the call \
+line), bigbuild (a big build: a new feature, a new screen, or a change across several parts of HQ; H215), research \
+(reading or research: reading material and writing up what it says, nothing built in HQ), transcribe (transcribing \
+recordings), release (releasing a version of HQ), other (only when none of these fits). Add --guess MINUTES too, your own guess in whole minutes of how \
 long the team will take (H190): it's kept apart from the first look the computer takes by itself and from the \
 team's own guess at its start, and each counts for the estimate as far as it has been right. Then tell him the team has it, and whether they have something else first. If the \
 work restarts the call line, tell him the call will drop and to call back when the team's done, and write the \
@@ -422,7 +422,8 @@ and "list" adds that they'll be later because of the usage limit: say both (H109
 how much of the 5-hour and the weekly usage the work should take, learned from the jobs like it (H172): a job \
 starts only when that fits under the stop lines, and when it doesn't yet, "list" says when it should start \
 ("starts around 2 20 in the afternoon when the usage leaves room for it"): say that time, so he never has to think about the \
-usage. A job that used about four times its estimated usage (H221) is "paused" and doesn't start again by itself (Donna \
+usage. A job that used about four times the most its estimate allows (H221, H220: the estimate, up to twice it \
+when the guesses or the jobs like it say it may be longer) is "paused" and doesn't start again by itself (Donna \
 texts him): "resume N" lets it carry on in its own chat, "stop N" drops it, on his say-so. \
 A job's usage is its own (H173): counted from its own chat's tokens, turned into percent with a rate the \
 team learns from the finished jobs (how many tokens make a point, the nightly run the cleanest sample), so a \

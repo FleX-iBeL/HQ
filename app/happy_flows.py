@@ -5957,32 +5957,38 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         before = real.read_text() if real.exists() else None
         # The kinds, from the words a call writes in a job.
         for text, kind in (("Transcribe the four videos on the VPS", "transcribe"),
-                           ("Build H1. This is a big change, so run the whole happy flow set at the end", "big"),
-                           ("Build H2, not the whole set. Restart the call line as the very last step", "call"),
+                           ("Read the week 7 transcripts and write up what they say. Research only", "research"),
+                           ("Build H2, not the whole set. Restart the call line as the very last step", "build"),
+                           ("Scheduled item 9, planned for Monday 19 October, 02:00: H169, the nightly run: every night",
+                            "maintenance"),
+                           ("Scheduled item 9, planned for Monday 19 October, 02:05: H178 and H186, the daily release on the "
+                            "nightly line: every night after the nightly run", "release"),
                            ("Build H3, not the whole set. Don't restart the call line.", "build"),
                            ("Measure the token cost of one run", "other")):
             need(est("kind", text).strip() == kind, f"{text!r} isn't seen as {kind}")
         # H70: build work by its wording anywhere, and a negated "build" doesn't count.
         for text, kind in (("H56.2 on the HQ roadmap (step 2 of 7). Build exactly what the H56.2 row says", "build"),
                            ("H56.6 on the HQ roadmap (step 6 of 7). Do exactly what the H56.6 row says", "build"),
-                           ("Continue H55: set up a test call line. Don't build the backup or the sync (H56)", "other"),
-                           ("H68 on the roadmap: research only for H56. Nothing built", "other")):
+                           ("Continue H55: set up a test call line. Don't build the backup or the sync (H56)", "build"),
+                           ("H68 on the roadmap: research only for H56. Nothing built", "research"),
+                           ("H183 on the HQ roadmap: a maintenance phase. Read the H183 row; the nightly run and the daily "
+                            "release stay as they are. Build it as it says", "build")):
             need(est("kind", text).strip() == kind, f"H70: {text!r} isn't seen as {kind}")
-        # Made-up past jobs: calls took 10 to 16 minutes, builds 5 to 7.
+        # Made-up past jobs: research took 10 to 16 minutes, builds 5 to 7 (H220: research is a kind of its own).
         est_dir.mkdir(parents=True, exist_ok=True)
         # F34: only jobs whose time was measured when they finished count; a seeded line (from before H61) doesn't.
         hist = [{"n": 900 + i, "kind": k, "est": None, "actual": a, "done": 1, "how": "seen"}
-                for i, (k, a) in enumerate([("call", 10), ("build", 5), ("call", 12), ("build", 6), ("call", 14), ("build", 7), ("call", 16)])]
-        hist.insert(0, {"n": 899, "kind": "call", "est": None, "actual": 90, "done": 1, "how": "seed"})
+                for i, (k, a) in enumerate([("research", 10), ("build", 5), ("research", 12), ("build", 6), ("research", 14), ("build", 7), ("research", 16)])]
+        hist.insert(0, {"n": 899, "kind": "research", "est": None, "actual": 90, "done": 1, "how": "seed"})
         (est_dir / "job-estimates-history.jsonl").write_text("".join(json.dumps(h) + "\n" for h in hist))
         for j in json.loads(jobs("next"))["waiting"] + json.loads(jobs("next"))["running"]:
             jobs("mark", str(j["n"]), "cancelled 12:00")
-        a_out = jobs("add", "Build H2, flow 54. Restart the call line as the very last step")
+        a_out = jobs("add", "H2 on the HQ roadmap, flow 54: research only, read the transcripts")
         a = int(a_out.split()[1])
         b = int(jobs("add", "Build H3, flow 54. Don't restart the call line.").split()[1])
         need("Estimate: about 14 min" in a_out, f"a new job doesn't get its estimate from the calls before it: {a_out}")
         state = json.loads((est_dir / "job-estimates.json").read_text())
-        need(state[str(a)]["est"] == 14 and state[str(a)]["kind"] == "call" and state[str(b)]["est"] == 6,
+        need(state[str(a)]["est"] == 14 and state[str(a)]["kind"] == "research" and state[str(b)]["est"] == 6,
              f"the estimates set when added are wrong: {state}")
         p = json.loads(est("plan"))
         need(p["jobs"][str(a)]["eta"] and p["jobs"][str(b)]["eta"] - p["jobs"][str(a)]["eta"] == (6 + 1) * 60,
@@ -6027,30 +6033,30 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         done = jobs("done", str(a))
         need("Took 30 min; the estimate was 14 min" in done, f"done doesn't write the real time next to the estimate: {done}")
         last = json.loads((est_dir / "job-estimates-history.jsonl").read_text().splitlines()[-1])
-        need(last["n"] == a and last["est"] == 14 and last["actual"] == 30 and last["kind"] == "call", f"the history line is wrong: {last}")
-        need(last.get("about", "").startswith("build h2, flow 54"), f"H166: the finished job doesn't keep its words: {last}")
-        sim = est("similar", "Build H2 again, flow 54. Restart the call line as the very last step")
+        need(last["n"] == a and last["est"] == 14 and last["actual"] == 30 and last["kind"] == "research", f"the history line is wrong: {last}")
+        need(last.get("about", "").startswith("h2 on the hq roadmap, flow 54"), f"H166: the finished job doesn't keep its words: {last}")
+        sim = est("similar", "H2 on the HQ roadmap again, flow 54: research only, read the transcripts")
         need("About " in sim and "the kind alone" in sim, f"H166: estimate.py similar doesn't say the estimate: {sim}")
         need("Estimated again" in est("reestimate"), "H166: estimate.py reestimate doesn't run")
         p = json.loads(est("plan"))
         need(p["accuracy"]["count"] == 1 and p["accuracy"]["avg_off"] == 16 and p["accuracy"]["longer"] == 1,
              f"how close the estimates have been is wrong: {p['accuracy']}")
-        c_out = jobs("add", "Build H4, flow 54. Restart the call line as the very last step")
+        c_out = jobs("add", "H4 on the HQ roadmap, flow 54: research only, read the transcripts")
         need("Estimate: about 16 min" in c_out, f"the next estimate didn't learn from the real time: {c_out}")
         # H70: --kind wins over the guess, is stored with the estimate, and the job learns under it.
         jobs("add", "Measure something, flow 54", "--kind", "nonsense", ok=False)
-        d_out = jobs("add", "Measure the token cost of one run, flow 54", "--kind", "call")
+        d_out = jobs("add", "Measure the token cost of one run, flow 54", "--kind", "research")
         d = int(d_out.split()[1])
-        need("Estimate: about 16 min" in d_out, f"H70: --kind call doesn't take the calls' estimate: {d_out}")
+        need("Estimate: about 16 min" in d_out, f"H70: --kind research doesn't take the research jobs' estimate: {d_out}")
         sd = json.loads((est_dir / "job-estimates.json").read_text())[str(d)]
-        need(sd["kind"] == "call" and sd.get("by_hand"), f"H70: the hand-set kind isn't stored: {sd}")
+        need(sd["kind"] == "research" and sd.get("by_hand"), f"H70: the hand-set kind isn't stored: {sd}")
         need("--kind" not in json.loads(jobs("next"))["waiting"][-1]["text"], "H70: --kind ended up in the job's text")
         e_ = int(jobs("add", "Build H5, flow 54. Restart the call line as the very last step", "--kind=build").split()[1])
         need(json.loads((est_dir / "job-estimates.json").read_text())[str(e_)]["kind"] == "build", "H70: --kind=build isn't taken")
         jobs("mark", str(d), "running since " + time.strftime("%H:%M"))
         jobs("done", str(d))
         last = json.loads((est_dir / "job-estimates-history.jsonl").read_text().splitlines()[-1])
-        need(last["n"] == d and last["kind"] == "call", f"H70: a hand-set kind doesn't learn in its own pile: {last}")
+        need(last["n"] == d and last["kind"] == "research", f"H70: a hand-set kind doesn't learn in its own pile: {last}")
         need("--kind" in config.VOICE_RULES and "H70" in config.VOICE_RULES, "H70: the call rules don't say to pass --kind")
         # H95: planned items get a kind and an estimate when planned, and when they should be done, counting
         # the job list and the items before them; the kind goes with the item when it becomes a job.
@@ -6067,10 +6073,10 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         i1_out = sched("add", "tomorrow 15:00", "H1 on the HQ roadmap, flow 54. Read the H1 row first and build it as it says.")
         i1 = int(i1_out.split()[1])
         need("Estimate: about" in i1_out and "(estimate)" in i1_out, f"H95: planning an item doesn't say its estimate: {i1_out}")
-        i2 = int(sched("add", "tomorrow 15:01", "Measure the token cost of one run, flow 54", "--kind", "call").split()[1])
+        i2 = int(sched("add", "tomorrow 15:01", "Measure the token cost of one run, flow 54", "--kind", "research").split()[1])
         i3 = int(sched("add", "now", "Measure the token cost of a call, flow 54", "--kind=transcribe").split()[1])
         kinds = json.loads((est_dir / "schedule-kinds.json").read_text())
-        need(kinds[str(i1)]["kind"] == "build" and not kinds[str(i1)].get("by_hand") and kinds[str(i2)]["kind"] == "call"
+        need(kinds[str(i1)]["kind"] == "build" and not kinds[str(i1)].get("by_hand") and kinds[str(i2)]["kind"] == "research"
              and kinds[str(i2)].get("by_hand") and kinds[str(i3)]["kind"] == "transcribe", f"H95: the items' kinds are wrong: {kinds}")
         need(not any("--kind" in l for l in sched("list").splitlines() if "flow 54" in l), "H95: --kind ended up in the item's text")
         # H215: a build is small (build) or big (bigbuild): sorted from its words, its row and the first look, unless a
@@ -6080,8 +6086,8 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need(est("kind", "H9 on the HQ roadmap: one label. Read the H9 row and build it as it says.").strip() == "build",
              "H215: a small build's wording isn't seen as a small build")
         need(est("kind", "Scheduled item 9, planned for Monday: H169, the nightly run: every night, the whole set, all the "
-                         "flows, fix it so it passes, push to dev with push.py. " + "and more " * 80).strip() == "build",
-             "H215: the nightly run is sorted as a big build")
+                         "flows, fix it so it passes, push to dev with push.py. " + "and more " * 80).strip() == "maintenance",
+             "H215, H220: the nightly run isn't maintenance")
         g1 = int(jobs("add", "Build H6, flow 54", "--kind", "small").split()[1])
         g2 = int(jobs("add", "Build H6, flow 54", "--kind", "big build").split()[1])
         g3 = int(jobs("add", "Build H6, flow 54", "--kind", "build").split()[1])
@@ -6100,6 +6106,9 @@ print(json.dumps({"look_big": E.build_size(t, 45), "look_small": E.build_size(E.
     "look_mid": E.build_size(t, 15), "retag": E.new_kind(t, "build", 45), "retag_fixed": E.new_kind(t, "build", 45, True),
     "retag_other": E.new_kind("Read the H9 row and look into it.", "other", 45), "hand": E.hand_kind(t, "bigbuild"),
     "plain": E.hand_kind(t, "Build"), "ok": [E.kind_word_ok(w) for w in ("small", "big build", "bigbuild", "huge")],
+    "h220": [E.kind_for(t, "call"), E.kind_given("big"), E.kind_for("Research only: read the H9 transcripts", "other"),
+             E.kind_for(t, "research"), E.kind_word_ok("research"), E.kind_word_ok("maintenance"),
+             E.kind_for("Scheduled item 4, planned for Sunday 18 October, 02:00: H169, the nightly run: all flows", "small")],
     "bt": E.backtest([{"n": i, "kind": "build", "actual": 30, "done": i, "how": "seen", "machine": "vps"} for i in range(1, 6)]
                      + [{"n": 9, "kind": "build", "actual": 2, "done": 9, "how": "seen", "machine": "vps"}])}))
 """, str(jv / "routine")], capture_output=True, text=True, env=env)
@@ -6107,11 +6116,15 @@ print(json.dumps({"look_big": E.build_size(t, 45), "look_small": E.build_size(E.
         o215 = json.loads(r215.stdout)
         need(o215["look_big"] == "bigbuild" and o215["look_small"] == "build" and o215["look_mid"] == "build",
              f"H215: the first look's minutes don't decide a build's size when they're clear: {o215}")
-        need(o215["retag"] == "bigbuild" and o215["retag_fixed"] == "build" and o215["retag_other"] == "other",
+        need(o215["retag"] == "bigbuild" and o215["retag_fixed"] == "build" and o215["retag_other"] == "bigbuild",
              f"H215: a retag doesn't sort the finished builds by their look, or moves a size said by hand: {o215}")
         need(o215["hand"] == ["bigbuild", True] and o215["plain"] == ["build", False] and o215["ok"] == [True, True, True, False],
              f"H215: the size words for --kind aren't read as they should: {o215}")
         need(o215["bt"].get("twice") == 0 and "count" in o215["bt"], f"H215: backtest doesn't count the builds over twice: {o215}")
+        need(o215["h220"] == ["build", "bigbuild", "research", "research", True, True, "maintenance"],
+             f"H220: the kinds (the old call and big, other by hand, research, maintenance over a hand-set kind) are off: {o215['h220']}")
+        need("research" in config.VOICE_RULES and "H220" in config.VOICE_RULES and "--kind <small|bigbuild|research" in config.VOICE_RULES,
+             "H220: the call rules don't give the kinds")
         need("bigbuild" in config.VOICE_RULES and "small" in config.VOICE_RULES and "H215" in config.VOICE_RULES,
              "H215: the call rules don't give the small and big build kinds")
         p = json.loads(est("plan"))
@@ -6121,7 +6134,7 @@ print(json.dumps({"look_big": E.build_size(t, 45), "look_small": E.build_size(E.
              f"H95: a due item doesn't wait for the job list in its estimate: {it[str(i3)]} {p['total']}")
         need(it[str(i1)]["start"] == at1 + 60 and it[str(i1)]["eta"] == it[str(i1)]["start"] + it[str(i1)]["est"] * 60,
              f"H95: an item later on doesn't start at its own time: {it[str(i1)]}")
-        need(it[str(i2)]["start"] == max(at1 + 60, it[str(i1)]["eta"]) + 60 and it[str(i2)]["kind"] == "call",
+        need(it[str(i2)]["start"] == max(at1 + 60, it[str(i1)]["eta"]) + 60 and it[str(i2)]["kind"] == "research",
              f"H95: an item doesn't count the item before it: {it[str(i2)]}")
         lst = sched("list")
         need(lst.count("Estimate: about") == 3 and "done around" in lst, f"H95: the scheduler's list doesn't say the estimates: {lst}")
@@ -6134,7 +6147,7 @@ print(json.dumps({"look_big": E.build_size(t, 45), "look_small": E.build_size(E.
         need(abs(tot["weekly"] - sum(round(it[k]["cost"]["weekly"], 1) for k in it)) < 0.05 and tot["repeating"] == 0
              and "The total counts each of the 3 planned items once:" in tot["counts"] and "of work in all" in tot["counts"]
              and "The total counts each of the 3 planned items once" in lst, f"H174: the planned items' total doesn't say what it counts: {tot} {lst}")
-        i4 = int(sched("add", "tomorrow 16:00", "Measure the token cost of one run again, flow 54", "--kind", "call", "--every", "day").split()[1])
+        i4 = int(sched("add", "tomorrow 16:00", "Measure the token cost of one run again, flow 54", "--kind", "research", "--every", "day").split()[1])
         p4 = json.loads(est("plan"))
         need(p4["items_total"]["items"] == 4 and p4["items_total"]["repeating"] == 1
              and p4["items_total"]["minutes"] == sum(e["est"] for e in p4["items"].values())
@@ -6402,6 +6415,12 @@ o["over"] = [U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 8,
              U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 9, "weekly": 0}, "allowed": True}),
              U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 9, "weekly": 0}, "late": True})]
 o["words"] = U.paused_words(7, "H7 on the HQ roadmap: the usage count. Read the H7 row", {"line": "five", "used": 5, "est": 2})
+# H220: the top of the estimate: how unsure it is (the jobs' range, the longest guess), at most twice; the pause is at four times it.
+o["top"] = [U.top_factor({"minutes": 10, "tokens": 100, "range": [50, 150]}, {}),
+            U.top_factor({"minutes": 10, "tokens": 100, "range": [50, 150]}, {"guess_look": 18}),
+            U.top_factor({"minutes": 10, "tokens": 100, "range": [50, 150]}, {"guess": 60, "guess_call": 5}),
+            U.overrun({"est": {"five": 2, "weekly": 0.2, "top": 2}, "so_far": {"five": 9, "weekly": 0.2}}),
+            U.overrun({"est": {"five": 2, "weekly": 0.2, "top": 2}, "so_far": {"five": 16, "weekly": 0.2}})]
 o["fb"] = U.cost_for(10, "zzz nothing alike", "other", hist=[])
 h = [{"n": 800 + i, "kind": "build", "actual": 10, "done": i + 1, "how": "seen", "machine": "vps",
       "about": f"the calendar colours sheet from google, part {w}", "cost": {"five": 2, "weekly": 0.4}} for i, w in enumerate("abcd")]
@@ -6432,6 +6451,8 @@ print(json.dumps(o, default=str))
         need(o2["held"]["five"] == 5 and o2["back"]["five"] == 6, f"H172: the usage while held counts, or it doesn't count on after: {o2}")
         need(o2["over"][0]["line"] == "five" and o2["over"][1] is None and o2["over"][2]["line"] == "weekly"
              and o2["over"][3] is None and o2["over"][4] is None, f"H172: the pause at about four times the estimate is off (H221): {o2['over']}")
+        need(o2["top"][:3] == [1.5, 1.8, 2.0] and o2["top"][3] is None and o2["top"][4]["line"] == "five" and o2["top"][4]["top"] == 4.0,
+             f"H220: the top of the estimate, or the pause at four times it, is off: {o2['top']}")
         need("four times" in o2["words"] and "the usage count" in o2["words"] and "H7" not in o2["words"] and "won't start again by itself" in o2["words"],
              f"H172: Donna's words for a paused job aren't plain: {o2['words']}")
         need((o2["fb"]["five"], o2["fb"]["weekly"], o2["fb"]["how"]) == (5, 1, "fallback"), f"H172: the fallback isn't START_ROOM's rates: {o2['fb']}")
@@ -12733,8 +12754,8 @@ s = [{"n": 1, "kind": "build", "actual": 90, "done": 1, "machine": "vps", "how":
 out["seed"] = E.estimate_detail("Build H1", s, machine="vps")
 # F34: a job the other HQ added, with its kind there; and a waiting job follows the newest finished jobs.
 E._load_state = lambda: {}
-cs = [{"n": 10 + i, "kind": "call", "actual": 9, "done": 10 + i, "machine": "vps", "how": "seen"} for i in range(4)]
-E._peer = lambda: {"name": "vps", "label": "VPS", "type": "server", "lines": [], "open": {"77": {"kind": "call", "est": 9}}}
+cs = [{"n": 10 + i, "kind": "research", "actual": 9, "done": 10 + i, "machine": "vps", "how": "seen"} for i in range(4)]
+E._peer = lambda: {"name": "vps", "label": "VPS", "type": "server", "lines": [], "open": {"77": {"kind": "research", "est": 9}}}
 d77 = E.job_estimate(77, "Measure the token cost of one run", s + cs, "vps")
 out["peer_kind"], out["peer_est"] = d77["kind"], d77["est"]
 E._peer = lambda: {"name": "vps", "label": "VPS", "type": "server", "lines": []}
@@ -12790,13 +12811,13 @@ print("H81OUT " + json.dumps(out))
         # F34: the kinds the wording tells for sure, builds worded otherwise, a merge stays a merge whatever a call says.
         k = o["kinds"]
         need(k["merge"] == "merge" and k["release"] == "release" and k["notrelease"] == "build" and k["buildcolon"] == "build"
-             and k["firstversion"] == "build" and k["fixso"] == "build" and k["research"] == "other" and k["mergehand"] == "merge"
-             and k["callhand"] == "call", f"F34: the kinds are wrong: {k}")
+             and k["firstversion"] == "build" and k["fixso"] == "build" and k["research"] == "research" and k["mergehand"] == "merge"
+             and k["callhand"] == "build", f"F34, H220: the kinds are wrong (research its own kind, the old call a build): {k}")
         need(o["seed"]["est"] == 5, f"F34: a seeded line (no measured time) still counts: {o['seed']}")
         # F34: a job added on the other HQ (its kind there) is estimated under that kind here, not guessed again.
-        need(o["peer_kind"] == "call" and o["peer_est"] == 9, f"F34: a job from the other HQ loses its kind: {o['peer_kind']} {o['peer_est']}")
+        need(o["peer_kind"] == "research" and o["peer_est"] == 9, f"F34: a job from the other HQ loses its kind: {o['peer_kind']} {o['peer_est']}")
         need(o["follows"][0] == 5 and o["follows"][1] == 20, f"F34: a waiting job's estimate doesn't follow the newest jobs: {o['follows']}")
-        need(o["retag"]["kinds"] == ["merge", "build", "release", "call"] and o["retag"]["marked"]
+        need(o["retag"]["kinds"] == ["merge", "build", "release", "build"] and o["retag"]["marked"]
              and {k: v for k, v in (o["retag"]["peer"] or {}).items() if k != "about"} == {"kind": "merge", "tags": ["files"]}
              and (o["retag"]["peer"] or {}).get("about", "").startswith("sync conflict"),
              f"F34: retag doesn't give every finished job its kind again: {o['retag']}")

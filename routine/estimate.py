@@ -4,8 +4,8 @@
 list still waiting)" and "that it improves it at the end so we can collect real data".
 
 How it works:
-  - Every job gets a kind from the words in its text (kind_of): transcribing, a big change (the whole
-    set of happy flows), a change to the call (the call line restarts at the end), a build, or other.
+  - Every job gets a kind from the words in its text (kind_of): since H220 a small or a big build, research or reading,
+    transcribing, the routine's maintenance, a release, a merge, or other (KINDS).
     A call can give the kind itself (jobs.py add --kind); that wins over the guess, is stored with the
     job's estimate, and is the kind it learns under when it finishes (H70).
   - A job's estimate is set when it's added (jobs.py add): the median of how long the last jobs of
@@ -108,6 +108,20 @@ How it works:
     builds took over twice their estimate. The pause stays at twice (H221 later moved it to four times, in
     usagecost.OVER; the backtest still counts over twice). [The cues and numbers are Claude's choice.]
 
+  - H220 (21 October 2026, call at 12:29): "We really need to sit down and look at the total picture: what kind of jobs we
+    can have and what kind of categories. ... If we keep bandaid-ing and adding one thing, the whole thing becomes
+    spaghetti". Job 292 (reading three course transcripts) was filed as other, a pile of one-to-four-minute jobs, and paused.
+    Every finished job on both computers (275) was looked at again, and the kinds made once from what the team really
+    does (KINDS): build and bigbuild (H215), research (new: reading material and writing up, nothing built), transcribe,
+    maintenance (new: the nightly run, the weekly sweep, the rules check, by how their jobs start), release, merge, and
+    other only when nothing fits. Gone: call (a build that restarts the call line; that's in its size) and big (the weekly
+    sweep, or a big build); a call's old words are still taken (OLD_KINDS). A job for a roadmap row that says nothing
+    else is a build: every one of those in the history built something. "other" given by hand yields to the words. The
+    "scheduled item N, planned for ..., 02:00:" opening was never cut off (the colon in the time), so a planned item's
+    words started with it; now it is. Retagged (RETAG 4). Backtest (estimate.py backtest, before and after in the H220
+    row): the minutes about as close as before, the usage about as close; what changed is the pause (usagecost.py,
+    top_factor): every job paused so far had guesses two to ten times its computed minutes, and was right.
+
 Files, in HQ's .status (never in the repo): job-estimates.json (each job's estimate, set when added,
 and when it started) and job-estimates-history.jsonl (one line per finished job: estimate and real).
 A test's copy of the roadmap (HQ_ROADMAP) gets its own files next to it, so tests never touch the real ones.
@@ -171,8 +185,8 @@ PATTERN_MIN = 4   # H81: finished jobs with a tag before it moves an estimate
 PATTERN_SHRINK = 4
 PATTERN_CLEAR = 1.2  # H81: a tag moves an estimate only when its jobs took at least this much longer (or shorter)
 PULL_EVERY = 120  # H81: seconds between two pulls of the other HQ's history (F34: 2 minutes, for the open jobs' kinds)
-RETAG = 3         # F34: the version of the kinds and tags; a finished line with an older one is retagged (2: H166's words,
-                  # 3: H215's small and big builds)
+RETAG = 4         # F34: the version of the kinds and tags; a finished line with an older one is retagged (2: H166's words,
+                  # 3: H215's small and big builds, 4: H220's one set of kinds)
 SIMILAR = 8       # H166: how many of the most similar finished jobs count
 SIM_MIN = 0.1     # H166: less alike than this (0 to 1) doesn't count as similar
 SIM_POW = 2       # H166: a job twice as alike counts four times as much
@@ -186,19 +200,26 @@ GUESS_MIN = 5     # H168: finished jobs with the team's own guess before the gue
 GUESS_SHRINK = 5  # H168: n guessed jobs trust the guess n/(n+GUESS_SHRINK) of the way its record says
 GUESS_MAX = 600   # H168: minutes; a guess above this is a slip
 
+# H220 (21 October 2026): one set of kinds, made from what the team really did in its first 275 jobs on both computers,
+# not added to piece by piece. In the user's words: "We really need to sit down and look at the total picture: what kind
+# of jobs we can have and what kind of categories." Each kind is work that takes its own time and usage per minute:
 KINDS = {
-    "transcribe": "transcribing",
-    "big": "a big change (whole set of happy flows)",
-    "call": "a change to the call (line restarts)",
     "build": "a small build (a fix, or a change to one part of HQ)",
     "bigbuild": "a big build (a new feature, a new screen, or several parts of HQ)",  # H215
+    "research": "research or reading (reading material, writing up what it says; nothing built)",  # H220
+    "transcribe": "transcribing recordings",
+    "maintenance": "the routine's own maintenance (the nightly run, the weekly sweep, the rules check)",  # H220
     "release": "a release",            # F34: a few minutes, nothing built
     "merge": "merging a sync conflict",  # F34: a minute or two; kept apart so they don't pull other kinds down
-    "other": "other",
+    "other": "other (none of these)",
 }
-# F34: a kind set by hand (a call's --kind) wins over the guess, except over these two: the routine's own
-# wording says them for sure, and a call has no word for a merge.
-SURE = ("merge", "release")
+# H220: the kinds before H220, as a call may still say them. "call" (a change that restarts the call line) is a build
+# like any other, sorted small or big (restarting the call line counts in its size); "big" (the whole set of happy
+# flows) was the weekly sweep or a big build.
+OLD_KINDS = {"call": "build", "big": "bigbuild"}
+# F34: a kind set by hand (a call's --kind) wins over the guess, except over these: the routine's own wording says
+# them for sure, and a call has no word for them.
+SURE = ("merge", "release", "maintenance")
 BUILDS = ("build", "bigbuild")  # H215: the two sizes of a build
 # H215: the words a call can give for a build's size. A plain "build" (the word the call rules used before H215) says
 # a build without its size: it's sorted into small or big like a guess (build_size). Only these say the size for sure.
@@ -207,8 +228,10 @@ SIZE_WORDS = {"small": "build", "small build": "build", "small-build": "build", 
 BIG_LOOK = 20     # H215: the first look guessing at least this many minutes makes a build a big one
 SMALL_LOOK = 10   # H215: at most this many, a small one; in between the words decide
 BIG_SCORE = 2     # H215: the words' score (build_size) from which a build is a big one
-# H215: the routine's repeating maintenance runs are never a big build: how long they take is their own thing.
-_MAINT = re.compile(r"\bthe nightly run\b|\bthe weekly sweep\b|\bthe daily release\b|\bthe weekly rules check\b")
+# H215, H220: the routine's repeating maintenance runs, by their own wording (and their rows, marked 🔁 in Phase R).
+# Anchored at the start of what the job is about: a job that builds the nightly run names it too, further on.
+_MAINT = re.compile(r"^h\d+(?: and h\d+)*, the (nightly run|weekly sweep|weekly rules check)\b"
+                    r"|^h162 on the hq roadmap: a full test run\b")
 
 
 def build_size(text, look_min=None):
@@ -219,8 +242,6 @@ def build_size(text, look_min=None):
     (+1); a long job text (+1); a bug fix (-1). [The cues and numbers are Claude's choice, from sorting the finished
     builds back: those are the ones that took clearly longer.]"""
     about = _about(text)
-    if _MAINT.search(about):
-        return "build"
     if isinstance(look_min, (int, float)) and look_min > 0:
         if look_min >= BIG_LOOK:
             return "bigbuild"
@@ -246,53 +267,74 @@ def size_score(about):
     return s
 
 
+def _first_row(t):
+    """H220: the roadmap row a job is for: "h169" from "h169 on the hq roadmap", "read the h169 row" or "h169, the ..."."""
+    m = re.search(r"\b([hfmlj]\d+(?:\.\d+)?)(?: and [hfmlj]\d+(?:\.\d+)?)?(?: on the (?:hq |jarvis va )?roadmap\b|,| \()"
+                  r"|\bread the ([hfmlj]\d+(?:\.\d+)?) row", t)
+    return (m.group(1) or m.group(2)) if m else None
+
+
 def _sure(t):
-    """F34: the kinds the wording tells for sure: the routine's merge jobs and a release of HQ."""
+    """F34, H220: the kinds the wording tells for sure: the routine's merge jobs, a release of HQ, and the routine's
+    maintenance runs (Phase R's nightly run, weekly sweep and rules check), each by how its job starts: a job that only
+    names them further on (building them, or a release that follows the nightly run) isn't one."""
     if re.search(r"^sync conflict|\bsync conflict \(h56\.4\), found by the routine\b", t):
         return "merge"
-    if re.search(r"(^|: )(do |build )?release hq \d|^h\d+ on the (hq )?roadmap: release hq \d", t):
+    if re.search(r"(^|: )(do |build )?release hq \d|^(h\d+ on the (hq )?roadmap: )?release (hq \d|hq now|now)\b"
+                 r"|^h\d+(?: and h\d+)*, the daily release\b|^h\d+ on the (hq )?roadmap, once, now, then the release\b", t):
         return "release"
+    if _MAINT.search(t):
+        return "maintenance"
     return None
 
 
+# H220: research or reading: the work is reading material and writing up what it says, nothing built in HQ.
+_RESEARCH = re.compile(r"\bresearch\b|\baction steps\b|\bread (the |all |his )?(whole |full )?transcripts?\b"
+                       r"|\bnothing built\b|\bwrite (it )?up\b|\bsummari[sz]e\b|\bread (the )?(course|workshop|book)")
+# What says HQ gets built after all (a happy flow, a push to dev, the call line restarted, "build it").
+_BUILT = re.compile(r"\bbuild (it|exactly|the|a |them\b)|\bfix (it|this|that|them) so\b|\bhappy flows?\b"
+                    r"|\bpush (to dev|with push\.py)|\brestart\w* the call line\b|\bfix it as it says\b")
+
+
 def kind_of(text):
-    """The kind of job, from the words the call wrote in it (Claude's choice, H61)."""
+    """The kind of job, from the words the call wrote in it (H61, made again in H220 from every finished job), in this
+    order: what the routine's wording says for sure (a merge, a release, maintenance); transcribing; research or
+    reading (when nothing says it builds); a build by its wording, sorted small or big (build_size); a job for a
+    roadmap row that says nothing else, a build too (nearly every one of those built something); else other."""
     t = " ".join(text.lower().split())
     t = t.split("follow the hq build notes")[0].split("follow the jarvis va build notes")[0]
     t = re.sub(r"^.*?the job, as agreed on the call: ", "", t)
-    t = re.sub(r"^scheduled item \d+, planned for [^:]*: ", "", t)
+    t = re.sub(r"^scheduled item \d+, planned for [^:]*?(?:\d{1,2}:\d\d)?: ", "", t)
     sure = _sure(t)
     if sure:
         return sure
-    if re.search(r"^transcrib|\btranscribe (the|four|all|his|\d)", t):
-        return "transcribe"
-    if re.search(r"(run|runs|running) the whole (happy flow )?set|whole happy flow set|all (the )?\d* ?happy flows (have )?pass", t) \
-            and not re.search(r"not the whole (happy flow )?set", t):
-        return "big"
-    if re.search(r"restart(s)? the call line (as|at) the (very )?last step", t) and not re.search(r"don'?t restart the call line", t):
-        return "call"
-    # Build work by its wording anywhere (H70): "Build exactly what the H56.2 row says", "build the ...",
-    # or a roadmap sub-step like "H56.1 on the HQ roadmap". A plain "H68 on the roadmap: research only"
-    # stays other, as before.
     # "Don't build the backup" or "nothing built" says what not to do, so negated wording doesn't count.
     tb = re.sub(r"\b(don'?t|do not|never|not|nothing|no need to) (build|built)\b[^.;:]*", " ", t)
-    # H95: the way planned items are worded, "Read the F18 row first and fix it as it says", counts too.
+    if re.search(r"^transcrib|\btranscribe (the|four|all|his|\d)", t) and not _BUILT.search(tb):
+        return "transcribe"
+    if _RESEARCH.search(t) and not _BUILT.search(tb):
+        return "research"
+    # Build work by its wording anywhere (H70, F34): "Build exactly what the H56.2 row says", "build the ...", a roadmap
+    # sub-step like "H56.1 on the HQ roadmap", "Read the F18 row first and fix it as it says" (H95), "Build: ...",
+    # "build a first version", "fix it so ...", a happy flow to add or run, a push to dev.
     if re.search(r"^build\b|\bbuild [a-z]\d|\bbuild exactly what\b|\bbuild the\b|^[a-z]\d+\.\d+ on the (hq )?roadmap"
-                 r"|\b(build|fix) it as it says\b|\bthen fix it\b", tb):
+                 r"|\b(build|fix) it as it says\b|\bthen fix it\b|^fix\b|^do [a-z]\d|^continue [a-z]\d", tb) \
+            or re.search(r"\bbuild(:| a | it\b| this\b| them\b)|\bfix (it|this|that|them) so\b|\badd (a|one|the) (new )?happy flow"
+                         r"|\bhappy flows? for it\b|\brun (happy flow|the affected|flows? \d)|\bpush (to dev|with push\.py)"
+                         r"|\brestart\w* the call line\b", tb):
         return build_size(text)
-    # F34: a job that changes HQ's code says so in how it ends: "Build: ...", "build a first version", "fix it
-    # so ...", a happy flow to add or run, a push to dev. Before, these fell into other, next to the merges.
-    if re.search(r"\bbuild(:| a | it\b| this\b| them\b)|\bfix (it|this|that|them) so\b|\badd (a|one|the) (new )?happy flow"
-                 r"|\bhappy flows? for it\b|\brun (happy flow|the affected|flows? \d)|\bpush (to dev|with push\.py)", tb):
+    # H220: a job for a roadmap row that says nothing else is a build: of the 275 finished jobs, every one of those
+    # changed HQ (the ones filed as other were mostly builds hiding there, as in F34).
+    if _first_row(t):
         return build_size(text)
     return "other"
 
 
 def kind_given(kind):
     """A kind set by hand (jobs.py add --kind), or None. Unknown words are refused by jobs.py. H215: a build's size
-    in words ("small", "big build") gives its kind."""
+    in words ("small", "big build") gives its kind. H220: the kinds from before H220 ("call", "big") are still taken."""
     k = " ".join((kind or "").strip().lower().split())
-    k = SIZE_WORDS.get(k, k)
+    k = SIZE_WORDS.get(k, OLD_KINDS.get(k, k))
     return k if k in KINDS else None
 
 
@@ -302,27 +344,36 @@ def kind_word_ok(kind):
 
 
 def kind_words():
-    """H215: the words --kind takes, for the refusal."""
-    return ", ".join(list(KINDS) + ["small", "big build"])
+    """H215, H220: the words --kind takes, for the refusal: the ones a call uses (the routine's own kinds, merge and
+    maintenance, and the old call and big, are taken too)."""
+    return "small, bigbuild, research, transcribe, release, other"
 
 
 def hand_kind(text, kind):
     """H215: (kind, fixed) for a kind given by hand: a build's size said for sure ("small", "bigbuild", "big build")
-    is fixed, so the first look doesn't move it; a plain "build" is sorted into small or big from its words."""
+    is fixed, so the first look doesn't move it; a plain "build" (and the old "call", H220) is sorted into small or
+    big from its words."""
     k = " ".join((kind or "").strip().lower().split())
     g = kind_given(k)
-    if g == "build" and k == "build":
+    if g == "build" and k in ("build", "call"):
         return build_size(text), False
     return g, g in BUILDS
 
 
 def kind_for(text, kind=None):
-    """F34: the kind a job learns and is estimated under: one set by hand wins over the guess, except when the
-    wording says a merge or a release for sure."""
+    """F34, H220: the kind a job learns and is estimated under: one set by hand wins over the guess, except when the
+    wording says a merge, a release or maintenance for sure, and except "other" by hand (it says nothing: a call's
+    "other" was mostly research or a build, as job 292 was). The old "call" is a build sorted by its words."""
     guess = kind_of(text)
     if guess in SURE:
         return guess
-    return kind_given(kind) or guess
+    k = " ".join((kind or "").strip().lower().split())
+    if k == "call":
+        return build_size(text)
+    given = kind_given(k)
+    if given == "other" and guess != "other":
+        return guess
+    return given or guess
 
 
 # H81: tags from the words in a job's text, for the patterns. The routine's own wording ("Planned on the call of
@@ -355,7 +406,7 @@ def _about(text):
     t = " ".join((text or "").lower().split())
     t = t.split("follow the hq build notes")[0]
     t = re.sub(r"^.*?the job, as agreed on the call: ", "", t)
-    t = re.sub(r"^scheduled item \d+, planned for [^:]*: ", "", t)
+    t = re.sub(r"^scheduled item \d+, planned for [^:]*?(?:\d{1,2}:\d\d)?: ", "", t)
     for cut in ("planned on the call of", "pull dev first", "only the affected happy flows", "restart what changed",
                 "write the result in its row"):
         t = t.split(cut)[0]
@@ -469,6 +520,8 @@ def _rows():
         _ROWS.clear()
         _ROWS.update(key=key, rows=rows)
     return _ROWS["rows"]
+
+
 
 
 _FLOWS = re.compile(r"happy flows? ((?:\d+(?:,? (?:and )?|\s*))+)|\bflows? ((?:\d+(?:,? (?:and )?|\s*))+)")
@@ -2299,12 +2352,18 @@ def _retag_map():
 
 
 def new_kind(text, old, look_min=None, fixed=False):
-    """F34: a finished job's kind with today's rules: what the wording says for sure (a merge, a release) wins; a
-    kind it learned under that says more than the guess (build, call, big, transcribe, often set by hand on a
-    call) stays; other is guessed again (merges and builds were hiding there). H215: a build is sorted into small or
-    big again from its words and its first look's minutes (look_min), unless its size was said by hand (fixed)."""
-    k = kind_for(text, None if old in (None, "other") else old)
-    if k in BUILDS and not fixed:
+    """F34, H220: a finished job's kind with today's rules, from its words: what the wording says for sure (a merge, a
+    release, maintenance) wins; a build's size said by hand (fixed) stays, and so does transcribing (often set by hand
+    on a call); everything else is sorted again from its words, builds into small or big with their first look's
+    minutes (look_min, H215). The old kinds (call, big, other) are gone that way."""
+    k = kind_of(text)
+    if k in SURE:
+        return k
+    if fixed and old in BUILDS:
+        return old
+    if old == "transcribe":
+        return old
+    if k in BUILDS:
         k = build_size(text, look_min)
     return k
 
@@ -2378,8 +2437,8 @@ def backtest(hist=None, last=None, alike=True, sized=False):
             pairs.append((_size_of(h), math.log(h["actual"] / d["est"])))
         off = abs(est - h["actual"])
         offs.append(off)
-        # H215: builds that took over twice their estimate: the ones the pause at twice would have stopped
-        twice.append(h.get("kind") in BUILDS and h["actual"] > 2 * est)
+        # H215, H220: jobs (H215 counted only builds) that took over twice their estimated time
+        twice.append(h["actual"] > 2 * est)
         within += off <= max(3, 0.25 * est)
     if last:
         offs, twice = offs[-last:], twice[-last:]
@@ -2486,7 +2545,15 @@ def main(argv):
                 if b.get("count"):
                     print(f"  {name}: {b['count']} measured jobs estimated back from the jobs before them: off by {b['avg_off']:g} min "
                           f"on average (median {b['median_off']:g})" + (f"; {b['within']} close" if not n else "")
-                          + f"; {b['twice']} builds took over twice their estimate.")  # H215
+                          + f"; {b['twice']} took over twice their estimated time.")  # H215, H220
+        import usagecost  # H220: the usage, estimated back the same way, against the pause
+        for name, n in (("All", None), ("Last 30", 30)):
+            u = usagecost.usage_backtest(hist, last=n)
+            if u.get("jobs"):
+                print(f"Usage, {name.lower()}: {u['jobs']} jobs estimated back; the middle one used {u['median']:g} times its estimate, "
+                      f"{u['within']} within half again either way. Paused at twice the estimate: {len(u['twice'])}; at four "
+                      f"times (H221): {len(u['four'])}; at four times the top (H220): {len(u['top'])}"
+                      + (f" (jobs {', '.join(map(str, u['top']))})" if u["top"] else "") + ".")
     elif cmd == "reestimate":
         print(reestimate())
     elif cmd == "guesses":

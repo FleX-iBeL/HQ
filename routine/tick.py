@@ -879,7 +879,8 @@ def job_need(job):
 
 
 def usage_overrun(job, s):
-    """H172: every minute while a job runs, its usage so far from the newest reading. At about four times its estimate (H221; twice before) it's
+    """H172: every minute while a job runs, its usage so far from the newest reading. At about four times the top of its estimate
+    (H220: the estimate times how unsure it is, at most twice; H221 four times the estimate; twice before) it's
     paused for good: its chat ends, it isn't started again by itself (a call resumes or drops it), and Donna texts him.
     True when it paused it. The stop at the line itself stays the job's own (H113)."""
     import usagecost
@@ -889,7 +890,7 @@ def usage_overrun(job, s):
     if not o:
         return False
     end_chat(s.get("pid"))
-    jobs("mark", str(n), "paused: used about four times its estimated usage")
+    jobs("mark", str(n), "paused: used about four times the top of its estimated usage")
     try:
         import carryon
         carryon.on_held(n, open(hqpaths.ROADMAP, encoding="utf8").read())  # a resume carries on in its own chat
@@ -899,9 +900,10 @@ def usage_overrun(job, s):
     clear()
     quiet.clear_request()
     line = "5-hour" if o["line"] == "five" else "weekly"
-    why = (f"used {o['used']:g}% of the {line} usage, about four times its estimate of {o['est']:g}%; paused for good: "
+    why = (f"used {o['used']:g}% of the {line} usage, about four times the top of its estimate of {o['est']:g}% "
+           f"(top {o.get('top', o['est']):g}%); paused for good: "
            f"a call resumes it (jobs.py resume {n}) or drops it (jobs.py stop {n})")
-    status("STOPPED", f"Job {n} paused: it used about four times its estimated usage", f"job {n} {why}")
+    status("STOPPED", f"Job {n} paused: it used about four times the top of its estimated usage", f"job {n} {why}")
     incidents.past("jobs", time.time(), time.time(), f"Job {n} {why}",
                    [(time.time(), "Ended its chat; it waits for a call, and Donna told him")])
     log(f"job {n} paused: {why}")
@@ -1179,7 +1181,7 @@ def tick():
             log(f"job {n} ended without a done mark")
             return
         try:
-            # H172, H221: about four times its estimated usage: paused for good.
+            # H172, H221, H220: about four times the top of its estimated usage: paused for good.
             if usage_overrun(job, s):
                 return
         except Exception as e:

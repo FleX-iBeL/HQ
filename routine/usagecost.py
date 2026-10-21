@@ -29,12 +29,19 @@ What it does:
     estimate.plan() gives each waiting job and planned item that start ("starts around" on the status page, in
     jobs.py list and schedule.py list).
   - The stop at the line for a running job stays as it is (H113). New: a job whose real cost reaches about four times
-    its estimate (OVER times; twice until H221, and at least OVER_MIN points more than the estimate, so a rounding of the readings doesn't do
-    it) is paused for good: its chat ends, it isn't started again by itself, and Donna texts him in plain words. A
-    call lets it carry on (jobs.py resume N, in its own chat, H113) or cancels it (jobs.py stop N).
+    the top of its estimate (OVER times; twice the estimate itself until H221, four times until H220; and at least
+    OVER_MIN points more than the estimate, so a rounding of the readings doesn't do it) is paused for good: its chat
+    ends, it isn't started again by itself, and Donna texts him in plain words. A call lets it carry on (jobs.py resume
+    N, in its own chat, H113) or cancels it (jobs.py stop N).
+  - H220 (21 October 2026): how sure the estimate is counts. Every pause so far (jobs 211, 248, 266, 281, 292) was a
+    job whose usage was estimated from its computed minutes alone, while the first look, the call and the team itself
+    had guessed it two to ten times longer, and they were right. The top of an estimate (top_factor) is the estimate
+    times how unsure it is: the high end of the jobs like it (the middle half's top), and the longest guess (the look's,
+    the call's, the team's) over the computed minutes, at most TOP_MAX times. A sure job is paused at four times its
+    estimate, as H221 said; an unsure one at most at eight. Backtest: pause_backtest.
 
 [The numbers are Claude's choice: COST_MIN 3 jobs, OVER 4 (2 until H221) with OVER_MIN 3 points on the 5-hour line and 1 on the
-weekly; the readings are whole percents, so a short job's cost is rough, and it evens out over many jobs.]
+weekly, TOP_MAX 2 (H220); the readings are whole percents, so a short job's cost is rough, and it evens out over many jobs.]
 
 Files, in HQ's .status (never in the repo), next to the estimates: job-usage.json (the running and held jobs' count).
 A test's copy of the roadmap (HQ_ROADMAP) gets its own files next to it and reads no real usage unless HQ_USAGE names
@@ -50,6 +57,8 @@ usage:
   python3 routine/usagecost.py tokens N            H173: job N's own tokens and cost, from its own chats
   python3 routine/usagecost.py calls [N]           H173: what the last N calls cost on their own
   python3 routine/usagecost.py fill                H173: the finished jobs' own tokens from their chats (by itself once)
+  python3 routine/usagecost.py pauses              H220: every finished job against the pause: twice, four times, and
+                                                   four times the top of its estimate (which ones would have paused)
 """
 import json, math, os, re, sys, time
 from datetime import datetime
@@ -73,7 +82,9 @@ KEYS = ("five", "weekly")  # the lines a job's cost is counted on (Weekly Fable 
 FALLBACK = {"five": 0.5, "weekly": 0.1}
 COST_MIN = 3        # finished jobs with a cost before they decide the rate
 RECENT = 12         # the last jobs of a kind (or of any kind) that count
-OVER = 4            # a running job at this many times its estimated cost pauses for good (H221: was 2)
+OVER = 4            # a running job at this many times the top of its estimated cost pauses for good (H221: was 2)
+TOP_MAX = 2         # H220: the top of an estimate is at most this many times the estimate (how unsure it can count)
+GUESS_KEYS = ("guess", "guess_call", "guess_look")  # H220: the guesses that say an estimate may be short
 OVER_MIN = {"five": 3, "weekly": 1}  # ... and at least this many points over it (the readings are whole percents)
 SAME_RESET = 5 * 60  # two reset times this close are the same window
 NEAR = {"before": 15 * 60, "after": 10 * 60}  # backfill: a reading this close to a job's start or end counts
@@ -451,6 +462,8 @@ def track(n, text="", now=None):
         _step(rec, _snap(now))
     if rec.get("running", True):  # H173: its own tokens, from its own chats
         _own(rec, n)
+    if isinstance(rec.get("est"), dict):  # H220: the top of its estimate, with the guesses known by now
+        rec["est"]["top"] = top_factor(rec["est"], job_guesses(n))
     d[str(n)] = rec
     _save(d)
     return {**rec, "so_far": _so_far(rec)}
@@ -505,18 +518,106 @@ def finish(n, now=None):
             "est_cost": rec.get("est"), "late": bool(rec.get("late"))}
 
 
+def top_factor(est, guesses=None):
+    """H220: how unsure an estimate is, as a factor from 1 to TOP_MAX: the high end of the jobs it's based on (its
+    tokens' range, the middle half's top, over its middle) and the longest guess of its minutes (the first look's, the
+    call's, the team's own; {key: minutes}) over the computed minutes. The top of the estimate is the estimate times
+    this."""
+    est = est or {}
+    f = 1.0
+    if est.get("range") and est.get("tokens"):
+        f = max(f, float(est["range"][1]) / float(est["tokens"]))
+    m = est.get("minutes")
+    if m:
+        for g in (guesses or {}).values():
+            if isinstance(g, (int, float)) and 0 < g <= 600:
+                f = max(f, g / float(m))
+    return round(min(TOP_MAX, f), 2)
+
+
+def job_guesses(n):
+    """H220: the guesses kept for job n ({key: minutes}), from the estimates."""
+    try:
+        e = _est()._load_state().get(str(n)) or {}
+    except Exception:
+        return {}
+    return {k: e[k] for k in GUESS_KEYS if e.get(k)}
+
+
 def overrun(rec):
-    """None, or {"line", "used", "est"} when the running job has used about four times its estimated cost on a line."""
+    """None, or {"line", "used", "est", "top"} when the running job has used about four times the top of its estimated
+    cost on a line (H220: the top is the estimate times top_factor, kept in its est as "top" by track)."""
     if not rec or (rec.get("late") and not rec.get("own")) or rec.get("allowed") or not rec.get("est"):
         return None
     so_far = rec.get("so_far") or _so_far(rec)
+    f = float(rec["est"].get("top") or 1)
     for k in KEYS:
         est, used = float(rec["est"].get(k) or 0), so_far.get(k)
         if used is None:
             continue
-        if used >= OVER * est and used - est >= OVER_MIN[k]:
-            return {"line": k, "used": used, "est": est}
+        top = round(est * f, 1)
+        if used >= OVER * top and used - est >= OVER_MIN[k]:
+            return {"line": k, "used": used, "est": est, "top": top}
     return None
+
+
+def usage_backtest(hist=None, last=None):
+    """H220: every finished job with its own tokens, its usage estimated back from only the jobs finished before it
+    (minutes from estimate_detail under its kind, usage from cost_for): {"jobs", "median", "within", "twice", "four",
+    "top", "at"}: the median of real over estimated usage on the 5-hour line, how many within a factor 1.5, and the jobs
+    the pause would have stopped at twice, four times, and four times the top (with the guesses kept on its line)."""
+    E = _est()
+    hist = sorted(E.all_history() if hist is None else hist, key=lambda h: h.get("done") or 0)
+    rows = []
+    for i, h in enumerate(hist):
+        c = h.get("cost")
+        if not (isinstance(c, dict) and c.get("five") and h.get("tokens") and h.get("actual")):
+            continue
+        prior = hist[:i]
+        if len(E._real(prior)) < COST_MIN:
+            continue
+        d = E.estimate_detail("", prior, h.get("kind"), h.get("machine"), h.get("tags") or [], h.get("about") or "")
+        e = cost_for(d["est"], "", h.get("kind"), prior, h.get("about") or "")
+        e["minutes"] = d["est"]
+        rows.append((h.get("n"), float(c["five"]), float(e["five"] or 0.1),
+                     top_factor(e, {k: h[k] for k in GUESS_KEYS if h.get(k)})))
+    if last:
+        rows = rows[-last:]
+    out = {"jobs": len(rows), "twice": [], "four": [], "top": [], "at": {}}
+    if not rows:
+        return out
+    ratios = sorted(u / e for _, u, e, _ in rows)
+    out["median"] = round(ratios[len(ratios) // 2], 2)
+    out["within"] = sum(1 for r in ratios if 1 / 1.5 <= r <= 1.5)
+    for name, mult in (("twice", lambda f: 2), ("four", lambda f: 4), ("top", lambda f: OVER * f)):
+        pts = sorted(mult(f) * e for _, _, e, f in rows)
+        out["at"][name] = round(pts[len(pts) // 2], 1)
+        out[name] = [n for n, u, e, f in rows if u >= mult(f) * e and u - e >= OVER_MIN["five"]]
+    return out
+
+
+def pause_backtest(hist=None):
+    """H220: every finished job with an estimated and a real cost, against the pause: {"jobs", "twice", "four", "top"}
+    with the jobs each rule would have paused (twice its estimate until H221, four times until H220, four times the top
+    of its estimate now), and the median pause point in points of the 5-hour line for each."""
+    E = _est()
+    hist = E.all_history() if hist is None else hist
+    out = {"jobs": 0, "twice": [], "four": [], "top": [], "at": {"twice": [], "four": [], "top": []}}
+    for h in hist:
+        e, c = h.get("est_cost"), h.get("cost")
+        if not (isinstance(e, dict) and isinstance(c, dict) and e.get("five")):
+            continue
+        out["jobs"] += 1
+        est, used = float(e["five"]), float(c.get("five") or 0)
+        f = top_factor(e, {k: h[k] for k in GUESS_KEYS if h.get(k)})
+        for name, line in (("twice", 2 * est), ("four", 4 * est), ("top", OVER * est * f)):
+            out["at"][name].append(line)
+            if used >= line and used - est >= OVER_MIN["five"]:
+                out[name].append(h.get("n"))
+    for name in ("twice", "four", "top"):
+        v = sorted(out["at"][name])
+        out["at"][name] = round(v[len(v) // 2], 1) if v else None
+    return out
 
 
 def allow(n):
@@ -549,7 +650,7 @@ def paused_words(n, text, o):
     """Donna's facts for a paused job: plain, everyday words (the text is sent as it is when she can't compose)."""
     line = "the five-hour usage" if o["line"] == "five" else "the weekly usage"
     return (f"Heads up: I paused one of the team's jobs, {short_what(text)}. It had used about {o['used']:g}% of "
-            f"{line}, roughly four times what it was expected to take, so I stopped it before it burns more. It won't start "
+            f"{line}, roughly four times the most it was expected to take, so I stopped it before it burns more. It won't start "
             f"again by itself; tell me on a call if it should carry on or be dropped.")
 
 
@@ -1113,6 +1214,15 @@ def main(argv):
     if cmd == "backfill":
         filled, left = backfill()
         print(f"Filled the cost of {filled} finished jobs from the saved readings; {left} couldn't be matched.")
+        return 0
+    if cmd == "pauses":  # H220
+        b = pause_backtest()
+        for name, words in (("twice", "twice the estimate (until H221)"), ("four", "four times the estimate (H221)"),
+                            ("top", "four times the top of the estimate (H220)")):
+            jobs_ = b[name]
+            print(f"At {words}: {len(jobs_)} of {b['jobs']} finished jobs would have paused"
+                  + (f" (jobs {', '.join(map(str, jobs_))})" if jobs_ else "") + f"; the pause point is {b['at'][name]}% "
+                  "of the 5-hour line for the middle job.")
         return 0
     if cmd == "costs":
         n = int(argv[1]) if len(argv) > 1 else 20
