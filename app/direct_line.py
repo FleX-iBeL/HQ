@@ -37,6 +37,9 @@ minutes; the backup taking over at once) and again when it's back. In her own ch
 Claude (or HQ_DIRECT_PLAIN=1) a plain line in the same spirit. He texts back on /direct: she answers as on a call,
 with the same workspace and the same limits (policy.py), one text at a time.
 
+The coaching line (H225, coaching.py) is this same code on another folder, with the Life coaching agent and her rules
+(HQ_DIRECT_DIR, HQ_DIRECT_AGENT, HQ_DIRECT_COACHING=1); nothing subscribes there, so it never pushes.
+
 Off: HQ_DIRECT=0 in switches.env. Tests: HQ_DIRECT_DRY=1 (her reply is canned, nothing is pushed out).
 
   python3 app/direct_line.py info                       her name and colour, the public key (JSON)
@@ -638,6 +641,12 @@ def _answer(words: str) -> str:
                         f"{m['text']}" for m in recent)
     rules = (_text_rules() + _agents.persona(a, user()).replace("on this call", "on this chat")
              .replace("call rules", "chat rules"))
+    if os.environ.get("HQ_DIRECT_COACHING") == "1":  # H225: the coaching line, a thread with her only for life coaching
+        try:
+            import coaching
+            rules += "\n\n" + coaching.rule()
+        except Exception as e:
+            print(f"reply: the coaching rule: {e!r}", file=sys.stderr)
     opts = _brain.call_session_options(
         model=a["model"], folder=_config.FOLDER, voice_rules=rules, policy=pol, cli_path=_config.CLAUDE_CLI,
         effort=_config.effort_for(a["model"]),

@@ -1040,6 +1040,13 @@ def direct_watch():
                 log("direct line: looking at the weather")
         except Exception as e:
             log(f"weather: {e!r}")
+        # H225: Life coaching's check-ins, kept in the background: one that comes due lands in the coaching line.
+        try:
+            import coaching
+            for key in coaching.refresh():
+                log(f"coaching: a check-in is due ({key})")
+        except Exception as e:
+            log(f"coaching: {e!r}")
         # H101: his calendar, read only, every hour in the day, for the call page's calendar.
         try:
             import agenda

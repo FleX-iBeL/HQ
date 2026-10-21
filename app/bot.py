@@ -336,6 +336,9 @@ async def bot(runner_args: RunnerArguments):
     if about is None and not free and body.get("about_todo"):  # H200: a call started from an item on the to-do list
         import todo as _todo_call
         about = _todo_call.about(str(body.get("about_todo") or ""))
+    if about is None and not free and body.get("about_coaching"):  # H225: a layer or a check-in from the Coaching place
+        import coaching as _coaching_call
+        about = _coaching_call.about(str(body.get("about_coaching") or ""))
     await run_call(transport, runner_args.handle_sigint, runner_args.webrtc_connection,
                    model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent["id"],
                    continues=None if free else continues, handover=handover and not free, voices=voices, about=about,
@@ -403,6 +406,10 @@ if __name__ == "__main__":
     @app.get("/games.js", include_in_schema=False)
     async def games_js():  # H222: the six-week game's sheet and its kinds of tracks
         return FileResponse(WEB / "games.js", media_type="text/javascript", headers=_NO_CACHE)
+
+    @app.get("/coach.js", include_in_schema=False)
+    async def coach_js():  # H225: the Coaching place
+        return FileResponse(WEB / "coach.js", media_type="text/javascript", headers=_NO_CACHE)
 
     @app.get("/tour.json", include_in_schema=False)
     async def tour_json():
@@ -798,6 +805,62 @@ if __name__ == "__main__":
         out = await asyncio.to_thread(_games.read)
         out["said"] = said
         out["undo"] = args[0] != "undo"
+        return JSONResponse(out, headers=_NO_CACHE)
+
+    # H225: Life coaching's own place (coaching.py): the layers with their checklist, the check-ins and which are due,
+    # and the coaching line, a thread with the workflow's agent. Reading it also takes the background look (a due
+    # check-in lands in the thread). Changed only from the page (x-hq: coaching): a check-in done or not now (on the
+    # backup handed to the main, H203), and a text on the coaching line (what's read is kept on the device). Never on a Free-only line.
+    import coaching as _coaching
+
+    @app.get("/api/coaching", include_in_schema=False)
+    async def coaching_read():
+        if config.FREE_ONLY:
+            return JSONResponse({"off": "Free", "on": False}, headers=_NO_CACHE)
+        from policy import is_backup as _is_backup
+        if not await asyncio.to_thread(_is_backup):
+            try:
+                await asyncio.to_thread(_coaching.refresh)
+            except Exception:
+                pass
+        return JSONResponse(await asyncio.to_thread(_coaching.read), headers=_NO_CACHE)
+
+    @app.post("/api/coaching", include_in_schema=False)
+    async def coaching_change(request: Request):
+        if request.headers.get("x-hq") != "coaching":
+            return JSONResponse({"error": "Only the HQ page can change Life coaching"}, status_code=403)
+        if config.FREE_ONLY:
+            return JSONResponse({"error": "Not on Free"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict):
+            return JSONResponse({"error": "nothing asked"}, status_code=400)
+        said = ""
+        if ask.get("send"):
+            text = str(ask.get("send") or "").strip()[:4000]
+            if not text:
+                return JSONResponse({"error": "nothing to send"}, status_code=400)
+            await asyncio.to_thread(_coaching.send, text)
+        elif ask.get("done") or ask.get("later"):
+            how = "done" if ask.get("done") else "later"
+            key = str(ask.get(how) or "")[:60]
+            from policy import is_backup as _is_backup
+            if await asyncio.to_thread(_is_backup):
+                import role as _role
+                code, out_, err_, hand_how = await asyncio.to_thread(_role.hand, "coaching", [how, key])
+                if code:
+                    return JSONResponse({"error": " ".join((out_ + " " + err_).split())[:300] or "the main didn't take it"},
+                                        status_code=409)
+                said = " ".join(out_.split())[:300] + (" It comes back here with the sync in a moment."
+                                                      if hand_how == "main" else "")
+            else:
+                said = await asyncio.to_thread(_coaching.done if how == "done" else _coaching.later, key)
+        else:
+            return JSONResponse({"error": "nothing asked"}, status_code=400)
+        out = await asyncio.to_thread(_coaching.read)
+        out["said"] = said
         return JSONResponse(out, headers=_NO_CACHE)
 
     # Job 257 (H202): the workflows the user can switch on in Settings, Life coaching first. On starts their map from

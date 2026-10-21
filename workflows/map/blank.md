@@ -183,6 +183,8 @@ Status: not started
 
 Each day a short look, each week a proper one, a debrief after each game, a check-in every few months; what changes.
 
+Check-ins: not set yet (the day and part of the day for the weekly look back, and how often the bigger check-in comes; HQ keeps them and shows a red dot in the Coaching place when one is due).
+
 Checklist (every question of this layer: answered, parked with why and when it comes back, later with when, or open):
 - open · day 1 · What were the three best things about today: wins, good moments, things you're…
 - open · day 2 · What didn't happen as planned, and why, in one line?

@@ -304,7 +304,19 @@ def rule(folder: Path, base: Path = SHIPPED) -> str:
             "later (on purpose, with when) or open; tick each line as you go, never skip one silently (one answered "
             "earlier is ticked answered, not asked again), and never call a layer done before holding it against the "
             f"guide line by line (python3 {ROOT / 'app' / 'workflows.py'} check <id> <layer>) and saying plainly what's "
-            "still open." + (GAME_RULE if any(w["id"] == "map" for w in ws) else ""))
+            "still open." + (GAME_RULE + CHECKIN_RULE if any(w["id"] == "map" for w in ws) else ""))
+
+
+# H225 (21 October 2026, call at 12:29), in the user's words: "in the background it gets tracked when those moments
+# should be ... It guarantees that we have those points of contact. Otherwise it might just drift away."
+CHECKIN_RULE = (" The check-ins and the Coaching place (H225): HQ keeps their check-ins (the weekly look back, each "
+                "game's debrief, the bigger check-in every few months) and shows a red dot in the app's Coaching place "
+                "when one is due; the moments come from the looking-back layer's `Check-ins:` line in their map.md "
+                "(\"Check-ins: the weekly look back on Friday morning; the bigger check-in every 3 months.\"). When the "
+                "weekly moment or the rhythm of the bigger check-in is set or changes, write that line in their words. "
+                f"What's due: python3 {ROOT / 'app' / 'coaching.py'} due. A call or chat that went through one marks it "
+                "at the end: coaching.py done KEY (not now: later KEY); never while it's halfway. A call started from "
+                "the Coaching place is one layer or one check-in only: keep to it, and the next one is its own call.")
 
 
 # H222 (21 October 2026, call at 12:29), in the user's words: "the moment they want to do a 6-week challenge, they need

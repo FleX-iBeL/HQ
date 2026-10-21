@@ -79,9 +79,11 @@ WRITES = {"jobs": {"add", "add-row", "send-row", "stop", "overrule", "move", "on
           "todo": {"add", "done", "letgo", "move", "tick", "untick", "undo"},
           "pings": {"appt", "remind", "cancel", "note", "note-clear", "watch", "unwatch", "out", "out-stop", "nudge", "nudge-done", "nudge-later"},
           "games": {"new", "spec", "tick", "count", "note", "diary", "week", "debrief", "undo"},
+          "coaching": {"done", "later"},
           "handover": {"edit"}}
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
-           "games": os.path.join(os.path.dirname(HERE), "app", "games.py")}  # H222; the rest are routine/<script>.py
+           "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
+           "coaching": os.path.join(os.path.dirname(HERE), "app", "coaching.py")}  # H225; the rest are routine/<script>.py
 PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main (who asked, for her notes)
 
 # H203, in the user's words (call of 17 October 2026, 14:45): "i am even more confused, you give it to the server but
@@ -89,7 +91,7 @@ PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main 
 # is main?" The files the main writes by itself (the team, the mail check, the log's three-hour cycle, the routine's
 # reminders), and so the only one that writes them: on the backup a call or chat hands its change to these to the
 # main, which writes it; the sync brings it back. Paths are relative to the workspace.
-ONE_WRITER = ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "HQ/games.json")
+ONE_WRITER = ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "HQ/games.json", "HQ/coaching.json")
 
 
 def one_writer(rel: str) -> bool:

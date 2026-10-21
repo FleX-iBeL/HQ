@@ -435,6 +435,11 @@ class Policy:
             return Decision(DENY, "making a six-week game or changing its design is the team's: write the design in "
                                   "their map and hand it to the team; from a call the games script reads, ticks, "
                                   "counts, notes, keeps the diary, the week's look back and the debrief")
+        # H225: Life coaching's check-ins: what's due, and marking one done (or not now) once it's through.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "coaching.py"):
+            if len(args) == 1 or args[1] in ("summary", "json", "due") or (args[1] in ("done", "later") and len(args) == 3):
+                return Decision(ALLOW, "Life coaching's check-ins")
+            return Decision(DENY, "from a call, the coaching script says what's due and marks a check-in done or not now")
         # H224: the workflows, read only: which are on, the call rule, a blank checklist, and their file's checklist
         # held against the guide before a layer is called done. Turning one on or off is Settings'.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "workflows.py"):

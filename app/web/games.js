@@ -310,6 +310,7 @@
       if (notesOpen()) showNotes(false);
       if (calOpen()) showCal(false);
       if (todoOpen()) showTodo(false);
+      if (typeof coachOpen === "function" && coachOpen()) showCoach(false);  // H225
       showDirect(false);
       closeWx();
       if (setEl.classList.contains("open")) showSettings(false);

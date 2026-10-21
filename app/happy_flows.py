@@ -349,6 +349,9 @@ class Server:
             "HQ_TODO": str(tmp / "todo-server" / "challenges.md"), "HQ_TODO_UNDO": str(tmp / "todo-server" / "undo.json"),
             # H222: the six-week games and their undo, never the workspace's own
             "HQ_GAMES": str(tmp / "games-server" / "games.json"), "HQ_GAMES_UNDO": str(tmp / "games-server" / "undo.json"),
+            # H225: Life coaching's check-ins and its coaching line, never the workspace's own; her reply canned
+            "HQ_COACHING": str(tmp / "coaching-server" / "coaching.json"), "HQ_COACHING_LINE": str(tmp / "coaching-server" / "line"),
+            "HQ_COACHING_DRY": "1",
             # job 257: the Life coaching switch in Settings, never the workspace's own
             "HQ_WORKFLOWS_FOLDER": str(tmp / "workflows-server"),
             # H205: What HQ helps you with, never the workspace's own switches or the real roadmap's mail check
@@ -5287,7 +5290,7 @@ window.fetch = async (url, opt) => {
             need("About the appointment: Dentist (" in head and transcript.read_call(tr.path.stem, d / "calls") is not None,
                  f"the transcript doesn't say which appointment, or can't be read back: {head!r}")
             csrc, bsrc = (APP / "call.py").read_text(), (APP / "bot.py").read_text()
-            need('_about(self.about, "note")' in csrc and "mod = todo if e.get(\"kind\") == \"todo\" else agenda" in csrc  # H200: an item or an appointment
+            need('_about(self.about, "note")' in csrc and "mod = todo if e.get(\"kind\") == \"todo\" else coaching if e.get(\"kind\") == \"coaching\" else agenda" in csrc  # H200, H225: an item, a coaching layer or check-in, or an appointment
                  and "None if free or not isinstance(about, dict)" in csrc
                  and "None if free else _agenda.about(" in bsrc, "the call doesn't get the appointment, or gets it on Free")
         finally:
@@ -12264,6 +12267,271 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             seen.append(name)
         return seen
 
+    # 131
+    async def flow131(self) -> str:
+        """H225: Life coaching as its own place in the app, with check-ins. No Claude turns (her reply on the coaching
+        line is canned). A fresh install: the blank map gives the six layers with every line open and no check-in due
+        (no weekly moment, no bigger check-in before a layer is done), and nothing personal is in the coaching code. On
+        a made-up map: the moments come from its Check-ins line (a day, a part of the day or a time, every N months),
+        else from a line in the ideal week; the weekly look back is due from its moment until done, a moment before HQ
+        first kept them doesn't count, not now puts it off until the next morning, done moves it to next week; a
+        game's debrief is due in its look-back week until it has one; the bigger check-in comes N months after the
+        first done layer's start or the last one; each due one lands once in the coaching line. A call started from a
+        layer or a check-in gets only that (its note, its greeting, done KEY at the end), and the transcript says so.
+        The rules, the guide, the policy, the backup's hand-over and the switch know it. The server serves the test
+        server's own copy, changes it only from the page, and her canned reply comes back on the coaching line. On the
+        call page in a headless browser (the phone, a small phone, the desktop app): the Coaching button with its red
+        dot, the sheet with the due check-in, the coaching line, the six layers; a layer's checklist; Done takes the
+        dot away and reaches the file; nothing is wider than the screen."""
+        import coaching as co
+        import workflows
+        from datetime import datetime as _dt, date as _date, timedelta as _td
+        code_text = (APP / "coaching.py").read_text() + (APP / "web" / "coach.js").read_text()
+        for word in ("Ring Fit", "FODMAP"):  # his own map is his; HQ's privacy check covers the rest (flow 44)
+            need(word.lower() not in code_text.lower(), f"HQ's coaching code names {word}")
+        blank = (APP.parent / "workflows" / "map" / "blank.md").read_text()
+        need("\nCheck-ins: not set yet" in blank, "the blank map has no Check-ins line")
+        cdir = self.tmp / "h225"
+        shutil.rmtree(cdir, ignore_errors=True)
+        (cdir / "HQ").mkdir(parents=True)
+        (cdir / "HQ" / "workflows.json").write_text(json.dumps({"on": ["map"]}))
+        (cdir / "map.md").write_text(blank)
+        keys = ("HQ_WORKFLOWS_FOLDER", "HQ_COACHING", "HQ_COACHING_LINE", "HQ_ROLE_HERE")
+        env_was = {k: os.environ.get(k) for k in keys}
+        os.environ.update({"HQ_WORKFLOWS_FOLDER": str(cdir), "HQ_COACHING": str(cdir / "HQ" / "coaching.json"),
+                           "HQ_COACHING_LINE": str(cdir / "HQ" / "coaching-line"), "HQ_ROLE_HERE": "1"})
+        T = _dt(2026, 3, 4, 10, 0)  # a Wednesday
+        try:
+            r = co.read(now=T, games=[])
+            need(r["on"] and r["map"] and [x["n"] for x in r["layers"]] == [1, 2, 3, 4, 5, 6], f"the blank map's layers: {r.get('layers')}")
+            need(all(i["mark"] == "open" for x in r["layers"] for i in x["items"]) and all(x["word"] == "not started" for x in r["layers"]),
+                 "a blank map isn't all open and not started")
+            need(co.refresh(now=T, games=[]) == [] and co.read(now=T, games=[])["checkins"] == [] and co.read(now=T, games=[])["due"] == 0,
+                 "a fresh install has a check-in")
+            # the moments
+            m = co.moments("x\nCheck-ins: the weekly look back on Sunday evening; the bigger check-in every four months.\n")
+            need(m["week"] and m["week"]["day"] == 6 and m["week"]["at"] == "19:00" and m["months"] == 4, f"the Check-ins line: {m}")
+            m = co.moments("Check-ins: weekly look back Tuesdays at 7:30\n")
+            need(m["week"]["day"] == 1 and m["week"]["at"] == "07:30" and m["months"] == co.EVERY_MONTHS, f"a time on the line: {m}")
+            m = co.moments("- Monday: deep work in the morning\n- Saturday: the weekly look back, after lunch.\n")
+            need(m["week"]["day"] == 5 and m["week"]["part"] == "afternoon" and m["week"]["from"] == "map", f"from the ideal week: {m}")
+            need(co.moments("- Monday: redone at the look back when something changes\n")["week"] is None, "a passing look back became the moment")
+            # a made-up map: the look back on Monday morning, a layer done
+            text = blank.replace("\nCheck-ins: not set yet", "\nCheck-ins: the weekly look back on Monday morning; the bigger check-in every 4 months.\n\nWas: not set yet", 1)
+            text = text.replace("Status: not started", "Status: done (made-up)", 1)
+            (cdir / "map.md").write_text(text)
+            (cdir / "HQ" / "coaching.json").write_text(json.dumps({"first": "2026-03-04T10:00"}))
+            r = co.read(now=T, games=[])
+            wk = next(c for c in r["checkins"] if c["kind"] == "week")
+            need(not wk["due"] and wk["key"] == "week:2026-W11" and wk["line"] == "Next: Monday 9 March morning",
+                 f"a moment before HQ kept them counted, or the next one is off: {wk}")
+            M = _dt(2026, 3, 9, 9, 30)
+            need(co.refresh(now=M, games=[]) == ["week:2026-W11"] and co.refresh(now=M, games=[]) == [], "the due look back didn't land once")
+            th = co.thread()
+            need(len(th) == 1 and th[0]["from"] == "agent" and "look back" in th[0]["text"], f"the coaching line: {th}")
+            wk = next(c for c in co.read(now=M, games=[])["checkins"] if c["kind"] == "week")
+            need(wk["due"] and wk["line"] == "Since this morning", f"the look back isn't due: {wk}")
+            need(next(c for c in co.read(now=_dt(2026, 3, 12, 20), games=[])["checkins"] if c["kind"] == "week")["due"],
+                 "the look back stopped being due before it was done")
+            need("not now" in co.later("week", now=M), "not now")
+            need(not next(c for c in co.read(now=M, games=[])["checkins"] if c["kind"] == "week")["due"]
+                 and next(c for c in co.read(now=_dt(2026, 3, 10, 9, 1), games=[])["checkins"] if c["kind"] == "week")["due"],
+                 "not now doesn't last until the next morning")
+            need(co.done("week", now=_dt(2026, 3, 10, 11)) == "The weekly look back: done.", "done")
+            wk = next(c for c in co.read(now=_dt(2026, 3, 10, 12), games=[])["checkins"] if c["kind"] == "week")
+            need(not wk["due"] and wk["key"] == "week:2026-W12", f"done didn't move it to next week: {wk}")
+            need(co.done("week:2026-W30", now=M).startswith("There's no check-in"), "an unknown check-in was marked")
+            # a game's debrief, and the bigger check-in
+            g = {"id": "walk", "name": "Walk the dog", "phase": "looking back", "end": "2026-03-08", "look_end": "2026-03-15", "debrief": ""}
+            gc = next(c for c in co.read(now=M, games=[g])["checkins"] if c["kind"] == "game")
+            need(gc["due"] and gc["key"] == "game:walk" and "Walk the dog" in gc["title"], f"the game's debrief isn't due: {gc}")
+            need(not any(c["kind"] == "game" for c in co.read(now=M, games=[{**g, "debrief": "Fun"}])["checkins"]), "a game with its debrief is still due")
+            big = next(c for c in co.read(now=M, games=[])["checkins"] if c["kind"] == "checkin")
+            need(not big["due"] and big["key"] == "checkin:2026-07-04" and big["every"] == 4, f"the bigger check-in: {big}")
+            need(next(c for c in co.read(now=_dt(2026, 7, 4, 9, 30), games=[])["checkins"] if c["kind"] == "checkin")["due"], "the bigger check-in isn't due after 4 months")
+            # a call about a layer or a check-in: only that
+            import call as _call_mod
+            import transcript as _tr
+            e = co.about("layer:4")
+            need(e and e["kind"] == "coaching" and e["title"].startswith("4. ") and co.about("layer:9") is None, f"about a layer: {e and e['title']}")
+            note = _call_mod._about(e, "note")
+            need("one layer only" in note and "Still open in this layer:" in note and "guide.md" in note, f"the layer call's note: {note[:300]}")
+            need(any("Let's work on" in x for x in _call_mod._about(e, "greetings")) and _call_mod._about(e, "line").endswith("(life coaching)"),
+                 "the layer call's greeting or line")
+            os.environ["HQ_COACHING_NOW"] = "2026-03-16T09:30"
+            try:
+                e = co.about("week:2026-W12")
+                need(e and e["what"] == "checkin" and "done week:2026-W12" in _call_mod._about(e, "note") and "Each week" in _call_mod._about(e, "note"),
+                     "the check-in call doesn't go straight into it, or isn't marked at the end")
+            finally:
+                os.environ.pop("HQ_COACHING_NOW", None)
+            ct = _tr.CallTranscript(self.tmp / "h225-calls", model="x", agent="Pepper", about="4. The ideal week (life coaching)")
+            ct.close() if hasattr(ct, "close") else None
+            saved = "\n".join(p.read_text() for p in (self.tmp / "h225-calls").glob("*.md"))
+            need(not saved or "About the life coaching: 4. The ideal week" in saved, f"the transcript doesn't say what the call is about: {saved[:200]}")
+            # her chat on the coaching line has the coaching rule
+            os.environ["HQ_COACHING_NOW"] = "2026-03-10T12:00"
+            try:
+                need("coaching line (H225)" in co.rule() and "Due now" not in co.rule(), "the coaching line's rule")
+                os.environ["HQ_COACHING_NOW"] = "2026-03-16T09:30"
+                need("Due now: The weekly look back (week:2026-W12)" in co.rule(), "the coaching line's rule doesn't say what's due")
+            finally:
+                os.environ.pop("HQ_COACHING_NOW", None)
+        finally:
+            for k, val in env_was.items():
+                if val is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = val
+        # the rules, the guide, the policy, the backup, the switch
+        from policy import Policy
+        import features
+        sys.path.insert(0, str(APP.parent / "routine"))
+        import role
+        need("Coaching place (H225)" in workflows.rule(cdir) and "done KEY" in workflows.rule(cdir), "the Life coaching rule doesn't know the check-ins")
+        guide = (APP.parent / "workflows" / "map" / "guide.md").read_text()
+        layer6 = guide.split("## 6. Looking back", 1)[1]
+        need("**In HQ.**" in layer6 and "`Check-ins:" in layer6, "the guide's looking-back layer has no In HQ part")
+        need({k: len(v) for k, v in workflows.questions(workflows.find("map")).items()}[6] == 21, "the guide's looking-back layer changed its questions")
+        pol = Policy(config.FOLDER, dry_run=True)
+        script = APP / "coaching.py"
+        need(pol.decide("Bash", {"command": f'python3 "{script}" due'}).verdict == "allow"
+             and pol.decide("Bash", {"command": f'python3 "{script}" done week'}).verdict == "allow"
+             and pol.decide("Bash", {"command": f'python3 "{script}" refresh'}).verdict == "deny", "a call can't see or mark a check-in, or can do more")
+        need({"done", "later"} <= role.WRITES["coaching"] and "HQ/coaching.json" in role.ONE_WRITER, "the backup doesn't hand the check-ins to the main")
+        need("coachbtn" in next(f for f in features.FEATURES if f["id"] == "coaching")["buttons"], "the Coaching button doesn't go with Life coaching")
+        need("coaching.refresh()" in (APP.parent / "routine" / "tick.py").read_text(), "the check-ins aren't kept in the background")
+        need("coaching.py" in (APP.parent / "template" / "CLAUDE.md").read_text(), "a friend's chat isn't told about the Coaching place")
+        # the server, on its own copy
+        await self.ensure_server()
+        sdir = Path(self.server.env["HQ_WORKFLOWS_FOLDER"])
+        cf, lf = Path(self.server.env["HQ_COACHING"]), Path(self.server.env["HQ_COACHING_LINE"])
+        wfs = sdir / "HQ" / "workflows.json"
+        mapf = sdir / "map.md"
+        was = {p: (p.read_text() if p.exists() else None) for p in (wfs, mapf)}
+        def post(body, hq="coaching"):
+            req = urllib.request.Request(TEST_URL + "/api/coaching", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        seen = []
+        try:
+            wfs.parent.mkdir(parents=True, exist_ok=True)
+            wfs.write_text(json.dumps({"on": []}))
+            code, body, _ = http_get("/api/coaching")
+            need(code == 200 and json.loads(body)["on"] is False, "/api/coaching isn't off with Life coaching off")
+            wfs.write_text(json.dumps({"on": ["map"]}))
+            now = _dt.now()
+            day = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"][now.weekday()]
+            mapf.write_text(blank.replace("\nCheck-ins: not set yet", f"\nCheck-ins: the weekly look back on {day.capitalize()} at 00:01.\n\nWas: not set yet", 1)
+                            .replace("Status: not started", "Status: in progress", 1))
+            def fresh():
+                shutil.rmtree(lf, ignore_errors=True)
+                cf.parent.mkdir(parents=True, exist_ok=True)
+                cf.write_text(json.dumps({"first": (now - _td(days=30)).isoformat(timespec="minutes")}))
+            fresh()
+            code, body, _ = http_get("/api/coaching")
+            got = json.loads(body) if code == 200 else {}
+            need(got.get("on") and got.get("due") == 1 and len(got.get("layers", [])) == 6 and got["agent"]["id"] == "pepper",
+                 f"/api/coaching doesn't serve the test server's own copy: {str(got)[:300]}")
+            need(len(got["thread"]) == 1 and "look back" in got["thread"][0]["text"], "the due look back didn't land on the coaching line")
+            key = next(c["key"] for c in got["checkins"] if c["due"])
+            need(post({"done": key}, hq="")[0] == 403 and "done" not in json.loads(cf.read_text()), "a change without the page's header was let in")
+            c, d = post({"send": "How did my week go?"})
+            need(c == 200 and d["thread"][-1]["from"] == "me", f"a text on the coaching line didn't land: {c}")
+            ok = False
+            for _ in range(60):
+                await asyncio.sleep(0.25)
+                code, body, _ = http_get("/api/coaching")
+                th = json.loads(body)["thread"]
+                if th[-1]["from"] == "agent" and "How did my week go" in th[-1]["text"]:
+                    ok = True
+                    break
+            need(ok, f"her reply didn't come back on the coaching line: {th[-2:]}")
+            need(not (Path(self.server.env["HQ_DIRECT_DIR"]) / "thread.jsonl").exists()
+                 or "How did my week go" not in (Path(self.server.env["HQ_DIRECT_DIR"]) / "thread.jsonl").read_text(),
+                 "the coaching line wrote into Donna's direct line")
+            c, d = post({"later": key})
+            need(c == 200 and d["due"] == 0 and "not now" in d["said"], f"not now from the page: {c} {d and d.get('said')}")
+            fresh()
+            # the call page: the phone, a small phone, the desktop app
+            cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+            cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+            chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+            need(Path(chrome).exists(), "no headless browser found to run the call page in")
+            page = (APP / "web/index.html").read_text()
+            dock = page.split('<nav id="dock"', 1)[1].split("</nav>", 1)[0]
+            need('id="coachbtn" data-dl="Coaching"' in dock and '<script src="coach.js"></script>' in page, "the Coaching button or its script isn't on the page")
+            harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms)), $ = id => document.getElementById(id);
+  const until = async (f, ms) => { for (let i = 0; i < ms / 50; i++) { if (f()) return true; await wait(50); } return false; };
+  try { localStorage.removeItem("hq-coach-read"); } catch (e) {}
+  await until(() => $("coachbtn").classList.contains("due"), 5000);
+  const dk = $("dock").getBoundingClientRect(), cb = $("coachbtn").getBoundingClientRect();
+  out.push("button:" + (cb.width > 20 && cb.left >= dk.left - 1 && cb.right <= dk.right + 1 && getComputedStyle($("coachbtn").querySelector(".cdot")).display === "block" ? "ok" : "off " + Math.round(cb.width)));
+  $("coachbtn").click();
+  await until(() => document.querySelector("#coachbody .ccard"), 4000);
+  const b = $("coachbody").textContent;
+  out.push("main:" + $("coachsheet").dataset.view + "/" + document.querySelectorAll("#coachbody .ccard.due").length + "/" + (/Text Pepper/.test(b) ? "line" : "noline"));
+  out.push("layers:" + [...document.querySelectorAll("#coachbody button.ccard")].filter(c => /^\s*(done|in progress|not started)\s*\d\./.test(c.textContent)).length);
+  const start = [...document.querySelectorAll("#coachbody .ccard.due .cbtn")].find(x => /Start with Pepper/.test(x.textContent));
+  out.push("start:" + (start && !start.disabled ? "ok" : "no"));
+  [...document.querySelectorAll("#coachbody button.ccard")].find(c => /4\. The ideal week/.test(c.textContent)).click(); await wait(50);
+  out.push("layer:" + $("coachsheet").dataset.view + "/" + document.querySelectorAll("#coachbody .citem").length + "/" + (/Start a session with Pepper/.test($("coachbody").textContent) ? "go" : "nogo"));
+  out.push("wide1:" + (document.documentElement.scrollWidth <= innerWidth + 1 && $("coachbody").scrollWidth <= $("coachbody").clientWidth + 1 ? "ok" : "too wide"));
+  $("coachback").click(); await wait(50);
+  [...document.querySelectorAll("#coachbody button.ccard")].find(c => /Text Pepper/.test(c.textContent)).click(); await wait(50);
+  out.push("thread:" + $("coachsheet").dataset.view + "/" + document.querySelectorAll("#coachbody .cmsg").length + "/" + ($("coachsend") ? "send" : "nosend"));
+  $("coachback").click(); await wait(50);
+  const done = [...document.querySelectorAll("#coachbody .ccard.due .cbtn")].find(x => x.textContent === "Done");
+  done.click();
+  await until(() => !document.querySelector("#coachbody .ccard.due"), 4000);
+  out.push("done:" + (document.querySelector("#coachbody .ccard.due") ? "still" : "ok") + "/" + ($("coachbtn").classList.contains("due") ? "dot" : "nodot"));
+  out.push("wide:" + (document.documentElement.scrollWidth <= innerWidth + 1 && $("coachbody").scrollWidth <= $("coachbody").clientWidth + 1 ? "ok" : "too wide"));
+  $("todobtn").click(); await wait(50);
+  out.push("onesheet:" + ($("coachsheet").classList.contains("open") ? "both" : "ok"));
+  const pre = document.createElement("pre"); pre.id = "h225"; pre.textContent = "H225RESULT " + out.join(" | ") + " END"; document.body.append(pre);
+})();
+</script>"""
+            for name, size, app_ in (("the phone", "390,844", False), ("a small phone", "320,640", False), ("the desktop app", "1180,780", True)):
+                fresh()
+                pf = self.tmp / f"h225-{name.replace(' ', '-')}.html"
+                pg = page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1).replace("</body>", harness + "</body>", 1)
+                if app_:
+                    pg = pg.replace('new URLSearchParams(location.search).has("app")', "true", 1)
+                pf.write_text(pg)
+                r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                                  f"--user-data-dir={self.tmp / 'h225-profile'}", "--disable-web-security", f"--window-size={size}",
+                                                  "--virtual-time-budget=12000", "--dump-dom", pf.as_uri()], timeout=90)
+                mm = re.search(r'<pre id="h225">H225RESULT (.*?) END</pre>', r.stdout)
+                need(mm, f"{name}: the coaching test on the call page didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+                res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+                say(f"   {name} ({size}): {mm.group(1)}")
+                need(res["button"] == "ok", f"{name}: the Coaching button or its dot isn't in the dock: {res}")
+                need(res["main"] == "main/1/line" and res["layers"] == "6" and res["start"] == "ok", f"{name}: the Coaching place's first view is off: {res}")
+                need(res["layer"].startswith("layer/30/go") and res["thread"] == "thread/1/send", f"{name}: a layer's checklist or the coaching line is off: {res}")
+                need(res["done"] == "ok/nodot" and key in json.loads(cf.read_text()).get("done", {}), f"{name}: Done didn't take the dot away or reach the file: {res}")
+                need(res["wide"] == "ok" and res["wide1"] == "ok" and res["onesheet"] == "ok", f"{name}: too wide, or two sheets at once: {res}")
+                seen.append(name)
+        finally:
+            for p, val in was.items():
+                if val is None:
+                    p.unlink(missing_ok=True)
+                else:
+                    p.write_text(val)
+            cf.unlink(missing_ok=True)
+            shutil.rmtree(lf, ignore_errors=True)
+        return ("Life coaching's own place: a fresh install all open with no check-in; the moments from the map's Check-ins line "
+                "or its ideal week, the weekly look back due until done (not now until the morning), a game's debrief, the "
+                "bigger check-in every few months, each landing once on the coaching line; a call about one layer or one "
+                "check-in only; the rules, guide, policy, hand-over and switch; the server's own copy and her reply on the "
+                "coaching line; in the app the Coaching button with its dot, the due check-in, the layers and their "
+                "checklist, the coaching line, Done taking the dot away (" + ", ".join(seen) + ")")
+
     # 124
     async def flow124(self) -> str:
         """F40: groceries ticked off in the app, and ticked back on. No Claude turns. On a throwaway copy of the
@@ -15267,6 +15535,7 @@ FLOWS = {
     128: ("H214, H216, H217, H218: a 9292 link door to door: where the phone is or home by default, never with a surcharge or a reservation unless asked, stations by 9292's own id, addresses by the government's open address service, trains only on ask; opened in 9292 with both ends", False, "flow128"),
     129: ("F44: an update finds lsof on a Mac with the helper app's bare PATH (/usr/sbin); the Mac scripts add it too", False, "flow129"),
     130: ("H222: the six-week game, part 1: one template every game gets (dates, win line, weekly look back, debrief, past games kept), its tracks by kind (tick, count, diary, graphs), kept from a call, Donna's chat and the app; designed in Life coaching and handed to the team", False, "flow130"),
+    131: ("H225: Life coaching as its own place in the app: the layers with their checklist, the check-ins kept from the map (the weekly look back, a game's debrief, the bigger check-in) with a red dot, one call per layer or check-in, and the coaching line", False, "flow131"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 

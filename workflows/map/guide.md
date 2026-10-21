@@ -390,6 +390,8 @@ Keep a short weekly note somewhere that lasts (a journal, or under this layer), 
 
 **Once a year,** read the vision together. Is it still theirs? Only they decide if it changes.
 
+**In HQ.** HQ keeps the check-ins for them and shows a red dot in the app's Coaching place when one is due, so nobody has to remember: the weekly look back, each game's debrief and the bigger check-in. Once the weekly moment is set (in the ideal week) and how often the bigger check-in comes, write it on one line under this layer, in their words: `Check-ins: the weekly look back on Friday morning; the bigger check-in every 3 months.` (a day, and a part of the day or a time; every three to six months). Change it whenever they do. Each check-in is its own call, started from the Coaching place, and it's marked done at the end.
+
 **What it makes.** Short notes per look under this layer in `map.md` (date, what came out, what changes), each game's debrief under the game, and the changes themselves in the layer they belong to, on their yes.
 
 **What it hands back up.** The changes to the ideal week, the game and the year, and, only when they say so, to the vision.
