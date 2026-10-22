@@ -1221,6 +1221,19 @@ console.log(JSON.stringify({{
         bot_src = (APP / "bot.py").read_text()
         need('message.get("type") == "typed"' in bot_src and "type_to_agent(worker, call.llm, call_state" in bot_src,
              "the call server doesn't pass a typed message on to HQ")
+        # F46: a long dictated message reaches the call whole (it was cut at 2000 characters, on the
+        # call of 21 October 2026 ending "I will stop no"); the page and the server say the same limit.
+        import pipeline as _pl
+        need(_pl.TYPED_MAX_CHARS >= 10000, f"a typed message is still cut at {_pl.TYPED_MAX_CHARS} characters")
+        box = re.search(r'<textarea id="typein"[^>]*>', page).group(0)
+        need("maxlength" not in box.lower(), f"the typed box still cuts a long paste: {box}")
+        need(f"const TYPED_MAX = {_pl.TYPED_MAX_CHARS};" in page, "the page and the server don't share the typed limit")
+        need("text.length > TYPED_MAX" in page, "the page doesn't stop a message past the limit before sending")
+        long_words = " ".join(f"word{i}" for i in range(1500))  # about 11500 characters
+        whole = long_words[:9000].rsplit(" ", 1)[0]
+        need(_pl.typed_text(whole) == whole, f"a {len(whole)}-character typed message didn't go in whole")
+        need(_pl.typed_text("one\n\ntwo   three") == "one two three", "a typed message's spaces aren't evened out")
+        need(len(_pl.typed_text(long_words)) == _pl.TYPED_MAX_CHARS, "the server doesn't keep to its own limit")
 
         from pipeline import type_to_agent
 

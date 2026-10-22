@@ -989,7 +989,7 @@
   <button id="setdone" type="button">Done</button>
 </div>
 <div id="chat" role="dialog" aria-label="Chat log"><div id="chathead"><h2 id="chattitle">What was said</h2><button id="chatclose" type="button">Close</button></div><div id="chatlog"></div>
-  <form id="typeform" autocomplete="off"><textarea id="typein" rows="1" enterkeyhint="send" placeholder="Type to Donna" aria-label="Type to Donna" maxlength="2000"></textarea><span id="sendwrap"><button id="yesbtn" type="button" tabindex="-1" aria-hidden="true">Yes</button><button id="typesend" type="submit" disabled>Send</button></span></form>
+  <form id="typeform" autocomplete="off"><textarea id="typein" rows="1" enterkeyhint="send" placeholder="Type to Donna" aria-label="Type to Donna"></textarea><span id="sendwrap"><button id="yesbtn" type="button" tabindex="-1" aria-hidden="true">Yes</button><button id="typesend" type="submit" disabled>Send</button></span></form>
   <div id="chatfoot"><button id="chatcont" type="button">Call back and continue</button><small id="chatcontnote"></small></div></div>
 <div id="statsheet" role="dialog" aria-label="Status"><div id="stathead"><h2>Status</h2><button id="statclose" type="button">Close</button></div><iframe id="statframe" title="Status" src="about:blank"></iframe></div>
 <div id="histsheet" role="dialog" aria-label="Past calls"><div id="histhead"><button id="histback" type="button">‹ Calls</button><h2 id="histtitle">Past calls</h2><button id="histclose" type="button">Close</button></div><div id="histlist"></div><div id="histlog"></div><div id="histfoot"><button id="histcont" type="button">Continue this call</button><small id="histcontnote"></small></div></div>
@@ -1957,8 +1957,16 @@ typeIn.addEventListener("keydown", ev => {
   ev.preventDefault();
   typeForm.requestSubmit();
 });
+// F46: no maxlength on the box: a long dictated message used to be cut at 2000 characters without a
+// word (the browser drops the rest of a paste). The server takes up to TYPED_MAX (pipeline.py's
+// TYPED_MAX_CHARS, the same number); past it nothing is cut: it stays in the box and says so.
+const TYPED_MAX = 10000;
 function sendTyped(text) {
   if (!text || !canType()) return false;
+  if (text.length > TYPED_MAX) {
+    errEl.textContent = `That's ${text.length} characters; one message takes ${TYPED_MAX}. Send it in two parts.`;
+    return false;
+  }
   try { dc.send(JSON.stringify({ type: "typed", text })); } catch (e) { errEl.textContent = "Couldn't send that. Try again."; return false; }
   hideCancel();  // H38: a new turn of his
   return true;

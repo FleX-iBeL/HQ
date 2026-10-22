@@ -557,7 +557,14 @@ class HoldableTurnStopStrategy(TurnAnalyzerUserTurnStopStrategy):
         await super()._maybe_trigger_user_turn_stopped()
 
 
-TYPED_MAX_CHARS = 2000  # H18: a typed message longer than this is cut
+# F46: up to 10000 characters, like the call page's box (TYPED_MAX in index.html); was 2000 (H18),
+# which cut long dictated messages off. 10000 stays under the data channel's 64 KB per message.
+TYPED_MAX_CHARS = 10000
+
+
+def typed_text(text: str) -> str:
+    """F46: what goes into the turn from a typed message: spaces evened out, at most TYPED_MAX_CHARS."""
+    return " ".join((text or "").split())[:TYPED_MAX_CHARS]
 
 
 async def type_to_agent(worker, llm: ClaudeSessionLLMService, call_state, text: str) -> bool:
@@ -569,7 +576,7 @@ async def type_to_agent(worker, llm: ClaudeSessionLLMService, call_state, text: 
     from pipecat.frames.frames import InterruptionWorkerFrame, LLMMessagesAppendFrame
     from pipecat.processors.frame_processor import FrameDirection
 
-    text = " ".join((text or "").split())[:TYPED_MAX_CHARS]
+    text = typed_text(text)
     if not text:
         return False
     busy = call_state is not None and call_state.state in ("thinking", "speaking")

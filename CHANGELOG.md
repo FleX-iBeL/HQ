@@ -13,6 +13,9 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - A team job is now only paused for its usage once it has used about four times its estimate, not twice, so jobs stop getting paused for using a bit more than guessed. The 5-hour and weekly stop lines stay as they were (H221).
 - The team's work is sorted into one clear set of kinds, made from everything the team has done so far: small and big builds, research and reading, transcribing, the routine's own maintenance, releases and merges. Reading work no longer lands in a pile of one-minute jobs, and the pause now counts how sure the estimate is: when the first look, the call or the team itself guessed a job would take longer, it gets that much more room (at most twice) before the pause at four times (H220).
 
+### Fixed
+- A long typed message on a call goes in whole. The chat's box and the call cut anything past 2000 characters without a word, so a long dictated message lost its end; now one message takes up to 10000, and past that it stays in the box and says so instead of being cut (F46).
+
 ## 0.4.9 · 21 October 2026
 
 ### Added
