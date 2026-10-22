@@ -378,6 +378,7 @@
   #todobtn { display:flex; align-items:center; justify-content:center; cursor:pointer; }
   #gamebtn { display:none; align-items:center; justify-content:center; cursor:pointer; }  /* H222: only once there's a game */
   #gamebtn.on { display:flex; }
+  #gamesheet:not(.open), #coachsheet:not(.open) { display:none; }  /* hidden from the start, also before or without games.js and coach.js */
   #todosheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
               border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:8px;
               padding:14px 16px calc(220px + env(safe-area-inset-bottom)); text-align:left; }

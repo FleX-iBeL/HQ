@@ -10508,7 +10508,8 @@ window.fetch = async (url, opt) => {
   out.push("button:" + (rows().length === 2 && nb(0) && nb(1) && rows()[0].querySelectorAll(".mk").length === 3 ? "ok" : "WRONG " + rows().length));
   const r = nb(0).getBoundingClientRect();
   out.push("fits:" + (r.width >= 30 && r.height >= 30 && rows()[0].getBoundingClientRect().right <= innerWidth + 1
-    && rows()[0].querySelector(".appt").getBoundingClientRect().width > 120 ? "ok" : "WRONG"));
+    && rows()[0].querySelector(".appt").getBoundingClientRect().width > 120 ? "ok"
+    : "WRONG " + [r.width, r.height, rows()[0].getBoundingClientRect().right, innerWidth, rows()[0].querySelector(".appt").getBoundingClientRect().width].map(Math.round).join("/") + " doc " + document.documentElement.clientWidth));
   nb(0).click(); await wait(300);
   const inp = () => document.getElementById("calnotein");
   out.push("onetap:" + (calEl.classList.contains("reading") && inp() && document.activeElement === inp() ? "ok" : "WRONG"));
