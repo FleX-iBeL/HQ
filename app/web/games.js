@@ -313,6 +313,7 @@
       if (calOpen()) showCal(false);
       if (todoOpen()) showTodo(false);
       if (typeof coachOpen === "function" && coachOpen()) showCoach(false);  // H225
+      if (typeof newsOpen === "function" && newsOpen()) showNews(false);  // H236
       showDirect(false);
       closeWx();
       if (setEl.classList.contains("open")) showSettings(false);

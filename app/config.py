@@ -599,7 +599,14 @@ def voice_rules() -> str:
         ext = _extensions.rule("call")
     except Exception:
         ext = ""
-    return rules + ("\n" + off + "\n" if off else "") + ("\n" + ext + "\n" if ext else "")
+    # H236: their news, when it's on: how a call keeps their setup, and what it is now.
+    try:
+        import news as _news
+        nw = _news.rule()
+    except Exception:
+        nw = ""
+    return (rules + ("\n" + off + "\n" if off else "") + ("\n" + nw + "\n" if nw else "")
+            + ("\n" + ext + "\n" if ext else ""))
 
 VOICE_RULES = VOICE_RULES.replace("{planning}", os.environ.get("HQ_PLANNING_CALENDAR") or _SWITCHES.get("HQ_PLANNING_CALENDAR", "").strip('"') or "HQ Planning")
 

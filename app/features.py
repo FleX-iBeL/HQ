@@ -12,7 +12,7 @@ Where HQ already had an off switch, this is that switch, not a second one:
     weather    weather.on()     (its rain alert comes as her text, so it needs texts; HQ_WEATHER=0 still wins)
     mail       the queue's "Mail check:" line on the roadmap (jobs.py mail-on / mail-off)
     coaching   the Life coaching workflow (workflows.py, the map)
-The rest only had their button: to-do, notes and the team's status. Every call reads what's off at its start
+The rest only had their button: to-do, notes and the team's status; News (H236) is new, its button and its hourly read. Every call reads what's off at its start
 (config.voice_rules), so the agent doesn't bring up what they turned off unless they ask.
 
 Which are off is the workspace's: `HQ/features.json` there, {"off": ["calendar"]}. No file: everything on, except
@@ -52,6 +52,8 @@ FEATURES = [
      "needs": "calendar", "default": "off", "key": True},
     {"id": "mail", "name": "Mail check", "line": "Every hour HQ looks at your new mail and tells you what needs you",
      "buttons": []},
+    {"id": "news", "name": "News", "line": "Your own newspaper: only the topics and sources you pick, read inside HQ, "
+     "apart from your mail. The News button", "buttons": ["newsbtn"]},
     {"id": "notes", "name": "Quick notes", "line": "Jot something down for later: the Notes button",
      "buttons": ["notesbtn"]},
     {"id": "team", "name": "The team's work", "line": "What the computer builds for you, and how far it is: the Status button",

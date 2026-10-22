@@ -256,6 +256,7 @@
       if (calOpen()) showCal(false);
       if (todoOpen()) showTodo(false);
       if (gameOpen()) showGame(false);
+      if (typeof newsOpen === "function" && newsOpen()) showNews(false);  // H236
       showDirect(false);
       closeWx();
       if (setEl.classList.contains("open")) showSettings(false);

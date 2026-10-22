@@ -442,6 +442,14 @@ class Policy:
             if len(args) == 1 or args[1] in ("summary", "json", "due") or (args[1] in ("done", "later") and len(args) == 3):
                 return Decision(ALLOW, "Life coaching's check-ins")
             return Decision(DENY, "from a call, the coaching script says what's due and marks a check-in done or not now")
+        # H236: their own news: read it, and keep their setup (topics, what to leave out, sources) as they say it; try a
+        # feed before adding it, read the sources now. `start` is the routine's.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "news.py"):
+            if len(args) == 1 or args[1] in ("summary", "json", "setup", "suggest", "try", "topic", "leave-out",
+                                             "source", "fetch", "rule"):
+                return Decision(ALLOW, "their own news")
+            return Decision(DENY, "from a call, the news script reads, keeps their topics, what's left out and the "
+                                  "sources, tries a feed or reads the sources now")
         # H235: their own extensions: list them, read their rules and the last clash check, and run one of an
         # extension's own scripts, only one it declares (extensions.py refuses the rest); one that says "ask" waits for
         # a yes. Settling a clash is the page's buttons'.

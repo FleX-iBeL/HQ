@@ -387,7 +387,7 @@
   #todobtn { display:flex; align-items:center; justify-content:center; cursor:pointer; }
   #gamebtn { display:none; align-items:center; justify-content:center; cursor:pointer; }  /* H222: only once there's a game */
   #gamebtn.on { display:flex; }
-  #gamesheet:not(.open), #coachsheet:not(.open) { display:none; }  /* hidden from the start, also before or without games.js and coach.js */
+  #gamesheet:not(.open), #coachsheet:not(.open), #newssheet:not(.open) { display:none; }  /* hidden from the start, also before or without games.js and coach.js */
   #todosheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
               border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:8px;
               padding:14px 16px calc(220px + env(safe-area-inset-bottom)); text-align:left; }
@@ -591,7 +591,7 @@
   body.chatting::after { display:none; }
   body.chatting h1, body.chatting #modes, body.chatting #modehint, body.chatting #setbtn,
   body.chatting #freetag { display:none; }
-  body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet, body.chatting #notesheet, body.chatting #calsheet, body.chatting #todosheet, body.chatting #gamesheet, body.chatting #coachsheet { top:0; height:auto; bottom:calc(318px + env(safe-area-inset-bottom));
+  body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet, body.chatting #notesheet, body.chatting #calsheet, body.chatting #todosheet, body.chatting #gamesheet, body.chatting #coachsheet, body.chatting #newssheet { top:0; height:auto; bottom:calc(318px + env(safe-area-inset-bottom));
                         border-top:0; border-bottom:1px solid var(--muted); border-radius:0 0 18px 18px;
                         padding:calc(14px + env(safe-area-inset-top)) 16px 12px; }
   body.chatting #orbwrap { order:1; flex-direction:row; }
@@ -701,15 +701,15 @@
     #dock > *::after { font-size:9.5px; letter-spacing:-.3px; } #dock.oncall { left:4px; right:4px; padding:6px 2px; } #dock.oncall > *::after { font-size:9px; letter-spacing:-.35px; } }
   #chatbtn .badge { top:0; right:calc(50% - 22px); }
   /* Sheets: one shape for all of them, reaching down to the dock, with a handle on top and a soft Close. */
-  #chat, #histsheet, #statsheet, #notesheet, #calsheet, #todosheet, #gamesheet, #coachsheet, #wxsheet, #settings {
+  #chat, #histsheet, #statsheet, #notesheet, #calsheet, #todosheet, #gamesheet, #coachsheet, #newssheet, #wxsheet, #settings {
     max-width:640px; margin:0 auto; border:0; border-top:1px solid var(--line); border-radius:26px 26px 0 0; box-shadow:0 -12px 40px rgba(0,0,0,.18);
     padding:24px 18px calc(var(--dockh) + 22px + env(safe-area-inset-bottom)); }
   #settings { padding-bottom:calc(18px + env(safe-area-inset-bottom)); max-height:calc(100dvh - 24px); overflow-y:auto; overscroll-behavior:contain; }
   #chat::before, #histsheet::before, #statsheet::before, #notesheet::before,
-  #calsheet::before, #todosheet::before, #gamesheet::before, #coachsheet::before, #wxsheet::before, #settings::before {
+  #calsheet::before, #todosheet::before, #gamesheet::before, #coachsheet::before, #newssheet::before, #wxsheet::before, #settings::before {
     content:""; position:absolute; left:50%; top:8px; width:38px; height:5px; margin-left:-19px; border-radius:3px; background:var(--line); }
   #settings::before { position:sticky; display:block; flex-shrink:0; margin:-14px auto 6px; left:auto; top:0; }
-  #chat h2, #histsheet h2, #statsheet h2, #notesheet h2, #calsheet h2, #todosheet h2, #gamesheet h2, #coachsheet h2, #wxsheet h2,
+  #chat h2, #histsheet h2, #statsheet h2, #notesheet h2, #calsheet h2, #todosheet h2, #gamesheet h2, #coachsheet h2, #newssheet h2, #wxsheet h2,
   #settings h2 { color:var(--fg); font-size:17px; font-weight:700; }
   #chatclose, #histclose, #statclose, #notesclose, #calclose, #todoclose, #wxclose {
     top:-6px; right:-2px; padding:7px 12px; border-radius:999px; background:var(--soft); font-size:14px; }
@@ -746,11 +746,11 @@
   /* With a sheet open on a call: the sheet on top, the call's controls in a short row above the dock. */
   body.chatting { gap:12px; padding-bottom:calc(var(--dockh) + 22px + env(safe-area-inset-bottom)); }
   body.chatting #chat, body.chatting #statsheet, body.chatting #histsheet,
-  body.chatting #notesheet, body.chatting #calsheet, body.chatting #todosheet, body.chatting #gamesheet, body.chatting #coachsheet {
+  body.chatting #notesheet, body.chatting #calsheet, body.chatting #todosheet, body.chatting #gamesheet, body.chatting #coachsheet, body.chatting #newssheet {
     top:0; bottom:calc(var(--dockh) + 262px + env(safe-area-inset-bottom)); border-top:0; border-bottom:1px solid var(--line); border-radius:0 0 26px 26px;
     padding:calc(14px + env(safe-area-inset-top)) 16px 12px; }
   body.chatting #chat::before, body.chatting #statsheet::before, body.chatting #histsheet::before,
-  body.chatting #notesheet::before, body.chatting #calsheet::before, body.chatting #todosheet::before, body.chatting #gamesheet::before, body.chatting #coachsheet::before { display:none; }
+  body.chatting #notesheet::before, body.chatting #calsheet::before, body.chatting #todosheet::before, body.chatting #gamesheet::before, body.chatting #coachsheet::before, body.chatting #newssheet::before { display:none; }
   body.chatting #orb { width:34px; height:34px; border-width:3px; }
   body.chatting #orblabel { font-size:16px; }
   body.chatting #mute { padding:14px 24px; }
@@ -832,9 +832,9 @@
   html.m3 #dock.oncall > * svg { padding:3px 8px; }
   html.m3 #chatbtn .badge { top:-2px; right:calc(50% - 26px); }
   /* Sheets: a soft grey ground with white cards on it, a clear title, a round close. */
-  html.m3 #chat, html.m3 #histsheet, html.m3 #statsheet, html.m3 #notesheet, html.m3 #calsheet, html.m3 #todosheet, html.m3 #gamesheet, html.m3 #coachsheet, html.m3 #wxsheet, html.m3 #settings {
+  html.m3 #chat, html.m3 #histsheet, html.m3 #statsheet, html.m3 #notesheet, html.m3 #calsheet, html.m3 #todosheet, html.m3 #gamesheet, html.m3 #coachsheet, html.m3 #newssheet, html.m3 #wxsheet, html.m3 #settings {
     background:var(--sheet); border-radius:28px 28px 0 0; border-top:0; box-shadow:0 -10px 40px rgba(0,0,0,.2); }
-  html.m3 #chat h2, html.m3 #histsheet h2, html.m3 #statsheet h2, html.m3 #notesheet h2, html.m3 #calsheet h2, html.m3 #todosheet h2, html.m3 #gamesheet h2, html.m3 #coachsheet h2, html.m3 #wxsheet h2,
+  html.m3 #chat h2, html.m3 #histsheet h2, html.m3 #statsheet h2, html.m3 #notesheet h2, html.m3 #calsheet h2, html.m3 #todosheet h2, html.m3 #gamesheet h2, html.m3 #coachsheet h2, html.m3 #newssheet h2, html.m3 #wxsheet h2,
   html.m3 #settings h2 { font-size:19px; font-weight:700; letter-spacing:-.01em; }
   html.m3 #chatclose, html.m3 #histclose, html.m3 #statclose, html.m3 #notesclose, html.m3 #calclose, html.m3 #todoclose, html.m3 #wxclose {
     width:34px; height:34px; padding:0; top:-8px; border-radius:50%; background:var(--soft); font-size:0; color:var(--fg); }
@@ -869,7 +869,7 @@
   html.m3 #dirframe { background:var(--sheet); }
   /* With a sheet open on a call: the sheet on top keeps its rounded foot. */
   html.m3 body.chatting #chat, html.m3 body.chatting #statsheet, html.m3 body.chatting #histsheet,
-  html.m3 body.chatting #notesheet, html.m3 body.chatting #calsheet, html.m3 body.chatting #todosheet, html.m3 body.chatting #gamesheet, html.m3 body.chatting #coachsheet { border-radius:0 0 28px 28px; }
+  html.m3 body.chatting #notesheet, html.m3 body.chatting #calsheet, html.m3 body.chatting #todosheet, html.m3 body.chatting #gamesheet, html.m3 body.chatting #coachsheet, html.m3 body.chatting #newssheet { border-radius:0 0 28px 28px; }
   html.m3 body.chatting #btn.live, html.m3 body.chatting #mute { height:auto; padding:13px 20px; }
   html.m3 body.chatting #orb { width:34px; height:34px; }
   /* H201, Modern 3's own: a sheet fades in (a fade only: a slide would move it while it's measured), the
@@ -877,7 +877,7 @@
      press on what's tapped so every tap answers. Nothing moves for someone who asked for less motion. */
   @keyframes m3in { from { opacity:0; } to { opacity:1; } }
   html.m3 #chat.open, html.m3 #histsheet.open, html.m3 #statsheet.open, html.m3 #notesheet.open, html.m3 #calsheet.open,
-  html.m3 #todosheet.open, html.m3 #gamesheet.open, html.m3 #coachsheet.open, html.m3 #wxsheet.open, html.m3 #settings.open, html.m3 #dirsheet.open { animation:m3in .2s cubic-bezier(.2,.8,.2,1); }
+  html.m3 #todosheet.open, html.m3 #gamesheet.open, html.m3 #coachsheet.open, html.m3 #newssheet.open, html.m3 #wxsheet.open, html.m3 #settings.open, html.m3 #dirsheet.open { animation:m3in .2s cubic-bezier(.2,.8,.2,1); }
   html.m3 #shade.open { animation:m3fade .2s ease-out; }
   @keyframes m3fade { from { opacity:0; } }
   html.m3 #dock > *, html.m3 #modes button, html.m3 #histlist button, html.m3 #callist .appt, html.m3 .tdq, html.m3 .tdrow .it,
@@ -893,7 +893,7 @@
   html.m3 #todobody .card.mail { background:color-mix(in srgb, var(--stop) 9%, var(--surface)); box-shadow:0 0 0 1px color-mix(in srgb, var(--stop) 25%, transparent); }
   @media (prefers-reduced-motion: reduce) {
     html.m3 #chat.open, html.m3 #histsheet.open, html.m3 #statsheet.open, html.m3 #notesheet.open, html.m3 #calsheet.open,
-    html.m3 #todosheet.open, html.m3 #gamesheet.open, html.m3 #coachsheet.open, html.m3 #wxsheet.open, html.m3 #settings.open, html.m3 #dirsheet.open, html.m3 #shade.open { animation:none; }
+    html.m3 #todosheet.open, html.m3 #gamesheet.open, html.m3 #coachsheet.open, html.m3 #newssheet.open, html.m3 #wxsheet.open, html.m3 #settings.open, html.m3 #dirsheet.open, html.m3 #shade.open { animation:none; }
     html.m3 *:active { transform:none !important; }
   }
   @media (max-height: 700px) {
@@ -1036,6 +1036,8 @@
   <div id="todobody"></div><div id="todonote" aria-live="polite"></div></div>
 <div id="coachsheet" role="dialog" aria-label="Life coaching" data-view="main"><div id="coachhead"><button id="coachback" type="button">‹ Coaching</button><h2 id="coachtitle">Life coaching</h2><button id="coachclose" type="button">Close</button></div>
   <div id="coachbody"></div><div id="coachnote" aria-live="polite"></div></div>
+<div id="newssheet" role="dialog" aria-label="News" data-view="main"><div id="newshead"><button id="newsback" type="button">‹ News</button><h2 id="newstitle">News</h2><button id="newsclose" type="button">Close</button></div>
+  <div id="newsbody"></div><div id="newsnote" aria-live="polite"></div></div>
 <div id="gamesheet" role="dialog" aria-label="Six-week game" data-view="list"><div id="gamehead"><button id="gameback" type="button">‹ Games</button><h2 id="gametitle">Six-week game</h2><button id="gameclose" type="button">Close</button></div>
   <div id="gamebody"></div><div id="gamenote" aria-live="polite"></div></div>
 <button id="wx" type="button" aria-label="Weather" aria-expanded="false"></button>
@@ -1061,6 +1063,9 @@
 </button>
 <button id="coachbtn" data-dl="Coaching" type="button" aria-label="Life coaching" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h18l-9 17z"/><path d="M6.6 9h10.8M9.3 14h5.4"/></svg><span class="cdot" aria-hidden="true"></span>
+</button>
+<button id="newsbtn" data-dl="News" type="button" aria-label="News" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h13v13a2 2 0 0 0 2 2H6a2 2 0 0 1-2-2z"/><path d="M17 9h3v9a2 2 0 0 1-2 2"/><path d="M7.5 9h6M7.5 12.5h6M7.5 16h4"/></svg><span class="ndot" aria-hidden="true"></span>
 </button>
 <button id="devbtn" data-dl="Mic" type="button" aria-label="Microphone and sound" aria-expanded="false" aria-controls="settings">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>
@@ -1341,6 +1346,7 @@ function showSettings(open) {
   if (open && todoOpen()) showTodo(false);  // H200
   if (open && gameOpen()) showGame(false);  // H222
   if (open && coachOpen()) showCoach(false);  // H225
+  if (open && newsOpen()) showNews(false);  // H236
   if (open) listDevices();  // H106
   if (open && !inCall) listWorkflows();  // job 257, H205
   if (!open || inCall) featView(false);  // H205: Settings opens at its top
@@ -1821,7 +1827,7 @@ function chatOpen() { return chatEl.classList.contains("open"); }
 // phone has settled its own scrolling (the iPhone finishes a swipe or a layout change a moment later).
 let sheetWasOpen = false;
 function showLayout() {
-  const open = chatOpen() || statOpen() || histOpen() || notesOpen() || calOpen() || todoOpen() || gameOpen() || coachOpen() || wxOpen();
+  const open = chatOpen() || statOpen() || histOpen() || notesOpen() || calOpen() || todoOpen() || gameOpen() || coachOpen() || newsOpen() || wxOpen();
   document.body.classList.toggle("chatting", open && state === "live"); fitCall();
   if (sheetWasOpen && !open && state !== "idle") { requestAnimationFrame(() => fitCall()); setTimeout(fitCall, 350); }
   sheetWasOpen = open;
@@ -1981,6 +1987,7 @@ function showChat(open) {
   if (open && todoOpen()) showTodo(false);  // H200
   if (open && gameOpen()) showGame(false);  // H222
   if (open && coachOpen()) showCoach(false);  // H225
+  if (open && newsOpen()) showNews(false);  // H236
   if (open) showDirect(false);  // F29
   if (open) closeWx();          // H135
   if (open) freshChat();       // H34: before a call, fresh each time it opens; F36: also after one
@@ -2089,6 +2096,7 @@ function showStatus(open) {
   if (open && todoOpen()) showTodo(false);  // H200
   if (open && gameOpen()) showGame(false);  // H222
   if (open && coachOpen()) showCoach(false);  // H225
+  if (open && newsOpen()) showNews(false);  // H236
   if (open) showDirect(false);   // F29
   if (open) closeWx();           // H135
   statEl.classList.toggle("open", open);
@@ -2233,6 +2241,7 @@ function showHistory(open) {
     if (todoOpen()) showTodo(false);  // H200
     if (gameOpen()) showGame(false);  // H222
     if (coachOpen()) showCoach(false);  // H225
+    if (newsOpen()) showNews(false);  // H236
     showDirect(false); // F29
     closeWx();         // H135
   }
@@ -2338,6 +2347,7 @@ function showNotes(open) {
     if (todoOpen()) showTodo(false);  // H200
     if (gameOpen()) showGame(false);  // H222
     if (coachOpen()) showCoach(false);  // H225
+    if (newsOpen()) showNews(false);  // H236
     showDirect(false); // F29
     closeWx();         // H135
   }
@@ -2365,6 +2375,7 @@ function showDirect(open) {
     if (todoOpen()) showTodo(false);  // H200
     if (gameOpen()) showGame(false);  // H222
     if (coachOpen()) showCoach(false);  // H225
+    if (newsOpen()) showNews(false);  // H236
     closeWx(); // H135
     dirEl.style.removeProperty("--dirh");
   }
@@ -2721,6 +2732,7 @@ const TODO_GRIP = '<svg viewBox="0 0 14 20" fill="currentColor" aria-hidden="tru
 const TODO_TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
 function gameOpen() { const e = document.getElementById("gamesheet"); return !!e && e.classList.contains("open"); }  // H222: games.js draws it
 function coachOpen() { const e = document.getElementById("coachsheet"); return !!e && e.classList.contains("open"); }  // H225: coach.js draws it
+function newsOpen() { const e = document.getElementById("newssheet"); return !!e && e.classList.contains("open"); }  // H236: news.js draws it
 function todoOpen() { return document.getElementById("todosheet").classList.contains("open"); }  // safe before the line above has run
 function todoLists(kind) { return ((todoData && todoData.lists) || []).filter(l => l.kind === kind); }
 function todoListBy(key) { return ((todoData && todoData.lists) || []).find(l => l.key === key) || null; }
@@ -3084,6 +3096,7 @@ function showTodo(open) {
     if (setEl.classList.contains("open")) showSettings(false);
     if (gameOpen()) showGame(false);  // H222
     if (coachOpen()) showCoach(false);  // H225
+    if (newsOpen()) showNews(false);  // H236
     todoView = { list: null, item: null, from: "main" }; todoKeep = {}; todoSay("");
   }
   todoEl.classList.toggle("open", open);
@@ -3116,6 +3129,7 @@ function showCal(open) {
     if (todoOpen()) showTodo(false);  // H200
     if (gameOpen()) showGame(false);  // H222
     if (coachOpen()) showCoach(false);  // H225
+    if (newsOpen()) showNews(false);  // H236
     calToToday = true;  // H156
   }
   calEl.classList.toggle("open", open);
@@ -3374,6 +3388,7 @@ function showWx(open) {
     if (todoOpen()) showTodo(false);  // H200
     if (gameOpen()) showGame(false);  // H222
     if (coachOpen()) showCoach(false);  // H225
+    if (newsOpen()) showNews(false);  // H236
     showDirect(false);
   }
   el.classList.toggle("open", open);
@@ -3653,6 +3668,7 @@ async function call() {
   const appt = aboutNext; aboutNext = null;  // H101: started from an appointment in the calendar
   const todoAbout = appt ? null : aboutTodoNext; aboutTodoNext = null;  // H200: started from an item on the to-do list
   const coachAbout = appt || todoAbout ? null : window.aboutCoachNext; window.aboutCoachNext = null;  // H225: a layer or a check-in
+  const newsAbout = appt || todoAbout || coachAbout ? null : window.aboutNewsNext; window.aboutNewsNext = null;  // H236: setting up their news
   const handover = handoverNext && !!cont; handoverNext = false;  // H79
   const demo = demoNext; demoNext = null; demoCall = demo !== null;  // H74: a demo call from the tutorial
   const plain = free || demoCall;
@@ -3685,7 +3701,7 @@ async function call() {
       body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, agent, free: plain, voice: voiceFor(agent),
         voices: Object.fromEntries(Object.keys(AGENTS).map(id => [id, voiceFor(id)])),  // H79: a three-way call speaks in both
         ...(demoCall ? { demo: true, demo_topic: demo } : {}),
-        ...(cont && !plain ? { continue: cont.name } : {}), ...(appt && !plain ? { about: appt.id } : {}), ...(todoAbout && !plain ? { about_todo: todoAbout } : {}), ...(coachAbout && !plain ? { about_coaching: coachAbout } : {}), ...(handover && !plain ? { handover: true } : {}) } }) });
+        ...(cont && !plain ? { continue: cont.name } : {}), ...(appt && !plain ? { about: appt.id } : {}), ...(todoAbout && !plain ? { about_todo: todoAbout } : {}), ...(coachAbout && !plain ? { about_coaching: coachAbout } : {}), ...(newsAbout && !plain ? { about_news: newsAbout } : {}), ...(handover && !plain ? { handover: true } : {}) } }) });
     if (!r.ok) throw new Error("The call server said " + r.status);
     const answer = await r.json();
     await pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });
@@ -3877,6 +3893,7 @@ document.addEventListener("click", ev => {
     [notesEl, () => showNotes(false)], [calEl, () => showCal(false)], [todoEl, () => showTodo(false)],
     [document.getElementById("gamesheet"), () => showGame(false)],
     [document.getElementById("coachsheet"), () => showCoach(false)],
+    [document.getElementById("newssheet"), () => showNews(false)],
     [document.getElementById("wxsheet"), () => showWx(false)], [dirEl, () => showDirect(false)]].find(([el]) => el.classList.contains("open"));
   if (!open || open[0].contains(t)) return;
   ev.preventDefault(); ev.stopPropagation(); open[1]();
@@ -3930,6 +3947,7 @@ async function showTour(open) {
     if (todoOpen()) showTodo(false);
     if (gameOpen()) showGame(false);  // H222
     if (coachOpen()) showCoach(false);  // H225
+    if (newsOpen()) showNews(false);  // H236
     try { localStorage.setItem("hq-tour-opened", "1"); } catch (e) {}
     helpBtn.classList.remove("new");
     await tourLoad(); tourDrawList();
@@ -4047,6 +4065,7 @@ sheetPull(tourEl, () => showTour(false));
 </script>
 <script src="games.js"></script>
 <script src="coach.js"></script>
+<script src="news.js"></script>
 <script>
 // H59: the version and a new one; the bar stays away while a call is on (the update waits for the call to end).
 if (window.HQUpdate) HQUpdate.mount({ line: document.getElementById("hqu-call-line"), banner: document.getElementById("hqu-call-banner"),

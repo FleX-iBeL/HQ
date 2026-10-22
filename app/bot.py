@@ -339,6 +339,9 @@ async def bot(runner_args: RunnerArguments):
     if about is None and not free and body.get("about_coaching"):  # H225: a layer or a check-in from the Coaching place
         import coaching as _coaching_call
         about = _coaching_call.about(str(body.get("about_coaching") or ""))
+    if about is None and not free and body.get("about_news"):  # H236: the short session that sets up their news
+        import news as _news_call
+        about = _news_call.about(str(body.get("about_news") or "setup"))
     await run_call(transport, runner_args.handle_sigint, runner_args.webrtc_connection,
                    model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent["id"],
                    continues=None if free else continues, handover=handover and not free, voices=voices, about=about,
@@ -410,6 +413,10 @@ if __name__ == "__main__":
     @app.get("/coach.js", include_in_schema=False)
     async def coach_js():  # H225: the Coaching place
         return FileResponse(WEB / "coach.js", media_type="text/javascript", headers=_NO_CACHE)
+
+    @app.get("/news.js", include_in_schema=False)
+    async def news_js():  # H236: the News sheet, their own newspaper
+        return FileResponse(WEB / "news.js", media_type="text/javascript", headers=_NO_CACHE)
 
     @app.get("/tour.json", include_in_schema=False)
     async def tour_json():
@@ -891,6 +898,46 @@ if __name__ == "__main__":
             return JSONResponse({"error": "nothing asked"}, status_code=400)
         out = await asyncio.to_thread(_coaching.read)
         out["said"] = said
+        return JSONResponse(out, headers=_NO_CACHE)
+
+    # H236: their own newspaper (news.py): the items the routine on the main kept from their sources, and their setup.
+    # ?id= reads one item inside HQ (its article's own text, fetched now; kept only on the main, the newspaper's one
+    # writer). Changed only from the page (x-hq: news): read the sources now, on the main. Never on a Free-only line.
+    import news as _news
+
+    @app.get("/api/news", include_in_schema=False)
+    async def news_read(id: str = ""):
+        if config.FREE_ONLY:
+            return JSONResponse({"off": "Free", "on": False}, headers=_NO_CACHE)
+        if id:
+            from policy import is_backup as _is_backup
+            backup = await asyncio.to_thread(_is_backup)
+            return JSONResponse(await asyncio.to_thread(_news.article, id[:40], None, not backup), headers=_NO_CACHE)
+        return JSONResponse(await asyncio.to_thread(_news.read), headers=_NO_CACHE)
+
+    @app.post("/api/news", include_in_schema=False)
+    async def news_change(request: Request):
+        if request.headers.get("x-hq") != "news":
+            return JSONResponse({"error": "Only the HQ page can change the news"}, status_code=403)
+        if config.FREE_ONLY:
+            return JSONResponse({"error": "Not on Free"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict) or not ask.get("fetch"):
+            return JSONResponse({"error": "nothing asked"}, status_code=400)
+        from policy import is_backup as _is_backup
+        if await asyncio.to_thread(_is_backup):
+            out = await asyncio.to_thread(_news.read)
+            out["said"] = "Your news is read on the main HQ; it comes over here with the sync."
+            return JSONResponse(out, headers=_NO_CACHE)
+        if not _news.on():
+            return JSONResponse({"error": "News is off"}, status_code=409)
+        r = await asyncio.to_thread(_news.fetch)
+        out = await asyncio.to_thread(_news.read)
+        bad = [n for n, x in r["sources"].items() if not x.get("ok")]
+        out["said"] = (f"{r['new']} new." if r["new"] else "Nothing new.") + (f" Didn't answer: {', '.join(bad)}." if bad else "")
         return JSONResponse(out, headers=_NO_CACHE)
 
     # Job 257 (H202): the workflows the user can switch on in Settings, Life coaching first. On starts their map from

@@ -6868,6 +6868,239 @@ print(json.dumps(o))
         return ("sees v0.3 and what's new; offline quiet; Update saves changes on a backup branch, moves to v0.3, "
                 "local/ and workspace kept, note for their Claude (not a Mac); with a call on it doesn't wait (H187)")
 
+    # 139
+    async def flow139(self) -> str:
+        """H236, no Claude, no internet: your own news. Made-up feeds on a local web server (an RSS feed, an Atom feed,
+        one that's broken, an article page), nothing of the user's. The setup kept in the workspace's HQ/news.json
+        (none to start, none in the template); fetch keeps what's about a topic or from a source taken whole, drops
+        what touches a word they leave out and what's older than a week, no doubles on the next read, a broken source
+        doesn't stop the rest; an item read inside HQ (the article's own paragraphs, not the menu or the cookie line;
+        kept only when saving); the routine's start about every hour, never without sources or with News off; the
+        switch in What HQ helps you with and the call rule; a call started from the News sheet (its note and
+        greeting); what a call may run; the server's /api/news (read, an item, read now only from the page); and the
+        sheet on a phone, a small phone and the desktop app: the empty state with Set up your news, the newspaper with
+        its topic chips, an item read inside HQ, and what's in your news."""
+        import http.server, socketserver, threading as th
+        import features as ft
+        import news
+        from policy import Policy, ALLOW, DENY
+        base = self.tmp / "h236"
+        if base.exists():
+            shutil.rmtree(base)
+        site, ws = base / "site", base / "ws"
+        site.mkdir(parents=True)
+        ws.mkdir()
+        now = time.time()
+        rfc = lambda t: time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime(t))
+        iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+        class Quiet(http.server.SimpleHTTPRequestHandler):
+            def __init__(self, *a, **k):
+                super().__init__(*a, directory=str(site), **k)
+            def log_message(self, *a):
+                pass
+        srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Quiet)
+        srv.daemon_threads = True
+        th.Thread(target=srv.serve_forever, daemon=True).start()
+        u = f"http://127.0.0.1:{srv.server_address[1]}"
+        (site / "article.html").write_text(
+            "<html><body><nav><p>Home News Sport Weather and everything else in the menu here</p></nav>"
+            "<article><h1>Robots learn</h1><p>A team of researchers showed a robot that learns to fold laundry from "
+            "watching people, a long-standing problem in robotics.</p><p>The model behind it was trained on thousands "
+            "of hours of video, and it runs on a small computer inside the robot itself.</p></article>"
+            "<footer><p>We use cookies to make this site work, accept all cookies or manage your settings</p></footer>"
+            "</body></html>")
+        (site / "rss.xml").write_text(f"""<?xml version="1.0"?><rss version="2.0"><channel><title>Made-up Daily</title>
+<item><title>New AI model folds laundry</title><link>{u}/article.html</link><description>&lt;p&gt;Robots &amp;amp; AI: a new model.&lt;/p&gt;</description><pubDate>{rfc(now - 3600)}</pubDate></item>
+<item><title>AI helps solve a murder case</title><link>{u}/a2.html</link><description>Police used software.</description><pubDate>{rfc(now - 7200)}</pubDate></item>
+<item><title>Local bakery wins a prize</title><link>{u}/a3.html</link><description>The best bread in town.</description><pubDate>{rfc(now - 1800)}</pubDate></item>
+<item><title>Old AI story</title><link>{u}/a4.html</link><description>From long ago.</description><pubDate>{rfc(now - 10 * 86400)}</pubDate></item>
+<item><title>Said twice about AI</title><link>{u}/a5.html</link><description>The first time.</description><pubDate>{rfc(now - 600)}</pubDate></item>
+</channel></rss>""")
+        (site / "atom.xml").write_text(f"""<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Made-up Space</title>
+<entry><title>A comet passes by</title><link rel="alternate" href="{u}/s1.html"/><summary>Look up tonight.</summary><updated>{iso(now - 900)}</updated></entry>
+<entry><title>Celebrity astronaut gossip</title><link href="{u}/s2.html"/><summary>Who wore what.</summary><updated>{iso(now - 300)}</updated></entry>
+<entry><title>Said twice about AI</title><link href="{u}/s3.html"/><summary>The second time.</summary><updated>{iso(now - 500)}</updated></entry>
+</feed>""")
+        env = {"HQ_NEWS_FOLDER": str(ws), "HQ_FEATURES_FOLDER": str(ws), "HQ_WORKFLOWS_FOLDER": str(ws)}
+        keep = {k: os.environ.get(k) for k in [*env, "HQ_NEWS_NOW"]}
+        os.environ.update(env)
+        os.environ.pop("HQ_NEWS_NOW", None)
+        try:
+            need(not (ROOT / "template" / news.SETUP).exists() and not (ROOT / "template" / news.ITEMS).exists(),
+                 "the template has a news setup: a fresh install must start empty")
+            r = news.read()
+            need(r["on"] and not r["set"] and not r["items"] and not news.start(), "a fresh news isn't empty, or the routine reads without sources")
+            need("Not set up yet" in news.summary(), news.summary())
+            need("News" in [i["name"] for i in ft.listing()] and next(i for i in ft.listing() if i["id"] == "news")["buttons"] == ["newsbtn"],
+                 "no News switch in What HQ helps you with")
+            # the session's commands
+            say_ = news.change(["topic", "add", "AI", "--words", "AI, robots"])
+            need(say_ == "Topic AI is in.", say_)
+            news.change(["topic", "add", "Bread"])
+            news.change(["topic", "remove", "Bread"])
+            news.change(["leave-out", "add", "murder, celebrity"])
+            need("isn't" not in news.change(["source", "add", "Made-up", "Daily", f"{u}/rss.xml"]), "a source with a two-word name")
+            news.change(["source", "add", "Made-up Space", f"{u}/atom.xml", "--all", "--topic", "Space"])
+            news.change(["source", "add", "Gone", f"{u}/missing.xml"])
+            need("needs its feed's link" in news.change(["source", "add", "Bad", "notalink"]), "a source without a link was taken")
+            s = news.setup()
+            need([t["name"] for t in s["topics"]] == ["AI"] and s["topics"][0]["words"] == ["AI", "robots"]
+                 and s["leave_out"] == ["murder", "celebrity"] and [x["name"] for x in s["sources"]] == ["Made-up Daily", "Made-up Space", "Gone"]
+                 and s["sources"][1] == {"name": "Made-up Space", "url": f"{u}/atom.xml", "all": True, "topic": "Space"} and s["since"],
+                 f"the setup isn't kept right: {s}")
+            need(news.try_feed(f"{u}/rss.xml").startswith("It works: 5 items") and news.try_feed(f"{u}/missing.xml").startswith("That feed doesn't work"),
+                 "try doesn't say whether a feed works")
+            # reading them
+            f1 = news.fetch()
+            titles = [i["title"] for i in f1["items"]]
+            need(sorted(titles) == sorted(["New AI model folds laundry", "A comet passes by", "Said twice about AI"]),
+                 f"the wrong items kept: {titles}")
+            byt = {i["title"]: i for i in f1["items"]}
+            need(byt["A comet passes by"]["topics"] == ["Space"] and byt["New AI model folds laundry"]["topics"] == ["AI"]
+                 and byt["New AI model folds laundry"]["summary"] == "Robots & AI: a new model." and byt["A comet passes by"]["source"] == "Made-up Space",
+                 f"an item's topics, summary or source: {byt}")
+            need(titles == [i["title"] for i in sorted(f1["items"], key=lambda i: -i["at"])], "not newest first")
+            need(f1["dropped"].get("leave out") == 2 and f1["dropped"].get("not about a topic") == 1, f"what's left out: {f1['dropped']}")
+            need(not f1["sources"]["Gone"]["ok"] and f1["sources"]["Made-up Daily"]["ok"], "a broken source isn't said, or stopped the rest")
+            f2 = news.fetch()
+            need(len(f2["items"]) == 3 and f2["new"] == 0, f"the second read doubled: {len(f2['items'])} items, {f2['new']} new")
+            # an item, read inside HQ
+            iid = byt["New AI model folds laundry"]["id"]
+            a = news.article(iid, save=False)
+            need("fold laundry from watching people" in a["text"] and "trained on thousands" in a["text"]
+                 and "cookies" not in a["text"] and "menu" not in a["text"], f"the article's text: {a.get('text')!r}")
+            need("text" not in next(i for i in json.loads((ws / news.ITEMS).read_text())["items"] if i["id"] == iid), "kept on the backup")
+            news.article(iid)
+            need("text" in next(i for i in json.loads((ws / news.ITEMS).read_text())["items"] if i["id"] == iid)
+                 and "text" not in news.read()["items"][0], "the article isn't kept on the main, or the list carries its text")
+            need("isn't in your news" in news.article("nope").get("error", ""), "an unknown item")
+            # the routine: about every hour, on its own
+            os.environ["HQ_NEWS_NOW"] = str(time.time() + 600)
+            need(not news.start(), "read again within the hour")
+            os.environ["HQ_NEWS_NOW"] = str(time.time() + 3700)
+            need(news.start() and json.loads((ws / news.ITEMS).read_text()).get("tried"), "not read again after an hour")
+            os.environ["HQ_NEWS_NOW"] = str(time.time() + 9000)
+            ft.switch("news", False)
+            need(not news.on() and not news.start() and not news.rule() and news.about() is None and not news.read()["on"],
+                 "News off, but it still reads or the call still hears it")
+            need("News" in ft.rule(), "the call isn't told News is off")
+            ft.switch("news", True)
+            os.environ.pop("HQ_NEWS_NOW", None)
+            rl = news.rule()
+            need("News (H236)" in rl and "source add" in rl and "Made-up Space" in rl, f"the call rule: {rl!r}")
+            need("News (H236)" in config.voice_rules(), "the call rules don't carry the news")
+            # a call started from the News sheet
+            import call as _call
+            e = news.about("setup")
+            need(e and e["kind"] == "news", f"about: {e}")
+            note_ = _call._about(e, "note")
+            need("News sheet" in note_ and "try URL" in note_ and "never a paid service" in note_ and "Made-up Daily" in note_,
+                 "the call's note doesn't set up the news")
+            need(any("news" in g for g in _call._about(e, "greetings")) and _call._about(e, "line") == "setting up your news", "the greeting")
+            pol = Policy(config.FOLDER)
+            nq = f'python3 "{APP / "news.py"}"'
+            for c_, v in ((f'{nq} topic add Space --words "space, comet"', ALLOW), (f"{nq} source add X https://x/feed", ALLOW),
+                          (f"{nq} try https://x/feed", ALLOW), (f"{nq} fetch", ALLOW), (f"{nq} json", ALLOW), (f"{nq} start", DENY)):
+                need(pol.decide("Bash", {"command": c_}).verdict == v, f"a call and {c_}")
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        # the server, on its own folder (its features folder is the workspace it reads)
+        await self.ensure_server()
+        sf = Path(self.server.env["HQ_FEATURES_FOLDER"])
+        sf.mkdir(parents=True, exist_ok=True)
+        for n_ in (news.SETUP, news.ITEMS):
+            (sf / n_).unlink(missing_ok=True)
+        (sf / "HQ").mkdir(exist_ok=True)
+        fe = sf / ft.STATE
+        if fe.exists():
+            d_ = json.loads(fe.read_text())
+            d_["off"] = [x for x in d_.get("off") or [] if x != "news"]
+            fe.write_text(json.dumps(d_))
+        code, body, _ = http_get("/api/news")
+        d = json.loads(body) if code == 200 else {}
+        need(code == 200 and d.get("on") and not d.get("set"), f"/api/news before a setup: {code} {d}")
+        shutil.copy(ws / news.SETUP, sf / news.SETUP)
+        def post(b, hq="news"):
+            req = urllib.request.Request(TEST_URL + "/api/news", data=json.dumps(b).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        need(post({"fetch": True}, hq="")[0] == 403 and post({})[0] == 400, "a read without the page's header, or nothing asked, was let in")
+        code, d = await asyncio.to_thread(post, {"fetch": True})
+        need(code == 200 and len(d["items"]) == 3 and "3 new" in d.get("said", "") and "Gone" in d.get("said", ""), f"read now: {code} {d and d.get('said')}")
+        sid = next(i["id"] for i in d["items"] if i["title"].startswith("New AI"))
+        code, body, _ = http_get("/api/news?id=" + sid)
+        need(code == 200 and "fold laundry" in json.loads(body).get("text", ""), "an item read through the server")
+        # the sheet: phone, small phone and the desktop app
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        page = page.replace('<script src="news.js"></script>', "<script>" + (APP / "web/news.js").read_text() + "</script>", 1)
+        harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms)), $ = id => document.getElementById(id);
+  const until = async (f, ms) => { for (let i = 0; i < ms / 50; i++) { if (f()) return true; await wait(50); } return false; };
+  const inside = e => { const r = e.getBoundingClientRect(), s = $("newssheet").getBoundingClientRect(); return r.width > 0 && r.left >= s.left - 1 && r.right <= s.right + 1; };
+  await until(() => $("newsbtn").offsetParent !== null, 5000);
+  out.push("button:" + ($("newsbtn").offsetParent !== null && $("newsbtn").getBoundingClientRect().width >= 34 ? "ok" : "off"));
+  $("newsbtn").click();
+  await until(() => document.querySelector("#newsbody .ncard"), 8000);
+  out.push("open:" + ($("newssheet").classList.contains("open") && $("newsbtn").getAttribute("aria-expanded") === "true" ? "ok" : "off"));
+  const cards = [...document.querySelectorAll("#newsbody button.ncard")];
+  out.push("items:" + cards.filter(c => c.querySelector(".nsum")).length);
+  out.push("chips:" + [...document.querySelectorAll("#newsbody .nchip")].map(c => c.textContent).join(","));
+  out.push("fit:" + (cards.every(inside) && document.documentElement.scrollWidth <= innerWidth + 1 ? "ok" : "off"));
+  [...document.querySelectorAll("#newsbody .nchip")].find(c => c.textContent === "Space").click(); await wait(50);
+  out.push("space:" + [...document.querySelectorAll("#newsbody button.ncard b")].map(b => b.textContent).filter(t => t !== "What's in your news").join(","));
+  [...document.querySelectorAll("#newsbody .nchip")][0].click(); await wait(50);
+  [...document.querySelectorAll("#newsbody button.ncard")].find(c => c.textContent.includes("folds laundry")).click();
+  await until(() => document.querySelector("#newsbody .nart a"), 8000);
+  const art = document.querySelector("#newsbody .nart");
+  out.push("read:" + (art && /fold laundry from watching/.test(art.textContent) && $("newssheet").dataset.view === "item" && $("newsback").offsetParent !== null && inside(art) ? "ok" : "off"));
+  out.push("link:" + (art && art.querySelector("a") && art.querySelector("a").target === "_blank" ? "ok" : "off"));
+  $("newsback").click(); await wait(50);
+  [...document.querySelectorAll("#newsbody button.ncard")].find(c => c.textContent.includes("What's in your news")).click(); await wait(50);
+  const t = $("newsbody").textContent;
+  out.push("setup:" + (/AI/.test(t) && /murder, celebrity/.test(t) && /Made-up Space/.test(t) && /All of it/.test(t) && /didn't answer/.test(t)
+                       && [...document.querySelectorAll("#newsbody .nbtn")].some(b => b.textContent === "Change your news") ? "ok" : "off"));
+  $("newsclose").click(); await wait(50);
+  out.push("closed:" + (!$("newssheet").classList.contains("open") ? "ok" : "off"));
+  const pre = document.createElement("pre"); pre.id = "h236"; pre.textContent = "H236RESULT " + out.join(" | ") + " END"; pre.style.display = "none"; document.body.append(pre);
+})();
+</script>"""
+        def browse(size, app_, tag):
+            pf = self.tmp / f"h236-{tag}.html"
+            pg = page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1).replace("</body>", harness + "</body>", 1)
+            if app_:
+                pg = pg.replace('new URLSearchParams(location.search).has("app")', "true", 1)
+            pf.write_text(pg)
+            return run([chrome, "--headless", "--disable-gpu", "--no-first-run", "--hide-scrollbars", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                        f"--user-data-dir={self.tmp / 'h236-profile'}", "--disable-web-security", f"--window-size={size}",
+                        "--virtual-time-budget=30000", "--dump-dom", pf.as_uri()], timeout=120)
+        want = {"button": "ok", "open": "ok", "items": "3", "chips": "All,AI,Space", "fit": "ok", "space": "A comet passes by",
+                "read": "ok", "link": "ok", "setup": "ok", "closed": "ok"}
+        for name, size, app_ in (("the phone", "390,844", False), ("a small phone", "375,553", False), ("the desktop app", "1180,780", True)):
+            tag = name.split()[-1] if not name.startswith("a small") else "small"
+            r = await asyncio.to_thread(browse, size, app_, tag)
+            mm = re.search(r'<pre id="h236"[^>]*>H236RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{name}: the test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+            say(f"   {name}: {mm.group(1)}")
+            need(res == want, f"{name}: not right: {mm.group(1)}")
+        srv.shutdown()
+        return ("setup kept and empty to start, the right items kept (topics, whole sources, left out, a week, no "
+                "doubles, a broken source), read inside HQ, hourly and off, the call's session and rules, the server, "
+                "the sheet on three screens")
+
     # 138
     async def flow138(self) -> str:
         """H235: extensions. A made-up extensions folder (one with call and text rules, mail steps, a script, a routine
@@ -15661,7 +15894,7 @@ print("H88OUT " + json.dumps(out))
             os.environ.pop("HQ_CALENDAR", None)
             items = ft.listing()
             ids = [i["id"] for i in items]
-            need(ids == ["calendar", "todo", "texts", "weather", "travel", "driving", "mail", "notes", "team", "coaching"], f"the switches: {ids}")
+            need(ids == ["calendar", "todo", "texts", "weather", "travel", "driving", "mail", "news", "notes", "team", "coaching"], f"the switches: {ids}")
             need(all(i["on"] for i in items if i["id"] not in ("coaching", "driving")) and not (tmp / ft.STATE).exists(), "not everything starts on")
             need(not next(i for i in items if i["id"] == "driving")["on"], "driving (H230, their own key) doesn't start off")
             need(all(i["line"] for i in items) and next(i for i in items if i["id"] == "weather").get("needs_name", "").startswith("Texts with"),
@@ -15803,7 +16036,7 @@ print("H88OUT " + json.dumps(out))
                     "--virtual-time-budget=30000"]
             args += [f"--screenshot={shot}"] if shot else ["--dump-dom"]
             return run(args + [pf.as_uri() + "#" + mode], timeout=120)
-        want = {"combos": "2048", "dock": "ok", "row": "ok", "title": "What HQ helps you with", "page": "ok", "calendar off": "gone",
+        want = {"combos": "4096", "dock": "ok", "row": "ok", "title": "What HQ helps you with", "page": "ok", "calendar off": "gone",
                 "weather waits": "ok", "tidy after taps": "ok", "back on": "ok", "back": "ok"}
         for name, size, app_ in (("the phone", "390,844", False), ("a small phone", "375,553", False), ("the desktop app", "1180,780", True)):
             tag = name.split()[-1] if not name.startswith("a small") else "small"
@@ -16021,7 +16254,7 @@ const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "
         targets = {st["target"] for pc in tour.load()["pieces"] for st in pc["steps"] if st["target"]}
         # which button opens which screen, where the page doesn't say it with aria-controls
         OPENS = {"chat": "chatbtn", "statsheet": "statbtn", "histsheet": "histbtn", "notesheet": "notesbtn", "calsheet": "calbtn",
-                 "todosheet": "todobtn", "coachsheet": "coachbtn", "gamesheet": "gamebtn", "wxsheet": "wx", "dirsheet": "directbtn"}
+                 "todosheet": "todobtn", "coachsheet": "coachbtn", "newssheet": "newsbtn", "gamesheet": "gamebtn", "wxsheet": "wx", "dirsheet": "directbtn"}
         OWN = {"helpbtn", "tour", "tourlayer"}  # the tutorial itself
         VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
 
@@ -16670,6 +16903,7 @@ FLOWS = {
     137: ("H231: an item put at another place in its list (a drag on its grip, the arrow keys) and renamed, on every list, through todo.py with its log line and undo; the ticked-off groceries readable; phone, small phone, desktop app, light and dark", False, "flow137"),
     136: ("H230: driving to appointments on their own maps key: off until turned on, the key kept on the computer only, the drive with the traffic and when to leave, Donna texts once when to leave and when the traffic changes, public transport or car per appointment, a daily cap, Google's and TomTom's answers", False, "flow136"),
     134: ("H227: every button and screen on the call page has a tutorial piece (the page read against tour.json; a new screen needs its button named)", False, "flow134"),
+    139: ("H236: your own news: the setup from a short session, the hourly read of their free feeds kept to their topics and without what they leave out, read inside HQ as their own newspaper; empty on a fresh install", False, "flow139"),
     138: ("H235: extensions: the workspace's folder read at HQ's fixed points (call and text rules, kinds of texts, the mail check, scripts, routines); the local check after an update, and its plain message with Talk it through and Send to the team", False, "flow138"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }

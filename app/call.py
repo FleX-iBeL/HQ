@@ -40,6 +40,7 @@ from pipeline import make_brain, make_stt, make_tts, warm_up_tts
 from policy import SESSION_TOOLS, Policy
 import agenda
 import coaching
+import news
 import todo
 import tour
 import transcript
@@ -48,8 +49,9 @@ from transcript import CallTranscript, now
 
 def _about(e: dict, what: str):
     """H101, H200, H225: what a call started from something in the app gets: an appointment (agenda), a to-do item
-    (todo), or a layer or check-in of their Life coaching (coaching)."""
-    mod = todo if e.get("kind") == "todo" else coaching if e.get("kind") == "coaching" else agenda
+    (todo), or a layer or check-in of their Life coaching (coaching). H236: or setting up their news (news)."""
+    mod = (todo if e.get("kind") == "todo" else coaching if e.get("kind") == "coaching"
+           else news if e.get("kind") == "news" else agenda)
     if what == "line":
         return mod.when_line(e)
     if what == "greetings":

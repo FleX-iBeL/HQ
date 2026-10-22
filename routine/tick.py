@@ -1095,6 +1095,13 @@ def direct_watch():
                 log("travel: looking at the trips")
         except Exception as e:
             log(f"travel: {e!r}")
+        # H236: their own news: the sources they picked, read about every hour (detached), kept when they fit.
+        try:
+            import news
+            if news.start():
+                log("news: reading the sources")
+        except Exception as e:
+            log(f"news: {e!r}")
         # H225: Life coaching's check-ins, kept in the background: one that comes due lands in the coaching line.
         try:
             import coaching

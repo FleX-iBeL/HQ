@@ -101,7 +101,7 @@
       "steps": [
         {"target": "setbtn", "title": "Voices and sound", "text": "Pick each agent's voice, your microphone and where her voice plays, and the soft thinking sound."},
         {"target": "devbtn", "title": "Microphone and sound, quickly", "text": "The microphone button is a shortcut to the same place: switch to your headphones or another microphone in two taps, also in the middle of a call."},
-        {"target": "setbtn", "title": "What HQ helps you with", "text": "Every feature is a switch: the calendar, the to-do list, texts, the weather, travel by public transport, the mail check, notes, the team's work, and Life coaching. Turn off what you don't use: its button goes away and the rest moves up. Driving to appointments starts off: it needs your own maps key."},
+        {"target": "setbtn", "title": "What HQ helps you with", "text": "Every feature is a switch: the calendar, the to-do list, texts, the weather, travel by public transport, the mail check, your news, notes, the team's work, and Life coaching. Turn off what you don't use: its button goes away and the rest moves up. Driving to appointments starts off: it needs your own maps key."},
         {"target": "setbtn", "title": "Life coaching", "text": "With Life coaching on, a few calm sessions with {pepper} build your long-term vision, from three to five years out down to your ideal week, and HQ supports you with it every day. You give your vision its own name."},
         {"target": "setbtn", "title": "Free", "text": "Free is plain Claude with only the web: none of your files, nothing saved. Handy to show HQ to someone without showing your life."}
       ]
@@ -113,6 +113,15 @@
         {"target": "coachbtn", "title": "One session per layer", "text": "Start a layer and {pepper} calls about only that one, one question at a time, and writes your answers down in your own words. Short sessions, so nothing drifts off.",
          "demo": {"kind": "list", "items": [["The vision", "Done"], ["The year", "In progress · 12 of 20"], ["The six-week game", "Not started"], ["The ideal week", "Not started"]]}},
         {"target": "coachbtn", "title": "Check-ins, with a red dot", "text": "HQ keeps the moments to look back: every week, at the end of a game, and a bigger check-in every few months. When one is due the button gets a red dot. There's also a chat with {pepper} just for life coaching."}
+      ]
+    },
+    {
+      "id": "news", "title": "Your own news", "line": "Only the topics and sources you pick, read inside HQ",
+      "steps": [
+        {"target": "newsbtn", "title": "Your own newspaper", "text": "News shows only what you asked for: the topics you care about, from the sources you picked, without the noise. It's read about every hour, and kept apart from your mail."},
+        {"target": "newsbtn", "title": "Set it up in a short call", "text": "The first time, tap Set up your news: a short call about what you want to hear about, what to leave out, and where from. {donna} or {pepper} suggests free sources and checks them. Change it the same way any time.",
+         "demo": {"kind": "list", "items": [["Topics", "Space, cycling"], ["Left out", "Celebrity gossip"], ["Sources", "Two science sites, one local paper"]]}},
+        {"target": "newsbtn", "title": "Read it here", "text": "Tap an item to read it inside HQ, with its source under it. A dot on the button means there's something new since you last looked."}
       ]
     },
     {
