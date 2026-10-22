@@ -33,7 +33,8 @@ when he's out today; before he goes out, only when it rains then (why out).
 
 She texts (watch(), every minute from tick.py): when the job list is finished (nothing running or waiting, after
 there was), when a very important mail lands in inbox.md, when something stays down (an incident open for three
-minutes; the backup taking over at once) and again when it's back. In her own character, through Claude; without
+minutes; the backup taking over at once) and again when it's back. H234: Tailscale off on this computer gets its own
+text (the other one is cut off from here, it hasn't gone down), and one when it's on again. In her own character, through Claude; without
 Claude (or HQ_DIRECT_PLAIN=1) a plain line in the same spirit. He texts back on /direct: she answers as on a call,
 with the same workspace and the same limits (policy.py), one text at a time.
 
@@ -343,6 +344,12 @@ PLAIN = {
     "down": ["Something's acting up on my end with {what}. I'm on it.",
              "Small hiccup with {what}, I'm looking at it.",
              "{What} is being a bit stubborn. On it, I'll tell you when it's fine."],
+    "tailscale": ["Tailscale is off on this computer, so I can't reach the other one from here. It hasn't gone down; "
+                  "switch Tailscale on when you can.",
+                  "Heads up: Tailscale's off here, that's why the other computer seems gone. Nothing's down, just "
+                  "turn it back on."],
+    "tailscale-back": ["Tailscale's on again, both computers can see each other.",
+                       "Tailscale's back on, all connected again."],
     "back": ["All good again, {what}'s back.",
              "Sorted, {what} is fine again.",
              "Fixed. {What}'s back up."],
@@ -484,6 +491,13 @@ def compose_prompt(why: str, facts: str) -> str:
                 "you're on it, in plain words (what it is in everyday terms, e.g. the call line); no technical "
                 "details, no alarm.",
         "back": "Something that was acting up is fine again. A quick all-clear, a few words.",
+        "tailscale": "Tailscale (the private network his two HQ computers talk over) is off on this computer, so the "
+                     "other HQ can't be reached from here. Say exactly that in plain words: the other one hasn't gone "
+                     "down, it's only cut off because Tailscale is off here, and turning Tailscale on fixes it. Never "
+                     "say it went down or came back. In his words: \"if it is not on, then it can conclude that might "
+                     "be the reason there is no connection\". Short, calm.",
+        "tailscale-back": "Tailscale is on again on this computer, so the two HQs reach each other again. A quick "
+                          "all-clear in a few words; don't say the other computer came back, it never went away.",
         "hello": "Say hi: this is your own direct line with him now. Quick and warm.",
         "sun": "It's dry and sunny where he is for the next hours. A light nudge to enjoy it: the sun, or a short "
                "walk. One idea at most, not pushy.",
@@ -793,9 +807,19 @@ def watch(q: dict | None = None, *, main: bool = True, incidents_data: list | No
         except Exception:
             incidents_data = []
     told = dict(s.get("told") or {})
-    downs, backs = [], []
+    downs, backs, ts_down, ts_back = [], [], [], []
     for e in incidents_data or []:
         iid = str(e.get("id"))
+        if str(e.get("key") or "").endswith("-tailscale"):  # H234: Tailscale off here, its own text, not "down"
+            if not e.get("back"):
+                if iid not in told and now - float(e.get("down") or now) >= DOWN_AFTER:
+                    if not first:
+                        ts_down.append(e.get("why") or "Tailscale is off on this computer")
+                    told[iid] = now
+            elif iid in told:
+                ts_back.append(((e.get("fixes") or [{}])[-1].get("what") or "Tailscale is on again"))
+                told.pop(iid)
+            continue
         if not e.get("back"):
             if iid not in told and (e.get("key") in ("role", "github") or now - float(e.get("down") or now) >= DOWN_AFTER):
                 if not first:
@@ -812,6 +836,10 @@ def watch(q: dict | None = None, *, main: bool = True, incidents_data: list | No
         out.append(("down", "\n".join(downs)))
     if backs:
         out.append(("back", "\n".join(backs)))
+    if ts_down:
+        out.append(("tailscale", "\n".join(ts_down)))
+    if ts_back:
+        out.append(("tailscale-back", "\n".join(ts_back)))
     s["told"] = told
     s["looked"] = now
     if not dry:

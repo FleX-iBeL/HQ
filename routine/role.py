@@ -58,6 +58,7 @@ import urllib.error, urllib.parse, urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import hqpaths
+import tailnet  # H234
 
 SUPPORT = hqpaths.SUPPORT
 CONFIG = os.path.join(SUPPORT, "role.json")
@@ -201,7 +202,9 @@ def mine() -> dict:
             "busy": busy(), "since": s.get("since"), "paired": bool(c), "at": time.time(),
             "took_over": bool(s.get("took_over")),  # F19: took over (main gone) or just handing over a choice
             "took_over_at": s.get("took_over") or None,  # H139: when, so a main that never left can tell
-            "label": hqpaths.short_name()}  # H88: the name of its heartbeat line on the other's status page
+            "label": hqpaths.short_name(),  # H88: the name of its heartbeat line on the other's status page
+            # H234: when Tailscale was last off here, so the other one's "answered again" can say why it was gone
+            "tailscale_off": _load(os.path.join(hqpaths.SUPPORT, "heartbeat-state.json"), {}).get("ts_last_off")}
 
 
 def busy() -> str:
@@ -514,10 +517,15 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
         s["peer_looks"] = 0
         s["lost_looks"] = int(s.get("lost_looks") or 0) + 1
         s["peer_lost_since"] = s.get("peer_lost_since") or now
-        if not online():  # H139: a look this one was cut off itself; the main that stayed checks it on return
+        # H234: Tailscale off here cuts this one off from the other just as no internet does
+        s["tailnet_off"] = tailnet.off_here(c)
+        if s["tailnet_off"]:  # its minutes don't count towards a takeover once Tailscale is on again
+            s["peer_lost_since"], s["lost_looks"] = now, 0
+        if s["tailnet_off"] or not online():  # H139: a look this one was cut off itself; the main that stayed checks it on return
             s["offline_seen"] = now
     if p:
         s["lost_looks"] = 0
+        s["tailnet_off"] = False
     # F23: only minutes this computer was awake and looking count; a sleep, a restart or a stopped routine
     # starts the count again from when it was back.
     s["awake_since"] = _awake_since(s, now)
@@ -547,7 +555,8 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
                            f"{peer} is handing the main role over" + (f" once {p['busy']} is done" if p.get("busy")
                                                                       else " now"), log)
             s["gave_way"] = now if took_over else None
-        elif not p and was == "backup" and s.get("gave_way") and not (gone and online() and not _main_still_there(c)):
+        elif not p and was == "backup" and s.get("gave_way") and not (gone and not s.get("tailnet_off") and online()
+                                                                       and not _main_still_there(c)):
             # F23: gave way to the other one, which took over; one look that doesn't reach it isn't the role back,
             # or both would be main. It stays the backup until the other hands back (it tells this one, or a look
             # sees it as the backup) or has been gone for the full takeover time.
@@ -586,7 +595,7 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
                                     "main role back when it answers" if s.get("main_back")
                                else s.get("why") if s.get("took_over") else f"{peer} was made main but can't be "
                                "reached; this one stays main until it answers", log)
-        elif gone and online():
+        elif gone and not s.get("tailnet_off") and online():
             why_not = _main_still_there(c)
             if why_not:
                 s["peer_lost_since"], s["lost_looks"] = now, 0
@@ -638,12 +647,16 @@ def _line_state(s, p, lost, chosen):
 
 def line(s, p, me, peer, lost, takeover, chosen) -> str:
     if s["acting"] == "main" and chosen:
-        tail = "" if p else f"; {peer}, the backup, can't be reached" if lost >= 120 else ""
+        tail = ("" if p else f"; {peer}, the backup, can't be reached from here: Tailscale is off on this computer"
+                if s.get("tailnet_off") else f"; {peer}, the backup, can't be reached" if lost >= 120 else "")
         return f"Main ({me}){tail}"
     if s["acting"] == "main":
         return f"Main for now ({me}): {s.get('why')}"
     if chosen:
         return f"Backup for now ({me}): {s.get('why')}"
+    if not p and s.get("tailnet_off"):  # H234: this one is cut off, the main hasn't gone down
+        return (f"Backup ({me}); {peer}, the main one, can't be reached from here: Tailscale is off on this computer; "
+                "doesn't take over while it's off")
     if not p and lost:
         left = max(0, takeover - lost)
         return (f"Backup ({me}); {peer}, the main one, can't be reached since {_clock(s['peer_lost_since'])}"

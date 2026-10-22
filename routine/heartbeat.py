@@ -10,6 +10,11 @@ one for this computer (it's up, and it reaches the internet) and one for the oth
 pages then show both computers, each under its short name (hqpaths.short_name: the VPS, the Laptop). Alone (no
 other HQ) there are no heartbeat lines at all, the same as Main or backup.
 
+H234 (22 October 2026): when the other is reached over Tailscale, a third line says whether Tailscale is on here.
+Off, the other's line says it can't be reached from here because of that (yellow, no missed answers, no incident:
+it hasn't gone down), the Tailscale line is red with its own incident (Donna texts it as Tailscale being off, not
+as something down), and when the other answers again after its Tailscale was off, the fix says so.
+
 [Claude's choices: one missed answer is yellow (one look can time out), two in a row are red and an incident;
 when this computer can't reach the internet itself, the other one's line says it can't tell, not that it's
 down.]
@@ -27,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import hqpaths
 import role
+import tailnet  # H234: Tailscale off here is why the other can't be reached, not the other going down
 
 STATE = os.path.join(hqpaths.SUPPORT, "heartbeat-state.json")
 PREFIX = "beat-"
@@ -42,9 +48,20 @@ def _clock(t):
     return time.strftime("%H:%M", time.localtime(t or time.time()))
 
 
-def look(c, s, now, online=None, peer=None) -> tuple[dict, dict]:
-    """One look: (this computer's line, the other's line), each {name, state, text}. Updates s."""
+def look(c, s, now, online=None, peer=None, tailscale=None) -> tuple[dict, dict]:
+    """One look: (this computer's line, the other's line), each {name, state, text}. Updates s. H234: also keeps
+    in s whether Tailscale is off here ("ts": on, off or None, "ts_off_since"), which the tick turns into its own
+    line; while it's off, the other's line says so and counts no missed answers."""
     me = hqpaths.short_name()
+    ts = (tailscale or None) if tailscale is not None else tailnet.state() if tailnet.matters(c) else None
+    s["ts"] = ts
+    if ts == "off":
+        s["ts_off_since"] = s.get("ts_off_since") or now
+    elif s.get("ts_off_since") and ts == "on":
+        s["ts_last_off"] = [s["ts_off_since"], now]  # told to the other one on its next look (role.mine)
+        s["ts_off_since"] = None
+    elif ts is None:
+        s["ts_off_since"] = None
     up = role.online() if online is None else online
     if up:
         s["offline_since"] = None
@@ -58,12 +75,17 @@ def look(c, s, now, online=None, peer=None) -> tuple[dict, dict]:
     ms = int((time.monotonic() - t0) * 1000)
     if p:
         s["peer_label"] = p.get("label") or s.get("peer_label") or p.get("name")
+        s["peer_ts_off"] = p.get("tailscale_off")  # H234: when Tailscale was off over there, last
     name = s.get("peer_label") or c.get("peer_name") or "The other HQ"
     if key(name) == key(me):
         name = f"{name} (the other one)"
     if p:
         s.update(peer_ok=now, misses=0, lost_since=None)
         other = {"name": name, "state": "ok", "text": f"Answers ({ms} ms)"}
+    elif ts == "off":  # H234: not the other going down; nothing counts as missed until Tailscale is on again
+        s.update(misses=0, lost_since=None)
+        other = {"name": name, "state": "waiting",
+                 "text": f"Can't be reached from here: Tailscale is off on this computer since {_clock(s['ts_off_since'])}"}
     else:
         s["misses"] = int(s.get("misses") or 0) + 1
         s["lost_since"] = s.get("lost_since") or now
@@ -77,9 +99,31 @@ def look(c, s, now, online=None, peer=None) -> tuple[dict, dict]:
     return mine, other
 
 
-def tick(routines=None, incidents=None, log=None, now=None, online=None, peer=None) -> dict | None:
-    """The routine's minute, on both HQs (main and backup). Writes the two lines, opens and closes their
-    incidents. Alone: removes any heartbeat lines left from a pairing and returns None, with no network."""
+def ts_line(s, me, other) -> dict | None:
+    """H234: this computer's Tailscale line, only when the other HQ is reached over it and Tailscale is here."""
+    if not s.get("ts"):
+        return None
+    name = f"{me} · Tailscale"
+    about = "Only with a second HQ reached over Tailscale: every minute, whether Tailscale is on on this computer"
+    if s["ts"] == "on":
+        return {"name": name, "state": "ok", "text": f"On: {other} is reached over it", "about": about}
+    return {"name": name, "state": "down", "about": about,
+            "text": f"Off since {_clock(s.get('ts_off_since'))}: {other} can't be reached from here until it's on again"}
+
+
+def _back_text(name, s, now, lost):
+    """The other one answers again: and if Tailscale was off over there in that time, say so (H234)."""
+    off = s.get("peer_ts_off") or []
+    lost = lost or now
+    if len(off) == 2 and off[1] >= lost - 60:
+        return (f"{name} answered again at {_clock(now)}; it hadn't gone down: Tailscale was off there from "
+                f"{_clock(off[0])} to {_clock(off[1])}")
+    return f"{name} answered again at {_clock(now)}"
+
+
+def tick(routines=None, incidents=None, log=None, now=None, online=None, peer=None, tailscale=None) -> dict | None:
+    """The routine's minute, on both HQs (main and backup). Writes the two lines (H234: three, with this computer's
+    Tailscale), opens and closes their incidents. Alone: removes any heartbeat lines left from a pairing and returns None, with no network."""
     c = role.config()
     if not c:
         if routines:
@@ -90,27 +134,38 @@ def tick(routines=None, incidents=None, log=None, now=None, online=None, peer=No
         s = json.load(open(STATE))
     except (OSError, ValueError):
         s = {}
-    mine, other = look(c, s, now, online=online, peer=peer)
+    was_lost = s.get("lost_since")
+    mine, other = look(c, s, now, online=online, peer=peer, tailscale=tailscale)
+    ts = ts_line(s, mine["name"], other["name"])
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
     with open(STATE + ".tmp", "w") as f:
         json.dump(s, f)
     os.replace(STATE + ".tmp", STATE)
     keys = []
-    for line in (mine, other):
+    for line in (mine, other, *([ts] if ts else [])):
         k = key(line["name"])
         keys.append(k)
         if routines:
             routines.beat(k, state=line["state"], text=line["text"], name=line["name"], last=now, next=now + EVERY,
-                          every=EVERY)
+                          every=EVERY, **({"about": line["about"]} if line.get("about") else {}))
         if incidents:
-            if line["state"] == "down" and not incidents.is_down(k):
+            if line is other and s.get("ts") == "off" and incidents.is_down(k):
+                # H234: it was never the other one going down: Tailscale is off here.
+                incidents.fix(k, f"It hadn't gone down: Tailscale is off on {mine['name']}, so it can't be reached "
+                                 "from here", at=now)
+                incidents.up(k, at=now)
+            elif line["state"] == "down" and not incidents.is_down(k):
                 why = (f"{line['name']} couldn't reach the internet" if line is mine else
-                       f"{line['name']} stopped answering")
-                incidents.down(k, why, at=s.get("offline_since") if line is mine else s.get("lost_since"))
+                       f"Tailscale is off on {mine['name']}, so {other['name']} can't be reached from here; it hasn't "
+                       "gone down" if line is ts else f"{line['name']} stopped answering")
+                incidents.down(k, why, at=s.get("offline_since") if line is mine else
+                               s.get("ts_off_since") if line is ts else s.get("lost_since"))
                 if log:
                     log(f"heartbeat: {line['name']} down: {line['text']}")
             elif line["state"] == "ok" and incidents.is_down(k):
-                incidents.fix(k, f"{line['name']} answered again at {_clock(now)}", at=now)
+                incidents.fix(k, f"Tailscale is on again at {_clock(now)}; {other['name']} can be reached" if line is ts
+                              else _back_text(line["name"], s, now, was_lost) if line is other
+                              else f"{line['name']} answered again at {_clock(now)}", at=now)
                 incidents.up(k, at=now)
                 if log:
                     log(f"heartbeat: {line['name']} back")
@@ -119,7 +174,8 @@ def tick(routines=None, incidents=None, log=None, now=None, online=None, peer=No
     if incidents:  # nor an open incident under its old name (H162, 18 October 2026)
         for k in {i["key"] for i in incidents.read()["incidents"]
                   if i["key"].startswith(PREFIX) and i["key"] not in keys and not i.get("back")}:
-            incidents.fix(k, "It goes by another name now; its old line is gone", at=now)
+            incidents.fix(k, "Tailscale isn't looked at here any more; its line is gone" if k.endswith("-tailscale")
+                          else "It goes by another name now; its old line is gone", at=now)
             incidents.up(k, at=now)
     return {"here": mine, "other": other}
 
@@ -129,6 +185,7 @@ if __name__ == "__main__":
     if not c:
         print("This HQ is on its own: no heartbeat lines.")
     else:
-        mine, other = look(c, {}, time.time())
-        for line in (mine, other):
+        s = {}
+        mine, other = look(c, s, time.time())
+        for line in (mine, other, *([ts_line(s, mine["name"], other["name"])] if s.get("ts") else [])):
             print(f"{line['name']}: {line['state']}: {line['text']}")

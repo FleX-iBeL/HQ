@@ -14296,7 +14296,9 @@ print(json.dumps(o))
         """H88, no Claude: heartbeats for both computers. The routine's part with a throwaway HQ memory (its own
         pairing, a stand-in for the other HQ on a spare port, the lines and incidents caught, nothing real written):
         alone no lines; paired, this computer up and online and the other answering; one missed answer yellow, two
-        red with an incident, closed when it answers again; offline, this one red and the other "can't tell"; a
+        red with an incident, closed when it answers again; offline, this one red and the other "can't tell"; H234:
+        Tailscale off here, the other "can't be reached from here" with no incident of its own, a red Tailscale line
+        with its own incident and Donna's own text, the backup not taking over; a
         new name leaves no old line and no open incident (H162). Then the status page in a headless browser: Laptop and VPS right after Main
         or backup, red when down, with their bars in the graph."""
         import subprocess as sp
@@ -14338,6 +14340,30 @@ heartbeat.tick(routines=r, incidents=i, online=True); out["up"] = snap()
 heartbeat.tick(routines=r, incidents=i, online=True, peer={}); out["miss1"] = snap()
 heartbeat.tick(routines=r, incidents=i, online=True, peer={}); out["miss2"] = snap(); out["inc2"] = list(i.log)
 heartbeat.tick(routines=r, incidents=i, online=True); out["back"] = snap(); out["inc3"] = list(i.log)
+# H234: Tailscale off here: the other can't be reached from here, it hasn't gone down
+n0 = len(i.log)
+heartbeat.tick(routines=r, incidents=i, online=True, peer={}, tailscale="off")
+heartbeat.tick(routines=r, incidents=i, online=True, peer={}, tailscale="off"); out["tsoff"] = snap(); out["tsinc"] = i.log[n0:]
+n0 = len(i.log)
+heartbeat.tick(routines=r, incidents=i, online=True, tailscale="on"); out["tson"] = snap(); out["tsinc2"] = i.log[n0:]
+heartbeat.tick(routines=r, incidents=i, online=True, peer={}, tailscale="on")
+heartbeat.tick(routines=r, incidents=i, online=True, peer={}, tailscale="on")
+import time as _t
+n0 = len(i.log)
+heartbeat.tick(routines=r, incidents=i, online=True, tailscale="on",
+               peer={"name": "far-away", "label": "VPS", "tailscale_off": [_t.time() - 600, _t.time() - 30]})
+out["tsthere"] = i.log[n0:]
+heartbeat.tick(routines=r, incidents=i, online=True, peer={}, tailscale="off")
+n0 = len(i.log)
+heartbeat.tick(routines=r, incidents=i, online=True, tailscale=""); out["tsgone"] = [snap(), i.log[n0:], sorted(i.open_)]
+import tailnet
+import ipaddress
+cgnat = ipaddress.ip_network("100.64.0.0/10")  # made-up tailnet addresses, taken from the range itself
+out["matters"] = [tailnet.matters({"peer": "https://a.tail1.ts.net:8444"}), tailnet.matters({"peer": f"http://{cgnat[9]}/"}),
+                  tailnet.matters({"peer": "http://127.0.0.1:9/"}), tailnet.matters({"peer": "https://x.example/", "peer_ip": str(cgnat[7])})]
+s = {"acting": "backup", "tailnet_off": True, "peer_lost_since": _t.time() - 900}
+out["roleline"] = role.line(s, None, "here", "far-away", 900, 300, False)
+out["mainline"] = role.line({"acting": "main", "tailnet_off": True}, None, "here", "far-away", 900, 300, True)
 heartbeat.tick(routines=r, incidents=i, online=False, peer={}); out["offline"] = snap()
 os.environ["HQ_LABEL"] = "Server"
 heartbeat.tick(routines=r, incidents=i, online=True); out["renamed"] = snap(); out["inc4"] = [list(i.log), sorted(i.open_)]
@@ -14357,6 +14383,45 @@ print("H88OUT " + json.dumps(out))
         need(o["miss2"]["beat-vps"][1] == "down" and "Doesn't answer since" in o["miss2"]["beat-vps"][2], f"two missed answers aren't red: {o['miss2']}")
         need(any(e[0] == "down" and e[1] == "beat-vps" for e in o["inc2"]), f"no incident when the other stopped answering: {o['inc2']}")
         need(o["back"]["beat-vps"][1] == "ok" and o["inc3"][-1] == ["up", "beat-vps"], f"answering again doesn't turn green and close the incident: {o['back']} {o['inc3'][-2:]}")
+        # H234: Tailscale off here.
+        need(o["tsoff"]["beat-vps"][1] == "waiting" and "Tailscale is off on this computer" in o["tsoff"]["beat-vps"][2]
+             and o["tsoff"]["beat-laptop-tailscale"][:2] == ["Laptop · Tailscale", "down"],
+             f"Tailscale off here doesn't say the other can't be reached because of it: {o['tsoff']}")
+        need(not any(e[1] == "beat-vps" and e[0] == "down" for e in o["tsinc"])
+             and any(e[0] == "down" and e[1] == "beat-laptop-tailscale" and "hasn't gone down" in e[2] for e in o["tsinc"]),
+             f"Tailscale off opened the wrong incident (the other going down, or none for Tailscale): {o['tsinc']}")
+        need(o["tson"]["beat-laptop-tailscale"][1] == "ok" and o["tson"]["beat-vps"][1] == "ok"
+             and ["up", "beat-laptop-tailscale"] in o["tsinc2"] and not any(e[1] == "beat-vps" for e in o["tsinc2"]),
+             f"Tailscale on again isn't green, or says the other came back: {o['tson']} {o['tsinc2']}")
+        need(any(e[0] == "fix" and e[1] == "beat-vps" and "Tailscale was off there" in e[2] for e in o["tsthere"]),
+             f"the other answering again after its Tailscale was off doesn't say so: {o['tsthere']}")
+        need("beat-laptop-tailscale" not in o["tsgone"][0] and "beat-laptop-tailscale" not in o["tsgone"][2],
+             f"a Tailscale line that's no longer looked at stays, or leaves its incident open: {o['tsgone']}")
+        need(o["matters"] == [True, True, False, True], f"which pairings go over the tailnet is wrong: {o['matters']}")
+        need("Tailscale is off on this computer" in o["roleline"] and "doesn't take over" in o["roleline"]
+             and "Tailscale is off" in o["mainline"], f"Main or backup doesn't say Tailscale is off here: {o['roleline']} / {o['mainline']}")
+        # H234: Donna texts Tailscale off as its own thing (not "something's down"), after the usual three minutes.
+        st = self.tmp / "h234-direct.json"
+        st.write_text(json.dumps({"looked": 1, "told": {}}))
+        old = os.environ.get("HQ_DIRECT_LOCAL")
+        os.environ["HQ_DIRECT_LOCAL"] = str(st)
+        try:
+            import direct_line
+            inc = [{"id": 7, "key": "beat-laptop-tailscale", "down": time.time() - 200,
+                    "why": "Tailscale is off on Laptop, so VPS can't be reached from here; it hasn't gone down"}]
+            got = direct_line.watch(None, main=False, incidents_data=inc, dry=True)
+            need([w for w, _ in got] == ["tailscale"], f"Donna doesn't text Tailscale off as its own thing: {got}")
+            st.write_text(json.dumps({"looked": 1, "told": {"7": 1}}))
+            inc[0].update(back=time.time(), fixes=[{"what": "Tailscale is on again at 12:00; VPS can be reached"}])
+            got = direct_line.watch(None, main=False, incidents_data=inc, dry=True)
+            need([w for w, _ in got] == ["tailscale-back"], f"Donna doesn't text Tailscale on again as its own all-clear: {got}")
+            need(all("went down" not in o_ and "acting up" not in o_ for o_ in direct_line.PLAIN["tailscale"]),
+                 "her plain Tailscale text says something went down")
+        finally:
+            if old is None:
+                os.environ.pop("HQ_DIRECT_LOCAL", None)
+            else:
+                os.environ["HQ_DIRECT_LOCAL"] = old
         need(o["offline"]["beat-laptop"][1] == "down" and o["offline"]["beat-vps"][1] == "waiting" and "Can't tell" in o["offline"]["beat-vps"][2],
              f"offline isn't this one red and the other can't tell: {o['offline']}")
         need(sorted(o["renamed"]) == ["beat-server", "beat-vps"], f"a new name left an old line behind: {sorted(o['renamed'])}")
@@ -14427,7 +14492,7 @@ print("H88OUT " + json.dumps(out))
         need("down" in res["vps"], f"the VPS line isn't red when it doesn't answer: {res['vps']}")
         need(res["lanes"] == "Laptop,VPS", f"the graph has no bars for Laptop and VPS: {res['lanes']}")
         return ("alone no lines; paired both green, one miss yellow, two red with an incident, closed when back; offline this "
-                "one red and the other can't tell; a new name leaves no old line and no open incident; on the page Laptop and VPS right after Main "
+                "one red and the other can't tell; Tailscale off here says so, not the other going down (H234); a new name leaves no old line and no open incident; on the page Laptop and VPS right after Main "
                 "or backup, the VPS red, both with bars in the graph")
 
     async def flow76(self) -> str:
@@ -16343,7 +16408,7 @@ FLOWS = {
     76: ("H78: his own calendar changes go without asking; with other people in it, or not looked at first, they don't", False, "flow76"),
     77: ("H82, H116: her text shows formatted in the call's chat, laid out like an AI chat app, while the voice stays plain; H170: links to tap", False, "flow77"),
     78: ("H86: the screen in the colour of who I'm calling; my lines green, hers in her colour", False, "flow78"),
-    79: ("H88: heartbeats for both computers: this one up and online, the other answering; on both status pages", False, "flow79"),
+    79: ("H88: heartbeats for both computers: this one up and online, the other answering, Tailscale on here (H234); on both status pages", False, "flow79"),
     80: ("F9: a call left quiet stays connected: no idle timeout; a hang-up or a lost connection still ends it", False, "flow80"),
     81: ("H81: job estimates per computer, the other's scaled, and patterns from all the data; H166: from the most similar jobs; H172: usage too; H173: the rate from both computers' tokens", False, "flow81"),
     82: ("H104, H108: times on calls as 5 30 in the afternoon, no colon, no words, never half, quarter or o'clock", False, "flow82"),
