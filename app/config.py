@@ -745,6 +745,19 @@ WHISPER_PIECES_MODEL = (os.environ.get("HQ_WHISPER_PIECES", _SWITCHES.get("HQ_WH
                         if STT_WHOLE_TURN else "") or WHISPER_MODEL
 WHOLE_TURN_MAX_AUDIO_SECS = 28.0  # Whisper hears 30 s at a time; longer would cost a second window
 
+# F45 (22 October 2026): Whisper gives one "no speech" score per 30 s window, so every sentence in a
+# piece shares it, and pipecat's cut at 0.4 threw away whole long pieces of his talking (17 s and 10 s on
+# the call of 22 October at 11:50, more on 17 and 21 October). Measured on the VPS (small, int8): pure
+# noise scores about 0.9, quiet real speech 0.3 to 0.5. A piece of LONG_PIECE_SECS or more now only goes
+# when its score is NO_SPEECH_LONG or higher; a shorter one keeps the old 0.4 (a cough, a breath). A quiet
+# piece is made louder first (its peak to QUIET_PEAK, at most QUIET_MAX_GAIN times), which lowers the
+# score of quiet speech and leaves noise at about 0.9, so its "Thank you." still goes.
+NO_SPEECH_SHORT = float(os.environ.get("HQ_NO_SPEECH_SHORT", "0.4"))
+NO_SPEECH_LONG = float(os.environ.get("HQ_NO_SPEECH_LONG", "0.75"))
+LONG_PIECE_SECS = 2.5
+QUIET_PEAK = 0.5
+QUIET_MAX_GAIN = 8.0
+
 # Ears. How long a silence must be before the turn may end. Pipecat's default is 0.2 s,
 # but Whisper needs about a second, and in that second the user often goes on talking,
 # which split one question into several Claude turns. 0.5 s kept every test question whole.

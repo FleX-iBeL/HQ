@@ -10563,6 +10563,78 @@ window.fetch = async (url, opt) => {
                 "app: the note button in each row, one tap to type, the note in the list and the appointment, Clear, a "
                 "half-typed note kept through a redraw")
 
+    async def flow132(self) -> str:
+        """F45, no Claude: a long piece of quiet talking isn't thrown away. Whisper gives one no-speech score
+        for the whole piece, and the old cut at 0.4 dropped long quiet stretches of his speech whole (the call
+        of 22 October 2026 at 11:50: a 17 s and a 10 s piece came back empty). The real listener hears HQ's
+        own voice, quiet, with pauses and a little noise, as one long piece, and the words come through;
+        noise alone still gives nothing; a normal sentence is heard as before; the rule itself on made-up
+        scores; a dropped piece is said in the log."""
+        import numpy as np
+        import soxr
+        from kokoro_onnx import Kokoro
+        from loguru import logger as log
+        from pipecat.frames.frames import TranscriptionFrame as TF
+
+        import pipeline as pl
+
+        # the rule on made-up scores
+        need(pl.keep_words([("So, okay, then they do the second test.", 0.5, 1.2)], 17.3) != "",
+             "a long piece at 0.5 was dropped")
+        need(pl.keep_words([("Yes.", 0.5, 1.0)], 1.0) == "", "a short piece at 0.5 was kept (a cough, a breath)")
+        need(pl.keep_words([("Thank you.", 0.9, 1.0)], 8.0) == "", "noise at 0.9 was kept")
+        need(pl.keep_words([("Thank you.", 0.1, 1.0)], 1.0) == "Thank you.", "a short clear piece was dropped")
+        q = np.full(16000, 0.1, np.float32)
+        need(abs(float(np.abs(pl.louder(q)).max()) - config.QUIET_PEAK) < 1e-3, "a quiet piece wasn't made louder")
+        need(float(np.abs(pl.louder(q * 0.001)).max()) <= 0.1 * 0.001 * config.QUIET_MAX_GAIN + 1e-6,
+             "the louder gain isn't capped")
+        loud = np.full(16000, 0.8, np.float32)
+        need(pl.louder(loud) is loud, "a loud piece was changed")
+        lines: list[str] = []
+        sink = log.add(lambda m: lines.append(str(m)), level="INFO")
+        try:
+            pl.keep_words([("Have a good day.", 0.95, 1.0)], 6.0, quiet=True)
+        finally:
+            log.remove(sink)
+        need(any("F45: a 6.0 s piece dropped" in x for x in lines), f"a dropped piece isn't in the log: {lines}")
+        need(not any("good day" in x for x in lines), "a quiet call's dropped words went into the log")
+
+        # the real listener
+        kokoro = Kokoro(str(config.KOKORO_MODEL), str(config.KOKORO_VOICES))
+        stt = pl.make_stt(quiet=True)
+        if hasattr(stt, "warm_up"):
+            await asyncio.to_thread(stt.warm_up)
+        rng = np.random.default_rng(45)
+
+        async def say(text: str) -> np.ndarray:
+            a, sr = await asyncio.to_thread(kokoro.create, text, voice=config.VOICE, speed=1.0, lang="en-us")
+            return soxr.resample(np.asarray(a, np.float32), sr, 16000)
+
+        async def hear(audio: np.ndarray) -> str:
+            pcm = (np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes()
+            got = [f.text async for f in stt.run_stt(pcm) if isinstance(f, TF)]
+            return " ".join(got)
+
+        parts = ["So, okay.", "Then they do the second test, and if something is still off", "they fix it",
+                 "and then", "I think maybe we can have three times", "the nightly check",
+                 "and if it is still not green, we hold it."]
+        gap = np.zeros(int(0.6 * 16000), np.float32)
+        speech = np.concatenate([np.concatenate([await say(t), gap]) for t in parts])
+        quiet_talk = speech * 0.04 + rng.normal(0, 0.005, len(speech)).astype(np.float32)
+        secs = len(quiet_talk) / 16000
+        text = (await hear(quiet_talk)).lower()
+        words = ["okay", "still off", "fix", "three times", "and then", "nightly", "green"]
+        found = [w for w in words if w in text]
+        need(len(found) >= 4, f"a {secs:.0f} s piece of quiet talking lost its words: {text!r}")
+        noise = (await hear(rng.normal(0, 0.01, 8 * 16000).astype(np.float32))).strip()
+        need(noise == "", f"noise alone gave words: {noise!r}")
+        plain = (await hear(np.concatenate([gap, await say("Can you move the dentist to Thursday?"), gap]) * 0.6)).lower()
+        need("dentist" in plain and "thursday" in plain, f"a normal sentence wasn't heard: {plain!r}")
+        return (f"a {secs:.0f} s piece of quiet talking heard ({len(found)} of {len(words)} phrases), noise alone "
+                f"nothing, a normal sentence as before; long pieces go at {config.NO_SPEECH_LONG}, short at "
+                f"{config.NO_SPEECH_SHORT}, quiet ones louder (capped), a dropped one in the log without its words "
+                "on a quiet call")
+
     async def flow102(self) -> str:
         """H165, no Claude: the whole turn heard again before she answers. The real listener hears a sentence
         spoken in three pieces (HQ's own voice, pauses between); with the switch on, the pieces with words are
@@ -15550,6 +15622,7 @@ FLOWS = {
     129: ("F44: an update finds lsof on a Mac with the helper app's bare PATH (/usr/sbin); the Mac scripts add it too", False, "flow129"),
     130: ("H222: the six-week game, part 1: one template every game gets (dates, win line, weekly look back, debrief, past games kept), its tracks by kind (tick, count, diary, graphs), kept from a call, Donna's chat and the app; designed in Life coaching and handed to the team", False, "flow130"),
     131: ("H225: Life coaching as its own place in the app: the layers with their checklist, the check-ins kept from the map (the weekly look back, a game's debrief, the bigger check-in) with a red dot, one call per layer or check-in, and the coaching line", False, "flow131"),
+    132: ("F45: a long piece of quiet talking isn't thrown away as no speech (one score per piece; long pieces at 0.75, short at 0.4, quiet ones louder); noise alone still gives nothing", False, "flow132"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 

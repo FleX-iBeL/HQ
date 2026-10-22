@@ -66,6 +66,36 @@ class DropSegmentDone(FrameProcessor):
             await self.push_frame(frame, direction)
 
 
+def louder(audio: np.ndarray) -> np.ndarray:
+    """F45: a quiet piece made louder (its peak to QUIET_PEAK, at most QUIET_MAX_GAIN times); else as it is."""
+    peak = float(np.abs(audio).max()) if audio.size else 0.0
+    if peak <= 0.0 or peak >= config.QUIET_PEAK:
+        return audio
+    return audio * min(config.QUIET_MAX_GAIN, config.QUIET_PEAK / peak)
+
+
+def keep_words(segments, secs: float, quiet: bool = False) -> str:
+    """F45: the words of a piece. segments: (text, no_speech_prob, compression_ratio) for each.
+    Whisper's no-speech score is one per window, so this keeps or drops the whole piece: a long one
+    only goes at NO_SPEECH_LONG or higher, a short one at NO_SPEECH_SHORT. A dropped piece with
+    words in it is said in the log, so a lost sentence can be found again."""
+    segments = list(segments)
+    limit = config.NO_SPEECH_LONG if secs >= config.LONG_PIECE_SECS else config.NO_SPEECH_SHORT
+    text, dropped = "", []
+    for words, no_speech, ratio in segments:
+        if ratio == 0.5555555555555556:
+            continue  # likely hallucination (as in pipecat)
+        if no_speech < limit:
+            text += f"{words} "
+        elif words.strip():
+            dropped.append(no_speech)
+    text = text.strip()
+    if dropped:
+        logger.info(f"F45: a {secs:.1f} s piece dropped as no speech (score {max(dropped):.2f}, limit {limit})"
+                    + ("" if quiet or not segments else f": [{' '.join(w for w, _, _ in segments).strip()}]"))
+    return text
+
+
 class WholeTurn:
     """H165: the pieces of this turn that had words, heard again in one go once the turn looks finished.
 
@@ -143,22 +173,17 @@ class HQWhisperSTT(WhisperSTTServiceMLX):
         """Blocking: the words in this audio (float32, 16 kHz)."""
         import mlx_whisper
 
+        secs = len(audio_float) / 16000
         with self._LOCK:
             chunk = mlx_whisper.transcribe(
-                audio_float,
+                louder(audio_float),
                 path_or_hf_repo=self._settings.model,
                 temperature=self._settings.temperature,
                 language=cast("Language | None", self._settings.language),
                 initial_prompt=self._initial_prompt,
             )
-        text = ""
-        threshold = self._settings.no_speech_prob
-        for segment in cast("list[dict[str, Any]]", chunk.get("segments", [])):
-            if segment.get("compression_ratio", None) == 0.5555555555555556:
-                continue  # likely hallucination
-            if threshold is not None and segment.get("no_speech_prob", 0.0) < threshold:
-                text += f"{segment.get('text', '')} "
-        return text.strip()
+        return keep_words(((seg.get("text", ""), seg.get("no_speech_prob", 0.0), seg.get("compression_ratio"))
+                           for seg in cast("list[dict[str, Any]]", chunk.get("segments", []))), secs, self._quiet)
 
     def warm_up(self) -> float:
         """Load the model and run it once (blocking), so the first turn isn't slow."""
@@ -234,15 +259,11 @@ class HQFasterWhisperSTT(WhisperSTTService):
         """Blocking: the words in this audio (float32, 16 kHz), heard by this model."""
         language = cast("Language | None", self._settings.language)
         with self._LOCK:
-            segments, _ = model.transcribe(audio_float, language=language, beam_size=1,
+            segments, _ = model.transcribe(louder(audio_float), language=language, beam_size=1,
                                            initial_prompt=self._initial_prompt)
             segments = list(segments)
-        text = ""
-        threshold = self._settings.no_speech_prob
-        for segment in segments:
-            if threshold is None or segment.no_speech_prob < threshold:
-                text += f"{segment.text} "
-        return text.strip()
+        return keep_words(((seg.text, seg.no_speech_prob, seg.compression_ratio) for seg in segments),
+                          len(audio_float) / 16000, self._quiet)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         try:
