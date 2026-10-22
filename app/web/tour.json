@@ -50,6 +50,18 @@
       ]
     },
     {
+      "id": "driving", "title": "Driving to appointments", "line": "By car, with the traffic, on your own maps key",
+      "steps": [
+        {"target": "calbtn", "title": "Driving to an appointment", "text": "If you drive, a trip can go by car instead. HQ works out how long the drive takes with the traffic and when to leave. From two hours before, it keeps an eye on the traffic, and {donna} texts you when it's time to go, and again when the drive gets ten minutes longer or shorter. It opens in Google Maps. It's its own switch, off until you turn it on.",
+         "demo": {"kind": "list", "items": [["14:00", "Visit Sam"], ["13:15", "Leave by 13:15: 35 minutes by car, 8 of it traffic"], ["12:55", "{donna}: time to get going, leave by 13:15"]]}},
+        {"target": "setbtn", "title": "Your own maps key", "text": "The traffic comes from a maps service, and HQ has no key of its own: you make your own, once, and it stays on your computer. Two kinds work. Google Maps asks for a card on file, but its free monthly use covers one person's trips many times over. TomTom is free without a card. Pick either; the next two pieces walk you through them."},
+        {"target": "setbtn", "title": "A Google Maps key, step by step", "text": "1. Go to console.cloud.google.com and sign in with your Google account. 2. At the top, make a new project, called HQ for example. 3. Open Billing and add a card (Google asks for it; the free use covers HQ). Under Budgets and alerts, set a small budget, like 5 euros, so you hear it if anything ever costs money. 4. Open APIs and Services, Library, search for Routes API, and press Enable. 5. Open APIs and Services, Credentials, Create credentials, API key. 6. Press Edit on the new key: under API restrictions pick Restrict key and tick only the Routes API, then Save. 7. Copy the key: it starts with AIza."},
+        {"target": "setbtn", "title": "Or TomTom, free without a card", "text": "1. Go to developer.tomtom.com and press Register. 2. Fill in your name and email, and confirm the email they send. 3. Sign in: your dashboard already has a key, on the Keys page. 4. Copy it. The free plan gives 2,500 looks a day; HQ uses about a dozen per trip and never more than 150 a day."},
+        {"target": "setbtn", "title": "Paste it in", "text": "Open Settings, What HQ helps you with, and turn on Driving to appointments. A box shows up under it: paste your key and press Save. It's kept on this computer only, never in your workspace and never uploaded; the page only shows which kind it is. Running two HQs, a main and a backup? Paste it on each. Forget takes it off again. Never say or type your key on a call or in a text."},
+        {"target": "calbtn", "title": "On each appointment", "text": "Open an appointment away from home and tap Travel. With only driving on, every trip is by car; with public transport on too, the trip starts by public transport and Go by car instead switches it. You can also just say it on a call: go by car to the dentist."}
+      ]
+    },
+    {
       "id": "notes", "title": "Quick notes", "line": "Jot something down for later",
       "steps": [
         {"target": "notesbtn", "title": "A quick note", "text": "A thought you don't want to lose? Write it here. The next call reads your notes, so you can say: let's go through my notes.",
@@ -89,7 +101,7 @@
       "steps": [
         {"target": "setbtn", "title": "Voices and sound", "text": "Pick each agent's voice, your microphone and where her voice plays, and the soft thinking sound."},
         {"target": "devbtn", "title": "Microphone and sound, quickly", "text": "The microphone button is a shortcut to the same place: switch to your headphones or another microphone in two taps, also in the middle of a call."},
-        {"target": "setbtn", "title": "What HQ helps you with", "text": "Every feature is a switch: the calendar, the to-do list, texts, the weather, the mail check, notes, the team's work, and Life coaching. Turn off what you don't use: its button goes away and the rest moves up."},
+        {"target": "setbtn", "title": "What HQ helps you with", "text": "Every feature is a switch: the calendar, the to-do list, texts, the weather, travel by public transport, the mail check, notes, the team's work, and Life coaching. Turn off what you don't use: its button goes away and the rest moves up. Driving to appointments starts off: it needs your own maps key."},
         {"target": "setbtn", "title": "Life coaching", "text": "With Life coaching on, a few calm sessions with {pepper} build your long-term vision, from three to five years out down to your ideal week, and HQ supports you with it every day. You give your vision its own name."},
         {"target": "setbtn", "title": "Free", "text": "Free is plain Claude with only the web: none of your files, nothing saved. Handy to show HQ to someone without showing your life."}
       ]
@@ -129,6 +141,6 @@
     "The routine is a small helper that runs every minute without Claude, so it costs nothing while waiting. A watchdog brings things back when they stop.",
     "Things that need your yes, like an appointment with other people in it or anything with your mail, are checked with you first. Mail is never sent.",
     "After a real call, its transcript is saved and the call's notes go into your log, in your own words. Free calls and demo calls are never saved.",
-    "Travel on appointments uses open data, free and without a key: the live train, bus, tram and metro data the Dutch transport companies publish (through OVapi), the government's address service, and 9292 links. Driving is a separate feature."
+    "Travel on appointments uses open data, free and without a key: the live train, bus, tram and metro data the Dutch transport companies publish (through OVapi), the government's address service, and 9292 links. Driving is a separate feature, on your own Google Maps or TomTom key, kept on your computer; HQ ships no key and counts its looks, at most 150 a day."
   ]
 }

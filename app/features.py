@@ -15,7 +15,8 @@ Where HQ already had an off switch, this is that switch, not a second one:
 The rest only had their button: to-do, notes and the team's status. Every call reads what's off at its start
 (config.voice_rules), so the agent doesn't bring up what they turned off unless they ask.
 
-Which are off is the workspace's: `HQ/features.json` there, {"off": ["calendar"]}. No file: everything on.
+Which are off is the workspace's: `HQ/features.json` there, {"off": ["calendar"]}. No file: everything on, except
+what starts off ("default": "off": Driving, H230, which needs their own key); turned on, it's in the file's "on" list.
 
     python3 app/features.py                 every switch, on or off
     python3 app/features.py on calendar     turn one on
@@ -46,6 +47,9 @@ FEATURES = [
      "buttons": ["wx"], "needs": "texts", "env": "HQ_WEATHER"},
     {"id": "travel", "name": "Travel on appointments", "line": "Each appointment away from home gets its trip by public "
      "transport, and {agent} texts you when a train or bus on it changes", "buttons": [], "needs": "calendar"},
+    {"id": "driving", "name": "Driving to appointments", "line": "Trips by car, with the traffic: {agent} texts you when to "
+     "leave, and when the traffic changes. Needs your own maps key (the tutorial shows how)", "buttons": [],
+     "needs": "calendar", "default": "off", "key": True},
     {"id": "mail", "name": "Mail check", "line": "Every hour HQ looks at your new mail and tells you what needs you",
      "buttons": []},
     {"id": "notes", "name": "Quick notes", "line": "Jot something down for later: the Notes button",
@@ -71,19 +75,30 @@ def _agent() -> str:
         return "Donna"
 
 
-def turned_off(base: Path | None = None) -> list[str]:
+def _state(base: Path | None = None) -> dict:
     try:
-        off = json.loads(((base or folder()) / STATE).read_text(encoding="utf8")).get("off", [])
-    except (OSError, ValueError, AttributeError):
-        return []
-    return [x for x in off if x in IDS]
+        d = json.loads(((base or folder()) / STATE).read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def turned_off(base: Path | None = None) -> list[str]:
+    """The switches that are off: turned off, or starting off and never turned on (H230)."""
+    d = _state(base)
+    off, on = d.get("off") or [], d.get("on") or []
+    return [x["id"] for x in FEATURES if x["id"] in off or (x.get("default") == "off" and x["id"] not in on)]
 
 
 def _save(base: Path, off: list[str]) -> None:
     p = base / STATE
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"off": [x for x in IDS if x in off]}, indent=2) + "\n", encoding="utf8")
+    d = {"off": [x["id"] for x in FEATURES if x["id"] in off and x.get("default") != "off"]}
+    on = [x["id"] for x in FEATURES if x.get("default") == "off" and x["id"] not in off]
+    if on:
+        d["on"] = on
+    tmp.write_text(json.dumps(d, indent=2) + "\n", encoding="utf8")
     os.replace(tmp, p)
 
 
@@ -172,6 +187,13 @@ def listing(base: Path | None = None) -> list[dict]:
             item["needs_name"] = need["name"].replace("{agent}", agent)
         if _computer_off(f):
             item["on"], item["fixed"] = False, "Off on this computer"
+        if f.get("key"):  # H230: their own maps key, kept on this computer (drive.py); never the key itself
+            try:
+                sys.path.insert(0, str(ROOT / "app"))
+                import drive
+                item["key"] = drive.status()
+            except Exception:
+                item["key"] = {"key": False}
         out.append(item)
     byid = {i["id"]: i for i in out}
     for i in out:  # what leans on a switch that's off is off too, and says why
@@ -205,7 +227,8 @@ def switch(fid: str, on: bool, base: Path | None = None) -> str:
 
 def rule(base: Path | None = None) -> str:
     """The call rule for what they turned off; empty when everything's on."""
-    names = [i["name"] for i in listing(base) if not i["on"] and i["id"] != "coaching"]
+    quiet = {f["id"] for f in FEATURES if f.get("default") == "off"}  # starts off: not something they turned off
+    names = [i["name"] for i in listing(base) if not i["on"] and i["id"] != "coaching" and i["id"] not in quiet]
     if not names:
         return ""
     return ("- Turned off in What HQ helps you with (H205): " + ", ".join(names) + ". Don't bring those up or offer "

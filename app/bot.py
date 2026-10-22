@@ -625,7 +625,8 @@ if __name__ == "__main__":
             return JSONResponse({"error": "which appointment?"}, status_code=400)
         import trips as _trips
         try:
-            await asyncio.to_thread(_trips.page_switch, ask["id"], bool(ask.get("on")))
+            await asyncio.to_thread(_trips.page_switch, ask["id"], bool(ask.get("on")),
+                                    ask["mode"] if ask.get("mode") in ("car", "transit") else "")
         except KeyError:
             return JSONResponse({"error": "no such appointment"}, status_code=404)
         return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
@@ -948,6 +949,32 @@ if __name__ == "__main__":
         except Exception:  # a file that can't be written, the mail check's jobs.py timing out
             return JSONResponse({"error": "Couldn't write it"}, status_code=500)
         return JSONResponse({"items": await asyncio.to_thread(_feat.listing, _feat_folder()), "said": said}, headers=_NO_CACHE)
+
+    # H230: their own maps key for Driving to appointments, pasted in Settings: kept on this computer only
+    # (drive.py, ~/.config/hq/maps-key), never in the workspace, never sent back. {key} keeps it, {key: ""} forgets it.
+    @app.post("/api/drive/key", include_in_schema=False)
+    async def drive_key(request: Request):
+        if request.headers.get("x-hq") != "features":
+            return JSONResponse({"error": "Only the HQ page can set the key"}, status_code=403)
+        if config.FREE_ONLY:
+            return JSONResponse({"error": "Not on Free"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict) or not isinstance(ask.get("key"), str):
+            return JSONResponse({"error": "no key"}, status_code=400)
+        import drive as _drive
+        try:
+            if ask["key"].strip():
+                await asyncio.to_thread(_drive.set_key, ask["key"], "")
+                import trips as _trips
+                await asyncio.to_thread(_trips.key_changed)
+            else:
+                await asyncio.to_thread(_drive.forget_key)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"items": await asyncio.to_thread(_feat.listing, _feat_folder())}, headers=_NO_CACHE)
 
     @app.get("/api/busy", include_in_schema=False)
     async def busy():

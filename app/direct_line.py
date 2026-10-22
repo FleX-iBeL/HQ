@@ -529,7 +529,9 @@ def compose_prompt(why: str, facts: str) -> str:
                   "metro stop near either end (that one is in Dutch from the transport company: say it in his "
                   "language, short). A quick heads-up the way a friend would text: what changed and what it means "
                   "for him, one or two sentences. Put the 9292 link from the facts at the end, as it is, so he can "
-                  "plan again. No technical words, no train numbers unless they help.",
+                  "plan again. No technical words, no train numbers unless they help. When the facts say By car "
+                  "(H230), it's the drive with the traffic: time to leave, or the drive got longer or shorter; say "
+                  "when to leave, and put the Google Maps link at the end as it is.",
         "watch-end": "Something he asked you to watch has stopped (the facts say what and why). One quick line that "
                      "you've stopped keeping an eye on it, and why in a few words (time's up and nothing came, or he "
                      "asked).",

@@ -44,6 +44,14 @@ off. Nothing is written to Google Calendar.
     python3 app/trips.py places                   the places book
     python3 app/trips.py forget "NAME"            take a place out of the book
     python3 app/trips.py check [--dry]            the routine's look (from tick.py); --dry texts nothing
+
+H230 (22 October 2026): by car, its own switch (Driving to appointments) on each person's own maps key (drive.py).
+A trip is by public transport ("transit") or by car ("car"): what the appointment was set to (`on --car`, `--transit`,
+or the app's By car / By public transport), else public transport when that's on, else the car. A car trip keeps
+Google Maps' directions link (no key needed for that) and, from one look at the traffic expected then, how long the
+drive takes and when to leave (DRIVE_SPARE minutes to spare, for parking). From DRIVE_BEFORE before, every DRIVE_EVERY,
+it looks again: Donna texts once when it's time to leave (LEAVE_AHEAD before), and when the drive got DRIVE_CHANGE
+minutes longer or shorter than she last said. A missing key or a refused one shows in the trip (why_not).
 """
 from __future__ import annotations
 
@@ -88,6 +96,11 @@ LATE_MIN = 5  # a delay this many minutes or more is worth a text, and a change 
 CROWD = 0.3  # this share of the trains at a station cancelled (at least CROWD_MIN) is trouble on the rails
 CROWD_MIN = 3
 KEEP_DONE = 2 * 86400  # trips of appointments over this long ago go
+DRIVE_BEFORE = 2 * 3600  # H230: the traffic is watched this long before an appointment
+DRIVE_EVERY = 10 * 60  # a look at the traffic this often then (about a dozen looks a trip)
+DRIVE_SPARE = 10  # minutes to spare when he gets there: parking, the walk in
+DRIVE_CHANGE = 10  # the drive this many minutes longer or shorter than last said is worth a text
+LEAVE_AHEAD = 20  # the time-to-leave text comes this many minutes before he should leave
 _lock = threading.Lock()
 
 
@@ -96,13 +109,26 @@ class NotFound(Exception):
 
 
 def on() -> bool:
+    """Trips at all: by public transport (travel) or by car (driving, H230)."""
+    return bool(modes())
+
+
+def modes() -> list[str]:
+    """The ways a trip can go here: "transit" (Travel on appointments), "car" (Driving to appointments, H230)."""
     if os.environ.get("HQ_TRIPS", "1") == "0" or not agenda.on():
-        return False
+        return []
     try:
         import features
-        return features.is_on("travel")
+        return [m for m, f in (("transit", "travel"), ("car", "driving")) if features.is_on(f)]
     except Exception:
-        return True
+        return ["transit"]
+
+
+def mode_of(rec: dict | None, ms: list[str] | None = None) -> str:
+    """The trip's way: what it was set to, while that's on; else public transport first, else the car."""
+    ms = modes() if ms is None else ms
+    m = (rec or {}).get("mode")
+    return m if m in ms else (ms[0] if ms else "transit")
 
 
 # -- the file ---------------------------------------------------------------------------------------------------
@@ -508,23 +534,58 @@ def plan(e: dict, s: dict, evs: list[dict]) -> dict:
             a = travel.where(pv["text"]) | {"start": "before", "after": pv.get("after", "")}
         else:
             a = travel.where("") | {"start": "home"}
+    base = {"on": rec.get("on", True), "title": e.get("title", ""), "start": e.get("start", ""),
+            "to_text": to_text, "to_place": {k: b.get(k) for k in ("id", "label", "kind")},
+            "from_place": {k: a.get(k) for k in ("id", "label", "kind", "start", "after") if a.get(k) is not None},
+            "planned": time.time()}
+    rec.pop("why_not", None)
+    if mode_of(rec) == "car":
+        return _plan_car(e, rec | base, a, b)
     lk = travel.link_for(a, b)
     all_stops = stops()
     st_a, st_b = nearest_station(a), nearest_station(b)
     if st_a and st_b and st_a["code"] == st_b["code"]:
         st_a = st_b = None  # close by: no train
-    rec.update({
-        "on": rec.get("on", True), "title": e.get("title", ""), "start": e.get("start", ""),
-        "to_text": to_text, "to_place": {k: b.get(k) for k in ("id", "label", "kind")},
-        "from_place": {k: a.get(k) for k in ("id", "label", "kind", "start", "after") if a.get(k) is not None},
+    rec.update(base | {
         "link": lk["url"], "stations": {"from": st_a, "to": st_b},
         "stops": {"from": stops_near(a, all_stops), "to": stops_near(b, all_stops)},
-        "planned": time.time(),
     })
+    for k in ("drive", "drive_for", "seen_drive"):
+        rec.pop(k, None)
     if rec.get("train") and rec.get("train_for") != [e.get("start"), (st_a or {}).get("code"), (st_b or {}).get("code")]:
         rec.pop("train", None)  # moved, or other ends: the train is picked again
-    rec.pop("why_not", None)
     return rec
+
+
+def _plan_car(e: dict, rec: dict, a: dict, b: dict) -> dict:
+    """H230: the car trip: Google Maps' link, and one look at the traffic expected around when he'd leave."""
+    import drive
+    pa, pb_ = drive.point(a), drive.point(b)
+    if not pa or not pb_:
+        raise NotFound("one end of the drive isn't on the map: give an address")
+    rec.update({"mode": rec.get("mode") or "car", "link": drive.maps_link(pa, pb_), "points": [list(pa), list(pb_)]})
+    for k in ("stations", "stops", "train", "train_for"):
+        rec.pop(k, None)
+    at = _ts(e.get("start", ""))
+    same = rec.get("drive_for") == [e.get("start"), list(pa), list(pb_)]
+    if same and rec.get("drive"):
+        return rec  # already looked: the live looks keep it up to date
+    guess = (rec.get("drive") or {}).get("minutes") or 45
+    try:
+        d = drive.look(pa, pb_, at - (guess + DRIVE_SPARE) * 60)
+    except (drive.NoKey, drive.Refused) as x:
+        rec["why_not"] = str(x)
+        rec.pop("drive", None)
+        return rec
+    rec["drive"], rec["drive_for"] = d, [e.get("start"), list(pa), list(pb_)]
+    rec["seen_drive"] = {"minutes": d["minutes"]}
+    return rec
+
+
+def leave_by(rec: dict) -> float | None:
+    d = rec.get("drive")
+    at = _ts(rec.get("start", ""))
+    return at - (d["minutes"] + DRIVE_SPARE) * 60 if d and at else None
 
 
 def _set(e: dict, change: dict) -> dict:
@@ -537,9 +598,14 @@ def _set(e: dict, change: dict) -> dict:
         return rec
 
 
-def turn_on(words: str, to: str = "", frm: str = "") -> dict:
+def turn_on(words: str, to: str = "", frm: str = "", mode: str = "") -> dict:
     e = find(words)
     change = {"on": True, "by": "hand"}
+    if mode:
+        if mode not in modes():
+            raise ValueError("driving to appointments is off (Settings, What HQ helps you with)" if mode == "car"
+                             else "travel by public transport is off (Settings, What HQ helps you with)")
+        change["mode"] = mode
     if to:
         change["to_hand"] = to
     if frm:
@@ -563,49 +629,109 @@ def turn_off(words: str) -> dict:
     return _set(e, {"on": False, "by": "hand"})
 
 
-def page_switch(eid: str, want: bool) -> dict:
-    """The app's Travel button: on or off by hand. On looks the trip up in the background."""
+def page_switch(eid: str, want: bool, mode: str = "") -> dict:
+    """The app's Travel button: on or off by hand, and By car / By public transport (H230). On looks the trip up in
+    the background."""
     e = next((x for x in _events() if x.get("id") == eid), None)
     if not e:
         raise KeyError("no such appointment")
-    rec = _set(e, {"on": bool(want), "by": "hand"})
+    change = {"on": bool(want), "by": "hand"}
+    if mode in modes():
+        change["mode"] = mode
+        with _lock:  # another way: looked up again
+            s = _read()
+            old = s["trips"].get(_key(eid))
+            if old and old.get("mode", mode_of(old)) != mode:
+                for k in ("link", "planned", "drive", "drive_for", "train", "why_not"):
+                    old.pop(k, None)
+                _write(s)
+    rec = _set(e, change)
     if want:
         _spawn("check")
     return rec
 
 
+def key_changed() -> None:
+    """H230: a maps key was pasted: car trips that waited for one are looked up again now, in the background."""
+    with _lock:
+        s = _read()
+        hit = [r for r in s["trips"].values() if r.get("why_not") and mode_of(r) == "car"]
+        for r in hit:
+            r.pop("planned", None)
+        if hit:
+            _write(s)
+    if hit:
+        _spawn("check")
+
+
 def attach(events: list[dict]) -> list[dict]:
     """The page's appointments with their trip: travel {on, from, to, link, train, news, why_not}, or nothing."""
-    if not on():
+    ms = modes()
+    if not ms:
         return events
     s = _read()
     out = []
     for e in events:
         rec = s["trips"].get(_key(e.get("id", ""))) or s["trips"].get(e.get("mark_id") or "")
         if rec:
-            e = {**e, "travel": _view(rec)}
+            e = {**e, "travel": _view(rec, ms)}
         elif not e.get("all_day") and not e.get("free"):
-            e = {**e, "travel": {"on": False, "can": True}}
+            e = {**e, "travel": {"on": False, "can": True, "mode": ms[0], "modes": ms}}
         out.append(e)
     return out
 
 
-def _view(rec: dict) -> dict:
+def _view(rec: dict, ms: list[str] | None = None) -> dict:
     f = rec.get("from_place") or {}
     st = rec.get("stations") or {}
+    ms = modes() if ms is None else ms
     v = {"on": bool(rec.get("on")), "by": rec.get("by", "auto"), "link": rec.get("link", ""),
+         "mode": mode_of(rec, ms), "modes": ms,
          "to": (rec.get("to_place") or {}).get("label", ""),
          "from": ("home" if f.get("start") == "home" else f.get("label", "")) if f else "",
          "after": f.get("after", "") if f.get("start") == "before" else "",
          "stations": [x["name"] for x in (st.get("from"), st.get("to")) if x],
          "news": list(rec.get("news") or [])[-3:], "why_not": rec.get("why_not", "")}
+    d = rec.get("drive")
+    if d and v["mode"] == "car":
+        v["drive"] = _drive_words(rec)
     tr = rec.get("train")
     if tr:
         v["train"] = f"{tr.get('kind') or 'train'} {tr['number']}, {_hm(tr['dep'])} from {tr['from']} to {tr['to']}, there {_hm(tr['arr'])}"
     return v
 
 
+def _drive_words(rec: dict) -> str:
+    d = rec["drive"]
+    out = f"{d['minutes']} minutes by car" + (f" ({d['traffic']} of it traffic)" if d.get("traffic") else "")
+    lb = leave_by(rec)
+    return out + (f", leave by {_hm(lb)}" if lb else "")
+
+
 # -- the live look ---------------------------------------------------------------------------------------------------
+
+def drive_news(rec: dict, now: float) -> list[tuple[str, str]]:
+    """H230: what to text about the drive: time to leave (once), and the traffic changing by DRIVE_CHANGE or more."""
+    d = rec.get("drive")
+    lb = leave_by(rec)
+    if not d or not lb:
+        return []
+    seen = rec.setdefault("seen_drive", {})
+    out = []
+    told = int(seen.get("minutes", d["minutes"]))
+    if abs(d["minutes"] - told) >= DRIVE_CHANGE:
+        seen["minutes"] = d["minutes"]
+        more = d["minutes"] > told
+        out.append((f"drive-{d['minutes']}-{_hm(lb)}", f"the drive now takes {d['minutes']} minutes, "
+                    f"{abs(d['minutes'] - told)} {'more' if more else 'less'} than before"
+                    + (f" ({d['traffic']} of it traffic)" if d.get("traffic") else "")
+                    + f": leave by {_hm(lb)}."))
+    if now >= lb - LEAVE_AHEAD * 60 and not seen.get("leave"):
+        seen["leave"] = True
+        out.append((f"leave-{_hm(lb)}", f"time to get going: leave by {_hm(lb)}, the drive takes {d['minutes']} "
+                    "minutes now" + (f" ({d['traffic']} of it traffic)" if d.get("traffic") else "") + "."))
+    return out
+
 
 def pick_train(rec: dict, at: float, all_trains: list[dict]) -> dict | None:
     """The latest direct train from the start's station that reaches the appointment's station in time."""
@@ -734,16 +860,34 @@ def check(now: float | None = None, dry: bool = False) -> list[tuple[str, str]]:
             if rec is not None and not rec.get("on"):
                 continue
             if rec and rec.get("planned") and rec.get("start") == e.get("start") and rec.get("title") == e.get("title") \
-                    and t - float(rec["planned"]) < 86400:
-                continue
+                    and t - float(rec["planned"]) < 86400 \
+                    and not (rec.get("why_not") and mode_of(rec) == "car" and t - float(rec["planned"]) >= PLAN_EVERY):
+                continue  # a car trip without its key or refused is tried again each hour (H230)
             try:
                 s["trips"][key] = plan(e, s, evs) | ({} if rec else {"on": True, "by": "auto"})
             except (NotFound, travel.NotFound) as x:
                 if rec is None:
                     continue  # nothing known about where it is: no trip
                 s["trips"][key] = {**rec, "why_not": str(x), "planned": t, "start": e.get("start", ""), "title": e.get("title", "")}
-        live = [(k, r) for k, r in s["trips"].items() if r.get("on") and r.get("link")
+        ms = modes()
+        live = [(k, r) for k, r in s["trips"].items() if r.get("on") and r.get("link") and mode_of(r, ms) == "transit"
                 and 0 <= _ts((by.get(k) or r).get("start", "")) - t <= LIVE_BEFORE]
+        driving = [(k, r) for k, r in s["trips"].items() if r.get("on") and r.get("points") and mode_of(r, ms) == "car"
+                   and 0 <= _ts((by.get(k) or r).get("start", "")) - t <= DRIVE_BEFORE]
+        for key, rec in driving:  # H230: the traffic, every DRIVE_EVERY
+            if t - float((rec.get("drive") or {}).get("asked") or 0) >= DRIVE_EVERY - 30:
+                import drive
+                try:
+                    rec["drive"] = drive.look(tuple(rec["points"][0]), tuple(rec["points"][1]))
+                    rec.pop("why_not", None)
+                except (drive.NoKey, drive.Refused) as x:
+                    rec["why_not"] = str(x)
+                    continue
+            fresh = [(k, w) for k, w in drive_news(rec, t) if k not in rec.setdefault("sent", [])]
+            if fresh:
+                rec["sent"].extend(k for k, _ in fresh)
+                rec["news"] = (list(rec.get("news") or []) + [f"{_hm(t)} {w}" for _, w in fresh])[-10:]
+                texts.append((key, _facts(rec, [w for _, w in fresh])))
         if live:
             all_trains = trains(feed("trainUpdates.pb"))
             all_alerts = alerts(feed("alerts.pb"))
@@ -793,7 +937,11 @@ def _facts(rec: dict, news: list[str]) -> str:
              f"From: {'home' if f.get('start') == 'home' else f.get('label', '')}",
              f"To: {(rec.get('to_place') or {}).get('label', '')}"]
     lines += [f"Changed: {w}" for w in news]
-    lines.append(f"9292 link for the trip: {rec.get('link', '')}")
+    if mode_of(rec) == "car":
+        lines.insert(1, "By car")
+        lines.append(f"Google Maps link for the drive: {rec.get('link', '')}")
+    else:
+        lines.append(f"9292 link for the trip: {rec.get('link', '')}")
     return "\n".join(lines)
 
 
@@ -804,7 +952,8 @@ def due(now: float | None = None) -> bool:
     s = _read()
     last = float(s.get("checked") or 0)
     hour = datetime.fromtimestamp(t).hour
-    live = any(r.get("on") and 0 <= _ts(r.get("start", "")) - t <= LIVE_BEFORE for r in s["trips"].values())
+    live = any(r.get("on") and 0 <= _ts(r.get("start", "")) - t <= (DRIVE_BEFORE if r.get("mode") == "car" else LIVE_BEFORE)
+               for r in s["trips"].values())
     if live:
         return t - last >= CHECK_EVERY
     return 7 <= hour < 23 and t - last >= PLAN_EVERY
@@ -838,7 +987,7 @@ def text(now: float | None = None) -> str:
     rows = sorted(((k, r) for k, r in s["trips"].items() if _ts(r.get("start", "")) >= t - 3600),
                   key=lambda kr: _ts(kr[1].get("start", "")))
     if not on():
-        return "Travel on appointments is off (Settings, What HQ helps you with)."
+        return "Travel on appointments and driving to appointments are off (Settings, What HQ helps you with)."
     if not rows:
         return "No trips on appointments coming up."
     lines = ["Trips on appointments (travel on appointments, H229):"]
@@ -847,10 +996,11 @@ def text(now: float | None = None) -> str:
         if not v["on"]:
             lines.append(f"- {r.get('title')} ({agenda.when_words(r)}): travel off{' (by hand)' if v['by'] == 'hand' else ''}")
             continue
-        lines.append(f"- {r.get('title')} ({agenda.when_words(r)}): from {v['from'] or '?'}"
+        lines.append(f"- {r.get('title')} ({agenda.when_words(r)}): {'by car' if v['mode'] == 'car' else 'by public transport'}, from {v['from'] or '?'}"
                      + (f" (after {v['after']})" if v["after"] else "") + f" to {v['to'] or '?'}"
                      + (f"; stations {' and '.join(v['stations'])}" if v["stations"] else "")
-                     + (f"; {v['train']}" if v.get("train") else "") + (f"; not found: {v['why_not']}" if v["why_not"] else "")
+                     + (f"; {v['train']}" if v.get("train") else "") + (f"; {v['drive']}" if v.get("drive") else "")
+                     + (f"; not found: {v['why_not']}" if v["why_not"] else "")
                      + (f"; link {v['link']}" if v["link"] else ""))
         for n in v["news"]:
             lines.append(f"    told: {n}")
@@ -867,7 +1017,9 @@ def show(words: str) -> str:
         return f"Travel is off for {e.get('title')}."
     out = [text_one(rec)]
     at = _ts(e.get("start", ""))
-    if 0 <= at - time.time() <= LIVE_BEFORE + 6 * 3600:
+    if mode_of(rec) == "car":
+        out.append("HQ looks at the traffic again from " + f"{DRIVE_BEFORE // 3600} hours before it.")
+    elif 0 <= at - time.time() <= LIVE_BEFORE + 6 * 3600:
         tr = trains(feed("trainUpdates.pb"))
         pick = rec.get("train") or pick_train(rec, at, tr)
         if pick:
@@ -882,6 +1034,10 @@ def show(words: str) -> str:
 
 def text_one(rec: dict) -> str:
     v = _view(rec)
+    if v["mode"] == "car":
+        return (f"{rec.get('title')} ({agenda.when_words(rec)}): by car from {v['from'] or '?'} to {v['to'] or '?'}"
+                + (f"; {v['drive']}" if v.get("drive") else "") + (f"; not found: {v['why_not']}" if v["why_not"] else "")
+                + (f"\n{v['link']}" if v["link"] else ""))
     return (f"{rec.get('title')} ({agenda.when_words(rec)}): from {v['from'] or '?'} to {v['to'] or '?'}"
             + (f"; stations {' and '.join(v['stations'])}" if v["stations"] else "; no train stations near both ends")
             + (f"; not found: {v['why_not']}" if v["why_not"] else "") + (f"\n{v['link']}" if v["link"] else ""))
@@ -894,6 +1050,8 @@ def main(argv: list[str]) -> int:
     o.add_argument("words")
     o.add_argument("--to", default="")
     o.add_argument("--from", dest="frm", default="")
+    o.add_argument("--car", dest="mode", action="store_const", const="car", default="")
+    o.add_argument("--transit", dest="mode", action="store_const", const="transit")
     sub.add_parser("off").add_argument("words")
     sub.add_parser("show").add_argument("words")
     pl = sub.add_parser("place")
@@ -909,7 +1067,7 @@ def main(argv: list[str]) -> int:
         if a.cmd in (None, "list"):
             print(text())
         elif a.cmd == "on":
-            r = turn_on(a.words, a.to, a.frm)
+            r = turn_on(a.words, a.to, a.frm, a.mode or "")
             print("Travel is on. " + text_one(r))
         elif a.cmd == "off":
             r = turn_off(a.words)

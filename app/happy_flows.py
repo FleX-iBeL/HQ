@@ -8862,6 +8862,190 @@ setTimeout(() => {
         need("Travel to an appointment" in (APP / "web" / "tour.json").read_text(), "the tutorial doesn't explain it")
         return "a trip by itself from home or the appointment before, the train picked, delays, platform, cancelled and a stop's message told once; off stays off"
 
+    async def flow136(self) -> str:
+        """H230, no Claude, no network: driving to appointments, on each person's own maps key. Offline, on made-up
+        places, a made-up calendar and a made-up maps service (a small local server that answers like Google's Routes
+        API and TomTom's Routing API): the switch starts off and needs the calendar; without a key a car trip says so;
+        the key is kept on the computer only (0600), never shown back; a car trip gets its Google Maps link, how long
+        the drive takes with the traffic and when to leave; from two hours before the traffic is looked at again, and
+        Donna texts once when it's time to leave and when the drive got ten minutes longer; public transport and car
+        switch per appointment; at most DAILY_MAX looks a day; Google's and TomTom's answers read right; a call may ask
+        whether there's a key, never set it; the page, the server, the rules and the tutorial carry it."""
+        import http.server
+        import threading as _th
+        from policy import Policy, ALLOW, DENY
+        d = self.tmp / "h230"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "stations.csv").write_text(
+            "id,code,uic,name_short,name_medium,name_long,slug,country,type,geo_lat,geo_lng\n"
+            "1,XC,1,Nergensdam C,Nergensdam C.,Nergensdam Centraal,nergensdam-centraal,NL,megastation,52.1,5.1\n"
+            "2,XZ,2,Ergens Zuid,Ergens Zuid,Ergenshoven Zuid,ergenshoven-zuid,NL,stoptreinstation,52.2,5.2\n")
+        (d / "places.json").write_text(json.dumps({"Voorbeeldlaan 12, 9999 ZZ Nergensdam": [52.101, 5.101, "Voorbeeldlaan 12, 9999ZZ Nergensdam"],
+                                                   "Proefweg 3 Ergenshoven": [52.201, 5.201, "Proefweg 3, Ergenshoven"]}))
+        (d / "me.md").write_text("# Me\n\n**Home:** Voorbeeldlaan 12, 9999 ZZ Nergensdam\n")
+        (d / "cache").mkdir(exist_ok=True)
+        (d / "cache" / "stops.json").write_text(json.dumps([["s1", "Voorbeeldlaan", 52.1012, 5.1012]]))
+        (d / "feeds").mkdir(exist_ok=True)
+        (d / "ws" / "HQ").mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        iso = lambda t: datetime.fromtimestamp(t).astimezone().isoformat(timespec="seconds")
+        at = (int(now) // 60) * 60 + 2 * 3600
+        tomorrow = (datetime.fromtimestamp(now) + timedelta(days=1)).replace(hour=14, minute=0, second=0, microsecond=0).timestamp()
+        cal = d / "ws" / "calendar.json"
+        cal.write_text(json.dumps({"events": [
+            {"id": "e1", "title": "Visit Sam", "start": iso(at), "end": iso(at + 3600), "where": "Proefweg 3 Ergenshoven", "all_day": False},
+            {"id": "e2", "title": "Dentist", "start": iso(tomorrow), "end": iso(tomorrow + 1800), "where": "Proefweg 3 Ergenshoven", "all_day": False},
+        ], "looked": now}))
+        answer = d / "answer.json"
+        answer.write_text(json.dumps({"minutes": 30, "free_minutes": 25, "km": 21.4}))
+        drv = d / "run.py"
+        drv.write_text("import sys, json\nsys.path.insert(0, sys.argv[1])\ncmd = sys.argv[2]\n"
+                       "if cmd == 'check':\n    import trips\n    print(json.dumps(trips.check(float(sys.argv[3]))))\n"
+                       "elif cmd == 'attach':\n    import trips, agenda\n    print(json.dumps(trips.attach(agenda._read()['events'])))\n"
+                       "elif cmd == 'switch':\n    import trips\n    trips.page_switch(sys.argv[3], sys.argv[4] == 'on', sys.argv[5])\n"
+                       "elif cmd == 'listing':\n    import features\n    print(json.dumps(features.listing()))\n"
+                       "elif cmd == 'drive':\n    import drive\n    sys.exit(drive.main(sys.argv[3:]))\n"
+                       "else:\n    import trips\n    sys.exit(trips.main(sys.argv[2:]))\n")
+        keyf = d / "maps-key"
+        env = {**os.environ, "HQ_TRAVEL_STATIONS": str(d / "stations.csv"), "HQ_TRAVEL_PLACES": str(d / "places.json"),
+               "HQ_TRAVEL_ME": str(d / "me.md"), "HQ_TRAVEL_OFFLINE": "1", "HQ_DIRECT_DIR": str(d / "direct-line"),
+               "HQ_CALENDAR_FILE": str(cal), "HQ_TRIPS_CACHE": str(d / "cache"), "HQ_TRIPS_FAKE_DIR": str(d / "feeds"),
+               "HQ_FEATURES_FOLDER": str(d / "ws"), "HQ_DIRECT": "0", "HQ_CALENDAR": "1", "HQ_CALENDAR_NOTES": str(d / "ws" / "notes.json"),
+               "HQ_MAPS_KEY_FILE": str(keyf), "HQ_DRIVE_COUNT": str(d / "count.json"), "HQ_DRIVE_FAKE": str(answer)}
+        env.pop("HQ_MAPS_KEY", None)
+        run = lambda *a, e=env: subprocess.run([sys.executable, str(drv), str(APP), *a], capture_output=True, text=True, env=e, timeout=60)
+        data = lambda: json.loads((d / "ws" / "calendar-travel.json").read_text())
+        last = lambda r: json.loads(r.stdout.strip().splitlines()[-1])
+        feats = d / "ws" / "HQ" / "features.json"
+        # the switch: off until turned on, needs the calendar; public transport alone offers no car
+        lst = {i["id"]: i for i in last(run("listing"))}
+        need(lst["driving"]["on"] is False and lst["driving"]["needs"] == "calendar" and lst["driving"]["key"]["key"] is False,
+             f"driving doesn't start off, or doesn't say there's no key: {lst['driving']}")
+        att = {e["id"]: e.get("travel") for e in last(run("attach"))}
+        need(att["e1"].get("modes") == ["transit"] or att["e1"].get("mode") == "transit", f"with driving off a car is offered: {att['e1']}")
+        r = run("on", "Visit Sam", "--car")
+        need(r.returncode == 1 and "driving to appointments is off" in r.stdout, f"a car trip with driving off isn't refused: {r.stdout}")
+        import features as _f
+        need(_f.switch("driving", True, d / "ws") and json.loads(feats.read_text()) == {"off": [], "on": ["driving"]},
+             f"turning driving on isn't kept: {feats.read_text()}")
+        _f.switch("travel", False, d / "ws")
+        need(json.loads(feats.read_text()) == {"off": ["travel"], "on": ["driving"]}, f"the file isn't right: {feats.read_text()}")
+        _f.switch("travel", True, d / "ws")
+        # no key: the car trip says so
+        r = run("on", "Visit Sam", "--car")
+        need(r.returncode == 0 and data()["trips"]["e1"]["mode"] == "car" and "no maps key" in data()["trips"]["e1"].get("why_not", ""),
+             f"a car trip without a key doesn't say so: {r.stdout} {data()['trips'].get('e1')}")
+        # the key: kept on this computer only, never shown back
+        r = run("drive", "key", "not a key")
+        need(r.returncode == 1 and not keyf.exists(), "a wrong key is kept")
+        secret = "AIzaFAKEfake0123456789abcdefghijklmnop"
+        r = run("drive", "key", secret)
+        need(r.returncode == 0 and "Google Maps" in r.stdout and (keyf.stat().st_mode & 0o777) == 0o600, f"the key isn't kept, or not private: {r.stdout}")
+        lst = {i["id"]: i for i in last(run("listing"))}
+        need(lst["driving"]["key"]["provider"] == "google" and secret not in json.dumps(lst), "the listing shows the key, or not its kind")
+        need(secret not in run("drive").stdout and "Google Maps key" in run("drive").stdout, "the status shows the key")
+        need(not (d / "ws" / "calendar-travel.json").read_text().count(secret), "the key ended up in the workspace")
+        # a car trip: the link, the drive, when to leave
+        r = run("check", str(now))
+        need(r.returncode == 0 and last(r) == [], f"the first look failed or texted: {r.stdout}{r.stderr}")
+        e1 = data()["trips"]["e1"]
+        need(not e1.get("why_not") and e1["drive"]["minutes"] == 30 and e1["drive"]["traffic"] == 5, f"the drive isn't looked up after the key: {e1}")
+        need(e1["link"].startswith("https://www.google.com/maps/dir/?") and "travelmode=driving" in e1["link"] and "stations" not in e1,
+             f"a car trip has no Google Maps link, or still has stations: {e1}")
+        need("e2" in data()["trips"] and data()["trips"]["e2"]["mode"] == "transit" if "mode" in data()["trips"]["e2"] else "stations" in data()["trips"]["e2"],
+             "with both on, a trip by itself isn't by public transport")
+        # the traffic gets worse: told once; then time to leave: told once
+        answer.write_text(json.dumps({"minutes": 45, "free_minutes": 25, "km": 21.4}))
+        got = last(run("check", str(now + 600)))
+        lb = datetime.fromtimestamp(at - 55 * 60).strftime("%H:%M")
+        need(len(got) == 1 and "45 minutes, 15 more" in got[0][1] and f"leave by {lb}" in got[0][1] and "Google Maps link" in got[0][1]
+             and "By car" in got[0][1], f"worse traffic isn't told: {got}")
+        need(last(run("check", str(now + 1200))) == [], "the same traffic is told twice")
+        got = last(run("check", str(at - 70 * 60)))
+        need(len(got) == 1 and "time to get going" in got[0][1] and lb in got[0][1], f"time to leave isn't told: {got}")
+        need(last(run("check", str(at - 60 * 60))) == [], "time to leave is told twice")
+        need(json.loads((d / "count.json").read_text()).popitem()[1] >= 4, "the looks aren't counted")
+        att = {e["id"]: e.get("travel") for e in last(run("attach"))}
+        need(att["e1"]["mode"] == "car" and att["e1"]["modes"] == ["transit", "car"] and "leave by" in att["e1"]["drive"],
+             f"the page doesn't get the car trip: {att['e1']}")
+        need("by car" in run("list").stdout, "the list doesn't say by car")
+        # switch the way on the page, and back by a call's words
+        run("switch", "e2", "on", "car")
+        need(data()["trips"]["e2"]["mode"] == "car" and "train" not in data()["trips"]["e2"], f"the page's By car doesn't switch: {data()['trips']['e2']}")
+        r = run("on", "Dentist", "--transit")
+        e2 = data()["trips"]["e2"]
+        need(r.returncode == 0 and e2["mode"] == "transit" and e2["link"].startswith("https://9292.nl/") and "drive" not in e2,
+             f"back to public transport doesn't work: {r.stdout} {e2}")
+        # only driving on: every trip by car
+        _f.switch("travel", False, d / "ws")
+        att = {e["id"]: e.get("travel") for e in last(run("attach"))}
+        need(att["e2"]["mode"] == "car" and att["e2"]["modes"] == ["car"], f"with only driving on a trip isn't by car: {att['e2']}")
+        _f.switch("travel", True, d / "ws")
+        # at most DAILY_MAX looks a day
+        import drive as _drive
+        (d / "count.json").write_text(json.dumps({datetime.now().strftime("%Y-%m-%d"): _drive.DAILY_MAX}))
+        r = run("drive", "test", "Proefweg 3 Ergenshoven")
+        need(r.returncode == 1 and "used up" in r.stdout, f"the daily limit doesn't hold: {r.stdout}")
+        (d / "count.json").unlink()
+        # Google's and TomTom's own answers, from a made-up service
+        seen = {}
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a): pass
+            def _send(self, body):
+                b = json.dumps(body).encode()
+                self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+            def do_POST(self):
+                seen["google"] = {"key": self.headers.get("X-Goog-Api-Key"), "mask": self.headers.get("X-Goog-FieldMask"),
+                                  "body": json.loads(self.rfile.read(int(self.headers["Content-Length"])))}
+                self._send({"routes": [{"duration": "2100s", "staticDuration": "1800s", "distanceMeters": 23500}]})
+            def do_GET(self):
+                seen["tomtom"] = self.path
+                self._send({"routes": [{"summary": {"lengthInMeters": 23500, "travelTimeInSeconds": 2400, "trafficDelayInSeconds": 300,
+                                                    "noTrafficTravelTimeInSeconds": 2100}}]})
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        _th.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{srv.server_address[1]}/"
+            live = {k: v for k, v in env.items() if k != "HQ_DRIVE_FAKE"} | {"HQ_DRIVE_GOOGLE": base + "g", "HQ_DRIVE_TOMTOM": base + "t/"}
+            r = run("drive", "test", "Proefweg 3 Ergenshoven", e=live)
+            g = seen.get("google") or {}
+            need(r.returncode == 0 and "35 minutes now (5 of it traffic), 23.5 km" in r.stdout, f"Google's answer doesn't read right: {r.stdout}")
+            need(g.get("key") == secret and "routes.staticDuration" in (g.get("mask") or "") and g["body"]["routingPreference"] == "TRAFFIC_AWARE"
+                 and g["body"]["travelMode"] == "DRIVE" and g["body"]["destination"]["location"]["latLng"]["latitude"] == 52.201,
+                 f"Google isn't asked right: {g}")
+            r = run("drive", "test", "Proefweg 3 Ergenshoven", e={**live, "HQ_MAPS_KEY": "tomtomFAKEkey0123456789"})
+            need(r.returncode == 0 and "40 minutes now (5 of it traffic)" in r.stdout and "traffic=true" in seen.get("tomtom", "")
+                 and "key=tomtomFAKEkey" in seen.get("tomtom", "") and "52.101000,5.101000:52.201000,5.201000" in seen.get("tomtom", ""),
+                 f"TomTom isn't asked or read right: {r.stdout} {seen.get('tomtom')}")
+        finally:
+            srv.shutdown()
+        need(run("drive", "forget-key").returncode == 0 and not keyf.exists(), "the key isn't forgotten")
+        # a call may ask whether there's a key, never set it; it may set the way for a trip
+        pol = Policy(config.FOLDER)
+        dp, tp = str(APP / "drive.py"), str(APP / "trips.py")
+        need(pol.decide("Bash", {"command": f'python3 "{dp}"'}).verdict == ALLOW, "a call can't ask whether there's a key")
+        for bad in ('key "AIzaX"', "forget-key", 'test "x"'):
+            need(pol.decide("Bash", {"command": f'python3 "{dp}" {bad}'}).verdict == DENY, f"a call may run drive.py {bad}")
+        need(pol.decide("Bash", {"command": f'python3 "{tp}" on "x" --car'}).verdict == ALLOW, "a call can't put a trip by car")
+        # carried everywhere it should be
+        import direct_line
+        need("drive.py" in config.VOICE_RULES and "--car" in direct_line._text_rules() and "Never" in config.TRAVEL_RULE.split("H230")[1],
+             "the call rules or Donna's chat rules don't have driving")
+        need("By car" in (APP / "direct_line.py").read_text().split('"travel": "He has travel on')[1][:1200], "Donna doesn't know a car trip")
+        bot = (APP / "bot.py").read_text()
+        ep = bot.split('@app.post("/api/drive/key"')[1].split("@app.")[0]
+        need('!= "features"' in ep and "FREE_ONLY" in ep and "set_key" in ep and "key_changed" in ep and '"mode"' in bot.split('"/api/calendar/travel"')[1][:1500],
+             "the server doesn't take the key only from the page, or doesn't pass the way")
+        page = (APP / "web" / "index.html").read_text()
+        need("function keyBox" in page and "api/drive/key" in page and "Open in Google Maps" in page and "Go by car instead" in page,
+             "the page has no key box or no car trip")
+        tour = json.loads((APP / "web" / "tour.json").read_text())
+        piece = next((p for p in tour["pieces"] if p["id"] == "driving"), None) if "pieces" in tour else None
+        raw = (APP / "web" / "tour.json").read_text()
+        need("console.cloud.google.com" in raw and "Routes API" in raw and "developer.tomtom.com" in raw and "Driving to appointments" in raw,
+             "the tutorial doesn't walk through getting a key")
+        return "off until turned on; no key says so; the key kept private and never shown; the drive, the link and when to leave; worse traffic and time to leave told once; the way switches; the daily cap; Google and TomTom read right"
+
     async def flow128(self) -> str:
         """H214, no Claude: a 9292 link door to door. Offline, on a made-up station list, made-up places and a made-up
         home: home is the start by default, a station gets 9292's own id, an address its point (@lat,lon) with its
@@ -14966,8 +15150,9 @@ print("H88OUT " + json.dumps(out))
             os.environ.pop("HQ_CALENDAR", None)
             items = ft.listing()
             ids = [i["id"] for i in items]
-            need(ids == ["calendar", "todo", "texts", "weather", "travel", "mail", "notes", "team", "coaching"], f"the switches: {ids}")
-            need(all(i["on"] for i in items if i["id"] != "coaching") and not (tmp / ft.STATE).exists(), "not everything starts on")
+            need(ids == ["calendar", "todo", "texts", "weather", "travel", "driving", "mail", "notes", "team", "coaching"], f"the switches: {ids}")
+            need(all(i["on"] for i in items if i["id"] not in ("coaching", "driving")) and not (tmp / ft.STATE).exists(), "not everything starts on")
+            need(not next(i for i in items if i["id"] == "driving")["on"], "driving (H230, their own key) doesn't start off")
             need(all(i["line"] for i in items) and next(i for i in items if i["id"] == "weather").get("needs_name", "").startswith("Texts with"),
                  "a switch without its line, or the weather doesn't say it needs the texts")
             need(agenda.on() and direct_line.on() and weather.on() and ft.rule() == "", "all on, but something reads as off")
@@ -15107,7 +15292,7 @@ print("H88OUT " + json.dumps(out))
                     "--virtual-time-budget=30000"]
             args += [f"--screenshot={shot}"] if shot else ["--dump-dom"]
             return run(args + [pf.as_uri() + "#" + mode], timeout=120)
-        want = {"combos": "1024", "dock": "ok", "row": "ok", "title": "What HQ helps you with", "page": "ok", "calendar off": "gone",
+        want = {"combos": "2048", "dock": "ok", "row": "ok", "title": "What HQ helps you with", "page": "ok", "calendar off": "gone",
                 "weather waits": "ok", "tidy after taps": "ok", "back on": "ok", "back": "ok"}
         for name, size, app_ in (("the phone", "390,844", False), ("a small phone", "375,553", False), ("the desktop app", "1180,780", True)):
             tag = name.split()[-1] if not name.startswith("a small") else "small"
@@ -15971,6 +16156,7 @@ FLOWS = {
     133: ("H239: a six-week game's texts (the evening one while today's tick isn't in, a heads-up on a day away around its time) and its score in the weekly look back", False, "flow133"),
     132: ("F45: a long piece of quiet talking isn't thrown away as no speech (one score per piece; long pieces at 0.75, short at 0.4, quiet ones louder); noise alone still gives nothing", False, "flow132"),
     135: ("H229: travel on appointments by public transport: a trip by itself (its place or a name from the places book), from home or the appointment before; the live open data watched before it, and Donna texts each change once (late, platform, cancelled, a stop's message)", False, "flow135"),
+    136: ("H230: driving to appointments on their own maps key: off until turned on, the key kept on the computer only, the drive with the traffic and when to leave, Donna texts once when to leave and when the traffic changes, public transport or car per appointment, a daily cap, Google's and TomTom's answers", False, "flow136"),
     134: ("H227: every button and screen on the call page has a tutorial piece (the page read against tour.json; a new screen needs its button named)", False, "flow134"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }

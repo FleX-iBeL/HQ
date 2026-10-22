@@ -478,6 +478,12 @@ class Policy:
             if len(args) == 1 or args[1] in ("list", "on", "off", "show", "place", "places", "forget"):
                 return Decision(ALLOW, "travel on appointments")
             return Decision(DENY, "the trips script takes list, on, off, show, place, places or forget")
+        # H230: driving to appointments: only whether a maps key is here and today's looks. The key itself is set in
+        # Settings (never on a call: it would be in the transcript), and a test look costs one of the day's looks.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "drive.py"):
+            if len(args) == 1 or args[1:] == ["status"]:
+                return Decision(ALLOW, "whether driving has a key")
+            return Decision(DENY, "the driving script only says whether a key is here; the key goes in Settings")
         # H45: lid-closed sleep. Reads it, or flips it on or off; the script itself only runs the two exact
         # pmset commands the one-time setup allows without a password, nothing else.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "lidsleep.py"):

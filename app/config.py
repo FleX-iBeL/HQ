@@ -252,7 +252,15 @@ like 2026-10-24 or a time like 15:00 narrows it). It starts at home, or at the a
 --from only when {user} says where from. A friend's or a regular place's address, kept once by name, so an appointment \
 with that name in its title finds it by itself: python3 "{HQ}/app/trips.py" place "NAME" "ADDRESS" (places, forget \
 "NAME"); keep one only when {user} gives it or says so. One trip with what the live data says now: show "ID or words". \
-Driving is a different thing (not this)."""
+Driving to appointments is its own feature, below.
+- Driving to appointments (H230), only when it's on in What HQ helps you with: a trip can go by car instead, on \
+{user}'s own maps key (Google Maps or TomTom, pasted in Settings, What HQ helps you with, Driving; HQ ships none). \
+python3 "{HQ}/app/trips.py" on "ID or words" --car (or --transit back to public transport) sets the way for one; with \
+only driving on, every trip is by car. A car trip shows how long the drive takes with the traffic and when to leave; \
+from two hours before, the routine looks at the traffic and the agent on the texts says once when it's time to leave, \
+and again when the drive gets ten minutes longer or shorter. Whether a key is here: python3 "{HQ}/app/drive.py". Never \
+ask {user} to say or type the key on a call or in a text: it's pasted in Settings only; how to get one is in the \
+tutorial (the question mark, Driving to appointments). A free one without a card: TomTom's developer portal."""
 
 # H133 (14 October 2026, call at 13:31), in the user's words: "I want to stop using the word job list or job queue.
 # I just want to refer to it as the team. So if I tell you, hey. Let's put it on our roadmap. You can put it on our
