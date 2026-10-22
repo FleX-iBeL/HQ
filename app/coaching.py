@@ -249,7 +249,8 @@ def checkins(d: dict, text: str, now: datetime | None = None, games: list | None
                     "line": ("Since " + _at_words(at, now, part) if st["due"] else
                              "Not now: back tomorrow morning" if st.get("later") else
                              "Next: " + _at_words(at, now, part)),
-                    "layer": 6, "group": "week", "said": wk["said"]})
+                    "layer": 6, "group": "week", "said": wk["said"],
+                    "score": _score(games) if st["due"] else []})
     for g in (games if games is not None else _games()):
         if g.get("phase") not in ("looking back", "past") or (g.get("debrief") or "").strip():
             continue
@@ -359,9 +360,22 @@ LAND = {"week": ["Time for our weekly look back. Tap Start when you're ready, an
         "checkin": ["It's been a few months: time for the bigger check-in on the whole picture. Tap Start when you're ready."]}
 
 
+def _score(games: list | None = None) -> list[str]:
+    """H239: the score of the game being played (or looked back on), for the weekly look back."""
+    try:
+        import games as _g
+        return _g.score_lines(games)
+    except Exception:
+        return []
+
+
 def _land(c: dict) -> None:
     opts = LAND.get(c["kind"]) or ["{title} is due."]
     text = opts[int(time.time() // 86400) % len(opts)].replace("{title}", c["title"])
+    if c["kind"] == "week":
+        score = _score()
+        if score:  # H239: the game's score comes with the weekly look back
+            text += " Your game so far: " + " ".join(score)
     add("agent", text, "checkin:" + c["key"])
 
 
@@ -533,6 +547,11 @@ def call_note(e: dict, user: str = "the user") -> str:
         elif c["kind"] == "week":
             extra = (" Look at what the week held first: their calendar for the last seven days, the six-week game's "
                      "score if one is on (games.py), and the last weekly note under the looking-back layer.")
+            score = _score()
+            if score:  # H239: the game's score is part of every weekly look back
+                extra += (" The six-week game is part of this look back: go through its score with them (what they "
+                          "did, how it felt, what came out of it), then put their look back on the week in with "
+                          f"games.py week \"TEXT\". The score now: {' '.join(score)}")
         return (
             f"{user} started this call from the Coaching place in HQ: it's a check-in, {c['title'].lower()}. This call "
             f"is only that check-in. Read their {mapf} first (the looking-back layer and the layers it adjusts) and "

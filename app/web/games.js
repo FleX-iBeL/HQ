@@ -216,6 +216,9 @@
     if (g.game) top.appendChild(el("div", "", g.game));
     if (g.for) top.appendChild(el("div", "gsub", "For: " + g.for));
     if (g.rules) top.appendChild(el("div", "gsub", "Rules: " + g.rules));
+    // H239: the rest of the game's design, in their words
+    [["best", "At my best"], ["lean", "What comes easily"], ["fears", "What could get in the way"],
+     ["honest", "Keeps me honest"]].forEach(([k, say]) => { if (g[k]) top.appendChild(el("div", "gsub", say + ": " + g[k])); });
     if (g.phase === "setup" || g.phase === "coming") top.appendChild(el("div", "gsub", `Setup week from ${fmt(g.setup)}, six weeks from ${fmt(g.start)}, look back until ${fmt(g.look_end)}.`));
     const w = g.win || {};
     if (w.text) {

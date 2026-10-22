@@ -139,6 +139,7 @@
     const due = data.checkins.filter(c => c.due);
     for (const c of due) {
       const k = card("due"); k.appendChild(el("b", "", c.title)); k.appendChild(el("div", "csub", c.line));
+      (c.score || []).forEach((x) => k.appendChild(el("div", "csub", x)));  // H239: the game's score
       const r = el("div", "crow"); r.appendChild(startBtn(c.key));
       r.appendChild(button("Done", "", () => send({ done: c.key }).then(d => d && draw())));
       r.appendChild(button("Not now", "", () => send({ later: c.key }).then(d => d && draw())));

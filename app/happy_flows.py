@@ -12390,6 +12390,85 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         return seen
 
     # 131
+    async def flow133(self) -> str:
+        """H239: the six-week game's texts and the weekly look back. No Claude turns. On a throwaway game with a
+        reminder time and an away window: the evening text is due at its time only while today's tick isn't in, and
+        goes once; on a day the calendar shows them away from home in the window, a heads-up comes before they leave,
+        with the game's own words; nothing on a day that isn't the game's. Donna knows both kinds. The weekly look back
+        carries the game's score (its landed line, the call's note and the app's check-in card). Nothing personal in
+        the code."""
+        import games as gm
+        import coaching as co
+        import pings
+        import weather as wx
+        from datetime import datetime as _dt
+        code = "".join((APP / f).read_text() for f in ("games.py", "coaching.py", "direct_line.py", "weather.py")) \
+            + (ROOT / "routine" / "pings.py").read_text()
+        for word in ("Ring Fit", "Zumba"):
+            need(word.lower() not in code.lower(), f"HQ's code names {word}")
+        gdir = self.tmp / "h239"
+        gdir.mkdir(parents=True, exist_ok=True)
+        keep = {k: os.environ.get(k) for k in ("HQ_GAMES", "HQ_GAMES_UNDO", "HQ_GAMES_TODAY", "HQ_DIRECT_DIR")}
+        os.environ.update({"HQ_GAMES": str(gdir / "games.json"), "HQ_GAMES_UNDO": str(gdir / "undo.json"),
+                           "HQ_GAMES_TODAY": "2026-03-04", "HQ_DIRECT_DIR": str(gdir / "line")})
+        (gdir / "line").mkdir(exist_ok=True)
+        spec = {"name": "Stretch daily", "start": "2026-03-02", "weeks": 6, "win": {"track": "did", "share": 0.9},
+                "tracks": [{"id": "did", "kind": "tick", "label": "Stretched"}], "rules": "Any length counts.",
+                "best": "patient", "remind": {"track": "did", "at": "20:00"},
+                "away": {"from": "17:00", "to": "20:00", "ahead": 120, "say": "A short one counts today."}}
+        was, was_asleep = wx.outings_now, pings._asleep
+        try:
+            need(not gm.check_spec({**spec, "remind": {"at": "8pm"}}) == [], "a bad reminder time is taken")
+            need(not gm.check_spec({**spec, "away": {"from": "20:00", "to": "17:00"}}) == [], "a backwards away window is taken")
+            gm.new(spec, by="a test")
+            out = [{"start": _dt(2026, 3, 4, 16, 30), "end": _dt(2026, 3, 4, 22, 0), "what": "Dinner out"}]
+            need(gm.texts_due(_dt(2026, 3, 4, 19, 59)) == [], "the evening text came before its time")
+            due = gm.texts_due(_dt(2026, 3, 4, 20, 3))
+            need(len(due) == 1 and due[0][0] == "game" and "Any length counts." in due[0][2] and "patient" in due[0][2],
+                 f"the evening text isn't right: {due}")
+            need(gm.texts_due(_dt(2026, 3, 4, 23, 0)) == [], "the evening text came hours late")
+            need(gm.texts_due(_dt(2026, 3, 4, 14, 0), out) == [], "the heads-up came too early")
+            away = gm.texts_due(_dt(2026, 3, 4, 14, 45), out)
+            need(len(away) == 1 and away[0][0] == "game-away" and "A short one counts today." in away[0][2]
+                 and "Dinner out" in away[0][2], f"the heads-up isn't right: {away}")
+            need(gm.texts_due(_dt(2026, 3, 4, 14, 45), [{**out[0], "start": _dt(2026, 3, 4, 9), "end": _dt(2026, 3, 4, 12)}]) == [],
+                 "a heads-up for a morning out")
+            need(gm.texts_due(_dt(2026, 4, 20, 20, 5)) == [], "a text after the game's days")
+            # pings sends each once
+            wx.outings_now = lambda t=None, evs=None: (_dt(2026, 3, 4, 20, 5), [])
+            pings._asleep = lambda t: False
+            s = {"games_sent": []}
+            first = pings._game_due(s, time.time(), [])
+            again = pings._game_due(s, time.time(), [])
+            need(len(first) == 1 and first[0][0] == "game" and again == [], f"the evening text isn't sent once: {first} {again}")
+            gm.tick(by="a test")
+            need(gm.texts_due(_dt(2026, 3, 4, 20, 5)) == [], "the evening text after the tick was in")
+            # the weekly look back carries the score
+            score = co._score()
+            need(score and "Stretch daily" in score[0] and "1 of 3 days" in score[0], f"no score for the look back: {score}")
+            note = co.call_note({"what": "checkin", "checkin": {"kind": "week", "title": "The weekly look back",
+                                                               "key": "week:2026-W10"}})
+            need("Stretch daily" in note and "games.py week" in note, "the weekly look back's call doesn't have the score")
+            sent = []
+            real_add = co.add
+            co.add = lambda who, text, why="": sent.append(text)
+            try:
+                co._land({"kind": "week", "title": "The weekly look back", "key": "week:2026-W10"})
+            finally:
+                co.add = real_add
+            need(sent and "Stretch daily" in sent[0], f"the landed weekly line has no score: {sent}")
+            need("c.score" in (APP / "web" / "coach.js").read_text(), "the app's check-in card doesn't show the score")
+            dl = (APP / "direct_line.py").read_text()
+            need('"game":' in dl and '"game-away":' in dl, "Donna doesn't know the game's texts")
+        finally:
+            wx.outings_now, pings._asleep = was, was_asleep
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        return "the evening text at its time until ticked, once; the heads-up before a day out; the score in the weekly look back"
+
     async def flow131(self) -> str:
         """H225: Life coaching as its own place in the app, with check-ins. No Claude turns (her reply on the coaching
         line is canned). A fresh install: the blank map gives the six layers with every line open and no check-in due
@@ -15667,6 +15746,7 @@ FLOWS = {
     129: ("F44: an update finds lsof on a Mac with the helper app's bare PATH (/usr/sbin); the Mac scripts add it too", False, "flow129"),
     130: ("H222: the six-week game, part 1: one template every game gets (dates, win line, weekly look back, debrief, past games kept), its tracks by kind (tick, count, diary, graphs), kept from a call, Donna's chat and the app; designed in Life coaching and handed to the team", False, "flow130"),
     131: ("H225: Life coaching as its own place in the app: the layers with their checklist, the check-ins kept from the map (the weekly look back, a game's debrief, the bigger check-in) with a red dot, one call per layer or check-in, and the coaching line", False, "flow131"),
+    133: ("H239: a six-week game's texts (the evening one while today's tick isn't in, a heads-up on a day away around its time) and its score in the weekly look back", False, "flow133"),
     132: ("F45: a long piece of quiet talking isn't thrown away as no speech (one score per piece; long pieces at 0.75, short at 0.4, quiet ones louder); noise alone still gives nothing", False, "flow132"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }

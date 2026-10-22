@@ -4,6 +4,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- A six-week game can have Donna keep you honest: a text in the evening, at the time you picked, when today's tick isn't in yet, and on a day your calendar shows you away from home around the time you usually play it, a heads-up earlier that today is different and what still counts. The weekly look back now goes through the game's score, and the game's card shows the rest of its design: who you are at your best in it, what comes easily, what could get in the way and who keeps you honest (H239).
 - The nightly check works in rounds: when it finds problems, everything gets fixed first and then the whole check runs again, at most three times. If it ends green, the update goes out that same night; if it's still not right after the third time, it waits and you hear why in the morning.
 
 ## 0.4.10 · 22 October 2026

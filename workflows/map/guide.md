@@ -250,7 +250,11 @@ In HQ:
 - Track: a diary, "…", how it felt: good / okay / bad
 - Graph: … (which counts, day by day or adding up)
 - Win line: … (90% of the days, 60 in total, …)
+- Agent: a text at … in the evening when there's no tick yet (optional)
+- Agent: on days their calendar shows them away from home around … to …, a heads-up earlier, saying … (optional)
 ```
+
+Their agent can keep them honest by text: a reminder at a set time while the day's tick isn't in, and a heads-up on a day they're away from home around the time they usually play it, with what counts on a day like that. Each weekly look back goes through the game's score.
 
 Then, on their yes, it goes to their team, who set the game up in HQ on the template, tailored to it, and build whatever it needs that HQ can't keep yet. From then on they tick and note it on any call, in the texts, or in the app.
 

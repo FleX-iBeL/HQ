@@ -760,6 +760,13 @@ def _loc(now: float, s: dict) -> tuple[datetime, str]:
     return local_now(tz, now).replace(tzinfo=None), tz
 
 
+def outings_now(now: float | None = None, evs: list[dict] | None = None) -> tuple[datetime, list[dict]]:
+    """H239: now where he is (a plain local time) and today's times away from home, for the six-week game's texts."""
+    now = now or time.time()
+    loc, tz = _loc(now, _read())
+    return loc, outings(loc.date(), _cal(evs), _own_outs(), tz)
+
+
 def asleep_at(now: float | None = None, s: dict | None = None, evs: list[dict] | None = None) -> bool:
     """H212: he's asleep now (for pings: a weather watch ending at night ends quietly)."""
     now = now or time.time()

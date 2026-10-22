@@ -737,6 +737,31 @@ def _nudge_due(s: dict, t: float) -> list[tuple[str, str]]:
     return out
 
 
+KEEP_GAME_SENT = 40  # the game texts' keys kept, so each goes once
+
+
+def _game_due(s: dict, t: float, evs: list[dict] | None = None) -> list[tuple[str, str]]:
+    """H239: the six-week game's texts (games.texts_due: the evening one when the tick isn't in, the heads-up on a
+    day away around the game's time). Marks each key in S so it goes once; never while asleep."""
+    try:
+        sys.path.insert(0, str(ROOT / "app"))
+        import games as _g
+        import weather as _w
+        loc, outs = _w.outings_now(t, evs)
+        due = _g.texts_due(loc, outs)
+    except Exception:
+        return []
+    sent = s.setdefault("games_sent", [])
+    out = []
+    for why, key, facts in due:
+        if key in sent or _asleep(t):
+            continue
+        sent.append(key)
+        out.append((why, facts))
+    del sent[:-KEEP_GAME_SENT]
+    return out
+
+
 def nudge_items() -> list[dict]:
     """For the app: the open nudges, each with its bell (no numbers of how often: that's hers)."""
     return [{"n": x["n"], "text": x["text"], "paused": bool(x.get("paused"))} for x in open_nudges()]
@@ -853,6 +878,7 @@ def watch(now: float | None = None, spawn=None, dry: bool = False) -> list[tuple
                 s["appointments"].pop(k)
         out += _watch_due(s, t)  # H125
         out += _nudge_due(s, t)  # H211
+        out += _game_due(s, t, evs)  # H239
         today = time.strftime("%Y-%m-%d", time.localtime(t))
         if any(not o.get("daily") and o.get("on", "") < today for o in s.get("outs") or []):  # H212: a day gone by
             s["outs"] = [o for o in s["outs"] if o.get("daily") or o.get("on", "") >= today]

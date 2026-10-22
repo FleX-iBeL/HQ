@@ -31,7 +31,12 @@ A spec (JSON), the team's to write from the map:
      "weeks": 6, "win": {"track": "…", "share": 0.9} or {"text": "…"}, "win_text": "how they said it",
      "tracks": [{"id": "done", "kind": "tick", "label": "…"}, {"id": "sent", "kind": "count", "label": "…",
                  "target": 60, "graph": true}, {"id": "food", "kind": "diary", "label": "…", "feel": ["good", "bad"]}],
-     "graphs": [{"label": "…", "tracks": ["sent", "replies"]}] (optional: several counts in one graph)}
+     "graphs": [{"label": "…", "tracks": ["sent", "replies"]}] (optional: several counts in one graph),
+     "best": "who they are at their best doing it", "lean": "what comes easily", "fears": "what could get in the
+     way, and what's done about it", "honest": "who plays along or keeps them honest" (all optional, their words),
+     "remind": {"track": "…", "at": "20:00"} (H239: their agent texts at that time when the tick isn't in yet),
+     "away": {"from": "17:00", "to": "20:00", "ahead": 120, "say": "…"} (H239: on a day their calendar shows them
+            away from home in that window, a heads-up AHEAD minutes before they leave, with what to say)}
 
     python3 app/games.py                        the games in a few lines, to say out loud
     python3 app/games.py json                   everything the app gets (JSON)
@@ -243,6 +248,20 @@ def check_spec(spec) -> list[str]:
                 bad.append("A win share is between 0 and 1, like 0.9.")
         elif not win.get("text"):
             bad.append("A win line names a track, or says it in words (text).")
+    rem = spec.get("remind")
+    if rem is not None:
+        if not isinstance(rem, dict) or not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", str(rem.get("at") or "")):
+            bad.append("remind is {\"track\": …, \"at\": \"HH:MM\"}.")
+        elif rem.get("track") is not None and rem["track"] not in ids:
+            bad.append(f"The reminder's track {rem['track']!r} isn't one of the tracks.")
+    away = spec.get("away")
+    if away is not None:
+        hm = r"([01]?\d|2[0-3]):[0-5]\d"
+        if not isinstance(away, dict) or not all(re.fullmatch(hm, str(away.get(k) or "")) for k in ("from", "to")) \
+                or away["from"].zfill(5) >= away["to"].zfill(5):
+            bad.append("away is {\"from\": \"HH:MM\", \"to\": \"HH:MM\", \"ahead\": minutes, \"say\": …}.")
+        elif "ahead" in away and not (isinstance(away["ahead"], int) and 0 <= away["ahead"] <= 12 * 60):
+            bad.append("away's ahead is whole minutes, up to 12 hours.")
     for g in spec.get("graphs") or []:
         if not isinstance(g, dict) or not g.get("tracks") or any(x not in ids for x in g.get("tracks", [])):
             bad.append(f"A graph names tracks of this game: {g!r}.")
@@ -328,7 +347,8 @@ def view(g: dict, today: date | None = None) -> dict:
                       "ended": t > ws + timedelta(days=6), "look": (g.get("looks") or {}).get(str(i + 1), "")})
     ph = _phase(g, t)
     return {**{k: g.get(k) for k in ("id", "name", "for", "game", "rules", "win_text", "tracks", "graphs", "weeks",
-                                      "made", "by", "debrief", "closed")},
+                                      "made", "by", "debrief", "closed", "best", "lean", "fears", "honest", "remind",
+                                      "away")},
             "phase": ph, "setup": d["setup"].isoformat(), "start": d["start"].isoformat(), "end": d["end"].isoformat(),
             "look_end": d["look_end"].isoformat(), "length": d["days"],
             "day": len(played) if ph == "playing" else None, "today": t.isoformat(),
@@ -446,7 +466,8 @@ def _spec_of(spec) -> dict:
         raise ValueError(f"The spec isn't JSON: {e}")
 
 
-_SPEC_KEYS = ("name", "for", "game", "rules", "start", "weeks", "win", "win_text", "tracks", "graphs")
+_SPEC_KEYS = ("name", "for", "game", "rules", "start", "weeks", "win", "win_text", "tracks", "graphs", "best", "lean",
+              "fears", "honest", "remind", "away")
 
 
 @_change
@@ -646,6 +667,75 @@ def line(v: dict) -> str:
         bits.append("no debrief yet")
     return head + ": " + "; ".join(bits) + "."
 
+# ---- H239: the agent's texts about a game ---------------------------------------------------------------------
+# A game's design can ask for two texts from their agent (Donna): `remind` (at a time, when the day's tick isn't in
+# yet) and `away` (on a day their calendar shows them away from home in a window, a heads-up before they leave). The
+# words come from the game itself; pings.watch sends them, once each, keyed per game and day.
+
+def _hm(day: date, hm: str) -> datetime:
+    h, m = (int(x) for x in hm.split(":"))
+    return datetime.combine(day, datetime.min.time()) + timedelta(hours=h, minutes=m)
+
+
+def _tick_track(g: dict, ref: str | None) -> dict | None:
+    ts = [t for t in g["tracks"] if t["kind"] == "tick"]
+    return next((t for t in ts if t["id"] == ref), None) if ref else (ts[0] if len(ts) == 1 else None)
+
+
+def texts_due(loc: datetime, outs: list[dict] | None = None, games: list[dict] | None = None) -> list[tuple[str, str, str]]:
+    """[(why, key, facts)] due at LOC (a plain local time): `game` for the evening text, `game-away` for the heads-up.
+    OUTS are the day's times away from home ({start, end, what}, weather.outings). Nothing is changed; the caller
+    keeps which keys it sent. A text is only due on a day of the game, while today's tick isn't in."""
+    if games is None:
+        try:
+            games = _load()["games"]
+        except ValueError:
+            return []
+    day, out = loc.date(), []
+    for g in games:
+        if g.get("closed") or _phase(g, day) != "playing":
+            continue
+        rem, away = g.get("remind") or {}, g.get("away") or {}
+        tr = _tick_track(g, rem.get("track")) or _tick_track(g, None)
+        if not tr or (g.get("days") or {}).get(day.isoformat(), {}).get(tr["id"]):
+            continue  # ticked (or an X) today: nothing to say
+        v = view(g, day)
+        s = v["sums"][tr["id"]]
+        score = (f"{s['done']} of {s['played']} days done so far (today not yet), day {v['day']} of {v['length']}; "
+                 f"win line {v['win'].get('text') or ''}")
+        label = tr.get("label") or tr["id"]
+        if rem.get("at") and _hm(day, rem["at"]) <= loc < _hm(day, rem["at"]) + timedelta(hours=2):
+            facts = [f"The game {g['name']}: today's tick isn't in yet ({label}).", f"The score: {score}."]
+            if g.get("rules"):
+                facts.append(f"The game's rules, in their words: {g['rules']}")
+            if g.get("best"):
+                facts.append(f"Who they are at their best in it: {g['best']}")
+            if any(o["start"] <= loc < o["end"] for o in outs or []):
+                facts.append("Their calendar says they're out right now; keep it extra light.")
+            out.append(("game", f"game:{g['id']}:{day.isoformat()}:remind", "\n".join(facts)))
+        if away.get("from") and outs:
+            a, b = _hm(day, away["from"]), _hm(day, away["to"])
+            hit = [o for o in outs if o["start"] < b and o["end"] > a]
+            if hit:
+                o = hit[0]
+                send = max(o["start"] - timedelta(minutes=int(away.get("ahead", 120))), _hm(day, "09:00"))
+                if send <= loc < min(o["start"], b) and loc < b:
+                    facts = [f"The game {g['name']}: today is different, they're away from home around "
+                             f"{away['from']} to {away['to']}: {o.get('what') or 'an appointment'} "
+                             f"({o['start']:%H:%M} to {o['end']:%H:%M}).", f"Today's tick: {label}, not in yet.",
+                             f"The score: {score}."]
+                    if away.get("say"):
+                        facts.append(f"What to tell them, from the game's design: {away['say']}")
+                    out.append(("game-away", f"game:{g['id']}:{day.isoformat()}:away", "\n".join(facts)))
+    return out
+
+
+def score_lines(games: list[dict] | None = None) -> list[str]:
+    """H239: the score of each game being played or looked back on, one line each, for the weekly look back."""
+    if games is None:
+        games = read().get("games", [])
+    return [line(v) for v in games if v.get("phase") in ("playing", "looking back")]
+
 
 def summary() -> str:
     d = read()
@@ -665,9 +755,10 @@ def show(ref: str) -> str:
     d = _load()
     v = view(_find(d, ref))
     out = [line(v)]
-    for k in ("for", "game", "rules"):
+    for k, say in (("for", "For"), ("game", "Game"), ("rules", "Rules"), ("best", "At their best"),
+                   ("lean", "What comes easily"), ("fears", "What could get in the way"), ("honest", "Keeps them honest")):
         if v.get(k):
-            out.append(f"{k.capitalize()}: {v[k]}")
+            out.append(f"{say}: {v[k]}")
     out.append(f"Setup {v['setup']}, played {v['start']} to {v['end']}, look back until {v['look_end']}.")
     for day in sorted(v["days"]):
         row = v["days"][day]

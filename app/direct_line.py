@@ -376,6 +376,9 @@ PLAIN = {
     "nudge": ["Hey, just a nudge: {facts}",
               "Still on my list for you: {facts}",
               "Friendly nudge: {facts}"],
+    "game": ["Your game today: {facts}",
+             "Quick one about your game: {facts}"],
+    "game-away": ["Heads up, today's a bit different: {facts}"],
     "watch-end": ["Stopped watching that one. {facts}",
                   "I'm done keeping an eye on that. {facts}"],
 }
@@ -509,6 +512,15 @@ def compose_prompt(why: str, facts: str) -> str:
                  "number or estimate. His reason only lightly, when it helps. A bit firmer, still kind, when it's been "
                  "open for days or the deadline is close. Now and then, not every time, that he can just tell you "
                  "when it's done.",
+        "game": "He's playing a six-week game (the facts say which, the score, and its rules in his words) and "
+                "today's tick isn't in yet. A short, warm text: a light reminder that today's still open, in the "
+                "game's own spirit (playful, never guilt). Any small amount counts when the rules say so; say that "
+                "lightly. No numbers unless the facts' score helps, and never a lecture. He can just tell you when "
+                "it's done.",
+        "game-away": "He's playing a six-week game and today he's away from home around the time he usually plays "
+                     "it (the facts say when and what). A short heads-up, earlier in the day, that today is "
+                     "different: be gentle with himself, and what the game's design says counts on a day like this "
+                     "(the facts give it). One or two sentences, kind, no pressure.",
         "watch-end": "Something he asked you to watch has stopped (the facts say what and why). One quick line that "
                      "you've stopped keeping an eye on it, and why in a few words (time's up and nothing came, or he "
                      "asked).",
