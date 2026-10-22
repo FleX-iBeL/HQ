@@ -10747,7 +10747,9 @@ window.fetch = async (url, opt) => {
         """H169, no Claude: the nightly run (routine/nightly.py). The set is the right one for this computer (the Mac:
         every quick flow; Linux: the Linux nightly set, every number a real flow, the installer's set inside it); a run
         where all pass writes one line in the H169 row's nights on a copy of the roadmap, newest first, seven kept,
-        nothing else on the roadmap changed; a failed flow is named and the run says so (exit 1); on the backup it
+        nothing else on the roadmap changed; a failed flow is named and the run says so (exit 1); H226: again is the
+        next full run of tonight, at most three (a third red one says hold, exit 3; no fourth), a green round ends the
+        night, an old night can't be gone on from; on the backup it
         does nothing; the line for the morning is Donna's at 08:00, as her own kind of text (not a reminder he asked
         for), in everyday words."""
         import importlib
@@ -10804,6 +10806,31 @@ window.fetch = async (url, opt) => {
             mid = rm.read_text()
             got = await asyncio.to_thread(ni.run)
             need(got == 1 and rm.read_text() == mid, "a run that didn't pass still said all pass, or wrote a night")
+            # H226: rounds. Still failing: round 2 (exit 1), round 3 (exit 3, hold), then no fourth run.
+            need(await asyncio.to_thread(ni.run, True) == 1, "round 2 that still fails didn't say fix and go again")
+            last = json.loads((tmp / "nightly" / "last.json").read_text())
+            need(last["round"] == 2 and len(last["rounds"]) == 2 and last["rounds_max"] == 3, f"round 2's last.json: {last}")
+            need(await asyncio.to_thread(ni.run, True) == 3, "round 3 that still fails didn't say hold")
+            n_logs = len(list((tmp / "nightly").glob("*.log")))
+            need(await asyncio.to_thread(ni.run, True) == 3 and len(list((tmp / "nightly").glob("*.log"))) == n_logs,
+                 "a fourth full run went")
+            # Round 1 fails, the fix is in, round 2 is green: tonight ends green; the job writes the night's line.
+            need(await asyncio.to_thread(ni.run) == 1, "a new night's round 1 didn't start over")
+            ni.flow_args = lambda: ["--only", "8"]
+            mid = rm.read_text()
+            need(await asyncio.to_thread(ni.run, True) == 0, "a green round 2 didn't end with 0")
+            last = json.loads((tmp / "nightly" / "last.json").read_text())
+            need(last["round"] == 2 and not last["failed"] and last["rounds"][0]["exit"] and rm.read_text() == mid,
+                 f"a green round 2: {last}")
+            need(await asyncio.to_thread(ni.run, True) == 0 and json.loads((tmp / "nightly" / "last.json").read_text())["round"] == 2,
+                 "after a green round another full run went")
+            # again without a run from tonight: start with round 1.
+            stale = dict(last, at="2026-01-01 02:00", night="2026-01-01 02:00")
+            (tmp / "nightly" / "last.json").write_text(json.dumps(stale))
+            need(await asyncio.to_thread(ni.run, True) == 2, "again went on from an old night")
+            need(ni.tonight(None) is None and ni.tonight({"at": "2026-10-22 02:00", "exit": 0, "ran": 3, "failed": []},
+                                                          datetime(2026, 10, 22, 3, 0))["round"] == 1,
+                 "a last.json from before the rounds isn't read as round 1")
             ni.is_main = lambda: False
             n_logs = len(list((tmp / "nightly").glob("*.log")))
             need(await asyncio.to_thread(ni.run) == 0 and len(list((tmp / "nightly").glob("*.log"))) == n_logs,
@@ -10824,8 +10851,9 @@ window.fetch = async (url, opt) => {
                  and "asked for" not in sent[0][1], f"Donna's morning text: {sent}")
             need("nightly" in dl.PLAIN and "no technical details" in dl.compose_prompt("nightly", "x").lower(),
                  "Donna has no everyday-words text for the nightly")
-            return ("the right set here; nights kept on the H169 row, seven; a failure named, exit 1; the backup "
-                    "does nothing; the morning line is Donna's at 08:00, in everyday words")
+            return ("the right set here; nights kept on the H169 row, seven; a failure named, exit 1; rounds: at most "
+                    "three full runs, a green round ends the night, a third red one holds; the backup does nothing; "
+                    "the morning line is Donna's at 08:00, in everyday words")
         finally:
             ni.flow_args, ni.is_main, ni.OUT, ni.hqpaths.ROADMAP = keep
             for k, v in keep_env.items():
@@ -11609,8 +11637,8 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         folder: a privacy hit pushes nothing, to nightly or main; hesitating puts the night's work on nightly only, main
         and the tags stay; sure puts it on nightly, then main as the next small version (Coming next becomes it, VERSION,
         the tag), back on dev; an empty Coming next still goes to nightly but isn't released; a refused main is put back
-        as it was. Friends' update bar sees only the version tags. The suggestion: all green or only a test fixed is
-        sure, a fix in HQ itself or no run tonight is hesitate. One line in the H178 row's Releases, newest first."""
+        as it was. Friends' update bar sees only the version tags. The suggestion (H226, rounds): green after any round
+        is sure, red with a round left is again, red after the third or no run tonight is hesitate. One line in the H178 row's Releases, newest first."""
         import datetime as _dt
         import importlib
         sys.path.insert(0, str(ROOT / "routine"))
@@ -11710,9 +11738,15 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             run = {"ran": 70, "passed": 70, "failed": []}
             bad = {"ran": 70, "passed": 69, "failed": ["45: FAILED - x"]}
             none, tests, hqc = {"tests": [], "hq": []}, {"tests": ["app/happy_flows.py"], "hq": []}, {"tests": [], "hq": ["routine/pings.py"]}
-            need(rl.suggest(run, none, True)[0] == "sure" and rl.suggest(bad, tests, True)[0] == "sure"
-                 and rl.suggest(bad, hqc, True)[0] == "hesitate" and rl.suggest(run, none, False)[0] == "hesitate"
-                 and rl.suggest(bad, none, True)[0] == "hesitate", "the suggestion isn't sure/hesitate as agreed")
+            # H226: rounds. Green after any round is sure (also when the fix before it was in HQ itself); red with a
+            # round left is again; red after round 3, or no run tonight, is hesitate.
+            r2 = dict(run, round=2, rounds_max=3)
+            need(rl.suggest(run, none, True)[0] == "sure" and rl.suggest(r2, none, True)[0] == "sure"
+                 and rl.suggest(run, hqc, True)[0] == "hesitate" and rl.suggest(run, none, False)[0] == "hesitate"
+                 and rl.suggest(bad, tests, True)[0] == "again" and rl.suggest(bad, hqc, True)[0] == "again"
+                 and rl.suggest(dict(bad, round=2, rounds_max=3), none, True)[0] == "again"
+                 and rl.suggest(dict(bad, round=3, rounds_max=3), tests, True)[0] == "hesitate",
+                 "the suggestion isn't sure/again/hesitate as agreed")
 
             # One line in the H178 row's Releases.
             road = tmp / "roadmap.md"

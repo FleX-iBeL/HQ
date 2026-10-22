@@ -6,10 +6,13 @@ hours, just run all the flows or something like that and just find bugs. ... We 
 maintenance moments because we just do it daily whenever we have space." and "Maybe we do the nightly check at
 2 am". A repeating planned item (H171) carries one job text (in the H169 row); that job runs this script:
 
-  python3 "routine/nightly.py" run          on the main only: the happy flows for this computer, no Claude turns.
-                                            All pass: one line in the H169 row's nights, exit 0, nothing else.
-                                            One fails: the failed flows and the log, exit 1 (the job fixes them).
+  python3 "routine/nightly.py" run          on the main only: round 1, the happy flows for this computer, no Claude
+                                            turns. All pass: one line in the H169 row's nights, exit 0, nothing else.
+                                            One fails: the failed flows and the log, exit 1 (the job fixes them all).
                                             Not the main: says so, changes nothing, exit 0.
+  python3 "routine/nightly.py" again        the next full run of tonight (round 2, then 3), only after every flow the
+                                            round before found is fixed. All pass: exit 0. Still failing with a round
+                                            left: exit 1 (fix all again). Still failing after round 3: exit 3 (hold).
   python3 "routine/nightly.py" set          which flows this computer runs
   python3 "routine/nightly.py" log "LINE"   one line in the H169 row's nights (the job, after its fix)
   python3 "routine/nightly.py" morning "TEXT"  a short plain line Donna texts him at 08:00 (the next one)
@@ -17,6 +20,14 @@ maintenance moments because we just do it daily whenever we have space." and "Ma
 The set: on a Mac every flow without Claude turns (--quick); elsewhere the Linux nightly set (flowsets.LINUX_NIGHTLY: every quick flow that holds on Linux).
 The flows with Claude turns stay out: they need a live voice and cost usage, and the daytime builds run them.
 [Claude's choice.] Each run's output is kept in scratch/nightly/ (the last 14 nights).
+
+Rounds (H226, 22 October 2026). The user on the call at 11:37: "they fix the 3 bugs, and then at the end they run it
+again, they might find another thing. They fix all those bugs again and then they run another time. If that time it
+still finds bugs, then we don't release." and "Of course if there is nothing found, we don't need to run it three
+times." So: round 1 is the full run; green ends the night's testing. Not green: the job fixes everything it found
+(each fix checked on the flows it touches, never a full run per fix), then `again`, a full run again; at most
+ROUNDS full runs. last.json holds the latest round and every round of tonight, so the release (release.py) reads
+whether the night ended green, and after which round.
 """
 from __future__ import annotations
 
@@ -41,6 +52,8 @@ KEEP_NIGHTS = 7
 KEEP_LOGS = 14
 OUT = os.path.join(HQ, "scratch", "nightly")
 MORNING = (8, 0)  # when Donna texts the line for the morning
+ROUNDS = 3  # H226: at most three full runs a night
+NIGHT_HOURS = 12  # a round belongs to tonight when tonight's round 1 started less than this long ago [Claude's choice]
 
 
 def flow_args() -> list[str]:
@@ -112,42 +125,91 @@ def _prune():
         os.remove(os.path.join(OUT, f))
 
 
-def run() -> int:
+def last() -> dict | None:
+    try:
+        return json.load(open(os.path.join(OUT, "last.json"), encoding="utf8"))
+    except Exception:
+        return None
+
+
+def tonight(prev: dict | None, now: dt.datetime | None = None) -> dict | None:
+    """The night prev belongs to, when it's still tonight's: {"night", "round", "rounds", "green"}; else None."""
+    if not prev or not prev.get("at"):
+        return None
+    now = now or dt.datetime.now()
+    night = prev.get("night") or prev["at"]
+    try:
+        start = dt.datetime.strptime(night, "%Y-%m-%d %H:%M")
+    except ValueError:
+        return None
+    if not dt.timedelta(0) <= now - start < dt.timedelta(hours=NIGHT_HOURS):
+        return None
+    green = prev.get("exit") == 0 and bool(prev.get("ran")) and not prev.get("failed")
+    rounds = prev.get("rounds") or [{k: prev.get(k) for k in ("at", "ran", "passed", "failed", "exit", "minutes", "log")}]
+    return {"night": night, "round": int(prev.get("round") or 1), "rounds": rounds, "green": green}
+
+
+def run(again: bool = False) -> int:
     stamp = dt.datetime.now()
     if not is_main():
         print("This computer isn't the main right now, so the nightly run is the main's. Nothing done.")
         return 0
     os.makedirs(OUT, exist_ok=True)
-    log = os.path.join(OUT, stamp.strftime("%Y-%m-%d-%H%M") + ".log")
+    night, n, rounds = stamp.strftime("%Y-%m-%d %H:%M"), 1, []
+    if again:
+        t = tonight(last(), stamp)
+        if not t:
+            print("No run from tonight to go on from: start with run (round 1).")
+            return 2
+        if t["green"]:
+            print(f"Round {t['round']} already passed every flow: no more runs tonight.")
+            return 0
+        if t["round"] >= ROUNDS:
+            print(f"Tonight already had {ROUNDS} full runs; still failing, so the night's work holds on nightly.")
+            return 3
+        night, n, rounds = t["night"], t["round"] + 1, t["rounds"]
+    log = os.path.join(OUT, stamp.strftime("%Y-%m-%d-%H%M%S") + ".log")
     cmd = [_python(), os.path.join(HQ, "app", "happy_flows.py")] + flow_args()
-    print(f"Running: {' '.join(cmd[1:])}  (output in {log})", flush=True)
-    t = time.time()
+    print(f"Round {n} of at most {ROUNDS}. Running: {' '.join(cmd[1:])}  (output in {log})", flush=True)
+    t0 = time.time()
     with open(log, "w", encoding="utf8") as f:
         r = subprocess.run(cmd, cwd=HQ, stdout=f, stderr=subprocess.STDOUT)
     out = open(log, encoding="utf8").read()
-    mins = round((time.time() - t) / 60)
+    mins = round((time.time() - t0) / 60)
     passed, ran = summary(out)
     failed = failures(out)
-    json.dump({"at": stamp.strftime("%Y-%m-%d %H:%M"), "ran": ran, "passed": passed, "failed": failed,
-               "exit": r.returncode, "minutes": mins, "log": log},
+    entry = {"at": stamp.strftime("%Y-%m-%d %H:%M"), "ran": ran, "passed": passed, "failed": failed,
+             "exit": r.returncode, "minutes": mins, "log": log}
+    json.dump({**entry, "round": n, "rounds_max": ROUNDS, "night": night, "rounds": rounds + [entry]},
               open(os.path.join(OUT, "last.json"), "w"), indent=1)
     _prune()
     when = stamp.strftime("%-d %b %H:%M")
     if r.returncode == 0 and ran and not failed:
-        add_night(f"{when} all {ran} flows pass ({mins} min)")
-        print(f"All {ran} flows pass ({mins} min). One line in the {ROW} row; nothing else to do.")
+        if n == 1:
+            add_night(f"{when} all {ran} flows pass ({mins} min)")
+            print(f"All {ran} flows pass ({mins} min). One line in the {ROW} row; nothing else to do.")
+        else:
+            print(f"Round {n}: all {ran} flows pass ({mins} min). Tonight ends green: the release can go out. "
+                  f"Write one line for the night with nightly.py log (what each round found and what was fixed).")
         return 0
-    print(f"{passed} of {ran} passed ({mins} min). Failed:")
+    print(f"Round {n}: {passed} of {ran} passed ({mins} min). Failed:")
     for ln in failed or [f"(no flow failed, but the run ended with exit {r.returncode}: see the log's end)"]:
         print("  " + ln)
     print(f"The full output: {log}")
-    return 1
+    if n < ROUNDS:
+        print(f"Fix everything this round found (check each fix on the flows it touches; no full run per fix), "
+              f"then: nightly.py again (round {n + 1} of {ROUNDS}).")
+        return 1
+    print(f"That was the last of {ROUNDS} full runs: the night's work holds on nightly, not released.")
+    return 3
 
 
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv else ""
     if cmd == "run":
         return run()
+    if cmd == "again":
+        return run(again=True)
     if cmd == "set":
         print(" ".join(flow_args()))
         return 0

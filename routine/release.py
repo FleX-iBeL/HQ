@@ -13,15 +13,16 @@ Friends' update bars only look at main's version tags (update.py remote_tags), s
 The daily release (H178, a repeating planned item at 2:05) runs after the nightly run or the Sunday sweep:
 
   python3 "routine/release.py" status          tonight's run, what changed since it started (tests or HQ itself),
-                                               dev against nightly and main, and the suggestion: sure or hesitate
+                                               dev against nightly and main, and the suggestion: sure, again or hesitate
   python3 "routine/release.py" nightly "WHY"   hesitating: the privacy check, then dev to nightly only; main stays
   python3 "routine/release.py" main            sure: the privacy check, dev to nightly, then the next small version
                                                the H90 way (Coming next becomes it, VERSION, tag, main, back to dev)
   python3 "routine/release.py" log "LINE"      one line in the H178 row's Releases, newest first
 
-Sure and low risk: tonight's run passed every flow, or what failed was only a test (the fix touched only the flows)
-and the rerun is green. Hesitating: a fix in HQ itself, or anything not green after the fix; the next night's run
-then tests the fix in full, and a green night releases it. The privacy check is a hard no for both branches.
+The night works in rounds (H226, 22 October 2026): round 1 is the full run; not green, everything it found is fixed and
+the full run goes again (nightly.py again), at most three full runs. Sure: the latest round passed every flow, after
+round 1, 2 or 3, also when a fix was in HQ itself (the green full run tested it). Again: not green and a round left.
+Hesitating: still not green after the third full run, or no run tonight; the next night tests it again. The privacy check is a hard no for both branches.
 A release also sets GitHub's About to the new version (H197, routine/about.py, through push.py).
 Only the main computer releases. Exits 0 when done, 1 on a privacy hit (nothing pushed), 2 when git refused or a
 check doesn't hold (nothing forced).
@@ -90,18 +91,24 @@ def changed_since(at: str | None) -> dict:
 
 
 def suggest(run: dict | None, changed: dict, tonight: bool) -> tuple[str, str]:
-    """Sure or hesitate, with why in everyday words. The team still reruns the failed flows before going on."""
+    """Sure, again or hesitate, with why in everyday words (H226: the night works in rounds of full runs).
+
+    run is last.json: the latest round of tonight (its own ran, passed, failed), with "round" and "rounds_max".
+    changed is what dev changed after that round started. Green after any round is sure, also when the round before
+    needed a fix in HQ itself: the green full run tested it. Not green with a round left: again (fix everything it
+    found, then nightly.py again). Not green after the last round: hesitate (hold on nightly)."""
     if not run or not tonight:
         return "hesitate", "there was no test run tonight"
+    n, most = int(run.get("round") or 1), int(run.get("rounds_max") or 3)
+    after = f" in round {n}" if n > 1 else ""
     if not run.get("failed") and run.get("passed") == run.get("ran") and run.get("ran"):
         if changed["hq"]:
-            return "hesitate", "every test passed, but HQ itself changed after the run started"
-        return "sure", f"all {run['ran']} tests passed"
-    if changed["hq"]:
-        return "hesitate", "a fix in how HQ itself works; the next night's run tests it in full"
-    if changed["tests"]:
-        return "sure", "only a test was wrong and it's fixed (sure once the rerun is green)"
-    return "hesitate", "a test failed and nothing was fixed yet"
+            return "hesitate", "every test passed, but HQ itself changed after that full run"
+        return "sure", f"all {run['ran']} tests passed{after}"
+    if n < most:
+        return "again", (f"round {n} found {len(run.get('failed') or []) or 'a'} failure(s): fix everything it found, "
+                         f"then a full run again (nightly.py again, round {n + 1} of {most})")
+    return "hesitate", f"still not green after {n} full runs tonight; the next night tests it again"
 
 
 def status() -> dict:
@@ -264,7 +271,8 @@ def words(s: dict) -> str:
     run = s["run"]
     lines = [f"Main computer: {'yes' if s['main_computer'] else 'no'} · on {s['branch']} · version {s['version']}"]
     if run and s["tonight"]:
-        lines.append(f"Tonight's run ({run.get('at')}): {run.get('passed')} of {run.get('ran')} passed"
+        lines.append(f"Tonight's run, round {run.get('round') or 1} of at most {run.get('rounds_max') or 3} "
+                     f"({run.get('at')}): {run.get('passed')} of {run.get('ran')} passed"
                      + (f"; failed: {'; '.join(run.get('failed') or [])}" if run.get("failed") else ""))
     else:
         lines.append("No test run from tonight" + (f" (the last was {run.get('at')})" if run else ""))

@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- The nightly check works in rounds: when it finds problems, everything gets fixed first and then the whole check runs again, at most three times. If it ends green, the update goes out that same night; if it's still not right after the third time, it waits and you hear why in the morning.
+
 ## 0.4.10 · 22 October 2026
 
 ### Added
