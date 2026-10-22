@@ -73,6 +73,18 @@ stops when he says it's done (a call, her chat, or Done in the app); later pause
                                             WHEN: the first nudge (now, tomorrow 9:00, wednesday 9:00, …)
     python3 routine/pings.py nudge-done N|"words"    he says it's done
     python3 routine/pings.py nudge-later N|"words" [WHEN]   quiet until WHEN (default: tomorrow morning)
+
+H238 (22 October 2026, call at 13:03, Pepper): an agent calls him. In his words: "let's say we had an appointment or
+something you can call me". Kept in pings.json (`calls`). At the agreed time (or when the appointment starts, or N
+minutes before) the main sends a push notification on the direct line's push, "<agent> is calling", with what it's
+about; one tap opens HQ and starts the call with that agent, who knows what it's about (app/ringing.py). Not picked
+up within RING_WAIT: a missed call, said so in her chat. No phone number, no paid service, no native app: iOS doesn't
+let a web app ring like a phone, so it's a notification.
+
+    python3 routine/pings.py call "WHEN" "WHAT" [--agent NAME]     WHEN as for remind; NAME: the agent who calls
+                                                                   (default: the direct line's own)
+    python3 routine/pings.py call appt "WORDS" "WHAT" [--agent NAME] [--before N]   when that appointment starts
+    python3 routine/pings.py call-cancel N
 """
 from __future__ import annotations
 
@@ -98,6 +110,8 @@ KEEP_SENT = 30  # sent reminders kept, for looking back
 INITIATIVE_DAY = (9, 21)  # her own look at her notes: only in the day
 INITIATIVE_EVERY = 3 * 3600
 INITIATIVE_MAX = 2  # texts a day from her own initiative, at most
+RING_WAIT = 10 * 60  # H238: a call not picked up this long after it rang is a missed call
+KEEP_CALLS = 30  # H238: calls that rang (picked up, missed or cancelled) kept, for looking back
 KINDS = ("mail", "weather")  # H125: where a watch can look; more can follow
 WATCH_DAYS = {"mail": 7}  # a watch without --until: mail for 7 days, weather until the end of today
 KEEP_ENDED = 30  # ended watches kept, for looking back
@@ -786,6 +800,155 @@ def _say_at(start: str) -> str:
         return start
 
 
+# -- H238: an agent calls him --------------------------------------------------------------------
+
+def _agents_mod():
+    sys.path.insert(0, str(ROOT / "app"))
+    import agents as _a
+    return _a
+
+
+def call_agent(name: str = "") -> dict:
+    """The agent who calls: by id or name, else the direct line's own. ValueError for one that can't be called."""
+    a = _agents_mod()
+    every = a.visible(Path(hqpaths.FOLDER))
+    want = (name or agent_id()).strip().lower()
+    hit = [x for x in every if want in (x["id"].lower(), x["name"].lower())]
+    if not hit:
+        raise ValueError(f"No agent called {name} to make the call; there's " + ", ".join(x["name"] for x in every) + ".")
+    return hit[0]
+
+
+def call_add(at: dt.datetime | None, what: str, who: str = "", appt: dict | None = None, before: int = 0,
+             by: str = "") -> dict:
+    """A call from WHO at AT, or when the appointment APPT starts (BEFORE minutes earlier)."""
+    what = " ".join(str(what).split())[:400]
+    if not what:
+        raise ValueError("What is the call about?")
+    a = call_agent(who)
+    with _Lock():
+        s = read()
+        calls = s.setdefault("calls", [])
+        n = max([int(c.get("n") or 0) for c in calls] + [int(s.get("last_call") or 0)]) + 1
+        c = {"n": n, "agent": a["id"], "what": what, "added": time.strftime(FMT), "by": by}
+        if appt:
+            c.update({"appt": appt.get("id", ""), "title": appt.get("title", ""), "start": appt.get("start", ""),
+                      "before": int(before or 0)})
+            c["at"] = (dt.datetime.fromtimestamp(_ts(appt.get("start", ""))) - dt.timedelta(minutes=int(before or 0))).strftime(FMT)
+        else:
+            c["at"] = at.strftime(FMT)
+        calls.append(c)
+        s["last_call"] = n
+        _write(s)
+    return c
+
+
+def _call_at(c: dict, by_id: dict) -> float:
+    """When it rings: an appointment's latest start from the calendar (a moved appointment moves the call)."""
+    if c.get("appt"):
+        e = by_id.get(c["appt"]) or {}
+        start = e.get("start") or c.get("start", "")
+        at = _ts(start)
+        return at - int(c.get("before") or 0) * 60 if at else 0.0
+    try:
+        return time.mktime(time.strptime(c["at"], FMT))
+    except (KeyError, ValueError):
+        return 0.0
+
+
+def call_get(n: int) -> dict | None:
+    return next((c for c in read().get("calls") or [] if int(c.get("n") or 0) == n), None)
+
+
+def call_cancel(n: int) -> bool:
+    with _Lock():
+        s = read()
+        c = next((c for c in s.get("calls") or [] if int(c.get("n") or 0) == n and not c.get("rang")), None)
+        if c is None:
+            return False
+        s["calls"] = [x for x in s["calls"] if x is not c]
+        _write(s)
+    return True
+
+
+def call_answered(n: int, now: float | None = None) -> dict | None:
+    """The call page started the call from the notification: picked up (and no missed call after all)."""
+    t = now or time.time()
+    with _Lock():
+        s = read()
+        c = next((c for c in s.get("calls") or [] if int(c.get("n") or 0) == n), None)
+        if c is None:
+            return None
+        if not c.get("answered"):
+            c["answered"] = time.strftime(FMT, time.localtime(t))
+            _write(s)
+    return c
+
+
+def open_calls(s: dict | None = None) -> list[dict]:
+    s = read() if s is None else s
+    return [c for c in s.get("calls") or [] if not c.get("rang")]
+
+
+def _call_says(c: dict) -> str:
+    try:
+        name = call_agent(c.get("agent", ""))["name"]
+    except ValueError:
+        name = c.get("agent", "")
+    when_ = (f"when {c['title']} starts" if not c.get("before") else f"{c['before']} minutes before {c['title']}") \
+        if c.get("appt") else c.get("at", "")
+    return f"{name} calls {when_} about {c.get('what', '')}"
+
+
+def _call_line(c: dict) -> str:
+    state = (" · picked up " + c["answered"][11:] if c.get("answered") else " · missed" if c.get("missed")
+             else " · ringing" if c.get("rang") else "")
+    return f"- call {c['n']}: {_call_says(c)} ({c.get('at', '')}){state}"
+
+
+def _calls_due(s: dict, t: float, evs: list[dict]) -> list[tuple[str, str]]:
+    """Ring what's due (marked rang first), and say a missed one once. [(why, facts)]: ring's facts are its number."""
+    out = []
+    by_id = {e.get("id"): e for e in evs}
+    calls = s.setdefault("calls", [])
+    for c in calls:
+        if c.get("rang"):
+            if not c.get("answered") and not c.get("missed") and t - _ts(c["rang"].replace(" ", "T")) >= RING_WAIT:
+                c["missed"] = time.strftime(FMT, time.localtime(t))
+                out.append(("missed-call", _missed_facts(c)))
+            continue
+        at = _call_at(c, by_id)
+        if not at or at > t:
+            continue
+        c["rang"] = time.strftime(FMT, time.localtime(t))
+        if t - at > LATE:  # HQ was off at the time: it never rang, so it's missed right away, saying so
+            c["missed"] = c["rang"]
+            out.append(("missed-call", _missed_facts(c, late=True)))
+        else:
+            out.append(("ring", str(c["n"])))
+    rang = [c for c in calls if c.get("rang")]
+    if len(rang) > KEEP_CALLS:
+        drop = {id(c) for c in rang[:len(rang) - KEEP_CALLS]}
+        s["calls"] = [c for c in calls if id(c) not in drop]
+    return out
+
+
+def _missed_facts(c: dict, late: bool = False) -> str:
+    try:
+        name = call_agent(c.get("agent", ""))["name"]
+    except ValueError:
+        name = c.get("agent", "")
+    me = name.lower() == agent_name().lower()
+    lines = [f"Missed call: {'you' if me else name} called him at {c.get('at', '')[11:]} and he didn't pick up.",
+             f"What it was about: {c.get('what', '')}"]
+    if c.get("title"):
+        lines.append(f"For the appointment: {c['title']}")
+    if late:
+        lines.append("HQ couldn't ring at the time (it was off), so it never rang; say so in passing.")
+    lines.append(f"He can call {'you' if me else name} back from the app whenever he likes, or say a new time.")
+    return "\n".join(lines)
+
+
 def due(now: float | None = None, s: dict | None = None, evs: list[dict] | None = None) -> list[tuple[str, str, str]]:
     """[(why, key, facts)] that are due now; why is appt or remind. Nothing is changed."""
     t = now or time.time()
@@ -879,6 +1042,7 @@ def watch(now: float | None = None, spawn=None, dry: bool = False) -> list[tuple
         out += _watch_due(s, t)  # H125
         out += _nudge_due(s, t)  # H211
         out += _game_due(s, t, evs)  # H239
+        out += _calls_due(s, t, evs)  # H238
         today = time.strftime("%Y-%m-%d", time.localtime(t))
         if any(not o.get("daily") and o.get("on", "") < today for o in s.get("outs") or []):  # H212: a day gone by
             s["outs"] = [o for o in s["outs"] if o.get("daily") or o.get("on", "") >= today]
@@ -932,7 +1096,7 @@ def _spawn(why: str, facts: str) -> None:
     log = ROOT / "scratch" / "direct-line.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     cmd = [str(py) if py.exists() else sys.executable, str(ROOT / "app" / "direct_line.py")]
-    cmd += ["initiative"] if why == "initiative" else ["text", why, facts]
+    cmd += ["initiative"] if why == "initiative" else ["ring", facts] if why == "ring" else ["text", why, facts]
     subprocess.Popen(cmd, cwd=str(ROOT), stdout=open(log, "a"), stderr=subprocess.STDOUT, start_new_session=True)
 
 
@@ -957,6 +1121,8 @@ def listing() -> str:
     out += [f"- out {o['n']} · {_out_says(o)}" for o in s.get("outs") or []] or ["- none"]
     out += ["", "Nudges until he says it's done (H211):"]
     out += [_nudge_line(x) for x in s.get("nudges") or [] if not x.get("done")] or ["- none"]
+    out += ["", "Calls an agent makes to him (H238):"]
+    out += [_call_line(c) for c in s.get("calls") or []] or ["- none"]
     out += ["", f"{agent_name()}'s own notes ({notes_file().relative_to(hqpaths.FOLDER) if str(notes_file()).startswith(hqpaths.FOLDER) else notes_file()}):"]
     out += [f"- {i['when'][:16]} · {i['text']} · id {i['id']}" for i in her_notes()] or ["- none"]
     return "\n".join(out)
@@ -1150,6 +1316,44 @@ def main(argv: list[str]) -> int:
         print({"new": f"Kept for watch {argv[1]}; she texts him within a minute.",
                "seen": f"Already kept for watch {argv[1]}."}.get(got, got))
         return 0 if got in ("new", "seen") else 1
+    elif cmd == "call" and len(argv) >= 3:
+        rest = argv[1:]
+
+        def copt(name: str) -> str:
+            return rest[rest.index(name) + 1] if name in rest and rest.index(name) + 1 < len(rest) else ""
+        who, bf = copt("--agent"), copt("--before")
+        words = [a for i, a in enumerate(rest) if not a.startswith("--") and not (i and rest[i - 1].startswith("--"))]
+        try:
+            if words and words[0] == "appt":
+                if len(words) < 3:
+                    raise ValueError('call appt "WORDS" "WHAT": which appointment, and what the call is about.')
+                hit = find_events(words[1])
+                if len(hit) != 1:
+                    print("No appointment like that in the calendar's next two weeks." if not hit else
+                          "More than one; give the id (or add the date or the time):\n" +
+                          "\n".join(f"- {e['title']} · {e['start'][:16].replace('T', ' ')} · id {e['id']}" for e in hit[:12]))
+                    return 1
+                c = call_add(None, " ".join(words[2:]), who, appt=hit[0], before=int(bf or 0), by=by)
+            else:
+                if len(words) < 2:
+                    raise ValueError('call "WHEN" "WHAT": when, and what the call is about.')
+                at = when(words[0])
+                if at < dt.datetime.now().replace(second=0, microsecond=0):
+                    raise ValueError(f"{at.strftime(FMT)} has passed already.")
+                c = call_add(at, " ".join(words[1:]), who, by=by)
+        except ValueError as e:
+            print(e)
+            return 2
+        print(f"Call {c['n']}: {_call_says(c)}, at {c['at']}. His phone gets a notification then; one tap picks up.")
+    elif cmd == "call-cancel" and len(argv) == 2 and argv[1].isdigit():
+        if not call_cancel(int(argv[1])):
+            print(f"No call {argv[1]} waiting.")
+            return 1
+        print(f"Call {argv[1]} cancelled.")
+    elif cmd == "answered" and len(argv) == 2 and argv[1].isdigit():
+        c = call_answered(int(argv[1]))
+        print(json.dumps(c, ensure_ascii=False) if c else "{}")
+        return 0 if c else 1
     elif cmd == "due":
         print(json.dumps(due(), ensure_ascii=False, indent=1))
     else:

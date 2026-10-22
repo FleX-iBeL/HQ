@@ -1327,7 +1327,7 @@ function showSoon(list) {
 }
 // H55: a line that only does Free calls (the test line on a server) says so, and Free can't be switched off.
 let freeOnly = false;
-fetch("/api/agents", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => {
+const agentsReady = fetch("/api/agents", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => {
   if (!j) return;
   if (j.free_only) { freeOnly = free = true; freeBtn.disabled = true; }
   const s = Array.isArray(j.soon) ? j.soon : [], has = a => Array.isArray(cards) && cards.includes(a.id);
@@ -1745,6 +1745,7 @@ function onServerMessage(ev) {
     else if (m && m.type === "hq-cancelled") markCancelled();
     else if (m && m.type === "hq-hangup" && state !== "idle") hangup();  // H75: she hung up after his goodbye
     else if (m && m.type === "hq-switch" && state !== "idle") switchTo(m.agent, m.call);  // H79: she put the other one on
+    else if (m && m.type === "hq-callback" && state !== "idle") callMeBack(m.agent, m.call);  // H238: she calls him right back
     else if (m && m.type === "hq-three-way" && Array.isArray(m.agents)) {  // H79: the other one joined
       panel = m.agents.filter(id => AGENTS[id] || SOON[id]); paintTint(onCall()); showCallTitle();
       if (state === "live" && !muted) setState("live", onCallText());
@@ -2191,6 +2192,33 @@ async function switchTo(id, name) {
   agent = id; mode = AGENTS[id].load; showMode();
   try { localStorage.setItem("hq-agent", agent); localStorage.setItem("hq-mode", mode); } catch (e) {}
   continueFrom = data && data.lines ? data : null; handoverNext = !!continueFrom;
+  call();
+}
+// H238: "hang up and call me back". This call ends as a hang-up does, the page loads itself again (fresh page code)
+// and calls the same agent at once, continuing this call. What to call back is kept for the reload in this tab only.
+let callbackNext = false, ringNext = null;
+function callMeBack(id, name) {
+  hangup();
+  try { sessionStorage.setItem("hq-callback", JSON.stringify({ agent: id, call: name || "", at: Date.now() })); } catch (e) {}
+  setTimeout(() => location.reload(), 900);  // the hang-up has closed
+}
+// After the reload, or a tap on "<agent> is calling" (?ring=N&agent=ID, H238 part 2): start that call by itself.
+async function callOnLoad() {
+  let back = null;
+  try { back = JSON.parse(sessionStorage.getItem("hq-callback") || "null"); sessionStorage.removeItem("hq-callback"); } catch (e) {}
+  const q = new URLSearchParams(location.search), ring = q.get("ring"), ringWho = q.get("agent") || "";
+  if (ring) { q.delete("ring"); q.delete("agent"); try { history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q : "")); } catch (e) {} }
+  if (!ring && !(back && Date.now() - back.at < 90000)) return;
+  await Promise.race([agentsReady, new Promise(res => setTimeout(res, 3000))]);
+  if (state !== "idle") return;
+  const want = ring ? ringWho : back.agent;
+  if (AGENTS[want]) { agent = want; mode = AGENTS[agent].load; showMode(); }
+  if (ring) ringNext = ring;  // the server knows the call and its agent; it says she's the one calling
+  else {
+    let data = null;
+    try { if (back.call) { const r = await fetch("api/calls/" + encodeURIComponent(back.call), { cache: "no-store" }); if (r.ok) data = await r.json(); } } catch (e) {}
+    continueFrom = data && data.lines ? data : null; callbackNext = !!continueFrom;
+  }
   call();
 }
 const histCont = document.getElementById("histcont"), histContNote = document.getElementById("histcontnote");
@@ -3670,6 +3698,8 @@ async function call() {
   const coachAbout = appt || todoAbout ? null : window.aboutCoachNext; window.aboutCoachNext = null;  // H225: a layer or a check-in
   const newsAbout = appt || todoAbout || coachAbout ? null : window.aboutNewsNext; window.aboutNewsNext = null;  // H236: setting up their news
   const handover = handoverNext && !!cont; handoverNext = false;  // H79
+  const callback = callbackNext && !!cont && !handover; callbackNext = false;  // H238: she called him right back
+  const ring = ringNext; ringNext = null;  // H238: he picked up her call from the notification
   const demo = demoNext; demoNext = null; demoCall = demo !== null;  // H74: a demo call from the tutorial
   const plain = free || demoCall;
   if (!plain) sendHere(true);  // H217
@@ -3678,7 +3708,7 @@ async function call() {
     contLabel = handover ? "from " + cont.agent : "continuing " + cont.started;
     for (const l of cont.lines) { if (l.who === "filler") continue; addChat(l.who, l.text, true, l.agent || cont.agent); if (l.cancelled) markCancelled(); }
     const d = document.createElement("div"); d.className = "divider";
-    d.textContent = handover ? (AGENTS[agent] || {}).name + " picked up" : "Continued now"; chatLog.appendChild(d);
+    d.textContent = handover ? (AGENTS[agent] || {}).name + " picked up" : callback ? "Called you back" : "Continued now"; chatLog.appendChild(d);
   }
   setState("connecting", "Connecting…");
   try {
@@ -3690,7 +3720,7 @@ async function call() {
     dc = pc.createDataChannel("chat", { ordered: true });
     dc.onmessage = onServerMessage;
     dc.onopen = () => { showTyping(); pingTimer = setInterval(() => { try { dc.send("ping: " + Date.now()); } catch (e) {} }, 1000); };
-    pc.ontrack = ev => { audioEl.srcObject = ev.streams[0] || new MediaStream([ev.track]); applyVoice(); applySink(); audioEl.play().catch(() => {}); };  // H40, H106
+    pc.ontrack = ev => { audioEl.srcObject = ev.streams[0] || new MediaStream([ev.track]); applyVoice(); applySink(); audioEl.play().catch(() => untapped()); };  // H40, H106; H238: started without a tap
     pc.onconnectionstatechange = () => {
       if (pc && pc.connectionState === "connected") { setState("live", muted ? "Muted: she can't hear you" : onCallText()); }
       if (pc && (pc.connectionState === "failed" || pc.connectionState === "closed") && state !== "idle") { cleanup("Call ended"); }
@@ -3701,7 +3731,7 @@ async function call() {
       body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: { mode, agent, free: plain, voice: voiceFor(agent),
         voices: Object.fromEntries(Object.keys(AGENTS).map(id => [id, voiceFor(id)])),  // H79: a three-way call speaks in both
         ...(demoCall ? { demo: true, demo_topic: demo } : {}),
-        ...(cont && !plain ? { continue: cont.name } : {}), ...(appt && !plain ? { about: appt.id } : {}), ...(todoAbout && !plain ? { about_todo: todoAbout } : {}), ...(coachAbout && !plain ? { about_coaching: coachAbout } : {}), ...(newsAbout && !plain ? { about_news: newsAbout } : {}), ...(handover && !plain ? { handover: true } : {}) } }) });
+        ...(cont && !plain ? { continue: cont.name } : {}), ...(appt && !plain ? { about: appt.id } : {}), ...(todoAbout && !plain ? { about_todo: todoAbout } : {}), ...(coachAbout && !plain ? { about_coaching: coachAbout } : {}), ...(newsAbout && !plain ? { about_news: newsAbout } : {}), ...(handover && !plain ? { handover: true } : {}), ...(callback && !plain ? { callback: true } : {}), ...(ring && !plain ? { ring } : {}) } }) });
     if (!r.ok) throw new Error("The call server said " + r.status);
     const answer = await r.json();
     await pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });
@@ -3710,6 +3740,14 @@ async function call() {
     errEl.textContent = (e && e.name === "NotAllowedError") ? "The microphone is blocked. Allow it for this page in Settings, then try again." : String(e.message || e);
     cleanup("Tap to call");
   }
+}
+
+// H238: a call started by itself (called back, or picked up from the notification) may not be allowed to play her
+// voice before a tap on the page: then one tap anywhere lets her through.
+function untapped() {
+  errEl.textContent = "Tap anywhere to hear her.";
+  const go = () => { startAudio(); audioEl.play().then(() => { errEl.textContent = ""; }).catch(() => {}); };
+  document.addEventListener("pointerdown", go, { once: true, capture: true });
 }
 
 // Hang up: tell the server first (so the after-call work starts at once), then close.
@@ -3753,7 +3791,7 @@ function cleanup(text) {
 }
 
 btn.addEventListener("click", () => { if (state === "idle") call(); else if (state === "live") askHangup(true); });
-clearChat(); showMode(); showVoices(); showSound(); applyVoice(); loadLastCall();
+clearChat(); showMode(); showVoices(); showSound(); applyVoice(); loadLastCall(); callOnLoad();
 // Closing the page or locking away from it also counts as hanging up.
 window.addEventListener("pagehide", ev => { if (ev.persisted) return; try { if (dc && dc.readyState === "open") dc.send(JSON.stringify({ type: "hangup" })); } catch (e) {} });
 window.addEventListener("focus", () => { if (state === "idle") freshChat(); });  // F36: the desktop app brought to the front

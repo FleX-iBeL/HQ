@@ -17,7 +17,16 @@
   // the MacBook it stays as the Mac app has it (?app: the Status tab instead of the button).
   const PHONE = location.port === '8444';
   if (PHONE) document.documentElement.classList.add('phone');
-  const callURL = () => (PHONE ? `https://${location.hostname}:8443/` : 'http://127.0.0.1:7860/?app=1');
+  // H238: a tap on "<agent> is calling" opens /hq?ring=N&agent=ID: the call page gets it once and starts that call.
+  const RING = (() => { const q = new URLSearchParams(location.search); return q.get('ring') ? `ring=${encodeURIComponent(q.get('ring'))}&agent=${encodeURIComponent(q.get('agent') || '')}` : ''; })();
+  let ringPassed = false;
+  const callURL = () => {
+    const base = PHONE ? `https://${location.hostname}:8443/` : 'http://127.0.0.1:7860/?app=1';
+    if (!RING || ringPassed) return base;
+    ringPassed = true;
+    try { history.replaceState(null, '', location.pathname); } catch {}
+    return base + (base.includes('?') ? '&' : '?') + RING;
+  };
   let frames = null;
   let timer = null;
 
@@ -49,7 +58,7 @@
       call: mk('frame-call', '', 'microphone; autoplay; clipboard-write'),
     };
     document.body.append(main);
-    tab(PHONE || localStorage.getItem('hq-tab') === 'call' ? 'call' : 'status');
+    tab(PHONE || RING || localStorage.getItem('hq-tab') === 'call' ? 'call' : 'status');
   }
   function tab(t) {
     if (!frames) return;

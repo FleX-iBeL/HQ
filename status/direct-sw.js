@@ -9,7 +9,9 @@ self.addEventListener('push', (e) => {
   e.waitUntil((async () => {
     await self.registration.showNotification(m.title || 'HQ', {
       body: m.body || '', tag: m.tag || 'hq-direct', renotify: true,
-      icon: '/hq-icon-192.png', badge: '/hq-icon-192.png', data: { url: m.url || '/direct' },
+      icon: '/hq-icon-192.png', badge: '/hq-icon-192.png', data: { url: m.url || '/direct', ring: m.ring || 0, agent: m.agent || '' },
+      // H238: an agent calling him stays until he taps it or swipes it away
+      ...(m.ring ? { requireInteraction: true } : {}),
     });
     for (const c of await self.clients.matchAll({ type: 'window' })) c.postMessage({ hq: 'direct' });
   })());
@@ -17,7 +19,14 @@ self.addEventListener('push', (e) => {
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || '/direct';
+  const d = e.notification.data || {};
+  let url = d.url || '/direct';
+  // H238: "<agent> is calling": the call page starts that call. On the call line's own address (8443, or 7860 on the
+  // Mac) the call page is /; on the HQ page's address (8444, or 4748) it's inside /hq, which passes ?ring on.
+  if (d.ring) {
+    const q = '?ring=' + encodeURIComponent(d.ring) + '&agent=' + encodeURIComponent(d.agent || '');
+    url = (self.location.port === '8443' || self.location.port === '7860' ? '/' : '/hq') + q;
+  }
   e.waitUntil((async () => {
     for (const c of await self.clients.matchAll({ type: 'window', includeUncontrolled: true })) {
       if ('focus' in c) {

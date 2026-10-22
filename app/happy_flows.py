@@ -6869,6 +6869,265 @@ print(json.dumps(o))
                 "local/ and workspace kept, note for their Claude (not a Mac); with a call on it doesn't wait (H187)")
 
     # 139
+    async def flow140(self) -> str:
+        """H238: call me back, and an agent calls him. No Claude turns. 1. "Hang up and call me back": the rule is in
+        every kind of call; a stand-in drives the real call service: her line is spoken without the mark, and once
+        it's heard the call-back hook runs (not the hang-up one); the call server tells the page (hq-callback, the
+        agent and this call), the page loads itself again and calls the same agent, continuing this call; the new
+        call greets with a back-on-the-line line and is told it's the call back. 2. An agent calls him: pings.py call
+        at a time or for an appointment (a moved appointment moves it), rings once at its time (a push "<agent> is
+        calling" with its own tag and the call's number, not in the chat; none with the texts off), a missed one is
+        said in her chat once, a picked-up one isn't; HQ off at the time is a missed call saying so; cancel before it
+        rings. A call started from the notification knows it (its note, her greeting, the transcript's line), is
+        marked picked up, and is made with the agent who called. The rules, the policy, the backup's hand-over, the
+        service worker, the HQ page and the tutorial know it. On the call page in a headless browser: after the reload
+        the call starts by itself, continuing with callback; with ?ring=N&agent=ID it starts that call. Nothing
+        personal in the code."""
+        import agents as ag
+        import direct_line as dl
+        import pings
+        import ringing
+        from call import Call
+        from claude_llm import ClaudeSessionLLMService, Marks
+        from pipecat.processors.aggregators.llm_context import LLMContext
+        from policy import Policy, ALLOW, DENY
+        from datetime import datetime as _dt, timedelta as _td
+        name = config.ME.get("name") or ""
+        code = (APP / "ringing.py").read_text() + (ROOT / "routine" / "pings.py").read_text()
+        need(not name or name not in code, "the user's name is written in HQ's code")
+        # 1. The rule, in every kind of call, and the mark taken out of the speech.
+        rules = config.HANGUP_RULES
+        need(config.CALLBACK_MARK in rules and "hang up and call me back" in rules and "pings.py call" in rules,
+             "the call rules don't say how to call him right back")
+        m = Marks([config.HANGUP_MARK, config.CALLBACK_MARK])
+        said = "".join(m.feed(x) for x in ["Sure, calling", " you right back. [[CA", "LL BACK]]"]) + m.flush()
+        need(m.found(config.CALLBACK_MARK) and not m.found(config.HANGUP_MARK) and "[[" not in said
+             and said.startswith("Sure, calling you right back."), f"the call-back mark isn't taken out: {said!r}")
+
+        class Stand:
+            model = "stand-in"
+            def __init__(self): self.replies = []
+            async def start(self): pass
+            async def stop(self): pass
+            def cancel_turn(self): pass
+            async def ask(self, text):
+                for piece in self.replies.pop(0):
+                    await asyncio.sleep(0.01)
+                    yield piece
+
+        class Script:
+            def __init__(self): self.replies = []
+            def user(self, *a, **k): pass
+            def note(self, *a, **k): pass
+            def reply(self, text, cut_off=False): self.replies.append(text)
+
+        brain, script = Stand(), Script()
+        llm = ClaudeSessionLLMService(brain, transcript=script)
+        spoken: list[str] = []
+        async def nothing(*a, **k): pass
+        async def speak(text): spoken.append(text)
+        llm.push_frame = nothing
+        llm._push_llm_text = speak
+        llm.start_processing_metrics = llm.stop_processing_metrics = nothing
+        llm.start_ttfb_metrics = llm.stop_ttfb_metrics = nothing
+        hung, back = [], []
+        async def on_hangup(): hung.append(1)
+        async def on_callback(): back.append(time.perf_counter())
+        llm.on_hangup, llm.on_callback = on_hangup, on_callback
+        llm.HANGUP_QUIET_SECS, llm.HANGUP_NO_VOICE_SECS, llm.HANGUP_MAX_SECS = 0.3, 1.0, 5.0
+        msgs = [{"role": "user", "content": "Hang up and call me back."}]
+        brain.replies.append(["Sure, calling", " you right back.", " [[CALL", " BACK]]"])
+        await llm._process_context(LLMContext(messages=list(msgs)))
+        need(config.CALLBACK_MARK not in "".join(spoken) and "calling you right back" in "".join(spoken),
+             f"the call-back line isn't spoken right: {spoken}")
+        need(config.CALLBACK_MARK not in script.replies[-1], "the mark went into the transcript")
+        llm._bot_speaking, llm._spoke_at = True, time.perf_counter()
+        await asyncio.sleep(0.5)
+        need(not back, "she called back while her line was still being spoken")
+        llm._bot_speaking, llm._quiet_at = False, time.perf_counter()
+        await asyncio.sleep(0.8)
+        need(len(back) == 1 and not hung, f"the call-back didn't run once after her line was heard (back {back}, hung {hung})")
+        bot = (APP / "bot.py").read_text()
+        hook = bot.split("async def agent_calls_back():", 1)[1].split("call.llm.on_callback = agent_calls_back", 1)[0]
+        need('"hq-callback"' in hook and '"agent": call.speaker["id"]' in hook and "transcript.path.stem" in hook
+             and "await worker.cancel()" in hook, "the call server doesn't hand the call back to the page")
+        page = (APP / "web/index.html").read_text()
+        need('m.type === "hq-callback" && state !== "idle") callMeBack(' in page and "location.reload()" in page
+             and 'sessionStorage.setItem("hq-callback"' in page, "the page doesn't reload itself to call back")
+        # The new call: her back-on-the-line greeting, told it's the call back; without a call to continue, an ordinary one.
+        calls = self.tmp / "h238-calls"
+        calls.mkdir(parents=True, exist_ok=True)
+        cname = "2099-12-29-2300"
+        (calls / f"{cname}.md").write_text("# Call\n\n> **Private.**\n\nStarted 23:00:00 · agent Pepper · brain test\n\n"
+                                           f"- 23:00:05 **{config.USER_LABEL}:** Let's plan the week.\n"
+                                           "- 23:00:09 **HQ:** Monday first, then.\n"
+                                           f"- 23:00:12 **{config.USER_LABEL}:** Hang up and call me back.\n\nEnded 23:00:20\n")
+        cc = Call(model="sonnet", calls_dir=calls, wrap_up="dry", test_mode=True, agent="pepper", continues=cname, callback=True)
+        need(cc.fillers._texts["greeting"] == config.callback_greetings(cc.agent) and cc.fillers._texts["greeting"],
+             f"the call back doesn't greet as being back on the line: {cc.fillers._texts['greeting']}")
+        for g in config.CALLBACK_GREETINGS:
+            need("where were we" not in g.lower() and "already" not in g.lower() and "so soon" not in g.lower(), f"H237: {g}")
+        note = cc._continue_note()
+        need("call him right back" in note and "Monday first, then." in note, f"the call back isn't told what it is: {note[:200]}")
+        cc.transcript.path.unlink(missing_ok=True)
+        cf = Call(model="sonnet", free=True, callback=True, continues=cname)
+        need(not cf.callback and cf.continued is None, "a Free call continued a call on a call back")
+
+        # 2. An agent calls him.
+        rdir = self.tmp / "h238"
+        shutil.rmtree(rdir, ignore_errors=True)
+        rdir.mkdir(parents=True)
+        keys = ("HQ_DIRECT_DIR", "HQ_CALENDAR_FILE", "HQ_ROLE_HERE", "HQ_DIRECT_DRY", "HQ_DIRECT", "HQ_DIRECT_PLAIN")
+        was = {k: os.environ.get(k) for k in keys}
+        os.environ.update({"HQ_DIRECT_DIR": str(rdir / "line"), "HQ_CALENDAR_FILE": str(rdir / "calendar.json"),
+                           "HQ_ROLE_HERE": "1", "HQ_DIRECT_DRY": "1", "HQ_DIRECT_PLAIN": "1"})
+        real_push = dl.push
+        pushed: list[tuple] = []
+        try:
+            pepper = ag.find(config.FOLDER, "pepper")
+            T = _dt.now().replace(second=0, microsecond=0) + _td(hours=2)
+            c = pings.call_add(T, "the week plan", "Pepper", by="a test")
+            need(c["agent"] == "pepper" and c["at"] == T.strftime(pings.FMT), f"the call isn't kept: {c}")
+            try:
+                pings.call_add(T, "x", "Nobody")
+                need(False, "an unknown agent was taken")
+            except ValueError:
+                pass
+            t0 = T.timestamp()
+            s = pings.read()
+            need(pings._calls_due(s, t0 - 60, []) == [], "it rang before its time")
+            first = pings._calls_due(s, t0 + 30, [])
+            need(first == [("ring", str(c["n"]))] and pings._calls_due(s, t0 + 90, []) == [], f"it didn't ring once: {first}")
+            missed = pings._calls_due(s, t0 + pings.RING_WAIT + 60, [])
+            need(len(missed) == 1 and missed[0][0] == "missed-call" and "the week plan" in missed[0][1]
+                 and pings._calls_due(s, t0 + pings.RING_WAIT + 120, []) == [], f"the missed call isn't said once: {missed}")
+            # picked up: no missed call
+            c2 = pings.call_add(T, "the shopping", by="a test")
+            pings.call_answered(c2["n"])
+            s = pings.read()
+            s["calls"][-1]["rang"] = (T - _td(minutes=1)).strftime(pings.FMT)
+            need(not [x for x in pings._calls_due(s, t0 + pings.RING_WAIT + 60, []) if "the shopping" in x[1]],
+                 "a picked-up call was said as missed")
+            # HQ off at the time: missed right away, saying so
+            c3 = pings.call_add(T - _td(hours=3), "an old one", by="a test")
+            s = pings.read()
+            late = [x for x in pings._calls_due(s, t0, []) if "an old one" in x[1]]
+            need(late and late[0][0] == "missed-call" and "couldn't ring" in late[0][1], f"a call HQ couldn't ring: {late}")
+            pings._write(s)  # as watch() keeps it: the first call has rung now
+            # an appointment: a moved one moves the call; cancel only before it rings
+            start = (T + _td(days=1)).astimezone()
+            ev = {"id": "e1", "title": "Dentist", "start": start.isoformat(), "end": (start + _td(hours=1)).isoformat(), "all_day": False}
+            (rdir / "calendar.json").write_text(json.dumps({"events": [ev]}))
+            ca = pings.call_add(None, "the dentist", appt=ev, before=10, by="a test")
+            need(ca["appt"] == "e1" and ca["at"] == (start - _td(minutes=10)).strftime(pings.FMT), f"the appointment's call: {ca}")
+            moved = {**ev, "start": (start + _td(hours=2)).isoformat()}
+            need(abs(pings._call_at(ca, {"e1": moved}) - ((start + _td(hours=2)).timestamp() - 600)) < 1, "a moved appointment didn't move the call")
+            need(pings.call_cancel(ca["n"]) and not pings.call_cancel(c["n"]), "cancel isn't only before it rings")
+            # the command line, as a call and her chat run it
+            out = subprocess.run([sys.executable, str(ROOT / "routine" / "pings.py"), "call", "in 30 minutes", "the plan", "--agent", "pepper"],
+                                 capture_output=True, text=True, env=os.environ)
+            need(out.returncode == 0 and "Pepper calls" in out.stdout, f"pings.py call: {out.stdout}{out.stderr}")
+            out = subprocess.run([sys.executable, str(ROOT / "routine" / "pings.py"), "list"], capture_output=True, text=True, env=os.environ)
+            need("Calls an agent makes to him" in out.stdout and "the plan" in out.stdout, "the list doesn't show the calls")
+            # the ring: a push with its own tag and the call's number, not in her chat; nothing with the texts off
+            dl.push = lambda text, title=None, extra=None: pushed.append((text, title, extra)) or ["201"]
+            n = pings.read()["calls"][-1]["n"]
+            r = dl.ring(n)
+            need(r["rang"] and pushed and pushed[-1][1] == "Pepper is calling" and "the plan" in pushed[-1][0]
+                 and pushed[-1][2]["ring"] == n and pushed[-1][2]["agent"] == "pepper" and pushed[-1][2]["tag"] == f"hq-ring-{n}",
+                 f"the ring push isn't right: {pushed}")
+            need(not any(x.get("why") == "ring" for x in dl.thread()), "the ring went into her chat")
+            os.environ["HQ_DIRECT"] = "0"
+            need(not dl.ring(n)["rang"], "it rang with the texts off")
+            os.environ.pop("HQ_DIRECT", None)
+            need("missed-call" in dl.KINDS and "missed-call" in dl.PLAIN, "Donna doesn't know a missed call")
+            need("ring" in (ROOT / "routine" / "pings.py").read_text().split("def _spawn", 1)[1][:600], "the routine doesn't start the ring")
+            # picked up from the notification: what the call knows, made with the agent who called
+            a = ringing.about(str(n))
+            need(a and a["kind"] == "ring" and a["agent"] == "pepper" and a["what"] == "the plan", f"the picked-up call: {a}")
+            need(pings.call_get(n).get("answered"), "picking up didn't mark it")
+            need(ringing.about("999") is None and ringing.about("x") is None, "an unknown call was picked up")
+            cr = Call(model="sonnet", calls_dir=calls, wrap_up="dry", test_mode=True, agent="donna", about=a)
+            need(any("calling like we said" in g or "as promised" in g for g in cr.fillers._texts["greeting"]),
+                 f"she doesn't greet as the one calling: {cr.fillers._texts['greeting']}")
+            need("the plan" in ringing.call_note(a, "Sam") and "picked up" in ringing.call_note(a, "Sam"), "the call isn't told why she called")
+            need("About the call they agreed" in cr.transcript.path.read_text(), "the transcript doesn't say which call")
+            cr.transcript.path.unlink(missing_ok=True)
+            need("_ringing.about(" in bot and 'agent = agents.find(config.FOLDER, about["agent"])' in bot, "the call isn't made with the agent who called")
+        finally:
+            dl.push = real_push
+            for k, v in was.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        # The rules, the policy, the backup, the service worker, the HQ page, the tutorial.
+        need("call appt" in config.PINGS_RULE and "call-cancel" in config.PINGS_RULE and "is calling" in config.PINGS_RULE,
+             "the texts rules (calls and her chat) don't say how an agent calls him")
+        import role
+        need({"call", "call-cancel", "answered"} <= role.WRITES["pings"], "the backup doesn't hand calls to the main")
+        pol = Policy(config.FOLDER)
+        p_ = f'python3 "{ROOT}/routine/pings.py"'
+        need(pol.decide("Bash", {"command": f'{p_} call "today 15:00" "the plan" --agent pepper'}).verdict == ALLOW, "a call can't set a call")
+        need(pol.decide("Bash", {"command": f"{p_} call-cancel 3"}).verdict == ALLOW, "a call can't cancel a call")
+        need(pol.decide("Bash", {"command": f"{p_} answered 3"}).verdict == DENY, "a call may mark a call picked up")
+        sw = (ROOT / "status" / "direct-sw.js").read_text()
+        need("d.ring" in sw and "requireInteraction" in sw and "'/hq'" in sw and "'8443'" in sw, "the service worker doesn't open the call")
+        need("ring=" in (ROOT / "desktop" / "phone.js").read_text(), "the HQ page doesn't pass the call on to the call page")
+        tour = (APP / "web" / "tour.json").read_text()
+        need("hang up and call me back" in tour and "is calling" in tour, "the tutorial doesn't say it")
+        # The call page, in a headless browser: after the reload, and from the notification.
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        import transcript
+        one = transcript.read_call(cname, calls)
+        harness = r"""
+<script>
+(async () => {
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  for (let i = 0; i < 100 && !OFFERS.length; i++) await wait(100);
+  await wait(200);
+  const rd = OFFERS.length ? OFFERS[0].request_data : {};
+  const div = chatLog.querySelector(".divider");
+  const pre = document.createElement("pre"); pre.id = "h238";
+  pre.textContent = "H238RESULT " + JSON.stringify({ rd, div: div ? div.textContent : "", url: location.search }) + " END";
+  document.body.appendChild(pre);
+})();
+</script>"""
+        stub_base = ("<script>const OFFERS = []; const ONE = " + json.dumps(one) + """;
+window.fetch = async (url, opts) => {
+  if (String(url) === "api/offer") { OFFERS.push(JSON.parse(opts.body)); return { ok: false, status: 599, json: async () => ({}) }; }
+  return { ok: true, json: async () => (String(url).startsWith("api/calls/") ? ONE : { lines: [] }) };
+};
+try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: async () => new MediaStream() } }); } catch (e) {}
+__EXTRA__</script>""")
+        results = {}
+        for case, extra, q in (
+                ("callback", 'try { sessionStorage.setItem("hq-callback", JSON.stringify({ agent: "pepper", call: "%s", at: Date.now() })); } catch (e) {}' % cname, ""),
+                ("ring", "", "?ring=7&agent=pepper"),
+                ("none", "", "")):
+            f = self.tmp / f"h238-{case}.html"
+            f.write_text(page.replace("<style>", stub_base.replace("__EXTRA__", extra) + "<style>", 1).replace("</body>", harness + "</body>", 1))
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              "--window-size=390,844", f"--user-data-dir={self.tmp / ('h238-' + case + '-profile')}",
+                                              "--virtual-time-budget=30000", "--dump-dom", f.as_uri() + q], timeout=120)
+            mm = re.search(r'<pre id="h238">H238RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"the page test didn't finish ({case}): {(r.stderr or r.stdout)[-300:]!r}")
+            results[case] = json.loads(mm.group(1).replace("&amp;", "&").replace("&quot;", '"').replace("&lt;", "<").replace("&gt;", ">"))
+        cb, rg = results["callback"], results["ring"]
+        need(cb["rd"].get("callback") is True and cb["rd"].get("continue") == cname and cb["rd"].get("agent") == "pepper"
+             and cb["div"] == "Called you back", f"after the reload the call back isn't started: {cb}")
+        need(rg["rd"].get("ring") == "7" and rg["rd"].get("agent") == "pepper" and "ring" not in rg["url"],
+             f"a tap on the notification doesn't start that call: {rg}")
+        need(results["none"]["rd"] == {}, f"a plain page started a call by itself: {results['none']}")
+        say(f"   page: call back {cb['rd'].get('callback')}, ring {rg['rd'].get('ring')}, plain page quiet")
+        return ("call me back: the mark never spoken, the call-back hook after her line, the page reloads and calls the same agent "
+                "continuing the call, greeted as back on the line; an agent calls: rings once at its time or the appointment's "
+                "(moved with it), a push with its own tag, a missed one said once, picked up knows why and is with that agent; "
+                "rules, policy, backup, service worker, HQ page, tutorial")
+
     async def flow139(self) -> str:
         """H236, no Claude, no internet: your own news. Made-up feeds on a local web server (an RSS feed, an Atom feed,
         one that's broken, an article page), nothing of the user's. The setup kept in the workspace's HQ/news.json
@@ -16931,6 +17190,7 @@ FLOWS = {
     134: ("H227: every button and screen on the call page has a tutorial piece (the page read against tour.json; a new screen needs its button named)", False, "flow134"),
     139: ("H236: your own news: the setup from a short session, the hourly read of their free feeds kept to their topics and without what they leave out, read inside HQ as their own newspaper; empty on a fresh install", False, "flow139"),
     138: ("H235: extensions: the workspace's folder read at HQ's fixed points (call and text rules, kinds of texts, the mail check, scripts, routines); the local check after an update, and its plain message with Talk it through and Send to the team", False, "flow138"),
+    140: ("H238: call me back (the page reloads and calls the same agent, continuing the call), and an agent calls him at an agreed time or appointment (a push, one tap picks up, a missed one in her chat)", False, "flow140"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 

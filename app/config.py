@@ -167,7 +167,13 @@ ask him why it matters only when you can't tell. Never tell him how often you'll
 any number or estimate: you'll just keep nudging, like a person would. The moment he says it's done, on any call or \
 in the chat, nudge-done N (list shows the numbers); "later" or "tomorrow" is nudge-later N [WHEN]. Set it on his clear ask, then say it in a sentence ("I'll text you when it \
 starts", "I'll keep an eye out"). When a reminder, watch, nudge or note is about something on the to-do list, add \
---item "ITEM" (its id or a few words of it), so it goes by itself once that item is done or let go (F43)."""
+--item "ITEM" (its id or a few words of it), so it goes by itself once that item is done or let go (F43). An agent \
+calls him (H238), "call me at 3", "call me when the appointment starts": call "WHEN" "WHAT IT'S ABOUT" [--agent NAME] \
+(WHEN as for remind; NAME the agent who calls, the one he asked for, by default {agent}), or call appt "WORDS" \
+"WHAT IT'S ABOUT" [--agent NAME] [--before N] for an appointment (a moved appointment moves the call); call-cancel N. \
+At that time his phone gets a notification, "NAME is calling"; one tap opens HQ and starts the call with that agent, \
+who knows what it's about. It can't ring like a phone call (iOS doesn't let an app like this do that); say so only \
+when he asks. Not picked up within ten minutes, {agent} says so in her chat. Set it on his clear ask; WHAT in his words."""
 
 # H146 (15 October 2026, call at 09:34): a quick note on each appointment, from the calendar in the app. On every full
 # call and in the direct line's chat, so "look at the haircut and update my calendar" works on either.
@@ -329,6 +335,10 @@ so don't make anything up about it."""
 # the goodbye finish, and ends the call as if Hang up was tapped. The starting set of phrases is
 # Claude's, in HQ's defaults; the roadmap row H75 has them for the user to correct.
 HANGUP_MARK = "[[END CALL]]"
+# H238 (call of 22 October 2026, 13:03), in the user's words: "wouldn't it be cool if I could ask you to hang up and
+# call me back? ... so it resets". She says a short line and ends it with CALLBACK_MARK; the call ends as a hang-up
+# does, the page loads itself again (fresh page code) and calls her again at once, continuing this call (H60).
+CALLBACK_MARK = "[[CALL BACK]]"
 GOODBYE_PHRASES = [
     "that's it, see you later", "okay, that is all", "that's all for now", "that's it for now, bye",
     "thanks, that's it", "bye", "goodbye", "see you", "see you later", "talk to you later", "talk later",
@@ -372,7 +382,16 @@ would as he heads off, instead of a generic goodbye: one or two short sentences,
 know, no tools, so the goodbye comes right away. Without such a note, just the short goodbye. It is never spoken; the call system hangs up after your goodbye, the same as his Hang up \
 button, and the after-call work runs as usual. Never write """ + HANGUP_MARK + """ in any other reply, \
 and never because a conversation seems finished. When you are not sure he meant to end the call, \
-don't: just stay on the line."""
+don't: just stay on the line.
+
+# Calling him right back (H238)
+When {user} asks you to hang up and call him back now ("hang up and call me back", "call me back", "can you \
+restart the call"), often so the app starts fresh: first finish anything he just asked for, then say one short \
+line in your own words, like "Sure, calling you right back", and end that reply with """ + CALLBACK_MARK + """ as \
+the very last thing. It is never spoken: the call system hangs up, the app loads itself again and calls you right \
+back, continuing this same call, so nothing is lost and he doesn't touch anything. Use it only on his clear ask, \
+never together with """ + HANGUP_MARK + """. Calling him at a later time (in an hour, at 3, for an appointment) is \
+not this: that's pings.py call (in the texts rules), when the call has them."""
 
 # A3: added to the folder's own instructions (CLAUDE.md, rules.md), not instead of them.
 VOICE_RULES = """# This chat is a live voice call
@@ -706,6 +725,11 @@ BACK_GREETINGS = {k: [g.replace("{s}", f" {_N}" if _N else "") for g in v] for k
 _CONTINUE_GREETINGS = ["Hey{s}, let's continue from where we left off.", "Hey{s}, let's pick up where we left off.",
                        "Hi{s}, let's continue where we left off."]
 CONTINUE_GREETINGS = [g.replace("{s}", f" {_N}" if _N else "") for g in _CONTINUE_GREETINGS]
+# H238: the greeting when she calls him right back after his "hang up and call me back" (wording Claude's choice;
+# never "where were we" or "back so soon", H237).
+_CALLBACK_GREETINGS = ["Hey{s}, I'm back on the line.", "Hi{s}, here I am again, fresh line.",
+                       "Hey{s}, called you right back."]
+CALLBACK_GREETINGS = [g.replace("{s}", f" {_N}" if _N else "") for g in _CALLBACK_GREETINGS]
 # H60: how much of the earlier call goes in, at most (characters, the newest kept; Claude's choice).
 CONTINUE_MAX_CHARS = 12000
 
@@ -735,6 +759,16 @@ def continue_greetings(agent: dict | None = None) -> list[str]:
         if mine:
             return mine
     return CONTINUE_GREETINGS
+
+
+def callback_greetings(agent: dict | None = None) -> list[str]:
+    """H238: her own greetings when she calls him right back (agents.json `callback_greetings`), else the call
+    system's."""
+    if agent:
+        mine = [_agents.fill(x, _N or None) for x in agent.get("callback_greetings") or []]
+        if mine:
+            return mine
+    return CALLBACK_GREETINGS
 
 
 def handover_greetings(agent: dict, came_from: str) -> list[str]:

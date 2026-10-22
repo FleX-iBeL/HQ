@@ -109,6 +109,7 @@ class ClaudeSessionLLMService(LLMService):
         self._cancellable = False
         self._late_cancel: str | None = None  # H38: the Cancel button's line, waiting to go in as his turn
         self.on_hangup = None  # H75: async, called once her goodbye has been heard (bot.py ends the call)
+        self.on_callback = None  # H238: async, called once her "calling you right back" has been heard
         # H79: the marks that bring in another agent (agents.switch_marks: mark -> ("switch"|"three-way", id)),
         # async on_switch(id) once her hand-over line has been heard, async on_three_way(id) right after the reply,
         # and async before_turn(words) -> notes for this turn (a three-way call picks who answers; Call sets it).
@@ -343,7 +344,7 @@ class ClaudeSessionLLMService(LLMService):
         watch = self.create_task(self._watch_for_fillers(turn), "filler-watch") if self.fillers else None
         open_text = False  # text pushed since the last response start (for flushing at a tool)
         # H75: her hang-up mark is never spoken; H79: nor the marks that bring in another agent
-        mark = Marks([config.HANGUP_MARK, *self.switch_marks])
+        mark = Marks([config.HANGUP_MARK, config.CALLBACK_MARK, *self.switch_marks])  # H238: nor the call-back one
         speech = SpeechFilter()  # H82: bold and list marks are for the chat, never spoken
         try:
             await self.push_frame(LLMFullResponseStartFrame())
@@ -387,7 +388,14 @@ class ClaudeSessionLLMService(LLMService):
             if said:
                 await self._push_llm_text(said)
             asked = [self.switch_marks[m] for m in self.switch_marks if mark.found(m)]
-            if mark.found(config.HANGUP_MARK):
+            if mark.found(config.CALLBACK_MARK) and not mark.found(config.HANGUP_MARK):
+                # H238: he asked her to hang up and call him right back
+                turn["callback"] = True
+                if self.on_callback is not None and not turn.get("cancelled"):
+                    logger.info("H238: she calls him right back once her line has been heard")
+                    self._hangup_task = asyncio.create_task(
+                        self._hang_up_after_goodbye(t0, then=self.on_callback), name="callback")
+            elif mark.found(config.HANGUP_MARK):
                 turn["hangup"] = True
                 if self.on_hangup is not None and not turn.get("cancelled"):
                     logger.info("H75: she said goodbye and hangs up once it has been heard")

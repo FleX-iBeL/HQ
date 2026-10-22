@@ -41,6 +41,7 @@ from policy import SESSION_TOOLS, Policy
 import agenda
 import coaching
 import news
+import ringing
 import todo
 import tour
 import transcript
@@ -52,6 +53,8 @@ def _about(e: dict, what: str):
     (todo), or a layer or check-in of their Life coaching (coaching). H236: or setting up their news (news)."""
     if e.get("kind") == "news":
         mod = news
+    elif e.get("kind") == "ring":  # H238: the agent called him and he picked up
+        mod = ringing
     else:
         mod = todo if e.get("kind") == "todo" else coaching if e.get("kind") == "coaching" else agenda
     if what == "line":
@@ -66,7 +69,8 @@ class Call:
                  wrap_up: str = config.WRAP_UP, test_mode: bool = False, waiting_lines: bool = True,
                  free: bool = False, load: str | None = None, loops: "open_loops.OpenLoops | None" = None,
                  agent: str | None = None, continues: str | None = None, handover: bool = False,
-                 voices: dict | None = None, about: dict | None = None, demo: bool = False, demo_topic: str = ""):
+                 voices: dict | None = None, about: dict | None = None, demo: bool = False, demo_topic: str = "",
+                 callback: bool = False):
         self._loops = loops
         # H74: a demo call from the tutorial is a Free call (nothing of his, nothing saved) on Opus, with no tools
         self.demo = bool(demo)
@@ -98,6 +102,7 @@ class Call:
         # H60: the earlier call this one continues (read before this call's own transcript exists)
         # H79: handover: the earlier call's agent just put her on (he asked for her); she picks up the phone
         self.handover = bool(handover)
+        self.callback = bool(callback) and not free  # H238: she calls him right back, continuing the call
         # H164: the first call of the day (any agent, from the saved calls) gets a first-of-the-day hello; read
         # before this call's own transcript exists. A free call isn't saved, so it doesn't count.
         self.first_today = transcript.first_call_today(calls_dir, agent=self.agent["name"])
@@ -126,6 +131,8 @@ class Call:
                                     else config.handover_greetings(self.agent, self.continued["agent"])
                                     if self.continued and self.handover and self.continued.get("agent")
                                     and self.continued["agent"] != self.agent["name"]
+                                    else config.callback_greetings(self.agent)
+                                    if self.continued and self.callback
                                     else config.continue_greetings(self.agent)
                                     if self.continued and not self.handover
                                     else config.greetings_now(self.agent, first=self.first_today))
@@ -153,6 +160,14 @@ class Call:
                 "phone, knowing what was said, without reading it back. What was said on that call, oldest first "
                 f"(\"You\" is you; {c['agent']}'s lines carry her name):\n"
                 f"<earlier-call>\n{c['text']}\n</earlier-call>\n"
+            )
+        if self.callback:
+            return (
+                f"{config.USER} asked you to hang up and call him right back, and this is that call: it continues "
+                f"the call of {c['started']} a moment ago, on a freshly loaded app. The call system greets him as you "
+                "being back on the line, so carry straight on from where it was, without reading it back or asking "
+                "where you were. What was said on that call, oldest first (\"You\" is you; another agent's lines "
+                f"carry her name):\n<earlier-call>\n{c['text']}\n</earlier-call>\n"
             )
         return (
             f"This call continues the earlier call of {c['started']}{who}. The call system greets "

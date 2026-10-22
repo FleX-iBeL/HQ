@@ -144,7 +144,7 @@ async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connect
                    model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
                    free: bool = False, load: str | None = None, agent: str | None = None,
                    continues: str | None = None, handover: bool = False, voices: dict | None = None,
-                   about: dict | None = None, demo: bool = False, demo_topic: str = "") -> None:
+                   about: dict | None = None, demo: bool = False, demo_topic: str = "", callback: bool = False) -> None:
     global _free_calls, _calls_on
     free = free or demo  # H74: a demo call is a Free call
     _filter_the_log()
@@ -154,7 +154,8 @@ async def run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connect
     try:
         await _run_call(transport, handle_sigint, connection, model=model, voice=voice,
                         waiting_lines=waiting_lines, free=free, load=load, agent=agent, continues=continues,
-                        handover=handover, voices=voices, about=about, demo=demo, demo_topic=demo_topic)
+                        handover=handover, voices=voices, about=about, demo=demo, demo_topic=demo_topic,
+                        callback=callback)
     finally:
         _calls_on -= 1
         if free:
@@ -165,9 +166,10 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
                     model: str | None = None, voice: str | None = None, waiting_lines: bool = False,
                     free: bool = False, load: str | None = None, agent: str | None = None,
                     continues: str | None = None, handover: bool = False, voices: dict | None = None,
-                    about: dict | None = None, demo: bool = False, demo_topic: str = "") -> None:
+                    about: dict | None = None, demo: bool = False, demo_topic: str = "", callback: bool = False) -> None:
     call = Call(model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent,
-                continues=continues, handover=handover, voices=voices, about=about, demo=demo, demo_topic=demo_topic)
+                continues=continues, handover=handover, voices=voices, about=about, demo=demo, demo_topic=demo_topic,
+                callback=callback)
     logger.info(f"Call started on {call.model} with {call.agent['name']}, voice {call.voice}, {'free' if free else call.load + ' load'}; "
                 + ("demo call from the tutorial, nothing kept" if demo else "free mode, nothing kept" if free else f"transcript: {call.transcript.path.name}")
                 + (f"; continues {call.continued['name']}" if call.continued else "")
@@ -253,6 +255,23 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
         await worker.cancel()
     call.llm.on_hangup = agent_hangs_up
 
+    # H238: he asked her to hang up and call him right back. The call ends as a hang-up does (notes and all); the
+    # page loads itself again (fresh page code) and calls the same agent, continuing this call.
+    async def agent_calls_back():
+        if call.ended_by_agent:
+            return
+        call.ended_by_agent = True
+        logger.info(f"H238: {call.speaker['name']} calls him right back")
+        if connection is not None:
+            try:
+                connection.send_app_message({"type": "hq-callback", "agent": call.speaker["id"],
+                                             "call": call.transcript.path.stem if call.transcript.path else None})
+            except Exception:
+                pass
+        await asyncio.sleep(1.0)
+        await worker.cancel()
+    call.llm.on_callback = agent_calls_back
+
     # H79: he asked for another agent. Hand over: the call ends as a hang-up does (notes and all) and the page
     # calls her at once, continuing this call. Three-way: she joins this same conversation.
     async def agent_switches(other_id: str):
@@ -329,6 +348,7 @@ async def bot(runner_args: RunnerArguments):
     continues = str(body.get("continue") or "") or None
     # H79: a hand-over from another agent (the page calls her right after), and every agent's voice from Settings
     handover = body.get("handover") is True
+    callback = body.get("callback") is True  # H238: she's calling him right back after his "hang up and call me back"
     voices = body.get("voices") if isinstance(body.get("voices"), dict) else {}
     # H101: a call started from an appointment in the calendar sends its id; the saved appointment goes in. Never on Free.
     import agenda as _agenda
@@ -342,10 +362,19 @@ async def bot(runner_args: RunnerArguments):
     if about is None and not free and body.get("about_news"):  # H236: the short session that sets up their news
         import news as _news_call
         about = _news_call.about(str(body.get("about_news") or "setup"))
+    if about is None and not free and body.get("ring"):  # H238: he picked up the agent's call from the notification
+        import ringing as _ringing
+        about = _ringing.about(str(body.get("ring") or ""))
+        if about is not None:
+            agent = agents.find(config.FOLDER, about["agent"]) or agent  # the agent who's calling, whatever the page had
+            model = config.MODEL_ALIASES.get(agents.runs_on(agent["model"]), agent["model"])
+            mode = agent["load"]
+            load = mode if mode in ("quick", "deep") else "quick"
+            voice = str(voices.get(agent["id"]) or agent.get("voice", ""))
     await run_call(transport, runner_args.handle_sigint, runner_args.webrtc_connection,
                    model=model, voice=voice, waiting_lines=waiting_lines, free=free, load=load, agent=agent["id"],
                    continues=None if free else continues, handover=handover and not free, voices=voices, about=about,
-                   demo=demo, demo_topic=demo_topic)
+                   demo=demo, demo_topic=demo_topic, callback=callback and not free)
 
 
 if __name__ == "__main__":

@@ -26,6 +26,9 @@ Donna texts first (H124, routine/pings.py): when an appointment he picked starts
 for (why remind), and now and then on her own about something on her own notes list (initiative).
 Her watch list (H125, routine/pings.py): a mail or the weather he asked her to keep an eye out for (why watch), and
 when a watch ends: its time is up, or he stopped it (why watch-end).
+H238: an agent calls him at a time they agreed (routine/pings.py call): `ring N` pushes "<agent> is calling" with
+its own tag and the call's number, not in the chat; a tap opens the call page and starts that call. Not picked up,
+she says so in the chat (why missed-call).
 
 The weather (H120, weather.py): every three hours in the day she texts when there's sun, rain coming or a rainy
 day (why sun, rain, cosy), quiet otherwise. H212: asleep nothing; on waking one text (why morning): will it rain
@@ -299,8 +302,9 @@ def unsubscribe(endpoint: str) -> None:
         _write(folder() / "subscriptions.json", [s for s in subscriptions() if s["endpoint"] != endpoint])
 
 
-def push(text: str, title: str | None = None) -> list[str]:
-    """Send one notification to every phone. Gone ones (404, 410) are dropped. Returns what happened per phone."""
+def push(text: str, title: str | None = None, extra: dict | None = None) -> list[str]:
+    """Send one notification to every phone. Gone ones (404, 410) are dropped. Returns what happened per phone.
+    H238: extra goes into the payload (a ring: its number and agent, its own tag)."""
     import urllib.request
     import urllib.error
     subs = subscriptions()
@@ -308,7 +312,7 @@ def push(text: str, title: str | None = None) -> list[str]:
         return []
     k = keys()
     payload = json.dumps({"title": title or agent()["name"], "body": text[:300], "url": "/direct",
-                          "tag": "hq-direct"}).encode()
+                          "tag": "hq-direct", **(extra or {})}).encode()
     said = []
     for s in subs:
         endpoint = s["endpoint"]
@@ -388,6 +392,8 @@ PLAIN = {
     "game-away": ["Heads up, today's a bit different: {facts}"],
     "travel": ["Heads up for your trip: {facts}",
                "Change on your way there: {facts}"],
+    "missed-call": ["Missed call. {facts}",
+                    "You missed a call. {facts}"],
     "watch-end": ["Stopped watching that one. {facts}",
                   "I'm done keeping an eye on that. {facts}"],
 }
@@ -558,6 +564,11 @@ KINDS = {
               "plan again. No technical words, no train numbers unless they help. When the facts say By car "
               "(H230), it's the drive with the traffic: time to leave, or the drive got longer or shorter; say "
               "when to leave, and put the Google Maps link at the end as it is.",
+    "missed-call": "A call he agreed to (an agent calling him at a time, or for an appointment; the facts say who, "
+                   "when and what about) rang on his phone and he didn't pick up. One or two short sentences: that "
+                   "the call was missed, what it was about in a few words, and that he can call back from the app "
+                   "whenever or just tell you a new time. When the facts say it was you, say you tried to call. No "
+                   "guilt, no fuss.",
     "watch-end": "Something he asked you to watch has stopped (the facts say what and why). One quick line that "
                  "you've stopped keeping an eye on it, and why in a few words (time's up and nothing came, or he "
                  "asked).",
@@ -626,6 +637,27 @@ def text(why: str, facts: str) -> dict:
     msg = add("agent", compose(why, facts), why)
     msg["pushed"] = push(msg["text"])
     return msg
+
+
+def ring(n: int) -> dict:
+    """H238: the agent's call rings on his phone: a push notification "<agent> is calling", what it's about; one tap
+    opens HQ and starts the call with her (the service worker opens the call page with ?ring=N). Not in her chat: a
+    missed one is (pings.py, missed-call). Nothing when the texts are off."""
+    sys.path.insert(0, str(ROOT / "routine"))
+    import pings as _pings
+    c = _pings.call_get(n)
+    if not c:
+        return {"rang": False, "why": f"no call {n}"}
+    if not on():
+        return {"rang": False, "why": "the texts are off, so there's no push to ring on"}
+    try:
+        who = _pings.call_agent(c.get("agent", ""))
+    except ValueError as e:
+        return {"rang": False, "why": str(e)}
+    about = c.get("what", "")
+    said = push(f"{about[:200]}. Tap to pick up." if about else "Tap to pick up.", title=f"{who['name']} is calling",
+                extra={"ring": n, "agent": who["id"], "tag": f"hq-ring-{n}", "url": f"/?ring={n}&agent={who['id']}"})
+    return {"rang": True, "call": n, "agent": who["id"], "pushed": said}
 
 
 QUIET = "QUIET"
@@ -902,6 +934,8 @@ if __name__ == "__main__":
     elif cmd == "text" and len(args) >= 2:
         m = text(args[1], args[2] if len(args) > 2 else "")
         print(json.dumps(m, ensure_ascii=False))
+    elif cmd == "ring" and len(args) >= 2 and args[1].isdigit():
+        print(json.dumps(ring(int(args[1])), ensure_ascii=False))
     elif cmd == "initiative":
         m = initiative()
         print(json.dumps(m, ensure_ascii=False) if m else "quiet")
