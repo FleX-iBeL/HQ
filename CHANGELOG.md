@@ -16,6 +16,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ### Fixed
 - The Coaching place shows every layer of your map and the check-ins without scrolling. Before a call it kept a big empty space at the bottom, so only the first three layers showed; now each layer is one short row, the map comes first and the check-ins right under it, before a call and on one. The six-week game screen had the same empty space; it is gone there too (F47).
 - A long typed message on a call goes in whole. The chat's box and the call cut anything past 2000 characters without a word, so a long dictated message lost its end; now one message takes up to 10000, and past that it stays in the box and says so instead of being cut (F46).
+- On a call, what you say while thinking out loud no longer gets lost. A long, quieter stretch of talking could be taken for silence and dropped whole, so the call answered only the last bit; now a long stretch is only dropped when it really is just noise, a quiet one is made louder first, and anything dropped is noted so it can be found (F45).
 
 ## 0.4.9 · 21 October 2026
 
