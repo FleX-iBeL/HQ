@@ -678,8 +678,8 @@ if __name__ == "__main__":
         return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
 
     # H200: the to-do list, the Eisenhower way (todo.py), from the workspace's own file. The page reads it and can tick
-    # one off, let it go, move it, add one (several at once, F40), tick a grocery off and back on (F40), and undo its
-    # last change; calls and Donna keep it the same way. Only from the page itself (x-hq: todo), never on a Free-only
+    # one off, let it go, move it, add one (several at once, F40), tick a grocery off and back on (F40), put one at
+    # another place in its list and rename it (H231), and undo its last change; calls and Donna keep it the same way. Only from the page itself (x-hq: todo), never on a Free-only
     # line.
     import todo as _todo
 
@@ -715,6 +715,10 @@ if __name__ == "__main__":
                 args = ["tick", ask["tick"]]
             elif isinstance(ask.get("untick"), str):
                 args = ["untick", ask["untick"]]
+            elif isinstance(ask.get("order"), str) and isinstance(ask.get("place"), int) and ask["place"] > 0:
+                args = ["order", ask["order"], str(ask["place"])]
+            elif isinstance(ask.get("rename"), str) and isinstance(ask.get("title"), str):
+                args = ["rename", ask["rename"], ask["title"][:300]]
             elif isinstance(ask.get("add"), str) and isinstance(ask.get("list"), str):
                 args = ["add", ask["list"], ask["add"][:2000]]
             elif ask.get("undo") is True:
@@ -744,6 +748,10 @@ if __name__ == "__main__":
                 said = await asyncio.to_thread(_todo.tick, ask["tick"], by)
             elif isinstance(ask.get("untick"), str):
                 said = await asyncio.to_thread(_todo.untick, ask["untick"], by)
+            elif isinstance(ask.get("order"), str) and isinstance(ask.get("place"), int) and ask["place"] > 0:
+                said = await asyncio.to_thread(_todo.order, ask["order"], ask["place"], by)
+            elif isinstance(ask.get("rename"), str) and isinstance(ask.get("title"), str):
+                said = await asyncio.to_thread(_todo.rename, ask["rename"], ask["title"][:300], by)
             elif isinstance(ask.get("add"), str) and isinstance(ask.get("list"), str):
                 said = await asyncio.to_thread(_todo.add, ask["list"], ask["add"][:2000], "", "", "", "", by)
             elif ask.get("undo") is True:
@@ -759,6 +767,8 @@ if __name__ == "__main__":
         out = await asyncio.to_thread(_todo.read)
         out["said"] = said.get("said", "")
         out["undo"] = bool(said.get("ok")) and ask.get("undo") is not True
+        if said.get("id"):
+            out["id"] = said["id"]  # H231: a renamed item has a new id
         return JSONResponse(out, headers=_NO_CACHE)
 
     # H222: the six-week games (games.py), the workspace's own HQ/games.json; a fresh install has none. The page reads

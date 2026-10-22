@@ -29,7 +29,7 @@
         {"target": "todobtn", "title": "One list for everything", "text": "Everything you have to do lives here, in four squares: important or not, urgent or not. Important but not urgent comes first, because that's where the things that really move your life forward are."},
         {"target": "todobtn", "title": "You just talk", "text": "Keeping a list like this is usually a lot of admin. In HQ you just say it on a call or in a text: it lands in the right square, in your own words. Done or let go, and it moves, with a line so you can look back.",
          "demo": {"kind": "matrix", "items": [["Important, not urgent", "Learn to cook three new dishes · Plan the summer trip"], ["Important and urgent", "Pay the tax bill by Friday"], ["Urgent, not important", "Book the boiler check"], ["Not urgent, not important", "Sort the old photos"]]}},
-        {"target": "todobtn", "title": "Tap to work with it", "text": "Tap a square for its list, an item for everything about it. Tick it off, move it, let it go, add one by hand, or start a call about it. Undo puts the last change back."}
+        {"target": "todobtn", "title": "Tap to work with it", "text": "Tap a square for its list, an item for everything about it. Tick it off, move it, let it go, rename it, add one by hand, or start a call about it. Drag the dots at the start of a row to put it higher or lower in its list. Undo puts the last change back."}
       ]
     },
     {

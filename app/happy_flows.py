@@ -13257,6 +13257,203 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         return ("groceries tick off to their own ticked-off list (not done), A to Z, and a tap puts one back; Last bought kept; "
                 "several at once give one item each; calls, the backup and the server know it (" + ", ".join(seen) + ")")
 
+    # 137
+    async def flow137(self) -> str:
+        """H231: the groceries' ticked-off text readable, and an item put in another place in its list and renamed,
+        on every list. No Claude turns. On a throwaway copy of the template's list: order moves the row in its own
+        table (the top, the bottom, past the end is the bottom, the same place says so), with its log line and undo;
+        rename keeps the rest of the row, refuses a name already on that list, writes its log line and undo, and
+        when the details in their own words were found by the old name only, keeps it in the Notes ("Renamed from:")
+        so they stay with it. The calls' rules, the policy, the backup's hand-over, a friend's chat and the server
+        know both. On the call page in a headless browser (the phone, a small phone, the desktop app; light and
+        dark): the ticked-off groceries aren't struck through and their text is the page's own, open lists have a
+        grip on each row (the ticked-off, done and let-go lists none), a drag on a grip puts the row at its new place
+        on the page and in the file, the arrow keys on a grip move it one, Rename in an item's view saves a new name,
+        and nothing is wider than the screen."""
+        import todo as td
+        tdir = self.tmp / "h231"
+        tdir.mkdir(parents=True, exist_ok=True)
+        tpl = (APP.parent / "template" / "challenges.md").read_text()
+        at = tpl.index("## Groceries")
+        eol = tpl.index("\n", tpl.index("|---", at))
+        text = tpl[:eol + 1] + "| pasta |  |  |  |\n| Milk |  |  |  |\n| eggs |  |  |  |\n| bread |  |  |  |\n" + tpl[eol + 1:]
+        at = text.index("## 1. ")
+        eol = text.index("\n", text.index("|---", at))
+        text = text[:eol + 1] + ("| Plan the garden | active | | open | | 2026-01-03 | |\n| Fix the bike | passive | | open | | 2026-01-03 | |\n"
+                                 "| Call the bank | passive | | open | | 2026-01-03 | |\n") + text[eol + 1:]
+        if "## Details" in text:
+            at = text.index("\n", text.index("## Details")) + 1
+            text = text[:at] + "\n**Garden.** The roses first, then the hedge.\n" + text[at:]
+        f = tdir / "challenges.md"
+        f.write_text(text)
+        env_was = {k: os.environ.get(k) for k in ("HQ_TODO_UNDO", "HQ_NOW")}
+        os.environ["HQ_TODO_UNDO"] = str(tdir / "undo.json")
+        os.environ["HQ_NOW"] = "2026-01-05T10:00:00"
+        one = lambda: [i["title"] for l in td.read(f)["lists"] if l["num"] == "1" for i in l["items"]]
+        gro = lambda: [i["title"] for l in td.read(f)["lists"] if l["kind"] == "groceries" for i in l["items"]]
+        try:
+            need(one() == ["Plan the garden", "Fix the bike", "Call the bank"], f"the test list reads wrong: {one()}")
+            r = td.order("call the bank", 1, by="a test", p=f)
+            need(one() == ["Call the bank", "Plan the garden", "Fix the bike"], f"order to the top didn't move the row: {one()}")
+            need("- 2026-01-05 10:00: Call the bank: to place 1 of 3 on 1 (important, not urgent) (a test)." in f.read_text(),
+                 f"order wrote no log line: {r}")
+            td.order("call the bank", 9, p=f)
+            need(one() == ["Plan the garden", "Fix the bike", "Call the bank"], f"order past the end isn't the bottom: {one()}")
+            need("already at place 3" in td.order("call the bank", 3, p=f)["said"], "the same place doesn't say so")
+            td.order("pasta", 4, p=f)
+            need(gro() == ["Milk", "eggs", "bread", "pasta"], f"order on the groceries didn't move it: {gro()}")
+            need(td.undo()["ok"] and gro() == ["pasta", "Milk", "eggs", "bread"], f"undo didn't take an order back: {gro()}")
+            before = f.read_text()
+            r = td.rename("plan the garden", "Plan the vegetable patch", by="a test", p=f)
+            t = f.read_text()
+            row = next(l for l in t.splitlines() if l.startswith("| Plan the vegetable patch |"))
+            need("| active |" in row and "| 2026-01-03 |" in row and "Renamed from: Plan the garden." in row,
+                 f"rename didn't keep the row, or lost the details' old name: {row!r}")
+            it = next(i for l in td.read(f)["lists"] for i in l["items"] if i["id"] == r["id"])
+            need(any("roses" in d for d in it["details"]), f"the details didn't stay with the renamed item: {it['details']}")
+            need("- 2026-01-05 10:00: Plan the garden: renamed to Plan the vegetable patch (1 (important, not urgent)) (a test)." in t,
+                 "rename wrote no log line")
+            need(td.undo()["ok"] and f.read_text() == before, "undo didn't take a rename back")
+            td.rename("milk", "oat milk", p=f)
+            need("oat milk" in gro() and "Renamed from" not in f.read_text().split("## Groceries\n")[1].split("## ")[0],
+                 "a plain rename added a note it didn't need")
+            try:
+                td.rename("oat milk", "Eggs", p=f)
+                need(False, "a rename to a name already on the list was let through")
+            except ValueError:
+                pass
+            for cmd in (["order", "eggs", "1"], ["rename", "eggs", "free-range eggs"]):
+                rc = run([sys.executable, str(APP / "todo.py"), *cmd, "--by", "a test"], env={**os.environ, "HQ_TODO": str(f),
+                         "HQ_ROLE_HERE": "1"}, timeout=30)
+                need(rc.returncode == 0, f"todo.py {cmd[0]} from the command line failed: {rc.stdout} {rc.stderr}")
+            need(gro()[0] == "free-range eggs", f"the command line's order and rename didn't land: {gro()}")
+        finally:
+            for k, v in env_was.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        from policy import Policy
+        import role as _role
+        pol = Policy(config.FOLDER, dry_run=True)
+        script = APP / "todo.py"
+        need(pol.decide("Bash", {"command": f'python3 "{script}" order "milk" 2 --by "a call"'}).verdict == "allow"
+             and pol.decide("Bash", {"command": f'python3 "{script}" rename "milk" "oat milk" --by "a call"'}).verdict == "allow",
+             "a call can't put an item in another place or rename it")
+        need({"order", "rename"} <= _role.WRITES["todo"], "the backup doesn't hand order and rename to the main")
+        need("order ITEM N" in config.TODO_RULE and "rename ITEM" in config.TODO_RULE and "`rename ITEM" in (APP.parent / "template" / "CLAUDE.md").read_text(),
+             "the call rules or a friend's chat don't know order and rename")
+        # the server, on its own copy
+        await self.ensure_server()
+        sf = Path(self.server.env["HQ_TODO"])
+        sf.parent.mkdir(parents=True, exist_ok=True)
+        sf.write_text(text)
+        Path(self.server.env["HQ_TODO_UNDO"]).unlink(missing_ok=True)
+
+        def post(body, hq="todo"):
+            req = urllib.request.Request(TEST_URL + "/api/todo", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        need(post({"order": "bread", "place": 1}, hq="")[0] == 403 and sf.read_text() == text, "an order without the page's header was let in")
+        code, got = post({"order": "bread", "place": 1})
+        need(code == 200 and [i["title"] for l in got["lists"] if l["kind"] == "groceries" for i in l["items"]][0] == "bread",
+             f"the server didn't put it at the top ({code})")
+        code, got = post({"rename": "bread", "title": "rye bread"})
+        need(code == 200 and got.get("id") and any(i["id"] == got["id"] and i["title"] == "rye bread" for l in got["lists"] for i in l["items"]),
+             f"the server didn't rename it, or didn't give its new id ({code})")
+        need(post({"rename": "rye bread", "title": "Milk"})[0] == 400, "a rename to a name already there wasn't refused")
+        need(post({"order": "nothing like it", "place": 1})[0] == 404, "an unknown item wasn't refused")
+        # the call page
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (f, ms) => { for (let i = 0; i < ms / 50; i++) { if (f()) return true; await wait(50); } return false; };
+  const rows = sel => [...document.querySelectorAll(sel)].map(r => r.querySelector(".it").firstChild.textContent);
+  const wide = () => [...document.querySelectorAll("#todosheet *")].some(e => { const b = e.getBoundingClientRect(); return b.width && b.right > innerWidth + 1; });
+  const pill = name => [...document.querySelectorAll(".tdmore button")].find(b => b.firstChild.textContent === name);
+  document.getElementById("todobtn").click();
+  await until(() => pill("Groceries"), 4000);
+  pill("Groceries").click(); await wait(100);
+  out.push("grips:" + document.querySelectorAll(".tdrow:not(.off) .grip").length + "/" + document.querySelectorAll(".tdrow.off .grip").length);
+  const tickOf = name => [...document.querySelectorAll(".tdrow:not(.off)")].find(r => r.querySelector(".it").firstChild.textContent === name).querySelector(".ck");
+  tickOf("Milk").click();
+  await until(() => rows(".tdrow.off").length === 1, 4000);
+  const off = document.querySelector(".tdrow.off .it"), cs = getComputedStyle(off), fg = getComputedStyle(document.body).color;
+  out.push("off:" + (cs.textDecorationLine.includes("line-through") ? "struck" : "plain") + "," + (cs.color === fg ? "fg" : cs.color + "!=" + fg));
+  // a drag on the first row's grip, down past the third row
+  const grip = name => [...document.querySelectorAll(".tdrow:not(.off)")].find(r => r.querySelector(".it").firstChild.textContent === name).querySelector(".grip");
+  const g = grip("pasta"), gb = g.getBoundingClientRect(), list = [...document.querySelectorAll(".tdrow:not(.off)")];
+  const target = list[2].getBoundingClientRect(), x = gb.left + gb.width / 2, y0 = gb.top + gb.height / 2;
+  const pe = (type, y) => g.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 7, pointerType: "touch", isPrimary: true, button: 0, clientX: x, clientY: y }));
+  pe("pointerdown", y0);
+  for (let k = 1; k <= 6; k++) { pe("pointermove", y0 + (target.top + target.height * 0.75 - y0) * k / 6); await wait(16); }
+  out.push("during:" + (document.querySelector(".tdrow.drag") ? "drag" : "none"));
+  pe("pointerup", target.top + target.height * 0.75);
+  await until(() => rows(".tdrow:not(.off)")[2] === "pasta" && !document.querySelector(".tdrow.drag"), 4000);
+  await wait(300);
+  out.push("dragged:" + rows(".tdrow:not(.off)").join("/"));
+  out.push("view:" + document.getElementById("todosheet").dataset.view);
+  grip("bread").focus();
+  grip("bread").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+  await until(() => rows(".tdrow:not(.off)")[0] === "bread", 4000);
+  out.push("keys:" + rows(".tdrow:not(.off)").join("/"));
+  out.push("wide:" + (wide() ? "yes" : "no"));
+  // Rename, from the item's view
+  [...document.querySelectorAll(".tdrow:not(.off) .it")].find(b => b.firstChild.textContent === "eggs").click(); await wait(100);
+  const rn = [...document.querySelectorAll(".tdacts button")].find(b => b.textContent === "Rename");
+  out.push("rename:" + (rn ? "yes" : "no"));
+  rn.click(); await wait(50);
+  const i = document.querySelector(".tdname input");
+  out.push("field:" + (i && i.value === "eggs" && document.activeElement === i ? "ok" : "no"));
+  i.value = "free-range eggs"; i.dispatchEvent(new Event("input"));
+  document.querySelector(".tdname").requestSubmit();
+  await until(() => document.querySelector("#todobody h3") && document.querySelector("#todobody h3").textContent === "free-range eggs", 4000);
+  out.push("renamed:" + (document.querySelector("#todobody h3") || {}).textContent + "," + document.getElementById("todosheet").dataset.view);
+  out.push("wide2:" + (wide() ? "yes" : "no"));
+  const pre = document.createElement("pre"); pre.id = "h231"; pre.textContent = "H231RESULT " + out.join(" | ") + " END"; document.body.append(pre);
+})();
+</script>"""
+        seen = []
+        for name, size, app_, dark in (("the phone", "390,844", False, False), ("a small phone", "320,568", False, True),
+                                       ("the desktop app", "1180,780", True, False), ("the phone, dark", "390,844", False, True)):
+            sf.write_text(text)
+            Path(self.server.env["HQ_TODO_UNDO"]).unlink(missing_ok=True)
+            pf = self.tmp / f"h231-{size.replace(',', 'x')}{'-dark' if dark else ''}.html"
+            pg = page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1).replace("</body>", harness + "</body>", 1)
+            if app_:
+                pg = pg.replace('new URLSearchParams(location.search).has("app")', "true", 1)
+            pf.write_text(pg)
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'h231-profile'}", "--disable-web-security", f"--window-size={size}",
+                                              *(["--force-dark-mode", "--blink-settings=preferredColorScheme=0"] if dark else []),
+                                              "--virtual-time-budget=15000", "--dump-dom", pf.as_uri()], timeout=90)
+            mm = re.search(r'<pre id="h231">H231RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{name}: the order and rename test on the call page didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+            say(f"   {name} ({size}): {mm.group(1)}")
+            need(res["grips"] == "4/0", f"{name}: the open groceries don't have a grip each: {res}")
+            need(res["off"] == "plain,fg", f"{name}: the ticked-off groceries are still hard to read: {res}")
+            need(res["during"] == "drag" and res["dragged"] == "eggs/bread/pasta" and res["view"] == "list",
+                 f"{name}: a drag on the grip didn't put the row in its new place: {res}")
+            need(res["keys"] == "bread/eggs/pasta", f"{name}: the arrow key on a grip didn't move it: {res}")
+            need(res["wide"] == "no" and res["wide2"] == "no", f"{name}: something is wider than the screen: {res}")
+            need(res["rename"] == "yes" and res["field"] == "ok" and res["renamed"] == "free-range eggs,item", f"{name}: Rename didn't save: {res}")
+            g = [x.strip("| ").split(" | ")[0] for x in sf.read_text().split("## Groceries\n")[1].split("## ")[0].splitlines() if x.startswith("| ") and "---" not in x][1:]
+            need(g == ["bread", "free-range eggs", "pasta"], f"{name}: the order and the new name didn't reach the file: {g}")
+            seen.append(name)
+        return ("an item goes to another place in its list (a drag on its grip, or the arrow keys) and gets a new name, "
+                "with its log line and undo, the details kept; the ticked-off groceries read plainly; calls, the backup and "
+                "the server know it (" + ", ".join(seen) + ")")
+
     async def flow113(self) -> str:
         """H194: HQ's own icon on a friend's fresh install. No Claude turns. A status server without HQ_LABEL (a
         laptop, like a fresh install) serves HQ's house (status/icons/hq-*.png, opaque squares) for every page that
@@ -16156,6 +16353,7 @@ FLOWS = {
     133: ("H239: a six-week game's texts (the evening one while today's tick isn't in, a heads-up on a day away around its time) and its score in the weekly look back", False, "flow133"),
     132: ("F45: a long piece of quiet talking isn't thrown away as no speech (one score per piece; long pieces at 0.75, short at 0.4, quiet ones louder); noise alone still gives nothing", False, "flow132"),
     135: ("H229: travel on appointments by public transport: a trip by itself (its place or a name from the places book), from home or the appointment before; the live open data watched before it, and Donna texts each change once (late, platform, cancelled, a stop's message)", False, "flow135"),
+    137: ("H231: an item put at another place in its list (a drag on its grip, the arrow keys) and renamed, on every list, through todo.py with its log line and undo; the ticked-off groceries readable; phone, small phone, desktop app, light and dark", False, "flow137"),
     136: ("H230: driving to appointments on their own maps key: off until turned on, the key kept on the computer only, the drive with the traffic and when to leave, Donna texts once when to leave and when the traffic changes, public transport or car per appointment, a daily cap, Google's and TomTom's answers", False, "flow136"),
     134: ("H227: every button and screen on the call page has a tutorial piece (the page read against tour.json; a new screen needs its button named)", False, "flow134"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),

@@ -436,6 +436,29 @@
   .tdrow .ck svg { width:18px; height:18px; }
   .tdrow .ck:hover, .tdrow .ck:focus-visible { border-color:var(--accent); color:var(--accent); }
   .tdrow.gone .it { color:var(--muted); text-decoration:line-through; }
+  /* H231 (his words: "Why is tick off in black in groceries? Hard to read"): the ticked-off groceries read as plain
+     text again, no line through them; the filled tick and their own heading say they're ticked off. */
+  .tdrow.off .it { color:var(--fg); text-decoration:none; }
+  .tdrow.off .it small { color:var(--muted); }
+  .tdrow.off .it, html.m3 .tdrow.off .it { background:color-mix(in srgb, var(--soft) 60%, transparent); box-shadow:none; }
+  /* H231 ("No I just want to change the order"): a grip at the start of each row; drag it up or down to put the item
+     at another place in its list (or the arrow keys on it). Only the grip drags, so the list still scrolls. */
+  .tdrow .grip { flex-shrink:0; width:26px; height:44px; margin-right:-4px; border:0; background:transparent; color:var(--muted); padding:0;
+                 display:flex; align-items:center; justify-content:center; cursor:grab; touch-action:none; -webkit-user-select:none; user-select:none; }
+  .tdrow .grip svg { width:14px; height:20px; }
+  .tdrow .grip:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; border-radius:8px; color:var(--accent); }
+  .tdrow.drag { position:relative; z-index:2; }
+  .tdrow.drag .it { box-shadow:0 8px 24px rgba(0,0,0,.22), 0 0 0 1.5px var(--accent); }
+  .tdrow.drag .grip { cursor:grabbing; color:var(--accent); }
+  #todosheet.dragging, #todosheet.dragging * { -webkit-user-select:none; user-select:none; }
+  .tdname { display:flex; flex-direction:column; gap:8px; }
+  .tdname input { height:48px; box-sizing:border-box; border:1.5px solid var(--accent); border-radius:14px; padding:0 14px; background:var(--soft); color:var(--fg);
+                  font:600 18px/1.2 -apple-system,sans-serif; width:100%; min-width:0; }
+  .tdname input:focus { outline:none; }
+  .tdname div { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .tdname button { min-height:44px; border:0; border-radius:14px; background:var(--soft); color:var(--fg); font:600 15px/1.2 -apple-system,sans-serif; cursor:pointer; }
+  .tdname button.ok { background:var(--accent); color:#04120f; }
+  .tdname button:disabled { opacity:.45; cursor:default; }
   #todoadd { display:flex; gap:8px; align-items:center; margin-top:4px; }
   #todoaddin { flex:1; min-width:0; height:44px; box-sizing:border-box; border:1.5px solid var(--line, var(--muted)); border-radius:22px; padding:0 15px;
                background:var(--soft); color:var(--fg); font:16px/1 -apple-system,sans-serif; }
@@ -821,6 +844,7 @@
   html.m3 #histlist button, html.m3 #callist .appt, html.m3 #noteslist .note, html.m3 #wxbody .fact, html.m3 #wxbody .hr, html.m3 #calone .notes,
   html.m3 .tdq, html.m3 .tdrow .it, html.m3 #todobody .card, html.m3 #todobody .words, html.m3 .tdacts button, html.m3 .tdacts select {
     background:var(--surface); box-shadow:0 0 0 1px var(--line); border-radius:var(--r); }
+  html.m3 .tdacts .ok { background:var(--accent); color:#04120f; box-shadow:none; }  /* H231: its dark text needs its green */
   html.m3 #histlist button { padding:14px 16px; align-items:center; justify-content:flex-start; }
   html.m3 #histlist button > :first-child { margin-right:auto; }
   html.m3 #histlist button::after { content:"›"; color:var(--muted); font-size:20px; line-height:1; margin-left:-2px; }
@@ -2689,6 +2713,7 @@ const todoEl = document.getElementById("todosheet"), todoBtn = document.getEleme
       todoNote = document.getElementById("todonote");
 let todoAsk = 0, todoData = null, todoView = { list: null, item: null, from: "main" }, todoKeep = {};
 const TODO_Q = { q1: ["Important", "Urgent"], q2: ["Important", "Not urgent"], q3: ["Not important", "Urgent"], q4: ["Not important", "Not urgent"] };
+const TODO_GRIP = '<svg viewBox="0 0 14 20" fill="currentColor" aria-hidden="true"><circle cx="4" cy="4" r="1.7"/><circle cx="10" cy="4" r="1.7"/><circle cx="4" cy="10" r="1.7"/><circle cx="10" cy="10" r="1.7"/><circle cx="4" cy="16" r="1.7"/><circle cx="10" cy="16" r="1.7"/></svg>';
 const TODO_TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
 function gameOpen() { const e = document.getElementById("gamesheet"); return !!e && e.classList.contains("open"); }  // H222: games.js draws it
 function coachOpen() { const e = document.getElementById("coachsheet"); return !!e && e.classList.contains("open"); }  // H225: coach.js draws it
@@ -2814,8 +2839,10 @@ function todoDrawList() {
   todoBody.innerHTML = "";
   const closed = l.kind === "done" || l.kind === "letgo";
   if (!l.items.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "Nothing here right now"; todoBody.appendChild(e); }
+  const sortable = !closed && l.kind !== "grocoff" && l.items.length > 1;  // H231
   for (const it of l.items) {
-    const row = document.createElement("div"); row.className = "tdrow";
+    const row = document.createElement("div"); row.className = "tdrow"; row.dataset.id = it.id;
+    if (sortable) row.appendChild(todoGrip(l, it, row));
     const b = document.createElement("button"); b.type = "button"; b.className = "it"; b.textContent = it.title;
     const meta = todoMeta(it);
     if (meta) { const m = document.createElement("small"); m.textContent = meta; if (!closed && todoSoon(it.deadline)) m.className = "due"; b.appendChild(m); }
@@ -2865,19 +2892,115 @@ function todoDrawTicked() {
   h.append(document.createTextNode("Ticked off"), n); todoBody.appendChild(h);
   if (!items.length) { const e = document.createElement("div"); e.className = "tdhint"; e.textContent = "What you tick off lands here, A to Z. Tap one to put it back on the list."; todoBody.appendChild(e); return; }
   for (const it of items) {
-    const row = document.createElement("div"); row.className = "tdrow gone off";
+    const row = document.createElement("div"); row.className = "tdrow off";
     const b = document.createElement("button"); b.type = "button"; b.className = "it"; b.textContent = it.title;
     if (it.at) { const m = document.createElement("small"); m.textContent = "Last bought " + it.at; b.appendChild(m); }
     const ck = document.createElement("button"); ck.type = "button"; ck.className = "ck"; ck.innerHTML = TODO_TICK;
     ck.setAttribute("aria-label", "Put back on the list: " + it.title); b.setAttribute("aria-label", "Put back on the list: " + it.title);
     const back = async () => {
-      b.disabled = ck.disabled = true; row.classList.remove("gone");
+      b.disabled = ck.disabled = true;
       const at = todoBody.scrollTop;
-      if (await todoSend({ untick: it.id })) { todoDraw(); todoBody.scrollTop = at; } else { b.disabled = ck.disabled = false; row.classList.add("gone"); }
+      if (await todoSend({ untick: it.id })) { todoDraw(); todoBody.scrollTop = at; } else { b.disabled = ck.disabled = false; }
     };
     b.addEventListener("click", back); ck.addEventListener("click", back);
     row.append(b, ck); todoBody.appendChild(row);
   }
+}
+// H231: the grip that drags a row to another place in its list (the server moves its row in the file, with a log line
+// and undo). A finger or the mouse on the grip only, so the list itself still scrolls and the sheet's swipes stay.
+// Near the top or bottom edge the list scrolls along. The arrow keys on a grip move it one place.
+function todoGrip(l, it, row) {
+  const g = document.createElement("button"); g.type = "button"; g.className = "grip"; g.innerHTML = TODO_GRIP;
+  g.setAttribute("aria-label", "Change the order: " + it.title + ". Drag, or the arrow keys");
+  const place = n => todoSend({ order: it.id, place: n });
+  const after = async n => {
+    const at = todoBody.scrollTop;
+    if (await place(n)) { todoDraw(); todoBody.scrollTop = at; const r = todoBody.querySelector('.tdrow[data-id="' + it.id + '"] .grip'); if (r) r.focus(); }
+    else todoDraw();
+  };
+  g.addEventListener("keydown", ev => {
+    const i = l.items.indexOf(it);
+    if (ev.key === "ArrowUp" && i > 0) { ev.preventDefault(); after(i); }
+    else if (ev.key === "ArrowDown" && i < l.items.length - 1) { ev.preventDefault(); after(i + 2); }
+  });
+  for (const t of ["touchstart", "touchmove"]) g.addEventListener(t, ev => ev.stopPropagation(), { passive: true });  // not a swipe back or a pull
+  g.addEventListener("click", ev => ev.preventDefault());
+  g.addEventListener("pointerdown", ev => {
+    if (ev.button !== 0 || todoEl.classList.contains("dragging")) return;
+    ev.preventDefault(); ev.stopPropagation();
+    try { g.setPointerCapture(ev.pointerId); } catch (_) {}
+    const rows = [...todoBody.querySelectorAll(".tdrow:not(.off)")].filter(r => r.dataset.id);
+    const from = rows.indexOf(row); if (from < 0) return;
+    const tops = rows.map(r => r.offsetTop), hs = rows.map(r => r.offsetHeight);
+    const step = rows.length > 1 ? (tops[1] - tops[0]) - hs[0] : 8;  // the gap between rows
+    const d = { y: ev.clientY, y0: ev.clientY, sc: todoBody.scrollTop, to: from, raf: 0, moved: false };
+    row.classList.add("drag"); todoEl.classList.add("dragging");
+    const quick = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    for (const r of rows) if (r !== row) r.style.transition = quick ? "none" : "transform .15s ease-out";
+    const layout = () => {
+      const dy = d.y - d.y0 + (todoBody.scrollTop - d.sc);
+      const mid = tops[from] + dy + hs[from] / 2;
+      let to = from;
+      for (let i = 0; i < rows.length; i++) {
+        if (i < from && mid < tops[i] + hs[i] / 2) { to = i; break; }
+        if (i > from && mid > tops[i] + hs[i] / 2) to = i;
+      }
+      d.to = to;
+      row.style.transform = "translateY(" + dy + "px)";
+      rows.forEach((r, i) => {
+        if (r === row) return;
+        const sh = (i > from && i <= to) ? -(hs[from] + step) : (i < from && i >= to) ? hs[from] + step : 0;
+        r.style.transform = sh ? "translateY(" + sh + "px)" : "";
+      });
+    };
+    const edge = () => {  // near an edge the list scrolls along
+      const b = todoBody.getBoundingClientRect(), zone = 48;
+      const v = d.y < b.top + zone ? -Math.ceil((b.top + zone - d.y) / 6) : d.y > b.bottom - zone ? Math.ceil((d.y - b.bottom + zone) / 6) : 0;
+      if (v) { todoBody.scrollTop += v; layout(); }
+      d.raf = requestAnimationFrame(edge);
+    };
+    d.raf = requestAnimationFrame(edge);
+    const move = e => { d.y = e.clientY; if (Math.abs(d.y - d.y0) > 3) d.moved = true; layout(); };
+    const stop = async e => {
+      g.removeEventListener("pointermove", move); g.removeEventListener("pointerup", stop); g.removeEventListener("pointercancel", stop);
+      cancelAnimationFrame(d.raf);
+      const to = e.type === "pointercancel" ? from : d.to;
+      for (const r of rows) { r.style.transition = "none"; r.style.transform = ""; }
+      row.classList.remove("drag"); todoEl.classList.remove("dragging");
+      if (to === from) { requestAnimationFrame(() => { for (const r of rows) r.style.transition = ""; }); return; }
+      // in place at once, then the list as the server has it
+      const ref = to > from ? rows[to].nextSibling : rows[to];
+      row.parentNode.insertBefore(row, ref);
+      requestAnimationFrame(() => { for (const r of rows) r.style.transition = ""; });
+      const at = todoBody.scrollTop;
+      if (await place(to + 1)) { todoDraw(); todoBody.scrollTop = at; } else { todoDraw(); todoBody.scrollTop = at; }
+    };
+    g.addEventListener("pointermove", move); g.addEventListener("pointerup", stop); g.addEventListener("pointercancel", stop);
+  });
+  return g;
+}
+// H231: a new name for an item, in place of its title; the rest of its row stays, and Undo puts the old one back.
+function todoRename(it, h) {
+  const f = document.createElement("form"); f.className = "tdname"; f.autocomplete = "off";
+  const i = document.createElement("input"); i.type = "text"; i.value = it.title; i.maxLength = 300; i.enterKeyHint = "done";
+  i.setAttribute("aria-label", "New name");
+  const bs = document.createElement("div");
+  const c = document.createElement("button"); c.type = "button"; c.textContent = "Cancel";
+  const ok = document.createElement("button"); ok.type = "submit"; ok.className = "ok"; ok.textContent = "Save";
+  bs.append(c, ok); f.append(i, bs);
+  i.addEventListener("input", () => { ok.disabled = !i.value.trim(); });
+  i.addEventListener("keydown", ev => { if (ev.key === "Escape") { ev.preventDefault(); todoDraw(); } });
+  c.addEventListener("click", () => todoDraw());
+  f.addEventListener("submit", async ev => {
+    ev.preventDefault(); const t = i.value.trim().replace(/\s+/g, " ");
+    if (!t) return;
+    if (t === it.title) return todoDraw();
+    ok.disabled = c.disabled = i.disabled = true;
+    const d = await todoSend({ rename: it.id, title: t });
+    if (d) { if (d.id) todoView.item = d.id; todoDraw(); }
+    else { ok.disabled = c.disabled = i.disabled = false; i.focus(); }
+  });
+  h.replaceWith(f); i.focus(); i.select();
 }
 function todoDrawItem() {
   const [l, it] = todoItem(todoView.item);
@@ -2896,6 +3019,8 @@ function todoDrawItem() {
   }
   const closed = l.kind === "done" || l.kind === "letgo";
   const acts = document.createElement("div"); acts.className = "tdacts";
+  const rn = document.createElement("button"); rn.type = "button"; rn.textContent = "Rename";  // H231
+  rn.addEventListener("click", () => { if (todoBody.contains(h)) todoRename(it, h); });
   if (!closed && l.kind !== "grocoff") {
     const d = document.createElement("button"); d.type = "button"; d.className = "ok"; d.textContent = "Tick off";
     const ask = l.kind === "groceries" ? { tick: it.id } : { done: it.id };  // F40
@@ -2918,6 +3043,7 @@ function todoDrawItem() {
     g.addEventListener("click", async () => { g.disabled = true; if (await todoSend({ letgo: it.id, why: "" })) todoGo({ list: l.key, item: null, from: "main" }); else g.disabled = false; });
     acts.appendChild(g);
   }
+  acts.appendChild(rn);
   todoBody.appendChild(acts);
   if (!closed) {
     const go = document.createElement("button"); go.type = "button"; go.id = "todogo";

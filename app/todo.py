@@ -17,6 +17,8 @@ column the other list doesn't have goes into its Notes), and writes one line in 
     python3 app/todo.py move "ITEM" LIST        to another list
     python3 app/todo.py tick "ITEM"             groceries: ticked off, onto the ticked-off list (not done)
     python3 app/todo.py untick "ITEM"           groceries: from the ticked-off list back onto the list
+    python3 app/todo.py order "ITEM" N          to place N in its own list (1 is the top)
+    python3 app/todo.py rename "ITEM" "NEW"     a new name, the rest of its row kept
     python3 app/todo.py undo                    puts back the last change made here, if nothing changed since
 
 LIST is a list's number (0, 1, 2 …), a few words of its name, or matrix words: "important urgent", "important not
@@ -28,6 +30,12 @@ F40 (18 October 2026), in the user's words: "maybe it should get it's own list t
 through it and tick it back on (can put it on alphabetical order), can be inside once you open groceries button". A
 ticked grocery goes to its own list, "## Groceries ticked off" (made under the groceries when it's first needed, with
 the groceries' own columns), its Last bought set to the day; untick puts it back. The app shows it A to Z.
+
+H231 (22 October 2026), in the user's words: "And i want to be able to move items on my list and rename them", and
+"No I just want to change the order". order puts an item at another place in its own list (the row moves in the
+table, nothing else changes), rename gives it a new name and keeps the rest of its row. Both get their log line and
+undo. A rename whose old name the details in their own words were found by, and the new one isn't, keeps the old name
+in its Notes ("Renamed from: …"), so the details stay with it.
 """
 from __future__ import annotations
 
@@ -180,6 +188,8 @@ def details_for(title: str, details: list[dict]) -> list[str]:
     return out
 
 
+_RENAMED = re.compile(r"Renamed from: (.+?)\.(?=\s|$)")  # H231
+
 _FIELDS = {"type": ("type",), "for": ("for",), "deadline": ("deadline", "when"), "status": ("status",),
            "calendar": ("in calendar", "calendar"), "added": ("added",), "notes": ("notes", "why"),
            "at": ("done", "decided", "last bought"), "often": ("how often",)}
@@ -211,7 +221,8 @@ def read(p: Path | None = None) -> dict:
                           "calendar": _field(r, "calendar"), "added": _field(r, "added"), "notes": _field(r, "notes"),
                           "at": _field(r, "at"), "often": _field(r, "often"),
                           "fields": [[c, v] for c, v in r.items() if v and c != lst["columns"][0]],
-                          "details": details_for(it["title"], doc["details"])})
+                          "details": details_for(it["title"] + " " + " ".join(_RENAMED.findall(_field(r, "notes"))),
+                                                 doc["details"])})
         out.append({"key": lst["key"], "num": lst["num"], "name": lst["name"], "kind": lst["kind"], "items": items})
     return {"lists": out, "log": doc["log"][:12], "how": doc["how"], "file": p.name,
             "changed": int(p.stat().st_mtime), "mail": very_important()}
@@ -608,6 +619,66 @@ def move(item: str, to: str, by: str = "", p: Path | None = None) -> dict:
     return _move(p or path(), item, to, by=by)
 
 
+def order(item: str, place: int, by: str = "", p: Path | None = None) -> dict:
+    """H231: the item to place N (1 is the top) in its own list; the row moves in the table, nothing else changes."""
+    p = p or path()
+    with _lock:
+        before = p.read_text(encoding="utf8")
+        doc = parse(before)
+        lst, it = find_item(doc, item)
+        items = lst["items"]
+        n = max(1, min(int(place), len(items)))
+        now = items.index(it) + 1
+        if n == now:
+            return {"ok": True, "said": f"{it['title']} is already at place {n}.", "id": it["id"], "list": lst["key"]}
+        lines = list(doc["lines"])
+        row = lines[it["line"]]
+        rest = [x for x in items if x is not it]
+        # the line it goes before (or after the last one), counted before its own line is taken out
+        at = rest[n - 1]["line"] if n - 1 < len(rest) else rest[-1]["line"] + 1
+        del lines[it["line"]]
+        lines.insert(at - (1 if at > it["line"] else 0), row)
+        stamp = _now().strftime("%Y-%m-%d %H:%M")
+        what = f"to place {n} of {len(items)} on {_list_label(lst)}"
+        lines = _insert_log(lines, f"- {stamp}: {it['title']}: {what}{_by(by)}.")
+        _write(p, before, lines, f"{it['title']}: {what}")
+    return {"ok": True, "said": f"{it['title']}: {what}.", "id": it["id"], "list": lst["key"]}
+
+
+def rename(item: str, title: str, by: str = "", p: Path | None = None) -> dict:
+    """H231: a new name; the rest of the row stays. Not to a name another item on the same list already has."""
+    p = p or path()
+    new = re.sub(r"\s+", " ", title or "").strip()
+    if not new:
+        raise ValueError("a new name is needed")
+    with _lock:
+        before = p.read_text(encoding="utf8")
+        doc = parse(before)
+        lst, it = find_item(doc, item)
+        old = it["title"]
+        if new == old:
+            return {"ok": True, "said": f"It's already called {old}.", "id": it["id"], "list": lst["key"]}
+        if any(x is not it and x["title"].lower() == new.lower() for x in lst["items"]):
+            raise ValueError(f"{new} is already on {_list_label(lst)}.")
+        cells = list(it["cells"])
+        cells[0] = new
+        r = it["row"]
+        had = details_for(old + " " + " ".join(_RENAMED.findall(_field(r, "notes"))), doc["details"])
+        if had and len(details_for(new, doc["details"])) < len(had):
+            note_at = next((i for i, c in enumerate(lst["columns"]) if i and c.lower().split(" ")[0] in ("notes", "why")),
+                           len(lst["columns"]) - 1)
+            if note_at and "Renamed from: " + old + "." not in cells[note_at]:
+                cells[note_at] = " ".join(x for x in (cells[note_at], f"Renamed from: {old}.") if x)
+        lines = list(doc["lines"])
+        lines[it["line"]] = _row_line(cells)
+        stamp = _now().strftime("%Y-%m-%d %H:%M")
+        lines = _insert_log(lines, f"- {stamp}: {old}: renamed to {new} ({_list_label(lst)}){_by(by)}.")
+        _write(p, before, lines, f"{old}: renamed to {new}")
+        nid = next((x["id"] for l in parse("\n".join(lines))["lists"] if l["head"] == lst["head"]
+                    for x in l["items"] if x["line"] == it["line"]), "")
+    return {"ok": True, "said": f"{old}: renamed to {new}.", "id": nid, "list": lst["key"]}
+
+
 def undo() -> dict:
     """The last change made through here, put back, only when the file is still as that change left it."""
     with _lock:
@@ -714,7 +785,7 @@ def _opt(args: list[str], name: str) -> str:
 def main(argv: list[str]) -> int:
     args = list(argv)
     # H203: on the backup HQ, a change to the list goes to the main one, which writes it (role.WRITES), like the queue.
-    if args and args[0] in ("add", "done", "letgo", "move", "tick", "untick", "undo") and not os.environ.get("HQ_ROLE_HERE"):
+    if args and args[0] in ("add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo") and not os.environ.get("HQ_ROLE_HERE"):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "routine"))
         import role
         if role.is_backup():
@@ -740,6 +811,10 @@ def main(argv: list[str]) -> int:
             print(tick(args[1], by=by)["said"])
         elif cmd == "untick" and len(args) >= 2:
             print(untick(args[1], by=by)["said"])
+        elif cmd == "order" and len(args) >= 3 and args[2].strip().isdigit():
+            print(order(args[1], int(args[2]), by=by)["said"])
+        elif cmd == "rename" and len(args) >= 3:
+            print(rename(args[1], args[2], by=by)["said"])
         elif cmd == "undo":
             print(undo()["said"])
         else:
