@@ -7723,6 +7723,21 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
                 need(not any(re.search(r"(?i)just got in|how did you sleep|morning\b|starting", g) for g in back[p]),
                      f"{aid}: a back-again greeting sounds like the day's first call: {back[p]}")
         backs = [set(g for p in agents.PARTS for g in agents.back_greetings(base[i] | {"back_greetings": agents._greetings(base[i]["back_greetings"])}, "Sam", p)) for i in agreed]
+        # H237: openers that make sense. A continued call never asks where we were (she has the earlier call) and never
+        # says how soon it is (it can be the next day); a back-again one doesn't say "already" or "so soon" (it can be
+        # hours later); a hand-over names who put him through. Nothing contradicts itself ("still thinking ... where were we").
+        for aid in agreed:
+            a = base[aid]
+            for g in a["continue_greetings"]:
+                need(not re.search(r"(?i)where were we|still thinking|so soon|that was quick|already", g),
+                     f"{aid}: a continue greeting that doesn't make sense (H237): {g}")
+            for v in agents._greetings(a["back_greetings"]).values():
+                need(not any(re.search(r"(?i)already|so soon", g) for g in v), f"{aid}: a back-again greeting says already (H237): {v}")
+            hand = agents.handover_greetings(a, "Sam", "Rex")
+            need(hand and all("Rex" in g and "{" not in g for g in hand), f"{aid}: no hand-over greeting naming who put him through: {hand}")
+        need(config.handover_greetings({"id": "x", "name": "Coach"}, "Rex") and all("Coach" in g and "Rex" in g
+             for g in config.handover_greetings({"id": "x", "name": "Coach"}, "Rex")),
+             "an agent without hand-over greetings doesn't get the call system's (H237)")
         need(not (backs[0] & backs[1] or backs[0] & backs[2] or backs[1] & backs[2]), "two agents share a back-again greeting")
         from transcript import first_call_today, TZ, now as tnow
         import datetime as _dt
@@ -7737,6 +7752,14 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         (day / "2026-10-16-0910.md").write_text("# Call\n")
         need(not first_call_today(day, nine), "a call at 9 10 today still leaves 9 30 the first of the day")
         need(first_call_today(day, _dt.datetime(2026, 10, 17, 8, 0, tzinfo=TZ)), "the next morning isn't the first call of the day again")
+        # H237: per agent: a call with Donna today leaves Pepper's first call of the day her first; a head without an
+        # agent counts for everyone.
+        (day / "2026-10-17-0900.md").write_text("# Call\n\nStarted 09:00:01 · agent Donna · brain test\n")
+        at10 = _dt.datetime(2026, 10, 17, 10, 0, tzinfo=TZ)
+        need(first_call_today(day, at10, agent="Pepper") and not first_call_today(day, at10, agent="Donna")
+             and not first_call_today(day, at10), "the first call of the day doesn't count per agent (H237)")
+        (day / "2026-10-17-0930.md").write_text("# Call\n")
+        need(not first_call_today(day, at10, agent="Pepper"), "a call without an agent in its head doesn't count for her (H237)")
         later = self.tmp / "calls69-later"
         later.mkdir(parents=True, exist_ok=True)
         (later / tnow().strftime("%Y-%m-%d-%H%M.md")).write_text("# Call\n")
@@ -8200,6 +8223,9 @@ setTimeout(() => {
         need(f"You: I'd plan it first." in cont["text"] and f"{one['name']}: Agreed." in cont["text"], f"continue text: {cont['text']}")
         d = Call(calls_dir=calls, test_mode=True, agent=two["id"], continues=c.transcript.path.stem, handover=True)
         need(f"{one['name']} just put you on the phone" in d._continue_note(), "the new call doesn't know it was handed over")
+        need(d.fillers._texts["greeting"] == config.handover_greetings(d.agent, one["name"])
+             and all(one["name"] in g for g in d.fillers._texts["greeting"]),
+             f"the handed-over agent doesn't greet as put through by the other (H237): {d.fillers._texts['greeting']}")
         need("Continues the call of" in d.transcript.path.read_text(), "the new transcript doesn't say which call it continues")
         c.switched_to, c.ended_by_agent = two, True
         c._finished = False; c.wrap_up_mode = "off"; c.llm.turns.append({"words": "What do you think?"})

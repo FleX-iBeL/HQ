@@ -527,7 +527,9 @@ def greetings(e: dict, name: str = "") -> list[str]:
         return [f"Hi{n}. Time for {what}. Ready when you are.", f"Hey{n}. Let's do {what}. How are you doing?"]
     lay = e.get("layer") or {}
     title = re.sub(r"\(.*?\)", "", lay.get("name", "")).strip() or "this layer"
-    return [f"Hi{n}. Let's work on {title}. Ready?", f"Hey{n}. {title} today. How are you doing?"]
+    # H237: "Let's work on the year", not "on The year", mid-sentence.
+    mid = re.sub(r"^(The|A|An) ", lambda m: m.group(1).lower() + " ", title)
+    return [f"Hi{n}. Let's work on {mid}. Ready?", f"Hey{n}. {title} today. How are you doing?"]
 
 
 def call_note(e: dict, user: str = "the user") -> str:

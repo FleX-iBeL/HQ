@@ -153,16 +153,29 @@ def _sort_key(path: Path) -> tuple[str, int]:
 DAY_STARTS = 5
 
 
-def first_call_today(folder: Path | None = None, at: datetime | None = None) -> bool:
-    """H164: is this the first call of the day? True when no call (any agent) was saved yet since the day
-    started. Read before this call's own transcript exists."""
+def first_call_today(folder: Path | None = None, at: datetime | None = None, agent: str | None = None) -> bool:
+    """H164: is this the first call of the day? True when no call was saved yet since the day started. Read before
+    this call's own transcript exists. H237: with `agent`, only her calls count (a call whose head names no agent
+    counts for everyone), so Pepper doesn't say "hey, again" when he only talked to Donna today."""
     from datetime import timedelta
     at = at or now()
     start = at.replace(hour=DAY_STARTS, minute=0, second=0, microsecond=0)
     if at < start:
         start -= timedelta(days=1)
     since, until = start.strftime("%Y-%m-%d-%H%M"), at.strftime("%Y-%m-%d-%H%M")
-    return not any(since <= _sort_key(p)[0] <= until for p in _calls(folder or config.CALLS))
+    return not any(since <= _sort_key(p)[0] <= until and (not agent or _agent_of(p) in ("", agent))
+                   for p in _calls(folder or config.CALLS))
+
+
+def _agent_of(path: Path) -> str:
+    """The agent named in a saved call's head ("· agent Pepper ·"), or "" when none."""
+    try:
+        with path.open(encoding="utf8") as f:
+            head = f.read(600)
+    except OSError:
+        return ""
+    m = re.search(r"· agent ([^·\n]+?)\s*(?:·|$)", head, re.M)
+    return m.group(1).strip() if m else ""
 
 
 def read_lines(path: Path) -> list[dict]:

@@ -737,6 +737,16 @@ def continue_greetings(agent: dict | None = None) -> list[str]:
     return CONTINUE_GREETINGS
 
 
+def handover_greetings(agent: dict, came_from: str) -> list[str]:
+    """H237: the greeting when another agent just put her on the phone. Before, she opened with a back-again line
+    ("Hey, again") although he hadn't talked to her yet. Her own lines, else the call system's (wording Claude's choice)."""
+    mine = _agents.handover_greetings(agent, _N or None, came_from)
+    if mine:
+        return mine
+    s = f" {_N}" if _N else ""
+    return [f"Hi{s}, it's {agent['name']}. {came_from} put you through. What can I do for you?"]
+
+
 def tool_kind(name: str) -> str:
     """Which kind of tool line fits this tool."""
     n = name.lower()

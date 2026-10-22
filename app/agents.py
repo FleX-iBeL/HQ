@@ -108,23 +108,28 @@ DEFAULTS: list[dict] = [
                         "Hey, early bird. What's up?", "Morning. Hit me."],
             "afternoon": ["Hey you. What do you need?", "There you are. What do you need?", "Hey. What've you got for me?",
                           "Hey, stranger. What's up?", "Afternoon. Go on, hit me."],
-            "evening": ["Hey you. What do you need?", "Evening. What do you need?", "Hey. Still at it? What's up?",
+            "evening": ["Hey you. What do you need?", "Evening. What do you need?", "Evening. Busy day? What's up?",
                         "Evening. Quick one or a long one?"],
             "night": ["Hey you. What do you need?", "Hey you. Still up? What do you need?", "Late one. What's up?",
                       "Can't sleep either? Go on."],
         },
         # H164: a later call the same day; her first-of-the-day lines above only open the day's first call.
         "back_greetings": {
-            "morning": ["Hey you, again. What do you need?", "Back already? What's up?", "You again. Go on, hit me.",
+            "morning": ["Hey you, again. What do you need?", "Hey, it's you again. What's up?", "You again. Go on, hit me.",
                         "Round two. What've you got?"],
-            "afternoon": ["Hey you, again. What do you need?", "You again. What's up?", "Back already? Go on.",
+            "afternoon": ["Hey you, again. What do you need?", "You again. What's up?", "Hello again. Go on.",
                           "Round two. What've you got for me?"],
             "evening": ["Hey you, again. What do you need?", "You again. Still at it? What's up?",
                         "Back for one more? Go on."],
             "night": ["Hey you, again. What do you need?", "Still up? What do you need?", "One more before bed? Go on."],
         },
-        "continue_greetings": ["Back again. Where were we?", "Hey you. Picking up where we left off.",
-                               "Miss me already? Go on.", "That was quick. Where were we?", "Back for more. Go on."],
+        # H237: a continued call: she has the earlier call, so she never asks where we were, and nothing says how
+        # long ago it was (it can be the next day).
+        "continue_greetings": ["Hey you. Picking up where we left off.", "Right, back to it. Go on.",
+                               "Back for more. I've got where we stopped.", "Picking that back up. Go on."],
+        # H237: she was just put on the phone by another agent ({from} is that agent's name).
+        "handover_greetings": ["Hey you, Donna here. {from} says you need me. What's up?",
+                               "Donna here. {from} put you through. Go on."],
     },
     {
         "id": "pepper",
@@ -175,7 +180,7 @@ DEFAULTS: list[dict] = [
         # H164: a later call the same day. In the user's words (16 October 2026): "You could not say I just got
         # in when we were already talking." Her morning lines above only open the day's first call.
         "back_greetings": {
-            "morning": ["Hey{s}, again. What's on your mind?", "Oh, hey{s}. Back already. What's up?",
+            "morning": ["Hey{s}, again. What's on your mind?", "Oh, hey{s}. Good to hear you again. What's up?",
                         "Hi again{n}. Something come up?", "Hey{s}. Good, I'm still at my desk. What's going on?"],
             "afternoon": ["Hey{s}, again. What's on your mind?", "Hi again{n}. How's it been since we talked?",
                           "Oh, hey{s}. Back again. What's up?", "Hey{s}. Good timing, I'm still here. What's going on?"],
@@ -184,10 +189,14 @@ DEFAULTS: list[dict] = [
             "night": ["Hey{s}, again. What's on your mind?", "Hi again{n}. Still up? What's keeping you?",
                       "Hey{s}. Back again, this late. Everything okay?"],
         },
-        "continue_greetings": ["Hey{s}. Okay, where were we?", "Hey{s}. Right, let's pick it back up.",
-                               "Hi again{n}. I still had my notes open. Go on.",
-                               "Hey{s}. Oh, I was still thinking about that. Where were we?",
-                               "Welcome back{n}. Let's keep going, no rush."],
+        # H237, in the user's words: "you said, Hey, [name], I was still thinking about that. Where were we? ...
+        # That statement doesn't make much sense to me. And then the statement itself is contradicting to itself".
+        # She has the earlier call, so she says plainly she's picking up, and never asks where we were.
+        "continue_greetings": ["Hey{s}. Okay, let's pick up where we left off.", "Hey{s}. Right, let's pick it back up.",
+                               "Hi again{n}. I've got my notes from last time. Go on.",
+                               "Welcome back{n}. Let's carry on from where we stopped, no rush."],
+        "handover_greetings": ["Hi{s}, it's Pepper. {from} said you wanted me. What's going on?",
+                               "Hey{s}. {from} put you through to me. What are we thinking about?"],
     },
     # H73 (12 October 2026, call at 12:23), in the user's words: "Moneypenny could be Fable. And that's kind of
     # fitting as well because Moneypenny is famous for running things behind the scenes." "we could just put it
@@ -220,17 +229,20 @@ DEFAULTS: list[dict] = [
         ),
         "pushback": "Noted. It'll be done. Just not tonight.",
         "greetings": ["{N}Go ahead.", "{N}I'm listening.", "{N}Yes?", "{N}You have my attention.", "{N}Moneypenny."],
-        "back_greetings": ["{N}Again. Go ahead.", "{N}Back so soon.", "{N}Once more. I'm listening."],
-        "continue_greetings": ["{N}Where we left off. Go ahead.", "{N}Back so soon. Go ahead.", "{N}As you were."],
+        "back_greetings": ["{N}Again. Go ahead.", "{N}You again.", "{N}Once more. I'm listening."],
+        "continue_greetings": ["{N}Where we left off. Go ahead.", "{N}Picking it up again. Go ahead.", "{N}As you were."],
+        "handover_greetings": ["{N}{from} put you through. Go ahead."],
     },
 ]
 
 PARTS = ("morning", "afternoon", "evening", "night")
 # The keys that make up an agent's character (H76); is_default compares these with HQ's own.
-CHARACTER_KEYS = ("character", "personality", "pushback", "greetings", "back_greetings", "continue_greetings")
+CHARACTER_KEYS = ("character", "personality", "pushback", "greetings", "back_greetings", "continue_greetings",
+                  "handover_greetings")
 
 _KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", "personality", "hidden", "coming_soon",
-         "character", "pushback", "greetings", "back_greetings", "continue_greetings", "own_goodbye")
+         "character", "pushback", "greetings", "back_greetings", "continue_greetings", "handover_greetings",
+         "own_goodbye")
 
 
 def _lines(v, most: int = 8) -> list[str]:
@@ -279,6 +291,7 @@ def _clean(a: dict) -> dict | None:
         "greetings": _greetings(a.get("greetings")),
         "back_greetings": _greetings(a.get("back_greetings")),
         "continue_greetings": _lines(a.get("continue_greetings")),
+        "handover_greetings": _lines(a.get("handover_greetings")),
         "own_goodbye": a.get("own_goodbye") is True,
     }
 
@@ -388,6 +401,11 @@ def back_greetings(agent: dict, user: str | None, part: str) -> list[str]:
 def continue_greetings(agent: dict, user: str | None) -> list[str]:
     """H76: her greetings when a call continues an earlier one; [] when she has none."""
     return [fill(x, user) for x in agent.get("continue_greetings") or []]
+
+
+def handover_greetings(agent: dict, user: str | None, came_from: str) -> list[str]:
+    """H237: her greetings when another agent just put her on the phone ({from} is that agent); [] when she has none."""
+    return [fill(x, user).replace("{from}", came_from) for x in agent.get("handover_greetings") or []]
 
 
 def is_default(agent: dict) -> bool:
