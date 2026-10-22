@@ -611,6 +611,25 @@ if __name__ == "__main__":
             _pings.appt_off(ask["id"])
         return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
 
+    # H229: travel on an appointment, by hand: {id, on}. Only HQ's own file in the workspace changes (trips.py); on looks
+    # the trip up in the background. Google Calendar is never written. Only from the page itself (x-hq: calendar).
+    @app.post("/api/calendar/travel", include_in_schema=False)
+    async def calendar_travel(request: Request):
+        if request.headers.get("x-hq") != "calendar":
+            return JSONResponse({"error": "Only the HQ page can change travel"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict) or not isinstance(ask.get("id"), str):
+            return JSONResponse({"error": "which appointment?"}, status_code=400)
+        import trips as _trips
+        try:
+            await asyncio.to_thread(_trips.page_switch, ask["id"], bool(ask.get("on")))
+        except KeyError:
+            return JSONResponse({"error": "no such appointment"}, status_code=404)
+        return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
+
     # H143: the check and the X on an appointment. A tap marks it (done or x), a second tap undoes it ("");
     # an X moves it in Google Calendar to HQ Planning and undo moves it back (planning.py, after the answer, on the
     # main HQ). Only from the page itself (x-hq: calendar).

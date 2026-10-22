@@ -44,7 +44,9 @@
       "steps": [
         {"target": "calbtn", "title": "Your days", "text": "Your Google Calendar inside HQ: today and the days ahead. Ask on a call to plan your week, move something or block time, and she does it.",
          "demo": {"kind": "list", "items": [["09:00", "A walk outside"], ["10:00", "Dentist"], ["14:00", "Call with Alex"], ["19:00", "Gym"]]}},
-        {"target": "calbtn", "title": "Notes and calls on an appointment", "text": "Tap an appointment for its details, a quick note of your own, or a call about it. Your own calendar she just changes; anything with other people in it, she checks with you first."}
+        {"target": "calbtn", "title": "Notes and calls on an appointment", "text": "Tap an appointment for its details, a quick note of your own, or a call about it. Your own calendar she just changes; anything with other people in it, she checks with you first."},
+        {"target": "calbtn", "title": "Travel to an appointment", "text": "An appointment away from home gets its trip by public transport by itself, once HQ knows where it is: its place in the calendar, or a friend's address you gave once. It starts at home, or where you are just before. In the hours before, HQ watches the live train, bus and tram data, and {donna} texts you when your train is cancelled, late or on another platform, or a stop near you has a message, with a 9292 link to plan again. Tap Travel in the appointment to turn it on or off.",
+         "demo": {"kind": "list", "items": [["14:00", "Visit Sam"], ["13:12", "Train from the station near home, there 13:39"], ["12:40", "{donna}: your train is 8 minutes late"]]}}
       ]
     },
     {
@@ -126,6 +128,7 @@
     "HQ is still in development, built and used daily by one person first, now shared with friends. A small grey version number opens what's new; an Update button appears when a new version is out.",
     "The routine is a small helper that runs every minute without Claude, so it costs nothing while waiting. A watchdog brings things back when they stop.",
     "Things that need your yes, like an appointment with other people in it or anything with your mail, are checked with you first. Mail is never sent.",
-    "After a real call, its transcript is saved and the call's notes go into your log, in your own words. Free calls and demo calls are never saved."
+    "After a real call, its transcript is saved and the call's notes go into your log, in your own words. Free calls and demo calls are never saved.",
+    "Travel on appointments uses open data, free and without a key: the live train, bus, tram and metro data the Dutch transport companies publish (through OVapi), the government's address service, and 9292 links. Driving is a separate feature."
   ]
 }

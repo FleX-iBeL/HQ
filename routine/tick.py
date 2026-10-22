@@ -1040,6 +1040,13 @@ def direct_watch():
                 log("direct line: looking at the weather")
         except Exception as e:
             log(f"weather: {e!r}")
+        # H229: travel on appointments: trips for new ones, and the live watch on the open data before each one.
+        try:
+            import trips
+            if trips.start():
+                log("travel: looking at the trips")
+        except Exception as e:
+            log(f"travel: {e!r}")
         # H225: Life coaching's check-ins, kept in the background: one that comes due lands in the coaching line.
         try:
             import coaching

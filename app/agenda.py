@@ -480,6 +480,11 @@ def read(now: float | None = None) -> dict:
         events = appt_notes.attach(events)
     except Exception:
         pass
+    try:  # H229: travel on appointments, public transport
+        import trips
+        events = trips.attach(events)
+    except Exception:
+        pass
     try:  # H124: the bell, on the appointments Donna will ping him for
         import pings
         bell = pings.pinged()

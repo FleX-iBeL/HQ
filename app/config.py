@@ -241,7 +241,18 @@ starts where the phone is or at home (a town alone, or a street without a town, 
 found). When it started at home only because there's no fresh location, and {user} isn't home, say once that \
 "Use my location" in the weather lets the link start where the phone is. It plans from now; a time or a date is set on 9292 itself. When it can't \
 find a place, ask for the address or the town, once; never make a 9292 link up by hand, and never use a browser for \
-it. Don't look the trip up on the web as well, the link is the advice."""
+it. Don't look the trip up on the web as well, the link is the advice.
+- Travel on appointments (H229): an appointment away from home gets its trip by public transport by itself when HQ \
+knows where it is (its place in the calendar, or a name in its title that's in the places book), and the team's \
+routine watches the open live data in the hours before it; the agent on the texts (Donna by default) texts {user} when the train is cancelled, late, on \
+another platform, or a bus, tram or metro stop near either end has a message. The trips: python3 "{HQ}/app/trips.py" \
+(what's coming, from where to where, the train, what was told). Turn it on or off for one: python3 "{HQ}/app/trips.py" \
+on "ID or words" [--to "PLACE"] [--from "PLACE"], or off "ID or words" (off stays off; the words are the title, a date \
+like 2026-10-24 or a time like 15:00 narrows it). It starts at home, or at the appointment just before it that day; \
+--from only when {user} says where from. A friend's or a regular place's address, kept once by name, so an appointment \
+with that name in its title finds it by itself: python3 "{HQ}/app/trips.py" place "NAME" "ADDRESS" (places, forget \
+"NAME"); keep one only when {user} gives it or says so. One trip with what the live data says now: show "ID or words". \
+Driving is a different thing (not this)."""
 
 # H133 (14 October 2026, call at 13:31), in the user's words: "I want to stop using the word job list or job queue.
 # I just want to refer to it as the team. So if I tell you, hey. Let's put it on our roadmap. You can put it on our

@@ -379,6 +379,8 @@ PLAIN = {
     "game": ["Your game today: {facts}",
              "Quick one about your game: {facts}"],
     "game-away": ["Heads up, today's a bit different: {facts}"],
+    "travel": ["Heads up for your trip: {facts}",
+               "Change on your way there: {facts}"],
     "watch-end": ["Stopped watching that one. {facts}",
                   "I'm done keeping an eye on that. {facts}"],
 }
@@ -521,6 +523,13 @@ def compose_prompt(why: str, facts: str) -> str:
                      "it (the facts say when and what). A short heads-up, earlier in the day, that today is "
                      "different: be gentle with himself, and what the game's design says counts on a day like this "
                      "(the facts give it). One or two sentences, kind, no pressure.",
+        "travel": "He has travel on for an appointment (the facts say which, from where to where), and something "
+                  "changed on the way there in the live public transport data: his train cancelled, late, another "
+                  "platform, a station skipped, trouble on the rails at a station, or a message for a bus, tram or "
+                  "metro stop near either end (that one is in Dutch from the transport company: say it in his "
+                  "language, short). A quick heads-up the way a friend would text: what changed and what it means "
+                  "for him, one or two sentences. Put the 9292 link from the facts at the end, as it is, so he can "
+                  "plan again. No technical words, no train numbers unless they help.",
         "watch-end": "Something he asked you to watch has stopped (the facts say what and why). One quick line that "
                      "you've stopped keeping an eye on it, and why in a few words (time's up and nothing came, or he "
                      "asked).",

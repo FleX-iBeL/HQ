@@ -44,6 +44,8 @@ FEATURES = [
      "buttons": ["directbtn"], "env": "HQ_DIRECT"},
     {"id": "weather", "name": "Weather", "line": "The weather at a glance, and a text when rain is coming",
      "buttons": ["wx"], "needs": "texts", "env": "HQ_WEATHER"},
+    {"id": "travel", "name": "Travel on appointments", "line": "Each appointment away from home gets its trip by public "
+     "transport, and {agent} texts you when a train or bus on it changes", "buttons": [], "needs": "calendar"},
     {"id": "mail", "name": "Mail check", "line": "Every hour HQ looks at your new mail and tells you what needs you",
      "buttons": []},
     {"id": "notes", "name": "Quick notes", "line": "Jot something down for later: the Notes button",

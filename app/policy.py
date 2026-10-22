@@ -472,6 +472,12 @@ class Policy:
             if len(args) >= 2 and args[1] in ("link", "where"):
                 return Decision(ALLOW, "a 9292 travel link")
             return Decision(DENY, "the travel script takes link or where")
+        # H229: travel on appointments. Lists and shows the trips, turns travel on or off for one, keeps a place by name;
+        # only HQ's own file in the workspace changes. `check` is the routine's, not a call's.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "trips.py"):
+            if len(args) == 1 or args[1] in ("list", "on", "off", "show", "place", "places", "forget"):
+                return Decision(ALLOW, "travel on appointments")
+            return Decision(DENY, "the trips script takes list, on, off, show, place, places or forget")
         # H45: lid-closed sleep. Reads it, or flips it on or off; the script itself only runs the two exact
         # pmset commands the one-time setup allows without a password, nothing else.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "lidsleep.py"):

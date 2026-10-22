@@ -8715,6 +8715,153 @@ setTimeout(() => {
             need('PATH="$PATH:/usr/sbin:/sbin"' in (ROOT / f).read_text(), f"{f} doesn't add /usr/sbin to its PATH")
         return "the update finds lsof with a bare PATH; the Mac scripts add /usr/sbin"
 
+    async def flow135(self) -> str:
+        """H229, no Claude: travel on appointments, by public transport, with Donna's texts on a change. Offline, on a
+        made-up station list, places, stops, calendar and live feeds (GTFS-realtime, made here byte by byte): an
+        appointment away from home with its place, or a name from the places book in its title, gets its trip by
+        itself, from home or from the appointment just before it; one at home doesn't; the live look picks the direct
+        train that gets there in time and says each change once (late, platform, cancelled), and a bus or tram stop
+        message near an end; off by hand stays off, on by hand with --to works; a call may run it but not the
+        routine's check; the page, the server, the routine, the switch, the rules and the tutorial carry it."""
+        from policy import Policy, ALLOW, DENY
+        d = self.tmp / "h229"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "stations.csv").write_text(
+            "id,code,uic,name_short,name_medium,name_long,slug,country,type,geo_lat,geo_lng\n"
+            "1,XC,1,Nergensdam C,Nergensdam C.,Nergensdam Centraal,nergensdam-centraal,NL,megastation,52.1,5.1\n"
+            "2,XZ,2,Ergens Zuid,Ergens Zuid,Ergenshoven Zuid,ergenshoven-zuid,NL,stoptreinstation,52.2,5.2\n")
+        (d / "places.json").write_text(json.dumps({"Voorbeeldlaan 12, 9999 ZZ Nergensdam": [52.101, 5.101, "Voorbeeldlaan 12, 9999ZZ Nergensdam"],
+                                                   "Proefweg 3 Ergenshoven": [52.201, 5.201, "Proefweg 3, Ergenshoven"]}))
+        (d / "me.md").write_text("# Me\n\n**Home:** Voorbeeldlaan 12, 9999 ZZ Nergensdam\n")
+        (d / "cache").mkdir(exist_ok=True)
+        (d / "cache" / "stops.json").write_text(json.dumps([["s1", "Voorbeeldlaan", 52.1012, 5.1012], ["s2", "Ver weg", 53.0, 6.0]]))
+        (d / "feeds").mkdir(exist_ok=True)
+        (d / "ws").mkdir(exist_ok=True)
+        now = time.time()
+        iso = lambda t: datetime.fromtimestamp(t).astimezone().isoformat(timespec="seconds")
+        at = (int(now) // 60) * 60 + 2 * 3600
+        tomorrow = (datetime.fromtimestamp(now) + timedelta(days=1)).replace(hour=14, minute=0, second=0, microsecond=0).timestamp()
+        events = [
+            {"id": "e1", "title": "Visit Sam", "start": iso(at), "end": iso(at + 3600), "where": "", "all_day": False},
+            {"id": "e2", "title": "Dentist", "start": iso(tomorrow), "end": iso(tomorrow + 1800), "where": "Proefweg 3 Ergenshoven", "all_day": False},
+            {"id": "e5", "title": "Lunch", "start": iso(tomorrow - 5400), "end": iso(tomorrow - 1800), "where": "Nergensdam Centraal", "all_day": False},
+            {"id": "e3", "title": "Call with Alex", "start": iso(at + 3600), "end": iso(at + 5400), "where": "", "all_day": False},
+        ]
+        cal = d / "ws" / "calendar.json"
+        cal.write_text(json.dumps({"events": events, "looked": now}))
+
+        def enc_v(n):
+            n &= (1 << 64) - 1
+            out = b""
+            while True:
+                b, n = n & 0x7F, n >> 7
+                out += bytes([b | (0x80 if n else 0)])
+                if not n:
+                    return out
+        def f(num, v):  # one protobuf field: an int as a varint, bytes or text as length-delimited
+            if isinstance(v, int):
+                return enc_v(num << 3) + enc_v(v)
+            v = v.encode() if isinstance(v, str) else v
+            return enc_v(num << 3 | 2) + enc_v(len(v)) + v
+        def stu(code, t, delay=0, track="5", now_track="", skipped=False):
+            ev = f(1, delay) + f(2, t + delay)
+            ext = f(2, track) + (f(3, now_track) if now_track else b"") + f(4, code)
+            return f(2, ev) + f(3, ev) + f(4, "x" + code) + f(5, 1 if skipped else 0) + f(1003, ext)
+        def train(number, dep, arr, delay=0, now_track="", cancelled=False):
+            td = f(1, f"t{number}") + f(3, "20991231") + f(4, 3 if cancelled else 0) + f(1003, f(1, f"IFF:IC:{number}") + f(2, number))
+            tu = f(1, td) + (b"" if cancelled else f(2, stu("xc", dep, delay, "5", now_track)) + f(2, stu("xz", arr, delay)))
+            return f(2, f(1, f"e{number}") + f(3, tu))
+        def feed_(*ents):
+            return f(1, f(1, "2.0")) + b"".join(ents)
+        def alert(aid, stop, text_, p0, p1):
+            tr = f(1, f(1, text_) + f(2, "nl"))
+            a = f(1, f(1, p0) + f(2, p1)) + f(5, f(5, stop)) + f(10, tr)
+            return f(2, f(1, aid) + f(5, a))
+        good = train("1234", at - 40 * 60, at - 20 * 60)
+        late = train("999", at - 15 * 60, at + 5 * 60)  # gets there too late: not his
+        (d / "feeds" / "trainUpdates.pb").write_bytes(feed_(good, late))
+        (d / "feeds" / "alerts.pb").write_bytes(feed_())
+        drv = d / "drive.py"
+        drv.write_text("import sys, json\nsys.path.insert(0, sys.argv[1])\nimport trips\n"
+                       "cmd = sys.argv[2]\n"
+                       "if cmd == 'check':\n    print(json.dumps(trips.check(float(sys.argv[3]))))\n"
+                       "elif cmd == 'attach':\n    import agenda\n    print(json.dumps(trips.attach(agenda._read()['events'])))\n"
+                       "else:\n    sys.exit(trips.main(sys.argv[2:]))\n")
+        env = {**os.environ, "HQ_TRAVEL_STATIONS": str(d / "stations.csv"), "HQ_TRAVEL_PLACES": str(d / "places.json"),
+               "HQ_TRAVEL_ME": str(d / "me.md"), "HQ_TRAVEL_OFFLINE": "1", "HQ_DIRECT_DIR": str(d / "direct-line"),
+               "HQ_CALENDAR_FILE": str(cal), "HQ_TRIPS_CACHE": str(d / "cache"), "HQ_TRIPS_FAKE_DIR": str(d / "feeds"),
+               "HQ_FEATURES_FOLDER": str(d / "ws"), "HQ_DIRECT": "0", "HQ_CALENDAR": "1", "HQ_CALENDAR_NOTES": str(d / "ws" / "notes.json")}
+        run = lambda *a: subprocess.run([sys.executable, str(drv), str(APP), *a], capture_output=True, text=True, env=env, timeout=60)
+        data = lambda: json.loads((d / "ws" / "calendar-travel.json").read_text())
+        r = run("place", "Sam", "Proefweg 3 Ergenshoven")
+        need(r.returncode == 0 and "Proefweg 3, Ergenshoven" in r.stdout, f"a place isn't kept: {r.stdout}{r.stderr}")
+        r = run("check", str(now))
+        need(r.returncode == 0 and json.loads(r.stdout.strip().splitlines()[-1]) == [], f"the first look failed or texted: {r.stdout}{r.stderr}")
+        t = data()["trips"]
+        need(set(t) == {"e1", "e2", "e5"}, f"the wrong appointments got travel (the call at home shouldn't): {sorted(t)}")
+        e1, e2 = t["e1"], t["e2"]
+        need(e1["on"] and e1["by"] == "auto" and e1["from_place"]["start"] == "home" and e1["to_place"]["id"] == "@52.201,5.201",
+             f"the friend's place from the book or home as the start isn't right: {e1}")
+        need(e1["stations"]["from"]["code"] == "xc" and e1["stations"]["to"]["code"] == "xz", f"the stations aren't the nearest: {e1['stations']}")
+        need(e1["link"].startswith("https://9292.nl/reisplanner?") and "withSurcharge=false" in e1["link"], f"no 9292 link: {e1['link']}")
+        need(e1["stops"]["from"] == ["s1"] and e1["stops"]["to"] == [], f"the stops near the ends aren't right: {e1['stops']}")
+        need(e1["train"]["number"] == "1234", f"his train isn't the latest direct one in time: {e1.get('train')}")
+        need(e2["from_place"]["start"] == "before" and e2["from_place"]["after"] == "Lunch" and "train" not in e2,
+             f"the appointment before isn't the start, or a train is picked a day ahead: {e2}")
+        # live changes, each told once
+        (d / "feeds" / "trainUpdates.pb").write_bytes(feed_(train("1234", at - 40 * 60, at - 20 * 60, delay=480), late))
+        r = run("check", str(now + 300))
+        got = json.loads(r.stdout.strip().splitlines()[-1])
+        need(len(got) == 1 and "8 minutes late" in got[0][1] and "9292" in got[0][1], f"a delay isn't told: {got} {r.stderr}")
+        need(json.loads(run("check", str(now + 600)).stdout.strip().splitlines()[-1]) == [], "the same delay is told twice")
+        (d / "feeds" / "trainUpdates.pb").write_bytes(feed_(train("1234", at - 40 * 60, at - 20 * 60, delay=480, now_track="7"), late))
+        got = json.loads(run("check", str(now + 900)).stdout.strip().splitlines()[-1])
+        need(len(got) == 1 and "platform 7" in got[0][1], f"another platform isn't told: {got}")
+        (d / "feeds" / "trainUpdates.pb").write_bytes(feed_(train("1234", 0, 0, cancelled=True), late))
+        (d / "feeds" / "alerts.pb").write_bytes(feed_(alert("KV15:1", "s1", "Halte vervalt vandaag", int(now) - 3600, int(now) + 86400),
+                                                      alert("KV15:2", "s2", "Ver weg", int(now) - 3600, int(now) + 86400)))
+        got = json.loads(run("check", str(now + 1200)).stdout.strip().splitlines()[-1])
+        words = got[0][1] if got else ""
+        need(len(got) == 1 and "cancelled" in words and "Halte vervalt vandaag" in words and "Ver weg" not in words,
+             f"a cancelled train or a stop's message near the start isn't told (or one far away is): {got}")
+        need(len(data()["trips"]["e1"]["news"]) == 4, f"what was told isn't kept on the trip: {data()['trips']['e1'].get('news')}")
+        # by hand: off stays off, on with --to
+        need(run("off", "Visit Sam").returncode == 0 and run("check", str(now + 4000)).returncode == 0
+             and not data()["trips"]["e1"]["on"], "off by hand doesn't stay off")
+        r = run("on", "Call with Alex", "--to", "Nergensdam Centraal")
+        need(r.returncode == 0 and "Travel is on" in r.stdout and data()["trips"]["e3"]["to_place"]["kind"] == "station", f"on by hand with --to failed: {r.stdout}")
+        r = run("list")
+        need("Dentist" in r.stdout and "after Lunch" in r.stdout and "Places book: Sam" in r.stdout, f"the list doesn't say the trips: {r.stdout}")
+        att = {e["id"]: e.get("travel") for e in json.loads(run("attach").stdout)}
+        need(att["e2"]["on"] and att["e2"]["stations"] == ["Nergensdam Centraal", "Ergenshoven Zuid"] and att["e1"]["on"] is False,
+             f"the page doesn't get the trips: {att}")
+        need(run("forget", "Sam").returncode == 0 and "Sam" not in run("places").stdout, "a place isn't forgotten")
+        # a negative delay (early) reads right
+        import trips as _trips
+        tr = _trips.trains(feed_(train("55", at, at + 600, delay=-60)))
+        need(tr and tr[0]["stops"][0]["dep_delay"] == -60, f"an early train reads wrong: {tr}")
+        # a call may run it, not the routine's check
+        pol = Policy(config.FOLDER)
+        py = str(APP / "trips.py")
+        for ok in (["list"], ["on", "x"], ["off", "x"], ["show", "x"], ["place", "a", "b"], ["places"], ["forget", "a"]):
+            need(pol.decide("Bash", {"command": f'python3 "{py}" ' + " ".join(ok)}).verdict == ALLOW, f"a call can't run trips {ok}")
+        need(pol.decide("Bash", {"command": f'python3 "{py}" check'}).verdict == DENY, "a call may run the routine's check")
+        # carried everywhere it should be
+        import direct_line
+        need("trips.py" in config.VOICE_RULES and "trips.py" in direct_line._text_rules(), "the call rules or Donna's chat rules don't have it")
+        need('"travel": [' in (APP / "direct_line.py").read_text() and '"travel": "He has travel on' in (APP / "direct_line.py").read_text(),
+             "Donna has no way to text a travel change")
+        need("trips.start()" in (ROOT / "routine" / "tick.py").read_text(), "the routine doesn't start the look")
+        need("trips.attach" in (APP / "agenda.py").read_text() and '"/api/calendar/travel"' in (APP / "bot.py").read_text(),
+             "the calendar or the server doesn't carry it")
+        page = (APP / "web" / "index.html").read_text()
+        need("function travelBox" in page and "api/calendar/travel" in page and "Plan it in 9292" in page, "the page has no Travel")
+        import features
+        fe = next(x for x in features.FEATURES if x["id"] == "travel")
+        need(fe["needs"] == "calendar", "travel's switch doesn't need the calendar")
+        need("Travel to an appointment" in (APP / "web" / "tour.json").read_text(), "the tutorial doesn't explain it")
+        return "a trip by itself from home or the appointment before, the train picked, delays, platform, cancelled and a stop's message told once; off stays off"
+
     async def flow128(self) -> str:
         """H214, no Claude: a 9292 link door to door. Offline, on a made-up station list, made-up places and a made-up
         home: home is the start by default, a station gets 9292's own id, an address its point (@lat,lon) with its
@@ -14819,7 +14966,7 @@ print("H88OUT " + json.dumps(out))
             os.environ.pop("HQ_CALENDAR", None)
             items = ft.listing()
             ids = [i["id"] for i in items]
-            need(ids == ["calendar", "todo", "texts", "weather", "mail", "notes", "team", "coaching"], f"the switches: {ids}")
+            need(ids == ["calendar", "todo", "texts", "weather", "travel", "mail", "notes", "team", "coaching"], f"the switches: {ids}")
             need(all(i["on"] for i in items if i["id"] != "coaching") and not (tmp / ft.STATE).exists(), "not everything starts on")
             need(all(i["line"] for i in items) and next(i for i in items if i["id"] == "weather").get("needs_name", "").startswith("Texts with"),
                  "a switch without its line, or the weather doesn't say it needs the texts")
@@ -14960,7 +15107,7 @@ print("H88OUT " + json.dumps(out))
                     "--virtual-time-budget=30000"]
             args += [f"--screenshot={shot}"] if shot else ["--dump-dom"]
             return run(args + [pf.as_uri() + "#" + mode], timeout=120)
-        want = {"combos": "512", "dock": "ok", "row": "ok", "title": "What HQ helps you with", "page": "ok", "calendar off": "gone",
+        want = {"combos": "1024", "dock": "ok", "row": "ok", "title": "What HQ helps you with", "page": "ok", "calendar off": "gone",
                 "weather waits": "ok", "tidy after taps": "ok", "back on": "ok", "back": "ok"}
         for name, size, app_ in (("the phone", "390,844", False), ("a small phone", "375,553", False), ("the desktop app", "1180,780", True)):
             tag = name.split()[-1] if not name.startswith("a small") else "small"
@@ -15005,7 +15152,7 @@ const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "
         say(f"   {made} screenshots in {shots}")
         shutil.rmtree(sf, ignore_errors=True)
         return ("every feature is a switch on one page, What HQ helps you with: all on to start, each followed by its part "
-                "of HQ and the next call, the weather waits for the texts; all 256 combinations keep the dock tidy on the "
+                "of HQ and the next call, the weather waits for the texts; all 1024 combinations keep the dock tidy on the "
                 f"phone, a small phone and the desktop app, before and on a call; {made} screenshots")
     # 120
     async def flow120(self) -> str:
@@ -15823,6 +15970,7 @@ FLOWS = {
     131: ("H225: Life coaching as its own place in the app: the layers with their checklist, the check-ins kept from the map (the weekly look back, a game's debrief, the bigger check-in) with a red dot, one call per layer or check-in, and the coaching line", False, "flow131"),
     133: ("H239: a six-week game's texts (the evening one while today's tick isn't in, a heads-up on a day away around its time) and its score in the weekly look back", False, "flow133"),
     132: ("F45: a long piece of quiet talking isn't thrown away as no speech (one score per piece; long pieces at 0.75, short at 0.4, quiet ones louder); noise alone still gives nothing", False, "flow132"),
+    135: ("H229: travel on appointments by public transport: a trip by itself (its place or a name from the places book), from home or the appointment before; the live open data watched before it, and Donna texts each change once (late, platform, cancelled, a stop's message)", False, "flow135"),
     134: ("H227: every button and screen on the call page has a tutorial piece (the page read against tour.json; a new screen needs its button named)", False, "flow134"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }

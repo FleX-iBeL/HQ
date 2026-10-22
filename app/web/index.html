@@ -358,10 +358,14 @@
   #calnotein:focus { outline:none; border-color:var(--accent); }
   #calnoteadd { flex-shrink:0; border:0; border-radius:999px; height:46px; background:var(--accent); color:#04120f; font:600 16px/1 -apple-system,sans-serif; padding:0 18px; cursor:pointer; }
   #calnoteadd:disabled { opacity:.45; cursor:default; }
-  #calping { border:1px solid var(--muted); border-radius:14px; background:transparent; color:var(--fg); font:600 16px/1 -apple-system,sans-serif;
+  #calping, #caltravel { border:1px solid var(--muted); border-radius:14px; background:transparent; color:var(--fg); font:600 16px/1 -apple-system,sans-serif;
              padding:13px 12px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
-  #calping svg { width:18px; height:18px; }
-  #calping.on { border-color:var(--accent); color:var(--accent); }
+  #calping svg, #caltravel svg { width:18px; height:18px; }
+  #caltrip { display:flex; flex-direction:column; gap:8px; }
+  #caltrip .trip { padding:10px 14px; display:flex; flex-direction:column; gap:4px; font-size:15px; line-height:1.35; }
+  #caltrip .trip small { color:var(--muted); }
+  #caltrip .trip a { color:var(--accent); font-weight:600; margin-top:2px; }
+  #calping.on, #caltravel.on { border-color:var(--accent); color:var(--accent); }
   #callist .empty, #calone .empty { color:var(--muted); text-align:center; margin:auto; }
   #calone h3 { margin:0; font-size:20px; line-height:1.3; overflow-wrap:anywhere; }
   #calone .line { color:var(--muted); font-size:15px; }
@@ -694,8 +698,8 @@
   #callist .day { margin:14px 0 4px 6px; text-transform:uppercase; letter-spacing:.04em; font-size:12px; }
   #callist .day:first-child { margin-top:2px; }
   #noteslist .note, #wxbody .fact, #wxbody .hr, #calone .notes { background:var(--soft); border-radius:14px; }
-  #calping { border:0; background:var(--soft); border-radius:16px; }
-  #calping.on { background:color-mix(in srgb, var(--accent) 16%, transparent); }
+  #calping, #caltravel { border:0; background:var(--soft); border-radius:16px; }
+  #calping.on, #caltravel.on { background:color-mix(in srgb, var(--accent) 16%, transparent); }
   /* Chat: rounder bubbles, a field like a messaging app. */
   #chatlog .msg, #histlog .msg { border-radius:20px; }
   #chatlog .me, #histlog .me { border-bottom-right-radius:6px; }
@@ -818,7 +822,7 @@
   html.m3 #callist .appt { padding:12px 14px; margin:3px 0; }
   html.m3 #histlist .day, html.m3 #callist .day { color:var(--muted); text-transform:uppercase; letter-spacing:.05em; font-size:12px; font-weight:700; }
   html.m3 #calcals button { background:var(--surface); }
-  html.m3 #calping { background:var(--surface); box-shadow:0 0 0 1px var(--line); }
+  html.m3 #calping, html.m3 #caltravel { background:var(--surface); box-shadow:0 0 0 1px var(--line); }
   /* Chat: her bubbles white on the grey, his in green; a field and Send like a messaging app. */
   html.m3 #chatlog .hq, html.m3 #histlog .hq { background:var(--surface); box-shadow:0 0 0 1px var(--line);
     background:color-mix(in srgb, var(--her, var(--accent)) 8%, var(--surface)); }
@@ -2537,6 +2541,51 @@ function pingButton(e) {
   });
   return p;
 }
+// H229: travel on an appointment, by public transport (app/trips.py through /api/calendar/travel). One away from home
+// gets it by itself when HQ knows where it is; a tap turns it on or off by hand. While it's on, the trip shows: from
+// where to where, the stations, the train once it's picked, what Donna told about it, and its 9 2 9 2 link. Only HQ's
+// own file changes; Google Calendar never does.
+const TRAIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="13" rx="3"/><path d="M5 10h14M9 20l-2 2M15 20l2 2M9 13h.01M15 13h.01"/></svg>';
+function travelBox(e) {
+  const box = document.createElement("div"); box.id = "caltrip";
+  const tv = e.travel || {};
+  const name = (AGENTS.donna || {}).name || "Donna";
+  const b = document.createElement("button"); b.type = "button"; b.id = "caltravel";
+  b.classList.toggle("on", !!tv.on); b.innerHTML = TRAIN;
+  b.append(tv.on ? "Travel on: " + name + " texts you when it changes" : "Turn on travel by public transport");
+  b.setAttribute("aria-pressed", String(!!tv.on));
+  b.addEventListener("click", async () => {
+    b.disabled = true;
+    try {
+      const r = await fetch("api/calendar/travel", { method: "POST", cache: "no-store",
+        headers: { "x-hq": "calendar", "content-type": "application/json" }, body: JSON.stringify({ id: e.id, on: !tv.on }) });
+      if (r.ok) {
+        const d = await r.json(); calNote.textContent = d ? calLooked(d) : "";
+        const n = d && (d.events || []).find(x => x.id === e.id);
+        e.travel = n && n.travel ? n.travel : { ...tv, on: !tv.on };
+        if (e.travel.on && !e.travel.link && !e.travel.why_not) e.travel.looking = true;
+        showAppt(e);
+      } else calNote.textContent = "Couldn't change that. Try again.";
+    } catch (err) { calNote.textContent = "Couldn't change that. Try again."; }
+    b.disabled = false;
+  });
+  box.appendChild(b);
+  if (!tv.on) return box;
+  const info = document.createElement("div"); info.className = "notes trip";
+  const line = t => { const l = document.createElement("div"); l.textContent = t; info.appendChild(l); };
+  if (tv.why_not) line("Not found yet: tell " + name + " where it is, or where you leave from.");
+  else if (!tv.link) line(tv.looking ? "Looking up the trip…" : "The trip is looked up within the hour.");
+  else {
+    line("From " + (tv.from === "home" ? "home" : tv.from) + (tv.after ? " (after " + tv.after + ")" : "") + " to " + tv.to);
+    if (tv.stations && tv.stations.length === 2) line("Stations: " + tv.stations.join(" to "));
+    if (tv.train) line("Train: " + tv.train);
+    for (const n of tv.news || []) { const l = document.createElement("small"); l.textContent = n; info.appendChild(l); }
+    const a = document.createElement("a"); a.href = tv.link; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Plan it in 9292";
+    info.appendChild(a);
+  }
+  box.appendChild(info);
+  return box;
+}
 // F30: an appointment is called about with the agent who does the agenda (her speciality says so; HQ's
 // default Donna), whoever is picked on the page; else the one picked.
 function agendaAgent() {
@@ -2569,6 +2618,7 @@ function showAppt(e, noteNow) {
   });
   calOne.appendChild(go);
   if (!e.all_day) calOne.appendChild(pingButton(e));
+  if (e.travel) calOne.appendChild(travelBox(e));  // H229
   if (free) { const n = document.createElement("small"); n.className = "line"; n.textContent = "Free is on. Turn it off in Settings to call about an appointment."; calOne.appendChild(n); }
   else if (state !== "idle") { const n = document.createElement("small"); n.className = "line"; n.id = "calbusy"; n.textContent = "You're on a call: just say what it's about. Call about it after this call."; calOne.appendChild(n); }
 }

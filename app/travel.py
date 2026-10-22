@@ -251,7 +251,11 @@ def start(frm: str = "", now: float | None = None) -> dict:
 
 
 def link(to: str, frm: str = "", train: bool = False, surcharge: bool = False, reservation: bool = False) -> dict:
-    a, b = start(frm), where(to)
+    return link_for(start(frm), where(to), train, surcharge, reservation)
+
+
+def link_for(a: dict, b: dict, train: bool = False, surcharge: bool = False, reservation: bool = False) -> dict:
+    """The 9292 link between two places already found (where(), start()); H229's trips keep theirs."""
     q = {"van": a["id"], "vanLabel": a["label"], "naar": b["id"], "naarLabel": b["label"]}
     if train:
         q["modalities"] = "Train"  # walking to and from the train stays, as on 9292 itself
