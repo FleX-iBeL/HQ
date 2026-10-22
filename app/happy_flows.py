@@ -10851,9 +10851,23 @@ window.fetch = async (url, opt) => {
                  and "asked for" not in sent[0][1], f"Donna's morning text: {sent}")
             need("nightly" in dl.PLAIN and "no technical details" in dl.compose_prompt("nightly", "x").lower(),
                  "Donna has no everyday-words text for the nightly")
+            # H227: the tutorial check is in both sets, and after the flows the job reads the tutorial from its last read on
+            need("134" in fs.LINUX_NIGHTLY.split(",") and 134 in FLOWS and not FLOWS[134][1], "flow 134 (the tutorial check) isn't in the nightly")
+            import contextlib, io
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                ni.tutorial()
+            need("Read the tutorial" in buf.getvalue() and "26 hours" in buf.getvalue(), f"the tutorial read: {buf.getvalue()[:200]}")
+            with contextlib.redirect_stdout(io.StringIO()):
+                ni.tutorial(done=True)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                ni.tutorial()
+            need("since the last read" in buf.getvalue(), f"the next tutorial read doesn't start from the last: {buf.getvalue()[:200]}")
             return ("the right set here; nights kept on the H169 row, seven; a failure named, exit 1; rounds: at most "
                     "three full runs, a green round ends the night, a third red one holds; the backup does nothing; "
-                    "the morning line is Donna's at 08:00, in everyday words")
+                    "the morning line is Donna's at 08:00, in everyday words; H227: the tutorial check every night, and "
+                    "the tutorial read from the last one on")
         finally:
             ni.flow_args, ni.is_main, ni.OUT, ni.hqpaths.ROADMAP = keep
             for k, v in keep_env.items():
@@ -15149,6 +15163,67 @@ const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "
                 f"finds it again; every step fits on the phone, a small phone and the desktop app; a demo call is Free, Opus, "
                 f"no tools, nothing saved, for {len(names)} agents; {made} screenshots")
 
+    # 134
+    async def flow134(self) -> str:
+        """H227, no Claude: every button and screen on the call page has a tutorial piece, so a new one can't slip in
+        without it. The page's own controls (the buttons and groups straight on the page, everything in the dock) are
+        read from index.html; each must be a spotlight of some step in tour.json. Every screen (a dialog straight on the
+        page) must be a spotlight itself or be opened by a button that is, through its aria-controls or OPENS below; a new
+        screen not in OPENS fails until it's added there and to the tutorial. Left out: the tutorial's own question mark
+        and screens, and the Are you sure confirmations. The nightly runs this every night (H169), then reads the
+        tutorial against what HQ does now and fixes what's outdated the same night."""
+        from html.parser import HTMLParser
+        import tour
+        page = (APP / "web/index.html").read_text()
+        targets = {st["target"] for pc in tour.load()["pieces"] for st in pc["steps"] if st["target"]}
+        # which button opens which screen, where the page doesn't say it with aria-controls
+        OPENS = {"chat": "chatbtn", "statsheet": "statbtn", "histsheet": "histbtn", "notesheet": "notesbtn", "calsheet": "calbtn",
+                 "todosheet": "todobtn", "coachsheet": "coachbtn", "gamesheet": "gamebtn", "wxsheet": "wx", "dirsheet": "directbtn"}
+        OWN = {"helpbtn", "tour", "tourlayer"}  # the tutorial itself
+        VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+
+        class Read(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.stack, self.controls, self.screens, self.controls_of = [], [], [], {}
+
+            def handle_starttag(self, tag, attrs):
+                a = dict(attrs)
+                parent = self.stack[-1] if self.stack else ("", {})
+                on_page = parent[0] == "body"
+                in_dock = any(t == "nav" and x.get("id") == "dock" for t, x in self.stack)
+                i = a.get("id")
+                if i and ((on_page and (tag in ("button", "a") or a.get("role") == "group")) or (in_dock and tag in ("button", "a"))):
+                    self.controls.append(i)
+                    if a.get("aria-controls"):
+                        self.controls_of[a["aria-controls"]] = i
+                if i and on_page and a.get("role") == "dialog":
+                    self.screens.append(i)
+                if tag not in VOID:
+                    self.stack.append((tag, a))
+
+            def handle_endtag(self, tag):
+                for k in range(len(self.stack) - 1, -1, -1):
+                    if self.stack[k][0] == tag:
+                        del self.stack[k:]
+                        break
+
+        r = Read()
+        r.feed(page)
+        controls = [c for c in r.controls if c not in OWN]
+        screens = [x for x in r.screens if x not in OWN]
+        need(len(controls) >= 12 and "btn" in controls and "todobtn" in controls and len(screens) >= 8,
+             f"the call page's buttons and screens weren't read: {controls} {screens}")
+        bare = [c for c in controls if c not in targets]
+        need(not bare, f"buttons on the call page without a tutorial piece: {bare} (add a step for each to app/web/tour.json)")
+        unknown = [x for x in screens if x not in targets and x not in r.controls_of and x not in OPENS]
+        need(not unknown, f"screens on the call page nobody knows the button of: {unknown} (add it to OPENS in flow 134 and its button to the tutorial)")
+        shut = [x for x in screens if x not in targets and (r.controls_of.get(x) or OPENS.get(x)) not in targets]
+        need(not shut, f"screens on the call page without a tutorial piece: {shut}")
+        stale = [o for o in OPENS if o not in screens] + [b for b in OPENS.values() if b not in controls]
+        need(not stale, f"OPENS names what the page no longer has: {stale}")
+        return f"{len(controls)} buttons and {len(screens)} screens on the call page, each with a tutorial piece"
+
     # 121
     async def flow122(self) -> str:
         """H204: the estimate counts the material a job has to read. No Claude turns: a made-up workspace with made-up
@@ -15748,6 +15823,7 @@ FLOWS = {
     131: ("H225: Life coaching as its own place in the app: the layers with their checklist, the check-ins kept from the map (the weekly look back, a game's debrief, the bigger check-in) with a red dot, one call per layer or check-in, and the coaching line", False, "flow131"),
     133: ("H239: a six-week game's texts (the evening one while today's tick isn't in, a heads-up on a day away around its time) and its score in the weekly look back", False, "flow133"),
     132: ("F45: a long piece of quiet talking isn't thrown away as no speech (one score per piece; long pieces at 0.75, short at 0.4, quiet ones louder); noise alone still gives nothing", False, "flow132"),
+    134: ("H227: every button and screen on the call page has a tutorial piece (the page read against tour.json; a new screen needs its button named)", False, "flow134"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 

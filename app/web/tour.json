@@ -8,6 +8,7 @@
       "steps": [
         {"target": "modes", "title": "Pick who you call", "text": "{donna} is quick: your day, your list, your mail, quick orders. {pepper} takes her time: planning, sparring, thinking something through. Each has her own voice and character."},
         {"target": "btn", "title": "Tap to call", "text": "One tap and she picks up. Talk the way you would on the phone. You can cut in at any moment and she stops talking."},
+        {"target": "cancel", "title": "Take it back", "text": "Said something you didn't mean, or she heard you wrong? On a call, Cancel takes back what you just said, before she acts on it. She asks once to be sure."},
         {"target": "mute", "title": "Mute, or hold to talk", "text": "On a call this button mutes you with a tap. Hold it down to talk as long as you like, even with long pauses; let go and she answers."},
         {"target": "status", "title": "What she's doing", "text": "This line says it: listening, thinking, talking. While she thinks you hear a soft tick, never silence.",
          "demo": {"kind": "chat", "items": [["you", "What's on my plate today?"], ["agent", "Three things. The dentist at ten, a call with Alex at two, and the report you wanted done before Friday."]]}}
@@ -85,9 +86,28 @@
       "id": "settings", "title": "Settings, and what HQ helps you with", "line": "Voices, Free, and switching features on or off",
       "steps": [
         {"target": "setbtn", "title": "Voices and sound", "text": "Pick each agent's voice, your microphone and where her voice plays, and the soft thinking sound."},
+        {"target": "devbtn", "title": "Microphone and sound, quickly", "text": "The microphone button is a shortcut to the same place: switch to your headphones or another microphone in two taps, also in the middle of a call."},
         {"target": "setbtn", "title": "What HQ helps you with", "text": "Every feature is a switch: the calendar, the to-do list, texts, the weather, the mail check, notes, the team's work, and Life coaching. Turn off what you don't use: its button goes away and the rest moves up."},
         {"target": "setbtn", "title": "Life coaching", "text": "With Life coaching on, a few calm sessions with {pepper} build your long-term vision, from three to five years out down to your ideal week, and HQ supports you with it every day. You give your vision its own name."},
         {"target": "setbtn", "title": "Free", "text": "Free is plain Claude with only the web: none of your files, nothing saved. Handy to show HQ to someone without showing your life."}
+      ]
+    },
+    {
+      "id": "coaching", "title": "Life coaching", "line": "Your long-term vision, one calm session at a time",
+      "steps": [
+        {"target": "coachbtn", "title": "Your vision, layer by layer", "text": "With Life coaching on, this button opens your map: from the life you want in three to five years, down to this year, a six-week game, your ideal week and this week. Each layer shows its checklist: what's answered, what's left for later and what's still open."},
+        {"target": "coachbtn", "title": "One session per layer", "text": "Start a layer and {pepper} calls about only that one, one question at a time, and writes your answers down in your own words. Short sessions, so nothing drifts off.",
+         "demo": {"kind": "list", "items": [["The vision", "Done"], ["The year", "In progress · 12 of 20"], ["The six-week game", "Not started"], ["The ideal week", "Not started"]]}},
+        {"target": "coachbtn", "title": "Check-ins, with a red dot", "text": "HQ keeps the moments to look back: every week, at the end of a game, and a bigger check-in every few months. When one is due the button gets a red dot. There's also a chat with {pepper} just for life coaching."}
+      ]
+    },
+    {
+      "id": "game", "title": "Your six-week game", "line": "One simple game you can win, six weeks at a time",
+      "steps": [
+        {"target": "gamebtn", "title": "A game you can win", "text": "In Life coaching you design a six-week game with {pepper}: one simple thing, like moving every day. Once it's set up, this button shows it: where you are, the win line and how far along you are."},
+        {"target": "gamebtn", "title": "Tick it off", "text": "Tick today off here, or just say it on a call or text {donna}. Add how it felt or a note when you want. {donna} can nudge you in the evening if today's tick isn't in yet.",
+         "demo": {"kind": "list", "items": [["Today", "A walk outside · ticked"], ["This week", "5 of 7 days"], ["Win line", "90% of the days · on track"]]}},
+        {"target": "gamebtn", "title": "Look back and keep it", "text": "Every week you look back on it, and at the end there's a short debrief: was it fun, was it useful, what did you learn. Past games are kept, so you can open them again."}
       ]
     },
     {

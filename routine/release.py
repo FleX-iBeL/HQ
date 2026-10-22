@@ -46,7 +46,9 @@ ROW = "H178"
 MARK = "Releases:"
 KEEP = 14
 # What counts as "only a test": the flows and their sets. Everything else is HQ itself. [Claude's choice.]
-TESTS = ("app/happy_flows.py", "routine/flowsets.py", "app/test_")
+# H227: the night's tutorial read comes after the green run; a change to the tutorial's text alone is checked by
+# flows 120 and 134 that same night, so it counts like a test change, not as HQ changing after the run. [Claude's choice]
+TESTS = ("app/happy_flows.py", "routine/flowsets.py", "app/test_", "app/web/tour.json")
 
 
 def git(*args: str) -> subprocess.CompletedProcess:

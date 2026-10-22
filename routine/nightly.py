@@ -16,6 +16,10 @@ maintenance moments because we just do it daily whenever we have space." and "Ma
   python3 "routine/nightly.py" set          which flows this computer runs
   python3 "routine/nightly.py" log "LINE"   one line in the H169 row's nights (the job, after its fix)
   python3 "routine/nightly.py" morning "TEXT"  a short plain line Donna texts him at 08:00 (the next one)
+  python3 "routine/nightly.py" tutorial     after the flows, every night (H227): what changed in HQ since the last
+                                            tutorial read (commits and the files they touched), and where the
+                                            tutorial is, to read it against what HQ does now
+  python3 "routine/nightly.py" tutorial done  the read is done: the next one starts from here
 
 The set: on a Mac every flow without Claude turns (--quick); elsewhere the Linux nightly set (flowsets.LINUX_NIGHTLY: every quick flow that holds on Linux).
 The flows with Claude turns stay out: they need a live voice and cost usage, and the daytime builds run them.
@@ -28,6 +32,13 @@ times." So: round 1 is the full run; green ends the night's testing. Not green: 
 (each fix checked on the flows it touches, never a full run per fix), then `again`, a full run again; at most
 ROUNDS full runs. last.json holds the latest round and every round of tonight, so the release (release.py) reads
 whether the night ended green, and after which round.
+
+The tutorial stays right (H227, 22 October 2026). The user on the call at 12:13: "If we keep adding features and
+changing things, then the tutorial still needs to work the same." and "Yeah, every night is fine. It doesn't need to
+skip it. ... Just included. Every night is good." Two parts, every night, no skipping: happy flow 134 (in both sets)
+fails when a button or screen on the call page has no tutorial piece; and after the flows the job reads the tutorial
+(app/web/tour.json) against what HQ does now and `tutorial`'s changes, and fixes what's outdated or missing the same
+night, in everyday words, demo content only, then `tutorial done`.
 """
 from __future__ import annotations
 
@@ -187,10 +198,11 @@ def run(again: bool = False) -> int:
     if r.returncode == 0 and ran and not failed:
         if n == 1:
             add_night(f"{when} all {ran} flows pass ({mins} min)")
-            print(f"All {ran} flows pass ({mins} min). One line in the {ROW} row; nothing else to do.")
+            print(f"All {ran} flows pass ({mins} min). One line in the {ROW} row. Then the tutorial read: nightly.py tutorial.")
         else:
             print(f"Round {n}: all {ran} flows pass ({mins} min). Tonight ends green: the release can go out. "
-                  f"Write one line for the night with nightly.py log (what each round found and what was fixed).")
+                  f"Write one line for the night with nightly.py log (what each round found and what was fixed). "
+                  f"Then the tutorial read: nightly.py tutorial.")
         return 0
     print(f"Round {n}: {passed} of {ran} passed ({mins} min). Failed:")
     for ln in failed or [f"(no flow failed, but the run ended with exit {r.returncode}: see the log's end)"]:
@@ -204,12 +216,47 @@ def run(again: bool = False) -> int:
     return 3
 
 
+TOUR = os.path.join(HQ, "app", "web", "tour.json")
+
+
+def tutorial(done: bool = False) -> int:
+    """H227: what changed in HQ since the last tutorial read, for the night's read; `done` sets the mark at HEAD."""
+    git = lambda *a: subprocess.run(["git", "-C", HQ, *a], capture_output=True, text=True).stdout.strip()
+    head = git("rev-parse", "HEAD")
+    mark_file = os.path.join(OUT, "tutorial.json")  # where the last read ended (commit, time)
+    if done:
+        os.makedirs(OUT, exist_ok=True)
+        json.dump({"commit": head, "at": dt.datetime.now().strftime("%Y-%m-%d %H:%M")}, open(mark_file, "w"), indent=1)
+        print(f"Tutorial read marked at {head[:7]}; the next read starts from here.")
+        return 0
+    try:
+        mark = json.load(open(mark_file))
+    except (OSError, ValueError):
+        mark = {}
+    since = mark.get("commit")
+    if since and git("cat-file", "-t", since) == "commit":
+        rng, start = [f"{since}..HEAD"], f"the last read ({mark.get('at')}, {since[:7]})"
+    else:
+        rng, start = ["--since=26 hours ago"], "the last 26 hours (no earlier read marked)"
+    commits = git("log", "--no-merges", "--format=%h %s", *rng)
+    files = sorted({f for f in git("log", "--no-merges", "--format=", "--name-only", *rng).splitlines() if f})
+    print(f"Read the tutorial ({TOUR}) against what HQ does now; changes since {start}:")
+    print(commits or "  (no commits: still read it once against the call page and the build notes)")
+    if files:
+        print("Files touched: " + ", ".join(files))
+    print("Fix what's outdated or missing tonight: everyday words, demo content only (never anyone's real life); "
+          "a new button or screen needs its piece (flow 134). Check with flows 120 and 134, then: nightly.py tutorial done.")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv else ""
     if cmd == "run":
         return run()
     if cmd == "again":
         return run(again=True)
+    if cmd == "tutorial":
+        return tutorial(done=argv[1:2] == ["done"])
     if cmd == "set":
         print(" ".join(flow_args()))
         return 0
