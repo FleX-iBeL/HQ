@@ -6868,6 +6868,210 @@ print(json.dumps(o))
         return ("sees v0.3 and what's new; offline quiet; Update saves changes on a backup branch, moves to v0.3, "
                 "local/ and workspace kept, note for their Claude (not a Mac); with a call on it doesn't wait (H187)")
 
+    # 138
+    async def flow138(self) -> str:
+        """H235: extensions. A made-up extensions folder (one with call and text rules, mail steps, a script, a routine
+        and two kinds of texts, one switched off, one without its extension.json), nothing of the user's, no Claude.
+        Each fixed point reads it: the call rules, the text rules, a kind of text after HQ's own, the mail check's step
+        and its permission, what a call may run (declared only, "ask" asks), a routine started in the background once
+        per its time; then the local check after an update (a changed part it uses or imports, HQ's own kind of text
+        with the same name, its name in what's new, the broken one), once per update, in the note for their Claude
+        and in the version bar's data; the three buttons (dry: nothing sent, no job); the bar itself in a headless
+        browser with its two buttons; the guide, the template and the tutorial say it."""
+        import subprocess as sp, importlib
+        base = self.tmp / "h235"
+        if base.exists():
+            shutil.rmtree(base)
+        ext = base / "extensions"
+        env = {"HQ_EXTENSIONS_FOLDER": str(ext), "HQ_EXTENSIONS_STATE": str(base / "state.json"),
+               "HQ_EXTENSIONS_CHECK": str(base / "check.json"), "HQ_EXTENSIONS_DRY": "1"}
+        old_env = {k: os.environ.get(k) for k in env}
+        os.environ.update(env)
+        d = ext / "demo-mail"
+        d.mkdir(parents=True)
+        (d / "extension.json").write_text(json.dumps({
+            "name": "Demo Mail", "what": "Reads a made-up mail app, for flow 138.",
+            "scripts": {"read": {"run": "read.py", "what": "the new mail, one line each", "mail": True},
+                        "careful": {"run": "read.py", "what": "the same, but asks first", "ask": True}},
+            "routines": {"tick": {"run": "tick.py", "every": 60, "what": "writes a line"}},
+            "texts": {"demo-alert": "A demo alert came in, flow one three eight.", "rain": "Not HQ's rain."},
+            "uses": ["routine/mail-check.md"], "keywords": ["demo inbox"]}))
+        (d / "read.py").write_text("import os, sys\nprint('read', *sys.argv[1:], os.environ.get('HQ_EXTENSION', ''))\n")
+        (d / "helper.py").write_text("import agenda  # uses HQ's calendar module\n")
+        (d / "tick.py").write_text("import os, time\nopen(os.path.join(os.environ['HQ_EXTENSION'], 'ticked'), 'a').write('x')\n")
+        (d / "call.md").write_text("On a call, flow one three eight's call rule.\n")
+        (d / "text.md").write_text("In a text, flow one three eight's text rule.\n")
+        (d / "mail.md").write_text("Flow one three eight's mail step: run its read script.\n")
+        (ext / "off-one").mkdir()
+        (ext / "off-one" / "extension.json").write_text(json.dumps({"name": "Off One", "what": "Switched off.", "on": False}))
+        (ext / "off-one" / "call.md").write_text("The off one's rule, never read.\n")
+        (ext / "broken").mkdir()
+        (ext / "broken" / "call.md").write_text("A rule without its extension.json.\n")
+        sys.path.insert(0, str(APP))
+        sys.path.insert(0, str(ROOT / "routine"))
+        try:
+            ex = importlib.reload(importlib.import_module("extensions"))
+            alls = {e["id"]: e for e in ex.all_()}
+            need(set(alls) == {"demo-mail", "off-one", "broken"} and not alls["demo-mail"]["problems"]
+                 and "it has no extension.json" in alls["broken"]["problems"] and not alls["off-one"]["on"],
+                 f"the folder isn't read right: {[(k, v['problems'], v['on']) for k, v in alls.items()]}")
+            need([e["id"] for e in ex.on()] == ["demo-mail"], "the off one or the broken one counts as on")
+            listed = sp.run([sys.executable, str(APP / "extensions.py")], capture_output=True, text=True).stdout
+            need("Demo Mail" in listed and "Reads a made-up mail app" in listed and "problem: it has no extension.json" in listed,
+                 f"the list doesn't say what each does and what's wrong: {listed[:300]}")
+            # The call rules, at every call start.
+            import config
+            vr = config.voice_rules()
+            need("flow one three eight's call rule" in vr and "Demo Mail: Reads a made-up mail app" in vr
+                 and "extensions.py\" run demo-mail read" in vr and "The off one's rule" not in vr
+                 and "A rule without" not in vr and "(asks for a yes first)" in vr, "the call rules don't carry the extension")
+            # The text rules and the kinds of texts: HQ's own first.
+            import direct_line
+            tr = direct_line._text_rules()
+            need("flow one three eight's text rule" in tr and "flow one three eight's call rule" not in tr, "the text rules don't carry it")
+            need("A demo alert came in" in direct_line.compose_prompt("demo-alert", "x"), "an extension's kind of text isn't used")
+            need("Not HQ's rain" not in direct_line.compose_prompt("rain", "x") and "Rain is coming" in direct_line.compose_prompt("rain", "x"),
+                 "an extension's kind replaced HQ's own")
+            need("rain" in ex.hq_kinds() and "jobs" in ex.hq_kinds(), "HQ's own kinds can't be read for the check")
+            # The mail check: its step and the one permission for the script that says mail.
+            mail = ex.mail_steps()
+            need("Flow one three eight's mail step" in mail and "run demo-mail read" in mail and "careful" not in mail,
+                 f"the mail check's step is wrong: {mail}")
+            need("{EXTENSIONS}" in (ROOT / "routine/mail-check.md").read_text() and "mail_ext_text()" in (ROOT / "routine/tick.py").read_text(),
+                 "the mail check doesn't read the extensions")
+            tick = importlib.import_module("tick")
+            allow, _ = tick.mail_tools(False)
+            need(f"Bash(python3 {APP / 'extensions.py'} run demo-mail read:*)" in allow and "careful" not in allow,
+                 "the mail check may not run the extension's mail script, or may run others")
+            # A script: only the declared ones; on a call, "ask" asks.
+            r = sp.run([sys.executable, str(APP / "extensions.py"), "run", "demo-mail", "read", "a", "b"], capture_output=True, text=True, env=os.environ)
+            need(r.returncode == 0 and r.stdout.startswith("read a b") and str(d) in r.stdout, f"the script didn't run: {r.stdout}{r.stderr}")
+            r = sp.run([sys.executable, str(APP / "extensions.py"), "run", "demo-mail", "tick"], capture_output=True, text=True, env=os.environ)
+            need(r.returncode == 2, "a routine (not a script) ran as a script")
+            import policy
+            pol = policy.Policy(Path(config.FOLDER), dry_run=True)
+            dec = lambda c: pol.decide("Bash", {"command": c}).verdict
+            app = APP / "extensions.py"
+            need(dec(f"python3 {app} run demo-mail read") == policy.ALLOW and dec(f"python3 {app} run demo-mail careful") == policy.ASK
+                 and dec(f"python3 {app} run demo-mail nothing") == policy.DENY and dec(f"python3 {app} run off-one read") == policy.DENY
+                 and dec(f"python3 {app}") == policy.ALLOW and dec(f"python3 {app} clash team") == policy.DENY,
+                 "a call may run the wrong extension scripts")
+            # A routine: in the background, once per its time.
+            out = ex.routines()
+            need(out["started"] == ["demo-mail/tick"], f"the routine didn't start: {out}")
+            end = time.time() + 20
+            while time.time() < end and (json.loads((base / "state.json").read_text()).get("demo-mail/tick") or {}).get("exit") is None:
+                await asyncio.sleep(0.3)
+            st = json.loads((base / "state.json").read_text())["demo-mail/tick"]
+            need(st.get("exit") == 0 and (d / "ticked").read_text() == "x", f"the routine didn't run: {st}")
+            need(ex.routines()["started"] == [] and "1 routine of your own" in ex.routines()["text"], "it started again before its time")
+            # The check after an update.
+            found = ex.check(["routine/mail-check.md", "app/agenda.py", "app/web/index.html"], "", "")
+            by = {x["id"]: x for x in found}
+            why = " | ".join(by.get("demo-mail", {}).get("why", []))
+            need("the mail check, which this update changed" in why and "the calendar, which this update changed" in why
+                 and "\"rain\" texts" in why and "the app's screens" not in why, f"the check missed something: {why}")
+            need("broken" in by and "HQ can't read it properly" in by["broken"]["why"][0] and "off-one" not in by,
+                 f"the broken one or the off one: {list(by)}")
+            orig = ex._whats_new
+            ex._whats_new = lambda o, n: ["Now reads the demo inbox too."]
+            try:
+                need(any("what's new in this update mentions demo inbox" in w for x in ex.check([], "0.1", "0.2") if x["id"] == "demo-mail" for w in x["why"]),
+                     "its keyword in what's new isn't seen")
+            finally:
+                ex._whats_new = orig
+            need(all("which this update changed" not in w for x in ex.check(["app/todo.py"]) for w in x["why"]),
+                 "an unrelated change counts as a clash")
+            run_ = {"state": "done", "from": "0.4.10", "to": "0.4.11", "finished": 123.0,
+                    "changed": ["routine/mail-check.md", "app/agenda.py"]}
+            notes = ROOT / "updates"
+            had = notes.is_dir()
+            res = ex.after_update(run_)
+            need(res and res["state"] == "new" and res["to"] == "0.4.11" and len(res["clashes"]) == 2, f"after the update: {res}")
+            need(ex.after_update(run_) is None, "the same update was checked twice")
+            need(ex.after_update({**run_, "state": "updating"}) is None, "an update still running was checked")
+            need("# After the last update" in ex.rule("call") and "Demo Mail:" in ex.rule("text"),
+                 "calls and texts don't hear about the clash")
+            update = importlib.import_module("update")
+            cs = update.clash_status()
+            need(cs and cs["state"] == "new" and "Demo Mail" in cs["words"] and "0.4.11" in cs["words"], f"the bar's data: {cs}")
+            out = ex.settle("chat")
+            need(out["ok"] and out.get("open") == "texts" and "Can we look at it together?" in out["text"]
+                 or (not out["ok"] and "Texts are off" in out["said"]), f"talk it through: {out}")
+            out = ex.settle("team")
+            need(out["ok"] and out["job"] == "dry" and "HQ/extensions" in out["task"] and "Demo Mail" in out["task"]
+                 and ex.clash()["state"] == "team", f"send it to the team: {out}")
+            need(update.clash_status()["state"] == "team" and "# After the last update" not in ex.rule("call"),
+                 "after the team has it, it's still told on calls")
+            out = ex.settle("ok")
+            need(out["ok"] and update.clash_status() is None, "it's fine doesn't put it away")
+            need(not had or not any("Demo Mail" in f.read_text() for f in notes.glob("0.4.11.md")), "a test wrote into a real update note")
+            # The bar on the page.
+            cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+            cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+            chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            need(Path(chrome).exists(), "no headless browser found")
+            harness = r"""<!doctype html><html><head><meta charset="utf-8"></head><body>
+<div id="line"></div><div id="banner"></div><a id="directbtn" href="#" onclick="window.opened=1;return false">texts</a>
+<script>
+const ST0 = {version:"0.4.11", tag:"v0.4.11", ahead:0, latest:"0.4.11", available:false, checked:1, offline:false, mac:true, new:[], run:{state:"idle"},
+  clash:{state:"new", to:"0.4.11", words:"w", items:[{name:"Demo Mail", why:["it works with the mail check, which this update changed"]}]}};
+let ST = ST0, posted = [];
+window.fetch = async (p, o) => { if (o && o.method === "POST") { posted.push(p);
+  const said = p.endsWith("clash-chat") ? {said:"Sent to Donna", open:"texts"} : {said:"Sent to the team"};
+  return { ok: true, json: async () => ({...ST0, clash:null, ...said}) }; }
+  return { ok: true, json: async () => JSON.parse(JSON.stringify(ST)) }; };
+</script>
+<script>__JS__</script>
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const check = (n, ok, why) => out.push(n + ":" + (ok ? "ok" : "WRONG " + why));
+  HQUpdate.mount({ line: document.getElementById("line"), banner: document.getElementById("banner"), busy: () => false });
+  await wait(100);
+  const bar = document.getElementById("hqu-bar");
+  check("message", bar.classList.contains("show") && bar.textContent.includes("Something you added might not fit this update")
+        && bar.textContent.includes("Demo Mail") && bar.textContent.includes("the mail check"), bar.textContent);
+  check("two-buttons", !!document.getElementById("hqu-clash-chat") && document.getElementById("hqu-clash-chat").textContent === "Talk it through"
+        && document.getElementById("hqu-clash-team").textContent === "Send to the team" && !!document.getElementById("hqu-clash-ok"), bar.textContent);
+  document.getElementById("hqu-clash-chat").click(); await wait(100);
+  check("chat", posted[0] && posted[0].endsWith("api/update/clash-chat") && window.opened === 1 && bar.textContent.includes("Sent to Donna"), posted + "/" + window.opened + "/" + bar.textContent);
+  ST = ST0; await wait(8200); await hqUpdate.poll(); await wait(50);
+  document.getElementById("hqu-clash-team").click(); await wait(100);
+  check("team", posted[1] && posted[1].endsWith("api/update/clash-team") && bar.textContent.includes("Sent to the team"), posted + "/" + bar.textContent);
+  const pre = document.createElement("pre"); pre.id = "r"; pre.textContent = "H235RESULT " + out.join(" | ") + " END"; document.body.appendChild(pre);
+})();
+</script></body></html>"""
+            f = self.tmp / "h235.html"
+            f.write_text(harness.replace("__JS__", (ROOT / "status/update-ui.js").read_text().replace("</script", "<\\/script")))
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'h235-profile'}", "--virtual-time-budget=10000", "--dump-dom", f.as_uri()], timeout=90)
+            m = re.search(r'<pre id="r">H235RESULT (.*?) END</pre>', r.stdout)
+            need(m, f"the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            say(f"   {m.group(1)}")
+            need(all(p.endswith(":ok") for p in m.group(1).split(" | ")), f"the clash bar doesn't behave: {m.group(1)}")
+            # Both servers take the buttons only from the page; the guide, the template and the tutorial say it.
+            need('"clash-chat", "clash-team", "clash-ok"' in (APP / "bot.py").read_text()
+                 and "clash-(chat|team|ok)" in (ROOT / "status/server.mjs").read_text(), "a server doesn't take the buttons")
+            code, _, _ = await asyncio.to_thread(http_get, "/api/update/clash-team", "http://127.0.0.1:4748")
+            need(code in (403, 404), f"the team button works without the page's header: {code}")
+            guide = (ROOT / "EXTENSIONS.md").read_text()
+            need("HQ's version leads" in guide and "Moving what's already built" in guide and "extension.json" in guide,
+                 "EXTENSIONS.md doesn't explain it")
+            need((ROOT / "template/HQ/extensions/README.md").exists() and "HQ/extensions/" in (ROOT / "template/CLAUDE.md").read_text()
+                 and "EXTENSIONS.md" in (ROOT / "INSTALL.md").read_text(), "the template or the install page doesn't say it")
+            need("Updates never break your own" in (APP / "web/tour.json").read_text(), "the tutorial doesn't say it")
+            need("EXTENSIONS.md" in (ROOT / "routine/update.py").read_text(), "the update's note doesn't point a changed HQ at it")
+        finally:
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        return ("the folder read (off and broken ones too); call and text rules, a kind of text after HQ's, the mail step "
+                "and its permission, declared scripts only (ask asks), a routine once per its time; the check after an "
+                "update, once, in calls and the bar; chat, team and it's fine; the bar's two buttons; the guide says it")
+
     # 57
     async def flow57(self) -> str:
         """H59 on the pages: the small grey version, the new-version bar, the changelog, the warning off a Mac,
@@ -16466,6 +16670,7 @@ FLOWS = {
     137: ("H231: an item put at another place in its list (a drag on its grip, the arrow keys) and renamed, on every list, through todo.py with its log line and undo; the ticked-off groceries readable; phone, small phone, desktop app, light and dark", False, "flow137"),
     136: ("H230: driving to appointments on their own maps key: off until turned on, the key kept on the computer only, the drive with the traffic and when to leave, Donna texts once when to leave and when the traffic changes, public transport or car per appointment, a daily cap, Google's and TomTom's answers", False, "flow136"),
     134: ("H227: every button and screen on the call page has a tutorial piece (the page read against tour.json; a new screen needs its button named)", False, "flow134"),
+    138: ("H235: extensions: the workspace's folder read at HQ's fixed points (call and text rules, kinds of texts, the mail check, scripts, routines); the local check after an update, and its plain message with Talk it through and Send to the team", False, "flow138"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
 

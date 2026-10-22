@@ -14,6 +14,9 @@
 //   window.hqUpdate.open()                   the changelog
 //   window.hqUpdate.ask()                    Update (on another computer than a Mac: the warning first)
 //   window.hqUpdate.render()                 draw again (the call page calls it when a call starts or ends)
+//   H235: after an update, when something they added themselves might clash with it (st.clash), the bar says so in
+//   plain words with Talk it through (a text to their agent; opt.openTexts, else the texts button) and Send to the
+//   team (a roadmap row and a job), and × for it's fine.
 // [Claude's choices: a look every minute, every 3 seconds while updating; the bar can be put away until the
 // next version; a finished update is shown for half an hour.]
 (() => {
@@ -88,6 +91,33 @@
       const t = $('div', 't');
       t.append($('b', '', `Updating to v${st.run.to || st.latest}`), $('span', '', [st.run.step, st.run.message].filter(Boolean).join(' · ')));
       bar.append(t);
+    } else if (said && !busy) {
+      show = true;
+      const t = $('div', 't');
+      t.append($('b', '', said));
+      bar.append(t);
+    } else if (st && st.clash && st.clash.state === 'new' && !busy) {
+      // H235: after an update, something they added themselves might not work with it. In his words: "in nontechnical
+      // terms it should give them a message that there might be possible conflicts. They could click on a button to
+      // either have a chat or send it directly to the team to fix and make sure their HQ runs properly".
+      show = true;
+      const c = st.clash, t = $('div', 't');
+      const names = c.items.map((x) => x.name);
+      t.append($('b', '', 'Something you added might not fit this update'),
+        $('span', '', `${names.join(', ')}: ${c.items[0].why[0]}${c.items.length > 1 || c.items[0].why.length > 1 ? ' (and more)' : ''}`));
+      t.lastChild.style.whiteSpace = 'normal';
+      t.lastChild.title = c.words || '';
+      const chat = $('button', 'b', 'Talk it through');
+      chat.id = 'hqu-clash-chat';
+      chat.onclick = () => settle('chat', chat);
+      const team = $('button', 'b go', 'Send to the team');
+      team.id = 'hqu-clash-team';
+      team.onclick = () => settle('team', team);
+      const x = $('button', 'x', '×');
+      x.title = 'It’s fine, leave it';
+      x.id = 'hqu-clash-ok';
+      x.onclick = () => settle('ok', x);
+      bar.append(t, chat, team, x);
     } else if (st && recent() && !busy) {
       show = true;
       const t = $('div', 't');
@@ -112,6 +142,20 @@
     }
     bar.classList.toggle('show', show);
     if (sheet.classList.contains('open') && mode === 'log') fillLog();
+  }
+
+  // H235: the clash buttons. What was done shows in the bar for a few seconds; Talk it through opens the texts.
+  let said = '', saidTimer = null;
+  async function settle(how, btn) {
+    btn.disabled = true;
+    let out = null;
+    try { out = await api('api/update/clash-' + how, true); } catch {}
+    if (out && out.version) st = out;
+    said = (out && out.said) || 'That didn’t go through just now; try again in a minute.';
+    clearTimeout(saidTimer);
+    saidTimer = setTimeout(() => { said = ''; render(); }, 8000);
+    render();
+    if (out && out.open === 'texts') (opt.openTexts || (() => { const a = document.getElementById('directbtn'); if (a) a.click(); else location.href = 'direct'; }))();
   }
 
   async function poll() {

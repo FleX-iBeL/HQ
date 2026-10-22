@@ -579,7 +579,8 @@ VOICE_RULES = VOICE_RULES.replace("{user}", USER)
 
 def voice_rules() -> str:
     """The call rules with the workflows as they are now (job 257): Life coaching switched in Settings counts from the
-    next call, no restart of the call line. H205: and what they turned off in What HQ helps you with."""
+    next call, no restart of the call line. H205: and what they turned off in What HQ helps you with. H235: and their
+    own extensions."""
     now = _workflows.rule(FOLDER)
     if now == WORKFLOWS_RULE:
         rules = VOICE_RULES
@@ -591,7 +592,14 @@ def voice_rules() -> str:
         off = _features.rule(Path(os.environ.get("HQ_FEATURES_FOLDER") or FOLDER))
     except Exception:
         off = ""
-    return rules + ("\n" + off + "\n" if off else "")
+    # H235: their own extensions' call rules and scripts, and what might clash after the last update; read at every
+    # call start, so a new extension counts from the next call.
+    try:
+        import extensions as _extensions
+        ext = _extensions.rule("call")
+    except Exception:
+        ext = ""
+    return rules + ("\n" + off + "\n" if off else "") + ("\n" + ext + "\n" if ext else "")
 
 VOICE_RULES = VOICE_RULES.replace("{planning}", os.environ.get("HQ_PLANNING_CALENDAR") or _SWITCHES.get("HQ_PLANNING_CALENDAR", "").strip('"') or "HQ Planning")
 

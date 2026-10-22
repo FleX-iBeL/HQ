@@ -216,6 +216,10 @@ Whatever Claude builds for this one computer (the Windows parts above, or anythi
 
 Something with no name here (the speech recognition, the laptop readings): change HQ's file as little as possible, and keep a copy of the change in `local/` with a line on what it is, so it can be put back after an update (the update saves the change on a backup branch too, and its note says so).
 
+### Their own extensions: the workspace's HQ/extensions
+
+What the person builds on top of HQ (a connector for another mail app, a routine of their own, their own kind of text, extra rules for calls) is an **extension**, in the workspace's `HQ/extensions/`, one folder each, never in HQ's own files. HQ reads them at fixed points (the call and text rules, the mail check, its routine every minute), an update never touches them, and after every update HQ checks on that computer whether anything might clash, and says so in plain words with two buttons: talk it through, or send it to their team. **EXTENSIONS.md** says how to build one, and how to move what was already built into HQ's files into an extension.
+
 ### Versions
 
 Versions are git tags on this repo: `v0.4`, `v0.4.5`, and so on. **Fixes get a patch number (0.4.5); bigger features the next minor (0.5).** An update only ever moves to a released version; the work in between lives on the `dev` branch, and a nightly test line, never on what everyone's update bar sees. HQ reads its own version from the newest tag in its history (`git describe`), else (no history, no tags, or only older ones) from the `VERSION` file.

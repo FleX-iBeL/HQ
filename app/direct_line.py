@@ -465,6 +465,7 @@ add {agent} "<the fact, one short line>", without asking him; never say you did.
 {travel}
 {onewriter}
 {team}
+{extensions}
 """
 
 
@@ -474,82 +475,107 @@ def _text_rules() -> str:
             .replace("{pings}", _config.PINGS_RULE).replace("{mailfast}", _config.MAIL_FAST_RULE + "\n" + _config.MAIL_TIDY_RULE)
             .replace("{apptnotes}", _config.APPT_NOTES_RULE).replace("{todo}", _config.TODO_RULE).replace("{games}", _config.GAMES_RULE).replace("{travel}", _config.TRAVEL_RULE)
             .replace("{onewriter}", _config.ONE_WRITER_RULE)
-            .replace("{team}", _config.TEAM_RULE))
+            .replace("{team}", _config.TEAM_RULE).replace("{extensions}", _extensions_rule()))
+
+
+def _extensions_rule() -> str:
+    """H235: their own extensions' rules for the texts, read at every text."""
+    try:
+        import extensions
+        return extensions.rule("text")
+    except Exception as e:
+        print(f"extensions: {e!r}", file=sys.stderr)
+        return ""
+
+
+# Her kinds of texts, what each is for. H235: an extension's own kind is looked up after these (extensions.text_kind),
+# so HQ's own always lead; the update's clash check reads these names.
+KINDS = {
+    "jobs": "The dev team at HQ (the specialists he hands his builds to) just finished up everything they had. "
+            "Text him one short, cool line that the team's done, like a colleague passing it on. In his words: "
+            "\"When they are done building, there should be a cool message, something about how they finished "
+            "up. There don't need to be any details.\" So no details, no feature names, no numbers, nothing like "
+            "\"nothing running, nothing waiting\" or \"the job list is clear\", no status talk, and no tips on "
+            "how to use what they built. The facts are only background for you, never in the text.",
+    "mail": "An important mail just came in. A quick heads-up text: who it's from and what it wants from him, in "
+            "a few plain words.",
+    "down": "Something at HQ is acting up and hasn't fixed itself. A quick, calm text that something's off and "
+            "you're on it, in plain words (what it is in everyday terms, e.g. the call line); no technical "
+            "details, no alarm.",
+    "back": "Something that was acting up is fine again. A quick all-clear, a few words.",
+    "tailscale": "Tailscale (the private network his two HQ computers talk over) is off on this computer, so the "
+                 "other HQ can't be reached from here. Say exactly that in plain words: the other one hasn't gone "
+                 "down, it's only cut off because Tailscale is off here, and turning Tailscale on fixes it. Never "
+                 "say it went down or came back. In his words: \"if it is not on, then it can conclude that might "
+                 "be the reason there is no connection\". Short, calm.",
+    "tailscale-back": "Tailscale is on again on this computer, so the two HQs reach each other again. A quick "
+                      "all-clear in a few words; don't say the other computer came back, it never went away.",
+    "hello": "Say hi: this is your own direct line with him now. Quick and warm.",
+    "sun": "It's dry and sunny where he is for the next hours. A light nudge to enjoy it: the sun, or a short "
+           "walk. One idea at most, not pushy.",
+    "rain": "Rain is coming where he is. A quick heads-up with when it starts (the time from the facts).",
+    "cosy": "It's a rainy day where he is. Suggest something cosy inside: a book, or something nice indoors. "
+            "Never suggest going outside today; in his words: \"Don't prompt me on rainy days to go "
+            "outside because it doesn't make any sense.\"",
+    "morning": "He just woke up. Tell him one thing only: is it going to rain when he's out today, yes or no, "
+               "with the time when it's yes (the facts say). When nothing takes him out, whether it rains today "
+               "at all. No forecast beyond that, no temperatures unless it matters, nothing about the night. In "
+               "his words: \"When I wake up, is it gonna rain or not? And if I need to go out\".",
+    "out": "He's about to go out (or is out; the facts say what and when), and it's going to rain then. A quick "
+           "heads-up the way a friend would text, like \"take your jacket, it starts around 3\". One line.",
+    "appt": "He asked you to ping him for this appointment: it starts now (or in the minutes the facts say). "
+            "A quick text that it's on, its name and time in passing; where, only when the facts give a place.",
+    "remind": "He asked you to remind him of this, now. A quick reminder in your own words; keep what he wanted "
+              "to be reminded of clear. When the facts say it's late, say so in passing.",
+    "watch": "He asked you to keep an eye out for this, and it came (the facts say what). A quick text with "
+             "what came, plainly (a mail: who from and what it says about what he's waiting for; the weather: "
+             "what and when). Whether you keep watching only in passing, as the facts say.",
+    "nightly": "Every night the team checks that all of HQ still works. Last night something didn't, and the "
+               "facts say what they found and whether it's fixed. A quick morning text in everyday words: what "
+               "was off, said the way he'd notice it, and that it's sorted (or still being looked at). No "
+               "technical details, no names of files or flows, no alarm.",
+    "nudge": "He asked you to keep nudging him about this until he tells you it's done (the facts say what, and "
+             "why it matters to him). A warm, short nudge in your own words, the way a friend who has his back "
+             "would text: one or two sentences. Never say how often you nudge, when the next one comes, or any "
+             "number or estimate. His reason only lightly, when it helps. A bit firmer, still kind, when it's been "
+             "open for days or the deadline is close. Now and then, not every time, that he can just tell you "
+             "when it's done.",
+    "game": "He's playing a six-week game (the facts say which, the score, and its rules in his words) and "
+            "today's tick isn't in yet. A short, warm text: a light reminder that today's still open, in the "
+            "game's own spirit (playful, never guilt). Any small amount counts when the rules say so; say that "
+            "lightly. No numbers unless the facts' score helps, and never a lecture. He can just tell you when "
+            "it's done.",
+    "game-away": "He's playing a six-week game and today he's away from home around the time he usually plays "
+                 "it (the facts say when and what). A short heads-up, earlier in the day, that today is "
+                 "different: be gentle with himself, and what the game's design says counts on a day like this "
+                 "(the facts give it). One or two sentences, kind, no pressure.",
+    "travel": "He has travel on for an appointment (the facts say which, from where to where), and something "
+              "changed on the way there in the live public transport data: his train cancelled, late, another "
+              "platform, a station skipped, trouble on the rails at a station, or a message for a bus, tram or "
+              "metro stop near either end (that one is in Dutch from the transport company: say it in his "
+              "language, short). A quick heads-up the way a friend would text: what changed and what it means "
+              "for him, one or two sentences. Put the 9292 link from the facts at the end, as it is, so he can "
+              "plan again. No technical words, no train numbers unless they help. When the facts say By car "
+              "(H230), it's the drive with the traffic: time to leave, or the drive got longer or shorter; say "
+              "when to leave, and put the Google Maps link at the end as it is.",
+    "watch-end": "Something he asked you to watch has stopped (the facts say what and why). One quick line that "
+                 "you've stopped keeping an eye on it, and why in a few words (time's up and nothing came, or he "
+                 "asked).",
+}
+
+
+def _kind(why: str) -> str:
+    if why in KINDS:
+        return KINDS[why]
+    try:
+        import extensions
+        return extensions.text_kind(why) or "Tell him this, in a quick text."
+    except Exception:
+        return "Tell him this, in a quick text."
 
 
 def compose_prompt(why: str, facts: str) -> str:
-    what = {
-        "jobs": "The dev team at HQ (the specialists he hands his builds to) just finished up everything they had. "
-                "Text him one short, cool line that the team's done, like a colleague passing it on. In his words: "
-                "\"When they are done building, there should be a cool message, something about how they finished "
-                "up. There don't need to be any details.\" So no details, no feature names, no numbers, nothing like "
-                "\"nothing running, nothing waiting\" or \"the job list is clear\", no status talk, and no tips on "
-                "how to use what they built. The facts are only background for you, never in the text.",
-        "mail": "An important mail just came in. A quick heads-up text: who it's from and what it wants from him, in "
-                "a few plain words.",
-        "down": "Something at HQ is acting up and hasn't fixed itself. A quick, calm text that something's off and "
-                "you're on it, in plain words (what it is in everyday terms, e.g. the call line); no technical "
-                "details, no alarm.",
-        "back": "Something that was acting up is fine again. A quick all-clear, a few words.",
-        "tailscale": "Tailscale (the private network his two HQ computers talk over) is off on this computer, so the "
-                     "other HQ can't be reached from here. Say exactly that in plain words: the other one hasn't gone "
-                     "down, it's only cut off because Tailscale is off here, and turning Tailscale on fixes it. Never "
-                     "say it went down or came back. In his words: \"if it is not on, then it can conclude that might "
-                     "be the reason there is no connection\". Short, calm.",
-        "tailscale-back": "Tailscale is on again on this computer, so the two HQs reach each other again. A quick "
-                          "all-clear in a few words; don't say the other computer came back, it never went away.",
-        "hello": "Say hi: this is your own direct line with him now. Quick and warm.",
-        "sun": "It's dry and sunny where he is for the next hours. A light nudge to enjoy it: the sun, or a short "
-               "walk. One idea at most, not pushy.",
-        "rain": "Rain is coming where he is. A quick heads-up with when it starts (the time from the facts).",
-        "cosy": "It's a rainy day where he is. Suggest something cosy inside: a book, or something nice indoors. "
-                "Never suggest going outside today; in his words: \"Don't prompt me on rainy days to go "
-                "outside because it doesn't make any sense.\"",
-        "morning": "He just woke up. Tell him one thing only: is it going to rain when he's out today, yes or no, "
-                   "with the time when it's yes (the facts say). When nothing takes him out, whether it rains today "
-                   "at all. No forecast beyond that, no temperatures unless it matters, nothing about the night. In "
-                   "his words: \"When I wake up, is it gonna rain or not? And if I need to go out\".",
-        "out": "He's about to go out (or is out; the facts say what and when), and it's going to rain then. A quick "
-               "heads-up the way a friend would text, like \"take your jacket, it starts around 3\". One line.",
-        "appt": "He asked you to ping him for this appointment: it starts now (or in the minutes the facts say). "
-                "A quick text that it's on, its name and time in passing; where, only when the facts give a place.",
-        "remind": "He asked you to remind him of this, now. A quick reminder in your own words; keep what he wanted "
-                  "to be reminded of clear. When the facts say it's late, say so in passing.",
-        "watch": "He asked you to keep an eye out for this, and it came (the facts say what). A quick text with "
-                 "what came, plainly (a mail: who from and what it says about what he's waiting for; the weather: "
-                 "what and when). Whether you keep watching only in passing, as the facts say.",
-        "nightly": "Every night the team checks that all of HQ still works. Last night something didn't, and the "
-                   "facts say what they found and whether it's fixed. A quick morning text in everyday words: what "
-                   "was off, said the way he'd notice it, and that it's sorted (or still being looked at). No "
-                   "technical details, no names of files or flows, no alarm.",
-        "nudge": "He asked you to keep nudging him about this until he tells you it's done (the facts say what, and "
-                 "why it matters to him). A warm, short nudge in your own words, the way a friend who has his back "
-                 "would text: one or two sentences. Never say how often you nudge, when the next one comes, or any "
-                 "number or estimate. His reason only lightly, when it helps. A bit firmer, still kind, when it's been "
-                 "open for days or the deadline is close. Now and then, not every time, that he can just tell you "
-                 "when it's done.",
-        "game": "He's playing a six-week game (the facts say which, the score, and its rules in his words) and "
-                "today's tick isn't in yet. A short, warm text: a light reminder that today's still open, in the "
-                "game's own spirit (playful, never guilt). Any small amount counts when the rules say so; say that "
-                "lightly. No numbers unless the facts' score helps, and never a lecture. He can just tell you when "
-                "it's done.",
-        "game-away": "He's playing a six-week game and today he's away from home around the time he usually plays "
-                     "it (the facts say when and what). A short heads-up, earlier in the day, that today is "
-                     "different: be gentle with himself, and what the game's design says counts on a day like this "
-                     "(the facts give it). One or two sentences, kind, no pressure.",
-        "travel": "He has travel on for an appointment (the facts say which, from where to where), and something "
-                  "changed on the way there in the live public transport data: his train cancelled, late, another "
-                  "platform, a station skipped, trouble on the rails at a station, or a message for a bus, tram or "
-                  "metro stop near either end (that one is in Dutch from the transport company: say it in his "
-                  "language, short). A quick heads-up the way a friend would text: what changed and what it means "
-                  "for him, one or two sentences. Put the 9292 link from the facts at the end, as it is, so he can "
-                  "plan again. No technical words, no train numbers unless they help. When the facts say By car "
-                  "(H230), it's the drive with the traffic: time to leave, or the drive got longer or shorter; say "
-                  "when to leave, and put the Google Maps link at the end as it is.",
-        "watch-end": "Something he asked you to watch has stopped (the facts say what and why). One quick line that "
-                     "you've stopped keeping an eye on it, and why in a few words (time's up and nothing came, or he "
-                     "asked).",
-    }.get(why, "Tell him this, in a quick text.")
+    what = _kind(why)
     before = _recent(why)
     said = ("\n\nYour last texts like this, so this one sounds different:\n" + "\n".join(f"- {t}" for t in before)
             if before else "")

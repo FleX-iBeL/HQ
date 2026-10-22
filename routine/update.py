@@ -311,7 +311,33 @@ def status(background: bool = True) -> dict:
         "new_tag": last.get("tag") if available else None, "new": last.get("new", []) if available else [],
         "checked": None if stale else last.get("checked"), "offline": bool(last.get("offline")) and not stale,
         "platform": platform(), "mac": platform() == "darwin", "run": run or {"state": "idle"},
+        "clash": clash_status(),
     }
+
+
+def _extensions():
+    """H235: app/extensions.py of the HQ as it stands now (after an update: the new version's)."""
+    app = os.path.join(HQ, "app")
+    if app not in sys.path:
+        sys.path.insert(0, app)
+    import extensions
+    return extensions
+
+
+def clash_status() -> dict | None:
+    """H235: after an update, whether something they added might clash with it, for the version bar: shown while it's
+    new; a day after a button, what was done."""
+    try:
+        ex = _extensions()
+        c = ex.clash()
+    except Exception:
+        return None
+    if not c.get("clashes") or c.get("state") not in ("new", "chat", "team"):
+        return None
+    if c["state"] != "new" and time.time() - float(c.get("settled") or 0) > 86400:
+        return None
+    return {"state": c["state"], "to": c.get("to"), "words": ex.clash_words(c),
+            "items": [{"name": x["name"], "why": x["why"]} for x in c["clashes"]]}
 
 
 # ---- the update ---------------------------------------------------------------------------------------------
@@ -788,7 +814,9 @@ def notes(old: str, new: str, saved: dict, changed: list[str], done: list[str], 
         b = saved["changes"]["branch"]
         w.append(f"- Changes to HQ's own files, saved on the branch `{b}` (never sent anywhere): "
                  + ", ".join(saved["changes"]["files"][:30]) + ". To bring them back: "
-                 f"`git stash apply {b}`; if something clashes with the new version, move it into local/ instead.")
+                 f"`git stash apply {b}`; if something clashes with the new version, move it into local/ instead. "
+                 "What they built on top of HQ (a connector, a routine, their own kind of text) belongs in an extension "
+                 "in the workspace's HQ/extensions, which updates never touch: EXTENSIONS.md says how to move it there (H235).")
     if saved.get("commits"):
         b = saved["commits"]["branch"]
         w.append(f"- The user's own commits ({saved['commits']['count']}), saved on the branch `{b}`. "
@@ -867,12 +895,23 @@ def run() -> int:
         done, todo = restart_new(changed, was)
         done = ended + done
         note = notes(old, tag, saved, changed, done, todo)
+        # H235: the local check against their own extensions, with the new version's own code, right away (the routine
+        # also runs it within a minute, for an update made by an older version of this file).
+        say("updating", "Checking your own extensions against the new version", notes=note, finished=time.time(),
+            changed=changed[:500])
+        try:
+            subprocess.run([sys.executable, os.path.join(HQ, "app", "extensions.py"), "after-update"], cwd=HQ,
+                           capture_output=True, text=True, timeout=120,
+                           env={**os.environ, "HQ_EXTENSIONS_RUN": json.dumps({**read_json(RUN_FILE), "state": "done", "to": vname(tag), "from": old})})
+        except Exception as e:
+            log(f"update: the extensions check: {e!r}")
         bits = [f"Updated to {vname(tag)}."]
         if saved:
             bits.append("Your own changes are saved on a backup branch.")
         if platform() != "darwin":
             bits.append("Your Claude has instructions to patch things up locally.")
-        say("done", "", " ".join(bits), done=done, todo=todo, notes=note, saved=saved, finished=time.time())
+        fin = read_json(RUN_FILE).get("finished") or time.time()
+        say("done", "", " ".join(bits), done=done, todo=todo, notes=note, saved=saved, finished=fin)
         check(force=True)
         return 0
     except Exception as e:
@@ -902,6 +941,10 @@ def main(argv: list[str]) -> int:
         print(json.dumps({"done": done, "todo": todo}))
     elif cmd == "parts":
         print(json.dumps(parts()))
+    elif cmd == "clash" and len(argv) == 2 and argv[1] in ("chat", "team", "ok"):  # H235: the bar's buttons
+        out = _extensions().settle(argv[1])
+        print(json.dumps({**status(background=False), "said": out.get("said"), "settled": out.get("ok"),
+                          "open": out.get("open")}))
     elif cmd == "version":
         print(json.dumps(local_version()))
     else:

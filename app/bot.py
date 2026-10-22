@@ -1006,8 +1006,11 @@ if __name__ == "__main__":
 
     @app.post("/api/update/{what}", include_in_schema=False)
     async def update_do(what: str, request: Request):
-        if what not in ("start", "check") or request.headers.get("x-hq") != "update":
+        if what not in ("start", "check", "clash-chat", "clash-team", "clash-ok") or request.headers.get("x-hq") != "update":
             return JSONResponse({"error": "Only the HQ page can start an update"}, status_code=403)
+        if what.startswith("clash-"):  # H235: after an update, talk a possible clash through, send it to the team, or it's fine
+            out = await asyncio.to_thread(_update, "clash", what[6:])
+            return JSONResponse(out, status_code=200 if out else 500, headers=_NO_CACHE)
         if what == "check":
             await asyncio.to_thread(_update, "check", "--force")
         out = await asyncio.to_thread(_update, "start" if what == "start" else "status")

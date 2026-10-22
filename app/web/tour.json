@@ -129,6 +129,7 @@
       "steps": [
         {"target": "", "title": "Your own headquarters", "text": "This is the reason HQ was built in the first place: so everyone can have their own headquarters, with their work supported by their own team. What's in it now are the things its creator thought most people would want. His own HQ has many more, and people testing it have already built their own extensions."},
         {"target": "", "title": "Customize, tailor, expand", "text": "It's not limited to what you see here. Ask on a call for something new, give it to the team, and they build it into your HQ. Your own builds stay yours: updates never touch them."},
+        {"target": "", "title": "Updates never break your own", "text": "What you add yourself is an extension: it lives in your own files, and an update never touches it. After every update HQ checks whether something you added might not fit the new version. If so, a short message says which one, with two buttons: talk it through with {donna}, or send it to your team to fix."},
         {"target": "", "title": "Coming soon: shared best practices", "text": "Ways of working that keep a build stable, like the checks that run every night and fix what broke, written so your own HQ understands them. Turn them on, and your HQ looks out for them and suggests them itself, so you don't have to be a programmer to avoid the classic mistakes.", "soon": true}
       ]
     }

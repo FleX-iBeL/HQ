@@ -1065,6 +1065,7 @@
         ['usage', 'Usage check', 'Every minute, free'],
         ['phone', 'Status page', 'Also on the phone'],
         ['call', 'Call line', 'For calls from the phone'],
+        ['extensions', 'Your own routines', 'From your extensions, each at its own time (H235)'],
         ['temp', 'Laptop temperature', 'Every minute, free, no password'],
         ['battery', 'Laptop battery', 'Every minute, free'],
       ].filter(([key]) => LAPTOP || (key !== 'temp' && key !== 'battery'));  // H92
@@ -1094,7 +1095,7 @@
         const card = el('div', 'card');
         for (const [key, name, about] of routineList(all)) {
           const x = all[key];
-          if ((key === 'role' || key === 'sync') && !x) continue;  // H56.3/H56.4: an HQ on its own says nothing about them
+          if ((key === 'role' || key === 'sync' || key === 'extensions') && !x) continue;  // H235: only with routines of their own  // H56.3/H56.4: an HQ on its own says nothing about them
           let state = x?.state ?? 'off';
           let text = x?.text ?? 'No line yet';
           const late = x && now - x.at > (x.every ?? 60) * 2 + 60;

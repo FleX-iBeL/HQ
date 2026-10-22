@@ -221,7 +221,7 @@ function updateTool(args, cacheMs = 0) {
     execFile('/usr/bin/python3', [join(root, 'routine/update.py'), ...args], { timeout: 120000 }, (err, out) => {
       let data = null;
       try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
-      if (args[0] === 'status' || args[0] === 'start' || args[0] === 'check') upd = { at: Date.now(), data: args[0] === 'check' ? null : data };
+      if (['status', 'start', 'check', 'clash'].includes(args[0])) upd = { at: Date.now(), data: args[0] === 'check' ? null : data };
       resolve(data);
     });
   });
@@ -436,6 +436,16 @@ const server = createServer(async (req, res) => {
   }
   if (path0 === '/api/update' || path0 === '/api/changelog') {
     const out = await updateTool([path0 === '/api/update' ? 'status' : 'changelog'], 4000);
+    res.writeHead(out ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(out));
+    return;
+  }
+  // H235: after an update, a possible clash with their own extensions: talk it through, send it to the team, or it's fine.
+  if (/^\/api\/update\/clash-(chat|team|ok)$/.test(path0)) {
+    if (req.method !== 'POST' || req.headers['x-hq'] !== 'update') {
+      res.writeHead(403).end('Only the HQ page can do this');
+      return;
+    }
+    const out = await updateTool(['clash', path0.split('-').pop()]);
     res.writeHead(out ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(out));
     return;
   }

@@ -20,6 +20,7 @@ A file with an @ in front of its name in CLAUDE.md is loaded in full at the star
 | Where you stand now: work, health, money, home, people, appointments and their context | `current-situation.md` | @ |
 | Everything to do: tasks, priorities, deadlines, status, done, let go, shopping wishlist, groceries | `challenges.md` | @ |
 | Your six-week games: every day ticked or counted, the notes, the diary, each week's look back, the debrief (designed in your map, set up by the team) | `HQ/games.json` (shown in the app) | on demand |
+| What you build on top of HQ yourself (extensions: a connector, a routine, your own kind of text, extra call rules); updates never touch it, and HQ checks it after every update | `HQ/extensions/`, one folder each (how: HQ's `EXTENSIONS.md`) | on demand |
 | Life coaching's check-ins (when each was done) and the coaching line with your agent (shown in the app's Coaching place) | `HQ/coaching.json`, `HQ/coaching-line/` | on demand |
 | What happened in each conversation: your words, commitments, follow-ups | `coaching/log.md` | @ |
 | Log entries older than three hours | `coaching/log-archive.md` | on demand: when they ask about something earlier |

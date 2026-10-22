@@ -365,14 +365,61 @@ def mail_sorting():
 
 
 def mail_tools(sorting=None):
-    """The mail check's allowed and refused tools for this run (H213: the label tools only with sorting rules on)."""
+    """The mail check's allowed and refused tools for this run (H213: the label tools only with sorting rules on;
+    H235: their own extensions' mail scripts)."""
     sorting = mail_sorting() if sorting is None else sorting
+    ext = ""
+    try:
+        extensions = _ext()
+        ext = "".join("," + t for t in extensions.mail_tools())
+    except Exception as e:
+        log(f"extensions: {e!r}")
     if not sorting:
-        return MAIL_ALLOW, MAIL_DENY
+        return MAIL_ALLOW + ext, MAIL_DENY
     allow = MAIL_ALLOW + "," + ",".join(MAIL_SORT_TOOLS) + \
-        f",Bash(python3 {os.path.join(JV, 'routine', 'mailsort.py')} sorted:*)"
+        f",Bash(python3 {os.path.join(JV, 'routine', 'mailsort.py')} sorted:*)" + ext
     deny = ",".join(t for t in MAIL_DENY.split(",") if t not in MAIL_SORT_TOOLS)
     return allow, deny
+
+
+def _ext():
+    """H235: app/extensions.py (stdlib only)."""
+    app = os.path.join(JV, "app")
+    if app not in sys.path:
+        sys.path.insert(0, app)
+    import extensions
+    return extensions
+
+
+def mail_ext_text():
+    """H235: the extra steps their own extensions add to the mail check."""
+    try:
+        return _ext().mail_steps()
+    except Exception as e:
+        log(f"extensions: {e!r}")
+        return "(no extensions add steps)"
+
+
+def extensions_minute():
+    """H235: their own extensions' routines that are due, started in the background; and once per finished update,
+    the local check whether anything they added might clash with it. On the main HQ only for the routines (the
+    backup runs none of the user's work); the check on both, since each has its own update."""
+    extensions = _ext()
+    try:
+        found = extensions.after_update()
+        if found:
+            log(f"extensions: checked after the update to {found['to']}: {len(found['clashes'])} might clash")
+    except Exception as e:
+        log(f"extensions check: {e!r}")
+    if role.acting() != "main" or updating():
+        return
+    r = extensions.routines()
+    if r["started"]:
+        log("extensions: started " + ", ".join(r["started"]))
+    if extensions.all_():
+        routines.beat("extensions", state=r["state"], text=r["text"], last=time.time(), next=time.time() + 60, every=60)
+    else:
+        routines.drop("extensions")
 
 
 def mail_sort_text():
@@ -609,7 +656,8 @@ def start_mail():
     # H125: with Donna's open mail watches in it, and the one command that keeps a match for her to text.
     open(instructions, "w").write(open(os.path.join(HERE, "mail-check.md")).read().replace("{WORKSPACE}", FOLDER)
                                   .replace("{WATCHES}", mail_watches()).replace("{PINGS}", os.path.join(JV, "routine", "pings.py"))
-                                  .replace("{SORTING}", mail_sort_text()).replace("{MAILSORT}", os.path.join(JV, "routine", "mailsort.py")))
+                                  .replace("{SORTING}", mail_sort_text()).replace("{MAILSORT}", os.path.join(JV, "routine", "mailsort.py"))
+                                  .replace("{EXTENSIONS}", mail_ext_text()))
     open(cmd, "w").write(mail_script_tmux(instructions, run_file) if LINUX_WINDOWS else f"""#!/bin/zsh
 # The hourly mail check, started by the HQ routine (phase L, L8). Hidden: opened in the
 # background, minimized to the Dock, and the window closes itself when it's done (L7).
@@ -1321,6 +1369,10 @@ if __name__ == "__main__":
             direct_watch()
         except Exception as e:
             log(f"direct line: {e!r}")
+        try:
+            extensions_minute()
+        except Exception as e:
+            log(f"extensions: {e!r}")
     except Exception as e:  # never let one bad minute stop the next
         log(f"error: {e!r}")
         sys.exit(1)

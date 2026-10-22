@@ -442,6 +442,25 @@ class Policy:
             if len(args) == 1 or args[1] in ("summary", "json", "due") or (args[1] in ("done", "later") and len(args) == 3):
                 return Decision(ALLOW, "Life coaching's check-ins")
             return Decision(DENY, "from a call, the coaching script says what's due and marks a check-in done or not now")
+        # H235: their own extensions: list them, read their rules and the last clash check, and run one of an
+        # extension's own scripts, only one it declares (extensions.py refuses the rest); one that says "ask" waits for
+        # a yes. Settling a clash is the page's buttons'.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "extensions.py"):
+            sub = args[1] if len(args) > 1 else "list"
+            if sub in ("list", "summary", "json", "rule", "mail") or (sub == "clash" and len(args) == 2):
+                return Decision(ALLOW, "their own extensions")
+            if sub == "run" and len(args) >= 4:
+                try:
+                    import extensions as _ext
+                    s = _ext.script(args[2], args[3])
+                except Exception:
+                    s = None
+                if not s:
+                    return Decision(DENY, f"there's no script {args[3]} in an extension {args[2]} that's on")
+                if s.get("ask"):
+                    return _ask(f"run {args[3]} from your extension {args[2]}", "an extension's script that asks first")
+                return Decision(ALLOW, "one of their own extension's scripts")
+            return Decision(DENY, "from a call, the extensions script lists them, gives their rules, the last check, or runs one of their scripts")
         # H224: the workflows, read only: which are on, the call rule, a blank checklist, and their file's checklist
         # held against the guide before a layer is called done. Turning one on or off is Settings'.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "workflows.py"):
