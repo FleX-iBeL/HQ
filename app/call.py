@@ -50,8 +50,10 @@ from transcript import CallTranscript, now
 def _about(e: dict, what: str):
     """H101, H200, H225: what a call started from something in the app gets: an appointment (agenda), a to-do item
     (todo), or a layer or check-in of their Life coaching (coaching). H236: or setting up their news (news)."""
-    mod = (todo if e.get("kind") == "todo" else coaching if e.get("kind") == "coaching"
-           else news if e.get("kind") == "news" else agenda)
+    if e.get("kind") == "news":
+        mod = news
+    else:
+        mod = todo if e.get("kind") == "todo" else coaching if e.get("kind") == "coaching" else agenda
     if what == "line":
         return mod.when_line(e)
     if what == "greetings":
