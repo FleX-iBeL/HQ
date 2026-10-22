@@ -39,7 +39,7 @@
   .hqu button.x { border: 0; background: transparent; color: var(--u-soft); font-size: 18px; cursor: pointer; padding: 2px 6px; }
   .hqu-shade { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 60; display: none; }
   .hqu-shade.open { display: block; }
-  .hqu-sheet { position: fixed; z-index: 61; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 24px));
+  .hqu-sheet { position: fixed; z-index: 61; inset: 0; margin: auto; height: -webkit-fit-content; height: fit-content; width: min(560px, calc(100vw - 24px));
     max-height: calc(100vh - 48px); max-height: calc(100dvh - 48px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow: auto; overscroll-behavior: contain; background: var(--u-card); color: var(--u-ink); border-radius: 16px;
     box-shadow: 0 12px 40px rgba(0,0,0,.35); padding: 18px 18px 14px; display: none; }
   .hqu-sheet.open { display: block; }
@@ -243,6 +243,9 @@
     }, { passive: false });
     // F39 (18 October 2026): a pull down closes it too, the way every sheet on the call page closes since Modern 3;
     // from anywhere while it's scrolled to its top. It follows the finger with translate, so the centring stays.
+    // F48 (22 October 2026, his words: "Changelog in the app if you scroll it jumps to the bottom right and half is
+    // unreadable"): it was centred with a transform; on the iPhone a scroll could lose it, leaving its top-left corner
+    // in the middle of the screen. Now it's centred with inset and margin auto, no transform to lose.
     let p = null;
     const back = (go) => {
       const quick = matchMedia('(prefers-reduced-motion: reduce)').matches;

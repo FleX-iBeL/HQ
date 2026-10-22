@@ -2158,9 +2158,13 @@ async function readCall(name) {
     histLog.appendChild(div);
   }
   if (!histLog.querySelector(".msg")) histNote(histLog, "Nothing said");
-  histLog.scrollTop = 0;
   histShown = data.lines.some(l => l.text && l.who !== "filler") ? data : null;  // H60: what Continue picks up
   showHistFoot();
+  // H233 (his note, 20 October 2026: "When you open up past calls it start at the top, make it start at the bottom"):
+  // a past call opens where it ended, like a chat. After the Continue button below it shows (it takes room), and again a
+  // frame later, once its formatted lines have their height.
+  const toEnd = () => { if (ask === histAsk) histLog.scrollTop = histLog.scrollHeight; };
+  toEnd(); requestAnimationFrame(toEnd);
 }
 // H60: Continue an earlier call. Only when not on a call; never as Free (nothing of the user's goes into a Free
 // call, and Free calls are never saved). It starts a call with that call's agent (else the one picked), the new

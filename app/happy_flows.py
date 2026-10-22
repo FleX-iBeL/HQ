@@ -4945,6 +4945,13 @@ setTimeout(() => {
   out.push("call:" + (histEl.classList.contains("reading") && shown(histLog) && !shown(histList) && msgs.length === 4
     && histLog.querySelectorAll(".msg.me.cancelled").length === 1 && histTitle.textContent.startsWith("Donna · ")
     && !histLog.textContent.includes("challenges.md") && !histLog.textContent.includes("connected") ? "ok" : "WRONG " + msgs.length + " " + histTitle.textContent));
+  // H233: a past call opens where it ended, at its newest lines.
+  document.getElementById("histback").click(); await wait(300);
+  const short = ONE.lines.slice(); for (let i = 0; i < 40; i++) ONE.lines.push({ who: i % 2 ? "hq" : "user", text: "Line " + i + " of a long call." });
+  histList.querySelectorAll("button")[1].click(); await wait(400);
+  out.push("at-end:" + (histLog.scrollHeight > histLog.clientHeight && histLog.scrollTop > 0 && histLog.scrollHeight - histLog.clientHeight - histLog.scrollTop <= 2
+    ? "ok" : "WRONG " + histLog.scrollTop + "/" + histLog.scrollHeight + "/" + histLog.clientHeight));
+  ONE.lines = short;
   document.getElementById("histback").click(); await wait(400);
   out.push("back:" + (!histEl.classList.contains("reading") && shown(histList) && histList.querySelectorAll("button").length === 3 ? "ok" : "WRONG"));
   chatBtn.click(); await wait(300);
@@ -4972,16 +4979,17 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
   : String(url) === "api/calls" ? (stubEmpty ? { calls: [] } : CALLS) : { lines: [] }) });</script>""")
         f = self.tmp / "h57.html"
         f.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
-        for where, q in (("phone", ""), ("app", "?app=1")):
-            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=390,844",
-                                              f"--user-data-dir={self.tmp / ('h57-' + where)}", "--virtual-time-budget=20000", "--dump-dom", f.as_uri() + q], timeout=120)
+        for where, q, size in (("phone", "", "390,844"), ("small phone", "", "320,568"), ("app", "?app=1", "390,844")):
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=" + size,
+                                              f"--user-data-dir={self.tmp / ('h57-' + where.replace(' ', '-'))}", "--virtual-time-budget=20000", "--dump-dom", f.as_uri() + q], timeout=120)
             m = re.search(r'<pre id="h57">H57RESULT (.*?) END</pre>', r.stdout)
             need(m, f"the page test didn't finish ({where}): {(r.stderr or r.stdout)[-300:]!r}")
             res = m.group(1)
             say(f"   {where}: {res}")
             need(all(part.endswith(":ok") for part in res.split(" | ")), f"the past-calls button or sheet isn't right ({where}): {res}")
         return ("every saved call newest first with date, time and agent, one call read by name only, served read only; "
-                "the button in the dock before the voice button before, during and after a call, in the browser and the app; list, call, Back, Close")
+                "the button in the dock before the voice button before, during and after a call, in the browser and the app; list, call, Back, Close; "
+                "H233: a long call opens at its end")
     async def flow83(self) -> str:
         """H105, no Claude: the notes button. The notes file itself (notes.py on a throwaway copy), the call server's
         /api/notes on the test server's own notes file (the workspace's is never touched), and the real call page in a
@@ -6910,6 +6918,10 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
   ver.click(); await wait(100);
   check("changelog", sheet.classList.contains("open") && sheet.textContent.includes("running the latest version, v0.2") && sheet.textContent.includes("The first version")
         && sheet.textContent.includes("you’re here"), sheet.textContent.slice(0, 160));
+  // F48: centred without a transform, so a scroll on the iPhone can't leave it in the bottom right.
+  const at = () => { const q = sheet.getBoundingClientRect(); return [Math.round(q.left), Math.round(innerWidth - q.right), Math.round(q.top)]; };
+  const a0 = at(); sheet.scrollTop = 400; await wait(50); const a1 = at();
+  check("changelog-centred", getComputedStyle(sheet).transform === "none" && Math.abs(a0[0] - a0[1]) <= 1 && a0.join() === a1.join(), a0 + "/" + a1 + " " + getComputedStyle(sheet).transform);
   const pre = document.createElement("pre"); pre.id = "r"; pre.textContent = "H59RESULT " + out.join(" | ") + " END"; document.body.appendChild(pre);
 })();
 </script></body></html>"""
