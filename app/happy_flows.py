@@ -12039,7 +12039,9 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
   await until(() => document.querySelector(".tdq.q2 .n"), 4000);
   const n = q => (document.querySelector(".tdq." + q + " .n") || {}).textContent;
   out.push("matrix:" + ["q1", "q2", "q3", "q4"].map(n).join("/"));
-  out.push("commit:" + (/Call the plumber back/.test(document.querySelector("#todobody .card") ? document.querySelector("#todobody .card").textContent : "") ? "ok" : "no"));
+  // the first card that isn't very important mail (the server reads the real mail list; mail stays on top by design)
+  const firstCard = document.querySelector("#todobody .card:not(.mail)");
+  out.push("commit:" + (/Call the plumber back/.test(firstCard ? firstCard.textContent : "") ? "ok" : "no"));
   const sh = document.getElementById("todosheet").getBoundingClientRect();
   out.push("sheet:" + (sh.height > 200 && sh.bottom <= innerHeight + 1 ? "ok" : "off"));
   document.querySelector(".tdq.q2").click(); await wait(100);
