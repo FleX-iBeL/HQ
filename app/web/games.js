@@ -17,8 +17,7 @@
   const css = document.createElement("style");
   css.textContent = `
   #gamesheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
-               border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:8px;
-               padding:14px 16px calc(220px + env(safe-area-inset-bottom)); text-align:left; }
+               border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:8px; text-align:left; }
   #gamesheet.open { display:flex; }
   #gamehead { position:relative; flex-shrink:0; }
   #gamesheet h2 { margin:0; font-size:15px; font-weight:600; color:var(--muted); text-align:center; padding:0 74px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

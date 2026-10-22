@@ -12368,7 +12368,9 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         server's own copy, changes it only from the page, and her canned reply comes back on the coaching line. On the
         call page in a headless browser (the phone, a small phone, the desktop app): the Coaching button with its red
         dot, the sheet with the due check-in, the coaching line, the six layers; a layer's checklist; Done takes the
-        dot away and reaches the file; nothing is wider than the screen."""
+        dot away and reaches the file; nothing is wider than the screen. F47: all six layers are in sight without
+        scrolling before a call (every size) and on one (the phone and the desktop app; a small phone's sheet on a call
+        is too short, so it scrolls there)."""
         import coaching as co
         import workflows
         from datetime import datetime as _dt, date as _date, timedelta as _td
@@ -12564,6 +12566,11 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
   const b = $("coachbody").textContent;
   out.push("main:" + $("coachsheet").dataset.view + "/" + document.querySelectorAll("#coachbody .ccard.due").length + "/" + (/Text Pepper/.test(b) ? "line" : "noline"));
   out.push("layers:" + [...document.querySelectorAll("#coachbody button.ccard")].filter(c => /^\s*(done|in progress|not started)\s*\d\./.test(c.textContent)).length);
+  // F47: every layer in sight without scrolling, before a call and on one (the sheet keeps the shared padding)
+  const inSight = () => { const lim = $("coachbody").getBoundingClientRect().bottom + 1;
+    return [...document.querySelectorAll("#coachbody .clayer")].filter(c => c.getBoundingClientRect().bottom <= lim).length; };
+  out.push("sight:" + inSight());
+  document.body.classList.add("chatting"); await wait(50); out.push("sightcall:" + inSight()); document.body.classList.remove("chatting"); await wait(50);
   const start = [...document.querySelectorAll("#coachbody .ccard.due .cbtn")].find(x => /Start with Pepper/.test(x.textContent));
   out.push("start:" + (start && !start.disabled ? "ok" : "no"));
   [...document.querySelectorAll("#coachbody button.ccard")].find(c => /4\. The ideal week/.test(c.textContent)).click(); await wait(50);
@@ -12598,6 +12605,8 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
                 say(f"   {name} ({size}): {mm.group(1)}")
                 need(res["button"] == "ok", f"{name}: the Coaching button or its dot isn't in the dock: {res}")
+                need(res["sight"] == "6" and (res["sightcall"] == "6" or name == "a small phone"),
+                     f"{name}: not every layer of the map is in sight without scrolling (F47): {res}")
                 need(res["main"] == "main/1/line" and res["layers"] == "6" and res["start"] == "ok", f"{name}: the Coaching place's first view is off: {res}")
                 need(res["layer"].startswith("layer/30/go") and res["thread"] == "thread/1/send", f"{name}: a layer's checklist or the coaching line is off: {res}")
                 need(res["done"] == "ok/nodot" and key in json.loads(cf.read_text()).get("done", {}), f"{name}: Done didn't take the dot away or reach the file: {res}")

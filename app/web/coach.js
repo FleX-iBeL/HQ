@@ -22,8 +22,7 @@
                     box-shadow:0 0 0 2px var(--bg); display:none; }
   #coachbtn.due .cdot { display:block; }
   #coachsheet { position:fixed; left:0; right:0; bottom:0; height:82vh; z-index:10; background:var(--bg); border-top:1px solid var(--muted);
-                border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:8px;
-                padding:14px 16px calc(220px + env(safe-area-inset-bottom)); text-align:left; }
+                border-radius:18px 18px 0 0; box-shadow:0 -8px 24px rgba(0,0,0,.2); display:none; flex-direction:column; gap:8px; text-align:left; }
   #coachsheet.open { display:flex; }
   #coachhead { position:relative; flex-shrink:0; }
   #coachsheet h2 { margin:0; font-size:15px; font-weight:600; color:var(--muted); text-align:center; padding:0 74px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -45,6 +44,13 @@
   #coachbody .cbar { height:6px; border-radius:99px; background:color-mix(in srgb, var(--muted) 22%, transparent); margin:8px 0 2px; overflow:hidden; display:flex; }
   #coachbody .cbar i { display:block; height:100%; background:var(--accent); }
   #coachbody .cbar i.p { background:color-mix(in srgb, var(--accent) 45%, transparent); }
+  #coachbody .clayers { display:flex; flex-direction:column; gap:6px; }
+  #coachbody .clayer { position:relative; padding:10px 12px 14px; }
+  #coachbody .clayer > b { display:flex; align-items:center; gap:8px; }
+  #coachbody .clayer .cword { order:3; float:none; margin:0; flex-shrink:0; }
+  #coachbody .clayer .cname { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #coachbody .clayer .ccount { order:2; flex-shrink:0; color:var(--muted); font-size:12px; font-weight:600; }
+  #coachbody .clayer .cbar { position:absolute; left:12px; right:12px; bottom:6px; height:3px; margin:0; }
   #coachbody .crow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:9px; }
   #coachbody .cbtn { border:1px solid color-mix(in srgb, var(--muted) 40%, transparent); background:var(--bg); color:var(--fg); border-radius:999px;
                      font:600 14px/1 -apple-system,sans-serif; padding:9px 14px; cursor:pointer; }
@@ -113,8 +119,24 @@
       const r = el("div", "crow"); r.style.justifyContent = "center"; r.appendChild(startBtn("layer:1", "Start the first session")); body.appendChild(r);
       return;
     }
+    // F47: the map first, one short row per layer, so every layer shows without scrolling on a phone; the due
+    // check-ins come right after it, and the details (parked, for later, open) are a tap away in the layer itself.
+    heading("Your map");
+    const list = el("div", "clayers"); body.appendChild(list);
+    for (const L of data.layers) {
+      const b = el("button", "ccard clayer"); b.type = "button";
+      const c = L.counts || {}, tot = L.total || 1, put = (c.parked || 0) + (c.later || 0);
+      const w = el("span", "cword" + (L.word === "done" ? " done" : L.word === "in progress" ? " prog" : ""), L.word);
+      const h = el("b"); h.append(w, el("span", "cname", L.n + ". " + L.name.replace(/\s*\(.*?\)\s*/g, " ").trim()),
+                                el("span", "ccount", (c.answered || 0) + "/" + L.total)); b.appendChild(h);
+      const bar = el("div", "cbar"); const a = el("i"); a.style.width = (100 * (c.answered || 0) / tot) + "%";
+      const p = el("i", "p"); p.style.width = (100 * put / tot) + "%"; bar.append(a, p); b.appendChild(bar);
+      b.setAttribute("aria-label", L.n + ". " + L.name + ", " + L.word + ": " + (c.answered || 0) + " of " + L.total + " answered" +
+                     (put ? ", " + put + " parked or for later" : "") + ((c.open || 0) ? ", " + c.open + " open" : ""));
+      b.addEventListener("click", () => go("layer", L.n)); list.appendChild(b);
+    }
+    heading("Check-ins");  // the due ones first, marked, right under the map (F47: the map stays in sight)
     const due = data.checkins.filter(c => c.due);
-    if (due.length) heading("Time for");
     for (const c of due) {
       const k = card("due"); k.appendChild(el("b", "", c.title)); k.appendChild(el("div", "csub", c.line));
       const r = el("div", "crow"); r.appendChild(startBtn(c.key));
@@ -122,23 +144,6 @@
       r.appendChild(button("Not now", "", () => send({ later: c.key }).then(d => d && draw())));
       k.appendChild(r);
     }
-    const t = el("button", "ccard"); t.type = "button";
-    const n = unread(), last = (data.thread || []).slice(-1)[0];
-    t.appendChild(el("b", "", "Text " + who() + (n ? " · " + n + " new" : "")));
-    t.appendChild(el("div", "csub", last ? (last.from === "me" ? "You: " : "") + last.text.slice(0, 110) : "Talk life coaching any time: the check-ins land here too."));
-    t.addEventListener("click", () => go("thread")); body.appendChild(t);
-    heading("Your map");
-    for (const L of data.layers) {
-      const b = el("button", "ccard"); b.type = "button";
-      const w = el("span", "cword" + (L.word === "done" ? " done" : L.word === "in progress" ? " prog" : ""), L.word);
-      const h = el("b", "", L.n + ". " + L.name.replace(/\s*\(.*?\)\s*/g, " ").trim()); h.prepend(w); b.appendChild(h);
-      const c = L.counts || {}, tot = L.total || 1;
-      const bar = el("div", "cbar"); const a = el("i"); a.style.width = (100 * (c.answered || 0) / tot) + "%";
-      const p = el("i", "p"); p.style.width = (100 * ((c.parked || 0) + (c.later || 0)) / tot) + "%"; bar.append(a, p); b.appendChild(bar);
-      b.appendChild(el("div", "csub", (c.answered || 0) + " of " + L.total + " answered" + ((c.parked || 0) + (c.later || 0) ? ", " + ((c.parked || 0) + (c.later || 0)) + " parked or for later" : "") + ((c.open || 0) ? ", " + c.open + " open" : "")));
-      b.addEventListener("click", () => go("layer", L.n)); body.appendChild(b);
-    }
-    heading("Check-ins");
     const rest = data.checkins.filter(c => !c.due);
     if (!data.checkins.some(c => c.kind === "week"))
       { const k = card(); k.appendChild(el("b", "", "The weekly look back")); k.appendChild(el("div", "csub", "Not set yet: its moment comes from your ideal week, in a session.")); }
@@ -147,6 +152,11 @@
       k.appendChild(el("div", "csub", [c.when, c.line].filter(Boolean).join(" · ")));
     }
     if (!data.kept) { const k = card(); k.appendChild(el("div", "csub", "HQ starts keeping your check-ins in a moment.")); }
+    const t = el("button", "ccard"); t.type = "button";
+    const n = unread(), last = (data.thread || []).slice(-1)[0];
+    t.appendChild(el("b", "", "Text " + who() + (n ? " · " + n + " new" : "")));
+    t.appendChild(el("div", "csub", last ? (last.from === "me" ? "You: " : "") + last.text.slice(0, 110) : "Talk life coaching any time: the check-ins land here too."));
+    t.addEventListener("click", () => go("thread")); body.appendChild(t);
   }
   function drawLayer(n) {
     const L = (data.layers || []).find(x => x.n === n);

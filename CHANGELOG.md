@@ -14,6 +14,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 - The team's work is sorted into one clear set of kinds, made from everything the team has done so far: small and big builds, research and reading, transcribing, the routine's own maintenance, releases and merges. Reading work no longer lands in a pile of one-minute jobs, and the pause now counts how sure the estimate is: when the first look, the call or the team itself guessed a job would take longer, it gets that much more room (at most twice) before the pause at four times (H220).
 
 ### Fixed
+- The Coaching place shows every layer of your map and the check-ins without scrolling. Before a call it kept a big empty space at the bottom, so only the first three layers showed; now each layer is one short row, the map comes first and the check-ins right under it, before a call and on one. The six-week game screen had the same empty space; it is gone there too (F47).
 - A long typed message on a call goes in whole. The chat's box and the call cut anything past 2000 characters without a word, so a long dictated message lost its end; now one message takes up to 10000, and past that it stays in the box and says so instead of being cut (F46).
 
 ## 0.4.9 · 21 October 2026
