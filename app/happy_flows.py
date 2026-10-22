@@ -7392,12 +7392,45 @@ setTimeout(() => {
         need("about_self.py\" add <her name>" in config.WRAP_UP_PROMPT and "@HQ@" not in config.WRAP_UP_PROMPT,
              "the after-call notes don't keep what an agent said about herself")
         need("about_self.py\" add donna" in direct_line._text_rules(), "her chat doesn't keep what she says about herself")
+        # H232: the list really grows: HQ harvests after a call and a text, a near-repeat is skipped, and she's nudged
+        pepper = agents.find(ws, "pepper")
+        need(about_self.add(ws, pepper, "Has said she's at her desk down the hall with a notebook, and that she takes a breath before she answers.")
+             and not about_self.add(ws, pepper, "Has a desk down the hall with a notebook, takes a breath before she answers."),
+             "the same detail said a bit differently is kept twice")
+        about_self._write(ws, pepper, ["Likes rainy Sundays", "Likes rainy Sundays a lot", "Can't stand cold coffee"])
+        need(about_self.tidy(ws, pepper) == 1 and about_self.facts(ws, "pepper") == ["Likes rainy Sundays", "Can't stand cold coffee"],
+             "tidy doesn't drop the near-repeats, or drops a different detail")
+        call = ("# Call\n\nStarted 10:00:00 · agent Pepper · brain x\n\n- 10:00:05 **Sam:** Morning\n"
+                "- 10:00:08 **HQ:** Bit slow today, I was up late with a puzzle.<br>Your dentist is at three.\n"
+                "- 10:00:09 *Donna joined: a three-way call with Pepper, Donna*\n- 10:00:10 **HQ:** Hi Sam!\n")
+        who, said = about_self.call_lines(call, agents.load(ws))
+        need(sorted(a["id"] for a in who) == ["donna", "pepper"] and "up late with a puzzle" in said and "Morning" not in said,
+             f"the harvest doesn't see who was on the call or only their lines: {[a['id'] for a in who]} {said!r}")
+        os.environ["HQ_ABOUT_FAKE"] = json.dumps({"new": [{"agent": "Pepper", "fact": "Was up late doing a puzzle"},
+                                                          {"agent": "Pepper", "fact": "Can't stand cold coffee."},
+                                                          {"agent": "Nobody", "fact": "x"}]})
+        try:
+            kept = about_self.harvest(ws, who, said)
+        finally:
+            os.environ.pop("HQ_ABOUT_FAKE", None)
+        need(len(kept) == 1 and kept[0][0] == "Pepper" and about_self.facts(ws, "pepper")[-1].startswith("Was up late doing a puzzle ("),
+             f"the harvest doesn't keep only the new detail, dated: {kept}")
+        per = agents.persona(agents.find(ws, "pepper"), "Sam")
+        need("Was up late doing a puzzle" in per and "Never contradict" in per and "say why it changed" in per
+             and "small new detail" in per and "bring an old one back" in per,
+             "her persona doesn't nudge her to add a new detail, bring an old one back and never contradict one")
+        need(about_self.block(pepper, "Sam", "2030-01-01") != about_self.block(pepper, "Sam", "2030-01-02")
+             or about_self.block(pepper, "Sam", "2030-01-01") != about_self.block(pepper, "Sam", "2030-01-03"),
+             "the nudge is the same every day")
+        need("about_self" in (APP / "call.py").read_text() and "_harvest(answer)" in (APP / "direct_line.py").read_text(),
+             "HQ doesn't harvest after a call or a text")
         need(not name or name not in (APP / "about_self.py").read_text(), "the user's name is written in HQ's about_self.py")
         need("about-herself" in tmpl, "the template's agents readme doesn't mention her own list")
         return ("Donna, Pepper and Moneypenny each with her agreed greeting and push-back, nothing personal; her character and no "
                 "talking while she thinks; calls greet in her words; a workspace's own character wins and is marked; "
                 "Settings, /api/agents, agents.py and the readme show the defaults; what she says about herself is kept in "
-                "her own list and comes with her persona (H132)")
+                "her own list and comes with her persona (H132); HQ harvests new details after calls and texts, near-repeats "
+                "skipped, and she's nudged to add one and bring an old one back (H232)")
 
 
     # 70

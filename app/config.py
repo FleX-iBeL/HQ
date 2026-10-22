@@ -600,9 +600,9 @@ Do the after-call work, quietly and fully, as in a normal chat:
 1. Write what matters from this call into the right places, as where-things-go.md says, in his words. \
 At least one entry in coaching/log.md, newest first, headed with today's date, the time the call \
 started ({start}) and the type "call", with his own words from the call and any commitments or follow-ups. \
-If you or another agent on this call said something about herself (her chair, her desk, her coffee, what she was \
-doing at HQ), keep each new fact with python3 "@HQ@/app/about_self.py" add <her name> "<the fact, one short line>" \
-(H132; it skips what's already kept and prints her file, which you add to the commit too).
+HQ has already kept the new things you and any other agent on this call said about yourselves (H232), so add \
+every HQ/agents/*-about-herself.md that git shows as changed to the commit. Only if one is clearly missing, keep it \
+with python3 "@HQ@/app/about_self.py" add <her name> "<the fact, one short line>" (H132; it skips a repeat).
 2. The full transcript of the call is in {transcript}. Read it if you need to; don't change it.
 3. Then commit and push, as CLAUDE.md says: git add every file you changed plus the transcript, \
 each by name (never -A or a dot), then one plain command: git commit -q -m "Call {start_short}: <a short description>", then git push. \

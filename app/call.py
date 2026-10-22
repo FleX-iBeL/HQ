@@ -319,6 +319,16 @@ class Call:
                 if is_backup():
                     prompt = re.sub(r"^3\. Then commit and push.*?no here-documents\.$", lambda m: config.WRAP_UP_BACKUP_STEP,
                                     prompt, count=1, flags=re.S | re.M)
+            if template is config.WRAP_UP_PROMPT:  # H232: HQ itself keeps what the agents said about themselves
+                try:
+                    import about_self
+                    words = self.transcript.path.read_text(encoding="utf8")
+                    who, said = about_self.call_lines(words, agents.load(config.FOLDER))
+                    kept = await asyncio.wait_for(asyncio.to_thread(about_self.harvest, config.FOLDER, who, said),
+                                                  timeout=about_self.HARVEST_TIMEOUT + 10)
+                    logger.info(f"About themselves: {len(kept)} new kept" + "".join(f"; {n}: {f}" for n, f in kept))
+                except Exception as e:
+                    logger.warning(f"About themselves: the harvest failed: {e!r}")
             t = time.perf_counter()
             if config.CHEAP_AFTER_CALL and self.brain._client:  # K4: the quiet work on a cheaper model
                 try:

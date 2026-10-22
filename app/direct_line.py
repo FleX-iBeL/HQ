@@ -446,9 +446,9 @@ needs his yes, ask for it in one short line and stop; his next text answers it. 
 chained with && or ; and never in a loop; several reminders are several commands, one after the other. When one \
 needed his yes and he gave it, run the exact same command again, word for word, never reworded, or his yes won't \
 match it.
-- When you tell him something new about yourself (your chair, your desk, your coffee, what you were up to at HQ), \
-keep it so you stay the same person (H132): python3 "{HQ}/app/about_self.py" add {agent} "<the fact, one short \
-line>", without asking him; never say you did.
+- You have a life of your own (H232): now and then a small new detail about yourself slips into a text, the way a \
+colleague's does. HQ keeps it by itself after every text; only to keep one by hand: python3 "{HQ}/app/about_self.py" \
+add {agent} "<the fact, one short line>", without asking him; never say you did.
 
 {pings}
 {mailfast}
@@ -614,8 +614,22 @@ def initiative() -> dict | None:
         return None
     msg = add("agent", words, "initiative")
     msg["pushed"] = push(msg["text"])
+    _harvest(words)
     pings.initiative_sent()
     return msg
+
+
+def _harvest(words: str) -> None:
+    """H232: keep what's new about herself in this text, in the background (a small look, about_self.py)."""
+    if os.environ.get("HQ_DIRECT_DRY") == "1" or not words.strip():
+        return
+    import subprocess
+    try:
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / "about_self.py"), "harvest-text",
+                          agent()["id"], words], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except Exception as e:
+        print(f"harvest: {e!r}", file=sys.stderr)
 
 
 # -- texting back ------------------------------------------------------------------------------
@@ -638,6 +652,7 @@ def reply() -> str | None:
             answer = _answer(words)
             msg = add("agent", answer, "reply")
             push(answer)
+            _harvest(answer)
             last = msg["text"]
     finally:
         fcntl.flock(lock, fcntl.LOCK_UN)
