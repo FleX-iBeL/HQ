@@ -456,7 +456,7 @@ def alerts(data: bytes) -> list[dict]:
         periods = [(_n(p, 1), _n(p, 2)) for p in (pb(x) for x in a.get(1, []))]
         text = words(10)
         more = words(11)
-        out.append({"id": _s(e, 1), "text": text if not more or more.strip() == text.strip() else f"{text} {more}".strip(),
+        out.append({"id": _s(e, 1), "header": text, "text": text if not more or more.strip() == text.strip() else f"{text} {more}".strip(),
                     "stops": [_s(x, 5) for x in ie if _s(x, 5)], "routes": [_s(x, 2) for x in ie if _s(x, 2)],
                     "periods": periods})
     return out
@@ -541,7 +541,7 @@ def plan(e: dict, s: dict, evs: list[dict]) -> dict:
     rec.pop("why_not", None)
     if mode_of(rec) == "car":
         return _plan_car(e, rec | base, a, b)
-    lk = travel.link_for(a, b)
+    lk = travel.link_for(a, b, at=_ts(e.get("start", "")) or None, arrive=True)  # H240: there by its start
     all_stops = stops()
     st_a, st_b = nearest_station(a), nearest_station(b)
     if st_a and st_b and st_a["code"] == st_b["code"]:
@@ -837,6 +837,53 @@ def stop_news(rec: dict, at: float, all_alerts: list[dict]) -> list[tuple[str, s
         out.append((f"stop-{al['id']}", f"A message for a stop near {'the start' if start_side else 'the appointment'}: "
                     f"{al['text']}"))
     return out
+
+
+NOTICE_AROUND = 2 * 3600  # H240: a notice counts when it's on within this long of the leaving time
+NOTICES_MAX = 4  # at most this many in the line with a link
+
+
+def notices(a: dict, b: dict, at: float, all_alerts: list[dict] | None = None,
+            all_trains: list[dict] | None = None) -> list[str]:
+    """H240: the notices that matter for a trip from a to b around `at`, for the line with a 9292 link: the bus, tram
+    and metro messages for the stops near either end (a stop closed or moved, a replacement stop, a line changed), and
+    trouble at the train stations near them. Only what the open feeds say, each once; [] when nothing's there, or when
+    the feeds can't be read. The lines on the way can't be known without the advice itself (9292 plans it in its page),
+    so only the messages that name a stop near an end count."""
+    if os.environ.get("HQ_TRAVEL_OFFLINE") and not os.environ.get("HQ_TRIPS_FAKE_DIR"):
+        return []
+    all_stops = stops()
+    names = {}
+    near = {}
+    for which, place in (("start", a), ("end", b)):
+        ids = stops_near(place, all_stops)
+        near[which] = set(ids)
+    if near["start"] or near["end"]:
+        names = {x[0]: x[1] for x in all_stops if x[0] in near["start"] | near["end"]}
+    all_alerts = alerts(feed("alerts.pb")) if all_alerts is None else all_alerts
+    out, seen = [], set()
+    for al in all_alerts:
+        text = " ".join((al.get("header") or al.get("text") or "").split())
+        text = text.split(" -- ")[0].strip()  # GVB writes it in Dutch, then " -- " and in English: the Dutch is 9292's
+        if not text or text in seen:
+            continue
+        if al["periods"] and not any((p0 or 0) <= at + NOTICE_AROUND and (p1 or at + 1) >= at - NOTICE_AROUND
+                                     for p0, p1 in al["periods"]):
+            continue
+        for which in ("start", "end"):
+            hit = near[which].intersection(al["stops"])
+            if hit:
+                stop = next((names[x] for x in sorted(hit) if names.get(x)), "")
+                where_ = f"near {'the start' if which == 'start' else 'the end'}" + (f" ({stop})" if stop else "")
+                out.append(f"At a stop {where_}: {text.rstrip('.')}.")
+                seen.add(text)
+                break
+    st_a, st_b = nearest_station(a), nearest_station(b)
+    if st_a and st_b and st_a["code"] != st_b["code"]:
+        all_trains = trains(feed("trainUpdates.pb")) if all_trains is None else all_trains
+        for _, words in station_news({"stations": {"from": st_a, "to": st_b}}, at, all_trains):
+            out.append(words.replace(" Check the trip again.", ""))
+    return out[:NOTICES_MAX]
 
 
 def check(now: float | None = None, dry: bool = False) -> list[tuple[str, str]]:

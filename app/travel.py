@@ -29,7 +29,22 @@ does: H161), or else the weather's last spot from the phone, while either is und
 before. A start he names wins, and "home" is home. The output says which start it used. The spot is kept in the direct
 line's folder (here.json, off GitHub, like weather.json).
 
-    python3 app/travel.py link "TO" [--from "FROM"] [--train] [--surcharge] [--reservation]   the link, and what it understood
+H240 (23 October 2026, Donna's chat), the user: "can you also include the time to leave in the url?", and on the call
+at 12:57: "i think this is important that the travel advice she sends out is accurate to the leaving time in the
+calendar". 9292's planner keeps a time only in its other kind of link, the one its own form makes:
+`/reisplanner/<from>/<to>/Departure|Arrival/<YYYY-MM-DDTHHmm in UTC>?fromLabel=…&toLabel=…&…`, its places and labels
+in the page's own light code: "92" before the text, each character xor'd with a key that's public in the page
+(PUBLIC_URL_PARAM_CIPHER_KEY), then base64 for URLs (read from its page code, and checked by decoding a link of
+9292's own: its places came out as @lat,lon and its labels as the addresses). `--at TIME` leaves then, `--by TIME`
+gets there by then; without either the link plans from now, as before. TIME is 14:45 (today), tomorrow 14:45,
+2026-10-24 14:45, or a calendar start like 2026-10-24T14:45:00+02:00. If 9292 ever changes its key, CIPHER_KEY is the
+one line to change (its old key keeps working there for a while, as it keeps a legacy one).
+
+With the link it gives the notices that matter for the trip (trips.notices, the open live data of H229): messages
+for the bus, tram and metro stops near both ends, and trouble at the train stations near them, around that time.
+Only what the feeds say; nothing found, nothing said. `--no-notices` leaves them out.
+
+    python3 app/travel.py link "TO" [--from "FROM"] [--train] [--surcharge] [--reservation] [--at TIME|--by TIME]
     python3 app/travel.py link "TO" --json                                     the same as JSON
     python3 app/travel.py where "PLACE"                                        what a place resolves to (a check)
     python3 app/travel.py here LAT LON                                         keep where the phone is now (the pages)
@@ -37,6 +52,7 @@ line's folder (here.json, off GitHub, like weather.json).
 FROM is where the phone is, else home, when left out; "home" (or thuis) works for TO too.
 """
 import argparse
+import base64
 import csv
 import io
 import json
@@ -47,6 +63,7 @@ import time
 import unicodedata
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -61,6 +78,8 @@ STATIONS_DAYS = 60  # the list is read again after this; an older copy still wor
 HOME_WORDS = {"home", "thuis", "my home", "huis", "naar huis", "my place", "my house"}
 HERE_FRESH = 30 * 60  # H217: the phone's spot stands in for home this long
 PDOK_REVERSE = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/reverse"
+CIPHER_KEY = "MV9yZWlzYWR2aWVzIHVpdCBoZXQgdmVybGVkZW4="  # H240: 9292's public key for the places in its timed links
+MODALITIES = "Bus,Train,Tram,Subway,Ferry"  # 9292's own list, as its timed links carry it
 UA = "HQ travel link (open source; https://github.com/FleX-iBeL/HQ)"
 
 
@@ -250,19 +269,66 @@ def start(frm: str = "", now: float | None = None) -> dict:
     return where("") | {"start": "home"}
 
 
-def link(to: str, frm: str = "", train: bool = False, surcharge: bool = False, reservation: bool = False) -> dict:
-    return link_for(start(frm), where(to), train, surcharge, reservation)
+def link(to: str, frm: str = "", train: bool = False, surcharge: bool = False, reservation: bool = False,
+         at: float | None = None, arrive: bool = False) -> dict:
+    return link_for(start(frm), where(to), train, surcharge, reservation, at, arrive)
 
 
-def link_for(a: dict, b: dict, train: bool = False, surcharge: bool = False, reservation: bool = False) -> dict:
-    """The 9292 link between two places already found (where(), start()); H229's trips keep theirs."""
+def code(text: str) -> str:
+    """H240: a place or a label the way 9292's timed links carry it (the page's own light code, see above)."""
+    raw = "92" + text
+    x = "".join(chr(ord(c) ^ ord(CIPHER_KEY[i % len(CIPHER_KEY)])) for i, c in enumerate(raw))
+    return base64.b64encode(x.encode("latin-1")).decode().replace("+", "-").replace("/", "_").rstrip("=")
+
+
+def uncode(text: str) -> str:
+    """The other way (a check, and to read 9292's own links)."""
+    t = text.replace("-", "+").replace("_", "/")
+    raw = base64.b64decode(t + "=" * (-len(t) % 4)).decode("latin-1")
+    x = "".join(chr(ord(c) ^ ord(CIPHER_KEY[i % len(CIPHER_KEY)])) for i, c in enumerate(raw))
+    if not x.startswith("92"):
+        raise ValueError("not a 9292 place")
+    return x[2:]
+
+
+def when(text: str, now: float | None = None) -> float:
+    """H240: a time he names or a calendar start, as seconds since 1970. 14:45 is today; tomorrow 14:45; a date with a
+    time; an ISO start with or without its offset (without: this computer's own time zone)."""
+    t = (text or "").strip().lower()
+    base = datetime.fromtimestamp(now or time.time())
+    m = re.fullmatch(r"(?:(today|vandaag|tomorrow|morgen)\s+)?(?:at\s+|om\s+)?(\d{1,2})[:.h](\d{2})", t)
+    if m:
+        d = base + timedelta(days=1) if m.group(1) in ("tomorrow", "morgen") else base
+        return d.replace(hour=int(m.group(2)), minute=int(m.group(3)), second=0, microsecond=0).timestamp()
+    t = re.sub(r"^(\d{4}-\d{2}-\d{2})\s+", r"\1T", t).upper().replace("Z", "+00:00")
+    try:
+        d = datetime.fromisoformat(t)
+    except ValueError:
+        raise NotFound(f"the time {text!r} (say it like 14:45, tomorrow 14:45 or 2026-10-24 14:45)")
+    return (d if d.tzinfo else d.astimezone()).timestamp()
+
+
+def link_for(a: dict, b: dict, train: bool = False, surcharge: bool = False, reservation: bool = False,
+             at: float | None = None, arrive: bool = False) -> dict:
+    """The 9292 link between two places already found (where(), start()); H229's trips keep theirs. With `at` (H240)
+    it plans for that time: leaving then, or with `arrive` getting there by then."""
+    if at:
+        q = {"fromLabel": code(a["label"]), "toLabel": code(b["label"]),
+             "modalities": "Train" if train else MODALITIES,
+             "withSurcharge": "true" if surcharge else "false", "onDemand": "true" if reservation else "false"}
+        stamp = datetime.fromtimestamp(at, timezone.utc).strftime("%Y-%m-%dT%H%M")
+        url = (f"{PLANNER}/{code(a['id'])}/{code(b['id'])}/{'Arrival' if arrive else 'Departure'}/{stamp}?"
+               + urllib.parse.urlencode(q))
+        return {"url": url, "from": a, "to": b, "train": train, "surcharge": surcharge, "reservation": reservation,
+                "at": at, "arrive": arrive}
     q = {"van": a["id"], "vanLabel": a["label"], "naar": b["id"], "naarLabel": b["label"]}
     if train:
         q["modalities"] = "Train"  # walking to and from the train stays, as on 9292 itself
     q["withSurcharge"] = "true" if surcharge else "false"  # H216: never "Vervoer met toeslag" unless asked
     q["onDemand"] = "true" if reservation else "false"  # H218: never "Vervoer met reservering" unless asked
     url = PLANNER + "?" + urllib.parse.urlencode(q, quote_via=urllib.parse.quote, safe="@,")
-    return {"url": url, "from": a, "to": b, "train": train, "surcharge": surcharge, "reservation": reservation}
+    return {"url": url, "from": a, "to": b, "train": train, "surcharge": surcharge, "reservation": reservation,
+            "at": None, "arrive": False}
 
 
 def main(argv: list[str]) -> int:
@@ -274,6 +340,10 @@ def main(argv: list[str]) -> int:
     l.add_argument("--train", action="store_true", help="trains and walking only")
     l.add_argument("--surcharge", action="store_true", help="also transport with a surcharge (off unless asked)")
     l.add_argument("--reservation", action="store_true", help="also transport that needs a reservation (off unless asked)")
+    t = l.add_mutually_exclusive_group()
+    t.add_argument("--at", default="", help="leave at this time (H240): 14:45, tomorrow 14:45, 2026-10-24 14:45")
+    t.add_argument("--by", default="", help="get there by this time (an appointment's start)")
+    l.add_argument("--no-notices", action="store_true", help="leave out the stop and station notices")
     l.add_argument("--json", action="store_true")
     w = sub.add_parser("where")
     w.add_argument("place")
@@ -289,9 +359,12 @@ def main(argv: list[str]) -> int:
         if a.cmd == "where":
             print(json.dumps(where(a.place), ensure_ascii=False))
             return 0
-        r = link(a.to, a.frm, a.train, a.surcharge, a.reservation)
+        at = when(a.at or a.by) if (a.at or a.by) else None
+        r = link(a.to, a.frm, a.train, a.surcharge, a.reservation, at, bool(a.by))
+        r["notices"] = [] if a.no_notices else _notices(r)
     except NotFound as e:
-        print(f"Couldn't find {e}. Ask for the address, a station or a town.")
+        print(f"Couldn't read {e}." if str(e).startswith("the time ") else
+              f"Couldn't find {e}. Ask for the address, a station or a town.")
         return 1
     if a.json:
         print(json.dumps(r, ensure_ascii=False))
@@ -305,8 +378,29 @@ def main(argv: list[str]) -> int:
           + (", with transport with a surcharge" if r["surcharge"] else ", without transport with a surcharge")
           + (" and with transport that needs a reservation." if r["reservation"]
              else " and without transport that needs a reservation."))
-    print("9 2 9 2 opens with both filled in and plans from now; a time or date is changed there.")
+    if r["at"]:
+        day = datetime.fromtimestamp(r["at"])
+        today = datetime.fromtimestamp(time.time()).date()
+        on = "" if day.date() == today else (" tomorrow" if day.date() == today + timedelta(days=1)
+                                              else f" on {day:%A %-d %B}")
+        print(f"9 2 9 2 opens with both filled in and plans {'to get there by' if r['arrive'] else 'leaving at'} "
+              f"{day:%H:%M}{on}.")
+    else:
+        print("9 2 9 2 opens with both filled in and plans from now; a time or date is changed there.")
+    if r["notices"]:
+        print("Notices from the open live data for this trip: " + " ".join(r["notices"]))
     return 0
+
+
+def _notices(r: dict) -> list[str]:
+    """H240: what the open live data says about the stops and stations near both ends then (trips.notices); [] when
+    it can't be read. Never anything else."""
+    try:
+        import trips
+        return trips.notices(r["from"], r["to"], r["at"] or time.time())
+    except Exception as e:
+        print(f"travel: the notices couldn't be read: {e!r}", file=sys.stderr)
+        return []
 
 
 if __name__ == "__main__":

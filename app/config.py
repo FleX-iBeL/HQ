@@ -234,9 +234,11 @@ session for the six-week game, written in their map.md, and handed to the team."
 # hidden browser nonsense unless this is actually the way to do it." On every full call and in the direct line's chat.
 # H216 and H217 (20 October 2026, call at 14:03): "I want never that vervoer met toeslag, by default" and "Also is it
 # possible it picks my gps?" H218 (call at 14:24): "apparently there is also another one about reservation. I also, by
-# default, don't want that one turned on."
+# default, don't want that one turned on." H240 (23 October 2026): "can you also include the time to leave in the url?" and
+# "i think this is important that the travel advice she sends out is accurate to the leaving time in the calendar, and
+# also i am curious if she can share the extra details".
 TRAVEL_RULE = """- Public transport door to door (H214): for travel advice in the Netherlands give {user} a 9292 link made \
-by python3 "{HQ}/app/travel.py" link "WHERE TO" [--from "WHERE FROM"] [--train] [--surcharge] [--reservation]. Without --from it starts \
+by python3 "{HQ}/app/travel.py" link "WHERE TO" [--from "WHERE FROM"] [--train] [--surcharge] [--reservation] [--at TIME | --by TIME]. Without --from it starts \
 where the phone is, when {user} has allowed the location in the app and it's fresh, else at home (the Home line in \
 me.md); a start {user} names wins, and --from home is home. WHERE can be an address, a street with its town, a postcode, \
 a town, a train station, or home. --train only when {user} asks for trains (and walking) only; from an address far from \
@@ -246,7 +248,14 @@ reservering": buses, boats and taxis booked ahead); --reservation only when {use
 what it understood: put the link in the chat as it is, and say in a few words from where to where, and whether it \
 starts where the phone is or at home (a town alone, or a street without a town, may not be the spot meant: say what it \
 found). When it started at home only because there's no fresh location, and {user} isn't home, say once that \
-"Use my location" in the weather lets the link start where the phone is. It plans from now; a time or a date is set on 9292 itself. When it can't \
+"Use my location" in the weather lets the link start where the phone is. The time (H240): when the trip is for something in \
+the calendar, use its start: --at its start when the calendar item is the trip itself (its start is when {user} leaves), \
+--by its start when it's an appointment {user} travels to (there by then); else the time {user} names (--at, or --by for \
+"be there by"), like 14:45, tomorrow 14:45 or 2026-10-24 14:45; else neither, and it plans from now. Say the time it \
+plans for. When it prints a "Notices" line (from the open live data: a stop near either end closed or moved, a \
+replacement stop, a line changed, trouble at a station), say what matters for the trip in one short line, in plain \
+words, translated when it's in Dutch; never add a notice it didn't print, and with no Notices line say nothing about \
+notices. When it can't \
 find a place, ask for the address or the town, once; never make a 9292 link up by hand, and never use a browser for \
 it. Don't look the trip up on the web as well, the link is the advice.
 - Travel on appointments (H229): an appointment away from home gets its trip by public transport by itself when HQ \

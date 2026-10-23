@@ -9482,6 +9482,134 @@ setTimeout(() => {
             need('PATH="$PATH:/usr/sbin:/sbin"' in (ROOT / f).read_text(), f"{f} doesn't add /usr/sbin to its PATH")
         return "the update finds lsof with a bare PATH; the Mac scripts add /usr/sbin"
 
+    async def flow141(self) -> str:
+        """H240, no Claude, offline: a 9292 link at the leaving time, and the notices with it. On a made-up station
+        list, places, stops and live alerts (made here byte by byte): --at plans leaving then and --by getting there by
+        then, in 9292's own timed link (its places and labels in the page's light code, the time in UTC); a time he
+        names, tomorrow, a date and a calendar start all read; without a time it's the old link from now; the notices
+        line has the message for a stop near the start (its Dutch part), not one far away or one long over, and with
+        nothing found there's no line; --no-notices leaves it out; a call may run it; the rules and the tutorial say so."""
+        from policy import Policy, ALLOW
+        from datetime import timezone
+        from urllib.parse import urlparse, parse_qs
+        import config
+        import direct_line
+        d = self.tmp / "h240"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "stations.csv").write_text(
+            "id,code,uic,name_short,name_medium,name_long,slug,country,type,geo_lat,geo_lng\n"
+            "1,XC,1,Nergensdam C,Nergensdam C.,Nergensdam Centraal,nergensdam-centraal,NL,megastation,52.1,5.1\n"
+            "2,XZ,2,Ergens Zuid,Ergens Zuid,Ergenshoven Zuid,ergenshoven-zuid,NL,stoptreinstation,52.2,5.2\n")
+        (d / "places.json").write_text(json.dumps({"Voorbeeldlaan 12, 9999 ZZ Nergensdam": [52.101, 5.101, "Voorbeeldlaan 12, 9999ZZ Nergensdam"],
+                                                   "Proefweg 3 Ergenshoven": [52.201, 5.201, "Proefweg 3, Ergenshoven"]}))
+        (d / "me.md").write_text("# Me\n\n**Home:** Voorbeeldlaan 12, 9999 ZZ Nergensdam\n")
+        (d / "cache").mkdir(exist_ok=True)
+        (d / "cache" / "stops.json").write_text(json.dumps([["s1", "Voorbeeldlaan", 52.1012, 5.1012], ["s2", "Ver weg", 53.0, 6.0]]))
+        (d / "feeds").mkdir(exist_ok=True)
+
+        def enc_v(n):
+            out = b""
+            while True:
+                b, n = n & 0x7F, n >> 7
+                out += bytes([b | (0x80 if n else 0)])
+                if not n:
+                    return out
+        def f(num, v):
+            if isinstance(v, int):
+                return enc_v(num << 3) + enc_v(v)
+            v = v.encode() if isinstance(v, str) else v
+            return enc_v(num << 3 | 2) + enc_v(len(v)) + v
+        def alert(aid, stop, text_, p0, p1):
+            a = f(1, f(1, p0) + f(2, p1)) + f(5, f(5, stop)) + f(10, f(1, f(1, text_) + f(2, "nl")))
+            return f(2, f(1, aid) + f(5, a))
+        feeds = lambda *ents: (d / "feeds" / "alerts.pb").write_bytes(f(1, f(1, "2.0")) + b"".join(ents))
+        now = int(time.time())
+        feeds(alert("KV15:1", "s1", "Lijn 9: halte vervalt, vervangende halte: Proefplein -- Line 9: stop closed", now - 3600, now + 86400),
+              alert("KV15:2", "s2", "Ver weg vervalt", now - 3600, now + 86400),
+              alert("KV15:3", "s1", "Allang voorbij", now - 9 * 86400, now - 8 * 86400))
+        (d / "feeds" / "trainUpdates.pb").write_bytes(f(1, f(1, "2.0")))
+        script = str(APP / "travel.py")
+        env = {**os.environ, "HQ_TRAVEL_STATIONS": str(d / "stations.csv"), "HQ_TRAVEL_PLACES": str(d / "places.json"),
+               "HQ_TRAVEL_ME": str(d / "me.md"), "HQ_TRAVEL_OFFLINE": "1", "HQ_DIRECT_DIR": str(d / "direct-line"),
+               "HQ_TRIPS_CACHE": str(d / "cache"), "HQ_TRIPS_FAKE_DIR": str(d / "feeds")}
+        run = lambda *a: subprocess.run([sys.executable, script, *a], capture_output=True, text=True, env=env, timeout=60)
+        sys.path.insert(0, str(APP))
+        import travel
+        for x in ("@52.1,5.1", "station-nergensdam-centraal", "Voorbeeldlaan 12, 9999ZZ Nergensdam"):
+            c = travel.code(x)
+            need(re.fullmatch(r"[A-Za-z0-9_-]+", c) and travel.uncode(c) == x, f"9292's light code doesn't go both ways: {x!r} {c!r}")
+
+        def timed(out: str) -> tuple[list[str], dict]:
+            url = out.split()[0]
+            u = urlparse(url)
+            parts = u.path.split("/")
+            need(url.startswith("https://9292.nl/reisplanner/") and len(parts) == 6, f"not 9292's timed link: {url}")
+            return parts[2:], {k: v[0] for k, v in parse_qs(u.query).items()}
+        r = run("link", "Proefweg 3 Ergenshoven", "--at", "14:45")
+        need(r.returncode == 0, f"a link with a leaving time failed: {r.stdout}{r.stderr}")
+        (frm, to, kind, stamp), q = timed(r.stdout)
+        want = datetime.now().replace(hour=14, minute=45, second=0, microsecond=0).astimezone(timezone.utc).strftime("%Y-%m-%dT%H%M")
+        need(kind == "Departure" and stamp == want, f"it doesn't leave at 14:45 (in UTC {want}): {kind} {stamp}")
+        need(travel.uncode(frm) == "@52.101,5.101" and travel.uncode(to) == "@52.201,5.201", "the ends aren't home and the place")
+        need(travel.uncode(q["fromLabel"]) == "Voorbeeldlaan 12, 9999ZZ Nergensdam" and travel.uncode(q["toLabel"]) == "Proefweg 3, Ergenshoven",
+             f"the labels aren't the places: {q}")
+        need(q.get("withSurcharge") == "false" and q.get("onDemand") == "false" and q.get("modalities") == "Bus,Train,Tram,Subway,Ferry",
+             f"the timed link lost the surcharge, reservation or the kinds: {q}")
+        need("leaving at 14:45" in r.stdout, f"it doesn't say the time it plans for: {r.stdout}")
+        lines = [x for x in r.stdout.splitlines() if x.startswith("Notices")]
+        need(len(lines) == 1 and "Lijn 9: halte vervalt, vervangende halte: Proefplein" in lines[0] and "near the start (Voorbeeldlaan)" in lines[0]
+             and "Line 9" not in lines[0] and "Ver weg" not in lines[0] and "Allang" not in lines[0],
+             f"the notices aren't the stop near the start (its Dutch part only), or others came in: {lines}")
+        # --by is getting there; tomorrow, a date and a calendar start; trains only
+        (_, _, kind, stamp), q = timed(run("link", "Ergenshoven Zuid", "--by", "tomorrow 9:05", "--train").stdout)
+        want = (datetime.now() + timedelta(days=1)).replace(hour=9, minute=5, second=0, microsecond=0).astimezone(timezone.utc).strftime("%Y-%m-%dT%H%M")
+        need(kind == "Arrival" and stamp == want and q.get("modalities") == "Train", f"--by tomorrow with trains isn't right: {kind} {stamp} {q}")
+        (_, _, kind, stamp), _q = timed(run("link", "Ergenshoven Zuid", "--at", "2099-01-02T10:30:00+01:00").stdout)
+        need(kind == "Departure" and stamp == "2099-01-02T0930", f"a calendar start isn't read: {stamp}")
+        (_, _, _k, stamp), _q = timed(run("link", "Ergenshoven Zuid", "--at", "2099-01-02 10:30").stdout)
+        need(stamp == datetime(2099, 1, 2, 10, 30).astimezone(timezone.utc).strftime("%Y-%m-%dT%H%M"), f"a date with a time isn't read: {stamp}")
+        r = run("link", "Ergenshoven Zuid", "--at", "soon")
+        need(r.returncode == 1 and "Couldn't read the time" in r.stdout, f"a time it can't read doesn't say so: {r.stdout}")
+        # without a time: the link from now, as before
+        r = run("link", "Proefweg 3 Ergenshoven")
+        need(r.stdout.startswith("https://9292.nl/reisplanner?") and "plans from now" in r.stdout, f"without a time it isn't the link from now: {r.stdout}")
+        need("Notices" in r.stdout, "without a time the notices for now are missing")
+        need("Notices" not in run("link", "Proefweg 3 Ergenshoven", "--at", "14:45", "--no-notices").stdout, "--no-notices doesn't leave them out")
+        feeds()
+        need("Notices" not in run("link", "Proefweg 3 Ergenshoven", "--at", "14:45").stdout, "with nothing found there's still a notices line")
+        need(json.loads(run("link", "Proefweg 3 Ergenshoven", "--at", "14:45", "--json").stdout)["notices"] == [], "the JSON doesn't carry the notices")
+        # a call and Donna's chat may run it; the rules and the tutorial say so
+        pol = Policy(config.FOLDER)
+        for cmd in (f'python3 "{script}" link "x" --at 14:45', f'python3 "{script}" link "x" --by "2026-10-24T15:00:00+02:00" --train'):
+            need(pol.decide("Bash", {"command": cmd}).verdict == ALLOW, f"a call may not run {cmd}")
+        rule = config.TRAVEL_RULE
+        need(rule in config.VOICE_RULES and rule in direct_line._text_rules() and "--at" in rule and "--by" in rule
+             and "Notices" in rule and "never add a notice" in rule and "its start" in rule, "the rules don't carry the leaving time or the notices")
+        tour = (APP / "web" / "tour.json").read_text()
+        need("plans for the time you leave" in tour and "replacement stop" in tour, "the tutorial's travel step doesn't say it")
+        done = ("the timed link (leave at, there by, tomorrow, a date, a calendar start, in UTC, 9292's light code both ways), the link "
+                "from now kept, the notices (near the start, Dutch part, none far away or over, none means no line, --no-notices), the policy, "
+                "the rules and the tutorial")
+        # live: 9292 itself opens the timed link with both ends and the time, when the network and a headless browser are here
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        if not cands:
+            return done + "; 9292 itself not opened (no headless browser here)"
+        url = travel.link_for({"id": "@52.357925,4.881323", "label": "Museumplein 6, Amsterdam"},
+                              {"id": "station-zwolle", "label": "Zwolle"}, at=travel.when("tomorrow 10:00"))["url"]
+        try:
+            dom = await asyncio.to_thread(subprocess.run, [str(cands[-1]), "--headless", "--disable-gpu", "--no-first-run",
+                                          *(["--no-sandbox"] if sys.platform != "darwin" else []), "--virtual-time-budget=20000",
+                                          "--window-size=1200,1400", "--dump-dom", url], capture_output=True, text=True, timeout=90)
+        except subprocess.TimeoutExpired:
+            return done + "; 9292 itself didn't answer in time"
+        html = dom.stdout
+        if "station-zwolle" not in html and "9292" not in html:
+            return done + "; 9292 itself didn't answer"
+        need('value="station-zwolle"' in html and 'value="@52.357925,4.881323"' in html and 'value="10:00"' in html,
+             "9292 didn't open the timed link with both ends and the time")
+        return done + "; live: 9292 opens it with both ends at 10:00 tomorrow"
+
     async def flow135(self) -> str:
         """H229, no Claude: travel on appointments, by public transport, with Donna's texts on a change. Offline, on a
         made-up station list, places, stops, calendar and live feeds (GTFS-realtime, made here byte by byte): an
@@ -9570,7 +9698,8 @@ setTimeout(() => {
         need(e1["on"] and e1["by"] == "auto" and e1["from_place"]["start"] == "home" and e1["to_place"]["id"] == "@52.201,5.201",
              f"the friend's place from the book or home as the start isn't right: {e1}")
         need(e1["stations"]["from"]["code"] == "xc" and e1["stations"]["to"]["code"] == "xz", f"the stations aren't the nearest: {e1['stations']}")
-        need(e1["link"].startswith("https://9292.nl/reisplanner?") and "withSurcharge=false" in e1["link"], f"no 9292 link: {e1['link']}")
+        need(e1["link"].startswith("https://9292.nl/reisplanner/") and "/Arrival/" in e1["link"] and "withSurcharge=false" in e1["link"],
+             f"no 9292 link that gets there by the start (H240): {e1['link']}")
         need(e1["stops"]["from"] == ["s1"] and e1["stops"]["to"] == [], f"the stops near the ends aren't right: {e1['stops']}")
         need(e1["train"]["number"] == "1234", f"his train isn't the latest direct one in time: {e1.get('train')}")
         need(e2["from_place"]["start"] == "before" and e2["from_place"]["after"] == "Lunch" and "train" not in e2,
@@ -17191,6 +17320,7 @@ FLOWS = {
     134: ("H227: every button and screen on the call page has a tutorial piece (the page read against tour.json; a new screen needs its button named)", False, "flow134"),
     139: ("H236: your own news: the setup from a short session, the hourly read of their free feeds kept to their topics and without what they leave out, read inside HQ as their own newspaper; empty on a fresh install", False, "flow139"),
     138: ("H235: extensions: the workspace's folder read at HQ's fixed points (call and text rules, kinds of texts, the mail check, scripts, routines); the local check after an update, and its plain message with Talk it through and Send to the team", False, "flow138"),
+    141: ("H240: a 9292 link at the leaving time (the calendar's start or the time he names, leaving then or there by then), with the notices for the stops and stations near both ends from the open live data, never made up", False, "flow141"),
     140: ("H238: call me back (the page reloads and calls the same agent, continuing the call), and an agent calls him at an agreed time or appointment (a push, one tap picks up, a missed one in her chat)", False, "flow140"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
 }
