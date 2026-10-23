@@ -1116,11 +1116,11 @@ def direct_watch():
                 log("calendar: reading it (read only)")
         except Exception as e:
             log(f"calendar: {e!r}")
-        # H143: an appointment X'd (or un-X'd) in the calendar sheet that still waits for its move to HQ Planning.
+        # H143, H241: an appointment an old X moved to HQ Planning that still waits to go back where it came from.
         try:
             import planning
             if planning.start():
-                log("calendar: moving X'd appointments (HQ Planning)")
+                log("calendar: moving old X'd appointments back from HQ Planning")
         except Exception as e:
             log(f"planning: {e!r}")
         # H124: Donna texts first: a ping when an appointment he picked starts, a reminder he asked for, and now and

@@ -668,8 +668,8 @@ if __name__ == "__main__":
         return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
 
     # H143: the check and the X on an appointment. A tap marks it (done or x), a second tap undoes it ("");
-    # an X moves it in Google Calendar to HQ Planning and undo moves it back (planning.py, after the answer, on the
-    # main HQ). Only from the page itself (x-hq: calendar).
+    # since H241 both are kept in HQ only (planning.py); what an old X moved to HQ Planning goes back, after the
+    # answer, on the main HQ. Only from the page itself (x-hq: calendar).
     @app.post("/api/calendar/mark", include_in_schema=False)
     async def calendar_mark(request: Request):
         if request.headers.get("x-hq") != "calendar":

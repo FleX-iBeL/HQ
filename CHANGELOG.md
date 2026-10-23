@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- An X on an appointment is now just a mark in HQ: nothing moves in your Google Calendar any more, and you don't need a calendar called HQ Planning. Done and X are still there for the weekly look back. Anything an X moved there before goes back where it came from by itself; once that calendar is empty you can delete it in Google.
+
 ## 0.4.11 · 23 October 2026
 
 - Your own news, inside HQ. Turn on News under What HQ helps you with and a News button shows up. The first time, set it up in a short call with your agent: what you want to stay up to date on, what you don't want to hear about, and where from (your agent suggests free sources and checks they work). About every hour HQ reads those sources, keeps only what's about your topics, leaves out what you said no to, and shows it as your own newspaper: short items with their source, newest first, a tap to read the whole thing inside HQ. Kept apart from your mail. Change it any time the same way.

@@ -9,22 +9,27 @@ In the calendar sheet of the call page every appointment gets a check (done) and
 tap marks it, a second tap undoes it. The marks are kept in the workspace next to calendar.json, as
 HQ/calendar-marks.json (HQ_CALENDAR_MARKS; synced to the other computer, off GitHub: titles are private).
 
-An X also moves that appointment in Google Calendar to the user's calendar named PLANNING ("HQ Planning", the
-setting HQ_PLANNING_CALENDAR in switches.env), and undo moves it back. The only write to Google Calendar HQ itself
-does. The connector has no move, so it's a copy and a removal, each a short `claude -p` run (Haiku) like agenda.py's
-read: first the copy is created in HQ Planning (only create_event allowed), and only when Google has answered with
-the new appointment is the original removed (only delete_event allowed). A hook (`guard`) lets each run make exactly
-the one call it was given, with exactly those values, and refuses everything else, so nothing else is ever created,
-changed or removed. Undo is the same the other way: the saved details go back into the calendar it came from, then
-the copy in HQ Planning is removed. An appointment with other people in it, a birthday or anything that isn't a plain appointment is never moved (one day of a repeating appointment is: that day leaves the series,
-and undo puts it back as a single appointment): its X is kept in HQ only, and the sheet says so.
+H241 (23 October 2026, call at 16:11, Pepper), his words: "I don't think HQ planning is necessary anymore, right?"
+An X is a mark in HQ only: the appointment stays where it is in Google, marked in the app and kept here for the
+look back (week()). Nobody needs a calendar named HQ Planning any more. What's still left of the old way: an
+appointment an X moved there before H241 goes back where it came from, by itself (retire(), from start()), so
+nothing is lost; once it's empty the user can delete that calendar in Google.
+
+Before H241 an X also moved that appointment in Google Calendar to the user's calendar named PLANNING ("HQ Planning",
+the setting HQ_PLANNING_CALENDAR in switches.env), as a copy there and the original removed, and undo moved it back.
+The move back is all that's left of it, and the only write to Google Calendar HQ itself does. The connector has no
+move, so it's a copy and a removal, each a short `claude -p` run (Haiku) like agenda.py's read: the saved details go
+back into the calendar it came from (only create_event allowed), and only when Google has answered with it is the
+copy in HQ Planning removed (only delete_event allowed). A hook (`guard`) lets each run make exactly the one call it
+was given, with exactly those values, and refuses everything else, so nothing else is ever created, changed or
+removed. One day of a repeating appointment comes back as a single appointment, as undo always did.
 
 The work runs on the main HQ only (`start()`: from the page's tap, and every minute from tick.py while something
 waits), one at a time (a lock).
 
     python3 app/planning.py               this week's appointments with their marks (what a call reads)
     python3 app/planning.py week [DATE]   the same, for the week of DATE (2026-10-12)
-    python3 app/planning.py work          do the waiting moves now
+    python3 app/planning.py work          do the waiting moves back now
 Tests: HQ_PLANNING_FAKE=<a folder> stands in for Claude (see run_claude).
 """
 from __future__ import annotations
@@ -47,7 +52,6 @@ import hqpaths  # noqa: E402
 TOOL = agenda.TOOL
 RUN_MAX = 4 * 60
 TRIES = 3  # a move that keeps failing stops after this many tries, and says why
-MOVABLE = {"DEFAULT", ""}
 
 
 def _setting(name: str, default: str) -> str:
@@ -145,7 +149,7 @@ def standins(events: list[dict], looked: float | None) -> list[dict]:
 
 def attach(events: list[dict]) -> list[dict]:
     """The page's appointments with their marks: mark (done, x or ""), mark_id (what a tap sends), and for an X
-    where it is in Google (move: moving, moved, back, kept, failed) with a plain line (move_note)."""
+    one an old X moved to HQ Planning, its way back (move: to_back or failed) with a plain line (move_note)."""
     marks = _marks(_read())
     by, gone = _index(marks)
     out = []
@@ -161,17 +165,12 @@ def attach(events: list[dict]) -> list[dict]:
 
 
 def _move_note(mv: dict) -> str:
-    st, name = mv.get("state", ""), calendar_name()
-    if st == "to_move":
-        return f"Moving to {name}…"
-    if st == "moved":
-        return f"In {name}"
+    """H241: only the way back is left (an old X that had moved it to HQ Planning)."""
+    st = mv.get("state", "")
     if st == "to_back":
-        return "Moving back…"
-    if st == "kept":
-        return mv.get("why") or f"Kept where it is, not moved to {name}"
+        return f"Moving back from {calendar_name()}…"
     if st == "failed":
-        return f"Couldn't move it: {mv.get('error') or 'try again'}"
+        return f"Couldn't move it back from {calendar_name()}: {mv.get('error') or 'tap the X to try again'}"
     return ""
 
 
@@ -193,31 +192,36 @@ def _event(key: str) -> dict | None:
     return next((by[i] for i in [key, *(m.get("also") or [])] if i in by), None)
 
 
-def _planning_id(cal: dict | None = None) -> str:
-    """HQ Planning's calendar id, by its name, from the calendars the last read listed (list_calendars)."""
-    name = calendar_name().strip().lower()
-    for c in (cal or agenda._read()).get("calendars") or []:
-        if str(c.get("name", "")).strip().lower() == name:
-            return str(c.get("id", ""))
-    return ""
+def _retire_one(m: dict) -> bool:
+    """H241: what an old X left in Google goes back; nothing new moves. True when the mark changed."""
+    mv = m.get("move") or {}
+    st = mv.get("state")
+    if not st:
+        return False
+    if st == "to_back":
+        return False
+    if st == "failed" and mv.get("was") == "to_back":
+        return False  # tried three times; a new tap on it tries again
+    if mv.get("copy"):  # it's (also) in HQ Planning: back where it came from
+        m["move"] = {**mv, "state": "to_back", "tries": 0, "asked": time.time()}
+        m["move"].pop("was", None)
+    else:  # never moved (waiting, kept, or failed before the copy): just the mark
+        m["move"] = {}
+    return True
 
 
-def why_not(e: dict) -> str:
-    """Why an appointment can't be moved to HQ Planning; empty when it can."""
-    if e.get("others"):
-        return "Has other people in it, so it stays where it is"
-    if str(e.get("type") or "DEFAULT") not in MOVABLE:
-        return "Not a plain appointment, so it stays where it is"
-    if not e.get("gid") or not e.get("cal"):
-        return ""  # an appointment read before H143: the next read of the calendar brings what's needed
-    if e.get("cal") == _planning_id():
-        return f"Already in {calendar_name()}"
-    return ""
+def retire(s: dict | None = None) -> int:
+    """H241: every mark still on its way to HQ Planning, or in it, is turned around. Returns how many changed."""
+    s = _read() if s is None else s
+    n = sum(1 for m in _marks(s).values() if isinstance(m, dict) and _retire_one(m))
+    if n:
+        _write(s)
+    return n
 
 
 def set_mark(key: str, mark: str, now: float | None = None) -> dict:
-    """A tap: mark is "done", "x" or "" (undo). An X asks for the move to HQ Planning, undoing an X asks for the
-    move back; the work itself runs after (start())."""
+    """A tap: mark is "done", "x" or "" (undo). Since H241 nothing moves in Google: the mark is kept here only. An
+    appointment an old X moved to HQ Planning goes back, whatever the tap; the work itself runs after (start())."""
     if mark not in ("done", "x", ""):
         raise ValueError("a mark is done, x or nothing")
     t = now or time.time()
@@ -227,33 +231,17 @@ def set_mark(key: str, mark: str, now: float | None = None) -> dict:
     e = _event(key)
     if not e and not m:
         raise KeyError("no such appointment")
-    mv = m.get("move") or {}
-    if mv.get("state") in ("to_move", "to_back") and m.get("mark") == "x" and mark == "x":
-        return s  # already on its way
     if e:
         m.update({k: e.get(k) for k in ("title", "start", "end", "all_day", "calendar")})
     m["mark"], m["marked"] = mark, t
-    if mark == "x":
-        if mv.get("state") == "failed" and mv.get("was"):
-            mv = {**mv, "state": mv["was"], "tries": 0}
-            mv.pop("was", None)
-            if mv["state"] == "to_back":
-                mv["state"] = "moved" if mv.get("removed") else "to_move"
-        elif mv.get("state") == "to_back":
-            mv["state"] = "moved"  # undo of the undo before it ran: it's still in HQ Planning
-        elif mv.get("state") != "moved":
-            why = why_not(e or {})
-            if why:
-                mv = {"state": "kept", "why": why}
-            else:
-                mv = {"state": "to_move", "tries": 0, "asked": t}
-                if e:
-                    mv["from"] = {k: e.get(k) for k in ("cal", "gid", "title", "start", "end", "all_day", "where", "notes", "free", "calendar")}
-    elif mv.get("state") == "moved":
-        mv = {**mv, "state": "to_back", "tries": 0, "asked": t}
-    elif mv.get("state") in ("to_move", "kept", "failed"):
-        mv = {} if not mv.get("copy") else {**mv, "state": "to_back", "tries": 0, "asked": t}
+    mv = m.get("move") or {}
+    if mv.get("state") == "failed" and mv.get("was") == "to_back":
+        mv = {**mv, "state": "to_back", "tries": 0, "asked": t}  # a tap tries the move back again
+        mv.pop("was", None)
+        m["move"] = mv
     m["move"] = mv
+    _retire_one(m)
+    mv = m.get("move") or {}
     if not mark and not mv and not m.get("gone"):
         marks.pop(key, None)
     else:
@@ -415,36 +403,6 @@ def _step(key: str, m: dict) -> bool:
     """One waiting move or move back. True when something changed."""
     mv = m.get("move") or {}
     st = mv.get("state")
-    if st == "to_move":
-        src = mv.get("from") or {}
-        if not src.get("gid") or not src.get("cal"):
-            e = _event(key) or {}
-            if not e.get("gid"):
-                agenda.refresh()  # read before H143: the next read brings its Google id
-                return False
-            src = mv["from"] = {k: e.get(k) for k in ("cal", "gid", "title", "start", "end", "all_day", "where", "notes", "free", "calendar")}
-            why = why_not(e)
-            if why:
-                m["move"] = {"state": "kept", "why": why}
-                return True
-        to = _planning_id()
-        if not to:
-            mv.update(state="failed", error=f"there's no calendar named {calendar_name()} in your Google Calendar")
-            return True
-        if not mv.get("copy"):
-            new = _copy(src, to)
-            if not new:
-                return _failed(mv, f"Google didn't make the copy in {calendar_name()}")
-            mv["copy"] = {"cal": to, "gid": new}
-            m.setdefault("also", []).append(agenda._event_id(to, new))
-            _save_one(key, m)
-        if not _remove(src["cal"], src["gid"]):
-            return _failed(mv, "the copy is in place, but the original couldn't be removed")
-        m.setdefault("gone", []).append(agenda._event_id(src["cal"], src["gid"]))
-        m["shown"] = _shown(src, mv["copy"], calendar_name())
-        mv["removed"] = True
-        mv.update(state="moved", moved=time.time(), tries=0, error="")
-        return True
     if st == "to_back":
         src, cp = mv.get("from") or {}, mv.get("copy") or {}
         if not cp.get("gid"):
@@ -465,7 +423,7 @@ def _step(key: str, m: dict) -> bool:
         m["shown"] = _shown(src, b or {"cal": src.get("cal"), "gid": src.get("gid")}, src.get("calendar") or "")
         if src.get("calendar"):
             m["calendar"] = src["calendar"]
-        m["move"] = {} if m.get("mark") != "x" else {"state": "to_move", "tries": 0, "from": {**src, **b}}
+        m["move"] = {}  # H241: the mark stays (an X stays an X), nothing moves again
         return True
     return False
 
@@ -493,7 +451,7 @@ def _save_one(key: str, m: dict) -> None:
 
 def pending(s: dict | None = None) -> list[str]:
     s = _read() if s is None else s
-    return [k for k, m in _marks(s).items() if isinstance(m, dict) and (m.get("move") or {}).get("state") in ("to_move", "to_back")]
+    return [k for k, m in _marks(s).items() if isinstance(m, dict) and (m.get("move") or {}).get("state") == "to_back"]
 
 
 def _lock() -> Path:
@@ -539,8 +497,6 @@ def work() -> int:
                     for k in ("shown", "calendar"):
                         if m.get(k):
                             cur[k] = m[k]
-                    if cur.get("mark") != "x" and (cur["move"] or {}).get("state") == "moved":
-                        cur["move"]["state"] = "to_back"
                     if not cur.get("mark") and not cur["move"] and not cur["gone"]:
                         _marks(s).pop(key, None)
                     else:
@@ -558,8 +514,18 @@ def work() -> int:
 
 
 def start() -> bool:
-    """Starts the work detached when something waits, on the main HQ only, one at a time. True when started."""
-    if not pending() or working():
+    """Starts the work detached when something waits, on the main HQ only, one at a time. True when started.
+    H241: first turns around what an old X left in HQ Planning (retire())."""
+    if working():
+        return False
+    try:
+        import role
+        if role.is_backup():
+            return False
+    except Exception:
+        pass
+    retire()
+    if not pending():
         return False
     try:
         import role
@@ -601,11 +567,10 @@ def week(day: datetime | None = None) -> str:
     rows.sort()
     now = time.time()
     word = {"done": "done", "x": "X"}
-    lines = [f"Week of {a:%A} {a.day} {a:%B} {a:%Y}; X means it didn't happen as planned "
-             f"(moved to the calendar {calendar_name()})."]
+    lines = [f"Week of {a:%A} {a.day} {a:%B} {a:%Y}; X means it didn't happen as planned."]
     for t, mk, title, when, note in rows:
         state = word.get(mk) or ("not ticked" if t < now else "coming")
-        lines.append(f"- {state}: {title} ({when})" + (f" [{note}]" if note and mk == "x" else ""))
+        lines.append(f"- {state}: {title} ({when})" + (f" [{note}]" if note else ""))
     if len(lines) == 1:
         lines.append("- nothing in the calendar this week (as last read)")
     n = {k: sum(1 for r in rows if (r[1] or ("open" if r[0] < now else "")) == k) for k in ("done", "x", "open")}

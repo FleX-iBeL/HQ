@@ -2541,8 +2541,8 @@ function calPlace() {  // H156
 }
 calList.addEventListener("scroll", calKeep, { passive: true });
 for (const ev of ["wheel", "touchstart", "pointerdown", "keydown"]) calList.addEventListener(ev, () => { calToToday = false; }, { passive: true });
-// H143: the check (done) and the X (didn't happen as planned). A tap marks it, a second tap undoes it; an X moves the
-// appointment in his Google Calendar to the calendar HQ Planning (app/planning.py), and undoing it moves it back.
+// H143: the check (done) and the X (didn't happen as planned). A tap marks it, a second tap undoes it. Since H241 both
+// stay in HQ (app/planning.py); only what an old X moved to HQ Planning still moves back, shown with its move_note.
 let calMoveTimer = null;
 const MARK_ICON = { done: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
                     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>' };
@@ -2564,7 +2564,7 @@ function markButton(e, kind) {
   return m;
 }
 // H146: a quick note on each appointment (app/appt_notes.py through /api/calendar/note), tied to it by its mark id, so
-// one X'd to HQ Planning keeps its notes. The note button opens the appointment with the field ready to type; a call
+// one an old X moved to HQ Planning and back keeps its notes. The note button opens the appointment with the field ready to type; a call
 // and Donna's chat read the notes, so "look at the haircut and update my calendar" puts the times right.
 const NOTE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
 function noteButton(e) {

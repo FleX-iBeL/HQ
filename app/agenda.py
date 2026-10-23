@@ -4,7 +4,7 @@
 that. We just have... The information in the app as well." and "Maybe through API or something, I don't know."
 
 The appointments stay in Google Calendar, the one place. HQ only reads them here: never writes, moves or deletes.
-(H143: the one write is planning.py's, moving an appointment the user X'd to the calendar HQ Planning and back.)
+(H143: the one write is planning.py's; since H241 only putting back what an old X moved to the calendar HQ Planning.)
 The read goes through the Google Calendar connector of the user's own Claude (claude.ai), the same way the
 hourly mail check reads Gmail, so no Google key or sign-in is needed in HQ: a short `claude -p` run (Haiku)
 that may only call list_calendars and list_events (everything that writes is refused), streamed, and the tool
@@ -314,7 +314,7 @@ def events_from(results: list[tuple[str, dict, object]]) -> tuple[list[dict], li
                 "free": e.get("transparency") == "transparent",
                 "type": str(e.get("eventType") or "DEFAULT"),
                 "link": str(e.get("htmlLink") or ""),
-                # H143: where it is in Google, for planning.py's move to HQ Planning; with others in it, never moved
+                # H143: where it is in Google (planning.py's way back from HQ Planning, H241, and the trips); others in it
                 "gid": str(e["id"]), "cal": cal,
                 "others": any(isinstance(a, dict) and not a.get("self") for a in e.get("attendees") or []),
             })
@@ -468,7 +468,7 @@ def read(now: float | None = None) -> dict:
     d = datetime.fromtimestamp(t)
     monday = (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
     events = [_day_only(e) for e in s.get("events") or [] if not _over(e, monday, t, week=True)]
-    try:  # H143: done, or X (moved to HQ Planning); H154: a moved one the last read doesn't show yet stays in view
+    try:  # H143: done, or X (kept in HQ only since H241); H154: a moved one the last read doesn't show yet stays in view
         import planning
         events += [_day_only(e) for e in planning.standins(s.get("events") or [], s.get("looked"))
                    if not _over(e, monday, t, week=True)]

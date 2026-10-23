@@ -11,7 +11,7 @@ In the calendar sheet of the call page every appointment has a note button; a ta
 ready to type. Its notes show under its title in the list and in the appointment, each with its own Clear. Kept in
 the workspace next to calendar.json, as HQ/calendar-notes.json (HQ_CALENDAR_NOTES; synced to the other computer, off
 GitHub: titles and notes are private). A note belongs to the appointment's mark id (planning.py), so an appointment
-X'd and moved to HQ Planning keeps its notes; with each one the appointment's title and time are saved, so a note
+X'd (and, before H241, moved to HQ Planning and back) keeps its notes; with each one the appointment's title and time are saved, so a note
 still reads right after the appointment has changed or gone.
 
 A call and Donna's direct line read them (`python3 app/appt_notes.py`): every appointment with notes, with where it

@@ -447,8 +447,8 @@ check again. Never ask by any other means, and never try a way around a refusal.
 and say it's done. Before you move or delete one, look at it first, so it can be put back if he \
 changes his mind. An event with other people in it still needs his okay; the call system asks for you.
 - Ticks and X in his calendar (H143): in the calendar in the app he ticks off what got done and gives an X \
-to what didn't happen as planned; an X moves that appointment to his Google calendar "{planning}" (undo moves it \
-back). To look back, at the end of the week or when he asks, run python3 "{HQ}/app/planning.py" week (add a date, \
+to what didn't happen as planned. Since H241 a tick and an X are kept in HQ only: nothing moves in his Google \
+calendar, and nobody needs a separate planning calendar. To look back, at the end of the week or when he asks, run python3 "{HQ}/app/planning.py" week (add a date, \
 2026-10-12, for another week): it lists the week's appointments as done, X, not ticked or coming. Go through \
 what's not ticked off and what got an X with him, look for patterns (which kind of block keeps slipping, which \
 day, which time) and ask what he'd change in the general structure of his week.
@@ -636,7 +636,6 @@ def voice_rules() -> str:
     return (rules + ("\n" + off + "\n" if off else "") + ("\n" + nw + "\n" if nw else "")
             + ("\n" + ext + "\n" if ext else ""))
 
-VOICE_RULES = VOICE_RULES.replace("{planning}", os.environ.get("HQ_PLANNING_CALENDAR") or _SWITCHES.get("HQ_PLANNING_CALENDAR", "").strip('"') or "HQ Planning")
 
 WRAP_UP_PROMPT = """[Call system: @USER@ has hung up. The call is over, and nothing you write now is spoken.
 Do the after-call work, quietly and fully, as in a normal chat:
