@@ -6,7 +6,7 @@
     {
       "id": "call", "title": "Call your team", "line": "Who you call, and how a call works",
       "steps": [
-        {"target": "modes", "title": "Pick who you call", "text": "{donna} is quick: your day, your list, your mail, quick orders. {pepper} takes her time: planning, sparring, thinking something through. Each has her own voice and character."},
+        {"target": "modes", "title": "Pick who you call", "text": "{donna} is quick: your day, your list, your mail, quick orders. {pepper} takes her time: planning, sparring, thinking something through. Each has her own voice and character, and her own week: little things from her day come up, like a real colleague."},
         {"target": "btn", "title": "Tap to call", "text": "One tap and she picks up. Talk the way you would on the phone. You can cut in at any moment and she stops talking."},
         {"target": "btn", "title": "Call me back, or call me later", "text": "Say \"hang up and call me back\" and she does: the app starts fresh and she rings straight back, carrying on the same call. Or agree a time, \"call me at three\", or \"call me when my appointment starts\": your phone shows \"{pepper} is calling\", and one tap picks up. She already knows what it's about. Missed it? {donna} tells you in her texts.",
          "demo": {"kind": "chat", "items": [["you", "Call me at three about the report, okay?"], ["agent", "Will do. I'll ring you at three."]]}},
@@ -37,7 +37,7 @@
     {
       "id": "texts", "title": "Texts with {donna}", "line": "Reminders, check-ins, and texting her yourself",
       "steps": [
-        {"target": "directbtn", "title": "Her own text line", "text": "{donna} texts you reminders at the time you asked, check-ins, and a heads-up when something needs you. You can text her back here like any chat app, and she does what you ask.",
+        {"target": "directbtn", "title": "Her own text line", "text": "{donna} texts you reminders at the time you asked, check-ins, and a heads-up when something needs you. You can text her back here like any chat app, and she does what you ask. Something you keep putting off? Ask her to nudge you until it's done: she picks how often, never at night, and stops when you say done.",
          "demo": {"kind": "chat", "items": [["agent", "Morning. Dentist at ten, leave by half nine."], ["you", "Thanks! Move my gym to tonight?"], ["agent", "Moved to seven tonight."]]}}
       ]
     },
@@ -56,7 +56,7 @@
       "steps": [
         {"target": "calbtn", "title": "Driving to an appointment", "text": "If you drive, a trip can go by car instead. HQ works out how long the drive takes with the traffic and when to leave. From two hours before, it keeps an eye on the traffic, and {donna} texts you when it's time to go, and again when the drive gets ten minutes longer or shorter. It opens in Google Maps. It's its own switch, off until you turn it on.",
          "demo": {"kind": "list", "items": [["14:00", "Visit Sam"], ["13:15", "Leave by 13:15: 35 minutes by car, 8 of it traffic"], ["12:55", "{donna}: time to get going, leave by 13:15"]]}},
-        {"target": "setbtn", "title": "Your own maps key", "text": "The traffic comes from a maps service, and HQ has no key of its own: you make your own, once, and it stays on your computer. Two kinds work. Google Maps asks for a card on file, but its free monthly use covers one person's trips many times over. TomTom is free without a card. Pick either; the next two pieces walk you through them."},
+        {"target": "setbtn", "title": "Your own maps key", "text": "The traffic comes from a maps service, and HQ has no key of its own: you make your own, once, and it stays on your computer. Two kinds work. Google Maps asks for a card on file, but its free monthly use covers one person's trips many times over. TomTom is free without a card. Pick either; the next two steps walk you through them."},
         {"target": "setbtn", "title": "A Google Maps key, step by step", "text": "1. Go to console.cloud.google.com and sign in with your Google account. 2. At the top, make a new project, called HQ for example. 3. Open Billing and add a card (Google asks for it; the free use covers HQ). Under Budgets and alerts, set a small budget, like 5 euros, so you hear it if anything ever costs money. 4. Open APIs and Services, Library, search for Routes API, and press Enable. 5. Open APIs and Services, Credentials, Create credentials, API key. 6. Press Edit on the new key: under API restrictions pick Restrict key and tick only the Routes API, then Save. 7. Copy the key: it starts with AIza."},
         {"target": "setbtn", "title": "Or TomTom, free without a card", "text": "1. Go to developer.tomtom.com and press Register. 2. Fill in your name and email, and confirm the email they send. 3. Sign in: your dashboard already has a key, on the Keys page. 4. Copy it. The free plan gives 2,500 looks a day; HQ uses about a dozen per trip and never more than 150 a day."},
         {"target": "setbtn", "title": "Paste it in", "text": "Open Settings, What HQ helps you with, and turn on Driving to appointments. A box shows up under it: paste your key and press Save. It's kept on this computer only, never in your workspace and never uploaded; the page only shows which kind it is. Running two HQs, a main and a backup? Paste it on each. Forget takes it off again. Never say or type your key on a call or in a text."},
@@ -73,7 +73,7 @@
     {
       "id": "history", "title": "Past calls", "line": "Every call, kept, to read back or continue",
       "steps": [
-        {"target": "histbtn", "title": "Every call kept", "text": "Every call is saved as text. Open one to read it back, or tap Continue this call, and she picks up where you left off, knowing what was said."}
+        {"target": "histbtn", "title": "Every call kept", "text": "Every call is saved as text. Open one and it starts at the end, like a chat; scroll up for the start. Read it back, or tap Continue this call, and she picks up where you left off, knowing what was said."}
       ]
     },
     {
@@ -88,14 +88,14 @@
     {
       "id": "mail", "title": "The mail check", "line": "HQ reads your new mail every hour",
       "steps": [
-        {"target": "", "title": "Every hour, quietly", "text": "Every hour HQ reads your new mail and keeps only what might need you. Very important things, like a bill with a date or someone waiting for your answer, you hear at the start of every call until you say it's sorted. HQ never sends mail: drafts at the most, you send them yourself.",
+        {"target": "", "title": "Every hour, quietly", "text": "Every hour HQ reads your new mail and keeps only what might need you. Very important things, like a bill with a date or someone waiting for your answer, you hear at the start of every call until you say it's sorted. Ask {donna} to tidy your mail: mark it read, archive it, star it or put a label on it. HQ never sends mail: drafts at the most, you send them yourself.",
          "demo": {"kind": "list", "items": [["Very important", "Tax office: pay before 30 November"], ["To check", "Your parcel is on its way"]]}}
       ]
     },
     {
       "id": "weather", "title": "Weather and rain alerts", "line": "The weather at a glance, a text before the rain",
       "steps": [
-        {"target": "wx", "title": "The weather", "text": "The weather where you are, at a glance. Tap it for the hours ahead, and turn on the rain alert: {donna} texts you before a shower comes and follows it as it moves."}
+        {"target": "wx", "title": "The weather", "text": "The weather where you are, at a glance. Tap it for the hours ahead. {donna} tells you when you wake up whether it'll rain while you're out; turn on the rain alert and she also texts before a shower would catch you outside, and follows it as it moves."}
       ]
     },
     {

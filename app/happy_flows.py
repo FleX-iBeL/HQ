@@ -14718,7 +14718,8 @@ console.log(JSON.stringify({{ W, F, L: {{ ...L, words: landingWords(L, T) }}, we
             text = text.replace(own, "") if own else text
             text = (text.replace(tools, "").replace(repeat, "").replace(config.PINGS_RULE, "")  # H124's command syntax (pings.py), not speech
                     .replace(config.APPT_NOTES_RULE, "")  # H146: his notes and the calendar's description, written, not spoken
-                    .replace(getattr(config, "MAIL_FAST_RULE", "") or "\0", ""))  # H149's mail-fast "until" syntax (H162)
+                    .replace(getattr(config, "MAIL_FAST_RULE", "") or "\0", "")  # H149's mail-fast "until" syntax (H162)
+                    .replace(getattr(config, "TRAVEL_RULE", "") or "\0", ""))  # H229's trips.py syntax ("a time like 15:00")
             hit = old.search(text)
             need(not hit, f"{name} still says a time another way: {hit and hit.group(0)!r}")
         need('Saturday at 6 30 in the evening?' in ask, "the ask-first note's example isn't in the new style")
