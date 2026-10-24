@@ -5,6 +5,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ## Coming next
 
 - An X on an appointment is now just a mark in HQ: nothing moves in your Google Calendar any more, and you don't need a calendar called HQ Planning. Done and X are still there for the weekly look back. Anything an X moved there before goes back where it came from by itself; once that calendar is empty you can delete it in Google.
+- Ask Donna how to get to something in your calendar and her 9292 link now plans for the right time: leaving when the trip starts, or getting there by the start of an appointment, instead of from right now. With the link she says in one short line what's off at the stops and stations near both ends, like a stop that's closed, from the open live data; when there's nothing, she says nothing.
 
 ## 0.4.11 · 23 October 2026
 
