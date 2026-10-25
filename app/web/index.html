@@ -534,6 +534,7 @@
                  font:15px/1.3 -apple-system,sans-serif; padding:9px 12px; cursor:pointer; width:100%; overflow-wrap:anywhere; }
   .tdplan .blk small { color:var(--muted); font-size:12px; }
   .tdplan .blk[aria-current="true"] { box-shadow:0 0 0 1.5px var(--accent); }
+  .tdrep select { min-height:40px; border:0; border-radius:12px; background:var(--bg); color:var(--fg); font:600 14px/1.2 -apple-system,sans-serif; padding:8px 12px; max-width:100%; }
   #todogo { border:0; border-radius:16px; background:var(--accent); color:#04120f; font:600 17px/1 -apple-system,sans-serif; padding:15px 12px; cursor:pointer; margin-top:2px; }
   #todogo:disabled { opacity:.45; cursor:default; }
   #todonote { display:flex; align-items:center; justify-content:center; gap:10px; color:var(--muted); font-size:13px; min-height:1.2em; text-align:center; flex-shrink:0; }
@@ -3058,6 +3059,7 @@ function todoDrawList() {
     const b = document.createElement("button"); b.type = "button"; b.className = "it"; b.textContent = it.title;
     const meta = todoMeta(it);
     if (meta) { const m = document.createElement("small"); m.textContent = meta; if (!closed && todoSoon(it.deadline)) m.className = "due"; b.appendChild(m); }
+    if (it.repeats && !closed) { const m = document.createElement("small"); m.className = "rep"; m.textContent = "Repeats " + it.repeats; b.appendChild(m); }  // H245
     if (it.planned && !closed) { const m = document.createElement("small"); m.className = "plan" + (it.planned.past ? " past" : ""); m.textContent = todoPlanWords(it.planned) + " · " + it.planned.title; b.appendChild(m); }
     b.addEventListener("click", () => todoGo({ list: l.key, item: it.id, from: "list" }));
     row.appendChild(b);
@@ -3232,6 +3234,7 @@ function todoDrawItem() {
   }
   const closed = l.kind === "done" || l.kind === "letgo";
   if (!closed && l.kind !== "groceries" && l.kind !== "grocoff") todoBody.appendChild(todoPlanBox(it));  // H243
+  if (!closed && l.kind !== "groceries" && l.kind !== "grocoff" && l.kind !== "wish") todoBody.appendChild(todoRepeatBox(it));  // H245
   const acts = document.createElement("div"); acts.className = "tdacts";
   const rn = document.createElement("button"); rn.type = "button"; rn.textContent = "Rename";  // H231
   rn.addEventListener("click", () => { if (todoBody.contains(h)) todoRename(it, h); });
@@ -3314,6 +3317,31 @@ function todoPlanBox(it) {
     bs.appendChild(c); box.appendChild(bs);
   };
   show();
+  return box;
+}
+// H245: an item that comes back by itself when it's ticked off, with its next date as its deadline.
+const TODO_REPEATS = [["off", "Doesn't repeat"], ["every week", "Every week"], ["every month", "Every month"],
+                      ["every quarter", "Every quarter"], ["every year", "Every year"]];
+function todoRepeatBox(it) {
+  const box = document.createElement("div"); box.className = "tdplan tdrep";
+  const h = document.createElement("b"); h.textContent = "Comes back";
+  const w = document.createElement("div"); w.className = "when";
+  w.textContent = it.repeats ? "Repeats " + it.repeats + ": ticked off, it comes back with its next date" : "Doesn't repeat";
+  const sel = document.createElement("select"); sel.setAttribute("aria-label", "How often it comes back");
+  let known = false;
+  for (const [v, t] of TODO_REPEATS) {
+    if (it.repeats && v !== "off" && it.repeats === v) continue;
+    const o = document.createElement("option"); o.value = v; o.textContent = t;
+    if (v === "off" && !it.repeats) { o.selected = true; known = true; }
+    sel.appendChild(o);
+  }
+  if (it.repeats && !known) { const o = document.createElement("option"); o.value = it.repeats; o.textContent = it.repeats[0].toUpperCase() + it.repeats.slice(1); o.selected = true; sel.prepend(o); }
+  sel.addEventListener("change", async () => {
+    sel.disabled = true;
+    const d = await todoSend({ repeat: it.id, rule: sel.value });
+    if (d) { if (d.id) todoView.item = d.id; todoDraw(); } else sel.disabled = false;
+  });
+  box.append(h, w, sel);
   return box;
 }
 let aboutTodoNext = null;

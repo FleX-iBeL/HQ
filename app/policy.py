@@ -474,10 +474,11 @@ class Policy:
         # one table row and its log line, the same as editing the file by hand, which a call may do anyway.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "todo.py"):
             if len(args) == 1 or args[1] in ("summary", "json", "add", "done", "letgo", "move", "tick", "untick",
-                                                  "order", "rename", "undo", "blocks", "plan", "unplan"):
+                                                  "order", "rename", "undo", "blocks", "plan", "unplan",
+                                                  "repeat"):
                 return Decision(ALLOW, "the to-do list")
             return Decision(DENY, "the to-do script takes summary, json, add, done, letgo, move, tick, untick, order, "
-                                  "rename, undo, blocks, plan or unplan")
+                                  "rename, undo, blocks, plan, unplan or repeat")
         # H222: the six-week games, the workspace's own HQ/games.json: read, tick a day, count, a note, the diary, a
         # week's look back, the debrief, undo. Making a game or changing its design is the team's (new, spec), from
         # the design written in their map.

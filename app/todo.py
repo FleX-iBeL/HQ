@@ -23,6 +23,7 @@ column the other list doesn't have goes into its Notes), and writes one line in 
     python3 app/todo.py blocks [DAYS]           the calendar blocks coming up (14 days), each with its id, to plan into
     python3 app/todo.py plan "ITEM" "BLOCK"     H243: the item is planned in that calendar block (linked by hand)
     python3 app/todo.py unplan "ITEM"           the link taken off
+    python3 app/todo.py repeat "ITEM" "RULE"     H245: it comes back by itself when it's ticked off (RULE: off to stop)
 
 LIST is a list's number (0, 1, 2 …), a few words of its name, or matrix words: "important urgent", "important not
 urgent", "urgent", "neither", "wishlist", "groceries". ITEM is the item's id or a few words of it; more than one
@@ -49,6 +50,17 @@ time as the last read of the calendar has it now, so a moved block shows its new
 `blocks`, or a few words of its title, with a day (a weekday, today, tomorrow, or YYYY-MM-DD) and a time (10:00) when
 more than one fits. Nothing is ever written in Google Calendar, and nothing is matched by title by itself. plan and
 unplan get their line in the list's log and undo, like every change here.
+
+H245 (23 October 2026, call at 18:30, Pepper), in the user's words: "our to-do list needs to have it as a recurring
+item. So that's every time we... Every week we go through our... To do a list, it comes back up". An item can repeat:
+repeat ITEM RULE writes "Repeats: RULE." in its Notes (in the row, so it's in their own file and synced). RULE is said
+loosely and kept in one plain form: every week (every 2 weeks, every week on Friday), every month on the 26th (every 2
+months on the 1st), every quarter on the 31st, every year on 1 May, or every month, the Friday before the 26th. A
+month, quarter or year without a day takes the day from the item's deadline, else today's. When it's ticked off (done)
+the done row is written as always, and the item comes back on its own list, at its place, open, with its notes and
+the next date as its deadline: one step on from its deadline (a day past the month's end is its last day, and the
+31st stays the 31st after a shorter month), or the first one after today when it has no date. One change, one undo,
+a log line each. Let go stops it: it doesn't come back. repeat ITEM off takes the rule off.
 """
 from __future__ import annotations
 
@@ -57,8 +69,9 @@ import json
 import os
 import re
 import sys
+import calendar
 import threading
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent  # HQ
@@ -234,6 +247,7 @@ def read(p: Path | None = None) -> dict:
                           "deadline": _field(r, "deadline"), "status": _field(r, "status"),
                           "calendar": _field(r, "calendar"), "added": _field(r, "added"), "notes": _field(r, "notes"),
                           "at": _field(r, "at"), "often": _field(r, "often"),
+                          "repeats": repeats_of(r),
                           "fields": [[c, v] for c, v in r.items() if v and c != lst["columns"][0]],
                           "details": details_for(it["title"] + " " + " ".join(_RENAMED.findall(_field(r, "notes"))),
                                                  doc["details"]),
@@ -436,7 +450,17 @@ def _move(p: Path, want_item: str, to: dict | str, at_value: str = "", note: str
         lines.insert(end, _row_line(cells))
         stamp = _now().strftime("%Y-%m-%d %H:%M")
         what = log_what or f"moved to {_list_label(dst)}"
+        # H245: a repeating item ticked off comes back on its own list, at its place, with its next date.
+        again = None
+        rule = repeats_of(r)
+        if rule and dst["kind"] == "done" and src["kind"] not in ("done", "letgo"):
+            nxt = next_date(rule, _base_date(_field(r, "deadline")))
+            lines.insert(it["line"] + (1 if end <= it["line"] else 0), _row_line(_again_cells(src, it, nxt)))
+            again = nxt.isoformat()
         lines = _insert_log(lines, f"- {stamp}: {it['title']}: {what}{_by(by)}.")
+        if again:
+            lines = _insert_log(lines, f"- {stamp}: {it['title']}: comes back on {_list_label(src)} for {again} "
+                                       f"(repeats {rule}){_by(by)}.")
         # F43: done or let go, so what still hangs on to it elsewhere (her notes, reminders, watches, nudges, the
         # mail list's To check lines) goes with it; what only might belong to it is left and named once.
         cleared, records, unsure = [], [], []
@@ -451,6 +475,11 @@ def _move(p: Path, want_item: str, to: dict | str, at_value: str = "", note: str
                 lines = _insert_log(lines, f"- {stamp}: {it['title']}: cleared with it: {c}{_by(by)}.")
         _write(p, before, lines, f"{it['title']}: {what}", records)
     out = {"ok": True, "said": f"{it['title']}: {what}.", "id": it["id"], "list": dst["key"]}
+    if again:
+        out["said"] += f" It comes back on {_list_label(src)} for {_say_date(again)}."
+        out["again"] = again
+    elif rule and dst["kind"] == "letgo" and src["kind"] not in ("done", "letgo"):
+        out["said"] += " It repeated; let go, it doesn't come back."
     if cleared or unsure:
         import loose_ends
         out["said"] += " " + loose_ends.said(cleared, unsure)
@@ -701,6 +730,212 @@ def rename(item: str, title: str, by: str = "", p: Path | None = None) -> dict:
         nid = next((x["id"] for l in parse("\n".join(lines))["lists"] if l["head"] == lst["head"]
                     for x in l["items"] if x["line"] == it["line"]), "")
     return {"ok": True, "said": f"{old}: renamed to {new}.", "id": nid, "list": lst["key"]}
+
+# ---- H245: items that come back ----------------------------------------------------------------------------------
+
+_REPEATS = re.compile(r"Repeats: (.+?)\.(?=\s|$)")
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+           "november", "december")
+_NUMS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "other": 2}
+
+
+def repeats_of(row: dict) -> str:
+    m = _REPEATS.search(_field(row, "notes") or "")
+    return m.group(1).strip() if m else ""
+
+
+def _nth(d: int) -> str:
+    return f"{d}" + ("th" if 10 <= d % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(d % 10, "th"))
+
+
+def _rule(text: str) -> dict:
+    """A rule said loosely, as its parts: unit (week, month, year), every (how many), day, month, weekday, before."""
+    t = re.sub(r"\s+", " ", (text or "").lower()).strip().rstrip(".")
+    t = re.sub(r"^(repeats?:?|recurring,?)\s*", "", t)
+    out = {"every": 1}
+    m = re.search(r"\bevery (\d+|" + "|".join(_NUMS) + r")\b", t)
+    if m:
+        out["every"] = int(m.group(1)) if m.group(1).isdigit() else _NUMS[m.group(1)]
+    if re.search(r"\b(quarter|quarterly)\b", t):
+        out["unit"], out["every"] = "month", 3 * out["every"]
+    elif re.search(r"\b(year|years|yearly|annual|annually)\b", t):
+        out["unit"] = "year"
+    elif re.search(r"\b(month|months|monthly)\b", t):
+        out["unit"] = "month"
+    elif re.search(r"\b(week|weeks|weekly)\b", t):
+        out["unit"] = "week"
+    elif re.search(r"\b(fortnight|fortnightly|biweekly)\b", t):
+        out["unit"], out["every"] = "week", 2
+    else:
+        raise ValueError(f"{text!r} isn't a rule HQ knows: say every week, every month on the 26th, every quarter, "
+                         "every year, or every month, the Friday before the 26th")
+    if not 1 <= out["every"] <= 24:
+        raise ValueError("that's too far apart")
+    wd = next((i for i, w in enumerate(_WEEKDAYS) if re.search(r"\b" + w + r"s?\b", t)), None)
+    b = re.search(r"\b(" + "|".join(_WEEKDAYS) + r") (?:just )?before the (\d{1,2})(?:st|nd|rd|th)?\b", t)
+    if b and out["unit"] == "month":
+        out["weekday"], out["before"] = _WEEKDAYS.index(b.group(1)), int(b.group(2))
+    elif wd is not None and out["unit"] == "week":
+        out["weekday"] = wd
+    mo = next((i + 1 for i, w in enumerate(_MONTHS) if re.search(r"\b" + w[:3] + r"[a-z]*\b", t)), None)
+    d = re.search(r"\b(?:on (?:the )?|day )?(\d{1,2})(?:st|nd|rd|th)?\b(?! (?:weeks?|months?|years?)\b)",
+                  re.sub(r"\bevery \d+\b", "", t))
+    if d and "before" not in out:
+        out["day"] = int(d.group(1))
+    if out["unit"] == "year" and mo:
+        out["month"] = mo
+    if "day" in out and not 1 <= out["day"] <= 31 or "before" in out and not 1 <= out["before"] <= 31:
+        raise ValueError("a day of the month is 1 to 31")
+    return out
+
+
+def _words_of(r: dict) -> str:
+    """The plain form a rule is kept in."""
+    n = r["every"]
+    if r["unit"] == "week":
+        s = "every week" if n == 1 else f"every {n} weeks"
+        return s + (f" on {_WEEKDAYS[r['weekday']].capitalize()}" if "weekday" in r else "")
+    if r["unit"] == "year":
+        s = "every year" if n == 1 else f"every {n} years"
+        return s + (f" on {r['day']} {_MONTHS[r['month'] - 1].capitalize()}" if "day" in r and "month" in r else "")
+    s = "every month" if n == 1 else "every quarter" if n == 3 else f"every {n} months"
+    if "before" in r:
+        return f"{s}, the {_WEEKDAYS[r['weekday']].capitalize()} before the {_nth(r['before'])}"
+    return s + (f" on the {_nth(r['day'])}" if "day" in r else "")
+
+
+def _base_date(deadline: str):
+    m = re.search(r"\b(\d{4})-(\d\d)-(\d\d)\b", deadline or "")
+    if m:
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            pass
+    return None
+
+
+def _month_day(y: int, m: int, d: int):
+    while m > 12:
+        y, m = y + 1, m - 12
+    return date(y, m, min(d, calendar.monthrange(y, m)[1]))
+
+
+def next_date(rule: str, base=None):
+    """The next date after base (its deadline), one step on; with no base, the first one after today."""
+    r = _rule(rule)
+    today = _now().date()
+    start = base or today
+    if r["unit"] == "week":
+        if "weekday" in r:
+            d = start + timedelta(days=(r["weekday"] - start.weekday()) % 7 or 7)
+            return d + timedelta(weeks=r["every"] - 1) if base else d
+        return start + timedelta(weeks=r["every"]) if base else today + timedelta(weeks=r["every"])
+    if r["unit"] == "year":
+        mo, dy = r.get("month", start.month), r.get("day", start.day)
+        d = _month_day(start.year, mo, dy)
+        while d <= start:
+            d = _month_day(d.year + r["every"], mo, dy)
+        return d
+    step = r["every"]
+
+    def on(y, m):
+        y, m = y + (m - 1) // 12, (m - 1) % 12 + 1
+        if "before" in r:
+            x = _month_day(y, m, r["before"]) - timedelta(days=1)
+            return x - timedelta(days=(x.weekday() - r["weekday"]) % 7)
+        return _month_day(y, m, r.get("day", start.day))
+    d = on(start.year, start.month)
+    if d > start:  # still to come in its own month
+        return d
+    if base is None:
+        k = 1
+        while on(start.year, start.month + k) <= start:
+            k += 1
+        return on(start.year, start.month + k)
+    return on(start.year, start.month + step)
+
+
+def _say_date(iso: str) -> str:
+    d = date.fromisoformat(iso)
+    return f"{_WEEKDAYS[d.weekday()].capitalize()} {d.day} {_MONTHS[d.month - 1].capitalize()} {d.year}"
+
+
+def _set_cell(lst: dict, cells: list[str], name: str, value: str) -> bool:
+    for i, c in enumerate(lst["columns"]):
+        cl = c.lower()
+        if i and any(cl == w or cl.startswith(w + " ") or cl.startswith(w + "(") for w in _FIELDS[name]):
+            cells[i] = value
+            return True
+    return False
+
+
+def _note_at(lst: dict) -> int:
+    cols = lst["columns"]
+    return next((i for i, c in enumerate(cols) if i and c.lower().split(" ")[0] in ("notes", "why")), len(cols) - 1)
+
+
+def _again_cells(lst: dict, it: dict, nxt) -> list[str]:
+    """The row it comes back with: the same, open, the next date as its deadline, not in the calendar yet."""
+    cells = list(it["cells"]) + [""] * (len(lst["columns"]) - len(it["cells"]))
+    if not _set_cell(lst, cells, "deadline", nxt.isoformat()):
+        k = _note_at(lst)
+        cells[k] = (re.sub(r"\s*Next: \d{4}-\d\d-\d\d\.", "", cells[k]) + f" Next: {nxt.isoformat()}.").strip()
+    _set_cell(lst, cells, "status", "open")
+    _set_cell(lst, cells, "calendar", "")
+    return cells
+
+
+def repeat(item: str, rule: str, by: str = "", p: Path | None = None) -> dict:
+    """The item comes back by itself when it's ticked off (rule), or no longer ("off")."""
+    p = p or path()
+    off = (rule or "").strip().lower() in ("off", "no", "none", "never", "stop", "doesn't repeat", "not")
+    with _lock:
+        before = p.read_text(encoding="utf8")
+        doc = parse(before)
+        lst, it = find_item(doc, item)
+        if lst["kind"] in ("done", "letgo", "groceries", "grocoff", "wish"):
+            raise ValueError(f"{it['title']} is on {_list_label(lst)}: only an open to-do item can repeat.")
+        had = repeats_of(it["row"])
+        if off:
+            if not had:
+                return {"ok": True, "said": f"{it['title']} doesn't repeat.", "id": it["id"], "list": lst["key"]}
+            words = ""
+        else:
+            r = _rule(rule)
+            base = _base_date(_field(it["row"], "deadline")) or _now().date()
+            if r["unit"] in ("month", "year") and "day" not in r and "before" not in r:
+                r["day"] = base.day
+            if r["unit"] == "year" and "month" not in r:
+                r["month"] = base.month
+            words = _words_of(r)
+            if words == had:
+                return {"ok": True, "said": f"{it['title']} already repeats {words}.", "id": it["id"],
+                        "list": lst["key"]}
+        cells = list(it["cells"]) + [""] * (len(lst["columns"]) - len(it["cells"]))
+        k = _note_at(lst)
+        note = _REPEATS.sub("", cells[k]).strip()
+        cells[k] = (f"Repeats: {words}. " + note).strip() if words else note
+        first = None
+        if words and not _base_date(_field(it["row"], "deadline")):
+            # no date yet: the first one becomes its deadline, so ticking it off early doesn't bring the same one back
+            first = next_date(words, None)
+            if not _set_cell(lst, cells, "deadline", first.isoformat()):
+                cells[k] = (cells[k] + f" Next: {first.isoformat()}.").strip()
+        lines = list(doc["lines"])
+        lines[it["line"]] = _row_line(cells)
+        stamp = _now().strftime("%Y-%m-%d %H:%M")
+        what = f"repeats {words}" if words else "doesn't repeat any more"
+        lines = _insert_log(lines, f"- {stamp}: {it['title']}: {what} ({_list_label(lst)}){_by(by)}.")
+        _write(p, before, lines, f"{it['title']}: {what}")
+    said = f"{it['title']}: {what}."
+    if first:
+        said += f" The first one is {_say_date(first.isoformat())}."
+    elif words:
+        nd = _base_date(_field(it["row"], "deadline"))
+        said += " When it's ticked off it comes back for " + _say_date(next_date(words, nd).isoformat()) + "."
+    return {"ok": True, "said": said, "id": it["id"], "list": lst["key"], "repeats": words}
+
 
 
 def undo() -> dict:
@@ -1016,6 +1251,7 @@ def summary(p: Path | None = None) -> str:
         out.append(f"{label}: {len(items)}" + ("" if not items else ": " + "; ".join(
             it["title"] + (f" [{it['deadline']}]" if it["deadline"] else "") + (f" ({it['status']})" if it["status"] and it["status"] != "open" else "")
             + (f" (planned {it['planned']['short']}, {it['planned']['title']})" if it.get("planned") else "")
+            + (f" (repeats {it['repeats']})" if it.get("repeats") and lst["kind"] not in ("done", "letgo") else "")
             + f" #{it['id']}" for it in items)))
     if d.get("mail"):
         out.append(f"Very important mail waiting for an answer: {len(d['mail'])}")
@@ -1035,7 +1271,7 @@ def main(argv: list[str]) -> int:
     args = list(argv)
     # H203: on the backup HQ, a change to the list goes to the main one, which writes it (role.WRITES), like the queue.
     if args and args[0] in ("add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo", "plan",
-                             "unplan") and not os.environ.get("HQ_ROLE_HERE"):
+                             "unplan", "repeat") and not os.environ.get("HQ_ROLE_HERE"):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "routine"))
         import role
         if role.is_backup():
@@ -1073,6 +1309,8 @@ def main(argv: list[str]) -> int:
             print(plan(args[1], args[2], by=by)["said"])
         elif cmd == "unplan" and len(args) >= 2:
             print(unplan(args[1], by=by)["said"])
+        elif cmd == "repeat" and len(args) >= 3:
+            print(repeat(args[1], args[2], by=by)["said"])
         else:
             print(__doc__.strip())
             return 2

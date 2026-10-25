@@ -78,7 +78,7 @@ PY = sys.executable or "/usr/bin/python3"
 WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place on the planning; piece 2: Plan the sprint; H271: its MoSCoW tag
           "jobs": {"add", "add-row", "send-row", "stop", "overrule", "move", "on", "off", "mail-on", "mail-off", "mail-fast", "mail-hourly", "resume"},
           "schedule": {"add", "cancel", "move", "priority", "every"},
-          "todo": {"add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo", "plan", "unplan"},
+          "todo": {"add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo", "plan", "unplan", "repeat"},
           "pings": {"appt", "remind", "cancel", "note", "note-clear", "watch", "unwatch", "out", "out-stop", "nudge", "nudge-done", "nudge-later", "call", "call-cancel", "answered"},
           "games": {"new", "spec", "tick", "count", "note", "diary", "week", "debrief", "undo"},
           "coaching": {"done", "later"},

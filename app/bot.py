@@ -789,6 +789,8 @@ if __name__ == "__main__":
                 args = ["plan", ask["plan"], ask["block"][:200]]
             elif isinstance(ask.get("unplan"), str):
                 args = ["unplan", ask["unplan"]]
+            elif isinstance(ask.get("repeat"), str) and isinstance(ask.get("rule"), str):  # H245
+                args = ["repeat", ask["repeat"], ask["rule"][:200] or "off"]
             elif ask.get("undo") is True:
                 args = ["undo"]
             else:
@@ -826,6 +828,8 @@ if __name__ == "__main__":
                 said = await asyncio.to_thread(_todo.plan, ask["plan"], ask["block"][:200], by)
             elif isinstance(ask.get("unplan"), str):
                 said = await asyncio.to_thread(_todo.unplan, ask["unplan"], by)
+            elif isinstance(ask.get("repeat"), str) and isinstance(ask.get("rule"), str):  # H245
+                said = await asyncio.to_thread(_todo.repeat, ask["repeat"], ask["rule"][:200] or "off", by)
             elif ask.get("undo") is True:
                 said = await asyncio.to_thread(_todo.undo)
             else:

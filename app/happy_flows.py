@@ -15930,6 +15930,146 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
                 "a moved block shows its new time, unplan, rename and undo keep it right; calls, the backup and the server know it; "
                 "the row's mark, the filter and the block picker on the page (" + ", ".join(seen) + ")")
 
+    # 156
+    async def flow156(self) -> str:
+        """H245: items that come back. No Claude turns. On a throwaway copy of the list: repeat sets a rule said
+        loosely in one plain form, the day from its deadline; ticked off (done) the item is on done and back on its own
+        list at its place, open, with the next date as its deadline and its notes kept, a log line each; the 31st
+        stays the 31st after a shorter month; a rule without a date gets its first one as the deadline; one undo
+        puts both back; let go doesn't bring it back; off takes the rule off; groceries can't repeat. The calls'
+        rules, the policy and the backup's hand-over know it; the test server's /api/todo sets it. On the call page
+        in a headless browser (the phone): Comes back on the item, a pick, the row's Repeats line."""
+        import todo as td
+        from datetime import date
+        d = self.tmp / "h245"
+        d.mkdir(parents=True, exist_ok=True)
+        tpl = (APP.parent / "template" / "challenges.md").read_text()
+        at = tpl.index("## 3. ")
+        eol = tpl.index("\n", tpl.index("|---", at))
+        text = tpl[:eol + 1] + ("| VAT return | passive | Q4 by 2027-01-31 | open | | 2026-01-03 | Admin. |\n"
+                                "| Check the rent | passive | | open | | 2026-01-03 | |\n"
+                                "| Income tax | passive | 2027-05-01 | open | | 2026-01-03 | |\n") + tpl[eol + 1:]
+        f = d / "challenges.md"
+        f.write_text(text)
+        keep = {k: os.environ.get(k) for k in ("HQ_TODO_UNDO", "HQ_NOW", "HQ_TODO_SWEEP")}
+        os.environ.update({"HQ_TODO_UNDO": str(d / "undo.json"), "HQ_NOW": "2026-10-25T22:00:00", "HQ_TODO_SWEEP": "0"})
+        item = lambda name, kind=None: next((i for l in td.read(f)["lists"] for i in l["items"] if i["title"] == name
+                                             and (kind is None or l["kind"] == kind)), None)
+        try:
+            need([td.next_date("every quarter on the 31st", x).isoformat() for x in (date(2027, 1, 31), date(2027, 4, 30))]
+                 == ["2027-04-30", "2027-07-31"], "every quarter on the 31st doesn't keep the 31st after a shorter month")
+            need(td.next_date("every month, the Friday before the 26th", date(2026, 11, 20)).isoformat() == "2026-12-25",
+                 "the Friday before the 26th is wrong")
+            need(td._words_of(td._rule("weekly on friday")) == "every week on Friday" and td._rule("quarterly")["every"] == 3,
+                 "a loosely said rule isn't read")
+            r = td.repeat("vat return", "quarterly", by="a test", p=f)
+            need(item("VAT return")["repeats"] == "every quarter on the 31st" and "Friday 30 April 2027" in r["said"],
+                 f"repeat didn't take the day from the deadline: {r}")
+            r = td.repeat("check the rent", "every month, the friday before the 26th", p=f)
+            need(item("Check the rent")["deadline"] == "2026-11-20" and "Friday 20 November 2026" in r["said"],
+                 f"a rule without a date didn't get its first one: {r} {item('Check the rent')}")
+            need("(repeats every quarter on the 31st)" in td.summary(f), "the list a call reads doesn't say it repeats")
+            before_lines = [l for l in f.read_text().splitlines() if l.startswith("| ")]
+            place = [l.split(" | ")[0] for l in before_lines].index("| VAT return")
+            r = td.done("vat return", by="a test", p=f)
+            back, gone = item("VAT return", "q3"), item("VAT return", "done")
+            need(back and gone and back["deadline"] == "2027-04-30" and back["status"] == "open" and "Admin." in back["notes"],
+                 f"ticked off, it didn't come back right: {back} {gone} {r}")
+            need("comes back on 3" in r["said"] and "Friday 30 April 2027" in r["said"], f"done doesn't say when it's back: {r}")
+            rows = [l.split(" | ")[0] for l in f.read_text().splitlines() if l.startswith("| ")]
+            need(rows.index("| VAT return") == place, "it didn't come back at its place")
+            log = f.read_text()
+            need("VAT return: comes back on 3" in log and "VAT return: done, moved to 7" in log, "no log line for done or the comeback")
+            td.done("vat return", p=f)
+            need(item("VAT return", "q3")["deadline"] == "2027-07-31", "the second time it didn't step on again")
+            need(td.undo()["ok"] and item("VAT return", "q3")["deadline"] == "2027-04-30", "undo didn't put both back")
+            r = td.letgo("check the rent", "", p=f)
+            need(item("Check the rent", "q3") is None and "doesn't come back" in r["said"], f"let go brought it back: {r}")
+            td.repeat("income tax", "every year", p=f)
+            need(item("Income tax")["repeats"] == "every year on 1 May", "every year didn't take the deadline's day")
+            td.repeat("income tax", "off", p=f)
+            need(not item("Income tax")["repeats"] and not td.done("income tax", p=f).get("again"), "off didn't take the rule off")
+            for bad in ("now and then", "every 99 months"):
+                try:
+                    td.repeat("vat return", bad, p=f)
+                    need(False, f"repeat took {bad!r}")
+                except ValueError:
+                    pass
+            rc = run([sys.executable, str(APP / "todo.py"), "repeat", "vat return", "every quarter", "--by", "a test"],
+                     env={**os.environ, "HQ_TODO": str(f), "HQ_ROLE_HERE": "1"}, timeout=30)
+            need(rc.returncode == 0 and "repeats" in rc.stdout, f"todo.py repeat from the command line failed: {rc.stdout} {rc.stderr}")
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        from policy import Policy
+        import role as _role
+        pol = Policy(config.FOLDER, dry_run=True)
+        need(pol.decide("Bash", {"command": f'python3 "{APP / "todo.py"}" repeat "vat" "every quarter" --by "a call"'}).verdict == "allow",
+             "a call can't set a repeat")
+        need("repeat" in _role.WRITES["todo"], "the backup doesn't hand repeat to the main")
+        need('repeat ITEM "RULE"' in config.TODO_RULE, "the call rules don't know repeat")
+        await self.ensure_server()
+        sf = Path(self.server.env["HQ_TODO"])
+        sf.parent.mkdir(parents=True, exist_ok=True)
+
+        def post(body):
+            req = urllib.request.Request(TEST_URL + "/api/todo", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", "x-hq": "todo"})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        sf.write_text(text)
+        Path(self.server.env["HQ_TODO_UNDO"]).unlink(missing_ok=True)
+        code, got = post({"repeat": "vat return", "rule": "every quarter"})
+        rep = next((i["repeats"] for l in (got or {}).get("lists", []) for i in l["items"] if i["title"] == "VAT return"), None)
+        need(code == 200 and rep == "every quarter on the 31st", f"the server didn't set it ({code}, {rep})")
+        need(post({"repeat": "vat return", "rule": "sometimes"})[0] == 400, "a rule HQ doesn't know wasn't refused")
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (f, ms) => { for (let i = 0; i < ms / 50; i++) { if (f()) return true; await wait(50); } return false; };
+  const wide = () => [...document.querySelectorAll("#todosheet *")].some(e => { const b = e.getBoundingClientRect(); return b.width && b.right > innerWidth + 1; });
+  const row = n => [...document.querySelectorAll(".tdrow .it")].find(b => b.firstChild.textContent === n);
+  document.getElementById("todobtn").click();
+  await until(() => document.querySelector(".tdq"), 4000);
+  [...document.querySelectorAll(".tdq")].find(c => /VAT return/.test(c.textContent)).click();
+  await until(() => row("VAT return"), 4000);
+  out.push("row:" + ((row("VAT return").querySelector("small.rep")) || {}).textContent);
+  row("Check the rent").click(); await wait(100);
+  const box = document.querySelector(".tdrep");
+  out.push("box:" + (box ? box.querySelector(".when").textContent : "none"));
+  const sel = box.querySelector("select"); sel.value = "every month"; sel.dispatchEvent(new Event("change"));
+  await until(() => /Repeats/.test((document.querySelector(".tdrep .when") || {}).textContent || ""), 4000);
+  out.push("set:" + document.querySelector(".tdrep .when").textContent);
+  out.push("wide:" + (wide() ? "yes" : "no"));
+  const pre = document.createElement("pre"); pre.id = "h245"; pre.textContent = "H245RESULT " + out.join(" | ") + " END"; document.body.append(pre);
+})();
+</script>"""
+        page = (APP / "web/index.html").read_text()
+        pf = self.tmp / "h245-phone.html"
+        pf.write_text(page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1).replace("</body>", harness + "</body>", 1))
+        r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                          f"--user-data-dir={self.tmp / 'h245-profile'}", "--disable-web-security", "--window-size=390,844",
+                                          "--virtual-time-budget=15000", "--dump-dom", pf.as_uri()], timeout=90)
+        mm = re.search(r'<pre id="h245">H245RESULT (.*?) END</pre>', r.stdout)
+        need(mm, f"the repeat test on the call page didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+        res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+        say(f"   the phone: {mm.group(1)}")
+        need(res["row"] == "Repeats every quarter on the 31st", f"the row doesn't say it repeats: {res}")
+        need(res["box"] == "Doesn't repeat" and res["set"].startswith("Repeats every month on the "), f"Comes back on the item reads wrong: {res}")
+        need(res["wide"] == "no", f"something is wider than the screen: {res}")
+        return ("an item repeats (a loose rule kept in one plain form), ticked off it's back at its place with its next date and "
+                "its notes, undo, let go and off; calls, the backup, the server and the item's Comes back on the phone know it")
+
     async def flow113(self) -> str:
         """H194: HQ's own icon on a friend's fresh install. No Claude turns. A status server without HQ_LABEL (a
         laptop, like a fresh install) serves HQ's house (status/icons/hq-*.png, opaque squares) for every page that
@@ -18981,6 +19121,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    156: ("H245: items that come back: a rule set loosely, ticked off back at its place with its next date and notes, undo, let go and off; calls, the backup, the server and the item's Comes back on the phone", False, "flow156"),
     155: ("H277: a call runs the planning and team commands without a yes, chained, after a cd into HQ, in a for loop, and reading its own saved output; anything else still asks", False, "flow155"),
     154: ("H258: light or dark in one tap: the sun and moon at the top right flips it and keeps it after reopening, Settings' Look (System, Light, Dark), System following the device, the status page and Donna's chat in their sheets taking the same; phone and the Mac app", False, "flow154"),
     153: ("H243: to-do items planned in a calendar block by hand (by id, or words with a day and a time), several in one block, a moved block showing its new time, unplan, rename and undo; the row's mark, the filter (all, planned, not planned) and the block picker; phone and desktop app, dark", False, "flow153"),
