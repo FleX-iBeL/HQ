@@ -4500,6 +4500,9 @@ window.addEventListener('load', () => setTimeout(() => {
              "F53: the tutorial's Bugs before features piece doesn't put MoSCoW first")
         need("definition of ready" not in agents.persona(every["donna"], "Alex") and "definition of ready" not in agents.persona(every["pepper"], "Alex"),
              "Donna or Pepper got Moneypenny's craft")
+        # H270: a touch warmer when it's late or he's tired, the rest of her as it is.
+        need("Good work tonight" in m["personality"] and "when he sounds tired" in m["personality"]
+             and "no exclamation marks" in m["personality"], "H270: Moneypenny's touch of warmth late or when he's tired is missing")
         need(m.get("own_goodbye") and "gatekeeper" in m["personality"] and "Clearance pending" not in m["speciality"],
              f"her H250 character or own goodbye is missing: {m['speciality']}")
         # Handed over to and brought in, like the others (H79, H121).
