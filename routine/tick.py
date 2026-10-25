@@ -110,6 +110,43 @@ def status(state, step, logline):
                     logline], capture_output=True)
 
 
+BUSY = ("BUILDING", "TESTING", "RELEASING")
+
+
+def settle_status(q):
+    """F51: with nothing running, a status block still busy (BUILDING, TESTING or RELEASING) on a job that's
+    over is set to DONE, or WAITING when the job didn't finish (stopped, held, paused, ended) or others wait.
+    Only when its Now line names that job, so a normal chat's own "let's go" status is never touched."""
+    if q.get("running"):
+        return
+    head = open(hqpaths.ROADMAP, encoding="utf8").read().partition("\n---\n")[0]
+    st = re.match(r"#\s*\S*\s*([A-Z]+)", head)
+    now = re.search(r"^## Now: (.*)$", head, re.M)
+    if not st or st.group(1) not in BUSY or not now:
+        return
+    m = re.search(r"\b[Jj]ob (\d+)\b", now.group(1))
+    if not m:
+        return
+    n = int(m.group(1))
+    line = re.search(rf"^- Job {n} · ([^·]+?) ·", text_of_queue(), re.M)
+    state = line.group(1).strip() if line else "done"
+    if state.startswith(("running", "stop asked", "ready")):
+        return
+    waits = q.get("waiting") or (q.get("ready") or []) + (q.get("held") or [])
+    if state.startswith("done") and not waits:
+        status("DONE", f"Job {n} is done; nothing runs or waits", "")
+    elif state.startswith("done"):
+        status("WAITING", f"Job {n} is done; job {waits[0]['n']} waits for its turn", "")
+    else:
+        status("WAITING", f"Job {n} isn't running ({state}); nothing runs now", "")
+    log(f"status block was still {st.group(1)} on job {n} ({state}); set it to match")
+
+
+def text_of_queue():
+    """The queue's lines from the roadmap (below the status block)."""
+    return open(hqpaths.ROADMAP, encoding="utf8").read().partition("\n---\n")[2]
+
+
 def alive(pid):
     try:
         os.kill(pid, 0)
@@ -1287,6 +1324,10 @@ def tick():
             incidents.up("jobs")
         clear()
         quiet.clear_request()  # H36: a nudge that wasn't picked up is for nobody now
+    try:
+        settle_status(q)
+    except Exception as e:
+        log(f"settle status: {e!r}")
     if handing_back:
         # H56.3: the main one is back; this HQ starts nothing new and hands the role back at its next look.
         routines.beat("jobs", state="ok", text="Handing over to the main one; it starts the next job", every=60)

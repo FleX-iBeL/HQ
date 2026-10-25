@@ -13155,6 +13155,51 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             srv.terminate()
         return f"four totals ({T['not_ready']['count']} not ready, 2 ready, 2 planned, {T['total']['count']} in all) that add up; the list says them; a fold at the top of Sprint planning"
 
+    async def flow150(self) -> str:
+        """F51: the status block never says the team builds when nothing runs. No Claude, no window: a copy of
+        the roadmap and the routine's settle step, with its status rewrite caught."""
+        import importlib
+        sys.path.insert(0, str(ROOT / "routine"))
+        tick = importlib.import_module("tick")
+        rm = self.tmp / "roadmap-F51.md"
+        base = ROADMAP.read_text().partition("\n---\n")[2]
+        saved = (tick.hqpaths.ROADMAP, tick.status, tick.log)
+        caught = []
+        tick.hqpaths.ROADMAP = str(rm)
+        tick.status = lambda *x: caught.append(x)
+        tick.log = lambda m: None
+        def case(state, now, line, q):
+            caught.clear()
+            rm.write_text(f"# {state}\n\n## Now: {now}\n\n**Just finished:** x\n**Next:** y\n\n| Phase F | F51 🔨 |\n|---|---|\n"
+                          f"\n---\n\n{line}\n" + base)
+            tick.settle_status({"running": [], "ready": [], "held": [], "waiting": [], **q})
+            return caught[-1] if caught else None
+        try:
+            got = case("🔨 BUILDING", "Job 9327 · started by the routine", "- Job 9327 · done 02:31 · agreed x · the release", {})
+            need(got and got[0] == "DONE" and "9327" in got[1], f"a done job with nothing waiting left: {got}")
+            got = case("🚀 RELEASING", "Job 9327 · releasing", "- Job 9327 · done 02:31 · agreed x · the release",
+                       {"waiting": [{"n": 9328}]})
+            need(got and got[0] == "WAITING" and "9328" in got[1], f"a done job with one waiting: {got}")
+            for st in ("stopped 02:50", "paused: used about four times the top of its estimated usage",
+                       "ended 02:50 without a done mark", "held: usage over the line"):
+                got = case("🔨 BUILDING", "Job 9328 · building", f"- Job 9328 · {st} · agreed x · Moneypenny", {})
+                need(got and got[0] == "WAITING", f"a {st.split()[0]} job left: {got}")
+            got = case("🔨 BUILDING", "Job 9001 · building", "", {})
+            need(got and got[0] == "DONE", f"a job no longer on the queue left: {got}")
+            got = case("🔨 BUILDING", "Job 9329 · building", "- Job 9329 · running since 19:00 · agreed x · F51",
+                       {"running": [{"n": 9329}]})
+            need(got is None, f"a running job was touched: {got}")
+            got = case("🔨 BUILDING", "Scheduled the nightly starts as job 9330", "- Job 9330 · ready · agreed x · nightly", {})
+            need(got is None, f"a job about to start was touched: {got}")
+            got = case("🔨 BUILDING", "Building the map guide in a normal chat", "", {})
+            need(got is None, f"a normal chat's own status was touched: {got}")
+            for st in ("✅ DONE", "⏸ WAITING FOR YOU", "⚠️ STOPPED"):
+                got = case(st, "Job 9327 · done", "- Job 9327 · done 02:31 · agreed x · the release", {})
+                need(got is None, f"{st} was rewritten: {got}")
+        finally:
+            tick.hqpaths.ROADMAP, tick.status, tick.log = saved
+        return "nothing running: a job that's done leaves DONE (WAITING with a job in line); stopped, paused, ended or held leaves WAITING; a running or starting job and a normal chat's own status are left alone"
+
     async def flow106(self) -> str:
         """H160, no Claude: the team's work from the status page, without a call. jobs.py add-row on a copy of the
         roadmap puts a numbered row first (H, or F for a bug, the next free number, right after that phase's highest;
@@ -18276,6 +18321,7 @@ FLOWS = {
     143: ("H269: the planning's rank: set on a call, 1 the top, moved and taken off, a new row unranked and the others kept, a done row dropping out, the list a call reads in rank order", False, "flow143"),
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
+    150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
     149: ("H275: the sprint planning's totals: not ready, ready and not planned yet, planned (with the team or for a night), and the total, adding up in rows, time and usage; the list a call reads; a fold at the top of Sprint planning", False, "flow149"),
     148: ("H272: the Ready mark on every planning row: set and taken off (a call may, the backup hands it on), next to the rank and tag, changed since ready on new words, Plan the sprint and Send to the team leave out unready rows and say why, a call's add only on his say-so, the page's tick", False, "flow148"),
     146: ("H269: Plan the sprint: the ticked rows on the schedule in rank order at their nights, not twice, through the status server and its page, a call may, the backup hands it on", False, "flow146"),

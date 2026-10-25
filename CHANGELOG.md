@@ -4,6 +4,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- The status page no longer says the team is building when nothing runs. When the team's last job ends, whether it was done, stopped, paused or held, and it left the status on building, testing or releasing, within a minute it says done, or waiting when the job didn't finish or another one is next in line. Work you started yourself in a chat is left alone (F51).
 - MoSCoW first, then bugs before features. Moneypenny used to say bugs always rank above features, so she could put a Should bug above a Must feature. Now she, the call rules and the tutorial say it the way the sprint already sorts: Must, Should, Could first, and inside each of those the bugs before the features (F53).
 - Hang up ends the call on the first confirm. The question's Hang up used to ignore a tap in the first half second after it opened, so a quick confirm left the question up and you had to tap again. Now only a second tap of a double tap on the big button is ignored; Cancel's question works the same way (F50).
 - On a three-way call, the one you say it to answers, every time, spoken or typed: "Pepper, …", "I meant Pepper, …" or "…, Pepper?". A name you only talk about ("what do you think of Moneypenny's update?") no longer picks her, a name the speech line splits ("Money penny") still counts, and a reply like "Yes, …" goes to the one who answered last (F49).
