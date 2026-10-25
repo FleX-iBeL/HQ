@@ -20,6 +20,9 @@ column the other list doesn't have goes into its Notes), and writes one line in 
     python3 app/todo.py order "ITEM" N          to place N in its own list (1 is the top)
     python3 app/todo.py rename "ITEM" "NEW"     a new name, the rest of its row kept
     python3 app/todo.py undo                    puts back the last change made here, if nothing changed since
+    python3 app/todo.py blocks [DAYS]           the calendar blocks coming up (14 days), each with its id, to plan into
+    python3 app/todo.py plan "ITEM" "BLOCK"     H243: the item is planned in that calendar block (linked by hand)
+    python3 app/todo.py unplan "ITEM"           the link taken off
 
 LIST is a list's number (0, 1, 2 …), a few words of its name, or matrix words: "important urgent", "important not
 urgent", "urgent", "neither", "wishlist", "groceries". ITEM is the item's id or a few words of it; more than one
@@ -36,6 +39,16 @@ H231 (22 October 2026), in the user's words: "And i want to be able to move item
 table, nothing else changes), rename gives it a new name and keeps the rest of its row. Both get their log line and
 undo. A rename whose old name the details in their own words were found by, and the new one isn't, keeps the old name
 in its Notes ("Renamed from: …"), so the details stay with it.
+
+H243 (25 October 2026, call at 18:11, Moneypenny), in the user's words: "todo items match per title doesnt work, cause
+pepper sometimes puts multiple in a block. can't she just manually tap them? i discuss everything on the calendar
+anyway on friday mornings". plan links an item to one calendar block by hand (one block can hold several items);
+the link is kept next to the calendar, as HQ/calendar-todo.json (HQ_CALENDAR_TODO; synced, off GitHub: titles are
+private), by the item's name, with the block's id and its title and time as they were. Every read shows the block's
+time as the last read of the calendar has it now, so a moved block shows its new time. BLOCK is a block's id from
+`blocks`, or a few words of its title, with a day (a weekday, today, tomorrow, or YYYY-MM-DD) and a time (10:00) when
+more than one fits. Nothing is ever written in Google Calendar, and nothing is matched by title by itself. plan and
+unplan get their line in the list's log and undo, like every change here.
 """
 from __future__ import annotations
 
@@ -212,6 +225,7 @@ def read(p: Path | None = None) -> dict:
         return {"lists": [], "missing": True, "file": p.name}
     doc = parse(text)
     out = []
+    plans = _plans()
     for lst in doc["lists"]:
         items = []
         for it in lst["items"]:
@@ -222,10 +236,11 @@ def read(p: Path | None = None) -> dict:
                           "at": _field(r, "at"), "often": _field(r, "often"),
                           "fields": [[c, v] for c, v in r.items() if v and c != lst["columns"][0]],
                           "details": details_for(it["title"] + " " + " ".join(_RENAMED.findall(_field(r, "notes"))),
-                                                 doc["details"])})
+                                                 doc["details"]),
+                          "planned": plans(it["title"]) if lst["kind"] not in ("done", "letgo", "grocoff") else None})
         out.append({"key": lst["key"], "num": lst["num"], "name": lst["name"], "kind": lst["kind"], "items": items})
     return {"lists": out, "log": doc["log"][:12], "how": doc["how"], "file": p.name,
-            "changed": int(p.stat().st_mtime), "mail": very_important()}
+            "changed": int(p.stat().st_mtime), "mail": very_important(), "blocks": blocks()}
 
 
 def very_important(folder_: Path | None = None) -> list[dict]:
@@ -350,7 +365,8 @@ def _insert_log(lines: list[str], line: str) -> list[str]:
     return lines[:first] + [line] + lines[first:]
 
 
-def _write(p: Path, before: str, lines: list[str], what: str, swept: list | None = None) -> None:
+def _write(p: Path, before: str, lines: list[str], what: str, swept: list | None = None,
+           links_before: dict | None = None) -> None:
     text = "\n".join(lines) + ("\n" if before.endswith("\n") else "")
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(text, encoding="utf8")
@@ -359,7 +375,8 @@ def _write(p: Path, before: str, lines: list[str], what: str, swept: list | None
         u = _undo_file()
         u.parent.mkdir(parents=True, exist_ok=True)
         u.write_text(json.dumps({"file": str(p), "before": before, "after_sha": hashlib.sha1(text.encode()).hexdigest(),
-                                 "what": what} | ({"swept": swept} if swept else {})), encoding="utf8")
+                                 "what": what} | ({"swept": swept} if swept else {})
+                                | ({"links_before": links_before} if links_before is not None else {})), encoding="utf8")
     except OSError:
         pass
 
@@ -673,7 +690,14 @@ def rename(item: str, title: str, by: str = "", p: Path | None = None) -> dict:
         lines[it["line"]] = _row_line(cells)
         stamp = _now().strftime("%Y-%m-%d %H:%M")
         lines = _insert_log(lines, f"- {stamp}: {old}: renamed to {new} ({_list_label(lst)}){_by(by)}.")
-        _write(p, before, lines, f"{old}: renamed to {new}")
+        links = _links()
+        moved = None
+        if _norm(old) in links["links"]:  # H243: the link goes with the new name
+            moved = json.loads(json.dumps(links))
+            links["links"][_norm(new)] = {**links["links"].pop(_norm(old)), "item": new}
+        _write(p, before, lines, f"{old}: renamed to {new}", links_before=moved)
+        if moved is not None:
+            _save_links(links)
         nid = next((x["id"] for l in parse("\n".join(lines))["lists"] if l["head"] == lst["head"]
                     for x in l["items"] if x["line"] == it["line"]), "")
     return {"ok": True, "said": f"{old}: renamed to {new}.", "id": nid, "list": lst["key"]}
@@ -696,6 +720,8 @@ def undo() -> dict:
         tmp = p.with_suffix(p.suffix + ".tmp")
         tmp.write_text(u["before"], encoding="utf8")
         os.replace(tmp, p)
+        if isinstance(u.get("links_before"), dict):  # H243
+            _save_links(u["links_before"])
         _undo_file().unlink(missing_ok=True)
     back = 0
     if u.get("swept"):
@@ -706,6 +732,226 @@ def undo() -> dict:
             back = 0
     return {"ok": True, "said": f"Undone: {u.get('what', 'the last change')}." + (
         f" Put back what was cleared with it ({back})." if back else "")}
+
+
+# ---- H243: planned in a calendar block, linked by hand -----------------------------------------------------------
+
+_DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def links_file() -> Path:
+    import agenda
+    return Path(os.environ.get("HQ_CALENDAR_TODO") or agenda.data_file().with_name("calendar-todo.json"))
+
+
+def _norm(title: str) -> str:
+    return re.sub(r"\s+", " ", (title or "").strip().lower())
+
+
+def _links() -> dict:
+    try:
+        s = json.loads(links_file().read_text(encoding="utf8"))
+        return s if isinstance(s, dict) and isinstance(s.get("links"), dict) else {"links": {}}
+    except (OSError, ValueError):
+        return {"links": {}}
+
+
+def _save_links(s: dict) -> None:
+    f = links_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(s, indent=1, ensure_ascii=False) + "\n", encoding="utf8")
+    os.replace(tmp, f)
+
+
+def _events() -> tuple[list[dict], dict]:
+    """The last read of the calendar, and which appointment ids stand for a mark id (as appt_notes does)."""
+    try:
+        import agenda
+        events = agenda._read().get("events") or []
+    except Exception:
+        events = []
+    try:
+        import planning
+        by = planning._index(planning._marks(planning._read()))[0]
+    except Exception:
+        by = {}
+    return events, by
+
+
+def _ts(start: str) -> float:
+    try:
+        return datetime.fromisoformat(start).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def short_when(start: str, now: float | None = None) -> str:
+    """How a planned block reads on a row: "Today 10:00", "Wednesday 10:00" within the coming week, else
+    "Wed 4 Nov, 10:00". The wording is Claude's choice."""
+    try:
+        d = datetime.fromisoformat(start)
+    except (TypeError, ValueError):
+        return ""
+    d = d.astimezone() if d.tzinfo else d
+    today = datetime.fromtimestamp(now or _now().timestamp()).date()
+    days = (d.date() - today).days
+    t = d.strftime("%H:%M")
+    if days == 0:
+        return f"Today {t}"
+    if days == 1:
+        return f"Tomorrow {t}"
+    if 1 < days < 7:
+        return f"{_DAYS[d.weekday()].capitalize()} {t}"
+    return f"{d.strftime('%a')} {d.day} {d.strftime('%b')}, {t}"
+
+
+def _block(e: dict, now: float) -> dict:
+    return {"id": e.get("id", ""), "title": e.get("title", ""), "start": e.get("start", ""), "end": e.get("end", ""),
+            "calendar": e.get("calendar", ""), "short": short_when(e.get("start", ""), now),
+            "past": bool(e.get("end")) and _ts(e.get("end", "")) < now}
+
+
+def blocks(days: int = 14, now: float | None = None) -> list[dict]:
+    """The calendar's timed blocks from now (still running included) to DAYS ahead, soonest first: what an item can be
+    planned into. A day's all-day label isn't a block."""
+    t = now or _now().timestamp()
+    events, _ = _events()
+    out = [_block(e, t) for e in events
+           if not e.get("all_day") and e.get("start") and _ts(e.get("end") or e["start"]) > t
+           and _ts(e["start"]) < t + days * 86400]
+    out.sort(key=lambda b: _ts(b["start"]))
+    return out
+
+
+def _plans(now: float | None = None):
+    """A function from an item's name to its planned block, as the calendar has it now (None when not planned)."""
+    links = _links()["links"]
+    if not links:
+        return lambda title: None
+    t = now or _now().timestamp()
+    events, by = _events()
+
+    def one(title: str) -> dict | None:
+        ln = links.get(_norm(title))
+        if not isinstance(ln, dict):
+            return None
+        key = ln.get("block", "")
+        e = (next((x for x in events if x.get("id") == key), None)
+             or next((x for x in events if by.get(x.get("id")) == key or x.get("mark_id") == key), None))
+        b = _block(e or ln, t)
+        b["id"] = key
+        b["seen"] = e is not None  # False: not in the last read of the calendar, so its time as it was linked
+        return b
+    return one
+
+
+def _find_block(want: str, now: float) -> dict:
+    """BLOCK: an id, or words of its title with a day and a time when more than one fits."""
+    events, by = _events()
+    want = (want or "").strip()
+    e = next((x for x in events if x.get("id") == want or by.get(x.get("id")) == want), None)
+    if e:
+        return e
+    w = want.lower()
+    cands = [x for x in events if not x.get("all_day") and x.get("start")]
+    day = None
+    m = re.search(r"\d{4}-\d\d-\d\d", w)
+    if m:
+        day = m.group(0)
+        w = w.replace(day, " ")
+    else:
+        today = datetime.fromtimestamp(now).date()
+        if re.search(r"\btoday\b", w):
+            day, w = today.isoformat(), re.sub(r"\btoday\b", " ", w)
+        elif re.search(r"\btomorrow\b", w):
+            from datetime import timedelta
+            day, w = (today + timedelta(days=1)).isoformat(), re.sub(r"\btomorrow\b", " ", w)
+        else:
+            for i, dn in enumerate(_DAYS):
+                if re.search(r"\b" + dn + r"\b", w):
+                    from datetime import timedelta
+                    day = (today + timedelta(days=(i - today.weekday()) % 7)).isoformat()
+                    w = re.sub(r"\b" + dn + r"\b", " ", w)
+                    break
+    hm = re.search(r"\b(\d{1,2})[:.](\d\d)\b", w)
+    at = f"{int(hm.group(1)):02d}:{hm.group(2)}" if hm else None
+    if hm:
+        w = w.replace(hm.group(0), " ")
+    words = [x for x in re.findall(r"[\w']+", w) if x not in ("at", "on", "the", "block", "from")]
+    if day:
+        cands = [x for x in cands if x["start"][:10] == day]
+    else:  # no day said: only what's still to come
+        cands = [x for x in cands if _ts(x.get("end") or x["start"]) > now]
+    if at:
+        cands = [x for x in cands if x["start"][11:16] == at]
+    if words:
+        cands = [x for x in cands if all(k in x.get("title", "").lower() for k in words)]
+    if not words and not day and not at:
+        cands = []
+    cands.sort(key=lambda x: _ts(x["start"]))
+    if not cands:
+        raise KeyError(f"No calendar block fits {want!r}. python3 app/todo.py blocks lists them with their ids.")
+    if len(cands) > 1 and not (day and at):
+        raise ValueError("More than one block fits; say the day and time, or its id: " + "; ".join(
+            f"{x.get('title', '')} {short_when(x['start'], now)} #{x.get('id', '')}" for x in cands[:8]))
+    return cands[0]
+
+
+def plan(item: str, block: str, by: str = "", p: Path | None = None) -> dict:
+    """H243: the item planned in a calendar block, by hand. One block can hold several items; an item has one block
+    (planning it again moves the link)."""
+    p = p or path()
+    t = _now().timestamp()
+    with _lock:
+        before = p.read_text(encoding="utf8")
+        doc = parse(before)
+        lst, it = find_item(doc, item)
+        if lst["kind"] in ("done", "letgo", "grocoff"):
+            raise ValueError(f"{it['title']} is on {_list_label(lst)}, so there's nothing to plan.")
+        e = _find_block(block, t)
+        links = _links()
+        was = json.loads(json.dumps(links))
+        key = e.get("mark_id") or e.get("id", "")
+        links["links"][_norm(it["title"])] = {"item": it["title"], "block": key, "title": e.get("title", ""),
+                                              "start": e.get("start", ""), "end": e.get("end", ""),
+                                              "calendar": e.get("calendar", ""), "at": _now().strftime("%Y-%m-%d %H:%M")}
+        import agenda
+        when = agenda.when_words(e)
+        stamp = _now().strftime("%Y-%m-%d %H:%M")
+        what = f"planned in {e.get('title', 'a block')} ({when})"
+        lines = _insert_log(list(doc["lines"]), f"- {stamp}: {it['title']}: {what}{_by(by)}.")
+        _write(p, before, lines, f"{it['title']}: {what}", links_before=was)
+        _save_links(links)
+    return {"ok": True, "said": f"{it['title']}: {what}.", "id": it["id"], "list": lst["key"]}
+
+
+def unplan(item: str, by: str = "", p: Path | None = None) -> dict:
+    p = p or path()
+    with _lock:
+        before = p.read_text(encoding="utf8")
+        doc = parse(before)
+        lst, it = find_item(doc, item)
+        links = _links()
+        if _norm(it["title"]) not in links["links"]:
+            return {"ok": True, "said": f"{it['title']} isn't planned in a block.", "id": it["id"], "list": lst["key"]}
+        was = json.loads(json.dumps(links))
+        ln = links["links"].pop(_norm(it["title"]))
+        stamp = _now().strftime("%Y-%m-%d %H:%M")
+        what = f"no longer planned in {ln.get('title') or 'its block'}"
+        lines = _insert_log(list(doc["lines"]), f"- {stamp}: {it['title']}: {what}{_by(by)}.")
+        _write(p, before, lines, f"{it['title']}: {what}", links_before=was)
+        _save_links(links)
+    return {"ok": True, "said": f"{it['title']}: {what}.", "id": it["id"], "list": lst["key"]}
+
+
+def blocks_text(days: int = 14) -> str:
+    bs = blocks(days)
+    if not bs:
+        return "No calendar blocks coming up in the last read of the calendar."
+    import agenda
+    return "Calendar blocks coming up (plan ITEM BLOCK takes the id after #):\n" + "\n".join(
+        f"- {b['title']} ({agenda.when_words(b)}; {b['calendar'] or 'Main'}) #{b['id']}" for b in bs)
 
 
 # ---- for a call ------------------------------------------------------------------------------------------------
@@ -739,6 +985,8 @@ def call_note(it: dict, user: str = "the user") -> str:
         lines.append(f"{c}: {v}")
     for d in it.get("details") or []:
         lines.append(f"In their own words: {d}")
+    if it.get("planned"):
+        lines.append(f"Planned in the calendar: {it['planned']['title']}, {it['planned']['short']}")
     return (
         f"{user} started this call by tapping an item on the to-do list in HQ, so this call is about it. The call "
         "system greets them by naming it; pick it up from their answer, without reading it all back, and help with "
@@ -767,6 +1015,7 @@ def summary(p: Path | None = None) -> str:
             continue
         out.append(f"{label}: {len(items)}" + ("" if not items else ": " + "; ".join(
             it["title"] + (f" [{it['deadline']}]" if it["deadline"] else "") + (f" ({it['status']})" if it["status"] and it["status"] != "open" else "")
+            + (f" (planned {it['planned']['short']}, {it['planned']['title']})" if it.get("planned") else "")
             + f" #{it['id']}" for it in items)))
     if d.get("mail"):
         out.append(f"Very important mail waiting for an answer: {len(d['mail'])}")
@@ -785,7 +1034,8 @@ def _opt(args: list[str], name: str) -> str:
 def main(argv: list[str]) -> int:
     args = list(argv)
     # H203: on the backup HQ, a change to the list goes to the main one, which writes it (role.WRITES), like the queue.
-    if args and args[0] in ("add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo") and not os.environ.get("HQ_ROLE_HERE"):
+    if args and args[0] in ("add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo", "plan",
+                             "unplan") and not os.environ.get("HQ_ROLE_HERE"):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "routine"))
         import role
         if role.is_backup():
@@ -817,6 +1067,12 @@ def main(argv: list[str]) -> int:
             print(rename(args[1], args[2], by=by)["said"])
         elif cmd == "undo":
             print(undo()["said"])
+        elif cmd == "blocks":
+            print(blocks_text(int(args[1]) if len(args) > 1 and args[1].isdigit() else 14))
+        elif cmd == "plan" and len(args) >= 3:
+            print(plan(args[1], args[2], by=by)["said"])
+        elif cmd == "unplan" and len(args) >= 2:
+            print(unplan(args[1], by=by)["said"])
         else:
             print(__doc__.strip())
             return 2

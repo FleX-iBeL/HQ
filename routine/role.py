@@ -78,7 +78,7 @@ PY = sys.executable or "/usr/bin/python3"
 WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place on the planning; piece 2: Plan the sprint; H271: its MoSCoW tag
           "jobs": {"add", "add-row", "send-row", "stop", "overrule", "move", "on", "off", "mail-on", "mail-off", "mail-fast", "mail-hourly", "resume"},
           "schedule": {"add", "cancel", "move", "priority", "every"},
-          "todo": {"add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo"},
+          "todo": {"add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo", "plan", "unplan"},
           "pings": {"appt", "remind", "cancel", "note", "note-clear", "watch", "unwatch", "out", "out-stop", "nudge", "nudge-done", "nudge-later", "call", "call-cancel", "answered"},
           "games": {"new", "spec", "tick", "count", "note", "diary", "week", "debrief", "undo"},
           "coaching": {"done", "later"},
@@ -94,7 +94,8 @@ PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main 
 # reminders), and so the only one that writes them: on the backup a call or chat hands its change to these to the
 # main, which writes it; the sync brings it back. Paths are relative to the workspace.
 ONE_WRITER = ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "HQ/games.json", "HQ/coaching.json",
-              "HQ/sprint.json")  # H269: the planning's ranks
+              "HQ/sprint.json",  # H269: the planning's ranks
+              "HQ/calendar-todo.json")  # H243: which block a to-do is planned in
 
 
 def one_writer(rel: str) -> bool:

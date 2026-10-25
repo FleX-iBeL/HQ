@@ -15593,6 +15593,214 @@ window.fetch = async (url, opt) => {
                 "with its log line and undo, the details kept; the ticked-off groceries read plainly; calls, the backup and "
                 "the server know it (" + ", ".join(seen) + ")")
 
+    # 153
+    async def flow153(self) -> str:
+        """H243: to-do items planned in a calendar block, linked by hand. No Claude turns. On throwaway copies of the
+        list and the calendar: plan links an item to a block by its id, or by words with a day and a time, refuses
+        when more than one fits; one block holds several items; the item reads the block's time as the calendar has
+        it now, so a moved block shows its new time; unplan takes it off; rename keeps the link; each gets its log
+        line and undo puts the link back too. Never by title by itself. The calls' rules, the policy and the backup's
+        hand-over know plan and unplan. The test server's /api/todo plans and unplans. On the call page in a headless
+        browser (the phone, the desktop app dark): the planned mark on a row, the filter (all, planned, not planned)
+        with its counts, Plan in a block picks a block from the coming two weeks, Unplan, nothing wider than the
+        screen."""
+        import todo as td
+        import agenda
+        from datetime import timedelta
+        d = self.tmp / "h243"
+        d.mkdir(parents=True, exist_ok=True)
+        tpl = (APP.parent / "template" / "challenges.md").read_text()
+        at = tpl.index("## 2. ")
+        eol = tpl.index("\n", tpl.index("|---", at))
+        text = tpl[:eol + 1] + ("| Fix the plant pot | passive | | open | | 2026-01-03 | |\n| Order fibre | passive | | open | | 2026-01-03 | |\n"
+                                "| Call the bank | passive | | open | | 2026-01-03 | |\n| Buy a printer | passive | | open | | 2026-01-03 | |\n") + tpl[eol + 1:]
+        f = d / "challenges.md"
+        f.write_text(text)
+        keep = {k: os.environ.get(k) for k in ("HQ_TODO_UNDO", "HQ_NOW", "HQ_CALENDAR_FILE", "HQ_CALENDAR_TODO", "HQ_CALENDAR_MARKS")}
+        os.environ.update({"HQ_TODO_UNDO": str(d / "undo.json"), "HQ_NOW": "2026-01-05T09:00:00", "HQ_CALENDAR_FILE": str(d / "calendar.json")})
+        os.environ.pop("HQ_CALENDAR_TODO", None)
+        os.environ["HQ_CALENDAR_MARKS"] = str(d / "marks.json")
+        loc = lambda y, m, dd, h: datetime(y, m, dd, h).astimezone().isoformat()
+        ev = lambda gid, title, dd, h, **kw: {"id": agenda._event_id("me@example.com", gid), "gid": gid, "cal": "me@example.com", "title": title,
+                                              "start": loc(2026, 1, dd, h), "end": loc(2026, 1, dd, h + 1), "all_day": False, "where": "",
+                                              "notes": "", "calendar": "Main", "free": False, "type": "DEFAULT", **kw}
+        wed, wed2, thu = ev("w", "Admin", 7, 10), ev("w2", "Admin", 7, 14), ev("t", "Kaizen", 8, 10)
+        label = {**ev("l", "CEO day", 7, 0), "all_day": True, "start": "2026-01-07", "end": "2026-01-08"}
+        cal = d / "calendar.json"
+        cal.write_text(json.dumps({"looked": time.time(), "calendars": [{"id": "me@example.com", "name": "Main"}], "events": [wed, wed2, thu, label]}))
+        item = lambda name: next(i for l in td.read(f)["lists"] for i in l["items"] if i["title"] == name)
+        try:
+            need(td.links_file() == d / "calendar-todo.json", "the links aren't next to the calendar copy")
+            bs = td.blocks()
+            need([b["title"] for b in bs] == ["Admin", "Admin", "Kaizen"], f"blocks lists the wrong ones (an all-day label is no block): {bs}")
+            need(item("Fix the plant pot")["planned"] is None, "an item is planned before anything was linked")
+            r = td.plan("plant pot", wed["id"], by="a test", p=f)
+            pl = item("Fix the plant pot")["planned"]
+            need(pl and pl["short"] == "Wednesday 10:00" and pl["title"] == "Admin" and pl["id"] == wed["id"], f"plan by id reads wrong: {pl} {r}")
+            need("- 2026-01-05 09:00: Fix the plant pot: planned in Admin (Wednesday 7 January, 10:00 to 11:00) (a test)." in f.read_text(),
+                 "plan wrote no log line")
+            td.plan("order fibre", wed["id"], p=f)
+            td.plan("call the bank", "admin wednesday 10:00", p=f)
+            need(all(item(n)["planned"]["id"] == wed["id"] for n in ("Fix the plant pot", "Order fibre", "Call the bank")),
+                 "one block doesn't hold several items")
+            for bad, kind in (("admin wednesday", ValueError), ("admin", ValueError), ("dentist", KeyError), ("", KeyError)):
+                try:
+                    td.plan("buy a printer", bad, p=f)
+                    need(False, f"plan took {bad!r}, which doesn't name one block")
+                except kind:
+                    pass
+            need(item("Buy a printer")["planned"] is None, "a refused plan still linked something")
+            # the block moves in Google: the item shows its new time
+            moved = {**wed, "start": loc(2026, 1, 8, 15), "end": loc(2026, 1, 8, 16)}
+            cal.write_text(json.dumps({"looked": time.time(), "calendars": [], "events": [moved, wed2, thu]}))
+            need(item("Fix the plant pot")["planned"]["short"] == "Thursday 15:00", f"a moved block doesn't show its new time: {item('Fix the plant pot')['planned']}")
+            summ = td.summary(f)
+            need("Fix the plant pot (planned Thursday 15:00, Admin)" in summ, f"the list a call reads doesn't say it's planned: {summ[:400]}")
+            r = td.rename("order fibre", "Order new fibre medicine", p=f)
+            need(item("Order new fibre medicine")["planned"]["id"] == wed["id"], "rename lost the link")
+            need(td.undo()["ok"] and item("Order fibre")["planned"]["id"] == wed["id"], "undo of a rename lost the link")
+            td.unplan("call the bank", by="a test", p=f)
+            need(item("Call the bank")["planned"] is None and "Call the bank: no longer planned in Admin (a test)." in f.read_text(),
+                 "unplan didn't take it off, or wrote no log line")
+            need(td.undo()["ok"] and item("Call the bank")["planned"], "undo didn't put the link back")
+            need("isn't planned" in td.unplan("buy a printer", p=f)["said"], "unplan on an unplanned item doesn't say so")
+            rc = run([sys.executable, str(APP / "todo.py"), "plan", "buy a printer", "kaizen thursday 10:00", "--by", "a test"],
+                     env={**os.environ, "HQ_TODO": str(f), "HQ_ROLE_HERE": "1"}, timeout=30)
+            need(rc.returncode == 0 and item("Buy a printer")["planned"]["title"] == "Kaizen", f"todo.py plan from the command line failed: {rc.stdout} {rc.stderr}")
+            rc = run([sys.executable, str(APP / "todo.py"), "blocks"], env={**os.environ, "HQ_TODO": str(f)}, timeout=30)
+            need(rc.returncode == 0 and "#" + thu["id"] in rc.stdout, f"todo.py blocks doesn't list the ids: {rc.stdout}")
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        from policy import Policy
+        import role as _role
+        pol = Policy(config.FOLDER, dry_run=True)
+        script = APP / "todo.py"
+        need(all(pol.decide("Bash", {"command": f'python3 "{script}" {c}'}).verdict == "allow"
+                 for c in ('blocks', 'plan "plant pot" "admin wednesday 10:00" --by "a call"', 'unplan "plant pot"')),
+             "a call can't plan or unplan an item")
+        need({"plan", "unplan"} <= _role.WRITES["todo"] and _role.one_writer("HQ/calendar-todo.json"),
+             "the backup doesn't hand plan and unplan to the main")
+        need("plan ITEM BLOCK" in config.TODO_RULE and "unplan ITEM" in config.TODO_RULE, "the call rules don't know plan and unplan")
+        # the server, on its own copies; the blocks relative to now, since the server reads the real clock
+        await self.ensure_server()
+        sf = Path(self.server.env["HQ_TODO"])
+        sf.parent.mkdir(parents=True, exist_ok=True)
+        scal = Path(self.server.env["HQ_CALENDAR_FILE"])
+        scal.parent.mkdir(parents=True, exist_ok=True)
+        cal_before = scal.read_bytes() if scal.exists() else None
+        day2 = (datetime.now() + timedelta(days=2)).replace(hour=10, minute=0, second=0, microsecond=0)
+        sev = lambda gid, title, t: {"id": agenda._event_id("me@example.com", gid), "gid": gid, "cal": "me@example.com", "title": title,
+                                     "start": t.astimezone().isoformat(), "end": (t + timedelta(hours=1)).astimezone().isoformat(), "all_day": False,
+                                     "where": "", "notes": "", "calendar": "Main", "free": False, "type": "DEFAULT"}
+        sw, sk = sev("sw", "Admin block", day2), sev("sk", "Kaizen block", day2 + timedelta(hours=4))
+        cal_text = json.dumps({"looked": time.time(), "calendars": [{"id": "me@example.com", "name": "Main"}], "events": [sw, sk]})
+        weekday = day2.strftime("%A")
+
+        def post(body, hq="todo"):
+            req = urllib.request.Request(TEST_URL + "/api/todo", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        links = scal.with_name("calendar-todo.json")
+        try:
+            sf.write_text(text); scal.write_text(cal_text); links.unlink(missing_ok=True)
+            Path(self.server.env["HQ_TODO_UNDO"]).unlink(missing_ok=True)
+            need(post({"plan": "plant pot", "block": sw["id"]}, hq="")[0] == 403, "a plan without the page's header was let in")
+            code, got = post({"plan": "plant pot", "block": sw["id"]})
+            pl = next((i["planned"] for l in (got or {}).get("lists", []) for i in l["items"] if i["title"] == "Fix the plant pot"), None)
+            need(code == 200 and pl and pl["short"] == f"{weekday} 10:00", f"the server didn't plan it ({code}, {pl})")
+            need([b["id"] for b in got.get("blocks", [])][:2] == [sw["id"], sk["id"]], f"the server doesn't give the blocks to pick from: {got.get('blocks')}")
+            need(post({"plan": "plant pot", "block": "nothing like it"})[0] == 404, "an unknown block wasn't refused")
+            code, got = post({"unplan": "plant pot"})
+            need(code == 200 and not any(i["planned"] for l in got["lists"] for i in l["items"] if i["title"] == "Fix the plant pot"),
+                 f"the server didn't unplan it ({code})")
+            # the call page
+            cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+            cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+            chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+            need(Path(chrome).exists(), "no headless browser found to run the call page in")
+            page = (APP / "web/index.html").read_text()
+            harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (f, ms) => { for (let i = 0; i < ms / 50; i++) { if (f()) return true; await wait(50); } return false; };
+  try { localStorage.removeItem("hq-todo-filter"); } catch (_) {}
+  const wide = () => [...document.querySelectorAll("#todosheet *")].some(e => { const b = e.getBoundingClientRect(); return b.width && b.right > innerWidth + 1; });
+  const titles = () => [...document.querySelectorAll(".tdrow .it")].map(b => b.firstChild.textContent);
+  const chip = k => document.querySelector('.tdfilter button[data-show="' + k + '"]');
+  document.getElementById("todobtn").click();
+  await until(() => document.querySelector(".tdq"), 4000);
+  const q1 = [...document.querySelectorAll(".tdq")].find(c => !c.disabled && /Fix the plant pot/.test(c.textContent)) || [...document.querySelectorAll(".tdq")].find(c => !c.disabled);
+  q1.click(); await until(() => chip("all"), 4000);
+  out.push("chips:" + ["all", "planned", "open"].map(k => chip(k) ? chip(k).lastChild.textContent : "-").join("/"));
+  [...document.querySelectorAll(".tdrow .it")].find(b => b.firstChild.textContent === "Fix the plant pot").click(); await wait(100);
+  const box = document.querySelector(".tdplan");
+  out.push("box:" + (box ? box.querySelector(".when").textContent : "none"));
+  [...box.querySelectorAll("button")].find(b => b.textContent === "Plan in a block").click(); await wait(50);
+  out.push("picker:" + document.querySelectorAll(".tdplan .blk").length);
+  document.querySelector(".tdplan .blk").click();
+  await until(() => /Planned/.test((document.querySelector(".tdplan .when") || {}).textContent || ""), 4000);
+  out.push("planned:" + document.querySelector(".tdplan .when").textContent);
+  out.push("wide:" + (wide() ? "yes" : "no"));
+  document.getElementById("todoback").click(); await until(() => chip("all"), 4000);
+  const row = [...document.querySelectorAll(".tdrow .it")].find(b => b.firstChild.textContent === "Fix the plant pot");
+  out.push("row:" + ((row && row.querySelector("small.plan")) || {}).textContent);
+  out.push("counts:" + ["all", "planned", "open"].map(k => chip(k).lastChild.textContent).join("/"));
+  chip("open").click(); await wait(100);
+  out.push("open:" + titles().join("/") + ",grips:" + document.querySelectorAll(".tdrow .grip").length);
+  chip("planned").click(); await wait(100);
+  out.push("only:" + titles().join("/"));
+  chip("all").click(); await wait(100);
+  [...document.querySelectorAll(".tdrow .it")].find(b => b.firstChild.textContent === "Fix the plant pot").click(); await wait(100);
+  [...document.querySelectorAll(".tdplan button")].find(b => b.textContent === "Unplan").click();
+  await until(() => /Not planned/.test((document.querySelector(".tdplan .when") || {}).textContent || ""), 4000);
+  out.push("unplanned:" + document.querySelector(".tdplan .when").textContent);
+  out.push("wide2:" + (wide() ? "yes" : "no"));
+  const pre = document.createElement("pre"); pre.id = "h243"; pre.textContent = "H243RESULT " + out.join(" | ") + " END"; document.body.append(pre);
+})();
+</script>"""
+            seen = []
+            for name, size, app_, dark in (("the phone", "390,844", False, False), ("the desktop app, dark", "1180,780", True, True)):
+                sf.write_text(text); links.unlink(missing_ok=True)
+                Path(self.server.env["HQ_TODO_UNDO"]).unlink(missing_ok=True)
+                pf = self.tmp / f"h243-{size.replace(',', 'x')}.html"
+                pg = page.replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1).replace("</body>", harness + "</body>", 1)
+                if app_:
+                    pg = pg.replace('new URLSearchParams(location.search).has("app")', "true", 1)
+                pf.write_text(pg)
+                r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                                  f"--user-data-dir={self.tmp / 'h243-profile'}", "--disable-web-security", f"--window-size={size}",
+                                                  *(["--force-dark-mode", "--blink-settings=preferredColorScheme=0"] if dark else []),
+                                                  "--virtual-time-budget=15000", "--dump-dom", pf.as_uri()], timeout=90)
+                mm = re.search(r'<pre id="h243">H243RESULT (.*?) END</pre>', r.stdout)
+                need(mm, f"{name}: the planning test on the call page didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+                res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+                say(f"   {name} ({size}): {mm.group(1)}")
+                need(res["chips"] == "4/0/4" and res["box"] == "Not planned yet" and res["picker"] == "2", f"{name}: the filter or the block picker reads wrong: {res}")
+                need(res["planned"] == f"Planned {weekday} 10:00 · Admin block", f"{name}: picking a block didn't plan it: {res}")
+                need(res["row"] == f"Planned {weekday} 10:00 · Admin block" and res["counts"] == "4/1/3", f"{name}: the row or the counts don't show it: {res}")
+                need(res["open"] == "Order fibre/Call the bank/Buy a printer,grips:0" and res["only"] == "Fix the plant pot",
+                     f"{name}: the filter doesn't show planned or not planned: {res}")
+                need(res["unplanned"] == "Not planned yet", f"{name}: Unplan didn't take it off: {res}")
+                need(res["wide"] == "no" and res["wide2"] == "no", f"{name}: something is wider than the screen: {res}")
+                seen.append(name)
+        finally:
+            links.unlink(missing_ok=True)
+            if cal_before is None:
+                scal.unlink(missing_ok=True)
+            else:
+                scal.write_bytes(cal_before)
+        return ("a to-do item is planned in a calendar block by hand (by id, or words with a day and a time), several in one block, "
+                "a moved block shows its new time, unplan, rename and undo keep it right; calls, the backup and the server know it; "
+                "the row's mark, the filter and the block picker on the page (" + ", ".join(seen) + ")")
+
     async def flow113(self) -> str:
         """H194: HQ's own icon on a friend's fresh install. No Claude turns. A status server without HQ_LABEL (a
         laptop, like a fresh install) serves HQ's house (status/icons/hq-*.png, opaque squares) for every page that
@@ -18625,6 +18833,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    153: ("H243: to-do items planned in a calendar block by hand (by id, or words with a day and a time), several in one block, a moved block showing its new time, unplan, rename and undo; the row's mark, the filter (all, planned, not planned) and the block picker; phone and desktop app, dark", False, "flow153"),
     152: ("H246: each agent loads what fits her role: Donna the day (no vision), Pepper the vision and coaching (no building, in her files or rules), Moneypenny the building (none of the life files), well under the whole folder", False, "flow152"),
     151: ("H244: the five kinds of the week in colour in the app's calendar, a tap hides or shows a kind, Edit renames one; Google's own colour of an appointment kept", False, "flow151"),
     149: ("H275: the sprint planning's totals: not ready, ready and not planned yet, planned (with the team or for a night), and the total, adding up in rows, time and usage; the list a call reads; a fold at the top of Sprint planning", False, "flow149"),

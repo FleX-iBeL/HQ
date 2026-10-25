@@ -495,6 +495,26 @@
   .tdacts button, .tdacts select { min-height:48px; border:0; border-radius:14px; background:var(--soft); color:var(--fg); font:600 15px/1.2 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
   .tdacts select { width:100%; min-width:0; appearance:none; -webkit-appearance:none; text-align:center; text-align-last:center; }
   .tdacts .ok { background:var(--accent); color:#04120f; }
+  /* H243 (his words: "can't she just manually tap them? i discuss everything on the calendar anyway on friday mornings"): an
+     item planned in a calendar block by hand shows the block's time; a filter on a list shows all, planned or not
+     planned; the item's own page picks the block from the coming two weeks. */
+  .tdrow .it small.plan { color:var(--accent); font-weight:600; }
+  .tdrow .it small.plan.past { color:var(--muted); font-weight:400; }
+  .tdfilter { display:flex; gap:6px; justify-content:center; flex-wrap:wrap; }
+  .tdfilter button { border:0; border-radius:999px; background:var(--soft); color:var(--fg); font:600 13px/1 -apple-system,sans-serif; padding:8px 12px; cursor:pointer; }
+  .tdfilter button[aria-pressed="true"] { background:var(--accent); color:#04120f; }
+  .tdfilter button span { opacity:.65; margin-left:5px; font-weight:400; }
+  .tdplan { display:flex; flex-direction:column; gap:8px; padding:10px 12px; border-radius:14px; background:var(--soft); }
+  .tdplan > b { color:var(--muted); font-size:12px; font-weight:700; }
+  .tdplan .when { font-size:15px; line-height:1.35; overflow-wrap:anywhere; }
+  .tdplan .bs { display:flex; gap:8px; flex-wrap:wrap; }
+  .tdplan .bs button { min-height:40px; border:0; border-radius:12px; background:var(--bg); color:var(--fg); font:600 14px/1.2 -apple-system,sans-serif; padding:8px 12px; cursor:pointer; }
+  .tdplan .bs button.ok { background:var(--accent); color:#04120f; }
+  .tdplan .day { color:var(--muted); font-size:12px; font-weight:700; margin-top:6px; }
+  .tdplan .blk { display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left; border:0; border-radius:12px; background:var(--bg); color:var(--fg);
+                 font:15px/1.3 -apple-system,sans-serif; padding:9px 12px; cursor:pointer; width:100%; overflow-wrap:anywhere; }
+  .tdplan .blk small { color:var(--muted); font-size:12px; }
+  .tdplan .blk[aria-current="true"] { box-shadow:0 0 0 1.5px var(--accent); }
   #todogo { border:0; border-radius:16px; background:var(--accent); color:#04120f; font:600 17px/1 -apple-system,sans-serif; padding:15px 12px; cursor:pointer; margin-top:2px; }
   #todogo:disabled { opacity:.45; cursor:default; }
   #todonote { display:flex; align-items:center; justify-content:center; gap:10px; color:var(--muted); font-size:13px; min-height:1.2em; text-align:center; flex-shrink:0; }
@@ -2866,6 +2886,7 @@ function todoSoon(d) {  // a deadline date within the next week, in red
   const m = /(\d{4}-\d\d-\d\d)/.exec(d || ""); if (!m) return false;
   const t = Date.parse(m[1] + "T23:59:00"); return t - Date.now() < 7 * 864e5;
 }
+function todoPlanWords(pl) { return pl ? "Planned " + pl.short + (pl.past ? " (gone by)" : "") : ""; }  // H243
 function todoMeta(it) {
   return [it.for ? "For " + it.for : "", it.deadline, it.status && it.status !== "open" ? it.status : "", it.calendar ? "In the calendar: " + it.calendar : "",
           it.at, it.often].filter(Boolean).join(" · ");
@@ -2976,13 +2997,33 @@ function todoDrawList() {
   todoBody.innerHTML = "";
   const closed = l.kind === "done" || l.kind === "letgo";
   if (!l.items.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "Nothing here right now"; todoBody.appendChild(e); }
-  const sortable = !closed && l.kind !== "grocoff" && l.items.length > 1;  // H231
-  for (const it of l.items) {
+  // H243: all, planned or not planned, remembered on this device; the order only changes with all showing
+  const canPlan = !closed && l.kind !== "groceries" && l.kind !== "grocoff" && l.items.length > 0;
+  let show = "all";
+  if (canPlan) {
+    try { show = localStorage.getItem("hq-todo-filter") || "all"; } catch (_) {}
+    if (!["all", "planned", "open"].includes(show)) show = "all";
+    const n = { all: l.items.length, planned: l.items.filter(x => x.planned).length };
+    n.open = n.all - n.planned;
+    const fl = document.createElement("div"); fl.className = "tdfilter"; fl.setAttribute("role", "group"); fl.setAttribute("aria-label", "Show");
+    for (const [k, w] of [["all", "All"], ["planned", "Planned"], ["open", "Not planned"]]) {
+      const b = document.createElement("button"); b.type = "button"; b.dataset.show = k; b.setAttribute("aria-pressed", String(show === k));
+      const c = document.createElement("span"); c.textContent = String(n[k]); b.append(document.createTextNode(w), c);
+      b.addEventListener("click", () => { try { localStorage.setItem("hq-todo-filter", k); } catch (_) {} const at = todoBody.scrollTop; todoDraw(); todoBody.scrollTop = at; });
+      fl.appendChild(b);
+    }
+    todoBody.appendChild(fl);
+  }
+  const shown = l.items.filter(x => show === "all" || (show === "planned" ? x.planned : !x.planned));
+  if (l.items.length && !shown.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = show === "planned" ? "Nothing here is planned in the calendar yet" : "Everything here is planned"; todoBody.appendChild(e); }
+  const sortable = !closed && l.kind !== "grocoff" && l.items.length > 1 && show === "all";  // H231
+  for (const it of shown) {
     const row = document.createElement("div"); row.className = "tdrow"; row.dataset.id = it.id;
     if (sortable) row.appendChild(todoGrip(l, it, row));
     const b = document.createElement("button"); b.type = "button"; b.className = "it"; b.textContent = it.title;
     const meta = todoMeta(it);
     if (meta) { const m = document.createElement("small"); m.textContent = meta; if (!closed && todoSoon(it.deadline)) m.className = "due"; b.appendChild(m); }
+    if (it.planned && !closed) { const m = document.createElement("small"); m.className = "plan" + (it.planned.past ? " past" : ""); m.textContent = todoPlanWords(it.planned) + " · " + it.planned.title; b.appendChild(m); }
     b.addEventListener("click", () => todoGo({ list: l.key, item: it.id, from: "list" }));
     row.appendChild(b);
     if (!closed) {
@@ -3155,6 +3196,7 @@ function todoDrawItem() {
     const b = document.createElement("b"); b.textContent = "In your own words"; w.append(b, document.createTextNode(d)); todoBody.appendChild(w);
   }
   const closed = l.kind === "done" || l.kind === "letgo";
+  if (!closed && l.kind !== "groceries" && l.kind !== "grocoff") todoBody.appendChild(todoPlanBox(it));  // H243
   const acts = document.createElement("div"); acts.className = "tdacts";
   const rn = document.createElement("button"); rn.type = "button"; rn.textContent = "Rename";  // H231
   rn.addEventListener("click", () => { if (todoBody.contains(h)) todoRename(it, h); });
@@ -3194,6 +3236,50 @@ function todoDrawItem() {
     todoBody.appendChild(go);
     if (state !== "idle") { const n = document.createElement("small"); n.className = "line"; n.textContent = "You're on a call: just say what it's about."; todoBody.appendChild(n); }
   }
+}
+// H243: which calendar block the item is planned in, picked by hand from the coming two weeks (one block can hold
+// several items); Change picks another, Unplan takes it off. Nothing is written in Google Calendar.
+function todoPlanBox(it) {
+  const box = document.createElement("div"); box.className = "tdplan";
+  const h = document.createElement("b"); h.textContent = "In the calendar";
+  const after = async ask => { const d = await todoSend(ask); if (d) { if (d.id) todoView.item = d.id; todoDraw(); } };
+  const show = () => {
+    box.innerHTML = ""; box.appendChild(h);
+    const w = document.createElement("div"); w.className = "when";
+    w.textContent = it.planned ? todoPlanWords(it.planned) + " · " + it.planned.title + (it.planned.seen === false ? " (not in the last read of the calendar)" : "") : "Not planned yet";
+    const bs = document.createElement("div"); bs.className = "bs";
+    const pick = document.createElement("button"); pick.type = "button"; pick.className = it.planned ? "" : "ok";
+    pick.textContent = it.planned ? "Change" : "Plan in a block"; pick.addEventListener("click", choose);
+    bs.appendChild(pick);
+    if (it.planned) {
+      const un = document.createElement("button"); un.type = "button"; un.textContent = "Unplan";
+      un.addEventListener("click", () => { un.disabled = true; after({ unplan: it.id }); });
+      bs.appendChild(un);
+    }
+    box.append(w, bs);
+  };
+  const choose = () => {
+    box.innerHTML = ""; box.appendChild(h);
+    const blocks = (todoData && todoData.blocks) || [];
+    if (!blocks.length) { const e = document.createElement("div"); e.className = "when"; e.textContent = "No blocks in the calendar in the next two weeks."; box.appendChild(e); }
+    let day = "";
+    for (const b of blocks) {
+      const d = new Date(b.start), dl = d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+      if (dl !== day) { day = dl; const x = document.createElement("div"); x.className = "day"; x.textContent = dl; box.appendChild(x); }
+      const k = document.createElement("button"); k.type = "button"; k.className = "blk"; k.dataset.block = b.id;
+      if (it.planned && it.planned.id === b.id) k.setAttribute("aria-current", "true");
+      const t = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }), e = new Date(b.end).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+      const sm = document.createElement("small"); sm.textContent = t + " to " + e + (b.calendar && b.calendar !== "Main" ? " · " + b.calendar : "");
+      k.append(document.createTextNode(b.title), sm);
+      k.addEventListener("click", () => { for (const x of box.querySelectorAll("button")) x.disabled = true; after({ plan: it.id, block: b.id }); });
+      box.appendChild(k);
+    }
+    const bs = document.createElement("div"); bs.className = "bs";
+    const c = document.createElement("button"); c.type = "button"; c.textContent = "Cancel"; c.addEventListener("click", show);
+    bs.appendChild(c); box.appendChild(bs);
+  };
+  show();
+  return box;
 }
 let aboutTodoNext = null;
 async function loadTodo() {

@@ -743,7 +743,7 @@ if __name__ == "__main__":
 
     # H200: the to-do list, the Eisenhower way (todo.py), from the workspace's own file. The page reads it and can tick
     # one off, let it go, move it, add one (several at once, F40), tick a grocery off and back on (F40), put one at
-    # another place in its list and rename it (H231), and undo its last change; calls and Donna keep it the same way. Only from the page itself (x-hq: todo), never on a Free-only
+    # another place in its list and rename it (H231), plan it in a calendar block by hand (H243), and undo its last change; calls and Donna keep it the same way. Only from the page itself (x-hq: todo), never on a Free-only
     # line.
     import todo as _todo
 
@@ -785,6 +785,10 @@ if __name__ == "__main__":
                 args = ["rename", ask["rename"], ask["title"][:300]]
             elif isinstance(ask.get("add"), str) and isinstance(ask.get("list"), str):
                 args = ["add", ask["list"], ask["add"][:2000]]
+            elif isinstance(ask.get("plan"), str) and isinstance(ask.get("block"), str):
+                args = ["plan", ask["plan"], ask["block"][:200]]
+            elif isinstance(ask.get("unplan"), str):
+                args = ["unplan", ask["unplan"]]
             elif ask.get("undo") is True:
                 args = ["undo"]
             else:
@@ -818,6 +822,10 @@ if __name__ == "__main__":
                 said = await asyncio.to_thread(_todo.rename, ask["rename"], ask["title"][:300], by)
             elif isinstance(ask.get("add"), str) and isinstance(ask.get("list"), str):
                 said = await asyncio.to_thread(_todo.add, ask["list"], ask["add"][:2000], "", "", "", "", by)
+            elif isinstance(ask.get("plan"), str) and isinstance(ask.get("block"), str):  # H243: by hand
+                said = await asyncio.to_thread(_todo.plan, ask["plan"], ask["block"][:200], by)
+            elif isinstance(ask.get("unplan"), str):
+                said = await asyncio.to_thread(_todo.unplan, ask["unplan"], by)
             elif ask.get("undo") is True:
                 said = await asyncio.to_thread(_todo.undo)
             else:
