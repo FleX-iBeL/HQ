@@ -47,6 +47,20 @@ from pathlib import Path
 import about_self
 
 LOADS = ("quick", "deep")
+# H246 (25 October 2026, call at 18:11, Moneypenny), in the user's words: "for now i want it trimmed, because when i
+# open a chat with you it seems its already 4% pulled up. thats crazy. so i want everyone checked again since now its
+# much clearer what everyone's role is", and "pepper can be excluded from the building and all of your context that's
+# loaded in. so she can focus on the vision, and the coaching modules". So each agent loads what fits her role
+# (quick_context.py): "day" the agenda, the list, the mail and where he stands; "coach" the vision, the map and the
+# coaching, nothing from the building; "build" the planning, the team's work, the build notes and the call rules, none
+# of the life files; "all" the whole folder, as a chat does. An agent without one takes it from her load.
+CONTEXTS = ("day", "coach", "build", "all")
+
+
+def context_of(agent: dict) -> str:
+    """What this agent loads on a call or a text (H246)."""
+    c = agent.get("context")
+    return c if c in CONTEXTS else ("day" if agent.get("load") == "quick" else "all")
 MODELS = ("sonnet", "opus", "haiku")  # the aliases config.MODEL_ALIASES knows
 PICTURE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
 
@@ -85,6 +99,7 @@ DEFAULTS: list[dict] = [
         "id": "donna",
         "name": "Donna",
         "load": "quick",
+        "context": "day",
         "model": "opus",
         "full_name": "Donna Paulsen",
         "voice": "af_bella",
@@ -138,6 +153,7 @@ DEFAULTS: list[dict] = [
         "id": "pepper",
         "name": "Pepper",
         "load": "deep",
+        "context": "coach",
         "model": "opus",
         "full_name": "Pepper Potts",
         "voice": "af_heart",
@@ -216,6 +232,7 @@ DEFAULTS: list[dict] = [
         "id": "moneypenny",
         "name": "Moneypenny",
         "load": "deep",
+        "context": "build",
         "model": "opus",
         "full_name": "Miss Moneypenny",
         "voice": "bf_emma",
@@ -295,7 +312,7 @@ CHARACTER_KEYS = ("character", "personality", "craft", "pushback", "greetings", 
 
 _KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", "personality", "hidden", "coming_soon",
          "character", "pushback", "greetings", "back_greetings", "continue_greetings", "handover_greetings",
-         "own_goodbye", "craft")
+         "own_goodbye", "craft", "context")
 
 
 def _lines(v, most: int = 8) -> list[str]:
@@ -347,6 +364,7 @@ def _clean(a: dict) -> dict | None:
         "continue_greetings": _lines(a.get("continue_greetings")),
         "handover_greetings": _lines(a.get("handover_greetings")),
         "own_goodbye": a.get("own_goodbye") is True,
+        "context": a.get("context") if a.get("context") in CONTEXTS else ("day" if load == "quick" else "all"),
     }
 
 

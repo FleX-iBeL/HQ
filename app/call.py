@@ -118,7 +118,10 @@ class Call:
         else:
             # In tests, nothing may change: no file edits, no git, even during the call.
             self.policy = Policy(config.FOLDER, dry_run=test_mode, listener=self._on_decision)
-            self.brain = make_brain(self.model, self.policy, load=self.load, persona=persona)
+            # H246: she loads what fits her role; a Deep call with the day's agent keeps the whole folder, as before
+            context = agents.context_of(self.agent)
+            self.context = "all" if context == "day" and self.load == "deep" else context
+            self.brain = make_brain(self.model, self.policy, load=self.load, persona=persona, context=self.context)
         self.stt = make_stt(quiet=free)
         self.voice = voice if voice in config.VOICES else config.VOICE
         self.voices.setdefault(self.agent["id"], self.voice)

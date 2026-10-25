@@ -634,10 +634,30 @@ HANGUP_RULES = HANGUP_RULES.replace("{user}", USER)
 VOICE_RULES = VOICE_RULES.replace("{user}", USER)
 
 
-def voice_rules() -> str:
+# H246: Pepper gets nothing from the building, in her rules either: the queue, the team, the scheduler and the
+# repeating items (from "Work for the computer" up to "Main and backup") become one line that hands it to Moneypenny.
+_BUILD_FROM, _BUILD_TO = "- Work for the computer (building", "- Main and backup (H56.3)"
+NO_BUILDING_RULE = """- Building HQ isn't yours: the planning, the team, the queue and the schedule are Moneypenny's (head of \
+development). When {user} wants something built, fixed in HQ or put on the planning, put her on or bring her in; \
+don't do it yourself and don't talk him through it.
+""".replace("{user}", USER)
+
+
+def without_building(rules: str) -> str:
+    """The rules without what's about building HQ (H246, a coaching call or text)."""
+    a = rules.find(_BUILD_FROM)
+    b = rules.find(_BUILD_TO, a + 1) if a >= 0 else -1
+    if a >= 0 and b > a:
+        rules = rules[:a] + NO_BUILDING_RULE + rules[b:]
+    elif TEAM_RULE in rules:
+        rules = rules.replace(TEAM_RULE, NO_BUILDING_RULE.rstrip("\n"))
+    return rules
+
+
+def voice_rules(context: str = "all") -> str:
     """The call rules with the workflows as they are now (job 257): Life coaching switched in Settings counts from the
     next call, no restart of the call line. H205: and what they turned off in What HQ helps you with. H235: and their
-    own extensions."""
+    own extensions. H246: a coaching call ("coach") without what's about building HQ."""
     now = _workflows.rule(FOLDER)
     if now == WORKFLOWS_RULE:
         rules = VOICE_RULES
@@ -662,6 +682,8 @@ def voice_rules() -> str:
         nw = _news.rule()
     except Exception:
         nw = ""
+    if context == "coach":
+        rules = without_building(rules)
     return (rules + ("\n" + off + "\n" if off else "") + ("\n" + nw + "\n" if nw else "")
             + ("\n" + ext + "\n" if ext else ""))
 

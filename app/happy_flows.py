@@ -13175,6 +13175,87 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             srv.terminate()
         return f"four totals ({T['not_ready']['count']} not ready, 2 ready, 2 planned, {T['total']['count']} in all) that add up; the list says them; a fold at the top of Sprint planning"
 
+    async def flow152(self) -> str:
+        """H246, no Claude: each agent loads what fits her role. On a throwaway workspace with a life file, a vision, a
+        to-do list, a mail list and a log with a life note, a team note and a Moneypenny call: Donna ("day") has the
+        list, the mail and where he stands but no vision; Pepper ("coach") has the vision but none of the team's
+        notes, only the very important mail, and call and text rules without the building; Moneypenny ("build") has
+        the team's notes and the planning, none of the life files. Then the real sessions as a call builds them, and
+        Moneypenny's text well under the whole folder's."""
+        import agents
+        import brain as brain_
+        import direct_line
+        import quick_context
+        from pipeline import make_brain
+        from policy import Policy
+
+        ws = self.tmp / "h246"
+        (ws / "coaching").mkdir(parents=True, exist_ok=True)
+        (ws / "HQ").mkdir(parents=True, exist_ok=True)
+        files = {
+            "CLAUDE.md": "# Life\n\n" + "".join(f"- {chr(64)}{m}\n" for m in (
+                "rules.md", "where-things-go.md", "vision.md", "current-situation.md", "challenges.md",
+                "coaching/log.md", "inbox.md")),
+            "rules.md": "# Rules\nRULES-PROBE\n",
+            "where-things-go.md": "# Where\nWHERE-PROBE\n",
+            "vision.md": "# Vision\nVISION-PROBE\n",
+            "current-situation.md": "# Now\nSITUATION-PROBE\n",
+            "challenges.md": "# Challenges\nTODO-PROBE\n",
+            "inbox.md": "# Mail\n\n## Very important\n\n- VERY-PROBE\n\n## To check\n\n- CHECK-PROBE\n",
+            "coaching/log.md": "# Coaching Log\n\n## Open commitments\n\n"
+                               "- 25 October 2026, 20:15, job 345 (H244): TEAM-PROBE built.\n\n"
+                               "- 25 October 2026, 18:11, call (Moneypenny, typed): PENNY-PROBE planning.\n\n"
+                               "- 25 October 2026, 11:40, call (Pepper): LIFE-PROBE his words.\n  still LIFE-TAIL\n",
+            "HQ/roadmap.md": "# 🔨 BUILDING\n\nSTATUS-PROBE\n\n## The queue\n\n- Job 1 · done 10:00 · OLD-JOB\n"
+                             "- Job 2 · ready · agreed · OPEN-JOB\n\n# HQ: the roadmap\n\nROW-PROBE\n",
+            "HQ/CLAUDE.md": "# HQ: build notes\n\n## Where the code is\n\nNOTES-BODY\n\n## The queue\n\nmore\n",
+        }
+        for rel, body in files.items():
+            (ws / rel).write_text(body)
+        day, coach, build = (quick_context.build(ws, context=c) for c in ("day", "coach", "build"))
+        for probe in ("RULES-PROBE", "TODO-PROBE", "VERY-PROBE", "CHECK-PROBE", "SITUATION-PROBE", "LIFE-PROBE"):
+            need(probe in day, f"Donna misses {probe}")
+        for probe in ("VISION-PROBE", "TEAM-PROBE", "PENNY-PROBE", "STATUS-PROBE"):
+            need(probe not in day, f"Donna has {probe}")
+        for probe in ("VISION-PROBE", "SITUATION-PROBE", "TODO-PROBE", "VERY-PROBE", "LIFE-PROBE", "LIFE-TAIL"):
+            need(probe in coach, f"Pepper misses {probe}")
+        for probe in ("TEAM-PROBE", "PENNY-PROBE", "CHECK-PROBE", "STATUS-PROBE", "NOTES-BODY"):
+            need(probe not in coach, f"Pepper has {probe}")
+        for probe in ("RULES-PROBE", "TEAM-PROBE", "PENNY-PROBE", "STATUS-PROBE", "OPEN-JOB", "Where the code is"):
+            need(probe in build, f"Moneypenny misses {probe}")
+        for probe in ("VISION-PROBE", "SITUATION-PROBE", "TODO-PROBE", "VERY-PROBE", "CHECK-PROBE", "LIFE-PROBE",
+                      "OLD-JOB", "ROW-PROBE", "NOTES-BODY"):
+            need(probe not in build, f"Moneypenny has {probe}")
+        # Who loads what, from HQ's own agents, and one of the workspace's own without a context.
+        by = {a["id"]: agents.context_of(a) for a in agents.DEFAULTS}
+        need(by == {"donna": "day", "pepper": "coach", "moneypenny": "build"}, f"the roles' contexts: {by}")
+        need(agents.context_of({"load": "quick"}) == "day" and agents.context_of({"load": "deep"}) == "all",
+             "an agent without a context doesn't take it from her load")
+        # The rules: Pepper's call and text rules leave out the building, and hand it to Moneypenny.
+        whole, coaching = config.voice_rules(), config.voice_rules("coach")
+        need("jobs.py\" add" in whole or "routine/jobs.py" in whole, "the call rules lost the team")
+        need(config.TEAM_RULE not in coaching and "routine/schedule.py\" add" not in coaching
+             and config.NO_BUILDING_RULE in coaching, "Pepper's call rules still have the building")
+        text = config.without_building(direct_line._text_rules())
+        need(config.TEAM_RULE not in text and config.NO_BUILDING_RULE.rstrip("\n") in text,
+             "Pepper's text rules still have the team")
+        # The sessions a call builds, on the real folder.
+        pol = Policy(config.FOLDER, dry_run=True)
+        sizes = {}
+        for c in ("day", "coach", "build", "all"):
+            o = make_brain(config.MODEL_ALIASES["opus"], pol, load="deep", context=c)._options
+            txt = brain_.prompt_text(o)
+            need((o.env.get("CLAUDE_CODE_DISABLE_CLAUDE_MDS") == "1") == (c != "all"), f"{c}: CLAUDE.md switch wrong")
+            sizes[c] = len(txt)
+        need("This is a call about building HQ" in brain_.prompt_text(
+            make_brain(config.MODEL_ALIASES["opus"], pol, context="build")._options), "Moneypenny's session misses her text")
+        whole_folder = sum(len((config.FOLDER / m).read_text()) for m in re.findall(
+            r"@([\w./-]+\.md)", (config.FOLDER / "CLAUDE.md").read_text()) if (config.FOLDER / m).exists())
+        need(sizes["build"] < whole_folder / 4, f"Moneypenny's text isn't light: {sizes['build']} of {whole_folder}")
+        return (f"Donna day, Pepper coach, Moneypenny build; Moneypenny's session {sizes['build'] // 1000} KB against "
+                f"the whole folder's {whole_folder // 1000} KB, Pepper {sizes['coach'] // 1000} KB, Donna "
+                f"{sizes['day'] // 1000} KB; Pepper's rules without the building")
+
     async def flow151(self) -> str:
         """H244, no Claude: the five kinds of the week in colour. kinds.py on its own copy (the defaults, a rename, another
         colour, a colour two kinds would share, back to HQ's own), agenda.py keeping Google's own colour of an appointment
@@ -18541,6 +18622,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    152: ("H246: each agent loads what fits her role: Donna the day (no vision), Pepper the vision and coaching (no building, in her files or rules), Moneypenny the building (none of the life files), well under the whole folder", False, "flow152"),
     151: ("H244: the five kinds of the week in colour in the app's calendar, a tap hides or shows a kind, Edit renames one; Google's own colour of an appointment kept", False, "flow151"),
     149: ("H275: the sprint planning's totals: not ready, ready and not planned yet, planned (with the team or for a night), and the total, adding up in rows, time and usage; the list a call reads; a fold at the top of Sprint planning", False, "flow149"),
     148: ("H272: the Ready mark on every planning row: set and taken off (a call may, the backup hands it on), next to the rank and tag, changed since ready on new words, Plan the sprint and Send to the team leave out unready rows and say why, a call's add only on his say-so, the page's tick", False, "flow148"),

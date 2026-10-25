@@ -757,10 +757,13 @@ def _answer(words: str) -> str:
             rules += "\n\n" + coaching.rule()
         except Exception as e:
             print(f"reply: the coaching rule: {e!r}", file=sys.stderr)
+    ctx = _agents.context_of(a)  # H246: what her role loads
+    if ctx == "coach":  # nothing from the building in her rules either
+        rules = _config.without_building(rules)
     opts = _brain.call_session_options(
         model=a["model"], folder=_config.FOLDER, voice_rules=rules, policy=pol, cli_path=_config.CLAUDE_CLI,
         effort=_config.effort_for(a["model"]),
-        quick_context=quick_context.build(_config.FOLDER) if a["load"] == "quick" else None)
+        quick_context=quick_context.build(_config.FOLDER, context=ctx) if ctx != "all" else None)
     b = _brain.ClaudeBrain(model=a["model"], system_prompt="", cwd=_config.FOLDER, options=opts)
     prompt = (f"The chat so far, newest last:\n{history}\n\n" if history else "") + f"His new text:\n{words}"
 
