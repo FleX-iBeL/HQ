@@ -34,6 +34,25 @@ HQ_ROUTINE = Path(os.path.realpath(Path(__file__).resolve().parent.parent / "rou
 HQ_ROOT = Path(os.path.realpath(Path(__file__).resolve().parent.parent))
 
 
+def _slug(path) -> str:
+    """How Claude Code names a working folder's own place under ~/.claude/projects."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
+
+
+def tool_output(path: str, folder: Path) -> bool:
+    """H277: a file where a call's Claude session saved a long tool output (…/<session>/tool-results/…), under
+    the projects folder of the workspace or HQ. Reading it back is reading what the call already read."""
+    try:
+        real = Path(os.path.realpath(Path(path).expanduser()))
+        base = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+        base = Path(os.path.realpath(base))
+        rel = real.relative_to(base).parts
+    except (ValueError, OSError):
+        return False
+    slugs = {_slug(folder), _slug(HQ_ROOT), _slug(HQ_ROOT / "workspace")}
+    return len(rel) >= 4 and rel[0] in slugs and rel[2] == "tool-results" and ".." not in rel
+
+
 def one_writer(rel: str) -> bool:
     """H203: a workspace file only the main writes (role.ONE_WRITER). Never raises."""
     try:
@@ -137,6 +156,8 @@ class Policy:
     listener: object = None  # called as listener(tool, summary, decision), e.g. the transcript
     # H78: calendar events read on this call: event id -> (others in it?, what it was, in one line).
     events: dict[str, tuple[bool, str]] = field(default_factory=dict)
+    # H277: where a cd earlier in the same command went, so `cd HQ && python3 routine/sprint.py …` is known.
+    _cwd: Path | None = None
 
     def __post_init__(self):
         self.folder = Path(os.path.realpath(self.folder))
@@ -205,6 +226,8 @@ class Policy:
                 return Decision(ALLOW, "reading in the folder")
             if self.in_hq(path):
                 return Decision(ALLOW, "reading in HQ")
+            if tool_output(path, self.folder):
+                return Decision(ALLOW, "reading this call's own saved output")
             return _ask(f"read {Path(path).name} outside your workspace", "reading outside the folder")
         if tool in EDIT_TOOLS:
             return self._edit(inp.get("file_path") or "", tool, inp)
@@ -335,13 +358,32 @@ class Policy:
             return _ask("run a shell command", "a shell command that doesn't parse")
         segments: list[list[str]] = [[]]
         for tok in tokens:
-            if tok in ("&&", "|", ";"):
+            if tok in ("&&", "|", ";", "||"):
                 segments.append([])
             elif tok and set(tok) <= set("();<>|&\n"):
                 return _ask("run a shell command", "a complex shell command")
             else:
                 segments[-1].append(tok)
-        results = [self._bash_one(s) for s in segments]
+        segments = _loops(segments)
+        if segments is None:
+            return _ask("run a shell command", "a shell loop it can't follow")
+        # H277: several steps chained count as one; a cd carries over to the steps after it.
+        results = []
+        self._cwd = None
+        try:
+            for seg in segments:
+                if any("$" in w for w in seg):
+                    results.append(_ask("run a shell command", "a shell command with a variable"))
+                    continue
+                d = self._bash_one(seg)
+                results.append(d)
+                if seg and seg[0] == "cd" and d.verdict == ALLOW:
+                    target = Path(seg[1]).expanduser() if len(seg) > 1 else Path.home()
+                    if not target.is_absolute():
+                        target = (self._cwd or self.folder) / target
+                    self._cwd = Path(os.path.realpath(target))
+        finally:
+            self._cwd = None
         for verdict in (DENY, ASK):
             for d in results:
                 if d.verdict == verdict:
@@ -370,7 +412,8 @@ class Policy:
         # uses them on his clear go. The job's own steps (done, held, mark, next) are not for calls.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "jobs.py"):
             sub = args[1] if len(args) > 1 else ""
-            if sub in ("add", "list", "stop", "overrule", "move", "on", "off", "resume",  # H172: resume a paused job
+            if sub in ("add", "add-row", "send-row",  # H277: a row on the roadmap first, or an open row to the team
+                       "list", "stop", "overrule", "move", "on", "off", "resume",  # H172: resume a paused job
                        "mail-fast", "mail-hourly"):  # H149: the mail check every 15 minutes for a while he names
 
                 return Decision(ALLOW, "the queue for the computer")
@@ -530,11 +573,13 @@ class Policy:
         if prog in SAFE_READ_COMMANDS:
             if prog == "find" and any(a in ("-exec", "-execdir", "-delete", "-ok", "-okdir", "-fprint") for a in args):
                 return _ask("run a find command that changes files", "find with actions")
-            paths = [a for a in args if not a.startswith("-") and ("/" in a or Path(self.folder, a).exists())]
+            paths = [a for a in args if not a.startswith("-") and ("/" in a or Path(self._base(), a).exists())]
             if all(self.inside(p) for p in paths):
                 return Decision(ALLOW, "reading in the folder")
             if all(self.inside(p) or self.in_hq(p) for p in paths):
                 return Decision(ALLOW, "reading in HQ")
+            if all(self.inside(p) or self.in_hq(p) or tool_output(p, self.folder) for p in paths):
+                return Decision(ALLOW, "reading this call's own saved output")
             return _ask("look at something outside your workspace", "reading outside the folder")
         return _ask(f"run the command {prog}", "a shell command")
 
@@ -620,10 +665,13 @@ class Policy:
 
     # -- paths ------------------------------------------------------------------
 
+    def _base(self) -> Path:
+        return self._cwd or self.folder
+
     def inside(self, path: str) -> bool:
         p = Path(path).expanduser()
         if not p.is_absolute():
-            p = self.folder / p
+            p = self._base() / p
         real = Path(os.path.realpath(p))
         return real == self.folder or self.folder in real.parents
 
@@ -631,7 +679,7 @@ class Policy:
         """H65: inside HQ itself (the app). The workspace link resolves to the folder, so it isn't counted here."""
         p = Path(path).expanduser()
         if not p.is_absolute():
-            p = self.folder / p
+            p = self._base() / p
         real = Path(os.path.realpath(p))
         return real == HQ_ROOT or HQ_ROOT in real.parents
 
@@ -639,20 +687,20 @@ class Policy:
         """M1: one of HQ's own routine scripts (HQ is the app, outside the folder the call works in)."""
         p = Path(path).expanduser()
         if not p.is_absolute():
-            p = self.folder / p
+            p = self._base() / p
         return Path(os.path.realpath(p)) == HQ_ROUTINE / name
 
     def hq_app_script(self, path: str, name: str) -> bool:
         """H132: one of HQ's own app scripts, like hq_script for the routine's."""
         p = Path(path).expanduser()
         if not p.is_absolute():
-            p = self.folder / p
+            p = self._base() / p
         return Path(os.path.realpath(p)) == HQ_ROUTINE.parent / "app" / name
 
     def rel(self, path: str) -> Path:
         p = Path(path).expanduser()
         if not p.is_absolute():
-            p = self.folder / p
+            p = self._base() / p
         return Path(os.path.realpath(p)).relative_to(self.folder)
 
 
@@ -672,6 +720,42 @@ _NOT = re.compile(
     r"rather|change|make it|move it)\b"
 )
 _HARMLESS = re.compile(r"\b(no problem|no worries|why not|not a problem)\b")
+
+
+def _loops(segments: list[list[str]]) -> list[list[str]] | None:
+    """H277: `for l in A B C; do …; done` becomes its body once per value, with $l, "$l" filled in, so each step
+    is judged as if typed out. Only plain loops over plain words; anything else gives None (asks)."""
+    out: list[list[str]] = []
+    i = 0
+    while i < len(segments):
+        seg = segments[i]
+        if seg[:1] in (["while"], ["until"], ["if"], ["then"], ["else"], ["fi"], ["do"], ["done"]):
+            return None
+        if seg[:1] != ["for"]:
+            out.append(seg)
+            i += 1
+            continue
+        if len(seg) < 3 or seg[2] != "in" or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", seg[1]):
+            return None
+        var, values = seg[1], seg[3:]
+        if any("$" in v or "*" in v or "?" in v for v in values):
+            return None
+        body: list[list[str]] = []
+        j = i + 1
+        while j < len(segments) and segments[j] != ["done"]:
+            body.append(segments[j])
+            j += 1
+        if j >= len(segments) or not body or body[0][:1] != ["do"]:
+            return None
+        body[0] = body[0][1:]
+        if any(b[:1] in (["for"], ["do"], ["while"], ["if"]) for b in body):
+            return None
+        pat = re.compile(r"\$(?:\{%s\}|%s(?![A-Za-z0-9_]))" % (var, var))
+        for v in values or [""]:
+            for b in body:
+                out.append([pat.sub(v, w) for w in b])
+        i = j + 1
+    return out
 
 
 def is_clear_yes(words: str) -> bool:

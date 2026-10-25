@@ -320,7 +320,10 @@ each falls in, when it should be done, its share of the 5-hour and the weekly us
 it plainly, night by night. When he says to plan them ("plan the sprint", "plan these for tonight", "from Tuesday"), \
 that's his go: python3 "{HQ}/routine/sprint.py" plan <label> <label> ... [--night ...] plans them for the team in that \
 order from 10 in the evening that night, the same as the Plan the sprint button on the status page; say what got planned for \
-which night, and what was left out and why."""
+which night, and what was left out and why. These planning and team commands (sprint.py, schedule.py, jobs.py, \
+usageline.py, reading a long output the call saved itself) run without a yes (H277), also several in one step, after a \
+cd into HQ or in a plain for loop over labels; so do it in one go and don't ask him to say yes for them. Anything \
+outside them still asks."""
 
 # H149 (16 October 2026, call at 09:10), in the user's words: "Six hours or something or whatever hours we declare. You
 # can make some suggestions. Or it can even be like days, right, until the end of the week or whatever. We need to

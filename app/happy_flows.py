@@ -13459,6 +13459,52 @@ window.fetch = async (url, opt) => {
                 "an appointment without a kind always shown, the kind in the appointment, Edit renaming one and back to HQ's own, no "
                 "row when nothing has a kind's colour")
 
+    async def flow155(self) -> str:
+        """H277: a call runs the planning and team commands its rules allow without a yes, also chained, after a cd
+        into HQ, in a plain for loop over labels, and reading the long output it saved itself; anything else still
+        asks. The commands are the ones from the call of 25 October 2026 at 18:56 that each needed a yes. No Claude."""
+        from policy import Policy, ALLOW, ASK, tool_output
+        pol = Policy(config.FOLDER)
+        hq = Path(os.path.realpath(ROOT))
+        saved = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects" / \
+            re.sub(r"[^A-Za-z0-9]", "-", str(Path(os.path.realpath(config.FOLDER)))) / "abc" / "tool-results" / "b1.txt"
+        def v(tool, inp):
+            d = pol.decide(tool, inp)
+            pol.pending.clear()
+            return d.verdict
+        allow = [
+            f'cd {hq} && for l in F49 F50 F53; do python3 routine/sprint.py ready $l on 2>&1 | tail -1; done',
+            f'cd {hq} && python3 routine/schedule.py list 2>&1 | head -40',
+            f'grep -n "^Item" {saved}',
+            f'cd {hq} && python3 routine/schedule.py move 124 "2026-10-26 01:00" && for l in F49 H244; do '
+            f'python3 routine/sprint.py ready "$l" on 2>&1 | tail -1; done && python3 routine/usageline.py 5-hour moving',
+            f'cd {hq} && python3 routine/sprint.py moscow H277 must 2>&1 | tail -1',
+            f'cd {hq} && python3 routine/sprint.py ready H277 on 2>&1 | tail -1; python3 routine/sprint.py list | head -80',
+            f'cd {hq} && for l in H277 H245; do python3 routine/jobs.py send-row $l 2>&1 | tail -1; done',
+            f'cd {hq} && python3 routine/jobs.py list && python3 routine/sprint.py check H277',
+            f'python3 {hq}/routine/jobs.py add-row "a new row" --kind small',
+        ]
+        for c in allow:
+            need(v("Bash", {"command": c}) == ALLOW, f"a call still asks a yes for: {c}")
+        need(v("Read", {"file_path": str(saved)}) == ALLOW, "reading the call's own saved output asks")
+        ask = [
+            f'cd {hq} && rm -rf scratch',
+            'for f in a b; do rm $f; done',
+            'cat $HOME/.ssh/config',
+            'cd /tmp && python3 routine/sprint.py list',
+            f'cd {hq} && python3 routine/tick.py --mail-now',
+            f'cd {hq} && python3 routine/jobs.py done 5',
+            f'cd {hq} && for l in a b; do python3 routine/sprint.py list; done; rm x',
+            'while true; do ls; done',
+            f'cat {saved.parent.parent.parent / "other-place" / "a.txt"}',
+        ]
+        for c in ask:
+            need(v("Bash", {"command": c}) != ALLOW, f"a call may run without a yes: {c}")
+        need(not tool_output(str(Path.home() / ".ssh" / "config"), config.FOLDER), "any file counts as saved output")
+        need(v("Read", {"file_path": str(Path.home() / ".ssh/config")}) == ASK, "reading elsewhere no longer asks")
+        need("H277" in config.TEAM_RULE, "the call rules don't say the planning's commands go without a yes")
+        return f"{len(allow)} planning and team steps go without a yes; {len(ask)} others still ask"
+
     async def flow154(self) -> str:
         """H258, no Claude: light or dark in one tap. The real call page in a headless browser (phone and the Mac app, the
         device on dark and on light): with nothing picked it follows the device; the sun and moon button sits at the top
@@ -18935,6 +18981,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    155: ("H277: a call runs the planning and team commands without a yes, chained, after a cd into HQ, in a for loop, and reading its own saved output; anything else still asks", False, "flow155"),
     154: ("H258: light or dark in one tap: the sun and moon at the top right flips it and keeps it after reopening, Settings' Look (System, Light, Dark), System following the device, the status page and Donna's chat in their sheets taking the same; phone and the Mac app", False, "flow154"),
     153: ("H243: to-do items planned in a calendar block by hand (by id, or words with a day and a time), several in one block, a moved block showing its new time, unplan, rename and undo; the row's mark, the filter (all, planned, not planned) and the block picker; phone and desktop app, dark", False, "flow153"),
     152: ("H246: each agent loads what fits her role: Donna the day (no vision), Pepper the vision and coaching (no building, in her files or rules), Moneypenny the building (none of the life files), well under the whole folder", False, "flow152"),
