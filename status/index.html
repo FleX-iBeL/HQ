@@ -486,7 +486,7 @@
     <script>HQUpdate.mount({ line: document.getElementById('hqu-line'), banner: document.getElementById('hqu-banner') });</script>
     <script type="module">
       import { parseRoadmap } from './parse.mjs';
-      import { stopLine, usageVerdict, landing, landingWords, LAND_KINDS, windowsAhead, windowWords, WINDOWS_AHEAD } from './usage.mjs';
+      import { stopLine, usageVerdict, landing, landingWords, LAND_KINDS, windowsAhead, windowWords, WINDOWS_AHEAD, daysAhead, dayWords } from './usage.mjs';
 
       const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped' };
       const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision', repeat: 'Repeats' };
@@ -789,6 +789,33 @@
         row.append(note);
         return row;
       }
+      // H264: whether the weekly bar's days up to its reset are unfolded, remembered on this device.
+      let daysOpen = false;
+      try { daysOpen = localStorage.getItem('aheadWeek') === 'yes'; } catch {}
+      const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      /** H264: one day of the weekly bar: the week so far, the work landing that day in its colours, its stop line by the day's end. */
+      function dayRow(d) {
+        const L = d.L;
+        const date = new Date(d.from * 1000);
+        const name = d.n === 0 ? 'Today' : d.n === 1 ? 'Tomorrow' : WEEKDAY[date.getDay()];
+        const sub = `${d.n < 2 ? `${WEEKDAY[date.getDay()]} ` : ''}${date.getDate()} ${date.toLocaleString('en-GB', { month: 'long' })}${d.last ? `, until the reset at ${clock(d.to * 1000)}` : ''}`;
+        const fixed = d.lineTo;
+        const row = meter(name, sub, d.start, d.share > 0 ? `+${d.share}% of the week` : 'Nothing lands', fixed, 'ahead day');
+        row.querySelector('.pct').textContent = L && L.pieces.length ? `~${L.to}%` : `~${d.start}%`;
+        const times = row.querySelector('.when');
+        for (const x of times.querySelectorAll('small')) x.remove();
+        if (d.lineTo !== null) times.append(el('small', '', d.moving ? `Stop line ${d.lineTo}% by the day's end` : `Stop line ${d.lineTo}%, fixed`));
+        if (L) drawLanding(row.querySelector('.bar'), { ...L, key: `day${d.n}`, lineThen: null, lineAll: null });
+        const note = el('p', 'soft note land-note');
+        const words = dayWords(d, (t) => clock(t * 1000));
+        if (L?.cross) {
+          const [a, c] = words.split(' That goes past the stop line');
+          note.append(a + ' ', el('span', 'crosses', `That goes past the stop line${c}`));
+        } else note.textContent = words;
+        if (d.waits.length) note.classList.add('waits');
+        row.append(note);
+        return row;
+      }
       /** H176: what the colours on the usage bars mean. */
       function landLegend() {
         const p = el('p', 'soft land-legend');
@@ -907,6 +934,31 @@
               card.append(fold);
               show();
               if (aheadOpen && ws.some((w) => w.L?.pieces.length)) landed = true;
+            }
+          }
+          // H264: under the weekly bar, a button unfolds the days up to its reset (today plus six), one row a day.
+          if (/^weekly.*all/i.test(l.label) && u.readable && E) {
+            const ds = daysAhead(l, lines, E, new Date());
+            if (ds.length) {
+              const fold = el('div', 'ahead-fold');
+              const b = el('button', 'chip range ahead-toggle days-toggle');
+              const rows = [];
+              const show = () => {
+                b.textContent = daysOpen ? 'Hide the days' : `Show the days up to the reset (${ds.length} ${ds.length === 1 ? 'day' : 'days'})`;
+                b.setAttribute('aria-expanded', String(daysOpen));
+                for (const r of rows.splice(0)) r.remove();
+                if (daysOpen) rows.push(...ds.map(dayRow));
+                fold.after(...rows);
+              };
+              b.addEventListener('click', () => {
+                daysOpen = !daysOpen;
+                try { localStorage.setItem('aheadWeek', daysOpen ? 'yes' : 'no'); } catch {}
+                show();
+              });
+              fold.append(b);
+              card.append(fold);
+              show();
+              if (daysOpen && ds.some((d) => d.L?.pieces.length)) landed = true;
             }
           }
         }

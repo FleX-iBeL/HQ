@@ -15265,7 +15265,54 @@ console.log(JSON.stringify({{ W, F, L: {{ ...L, words: landingWords(L, T) }}, we
         need("windowsAhead(l, lines, E, new Date())" in page and "localStorage.setItem('ahead5'" in page and "Show the next 20 hours" in page
              and "function aheadRow(w)" in page and ".meter.ahead {" in page and "aria-expanded" in page,
              "H199: the status page has no button that unfolds the next 5-hour windows")
-        return "four 5-hour windows back to back, each its own work, reset, moving line and what waits; the current bar says next vs later"
+        # H264: the weekly bar unfolds into its days up to the reset, today first, one row a day.
+        js2 = f"""
+import {{ daysAhead, dayWords }} from '{(status / "usage.mjs").as_uri()}';
+const n = Date.parse('2026-10-25T14:00:00Z') / 1000, M = 60, H = 3600, D = 86400;
+const mid = (t) => (Math.floor(t / D) + 1) * D;
+const reset = Date.parse('2026-10-29T10:00:00Z') / 1000;
+const E = {{ jobs: {{ 5: {{ left: 20, est: 30, eta: n + 20 * M, cost: {{ five: 3, weekly: 1 }}, used: {{ weekly: 0.4 }} }} }},
+  items: {{ 10: {{ start: mid(n) + 22 * H, eta: mid(n) + 23 * H, cost: {{ weekly: 2 }} }},
+    11: {{ start: mid(n) - H, eta: mid(n) + H, cost: {{ weekly: 1 }} }},
+    12: {{ start: n + 12 * H, eta: n + 12 * H + 10 * M, every: 'day', cost: {{ weekly: 0.5 }} }},
+    13: {{ start: mid(n) + D + 2 * H, eta: mid(n) + D + 3 * H, usage_wait: true, cost: {{ weekly: 3 }} }} }} }};
+const l = {{ label: 'Weekly · all models', percent: 51, resetsAt: new Date(reset * 1000).toISOString() }};
+const mv = {{ five: {{ moving: true, fixed: 50 }}, weekly: {{ moving: true, fixed: 90 }}, fable: {{ moving: true, fixed: 90 }} }};
+const fx = {{ ...mv, weekly: {{ moving: false, fixed: 80 }} }};
+const T = (t) => `T${{Math.round((t - n) / M)}}`;
+const now = new Date(n * 1000);
+const W = daysAhead(l, mv, E, now, {{ midnight: mid }}).map((d) => ({{ ...d, words: dayWords(d, T) }}));
+const F = daysAhead(l, fx, E, now, {{ midnight: mid }}).map((d) => ({{ ...d, words: dayWords(d, T) }}));
+const long = daysAhead({{ ...l, resetsAt: new Date((n + 7 * D - 60) * 1000).toISOString() }}, mv, {{ jobs: {{}}, items: {{}} }}, now, {{ midnight: mid }});
+console.log(JSON.stringify({{ W, F, long: long.length, five: daysAhead({{ ...l, label: '5-hour limit' }}, mv, E, now).length }}));
+"""
+        r = await asyncio.to_thread(run, ["node", "--input-type=module", "-e", js2])
+        need(r.returncode == 0, f"node failed (the days): {r.stderr.strip()[-300:]}")
+        d = json.loads(r.stdout.strip().splitlines()[-1])
+        Dy, Fx = d["W"], d["F"]
+        need(len(Dy) == 5 and [x["n"] for x in Dy] == [0, 1, 2, 3, 4] and Dy[-1]["last"] and not Dy[0]["last"] and d["five"] == 0,
+             f"not the days up to the reset (or the 5-hour bar got them): {len(Dy)}, {d['five']}")
+        need(d["long"] == 7, f"a whole week ahead isn't today plus six: {d['long']}")
+        need(all(Dy[k]["from"] == Dy[k - 1]["to"] for k in range(1, 5)), f"the days aren't back to back: {[(x['from'], x['to']) for x in Dy]}")
+        dwhat = lambda x: [(p["what"], p["add"], p["kind"]) for p in (x["L"] or {}).get("pieces", [])]
+        need(dwhat(Dy[0]) == [("Job 5", 0.6, "team"), ("Planned item 11", 0.5, "planned")] and Dy[0]["start"] == 51 and Dy[0]["share"] == 1.1,
+             f"today doesn't have the team's job and half of item 11 from where the week stands: {dwhat(Dy[0])}, {Dy[0]['start']}, {Dy[0]['share']}")
+        need(dwhat(Dy[1]) == [("Planned item 11", 0.5, "planned"), ("Planned item 12", 0.5, "repeat"), ("Planned item 10", 2, "planned")]
+             and Dy[1]["start"] == 52.1 and Dy[1]["share"] == 3, f"tomorrow's work or its start is off: {dwhat(Dy[1])}, {Dy[1]['start']}")
+        need(dwhat(Dy[3]) == [("Planned item 12 (again)", 0.5, "repeat")] and dwhat(Dy[4]) == [("Planned item 12 (again)", 0.5, "repeat")],
+             f"the daily item doesn't come back every day up to the reset: {dwhat(Dy[3])}, {dwhat(Dy[4])}")
+        need(Dy[2]["waits"] and Dy[2]["waits"][0]["what"] == "Planned item 13" and "Waits for the stop line to climb" in Dy[2]["words"],
+             f"what waits for the line on its day isn't said: {Dy[2]['waits']}, {Dy[2]['words']}")
+        need(all(x["moving"] for x in Dy) and [x["lineTo"] for x in Dy] == sorted(x["lineTo"] for x in Dy) and Dy[-1]["lineTo"] >= 99.5,
+             f"the moving line by each day's end doesn't climb to 100% at the reset: {[x['lineTo'] for x in Dy]}")
+        need("about 3% of the week lands this day (planned once 2.5%, repeating 0.5%), taking it to 55.1%" in Dy[1]["words"]
+             and "By the end of the day the stop line stands at" in Dy[1]["words"] and Dy[-1]["words"].endswith("The week resets at T5520."),
+             f"a day's words are off: {Dy[1]['words']} / {Dy[-1]['words']}")
+        need(all(x["lineTo"] == 80 and not x["moving"] and "The stop line stays at 80%." in x["words"] for x in Fx),
+             f"a fixed weekly line doesn't stay put in the days: {[x['words'] for x in Fx]}")
+        need("daysAhead(l, lines, E, new Date())" in page and "localStorage.setItem('aheadWeek'" in page and "Show the days up to the reset" in page
+             and "function dayRow(d)" in page, "H264: the status page has no button that unfolds the weekly bar's days")
+        return "four 5-hour windows back to back, each its own work, reset, moving line and what waits; the current bar says next vs later; the weekly bar's days up to the reset, each its work, share, line and waits"
 
     async def flow115(self) -> str:
         """H197, no Claude, no network: GitHub's About says the version that's out. about.py against a throwaway GitHub
@@ -18060,7 +18107,7 @@ FLOWS = {
     111: ("H202: the map as a guided workflow: six layers with their questions, nothing private or named; turned on, its blank map and line, never over theirs", False, "flow111"),
     112: ("H200: the to-do list, the Eisenhower way: read, kept by calls and the app, shown as a matrix, a tick and its undo", False, "flow112"),
     113: ("H194: HQ's own icon on a fresh install: every page saved to a home screen or the Dock, and the Mac app's Dock icon", False, "flow113"),
-    114: ("H199: the 5-hour bar unfolds into the whole day: four more windows, each its work, reset, moving line and what waits for it", False, "flow114"),
+    114: ("H199, H264: the 5-hour bar unfolds into the whole day, four more windows; the weekly bar into its days up to the reset; each its work, its line and what waits for it", False, "flow114"),
     115: ("H197: every release sets GitHub's About to the new version, in everyday words; without a token it's an incident, never silent", False, "flow115"),
     117: ("H203: one writer: on the backup a call's change to the roadmap, the log, the mail list, the to-do list and her notes is made by the main; kept when it's down", False, "flow117"),
     116: ("H198: on the Mac, other sound at normal volume during a call (a switch), and Bluetooth headphones stay in high quality (the MacBook's own mic, the sound bounced in the app)", False, "flow116"),

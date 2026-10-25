@@ -219,13 +219,15 @@ export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = fa
  *   lineThen, thenAt, thenLands: the moving line when the one-off work lands (H177, H181); lineAll, allAt, allLands: when everything does }}
  */
 export const LAND_KINDS = { team: "the team's work", planned: 'planned once', repeat: 'repeating' };
-export function landing(l, lines, E, now = new Date(), { from = null } = {}) {
+export function landing(l, lines, E, now = new Date(), { from = null, to = null } = {}) {
   const key = lineKey(l?.label);
   if (!key || key === 'fable' || !E || !Number.isFinite(Number(l.percent))) return null;
   const t = now.getTime() / 1000;
   const reset = l.resetsAt ? new Date(l.resetsAt).getTime() / 1000 : null;
   // H199: a later window (`from`, epoch seconds) counts only the work from its start; the current one counts all of it.
   const lo = from ?? -Infinity;
+  // H264: a day of the weekly bar counts only the work up to its end (`to`, epoch seconds), before the weekly reset.
+  const cut = to !== null && (reset === null || to < reset) ? to : reset;
   const work = [];
   let untimed = 0;
   const put = (w) => (w.end && w.start !== null ? work.push(w) : (untimed += w.add > 0 ? 1 : 0));
@@ -256,7 +258,7 @@ export function landing(l, lines, E, now = new Date(), { from = null } = {}) {
     // before a later window's start was an earlier window's).
     const span = Math.max(1, w.end - w.start);
     const part = (a, b) => Math.max(0, Math.min(b, w.end) - Math.max(a, w.start)) / span;
-    const frac = w.end <= lo ? 0 : reset === null || w.end <= reset ? (w.start >= lo ? 1 : part(lo, w.end)) : part(lo, reset);
+    const frac = w.end <= lo ? 0 : cut === null || w.end <= cut ? (w.start >= lo ? 1 : part(lo, w.end)) : part(lo, cut);
     const here = w.add * frac;
     next += reset === null ? 0 : w.add * (w.start >= reset ? 1 : part(reset, w.end));
     // H199: of that, what falls in the 5-hour window right after the reset (the rest lands later still).
@@ -264,16 +266,16 @@ export function landing(l, lines, E, now = new Date(), { from = null } = {}) {
     if (here < 0.05) continue;
     const start = at;
     at += here;
-    const lands = reset === null ? w.end : Math.min(w.end, reset);
+    const lands = cut === null ? w.end : Math.min(w.end, cut);
     pieces.push({ kind: w.kind, what: w.what, add: r1(here), from: r1(start), to: r1(at), start: w.start, lands, priority: w.priority, waits: !!w.waits });
     kinds[w.kind] += here;
-    const sl = stopLine(l, lines, new Date(1000 * (reset === null ? lands : Math.min(lands, reset - 60))));
+    const sl = stopLine(l, lines, new Date(1000 * (cut === null ? lands : Math.min(lands, cut - 60))));
     if (!cross && sl && r1(at) > sl.line) cross = { what: w.what, at: lands, pct: r1(at), line: sl.line };
   }
   const line = stopLine(l, lines, from !== null && from * 1000 > now.getTime() ? new Date(from * 1000) : now);
   // Where a moving line will stand when the last piece lands (before the reset), so the bar shows whether it fits then.
   // H177: the time it's read at is a landing (the 5-hour bar: before its reset); a fixed line gets none.
-  const readAt = (last) => (last ? (reset === null ? last : Math.min(last, reset - 60)) : null);
+  const readAt = (last) => (last ? (cut === null ? last : Math.min(last, cut - 60)) : null);
   const lineAt = (when) => (when && line?.moving ? stopLine(l, lines, new Date(1000 * when)) : null);
   // H181: the purple line counts only the one-off work (the team's and planned once), so a repeating item every
   // night doesn't push it to the end; the green one counts everything, repeating included, and only when it's later.
@@ -382,5 +384,75 @@ export function windowWords(w, clock) {
     s.push(`Waits for the stop line to climb, so it starts later than it could: ${names.join(', ')}.`);
   }
   if (L.cross) s.push(`That goes past the stop line: around ${clock(L.cross.at)}, ${L.cross.what} takes it to ${L.cross.pct}% while the line is at ${L.cross.line}%.`);
+  return s.join(' ');
+}
+
+/**
+ * H264 (25 October 2026, call at 14:06, Moneypenny): "the green line per day i thought we could fix by also being able
+ * to unfold the weekly the same as the 5 hour but the weekly we unfold for another 6 days and then include the own
+ * colors and kind since i think its about the same". The weekly bar's days up to its reset, today first (today plus
+ * six): each with the work landing that day (landing with `to` at its midnight, the reset on the last day), from where
+ * the week stands at its start, so a day shows its share of the week; where the moving stop line stands by the day's
+ * end; and what waits for that line. Repeating items come back each day they repeat on (every day, or a weekday a week
+ * later) while that's still before the reset. `midnight(t)` gives the next local midnight after t (a test passes its own).
+ * @returns {Array<{ n: number, from: number, to: number, last: boolean, start: number, share: number, L: ReturnType<typeof landing>,
+ *   lineFrom: number | null, lineTo: number | null, moving: boolean, waits: Array<{ what: string, start: number }> }>}
+ */
+export const DAYS_AHEAD = 7;
+const localMidnight = (t) => {
+  const d = new Date(t * 1000);
+  d.setHours(24, 0, 0, 0);
+  return d.getTime() / 1000;
+};
+export function daysAhead(l, lines, E, now = new Date(), { count = DAYS_AHEAD, midnight = localMidnight } = {}) {
+  if (lineKey(l?.label) !== 'weekly' || !l.resetsAt || !E || !Number.isFinite(Number(l.percent))) return [];
+  const t = now.getTime() / 1000;
+  const reset = Math.round(new Date(l.resetsAt).getTime() / 60000) * 60;
+  if (!Number.isFinite(reset) || reset <= t) return [];
+  const items = { ...(E.items ?? {}) };
+  for (const [n, e] of Object.entries(E.items ?? {})) {
+    if (!e.every || !e.start || !e.eta) continue;
+    const step = e.every === 'day' ? 86400 : 7 * 86400;
+    for (let k = 1; e.start + k * step < reset; k++) {
+      items[`${n}+${k}`] = { ...e, what: `${e.what ?? `Planned item ${n}`} (again)`, start: e.start + k * step, eta: e.eta + k * step, usage_wait: false };
+    }
+  }
+  const E2 = { ...E, items };
+  const r1 = (x) => Math.round(x * 10) / 10;
+  const out = [];
+  let at = Number(l.percent);
+  let from = t;
+  for (let k = 0; k < count && from < reset; k++) {
+    const to = Math.min(midnight(from), reset);
+    const lw = { label: l.label, percent: at, resetsAt: l.resetsAt };
+    // Today counts everything before its midnight, as the bar itself does; a later day only its own.
+    const L = landing(lw, lines, E2, now, { from: k === 0 ? null : from, to });
+    const a = stopLine(lw, lines, new Date(from * 1000));
+    const b = stopLine(lw, lines, new Date((to - 60) * 1000));
+    const waits = L ? L.pieces.filter((p) => p.waits && p.start >= from && p.start < to).map((p) => ({ what: p.what, start: p.start })) : [];
+    const end = L ? L.to : at;
+    out.push({ n: k, from, to, last: to >= reset, start: r1(at), share: r1(end - at), L, lineFrom: a ? a.line : null, lineTo: b ? b.line : null, moving: !!a?.moving, waits });
+    at = end;
+    from = to;
+  }
+  return out;
+}
+
+/** H264: one day of the weekly bar in plain words, under its bar. */
+export function dayWords(d, clock) {
+  const L = d.L;
+  const s = [];
+  if (L && L.pieces.length) {
+    const parts = Object.entries(L.kinds).filter(([, v]) => v > 0).map(([k, v]) => `${LAND_KINDS[k]} ${v}%`);
+    s.push(`If the work goes as estimated, about ${d.share}% of the week lands this day (${parts.join(', ')}), taking it to ${L.to}% around ${clock(L.lands)}.`);
+  } else s.push(`Nothing lands this day; the week stays at about ${d.start}%.`);
+  if (d.moving && d.lineTo !== null) s.push(`By the end of the day the stop line stands at ${d.lineTo}%.`);
+  else if (d.lineTo !== null) s.push(`The stop line stays at ${d.lineTo}%.`);
+  if (d.waits.length) {
+    const names = d.waits.map((x) => `${x.what} around ${clock(x.start)}`);
+    s.push(`Waits for the stop line to climb, so it starts later than it could: ${names.join(', ')}.`);
+  }
+  if (L?.cross) s.push(`That goes past the stop line: around ${clock(L.cross.at)}, ${L.cross.what} takes it to ${L.cross.pct}% while the line is at ${L.cross.line}%.`);
+  if (d.last) s.push(`The week resets at ${clock(d.to)}.`);
   return s.join(' ');
 }
