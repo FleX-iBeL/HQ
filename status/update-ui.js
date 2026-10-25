@@ -24,8 +24,9 @@
   .hqu { --u-ink: #1b1f24; --u-soft: #6b7785; --u-card: #fff; --u-rule: #d5d9df; --u-blue: #0b5fbf; --u-red: #b42318; --u-tint: #eef4fc;
     font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: left; }
   @media (prefers-color-scheme: dark) {
-    .hqu { --u-ink: #e8eaed; --u-soft: #8c97a8; --u-card: #1f2227; --u-rule: #3a3f47; --u-blue: #6aa9f0; --u-red: #f0766a; --u-tint: #1d2a3a; }
+    :root:not([data-theme=light]) .hqu { --u-ink: #e8eaed; --u-soft: #8c97a8; --u-card: #1f2227; --u-rule: #3a3f47; --u-blue: #6aa9f0; --u-red: #f0766a; --u-tint: #1d2a3a; }
   }
+  :root[data-theme=dark] .hqu { --u-ink: #e8eaed; --u-soft: #8c97a8; --u-card: #1f2227; --u-rule: #3a3f47; --u-blue: #6aa9f0; --u-red: #f0766a; --u-tint: #1d2a3a; }
   .hqu-ver { border: 0; background: transparent; color: var(--u-soft); opacity: .8; font: 12px/1.3 -apple-system, BlinkMacSystemFont, sans-serif;
     padding: 4px 6px; cursor: pointer; letter-spacing: .2px; }
   .hqu-ver:hover { opacity: 1; text-decoration: underline; }

@@ -157,11 +157,12 @@
       ]
     },
     {
-      "id": "settings", "title": "Settings", "line": "Voices, sound, and what HQ helps you with",
+      "id": "settings", "title": "Settings", "line": "Voices, sound, light or dark, and what HQ helps you with",
       "steps": [
         {"target": "setbtn", "title": "Voices and sound", "text": "Pick each agent's voice, your microphone, where her voice comes out, and whether you hear the soft thinking sound."},
         {"target": "devbtn", "title": "Microphone and sound, quickly", "text": "The microphone button is a shortcut to the same place. Switch to your headphones or another microphone in two taps, also in the middle of a call."},
         {"target": "setbtn", "title": "What HQ helps you with", "text": "Every part of HQ is a switch: the calendar, the to-do list, texts, the weather, travel by public transport, the mail check, your news, notes, the team's work, and Life coaching. Turn off what you don't use. Its button goes away and the rest moves up. Driving to appointments starts off, because it needs your own maps key."},
+        {"target": "themebtn", "title": "Light or dark", "text": "The sun and moon at the top right switches between light and dark in one tap, and HQ keeps it that way on this device. Settings, Look, has System too, to follow your phone or computer again."},
         {"target": "setbtn", "title": "Free", "text": "Free is plain Claude with only the web: none of your files, and nothing is saved. Handy when you want to show HQ to someone without showing your life."}
       ]
     },

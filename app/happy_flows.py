@@ -1062,10 +1062,11 @@ console.log(JSON.stringify({{
              and L7["lineAll"] >= L7["lineThen"] and "green" not in L7["words"].lower() and str(L7["lineAll"]) + "%" not in L7["words"].replace(f"{L7['lineThen']}%", ""),
              f"H181: the green dotted line, with the repeating work, is off: {L7}")
         page10 = (status / "index.html").read_text()
-        need("box.classList.add('has-then')" in page10 and "border-left: 3px dotted var(--then)" in page10 and page10.count("--then:") == 2
+        # light, dark by the system, dark picked on the call page (H258): three times
+        need("box.classList.add('has-then')" in page10 and "border-left: 3px dotted var(--then)" in page10 and page10.count("--then:") == 3
              and ".bar s.then::after { opacity: 1;" in page10 and "el('i', 'swatch then')" in page10,
              "H177: the status page doesn't draw the dotted line with its time and percent, in light and dark")
-        need("el('s', `then-all" in page10 and "border-left: 3px dotted var(--then-all)" in page10 and page10.count("--then-all:") == 2
+        need("el('s', `then-all" in page10 and "border-left: 3px dotted var(--then-all)" in page10 and page10.count("--then-all:") == 3
              and ".bar s.then-all.open::after { opacity: 1; }" in page10 and "allOpen.add(L.key)" in page10 and "el('i', 'swatch then-all')" in page10,
              "H181: the status page doesn't draw the green dotted line that opens on a tap, in light and dark")
         need("landing(l, lines, E, new Date())" in page10 and "drawUsage(usage, s.usageLines, routines?.estimate" in page10,
@@ -13458,6 +13459,88 @@ window.fetch = async (url, opt) => {
                 "an appointment without a kind always shown, the kind in the appointment, Edit renaming one and back to HQ's own, no "
                 "row when nothing has a kind's colour")
 
+    async def flow154(self) -> str:
+        """H258, no Claude: light or dark in one tap. The real call page in a headless browser (phone and the Mac app, the
+        device on dark and on light): with nothing picked it follows the device; the sun and moon button sits at the top
+        right, level with the question mark, clear of the title and the version, flips to the other look in one tap and keeps it after the page is opened again; Settings' Look shows
+        the pick and takes System, Light and Dark; the status page and Donna's chat in their sheets get the same pick, and
+        both pages take ?theme= themselves."""
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        stub = r"""<script>
+window.fetch = async () => ({ ok: true, json: async () => ({ lines: [], calls: [], items: [], events: [], calendars: [] }) });
+if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme"); } catch (_) {} }</script>"""
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms)), q = location.search, dev = q.includes("devdark") ? "dark" : "light";
+  const other = dev === "dark" ? "light" : "dark", th = () => document.documentElement.dataset.theme;
+  const bg = () => getComputedStyle(document.body).backgroundColor, dark = c => { const n = c.match(/\d+/g).map(Number); return n[0] + n[1] + n[2] < 200; };
+  await wait(500);
+  const tb = document.getElementById("themebtn"), hb = document.getElementById("helpbtn"), look = document.getElementById("look");
+  if (q.includes("fresh")) {
+    out.push("follows-device:" + (th() === dev && dark(bg()) === (dev === "dark") && look.value === "system" ? "ok" : "WRONG " + th() + " " + bg()));
+    const a = tb.getBoundingClientRect(), b = hb.getBoundingClientRect(), h = document.querySelector("h1").getBoundingClientRect();
+    const v = document.getElementById("hqu-call-line").getBoundingClientRect(), W = document.documentElement.clientWidth;
+    const apart = (x, y) => x.right <= y.left || y.right <= x.left || x.bottom <= y.top || y.bottom <= x.top;
+    out.push("top-right:" + (a.width > 20 && W - a.right >= 8 && W - a.right <= 16 && Math.abs(a.top - b.top) < 2 && apart(a, h) && apart(a, v) && apart(a, b) ? "ok" : "WRONG " + a.left + " " + h.right));
+    const icon = c => getComputedStyle(tb.querySelector(c)).display !== "none";
+    out.push("icon:" + ((dev === "dark" ? icon(".sun") && !icon(".moon") : icon(".moon") && !icon(".sun")) && tb.getAttribute("aria-label") === "Switch to " + other ? "ok" : "WRONG"));
+    tb.click(); await wait(100);
+    let kept = null; try { kept = localStorage.getItem("hq-theme"); } catch (_) {}
+    out.push("one-tap:" + (th() === other && dark(bg()) === (other === "dark") && kept === other && look.value === other
+      && tb.getAttribute("aria-label") === "Switch to " + dev ? "ok" : "WRONG " + th() + " " + kept));
+    statBtn.click(); await wait(100);
+    out.push("status-sheet:" + (statFrame.getAttribute("src").includes("theme=" + other) ? "ok" : "WRONG " + statFrame.getAttribute("src")));
+    HQTheme.flip(); await wait(100);  // an open sheet covers the button; the device's own switch on System lands here too
+    out.push("sheet-follows:" + (statFrame.getAttribute("src").includes("theme=" + dev) && !statFrame.getAttribute("src").includes("theme=" + other) ? "ok" : "WRONG " + statFrame.getAttribute("src")));
+    showStatus(false); showDirect(true); await wait(100);
+    out.push("donna-sheet:" + (dirFrame.getAttribute("src") === "/direct?sheet&theme=" + dev ? "ok" : "WRONG " + dirFrame.getAttribute("src")));
+    showDirect(false);
+    look.value = "system"; look.dispatchEvent(new Event("change")); await wait(50);
+    let gone = "x"; try { gone = localStorage.getItem("hq-theme"); } catch (_) {}
+    out.push("look-system:" + (gone === null && th() === dev ? "ok" : "WRONG " + gone));
+    tb.click(); await wait(50);  // leave the other one picked, for the reopen
+  } else {
+    out.push("kept-after-reopen:" + (th() === other && dark(bg()) === (other === "dark") && look.value === other ? "ok" : "WRONG " + th() + " " + look.value));
+    look.value = dev; look.dispatchEvent(new Event("change")); await wait(50);
+    out.push("look-pick:" + (th() === dev && localStorage.getItem("hq-theme") === dev ? "ok" : "WRONG " + th()));
+  }
+  const pre = document.createElement("pre"); pre.id = "h258"; pre.textContent = "H258RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f2 = self.tmp / "h258.html"
+        f2.write_text(page.replace('<link rel="manifest"', stub + '<link rel="manifest"', 1).replace("</body>", harness + "</body>", 1))
+        def browse(url, flags, prof, size):
+            return run([chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                        f"--window-size={size}", *flags, f"--user-data-dir={prof}", "--virtual-time-budget=20000", "--dump-dom", url], timeout=120)
+        for where, q, size in (("phone", "", "390,844"), ("app", "app=1&", "1100,800")):
+            for mode in ("light", "dark"):
+                flags = ["--blink-settings=preferredColorScheme=0", "--force-dark-mode"] if mode == "dark" else ["--blink-settings=preferredColorScheme=1"]
+                prof = self.tmp / ("h258-" + where + mode)
+                for step in ("fresh", "again"):
+                    r = await asyncio.to_thread(browse, f2.as_uri() + f"?{q}{step}&dev{mode}", flags, prof, size)
+                    m = re.search(r'<pre id="h258">H258RESULT (.*?) END</pre>', r.stdout)
+                    need(m, f"the page test didn't finish ({where}, {mode}, {step}): {(r.stderr or r.stdout)[-300:]!r}")
+                    res = m.group(1)
+                    say(f"   {where}, {mode}, {step}: {res}")
+                    need(all(part.endswith(":ok") for part in res.split(" | ")), f"light or dark isn't right ({where}, {mode}, {step}): {res}")
+            # the status page and Donna's chat take ?theme= themselves, against the device
+            for name in ("index.html", "direct.html"):
+                f3 = self.tmp / ("h258-" + name)
+                f3.write_text((ROOT / "status" / name).read_text())
+                r = await asyncio.to_thread(browse, f3.as_uri() + "?sheet&theme=light", ["--blink-settings=preferredColorScheme=0", "--force-dark-mode"], self.tmp / "h258-st", size)
+                need(re.search(r'<html[^>]*data-theme="light"', r.stdout), f"the status server's {name} doesn't take ?theme= ({where})")
+        return ("light or dark in one tap: with nothing picked the call page follows the device; the sun and moon sits at the top right, "
+                "clear of the title and the version, shows where a tap goes, flips the look and keeps it after reopening; Settings' Look shows the pick and "
+                "takes System, Light and Dark; the status page and Donna's chat in their sheets get the same pick and take ?theme= "
+                "themselves; phone and the Mac app, the device on light and on dark")
+
     async def flow150(self) -> str:
         """F51: the status block never says the team builds when nothing runs. No Claude, no window: a copy of
         the roadmap and the routine's settle step, with its status rewrite caught."""
@@ -18852,6 +18935,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    154: ("H258: light or dark in one tap: the sun and moon at the top right flips it and keeps it after reopening, Settings' Look (System, Light, Dark), System following the device, the status page and Donna's chat in their sheets taking the same; phone and the Mac app", False, "flow154"),
     153: ("H243: to-do items planned in a calendar block by hand (by id, or words with a day and a time), several in one block, a moved block showing its new time, unplan, rename and undo; the row's mark, the filter (all, planned, not planned) and the block picker; phone and desktop app, dark", False, "flow153"),
     152: ("H246: each agent loads what fits her role: Donna the day (no vision), Pepper the vision and coaching (no building, in her files or rules), Moneypenny the building (none of the life files), well under the whole folder", False, "flow152"),
     151: ("H244: the five kinds of the week in colour in the app's calendar, a tap hides or shows a kind, Edit renames one; Google's own colour of an appointment kept", False, "flow151"),

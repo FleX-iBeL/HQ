@@ -2,6 +2,7 @@
 <html lang="en" class="m3">
 <head>
 <meta charset="utf-8">
+<script>/* H258: opened in the call page's sheet, it takes the call page's light or dark pick (?theme=); else the system decides. */ try { const t = new URLSearchParams(location.search).get("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#16181c">
@@ -43,7 +44,8 @@
 <!-- H201: Modern 3, the only look: the call page's ground and type, rounder bubbles (html.m3 is in the page itself). -->
 <style>
   html.m3 { --bg:#f2f3f6; --panel:#ffffff; --text:#12161e; --dim:#5b6574; }
-  @media (prefers-color-scheme: dark) { html.m3 { --bg:#14181f; --panel:#1a1e26; --text:#eef1f5; --dim:#8c97a8; } }
+  @media (prefers-color-scheme: dark) { html.m3:not([data-theme=light]) { --bg:#14181f; --panel:#1a1e26; --text:#eef1f5; --dim:#8c97a8; } }
+  html.m3[data-theme=dark] { --bg:#14181f; --panel:#1a1e26; --text:#eef1f5; --dim:#8c97a8; }
   html.m3 body { font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif; }
   html.m3 header, html.m3 form, html.m3 textarea { border-color:rgba(127,127,127,.2); }
   html.m3 .agent { box-shadow:0 0 0 1px rgba(127,127,127,.14); }
