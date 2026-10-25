@@ -142,10 +142,10 @@ Run them before and after every update; they print a short pass/fail table at th
      in the call rules says a time another way; the speech filter says a stray 5:30 as "5 30"; Kokoro reads
      "5 30" as five thirty with no pause (when the model is there)
   83 H105, no Claude: the notes button. Notes kept one line each in a throwaway notes file (a line a call
-     wrote by hand read too), cleared one by one or all, just text since H117 (no doodle endpoints, a picture
+     wrote by hand read too), cleared one by one and kept (H263: no Clear all, Undo after a Clear, a call brings one back), just text since H117 (no doodle endpoints, a picture
      saved before left alone); /api/notes only from the page; the real call page in a headless browser, phone
      and app: the button in the dock before Past calls before, during and after a call, the sheet without paper, the
-     note field growing with what's typed and back after Add, add, clear, clear all on a second tap
+     note field growing with what's typed and back after Add, add, clear, Undo
   91 H101, no Claude: the calendar. A stand-in for the read-only Claude run (only list_calendars and
      list_events allowed, everything that writes refused): the tool results read from its stream, word for
      word (an answer too big for the chat read from Claude Code's own file, nothing outside it), cancelled
@@ -5073,8 +5073,30 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
              and f.read_text().index("After the hand one") < f.read_text().index("## Later"), "a new note didn't go at the end of Notes")
         need(_notes.clear(got[1]["id"], f) and not _notes.clear("nope", f), "clearing one note by its id went wrong")
         need([i["text"] for i in _notes.items(f)] == ["Call the dentist", "Written by a call", "After the hand one"], "the wrong note was cleared")
-        need(_notes.clear_all(f) == 3 and _notes.items(f) == [] and "kept as it is" in f.read_text() and "# Quick notes" in f.read_text(),
-             "clear all didn't keep the rest of the file")
+        # H263: no Clear all; a cleared note is kept and comes back in its place, also from a call by its words.
+        need(not hasattr(_notes, "clear_all"), "Clear all is still in the notes code (H263)")
+        kept = _notes.cleared(f)
+        need(len(kept) == 1 and kept[0]["id"] == got[1]["id"] and kept[0]["text"] == "Two lines\nsecond one"
+             and _notes.cleared_file(f).name == "notes-cleared.md", f"the cleared note wasn't kept: {kept}")
+        back = _notes.restore(got[1]["id"], f)
+        need(back and [i["text"] for i in _notes.items(f)] == ["Call the dentist", "Two lines\nsecond one", "Written by a call", "After the hand one"]
+             and _notes.cleared(f) == [] and not _notes.restore("nope", f) and "kept as it is" in f.read_text(),
+             f"bringing a cleared note back went wrong: {_notes.items(f)}")
+        cli = [sys.executable, str(APP / "notes.py")]
+        env = {**os.environ, "HQ_NOTES": str(f)}
+        r1 = run(cli + ["clear", "hand one"], env=env, timeout=30)
+        r2 = run(cli + ["clear", "e"], env=env, timeout=30)
+        r3 = run(cli + ["cleared"], env=env, timeout=30)
+        r4 = run(cli + ["restore", "hand"], env=env, timeout=30)
+        need(r1.returncode == 0 and "Cleared" in r1.stdout and r2.returncode == 1 and "say more" in r2.stdout
+             and "After the hand one" in r3.stdout and r4.returncode == 0 and "Back in the notes" in r4.stdout
+             and [i["text"] for i in _notes.items(f)][-1] == "After the hand one",
+             f"a call's notes commands went wrong: {[r.stdout for r in (r1, r2, r3, r4)]}")
+        from policy import Policy as _Policy
+        pol = _Policy(config.FOLDER, dry_run=True)
+        for a in (["clear", "x"], ["cleared"], ["restore", "x"]):
+            need(pol.decide("Bash", {"command": f'python3 "{APP / "notes.py"}" ' + " ".join(a)}).verdict == "allow",
+                 f"a call isn't allowed the notes command {a}")
         need(not hasattr(_notes, "save_doodle") and not hasattr(_notes, "doodle_path"), "the doodle is still in the notes code (H117)")
 
         await self.ensure_server()
@@ -5096,8 +5118,16 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
              and post("/api/notes", b'[]')[0] == 400, "a bad change wasn't refused")
         old_pic = sf.with_name("notes-doodle.png")  # H117: a picture saved before stays where it is, unread
         old_pic.write_bytes(b"\x89PNG\r\n\x1a\nold")
-        code, d = post("/api/notes", json.dumps({"clear": d["items"][0]["id"]}).encode())
+        first = d["items"][0]
+        code, d = post("/api/notes", json.dumps({"clear": first["id"]}).encode())
         need(code == 200 and d.get("items") == [], f"clearing through the server went wrong ({code} {d})")
+        code, d = post("/api/notes", json.dumps({"restore": first["id"]}).encode())  # H263: Undo
+        need(code == 200 and [i["text"] for i in d["items"]] == ["From the page"], f"Undo through the server went wrong ({code} {d})")
+        code, d = post("/api/notes", json.dumps({"clear": first["id"]}).encode())
+        need(code == 200 and d.get("items") == [], f"clearing through the server went wrong ({code} {d})")
+        code, d2 = post("/api/notes", json.dumps({"restore": "nope"}).encode())
+        need(code == 404, "bringing back a note that was never cleared wasn't refused")
+        need(post("/api/notes", b'{"clear_all": true}')[0] == 400, "Clear all is still taken by the server (H263)")
         need(post("/api/notes/doodle", b"\x89PNG\r\n\x1a\nnew", "image/png")[0] != 200 and http_get("/api/notes/doodle")[0] != 200
              and old_pic.read_bytes() == b"\x89PNG\r\n\x1a\nold", "the doodle endpoints are still there, or the old picture was touched (H117)")
         old_pic.unlink()
@@ -5109,15 +5139,15 @@ window.fetch = async (url) => ({ ok: true, json: async () => (String(url).starts
         page = (APP / "web/index.html").read_text()
         stub = r"""<script>
 var NOTES = [{ id: "a1", when: "2099-12-31 09:00:00", text: "Ask about the dentist" }, { id: "b2", when: "", text: "Two\nlines" }],
-    SENT = [], nextId = 1;
+    SENT = [], GONE = [], nextId = 1;
 window.fetch = async (url, opt) => {
   url = String(url); const m = (opt && opt.method) || "GET", hq = opt && opt.headers && opt.headers["x-hq"];
   const answer = () => ({ items: NOTES.slice() });
   if (url === "api/notes" && m === "POST") {
     const b = JSON.parse(opt.body); SENT.push((hq === "notes" ? "" : "NOHEADER ") + Object.keys(b)[0]);
     if (b.add) NOTES.push({ id: "n" + (nextId++), when: "2099-12-31 10:00:00", text: b.add });
-    if (b.clear) NOTES = NOTES.filter(n => n.id !== b.clear);
-    if (b.clear_all) NOTES = [];
+    if (b.clear) { GONE.push(NOTES.find(n => n.id === b.clear)); NOTES = NOTES.filter(n => n.id !== b.clear); }
+    if (b.restore) { const g = GONE.find(n => n && n.id === b.restore); if (g) NOTES.unshift(g); }
     return { ok: true, json: async () => answer() };
   }
   if (url === "api/notes") return { ok: true, json: async () => answer() };
@@ -5152,10 +5182,16 @@ window.fetch = async (url, opt) => {
     && Math.abs(notesIn.getBoundingClientRect().height - 46) < 2 ? "ok" : "WRONG " + SENT + " " + notesIn.getBoundingClientRect().height));
   rows()[0].querySelector(".clr").click(); await wait(300);
   out.push("clearone:" + (rows().length === 2 && !notesList.textContent.includes("dentist") && SENT.includes("clear") ? "ok" : "WRONG"));
-  notesAll.click(); await wait(100);
-  out.push("allasks:" + (rows().length === 2 && notesAll.classList.contains("sure") && !SENT.includes("clear_all") ? "ok" : "WRONG"));
-  notesAll.click(); await wait(300);
-  out.push("all:" + (rows().length === 0 && notesList.textContent.includes("No notes yet") && notesAll.disabled ? "ok" : "WRONG"));
+  // H263: no Clear all; after a Clear, Undo puts it back, and it goes by itself after a while.
+  out.push("noclearall:" + (!document.getElementById("notesall") && !document.getElementById("notessheet") && !/Clear all/.test(notesEl.textContent) ? "ok" : "WRONG"));
+  out.push("undoshown:" + (!notesUndo.hidden && shown(notesUndo) && notesUndoTxt.textContent.includes("dentist") ? "ok" : "WRONG"));
+  document.getElementById("notesundobtn").click(); await wait(300);
+  out.push("undo:" + (rows().length === 3 && notesList.textContent.includes("dentist") && SENT.includes("restore") && notesUndo.hidden ? "ok" : "WRONG " + rows().length));
+  rows()[0].querySelector(".clr").click(); await wait(300);
+  const undoBox = notesUndo.getBoundingClientRect(), field = notesForm.getBoundingClientRect();
+  out.push("undoplace:" + (undoBox.bottom <= field.top + 1 && undoBox.height > 20 ? "ok" : "WRONG " + undoBox.bottom + " " + field.top));
+  await wait(8500);
+  out.push("undogoes:" + (notesUndo.hidden && rows().length === 2 ? "ok" : "WRONG"));
   out.push("header:" + (!SENT.some(x => x.startsWith("NOHEADER")) ? "ok" : "WRONG"));
   chatBtn.click(); await wait(300);
   out.push("onesheet:" + (chatOpen() && !notesOpen() ? "ok" : "WRONG"));
@@ -5189,10 +5225,10 @@ window.fetch = async (url, opt) => {
             need(all(part.endswith(":ok") for part in res.split(" | ")), f"the notes button or sheet isn't right ({where}): {res}")
         need((real.read_bytes() if real.exists() else None) == real_before
              and (real_pic.stat().st_mtime if real_pic.exists() else None) == pic_before, "the workspace's own notes were touched")
-        return ("notes kept one line each in a throwaway notes file, a hand-written line read too, cleared one by one or all, just text "
+        return ("notes kept one line each in a throwaway notes file, a hand-written line read too, cleared one by one, just text "
                 "(no doodle endpoints, an old picture left alone); the server's /api/notes only from the page; the button in the dock before Past calls "
                 "before, during and after a call, phone and app: the sheet without paper, the note field growing and back after Add, add, "
-                "clear, clear all on a second tap")
+                "clear, Undo after a Clear and gone after a while; no Clear all, a cleared note kept and brought back, also by a call (H263)")
 
     async def flow91(self) -> str:
         """H101, no Claude: the calendar inside HQ. agenda.py with a stand-in for the read-only Claude run, the

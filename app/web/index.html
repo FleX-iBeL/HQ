@@ -604,11 +604,13 @@
   #notesheet.open { display:flex; }
   #noteshead { position:relative; }
   #notesheet h2 { margin:0; font-size:15px; font-weight:600; color:var(--muted); text-align:center; padding:0 64px; }
-  #notesclose, #notesall { position:absolute; top:-8px; border:0; background:transparent; color:var(--fg); font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
+  #notesclose { position:absolute; top:-8px; border:0; background:transparent; color:var(--fg); font:600 15px/1 -apple-system,sans-serif; padding:8px 10px; cursor:pointer; }
   #notesclose { right:-6px; }
-  #notesall { left:-6px; color:var(--muted); font-weight:500; }
-  #notesall.sure { color:var(--stop); font-weight:600; }
-  #notesall:disabled { visibility:hidden; }
+  /* H263: no Clear all; after a Clear, Undo for a moment above the field. */
+  #notesundo { display:flex; align-items:center; gap:10px; padding:8px 8px 8px 14px; border-radius:12px; background:color-mix(in srgb, var(--fg) 12%, var(--bg)); }
+  #notesundo[hidden] { display:none; }
+  #notesundotxt { flex:1; min-width:0; color:var(--muted); font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #notesundobtn { flex-shrink:0; border:0; border-radius:999px; padding:7px 14px; background:var(--accent); color:#04120f; font:600 14px/1 -apple-system,sans-serif; cursor:pointer; }
   #noteslist { flex:1; min-height:60px; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; display:flex; flex-direction:column; gap:6px; }
   #noteslist .note { display:flex; align-items:flex-start; gap:8px; padding:9px 4px 9px 12px; border-radius:12px; background:color-mix(in srgb, var(--fg) 7%, var(--bg)); }
   #noteslist .txt { flex:1; white-space:pre-wrap; overflow-wrap:anywhere; font-size:16px; line-height:1.35; }
@@ -774,7 +776,7 @@
   #settings h2 { color:var(--fg); font-size:17px; font-weight:700; }
   #chatclose, #histclose, #statclose, #notesclose, #calclose, #todoclose, #wxclose {
     top:-6px; right:-2px; padding:7px 12px; border-radius:999px; background:var(--soft); font-size:14px; }
-  #histback, #calback, #todoback, #notesall { top:-6px; left:-2px; padding:7px 12px; border-radius:999px; font-size:14px; }
+  #histback, #calback, #todoback { top:-6px; left:-2px; padding:7px 12px; border-radius:999px; font-size:14px; }
   #histback, #calback, #todoback { background:var(--soft); }
   #histfoot { padding-left:0; } #chatfoot { padding:12px 0 0; }
   #histcont, #chatcont, #calgo { border-radius:16px; }
@@ -902,7 +904,7 @@
     width:34px; height:34px; padding:0; top:-8px; border-radius:50%; background:var(--soft); font-size:0; color:var(--fg); }
   html.m3 #chatclose::before, html.m3 #histclose::before, html.m3 #statclose::before, html.m3 #notesclose::before,
   html.m3 #calclose::before, html.m3 #todoclose::before, html.m3 #wxclose::before { content:"✕"; font:600 15px/34px -apple-system,sans-serif; }
-  html.m3 #histback, html.m3 #calback, html.m3 #todoback, html.m3 #notesall { top:-8px; background:var(--soft); }
+  html.m3 #histback, html.m3 #calback, html.m3 #todoback { top:-8px; background:var(--soft); }
   html.m3 #histlist button, html.m3 #callist .appt, html.m3 #noteslist .note, html.m3 #wxbody .fact, html.m3 #wxbody .hr, html.m3 #calone .notes,
   html.m3 .tdq, html.m3 .tdrow .it, html.m3 #todobody .card, html.m3 #todobody .words, html.m3 .tdacts button, html.m3 .tdacts select {
     background:var(--surface); box-shadow:0 0 0 1px var(--line); border-radius:var(--r); }
@@ -1099,9 +1101,10 @@
   <div id="chatfoot"><button id="chatcont" type="button">Call back and continue</button><small id="chatcontnote"></small></div></div>
 <div id="statsheet" role="dialog" aria-label="Status"><div id="stathead"><h2>Status</h2><button id="statclose" type="button">Close</button></div><iframe id="statframe" title="Status" src="about:blank"></iframe></div>
 <div id="histsheet" role="dialog" aria-label="Past calls"><div id="histhead"><button id="histback" type="button">‹ Calls</button><h2 id="histtitle">Past calls</h2><button id="histclose" type="button">Close</button></div><div id="histlist"></div><div id="histlog"></div><div id="histfoot"><button id="histcont" type="button">Continue this call</button><small id="histcontnote"></small></div></div>
-<div id="notesheet" role="dialog" aria-label="Notes"><div id="noteshead"><button id="notesall" type="button" disabled>Clear all</button><h2>Notes</h2><button id="notesclose" type="button">Close</button></div>
+<div id="notesheet" role="dialog" aria-label="Notes"><div id="noteshead"><h2>Notes</h2><button id="notesclose" type="button">Close</button></div>
   <div id="notesmode" role="tablist" aria-label="Notes or feedback"><button type="button" role="tab" data-mode="notes" aria-selected="true">My notes</button><button type="button" role="tab" data-mode="feedback" aria-selected="false">Feedback</button></div>
   <div id="noteslist"></div>
+  <div id="notesundo" role="status" hidden><span id="notesundotxt"></span><button id="notesundobtn" type="button">Undo</button></div>
   <label id="fbbug" hidden><input type="checkbox" id="fbbugin"> It's a bug, something that doesn't work</label>
   <form id="notesform" autocomplete="off"><textarea id="notesin" rows="1" placeholder="A quick note" aria-label="A quick note" maxlength="2000"></textarea><button id="notesadd" type="submit" disabled>Add</button></form>
   <small id="notesnote"></small></div>
@@ -2362,14 +2365,26 @@ document.getElementById("histclose").addEventListener("click", () => showHistory
 document.getElementById("histback").addEventListener("click", () => loadHistory());
 
 // H105: his quick notes, behind the round button above Past calls. The notes are kept in his workspace through the
-// call server (/api/notes: add, clear one once it's gone through, clear all with a second tap), so a call can read
+// call server (/api/notes: add, clear one once it's gone through; since H263 no Clear all, and a cleared note is kept,
+// with Undo for a moment after its Clear and a call able to bring any back), so a call can read
 // them and go through them with him. Since H117 just text: the paper to draw on is gone (a picture saved before is
 // left where it is), and the note field grows with what's typed, like the chat's.
 const notesBtn = document.getElementById("notesbtn"), notesEl = document.getElementById("notesheet"),
       notesList = document.getElementById("noteslist"), notesIn = document.getElementById("notesin"),
-      notesAdd = document.getElementById("notesadd"), notesAll = document.getElementById("notesall"),
-      notesNote = document.getElementById("notesnote");
-let notesAsk = 0, notesSure = null;
+      notesAdd = document.getElementById("notesadd"), notesNote = document.getElementById("notesnote"),
+      notesUndo = document.getElementById("notesundo"), notesUndoTxt = document.getElementById("notesundotxt");
+let notesAsk = 0, undoAsk = null, undoTimer = null;
+// H263: after a Clear, Undo shows for eight seconds; a tap puts the note back. Cleared notes are kept either way.
+function hideUndo() { clearTimeout(undoTimer); undoTimer = null; undoAsk = null; notesUndo.hidden = true; }
+function offerUndo(ask, text) {
+  undoAsk = ask; notesUndoTxt.textContent = "Cleared: " + (text.length > 40 ? text.slice(0, 40).trimEnd() + "…" : text);
+  notesUndo.hidden = false; clearTimeout(undoTimer); undoTimer = setTimeout(hideUndo, 8000);
+}
+document.getElementById("notesundobtn").addEventListener("click", async () => {
+  if (!undoAsk) return;
+  const ask = undoAsk; hideUndo();
+  const d = await notesSend("api/notes", ask); if (d) showNoteItems(d);
+});
 function notesOpen() { return notesEl.classList.contains("open"); }
 async function notesSend(url, body) {
   try {
@@ -2389,7 +2404,7 @@ function showNoteItems(data) {
     if (it.when) { const w = document.createElement("small"); w.className = "when"; w.textContent = it.when.slice(0, 16); t.appendChild(w); }
     const c = document.createElement("button"); c.type = "button"; c.className = "clr"; c.textContent = "Clear";
     c.setAttribute("aria-label", "Clear this note");
-    c.addEventListener("click", async () => { c.disabled = true; const d = await notesSend("api/notes", { clear: it.id }); if (d) showNoteItems(d); else c.disabled = false; });
+    c.addEventListener("click", async () => { c.disabled = true; const d = await notesSend("api/notes", { clear: it.id }); if (d) { showNoteItems(d); offerUndo({ restore: it.id }, it.text); } else c.disabled = false; });
     row.append(t, c); notesList.appendChild(row);
   }
   const hers = data.hers && Array.isArray(data.hers.items) ? data.hers : null;  // H124: her own notes, under his
@@ -2406,7 +2421,7 @@ function showNoteItems(data) {
       if (it.when) { const w = document.createElement("small"); w.className = "when"; w.textContent = it.when.slice(0, 16); t.appendChild(w); }
       const c = document.createElement("button"); c.type = "button"; c.className = "clr"; c.textContent = "Clear";
       c.setAttribute("aria-label", "Clear this note of " + (hers.name || "hers"));
-      c.addEventListener("click", async () => { c.disabled = true; const d = await notesSend("api/notes", { clear_hers: it.id }); if (d) showNoteItems(d); else c.disabled = false; });
+      c.addEventListener("click", async () => { c.disabled = true; const d = await notesSend("api/notes", { clear_hers: it.id }); if (d) { showNoteItems(d); offerUndo({ restore_hers: it.id }, it.text); } else c.disabled = false; });
       row.append(t, c); notesList.appendChild(row);
     }
   }
@@ -2435,7 +2450,6 @@ function showNoteItems(data) {
       t.appendChild(u); row.append(t); notesList.appendChild(row);
     }
   }
-  notesAll.disabled = !data.items.length; notesSure = null; notesAll.classList.remove("sure"); notesAll.textContent = "Clear all";
 }
 // H247: the same sheet sends feedback to the HQ maker: what's sent lands on the planning under Feedback, and its
 // status (received, looked at, planned, being built, done, not doing it) shows here next to it.
@@ -2448,7 +2462,7 @@ function setNotesMode(m) {
   notesIn.placeholder = fb ? "A bug, a wish or an idea for HQ" : "A quick note";
   notesIn.setAttribute("aria-label", notesIn.placeholder);
   notesAdd.textContent = fb ? "Send" : "Add";
-  fbBug.hidden = !fb; notesAll.hidden = fb; notesNote.textContent = "";
+  fbBug.hidden = !fb; hideUndo(); notesNote.textContent = "";
   notesList.innerHTML = ""; loadNotes();
 }
 for (const b of document.querySelectorAll("#notesmode button")) b.addEventListener("click", () => { if (b.dataset.mode !== notesMode) setNotesMode(b.dataset.mode); });
@@ -3770,15 +3784,6 @@ notesForm.addEventListener("submit", async e => {
   const d = await notesSend("api/notes", { add: text });
   if (d) { notesIn.value = ""; fitNote(); showNoteItems(d); notesList.scrollTop = notesList.scrollHeight; }
   notesAdd.disabled = !notesIn.value.trim();
-});
-notesAll.addEventListener("click", async () => {
-  if (!notesSure) {  // a second tap within four seconds clears them all
-    notesAll.classList.add("sure"); notesAll.textContent = "Sure? Tap again";
-    notesSure = setTimeout(() => { notesSure = null; notesAll.classList.remove("sure"); notesAll.textContent = "Clear all"; }, 4000);
-    return;
-  }
-  clearTimeout(notesSure); notesSure = null;
-  const d = await notesSend("api/notes", { clear_all: true }); if (d) showNoteItems(d);
 });
 
 // H40: her voice off. On the iPhone a page can't set the volume, and starting a call switches the phone

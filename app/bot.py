@@ -556,8 +556,13 @@ if __name__ == "__main__":
         elif isinstance(ask.get("clear"), str):
             if not _notes.clear(ask["clear"]):
                 return JSONResponse({"error": "no such note"}, status_code=404)
-        elif ask.get("clear_all") is True:
-            _notes.clear_all()
+        elif isinstance(ask.get("restore"), str):  # H263: Undo after a Clear (no Clear all any more)
+            if not _notes.restore(ask["restore"]):
+                return JSONResponse({"error": "no such cleared note"}, status_code=404)
+        elif isinstance(ask.get("restore_hers"), str):
+            import pings as _pings
+            if not _notes.restore(ask["restore_hers"], _pings.notes_file()):
+                return JSONResponse({"error": "no such cleared note"}, status_code=404)
         elif isinstance(ask.get("clear_hers"), str):
             import pings as _pings
             if not _notes.clear(ask["clear_hers"], _pings.notes_file()):

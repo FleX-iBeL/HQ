@@ -470,6 +470,12 @@ class Policy:
             if len(args) == 1 or (len(args) == 2 and args[1] in ("list", "json")):
                 return Decision(ALLOW, "his notes on the appointments")
             return Decision(DENY, "from a call, the appointment notes script only reads them")
+        # H263: his quick notes: read, clear one (kept, so it can come back), the cleared ones, bring one back. The
+        # notes file is in the workspace, which a call may edit anyway; this way a cleared note is never lost.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "notes.py"):
+            if len(args) == 1 or args[1] in ("clear", "cleared", "restore"):
+                return Decision(ALLOW, "his quick notes")
+            return Decision(DENY, "the notes script takes clear, cleared or restore")
         # H200: the to-do list, the user's own file in the workspace: read, add, done, let go, move, undo. Each change is
         # one table row and its log line, the same as editing the file by hand, which a call may do anyway.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "todo.py"):

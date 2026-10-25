@@ -89,7 +89,7 @@
     {
       "id": "notes", "title": "Quick notes", "line": "Jot something down for later",
       "steps": [
-        {"target": "notesbtn", "title": "A quick note", "text": "A thought you don't want to lose? Write it here. The next call can read your notes, so you can say: let's go through my notes.",
+        {"target": "notesbtn", "title": "A quick note", "text": "A thought you don't want to lose? Write it here. The next call can read your notes, so you can say: let's go through my notes. Cleared one by mistake? Tap Undo right after, or later ask on a call to bring it back: nothing you clear is lost.",
          "demo": {"kind": "list", "items": [["Note", "Ask about the new running shoes"], ["Note", "Idea: a picnic in the park"]]}},
         {"target": "notesbtn", "title": "Feedback for HQ", "text": "Found a bug, or wish HQ did something? In the notes, tap Feedback, type it and Send. Tick It's a bug when something doesn't work. It goes straight onto the planning of the people building HQ, and next to what you sent you see what happens with it: received, looked at, planned, being built, done, or not doing it."}
       ]

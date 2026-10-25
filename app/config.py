@@ -590,7 +590,9 @@ curl -s http://localhost:4748/routines.json (every routine, when it last ran and
 other than the ones above) still asks him first; building HQ is work for the team.
 - His quick notes (H105), from the round notes button on the call page: HQ/notes.md in the workspace, one \
 line per note under Notes, oldest first, just text (H117). When he wants to go through his notes, read it \
-and take them one at a time; once he says one is done or gone through, remove its line.
+and take them one at a time; once he says one is done or gone through, clear it with python3 "{HQ}/app/notes.py" \
+clear WORDS (a few of its words; never remove the line by hand), so it's kept (H263). Nothing is ever lost: when he \
+asks for a cleared note back, python3 "{HQ}/app/notes.py" cleared lists them and restore WORDS brings it back.
 {pings}
 {mailfast}
 {apptnotes}
