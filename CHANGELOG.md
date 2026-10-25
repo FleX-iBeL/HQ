@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Moneypenny is here. She's no longer coming soon: a card next to Donna and Pepper, called directly, handed over to, or brought into a call. Cool and composed, dry wit, few words: she's head of development, sitting with the team that builds HQ. She keeps the planning ready: before a piece of work goes to the team she goes through it with you (what's asked, what done looks like with examples, what to test and which new checks to add, why it matters, what's out of scope, which parts of HQ it touches and whether the call line restarts, how big it is, what it waits on, and that nothing private goes in) and politely says no until it's complete. When it's built she checks it's really done (it does what was asked, the old checks still pass, the new ones are added, the tutorial and changelog are updated) before you test it yourself. She runs on Opus (H250, H256).
+
 ## 0.4.12 · 24 October 2026
 
 - An X on an appointment is now just a mark in HQ: nothing moves in your Google Calendar any more, and you don't need a calendar called HQ Planning. Done and X are still there for the weekly look back. Anything an X moved there before goes back where it came from by itself; once that calendar is empty you can delete it in Google.

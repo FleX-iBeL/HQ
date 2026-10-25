@@ -60,7 +60,7 @@
   #modes button img { width:32px; height:32px; border-radius:50%; object-fit:cover; flex-shrink:0; background:var(--muted); }
   #modes button.on { background:var(--fg); color:var(--bg); }
   #modehint { color:var(--muted); font-size:14px; margin-top:-18px; min-height:1.2em; }
-  /* H73: an agent still coming soon (Moneypenny): a smaller locked card under the others, greyed out;
+  /* H73: an agent still coming soon (Moneypenny until H250): a smaller locked card under the others, greyed out;
      only her icon keeps its colour. Not a button: she can't be picked. */
   #soon { display:flex; flex-direction:column; gap:6px; align-items:center; margin-top:-14px; }
   #soon.hide { display:none; }
@@ -1295,7 +1295,8 @@ function showAgents(list) {
   mode = AGENTS[agent].load;
   showMode(); showVoices();
 }
-// H73: agents still coming soon (Moneypenny), each a small locked card under the others, not on the picker.
+// H73: agents still coming soon, each a small locked card under the others, not on the picker (Moneypenny until H250;
+// now only an agent a workspace locks itself).
 // H121: she can still join a three-way or four-way call, so the chat knows her name and colour (SOON).
 const soonEl = document.getElementById("soon");
 // H126: only for this page; closing the app locks her again, and an old saved one goes.
@@ -3947,8 +3948,8 @@ const helpBtn = document.getElementById("helpbtn"), tourEl = document.getElement
 let TOUR = null, tourAt = null;  // tourAt: { p: piece index, s: step index }
 function tourSeen() { try { return JSON.parse(localStorage.getItem("hq-tour-seen") || "[]"); } catch (e) { return []; } }
 function tourName(t) {
-  const n = id => (AGENTS[id] || {}).name || (id === "donna" ? "Donna" : "Pepper");
-  return String(t || "").replace(/\{donna\}/g, n("donna")).replace(/\{pepper\}/g, n("pepper"));
+  const n = id => (AGENTS[id] || {}).name || ({ donna: "Donna", pepper: "Pepper", moneypenny: "Moneypenny" })[id];
+  return String(t || "").replace(/\{donna\}/g, n("donna")).replace(/\{pepper\}/g, n("pepper")).replace(/\{moneypenny\}/g, n("moneypenny"));  // H250
 }
 async function tourLoad() {
   if (TOUR) return TOUR;

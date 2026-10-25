@@ -161,7 +161,7 @@ Run them before and after every update; they print a short pass/fail table at th
      (HQ_LAPTOP=0) and as the laptop (HQ_LAPTOP=1), with a hot laptop and a low battery: on a server no Laptop
      section, no battery in the top line, no laptop lines or bars under Routines, and the Routines light green;
      on the laptop all of it as before, the light red
-  64 F16, no Claude: the call page fits the screen. The real call page (with Moneypenny's card) in a headless
+  64 F16, no Claude: the call page fits the screen. The real call page (three agent cards, H250) in a headless
      browser at iPhone 13 sizes (Safari and the home screen), a small phone, and the desktop app's size (?app):
      on a call the old layout stays (the picker and her card keep their room) and the page can't be scrolled
      into white space, and after Past calls is opened and closed it's back where it was (F20); a screen too short
@@ -4435,36 +4435,57 @@ window.addEventListener('load', () => setTimeout(() => {
 
     # 62
     async def flow62(self) -> str:
-        """H73: Moneypenny, coming soon. In HQ's defaults (Fable, yellow), not on the picker; the call
-        page shows her as a smaller locked card under Donna and Pepper, greyed out, her icon yellow with an M.
-        The page is the same in the desktop app and the phone version. No Claude turns."""
+        """H73, since H250 and H256: Moneypenny, head of development. In HQ's defaults (Opus, yellow), no longer
+        coming soon: a card like Donna and Pepper on the picker, called directly, handed over to or brought in, with
+        a voice in Settings. Her persona holds the definition of ready and done. The coming-soon switch still works
+        for a workspace that locks her. The page is the same in the desktop app and the phone version. No Claude turns."""
         import agents
         every = {a["id"]: a for a in agents.load(config.FOLDER)}
         m = every.get("moneypenny")
-        need(m and m["coming_soon"] and m["model"] == "fable" and m["colour"].lower() == "#ca8a04",
-             f"Moneypenny isn't in the defaults as a locked Fable agent in yellow: {m}")
-        need([a["id"] for a in agents.visible(config.FOLDER)] == ["donna", "pepper"]
-             and [a["id"] for a in agents.soon(config.FOLDER)] == ["moneypenny"], "Moneypenny can be picked, or isn't listed as coming soon")
-        need(agents.find(config.FOLDER, None, "deep")["id"] == "pepper" and agents.find(config.FOLDER, "nobody")["id"] == "donna",
-             "a call without her asked for lands on Moneypenny")
-        # H121: she can be brought into a call, on Opus while there's no Fable, so the ears know her name
-        need(agents.runs_on(m["model"]) == "opus" and agents.runs_on("sonnet") == "sonnet"
+        need(m and not m["coming_soon"] and m["model"] == "opus" and m["colour"].lower() == "#ca8a04",
+             f"Moneypenny isn't in the defaults as an unlocked Opus agent in yellow: {m}")
+        need([a["id"] for a in agents.visible(config.FOLDER)] == ["donna", "pepper", "moneypenny"]
+             and not agents.soon(config.FOLDER), "Moneypenny can't be picked, or is still listed as coming soon")
+        need(agents.find(config.FOLDER, None, "deep")["id"] == "pepper" and agents.find(config.FOLDER, "nobody")["id"] == "donna"
+             and agents.find(config.FOLDER, "moneypenny")["id"] == "moneypenny",
+             "a call without her asked for lands on Moneypenny, or a call for her doesn't")
+        need(agents.runs_on(m["model"]) == "opus" and agents.runs_on("fable") == "opus" and agents.runs_on("sonnet") == "sonnet"
              and agents.runs_on("claude-x-1") == "claude-x-1", "a model HQ doesn't know isn't run on Opus")
         need("Moneypenny" in config.WHISPER_PROMPT, "Moneypenny isn't in the speech recognition prompt")
         need(">M</text>" in agents.picture_svg(m) and "#ca8a04" in agents.picture_svg(m), "her placeholder isn't a yellow M")
-        # A workspace can unlock her, or hide her.
+        # H256: her craft, the definition of ready and done, is in her persona on every call with her, and nobody else's.
+        pm = agents.persona(m, "Alex")
+        for w in ("definition of ready", "what done means", "concrete examples", "new happy flows", "out of scope",
+                  "call line restarts", "split into pieces", "privacy check", "definition of done", "old flows",
+                  "tutorial and the changelog", "you first, in QA", "sprint planning"):
+            need(w in pm, f"her persona misses {w!r} of the definition of ready and done")
+        need("definition of ready" not in agents.persona(every["donna"], "Alex") and "definition of ready" not in agents.persona(every["pepper"], "Alex"),
+             "Donna or Pepper got Moneypenny's craft")
+        need(m.get("own_goodbye") and "gatekeeper" in m["personality"] and "Clearance pending" not in m["speciality"],
+             f"her H250 character or own goodbye is missing: {m['speciality']}")
+        # Handed over to and brought in, like the others (H79, H121).
+        marks = agents.switch_marks([m])
+        need(marks.get(agents.SWITCH_MARK.format(name="Moneypenny")) == ("switch", "moneypenny")
+             and marks.get(agents.THREE_WAY_MARK.format(name="Moneypenny")) == ("three-way", "moneypenny"),
+             f"she can't be handed over to and brought in: {marks}")
+        rules = agents.switch_rules(every["donna"], [every["pepper"], m])
+        need("Moneypenny" in rules and "can only be brought in" not in rules, "the call rules still say she can only be brought in")
+        # A workspace can still lock her (coming soon, brought in only), or hide her.
         ws = self.tmp / "agents62"
         (ws / "HQ" / "agents").mkdir(parents=True)
-        (ws / "HQ" / "agents" / "agents.json").write_text(json.dumps([{"id": "moneypenny", "coming_soon": False}]))
-        need([a["id"] for a in agents.visible(ws)] == ["donna", "pepper", "moneypenny"] and not agents.soon(ws), "a workspace can't unlock her")
+        (ws / "HQ" / "agents" / "agents.json").write_text(json.dumps([{"id": "moneypenny", "coming_soon": True}]))
+        need([a["id"] for a in agents.visible(ws)] == ["donna", "pepper"] and [a["id"] for a in agents.soon(ws)] == ["moneypenny"],
+             "a workspace can't lock her as coming soon")
+        locked = agents.soon(ws)[0]
+        need(agents.SWITCH_MARK.format(name="Moneypenny") not in agents.switch_marks([locked]), "a locked agent can be handed over to")
         (ws / "HQ" / "agents" / "agents.json").write_text(json.dumps([{"id": "moneypenny", "hidden": True}]))
-        need(not agents.soon(ws), "a hidden locked agent still shows")
+        need(not agents.soon(ws) and "moneypenny" not in [a["id"] for a in agents.visible(ws)], "a hidden agent still shows")
         await self.ensure_server()
         code, body, _ = http_get("/api/agents")
         j = json.loads(body or b"{}")
-        need(code == 200 and [a["id"] for a in j.get("agents", [])] == ["donna", "pepper"]
-             and [a["id"] for a in j.get("soon", [])] == ["moneypenny"] and "personality" not in j["soon"][0],
-             f"/api/agents doesn't list her apart as coming soon: {body[:200]!r}")
+        need(code == 200 and [a["id"] for a in j.get("agents", [])] == ["donna", "pepper", "moneypenny"]
+             and not j.get("soon") and all("personality" not in a and "craft" not in a for a in j["agents"]),
+             f"/api/agents doesn't list her with the others: {body[:200]!r}")
         code, body, ctype = http_get("/agents/moneypenny/picture")
         need(code == 200 and ctype.startswith("image/"), "her picture doesn't load")
         page = http_get("/")[1].decode()
@@ -4474,47 +4495,37 @@ window.addEventListener('load', () => setTimeout(() => {
         need(Path(chrome).exists(), "no headless browser found to run the call page in")
         harness = r"""<script>
 setTimeout(() => {
-  const out = [], card = document.querySelector('#soon .card[data-soon="moneypenny"]');
+  const out = [], card = document.querySelector('#modes button[data-agent="moneypenny"]');
   out.push('buttons:' + [...document.querySelectorAll('#modes button')].map(b => b.dataset.agent).join(','));
+  out.push('soon:' + document.querySelectorAll('#soon .card').length);
   out.push('card:' + (card ? card.textContent.replace(/\s+/g, ' ').trim() : 'none'));
-  out.push('below:' + (card ? String(card.getBoundingClientRect().top > document.getElementById('modes').getBoundingClientRect().bottom) : 'none'));
-  out.push('smaller:' + (card ? String(card.querySelector('img').getBoundingClientRect().width < document.querySelector('#modes img').getBoundingClientRect().width) : 'none'));
-  out.push('greyed:' + (card ? getComputedStyle(card.querySelector('div')).opacity + '/' + getComputedStyle(card.querySelector('img')).opacity : 'none'));
   if (card) card.click();
-  out.push('picked:' + agent + '/' + mode + ' inagents:' + ('moneypenny' in AGENTS));
+  out.push('picked:' + agent + '/' + mode + ' saved:' + localStorage.getItem('hq-agent'));
+  out.push('hint:' + document.getElementById('modehint').textContent);
   out.push('voices:' + [...document.querySelectorAll('#voices .row span')].map(s => s.firstChild.textContent).join(','));
-  setState('live', 'x'); out.push('oncall:' + (getComputedStyle(document.getElementById('soon')).display === 'none' ? 'hidden' : 'shown'));  // H140: steps aside setState('idle', 'x');
-  out.push('oldsaved:' + localStorage.getItem('hq-cards'));
-  if (card) for (let i = 0; i < 11; i++) card.click();  // with the tap above, twelve
-  out.push('egg:' + [...document.querySelectorAll('#modes button')].map(b => b.dataset.agent).join(',') + '/' + localStorage.getItem('hq-cards') + '/' + sessionStorage.getItem('hq-cards'));
+  setState('live', 'x'); out.push('oncall:' + (document.getElementById('modes').getBoundingClientRect().height === 0 ? 'hidden' : 'shown'));
   const pre = document.createElement('pre'); pre.id = 'h73'; pre.textContent = 'H73RESULT ' + out.join(' | ') + ' END'; document.body.append(pre);
 }, 1500);
 </script>"""
         f = self.tmp / "h73.html"
-        # H126: an unlock saved by the old page (before H126) is dropped when the page opens.
-        saved = "<script>try { localStorage.setItem('hq-cards', '[\"moneypenny\"]'); } catch (e) {}</script>"
-        f.write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">' + saved, 1))
+        f.write_text(page.replace("</body>", harness + "</body>", 1).replace("<head>", f'<head><base href="{TEST_URL.rstrip("/")}/">', 1))
         r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), f"--user-data-dir={self.tmp / 'h73-profile'}",
                                           "--disable-web-security", "--virtual-time-budget=5000", "--dump-dom", f.as_uri()], timeout=60)
         mm = re.search(r'<pre id="h73">H73RESULT (.*?) END</pre>', r.stdout)
         need(mm, f"the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
         res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
         say(f"   {mm.group(1)}")
-        need(res["buttons"] == "donna,pepper", f"Moneypenny is a button you can pick: {res}")
-        need(res["card"].startswith("Moneypenny") and "Coming soon" in res["card"], f"her card doesn't say coming soon: {res}")
-        need(res["below"] == "true" and res["smaller"] == "true", f"her card isn't smaller and under Donna and Pepper: {res}")
-        need(float(res["greyed"].split("/")[0]) < 1 and res["greyed"].split("/")[1] == "1", f"her card isn't greyed out, or her yellow icon is: {res}")
-        need(res["picked"].startswith("donna/quick inagents:false"), f"tapping her card picked her: {res}")
-        need("Moneypenny" not in res["voices"], f"she has a voice in Settings: {res}")
-        need(res["oncall"] == "hidden", f"her card shows during a call: {res}")
-        # H126: the easter egg unlocks her only for this page; nothing is kept for the next time the app opens.
-        need(res["oldsaved"] == "null", f"an old saved unlock is still kept: {res}")
-        need(res["egg"] == "donna,pepper,moneypenny/null/null", f"twelve fast taps don't unlock her only for this page: {res}")
-        return "Moneypenny: a smaller locked card under Donna and Pepper, coming soon, yellow M, not on the picker; brought in on Opus; the easter egg lasts only until the app closes"
+        need(res["buttons"] == "donna,pepper,moneypenny" and res["soon"] == "0", f"Moneypenny isn't a card like the others: {res}")
+        need(res["card"] == "Moneypenny", f"her card isn't a plain card with her name: {res}")
+        need(res["picked"].startswith("moneypenny/deep saved:moneypenny"), f"tapping her card doesn't pick her: {res}")
+        need("ready" in res["hint"] or "development" in res["hint"] or "Building" in res["hint"], f"the hint doesn't say what she's for: {res}")
+        need("Moneypenny" in res["voices"], f"she has no voice in Settings: {res}")
+        need(res["oncall"] == "hidden", f"the picker shows during a call: {res}")
+        return "Moneypenny: unlocked, a third card next to Donna and Pepper, on Opus, yellow M, her own voice; handed over to and brought in; her persona holds the definition of ready and done; a workspace can still lock her"
 
     async def flow64(self) -> str:
         """F16: on a call the page can't be scrolled into white space. Since H140 (Modern, the one look) the agent
-        picker and Moneypenny's card step aside on a call and her orb leads, then the status line, Mute and the
+        picker (Donna, Pepper and, since H250, Moneypenny) steps aside on a call and her orb leads, then the status line, Mute and the
         round button, in that order (before H140, Classic kept their room). The scrolling is locked as long as the listening
         line fits on the screen. F20: after Past calls is opened and closed on a call, the call screen is back where
         it was, also when the phone's scrolling carries on a moment after the close. The real page in a headless
@@ -4535,11 +4546,13 @@ setTimeout(async () => {
   const over = () => document.scrollingElement.scrollHeight - innerHeight;
   const locked = () => getComputedStyle(document.documentElement).overflowY === 'hidden' && getComputedStyle(document.body).overflowY === 'hidden';
   const box = id => { const r = document.getElementById(id).getBoundingClientRect(); return [r.top, r.bottom, r.height]; };
-  const card = document.querySelector('#soon .card');
-  out.push('card:' + (card ? 'yes' : 'no'));
+  // H250: Moneypenny is a third card on the picker now, no longer a locked one under it; all three fit side by side.
+  const card = document.querySelector('#modes button[data-agent="moneypenny"]');
+  out.push('card:' + (card && document.querySelectorAll('#modes button').length === 3 ? 'yes' : 'no'));
   const [, mb] = box('modes'), [ht] = box('modehint'), [st] = box('soon');
+  const mr = document.getElementById('modes').getBoundingClientRect();
   out.push('idle:' + over());
-  out.push('apart:' + (ht >= mb && st >= mb ? 'yes' : 'no'));
+  out.push('apart:' + (ht >= mb && st >= mb && mr.left >= 0 && mr.right <= innerWidth + 1 && card.getBoundingClientRect().right <= mr.right + 1 ? 'yes' : 'no'));
   out.push('sizes:' + Math.round(box('modes')[2]) + '/' + (card ? Math.round(card.getBoundingClientRect().height) : 0));
   calledHere = true; setState('connecting', ''); await wait(100); out.push('connecting:' + (locked() ? 'locked' : 'free'));
   setState('live', 'On the call'); setMuted(false); await wait(100);
@@ -4584,9 +4597,9 @@ setTimeout(async () => {
             need(mm, f"{name}: the call page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
             res = dict(part.split(":", 1) for part in mm.group(1).replace(" mute:", " | mute:").replace(" status:", " | status:").replace(" h:", " | h:").split(" | "))
             say(f"   {name} ({size}): {mm.group(1)}")
-            need(res["card"] == "yes", f"{name}: Moneypenny's card isn't on the page, so the test proves nothing: {res}")
+            need(res["card"] == "yes", f"{name}: Moneypenny isn't the third card on the picker (H250): {res}")
             need(int(res["idle"]) <= 0 and int(res["after"]) <= 0, f"{name}: the page scrolls past the screen before or after a call: {res}")
-            need(res["apart"] == "yes", f"{name}: the hint or her card overlaps Donna and Pepper: {res}")
+            need(res["apart"] == "yes", f"{name}: the hint overlaps the cards, or the three cards don't fit the screen: {res}")
             need(res["room"] == "aside" and res["order"] == "ok", f"{name}: on a call the picker or her card still takes room, or her orb, the status line, Mute and the button aren't in that order (H140): {res}")
             need(res["afterlock"] == "free", f"{name}: the page stays locked after the call: {res}")
             need(res["chat"] == "ok", f"{name}: with the chat open the page scrolls: {res}")
@@ -4601,8 +4614,9 @@ setTimeout(async () => {
                 # Off a Mac the fonts are a pixel smaller, so here it may just fit; then it's locked, rightly.
                 need(res["live"] == "free" or res["statusfits"] == "yes", f"{name}: the listening line is off the screen and can't be scrolled to: {res}")
             seen.append(res["sizes"])
-        # H140: Modern draws Donna and Pepper a little tighter on a short screen (under 700 high), on purpose; her card stays the same.
-        need(len({s.split("/")[1] for s in seen[:2]}) == 1, f"her card looks different between the iPhone 13 sizes: {seen}")
+        # H140: Modern draws the cards a little tighter on a short screen (under 700 high), on purpose. Since H250 her card
+        # is one of them, so it's drawn the same as Donna's and Pepper's on every size.
+        need(all(x.split("/")[0] == x.split("/")[1] for x in seen), f"her card isn't drawn like the others: {seen}")
         return "on a call her orb leads and the picker steps aside (H140), the page can't be scrolled and Past calls closes back to the same place (iPhone 13 Safari and home screen, desktop app); a small phone still scrolls to its listening line; the calendar opens on a call above the call's buttons and closes back to the same place (H144)"
 
     # 48
@@ -4632,7 +4646,7 @@ setTimeout(async () => {
         (ws / "HQ" / "agents" / "coach.png").write_bytes(b"\x89PNG\r\n\x1a\n")
         mine = agents.load(ws)
         need([a["id"] for a in mine] == ["donna", "pepper", "moneypenny", "coach"], f"the workspace's agents aren't read right: {[a['id'] for a in mine]}")
-        need([a["id"] for a in agents.visible(ws)] == ["donna", "coach"], "a hidden agent still shows")
+        need([a["id"] for a in agents.visible(ws)] == ["donna", "moneypenny", "coach"], "a hidden agent still shows")  # H250: she's unlocked
         need(mine[0]["personality"] == "Test personality." and mine[0]["name"] == "Donna", "a workspace change isn't applied")
         need(agents.picture(ws, "coach") and not agents.picture(ws, "donna") and not agents.picture(ws, "../coach"),
              "headshots aren't found in the workspace only")
@@ -7919,7 +7933,7 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         every = {a["id"]: a for a in agents.load(config.FOLDER)}
         agreed = {"donna": ("Hey you. What do you need?", "You said that yesterday too. Shall I just put it in?"),
                   "pepper": ("Hey{s}. What's on your mind?", "So... that's the third build today. Is this the needle mover, or the fun one?"),
-                  "moneypenny": ("{N}Go ahead.", "Noted. It'll be done. Just not tonight.")}
+                  "moneypenny": ("{N}Go ahead.", "Noted. Does it need building now, or can it wait for the sprint?")}
         base = {a["id"]: a for a in agents.DEFAULTS}
         for aid, (greet, push) in agreed.items():
             a = base[aid]
@@ -8062,7 +8076,7 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         need("Donna (opus): Soft and slow. [changed in your workspace" in text and "Pepper (opus)" in text and "Hello Sam." in text,
              f"describe doesn't show the workspace's characters: {text[:300]}")
         r = await asyncio.to_thread(run, [sys.executable, str(APP / "agents.py")], timeout=60)
-        need(r.returncode == 0 and "Donna (opus)" in r.stdout and "Pepper (opus)" in r.stdout and "Moneypenny (fable, coming soon)" in r.stdout,
+        need(r.returncode == 0 and "Donna (opus)" in r.stdout and "Pepper (opus)" in r.stdout and "Moneypenny (opus)" in r.stdout and "coming soon" not in r.stdout,
              f"python3 app/agents.py doesn't print the agents: {(r.stderr or r.stdout)[-300:]!r}")
         # The page and the docs show the defaults.
         await self.ensure_server()
@@ -8099,7 +8113,7 @@ setTimeout(() => {
         about = (ROOT / "ABOUT.md").read_text()
         need("python3 app/agents.py" in readme and "pushback" in readme and "agents.json" in readme and "HQ's defaults" in readme,
              "the readme doesn't tell their Claude the characters are defaults they can change")
-        need(all(x in tmpl for x in ("Hey you. What do you need?", "Just not tonight.", '"pushback"', '"greetings"')),
+        need(all(x in tmpl for x in ("Hey you. What do you need?", "wait for the sprint?", '"pushback"', '"greetings"')),
              "the template's agents readme doesn't show the defaults and how to change them")
         need("Quick and dry" in about and "HQ's defaults" in about, "ABOUT.md doesn't describe the characters")
         # H132: what she says about herself is kept in her own list in the workspace, and comes with her persona
@@ -16637,7 +16651,7 @@ const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "
       if (!inside(c)) bad.push(TOUR.pieces[i].id + s + " card outside");
       if (spot && meets(c, spot)) bad.push(TOUR.pieces[i].id + s + " covers the spot " + JSON.stringify([Math.round(c.top), Math.round(c.bottom), Math.round(spot.top), Math.round(spot.bottom)]));
       if (!$("tourtitle").textContent || $("tourtext").textContent.length < 30) bad.push(TOUR.pieces[i].id + s + " no text");
-      if (/\{(donna|pepper)\}/.test($("tourcard").textContent)) bad.push(TOUR.pieces[i].id + s + " a name placeholder");
+      if (/\{(donna|pepper|moneypenny)\}/.test($("tourcard").textContent)) bad.push(TOUR.pieces[i].id + s + " a name placeholder");
       const want = TOUR.pieces[i].steps[s].target, el = want && $(want);
       if (el && el.offsetParent !== null && !el.classList.contains("featoff") && !spot) bad.push(TOUR.pieces[i].id + s + " no spot on " + want);
       if (document.documentElement.scrollWidth > innerWidth + 1) bad.push("sideways");
@@ -17291,7 +17305,7 @@ FLOWS = {
     59: ("H62: after a crash the job runs again, first in line, picking up where it left off", False, "flow59"),
     60: ("H65: a call reads HQ freely (files, logs, status page data); changes still ask; web lookups never ask (H103)", False, "flow60"),
     61: ("H56.1: the routine and the watchdog on Linux; the Mac as it was", False, "flow61"),
-    62: ("H73: Moneypenny, coming soon: a locked card under Donna and Pepper, not on the picker", False, "flow62"),
+    62: ("H73, H250, H256: Moneypenny, head of development: a card like Donna and Pepper, on Opus, the definition of ready and done", False, "flow62"),
     63: ("H56.2: job windows and the mail check on Linux, in tmux: a throwaway job and mail check", False, "flow63"),
     64: ("F16: the call page fits the screen before, during and after a call; no scrolling into white space", False, "flow64"),
     65: ("H56.3: main and backup: two throwaway HQs hand the main role back and forth; alone, an HQ is simply main", False, "flow65"),

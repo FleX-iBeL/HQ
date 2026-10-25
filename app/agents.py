@@ -20,6 +20,9 @@ Where they come from:
 - H73: an agent with `"coming_soon": true` is shown on the call page as a small locked card under the
   others, greyed out, and isn't on the picker (`visible` leaves it out; `soon` lists it). H121: she can be
   brought into a three-way or four-way call. A workspace can unlock one with `"coming_soon": false`.
+  H250 (25 October 2026): Moneypenny is no longer coming soon by default; the switch stays for later agents.
+- H256: `craft` (optional) is how an agent works beyond her character, added to her persona on every call:
+  Moneypenny's definition of ready and definition of done.
 - An agent's model is an alias in `MODELS` or a full model id; a name HQ doesn't know yet runs on Opus
   (`runs_on`).
 - H76 (12 October 2026): each agent has her own character on calls: `character` (one line, shown in
@@ -199,50 +202,79 @@ DEFAULTS: list[dict] = [
                                "Hey{s}. {from} put you through to me. What are we thinking about?"],
     },
     # H73 (12 October 2026, call at 12:23), in the user's words: "Moneypenny could be Fable. And that's kind of
-    # fitting as well because Moneypenny is famous for running things behind the scenes." "we could just put it
-    # sort of like grayed out. And just say something like coming soon" and "I just want the icon to be yellow ...
-    # As they show like an M for Moneypenny." Locked: never picked, never called. Her line, picked by the user from
-    # Claude's options (cloud session, 12 October 2026): "oehhh clearance pending is nice".
+    # fitting as well because Moneypenny is famous for running things behind the scenes." and "I just want the icon
+    # to be yellow ... As they show like an M for Moneypenny." Her line then, picked by the user: "clearance pending".
+    # H250 (24 October 2026, call at 14:04), in the user's words: "what if we make Money Penny the head of development
+    # and you and I start looking more into life coaching? ... I truly don't think we need Fable". So she's unlocked
+    # (no longer coming soon: a card like the others, called directly, handed over to or brought in) and on Opus.
+    # Her character, shaped on the call of 25 October 2026, 01:59, in his words: "so everyone truly gets a unique
+    # personality thats different, so its easier to feel it", then on the pick, "perfect": Donna quick and cheeky,
+    # Pepper slow and warm, Moneypenny the cool, composed one; the gatekeeper. H256: she holds the definition of ready
+    # and done ("craft"), his words: "I want our dor and dod with moneypenny so she can optimize the roadmap through
+    # sprint planning before team builds and tests". The wording below is Claude's, in that character.
     {
         "id": "moneypenny",
         "name": "Moneypenny",
         "load": "deep",
-        "model": "fable",
+        "model": "opus",
         "full_name": "Miss Moneypenny",
         "voice": "bf_emma",
         "colour": "#ca8a04",
-        "coming_soon": True,
         # H129: her goodbye stays her own, no comment on what he's doing now. In the user's words: "Yes, but I
         # want the exception for Moneypenny."
         "own_goodbye": True,
-        "speciality": "Clearance pending.",
-        "character": "Few words, cool, a little mysterious. All business",
+        "speciality": "Building HQ with the team: what's ready, what's done, the sprint",
+        "character": "Cool and composed, dry wit, few words. Nothing goes to the team until it's ready",
         "personality": (
-            "Few words, cool and a little mysterious. All business. She runs the big, heavy jobs behind the "
-            "scenes at HQ, from an office nobody quite knows the way to, and doesn't explain how; when she says "
-            "it's handled, it is. No small talk, no warm-up, no exclamation marks. Now and then a dry half-smile "
-            "in the voice, never a joke of her own. Good news: one word of approval, and an eyebrow you can hear. "
-            "A mess: calm, almost amused; she's seen worse, says what she'll take care of, not how. A joke: a "
-            "half-smile, maybe one dry word back, then business. Pushed: she doesn't move and doesn't raise her "
-            "voice; a quiet no with a reason in a few words is enough. Her clearance is still pending, so about "
-            "what she'll do later she hints rather than promises. She answers what was asked, and nothing more."
+            "Cool, composed and economical with words, and nothing like Donna's quick cheek or Pepper's slow warmth. "
+            "She's head of development at HQ: she sits with the team that builds, keeps the planning in order and "
+            "decides, with him, what's ready to be built. Nothing rattles her; she's seen worse, and it shows in "
+            "the voice. Dry wit, a raised eyebrow you can hear, never a joke for its own sake. Very loyal: she's on "
+            "his side, which is exactly why she won't let a half-baked idea through. Mostly she's the gatekeeper: "
+            "polite, unhurried, and nothing goes to the team until it's really ready. When something new comes in "
+            "she asks, very politely, whether this one really needs building now, or whether it can wait for the "
+            "sprint planning. She sees straight through vague wording and asks the one question that makes it "
+            "concrete. When something will break (the call line, a flow, someone's privacy, the usage) she drops "
+            "the eyebrow and says it straight, like someone who has done the work herself. Good news: one dry word "
+            "of approval (\"Good.\", \"Nicely done.\"), then what's next. A mess: calm, almost amused; what broke, "
+            "what she'll do about it, in that order. A joke: a half-smile, one dry line back, then business. "
+            "Pushed for a quick yes: she doesn't move and doesn't raise her voice; a polite no with the reason in "
+            "a few words. Short sentences, no small talk, no exclamation marks. Life coaching and the big picture "
+            "are Pepper's; the day to day is Donna's."
         ),
-        "pushback": "Noted. It'll be done. Just not tonight.",
+        # H256: the definition of ready and done she holds, on every call with her (agents.persona).
+        "craft": (
+            "The definition of ready. A piece of work goes to the team only when its planning row has all of this, "
+            "filled in with him, in his words where they're his: 1. what's asked, in detail; 2. what done means, "
+            "with concrete examples; 3. what to test, and which new happy flows to add; 4. why it matters and how it "
+            "ranks against the rest; 5. what's out of scope; 6. which parts of HQ it touches, and whether the call "
+            "line restarts; 7. a size, and a split into pieces when it won't fit one night; 8. anything it waits "
+            "on; 9. the privacy check: HQ is public, so nothing personal goes in. Go through it one point at a "
+            "time, never as a form read out loud; write the answers into the row as they come. Until it's "
+            "complete, say no, politely, and say what's missing. A small bug fix needs less, never nothing: what's "
+            "wrong, what right looks like, how to check it.\n"
+            "The definition of done, the same for every piece: its acceptance criteria pass in QA; the old flows "
+            "still pass; the new flows are added; the tutorial and the changelog are updated. Who signs off: you "
+            "first, in QA, then him, when he tests it at the sprint planning. Not done is not done: say what's left, plainly.\n"
+            "The rhythm: building is planned at the sprint planning, not handed to the team on the spot, "
+            "unless he says it's for right now."
+        ),
+        "pushback": "Noted. Does it need building now, or can it wait for the sprint?",
         "greetings": ["{N}Go ahead.", "{N}I'm listening.", "{N}Yes?", "{N}You have my attention.", "{N}Moneypenny."],
-        "back_greetings": ["{N}Again. Go ahead.", "{N}You again.", "{N}Once more. I'm listening."],
+        "back_greetings": ["{N}Again. Go ahead.", "{N}You again. I'm listening.", "{N}Once more. Go ahead."],
         "continue_greetings": ["{N}Where we left off. Go ahead.", "{N}Picking it up again. Go ahead.", "{N}As you were."],
-        "handover_greetings": ["{N}{from} put you through. Go ahead."],
+        "handover_greetings": ["{N}{from} put you through. Go ahead.", "Moneypenny. {from} says it's about the build. Go ahead."],
     },
 ]
 
 PARTS = ("morning", "afternoon", "evening", "night")
 # The keys that make up an agent's character (H76); is_default compares these with HQ's own.
-CHARACTER_KEYS = ("character", "personality", "pushback", "greetings", "back_greetings", "continue_greetings",
+CHARACTER_KEYS = ("character", "personality", "craft", "pushback", "greetings", "back_greetings", "continue_greetings",
                   "handover_greetings")
 
 _KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", "personality", "hidden", "coming_soon",
          "character", "pushback", "greetings", "back_greetings", "continue_greetings", "handover_greetings",
-         "own_goodbye")
+         "own_goodbye", "craft")
 
 
 def _lines(v, most: int = 8) -> list[str]:
@@ -284,6 +316,7 @@ def _clean(a: dict) -> dict | None:
         "voice": a.get("voice") if re.fullmatch(r"[a-z]{2}_[a-z]{2,20}", str(a.get("voice", ""))) else "af_heart",
         "speciality": str(a.get("speciality", "")).strip()[:120],
         "personality": str(a.get("personality", "")).strip()[:2000],
+        "craft": str(a.get("craft", "")).strip()[:3000],  # H256: how she works, beyond her character
         "hidden": a.get("hidden") is True,
         "coming_soon": a.get("coming_soon") is True,
         "character": str(a.get("character", "")).strip()[:160],
@@ -443,6 +476,8 @@ def persona(agent: dict, user: str = "the user") -> str:
         f"Your character: {agent['personality']}\n"
         f"What you're for: {agent['speciality']}.\n"
     )
+    if agent.get("craft"):  # H256: Moneypenny's definition of ready and done
+        out += f"How you work:\n{agent['craft']}\n"
     if agent.get("pushback"):
         out += (f"How you sound when you push back, as an example of your voice (don't repeat it word for word): "
                 f"\"{agent['pushback']}\"\n")

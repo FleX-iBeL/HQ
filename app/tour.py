@@ -21,7 +21,8 @@ def load() -> dict:
 
 
 def _names(text: str, names: dict) -> str:
-    return text.replace("{donna}", names.get("donna", "Donna")).replace("{pepper}", names.get("pepper", "Pepper"))
+    return (text.replace("{donna}", names.get("donna", "Donna")).replace("{pepper}", names.get("pepper", "Pepper"))
+            .replace("{moneypenny}", names.get("moneypenny", "Moneypenny")))  # H250
 
 
 def piece(topic: str, tour: dict | None = None) -> dict | None:

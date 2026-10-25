@@ -1,12 +1,12 @@
 {
-  "_about": "H74: the get-started tutorial. The call page shows these pieces on its real screens (the question mark at the top left); the demo call (app/tour.py) reads the same text, so both say the same. Demo content only: nothing here is anyone's real life. {donna} and {pepper} become the names of this HQ's agents.",
+  "_about": "H74: the get-started tutorial. The call page shows these pieces on its real screens (the question mark at the top left); the demo call (app/tour.py) reads the same text, so both say the same. Demo content only: nothing here is anyone's real life. {donna}, {pepper} and {moneypenny} become the names of this HQ's agents.",
   "intro": "HQ is your own headquarters. You call your team, and they don't just answer: they write things down, plan your days and do the work. Pick a short piece below to see where everything is, or try a demo call and ask anything.",
   "demo_note": "Demo: everything in this tutorial is made-up example content. Nothing you tap here changes your HQ, and nothing is saved.",
   "pieces": [
     {
       "id": "call", "title": "Call your team", "line": "Who you call, and how a call works",
       "steps": [
-        {"target": "modes", "title": "Pick who you call", "text": "{donna} is quick: your day, your list, your mail, quick orders. {pepper} takes her time: planning, sparring, thinking something through. Each has her own voice and character, and her own week: little things from her day come up, like a real colleague."},
+        {"target": "modes", "title": "Pick who you call", "text": "{donna} is quick: your day, your list, your mail, quick orders. {pepper} takes her time: planning, sparring, thinking something through. {moneypenny} is cool and composed: she runs the building with the team and makes sure work is ready before it's built, and done before it's called done. Each has her own voice and character, and her own week: little things from her day come up, like a real colleague."},
         {"target": "btn", "title": "Tap to call", "text": "One tap and she picks up. Talk the way you would on the phone. You can cut in at any moment and she stops talking."},
         {"target": "btn", "title": "Call me back, or call me later", "text": "Say \"hang up and call me back\" and she does: the app starts fresh and she rings straight back, carrying on the same call. Or agree a time, \"call me at three\", or \"call me when my appointment starts\": your phone shows \"{pepper} is calling\", and one tap picks up. She already knows what it's about. Missed it? {donna} tells you in her texts.",
          "demo": {"kind": "chat", "items": [["you", "Call me at three about the report, okay?"], ["agent", "Will do. I'll ring you at three."]]}},
@@ -84,7 +84,8 @@
         {"target": "statbtn", "title": "Give it to the team", "text": "On a call you can agree a bigger piece of work: build something, sort something out, research something. Say: give it to the team. You hang up, and the computer does it by itself, one piece at a time."},
         {"target": "statbtn", "title": "Watch how far it is", "text": "The Status page shows what's being done right now and its step, what's waiting, what's planned for later, and your Claude usage. The team stops at the usage lines you set and carries on when there's room.",
          "demo": {"kind": "list", "items": [["Now", "Research three summer trips, step 2 of 3"], ["Next", "Clean up the shopping list"], ["Tonight 22:00", "The nightly check"], ["Usage", "5-hour 20%, weekly 47%"]]}},
-        {"target": "statbtn", "title": "The roadmap", "text": "Every bigger idea goes on the roadmap first, with your own words, so nothing gets lost. Then it goes to the team when you're ready, or it gets planned for a time, like tonight at ten."}
+        {"target": "statbtn", "title": "The roadmap", "text": "Every bigger idea goes on the roadmap first, with your own words, so nothing gets lost. Then it goes to the team when you're ready, or it gets planned for a time, like tonight at ten."},
+        {"target": "statbtn", "title": "Ready before it's built, done when it's done", "text": "{moneypenny} keeps the planning. Before a piece goes to the team she goes through it with you: what's asked, what done looks like with examples, what to test, what's out of scope, what it touches and how big it is. When it's built she checks it first: it does what was asked, the old checks still pass, new checks are added, the tutorial and changelog are updated. Then you test it yourself."}
       ]
     },
     {
