@@ -410,7 +410,7 @@ def main(argv):
                 elif a == "--every" or a.startswith("--every="):  # H171
                     every = a.split("=", 1)[1] if "=" in a else (args[k + 1] if k + 1 < len(args) else "")
                     skip = "=" not in a
-                elif a not in ("--past-the-line", "--priority"):
+                elif a not in ("--past-the-line", "--priority", "--not-ready"):
                     rest.append(a)
             if kind is not None:
                 kind = kind.strip().lower()
@@ -431,10 +431,12 @@ def main(argv):
                     at = next_at(at, every, dt.datetime.now() - dt.timedelta(minutes=1))
             if at < dt.datetime.now().replace(second=0, microsecond=0) - dt.timedelta(minutes=1):
                 sys.exit(f"{say_when(at.strftime(FMT))} has already passed. Give a time ahead, or now.")
+            import sprint as sp_  # H272: the open planning rows it names must be marked ready, or his say-so
+            said = sp_.gate(text, jobs.one_line(" ".join(rest[1:])), "--not-ready" in args)
             n = max([i["n"] for i in items] + [0]) + 1
             prio = "--priority" in args
             item = {"n": n, "state": "waiting", "past": past, "priority": prio, "every": every, "at": at.strftime(FMT),
-                    "added": time.strftime(FMT), "text": jobs.one_line(" ".join(rest[1:])).replace("·", "-")}
+                    "added": time.strftime(FMT), "text": jobs.one_line(said).replace("·", "-")}
             items.append(item)
             write(text, items)
             estimate("item_on_add", n, item["text"], kind, guess)

@@ -301,7 +301,16 @@ one, and a new row on the planning has no rank until he gives it one. Say it as 
 number one now", never the command. MoSCoW (H271): each row can carry a tag for the sprint, Must, Should, Could or \
 Won't (this time); when he gives one ("the feedback button is a must", "make H243 a could", "that one's a won't this \
 time", "take its tag off"), that's his go: python3 "{HQ}/routine/sprint.py" moscow <label> <must|should|could|wont|off>. \
-The planning is shown and laid in groups, Must, Should, Could, the rows not sorted yet, then Won't, and inside each \
+The Ready mark (H272): only rows marked ready go to the team. A row is ready when the nine ready points are \
+filled in with him (what's asked, what done means with examples, the test, why it matters, out of scope, what it \
+touches, a size, what it waits on, the privacy check; a small bug fix: what's wrong, what right looks like, how to \
+check). When he says a row is ready ("mark the feedback button ready", "H243 is ready", "take its ready off"), that's \
+his go: python3 "{HQ}/routine/sprint.py" ready <label> <on|off>; python3 "{HQ}/routine/sprint.py" check <label> says \
+which points a row still seems to miss. The list shows each row as ready, not ready, or changed since ready (its words \
+changed after it was marked, so it needs the mark again). Plan the sprint and Send to the team leave out a row that \
+isn't ready and say which point is missing; jobs.py add and schedule.py add refuse work naming one too. Only on his \
+explicit say-so to give it to the team anyway ("give it to the team even though it isn't ready"), add --not-ready, \
+and the job says it went without the mark; never add it by yourself. The planning is shown and laid in groups, Must, Should, Could, the rows not sorted yet, then Won't, and inside each \
 group the bugs come before the features, then the rank: bugs always before features, so the tech debt (the shortcuts \
 and unfixed bugs that pile up and make every next change slower and riskier) stays low. The sprint (H269): at the sprint planning, when he picks rows for this sprint, \
 python3 "{HQ}/routine/sprint.py" lay <label> <label> ... [--night tonight|tomorrow|<weekday>|<YYYY-MM-DD>] shows them \

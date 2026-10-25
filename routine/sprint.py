@@ -38,6 +38,8 @@ usage:
   python3 routine/sprint.py json                       the same as JSON (the status server shows it)
   python3 routine/sprint.py rank LABEL N|top|bottom|off  give row LABEL a place (1 the top), or take its rank away
   python3 routine/sprint.py moscow LABEL must|should|could|wont|off  its MoSCoW tag for the sprint (H271), or none
+  python3 routine/sprint.py ready LABEL [on|off]          its Ready mark (H272): only rows marked ready go to the team
+  python3 routine/sprint.py check LABEL...             why a row isn't ready (the points it seems to miss), or that it is
   python3 routine/sprint.py lay LABEL... [--night D]     the sprint: the rows, in rank order, laid over the nights from
                                                         night D (tonight, tomorrow, a weekday or 2026-10-26; tonight
                                                         when left out); --json for the status page
@@ -161,6 +163,136 @@ def set_moscow(label, word):
     d["set"] = int(time.time())
     _save(RANKS, d)
     return None if t == "off" else t
+
+
+# ---------- the Ready mark (H272) ----------
+
+# H272 (25 October 2026, call at 12:36), in the user's words: "Btw can items pass through if they are not checked? How do
+# we know you and i decided they pass the ready for sprint?" Each open row can carry a Ready mark, kept next to its rank
+# and MoSCoW tag in sprint.json ("ready": {label: {"fp", "at"}}), never in the row: set and taken off on a call (once
+# the nine points are filled in with him) and with a tick in the sprint view. The mark holds the row's words as they
+# were (fp); when they change after, the row says "changed since ready" until it's marked again. Plan the sprint and
+# Send to the team refuse a row without a mark that still holds, and say which point seems to be missing; a call can
+# still give one to the team on the user's explicit say-so (jobs.py or schedule.py add --not-ready), and the job then
+# says it went without the mark. Which points a row seems to miss is only a hint from its words (the full check of the
+# nine points is the weekly ready review, H273), never a reason to set or take off the mark.
+
+READY_POINTS = (  # (the words for a missing point, what in a row's words says it's there)
+    ("what's asked", r"what'?s asked|what is asked|\b1\. "),
+    ("what done means", r"done means|\bdone is\b"),
+    ("test", r"\btests?\b|\bflows?\b"),
+    ("why", r"\bwhy\b"),
+    ("out of scope", r"out of scope"),
+    ("what it touches", r"\btouches\b"),
+    ("size", r"\bsize\b|small build|big build|one night"),
+    ("what it waits on", r"waits on"),
+    ("privacy check", r"privacy"),
+)
+BUG_POINTS = (  # a small bug fix is ready with what's wrong, what right looks like and how to check
+    ("what's wrong", r"wrong|broken|breaks|fails|doesn'?t|isn'?t|bug"),
+    ("what right looks like", r"right looks like|should|expected|instead"),
+    ("how to check", r"how to check|\bcheck\b|\btest"),
+)
+
+
+def row_words_fp(line):
+    """The row's words, without its mark and its result column: what the Ready mark holds on to."""
+    cells = [c.strip() for c in line.split("|")[1:-1]]
+    return _fp(" | ".join(cells[1:4]))
+
+
+def ready_of(rows=None):
+    """{label: "ready" | "changed"} for the open rows with a mark: ready while the words are the ones it was given on,
+    changed when they've changed since."""
+    rows = open_rows() if rows is None else rows
+    marks = _load(RANKS).get("ready") or {}
+    out = {}
+    for r in rows:
+        m = marks.get(r["label"])
+        if isinstance(m, dict):
+            out[r["label"]] = "ready" if m.get("fp") == row_words_fp(r["line"]) else "changed"
+    return out
+
+
+def missing_points(row):
+    """The points the row's words don't seem to have (a hint only, H273 checks them properly)."""
+    text = row["line"].lower()
+    pts = BUG_POINTS if is_bug(row) and str(row.get("label", "")).startswith("F") else READY_POINTS
+    return [name for name, pat in pts if not re.search(pat, text)]
+
+
+def not_ready_why(row, state=None):
+    """Why a row isn't ready, in a few plain words, or None when it is: "H257 isn't ready: no out of scope, no size"."""
+    state = ready_of([row]).get(row["label"]) if state is None else state
+    if state == "ready":
+        return None
+    if state == "changed":
+        return f"{row['label']} isn't ready: its words changed since it was marked ready, so it needs the mark again"
+    miss = missing_points(row)
+    if len(miss) == len(BUG_POINTS if row["label"].startswith("F") and is_bug(row) else READY_POINTS):
+        return f"{row['label']} isn't ready: none of its ready points are written in it yet"
+    if miss:
+        return f"{row['label']} isn't ready: no {', no '.join(miss)}"
+    return f"{row['label']} isn't ready: it isn't marked ready yet (its points seem to be there, it only needs the mark)"
+
+
+def set_ready(label, on=True):
+    """Row LABEL's Ready mark on (on its words as they are now) or off. Returns True for on. Exits with why."""
+    label = label.strip().upper()
+    rows = open_rows()
+    row = next((r for r in rows if r["label"] == label), None)
+    if not row:
+        sys.exit(f"{label} isn't an open row on the planning (done, parked, repeating or not there), so it gets no Ready mark.")
+    d = _load(RANKS)
+    have = {r["label"] for r in rows}
+    m = {l: v for l, v in (d.get("ready") or {}).items() if l in have}
+    if on:
+        m[label] = {"fp": row_words_fp(row["line"]), "at": int(time.time())}
+    else:
+        m.pop(label, None)
+    d["ready"] = m
+    d["set"] = int(time.time())
+    _save(RANKS, d)
+    return bool(on)
+
+
+def _onoff(word):
+    w = re.sub(r"[^a-z]", "", str(word or "on").lower())
+    if w in ("on", "yes", "ready", "set", "mark"):
+        return True
+    if w in ("off", "no", "notready", "unset", "remove", "clear"):
+        return False
+    sys.exit("The Ready mark is on or off.")
+
+
+def named_open_rows(text, job_text_):
+    """The open planning rows a job's words name the way a job reads its row ("LABEL on the HQ roadmap", "the LABEL
+    row"), as jobs.with_team counts them; another label mentioned in passing doesn't count."""
+    out = []
+    for r in open_rows(text):
+        l = re.escape(r["label"])
+        if re.search(rf"(?<![\w.]){l} on the (hq )?roadmap\b|\bthe {l} row\b", job_text_, re.I):
+            out.append(r)
+    return out
+
+
+def gate(text, job_text_, say_so=False):
+    """H272, for a call adding work for the team (jobs.py add, schedule.py add): the open rows it names must be ready.
+    Returns the job's words to use (with a line that it went without the mark, on the say-so); exits with why when a
+    row isn't ready and there's no say-so."""
+    rows = named_open_rows(text, job_text_)
+    if not rows:
+        return job_text_
+    states = ready_of(rows)
+    whys = [w for w in (not_ready_why(r, states.get(r["label"])) for r in rows) if w]
+    if not whys:
+        return job_text_
+    if not say_so:
+        sys.exit("; ".join(whys) + ". Only rows marked ready go to the team; mark it ready first "
+                 "(sprint.py ready LABEL), or, on his explicit say-so, add it with --not-ready.")
+    labels = ", ".join(r["label"] for r in rows if states.get(r["label"]) != "ready")
+    return (job_text_.rstrip() + f" It went to the team without the Ready mark ({labels}), on the explicit say-so "
+            "on the call; check the row's points before building.")
 
 
 def group_key(x, roadmap_place):
@@ -292,6 +424,7 @@ def plan():
     ranked = order(rows)
     place = {l: i + 1 for i, l in enumerate(ranked)}
     tags = moscow_of(rows)  # H271
+    readies = ready_of(rows)  # H272
     roadmap_place = {r["label"]: i for i, r in enumerate(rows)}
     d = _load(ESTS)
     hist = E.all_history()
@@ -314,7 +447,10 @@ def plan():
         guess, gkey, gf = E.pick_guess(ge, fits)
         est = E.with_guess(computed, guess, gf)
         x = {"label": r["label"], "title": r["title"], "phase": r["phase"], "rank": place.get(r["label"]),
-             "est": est, "kind": det["kind"], "moscow": tags.get(r["label"]), "bug": is_bug(r)}
+             "est": est, "kind": det["kind"], "moscow": tags.get(r["label"]), "bug": is_bug(r),
+             "ready": readies.get(r["label"])}
+        if readies.get(r["label"]) != "ready":
+            x["not_ready"] = not_ready_why(r, readies.get(r["label"]))
         if est != computed:
             x.update({"computed": computed, "guess_used": gkey})
         if ge.get("guess_look"):
@@ -336,7 +472,8 @@ def plan():
         out.append(x)
     out.sort(key=lambda x: group_key(x, roadmap_place))  # H271: Must first, bugs first in each group, then the rank
     counts = {MOSCOW_NAMES[g]: sum(1 for x in out if x.get("moscow") == g) for g in GROUPS}
-    return {"rows": out, "ranked": len(ranked), "tagged": len(tags), "groups": counts}
+    return {"rows": out, "ranked": len(ranked), "tagged": len(tags), "groups": counts,
+            "ready": sum(1 for v in readies.values() if v == "ready")}
 
 
 def row_words(x):
@@ -361,10 +498,11 @@ def words(p):
         where = (f"{x['rank']}." if x["rank"] else "unranked:") + (" (bug)" if x.get("bug") else "")
         team = (f" (with the team: job {x['team']})" if x.get("team") else
                 f" (planned for the team: item {x['planned']['n']}, {x['planned']['at']})" if x.get("planned") else "")
-        lines.append(f"{where} {x['label']} {q.one_line(x['title'])[:90]}: {row_words(x)}{team}")
+        mark = {"ready": " [ready]", "changed": " [changed since ready]"}.get(x.get("ready"), " [not ready]")  # H272
+        lines.append(f"{where} {x['label']} {q.one_line(x['title'])[:90]}: {row_words(x)}{team}{mark}")
     if not lines:
         return "Nothing open on the planning."
-    head = (f"The planning, {len(p['rows'])} open rows, {p['ranked']} ranked, {p.get('tagged', 0)} with a MoSCoW tag; "
+    head = (f"The planning, {len(p['rows'])} open rows, {p['ranked']} ranked, {p.get('tagged', 0)} with a MoSCoW tag, {p.get('ready', 0)} marked ready; "
             "grouped Must, Should, Could, not sorted yet, Won't, bugs first in each (estimate):")
     return "\n".join([head] + lines)
 
@@ -510,7 +648,7 @@ def lay(labels, night=None, now=None):
         cost = x.get("cost") or {}
         need = {kk: cost.get(kk, 0) for kk in ("five", "weekly")}
         r = {"label": x["label"], "title": x["title"], "rank": x["rank"], "est": x["est"], "cost": cost, "kind": x.get("kind"),
-             "moscow": x.get("moscow"), "bug": x.get("bug")}
+             "moscow": x.get("moscow"), "bug": x.get("bug"), "ready": x.get("ready"), "not_ready": x.get("not_ready")}
         placed = False
         first_k = k
         while k < len(nights):
@@ -601,7 +739,8 @@ def lay_words(L):
         where = (f"starts around {E.hhmm(r['start'])}{' (it waits for the usage)' if r.get('usage') else ''}, done around {E.hhmm(r['eta'])}"
                  if r.get("start") else r.get("why", "no time"))
         out.append(f"  {r['rank'] or '-'}. {r['label']} {q.one_line(r['title'])[:80]}: about {E.dur(r['est'])}, "
-                   f"5-hour {E._pct(c.get('five') or 0)}, weekly {E._pct(c.get('weekly') or 0)}; {where}")
+                   f"5-hour {E._pct(c.get('five') or 0)}, weekly {E._pct(c.get('weekly') or 0)}; {where}"
+                   + (f" ({r['not_ready']}, so Plan the sprint leaves it out)" if r.get("ready") != "ready" else ""))
     if not L["line"]:
         out.append("Everything ticked fits in the room (estimate).")
     return "\n".join(out)
@@ -617,6 +756,9 @@ def plan_sprint(labels, night=None, now=None):
     at_of = {}
     for r in L["rows"]:
         day = r.get("night")
+        if r.get("ready") != "ready":  # H272: only rows marked ready go to the team
+            said.append((r.get("not_ready") or f"{r['label']} isn't ready") + ", so it isn't planned.")
+            continue
         if not day:
             said.append(f"{r['label']} isn't planned: {r.get('why', 'no room')}.")
             continue
@@ -663,7 +805,7 @@ def _args(argv):
 
 def main(argv):
     cmd = argv[0] if argv else "--help"
-    if cmd in ("rank", "plan", "moscow"):
+    if cmd in ("rank", "plan", "moscow", "ready"):
         import role
         if not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
             sys.exit(role.forward("sprint", list(argv)))
@@ -686,6 +828,18 @@ def main(argv):
             t = set_moscow(argv[1], argv[2])
         label = argv[1].strip().upper()
         print(f"{label} is now {MOSCOW_NAMES[t]}." if t else f"{label} has no MoSCoW tag now.")
+    elif cmd == "ready":  # H272
+        if len(argv) < 2:
+            sys.exit("ready LABEL [on|off]")
+        on = _onoff(argv[2] if len(argv) > 2 else "on")
+        with q.locked():
+            set_ready(argv[1], on)
+        label = argv[1].strip().upper()
+        print(f"{label} is marked ready for the sprint." if on else f"{label} has no Ready mark now.")
+    elif cmd == "check":  # H272: why a row isn't ready, for a call or the page
+        rows = {r["label"]: r for r in open_rows()}
+        for l in [a.strip().upper() for a in argv[1:]]:
+            print((not_ready_why(rows[l]) or f"{l} is ready.") if l in rows else f"{l} isn't an open row on the planning.")
     elif cmd == "lay":
         labels, night, as_json = _args(argv[1:])
         L = lay(labels, night)

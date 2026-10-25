@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Ready for the sprint: only items you've signed off as ready go to the team. Each item on the planning has a Ready tick in Sprint planning on the Status page, next to its place and its MoSCoW tag, and on a call you can say it: "the feedback button is ready", or "take its ready off". If an item's words change after it was marked, it shows Changed since ready until you mark it again. Plan the sprint and Send to the team leave out an item that isn't ready and say what it still seems to miss, like no out of scope or no size; only on your clear say-so on a call does one go to the team anyway, and the team is told it went without the mark (H272).
+
 ## 0.4.13 · 25 October 2026
 
 - Bugs before features, always. Moneypenny ranks every bug above the features and puts it first in the sprint, to keep the tech debt down: the shortcuts and unfixed bugs that pile up like interest on a loan, until every new change gets slower and riskier. Ask her what tech debt is and she'll say it plainly. Every planning keeps Bugs and Features apart (a fresh one starts that way), and if your HQ has no routine check for bugs, she suggests one (H271).

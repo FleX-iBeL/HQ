@@ -283,6 +283,10 @@
       .mo-group { margin: 10px 0 2px; padding: 2px 0 2px 8px; border-left: 4px solid var(--mo); font-weight: 600; color: var(--mo); }
       .sprint-row.mo, .sprint-laid.mo { border-left: 4px solid var(--mo); padding-left: 8px; }
       .sprint-row select { flex: none; font: inherit; font-size: 13px; max-width: 8.5em; }
+      /* H272: the Ready mark, a tick of its own next to the MoSCoW picker */
+      .ready-tick { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap; }
+      .ready-tick input { margin: 0; width: 16px; height: 16px; }
+      .ready-note { color: var(--red); font-size: 13px; }
       .mo-bug { font-size: 12px; font-weight: 600; padding: 0 5px; border-radius: 4px; border: 1px solid var(--red); color: var(--red); margin-left: 4px; }
       .sprint-line { margin: 10px 0; padding: 6px 0; border-top: 2px dashed var(--bad, #c0392b); color: var(--bad, #c0392b); font-size: 14px; }
       .eta-guess { display: block; font-size: 12px; color: var(--soft); opacity: 0.75; font-style: italic; }
@@ -1052,7 +1056,7 @@
         const open = P.rows.filter((x) => !x.team && !x.planned);
         for (const l of [...sprint.ticks]) if (!open.some((x) => x.label === l)) sprint.ticks.delete(l);
         const ticked = open.filter((x) => sprint.ticks.has(x.label)).map((x) => x.label);
-        const fold = foldPart('sprint', false, 'Sprint planning', `${P.rows.length} on the planning · ${P.ranked} ranked · ${P.tagged ?? 0} with a MoSCoW tag · ${ticked.length} ticked for this sprint`);
+        const fold = foldPart('sprint', false, 'Sprint planning', `${P.rows.length} on the planning · ${P.ranked} ranked · ${P.tagged ?? 0} with a MoSCoW tag · ${P.ready ?? 0} ready · ${ticked.length} ticked for this sprint`);
         const parts = el('div', 'parts');
         // The night it starts from: tonight or one of the six after it.
         const pick = el('div', 'sprint-pick');
@@ -1128,13 +1132,33 @@
             if (out.ok) { x.moscow = tag.value === 'off' ? null : tag.value; }
             redraw();
           });
-          row.append(cb, what, tag);
+          // H272: the Ready mark: only rows marked ready go to the team; "changed since ready" when its words moved on.
+          const rd = el('label', 'ready-tick');
+          const rb = el('input');
+          rb.type = 'checkbox';
+          rb.checked = x.ready === 'ready';
+          rb.setAttribute('aria-label', `${x.label}: ready`);
+          rd.append(rb, document.createTextNode(x.ready === 'changed' ? 'Changed since ready' : 'Ready'));
+          rd.addEventListener('click', (e) => e.stopPropagation());
+          rb.addEventListener('change', async (e) => {
+            e.stopPropagation();
+            let out;
+            try {
+              const r = await fetch('/api/sprint-ready', { method: 'POST', headers: { 'x-hq': 'sprint', 'content-type': 'application/json' }, body: JSON.stringify({ label: x.label, on: rb.checked }) });
+              out = await r.json().catch(() => ({ ok: false, said: `The status server said ${r.status}` }));
+            } catch { out = { ok: false, said: 'The status server is not answering.' }; }
+            sprint.said = { at: Date.now() + 8000, said: out.said.split('\n').join(' ') };
+            if (out.ok) { x.ready = rb.checked ? 'ready' : null; delete x.not_ready; sprint.key = ''; sprint.asked = ''; }
+            redraw();
+          });
+          if (x.ready !== 'ready' && x.not_ready) what.append(el('span', 'ready-note', ` · ${x.not_ready.replace(/^\S+ isn't ready: /, 'Not ready: ')}`));
+          row.append(cb, what, tag, rd);
           list.append(row);
         }
         parts.append(list);
         // The ticked rows over the nights.
         const laid = el('div', 'sprint-nights');
-        const key = `${ticked.join(',')}|${sprint.night}|${JSON.stringify(P.rows.map((x) => [x.label, x.rank, x.est]))}`;
+        const key = `${ticked.join(',')}|${sprint.night}|${JSON.stringify(P.rows.map((x) => [x.label, x.rank, x.est, x.ready]))}`;
         if (!ticked.length) laid.append(el('p', 'soft', 'Tick the rows for this sprint to see them fall into the nights.'));
         else {
           if (sprint.key !== key) sprintLay(key, ticked);
@@ -1155,7 +1179,8 @@
               const c = r.cost || {};
               const when = r.start ? `starts around ${sprintClock(r.start)}${r.usage ? ' (it waits for the usage)' : ''}, done around ${sprintClock(r.eta)}` : (r.why || 'no time');
               const lg = moscowOf(r.moscow);
-              const ld = el('div', `sprint-laid mo${r.past ? ' past' : ''}`, `${lg.key !== 'none' ? `${lg.name} · ` : ''}${r.bug ? 'bug · ' : ''}${r.rank ? `${r.rank}. ` : ''}${r.label} ${r.title} · about ${etaDur(r.est)} · ${etaPct(c.five ?? 0)} of the 5-hour, ${etaPct(c.weekly ?? 0)} of the week · ${when}`);
+              const notReady = r.ready !== 'ready' ? ` · ${r.not_ready || `${r.label} isn't ready`}, so Plan the sprint leaves it out` : '';
+              const ld = el('div', `sprint-laid mo${r.past ? ' past' : ''}`, `${lg.key !== 'none' ? `${lg.name} · ` : ''}${r.bug ? 'bug · ' : ''}${r.rank ? `${r.rank}. ` : ''}${r.label} ${r.title} · about ${etaDur(r.est)} · ${etaPct(c.five ?? 0)} of the 5-hour, ${etaPct(c.weekly ?? 0)} of the week · ${when}${notReady}`);
               ld.style.setProperty('--mo', `var(--mo-${lg.key})`);
               laid.append(ld);
             }

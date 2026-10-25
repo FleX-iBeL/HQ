@@ -15,17 +15,21 @@ The waiting jobs (ready or held) run in the order they stand on the list, top fi
 a new job goes at the bottom, and "move" changes its place. The job numbers never change.
 
 usage (from the workspace):
-  python3 "routine/jobs.py" add "TEXT" [--past-the-line] [--kind K] [--guess MINUTES]   a call's let's go: the
+  python3 "routine/jobs.py" add "TEXT" [--past-the-line] [--kind K] [--guess MINUTES] [--not-ready]   a call's let's go: the
                                                            job is ready; K (small, bigbuild, research, transcribe, release, other; H220) sets
                                                            the kind for its estimate instead of the guess (H70);
                                                            MINUTES is the call's own guess (H190), kept apart from the
                                                            first look's (a small Claude look, started in the
-                                                           background) and the team's at its start
+                                                           background) and the team's at its start; an open
+                                                           planning row it names must carry the Ready mark (H272,
+                                                           sprint.py ready), or --not-ready on his explicit say-so,
+                                                           and the job then says it went without the mark
   python3 "routine/jobs.py" add-row "TEXT" [--bug] [--kind K]   the status page (H160): a numbered roadmap row first
                                                            (F with --bug, else H), then a job that reads that row
   python3 "routine/jobs.py" send-row LABEL                 the status page (H182): an open roadmap item (⬜, not in
                                                            Phase P) goes to the team as a job that reads its row; its
-                                                           kind guessed from the row; refused when it's already there
+                                                           kind guessed from the row; refused when it's already there,
+                                                           or when it isn't marked ready (H272)
   python3 "routine/jobs.py" list                           the queue, as on the roadmap, with each job's estimate (H61)
   python3 "routine/jobs.py" stop [N]                       stop the running job (or cancel ready job N)
   python3 "routine/jobs.py" overrule N                     job N may go past the 5-hour line (the weekly line still counts)
@@ -375,12 +379,17 @@ def main(argv):
             # H160: work added on the status page, without a call. Roadmap first stays the rule (rules 13): it gets its own
             # numbered row (F for a bug, else H) before it goes to the team, and the job says to read that row.
             bug = "--bug" in args
+            if "--not-ready" not in args:  # H272: a new row has no Ready mark yet, so nothing is written without his say-so
+                sys.exit("A new row has no Ready mark yet, so it doesn't go to the team. Put it on the planning and mark it "
+                         "ready first, or, on his explicit say-so, add it with --not-ready.")
             words, extra = [], []
             it = iter(a for a in args if a != "--bug")
             for a in it:
                 if a in ("--kind", "--guess"):  # H190: --guess goes on to add
                     extra += [a, next(it, "")]
                 elif a.startswith(("--kind=", "--guess=")):
+                    extra.append(a)
+                elif a == "--not-ready":  # H272: a new row has no Ready mark; only on his say-so
                     extra.append(a)
                 else:
                     words.append(a)
@@ -403,6 +412,11 @@ def main(argv):
             j = with_team(jobs, label)
             if j:
                 sys.exit(f"{label} is already with the team: job {j['n']} ({j['state']}).")
+            import sprint as sp_  # H272: only a row marked ready goes to the team from the page
+            row = next((r for r in sp_.open_rows(text) if r["label"] == label), None)
+            why = sp_.not_ready_why(row) if row else None
+            if why:
+                sys.exit(f"{why}. Only rows marked ready go to the team; mark it ready first.")
             import estimate as est_
             title = one_line(title).replace("·", "-").rstrip(".")
             cmd = "add"
@@ -411,7 +425,8 @@ def main(argv):
                     f"write the result in the {label} row.", "--kind", est_.kind_of(line)]
         if cmd == "add":
             past = "--past-the-line" in args
-            words = [a for a in args if a != "--past-the-line"]
+            say_so = "--not-ready" in args  # H272: his explicit say-so for a row without the Ready mark
+            words = [a for a in args if a not in ("--past-the-line", "--not-ready")]
             guess = None  # H190: the call's own guess in minutes, kept apart from the look's and the team's
             for i, a in enumerate(words):
                 if a == "--guess" or a.startswith("--guess="):
@@ -435,9 +450,11 @@ def main(argv):
                     sys.exit(f"--kind is one of: {est_.kind_words()}.")
             if not words or not one_line(" ".join(words)):
                 sys.exit("What should the job do? Give it as one self-contained line.")
+            import sprint as sp_  # H272: the open planning rows it names must be marked ready, or his say-so
+            said = sp_.gate(text, one_line(" ".join(words)), say_so)
             n = max([j["n"] for j in jobs] + [0]) + 1
             j = {"n": n, "state": "ready", "past": past, "agreed": time.strftime("%Y-%m-%d %H:%M"),
-                 "text": one_line(" ".join(words)).replace("·", "-")}
+                 "text": one_line(said).replace("·", "-")}
             jobs.append(j)
             write(text, jobs, on)
             e = estimate("on_add", n, j["text"], kind, None, guess)

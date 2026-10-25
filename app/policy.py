@@ -386,9 +386,9 @@ class Policy:
         # piece 2: lay a sprint over the nights, and plan it for the team (the schedule, as schedule.py add would).
         if prog in ("python3", "python") and args and self.hq_script(args[0], "sprint.py"):
             sub = args[1] if len(args) > 1 else "list"
-            if sub in ("list", "json", "rank", "lay", "plan", "moscow"):  # H271: moscow, a row's MoSCoW tag
+            if sub in ("list", "json", "rank", "lay", "plan", "moscow", "ready", "check"):  # H271: moscow; H272: ready, check
                 return Decision(ALLOW, "the planning's ranks and estimates, and the sprint")
-            return Decision(DENY, "from a call, the sprint script takes list, json, rank, moscow, lay or plan")
+            return Decision(DENY, "from a call, the sprint script takes list, json, rank, moscow, ready, check, lay or plan")
         # H173: the usage counts, read only: what a job or a call cost on its own tokens, the rate, the room now.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usagecost.py"):
             sub = args[1] if len(args) > 1 else ""

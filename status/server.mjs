@@ -541,6 +541,28 @@ const server = createServer(async (req, res) => {
     });
     return;
   }
+  // H272: a row's Ready mark from the sprint view (on or off), through routine/sprint.py ready, which hands it to the
+  // main HQ when this is the backup. Only rows marked ready go to the team. The POST needs the x-hq header.
+  if (path0 === '/api/sprint-ready' && req.method === 'POST') {
+    if (req.headers['x-hq'] !== 'sprint') {
+      res.writeHead(403).end('Only the HQ page can mark the planning ready');
+      return;
+    }
+    let body = {};
+    try { body = JSON.parse(await readBody(req)); } catch {}
+    const label = String(body.label ?? '').trim().toUpperCase();
+    const on = body.on === true ? 'on' : body.on === false ? 'off' : '';
+    if (!/^[A-Z]\d+(\.\d+)*$/.test(label) || !on) {
+      res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ ok: false, said: 'A row and on (true or false).' }));
+      return;
+    }
+    execFile('/usr/bin/python3', [join(root, 'routine/sprint.py'), 'ready', label, on], { timeout: 60000 }, (err, out, errOut) => {
+      sprintPlan.at = 0;  // the planning changed: read it again
+      const said = String(err ? `${errOut || ''}${out}` : out).trim();
+      res.writeHead(err ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ ok: !err, said }));
+    });
+    return;
+  }
   // H269, piece 2: the sprint view. GET lays the ticked rows (rows=H247,F49) over the nights from the one picked
   // (night=tonight, tomorrow or 2026-10-26); POST plans them for the team in that order (Plan the sprint), through
   // routine/sprint.py, which hands it to the main HQ when this is the backup. The POST needs the x-hq header.
