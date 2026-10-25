@@ -75,7 +75,8 @@ PY = sys.executable or "/usr/bin/python3"
 # What a call may ask of the queue and the schedule, and so what the backup hands to the main.
 # H203 (17 October 2026): also the to-do list (todo.py), the agent's reminders and notes (pings.py), and a call's or
 # chat's own edits to the files only the main writes (handover.py edit, see ONE_WRITER).
-WRITES = {"jobs": {"add", "add-row", "send-row", "stop", "overrule", "move", "on", "off", "mail-on", "mail-off", "mail-fast", "mail-hourly", "resume"},
+WRITES = {"sprint": {"rank"},  # H269: a row's place on the planning
+          "jobs": {"add", "add-row", "send-row", "stop", "overrule", "move", "on", "off", "mail-on", "mail-off", "mail-fast", "mail-hourly", "resume"},
           "schedule": {"add", "cancel", "move", "priority", "every"},
           "todo": {"add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo"},
           "pings": {"appt", "remind", "cancel", "note", "note-clear", "watch", "unwatch", "out", "out-stop", "nudge", "nudge-done", "nudge-later", "call", "call-cancel", "answered"},
@@ -92,7 +93,8 @@ PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main 
 # is main?" The files the main writes by itself (the team, the mail check, the log's three-hour cycle, the routine's
 # reminders), and so the only one that writes them: on the backup a call or chat hands its change to these to the
 # main, which writes it; the sync brings it back. Paths are relative to the workspace.
-ONE_WRITER = ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "HQ/games.json", "HQ/coaching.json")
+ONE_WRITER = ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "HQ/games.json", "HQ/coaching.json",
+              "HQ/sprint.json")  # H269: the planning's ranks
 
 
 def one_writer(rel: str) -> bool:

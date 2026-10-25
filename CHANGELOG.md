@@ -4,6 +4,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Sprint planning, the first half: every open item on the planning now has an estimate by itself, about how long it takes and how much of the 5-hour and weekly usage, made the same way as for the team's own work (and made again when its words change, never when it's only moved). On a call, give items their place: "make the feedback button number one", "put it third", "take its rank off". A new item has no place until you give it one, so the others keep theirs. The Status page shows each item's place and estimate, and a call can read the whole planning in rank order (H269).
 - Moneypenny is here. She's no longer coming soon: a card next to Donna and Pepper, called directly, handed over to, or brought into a call. Cool and composed, dry wit, few words: she's head of development, sitting with the team that builds HQ. She keeps the planning ready: before a piece of work goes to the team she goes through it with you (what's asked, what done looks like with examples, what to test and which new checks to add, why it matters, what's out of scope, which parts of HQ it touches and whether the call line restarts, how big it is, what it waits on, and that nothing private goes in) and politely says no until it's complete. When it's built she checks it's really done (it does what was asked, the old checks still pass, the new ones are added, the tutorial and changelog are updated) before you test it yourself. She runs on Opus (H250, H256).
 
 ## 0.4.12 · 24 October 2026

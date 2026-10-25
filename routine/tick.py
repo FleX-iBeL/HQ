@@ -1194,6 +1194,12 @@ def tick():
         estimate.relook(log=log)
     except Exception as e:
         log(f"estimates: relook: {e!r}")
+    # H269: the planning's open rows: their size again and a first look when their words change (never on a move or a rank).
+    try:
+        import sprint
+        sprint.refresh(log=log)
+    except Exception as e:
+        log(f"sprint: refresh: {e!r}")
     handing_back = r.get("handing_back")
     q = json.loads(jobs("next"))
     jobs_line(q)

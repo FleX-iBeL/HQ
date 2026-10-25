@@ -6683,7 +6683,7 @@ print(json.dumps(o))
              and "--land-planned" in page72 and "--land-repeat" in page72, "H176: the status page doesn't draw where the usage will land")
         srv = (jv / "status/server.mjs").read_text()
         page = (jv / "status/index.html").read_text()
-        need("routine/estimate.py" in srv and "estimate };" in srv, "the status server doesn't serve the estimates")
+        need("routine/estimate.py" in srv and ("estimate };" in srv or "estimate, planning };" in srv), "the status server doesn't serve the estimates")
         need("function etaWords" in page and "etaTotal(E)" in page and "etaAccuracy(E.accuracy)" in page and "(estimate)" in page,
              "the status page doesn't show the estimates")
         # H174: under each heading what its total counts; the total says it's the computed estimate; the team's guess on its own quiet line.
@@ -9495,6 +9495,156 @@ setTimeout(() => {
         for f in ("status/phone.sh", "app/start.sh", "app/stop.sh"):
             need('PATH="$PATH:/usr/sbin:/sbin"' in (ROOT / f).read_text(), f"{f} doesn't add /usr/sbin to its PATH")
         return "the update finds lsof with a bare PATH; the Mac scripts add /usr/sbin"
+
+    def _sprint_env(self, tag):
+        """H269: a copy of the roadmap with a made-up planning, its own ranks and estimates, looks made up."""
+        rm = self.tmp / f"roadmap-{tag}.md"
+        text = ROADMAP.read_text()
+        extra = ("\n## Phase Z · Made-up planning for a test\n\n| | Step | What you get | Backlog | Model |\n|---|---|---|---|---|\n"
+                 "| ⬜ | H9001 A made-up feedback button | Tap to send feedback from the call page | | |\n"
+                 "| ⬜ | H9002 A made-up colour change | The calendar's colours | | |\n"
+                 "| ✅ | H9003 A made-up done row | Done already | | |\n"
+                 "| ⬜ | H9004 A made-up export | Export the to-do list | | |\n")
+        # the made-up phase goes before the queue, so it's a phase of its own
+        i = text.find("\n## The queue")
+        rm.write_text(text[:i] + extra + text[i:] if i >= 0 else text + extra)
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_SPRINT": str(self.tmp / f"sprint-{tag}.json"), "HQ_LOOK_FAKE": "37"}
+        for k in ("HQ_ESTIMATES", "HQ_ROUTINES_HISTORY", "HQ_ROLE_HERE"):
+            env.pop(k, None)
+        return rm, env
+
+    def _sprint(self, env, *args):
+        import subprocess as sp
+        r = sp.run(["python3", str(ROOT / "routine" / "sprint.py"), *args], capture_output=True, text=True, env=env, timeout=120)
+        return r
+
+    async def flow143(self) -> str:
+        """H269: every open row on the planning gets a rank: set on a call (sprint.py rank, which a call may run), 1 the
+        top, the rows from there moving down; moved, taken off; a new row has none, so the others keep theirs; a done or
+        parked row gets none; the list (what a call reads) says them in rank order. No Claude turns."""
+        rm, env = self._sprint_env("H269r")
+        env["HQ_LOOK"] = "0"
+        ok = lambda r, what: need(r.returncode == 0, f"H269: {what}: {r.stderr[-600:]}")  # noqa: E731
+        ok(self._sprint(env, "rank", "H9002", "1"), "a rank couldn't be set")
+        ok(self._sprint(env, "rank", "H9001", "1"), "a second rank couldn't be set")
+        ok(self._sprint(env, "rank", "h9004", "bottom"), "a rank at the bottom couldn't be set")
+        import json as js
+        order = js.loads(Path(env["HQ_SPRINT"]).read_text())["order"]
+        need(order == ["H9001", "H9002", "H9004"], f"H269: the ranks aren't in place (1 the top, the rest moving down): {order}")
+        r = self._sprint(env, "rank", "H9004", "2")
+        ok(r, "a rank couldn't be moved")
+        need("rank 2 of 3" in r.stdout, f"H269: a move doesn't say its new place: {r.stdout}")
+        order = js.loads(Path(env["HQ_SPRINT"]).read_text())["order"]
+        need(order == ["H9001", "H9004", "H9002"], f"H269: a moved rank isn't in place: {order}")
+        bad = self._sprint(env, "rank", "H9003", "1")
+        need(bad.returncode != 0 and "isn't an open row" in (bad.stderr + bad.stdout), "H269: a done row got a rank")
+        need(self._sprint(env, "rank", "H9001", "nonsense").returncode != 0, "H269: a rank that isn't a place was taken")
+        # a new row on the planning: no rank, the others keep theirs
+        rm.write_text(rm.read_text().replace("| ⬜ | H9004 A made-up export",
+                                             "| ⬜ | H9005 A made-up new row | Added later | | |\n| ⬜ | H9004 A made-up export"))
+        r = self._sprint(env, "json")
+        ok(r, "the planning couldn't be read")
+        p = js.loads(r.stdout)
+        rows = {x["label"]: x for x in p["rows"]}
+        need(rows["H9005"]["rank"] is None and rows["H9001"]["rank"] == 1 and rows["H9004"]["rank"] == 2
+             and rows["H9002"]["rank"] == 3 and p["ranked"] == 3, f"H269: a new row moved the ranks: {[(x['label'], x['rank']) for x in p['rows']][:4]}")
+        need([x["label"] for x in p["rows"][:3]] == ["H9001", "H9004", "H9002"] and "H9003" not in rows,
+             "H269: the planning isn't in rank order, or a done row is on it")
+        need(not any(x["label"].startswith("P") for x in p["rows"]) and all(x["phase"] != "P" for x in p["rows"]), "H269: a parked row is on the planning")
+        # a row that's done drops out, the ones below move up
+        rm.write_text(rm.read_text().replace("| ⬜ | H9001 A made-up feedback", "| ✅ | H9001 A made-up feedback"))
+        p = js.loads(self._sprint(env, "json").stdout)
+        rows = {x["label"]: x for x in p["rows"]}
+        need("H9001" not in rows and rows["H9004"]["rank"] == 1 and rows["H9002"]["rank"] == 2, "H269: a done row's rank didn't drop out")
+        ok(self._sprint(env, "rank", "H9002", "off"), "a rank couldn't be taken off")
+        p = js.loads(self._sprint(env, "json").stdout)
+        need({x["label"]: x["rank"] for x in p["rows"]}["H9002"] is None, "H269: off didn't take the rank away")
+        lst = self._sprint(env, "list").stdout
+        need("1. H9004 A made-up export: about" in lst and "unranked: H9002" in lst and "5-hour" in lst and "weekly" in lst,
+             f"H269: the list a call reads doesn't say the rank and the estimate: {lst[:400]}")
+        # a call may read and rank, nothing else
+        import sys as _s
+        _s.path.insert(0, str(ROOT / "app"))
+        import policy
+        pol = policy.Policy(Path(config.FOLDER))
+        for cmd, want in ((f'python3 "{ROOT}/routine/sprint.py" list', policy.ALLOW),
+                          (f'python3 "{ROOT}/routine/sprint.py" rank H247 1', policy.ALLOW),
+                          (f'python3 "{ROOT}/routine/sprint.py" refresh', policy.DENY)):
+            d = pol.decide("Bash", {"command": cmd})
+            need(d.verdict == want, f"H269: a call's {' '.join(cmd.split()[-2:])} is {d.verdict}, not {want} ({d.why})")
+        need("sprint.py\" list" in config.VOICE_RULES and "sprint.py\" rank" in config.VOICE_RULES, "H269: the call rules don't say the planning's rank")
+        return "ranks set, moved and taken off; a new row unranked, the others kept; a done row drops out; the list in rank order with estimates"
+
+    async def flow144(self) -> str:
+        """H269: every open row on the planning has an estimate of time and usage (the 5-hour and the weekly), made like
+        the team's: its kind and size (with the material it names), the finished jobs like it, and the first look (made
+        up here) once it's back; made again when the row's words change, never on a move or a rank change; the status
+        server serves it with the routines, and the page shows the rank and estimate on the planning's items."""
+        import json as js
+        import time as tm
+        rm, env = self._sprint_env("H269e")
+        est = Path(str(rm)[:-3] + "-estimates") / "sprint-estimates.json"
+        def refresh():
+            r = self._sprint(env, "refresh")
+            need(r.returncode == 0, f"H269: refresh failed: {r.stderr[-600:]}")
+            return r.stdout
+        def wait_look(label, secs=60):
+            end = tm.time() + secs
+            while tm.time() < end:
+                e = js.loads(est.read_text()).get(label, {}) if est.exists() else {}
+                if e.get("look_fp") and e.get("look_fp") == e.get("fp") and not e.get("look_pending"):
+                    return e
+                refresh()
+                tm.sleep(1)
+            raise Failed(f"H269: no first look for {label} within {secs} s: {js.loads(est.read_text()).get(label) if est.exists() else None}")
+        refresh()
+        d = js.loads(est.read_text())
+        need({"H9001", "H9002", "H9004"} <= set(d) and "H9003" not in d, f"H269: not every open row got an estimate: {sorted(d)[:8]}")
+        need(all(d[k].get("fp") and isinstance(d[k].get("size"), dict) and d[k].get("kind") for k in ("H9001", "H9002")),
+             f"H269: a row's estimate has no size, kind or fingerprint: {d['H9001']}")
+        e1 = wait_look("H9001")
+        need(e1.get("guess_look") == 37, f"H269: the first look's guess isn't kept: {e1}")
+        p = js.loads(self._sprint(env, "json").stdout)
+        x = next(r for r in p["rows"] if r["label"] == "H9001")
+        need(isinstance(x["est"], int) and x["est"] > 0 and x.get("guess_look") == 37 and x.get("cost")
+             and "five" in x["cost"] and "weekly" in x["cost"], f"H269: a row's estimate has no time, look or usage: {x}")
+        # a move (another place on the roadmap) and a rank don't make it again
+        fp, at = e1["fp"], e1.get("look_at")
+        text = rm.read_text()
+        row = next(l for l in text.split("\n") if "H9001 A made-up feedback" in l)
+        text = text.replace(row + "\n", "")
+        rm.write_text(text.replace("| ⬜ | H9004 A made-up export", row + "\n| ⬜ | H9004 A made-up export"))
+        env2 = {**env, "HQ_LOOK": "0"}
+        need(self._sprint(env2, "rank", "H9001", "1").returncode == 0, "H269: rank failed")
+        refresh()
+        e = js.loads(est.read_text())["H9001"]
+        need(e["fp"] == fp and e.get("look_at") == at and e.get("look_fp") == fp, f"H269: a move or a rank made the estimate again: {e}")
+        # new words: a new size and a new look
+        rm.write_text(rm.read_text().replace("Tap to send feedback from the call page",
+                                             "Tap to send feedback from the call page, with a screenshot, the status page and happy flows 10 and 106"))
+        refresh()
+        e = js.loads(est.read_text())["H9001"]
+        need(e["fp"] != fp, "H269: new words didn't make the estimate again")
+        env["HQ_LOOK_FAKE"] = "52"
+        e = wait_look("H9001")
+        need(e.get("guess_look") == 52 and e.get("look_at") != at, f"H269: new words didn't get a new look: {e}")
+        # a row no longer open is let go
+        rm.write_text(rm.read_text().replace("| ⬜ | H9002 A made-up colour", "| ✅ | H9002 A made-up colour"))
+        refresh()
+        need("H9002" not in js.loads(est.read_text()), "H269: a done row's estimate stayed")
+        # the status server serves it, the page draws it
+        srv = (ROOT / "status" / "server.mjs").read_text()
+        page = (ROOT / "status" / "index.html").read_text()
+        need("routine/sprint.py'), 'json'" in srv and "estimate, planning }" in srv, "H269: the status server doesn't serve the planning")
+        need("function planLine(" in page and "planLine(routines?.planning, label)" in page and "routines.planning])" in page,
+             "H269: the status page doesn't show the rank and estimate on the planning's items")
+        tick = (ROOT / "routine" / "tick.py").read_text()
+        need("sprint.refresh(log=log)" in tick, "H269: the routine doesn't refresh the planning's estimates")
+        import sys as _s
+        _s.path.insert(0, str(ROOT / "routine"))
+        import role
+        need("rank" in role.WRITES.get("sprint", ()) and "HQ/sprint.json" in role.ONE_WRITER, "H269: a rank on the backup isn't handed to the main")
+        return "each open row an estimate (time, 5-hour, weekly, the first look); kept on a move and a rank, made again on new words; let go when done; served and shown"
 
     async def flow142(self) -> str:
         """H241, no Claude: a friend's HQ needs no calendar called HQ Planning. On its own copies, with a calendar that
@@ -17382,6 +17532,8 @@ FLOWS = {
     134: ("H227: every button and screen on the call page has a tutorial piece (the page read against tour.json; a new screen needs its button named)", False, "flow134"),
     139: ("H236: your own news: the setup from a short session, the hourly read of their free feeds kept to their topics and without what they leave out, read inside HQ as their own newspaper; empty on a fresh install", False, "flow139"),
     138: ("H235: extensions: the workspace's folder read at HQ's fixed points (call and text rules, kinds of texts, the mail check, scripts, routines); the local check after an update, and its plain message with Talk it through and Send to the team", False, "flow138"),
+    143: ("H269: the planning's rank: set on a call, 1 the top, moved and taken off, a new row unranked and the others kept, a done row dropping out, the list a call reads in rank order", False, "flow143"),
+    144: ("H269: an estimate of time and usage on every open planning row, made like the team's (kind, size, similar jobs, the first look), again on new words, never on a move or a rank; served and shown on the status page", False, "flow144"),
     142: ("H241: a friend's HQ needs no calendar called HQ Planning: an X is a mark only, an old move goes back on the main only, and the rules and tutorial never ask for it", False, "flow142"),
     141: ("H240: a 9292 link at the leaving time (the calendar's start or the time he names, leaving then or there by then), with the notices for the stops and stations near both ends from the open live data, never made up", False, "flow141"),
     140: ("H238: call me back (the page reloads and calls the same agent, continuing the call), and an agent calls him at an agreed time or appointment (a push, one tap picks up, a missed one in her chat)", False, "flow140"),

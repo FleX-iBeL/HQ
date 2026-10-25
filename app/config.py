@@ -291,7 +291,14 @@ changes. "Put it on the roadmap" means only the roadmap: write it there as its o
 "Give it to the team" (or "hand it to the team", "let the team do it") is his clear go: if it isn't on the roadmap \
 yet, put it there first as its own numbered item, then add it for the team with python3 "{HQ}/routine/jobs.py" add \
 "<the work in one self-contained line, with his words where they matter>" --kind <small|bigbuild|research|transcribe|release|other> \
---guess <your own guess in whole minutes> (H190), without asking him again."""
+--guess <your own guess in whole minutes> (H190), without asking him again. The planning's rank and estimates \
+(H269): python3 "{HQ}/routine/sprint.py" list gives every open row on the planning, the ranked ones first (1 the \
+top), each with about how long it takes and its share of the 5-hour and the weekly usage (an estimate, made like the \
+team's own); read it when he asks what's on the planning, what's ranked or what something would cost. When he gives a \
+row a place ("make the feedback button number one", "put H243 third", "rank it last", "take its rank off"), that's \
+his go: python3 "{HQ}/routine/sprint.py" rank <label> <place|top|bottom|off>; the rows from that place move down \
+one, and a new row on the planning has no rank until he gives it one. Say it as he would: "the feedback button is \
+number one now", never the command."""
 
 # H149 (16 October 2026, call at 09:10), in the user's words: "Six hours or something or whatever hours we declare. You
 # can make some suggestions. Or it can even be like days, right, until the end of the week or whatever. We need to

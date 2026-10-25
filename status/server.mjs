@@ -143,6 +143,20 @@ function estimates() {
   });
 }
 
+// H269: the planning's ranks and estimates, from routine/sprint.py; asked at most every 20 seconds, like the estimates.
+let sprintPlan = { at: 0, data: null };
+function sprint() {
+  if (Date.now() - sprintPlan.at < 20000) return Promise.resolve(sprintPlan.data);
+  return new Promise((resolve) => {
+    execFile('/usr/bin/python3', [join(root, 'routine/sprint.py'), 'json'], { timeout: 30000 }, (err, out) => {
+      let data = null;
+      try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
+      sprintPlan = { at: Date.now(), data };
+      resolve(data);
+    });
+  });
+}
+
 // H184: the usage from the other HQ. Paired (role.json with a peer), this page asks the other's own reading
 // (GET /usage.json?own=1, its saved file only, so two pages never ask each other in a loop) and shows whichever
 // was read last; when the other can't be reached, or has no reading, its own. Only the usage: everything else on
@@ -251,8 +265,8 @@ async function routines() {
   const stats = await read(join(root, '.status/stats.json'));
   // H45: whether the laptop keeps working with the lid closed (routine/lidsleep.py, every minute).
   const lidsleep = await read(join(root, '.status/lidsleep.json'));
-  const estimate = await estimates();
-  return { now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate };
+  const [estimate, planning] = await Promise.all([estimates(), sprint()]);
+  return { now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning };
 }
 
 // H23: every minute the state of each routine is written down, also when the helper is gone (its lines then

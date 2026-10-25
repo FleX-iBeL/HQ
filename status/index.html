@@ -986,6 +986,16 @@
         if (!e.finished && e.computed && e.computed !== e.est) s += ` · ${e.guess_used ? `the ${{ guess_look: "first look's", guess_call: "call's", guess: "team's" }[e.guess_used]}` : 'the guess'} taken into the estimate (computed alone ${etaDur(e.computed)})`;
         return s;
       }
+      /** H269: an open row's place on the planning and its estimate, as routine/sprint.py says it to a call. */
+      function planLine(P, label) {
+        const x = (P?.rows ?? []).find((r) => r.label === label);
+        if (!x) return '';
+        let s = x.rank ? `Rank ${x.rank}` : 'No rank yet';
+        s += ` · about ${etaDur(x.est)}${x.cost ? ` · ${etaCost(x.cost)}` : ''}`;
+        if (x.guess_look) s += ` · the first look guessed ${etaDur(x.guess_look)}`;
+        else if (x.looking) s += ' · a first look is on its way';
+        return `${s} (estimate)`;
+      }
       function etaGuess(E, n) {
         return guessLine(E?.jobs?.[n]);
       }
@@ -1882,7 +1892,11 @@
             if (rest.length) text.append(inline(el('p', 'soft'), rest.map((d) => `${d.label}: ${d.text}`).join(' · ')));
             // H182: an open item, not parked, can go to the team from here.
             const label = st.name.split(' ')[0];
-            if (st.status === 'todo' && p.id !== 'P' && /^[A-Z]\d+(\.\d+)*$/.test(label)) text.append(teamSend(label, teamJobs, li));
+            if (st.status === 'todo' && p.id !== 'P' && /^[A-Z]\d+(\.\d+)*$/.test(label)) {
+              const pl = planLine(routines?.planning, label);  // H269: its rank and estimate on the planning
+              if (pl) text.append(el('p', 'soft plan-est', pl));
+              text.append(teamSend(label, teamJobs, li));
+            }
             li.append(el('i'), text);
             return li;
           };
@@ -1970,7 +1984,7 @@
           // Also once a minute, so "read 4 min ago" and "resets in" stay true.
           let routines = null;
           try { routines = JSON.parse(routinesText); } catch { routines = null; }
-          const lines = routines ? JSON.stringify([routines.routines, routines.incidents, routines.temperature, routines.battery, routines.stats, routines.lidsleep, routines.estimate]) : '';
+          const lines = routines ? JSON.stringify([routines.routines, routines.incidents, routines.temperature, routines.battery, routines.stats, routines.lidsleep, routines.estimate, routines.planning]) : '';
           const key = `${text}\n${usageText}\n${lines}\n${Math.floor(Date.now() / 60000)}`;
           // H23: the graph's history, once a minute (and when the time span or a routine is switched).
           if (key !== last) { await loadUptime(); await loadTemp(); }
