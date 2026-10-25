@@ -4459,6 +4459,13 @@ window.addEventListener('load', () => setTimeout(() => {
                   "call line restarts", "split into pieces", "privacy check", "definition of done", "old flows",
                   "tutorial and the changelog", "you first, in QA", "sprint planning"):
             need(w in pm, f"her persona misses {w!r} of the definition of ready and done")
+        # H274: she runs as autonomously as she can, with whole proposals, and checks every new item herself.
+        for w in ("as autonomously as you can", "one complete proposal", "accept, improve or deny", "as many items as possible in one go",
+                  "truly his", "your pick next to it", "Every new item you write", "what's thin", "marked ready on the spot"):
+            need(w in pm, f"her persona misses {w!r} of how she runs (H274)")
+        need("one point at a time" not in pm, "her craft still asks one point at a time")
+        tourtext = (Path(__file__).parent / "web" / "tour.json").read_text(encoding="utf8")
+        need("one whole proposal" in tourtext and "on the spot" in tourtext, "the tutorial's Moneypenny step doesn't say how she runs (H274)")
         need("definition of ready" not in agents.persona(every["donna"], "Alex") and "definition of ready" not in agents.persona(every["pepper"], "Alex"),
              "Donna or Pepper got Moneypenny's craft")
         need(m.get("own_goodbye") and "gatekeeper" in m["personality"] and "Clearance pending" not in m["speciality"],
