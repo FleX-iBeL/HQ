@@ -1626,7 +1626,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         click = page.split('btn.addEventListener("click"', 1)[1].split("\n", 1)[0]
         need("askHangup(true)" in click and "hangup()" not in click, "tapping Hang up ends the call without asking")
         yes = page.split('getElementById("hangyes").addEventListener("click", () => {', 1)[1].split("});", 1)[0]
-        need("Date.now() - hangAskedAt < 500" in yes and 'askHangup(false); if (state === "live") hangup();' in yes,
+        need("doubleTap(hangAskedAt, hangFrom)" in yes and "hangFrom = btn.getBoundingClientRect()" in page and 'askHangup(false); if (state === "live") hangup();' in yes,
              "the question's Hang up doesn't end the call, or a double tap on Hang up gets through")
         need('getElementById("hangno").addEventListener("click", () => askHangup(false))' in page
              and 'hangShade.addEventListener("click", () => askHangup(false))' in page,
@@ -3105,6 +3105,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
   await wait(3000);
   cancelBtn.click(); await wait(50);
   check("asks", asking() && nsent() === 1, asking() + "/" + nsent());
+  { const r = cxFrom; document.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); }  // F50: the second tap of a double tap lands where Cancel was
   document.getElementById("cxyes").click(); await wait(50);
   check("doubletap", asking() && nsent() === 1, asking() + "/" + nsent());
   document.getElementById("cxno").click(); await wait(50);
@@ -11746,6 +11747,18 @@ setTimeout(async () => {
   await drag(hangAsk, 200); ok("ask-pull-stays", !on(hangAsk) && state === "live" && !hangAsk.style.translate);
   btn.click(); await wait(600); document.getElementById("hangyes").click(); await wait(500);
   ok("hangup", state === "idle" && !on(hangAsk));
+  // F50: a quick confirm, right after the question opened, ends the call on the first tap; only a press where the
+  // big button was, within that moment, is taken as a double tap and ignored.
+  const press = el => { const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+    document.elementFromPoint(x, y).dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: x, clientY: y })); };
+  setState("live", "On the call"); await wait(100);
+  btn.click(); await wait(80); const r0 = btn.getBoundingClientRect();
+  document.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: r0.left + r0.width / 2, clientY: r0.top + r0.height / 2 }));
+  document.getElementById("hangyes").click(); await wait(100);
+  ok("double-tap-ignored", state === "live" && on(hangAsk));
+  askHangup(false); await wait(100);
+  btn.click(); await wait(80); press(document.getElementById("hangyes")); document.getElementById("hangyes").click(); await wait(500);
+  ok("quick-confirm", state === "idle" && !on(hangAsk));
   setState("live", "On the call"); showChat(true); await wait(300);
   muteBtn.click(); await wait(100); ok("call-mute-chat", on(chatEl));
   await drag(document.getElementById("chathead"), 180); ok("call-pull-down", !on(chatEl));
@@ -11769,7 +11782,7 @@ setTimeout(async () => {
             bad = [part for part in mm.group(1).split(" | ") if not part.endswith(":ok") and not part.endswith(":skip")]
             need(not bad, f"{name}: a sheet or menu didn't close, or Hang up didn't end the call: {bad}")
             seen.append(name)
-        return "F39: the changelog closes with Close, a tap beside it and a pull down (a short pull keeps it); Are you sure closes with a pull down and stays on the call, its Hang up ends it; every sheet closes with its close, a tap beside it (nothing under it pressed) and a pull down, a tap inside keeps it; on a call Mute leaves the chat open and a pull down or up on its title closes it (" + ", ".join(seen) + ")"
+        return "F39: the changelog closes with Close, a tap beside it and a pull down (a short pull keeps it); Are you sure closes with a pull down and stays on the call, its Hang up ends it, also a quick one (F50); every sheet closes with its close, a tap beside it (nothing under it pressed) and a pull down, a tap inside keeps it; on a call Mute leaves the chat open and a pull down or up on its title closes it (" + ", ".join(seen) + ")"
 
     # 98
     async def flow98(self) -> str:
@@ -18237,7 +18250,7 @@ FLOWS = {
     119: ("H205: What HQ helps you with, every feature a switch: all on to start, each followed through HQ, every combination keeps the screen tidy, screenshots of each state", False, "flow119"),
     120: ("H74: the get-started tutorial behind the question mark: short pieces on the real screen with demo content, the closing part, and a safe demo call (Free, Opus, no tools, nothing saved)", False, "flow120"),
     121: ("H74: a demo call's Claude answers a question about HQ from the tutorial, on Opus, without a tool", True, "flow121"),
-    123: ("F39: every sheet and menu closes (its close, a tap beside it, a pull down), Hang up ends the call; phone, small phone, desktop app", False, "flow123"),
+    123: ("F39, F50: every sheet and menu closes (its close, a tap beside it, a pull down), Hang up ends the call, a quick confirm too; phone, small phone, desktop app", False, "flow123"),
     124: ("F40: groceries tick off in the app to their own ticked-off list (A to Z, a tap puts one back), and several at once give one item each; phone, small phone, desktop app", False, "flow124"),
     125: ("H211: nudge until done: from its start, again and again in the day by how much it matters, never at night, no numbers; later pauses, done stops it (a call, her chat, Done in the app)", False, "flow125"),
     126: ("F43: something done doesn't come back: done or let go clears what clearly belongs to it (her notes, reminders, watches, nudges, To check mail lines), names the rest once, undo puts it back", False, "flow126"),

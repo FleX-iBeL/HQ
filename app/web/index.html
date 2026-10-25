@@ -1801,15 +1801,15 @@ cancelBtn.addEventListener("click", () => {
   else sendCancel();
 });
 // The question, like Hang up's (H24): Keep (or a tap beside it) closes it; the call goes on while it
-// asks. Its Cancel ignores taps for half a second after it opens, so a double tap can't confirm it.
+// asks. A double tap on Cancel can't confirm it (F50: only a second tap on Cancel's own spot is a double tap).
 const cxAsk = document.getElementById("cxask"), cxShade = document.getElementById("cxshade");
-let cxAskedAt = 0;
+let cxAskedAt = 0, cxFrom = null;
 function askCancel(open) {
   cxAsk.classList.toggle("open", open); cxShade.classList.toggle("open", open);
-  if (open) { cxAskedAt = Date.now(); document.getElementById("cxno").focus(); }
+  if (open) { cxAskedAt = Date.now(); cxFrom = cancelBtn.getBoundingClientRect(); document.getElementById("cxno").focus(); }
 }
 document.getElementById("cxyes").addEventListener("click", () => {
-  if (Date.now() - cxAskedAt < 500) return;
+  if (doubleTap(cxAskedAt, cxFrom)) return;
   askCancel(false); if (state === "live") sendCancel();
 });
 document.getElementById("cxno").addEventListener("click", () => askCancel(false));
@@ -3758,16 +3758,25 @@ function hangup() {
 }
 
 // H24: tapping Hang up asks "Are you sure?" first; the call goes on while it asks.
-// Stay on (or a tap beside it) closes the question; only Hang up ends the call. Its Hang up sits
-// where the big button was, so for half a second after it opens it ignores taps (a double tap).
+// Stay on (or a tap beside it) closes the question; only Hang up ends the call.
+// F50 (his quick note, 24 October 2026: "When i want to hang up i click on confirm then it pops up once more, and then
+// jt works"): its Hang up used to ignore every tap for half a second after the question opened, against a double tap
+// on the big button; a quick, real confirm was swallowed and the question stayed. Now only a press that lands where
+// the big button was, within that moment, counts as the double tap; a tap on the question's own Hang up always ends it.
 const hangAsk = document.getElementById("hangask"), hangShade = document.getElementById("hangshade");
-let hangAskedAt = 0;
+let hangAskedAt = 0, hangFrom = null, lastDown = null;
+document.addEventListener("pointerdown", ev => { lastDown = { x: ev.clientX, y: ev.clientY, at: Date.now() }; }, { capture: true, passive: true });
+function doubleTap(askedAt, from) {
+  const d = lastDown;
+  if (!d || !from || d.at < askedAt || d.at - askedAt > 500) return false;
+  return d.x >= from.left && d.x <= from.right && d.y >= from.top && d.y <= from.bottom;
+}
 function askHangup(open) {
   hangAsk.classList.toggle("open", open); hangShade.classList.toggle("open", open);
-  if (open) { hangAskedAt = Date.now(); document.getElementById("hangno").focus(); }
+  if (open) { hangAskedAt = Date.now(); hangFrom = btn.getBoundingClientRect(); document.getElementById("hangno").focus(); }
 }
 document.getElementById("hangyes").addEventListener("click", () => {
-  if (Date.now() - hangAskedAt < 500) return;
+  if (doubleTap(hangAskedAt, hangFrom)) return;
   askHangup(false); if (state === "live") hangup();
 });
 document.getElementById("hangno").addEventListener("click", () => askHangup(false));
