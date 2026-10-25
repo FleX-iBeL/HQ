@@ -519,6 +519,47 @@ const server = createServer(async (req, res) => {
     });
     return;
   }
+  // H269, piece 2: the sprint view. GET lays the ticked rows (rows=H247,F49) over the nights from the one picked
+  // (night=tonight, tomorrow or 2026-10-26); POST plans them for the team in that order (Plan the sprint), through
+  // routine/sprint.py, which hands it to the main HQ when this is the backup. The POST needs the x-hq header.
+  if (path0 === '/api/sprint') {
+    const post = req.method === 'POST';
+    let rows = [], night = 'tonight';
+    if (post) {
+      if (req.headers['x-hq'] !== 'sprint') {
+        res.writeHead(403).end('Only the HQ page can plan the sprint');
+        return;
+      }
+      let body = {};
+      try { body = JSON.parse(await readBody(req)); } catch {}
+      rows = Array.isArray(body.rows) ? body.rows : [];
+      night = typeof body.night === 'string' ? body.night : 'tonight';
+    } else {
+      const q = new URL(req.url, 'http://x').searchParams;
+      rows = (q.get('rows') ?? '').split(',');
+      night = q.get('night') ?? 'tonight';
+    }
+    rows = rows.map((x) => String(x).trim().toUpperCase()).filter((x) => /^[A-Z]\d+(\.\d+)*$/.test(x)).slice(0, 60);
+    if (!/^(tonight|tomorrow|\d{4}-\d\d-\d\d)$/.test(night)) night = 'tonight';
+    if (post && !rows.length) {
+      res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ ok: false, said: 'Tick the rows for the sprint first.' }));
+      return;
+    }
+    const args = post ? ['plan', ...rows, '--night', night] : ['lay', ...rows, '--night', night, '--json'];
+    execFile('/usr/bin/python3', [join(root, 'routine/sprint.py'), ...args], { timeout: 150000 }, (err, out, errOut) => {
+      if (post) {
+        sprintPlan.at = 0;  // the planning changed: read it again
+        const said = String(err ? `${errOut || ''}${out}` : out).trim();
+        res.writeHead(err ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ ok: !err, said }));
+        return;
+      }
+      let data = null;
+      try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
+      res.writeHead(data ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        .end(JSON.stringify(data ?? { error: String(errOut || err || 'no answer').slice(0, 300) }));
+    });
+    return;
+  }
   // H160, H182: the team's work from the page, without a call: send an open roadmap item to the team (a job that reads
   // its row; new work only after a call has sparred on it, so no free text here), cancel a waiting job, or move it in
   // the line. All through routine/jobs.py (which hands it to the main HQ when this is the backup). Needs the x-hq

@@ -382,12 +382,13 @@ class Policy:
             if sub in ("add", "list", "cancel", "move", "priority", "every"):  # H171: every
                 return Decision(ALLOW, "the schedule for the computer")
             return Decision(DENY, "that part of the schedule is only for the computer itself")
-        # H269: the planning's ranks and estimates: read them, and give a row its place (only HQ's own sprint.json).
+        # H269: the planning's ranks and estimates: read them, and give a row its place (only HQ's own sprint.json);
+        # piece 2: lay a sprint over the nights, and plan it for the team (the schedule, as schedule.py add would).
         if prog in ("python3", "python") and args and self.hq_script(args[0], "sprint.py"):
             sub = args[1] if len(args) > 1 else "list"
-            if sub in ("list", "json", "rank"):
-                return Decision(ALLOW, "the planning's ranks and estimates")
-            return Decision(DENY, "from a call, the sprint script takes list, json or rank")
+            if sub in ("list", "json", "rank", "lay", "plan"):
+                return Decision(ALLOW, "the planning's ranks and estimates, and the sprint")
+            return Decision(DENY, "from a call, the sprint script takes list, json, rank, lay or plan")
         # H173: the usage counts, read only: what a job or a call cost on its own tokens, the rate, the room now.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usagecost.py"):
             sub = args[1] if len(args) > 1 else ""

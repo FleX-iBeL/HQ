@@ -257,6 +257,15 @@
       .team-send { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
       .team-send .chip[data-armed="yes"] { border-color: var(--accent, var(--ink)); font-weight: 600; }
       .team-send .said { font-size: 13px; color: var(--soft); }
+      /* H269: the sprint view: the planning's rows to tick, laid over the nights, a line where the room runs out. */
+      .sprint-pick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 10px; }
+      .sprint-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--rule); }
+      .sprint-row input { margin-top: 4px; width: 18px; height: 18px; flex: none; }
+      .sprint-row .what { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+      .sprint-night { margin: 12px 0 4px; font-weight: 600; }
+      .sprint-laid { padding: 4px 0 4px 12px; border-left: 3px solid var(--rule); margin: 2px 0; overflow-wrap: anywhere; }
+      .sprint-laid.past { opacity: .6; }
+      .sprint-line { margin: 10px 0; padding: 6px 0; border-top: 2px dashed var(--bad, #c0392b); color: var(--bad, #c0392b); font-size: 14px; }
       .eta-guess { display: block; font-size: 12px; color: var(--soft); opacity: 0.75; font-style: italic; }
       /* H174: what a total counts, right under its heading */
       .eta-counts { font-size: 13px; margin: 2px 0 8px; }
@@ -985,6 +994,143 @@
         let s = parts.join(' · ');
         if (!e.finished && e.computed && e.computed !== e.est) s += ` · ${e.guess_used ? `the ${{ guess_look: "first look's", guess_call: "call's", guess: "team's" }[e.guess_used]}` : 'the guess'} taken into the estimate (computed alone ${etaDur(e.computed)})`;
         return s;
+      }
+      /** H269, piece 2: the sprint view's state: the ticked rows and the night, kept on this device; the laid-out
+          sprint as the status server last said it. */
+      const sprint = { ticks: new Set(), night: 'tonight', lay: null, key: '', asked: '', said: null, armed: 0 };
+      try {
+        const kept = JSON.parse(localStorage.getItem('sprint') || '{}');
+        sprint.ticks = new Set(kept.ticks || []);
+        sprint.night = kept.night || 'tonight';
+      } catch {}
+      function sprintKeep() {
+        try { localStorage.setItem('sprint', JSON.stringify({ ticks: [...sprint.ticks], night: sprint.night })); } catch {}
+      }
+      async function sprintLay(key, rows) {
+        if (sprint.asked === key) return;
+        sprint.asked = key;
+        try {
+          const r = await fetch(`/api/sprint?rows=${encodeURIComponent(rows.join(','))}&night=${encodeURIComponent(sprint.night)}`, { cache: 'no-store' });
+          const d = await r.json();
+          if (sprint.asked === key) { sprint.lay = d; sprint.key = key; }
+        } catch {
+          if (sprint.asked === key) { sprint.lay = { error: 'The status server is not answering.' }; sprint.key = key; }
+        }
+        redraw();
+      }
+      const sprintClock = (t) => new Date(t * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      function sprintNightName(day) {
+        const d = new Date(`${day}T12:00:00`);
+        const t = new Date(); t.setHours(12, 0, 0, 0);
+        const k = Math.round((d - t) / 86400000);
+        return k === 0 ? 'Tonight' : k === 1 ? 'Tomorrow night' : `${d.toLocaleDateString('en-GB', { weekday: 'long' })} night`;
+      }
+      function drawSprint(P) {
+        const box = el('section', 'sprint');
+        const open = P.rows.filter((x) => !x.team && !x.planned);
+        for (const l of [...sprint.ticks]) if (!open.some((x) => x.label === l)) sprint.ticks.delete(l);
+        const ticked = open.filter((x) => sprint.ticks.has(x.label)).map((x) => x.label);
+        const fold = foldPart('sprint', false, 'Sprint planning', `${P.rows.length} on the planning · ${P.ranked} ranked · ${ticked.length} ticked for this sprint`);
+        const parts = el('div', 'parts');
+        // The night it starts from: tonight or one of the six after it.
+        const pick = el('div', 'sprint-pick');
+        const sel = el('select');
+        sel.setAttribute('aria-label', 'The night the sprint starts');
+        const today = new Date();
+        for (let k = 0; k < 7; k++) {
+          const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + k);
+          const v = k === 0 ? 'tonight' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          const o = el('option', '', k === 0 ? 'From tonight, 22:00' : `From ${d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}, 22:00`);
+          o.value = v;
+          if (v === sprint.night) o.selected = true;
+          sel.append(o);
+        }
+        sel.addEventListener('change', () => { sprint.night = sel.value; sprintKeep(); redraw(); });
+        pick.append(sel);
+        parts.append(pick);
+        // The rows in rank order, each with a tick and its estimate.
+        const list = el('div', 'card');
+        for (const x of P.rows) {
+          const row = el('label', 'sprint-row');
+          const cb = el('input');
+          cb.type = 'checkbox';
+          cb.value = x.label;
+          cb.checked = sprint.ticks.has(x.label);
+          cb.disabled = !!(x.team || x.planned);
+          cb.setAttribute('aria-label', `${x.label} in this sprint`);
+          cb.addEventListener('change', () => { if (cb.checked) sprint.ticks.add(x.label); else sprint.ticks.delete(x.label); sprintKeep(); redraw(); });
+          const what = el('span', 'what');
+          what.append(el('strong', '', `${x.rank ? `${x.rank}. ` : ''}${x.label}`), document.createTextNode(` ${x.title}`));
+          const how = x.team ? `With the team: job ${x.team}` : x.planned ? `Planned for the team: item ${x.planned.n}, ${x.planned.at}` : planLine(P, x.label);
+          what.append(el('span', 'soft', ` · ${how}`));
+          row.append(cb, what);
+          list.append(row);
+        }
+        parts.append(list);
+        // The ticked rows over the nights.
+        const laid = el('div', 'sprint-nights');
+        const key = `${ticked.join(',')}|${sprint.night}|${JSON.stringify(P.rows.map((x) => [x.label, x.rank, x.est]))}`;
+        if (!ticked.length) laid.append(el('p', 'soft', 'Tick the rows for this sprint to see them fall into the nights.'));
+        else {
+          if (sprint.key !== key) sprintLay(key, ticked);
+          const L = sprint.key === key ? sprint.lay : null;
+          if (!L) laid.append(el('p', 'soft', 'Laying them over the nights…'));
+          else if (L.error) laid.append(el('p', 'soft', `The sprint couldn't be laid out: ${L.error}`));
+          else {
+            const nights = Object.fromEntries((L.nights || []).map((n) => [n.day, n]));
+            const seen = new Set();
+            for (const x of L.left_out || []) laid.append(el('p', 'soft', `${x.label} is left out: ${x.why}.`));
+            for (const r of L.rows) {
+              if (L.line && L.line.before === r.label) laid.append(el('div', 'sprint-line', `The room runs out here: ${L.line.why}.`));
+              if (r.night && !seen.has(r.night)) {
+                seen.add(r.night);
+                const n = nights[r.night];
+                laid.append(el('p', 'sprint-night', `${sprintNightName(r.night)}: ${n.rows.length} ${n.rows.length === 1 ? 'row' : 'rows'}, about ${etaDur(n.minutes)}, done around ${sprintClock(n.eta)} · ${etaPct(n.five)} of the 5-hour, ${etaPct(n.weekly)} of the week`));
+              }
+              const c = r.cost || {};
+              const when = r.start ? `starts around ${sprintClock(r.start)}${r.usage ? ' (it waits for the usage)' : ''}, done around ${sprintClock(r.eta)}` : (r.why || 'no time');
+              laid.append(el('div', `sprint-laid${r.past ? ' past' : ''}`, `${r.rank ? `${r.rank}. ` : ''}${r.label} ${r.title} · about ${etaDur(r.est)} · ${etaPct(c.five ?? 0)} of the 5-hour, ${etaPct(c.weekly ?? 0)} of the week · ${when}`));
+            }
+            if (!L.line) laid.append(el('p', 'soft', 'Everything ticked fits in the room (estimate).'));
+          }
+        }
+        parts.append(laid);
+        // Plan the sprint: a second tap within five seconds to be sure.
+        const act = el('div', 'team-send');
+        const armed = sprint.armed > Date.now();
+        const b = el('button', 'chip', armed ? `Plan these ${ticked.length}?` : 'Plan the sprint');
+        b.type = 'button';
+        b.dataset.armed = armed ? 'yes' : 'no';
+        b.disabled = !ticked.length;
+        b.setAttribute('aria-label', 'Plan the sprint');
+        b.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (sprint.armed > Date.now()) {
+            sprint.armed = 0;
+            sprint.said = { at: Date.now() + 15000, said: 'Planning…' };
+            redraw();
+            let out;
+            try {
+              const r = await fetch('/api/sprint', { method: 'POST', headers: { 'x-hq': 'sprint', 'content-type': 'application/json' }, body: JSON.stringify({ rows: ticked, night: sprint.night }) });
+              out = await r.json().catch(() => ({ ok: false, said: `The status server said ${r.status}` }));
+            } catch { out = { ok: false, said: 'The status server is not answering.' }; }
+            if (out.ok) { sprint.ticks.clear(); sprintKeep(); }
+            sprint.said = { at: Date.now() + 20000, said: out.said.split('\n').join(' ') };
+            sprint.key = ''; sprint.asked = '';
+            redraw();
+            setTimeout(redraw, 20100);
+          } else {
+            sprint.armed = Date.now() + 5000;
+            redraw();
+            setTimeout(redraw, 5100);
+          }
+        });
+        act.append(b);
+        if (sprint.said && sprint.said.at > Date.now()) act.append(el('span', 'said', sprint.said.said));
+        parts.append(act);
+        fold.append(parts);
+        box.append(fold);
+        return box;
       }
       /** H269: an open row's place on the planning and its estimate, as routine/sprint.py says it to a call. */
       function planLine(P, label) {
@@ -1855,6 +2001,12 @@
           box.append(fold);
           app.append(box);
         }
+
+        // H269, piece 2: the sprint view. The planning's open rows in rank order with their estimates; tick the ones
+        // for this sprint and see them fall into the coming nights (the team's room: every night 22:00 to 8), each with
+        // when it should be done and its share of the 5-hour and weekly room, and a line where the room runs out. Plan
+        // the sprint plans the ticked rows for the team in that order from the night picked (a second tap to be sure).
+        if (routines?.planning?.rows) app.append(drawSprint(routines.planning));
 
         // H15: Recent activity folds open and closed, like the job list.
         if (s.log.length) {

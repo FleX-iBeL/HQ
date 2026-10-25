@@ -298,7 +298,14 @@ team's own); read it when he asks what's on the planning, what's ranked or what 
 row a place ("make the feedback button number one", "put H243 third", "rank it last", "take its rank off"), that's \
 his go: python3 "{HQ}/routine/sprint.py" rank <label> <place|top|bottom|off>; the rows from that place move down \
 one, and a new row on the planning has no rank until he gives it one. Say it as he would: "the feedback button is \
-number one now", never the command."""
+number one now", never the command. The sprint (H269): at the sprint planning, when he picks rows for this sprint, \
+python3 "{HQ}/routine/sprint.py" lay <label> <label> ... [--night tonight|tomorrow|<weekday>|<YYYY-MM-DD>] shows them \
+in rank order over the coming nights (the team's room is every night from 22:00 to 8 in the morning): which night \
+each falls in, when it should be done, its share of the 5-hour and the weekly usage, and where the room runs out; say \
+it plainly, night by night. When he says to plan them ("plan the sprint", "plan these for tonight", "from Tuesday"), \
+that's his go: python3 "{HQ}/routine/sprint.py" plan <label> <label> ... [--night ...] plans them for the team in that \
+order from 22:00 that night, the same as the Plan the sprint button on the status page; say what got planned for \
+which night, and what was left out and why."""
 
 # H149 (16 October 2026, call at 09:10), in the user's words: "Six hours or something or whatever hours we declare. You
 # can make some suggestions. Or it can even be like days, right, until the end of the week or whatever. We need to

@@ -9646,6 +9646,216 @@ setTimeout(() => {
         need("rank" in role.WRITES.get("sprint", ()) and "HQ/sprint.json" in role.ONE_WRITER, "H269: a rank on the backup isn't handed to the main")
         return "each open row an estimate (time, 5-hour, weekly, the first look); kept on a move and a rank, made again on new words; let go when done; served and shown"
 
+    def _sprint_lay_env(self, tag, weekly=10.0, fixed=None):
+        """H269, piece 2: the made-up planning with two more rows, no queue and no planned items of its own, a made-up
+        reading (the 5-hour empty, the weekly at `weekly`, its reset five days on), a clock at Monday 26 October 12:00
+        and a room of one hour a night (22:00 to 23:00), so four rows of about 15 minutes fill a night."""
+        import datetime as _dt
+        rm, env = self._sprint_env(tag)
+        t = rm.read_text()
+        t = "\n".join(l for l in t.split("\n") if not l.startswith(("- Job ", "- Item ")))
+        t = t.replace("| ⬜ | H9004 A made-up export", "| ⬜ | H9006 A made-up sixth row | Something | | |\n"
+                      "| ⬜ | H9007 A made-up seventh row | Something else | | |\n| ⬜ | H9004 A made-up export")
+        if fixed is not None:
+            t = re.sub(r"\*\*Weekly line: [^*]*\*\*", f"**Weekly line: fixed at {fixed}%.**", t)
+        rm.write_text(t)
+        now = _dt.datetime(2026, 10, 26, 12, 0).timestamp()
+        iso = lambda x: _dt.datetime.fromtimestamp(x, _dt.timezone.utc).isoformat().replace("+00:00", "Z")  # noqa: E731
+        u = self.tmp / f"usage-{tag}.json"
+        u.write_text(json.dumps({"readable": True, "limits": [
+            {"label": "5-hour limit", "percent": 0, "resetsAt": iso(now + 3600)},
+            {"label": "Weekly · all models", "percent": weekly, "resetsAt": iso(now + 5 * 86400)}]}))
+        env.update({"HQ_LOOK": "0", "HQ_USAGE": str(u), "HQ_SPRINT_NOW": str(int(now)), "HQ_SPRINT_ROOM": "22-23"})
+        return rm, env, now
+
+    async def flow145(self) -> str:
+        """H269, piece 2: the sprint view's layout (sprint.py lay, what the status page and a call show). No Claude turns.
+        Ticked rows fall into the nights in rank order (ranked first, then the roadmap's order), each starting when the
+        one before is done, with when it should be done and its share of the 5-hour and weekly; a night that's full sends
+        the next row to the next night (four in Monday's, the fifth on Tuesday); a later night picked starts there; no line
+        while everything fits; with the weekly room nearly gone, a line where it runs out, the rows after it waiting for
+        the weekly reset. A row that isn't open, or is with the team, is left out and said."""
+        import json as js
+        rm, env, now = self._sprint_lay_env("H269l")
+        ok = lambda r, what: need(r.returncode == 0, f"H269: {what}: {r.stderr[-600:]}")  # noqa: E731
+        ok(self._sprint(env, "rank", "H9004", "1"), "rank")
+        ok(self._sprint(env, "rank", "H9007", "2"), "rank")
+        r = self._sprint(env, "lay", "H9001,H9002", "H9006", "H9007", "H9004", "H9003", "--json")
+        ok(r, "lay")
+        L = js.loads(r.stdout)
+        rows = L["rows"]
+        need([x["label"] for x in rows] == ["H9004", "H9007", "H9001", "H9002", "H9006"],
+             f"H269: the ticked rows aren't in rank order: {[x['label'] for x in rows]}")
+        need(L["left_out"] == [{"label": "H9003", "why": "not an open row on the planning"}], f"H269: a done row wasn't left out: {L['left_out']}")
+        mon, tue = "2026-10-26", "2026-10-27"
+        need([x["night"] for x in rows] == [mon] * 4 + [tue], f"H269: the nights don't fill (four Monday, the fifth Tuesday): {[x['night'] for x in rows]}")
+        import datetime as _dt
+        start = _dt.datetime(2026, 10, 26, 22, 0).timestamp()
+        need(rows[0]["start"] == int(start) and all(rows[k]["start"] >= rows[k - 1]["eta"] for k in range(1, 4))
+             and all(x["eta"] == x["start"] + x["est"] * 60 for x in rows) and rows[3]["eta"] <= start + 3600
+             and rows[4]["start"] == int(start + 86400),
+             f"H269: the rows don't follow each other inside the night's room: {[(x['start'], x['eta']) for x in rows]}")
+        need(all(x["cost"].get("five") and x["cost"].get("weekly") is not None and x["est"] > 0 for x in rows),
+             f"H269: a laid row has no time or usage share: {rows[0]}")
+        need(L["line"] is None and not any(x["past"] for x in rows), f"H269: a line while everything fits: {L['line']}")
+        n0 = L["nights"][0]
+        need(n0["day"] == mon and n0["rows"] == ["H9004", "H9007", "H9001", "H9002"]
+             and n0["minutes"] == sum(x["est"] for x in rows[:4]) and abs(n0["five"] - sum(x["cost"]["five"] for x in rows[:4])) < 0.2,
+             f"H269: Monday night's sums are off: {n0}")
+        words = self._sprint(env, "lay", "H9004", "H9007", "H9001", "H9002", "H9006").stdout
+        need("Tonight (2026-10-26): 4 rows, about" in words and "Tomorrow night (2026-10-27): 1 row" in words
+             and "1. H9004 A made-up export: about" in words and "starts around 22:00" in words and "Everything ticked fits" in words,
+             f"H269: the words a call reads aren't night by night: {words[:600]}")
+        # a later night picked
+        L2 = js.loads(self._sprint(env, "lay", "H9004", "H9007", "--night", "thursday", "--json").stdout)
+        need(L2["night"] == "2026-10-29" and all(x["night"] == "2026-10-29" for x in L2["rows"]), f"H269: the night picked isn't where it starts: {L2['night']}")
+        need(self._sprint(env, "lay", "H9004", "--night", "nonsense").returncode != 0, "H269: a night that isn't one was taken")
+        # the weekly room nearly gone (a fixed line at 30%, at 27% now): the first row fits, then the room runs out
+        rm2, env2, _ = self._sprint_lay_env("H269w", weekly=27, fixed=30)
+        L3 = js.loads(self._sprint(env2, "lay", "H9001", "H9002", "H9004", "--json").stdout)
+        r3 = L3["rows"]
+        need(r3[0]["night"] == mon and not r3[0]["past"] and L3["line"] and L3["line"]["before"] == r3[1]["label"]
+             and "weekly reset" in L3["line"]["why"] and r3[1]["past"] and r3[2]["past"] and r3[1].get("usage")
+             and r3[1]["start"] >= now + 5 * 86400, f"H269: no line where the weekly room runs out: {L3['line']}, {[(x['label'], x.get('night'), x['past']) for x in r3]}")
+        w3 = self._sprint(env2, "lay", "H9001", "H9002").stdout
+        need("--- the room runs out here: the weekly room runs out" in w3 and "it waits for the usage" in w3, f"H269: the line isn't said: {w3}")
+        # a row already with the team is left out
+        text = rm.read_text()
+        i = text.find("**Mail check:**")
+        j = text.find("\n", i)
+        rm.write_text(text[:j + 1] + "\n- Job 9901 · ready · agreed 2026-10-26 11:00 · H9006 on the HQ roadmap, sent to the team from the status page: A made-up sixth row.\n" + text[j + 1:])
+        L4 = js.loads(self._sprint(env, "lay", "H9006", "H9004", "--json").stdout)
+        need([x["label"] for x in L4["rows"]] == ["H9004"] and L4["left_out"][0]["label"] == "H9006" and "with the team" in L4["left_out"][0]["why"],
+             f"H269: a row with the team wasn't left out: {L4['left_out']}")
+        page = (ROOT / "status" / "index.html").read_text()
+        need("function drawSprint(P)" in page and "/api/sprint?rows=" in page and "sprint-line" in page and "'Plan the sprint'" in page,
+             "H269: the status page has no sprint view")
+        return "ticked rows in rank order over the nights (four Monday, the fifth Tuesday), times and shares, a later night, the line where the weekly room runs out, rows with the team left out"
+
+    async def flow146(self) -> str:
+        """H269, piece 2: Plan the sprint. No Claude turns. sprint.py plan puts the ticked rows on the schedule for the
+        team in rank order, each at its night's 22:00, a minute apart (the next night's at that night), as a call would;
+        a row already planned is left out after that; the status server on a test port lays them (GET /api/sprint) and
+        plans them only with the HQ page's header (POST); the page, in a headless browser, ticks rows and shows them over
+        the nights; a call may lay and plan (call rules, policy); on the backup it goes to the main (role.WRITES)."""
+        import json as js
+        rm, env, now = self._sprint_lay_env("H269p")
+        env.pop("HQ_SPRINT_NOW")  # schedule.py checks real time; plan from tomorrow night on
+        import datetime as _dt
+        tomorrow = (_dt.date.today() + _dt.timedelta(days=1))
+        ok = lambda r, what: need(r.returncode == 0, f"H269: {what}: {r.stdout[-300:]} {r.stderr[-600:]}")  # noqa: E731
+        ok(self._sprint(env, "rank", "H9002", "1"), "rank")
+        r = self._sprint(env, "plan", "H9001", "H9002", "H9004", "H9006", "H9007", "--night", tomorrow.isoformat())
+        ok(r, "plan")
+        import sys as _s0
+        _s0.path.insert(0, str(ROOT / "routine"))
+        import schedule as sc
+        items = [i for i in sc.read(rm.read_text()) if i["state"] == "waiting"]
+        got = [(re.match(r"(H\d+)", i["text"]).group(1), i["at"]) for i in items]
+        d1, d2 = tomorrow.isoformat(), (tomorrow + _dt.timedelta(days=1)).isoformat()
+        # H9002 ranked first, then the roadmap's order (H9006 and H9007 stand above H9004 on it)
+        need(got == [("H9002", f"{d1} 22:00"), ("H9001", f"{d1} 22:01"), ("H9006", f"{d1} 22:02"), ("H9007", f"{d1} 22:03"), ("H9004", f"{d2} 22:00")],
+             f"H269: the sprint isn't planned in rank order at its nights: {got}")
+        need(all("on the HQ roadmap, planned for the team at the sprint planning" in i["text"] and "Read the" in i["text"] for i in items),
+             f"H269: a planned row doesn't read its row: {items[0]['text']}")
+        need("H9002 planned for" in r.stdout and "22:00" in r.stdout, f"H269: what got planned isn't said: {r.stdout}")
+        again = self._sprint(env, "plan", "H9002", "--night", d1)
+        need(again.returncode != 0 and "already planned for the team" in again.stdout, f"H269: a planned row was planned twice: {again.stdout}")
+        p = js.loads(self._sprint(env, "json").stdout)
+        need(next(x for x in p["rows"] if x["label"] == "H9002").get("planned", {}).get("at") == f"{d1} 22:00", "H269: the planning doesn't say a row is planned")
+        # the status server and the page
+        import urllib.request, urllib.error
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        site = self.tmp / "h269-site"
+        shutil.rmtree(site, ignore_errors=True)
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        (site / ".status").mkdir()
+        for d in ("routine", "app"):
+            (site / d).symlink_to(ROOT / d)
+        rm.write_text("\n".join(l for l in rm.read_text().split("\n") if not l.startswith("- Item ")))
+        port = 4794
+        senv = {**env, "HQ_STATUS_PORT": str(port)}
+        harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  for (let i = 0; i < 80 && !document.querySelector('section.sprint'); i++) await wait(250);
+  const sec = document.querySelector('section.sprint');
+  out.push('section:' + !!sec);
+  if (sec) {
+    sec.querySelector('details').open = true;
+    for (const l of ['H9004', 'H9001']) { const cb = document.querySelector(`section.sprint input[value="${l}"]`); cb && cb.click(); await wait(300); }
+    for (let i = 0; i < 80 && !/done around/.test(document.querySelector('section.sprint .sprint-nights')?.textContent || ''); i++) await wait(250);
+    out.push('nights:' + document.querySelector('section.sprint .sprint-nights').innerText.replace(/\s+/g, ' '));
+    out.push('button:' + [...document.querySelectorAll('section.sprint button')].map(b => b.textContent).join(','));
+  }
+  const pre = document.createElement('pre'); pre.id = 'h269'; pre.textContent = 'H269RESULT ' + out.join(' | ') + ' END';
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        idx = site / "status/index.html"
+        idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
+        log = open(self.tmp / "h269-server.log", "w")
+        srv = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=senv, stdout=log, stderr=subprocess.STDOUT)
+        base = f"http://127.0.0.1:{port}"
+
+        def call(path, method="GET", headers=None, body=None):
+            req = urllib.request.Request(base + path, method=method, headers=headers or {}, data=body)
+            try:
+                with urllib.request.urlopen(req, timeout=150) as x:
+                    return x.status, x.read()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read()
+        try:
+            for _ in range(50):
+                try:
+                    call("/routines.json")
+                    break
+                except Exception:
+                    await asyncio.sleep(0.2)
+            st, body = await asyncio.to_thread(call, f"/api/sprint?rows=H9004,H9001&night={d1}")
+            L = js.loads(body)
+            need(st == 200 and [x["label"] for x in L["rows"]] == ["H9001", "H9004"] and L["night"] == d1 and L["nights"],
+                 f"H269: the status server doesn't lay the sprint: {st} {body[:300]}")
+            st, _ = await asyncio.to_thread(call, "/api/sprint", "POST", {"content-type": "application/json"}, b'{"rows":["H9004"]}')
+            need(st == 403, f"H269: Plan the sprint answers without the HQ page's header: {st}")
+            st, body = await asyncio.to_thread(call, "/api/sprint", "POST", {"x-hq": "sprint", "content-type": "application/json"},
+                                               js.dumps({"rows": ["H9004"], "night": d1}).encode())
+            out = js.loads(body)
+            need(st == 200 and out["ok"] and "H9004 planned for" in out["said"], f"H269: Plan the sprint from the page didn't plan: {st} {out}")
+            need(any("H9004 on the HQ roadmap, planned for the team" in i["text"] and i["at"] == f"{d1} 22:00" for i in sc.read(rm.read_text())),
+                 "H269: the page's Plan the sprint isn't on the schedule")
+            cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+            cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+            chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            need(Path(chrome).exists(), "no headless browser found to run the status page in")
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'h269-profile'}", "--virtual-time-budget=40000", "--dump-dom", base + "/"], timeout=150)
+            m = re.search(r'<pre id="h269">H269RESULT (.*?) END</pre>', r.stdout)
+            need(m, f"H269: the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in m.group(1).split(" | "))
+            say(f"   {m.group(1)[:300]}")
+            need(res.get("section") == "true", "H269: the status page has no sprint view")
+            need("H9001 A made-up feedback button · about" in res.get("nights", "") and "done around" in res["nights"] and "of the week" in res["nights"]
+                 and "H9004" not in res["nights"].split("Everything")[0].replace("H9004 is", ""),
+                 f"H269: the page doesn't lay the ticked rows over the nights (H9004 is planned, so it can't be ticked): {res.get('nights')}")
+            need("Plan the sprint" in res.get("button", ""), f"H269: no Plan the sprint button: {res.get('button')}")
+        finally:
+            srv.terminate()
+        # a call may lay and plan; on the backup it goes to the main
+        import sys as _s
+        _s.path.insert(0, str(ROOT / "app"))
+        import policy
+        pol = policy.Policy(Path(config.FOLDER))
+        for cmd in (f'python3 "{ROOT}/routine/sprint.py" lay H247 F49 --night tonight', f'python3 "{ROOT}/routine/sprint.py" plan H247 F49'):
+            d = pol.decide("Bash", {"command": cmd})
+            need(d.verdict == policy.ALLOW, f"H269: a call can't {cmd.split()[3]} the sprint ({d.why})")
+        need("sprint.py\" lay" in config.VOICE_RULES and "sprint.py\" plan" in config.VOICE_RULES, "H269: the call rules don't say how to lay and plan the sprint")
+        _s.path.insert(0, str(ROOT / "routine"))
+        import role
+        need("plan" in role.WRITES.get("sprint", ()), "H269: Plan the sprint on the backup isn't handed to the main")
+        return "planned in rank order at each night's 22:00, a minute apart; not twice; laid and planned through the status server (header needed); the page ticks and lays; a call may; the backup hands it on"
+
     async def flow142(self) -> str:
         """H241, no Claude: a friend's HQ needs no calendar called HQ Planning. On its own copies, with a calendar that
         has no HQ Planning at all: an X and a check are marks only, nothing waits and nothing starts in Google; the call
@@ -17533,6 +17743,8 @@ FLOWS = {
     139: ("H236: your own news: the setup from a short session, the hourly read of their free feeds kept to their topics and without what they leave out, read inside HQ as their own newspaper; empty on a fresh install", False, "flow139"),
     138: ("H235: extensions: the workspace's folder read at HQ's fixed points (call and text rules, kinds of texts, the mail check, scripts, routines); the local check after an update, and its plain message with Talk it through and Send to the team", False, "flow138"),
     143: ("H269: the planning's rank: set on a call, 1 the top, moved and taken off, a new row unranked and the others kept, a done row dropping out, the list a call reads in rank order", False, "flow143"),
+    145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
+    146: ("H269: Plan the sprint: the ticked rows on the schedule in rank order at their nights, not twice, through the status server and its page, a call may, the backup hands it on", False, "flow146"),
     144: ("H269: an estimate of time and usage on every open planning row, made like the team's (kind, size, similar jobs, the first look), again on new words, never on a move or a rank; served and shown on the status page", False, "flow144"),
     142: ("H241: a friend's HQ needs no calendar called HQ Planning: an X is a mark only, an old move goes back on the main only, and the rules and tutorial never ask for it", False, "flow142"),
     141: ("H240: a 9292 link at the leaving time (the calendar's start or the time he names, leaving then or there by then), with the notices for the stops and stations near both ends from the open live data, never made up", False, "flow141"),
