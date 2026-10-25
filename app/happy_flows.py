@@ -15297,10 +15297,12 @@ console.log(JSON.stringify({{ W, F, long: long.length, five: daysAhead({{ ...l, 
         need(r.returncode == 0, f"node failed (the days): {r.stderr.strip()[-300:]}")
         d = json.loads(r.stdout.strip().splitlines()[-1])
         Dy, Fx = d["W"], d["F"]
-        need(len(Dy) == 5 and [x["n"] for x in Dy] == [0, 1, 2, 3, 4] and Dy[-1]["last"] and not Dy[0]["last"] and d["five"] == 0,
-             f"not the days up to the reset (or the 5-hour bar got them): {len(Dy)}, {d['five']}")
+        # F54: always the whole week, today plus six days, also past the reset; the reset's day is two rows.
+        need(len(Dy) == 8 and [x["n"] for x in Dy] == [0, 1, 2, 3, 4, 4, 5, 6] and Dy[4]["last"] and not Dy[4]["after"]
+             and Dy[5]["after"] and not any(x["last"] for x in Dy[:4] + Dy[5:]) and d["five"] == 0,
+             f"not the whole week with the reset's day split (or the 5-hour bar got them): {[(x['n'], x['last'], x['after']) for x in Dy]}, {d['five']}")
         need(d["long"] == 7, f"a whole week ahead isn't today plus six: {d['long']}")
-        need(all(Dy[k]["from"] == Dy[k - 1]["to"] for k in range(1, 5)), f"the days aren't back to back: {[(x['from'], x['to']) for x in Dy]}")
+        need(all(Dy[k]["from"] == Dy[k - 1]["to"] for k in range(1, 8)), f"the days aren't back to back: {[(x['from'], x['to']) for x in Dy]}")
         dwhat = lambda x: [(p["what"], p["add"], p["kind"]) for p in (x["L"] or {}).get("pieces", [])]
         need(dwhat(Dy[0]) == [("Job 5", 0.6, "team"), ("Planned item 11", 0.5, "planned")] and Dy[0]["start"] == 51 and Dy[0]["share"] == 1.1,
              f"today doesn't have the team's job and half of item 11 from where the week stands: {dwhat(Dy[0])}, {Dy[0]['start']}, {Dy[0]['share']}")
@@ -15310,16 +15312,25 @@ console.log(JSON.stringify({{ W, F, long: long.length, five: daysAhead({{ ...l, 
              f"the daily item doesn't come back every day up to the reset: {dwhat(Dy[3])}, {dwhat(Dy[4])}")
         need(Dy[2]["waits"] and Dy[2]["waits"][0]["what"] == "Planned item 13" and "Waits for the stop line to climb" in Dy[2]["words"],
              f"what waits for the line on its day isn't said: {Dy[2]['waits']}, {Dy[2]['words']}")
-        need(all(x["moving"] for x in Dy) and [x["lineTo"] for x in Dy] == sorted(x["lineTo"] for x in Dy) and Dy[-1]["lineTo"] >= 99.5,
+        need(all(x["moving"] for x in Dy) and [x["lineTo"] for x in Dy[:5]] == sorted(x["lineTo"] for x in Dy[:5]) and Dy[4]["lineTo"] >= 99.5,
              f"the moving line by each day's end doesn't climb to 100% at the reset: {[x['lineTo'] for x in Dy]}")
+        # F54: after the reset the new week starts from 0%, its line starts again, and the daily item comes back in it.
+        need(Dy[5]["start"] == 0 and Dy[5]["share"] == 0 and Dy[5]["lineFrom"] < 30 and Dy[5]["words"].startswith("The week reset at T5520; a new week starts from 0%.")
+             and "Nothing lands after the reset" in Dy[5]["words"],
+             f"the new week after the reset doesn't start again: {Dy[5]['start']}, {Dy[5]['lineFrom']}, {Dy[5]['words']}")
+        need(dwhat(Dy[6]) == [("Planned item 12 (again)", 0.5, "repeat")] and Dy[6]["start"] == 0 and Dy[7]["start"] == 0.5
+             and [x["lineTo"] for x in Dy[5:]] == sorted(x["lineTo"] for x in Dy[5:]),
+             f"the days after the reset are off: {dwhat(Dy[6])}, {Dy[6]['start']}, {Dy[7]['start']}, {[x['lineTo'] for x in Dy[5:]]}")
         need("about 3% of the week lands this day (planned once 2.5%, repeating 0.5%), taking it to 55.1%" in Dy[1]["words"]
-             and "By the end of the day the stop line stands at" in Dy[1]["words"] and Dy[-1]["words"].endswith("The week resets at T5520."),
-             f"a day's words are off: {Dy[1]['words']} / {Dy[-1]['words']}")
+             and "By the end of the day the stop line stands at" in Dy[1]["words"] and Dy[4]["words"].endswith("The week resets at T5520."),
+             f"a day's words are off: {Dy[1]['words']} / {Dy[4]['words']}")
         need(all(x["lineTo"] == 80 and not x["moving"] and "The stop line stays at 80%." in x["words"] for x in Fx),
              f"a fixed weekly line doesn't stay put in the days: {[x['words'] for x in Fx]}")
-        need("daysAhead(l, lines, E, new Date())" in page and "localStorage.setItem('aheadWeek'" in page and "Show the days up to the reset" in page
-             and "function dayRow(d)" in page, "H264: the status page has no button that unfolds the weekly bar's days")
-        return "four 5-hour windows back to back, each its own work, reset, moving line and what waits; the current bar says next vs later; the weekly bar's days up to the reset, each its work, share, line and waits"
+        need("daysAhead(l, lines, E, new Date())" in page and "localStorage.setItem('aheadWeek'" in page and "'Show the whole week'" in page
+             and "function dayRow(d)" in page and "from the reset at" in page, "H264: the status page has no button that unfolds the weekly bar's whole week")
+        need("'Show the next 20 hours'" in page and "more 5-hour windows" not in page and "up to the reset (" not in page,
+             "F54: the buttons still say four more 5-hour windows or the days up to the reset")
+        return "four 5-hour windows back to back, each its own work, reset, moving line and what waits; the current bar says next vs later; the weekly bar's whole week (also past the reset, which starts again), each day its work, share, line and waits"
 
     async def flow115(self) -> str:
         """H197, no Claude, no network: GitHub's About says the version that's out. about.py against a throwaway GitHub
@@ -18114,7 +18125,7 @@ FLOWS = {
     111: ("H202: the map as a guided workflow: six layers with their questions, nothing private or named; turned on, its blank map and line, never over theirs", False, "flow111"),
     112: ("H200: the to-do list, the Eisenhower way: read, kept by calls and the app, shown as a matrix, a tick and its undo", False, "flow112"),
     113: ("H194: HQ's own icon on a fresh install: every page saved to a home screen or the Dock, and the Mac app's Dock icon", False, "flow113"),
-    114: ("H199, H264: the 5-hour bar unfolds into the whole day, four more windows; the weekly bar into its days up to the reset; each its work, its line and what waits for it", False, "flow114"),
+    114: ("H199, H264: the 5-hour bar unfolds into the whole day, four more windows; the weekly bar into the whole week, also past the reset (F54); each its work, its line and what waits for it", False, "flow114"),
     115: ("H197: every release sets GitHub's About to the new version, in everyday words; without a token it's an incident, never silent", False, "flow115"),
     117: ("H203: one writer: on the backup a call's change to the roadmap, the log, the mail list, the to-do list and her notes is made by the main; kept when it's down", False, "flow117"),
     116: ("H198: on the Mac, other sound at normal volume during a call (a switch), and Bluetooth headphones stay in high quality (the MacBook's own mic, the sound bounced in the app)", False, "flow116"),

@@ -487,7 +487,7 @@
     <script>HQUpdate.mount({ line: document.getElementById('hqu-line'), banner: document.getElementById('hqu-banner') });</script>
     <script type="module">
       import { parseRoadmap } from './parse.mjs';
-      import { stopLine, usageVerdict, landing, landingWords, LAND_KINDS, windowsAhead, windowWords, WINDOWS_AHEAD, daysAhead, dayWords } from './usage.mjs';
+      import { stopLine, usageVerdict, landing, landingWords, LAND_KINDS, windowsAhead, windowWords, daysAhead, dayWords } from './usage.mjs';
 
       const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped' };
       const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision', repeat: 'Repeats' };
@@ -799,13 +799,13 @@
         const L = d.L;
         const date = new Date(d.from * 1000);
         const name = d.n === 0 ? 'Today' : d.n === 1 ? 'Tomorrow' : WEEKDAY[date.getDay()];
-        const sub = `${d.n < 2 ? `${WEEKDAY[date.getDay()]} ` : ''}${date.getDate()} ${date.toLocaleString('en-GB', { month: 'long' })}${d.last ? `, until the reset at ${clock(d.to * 1000)}` : ''}`;
+        const sub = `${d.n < 2 ? `${WEEKDAY[date.getDay()]} ` : ''}${date.getDate()} ${date.toLocaleString('en-GB', { month: 'long' })}${d.after ? `, from the reset at ${clock(d.from * 1000)}: a new week` : d.last ? `, until the reset at ${clock(d.to * 1000)}` : ''}`;
         const fixed = d.lineTo;
         const row = meter(name, sub, d.start, d.share > 0 ? `+${d.share}% of the week` : 'Nothing lands', fixed, 'ahead day');
         row.querySelector('.pct').textContent = L && L.pieces.length ? `~${L.to}%` : `~${d.start}%`;
         const times = row.querySelector('.when');
         for (const x of times.querySelectorAll('small')) x.remove();
-        if (d.lineTo !== null) times.append(el('small', '', d.moving ? `Stop line ${d.lineTo}% by the day's end` : `Stop line ${d.lineTo}%, fixed`));
+        if (d.lineTo !== null) times.append(el('small', '', d.moving ? `Stop line ${d.lineTo}% by ${d.last ? 'the reset' : "the day's end"}` : `Stop line ${d.lineTo}%, fixed`));
         if (L) drawLanding(row.querySelector('.bar'), { ...L, key: `day${d.n}`, lineThen: null, lineAll: null });
         const note = el('p', 'soft note land-note');
         const words = dayWords(d, (t) => clock(t * 1000));
@@ -920,7 +920,7 @@
               const rows = [];
               // Unfolded at once on a click, without waiting for the page's next redraw.
               const show = () => {
-                b.textContent = aheadOpen ? 'Hide the next 20 hours' : `Show the next 20 hours (${WINDOWS_AHEAD} more 5-hour windows)`;
+                b.textContent = aheadOpen ? 'Hide the next 20 hours' : 'Show the next 20 hours';
                 b.setAttribute('aria-expanded', String(aheadOpen));
                 for (const r of rows.splice(0)) r.remove();
                 if (aheadOpen) rows.push(...ws.map(aheadRow));
@@ -937,7 +937,7 @@
               if (aheadOpen && ws.some((w) => w.L?.pieces.length)) landed = true;
             }
           }
-          // H264: under the weekly bar, a button unfolds the days up to its reset (today plus six), one row a day.
+          // H264: under the weekly bar, a button unfolds the whole week (today plus six days, F54: also past the reset), one row a day.
           if (/^weekly.*all/i.test(l.label) && u.readable && E) {
             const ds = daysAhead(l, lines, E, new Date());
             if (ds.length) {
@@ -945,7 +945,7 @@
               const b = el('button', 'chip range ahead-toggle days-toggle');
               const rows = [];
               const show = () => {
-                b.textContent = daysOpen ? 'Hide the days' : `Show the days up to the reset (${ds.length} ${ds.length === 1 ? 'day' : 'days'})`;
+                b.textContent = daysOpen ? 'Hide the whole week' : 'Show the whole week';
                 b.setAttribute('aria-expanded', String(daysOpen));
                 for (const r of rows.splice(0)) r.remove();
                 if (daysOpen) rows.push(...ds.map(dayRow));

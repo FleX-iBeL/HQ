@@ -394,7 +394,9 @@ export function windowWords(w, clock) {
  * six): each with the work landing that day (landing with `to` at its midnight, the reset on the last day), from where
  * the week stands at its start, so a day shows its share of the week; where the moving stop line stands by the day's
  * end; and what waits for that line. Repeating items come back each day they repeat on (every day, or a weekday a week
- * later) while that's still before the reset. `midnight(t)` gives the next local midnight after t (a test passes its own).
+ * later). F54 (25 October 2026, call at 14:39): "i want 7 full days, so on a wednesday its wednesday + 6 days, if its a
+ * saturday its saturday + 6 days": always the whole week, also past the reset; the reset's day is two rows, `last` up to
+ * the reset and `after` the new week from 0%. `midnight(t)` gives the next local midnight after t (a test passes its own).
  * @returns {Array<{ n: number, from: number, to: number, last: boolean, start: number, share: number, L: ReturnType<typeof landing>,
  *   lineFrom: number | null, lineTo: number | null, moving: boolean, waits: Array<{ what: string, start: number }> }>}
  */
@@ -407,13 +409,16 @@ const localMidnight = (t) => {
 export function daysAhead(l, lines, E, now = new Date(), { count = DAYS_AHEAD, midnight = localMidnight } = {}) {
   if (lineKey(l?.label) !== 'weekly' || !l.resetsAt || !E || !Number.isFinite(Number(l.percent))) return [];
   const t = now.getTime() / 1000;
-  const reset = Math.round(new Date(l.resetsAt).getTime() / 60000) * 60;
-  if (!Number.isFinite(reset) || reset <= t) return [];
+  let week = Math.round(new Date(l.resetsAt).getTime() / 60000) * 60;
+  if (!Number.isFinite(week) || week <= t) return [];
+  // F54: always the whole week, today plus six days, also past the weekly reset.
+  let endAll = t;
+  for (let k = 0; k < count; k++) endAll = midnight(endAll);
   const items = { ...(E.items ?? {}) };
   for (const [n, e] of Object.entries(E.items ?? {})) {
     if (!e.every || !e.start || !e.eta) continue;
     const step = e.every === 'day' ? 86400 : 7 * 86400;
-    for (let k = 1; e.start + k * step < reset; k++) {
+    for (let k = 1; e.start + k * step < endAll; k++) {
       items[`${n}+${k}`] = { ...e, what: `${e.what ?? `Planned item ${n}`} (again)`, start: e.start + k * step, eta: e.eta + k * step, usage_wait: false };
     }
   }
@@ -422,18 +427,31 @@ export function daysAhead(l, lines, E, now = new Date(), { count = DAYS_AHEAD, m
   const out = [];
   let at = Number(l.percent);
   let from = t;
-  for (let k = 0; k < count && from < reset; k++) {
-    const to = Math.min(midnight(from), reset);
-    const lw = { label: l.label, percent: at, resetsAt: l.resetsAt };
-    // Today counts everything before its midnight, as the bar itself does; a later day only its own.
-    const L = landing(lw, lines, E2, now, { from: k === 0 ? null : from, to });
-    const a = stopLine(lw, lines, new Date(from * 1000));
-    const b = stopLine(lw, lines, new Date((to - 60) * 1000));
-    const waits = L ? L.pieces.filter((p) => p.waits && p.start >= from && p.start < to).map((p) => ({ what: p.what, start: p.start })) : [];
-    const end = L ? L.to : at;
-    out.push({ n: k, from, to, last: to >= reset, start: r1(at), share: r1(end - at), L, lineFrom: a ? a.line : null, lineTo: b ? b.line : null, moving: !!a?.moving, waits });
-    at = end;
-    from = to;
+  let after = false;
+  for (let k = 0; k < count; k++) {
+    const dayEnd = midnight(from);
+    // A day the week resets on is two rows: up to the reset, then the new week from 0% (F54).
+    for (;;) {
+      const to = Math.min(dayEnd, week);
+      const lw = { label: l.label, percent: at, resetsAt: new Date(week * 1000).toISOString() };
+      // Today counts everything before its midnight, as the bar itself does; a later day (or the new week) only its own.
+      const L = landing(lw, lines, E2, now, { from: k === 0 && !after ? null : from, to });
+      const a = stopLine(lw, lines, new Date(from * 1000));
+      const b = stopLine(lw, lines, new Date((to - 60) * 1000));
+      const waits = L ? L.pieces.filter((p) => p.waits && p.start >= from && p.start < to).map((p) => ({ what: p.what, start: p.start })) : [];
+      const end = L ? L.to : at;
+      const last = to >= week;
+      out.push({ n: k, from, to, last, after, start: r1(at), share: r1(end - at), L, lineFrom: a ? a.line : null, lineTo: b ? b.line : null, moving: !!a?.moving, waits });
+      at = end;
+      after = false;
+      if (last) {
+        at = 0;
+        week += 7 * 86400;
+        after = to < dayEnd;
+      }
+      from = to;
+      if (to >= dayEnd) break;
+    }
   }
   return out;
 }
@@ -442,11 +460,13 @@ export function daysAhead(l, lines, E, now = new Date(), { count = DAYS_AHEAD, m
 export function dayWords(d, clock) {
   const L = d.L;
   const s = [];
+  if (d.after) s.push(`The week reset at ${clock(d.from)}; a new week starts from 0%.`);
+  const when = d.after ? 'after the reset' : 'this day';
   if (L && L.pieces.length) {
     const parts = Object.entries(L.kinds).filter(([, v]) => v > 0).map(([k, v]) => `${LAND_KINDS[k]} ${v}%`);
-    s.push(`If the work goes as estimated, about ${d.share}% of the week lands this day (${parts.join(', ')}), taking it to ${L.to}% around ${clock(L.lands)}.`);
-  } else s.push(`Nothing lands this day; the week stays at about ${d.start}%.`);
-  if (d.moving && d.lineTo !== null) s.push(`By the end of the day the stop line stands at ${d.lineTo}%.`);
+    s.push(`If the work goes as estimated, about ${d.share}% of the week lands ${when} (${parts.join(', ')}), taking it to ${L.to}% around ${clock(L.lands)}.`);
+  } else s.push(`Nothing lands ${when}; the week stays at about ${d.start}%.`);
+  if (d.moving && d.lineTo !== null) s.push(`By ${d.last ? 'the reset' : 'the end of the day'} the stop line stands at ${d.lineTo}%.`);
   else if (d.lineTo !== null) s.push(`The stop line stays at ${d.lineTo}%.`);
   if (d.waits.length) {
     const names = d.waits.map((x) => `${x.what} around ${clock(x.start)}`);
