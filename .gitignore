@@ -2,6 +2,10 @@
 # The user's own files: one folder (it can be a link to a folder elsewhere). Never uploaded.
 /workspace
 /workspace/
+# H56.7: on the server HQ sits around the workspace, and a link HQ -> . makes the workspace's ../HQ paths work.
+# Ignored, so a stash with untracked files (a job setting work aside, an update's backup) never sweeps it away
+# (H162, sweep of 25 October: it went missing on 20 October and the mail check couldn't commit since).
+/HQ
 
 # Runtime, per machine: logs, state, the status page's readings, the Python environment, the models
 /scratch/

@@ -120,12 +120,26 @@ def said(end, now=None):
     return f"{DAYS[e.weekday()].capitalize()} {e.day} {e.strftime('%B')} at {hm}"
 
 
+def _ambiguous(wall):
+    """H162 (sweep of 25 October): the hour the clocks go back happens twice, so its clock time alone can't say which."""
+    t = time.strptime(wall, "%Y-%m-%d %H:%M")
+    a, b = (int(time.mktime((*t[:8], dst))) for dst in (0, 1))
+    return a != b and all(time.strftime("%Y-%m-%d %H:%M", time.localtime(x)) == wall for x in (a, b))
+
+
 def stamp(end):
-    """How the end stands on the roadmap's Mail check line: 2026-10-16 22:00."""
-    return time.strftime("%Y-%m-%d %H:%M", time.localtime(end))
+    """How the end stands on the roadmap's Mail check line: 2026-10-16 22:00. In the hour that happens twice
+    when the clocks go back, with its offset: 2026-10-25 02:10+02:00."""
+    wall = time.strftime("%Y-%m-%d %H:%M", time.localtime(end))
+    if _ambiguous(wall):
+        z = time.strftime("%z", time.localtime(end))
+        wall += f"{z[:3]}:{z[3:]}"
+    return wall
 
 
 def from_stamp(s):
+    if len(s) > 16:  # with its offset (above)
+        return int(datetime.strptime(s[:16] + s[16:].replace(":", ""), "%Y-%m-%d %H:%M%z").timestamp())
     return int(time.mktime(time.strptime(s, "%Y-%m-%d %H:%M")))
 
 

@@ -12253,6 +12253,9 @@ window.fetch = async (url, opt) => {
                             ("2 days", now + 2 * 86400), ("2026-10-19 14:00", at(2026, 10, 19, 14))):
             need(mf.parse(words, now) == int(want), f"'{words}' reads as {mf.stamp(mf.parse(words, now))}, not {mf.stamp(want)}")
         need(mf.parse("Friday", at(2026, 10, 16, 23)) == int(at(2026, 10, 23, 22)), "'Friday' late on a Friday isn't the next one")
+        # H162 (sweep of 25 October): the hour the clocks go back happens twice; both reads come back as written
+        for t in (1792887000, 1792890600, 1792894200, 1792850400):
+            need(mf.from_stamp(mf.stamp(t)) == t, f"{t} reads back as {mf.from_stamp(mf.stamp(t))} from '{mf.stamp(t)}'")
         for words in ("banana", "5 minutes", "3 weeks", "until 99:00"):
             try:
                 mf.parse(words, now)

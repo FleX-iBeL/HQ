@@ -1274,6 +1274,11 @@ def tick():
                 time.sleep(wait)
             end_chat(pid)
             log(f"job {s.get('n')} finished; closed its window")
+        # H162 (sweep of 25 October): a job that went quiet and then said done (or was held) kept its
+        # quiet incident open, and the next quiet job's would have been added to that one.
+        if incidents.is_down("jobs"):
+            incidents.fix("jobs", f"Job {s.get('n')} isn't running any more (done or held)")
+            incidents.up("jobs")
         clear()
         quiet.clear_request()  # H36: a nudge that wasn't picked up is for nobody now
     if handing_back:

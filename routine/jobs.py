@@ -76,7 +76,7 @@ MAIL = True  # the hourly mail check through the routine (L8); its own switch, s
 # H149: (from, until) epoch seconds while the mail check runs every 15 minutes for a while he named, else None.
 # Kept on the Mail check line; once `until` has passed it counts as hourly and the next write drops it.
 MAIL_FAST = None
-FAST_RE = re.compile(r"every 15 minutes from (\d{4}-\d\d-\d\d \d\d:\d\d) until (\d{4}-\d\d-\d\d \d\d:\d\d)")
+FAST_RE = re.compile(r"every 15 minutes from (\d{4}-\d\d-\d\d \d\d:\d\d(?:[+-]\d\d:\d\d)?) until (\d{4}-\d\d-\d\d \d\d:\d\d(?:[+-]\d\d:\d\d)?)")
 
 
 @contextmanager
