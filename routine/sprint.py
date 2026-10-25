@@ -473,7 +473,41 @@ def plan():
     out.sort(key=lambda x: group_key(x, roadmap_place))  # H271: Must first, bugs first in each group, then the rank
     counts = {MOSCOW_NAMES[g]: sum(1 for x in out if x.get("moscow") == g) for g in GROUPS}
     return {"rows": out, "ranked": len(ranked), "tagged": len(tags), "groups": counts,
-            "ready": sum(1 for v in readies.values() if v == "ready")}
+            "ready": sum(1 for v in readies.values() if v == "ready"), "totals": totals(out)}
+
+
+TOTAL_PARTS = (("not_ready", "Not ready"), ("ready", "Ready, not planned yet"), ("planned", "Planned"), ("total", "Total"))
+
+
+def part_of(x):
+    """H275: which total a planning row counts in: planned (with the team, or planned for a night), else ready (its
+    Ready mark on and its words unchanged since), else not ready. Ready never counts what's planned, so the three add up."""
+    if x.get("team") or x.get("planned"):
+        return "planned"
+    return "ready" if x.get("ready") == "ready" else "not_ready"
+
+
+def totals(rows):
+    """H275: the planning's totals, the way the job list shows its own: per part (not ready, ready and not yet
+    planned, planned) and in all, how many rows, the minutes and the share of the 5-hour and the weekly."""
+    t = {k: {"count": 0, "minutes": 0, "five": 0.0, "weekly": 0.0} for k, _ in TOTAL_PARTS}
+    for x in rows:
+        for k in (part_of(x), "total"):
+            t[k]["count"] += 1
+            t[k]["minutes"] += x.get("est") or 0
+            for c in ("five", "weekly"):
+                t[k][c] += (x.get("cost") or {}).get(c) or 0
+    for v in t.values():
+        v["five"], v["weekly"] = round(v["five"], 1), round(v["weekly"], 1)
+    return t
+
+
+def total_words(t):
+    """H275: one total in words: "6 rows, about 2 h, 5-hour 40%, weekly 9%"."""
+    s = f"{t['count']} {'row' if t['count'] == 1 else 'rows'}"
+    if t["count"]:
+        s += f", about {E.dur(t['minutes'])}, 5-hour {E._pct(t['five'])}, weekly {E._pct(t['weekly'])}"
+    return s
 
 
 def row_words(x):
@@ -504,6 +538,9 @@ def words(p):
         return "Nothing open on the planning."
     head = (f"The planning, {len(p['rows'])} open rows, {p['ranked']} ranked, {p.get('tagged', 0)} with a MoSCoW tag, {p.get('ready', 0)} marked ready; "
             "grouped Must, Should, Could, not sorted yet, Won't, bugs first in each (estimate):")
+    t = p.get("totals")
+    if t:  # H275
+        head += "\nTotals: " + "; ".join(f"{name}: {total_words(t[k])}" for k, name in TOTAL_PARTS) + "."
     return "\n".join([head] + lines)
 
 

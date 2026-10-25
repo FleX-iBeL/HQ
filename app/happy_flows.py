@@ -13032,6 +13032,93 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         return ("a Ready mark per row next to its rank and tag, changed since ready on new words, check says the missing points; "
                 "Plan the sprint and send-row leave out unready rows, a call's add only on his say-so (and says so); the page ticks it; a call may")
 
+    async def flow149(self) -> str:
+        """H275: the sprint planning's totals. No Claude turns. sprint.py json carries totals in four parts: not ready,
+        ready and not planned yet, planned (with the team, or planned for a night), and the total; ready never counts a
+        planned row (one marked ready and planned counts as planned), so the three add up to the total in rows, minutes
+        and the share of the 5-hour and the weekly; the list a call reads says them; the status page shows them as a
+        fold at the top of Sprint planning (the sum in its heading, the four lines inside); the tutorial and the
+        changelog say it."""
+        import json as js
+        import subprocess as sp
+        rm, env, now = self._sprint_lay_env("H275")
+        env.pop("HQ_SPRINT_NOW")
+        env["HQ_ROLE_HERE"] = "1"
+        import datetime as _dt
+        d1 = (_dt.date.today() + _dt.timedelta(days=1)).isoformat()
+        ok = lambda r, what: need(r.returncode == 0, f"H275: {what}: {r.stdout[-300:]} {r.stderr[-600:]}")  # noqa: E731
+        for l in ("H9004", "H9006", "H9007"):
+            ok(self._sprint(env, "ready", l), f"ready {l}")
+        jobs = lambda *a: sp.run(["python3", str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)  # noqa: E731
+        sched = lambda *a: sp.run(["python3", str(ROOT / "routine/schedule.py"), *a], capture_output=True, text=True, env=env)  # noqa: E731
+        ok(jobs("add", "H9001 on the HQ roadmap: the first row. Read the H9001 row.", "--not-ready"), "with the team")
+        ok(sched("add", f"{d1} 23:00", "H9007 on the HQ roadmap: the seventh row."), "planned for a night")
+        p = js.loads(self._sprint(env, "json").stdout)
+        T, rows = p.get("totals"), p["rows"]
+        need(T and set(T) == {"not_ready", "ready", "planned", "total"}, f"H275: no totals in four parts: {T}")
+        by = lambda f: [x for x in rows if f(x)]  # noqa: E731
+        planned = by(lambda x: x.get("team") or x.get("planned"))
+        ready = by(lambda x: x.get("ready") == "ready" and not (x.get("team") or x.get("planned")))
+        need(sorted(x["label"] for x in planned) == ["H9001", "H9007"] and T["planned"]["count"] == 2,
+             f"H275: planned isn't the row with the team and the one planned for a night: {T['planned']} {[x['label'] for x in planned]}")
+        need(sorted(x["label"] for x in ready) == ["H9004", "H9006"] and T["ready"]["count"] == 2,
+             f"H275: ready counts a planned row, or misses one: {T['ready']}")
+        need(T["not_ready"]["count"] == len(rows) - 4 and T["total"]["count"] == len(rows), f"H275: not ready or the total is off: {T}")
+        for k in ("count", "minutes", "five", "weekly"):
+            parts = T["not_ready"][k] + T["ready"][k] + T["planned"][k]
+            need(abs(parts - T["total"][k]) < 0.25, f"H275: the three don't add up to the total in {k}: {T}")
+        need(T["total"]["minutes"] == sum(x["est"] for x in rows) and T["ready"]["minutes"] == sum(x["est"] for x in ready),
+             f"H275: the minutes aren't the rows' estimates: {T}")
+        need(T["total"]["weekly"] > 0, f"H275: no usage in the totals: {T}")
+        lst = self._sprint(env, "list").stdout
+        need("Totals: Not ready: " in lst and "Ready, not planned yet: 2 rows" in lst and "Planned: 2 rows" in lst
+             and f"Total: {len(rows)} rows" in lst, f"H275: the list a call reads doesn't say the totals: {lst[:500]}")
+        tour = js.loads((APP / "web/tour.json").read_text())
+        need(any("Totals" in s_["title"] for p_ in tour["pieces"] for s_ in p_["steps"]), "H275: no tutorial step on the totals")
+        need("(H275)" in (ROOT / "CHANGELOG.md").read_text(), "H275: not in the changelog")
+        # the status page: the fold at the top of Sprint planning, folded, the sum in its heading, the four lines inside
+        import urllib.request
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        site = self.tmp / "h275-site"
+        shutil.rmtree(site, ignore_errors=True)
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        (site / ".status").mkdir()
+        for dname in ("routine", "app"):
+            (site / dname).symlink_to(ROOT / dname)
+        port = 4797
+        senv = {**env, "HQ_STATUS_PORT": str(port)}
+        senv.pop("HQ_ROLE_HERE", None)
+        srv = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=senv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        base = f"http://127.0.0.1:{port}"
+        try:
+            for _ in range(50):
+                try:
+                    urllib.request.urlopen(base + "/routines.json", timeout=5).read()
+                    break
+                except Exception:
+                    await asyncio.sleep(0.2)
+            cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+            cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+            chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            need(Path(chrome).exists(), "no headless browser found to run the status page in")
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'h275-profile'}", "--virtual-time-budget=20000", "--dump-dom", base + "/"], timeout=150)
+            dom = r.stdout
+            sp_ = dom[dom.find("Sprint planning"):]
+            tot = sp_[sp_.find(">Totals<"):]
+            need(">Totals<" in sp_ and sp_.find(">Totals<") < sp_.find("The night the sprint starts"),
+                 f"H275: no Totals fold at the top of Sprint planning: {sp_[:600]!r}")
+            need(f"{len(rows)} items, about " in tot[:400] and "(computed estimate)" in tot[:400], f"H275: the fold's heading doesn't carry the sum: {tot[:400]!r}")
+            for k, name in (("not_ready", "Not ready"), ("ready", "Ready, not planned yet"), ("planned", "Planned"), ("total", "Total")):
+                need(f'data-part="{k}"' in tot and f">{name}<" in tot, f"H275: the fold has no {name} line: {tot[:900]!r}")
+            need("2 items, about " in tot and "of the 5-hour" in tot and "of the week" in tot, f"H275: the lines don't say items, time and usage: {tot[:900]!r}")
+            need(re.search(r'<details class="fold sub"[^>]*>\s*<summary[^>]*>(?:(?!</summary>).)*>Totals<', sp_, re.S) and "open" not in
+                 re.search(r'<details class="fold sub"([^>]*)>\s*<summary[^>]*>(?:(?!</summary>).)*>Totals<', sp_, re.S).group(1),
+                 "H275: the totals aren't a fold that starts closed")
+        finally:
+            srv.terminate()
+        return f"four totals ({T['not_ready']['count']} not ready, 2 ready, 2 planned, {T['total']['count']} in all) that add up; the list says them; a fold at the top of Sprint planning"
+
     async def flow106(self) -> str:
         """H160, no Claude: the team's work from the status page, without a call. jobs.py add-row on a copy of the
         roadmap puts a numbered row first (H, or F for a bug, the next free number, right after that phase's highest;
@@ -18153,6 +18240,7 @@ FLOWS = {
     143: ("H269: the planning's rank: set on a call, 1 the top, moved and taken off, a new row unranked and the others kept, a done row dropping out, the list a call reads in rank order", False, "flow143"),
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
+    149: ("H275: the sprint planning's totals: not ready, ready and not planned yet, planned (with the team or for a night), and the total, adding up in rows, time and usage; the list a call reads; a fold at the top of Sprint planning", False, "flow149"),
     148: ("H272: the Ready mark on every planning row: set and taken off (a call may, the backup hands it on), next to the rank and tag, changed since ready on new words, Plan the sprint and Send to the team leave out unready rows and say why, a call's add only on his say-so, the page's tick", False, "flow148"),
     146: ("H269: Plan the sprint: the ticked rows on the schedule in rank order at their nights, not twice, through the status server and its page, a call may, the backup hands it on", False, "flow146"),
     144: ("H269: an estimate of time and usage on every open planning row, made like the team's (kind, size, similar jobs, the first look), again on new words, never on a move or a rank; served and shown on the status page", False, "flow144"),

@@ -289,6 +289,12 @@
       .ready-tick input { margin: 0; width: 16px; height: 16px; }
       .ready-note { color: var(--red); font-size: 13px; }
       .mo-bug { font-size: 12px; font-weight: 600; padding: 0 5px; border-radius: 4px; border: 1px solid var(--red); color: var(--red); margin-left: 4px; }
+      /* H275: the sprint planning's totals */
+      .sprint-total { display: flex; flex-wrap: wrap; gap: 2px 12px; justify-content: space-between; padding: 10px 20px; }
+      .sprint-total .name { font-weight: 600; }
+      .sprint-total .what { overflow-wrap: anywhere; }
+      .card > .sprint-total.sum { border-top-width: 2px; }
+      .sprint-totals .soft { margin: 0; padding: 10px 20px; font-size: 13px; }
       .sprint-line { margin: 10px 0; padding: 6px 0; border-top: 2px dashed var(--bad, #c0392b); color: var(--bad, #c0392b); font-size: 14px; }
       .eta-guess { display: block; font-size: 12px; color: var(--soft); opacity: 0.75; font-style: italic; }
       /* H174: what a total counts, right under its heading */
@@ -1104,6 +1110,25 @@
       /** H271: the MoSCoW groups, in the order the sprint shows them. */
       const MOSCOW = [{ key: 'must', name: 'Must' }, { key: 'should', name: 'Should' }, { key: 'could', name: 'Could' }, { key: 'none', name: 'Not sorted yet' }, { key: 'wont', name: "Won't this time" }];
       const moscowOf = (t) => MOSCOW.find((m) => m.key === (t || 'none')) || MOSCOW[3];
+      /** H275: the planning's totals as a fold: the sum in its heading, the three parts and the total inside. */
+      const SPRINT_TOTALS = [['not_ready', 'Not ready'], ['ready', 'Ready, not planned yet'], ['planned', 'Planned'], ['total', 'Total']];
+      function sprintTotalWords(t) {
+        if (!t?.count) return 'nothing';
+        return `${t.count} ${t.count === 1 ? 'item' : 'items'}, about ${etaDur(t.minutes)}, ${etaPct(t.five)} of the 5-hour, ${etaPct(t.weekly)} of the week`;
+      }
+      function sprintTotals(T) {
+        const fold = foldPart('sprint-totals', false, 'Totals', `${sprintTotalWords(T.total)} (computed estimate)`, true);
+        const card = el('div', 'card sprint-totals');
+        for (const [k, name] of SPRINT_TOTALS) {
+          const row = el('div', `sprint-total${k === 'total' ? ' sum' : ''}`);
+          row.dataset.part = k;
+          row.append(el('span', 'name', name), el('span', 'what', sprintTotalWords(T[k])));
+          card.append(row);
+        }
+        card.append(el('p', 'soft', 'Ready leaves out what\'s already planned, so the three add up to the total. Planned is with the team or planned for a night.'));
+        fold.append(card);
+        return fold;
+      }
       function drawSprint(P) {
         const box = el('section', 'sprint');
         const open = P.rows.filter((x) => !x.team && !x.planned);
@@ -1111,6 +1136,8 @@
         const ticked = open.filter((x) => sprint.ticks.has(x.label)).map((x) => x.label);
         const fold = foldPart('sprint', false, 'Sprint planning', `${P.rows.length} on the planning · ${P.ranked} ranked · ${P.tagged ?? 0} with a MoSCoW tag · ${P.ready ?? 0} ready · ${ticked.length} ticked for this sprint`);
         const parts = el('div', 'parts');
+        // H275: the totals, like the job list's: not ready, ready and not planned yet, planned, and all of it; a tap unfolds them.
+        if (P.totals) parts.append(sprintTotals(P.totals));
         // The night it starts from: tonight or one of the six after it.
         const pick = el('div', 'sprint-pick');
         const sel = el('select');
