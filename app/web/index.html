@@ -993,7 +993,7 @@
   #tourdemo .mx div { border-radius:10px; padding:7px 8px; background:var(--ring); font-size:13px; line-height:1.3; }
   #tourdemo .mx div:first-child { box-shadow:inset 0 0 0 2px var(--accent); }
   #tourdemo .mx b { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); margin-bottom:3px; }
-  #tourcard .btns { display:flex; gap:8px; margin-top:4px; }
+  #tourcard .btns { display:flex; gap:8px; margin-top:auto; padding:4px 0 14px; flex:0 0 auto; position:sticky; bottom:-14px; margin-bottom:-14px; background:var(--bg); }
   #tourcard .btns button { flex:1; padding:11px 8px; border-radius:999px; font:600 15px/1 -apple-system,sans-serif; cursor:pointer; border:2px solid var(--muted);
                            background:transparent; color:var(--fg); }
   #tourcard .btns #tournext { border-color:var(--fg); background:var(--fg); color:var(--bg); }
@@ -4203,31 +4203,47 @@ function tourDemo(d) {
     box.append(g);
   }
 }
-function tourDraw() {
-  if (!tourAt || !TOUR) return;
-  const pc = TOUR.pieces[tourAt.p], st = pc.steps[tourAt.s], last = tourAt.s === pc.steps.length - 1;
-  document.getElementById("tourstep").textContent = tourName(pc.title) + (pc.steps.length > 1 ? ` · ${tourAt.s + 1} of ${pc.steps.length}` : "");
+function tourFill(pc, i) {
+  const st = pc.steps[i];
+  document.getElementById("tourstep").textContent = tourName(pc.title) + (pc.steps.length > 1 ? ` · ${i + 1} of ${pc.steps.length}` : "");
   document.getElementById("tourtitle").textContent = tourName(st.title);
   document.getElementById("tourtext").textContent = tourName(st.text);
   const top = tourCard.querySelector(".top"); top.querySelector(".soon")?.remove();
   if (st.soon) { const t = document.createElement("span"); t.className = "soon"; t.textContent = "Coming soon"; top.querySelector(".demo").after(t); }
   tourDemo(st.demo);
-  const r = tourTarget(st.target), where = document.getElementById("tourwhere");
-  where.hidden = !(st.target && !r);
-  where.textContent = "It isn't on this screen right now: it may be switched off in Settings, under What HQ helps you with.";
+  const where = document.getElementById("tourwhere");
+  where.hidden = !(st.target && !tourTarget(st.target));
+  where.textContent = "It isn't on this screen right now: it shows up on a call, or it's switched off in Settings, under What HQ helps you with.";
+}
+// H208: Next stayed put on the iPhone but the buttons jumped: the card took each step's own height, so Back, Ask and
+// Next moved up or down with every text. Now the whole piece gets the height of its tallest step (measured once,
+// hidden), the buttons sit at the card's bottom, and on the same spotlight the card and its buttons don't move at all.
+function tourHeight(pc) {
+  let h = 0;
+  Object.assign(tourCard.style, { visibility: "hidden", top: "0px", bottom: "", transform: "", maxHeight: "", height: "" });
+  for (let i = 0; i < pc.steps.length; i++) { tourFill(pc, i); h = Math.max(h, tourCard.offsetHeight); }
+  tourCard.style.visibility = "";
+  return h;
+}
+function tourDraw() {
+  if (!tourAt || !TOUR) return;
+  const pc = TOUR.pieces[tourAt.p], st = pc.steps[tourAt.s], last = tourAt.s === pc.steps.length - 1;
+  if (!tourAt.h) tourAt.h = tourHeight(pc);
+  tourFill(pc, tourAt.s); tourCard.scrollTop = 0;
+  const r = tourTarget(st.target);
   tourLayer.classList.toggle("nospot", !r);
   if (r) {
     const pad = 6;
     Object.assign(tourSpot.style, { left: r.left - pad + "px", top: r.top - pad + "px", width: r.width + 2 * pad + "px", height: r.height + 2 * pad + "px" });
   }
   // the card where it doesn't cover the spotlight: on the side with room for it (else the roomier side, scrolling inside)
-  Object.assign(tourCard.style, { top: "", bottom: "", transform: "", maxHeight: "" });
-  const gap = 12, ch = tourCard.offsetHeight;
-  if (!r) Object.assign(tourCard.style, { top: "50%", transform: "translateY(-50%)", maxHeight: innerHeight - 2 * gap + "px" });
+  Object.assign(tourCard.style, { top: "", bottom: "", transform: "", maxHeight: "", height: "" });
+  const gap = 12, ch = tourAt.h, fit = room => Math.min(ch, room) + "px";
+  if (!r) Object.assign(tourCard.style, { top: "50%", transform: "translateY(-50%)", height: fit(innerHeight - 2 * gap), maxHeight: innerHeight - 2 * gap + "px" });
   else {
     const above = r.top - 6 - 2 * gap, under = innerHeight - r.bottom - 6 - 2 * gap;
-    if (under >= ch || (above < ch && under > above)) Object.assign(tourCard.style, { top: r.bottom + 6 + gap + "px", maxHeight: under + "px" });
-    else Object.assign(tourCard.style, { bottom: innerHeight - r.top + 6 + gap + "px", maxHeight: above + "px" });
+    if (under >= ch || (above < ch && under > above)) Object.assign(tourCard.style, { top: r.bottom + 6 + gap + "px", height: fit(under), maxHeight: under + "px" });
+    else Object.assign(tourCard.style, { bottom: innerHeight - r.top + 6 + gap + "px", height: fit(above), maxHeight: above + "px" });
   }
   const prev = document.getElementById("tourprev"), next = document.getElementById("tournext"), ask = document.getElementById("tourask");
   prev.disabled = tourAt.s === 0;
@@ -4278,7 +4294,7 @@ window.addEventListener("keydown", ev => {
     else if (ev.key === "ArrowLeft") { ev.preventDefault(); tourStepBy(-1); }
   } else if (ev.key === "Escape" && tourEl.classList.contains("open")) showTour(false);
 });
-window.addEventListener("resize", () => { if (tourAt) tourDraw(); });
+window.addEventListener("resize", () => { if (tourAt) { tourAt.h = 0; tourDraw(); } });
 try { if (!localStorage.getItem("hq-tour-opened")) helpBtn.classList.add("new"); } catch (e) {}
 // next to Settings, the same height, so the top left reads as one row
 function placeHelp() {

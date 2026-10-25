@@ -18017,7 +18017,9 @@ const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "
         sits at the top left without touching anything, opens the tutorial (the demo note, a demo call button per agent,
         one line per piece); every step of every piece keeps its card inside the screen and off the spotlight; a tap
         beside the card presses nothing underneath; a finished piece is ticked; Ask starts a demo call about that piece.
-        Screenshots go to HQ_SHOTS_DIR (else the flow's own folder)."""
+        Screenshots go to HQ_SHOTS_DIR (else the flow's own folder). H208: the pieces on getting HQ running (the phone,
+        a server, two HQs, the Mac app, updates) and the changelog's features it missed are in, no AI wording, and on
+        the same spotlight Next doesn't move between steps."""
         import brain as _brain  # noqa: F401
         import agents
         import tour
@@ -18031,6 +18033,20 @@ const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "
             need(want in ids, f"no piece about {want}")
         targets = {s["target"] for p in t["pieces"] for s in p["steps"] if s["target"]}
         need(all(f'id="{x}"' in page for x in targets), f"a spotlight on a button the page doesn't have: {sorted(x for x in targets if f'id={chr(34)}{x}{chr(34)}' not in page)}")
+        # H208: getting HQ running (the phone, a server, two HQs) and the 34 features the changelog had and the tutorial missed
+        for want in ("phone", "server", "twohq", "mac", "updates", "together", "sprint"):
+            need(want in ids, f"H208: no piece about {want}")
+        whole = json.dumps(t)
+        features = ["give me {pepper}", "bring in {pepper}", "four", "bye", "slide up onto Yes", "opens with one tap", "space bar",
+                    "Add to Home Screen", "Linux server", "green Main", "make the server main", "Mac app", "the dog", "grey number",
+                    "Update button", "a bell", "let me know when", "let me know if it rains", "her own", "check my mail more often",
+                    "official weather warning", "rain radar", "let me know between 2 and 6", "Ticked off", "sorting rule",
+                    "Gmail filter", "a day and a time", "repeat", "priority tag", "fix a line", "Show the next 20 hours",
+                    "Show the whole week", "Totals", "Ready", "carry on or stop", "Incidents", "lid", "Other sound to Normal"]
+        missing = [f for f in features if f not in whole]
+        need(not missing, f"H208: the tutorial misses {missing}")
+        slop = [w for w in ("seamless", "effortless", "empower", "leverage", "elevate", "unlock", "delve", "robust", "safe playground") if w in whole.lower()]
+        need(not slop, f"H208: AI wording in the tutorial: {slop}")
         last = t["pieces"][-1]
         need(last.get("closing") and any(s.get("soon") for s in last["steps"]) and "own headquarters" in json.dumps(last),
              "the closing part (built to be expanded, best practices coming soon) is missing")
@@ -18087,7 +18103,7 @@ const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "
   out.push("sheet:" + (tr.width > 0 && tr.right <= innerWidth + 1 && tr.top >= 0 && document.documentElement.scrollWidth <= innerWidth + 1 ? "ok" : "off"));
   const shot = location.hash.slice(1);
   if (shot === "list") return done();
-  let steps = 0, bad = [];
+  let steps = 0, bad = [], jumps = 0;
   for (let i = 0; i < pieces.length; i++) {
     tourStart(i); await wait(10);
     const n = TOUR.pieces[i].steps.length;
@@ -18102,7 +18118,10 @@ const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "
       const want = TOUR.pieces[i].steps[s].target, el = want && $(want);
       if (el && el.offsetParent !== null && !el.classList.contains("featoff") && !spot) bad.push(TOUR.pieces[i].id + s + " no spot on " + want);
       if (document.documentElement.scrollWidth > innerWidth + 1) bad.push("sideways");
+      const nb = $("tournext").getBoundingClientRect(), same = s + 1 < n && TOUR.pieces[i].steps[s + 1].target === want;
       $("tournext").click(); await wait(10);
+      // H208: on the same spotlight, Next doesn't move under the finger
+      if (same) { const na = $("tournext").getBoundingClientRect(); if (Math.abs(na.top - nb.top) > 1 || Math.abs(na.left - nb.left) > 1) { jumps++; bad.push(TOUR.pieces[i].id + s + " Next jumped " + Math.round(na.top - nb.top)); } }
     }
     if (!$("tour").classList.contains("open")) bad.push(TOUR.pieces[i].id + " didn't go back to the list");
   }

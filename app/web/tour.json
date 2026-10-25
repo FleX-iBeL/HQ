@@ -1,177 +1,248 @@
 {
-  "_about": "H74: the get-started tutorial. The call page shows these pieces on its real screens (the question mark at the top left); the demo call (app/tour.py) reads the same text, so both say the same. Demo content only: nothing here is anyone's real life. {donna}, {pepper} and {moneypenny} become the names of this HQ's agents.",
-  "intro": "HQ is your own headquarters. You call your team, and they don't just answer: they write things down, plan your days and do the work. Pick a short piece below to see where everything is, or try a demo call and ask anything.",
-  "demo_note": "Demo: everything in this tutorial is made-up example content. Nothing you tap here changes your HQ, and nothing is saved.",
+  "_about": "H74: the get-started tutorial. The call page shows these pieces on its real screens (the question mark at the top left); the demo call (app/tour.py) reads the same text, so both say the same. Demo content only: nothing here is anyone's real life. {donna}, {pepper} and {moneypenny} become the names of this HQ's agents. H208 (25 October 2026): rewritten in plain words, with getting HQ running (the phone, a server, two HQs, the Mac app, updates) and every feature from the changelog it was missing.",
+  "intro": "HQ is your own office, with a team in it. You call them, and they don't just talk back: they write things down, plan your days and get work done while you're away. Pick a piece below to see where things are, or try a demo call and ask whatever you want.",
+  "demo_note": "Demo: everything in this tutorial is made up. Nothing you tap here changes your HQ, and nothing is saved.",
   "pieces": [
     {
-      "id": "call", "title": "Call your team", "line": "Who you call, and how a call works",
+      "id": "call", "title": "Call your team", "line": "Who to call, and how a call goes",
       "steps": [
-        {"target": "modes", "title": "Pick who you call", "text": "{donna} is quick: your day, your list, your mail, quick orders. {pepper} takes her time: planning, sparring, thinking something through. {moneypenny} is cool and composed: she runs the building with the team and makes sure work is ready before it's built, and done before it's called done. Each has her own voice and character, and her own week: little things from her day come up, like a real colleague."},
-        {"target": "btn", "title": "Tap to call", "text": "One tap and she picks up. Talk the way you would on the phone. You can cut in at any moment and she stops talking."},
-        {"target": "btn", "title": "Call me back, or call me later", "text": "Say \"hang up and call me back\" and she does: the app starts fresh and she rings straight back, carrying on the same call. Or agree a time, \"call me at three\", or \"call me when my appointment starts\": your phone shows \"{pepper} is calling\", and one tap picks up. She already knows what it's about. Missed it? {donna} tells you in her texts.",
-         "demo": {"kind": "chat", "items": [["you", "Call me at three about the report, okay?"], ["agent", "Will do. I'll ring you at three."]]}},
-        {"target": "cancel", "title": "Take it back", "text": "Said something you didn't mean, or she heard you wrong? On a call, Cancel takes back what you just said, before she acts on it. She asks once to be sure."},
-        {"target": "mute", "title": "Mute, or hold to talk", "text": "On a call this button mutes you with a tap. Hold it down to talk as long as you like, even with long pauses; let go and she answers."},
-        {"target": "status", "title": "What she's doing", "text": "This line says it: listening, thinking, talking. While she thinks you hear a soft tick, never silence.",
-         "demo": {"kind": "chat", "items": [["you", "What's on my plate today?"], ["agent", "Three things. The dentist at ten, a call with Alex at two, and the report you wanted done before Friday."]]}}
+        {"target": "modes", "title": "Pick who you call", "text": "{donna} is the quick one. Your day, your list, your mail, small jobs. {pepper} takes her time. Call her to plan, to think something through, or to talk about the bigger picture. {moneypenny} looks after the building of HQ with the team. They each have their own voice and their own week, and now and then something from their day comes up, like with a colleague."},
+        {"target": "btn", "title": "Tap to call", "text": "One tap and she picks up. Talk like you would on the phone. You can cut in any time, and she stops talking."},
+        {"target": "btn", "title": "Call me back, or call me later", "text": "Say \"hang up and call me back\" and she does. The app starts fresh and she calls you straight back, on the same call. You can also agree a time: \"call me at three\", or \"call me when my appointment starts\". Your phone then shows \"{pepper} is calling\", and one tap picks up. She already knows what it's about. If you miss it, {donna} tells you in her texts.",
+         "demo": {"kind": "chat", "items": [["you", "Call me at three about the report, okay?"], ["agent", "Will do. I'll call you at three."]]}},
+        {"target": "cancel", "title": "Take it back", "text": "Said something you didn't mean, or she heard you wrong? Cancel takes back what you just said, before she does anything with it. She asks once to make sure."},
+        {"target": "mute", "title": "Mute, or hold to talk", "text": "Tap this button to mute yourself. Hold it down to talk for as long as you want, pauses and all. Let go and she answers."},
+        {"target": "status", "title": "What she's doing", "text": "This line tells you: listening, thinking or talking. While she thinks you hear a soft tick, so it's never just silence.",
+         "demo": {"kind": "chat", "items": [["you", "What's on my plate today?"], ["agent", "Three things. The dentist at ten, a call with Alex at two, and the report you wanted done before Friday."]]}},
+        {"target": "btn", "title": "Hang up by saying bye", "text": "You don't have to press anything to end a call. Say bye, \"that's it, see you later\" or \"cheers\", and she says goodbye and hangs up. Her goodbye goes with what you're doing next, like the appointment that's coming up. Say something right after and the call goes on."}
       ]
     },
     {
-      "id": "chat", "title": "The chat, and typing instead", "line": "Read back what was said, or type when you can't talk",
+      "id": "together", "title": "Calls with more than one", "line": "Hand over, or bring someone in",
       "steps": [
-        {"target": "chatbtn", "title": "What was said", "text": "The chat shows the whole call as text, as it happens. Lists and bold words show there; she never reads the marks out loud."},
-        {"target": "chatbtn", "title": "Type instead of talking", "text": "On a train or in a library? Type in the chat's box and she answers out loud and in the chat. After a call, Call back and continue picks up right where you were.",
+        {"target": "modes", "title": "Hand the call over", "text": "Calling {donna} but it's really something for {pepper}? Say \"give me {pepper}\". {donna} hangs up the normal way, notes and all, and {pepper} picks up right away, knowing what was said.",
+         "demo": {"kind": "chat", "items": [["you", "Give me {pepper}, I want to plan my week."], ["agent", "Sure, putting you through."]]}},
+        {"target": "modes", "title": "Bring someone in", "text": "Want both on the line? Say \"bring in {pepper}\" and it's a three-way call. Bring in one more and it's four. The one who joins says hi in her own voice. The screen shows everyone in their own colour."},
+        {"target": "modes", "title": "Who answers", "text": "With more than one on the line, the one you talk to answers. Start with her name, \"{pepper}, what do you think?\", or end with it. Talking about someone doesn't count, so \"what do you think of {moneypenny}'s idea?\" goes to whoever you asked. A plain \"yes\" goes to the one who spoke last."}
+      ]
+    },
+    {
+      "id": "chat", "title": "The chat, and typing", "line": "Read back what was said, or type when you can't talk",
+      "steps": [
+        {"target": "chatbtn", "title": "What was said", "text": "The chat shows the whole call as text while it happens. Lists and bold words show up there, but she never reads the marks out loud."},
+        {"target": "chatbtn", "title": "Type instead of talking", "text": "On a train or in a library? Type in the chat and she answers out loud and in the chat. After a call, Call back and continue picks up where you left off.",
          "demo": {"kind": "chat", "items": [["you", "Remind me to buy coffee tomorrow"], ["agent", "Done. I'll text you tomorrow morning at nine."]]}},
-        {"target": "voicebtn", "title": "Mute her voice", "text": "Turns her voice off and on, for when you'd rather read. She keeps answering in the chat."}
+        {"target": "chatbtn", "title": "A quick yes", "text": "She asks for your yes before some things. With nothing typed, hold the grey Send button, slide up onto Yes and let go. That sends a yes without typing a word."},
+        {"target": "chatbtn", "title": "Links you can tap", "text": "When she gives you a web link, it opens with one tap: in the call's chat, in past calls and in {donna}'s chat. The call keeps going in the meantime. She never reads a link out loud."},
+        {"target": "voicebtn", "title": "Turn her voice off", "text": "Turns her voice off and on again, for when you'd rather read. She keeps answering in the chat."}
       ]
     },
     {
       "id": "todo", "title": "Your to-do list, the Eisenhower way", "line": "Everything to do, sorted by what really matters",
       "steps": [
-        {"target": "todobtn", "title": "One list for everything", "text": "Everything you have to do lives here, in four squares: important or not, urgent or not. Important but not urgent comes first, because that's where the things that really move your life forward are."},
-        {"target": "todobtn", "title": "You just talk", "text": "Keeping a list like this is usually a lot of admin. In HQ you just say it on a call or in a text: it lands in the right square, in your own words. Done or let go, and it moves, with a line so you can look back.",
+        {"target": "todobtn", "title": "One list for everything", "text": "Everything you have to do goes here, in four boxes: important or not, urgent or not. Important but not urgent comes first. That's where the things are that really move your life forward, and they're the first to get pushed aside when you don't watch them."},
+        {"target": "todobtn", "title": "You just talk", "text": "A list like this is normally a lot of admin. In HQ you just say it on a call or in a text, and it lands in the right box, in your own words. When something's done or you let it go, it moves, with a line so you can look back later.",
          "demo": {"kind": "matrix", "items": [["Important, not urgent", "Learn to cook three new dishes · Plan the summer trip"], ["Important and urgent", "Pay the tax bill by Friday"], ["Urgent, not important", "Book the boiler check"], ["Not urgent, not important", "Sort the old photos"]]}},
-        {"target": "todobtn", "title": "Tap to work with it", "text": "Tap a square for its list, an item for everything about it. Tick it off, move it, let it go, rename it, add one by hand, or start a call about it. Drag the dots at the start of a row to put it higher or lower in its list. Undo puts the last change back."},
-        {"target": "todobtn", "title": "Planned, or not yet", "text": "On an item, Plan in a block picks the block in your calendar it gets done in, from the coming two weeks; one block can hold several items, and on a call you just say which block. The item then shows that block's day and time, also when the block moves. On a list, the filter shows all, only what's planned, or only what isn't yet."}
+        {"target": "todobtn", "title": "Working with it", "text": "Tap a box to see its list, and an item to see everything about it. Tick it off, move it, let it go, rename it, add one yourself, or start a call about it. Drag the dots at the start of a row to move it up or down. Undo puts the last change back."},
+        {"target": "todobtn", "title": "Planned, or not yet", "text": "On an item, Plan in a block picks the block in your calendar where it gets done, from the coming two weeks. One block can hold more than one item, and on a call you just say which block. The item then shows that block's day and time, also when the block moves. The filter on a list shows everything, only what's planned, or only what isn't yet."},
+        {"target": "todobtn", "title": "Groceries", "text": "The groceries have their own list. Add a few at once, one per line or with commas. Tick one when it's in your basket and it goes to a Ticked off list underneath, A to Z. One tap puts it back on the list for next time."}
       ]
     },
     {
-      "id": "texts", "title": "Texts with {donna}", "line": "Reminders, check-ins, and texting her yourself",
+      "id": "texts", "title": "Texts with {donna}", "line": "Reminders, heads-ups, and texting her yourself",
       "steps": [
-        {"target": "directbtn", "title": "Her own text line", "text": "{donna} texts you reminders at the time you asked, check-ins, and a heads-up when something needs you. You can text her back here like any chat app, and she does what you ask. Something you keep putting off? Ask her to nudge you until it's done: she picks how often, never at night, and stops when you say done.",
-         "demo": {"kind": "chat", "items": [["agent", "Morning. Dentist at ten, leave by half nine."], ["you", "Thanks! Move my gym to tonight?"], ["agent", "Moved to seven tonight."]]}}
+        {"target": "directbtn", "title": "Her own text line", "text": "{donna} texts you reminders at the time you asked, and a heads-up when something needs you. You can text her back here like in any chat app, and she does what you ask. Allow notifications on your phone and her texts show up on your lock screen.",
+         "demo": {"kind": "chat", "items": [["agent", "Morning. Dentist at ten, leave by half nine."], ["you", "Thanks! Move my gym to tonight?"], ["agent", "Moved to seven tonight."]]}},
+        {"target": "directbtn", "title": "Nudge me until it's done", "text": "Something you keep putting off? Ask her to keep nudging you until it's done. She decides how often, more when it matters or a deadline is close, never at night. Say done and she stops. Say later and she leaves it until the next morning."},
+        {"target": "directbtn", "title": "A text when it starts", "text": "Ask her to text you when an appointment starts, or a few minutes before. Only the ones you pick get one, and they show a bell in your calendar. She also does reminders outside the calendar, like \"remind me at three to call the bank\"."},
+        {"target": "directbtn", "title": "Let me know when", "text": "Waiting for a parcel? Say \"let me know when it's delivered\" and she texts you every update from your mail, until it's there or a week has gone by. It works for the weather too: \"let me know if it rains later today\". She texts you when it ends as well."},
+        {"target": "notesbtn", "title": "Her own notes", "text": "{donna} keeps a short list of her own, under your quick notes: things she's keeping an eye on, the nudges that are open, and what she's waiting for. Now and then, only when it's worth it, she texts you about one of them."}
       ]
     },
     {
       "id": "calendar", "title": "Your calendar", "line": "Your days at a glance, planned on a call",
       "steps": [
-        {"target": "calbtn", "title": "Your days", "text": "Your Google Calendar inside HQ: today and the days ahead. Ask on a call to plan your week, move something or block time, and she does it.",
+        {"target": "calbtn", "title": "Your days", "text": "Your Google Calendar inside HQ: today and the two weeks ahead. Ask on a call to plan your week, move something or block time, and she does it. The calendar stays open on a call too, so you can look while you talk.",
          "demo": {"kind": "list", "items": [["09:00", "A walk outside"], ["10:00", "Dentist"], ["14:00", "Call with Alex"], ["19:00", "Gym"]]}},
-        {"target": "calbtn", "title": "Notes and calls on an appointment", "text": "Tap an appointment for its details, a quick note of your own, or a call about it. Your own calendar she just changes; anything with other people in it, she checks with you first."},
-        {"target": "calbtn", "title": "Done, or an X", "text": "Every appointment has a check for done and an X for didn't happen as planned. They're kept in HQ only: nothing moves in your Google Calendar, and you don't need an extra calendar for it. At the end of the week, look back on a call: what got done, what got an X, and what keeps slipping.",
+        {"target": "calbtn", "title": "Notes and calls on an appointment", "text": "Tap an appointment to see it, write a quick note on it, or start a call about it. Your own appointments she just changes. Anything with other people in it, she asks you first."},
+        {"target": "calbtn", "title": "Done, or an X", "text": "Every appointment has a check for done and an X for didn't happen as planned. They're kept in HQ only, nothing moves in your Google Calendar. At the end of the week you look back on a call: what got done, what got an X, and what keeps slipping.",
          "demo": {"kind": "list", "items": [["Monday 09:00", "Deep work · done"], ["Tuesday 18:00", "Gym · X"], ["Wednesday 10:00", "Dentist · not ticked yet"]]}},
-        {"target": "calbtn", "title": "The five kinds, in colour", "text": "Give an appointment a colour in Google Calendar and HQ knows its kind: money makers yellow (what brings new money in), client delivery green (the work someone already pays for), admin essentials red, CEO time blue-green (working on your business and your life), cup fillers purple (what fills you up again); grey is a block you haven't settled yet. The calendar shows each kind in its colour, with a row of the kinds on top: tap one to hide or show it, and see at a glance where each kind sits in your week. Edit gives a kind your own name or another colour; Google isn't changed.",
+        {"target": "calbtn", "title": "The five kinds, in colour", "text": "Give an appointment a colour in Google Calendar and HQ knows what kind it is. Money makers are yellow: what brings new money in. Client delivery is green: the work someone already pays for. Admin essentials are red. CEO time is blue-green: working on your business and your life. Cup fillers are purple: what fills you up again. Grey is a block you haven't decided on yet. The row of kinds on top lets you hide or show one with a tap, and Edit gives a kind your own name or colour. Google itself isn't changed.",
          "demo": {"kind": "list", "items": [["Monday 11:00", "CEO time · blue-green"], ["Wednesday 11:00", "Outreach · yellow"], ["Tuesday 13:00", "Client work · green"], ["Friday 19:00", "Date night · grey, not set yet"]]}},
-        {"target": "calbtn", "title": "Travel to an appointment", "text": "An appointment away from home gets its trip by public transport by itself, once HQ knows where it is: its place in the calendar, or a friend's address you gave once. It starts at home, or where you are just before. In the hours before, HQ watches the live train, bus and tram data, and {donna} texts you when your train is cancelled, late or on another platform, or a stop near you has a message, with a 9292 link to plan again. Tap Travel in the appointment to turn it on or off. Ask on a call or in {donna}'s chat how to get somewhere and you get a 9292 link that plans for the time you leave (the appointment's start, or the time you say), with any notices for the stops near both ends, like a stop that's closed or a replacement stop.",
+        {"target": "calbtn", "title": "Travel to an appointment", "text": "An appointment away from home gets its trip by public transport, once HQ knows where it is: from its place in the calendar, or a friend's address you gave once. It starts from home, or from where you were just before. In the hours before, HQ watches the live train, bus and tram info, and {donna} texts you when your train is cancelled, late or on another platform, with a 9292 link to plan again. Tap Travel on the appointment to turn it on or off. Ask on a call how to get somewhere and you get a 9292 link that plans for the time you leave, with any news about the stops at both ends, like a closed stop or a replacement stop.",
          "demo": {"kind": "list", "items": [["14:00", "Visit Sam"], ["13:12", "Train from the station near home, there 13:39"], ["12:40", "{donna}: your train is 8 minutes late"]]}}
       ]
     },
     {
       "id": "driving", "title": "Driving to appointments", "line": "By car, with the traffic, on your own maps key",
       "steps": [
-        {"target": "calbtn", "title": "Driving to an appointment", "text": "If you drive, a trip can go by car instead. HQ works out how long the drive takes with the traffic and when to leave. From two hours before, it keeps an eye on the traffic, and {donna} texts you when it's time to go, and again when the drive gets ten minutes longer or shorter. It opens in Google Maps. It's its own switch, off until you turn it on.",
-         "demo": {"kind": "list", "items": [["14:00", "Visit Sam"], ["13:15", "Leave by 13:15: 35 minutes by car, 8 of it traffic"], ["12:55", "{donna}: time to get going, leave by 13:15"]]}},
-        {"target": "setbtn", "title": "Your own maps key", "text": "The traffic comes from a maps service, and HQ has no key of its own: you make your own, once, and it stays on your computer. Two kinds work. Google Maps asks for a card on file, but its free monthly use covers one person's trips many times over. TomTom is free without a card. Pick either; the next two steps walk you through them."},
-        {"target": "setbtn", "title": "A Google Maps key, step by step", "text": "1. Go to console.cloud.google.com and sign in with your Google account. 2. At the top, make a new project, called HQ for example. 3. Open Billing and add a card (Google asks for it; the free use covers HQ). Under Budgets and alerts, set a small budget, like 5 euros, so you hear it if anything ever costs money. 4. Open APIs and Services, Library, search for Routes API, and press Enable. 5. Open APIs and Services, Credentials, Create credentials, API key. 6. Press Edit on the new key: under API restrictions pick Restrict key and tick only the Routes API, then Save. 7. Copy the key: it starts with AIza."},
-        {"target": "setbtn", "title": "Or TomTom, free without a card", "text": "1. Go to developer.tomtom.com and press Register. 2. Fill in your name and email, and confirm the email they send. 3. Sign in: your dashboard already has a key, on the Keys page. 4. Copy it. The free plan gives 2,500 looks a day; HQ uses about a dozen per trip and never more than 150 a day."},
-        {"target": "setbtn", "title": "Paste it in", "text": "Open Settings, What HQ helps you with, and turn on Driving to appointments. A box shows up under it: paste your key and press Save. It's kept on this computer only, never in your workspace and never uploaded; the page only shows which kind it is. Running two HQs, a main and a backup? Paste it on each. Forget takes it off again. Never say or type your key on a call or in a text."},
-        {"target": "calbtn", "title": "On each appointment", "text": "Open an appointment away from home and tap Travel. With only driving on, every trip is by car; with public transport on too, the trip starts by public transport and Go by car instead switches it. You can also just say it on a call: go by car to the dentist."}
+        {"target": "calbtn", "title": "Driving to an appointment", "text": "If you drive, a trip can go by car instead. HQ works out how long the drive takes with the traffic, and when you need to leave. From two hours before, it keeps an eye on the traffic. {donna} texts you when it's time to go, and again if the drive gets ten minutes longer or shorter. It opens in Google Maps. This one is off until you turn it on.",
+         "demo": {"kind": "list", "items": [["14:00", "Visit Sam"], ["13:15", "Leave by 13:15: 35 minutes by car, 8 of it traffic"], ["12:55", "{donna}: time to go, leave by 13:15"]]}},
+        {"target": "setbtn", "title": "Your own maps key", "text": "The traffic comes from a maps service, and HQ doesn't come with a key for it. You make your own once, and it stays on your computer. Two kinds work. Google Maps asks for a card, but its free monthly use covers one person's trips many times over. TomTom is free and needs no card. Pick either one, the next two steps show how."},
+        {"target": "setbtn", "title": "A Google Maps key, step by step", "text": "1. Go to console.cloud.google.com and sign in with your Google account. 2. At the top, make a new project, called HQ for example. 3. Open Billing and add a card (Google asks for it; the free use covers HQ). Under Budgets and alerts, set a small budget, like 5 euros, so you hear about it if anything ever costs money. 4. Open APIs and Services, Library, search for Routes API, and press Enable. 5. Open APIs and Services, Credentials, Create credentials, API key. 6. Press Edit on the new key: under API restrictions pick Restrict key, tick only the Routes API, and Save. 7. Copy the key. It starts with AIza."},
+        {"target": "setbtn", "title": "Or TomTom, free without a card", "text": "1. Go to developer.tomtom.com and press Register. 2. Fill in your name and email, and confirm the email they send you. 3. Sign in. Your dashboard already has a key on the Keys page. 4. Copy it. The free plan gives 2,500 looks a day. HQ uses about a dozen per trip and never more than 150 a day."},
+        {"target": "setbtn", "title": "Paste it in", "text": "Open Settings, What HQ helps you with, and turn on Driving to appointments. A box shows up under it: paste your key and press Save. It's kept on this computer only, never in your files and never uploaded. Running two HQs? Paste it on both. Forget takes it off again. Never say or type your key on a call or in a text."},
+        {"target": "calbtn", "title": "On each appointment", "text": "Open an appointment away from home and tap Travel. With only driving on, every trip goes by car. With public transport on too, a trip starts by public transport and Go by car instead switches it. Or just say it on a call: go by car to the dentist."}
       ]
     },
     {
       "id": "notes", "title": "Quick notes", "line": "Jot something down for later",
       "steps": [
-        {"target": "notesbtn", "title": "A quick note", "text": "A thought you don't want to lose? Write it here. The next call reads your notes, so you can say: let's go through my notes.",
+        {"target": "notesbtn", "title": "A quick note", "text": "A thought you don't want to lose? Write it here. The next call can read your notes, so you can say: let's go through my notes.",
          "demo": {"kind": "list", "items": [["Note", "Ask about the new running shoes"], ["Note", "Idea: a picnic in the park"]]}}
       ]
     },
     {
-      "id": "history", "title": "Past calls", "line": "Every call, kept, to read back or continue",
+      "id": "history", "title": "Past calls", "line": "Every call kept, to read back or carry on",
       "steps": [
-        {"target": "histbtn", "title": "Every call kept", "text": "Every call is saved as text. Open one and it starts at the end, like a chat; scroll up for the start. Read it back, or tap Continue this call, and she picks up where you left off, knowing what was said."}
-      ]
-    },
-    {
-      "id": "team", "title": "The team works while you're away", "line": "Agree work on a call, hang up, it gets done",
-      "steps": [
-        {"target": "statbtn", "title": "Give it to the team", "text": "On a call you can agree a bigger piece of work: build something, sort something out, research something. Say: give it to the team. You hang up, and the computer does it by itself, one piece at a time."},
-        {"target": "statbtn", "title": "Watch how far it is", "text": "The Status page shows what's being done right now and its step, what's waiting, what's planned for later, and your Claude usage. The team stops at the usage lines you set and carries on when there's room.",
-         "demo": {"kind": "list", "items": [["Now", "Research three summer trips, step 2 of 3"], ["Next", "Clean up the shopping list"], ["Tonight 22:00", "The nightly check"], ["Usage", "5-hour 20%, weekly 47%"]]}},
-        {"target": "statbtn", "title": "See where the usage goes", "text": "On the Status page each usage bar shows, in colours, where the work should land if it goes as estimated: the team's work, what's planned once, and what repeats. Under the 5-hour bar, Show the next 20 hours unfolds the 5-hour windows after this one. Under the weekly bar, Show the whole week unfolds today and the six days after it: each day with the work landing that day, its share of the week, where the stop line stands by the day's end, and what waits for that line. On the day the week resets, the day shows twice: up to the reset, then the new week starting again from 0%.",
-         "demo": {"kind": "list", "items": [["Today", "+0.3% of the week, the team's work"], ["Monday", "+3% of the week, the planned bug sprint"], ["Wednesday", "nothing lands"]]}},
-        {"target": "statbtn", "title": "The roadmap", "text": "Every bigger idea goes on the roadmap first, with your own words, so nothing gets lost. Then it goes to the team when you're ready, or it gets planned for a time, like tonight at ten."},
-        {"target": "statbtn", "title": "Rank the planning", "text": "Every open item on the planning gets an estimate by itself: about how long it takes and how much of your 5-hour and weekly usage, made the same way as for the team's own work, and made again when its words change. On a call, give items their place: say make the feedback button number one, or put it third. A new item has no place until you give it one, so the others keep theirs. The Status page shows each item's place and estimate.",
-         "demo": {"kind": "list", "items": [["Rank 1", "Feedback button, about 40 min, 5-hour 12%, weekly 3%"], ["Rank 2", "Recipes with the groceries, about 25 min"], ["No rank yet", "A new idea from today"]]}},
-        {"target": "statbtn", "title": "Plan the sprint", "text": "Under Sprint planning on the Status page, tick the items for this sprint and see them fall into the coming nights in rank order: the team works every night from ten in the evening to eight in the morning. Each item says when it should be done and how much of your 5-hour and weekly usage it takes, and a line shows where the room runs out. Pick the night it starts, then Plan the sprint plans them for the team in that order. On a call, say plan these for tonight.",
-         "demo": {"kind": "list", "items": [["Monday night", "4 items, done around 1:40"], ["Tuesday night", "Recipes with the groceries"], ["The room runs out", "the rest waits for the weekly reset"]]}},
-        {"target": "statbtn", "title": "Totals for the sprint", "text": "At the top of Sprint planning on the Status page, Totals shows in its heading how many items are on the planning, about how long they take and how much of your 5-hour and weekly usage. A tap unfolds it into three parts and their sum: what isn't ready yet, what's ready and not planned yet, and what's already planned (with the team, or planned for a night). Ready leaves out what's already planned, so the three add up to the total.",
-         "demo": {"kind": "list", "items": [["Not ready", "20 items, about 5 h, 10% of the week"], ["Ready, not planned yet", "6 items, about 2 h, 4% of the week"], ["Planned", "2 items, about 25 min, 1% of the week"], ["Total", "28 items, about 7 h 25, 15% of the week"]]}},
-        {"target": "statbtn", "title": "Must, Should, Could, Won't", "text": "Give each item on the planning a tag for the sprint: Must, Should, Could, or Won't this time. Pick it on the item in Sprint planning, or say it on a call: the feedback button is a must. The planning then shows in groups, each in its own colour with a legend at the top: Must first, then Should, Could, the ones not sorted yet, and Won't last. Inside each group the bugs come first, then the rank.",
-         "demo": {"kind": "list", "items": [["Must", "bug: the clock is wrong · Feedback button"], ["Should", "Recipes with the groceries"], ["Won't this time", "A new idea from today"]]}},
-        {"target": "statbtn", "title": "Ready for the sprint", "text": "Only items marked ready go to the team. An item is ready when what it asks is written out with you: what done looks like, how to test it, why it matters, what's out of scope, what it touches, how big it is, what it waits on, and that nothing private goes in; for a small bug, what's wrong, what right looks like and how to check. Tick Ready on the item in Sprint planning, or say it on a call: the feedback button is ready. If its words change afterwards it says Changed since ready, until you mark it again. Plan the sprint and Send to the team leave out an item that isn't ready and say what it still misses; only when you say so on a call does one go to the team anyway, and then the team knows it went without the mark."},
-        {"target": "statbtn", "title": "Bugs before features", "text": "Your planning keeps bugs and features apart. The Must, Should, Could tag comes first, so a Must feature stays above a Should bug; inside each of those, bugs go first. That keeps the tech debt down: the shortcuts and unfixed bugs that pile up like interest on a loan, until every new change gets slower and riskier. A check that runs every night looks for bugs before you do; ask {moneypenny} about it if your HQ doesn't have one yet."},
-        {"target": "statbtn", "title": "Ready before it's built, done when it's done", "text": "{moneypenny} keeps the planning. She runs as much as she can herself: she fills in what she can and brings you one whole proposal (the MoSCoW, the open answers, the split, the order), as many items as she can at once, for you to accept, improve or say no to; only what's truly yours is left open, with her pick next to it. Before a piece goes to the team it has to be ready: what's asked, what done looks like with examples, what to test, what's out of scope, what it touches and how big it is (a small build, a big build or research; which nights is only decided at the sprint planning). Every new item she writes, she checks against that herself in the same reply, so you can mark it ready on the spot. When it's built she checks it first: it does what was asked, the old checks still pass, new checks are added, the tutorial and changelog are updated. Then you test it yourself."}
+        {"target": "histbtn", "title": "Every call kept", "text": "Every call is saved as text. Open one and it starts at the end, like a chat. Scroll up for the start. Read it back, or tap Continue this call and she picks up where you left off, knowing what was said."}
       ]
     },
     {
       "id": "mail", "title": "The mail check", "line": "HQ reads your new mail every hour",
       "steps": [
-        {"target": "", "title": "Every hour, quietly", "text": "Every hour HQ reads your new mail and keeps only what might need you. Very important things, like a bill with a date or someone waiting for your answer, you hear at the start of every call until you say it's sorted. Ask {donna} to tidy your mail: mark it read, archive it, star it or put a label on it. HQ never sends mail: drafts at the most, you send them yourself.",
-         "demo": {"kind": "list", "items": [["Very important", "Tax office: pay before 30 November"], ["To check", "Your parcel is on its way"]]}}
+        {"target": "", "title": "Every hour, quietly", "text": "Every hour HQ reads your new mail and keeps only what might need you. The very important things, like a bill with a date or someone waiting for your answer, you hear at the start of every call until you say it's sorted. HQ never sends mail. Drafts at the most, and you send them yourself.",
+         "demo": {"kind": "list", "items": [["Very important", "Tax office: pay before 30 November"], ["To check", "Your parcel is on its way"]]}},
+        {"target": "", "title": "Check more often for a while", "text": "Waiting for something important? Say \"check my mail more often until tonight\", or for a few hours, or until Friday. HQ then looks every fifteen minutes, and goes back to once an hour by itself when the time's up."},
+        {"target": "", "title": "Tidy your mail", "text": "Ask {donna} to tidy up: mark mail read, archive it, star it, or put a label on it. She makes and renames labels too. The trash only when you ask for exactly that."},
+        {"target": "", "title": "Sorted from now on", "text": "Want a kind of mail sorted from now on, like all your receipts in one label? {donna} gives you two ways. She walks you through making a real Gmail filter, step by step. Or you agree a sorting rule with her, and the hourly mail check puts new mail in its label for you. You can see your rules, and stop one any time."}
       ]
     },
     {
-      "id": "weather", "title": "Weather and rain alerts", "line": "The weather at a glance, a text before the rain",
+      "id": "weather", "title": "Weather and rain", "line": "The weather at a glance, a text before the rain",
       "steps": [
-        {"target": "wx", "title": "The weather", "text": "The weather where you are, at a glance. Tap it for the hours ahead. {donna} tells you when you wake up whether it'll rain while you're out; turn on the rain alert and she also texts before a shower would catch you outside, and follows it as it moves."}
+        {"target": "wx", "title": "The weather", "text": "The weather where you are. Tap it for more: the next hours, today and tomorrow, and the rain radar for the next two hours. A yellow, orange or red mark means there's an official weather warning, and the full warning is in there too."},
+        {"target": "wx", "title": "Rain while you're out", "text": "When you wake up, {donna} tells you if it'll rain while you're out today. Turn on the rain alert and she also texts before a shower would catch you outside, and keeps following it as it moves. While you sleep, she says nothing."},
+        {"target": "wx", "title": "Let me know between 2 and 6", "text": "Going out at a time that's not in your calendar? Tell her \"let me know between 2 and 6\", once or every day, and she watches the rain for those hours."}
       ]
     },
     {
-      "id": "settings", "title": "Settings, and what HQ helps you with", "line": "Voices, Free, and switching features on or off",
+      "id": "news", "title": "Your own news", "line": "Only the topics and sources you pick",
       "steps": [
-        {"target": "setbtn", "title": "Voices and sound", "text": "Pick each agent's voice, your microphone and where her voice plays, and the soft thinking sound."},
-        {"target": "devbtn", "title": "Microphone and sound, quickly", "text": "The microphone button is a shortcut to the same place: switch to your headphones or another microphone in two taps, also in the middle of a call."},
-        {"target": "setbtn", "title": "What HQ helps you with", "text": "Every feature is a switch: the calendar, the to-do list, texts, the weather, travel by public transport, the mail check, your news, notes, the team's work, and Life coaching. Turn off what you don't use: its button goes away and the rest moves up. Driving to appointments starts off: it needs your own maps key."},
-        {"target": "setbtn", "title": "Life coaching", "text": "With Life coaching on, a few calm sessions with {pepper} build your long-term vision, from three to five years out down to your ideal week, and HQ supports you with it every day. You give your vision its own name."},
-        {"target": "setbtn", "title": "Free", "text": "Free is plain Claude with only the web: none of your files, nothing saved. Handy to show HQ to someone without showing your life."}
-      ]
-    },
-    {
-      "id": "coaching", "title": "Life coaching", "line": "Your long-term vision, one calm session at a time",
-      "steps": [
-        {"target": "coachbtn", "title": "Your vision, layer by layer", "text": "With Life coaching on, this button opens your map: from the life you want in three to five years, down to this year, a six-week game, your ideal week and this week. Each layer shows its checklist: what's answered, what's left for later and what's still open."},
-        {"target": "coachbtn", "title": "One session per layer", "text": "Start a layer and {pepper} calls about only that one, one question at a time, and writes your answers down in your own words. Short sessions, so nothing drifts off.",
-         "demo": {"kind": "list", "items": [["The vision", "Done"], ["The year", "In progress · 12 of 20"], ["The six-week game", "Not started"], ["The ideal week", "Not started"]]}},
-        {"target": "coachbtn", "title": "Check-ins, with a red dot", "text": "HQ keeps the moments to look back: every week, at the end of a game, and a bigger check-in every few months. When one is due the button gets a red dot. There's also a chat with {pepper} just for life coaching."}
-      ]
-    },
-    {
-      "id": "news", "title": "Your own news", "line": "Only the topics and sources you pick, read inside HQ",
-      "steps": [
-        {"target": "newsbtn", "title": "Your own newspaper", "text": "News shows only what you asked for: the topics you care about, from the sources you picked, without the noise. It's read about every hour, and kept apart from your mail."},
-        {"target": "newsbtn", "title": "Set it up in a short call", "text": "The first time, tap Set up your news: a short call about what you want to hear about, what to leave out, and where from. {donna} or {pepper} suggests free sources and checks them. Change it the same way any time.",
+        {"target": "newsbtn", "title": "Your own newspaper", "text": "News shows only what you asked for: your topics, from the sources you picked, without the noise. It's read about every hour and kept apart from your mail."},
+        {"target": "newsbtn", "title": "Set it up in a short call", "text": "The first time, tap Set up your news. It's a short call about what you want to hear about, what to leave out, and where from. She suggests free sources and checks them. Change it the same way whenever you want.",
          "demo": {"kind": "list", "items": [["Topics", "Space, cycling"], ["Left out", "Celebrity gossip"], ["Sources", "Two science sites, one local paper"]]}},
         {"target": "newsbtn", "title": "Read it here", "text": "Tap an item to read it inside HQ, with its source under it. A dot on the button means there's something new since you last looked."}
       ]
     },
     {
+      "id": "team", "title": "The team works while you're away", "line": "Agree work on a call, hang up, it gets done",
+      "steps": [
+        {"target": "statbtn", "title": "Give it to the team", "text": "On a call you can agree a bigger piece of work: build something, sort something out, look something up. Say \"give it to the team\". You hang up, and your computer does it by itself, one piece at a time."},
+        {"target": "statbtn", "title": "See how far it is", "text": "The Status page shows what's being done right now and which step it's on, what's waiting, what's planned for later, and how much of your Claude usage is left.",
+         "demo": {"kind": "list", "items": [["Now", "Research three summer trips, step 2 of 3"], ["Next", "Clean up the shopping list"], ["Tonight 22:00", "The nightly check"], ["Usage", "5-hour 20%, weekly 47%"]]}},
+        {"target": "statbtn", "title": "Plan it for later", "text": "Work doesn't have to start right away. On a call, plan it for a day and a time, like tonight at ten, or let it repeat, like every night or every Friday. Give it the priority tag and when its time comes it goes first, ahead of the work that's waiting. A job that's already running is never stopped for it."},
+        {"target": "statbtn", "title": "The usage lines", "text": "Your Claude plan has a 5-hour limit and a weekly limit. The team stops at a line on each bar, so there's always some left for you. By default the line moves up through the window, so the team doesn't use it all early on. You can also fix a line at a number of your own, on the Status page or by asking on a call."},
+        {"target": "statbtn", "title": "See where the usage goes", "text": "Each usage bar shows in colours where the work should land: the team's work, what's planned once, and what repeats. Under the 5-hour bar, Show the next 20 hours opens up the windows after this one. Under the weekly bar, Show the whole week opens up today and the six days after it, each with what lands that day and where the line stands. The day the week resets shows twice: up to the reset, and the new week starting again from 0%.",
+         "demo": {"kind": "list", "items": [["Today", "+0.3% of the week, the team's work"], ["Monday", "+3% of the week, the planned bug sprint"], ["Wednesday", "nothing lands"]]}},
+        {"target": "statbtn", "title": "A paused job", "text": "If a job uses far more than expected, about four times its estimate, the team pauses it and {donna} tells you. On the Status page, or on a call, you say carry on or stop. Nothing big runs away without you knowing."},
+        {"target": "statbtn", "title": "When something goes wrong", "text": "When something in HQ stops working, it shows under Incidents on the Status page and {donna} texts you, and again when it's back. A watchdog brings most things back by itself. A job that keeps failing waits for you instead of trying forever."}
+      ]
+    },
+    {
+      "id": "sprint", "title": "The planning and the sprint", "line": "Ideas first on the planning, then built in a sprint",
+      "steps": [
+        {"target": "statbtn", "title": "The planning", "text": "Every bigger idea goes on the planning first, in your own words, so nothing gets lost. Once a week, at your sprint planning, you pick what the team builds next."},
+        {"target": "statbtn", "title": "Rank the planning", "text": "Every open item gets an estimate by itself: about how long it takes and how much of your usage. On a call, give items their place: \"make the feedback button number one\", or \"put it third\". A new item has no place until you give it one, so the others keep theirs.",
+         "demo": {"kind": "list", "items": [["Rank 1", "Feedback button, about 40 min, 5-hour 12%, weekly 3%"], ["Rank 2", "Recipes with the groceries, about 25 min"], ["No rank yet", "A new idea from today"]]}},
+        {"target": "statbtn", "title": "Must, Should, Could, Won't", "text": "Give each item a tag for the sprint: Must, Should, Could, or Won't this time. Pick it on the item, or say it on a call: \"the feedback button is a must\". The planning then shows in groups, each in its own colour: Must first, then Should, Could, the ones without a tag, and Won't last.",
+         "demo": {"kind": "list", "items": [["Must", "bug: the clock is wrong · Feedback button"], ["Should", "Recipes with the groceries"], ["Won't this time", "A new idea from today"]]}},
+        {"target": "statbtn", "title": "Bugs before features", "text": "Your planning keeps bugs and features apart. The tag comes first, so a Must feature stays above a Should bug, and inside each tag the bugs go first. That keeps the tech debt down: shortcuts and unfixed bugs pile up like interest on a loan, until every new change gets slower and riskier. A check that runs every night finds bugs before you do. Ask {moneypenny} about it if your HQ doesn't have one yet."},
+        {"target": "statbtn", "title": "Ready for the sprint", "text": "Only items marked ready go to the team. Ready means it's written out with you: what done looks like, how to test it, why it matters, what's left out, what it touches, how big it is, what it waits on, and that nothing private goes in. For a small bug: what's wrong, what right looks like, and how to check. Tick Ready on the item, or say \"the feedback button is ready\". If the words change afterwards, it says Changed since ready until you mark it again. Only when you say so on a call does an unready one go anyway, and then the team knows."},
+        {"target": "statbtn", "title": "Totals for the sprint", "text": "At the top of Sprint planning, Totals shows how many items there are, about how long they take and how much of your usage. Tap it and it splits into three: not ready yet, ready but not planned, and already planned. The three add up to the total.",
+         "demo": {"kind": "list", "items": [["Not ready", "20 items, about 5 h, 10% of the week"], ["Ready, not planned yet", "6 items, about 2 h, 4% of the week"], ["Planned", "2 items, about 25 min, 1% of the week"], ["Total", "28 items, about 7 h 25, 15% of the week"]]}},
+        {"target": "statbtn", "title": "Plan the sprint", "text": "Under Sprint planning, tick the items for this sprint and you see them fall into the coming nights in order. The team works every night from ten in the evening to eight in the morning. Each item shows when it should be done and how much usage it takes, and a line shows where the room runs out. Pick the night it starts and press Plan the sprint. On a call, say \"plan these for tonight\".",
+         "demo": {"kind": "list", "items": [["Monday night", "4 items, done around 1:40"], ["Tuesday night", "Recipes with the groceries"], ["The room runs out", "the rest waits for the weekly reset"]]}},
+        {"target": "statbtn", "title": "Ready before it's built, done when it's done", "text": "{moneypenny} keeps the planning. She does as much as she can herself, and brings you one whole proposal at a time, as many items as she can: the tags, the open answers, how to split it and in what order. You say yes, change it, or say no. Only what's really yours to decide is left open, with her pick next to it. Every new item she writes, she checks right away, so you can mark it ready on the spot. When something's built she checks it first: it does what was asked, the old checks still pass, new checks are added, and the tutorial and what's new are updated. Then you try it yourself."}
+      ]
+    },
+    {
+      "id": "settings", "title": "Settings", "line": "Voices, sound, and what HQ helps you with",
+      "steps": [
+        {"target": "setbtn", "title": "Voices and sound", "text": "Pick each agent's voice, your microphone, where her voice comes out, and whether you hear the soft thinking sound."},
+        {"target": "devbtn", "title": "Microphone and sound, quickly", "text": "The microphone button is a shortcut to the same place. Switch to your headphones or another microphone in two taps, also in the middle of a call."},
+        {"target": "setbtn", "title": "What HQ helps you with", "text": "Every part of HQ is a switch: the calendar, the to-do list, texts, the weather, travel by public transport, the mail check, your news, notes, the team's work, and Life coaching. Turn off what you don't use. Its button goes away and the rest moves up. Driving to appointments starts off, because it needs your own maps key."},
+        {"target": "setbtn", "title": "Free", "text": "Free is plain Claude with only the web: none of your files, and nothing is saved. Handy when you want to show HQ to someone without showing your life."}
+      ]
+    },
+    {
+      "id": "coaching", "title": "Life coaching", "line": "Your long-term vision, one calm session at a time",
+      "steps": [
+        {"target": "coachbtn", "title": "Your vision, layer by layer", "text": "With Life coaching on, this button opens your map. It goes from the life you want in three to five years, down to this year, a six-week game, your ideal week and this week. Each layer has its checklist: what's answered, what's left for later, and what's still open. You give your vision its own name."},
+        {"target": "coachbtn", "title": "One session per layer", "text": "Start a layer and {pepper} calls about only that one, one question at a time, and writes your answers down in your own words. Short sessions, so nothing drifts off.",
+         "demo": {"kind": "list", "items": [["The vision", "Done"], ["The year", "In progress · 12 of 20"], ["The six-week game", "Not started"], ["The ideal week", "Not started"]]}},
+        {"target": "coachbtn", "title": "Check-ins, with a red dot", "text": "HQ keeps the moments to look back: every week, at the end of a game, and a bigger check-in every few months. When one is due, the button gets a red dot. There's also a chat with {pepper} just for life coaching."}
+      ]
+    },
+    {
       "id": "game", "title": "Your six-week game", "line": "One simple game you can win, six weeks at a time",
       "steps": [
-        {"target": "gamebtn", "title": "A game you can win", "text": "In Life coaching you design a six-week game with {pepper}: one simple thing, like moving every day. Once it's set up, this button shows it: where you are, the win line and how far along you are."},
-        {"target": "gamebtn", "title": "Tick it off", "text": "Tick today off here, or just say it on a call or text {donna}. Add how it felt or a note when you want. {donna} can nudge you in the evening if today's tick isn't in yet.",
+        {"target": "gamebtn", "title": "A game you can win", "text": "In Life coaching you design a six-week game with {pepper}: one simple thing, like moving every day. Once it's set up, this button shows where you are, the win line, and how far along you are."},
+        {"target": "gamebtn", "title": "Tick it off", "text": "Tick today off here, or just say it on a call or text {donna}. Add how it felt, or a note, when you want. {donna} can nudge you in the evening if today's tick isn't in yet.",
          "demo": {"kind": "list", "items": [["Today", "A walk outside · ticked"], ["This week", "5 of 7 days"], ["Win line", "90% of the days · on track"]]}},
         {"target": "gamebtn", "title": "Look back and keep it", "text": "Every week you look back on it, and at the end there's a short debrief: was it fun, was it useful, what did you learn. Past games are kept, so you can open them again."}
       ]
     },
     {
-      "id": "yours", "title": "Make it yours", "line": "HQ is built to be expanded", "closing": true,
+      "id": "phone", "title": "HQ on your phone", "line": "Call your computer from anywhere",
       "steps": [
-        {"target": "", "title": "Your own headquarters", "text": "This is the reason HQ was built in the first place: so everyone can have their own headquarters, with their work supported by their own team. What's in it now are the things its creator thought most people would want. His own HQ has many more, and people testing it have already built their own extensions."},
-        {"target": "", "title": "Customize, tailor, expand", "text": "It's not limited to what you see here. Ask on a call for something new, give it to the team, and they build it into your HQ. Your own builds stay yours: updates never touch them."},
-        {"target": "", "title": "Updates never break your own", "text": "What you add yourself is an extension: it lives in your own files, and an update never touches it. After every update HQ checks whether something you added might not fit the new version. If so, a short message says which one, with two buttons: talk it through with {donna}, or send it to your team to fix."},
-        {"target": "", "title": "Coming soon: shared best practices", "text": "Ways of working that keep a build stable, like the checks that run every night and fix what broke, written so your own HQ understands them. Turn them on, and your HQ looks out for them and suggests them itself, so you don't have to be a programmer to avoid the classic mistakes.", "soon": true}
+        {"target": "", "title": "Nothing to install on the phone", "text": "HQ runs on your computer, or on a server. Your phone just calls it. It reaches your computer privately through Tailscale, a free app, with nothing open to the internet."},
+        {"target": "", "title": "Connect it, step by step", "text": "1. Install Tailscale on your computer and on your phone, and sign in on both with the same account. 2. On the phone, open the address your Claude gave you after the install in Safari. It ends in .ts.net:8443. 3. Allow the microphone. That's it, you can call."},
+        {"target": "", "title": "Put it on your home screen", "text": "In Safari, tap Share, then Add to Home Screen. HQ's icon, the house, lands next to your other apps and opens like an app. Opened from there, {donna}'s texts can show up on your lock screen once you allow notifications. The Status page has its own address: the same, ending in :8444."}
+      ]
+    },
+    {
+      "id": "server", "title": "HQ on a server", "line": "Always on, also when your laptop is closed",
+      "steps": [
+        {"target": "", "title": "Why a server", "text": "A laptop goes to sleep. A small server never does, so the team keeps working at night and your mail keeps getting checked while your laptop is closed. HQ runs on a Linux server just like on a Mac. Everything works there, except what's about a laptop, like the battery and the lid."},
+        {"target": "", "title": "Getting it there", "text": "The steps are the same as on a Mac: install Claude Code on the server, get HQ, and ask Claude to install everything. It tells you plainly what's missing and the line to fix it. You then call it from your phone or laptop through Tailscale, the same way."}
+      ]
+    },
+    {
+      "id": "twohq", "title": "Two HQs: main and backup", "line": "Your laptop and a server, working as one",
+      "steps": [
+        {"target": "", "title": "One main, one backup", "text": "Have HQ on your laptop and on a server? They can work as one. The main one does the work: the team, the mail check, the planned jobs. The backup takes your calls too and passes anything you agree on to the main one. Your files are the same on both within seconds."},
+        {"target": "", "title": "Which one is main", "text": "A small pill next to the name tells you. A green Main on the main one, and a grey Backup, saying which one is main, on the other. Each Status page also shows whether the other one answers, every minute."},
+        {"target": "", "title": "When one goes away", "text": "If the main one goes offline, the backup takes over by itself after five minutes, and hands back when the main one returns. Want to switch yourself? Just say it on a call: make the server main. It switches right away, or as soon as the running job is done."}
+      ]
+    },
+    {
+      "id": "mac", "title": "The Mac app", "line": "Everything in one window, with the dog",
+      "steps": [
+        {"target": "", "title": "One window", "text": "On a Mac, HQ can have its own app: the call, the Status page and {donna}'s texts in one window. Ask your Claude to build it for you."},
+        {"target": "", "title": "The dog", "text": "At the top of the Mac app sits the watchdog, drawn as a dog. Its mood follows how HQ is doing. When something's off it barks Woof! in red. When a new version is out, it sits by its empty food bowl and barks Update! in green."},
+        {"target": "", "title": "Talk with the space bar", "text": "In the Mac app the space bar is your mute button. Tap it to mute. Hold it to talk, and let go to send."},
+        {"target": "", "title": "Music during a call", "text": "On a Mac your music turns down during a call. Want it to stay normal? In Settings, set Other sound to Normal. With Bluetooth headphones on, the call then uses the MacBook's own microphone, so your headphones keep their full sound."},
+        {"target": "", "title": "The lid", "text": "On a laptop, the Status page has a switch on the lid line. One tap and it keeps working with the lid closed. Tap again and it goes to sleep like normal."}
+      ]
+    },
+    {
+      "id": "updates", "title": "Updates", "line": "What's new, and getting it",
+      "steps": [
+        {"target": "", "title": "The version number", "text": "A small grey number on the call page, the Status page and in the Mac app tells you which version you're on. Tap it to see what's new in every version."},
+        {"target": "", "title": "The Update button", "text": "HQ looks a few times a day for a new version. When there is one, a small bar shows what's new with an Update button. One tap and it updates and restarts what it needs to, without restarting your computer. A call in progress ends, so tap it when you're off a call. Your own files and what you built yourself are never touched."}
+      ]
+    },
+    {
+      "id": "yours", "title": "Make it yours", "line": "HQ is built to grow", "closing": true,
+      "steps": [
+        {"target": "", "title": "Your own headquarters", "text": "This is why HQ was built: so everyone can have their own headquarters, with their own team behind them. What's in it now is what its maker thought most people would want. His own HQ has a lot more, and people testing it have already built their own."},
+        {"target": "", "title": "Change it, add to it", "text": "You're not stuck with what you see here. Ask on a call for something new, put it on the planning, and the team builds it into your HQ. What you build stays yours."},
+        {"target": "", "title": "Updates never break your own", "text": "What you add yourself is an extension. It lives in your own files, and an update never touches it. After every update HQ checks whether something you added might not fit the new version. If so, a short message says which one, with two buttons: talk it through with {donna}, or send it to the team to fix."},
+        {"target": "", "title": "Coming soon: shared best practices", "text": "Ways of working that keep a build stable, like the checks that run every night and fix what broke, written so your own HQ understands them. Turn them on, and your HQ keeps an eye out for them and suggests them itself, so you don't have to be a programmer to avoid the classic mistakes.", "soon": true}
       ]
     }
   ],
   "facts": [
-    "HQ runs on your own computer, on your own Claude plan, through Claude Code. Your voice is turned into text on your computer, and her voice is made there too; only the thinking goes to Anthropic, the same as any Claude chat.",
-    "Your phone reaches your computer privately (through Tailscale), with nothing open to the internet. Add the call page to your phone's home screen and it works like an app. There is also a Mac app.",
-    "Your own files live in your workspace, a folder of plain text files on your computer. They are never uploaded with HQ, and updates never touch them.",
-    "HQ is still in development, built and used daily by one person first, now shared with friends. A small grey version number opens what's new; an Update button appears when a new version is out.",
-    "The routine is a small helper that runs every minute without Claude, so it costs nothing while waiting. A watchdog brings things back when they stop.",
+    "HQ runs on your own computer, on your own Claude plan, through Claude Code. Your voice is turned into text on your computer, and her voice is made there too. Only the thinking goes to Anthropic, the same as any Claude chat.",
+    "Your phone reaches your computer privately, through Tailscale, with nothing open to the internet. Add the call page to your phone's home screen and it works like an app. There's a Mac app too.",
+    "Your own files live in your workspace, a folder of plain text files on your computer. They're never uploaded with HQ, and updates never touch them.",
+    "HQ is still being built. One person built it and uses it every day, and now it's shared with friends. The small grey version number shows what's new; an Update button shows up when a new version is out.",
+    "The routine is a small helper that runs every minute without Claude, so waiting costs nothing. A watchdog brings things back when they stop.",
     "Things that need your yes, like an appointment with other people in it or anything with your mail, are checked with you first. Mail is never sent.",
-    "After a real call, its transcript is saved and the call's notes go into your log, in your own words. Free calls and demo calls are never saved.",
-    "Travel on appointments uses open data, free and without a key: the live train, bus, tram and metro data the Dutch transport companies publish (through OVapi), the government's address service, and 9292 links. Driving is a separate feature, on your own Google Maps or TomTom key, kept on your computer; HQ ships no key and counts its looks, at most 150 a day.",
-    "When an agent calls you at a time you agreed, it comes as a notification on your phone, not a real phone call: an app like this can't ring like one, and HQ uses no paid phone service. One tap on it opens HQ and the call starts."
+    "After a real call, the text of it is saved and the call's notes go in your log, in your own words. Free calls and demo calls are never saved.",
+    "Travel on appointments uses open data, free and without a key: the live train, bus, tram and metro info the Dutch transport companies publish (through OVapi), the government's address service, and 9292 links. Driving is its own feature, on your own Google Maps or TomTom key, kept on your computer; HQ doesn't come with a key and counts its looks, at most 150 a day.",
+    "When an agent calls you at a time you agreed, it comes as a notification on your phone, not a real phone call: an app like this can't ring like a phone, and HQ uses no paid phone service. One tap on it opens HQ and the call starts.",
+    "Running HQ on a server and on a laptop at once is set up by your Claude once both are installed; the steps are in INSTALL.md. Windows has no ready version yet."
   ]
 }
