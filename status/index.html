@@ -34,6 +34,12 @@
         --land-team: #d9730d;
         --land-planned: #e8c547;
         --land-repeat: #4fae6a;
+        /* H271: the sprint's MoSCoW groups, each its own colour */
+        --mo-must: #c0392b;
+        --mo-should: #d9730d;
+        --mo-could: #2f7fd1;
+        --mo-none: #8a94a0;
+        --mo-wont: #7a5aa8;
         /* H177: the dotted line for where a moving stop line will be when the work lands. */
         --then: #7a3fd1;
         /* H181: the green dotted line, with the repeating work too: the repeating items' colour, a shade deeper to read on the track. */
@@ -60,6 +66,11 @@
           --land-team: #e8913a;
           --land-planned: #f0d77a;
           --land-repeat: #5fbf7d;
+          --mo-must: #f0766a;
+          --mo-should: #f0a35a;
+          --mo-could: #7ab4f2;
+          --mo-none: #9aa3ae;
+          --mo-wont: #b79be6;
           --then: #c4a2ff;
           --then-all: #6fd08c;
         }
@@ -265,6 +276,14 @@
       .sprint-night { margin: 12px 0 4px; font-weight: 600; }
       .sprint-laid { padding: 4px 0 4px 12px; border-left: 3px solid var(--rule); margin: 2px 0; overflow-wrap: anywhere; }
       .sprint-laid.past { opacity: .6; }
+      /* H271: MoSCoW: a coloured bar per group, a legend, the tag picker on each row */
+      .mo-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 2px 0 8px; font-size: 13px; }
+      .mo-legend span { display: inline-flex; align-items: center; gap: 5px; }
+      .mo-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; display: inline-block; }
+      .mo-group { margin: 10px 0 2px; padding: 2px 0 2px 8px; border-left: 4px solid var(--mo); font-weight: 600; color: var(--mo); }
+      .sprint-row.mo, .sprint-laid.mo { border-left: 4px solid var(--mo); padding-left: 8px; }
+      .sprint-row select { flex: none; font: inherit; font-size: 13px; max-width: 8.5em; }
+      .mo-bug { font-size: 12px; font-weight: 600; padding: 0 5px; border-radius: 4px; border: 1px solid var(--red); color: var(--red); margin-left: 4px; }
       .sprint-line { margin: 10px 0; padding: 6px 0; border-top: 2px dashed var(--bad, #c0392b); color: var(--bad, #c0392b); font-size: 14px; }
       .eta-guess { display: block; font-size: 12px; color: var(--soft); opacity: 0.75; font-style: italic; }
       /* H174: what a total counts, right under its heading */
@@ -1025,12 +1044,15 @@
         const k = Math.round((d - t) / 86400000);
         return k === 0 ? 'Tonight' : k === 1 ? 'Tomorrow night' : `${d.toLocaleDateString('en-GB', { weekday: 'long' })} night`;
       }
+      /** H271: the MoSCoW groups, in the order the sprint shows them. */
+      const MOSCOW = [{ key: 'must', name: 'Must' }, { key: 'should', name: 'Should' }, { key: 'could', name: 'Could' }, { key: 'none', name: 'Not sorted yet' }, { key: 'wont', name: "Won't this time" }];
+      const moscowOf = (t) => MOSCOW.find((m) => m.key === (t || 'none')) || MOSCOW[3];
       function drawSprint(P) {
         const box = el('section', 'sprint');
         const open = P.rows.filter((x) => !x.team && !x.planned);
         for (const l of [...sprint.ticks]) if (!open.some((x) => x.label === l)) sprint.ticks.delete(l);
         const ticked = open.filter((x) => sprint.ticks.has(x.label)).map((x) => x.label);
-        const fold = foldPart('sprint', false, 'Sprint planning', `${P.rows.length} on the planning · ${P.ranked} ranked · ${ticked.length} ticked for this sprint`);
+        const fold = foldPart('sprint', false, 'Sprint planning', `${P.rows.length} on the planning · ${P.ranked} ranked · ${P.tagged ?? 0} with a MoSCoW tag · ${ticked.length} ticked for this sprint`);
         const parts = el('div', 'parts');
         // The night it starts from: tonight or one of the six after it.
         const pick = el('div', 'sprint-pick');
@@ -1048,10 +1070,31 @@
         sel.addEventListener('change', () => { sprint.night = sel.value; sprintKeep(); redraw(); });
         pick.append(sel);
         parts.append(pick);
-        // The rows in rank order, each with a tick and its estimate.
+        // H271: the legend, then the rows grouped by MoSCoW (Must, Should, Could, not sorted yet, Won't), bugs first in
+        // each group, then the rank; each with a tick, its tag and its estimate.
+        const legend = el('div', 'mo-legend');
+        legend.setAttribute('aria-label', 'MoSCoW colours');
+        for (const g of MOSCOW) {
+          const s = el('span');
+          const d = el('span', 'mo-dot');
+          d.style.background = `var(--mo-${g.key})`;
+          s.append(d, document.createTextNode(g.name));
+          legend.append(s);
+        }
+        parts.append(legend);
         const list = el('div', 'card');
+        let group = null;
         for (const x of P.rows) {
-          const row = el('label', 'sprint-row');
+          const g = moscowOf(x.moscow);
+          if (g !== group) {
+            group = g;
+            const n = P.rows.filter((r) => moscowOf(r.moscow) === g).length;
+            const h = el('div', 'mo-group', `${g.name} · ${n}`);
+            h.style.setProperty('--mo', `var(--mo-${g.key})`);
+            list.append(h);
+          }
+          const row = el('label', 'sprint-row mo');
+          row.style.setProperty('--mo', `var(--mo-${g.key})`);
           const cb = el('input');
           cb.type = 'checkbox';
           cb.value = x.label;
@@ -1060,10 +1103,32 @@
           cb.setAttribute('aria-label', `${x.label} in this sprint`);
           cb.addEventListener('change', () => { if (cb.checked) sprint.ticks.add(x.label); else sprint.ticks.delete(x.label); sprintKeep(); redraw(); });
           const what = el('span', 'what');
-          what.append(el('strong', '', `${x.rank ? `${x.rank}. ` : ''}${x.label}`), document.createTextNode(` ${x.title}`));
+          what.append(el('strong', '', `${x.rank ? `${x.rank}. ` : ''}${x.label}`));
+          if (x.bug) what.append(el('span', 'mo-bug', 'bug'));
+          what.append(document.createTextNode(` ${x.title}`));
           const how = x.team ? `With the team: job ${x.team}` : x.planned ? `Planned for the team: item ${x.planned.n}, ${x.planned.at}` : planLine(P, x.label);
           what.append(el('span', 'soft', ` · ${how}`));
-          row.append(cb, what);
+          const tag = el('select');
+          tag.setAttribute('aria-label', `${x.label}: MoSCoW`);
+          for (const o of [{ key: 'off', name: 'MoSCoW…' }, ...MOSCOW.filter((m) => m.key !== 'none')]) {
+            const op = el('option', '', o.name);
+            op.value = o.key;
+            if ((x.moscow || 'off') === o.key) op.selected = true;
+            tag.append(op);
+          }
+          tag.addEventListener('click', (e) => e.stopPropagation());
+          tag.addEventListener('change', async (e) => {
+            e.stopPropagation();
+            let out;
+            try {
+              const r = await fetch('/api/sprint-moscow', { method: 'POST', headers: { 'x-hq': 'sprint', 'content-type': 'application/json' }, body: JSON.stringify({ label: x.label, tag: tag.value }) });
+              out = await r.json().catch(() => ({ ok: false, said: `The status server said ${r.status}` }));
+            } catch { out = { ok: false, said: 'The status server is not answering.' }; }
+            sprint.said = { at: Date.now() + 8000, said: out.said.split('\n').join(' ') };
+            if (out.ok) { x.moscow = tag.value === 'off' ? null : tag.value; }
+            redraw();
+          });
+          row.append(cb, what, tag);
           list.append(row);
         }
         parts.append(list);
@@ -1089,7 +1154,10 @@
               }
               const c = r.cost || {};
               const when = r.start ? `starts around ${sprintClock(r.start)}${r.usage ? ' (it waits for the usage)' : ''}, done around ${sprintClock(r.eta)}` : (r.why || 'no time');
-              laid.append(el('div', `sprint-laid${r.past ? ' past' : ''}`, `${r.rank ? `${r.rank}. ` : ''}${r.label} ${r.title} · about ${etaDur(r.est)} · ${etaPct(c.five ?? 0)} of the 5-hour, ${etaPct(c.weekly ?? 0)} of the week · ${when}`));
+              const lg = moscowOf(r.moscow);
+              const ld = el('div', `sprint-laid mo${r.past ? ' past' : ''}`, `${lg.key !== 'none' ? `${lg.name} · ` : ''}${r.bug ? 'bug · ' : ''}${r.rank ? `${r.rank}. ` : ''}${r.label} ${r.title} · about ${etaDur(r.est)} · ${etaPct(c.five ?? 0)} of the 5-hour, ${etaPct(c.weekly ?? 0)} of the week · ${when}`);
+              ld.style.setProperty('--mo', `var(--mo-${lg.key})`);
+              laid.append(ld);
             }
             if (!L.line) laid.append(el('p', 'soft', 'Everything ticked fits in the room (estimate).'));
           }

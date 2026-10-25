@@ -37,12 +37,22 @@ usage:
   python3 routine/sprint.py list                       the planning in rank order, each with its estimate (a call reads this)
   python3 routine/sprint.py json                       the same as JSON (the status server shows it)
   python3 routine/sprint.py rank LABEL N|top|bottom|off  give row LABEL a place (1 the top), or take its rank away
+  python3 routine/sprint.py moscow LABEL must|should|could|wont|off  its MoSCoW tag for the sprint (H271), or none
   python3 routine/sprint.py lay LABEL... [--night D]     the sprint: the rows, in rank order, laid over the nights from
                                                         night D (tonight, tomorrow, a weekday or 2026-10-26; tonight
                                                         when left out); --json for the status page
   python3 routine/sprint.py plan LABEL... [--night D]    Plan the sprint: those rows planned for the team in that order
   python3 routine/sprint.py refresh                    the sizes and the looks for rows whose words changed (the routine does it)
 Used by the background look itself: look-run LABEL.
+
+H271 (25 October 2026, call at 11:31), in the user's words: "i want moneypenny to prioritize bugs always over features
+... (all of it is to avoid tech debt as a whole ...) then i was thinking maybe we can sort our sprint planning with
+moscow method ... and then color code each step, so its a clear overview." Each open row can carry a MoSCoW tag
+(Must, Should, Could, Won't this time), kept next to the rank in sprint.json ("moscow"), set on a call or in the sprint
+view (moscow LABEL TAG|off), dropped like the rank when the row is no longer open. The planning is shown and laid in
+groups: Must, Should, Could, then the rows not sorted yet, then Won't; inside each group the bugs first (a row in the
+Bugs phase, F on this roadmap), then the rank, then the roadmap's order. Bugs before features is how HQ keeps its
+tech debt down.
 """
 import hashlib, json, os, re, subprocess, sys, time
 
@@ -75,7 +85,8 @@ def open_rows(text=None):
         if not re.fullmatch(r"[A-Z]\d+(\.\d+)*", head[0]):
             continue
         out.append({"label": head[0], "title": head[1].strip() if len(head) > 1 else head[0], "line": line,
-                    "phase": phase[9:].split(" ·", 1)[0]})
+                    "phase": phase[9:].split(" ·", 1)[0],
+                    "phase_title": phase[9:].strip()})
     return out
 
 
@@ -104,6 +115,60 @@ def _save(path, d):
     os.replace(tmp, path)
 
 
+MOSCOW = ("must", "should", "could", "wont")
+MOSCOW_NAMES = {"must": "Must", "should": "Should", "could": "Could", "wont": "Won't this time", None: "Not sorted yet"}
+GROUPS = ("must", "should", "could", None, "wont")  # the order the groups are shown and laid in
+
+
+def is_bug(row):
+    """A bug: a row in the roadmap's Bugs phase (Phase F, or a phase called Bugs), or an F row (HQ's letter for a bug,
+    jobs.roadmap_row) wherever it stands."""
+    ph = (row.get("phase_title") or row.get("phase") or "")
+    return ph.split(" ", 1)[0] == "F" or "bug" in ph.lower() or str(row.get("label", "")).startswith("F")
+
+
+def moscow_of(rows=None):
+    """{label: tag} for the open rows that have one."""
+    rows = open_rows() if rows is None else rows
+    have = {r["label"] for r in rows}
+    m = _load(RANKS).get("moscow") or {}
+    return {l: t for l, t in m.items() if l in have and t in MOSCOW}
+
+
+def _tag(word):
+    w = re.sub(r"[^a-z]", "", str(word).lower())
+    w = {"m": "must", "s": "should", "c": "could", "w": "wont", "wont": "wont", "wonthistime": "wont",
+         "none": "off", "clear": "off", "remove": "off"}.get(w, w)
+    if w not in MOSCOW + ("off",):
+        sys.exit("A MoSCoW tag is must, should, could, wont, or off.")
+    return w
+
+
+def set_moscow(label, word):
+    """Row LABEL's MoSCoW tag, or off. Returns the tag (None for off). Exits with why."""
+    label = label.strip().upper()
+    rows = open_rows()
+    if label not in {r["label"] for r in rows}:
+        sys.exit(f"{label} isn't an open row on the planning (done, parked, repeating or not there), so it gets no tag.")
+    t = _tag(word)
+    d = _load(RANKS)
+    m = {l: v for l, v in (d.get("moscow") or {}).items() if l in {r["label"] for r in rows}}
+    if t == "off":
+        m.pop(label, None)
+    else:
+        m[label] = t
+    d["moscow"] = m
+    d["set"] = int(time.time())
+    _save(RANKS, d)
+    return None if t == "off" else t
+
+
+def group_key(x, roadmap_place):
+    """How a row sorts in the sprint view: its MoSCoW group, bugs first, its rank, the roadmap's order."""
+    return (GROUPS.index(x.get("moscow")), not x.get("bug"), x["rank"] is None, x["rank"] or 0,
+            roadmap_place.get(x["label"], 0))
+
+
 def order(rows=None):
     """The ranked labels, top first, only the rows still open."""
     rows = open_rows() if rows is None else rows
@@ -129,7 +194,9 @@ def set_rank(label, place):
         else:
             sys.exit("A rank is a number from 1 (the top), top, bottom, or off.")
         ranked.insert(i, label)
-    _save(RANKS, {"order": ranked, "set": int(time.time())})
+    d = _load(RANKS)
+    d.update({"order": ranked, "set": int(time.time())})  # H271: the MoSCoW tags stay
+    _save(RANKS, d)
     return ranked
 
 
@@ -224,6 +291,8 @@ def plan():
     rows = open_rows()
     ranked = order(rows)
     place = {l: i + 1 for i, l in enumerate(ranked)}
+    tags = moscow_of(rows)  # H271
+    roadmap_place = {r["label"]: i for i, r in enumerate(rows)}
     d = _load(ESTS)
     hist = E.all_history()
     fits = E.guess_fits(hist)
@@ -245,7 +314,7 @@ def plan():
         guess, gkey, gf = E.pick_guess(ge, fits)
         est = E.with_guess(computed, guess, gf)
         x = {"label": r["label"], "title": r["title"], "phase": r["phase"], "rank": place.get(r["label"]),
-             "est": est, "kind": det["kind"]}
+             "est": est, "kind": det["kind"], "moscow": tags.get(r["label"]), "bug": is_bug(r)}
         if est != computed:
             x.update({"computed": computed, "guess_used": gkey})
         if ge.get("guess_look"):
@@ -265,8 +334,9 @@ def plan():
         if i:
             x["planned"] = {"n": i["n"], "at": i["at"]}
         out.append(x)
-    out.sort(key=lambda x: (x["rank"] is None, x["rank"] or 0))
-    return {"rows": out, "ranked": len(ranked)}
+    out.sort(key=lambda x: group_key(x, roadmap_place))  # H271: Must first, bugs first in each group, then the rank
+    counts = {MOSCOW_NAMES[g]: sum(1 for x in out if x.get("moscow") == g) for g in GROUPS}
+    return {"rows": out, "ranked": len(ranked), "tagged": len(tags), "groups": counts}
 
 
 def row_words(x):
@@ -283,15 +353,19 @@ def row_words(x):
 
 
 def words(p):
-    lines = []
+    lines, g = [], object()
     for x in p["rows"]:
-        where = f"{x['rank']}." if x["rank"] else "unranked:"
+        if x.get("moscow") != g:
+            g = x.get("moscow")
+            lines.append(f"{MOSCOW_NAMES[g]}:")
+        where = (f"{x['rank']}." if x["rank"] else "unranked:") + (" (bug)" if x.get("bug") else "")
         team = (f" (with the team: job {x['team']})" if x.get("team") else
                 f" (planned for the team: item {x['planned']['n']}, {x['planned']['at']})" if x.get("planned") else "")
         lines.append(f"{where} {x['label']} {q.one_line(x['title'])[:90]}: {row_words(x)}{team}")
     if not lines:
         return "Nothing open on the planning."
-    head = f"The planning, {len(p['rows'])} open rows, {p['ranked']} ranked (estimate):"
+    head = (f"The planning, {len(p['rows'])} open rows, {p['ranked']} ranked, {p.get('tagged', 0)} with a MoSCoW tag; "
+            "grouped Must, Should, Could, not sorted yet, Won't, bugs first in each (estimate):")
     return "\n".join([head] + lines)
 
 
@@ -419,7 +493,7 @@ def lay(labels, night=None, now=None):
         else:
             picked.append(x)
     order_ = [x["label"] for x in p["rows"]]
-    picked.sort(key=lambda x: order_.index(x["label"]))  # rank order: the ranked first, then the roadmap's order
+    picked.sort(key=lambda x: order_.index(x["label"]))  # the planning's order: MoSCoW group, bugs first, the rank (H271)
     a0, _ = _night(d0)
     horizon_end = _night(d0 + dt.timedelta(days=NIGHTS - 1))[1]
     proj, busy, reserved = _busy(now, horizon_end)
@@ -435,7 +509,8 @@ def lay(labels, night=None, now=None):
     for x in picked:
         cost = x.get("cost") or {}
         need = {kk: cost.get(kk, 0) for kk in ("five", "weekly")}
-        r = {"label": x["label"], "title": x["title"], "rank": x["rank"], "est": x["est"], "cost": cost, "kind": x.get("kind")}
+        r = {"label": x["label"], "title": x["title"], "rank": x["rank"], "est": x["est"], "cost": cost, "kind": x.get("kind"),
+             "moscow": x.get("moscow"), "bug": x.get("bug")}
         placed = False
         first_k = k
         while k < len(nights):
@@ -588,7 +663,7 @@ def _args(argv):
 
 def main(argv):
     cmd = argv[0] if argv else "--help"
-    if cmd in ("rank", "plan"):
+    if cmd in ("rank", "plan", "moscow"):
         import role
         if not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
             sys.exit(role.forward("sprint", list(argv)))
@@ -604,6 +679,13 @@ def main(argv):
         label = argv[1].strip().upper()
         print(f"{label} is now rank {ranked.index(label) + 1} of {len(ranked)}." if label in ranked
               else f"{label} has no rank now; {len(ranked)} rows are ranked.")
+    elif cmd == "moscow":
+        if len(argv) < 3:
+            sys.exit("moscow LABEL must|should|could|wont|off")
+        with q.locked():
+            t = set_moscow(argv[1], argv[2])
+        label = argv[1].strip().upper()
+        print(f"{label} is now {MOSCOW_NAMES[t]}." if t else f"{label} has no MoSCoW tag now.")
     elif cmd == "lay":
         labels, night, as_json = _args(argv[1:])
         L = lay(labels, night)

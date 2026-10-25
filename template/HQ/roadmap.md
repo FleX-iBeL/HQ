@@ -38,3 +38,17 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started · ❓ needs a decision 
 | | Step | What you get | Model |
 |---|---|---|---|
 | ⬜ | A1 Your first step | [Tell HQ on a call, or in a chat, what you want first.] | |
+
+## Phase F · Bugs
+
+What's broken or doesn't work as it should. Bugs go before features: left alone, they pile up as tech debt, and every next change gets slower and riskier.
+
+| | Step | What you get | Model |
+|---|---|---|---|
+
+## Phase H · Features
+
+What's new: things HQ should build or manage next.
+
+| | Step | What you get | Model |
+|---|---|---|---|

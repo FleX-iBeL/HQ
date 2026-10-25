@@ -9548,7 +9548,7 @@ setTimeout(() => {
         rows = {x["label"]: x for x in p["rows"]}
         need(rows["H9005"]["rank"] is None and rows["H9001"]["rank"] == 1 and rows["H9004"]["rank"] == 2
              and rows["H9002"]["rank"] == 3 and p["ranked"] == 3, f"H269: a new row moved the ranks: {[(x['label'], x['rank']) for x in p['rows']][:4]}")
-        need([x["label"] for x in p["rows"][:3]] == ["H9001", "H9004", "H9002"] and "H9003" not in rows,
+        need([x["label"] for x in p["rows"] if x["label"].startswith("H900")][:3] == ["H9001", "H9004", "H9002"] and "H9003" not in rows,
              "H269: the planning isn't in rank order, or a done row is on it")
         need(not any(x["label"].startswith("P") for x in p["rows"]) and all(x["phase"] != "P" for x in p["rows"]), "H269: a parked row is on the planning")
         # a row that's done drops out, the ones below move up
@@ -9855,6 +9855,160 @@ setTimeout(() => {
         import role
         need("plan" in role.WRITES.get("sprint", ()), "H269: Plan the sprint on the backup isn't handed to the main")
         return "planned in rank order at each night's 22:00, a minute apart; not twice; laid and planned through the status server (header needed); the page ticks and lays; a call may; the backup hands it on"
+
+    async def flow147(self) -> str:
+        """H271: bugs before features, against tech debt, and the sprint by MoSCoW. No Claude turns. A MoSCoW tag per
+        planning row (sprint.py moscow, which a call may run and the backup hands to the main), kept next to the rank,
+        dropped with the row; the planning grouped Must, Should, Could, not sorted yet, Won't, the bugs first in each
+        group, then the rank, and the sprint laid in that order; the status page shows the groups in their own colours,
+        light and dark, with a legend, and sets a tag from the view; Moneypenny's craft puts bugs first and explains
+        tech debt; a fresh roadmap has Bugs and Features apart."""
+        import json as js
+        rm, env, now = self._sprint_lay_env("H271")
+        rm.write_text(rm.read_text().replace("| ⬜ | H9004 A made-up export",
+                                             "| ⬜ | F9008 A made-up bug in the export | It breaks | | |\n| ⬜ | H9004 A made-up export"))
+        ok = lambda r, what: need(r.returncode == 0, f"H271: {what}: {r.stdout[-300:]} {r.stderr[-600:]}")  # noqa: E731
+        ok(self._sprint(env, "rank", "H9002", "1"), "rank")
+        ok(self._sprint(env, "rank", "F9008", "2"), "rank")
+        for label, tag in (("H9001", "must"), ("F9008", "Must"), ("H9002", "should"), ("H9007", "won't"), ("H9006", "could")):
+            r = self._sprint(env, "moscow", label, tag)
+            ok(r, f"moscow {label} {tag}")
+        r = self._sprint(env, "moscow", "H9006", "off")
+        ok(r, "moscow off")
+        need("no MoSCoW tag now" in r.stdout, f"H271: off doesn't say so: {r.stdout}")
+        bad = self._sprint(env, "moscow", "H9003", "must")
+        need(bad.returncode != 0 and "isn't an open row" in bad.stderr + bad.stdout, "H271: a done row got a tag")
+        need(self._sprint(env, "moscow", "H9001", "maybe").returncode != 0, "H271: a tag that isn't MoSCoW was taken")
+        d = js.loads(Path(env["HQ_SPRINT"]).read_text())
+        need(d.get("order", [])[:2] == ["H9002", "F9008"] and d["moscow"] == {"H9001": "must", "F9008": "must", "H9002": "should", "H9007": "wont"},
+             f"H271: the tags aren't kept next to the ranks: {d}")
+        ok(self._sprint(env, "rank", "H9004", "top"), "a rank after the tags")
+        need(js.loads(Path(env["HQ_SPRINT"]).read_text()).get("moscow", {}).get("H9001") == "must", "H271: a rank change lost the tags")
+        p = js.loads(self._sprint(env, "json").stdout)
+        mine = [x["label"] for x in p["rows"] if x["label"].endswith(("9001", "9002", "9004", "9006", "9007", "9008"))]
+        # Must: the bug first (F9008, rank 3), then H9001 (unranked); Should: H9002; not sorted: H9004 (rank 1), H9006; Won't: H9007
+        need(mine == ["F9008", "H9001", "H9002", "H9004", "H9006", "H9007"], f"H271: the planning isn't grouped Must first, bugs first: {mine}")
+        by = {x["label"]: x for x in p["rows"]}
+        need(by["F9008"]["bug"] and not by["H9001"]["bug"] and by["H9001"]["moscow"] == "must" and by["H9006"]["moscow"] is None
+             and p["tagged"] >= 4 and p["groups"]["Must"] >= 2, f"H271: the rows don't say their tag and bug: {by['F9008']} {p.get('groups')}")
+        lst = self._sprint(env, "list").stdout
+        need("Must:" in lst and "Won't this time:" in lst and "(bug) F9008" in lst and lst.index("Must:") < lst.index("Should:") < lst.index("Won't this time:"),
+             f"H271: the list a call reads isn't grouped: {lst[:500]}")
+        L = js.loads(self._sprint(env, "lay", "H9007", "H9001", "F9008", "H9002", "--json").stdout)
+        need([x["label"] for x in L["rows"]] == ["F9008", "H9001", "H9002", "H9007"] and L["rows"][0]["moscow"] == "must" and L["rows"][0]["bug"],
+             f"H271: the sprint isn't laid in the planning's order: {[x['label'] for x in L['rows']]}")
+        # a row that's done drops its tag
+        rm.write_text(rm.read_text().replace("| ⬜ | H9001 A made-up feedback", "| ✅ | H9001 A made-up feedback"))
+        p = js.loads(self._sprint(env, "json").stdout)
+        need("H9001" not in {x["label"] for x in p["rows"]} and p["tagged"] == 3, f"H271: a done row's tag stayed: {p['tagged']}")
+        # a call may tag; the call rules say MoSCoW and bugs first; the backup hands it on
+        import sys as _s
+        _s.path.insert(0, str(ROOT / "app"))
+        _s.path.insert(0, str(ROOT / "routine"))
+        import policy, role, agents
+        pol = policy.Policy(Path(config.FOLDER))
+        dd = pol.decide("Bash", {"command": f'python3 "{ROOT}/routine/sprint.py" moscow H247 must'})
+        need(dd.verdict == policy.ALLOW, f"H271: a call can't tag a row ({dd.why})")
+        need("moscow" in role.WRITES.get("sprint", ()), "H271: a tag on the backup isn't handed to the main")
+        need("sprint.py\" moscow" in config.VOICE_RULES and "bugs come before the features" in config.VOICE_RULES and "tech debt" in config.VOICE_RULES,
+             "H271: the call rules don't say MoSCoW and bugs first")
+        mp = next(a for a in agents.DEFAULTS if a["id"] == "moneypenny")
+        c = mp.get("craft", "")
+        need("Bugs before features" in c and "tech debt" in c and "interest on a loan" in c and "Features and Bugs" in c
+             and "bug check" in c and "MoSCoW" in c and len(c) <= 3000, "H271: Moneypenny's craft doesn't put bugs first, explain tech debt, keep them apart and suggest a bug check")
+        need("bugs before features" in agents.persona(mp).lower() if hasattr(agents, "persona") else True, "H271: her persona doesn't carry it")
+        fresh = (ROOT / "template/HQ/roadmap.md").read_text()
+        need("## Phase F · Bugs" in fresh and "## Phase H · Features" in fresh and "tech debt" in fresh, "H271: a fresh roadmap doesn't keep Bugs and Features apart")
+        # the status page: groups in their colours, light and dark, a legend, a tag set from the view
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        site = self.tmp / "h271-site"
+        shutil.rmtree(site, ignore_errors=True)
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        (site / ".status").mkdir()
+        for dname in ("routine", "app"):
+            (site / dname).symlink_to(ROOT / dname)
+        port = 4796
+        senv = {**env, "HQ_STATUS_PORT": str(port)}
+        harness = r"""<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  for (let i = 0; i < 80 && !document.querySelector('section.sprint'); i++) await wait(250);
+  const sec = document.querySelector('section.sprint');
+  out.push('section:' + !!sec);
+  if (sec) {
+    sec.querySelector('details').open = true;
+    await wait(300);
+    out.push('legend:' + (sec.querySelector('.mo-legend')?.innerText.replace(/\s+/g, ' ') || ''));
+    const gs = [...sec.querySelectorAll('.mo-group')];
+    out.push('groups:' + gs.map(g => g.textContent.split(' · ')[0]).join(','));
+    out.push('colours:' + gs.map(g => getComputedStyle(g).borderLeftColor).join(';'));
+    out.push('dark:' + matchMedia('(prefers-color-scheme: dark)').matches);
+    out.push('bug:' + !!sec.querySelector('.mo-bug'));
+    const sel = sec.querySelector('select[aria-label="H9004: MoSCoW"]');
+    out.push('select:' + !!sel);
+    if (sel) { sel.value = 'could'; sel.dispatchEvent(new Event('change')); await wait(3000); }
+  }
+  const pre = document.createElement('pre'); pre.id = 'h271'; pre.textContent = 'H271RESULT ' + out.join(' | ') + ' END';
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        idx = site / "status/index.html"
+        idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
+        log = open(self.tmp / "h271-server.log", "w")
+        srv = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=senv, stdout=log, stderr=subprocess.STDOUT)
+        base = f"http://127.0.0.1:{port}"
+
+        def call(path, method="GET", headers=None, body=None):
+            req = urllib.request.Request(base + path, method=method, headers=headers or {}, data=body)
+            try:
+                with urllib.request.urlopen(req, timeout=60) as x:
+                    return x.status, x.read()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read()
+        res = {}
+        try:
+            for _ in range(50):
+                try:
+                    call("/routines.json")
+                    break
+                except Exception:
+                    await asyncio.sleep(0.2)
+            st, _b = await asyncio.to_thread(call, "/api/sprint-moscow", "POST", {"content-type": "application/json"}, b'{"label":"H9002","tag":"must"}')
+            need(st == 403, f"H271: a tag is set without the HQ page's header: {st}")
+            st, body = await asyncio.to_thread(call, "/api/sprint-moscow", "POST", {"x-hq": "sprint", "content-type": "application/json"}, b'{"label":"H9002","tag":"nope"}')
+            need(st == 400, f"H271: a wrong tag was taken: {st}")
+            st, body = await asyncio.to_thread(call, "/api/sprint-moscow", "POST", {"x-hq": "sprint", "content-type": "application/json"}, b'{"label":"H9002","tag":"must"}')
+            out = js.loads(body)
+            need(st == 200 and out["ok"] and "Must" in out["said"], f"H271: the page couldn't set a tag: {st} {out}")
+            cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+            cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+            chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            need(Path(chrome).exists(), "no headless browser found to run the status page in")
+            for mode in ("light", "dark"):
+                flags = ["--blink-settings=preferredColorScheme=0", "--force-dark-mode"] if mode == "dark" else ["--blink-settings=preferredColorScheme=1"]
+                r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), *flags,
+                                                  f"--user-data-dir={self.tmp / ('h271-profile-' + mode)}", "--virtual-time-budget=40000", "--dump-dom", base + "/"], timeout=150)
+                m = re.search(r'<pre id="h271">H271RESULT (.*?) END</pre>', r.stdout)
+                need(m, f"H271: the page test didn't finish ({mode}): {(r.stderr or r.stdout)[-300:]!r}")
+                res[mode] = dict(part.split(":", 1) for part in m.group(1).split(" | "))
+                say(f"   {mode}: {m.group(1)[:300]}")
+        finally:
+            srv.terminate()
+        for mode, x in res.items():
+            need(x.get("section") == "true", "H271: the status page has no sprint view")
+            need(all(w in x.get("legend", "") for w in ("Must", "Should", "Could", "Not sorted yet", "Won't this time")), f"H271: no legend ({mode}): {x.get('legend')}")
+            gs = x.get("groups", "").split(",")
+            want = ["Must", "Should", "Could", "Not sorted yet", "Won't this time"]
+            need(gs[0] == "Must" and gs[-1] == "Won't this time" and "Not sorted yet" in gs and gs == [g for g in want if g in gs],
+                 f"H271: the groups aren't in MoSCoW order ({mode}): {gs}")
+            cols = x.get("colours", "").split(";")
+            need(len(set(cols)) == len(cols) == len(gs), f"H271: the groups don't each have their own colour ({mode}): {cols}")
+            need(x.get("bug") == "true" and x.get("select") == "true", f"H271: no bug mark or no tag picker on the rows ({mode}): {x}")
+        need(res["light"].get("dark") == "false" and res["dark"].get("dark") == "true", f"H271: the dark mode wasn't tried: {res['dark'].get('dark')}")
+        need(res["light"]["colours"].split(";")[0] != res["dark"]["colours"].split(";")[0], "H271: Must's colour is the same in light and dark")
+        need(js.loads(Path(env["HQ_SPRINT"]).read_text()).get("moscow", {}).get("H9004") == "could", "H271: the tag picker on the page didn't set the tag")
+        return "MoSCoW tags set, kept and dropped; grouped Must first, bugs first, then the rank; laid in that order; a call may; the page in colours, light and dark, with a legend and a picker; Moneypenny puts bugs first; Bugs and Features apart on a fresh roadmap"
 
     async def flow142(self) -> str:
         """H241, no Claude: a friend's HQ needs no calendar called HQ Planning. On its own copies, with a calendar that
@@ -12764,7 +12918,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
 
         # H182: send-row, an open roadmap item to the team.
         sr = self.tmp / "roadmap-H182.md"
-        sr.write_text((ROOT / "template/HQ/roadmap.md").read_text().rstrip("\n") + "\n\n## Phase H · Features\n\n"
+        sr.write_text((ROOT / "template/HQ/roadmap.md").read_text().rstrip("\n") + "\n\n## Phase T · Tried\n\n"
                       "| | Step | What you get | Model |\n|---|---|---|---|\n"
                       "| ⬜ | H7 Make the clock tick | Build the clock and add a happy flow for it | It ticks | |\n"
                       "| ⬜ | H8 Spar on the colours | Talk it through | Colours | |\n"
@@ -17744,6 +17898,7 @@ FLOWS = {
     138: ("H235: extensions: the workspace's folder read at HQ's fixed points (call and text rules, kinds of texts, the mail check, scripts, routines); the local check after an update, and its plain message with Talk it through and Send to the team", False, "flow138"),
     143: ("H269: the planning's rank: set on a call, 1 the top, moved and taken off, a new row unranked and the others kept, a done row dropping out, the list a call reads in rank order", False, "flow143"),
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
+    147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     146: ("H269: Plan the sprint: the ticked rows on the schedule in rank order at their nights, not twice, through the status server and its page, a call may, the backup hands it on", False, "flow146"),
     144: ("H269: an estimate of time and usage on every open planning row, made like the team's (kind, size, similar jobs, the first look), again on new words, never on a move or a rank; served and shown on the status page", False, "flow144"),
     142: ("H241: a friend's HQ needs no calendar called HQ Planning: an X is a mark only, an old move goes back on the main only, and the rules and tutorial never ask for it", False, "flow142"),
