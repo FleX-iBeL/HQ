@@ -13175,6 +13175,205 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             srv.terminate()
         return f"four totals ({T['not_ready']['count']} not ready, 2 ready, 2 planned, {T['total']['count']} in all) that add up; the list says them; a fold at the top of Sprint planning"
 
+    async def flow151(self) -> str:
+        """H244, no Claude: the five kinds of the week in colour. kinds.py on its own copy (the defaults, a rename, another
+        colour, a colour two kinds would share, back to HQ's own), agenda.py keeping Google's own colour of an appointment
+        and giving it its kind, the test server's /api/calendar/kind, and the real call page in a headless browser
+        (phone and the Mac app, light and dark): the kinds' row, a tap hiding and showing a kind, the template's grey,
+        the kind in the appointment, Edit renaming one."""
+        import agenda
+        import kinds
+        d = self.tmp / "h244"
+        d.mkdir(parents=True, exist_ok=True)
+        real = Path(os.path.join(kinds.hqpaths.DATA, "calendar-kinds.json"))
+        real_before = real.read_bytes() if real.exists() else None
+        keep = {k: os.environ.get(k) for k in ("HQ_CALENDAR_KINDS", "HQ_CALENDAR_FILE", "HQ_CALENDAR_FAKE")}
+        os.environ["HQ_CALENDAR_FILE"] = str(d / "calendar.json")
+        os.environ.pop("HQ_CALENDAR_KINDS", None)
+        try:
+            need(kinds.kinds_file() == d / "calendar-kinds.json", "the kinds aren't kept next to the calendar copy")
+            ks = kinds.kinds()
+            need([(k["name"], k["colour"], k["gcolor"]) for k in ks] == [
+                ("Money makers", "banana", "5"), ("Client delivery", "basil", "10"), ("Admin essentials", "tomato", "11"),
+                ("CEO time", "peacock", "7"), ("Cup fillers", "grape", "3"), ("Not set yet", "graphite", "8")]
+                 and ks[-1]["template"], f"the default kinds aren't the training's five and grey: {ks}")
+            need(kinds.kind_of("7") == "ceo" and kinds.kind_of("5") == "money" and kinds.kind_of("8") == "template"
+                 and kinds.kind_of("1") == "" and kinds.kind_of("") == "", "an appointment's colour doesn't give its kind")
+            kinds.rename("CEO time", "  Steering   time ")
+            need(kinds.kinds()[3]["name"] == "Steering time" and kinds.find("steering time") == "ceo", "a kind couldn't be renamed")
+            kinds.recolour("ceo", "Lavender")
+            need(kinds.kind_of("1") == "ceo" and kinds.kind_of("7") == "", "a kind's new colour isn't its kind")
+            kinds.recolour("cup", "banana")  # money makers already has banana: cup fillers catches nothing then
+            need(kinds.kind_of("5") == "money" and next(k for k in kinds.kinds() if k["id"] == "cup")["gcolor"] == "",
+                 "two kinds share one colour")
+            for bad in (lambda: kinds.rename("nope", "x"), lambda: kinds.recolour("ceo", "pink"), lambda: kinds.rename("ceo", "  ")):
+                try:
+                    bad()
+                    need(False, "a wrong kind, colour or empty name was taken")
+                except (KeyError, ValueError):
+                    pass
+            kinds.reset("cup")
+            kinds.reset("Steering time")
+            need([k["name"] for k in kinds.kinds()][3] == "CEO time" and kinds.kind_of("7") == "ceo" and kinds.kind_of("3") == "cup",
+                 "back to HQ's own didn't bring the name and colour back")
+            (d / "calendar-kinds.json").write_text("not json")
+            need(kinds.kinds()[0]["name"] == "Money makers", "a broken kinds file isn't passed over")
+            (d / "calendar-kinds.json").unlink()
+            # agenda keeps Google's own colour (colorId) and gives each appointment its colour and its kind
+            iso = lambda h: datetime(2099, 1, 1, h).astimezone().isoformat()
+            res = [(agenda.TOOL + "list_calendars", {}, {"calendars": [{"id": "me@example.com", "summary": "me@example.com"}]}),
+                   (agenda.TOOL + "list_events", {"calendarId": "me@example.com"}, {"events": [
+                       {"id": "a", "summary": "CEO time", "colorId": "7", "start": {"dateTime": iso(11)}, "end": {"dateTime": iso(12)}},
+                       {"id": "b", "summary": "Lunch", "start": {"dateTime": iso(12)}, "end": {"dateTime": iso(13)}},
+                       {"id": "c", "summary": "Date night", "colorId": "8", "start": {"dateTime": iso(19)}, "end": {"dateTime": iso(22)}}]})]
+            cals, evs = agenda.events_from(res)
+            need([e["gcolor"] for e in evs] == ["7", "", "8"], f"Google's own colour of an appointment isn't kept: {evs}")
+            (d / "calendar.json").write_text(json.dumps({"looked": datetime(2099, 1, 1, 10).timestamp(), "calendars": cals, "events": evs}))
+            rd = agenda.read(now=datetime(2099, 1, 1, 10).timestamp())
+            got = {e["title"]: (e["color"], e.get("kind")) for e in rd["events"]}
+            main = rd["calendars"][0]["color"]
+            need(got == {"CEO time": ("#039be5", "ceo"), "Lunch": (main, ""), "Date night": ("#616161", "template")}
+                 and [k["id"] for k in rd["kinds"]][:5] == ["money", "delivery", "admin", "ceo", "cup"],
+                 f"the appointments' colours and kinds aren't right: {got}")
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        need((real.read_bytes() if real.exists() else None) == real_before, "the workspace's own kinds were touched")
+
+        await self.ensure_server()
+        sfile = Path(self.server.env["HQ_CALENDAR_FILE"])
+        sfile.parent.mkdir(parents=True, exist_ok=True)
+        t = time.time()
+        sfile.write_text(json.dumps({"looked": t, "calendars": [], "events": [
+            {"id": "s1", "title": "CEO time", "gcolor": "7", "start": datetime.fromtimestamp(t + 3600).astimezone().isoformat(), "end": "", "all_day": False}]}))
+        def post(body, hq):
+            req = urllib.request.Request(TEST_URL + "/api/calendar/kind", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", **({"x-hq": hq} if hq else {})})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read() or b"{}")
+            except urllib.error.HTTPError as e:
+                return e.code, {}
+        need(post({"id": "ceo", "name": "x"}, "")[0] == 403, "a kind could be renamed without the page's header")
+        code, got = post({"id": "ceo", "name": "Steering", "colour": "lavender"}, "calendar")
+        k = next((x for x in got.get("kinds", []) if x["id"] == "ceo"), {})
+        need(code == 200 and k.get("name") == "Steering" and k.get("colour") == "lavender" and got["events"][0].get("kind") == "",
+             f"the server didn't rename and recolour the kind ({code} {k})")
+        need(post({"id": "nope", "name": "x"}, "calendar")[0] == 404 and post({"id": "ceo", "colour": "pink"}, "calendar")[0] == 400
+             and post({}, "calendar")[0] == 400, "an unknown kind or colour was taken")
+        code, got = post({"id": "ceo", "reset": True}, "calendar")
+        need(code == 200 and got["events"][0].get("kind") == "ceo" and got["events"][0]["color"] == "#039be5", "back to HQ's own didn't work on the server")
+        need(sfile.with_name("calendar-kinds.json").exists() and (real.read_bytes() if real.exists() else None) == real_before,
+             "the server wrote the kinds somewhere else than its own copy")
+
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        stub = r"""<script>
+var ASKED = [], POSTS = [], T = new Date(); T.setHours(0, 0, 0, 0);
+function at(days, h, m) { const d = new Date(T); d.setDate(d.getDate() + days); d.setHours(h, m || 0); return d.toISOString(); }
+var KINDS = [
+  { id: "money", name: "Money makers", colour: "banana", color: "#f6bf26", gcolor: "5", template: false, own: false },
+  { id: "delivery", name: "Client delivery", colour: "basil", color: "#0b8043", gcolor: "10", template: false, own: false },
+  { id: "admin", name: "Admin essentials", colour: "tomato", color: "#d50000", gcolor: "11", template: false, own: false },
+  { id: "ceo", name: "CEO time", colour: "peacock", color: "#039be5", gcolor: "7", template: false, own: false },
+  { id: "cup", name: "Cup fillers", colour: "grape", color: "#8e24aa", gcolor: "3", template: false, own: false },
+  { id: "template", name: "Not set yet", colour: "graphite", color: "#616161", gcolor: "8", template: true, own: false }];
+var EVENTS = [
+  { id: "k1", title: "CEO time", start: at(0, 22), end: at(0, 23), all_day: false, where: "", notes: "", calendar: "Main", view: "Main", color: "#039be5", kind: "ceo", free: false },
+  { id: "k2", title: "Executing", start: at(1, 11), end: at(1, 12), all_day: false, where: "", notes: "", calendar: "Main", view: "Main", color: "#f6bf26", kind: "money", free: false },
+  { id: "k3", title: "Lunch", start: at(1, 12), end: at(1, 13), all_day: false, where: "", notes: "", calendar: "Main", view: "Main", color: "#f1f1f1", kind: "", free: false },
+  { id: "k4", title: "Date night", start: at(2, 19), end: at(2, 22), all_day: false, where: "", notes: "", calendar: "Main", view: "Main", color: "#616161", kind: "template", free: false }];
+window.fetch = async (url, opt) => {
+  url = String(url);
+  if (url === "api/calendar/kind") {
+    const b = JSON.parse(opt.body); POSTS.push(b);
+    KINDS = KINDS.map(k => k.id === b.id ? { ...k, ...(b.name ? { name: b.name, own: true } : {}) } : k);
+  }
+  if (url.startsWith("api/calendar")) { ASKED.push(url); return { ok: true, json: async () => ({ on: true, looked: Date.now() / 1000 - 60, looking: false, error: "", events: EVENTS, calendars: [{ name: "Main", color: "#f1f1f1" }], kinds: KINDS }) }; }
+  return { ok: true, json: async () => ({ lines: [], calls: [], items: [] }) };
+};</script>"""
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  const shown = el => el && getComputedStyle(el).display !== "none" && el.getBoundingClientRect().width > 0;
+  try { localStorage.removeItem("hq-kind-off"); localStorage.removeItem("hq-cal-off"); } catch (_) {}
+  await wait(300);
+  calBtn.click(); await wait(400);
+  const row = document.getElementById("calkinds");
+  const chips = () => [...row.querySelectorAll("button[data-kind]")], chip = id => chips().find(b => b.dataset.kind === id);
+  const appts = () => [...calList.querySelectorAll(".appt")];
+  const dotOf = el => el && getComputedStyle(el.querySelector(".cd")).backgroundColor;
+  const appt = t => appts().find(b => b.textContent.includes(t));
+  out.push("row:" + (shown(row) && chips().map(b => b.dataset.kind).join() === "money,delivery,admin,ceo,cup,template"
+    && chips().every(b => b.getAttribute("aria-pressed") === "true") && row.querySelector(".kedit") ? "ok" : "WRONG " + chips().map(b => b.dataset.kind)));
+  out.push("colours:" + (dotOf(chip("ceo")) === "rgb(3, 155, 229)" && dotOf(chip("money")) === "rgb(246, 191, 38)"
+    && dotOf(appt("CEO time")) === "rgb(3, 155, 229)" && dotOf(appt("Date night")) === "rgb(97, 97, 97)" && dotOf(chip("template")) === "rgb(97, 97, 97)" ? "ok" : "WRONG " + dotOf(appt("CEO time"))));
+  const wide = row.getBoundingClientRect(), fits = row.scrollWidth <= document.documentElement.clientWidth || getComputedStyle(row).overflowX === "auto";
+  out.push("no-page-scroll:" + (document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1 && fits ? "ok" : "WRONG " + document.documentElement.scrollWidth));
+  const asked = ASKED.length;
+  chip("ceo").click(); await wait(100);
+  out.push("off:" + (appts().length === 3 && !appt("CEO time") && chip("ceo").getAttribute("aria-pressed") === "false" && ASKED.length === asked
+    && JSON.parse(localStorage.getItem("hq-kind-off")).join() === "ceo" ? "ok" : "WRONG " + appts().length));
+  chip("money").click(); chip("template").click(); await wait(100);
+  out.push("no-kind-stays:" + (appts().length === 1 && appt("Lunch") ? "ok" : "WRONG " + appts().length));
+  showCal(false); await wait(100); calBtn.click(); await wait(400);
+  out.push("remembered:" + (appts().length === 1 && chip("ceo").getAttribute("aria-pressed") === "false" ? "ok" : "WRONG " + appts().length));
+  for (const id of ["ceo", "money", "template"]) chip(id).click();
+  await wait(100);
+  out.push("on-again:" + (appts().length === 4 && JSON.parse(localStorage.getItem("hq-kind-off")).length === 0 ? "ok" : "WRONG " + appts().length));
+  appt("Executing").click(); await wait(200);
+  out.push("in-appt:" + (calOne.textContent.includes("Kind: Money makers") && !shown(row) ? "ok" : "WRONG"));
+  document.getElementById("calback").click(); await wait(300);
+  appt("Lunch").click(); await wait(200);
+  out.push("no-kind-line:" + (!calOne.textContent.includes("Kind:") ? "ok" : "WRONG"));
+  document.getElementById("calback").click(); await wait(300);
+  row.querySelector(".kedit").click(); await wait(200);
+  const ed = document.getElementById("kindedit");
+  out.push("edit:" + (shown(ed) && calTitle.textContent === "Kinds" && ed.querySelectorAll(".krow").length === 6 ? "ok" : "WRONG"));
+  const ceoRow = ed.querySelector('.krow[data-kind="ceo"]');
+  ceoRow.querySelector("input").value = "Steering";
+  ed.querySelector("button.save").click(); await wait(400);
+  out.push("renamed:" + (POSTS.length === 1 && POSTS[0].id === "ceo" && POSTS[0].name === "Steering" && !POSTS[0].colour
+    && !calEl.classList.contains("reading") && chip("ceo").textContent === "Steering" ? "ok" : "WRONG " + JSON.stringify(POSTS)));
+  row.querySelector(".kedit").click(); await wait(200);
+  document.querySelector('#kindedit button:not(.save)').click(); await wait(400);
+  out.push("reset:" + (POSTS.length === 2 && POSTS[1].id === "ceo" && POSTS[1].reset === true ? "ok" : "WRONG " + JSON.stringify(POSTS)));
+  // no appointment in a kind's colour: no row
+  EVENTS = EVENTS.map(e => ({ ...e, kind: "" })); showCal(false); await wait(100); calBtn.click(); await wait(400);
+  out.push("no-row:" + (!shown(row) ? "ok" : "WRONG"));
+  const pre = document.createElement("pre"); pre.id = "h244"; pre.textContent = "H244RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f2 = self.tmp / "h244.html"
+        f2.write_text(page.replace("<style>", stub + "<style>", 1).replace("</body>", harness + "</body>", 1))
+        for where, q, size in (("phone", "", "390,844"), ("app", "?app=1", "1100,800")):
+            for mode in ("light", "dark"):
+                flags = ["--blink-settings=preferredColorScheme=0", "--force-dark-mode"] if mode == "dark" else ["--blink-settings=preferredColorScheme=1"]
+                r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                                  f"--window-size={size}", *flags, f"--user-data-dir={self.tmp / ('h244-' + where + mode)}",
+                                                  "--virtual-time-budget=20000", "--dump-dom", f2.as_uri() + q], timeout=120)
+                m = re.search(r'<pre id="h244">H244RESULT (.*?) END</pre>', r.stdout)
+                need(m, f"the page test didn't finish ({where}, {mode}): {(r.stderr or r.stdout)[-300:]!r}")
+                res = m.group(1)
+                say(f"   {where}, {mode}: {res}")
+                need(all(part.endswith(":ok") for part in res.split(" | ")), f"the kinds in the calendar aren't right ({where}, {mode}): {res}")
+        return ("the five kinds (money makers banana, client delivery basil, admin essentials tomato, CEO time peacock, cup fillers "
+                "grape) and grey for a template, as every HQ's default; a rename, another colour, a shared colour catching nothing, "
+                "back to HQ's own, a broken file passed over, kept next to the calendar copy; Google's own colour of an appointment "
+                "kept and shown, its kind given; /api/calendar/kind only from the page; the page, phone and app, light and dark: the "
+                "kinds' row in their colours, a tap hiding and showing a kind (remembered on the device, nothing asked of the server), "
+                "an appointment without a kind always shown, the kind in the appointment, Edit renaming one and back to HQ's own, no "
+                "row when nothing has a kind's colour")
+
     async def flow150(self) -> str:
         """F51: the status block never says the team builds when nothing runs. No Claude, no window: a copy of
         the roadmap and the routine's settle step, with its status rewrite caught."""
@@ -18342,6 +18541,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    151: ("H244: the five kinds of the week in colour in the app's calendar, a tap hides or shows a kind, Edit renames one; Google's own colour of an appointment kept", False, "flow151"),
     149: ("H275: the sprint planning's totals: not ready, ready and not planned yet, planned (with the team or for a night), and the total, adding up in rows, time and usage; the list a call reads; a fold at the top of Sprint planning", False, "flow149"),
     148: ("H272: the Ready mark on every planning row: set and taken off (a call may, the backup hands it on), next to the rank and tag, changed since ready on new words, Plan the sprint and Send to the team leave out unready rows and say why, a call's add only on his say-so, the page's tick", False, "flow148"),
     146: ("H269: Plan the sprint: the ticked rows on the schedule in rank order at their nights, not twice, through the status server and its page, a call may, the backup hands it on", False, "flow146"),

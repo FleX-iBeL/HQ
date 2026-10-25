@@ -308,13 +308,24 @@
   #calsheet.reading #calone { display:flex; }
   #callist .day { color:var(--muted); font-size:13px; font-weight:600; margin:12px 0 4px; }
   /* H157: each calendar's colour, as in Google, and a row of chips that turns each one on or off for this view only */
-  #calcals { display:flex; gap:6px; overflow-x:auto; flex-shrink:0; padding:2px 0 8px; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
-  #calcals::-webkit-scrollbar { display:none; }
-  #calcals:empty, #calsheet.reading #calcals { display:none; }
-  #calcals button { flex-shrink:0; display:flex; align-items:center; gap:6px; min-height:32px; padding:4px 12px 4px 9px; border-radius:16px;
+  #calcals, #calkinds { display:flex; gap:6px; overflow-x:auto; flex-shrink:0; padding:2px 0 8px; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+  #calcals::-webkit-scrollbar, #calkinds::-webkit-scrollbar { display:none; }
+  #calcals:empty, #calsheet.reading #calcals, #calkinds:empty, #calsheet.reading #calkinds { display:none; }
+  #calcals button, #calkinds button { flex-shrink:0; display:flex; align-items:center; gap:6px; min-height:32px; padding:4px 12px 4px 9px; border-radius:16px;
     border:1px solid color-mix(in srgb, var(--muted) 55%, transparent); background:transparent; color:var(--fg); font:inherit; font-size:13px; cursor:pointer; }
-  #calcals button[aria-pressed="false"] { color:var(--muted); border-style:dashed; }
-  #calcals button[aria-pressed="false"] .cd { background:transparent; }
+  #calcals button[aria-pressed="false"], #calkinds button[aria-pressed="false"] { color:var(--muted); border-style:dashed; }
+  #calcals button[aria-pressed="false"] .cd, #calkinds button[aria-pressed="false"] .cd { background:transparent; }
+  /* H244: the five kinds of the week, each in its Google colour; tap one to hide or show it, Edit to rename */
+  #calkinds { padding-top:0; }
+  #calkinds button.kedit { color:var(--muted); }
+  #kindedit { display:flex; flex-direction:column; gap:10px; }
+  #kindedit .krow { display:flex; gap:8px; align-items:center; }
+  #kindedit .krow input { flex:1; min-width:0; min-height:40px; padding:6px 10px; border-radius:10px; border:1px solid color-mix(in srgb, var(--muted) 55%, transparent);
+    background:var(--bg); color:var(--fg); font:inherit; font-size:15px; }
+  #kindedit .krow select { min-height:40px; border-radius:10px; border:1px solid color-mix(in srgb, var(--muted) 55%, transparent); background:var(--bg); color:var(--fg); font:inherit; font-size:14px; max-width:38%; }
+  #kindedit .kfoot { display:flex; gap:8px; }
+  #kindedit .kfoot button { min-height:40px; padding:6px 14px; border-radius:12px; border:1px solid color-mix(in srgb, var(--muted) 55%, transparent); background:transparent; color:var(--fg); font:inherit; cursor:pointer; }
+  #kindedit .kfoot button.save { background:var(--fg); color:var(--bg); border-color:var(--fg); }
   .cd { flex-shrink:0; width:10px; height:10px; border-radius:50%; background:var(--cc, var(--muted)); border:1.5px solid var(--cc, var(--muted));
     box-shadow:0 0 0 1px color-mix(in srgb, var(--muted) 45%, transparent); box-sizing:border-box; }
   #callist .appt .cd { align-self:center; margin-right:-4px; }
@@ -850,7 +861,7 @@
   html.m3 #histlist button::after { content:"›"; color:var(--muted); font-size:20px; line-height:1; margin-left:-2px; }
   html.m3 #callist .appt { padding:12px 14px; margin:3px 0; }
   html.m3 #histlist .day, html.m3 #callist .day { color:var(--muted); text-transform:uppercase; letter-spacing:.05em; font-size:12px; font-weight:700; }
-  html.m3 #calcals button { background:var(--surface); }
+  html.m3 #calcals button, html.m3 #calkinds button { background:var(--surface); }
   html.m3 #calping, html.m3 #caltravel { background:var(--surface); box-shadow:0 0 0 1px var(--line); }
   /* Chat: her bubbles white on the grey, his in green; a field and Send like a messaging app. */
   html.m3 #chatlog .hq, html.m3 #histlog .hq { background:var(--surface); box-shadow:0 0 0 1px var(--line);
@@ -1031,7 +1042,7 @@
   <form id="notesform" autocomplete="off"><textarea id="notesin" rows="1" placeholder="A quick note" aria-label="A quick note" maxlength="2000"></textarea><button id="notesadd" type="submit" disabled>Add</button></form>
   <small id="notesnote"></small></div>
 <div id="calsheet" role="dialog" aria-label="Calendar"><div id="calhead"><button id="calback" type="button">‹ Days</button><h2 id="caltitle">Calendar</h2><button id="calclose" type="button">Close</button></div>
-  <div id="calcals" role="group" aria-label="Calendars shown"></div><div id="callist"></div><div id="calone"></div><small id="calnote"></small></div>
+  <div id="calcals" role="group" aria-label="Calendars shown"></div><div id="calkinds" role="group" aria-label="Kinds shown"></div><div id="callist"></div><div id="calone"></div><small id="calnote"></small></div>
 <div id="todosheet" role="dialog" aria-label="To-do" data-view="main"><div id="todohead"><button id="todoback" type="button">‹ To-do</button><h2 id="todotitle">To-do</h2><button id="todoclose" type="button">Close</button></div>
   <div id="todobody"></div><div id="todonote" aria-live="polite"></div></div>
 <div id="coachsheet" role="dialog" aria-label="Life coaching" data-view="main"><div id="coachhead"><button id="coachback" type="button">‹ Coaching</button><h2 id="coachtitle">Life coaching</h2><button id="coachclose" type="button">Close</button></div>
@@ -2480,6 +2491,7 @@ function showCalChips(d) {
   const cals = Array.isArray(d.calendars) && d.calendars.length ? d.calendars
     : [...new Set(d.events.map(calView))].map(name => ({ name, color: (d.events.find(e => calView(e) === name) || {}).color }));
   el.innerHTML = "";
+  showKindChips(d);  // H244
   if (cals.length < 2 && !off.size) return;
   for (const c of cals) {
     const b = document.createElement("button"); b.type = "button"; b.dataset.cal = c.name;
@@ -2493,17 +2505,96 @@ function showCalChips(d) {
     el.appendChild(b);
   }
 }
+// H244: the five kinds of the week (app/kinds.py), each an appointment's own colour in Google. Which kinds are off is
+// remembered on this device only, like the calendars; Edit renames a kind or gives it another of Google's colours.
+const KIND_OFF = "hq-kind-off";
+const GOOGLE_EVENT_COLOURS = { lavender: "#7986cb", sage: "#33b679", grape: "#8e24aa", flamingo: "#e67c73", banana: "#f6bf26", tangerine: "#f4511e",
+  peacock: "#039be5", graphite: "#616161", blueberry: "#3f51b5", basil: "#0b8043", tomato: "#d50000" };
+function kindOff() { try { const v = JSON.parse(localStorage.getItem(KIND_OFF) || "[]"); return new Set(Array.isArray(v) ? v : []); } catch (_) { return new Set(); } }
+function kindSetOff(off) { try { localStorage.setItem(KIND_OFF, JSON.stringify([...off])); } catch (_) {} }
+function showKindChips(d) {
+  const el = document.getElementById("calkinds"), off = kindOff();
+  el.innerHTML = "";
+  const ks = Array.isArray(d.kinds) ? d.kinds : [];
+  if (!ks.length || !d.events.some(e => e.kind)) return;  // nothing in a kind's colour yet: no row
+  for (const k of ks) {
+    if (k.template && !d.events.some(e => e.kind === k.id)) continue;  // grey only when there's a template block
+    const b = document.createElement("button"); b.type = "button"; b.dataset.kind = k.id;
+    b.setAttribute("aria-pressed", String(!off.has(k.id)));
+    const dot = document.createElement("span"); dot.className = "cd"; dot.style.setProperty("--cc", k.color);
+    b.append(dot, document.createTextNode(k.name));
+    b.addEventListener("click", () => {
+      const o = kindOff(); o.has(k.id) ? o.delete(k.id) : o.add(k.id); kindSetOff(o);
+      calKeep(); if (calLast) showCalList(calLast);
+    });
+    el.appendChild(b);
+  }
+  const ed = document.createElement("button"); ed.type = "button"; ed.className = "kedit"; ed.textContent = "Edit";
+  ed.setAttribute("aria-label", "Rename the kinds or change their colours");
+  ed.addEventListener("click", () => showKindEdit(d));
+  el.appendChild(ed);
+}
+function showKindEdit(d) {
+  calKeep(); shownAppt = null;
+  calEl.classList.add("reading"); calTitle.textContent = "Kinds";
+  calOne.innerHTML = ""; calOne.style.transform = calOne.style.transition = calOne.style.opacity = "";
+  const box = document.createElement("div"); box.id = "kindedit";
+  const intro = document.createElement("div"); intro.className = "line";
+  intro.textContent = "An appointment's colour in Google Calendar is its kind. Give a kind your own name or another colour; Google isn't changed.";
+  box.appendChild(intro);
+  for (const k of d.kinds || []) {
+    const row = document.createElement("div"); row.className = "krow"; row.dataset.kind = k.id;
+    const dot = document.createElement("span"); dot.className = "cd"; dot.style.setProperty("--cc", k.color);
+    const inp = document.createElement("input"); inp.value = k.name; inp.maxLength = 40; inp.setAttribute("aria-label", "Name for " + k.name);
+    const sel = document.createElement("select"); sel.setAttribute("aria-label", "Colour for " + k.name);
+    for (const [n, hx] of Object.entries(GOOGLE_EVENT_COLOURS)) { const o = document.createElement("option"); o.value = n; o.textContent = n[0].toUpperCase() + n.slice(1); if (n === k.colour) o.selected = true; sel.appendChild(o); }
+    sel.addEventListener("change", () => dot.style.setProperty("--cc", GOOGLE_EVENT_COLOURS[sel.value]));
+    row.append(dot, inp, sel); box.appendChild(row);
+  }
+  const foot = document.createElement("div"); foot.className = "kfoot";
+  const save = document.createElement("button"); save.type = "button"; save.className = "save"; save.textContent = "Save";
+  const back = document.createElement("button"); back.type = "button"; back.textContent = "HQ's own names and colours";
+  const send = async bodies => {
+    save.disabled = back.disabled = true;
+    let last = null;
+    for (const body of bodies) {
+      try {
+        const r = await fetch("api/calendar/kind", { method: "POST", cache: "no-store",
+          headers: { "x-hq": "calendar", "content-type": "application/json" }, body: JSON.stringify(body) });
+        if (r.ok) last = await r.json(); else { calNote.textContent = "Couldn't save that. Try again."; save.disabled = back.disabled = false; return; }
+      } catch (err) { calNote.textContent = "Couldn't save that. Try again."; save.disabled = back.disabled = false; return; }
+    }
+    calEl.classList.remove("reading"); calTitle.textContent = "Calendar";
+    if (last) showCalList(last); else if (calLast) showCalList(calLast);
+  };
+  save.addEventListener("click", () => {
+    const bodies = [];
+    for (const row of box.querySelectorAll(".krow")) {
+      const k = (d.kinds || []).find(x => x.id === row.dataset.kind); if (!k) continue;
+      const name = row.querySelector("input").value.trim(), colour = row.querySelector("select").value;
+      const body = { id: k.id };
+      if (name && name !== k.name) body.name = name;
+      if (colour !== k.colour) body.colour = colour;
+      if (body.name || body.colour) bodies.push(body);
+    }
+    send(bodies);
+  });
+  back.addEventListener("click", () => send((d.kinds || []).filter(k => k.own).map(k => ({ id: k.id, reset: true }))));
+  foot.append(save, back); box.appendChild(foot);
+  calOne.appendChild(box);
+}
 function showCalList(d) {
   calNote.textContent = d ? calLooked(d) : "";
   if (calEl.classList.contains("reading")) return;
   if (!d || !Array.isArray(d.events)) { histNote(calList, "Couldn't load the calendar. Try again."); return; }
   calKeep();
   calLast = d; showCalChips(d);  // H157
-  const off = calOff();
+  const off = calOff(), koff = kindOff();
   calList.innerHTML = "";
   let day = "", moving = false, hidden = 0;
   for (const e of d.events) {
     if (off.has(calView(e))) { hidden++; continue; }  // H157: that calendar is off in this view
+    if (e.kind && koff.has(e.kind)) { hidden++; continue; }  // H244: that kind is off in this view
     const a = calDate(e.start); if (!a) continue;
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const z = e.end ? calDate(e.end) : a;  // H143: the week's past days stay; one still running counts for today
@@ -2528,7 +2619,7 @@ function showCalList(d) {
   }
   clearTimeout(calMoveTimer);
   if (moving) calMoveTimer = setTimeout(() => { if (calOpen() && !calEl.classList.contains("reading")) loadCal(false); }, 4000);
-  if (!calList.children.length) histNote(calList, hidden ? "Every calendar with appointments is switched off" : d.looking ? "Reading your calendar…" : d.looked ? "Nothing in the next two weeks" : "Not read yet");
+  if (!calList.children.length) histNote(calList, hidden ? "Everything is switched off in this view" : d.looking ? "Reading your calendar…" : d.looked ? "Nothing in the next two weeks" : "Not read yet");
   calPlace();
 }
 function calKeep() { if (calOpen() && !calEl.classList.contains("reading") && calList.querySelector(".day")) calScroll = calList.scrollTop; }  // H156
@@ -2715,8 +2806,9 @@ function showAppt(e, noteNow) {
   const h = document.createElement("h3"); h.textContent = e.title;
   const when = document.createElement("div"); when.className = "line"; when.textContent = calWhen(e);
   calOne.append(h, when);
+  const kd = e.kind && calLast && Array.isArray(calLast.kinds) ? calLast.kinds.find(k => k.id === e.kind) : null;  // H244
   const mk = e.mark === "done" ? "Ticked off: done" : e.mark === "x" ? "X: didn't happen as planned" + (e.move_note ? " · " + e.move_note : "") : "";
-  for (const x of [e.where, calView(e) !== "Main" ? calView(e) + " calendar" : "", e.free ? "Shown as free" : "", mk]) {
+  for (const x of [e.where, calView(e) !== "Main" ? calView(e) + " calendar" : "", kd ? "Kind: " + kd.name : "", e.free ? "Shown as free" : "", mk]) {
     if (!x) continue; const l = document.createElement("div"); l.className = "line"; l.textContent = x; calOne.appendChild(l);
   }
   if (e.notes) { const n = document.createElement("div"); n.className = "notes"; n.textContent = e.notes; calOne.appendChild(n); }

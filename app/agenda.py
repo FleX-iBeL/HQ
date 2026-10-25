@@ -29,6 +29,9 @@ H157: each calendar's colour, as in Google. The connector's own colour (backgrou
 workspace's HQ/calendar-colours.json (HQ_CALENDAR_COLOURS): a calendar's name as HQ shows it (Main for the main one,
 Birthdays for the birthdays) or its id, to one of Google's colour names (mango, peacock, ...) or a hex colour;
 else one of Google's colours picked from the name. Turning a calendar off is the page's, per device, never Google's.
+
+H244: an appointment's own colour in Google (colorId, kept as gcolor) wins over its calendar's, and is its kind
+(kinds.py: money makers, client delivery, admin essentials, CEO time, cup fillers; grey a template not set yet).
 """
 from __future__ import annotations
 
@@ -317,6 +320,7 @@ def events_from(results: list[tuple[str, dict, object]]) -> tuple[list[dict], li
                 # H143: where it is in Google (planning.py's way back from HQ Planning, H241, and the trips); others in it
                 "gid": str(e["id"]), "cal": cal,
                 "others": any(isinstance(a, dict) and not a.get("self") for a in e.get("attendees") or []),
+                "gcolor": str(e.get("colorId") or ""),  # H244: its own colour in Google, when it has one (its kind)
             })
     events.sort(key=_order)
     return [{"id": k, "name": v, **({"color": colors[k]} if k in colors else {})} for k, v in cals.items()], events
@@ -495,8 +499,16 @@ def read(now: float | None = None) -> dict:
     cals = calendars(s, events, own)
     col = {c["name"]: c["color"] for c in cals}
     events = [{**e, "view": view_of(e), "color": col.get(view_of(e)) or colour(view_of(e), own=own)} for e in events]
+    ks = []
+    try:  # H244: an appointment with its own colour shows in it, and that colour is its kind (kinds.py)
+        import kinds as _kinds
+        ks = _kinds.kinds()
+        events = [{**e, "color": _kinds.event_colour(e.get("gcolor")) or e["color"],
+                   "kind": _kinds.kind_of(e.get("gcolor"), ks)} for e in events]
+    except Exception:
+        pass
     return {"on": on(), "looked": s.get("looked"), "looking": running(s, t), "error": s.get("error", ""),
-            "events": events, "calendars": cals}
+            "events": events, "calendars": cals, "kinds": ks}
 
 
 def _over(e: dict, today: str, t: float, week: bool = False) -> bool:

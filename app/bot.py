@@ -688,6 +688,34 @@ if __name__ == "__main__":
         await asyncio.to_thread(_planning.start)
         return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
 
+    # H244: a kind of the week renamed or given another of Google's colours (kinds.py): {id, name} or {id, colour} or
+    # {id, reset: true}. Only HQ's own file in the workspace changes; Google Calendar never does. Only from the page
+    # itself (x-hq: calendar).
+    @app.post("/api/calendar/kind", include_in_schema=False)
+    async def calendar_kind(request: Request):
+        if request.headers.get("x-hq") != "calendar":
+            return JSONResponse({"error": "Only the HQ page can change the kinds"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict) or not isinstance(ask.get("id"), str):
+            return JSONResponse({"error": "which kind?"}, status_code=400)
+        import kinds as _kinds
+        try:
+            if ask.get("reset") is True:
+                await asyncio.to_thread(_kinds.reset, ask["id"])
+            else:
+                if isinstance(ask.get("name"), str):
+                    await asyncio.to_thread(_kinds.rename, ask["id"], ask["name"])
+                if isinstance(ask.get("colour"), str):
+                    await asyncio.to_thread(_kinds.recolour, ask["id"], ask["colour"])
+        except KeyError:
+            return JSONResponse({"error": "no such kind"}, status_code=404)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
+
     # H146: a quick note on an appointment (appt_notes.py): {id, add: text} or {id, clear: note id}. Only HQ's own file in
     # the workspace changes; Google Calendar never does. Only from the page itself (x-hq: calendar).
     @app.post("/api/calendar/note", include_in_schema=False)
