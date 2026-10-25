@@ -4485,6 +4485,9 @@ window.addEventListener('load', () => setTimeout(() => {
                   "truly his", "your pick next to it", "Every new item you write", "what's thin", "marked ready on the spot"):
             need(w in pm, f"her persona misses {w!r} of how she runs (H274)")
         need("one point at a time" not in pm, "her craft still asks one point at a time")
+        # H276: she says how big, never which nights, while making an item ready; the nights are the sprint planning's.
+        need("Size, never nights" in pm and "a small build, a big build or research" in pm and "only decided at the sprint planning" in pm
+             and "won't fit one night" not in pm, "H276: her craft still sizes work into nights while readying it")
         tourtext = (Path(__file__).parent / "web" / "tour.json").read_text(encoding="utf8")
         need("one whole proposal" in tourtext and "on the spot" in tourtext, "the tutorial's Moneypenny step doesn't say how she runs (H274)")
         need("MoSCoW first, then bugs before features" in pm and "a Must feature stays above a Should bug" in pm,
