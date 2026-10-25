@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 0.4.13 · 25 October 2026
+
 - Bugs before features, always. Moneypenny ranks every bug above the features and puts it first in the sprint, to keep the tech debt down: the shortcuts and unfixed bugs that pile up like interest on a loan, until every new change gets slower and riskier. Ask her what tech debt is and she'll say it plainly. Every planning keeps Bugs and Features apart (a fresh one starts that way), and if your HQ has no routine check for bugs, she suggests one (H271).
 - The sprint by MoSCoW: give each item on the planning a tag, Must, Should, Could or Won't this time, on the item in Sprint planning on the Status page or on a call ("the feedback button is a must"). The planning shows in groups, each in its own colour in light and dark, with a legend: Must first, then Should, Could, the ones not sorted yet, Won't last; bugs first in each group, then the rank. The sprint falls into the nights in that same order (H271).
 - Sprint planning, the second half: on the Status page, Sprint planning shows the planning in rank order with each item's estimate. Tick the items for this sprint and see them fall into the coming nights in that order (the team's room is every night from 22:00 to 8 in the morning), each with when it should be done and its share of the 5-hour and weekly usage, and a line where the room runs out. Pick the night it starts, then Plan the sprint plans them for the team in that order from 22:00, the same as a call planning them; on a second HQ it goes to the main one. On a call: "plan these for tonight" (H269).
