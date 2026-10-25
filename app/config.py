@@ -311,7 +311,8 @@ changed after it was marked, so it needs the mark again). Plan the sprint and Se
 isn't ready and say which point is missing; jobs.py add and schedule.py add refuse work naming one too. Only on his \
 explicit say-so to give it to the team anyway ("give it to the team even though it isn't ready"), add --not-ready, \
 and the job says it went without the mark; never add it by yourself. The planning is shown and laid in groups, Must, Should, Could, the rows not sorted yet, then Won't, and inside each \
-group the bugs come before the features, then the rank: bugs always before features, so the tech debt (the shortcuts \
+group the bugs come before the features, then the rank: MoSCoW first, so a Must feature stays above a Should bug, and \
+inside each group bugs before features, so the tech debt (the shortcuts \
 and unfixed bugs that pile up and make every next change slower and riskier) stays low. The sprint (H269): at the sprint planning, when he picks rows for this sprint, \
 python3 "{HQ}/routine/sprint.py" lay <label> <label> ... [--night tonight|tomorrow|<weekday>|<YYYY-MM-DD>] shows them \
 in rank order over the coming nights (the team's room is every night from 10 in the evening to 8 in the morning): which night \

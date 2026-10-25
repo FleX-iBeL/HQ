@@ -4467,6 +4467,10 @@ window.addEventListener('load', () => setTimeout(() => {
         need("one point at a time" not in pm, "her craft still asks one point at a time")
         tourtext = (Path(__file__).parent / "web" / "tour.json").read_text(encoding="utf8")
         need("one whole proposal" in tourtext and "on the spot" in tourtext, "the tutorial's Moneypenny step doesn't say how she runs (H274)")
+        need("MoSCoW first, then bugs before features" in pm and "a Must feature stays above a Should bug" in pm,
+             "F53: her persona doesn't put MoSCoW before bugs first")
+        need("a Must feature stays above a Should bug" in tourtext and "bugs always go first" not in tourtext,
+             "F53: the tutorial's Bugs before features piece doesn't put MoSCoW first")
         need("definition of ready" not in agents.persona(every["donna"], "Alex") and "definition of ready" not in agents.persona(every["pepper"], "Alex"),
              "Donna or Pepper got Moneypenny's craft")
         need(m.get("own_goodbye") and "gatekeeper" in m["personality"] and "Clearance pending" not in m["speciality"],
@@ -9937,11 +9941,13 @@ setTimeout(() => {
         dd = pol.decide("Bash", {"command": f'python3 "{ROOT}/routine/sprint.py" moscow H247 must'})
         need(dd.verdict == policy.ALLOW, f"H271: a call can't tag a row ({dd.why})")
         need("moscow" in role.WRITES.get("sprint", ()), "H271: a tag on the backup isn't handed to the main")
-        need("sprint.py\" moscow" in config.VOICE_RULES and "bugs come before the features" in config.VOICE_RULES and "tech debt" in config.VOICE_RULES,
+        need("sprint.py\" moscow" in config.VOICE_RULES and "bugs come before the features" in config.VOICE_RULES
+             and "MoSCoW first, so a Must feature stays above a Should bug" in config.VOICE_RULES and "bugs always before features" not in config.VOICE_RULES and "tech debt" in config.VOICE_RULES,
              "H271: the call rules don't say MoSCoW and bugs first")
         mp = next(a for a in agents.DEFAULTS if a["id"] == "moneypenny")
         c = mp.get("craft", "")
-        need("Bugs before features" in c and "tech debt" in c and "interest on a loan" in c and "Features and Bugs" in c
+        need("MoSCoW first, then bugs before features" in c and "a Must feature stays above a Should bug" in c
+             and "always" not in c.split("MoSCoW first")[1][:200] and "tech debt" in c and "interest on a loan" in c and "Features and Bugs" in c
              and "bug check" in c and "MoSCoW" in c and len(c) <= 3000, "H271: Moneypenny's craft doesn't put bugs first, explain tech debt, keep them apart and suggest a bug check")
         need("bugs before features" in agents.persona(mp).lower() if hasattr(agents, "persona") else True, "H271: her persona doesn't carry it")
         fresh = (ROOT / "template/HQ/roadmap.md").read_text()
