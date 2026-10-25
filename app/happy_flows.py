@@ -8370,6 +8370,23 @@ setTimeout(() => {
         need(ag.pick([a, b], "Any new mail today?", b["id"]) is a, "mail doesn't go to the one for mail")
         need(ag.pick([a, b], "Let's plan the bigger picture for next week", a["id"]) is b, "planning doesn't go to the planner")
         need(ag.pick([a, b], "Hmm, okay.", b["id"]) is b, "nothing fits: not the one who answered last")
+        # F49: the one he says it to wins, spoken or typed, with two and three on the call; one he only talks about
+        # picks nobody; a name split by the speech line still counts; a reply goes to the one who answered last.
+        c = {"id": "f49c", "name": "Moneypenny", "speciality": "Building with the team: what's ready, the sprint"}
+        for panel in ([b, c], [a, b, c]):
+            need(ag.pick(panel, f"I meant {b['name'].lower()}, tell me what do you think of the update of moneypenny?", c["id"]) is b,
+                 f"F49: said to her, talked about the other: not her ({len(panel)} on the call)")
+            need(ag.pick(panel, f"{b['name']}, tell me what do you think of the update of Moneypenny?", c["id"]) is b,
+                 f"F49: her name first doesn't win ({len(panel)} on the call)")
+            need(ag.pick(panel, "Money penny you're here?", b["id"]) is c, f"F49: a split name isn't heard ({len(panel)} on the call)")
+            need(ag.pick(panel, f"What do you think of Moneypenny's update, {b['name']}?", c["id"]) is b,
+                 f"F49: her name at the end doesn't win ({len(panel)} on the call)")
+            need(ag.pick(panel, "What do you think of Moneypenny's update?", b["id"]) is b,
+                 f"F49: one only talked about answers ({len(panel)} on the call)")
+            need(ag.pick(panel, "Yes first put it on the planning then give her", c["id"]) is c,
+                 f"F49: a reply doesn't go to the one who answered last ({len(panel)} on the call)")
+        need(ag.pick([a, b, c], f"{a['name']}, what did {b['name']} say about Moneypenny's sprint?", b["id"]) is a,
+             "F49: three named, not the one it's said to")
 
         class Stand:
             model = "stand-in"

@@ -568,15 +568,53 @@ def _stems(text: str) -> set[str]:
     return set(re.findall(r"[a-z]{4,}", text.lower())) - {"your", "with", "that", "this", "what", "about", "have"}
 
 
+# F49: how a name is used decides who answers. Said to her ("Pepper, …", "I meant Pepper", "…, Pepper?") wins over
+# talked about ("…of Moneypenny", "Moneypenny's update"); a speech line may split a name ("Money penny").
+_FILLERS = {"hey", "hi", "hello", "oh", "ok", "okay", "so", "and", "but", "yes", "yeah", "yep", "no", "well", "now",
+            "right", "thanks", "thank", "you", "i", "meant", "mean", "actually", "sorry", "then", "also", "um", "uh",
+            "alright", "wait", "dear", "please", "great", "cool", "perfect", "good", "nice", "sure"}
+_ABOUT = {"of", "about", "for", "with", "from", "to", "at", "on", "than", "like", "by", "into", "without"}
+_ANSWER = re.compile(r"^\W*(yes|yeah|yep|yup|no|nope|ok|okay|sure|right|exactly|perfect|alright|correct|agreed)\b")
+
+
+def _name_re(name: str) -> re.Pattern:
+    return re.compile(r"\b" + r"[\s\-]?".join(re.escape(c) for c in name.lower()) + r"(?P<s>'s|s')?\b")
+
+
+def _how_named(low: str, m: re.Match) -> str:
+    """"to" (said to her), "about" (talked about) or "" (just named)."""
+    if m.group("s"):
+        return "about"
+    before, after = low[:m.start()], low[m.end():]
+    sentence = re.split(r"[.!?\n]", before)[-1]
+    words = re.findall(r"[a-z']+", sentence)
+    if all(w in _FILLERS for w in words):
+        return "to"
+    if sentence.rstrip().endswith(",") and re.match(r"\s*([.!?]|$)", after):
+        return "to"
+    return "about" if words and words[-1] in _ABOUT else ""
+
+
 def pick(panel: list[dict], words: str, last: str | None = None) -> dict:
     """H79: on a three-way call, who answers this turn. In the user's words (12 October 2026): "which person would
-    make most sense". The one he names (named both: the one named last); else the one whose speciality shares the
-    most words with his (Claude's choice: words of four letters or more, "plan" matches "planning"); else the one
-    who answered last."""
+    make most sense". F49 (25 October 2026): the one he says it to ("Pepper, …", spoken or typed), every time; said
+    to two: the last of them; else the one just named (named both: the one named last); a name he only talks about
+    ("…of Moneypenny") picks nobody. Then a reply ("Yes, …") goes to the one who answered last; else the one whose
+    speciality shares the most words with his (Claude's choice: words of four letters or more, "plan" matches
+    "planning"); else the one who answered last."""
     low = words.lower()
-    named = [a for a in panel if re.search(rf"\b{re.escape(a['name'].lower())}\b", low)]
-    if named:
-        return max(named, key=lambda a: low.rfind(a["name"].lower()))
+    seen = {"to": [], "": []}
+    for a in panel:
+        for m in _name_re(a["name"]).finditer(low):
+            how = _how_named(low, m)
+            if how in seen:
+                seen[how].append((m.start(), a))
+    for how in ("to", ""):
+        if seen[how]:
+            return max(seen[how], key=lambda x: x[0])[1]
+    lasts = next((a for a in panel if a["id"] == last), panel[0])
+    if _ANSWER.match(low):
+        return lasts
     his = _stems(low)
 
     def score(a: dict) -> int:
@@ -586,7 +624,7 @@ def pick(panel: list[dict], words: str, last: str | None = None) -> dict:
     tops = [a for s, a in scores if s == best]
     if best > 0 and len(tops) == 1:
         return tops[0]
-    return next((a for a in panel if a["id"] == last), panel[0])
+    return lasts
 
 
 def describe(folder: Path, user: str | None = None) -> str:
