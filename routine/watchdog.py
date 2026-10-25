@@ -48,6 +48,17 @@ def systemctl(*args):
     return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True)
 
 
+def timer_waits(timer):
+    """F52: when the timer's next run is more than two minutes off (it should be a minute away at most), its
+    local time as HH:MM, else "". The routine's timer runs every minute, so a longer wait means it's stuck waiting."""
+    v = systemctl("show", "-p", "NextElapseUSecRealtime", "--value", "--timestamp=unix", timer).stdout.strip()
+    try:
+        at = float(v.lstrip("@"))
+    except ValueError:
+        return ""
+    return clock(at) if at - time.time() > 120 else ""
+
+
 def linux_helper(beat, age):
     """H56.1: the helper on Linux is a timer. Returns (state, text) like the Mac's checks below."""
     timer, service = f"{UNIT}-routine.timer", f"{UNIT}-routine.service"
@@ -65,8 +76,13 @@ def linux_helper(beat, age):
             if systemctl("kill", "--kill-whom=main", service).returncode:
                 systemctl("kill", "--kill-who=main", service)
             time.sleep(3)
+        waits = "" if hanging else timer_waits(timer)
         systemctl("restart", timer)
         systemctl("start", "--no-block", service)
+        if waits:
+            # F52: nothing hung, the timer itself was waiting (in local time the clocks going back made it wait an hour).
+            return "fixed", (f"The routine hadn't run for {int(age // 60)} min: its timer was waiting until {waits}. "
+                             "Ran it now and restarted the timer")
         return "fixed", (f"The helper was stuck (no heartbeat for {int(age // 60)} min"
                          + ("; a run was hanging, ended it" if hanging else "") + "): restarted it")
     return "ok", "The helper is alive"

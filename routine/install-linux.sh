@@ -5,6 +5,8 @@
 #   <U>-start.service    at the start of the server: app/start-linux.sh, the call line (the helper's "on run")
 #   <U>-watchdog.timer   every 5 minutes on the five-minute marks, and a minute after the start:
 #                        <U>-watchdog.service runs routine/watchdog.py, which starts or restarts the helper
+# Both timers keep their times in UTC (F52, 25 October 2026): in local time, when the clocks went back an hour,
+# systemd waited for the repeated hour to come round again, an hour with no routine and no watchdog. Same marks.
 # <U> is "hq", or HQ_UNIT. Every HQ_* setting in the environment when this runs goes into the units
 # (e.g. HQ_SUPPORT, HQ_WORKSPACE, HQ_PORT, HQ_STATUS_PORT, HQ_NO_PHONE, HQ_CALL_FIX), so a second HQ on one
 # server gets its own units, memory and ports. Lingering is switched on for the user (through sudo -n when
@@ -70,7 +72,7 @@ write "$U-routine.timer" <<EOF
 Description=HQ routine every minute (the Mac's HQ Routine helper)
 
 [Timer]
-OnCalendar=*-*-* *:*:00
+OnCalendar=*-*-* *:*:00 UTC
 AccuracySec=1s
 Unit=$U-routine.service
 
@@ -115,7 +117,7 @@ write "$U-watchdog.timer" <<EOF
 Description=HQ watchdog every 5 minutes, and a minute after the start
 
 [Timer]
-OnCalendar=*-*-* *:00/5:00
+OnCalendar=*-*-* *:00/5:00 UTC
 OnStartupSec=1min
 AccuracySec=1s
 Unit=$U-watchdog.service

@@ -4,6 +4,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- On a Linux server, HQ's routine and watchdog no longer stop for an hour when the clocks go back. Their timers kept local time, so in the hour that comes twice they waited for it to come round again. Now they keep UTC, still on the same minutes. And when the routine hasn't run for a few minutes because its timer is waiting, the watchdog runs it right away and says so plainly. Run `sh routine/install-linux.sh` once on your server to put the new timers in (F52).
 - The status page no longer says the team is building when nothing runs. When the team's last job ends, whether it was done, stopped, paused or held, and it left the status on building, testing or releasing, within a minute it says done, or waiting when the job didn't finish or another one is next in line. Work you started yourself in a chat is left alone (F51).
 - MoSCoW first, then bugs before features. Moneypenny used to say bugs always rank above features, so she could put a Should bug above a Must feature. Now she, the call rules and the tutorial say it the way the sprint already sorts: Must, Should, Could first, and inside each of those the bugs before the features (F53).
 - Hang up ends the call on the first confirm. The question's Hang up used to ignore a tap in the first half second after it opened, so a quick confirm left the question up and you had to tap again. Now only a second tap of a double tap on the big button is ignored; Cancel's question works the same way (F50).

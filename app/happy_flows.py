@@ -2756,7 +2756,7 @@ spid() { ss -Hltnp "sport = :$SP" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 |
 SERVER_BEFORE=$(spid)
 cleanup() {
   M=$(systemctl --user show -p MainPID --value $U-routine.service 2>/dev/null); [ -n "$M" ] && [ "$M" != 0 ] && kill "$M" 2>/dev/null
-  rm -rf "$HOME/.config/systemd/user/$U-routine.service.d"
+  rm -rf "$HOME/.config/systemd/user/$U-routine.service.d" "$HOME/.config/systemd/user/$U-routine.timer.d"
   sh "$H/routine/install-linux.sh" --remove >/dev/null 2>&1
   P=$(spid); [ -n "$P" ] && [ "$P" != "$SERVER_BEFORE" ] && kill "$P"
   rm -rf "$T"
@@ -2799,6 +2799,26 @@ systemctl --user start $U-watchdog.service
 systemctl --user is-active --quiet $U-routine.timer || fail "the watchdog didn't start the stopped routine again"
 grep -q "wasn't running: started its timer again" "$S/watchdog.log" || fail "the watchdog didn't say what it did"
 echo "OK a stopped routine is started again by the watchdog"
+# F52: in local time the timers waited out the hour that comes twice when the clocks go back; in UTC they don't.
+for x in routine.timer watchdog.timer; do
+  CAL=$(sed -n 's/^OnCalendar=//p' "$HOME/.config/systemd/user/$U-$x")
+  case "$CAL" in *UTC) ;; *) fail "$U-$x keeps local time ($CAL): it would stop for an hour when the clocks go back";; esac
+  N=$(TZ=Europe/Amsterdam systemd-analyze calendar --base-time="2026-10-25 02:59:30 CEST" "$CAL" 2>/dev/null | sed -n 's/.*(in UTC): //p' | head -1)
+  [ -z "$N" ] || [ "$N" = "Sun 2026-10-25 01:00:00 UTC" ] || fail "$U-$x's next run after 02:59 CEST is $N, not a minute later"
+done
+echo "OK the timers keep going when the clocks go back"
+mkdir -p "$HOME/.config/systemd/user/$U-routine.timer.d"
+printf '[Timer]\nOnCalendar=\nOnCalendar=*-*-* 03:33:00 UTC\n' > "$HOME/.config/systemd/user/$U-routine.timer.d/wait.conf"
+systemctl --user daemon-reload; systemctl --user restart $U-routine.timer
+python3 -c "import time; open('$S/heartbeat', 'w').write(str(time.time() - 700))"
+systemctl --user start $U-watchdog.service
+rm -rf "$HOME/.config/systemd/user/$U-routine.timer.d"; systemctl --user daemon-reload; systemctl --user restart $U-routine.timer
+grep -q "The routine hadn't run for 11 min: its timer was waiting until" "$S/watchdog.log" \
+  || fail "the watchdog didn't say plainly that the routine's timer was waiting"
+timeout 30 bash -c "until python3 -c \"import time,sys; sys.exit(time.time() - float(open('$S/heartbeat').read()) > 60)\"; do sleep 2; done" \
+  || fail "the watchdog didn't run the waiting routine now"
+timeout 60 bash -c "until [ \"\$(systemctl --user show -p ActiveState --value $U-routine.service)\" = inactive ]; do sleep 1; done"
+echo "OK a routine whose timer waits is run now, and the watchdog says why"
 mkdir -p "$HOME/.config/systemd/user/$U-routine.service.d"
 printf '[Service]\nExecStart=\nExecStart=/bin/sleep 600\n' > "$HOME/.config/systemd/user/$U-routine.service.d/hang.conf"
 systemctl --user daemon-reload
