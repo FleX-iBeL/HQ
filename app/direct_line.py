@@ -798,6 +798,13 @@ def _very_important(inbox: Path) -> list[str]:
     return [l[2:].strip() for l in (m.group(1) if m else "").splitlines() if l.startswith("- ")]
 
 
+def _event(line: str) -> str:
+    """H248: one event is one sender on one day (the first two parts), so two mails about one login are one text."""
+    parts = [p.strip() for p in line.split("·")]
+    sender = re.sub(r"\s*\(.*?\)", "", parts[1] if len(parts) > 1 else "").strip().lower()
+    return f"{' '.join(parts[0].lower().split())}|{sender}"
+
+
 def _mail_key(line: str) -> str:
     """The mail itself (date, sender, subject), not its status or what's new, so an update isn't a new text."""
     return hashlib.sha1("·".join(p.strip() for p in line.split("·")[:3]).encode()).hexdigest()[:16]
@@ -853,8 +860,14 @@ def watch(q: dict | None = None, *, main: bool = True, incidents_data: list | No
         known = set(shared.get("mail_seen") or [])
         fresh = [l for l in lines if _mail_key(l) not in known]
         if fresh and (known or shared.get("mail_started")):
+            # H248: one text per event: lines from the same sender on the same day that land in one look are one
+            # text, with how many there were (the mail check itself keeps one line per event and skips what's Closed).
+            events: dict[str, list[str]] = {}
             for l in fresh:
-                out.append(("mail", _mail_facts(l)))
+                events.setdefault(_event(l), []).append(l)
+            for ls in events.values():
+                facts = " | ".join(_mail_facts(l) for l in ls)
+                out.append(("mail", facts if len(ls) == 1 else f"{len(ls)} lines about one event: {facts}"[:800]))
         if fresh or not shared.get("mail_started"):
             shared["mail_seen"] = sorted(known | {_mail_key(l) for l in lines})
             shared["mail_started"] = True

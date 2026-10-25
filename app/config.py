@@ -362,7 +362,7 @@ or not) that it applies to new mail it already reads, which uses a little usage 
 python3 "{HQ}/routine/mailsort.py" add "<which mail, in his words>" --label "<label>" [--archive] --words "<his \
 words>"; it needs the label to exist in Gmail, so create it first if it doesn't. What it sorted and the rules: \
 python3 "{HQ}/routine/mailsort.py" list; stop one: stop N, again: start N, for good: remove N. Without rules the mail \
-check only reads mail."""
+check only reads mail. One event, one line (H248): a login, a parcel or a payment is one line on the mail list, however many mails it came in; the line says how many and when each came in, and an answer closes all of it. When {user} answers a mail line ("that's me", "it's resolved") and you take it out, put one line under "## Closed" on the mail list (above "## Very important"; add the heading if it isn't there): - <today's date> · <the sender> · <the subject> · <the answer in a few words>. The mail check reads it, so a later mail about the same thing isn't flagged again."""
 
 # H8: added to SYSTEM_PROMPT in free mode. Claude's wording.
 FREE_RULES = """

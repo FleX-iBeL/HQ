@@ -16,6 +16,7 @@ Runs every hour, started by HQ's routine on the computer, hidden. Only reads mai
    - "To check" line: received date, sender, subject, one plain line on what it is and what it might ask of them, and the Gmail link.
    - "Very important" line, exactly this shape, so every chat and call can read it: `- <received date> · <sender> · <subject> · <one plain line on what it is and what it asks of them> · Why: <which rule below, in a few words> · Status: new · [Gmail](<link>)`
 4. Never remove or shorten a line under "Very important": it stays until the user resolves it. A new mail about an item that's already there goes into that same line.
+4b. One event, one line (H248): a login, a parcel, a payment is one line, however many mails it came in. Mails from the same sender about the same thing within 30 minutes (or about the same order, parcel, payment or sign-in) go in one line that says how many and when each came in, e.g. `(2 mails, 01:52 and 01:52)`. A later mail about an event already here goes into its line, keeping the line's first three parts as they are. A mail about an event under "Closed" (already answered) is skipped, unless it asks something new with a date.
 5. Move the marker to the newest mail seen (also when nothing was kept): epoch seconds plus the readable date and time.
 6. Never send, reply, forward or draft, and never label, archive, trash or mark mail as read. The one exception: a sorting rule agreed on a call or in the texts (HQ's mail sorting rules, H213) adds its label and archives if it says so, only for new mail that fits it, with a line for each.
 
@@ -41,8 +42,13 @@ After their answer:
 
 - "To check": only after they confirm an item, write it into the right place (see where-things-go.md), then remove it from here.
 - "Very important": when they confirm it, write it into the right place and change its status to `Status: on the list`; it stays here. It goes only when they say it's resolved or that it's not that important. One line in the log either way.
+- When they answer a line ("that's me", resolved) and it's taken out, it gets one line under "Closed": `- <date> · <sender> · <subject> · <the answer in a few words>`, so the mail check doesn't flag the same thing again. Lines there older than 3 days may go.
 
 Marker: not set yet (the first mail check sets it)
+
+## Closed
+
+Events already answered (H248), so a later mail about the same thing isn't flagged again. Kept 3 days.
 
 ## Very important
 

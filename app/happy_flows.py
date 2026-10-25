@@ -16113,6 +16113,59 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
                 "its notes, undo, let go and off; calls, the backup, the server and the item's Comes back on the phone know it")
 
     # 157
+    async def flow158(self) -> str:
+        """H248, no Claude: one alert per event, not per mail. The mail check's instructions (every HQ) say one line per
+        event with how many mails and when each came in, a later mail into its line, and skip what's under Closed; a
+        fresh mail list and the call and chat rules have Closed; the mail list's readers still read it with Closed in
+        it; Donna's look gives one text for two lines from one sender on one day, and a single one stays single."""
+        mc = (ROOT / "routine" / "mail-check.md").read_text()
+        need("4b. One event, one line (H248)" in mc and "within 30 minutes" in mc and "how many mails and when each came in" in mc
+             and '"## Closed"' in mc and "never a line of its own" in mc, "the mail check's instructions don't group mails into one event")
+        tpl = (ROOT / "template" / "inbox.md").read_text()
+        need(tpl.index("## Closed") < tpl.index("## Very important") < tpl.index("## To check") and "4b. One event" in tpl,
+             "a fresh mail list has no Closed section above Very important")
+        import config
+        need("One event, one line (H248)" in config.MAIL_TIDY_RULE and '"## Closed"' in config.MAIL_TIDY_RULE,
+             "the call and chat rules don't say to close an answered mail under Closed")
+        d = self.tmp / "h248"
+        d.mkdir(parents=True, exist_ok=True)
+        inbox = d / "inbox.md"
+        steam = ("- 24 Oct 2026 · Game Support · Your game account: Access from new computer · a guard code "
+                 "(2 mails, 01:52 and 01:52) · Why: security · Status: new · [Gmail](a)\n")
+        inbox.write_text("# Mail\n\nMarker: 1\n\n## Closed\n\n- 23 Oct 2026 · Shop · Parcel · that's me\n\n## Very important\n\n"
+                         + steam + "\n## To check\n\n### 24 October 2026\n\n- 24 Oct · PostNL · parcel (3 mails, 10:01, 10:02 and 10:40) · [Gmail](b)\n")
+        import open_loops
+        ol = open_loops.read(d) if hasattr(open_loops, "read") else None
+        if ol is not None:
+            need(len(ol.very_important) == 1 and ol.to_check == 1 and "game account" in ol.very_important[0],
+                 f"the mail list's reader got it wrong with a Closed section: {ol}")
+        import loose_ends
+        secs = [s for s, _, _ in loose_ends._inbox_lines(inbox)]
+        need(secs == ["vi", "check"], f"the Closed line was read as a mail line: {secs}")
+        saved = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_DIRECT_LOCAL", "HQ_DIRECT_DRY", "HQ_DIRECT")}
+        os.environ.update({"HQ_DIRECT_DIR": str(d / "line"), "HQ_DIRECT_LOCAL": str(d / "local.json"), "HQ_DIRECT_DRY": "1"})
+        os.environ.pop("HQ_DIRECT", None)
+        try:
+            import direct_line as dl
+            look = lambda: dl.watch({}, inbox=inbox, incidents_data=[], dry=False, spawn=lambda w, f: None)
+            need(look() == [], "the first look texted about what was already there")
+            # Two lines from one sender on one day (a mail check that didn't group them): one text.
+            two = ("- 24 Oct 2026 · Game Support (noreply) · New sign in · a new sign-in at 01:52 · Why: security · Status: new · [Gmail](c)\n"
+                   "- 24 Oct 2026 · Game Support · Guard code · the code for it · Why: security · Status: new · [Gmail](e)\n"
+                   "- 24 Oct 2026 · The bank · A payment · paid · Why: money · Status: new · [Gmail](f)\n")
+            inbox.write_text(inbox.read_text().replace(steam, steam + two))
+            out = look()
+            need([w for w, _ in out] == ["mail", "mail"], f"one sign-in and a payment didn't give two texts: {out}")
+            need(out[0][1].startswith("2 lines about one event") and "New sign in" in out[0][1] and "Guard code" in out[0][1],
+                 f"the two sign-in lines weren't one text: {out[0][1]}")
+            need("The bank" in out[1][1] and "lines about" not in out[1][1], f"a single line isn't single: {out[1][1]}")
+            inbox.write_text(inbox.read_text().replace("a new sign-in at 01:52", "a new sign-in at 01:52 (2 mails, 01:52 and 01:53)"))
+            need(look() == [], "a count added to a line she already texted about was texted again")
+        finally:
+            for k, v in saved.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        return "one line per event in the mail check, Closed on the mail list and in the rules, readers fine, one text per event"
+
     async def flow157(self) -> str:
         """H247, piece (a): feedback straight onto the planning in its own phase. No Claude turns. On a throwaway copy
         of a fresh roadmap: jobs.py feedback makes Phase U · Feedback (before Parked, or at the end) and a row each,
@@ -19241,6 +19294,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    158: ("H248: one alert per event, not per mail: the mail check keeps one line per event with how many mails and when, a later mail into its line, and skips what's Closed; Closed on the mail list and in the call and chat rules; Donna texts once for two lines from one sender on one day", False, "flow158"),
     157: ("H247, piece (a): feedback straight onto the planning in its own phase (Phase U), one row each with who and when, bugs as bugs, never a job; each one's status back to the sender; the server and the notes sheet's Feedback tab", False, "flow157"),
     156: ("H245: items that come back: a rule set loosely, ticked off back at its place with its next date and notes, undo, let go and off; calls, the backup, the server and the item's Comes back on the phone", False, "flow156"),
     155: ("H277: a call runs the planning and team commands without a yes, chained, after a cd into HQ, in a for loop, and reading its own saved output; anything else still asks", False, "flow155"),

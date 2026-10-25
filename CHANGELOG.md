@@ -4,6 +4,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- One alert per event, not per mail. A login, a parcel or a payment that sends two or three mails is now one line on your mail list, saying how many mails came and when each came in, and Donna texts about it once. When you answer it ("that's me"), that closes all of it, and the mail check remembers your answer for a few days, so a later mail about the same thing isn't flagged again (H248).
 - Moneypenny, a touch warmer when it's late or you're tired. She stays cool and dry, and now and then lets a little warmth show at the right moment, a short "Good work tonight.", once, then back to business.
 - No note lost by a mistap. The notes no longer have Clear all. When you clear one note, Undo shows for a few seconds: a tap puts it back. And every cleared note is kept, so on a call you can ask to bring one back later, like "bring back the note about the printer" (H263).
 - Feedback, straight onto the planning. In the notes, tap Feedback to send a bug, a wish or an idea for HQ (tick It's a bug when something doesn't work). It lands by itself on the planning, under Feedback, one item each with who sent it and when, and waits there for the sprint planning; it's never given to the team by itself. Next to what you sent you see what happens with it: received, looked at, planned, being built, done, or not doing it. For now it lands on your own HQ's planning; sending it from your HQ to the people who build HQ, and saying it to your agent on a call, come next (H247).
