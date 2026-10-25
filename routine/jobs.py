@@ -26,6 +26,7 @@ usage (from the workspace):
                                                            and the job then says it went without the mark
   python3 "routine/jobs.py" add-row "TEXT" [--bug] [--kind K]   the status page (H160): a numbered roadmap row first
                                                            (F with --bug, else H), then a job that reads that row
+  python3 "routine/jobs.py" feedback "TEXT" [--from NAME] [--bug]   H247: a row under Phase U · Feedback, no job
   python3 "routine/jobs.py" send-row LABEL                 the status page (H182): an open roadmap item (⬜, not in
                                                            Phase P) goes to the team as a job that reads its row; its
                                                            kind guessed from the row; refused when it's already there,
@@ -189,6 +190,37 @@ def roadmap_row(text, said, bug=False):
     label = f"{letter}{n}"
     lines.insert(at + 1, f"| ⬜ | {label} {title} | {when}, typed: \"{said}\" [Added on the status page, no call; "
                          f"the title is the first sentence.] | {said} | |")
+    return text[:head] + "\n".join(lines) + text[end:], label
+
+
+FEEDBACK_PHASE = "## Phase U · Feedback"  # H247: what people using HQ send; U for users (Claude's choice)
+FEEDBACK_INTRO = ("What the people using HQ send with the Feedback button, or ask their agent on a call to pass on (H247). "
+                  "One row each, in the sender's words; the sprint planning decides on each, and its status goes back to them.")
+
+
+def feedback_row(text, said, by, bug=False):
+    """H247: a row in Phase U · Feedback (made at the end when it isn't there), right after its highest number, with who
+    sent it and when, in their own words. Not a job: it waits for the sprint planning. Returns (text, label)."""
+    head = text.find("\n" + FEEDBACK_PHASE + "\n")
+    if head < 0:
+        park = text.find("\n## Phase P ")  # before the parked phase, so the planning reads it with the rest
+        block = (f"\n{FEEDBACK_PHASE}\n\n{FEEDBACK_INTRO}\n\n| | Step | What you get | Model |\n|---|---|---|---|\n")
+        text = (text[:park] + block + text[park:]) if park >= 0 else text.rstrip("\n") + "\n" + block
+        head = text.find("\n" + FEEDBACK_PHASE + "\n")
+    end = text.find("\n## ", head + 1)
+    end = len(text) if end < 0 else end
+    lines = text[head:end].split("\n")
+    table = [i for i, l in enumerate(lines) if l.startswith("|")]
+    n = max([int(m.group(2)) for m in ROW_NUM.finditer(text) if m.group(1) == "U"] + [0]) + 1
+    title = said.split(". ")[0].rstrip(".")
+    if len(title) > 80:
+        title = title[:80].rsplit(" ", 1)[0] + "…"
+    who = one_line(by or "someone using HQ").replace("|", "/")
+    when = time.strftime("%-d %B %Y, %H:%M")
+    label = f"U{n}"
+    kind = "A bug" if bug else "Feedback"
+    lines.insert(table[-1] + 1, f"| ⬜ | {label} {title} | {kind} from {who}, {when}, sent with the Feedback button: "
+                                f"\"{said}\" [The title is the first sentence.] | {said} | |")
     return text[:head] + "\n".join(lines) + text[end:], label
 
 
@@ -374,6 +406,22 @@ def main(argv):
             print(json.dumps({"on": on, "mail": MAIL, "mail_fast": list(MAIL_FAST) if MAIL_FAST else None, "running": running, "ready": ready,
                               "held": [j for j in jobs if j["state"].startswith("held")], "waiting": line_up(jobs),
                               "parked": [j for j in jobs if parked(j)]}))  # F37
+            return
+        if cmd == "feedback":
+            # H247: feedback from someone using HQ lands on the planning in its own phase, never as a job for the team.
+            bug, by, words = "--bug" in args, "", []
+            it = iter(a for a in args if a != "--bug")
+            for a in it:
+                if a == "--from":
+                    by = next(it, "")
+                else:
+                    words.append(a)
+            said = one_line(" ".join(words)).replace("|", "/")
+            if not said:
+                sys.exit("What's the feedback? Write it in a line or two.")
+            text, label = feedback_row(text, said[:2000], by, bug)
+            write(text, jobs, on)
+            print(f"{label} is on the planning, under Feedback.")
             return
         if cmd == "add-row":
             # H160: work added on the status page, without a call. Roadmap first stays the rule (rules 13): it gets its own

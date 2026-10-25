@@ -345,6 +345,9 @@ class Server:
             "HQ_PORT": str(TEST_PORT), "HQ_NO_PHONE": "1", "HQ_WRAP_UP": "dry",
             "HQ_CALLS": str(self.calls), "HQ_LOG": str(self.log), "HQ_PID_FILE": str(self.pidfile),
             "HQ_NOTES": str(self.notes),
+            # H247: feedback lands on its own throwaway planning, never the real roadmap
+            "HQ_FEEDBACK": str(tmp / "feedback-server" / "feedback.json"),
+            "HQ_FEEDBACK_ROADMAP": str(tmp / "feedback-server" / "roadmap.md"),
             # H200: the to-do list and its undo, never the workspace's own
             "HQ_TODO": str(tmp / "todo-server" / "challenges.md"), "HQ_TODO_UNDO": str(tmp / "todo-server" / "undo.json"),
             # H222: the six-week games and their undo, never the workspace's own
@@ -16070,6 +16073,84 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
         return ("an item repeats (a loose rule kept in one plain form), ticked off it's back at its place with its next date and "
                 "its notes, undo, let go and off; calls, the backup, the server and the item's Comes back on the phone know it")
 
+    # 157
+    async def flow157(self) -> str:
+        """H247, piece (a): feedback straight onto the planning in its own phase. No Claude turns. On a throwaway copy
+        of a fresh roadmap: jobs.py feedback makes Phase U · Feedback (before Parked, or at the end) and a row each,
+        U1 then U2, with who sent it and when in their words, never a job; a bug is a bug on the planning; the
+        planning (sprint.py) reads them like any row and send-row takes one; feedback.py keeps the sender's own list
+        and reads each one's status back (received, looked at, planned, being built, done, not doing it). The backup
+        hands it to the main. The test server's /api/feedback sends one (only from the page) to its own planning.
+        The call page has the Feedback tab in the notes sheet."""
+        import feedback as fbk
+        import role as _role
+        d = self.tmp / "h247"
+        d.mkdir(parents=True, exist_ok=True)
+        rm = d / "roadmap.md"
+        rm.write_text((APP.parent / "template" / "HQ" / "roadmap.md").read_text())
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_FEEDBACK": str(d / "feedback.json"), "HQ_SPRINT": str(d / "sprint.json"),
+               "HQ_USER_NAME": "Sam", "HQ_ROLE_HERE": "1"}
+        r = run([sys.executable, str(APP / "feedback.py"), "send", "The changelog jumps on my iPhone. It moves.", "--bug"], env=env, timeout=60)
+        need(r.returncode == 0 and '"row": "U1"' in r.stdout, f"the first feedback didn't land as U1: {r.stdout} {r.stderr}")
+        r = run([sys.executable, str(APP / "feedback.py"), "send", "Weather text | came twice"], env=env, timeout=60)
+        need('"row": "U2"' in r.stdout, f"the second feedback didn't land as U2: {r.stdout} {r.stderr}")
+        text = rm.read_text()
+        need(text.count("## Phase U · Feedback") == 1, "no Feedback phase, or two")
+        need("| ⬜ | U1 The changelog jumps on my iPhone | A bug from Sam, " in text, "U1 doesn't say it's a bug from Sam")
+        need("| ⬜ | U2 Weather text / came twice | Feedback from Sam, " in text, "U2's row is wrong (a | in the words breaks the table)")
+        need("Job " not in text.split("## The queue", 1)[1].split("## Phase", 1)[0] or "No jobs yet" in text,
+             "feedback became a job for the team")
+        sp = run([sys.executable, str(APP.parent / "routine" / "sprint.py"), "list"], env=env, timeout=60)
+        need("(bug) U1 The changelog" in sp.stdout and "U2 Weather" in sp.stdout, f"the planning doesn't read the feedback: {sp.stdout}")
+        import sprint as _sp
+        rows = {x["label"]: x for x in _sp.open_rows(text)}
+        need(_sp.is_bug(rows["U1"]) and not _sp.is_bug(rows["U2"]), "a bug sent as feedback isn't a bug on the planning")
+        keep = {k: os.environ.get(k) for k in ("HQ_FEEDBACK", "HQ_ROADMAP", "HQ_SPRINT")}
+        os.environ.update({k: env[k] for k in keep})
+        try:
+            st = lambda: {x["row"]: x["status"] for x in fbk.read()["items"]}
+            need(st() == {"U1": "received", "U2": "received"}, f"a new one isn't received: {st()}")
+            (d / "sprint.json").write_text(json.dumps({"moscow": {"U1": "must", "U2": "wont"}}))
+            need(st() == {"U1": "looked", "U2": "wont"}, f"a tag doesn't read as looked at / not doing it: {st()}")
+            (d / "sprint.json").write_text(json.dumps({"moscow": {"U1": "must"}, "ready": {"U1": {"fp": "x", "at": 1}}}))
+            need(st()["U1"] == "planned", f"a ready one isn't planned: {st()}")
+            t = rm.read_text().replace("No jobs yet.", "- Job 9 · ready · agreed 2026-10-25 22:00 · U1 on the HQ roadmap, sent to the team from the status page: x.")
+            rm.write_text(t)
+            need(st()["U1"] == "building", f"with the team isn't being built: {st()}")
+            rm.write_text(t.replace("| ⬜ | U1 ", "| ✅ | U1 "))
+            need(st()["U1"] == "done" and fbk.read()["items"][0]["status_words"] == "Received", f"done doesn't read back: {fbk.read()}")
+            need(fbk.send("   ").get("error"), "an empty feedback was sent")
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        need("feedback" in _role.WRITES["jobs"], "the backup doesn't hand feedback to the main")
+        await self.ensure_server()
+        srm = Path(self.server.env["HQ_FEEDBACK_ROADMAP"])
+        srm.parent.mkdir(parents=True, exist_ok=True)
+        srm.write_text((APP.parent / "template" / "HQ" / "roadmap.md").read_text())
+
+        def post(body, hq="feedback"):
+            req = urllib.request.Request(TEST_URL + "/api/feedback", data=json.dumps(body).encode(), method="POST",
+                                         headers={"content-type": "application/json", "x-hq": hq})
+            try:
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, None
+        need(post({"text": "x"}, hq="notes")[0] == 403, "feedback was taken from outside the page")
+        code, got = post({"text": "Please add a dark mode for the calendar", "bug": False})
+        need(code == 200 and (got or {}).get("sent", {}).get("row") == "U1" and got["items"][0]["status"] == "received",
+             f"the server didn't send it ({code}, {got})")
+        need("U1 Please add a dark mode for the calendar" in srm.read_text(), "the server's feedback isn't on its planning")
+        page = (APP / "web/index.html").read_text()
+        for bit in ('id="notesmode"', 'data-mode="feedback"', 'id="fbbugin"', '"x-hq": "feedback"', "api/feedback"):
+            need(bit in page, f"the call page misses {bit}")
+        return ("feedback lands on the planning in its own phase, one row each with who and when, bugs as bugs, never a "
+                "job; its status reads back to the sender; the backup hands it on; the page sends it from the notes sheet")
+
     async def flow113(self) -> str:
         """H194: HQ's own icon on a friend's fresh install. No Claude turns. A status server without HQ_LABEL (a
         laptop, like a fresh install) serves HQ's house (status/icons/hq-*.png, opaque squares) for every page that
@@ -19121,6 +19202,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    157: ("H247, piece (a): feedback straight onto the planning in its own phase (Phase U), one row each with who and when, bugs as bugs, never a job; each one's status back to the sender; the server and the notes sheet's Feedback tab", False, "flow157"),
     156: ("H245: items that come back: a rule set loosely, ticked off back at its place with its next date and notes, undo, let go and off; calls, the backup, the server and the item's Comes back on the phone", False, "flow156"),
     155: ("H277: a call runs the planning and team commands without a yes, chained, after a cd into HQ, in a for loop, and reading its own saved output; anything else still asks", False, "flow155"),
     154: ("H258: light or dark in one tap: the sun and moon at the top right flips it and keeps it after reopening, Settings' Look (System, Light, Dark), System following the device, the status page and Donna's chat in their sheets taking the same; phone and the Mac app", False, "flow154"),

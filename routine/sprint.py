@@ -124,9 +124,10 @@ GROUPS = ("must", "should", "could", None, "wont")  # the order the groups are s
 
 def is_bug(row):
     """A bug: a row in the roadmap's Bugs phase (Phase F, or a phase called Bugs), or an F row (HQ's letter for a bug,
-    jobs.roadmap_row) wherever it stands."""
+    jobs.roadmap_row) wherever it stands, or feedback sent as a bug (H247: "| A bug from …" in its row)."""
     ph = (row.get("phase_title") or row.get("phase") or "")
-    return ph.split(" ", 1)[0] == "F" or "bug" in ph.lower() or str(row.get("label", "")).startswith("F")
+    return (ph.split(" ", 1)[0] == "F" or "bug" in ph.lower() or str(row.get("label", "")).startswith("F")
+            or "| A bug from " in (row.get("line") or ""))
 
 
 def moscow_of(rows=None):

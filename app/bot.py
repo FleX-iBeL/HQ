@@ -570,6 +570,29 @@ if __name__ == "__main__":
             return JSONResponse({"error": "no change asked"}, status_code=400)
         return JSONResponse(_notes_both(), headers=_NO_CACHE)
 
+    # H247: the Feedback button, next to the quick notes. What's sent lands on the planning under Feedback
+    # (feedback.py, jobs.py feedback); the sender's own list with each one's status comes back.
+    import feedback as _feedback
+
+    @app.get("/api/feedback", include_in_schema=False)
+    async def feedback_read():
+        return JSONResponse(await asyncio.to_thread(_feedback.read), headers=_NO_CACHE)
+
+    @app.post("/api/feedback", include_in_schema=False)
+    async def feedback_send(request: Request):
+        if request.headers.get("x-hq") != "feedback":
+            return JSONResponse({"error": "Only the HQ page can send feedback"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict) or not isinstance(ask.get("text"), str):
+            return JSONResponse({"error": "nothing to send"}, status_code=400)
+        res = await asyncio.to_thread(_feedback.send, ask["text"], ask.get("bug") is True)
+        if "error" in res:
+            return JSONResponse(res, status_code=400)
+        return JSONResponse({"sent": res, **(await asyncio.to_thread(_feedback.read))}, headers=_NO_CACHE)
+
     # H101: his calendar, read only (agenda.py). ?fresh=1 (the page opening it) reads Google again when the last read
     # is older than a quarter of an hour; the answer says it's reading, and the page asks again a bit later.
     import agenda as _agenda_api

@@ -76,7 +76,7 @@ PY = sys.executable or "/usr/bin/python3"
 # H203 (17 October 2026): also the to-do list (todo.py), the agent's reminders and notes (pings.py), and a call's or
 # chat's own edits to the files only the main writes (handover.py edit, see ONE_WRITER).
 WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place on the planning; piece 2: Plan the sprint; H271: its MoSCoW tag
-          "jobs": {"add", "add-row", "send-row", "stop", "overrule", "move", "on", "off", "mail-on", "mail-off", "mail-fast", "mail-hourly", "resume"},
+          "jobs": {"add", "add-row", "feedback", "send-row", "stop", "overrule", "move", "on", "off", "mail-on", "mail-off", "mail-fast", "mail-hourly", "resume"},
           "schedule": {"add", "cancel", "move", "priority", "every"},
           "todo": {"add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo", "plan", "unplan", "repeat"},
           "pings": {"appt", "remind", "cancel", "note", "note-clear", "watch", "unwatch", "out", "out-stop", "nudge", "nudge-done", "nudge-later", "call", "call-cancel", "answered"},
