@@ -174,7 +174,7 @@
         {"target": "coachbtn", "title": "Your vision, layer by layer", "text": "With Life coaching on, this button opens your map. It goes from the life you want in three to five years, down to this year, a six-week game, your ideal week and this week. Each layer has its checklist: what's answered, what's left for later, and what's still open. You give your vision its own name."},
         {"target": "coachbtn", "title": "One session per layer", "text": "Start a layer and {pepper} calls about only that one, one question at a time, and writes your answers down in your own words. Short sessions, so nothing drifts off.",
          "demo": {"kind": "list", "items": [["The vision", "Done"], ["The year", "In progress · 12 of 20"], ["The six-week game", "Not started"], ["The ideal week", "Not started"]]}},
-        {"target": "coachbtn", "title": "Check-ins, with a red dot", "text": "HQ keeps the moments to look back: every week, at the end of a game, and a bigger check-in every few months. When one is due, the button gets a red dot. There's also a chat with {pepper} just for life coaching."}
+        {"target": "coachbtn", "title": "Check-ins, with a red dot", "text": "HQ keeps the moments to look back: every week, at the end of a game, and a bigger check-in every eight weeks, in step with the games. When one is due, the button gets a red dot. There's also a chat with {pepper} just for life coaching."}
       ]
     },
     {

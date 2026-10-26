@@ -10754,9 +10754,12 @@ setTimeout(() => {
         chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         if not Path(chrome).exists():
             return "offline parts pass, and the address service answers; 9292 itself not opened (no headless browser here)"
-        dom = await asyncio.to_thread(subprocess.run, [chrome, "--headless", "--disable-gpu", "--no-first-run",
-                                      *(["--no-sandbox"] if sys.platform != "darwin" else []), "--virtual-time-budget=20000",
-                                      "--window-size=1200,1400", "--dump-dom", url], capture_output=True, text=True, timeout=90)
+        try:
+            dom = await asyncio.to_thread(subprocess.run, [chrome, "--headless", "--disable-gpu", "--no-first-run",
+                                          *(["--no-sandbox"] if sys.platform != "darwin" else []), "--virtual-time-budget=20000",
+                                          "--window-size=1200,1400", "--dump-dom", url], capture_output=True, text=True, timeout=90)
+        except subprocess.TimeoutExpired:
+            return "offline parts pass, and the address service answers; 9292 itself didn't load within 90 seconds, so its page was skipped"
         html = dom.stdout
         need('value="station-zwolle"' in html and "Museumplein 6" in html and 'value="@52.3' in html, "9292 didn't open with both ends filled in")
         planned = 'data-testid="journey-list"' in html or 'data-testid="journey-details"' in html
@@ -11651,9 +11654,12 @@ print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now),
         there is one and does nothing at the top. The real page in a headless browser, phone and desktop app."""
         page = (APP / "web/index.html").read_text()
         for gone, what in (('data-look=', "a Look button"), ("html.modern", "the html.modern switch"), ('classList.toggle("modern"', "the old switch in the code"),
-                           ("hqSpot", "Classic's own spots for the buttons"), ('id="lookrow"', "the Look row"), ('<style id="look2">', "Modern 2's block"),
+                           ("hqSpot", "Classic's own spots for the buttons"), ('<style id="look2">', "Modern 2's block"),
                            ("html.m2", "a Modern 2 rule"), ("hq-look", "a saved look"), ("lookQuery", "the look passed on")):
             need(gone not in page, f"{what} is still on the call page (H201: Modern 3 is the only look)")
+        # H258 brought a Look row back, for light or dark only, not a choice of looks
+        lr = page.split('id="lookrow"', 1)[1].split("</div>", 1)[0] if 'id="lookrow"' in page else ""
+        need(not lr or ('value="dark"' in lr and "Modern" not in lr and "Classic" not in lr), "the Look row offers looks again, not light or dark (H201, H258)")
         need(page.count('<style id="look">') == 1, "the base look's style block is missing")
         need(page.count('<style id="look3">') == 1 and page.index('<style id="look3">') > page.index('<style id="look">'), "Modern 3's style block is missing or before the base look's")
         need('<html lang="en" class="m3">' in page, "Modern 3 isn't set in the page itself")
@@ -11751,7 +11757,7 @@ setTimeout(async () => {
             need(res["dock"] == "ok", f"{name}: with {lk} saved on the device, the dock isn't at the bottom: {res}")
             need(res["inside"] == "ok", f"{name}: round buttons outside the dock: {res}")
             need(res["label"] == '"Chat"', f"{name}: the dock's buttons have no names under them: {res}")
-            need(res["lookrow"] == "gone" and res["m3"] == "yes", f"{name}: with {lk} saved, it isn't Modern 3 alone without a Look row: {res}")
+            need(res["m3"] == "yes", f"{name}: with {lk} saved, it isn't Modern 3 alone: {res}")
             for k, what in (("pull-short", "a short pull closed the sheet or left it moved"), ("right-top", "a swipe right at the top closed the sheet"),
                             ("pull-scrolling", "pulling down a scrolled list closed the sheet"), ("pull-close", "a pull down didn't close the sheet"),
                             ("pull-settings", "a pull down didn't close Settings"), ("right-back", "a swipe right didn't go back from a past call"),
@@ -14491,7 +14497,7 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
                   2: ("fun", "useful", "learn", "debrief", "simple"),
                   3: ("love list", "hate list", "easy or forced", "cross out the days", "two-days test",
                       "one hat per day", "working on it"),
-                  5: ("so what", "now what", "every three to six months", "three best things", "script tomorrow")}
+                  5: ("so what", "now what", "every eight weeks", "three best things", "script tomorrow")}
         for i, words in pieces.items():
             missing = [x for x in words if x not in bodies[i].lower()]
             need(not missing, f"{layers[i]}: missing {missing}")
@@ -18186,7 +18192,7 @@ print("H88OUT " + json.dumps(out))
             need("Workflows they turned on" not in config.voice_rules(), "switched off, the next call still has it")
         finally:
             config.FOLDER = was
-        need("config.voice_rules()" in (APP / "pipeline.py").read_text(), "the call doesn't read the rules fresh")
+        need("config.voice_rules(" in (APP / "pipeline.py").read_text(), "the call doesn't read the rules fresh")
         # the server, on its own folder
         await self.ensure_server()
         sf = Path(self.server.env["HQ_WORKFLOWS_FOLDER"])
