@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 0.4.14 · 26 October 2026
+
 - The bigger check-in comes every eight weeks, in step with your six-week games. It's due in each game's look-back week, next to the game's debrief but as its own session. Without a game it comes every eight weeks from the last one.
 - One alert per event, not per mail. A login, a parcel or a payment that sends two or three mails is now one line on your mail list, saying how many mails came and when each came in, and Donna texts about it once. When you answer it ("that's me"), that closes all of it, and the mail check remembers your answer for a few days, so a later mail about the same thing isn't flagged again (H248).
 - Moneypenny, a touch warmer when it's late or you're tired. She stays cool and dry, and now and then lets a little warmth show at the right moment, a short "Good work tonight.", once, then back to business.
