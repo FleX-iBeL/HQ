@@ -279,6 +279,8 @@
       .detail .fold.sub > summary h3 { font-size: 15px; }
       .job { cursor: pointer; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
       .job.all { display: block; }
+      .jobnote { display: block; margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--accent, #c80); font-size: 0.9em; }
+      .jobnote.read { opacity: 0.7; }
       /* H61: each job's estimate, under its text, and how close the estimates have been. */
       .jobtext { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
       .eta { font-size: 13px; color: var(--soft); }
@@ -2169,6 +2171,8 @@
               });
               const left = el('div', 'jobtext');
               left.append(text);
+              // H283: the notes given to the job while it runs or waits, and whether it has read them.
+              for (const nt of j.notes ?? []) left.append(el('span', `jobnote${nt.read ? ' read' : ''}`, `Note ${nt.at.slice(11)}: ${nt.text}${nt.read ? ` · read ${nt.read}` : ' · not read yet'}`));
               const w = etaWords(E, j.n);
               if (w) left.append(etaSpan(`eta${E.jobs[j.n].over ? ' over' : ''}`, w, E.jobs[j.n]));
               const gw = etaGuess(E, j.n);

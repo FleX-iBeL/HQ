@@ -34,7 +34,7 @@ H30: whatever goes down, why, what was done about it and when it was back goes i
 (routine/incidents.py), shown under Routines. The helper also checks the watchdog, and starts it again
 when it has stopped: the watchdog checks the helper, the helper checks the watchdog.
 """
-import json, os, re, signal, subprocess, sys, time
+import importlib, json, os, re, signal, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import routines  # H19: every routine writes its own line for the status page
@@ -311,7 +311,11 @@ def start(job):
             # H168: the team estimates itself: its own guess at the start, kept next to the computed one and the real time.
             f"After reading the job's row, before building, write down your own guess of how many minutes this job will "
             f"take: python3 {json.dumps(os.path.join(HERE, 'jobs.py'))} guess {n} MINUTES (H168). "
+            # H283: a note can come while the job runs; it reads them after each step and always before a push or release.
+            f"After each step, and always before any push or release, read your notes: python3 "
+            f"{json.dumps(os.path.join(HERE, 'jobs.py'))} notes {n}, and follow what's new (H283). "
             + past_note
+            + importlib.import_module("jobs").notes_for_prompt(job)
         )
     chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")
     # The job's settings (its status line) with this HQ's path, written fresh each time.

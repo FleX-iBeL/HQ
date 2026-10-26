@@ -43,6 +43,12 @@ usage (from the workspace):
   python3 "routine/jobs.py" held N                         the job's own chat, when the usage says STOP; the
                                                            next start carries on from there (H113); held N WHY
                                                            holds it for another reason (H187: an update ended it)
+  python3 "routine/jobs.py" tell N "TEXT"                 a note for job N while it runs or waits (H283): kept in its
+                                                           line, read by the job after each step and always before a
+                                                           push or release; push.py and release.py refuse while the
+                                                           running job has a note it hasn't read
+  python3 "routine/jobs.py" notes N                        the job's own chat (H283): its notes, the new ones marked
+                                                           read (with the time); "No notes." when there are none
   python3 "routine/jobs.py" resume N                       a job paused for using about four times the top of its estimated usage
                                                            carries on, in its own chat (H172); stop N drops it
   python3 "routine/jobs.py" off | on                       jobs from calls off or on
@@ -85,6 +91,48 @@ MAIL_FAST = None
 FAST_RE = re.compile(r"every 15 minutes from (\d{4}-\d\d-\d\d \d\d:\d\d(?:[+-]\d\d:\d\d)?) until (\d{4}-\d\d-\d\d \d\d:\d\d(?:[+-]\d\d:\d\d)?)")
 
 
+# H283: notes for a job while it runs or waits, kept at the end of its line, so the job's own text (its estimate,
+# its kind, its first look) never changes by a note: " ⟪note 2026-10-26 16:50⟫ TEXT", read: "⟪note … · read 16:52⟫".
+NOTE = re.compile(r" ⟪note (\d{4}-\d\d-\d\d \d\d:\d\d)(?: · read (\d\d:\d\d))?⟫ (.*?)(?= ⟪note |$)")
+NOTE_START = " ⟪note "
+
+
+def split_notes(rest):
+    """(text, notes) from what follows "agreed …· " on a job's line."""
+    i = rest.find(NOTE_START)
+    if i < 0:
+        return rest, []
+    return rest[:i], [{"at": m.group(1), "read": m.group(2), "text": m.group(3)} for m in NOTE.finditer(rest[i:])]
+
+
+def notes_text(j):
+    return "".join(f"{NOTE_START}{x['at']}{' · read ' + x['read'] if x.get('read') else ''}⟫ {x['text']}"
+                   for x in j.get("notes") or [])
+
+
+def unread_running():
+    """H283: (n, [notes]) of the running job's notes it hasn't read, else None. push.py and release.py ask this."""
+    try:
+        _, jobs, _ = read()
+    except OSError:
+        return None
+    for j in jobs:
+        if j["state"].startswith(("running", "stop asked")):
+            new = [x for x in j.get("notes") or [] if not x.get("read")]
+            if new:
+                return j["n"], new
+    return None
+
+
+def notes_for_prompt(j):
+    """H283: the notes a job had before it started, for its first prompt."""
+    ns = j.get("notes") or []
+    if not ns:
+        return ""
+    return ("\n\nNotes for this job, given after it was agreed (H283), follow them; they're marked read once you run "
+            f"jobs.py notes {j['n']}:\n" + "\n".join(f"- {x['at']}: {x['text']}" for x in ns))
+
+
 @contextmanager
 def locked():
     os.makedirs(os.path.dirname(LOCK), exist_ok=True)
@@ -106,8 +154,9 @@ def read():
             if m:
                 state = m.group(2)
                 past = state.endswith(PAST)
+                body, notes = split_notes(m.group(4))
                 jobs.append({"n": int(m.group(1)), "state": state[: -len(PAST)] if past else state,
-                             "past": past, "agreed": m.group(3), "text": m.group(4)})
+                             "past": past, "agreed": m.group(3), "text": body, "notes": notes})
             elif l.startswith("**Routine:**"):
                 on = "off" not in l.lower()
             elif l.startswith("**Mail check:**"):
@@ -138,7 +187,7 @@ def write(text, jobs, on):
     # H39: finished jobs by number, then running, then the waiting ones in their place in line.
     rest = [j for j in jobs if not j["state"].startswith(FINISHED)]
     order = sorted(finished, key=lambda j: j["n"]) + [j for j in rest if not waiting(j)] + [j for j in rest if waiting(j)]
-    lines = [f"- Job {j['n']} · {j['state']}{PAST if j['past'] else ''} · agreed {j['agreed']} · {j['text']}"
+    lines = [f"- Job {j['n']} · {j['state']}{PAST if j['past'] else ''} · agreed {j['agreed']} · {j['text']}{notes_text(j)}"
              for j in order if j["n"] not in drop]
     body = (f"{HEADING}\n\n{INTRO}\n\n**Routine:** {'on' if on else 'off'}\n\n"
             f"**Mail check:** {'on' if MAIL else 'off'} ({mail_words()}, hidden, also while a job runs; commits take turns)\n\n"
@@ -624,6 +673,45 @@ def main(argv):
             print(f"Job {j['n']}: the team's guess is {m} min; the computed estimate is {e.get('est')} min."
                   + (f" Now: {w}" if w else ""))
             return
+        if cmd == "tell":
+            # H283: a note for a job that has started (or still waits): his words of 26 October 2026, "if they picked
+            # up the item they don't see changes on the item. That is your first mistake. That should never happen again."
+            if len(args) < 2 or not args[0].isdigit() or not one_line(" ".join(args[1:])):
+                sys.exit('Usage: tell N "TEXT"')
+            j = find(jobs, int(args[0]))
+            if j["state"].startswith(FINISHED):
+                sys.exit(f"Job {j['n']} is {j['state']}; a note is for a job that hasn't finished. Give the change "
+                         "to the team as a new job instead.")
+            note = one_line(" ".join(args[1:])).replace("⟪", "(").replace("⟫", ")")
+            j.setdefault("notes", []).append({"at": time.strftime("%Y-%m-%d %H:%M"), "read": None, "text": note})
+            write(text, jobs, on)
+            if j["state"].startswith(("running", "stop asked")):
+                print(f"Job {j['n']} has the note; it reads it after its current step, and always before it pushes "
+                      "or releases.")
+            else:
+                print(f"Job {j['n']} has the note in its line; it reads it when it starts.")
+            return
+        if cmd == "notes":
+            # H283: the job's own chat reads its notes after each step and before any push or release.
+            if not args or not args[0].isdigit():
+                sys.exit("Usage: notes N")
+            j = find(jobs, int(args[0]))
+            ns = j.get("notes") or []
+            if not ns:
+                print("No notes.")
+                return
+            new = [x for x in ns if not x.get("read")]
+            for x in ns:
+                print(f"{'NEW ' if not x.get('read') else ''}{x['at']}: {x['text']}"
+                      + (f" (read {x['read']})" if x.get("read") else ""))
+            if new:
+                for x in new:
+                    x["read"] = now
+                write(text, jobs, on)
+                print(f"{len(new)} new; marked read at {now}. Follow them: say in the status log what you did with each.")
+            else:
+                print("Nothing new since you last read them.")
+            return
         if cmd == "resume":
             # H172: he lets a job paused for its usage carry on: it waits in line again like a held job (its own
             # chat, H113) and isn't paused for its usage again.
@@ -687,7 +775,7 @@ def main(argv):
                             "queued again by the routine). First look at what the first run left in HQ (git status, "
                             "the roadmap's row for it, the status page) and pick up from there instead of starting "
                             "over; nothing of it was committed unless git says so. Then the job as it was: "
-                            + j["text"])}
+                            + j["text"]), "notes": j.get("notes") or []}
             jobs.append(new)
             jobs = move(jobs, n, "top")
             write(text, jobs, on)

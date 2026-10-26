@@ -432,6 +432,7 @@ class Policy:
         if prog in ("python3", "python") and args and self.hq_script(args[0], "jobs.py"):
             sub = args[1] if len(args) > 1 else ""
             if sub in ("add", "add-row", "send-row",  # H277: a row on the roadmap first, or an open row to the team
+                       "tell",  # H283: a note for a job while it runs or waits
                        "list", "stop", "overrule", "move", "on", "off", "resume",  # H172: resume a paused job
                        "mail-fast", "mail-hourly"):  # H149: the mail check every 15 minutes for a while he names
 

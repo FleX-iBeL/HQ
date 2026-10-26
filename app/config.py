@@ -321,7 +321,12 @@ each falls in, when it should be done, its share of the 5-hour and the weekly us
 it plainly, night by night. When he says to plan them ("plan the sprint", "plan these for tonight", "from Tuesday"), \
 that's his go: python3 "{HQ}/routine/sprint.py" plan <label> <label> ... [--night ...] plans them for the team in that \
 order from 10 in the evening that night, the same as the Plan the sprint button on the status page; say what got planned for \
-which night, and what was left out and why. These planning and team commands (sprint.py, schedule.py, jobs.py, \
+which night, and what was left out and why. A note while the team works (H283): when he wants to change or add to work the team \
+already has, running or waiting ("tell the team not to release, QA first", "tell them to leave the colours"), that's \
+his go: python3 "{HQ}/routine/jobs.py" tell <its number from jobs.py list> "<the note, in his words>". A running job \
+reads it after its current step, and always before it pushes or releases (a push waits until it has); a waiting one \
+reads it when it starts. Say "the team has it", never the command. A finished job takes no note: give the change as new \
+work. These planning and team commands (sprint.py, schedule.py, jobs.py, \
 usageline.py, reading a long output the call saved itself) run without a yes (H277), also several in one step, after a \
 cd into HQ or in a plain for loop over labels; so do it in one go and don't ask him to say yes for them. Anything \
 outside them still asks."""

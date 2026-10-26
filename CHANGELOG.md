@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Tell the team something while they work. On a call, a change or an extra for work the team already has ("don't release before it's checked") goes to it as a note; they read their notes after every step and always before they put anything out, and nothing goes out while a note is unread. A note for work still waiting is read when it starts. The Status page shows each note under the work, and when it was read. Before, a change after the team had started meant stopping the work and giving it again whole (H283).
+
 - Moneypenny checks before she answers. She looks at everything a question touches first (the planning, the notes on how HQ is built, the code, the logs, the computers) and has it confirmed twice, so what she says is a fact, not a guess. On a call she says she's checking and takes the minutes it needs, then comes back with it on the same call. Before anything goes to the team she reads its line back against the checklist twice, without being asked. She thinks longer for it; her character stays as it was, and Donna and Pepper are unchanged (H282).
 
 - Moneypenny starts every call knowing how HQ works: the notes on how it's built, in full, the team's last 30 pieces of work, and the lessons learned before. When she learns something new on a call about building, she writes it down herself without asking, so the next call starts with it. Her calls start a bit heavier for it, on purpose. Donna's and Pepper's stay as they were (H280).

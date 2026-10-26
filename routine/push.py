@@ -12,6 +12,7 @@ anything goes up, `app/privacy.py --history` must say nothing personal; one hit 
     python3 routine/push.py --dry-run  the same, but git only shows what it would push
     python3 routine/push.py --check    only checks that GitHub accepts HQ's key; pushes nothing
     python3 routine/push.py --pull     brings HQ up to date with dev from GitHub (fast-forward only), at a job's start
+    Every push (and release.py) waits while the running job has a note it hasn't read (H283, jobs.py notes N).
 
 Exits 0 when pushed (or pulled, or the check passed), 1 when the privacy check found something, 2 when git failed.
 
@@ -133,11 +134,32 @@ def push_nightly(branch: str, dry: list[str]) -> int:
     return 0
 
 
+def notes_waiting() -> bool:
+    """H283: True (and says so) while the running job has a note it hasn't read: a push or release waits until the
+    job has read its notes with jobs.py notes N, so a "don't release, QA first" is never passed by."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import jobs
+        hit = jobs.unread_running()
+    except Exception:
+        return False
+    if not hit:
+        return False
+    n, new = hit
+    print(f"Not pushed: job {n} has {len(new)} note(s) it hasn't read (H283). Read them first with "
+          f"python3 routine/jobs.py notes {n}, follow them, then push again:")
+    for x in new:
+        print(f"- {x['at']}: {x['text']}")
+    return True
+
+
 def main() -> int:
     if "--check" in sys.argv:
         return check_key()
     if "--pull" in sys.argv:
         return pull()
+    if notes_waiting():
+        return 3
     dry = ["--dry-run"] if "--dry-run" in sys.argv else []
 
     if not privacy_ok(bool(dry)):

@@ -141,7 +141,13 @@ export function parseRoadmap(markdown) {
       if (/^#{1,2} /.test(line)) break;
       if (/^\*\*Routine:\*\*/.test(line)) queue.on = !/off/i.test(line);
       const m = /^- Job (\d+) · (.+?) · agreed (\S+ \S+) · (.*)$/.exec(line);
-      if (m) queue.jobs.push({ n: Number(m[1]), state: m[2], agreed: m[3], text: plain(m[4]) });
+      if (m) {
+        // H283: notes for a job while it runs or waits sit at the end of its line: " ⟪note DATE TIME[ · read HH:MM]⟫ TEXT".
+        const at = m[4].indexOf(' ⟪note ');
+        const notes = at < 0 ? [] : [...m[4].slice(at).matchAll(/ ⟪note (\S+ \S+?)(?: · read (\S+))?⟫ (.*?)(?= ⟪note |$)/g)]
+          .map((x) => ({ at: x[1], read: x[2] ?? null, text: plain(x[3]) }));
+        queue.jobs.push({ n: Number(m[1]), state: m[2], agreed: m[3], text: plain(at < 0 ? m[4] : m[4].slice(0, at)), notes });
+      }
     }
     // H39: the waiting jobs (ready or held) run in the order they stand on the list; number their place.
     let place = 0;

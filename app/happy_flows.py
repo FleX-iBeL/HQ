@@ -13279,6 +13279,93 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("H282" in (ROOT / "CHANGELOG.md").read_text(encoding="utf8"), "H282: not in the changelog")
         return f"her craft {len(m['craft'])} characters whole, effort high (Pepper and Donna {config.effort_for(opus)}), the build call's checking rule"
 
+    async def flow164(self) -> str:
+        """H283, no Claude: a note for the team while they work. On a copy of the roadmap (F17): jobs.py tell N adds a
+        note to a running job and to a waiting one, without changing the job's own text; push.py and release.py refuse
+        while the running job has a note it hasn't read, and say the note; jobs.py notes N shows it and marks it read,
+        after which the gate is open; a waiting job's note goes into its first prompt; a finished job takes none; the
+        status page reads the notes apart from the text; a call may tell without a yes, and the backup hands it on."""
+        import subprocess as sp
+        from policy import Policy, ALLOW
+        rm = self.tmp / "roadmap-H283.md"
+        rm.write_text(ROADMAP.read_text())
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1"}
+        def run(*a, ok=True):
+            r = sp.run(["python3", *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            if ok:
+                need(r.returncode == 0, f"{a} failed: {r.stdout}{r.stderr}")
+            return r
+        def jobs(*a, ok=True):
+            return run(str(ROOT / "routine/jobs.py"), *a, ok=ok)
+        def job(n):
+            q = json.loads(jobs("next").stdout)
+            return next(j for k in ("running", "waiting") for j in q[k] if j["n"] == n)
+        jobs("add", "flow 164 running job, build it, push to dev, release")
+        jobs("add", "flow 164 waiting job")
+        q = json.loads(jobs("next").stdout)
+        a, b = q["ready"][-2]["n"], q["ready"][-1]["n"]
+        for j in q["running"]:  # only the copy's own running jobs: none may hold the gate but ours
+            jobs("mark", str(j["n"]), "done 00:00")
+        jobs("mark", str(a), "running since 12:00")
+        out = jobs("tell", str(a), "Don't release, QA first.").stdout
+        need("after its current step" in out, f"tell to a running job said: {out}")
+        ja = job(a)
+        need(ja["text"] == "flow 164 running job, build it, push to dev, release", f"a note changed the job's own text: {ja['text']}")
+        need(len(ja["notes"]) == 1 and ja["notes"][0]["text"] == "Don't release, QA first." and not ja["notes"][0]["read"],
+             f"the note didn't read back unread: {ja['notes']}")
+        # The gate: a push and a release wait for the note, and say it.
+        r = run(str(ROOT / "routine/push.py"), "--dry-run", ok=False)
+        need(r.returncode == 3 and f"job {a} has 1 note" in r.stdout and "QA first" in r.stdout, f"push.py passed an unread note: {r.returncode} {r.stdout}")
+        r = run(str(ROOT / "routine/release.py"), "main", ok=False)
+        need(r.returncode == 3 and "QA first" in r.stdout, f"release.py main passed an unread note: {r.returncode} {r.stdout}")
+        # The job reads it: shown as new, marked read, and the gate opens.
+        out = jobs("notes", str(a)).stdout
+        need("NEW" in out and "QA first" in out and "marked read" in out, f"notes didn't show the new note: {out}")
+        need("Nothing new" in jobs("notes", str(a)).stdout, "a note read once showed as new again")
+        need(job(a)["notes"][0]["read"], "the note wasn't marked read")
+        r = run("-c", "import sys; sys.path.insert(0, 'routine'); import push; print(push.notes_waiting())")
+        need(r.stdout.strip() == "False", f"the gate stayed shut after the note was read: {r.stdout}")
+        # A second note shuts it again, until read.
+        jobs("tell", str(a), "Also: leave the colours as they are")
+        r = run("-c", "import sys; sys.path.insert(0, 'routine'); import push; print(push.notes_waiting())")
+        need(r.stdout.strip().endswith("True"), f"a second note didn't shut the gate: {r.stdout}")
+        jobs("notes", str(a))
+        # A waiting job: the note is in its line and goes into its first prompt; the start text tells every job to read.
+        out = jobs("tell", str(b), "Use the new colours").stdout
+        need("when it starts" in out, f"tell to a waiting job said: {out}")
+        r = run("-c", f"import sys; sys.path.insert(0, 'routine'); import jobs; "
+                f"_, js, _ = jobs.read(); print(jobs.notes_for_prompt(next(x for x in js if x['n'] == {b})))")
+        need("Use the new colours" in r.stdout and f"jobs.py notes {b}" in r.stdout, f"the waiting job's first prompt lacks its note: {r.stdout}")
+        tick = (ROOT / "routine/tick.py").read_text()
+        need("notes_for_prompt(job)" in tick and "always before any push or release" in tick,
+             "the job's start text doesn't carry its notes or the rule to read them")
+        need("notes N" in (ROOT / "routine/jobs.py").read_text(), "jobs.py --help lacks notes")
+        # A finished job takes no note.
+        jobs("mark", str(b), "done 12:30")
+        r = jobs("tell", str(b), "too late", ok=False)
+        need(r.returncode != 0 and "new job" in (r.stdout + r.stderr), f"a finished job took a note: {r.stdout}{r.stderr}")
+        # The status page reads the notes apart from the text.
+        js = f"""import {{ parseRoadmap }} from {json.dumps(str(ROOT / 'status/parse.mjs'))};
+import {{ readFileSync }} from 'node:fs';
+const r = parseRoadmap(readFileSync({json.dumps(str(rm))}, 'utf8'));
+console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) => j.n === {a})}}));"""
+        d = json.loads(sp.run(["node", "--input-type=module", "-e", js], capture_output=True, text=True).stdout)
+        need(not d["problems"] and d["job"]["text"] == "flow 164 running job, build it, push to dev, release"
+             and [n["text"] for n in d["job"]["notes"]] == ["Don't release, QA first.", "Also: leave the colours as they are"]
+             and all(n["read"] for n in d["job"]["notes"]), f"the status page reads the notes wrong: {d}")
+        need("jobnote" in (ROOT / "status/index.html").read_text(), "the status page doesn't show a job's notes")
+        # A call may tell the team without a yes; the backup hands it on; the call rules say how.
+        pol = Policy(config.FOLDER)
+        dec = pol.decide("Bash", {"command": f'python3 "{ROOT}/routine/jobs.py" tell 12 "QA first"'})
+        need(dec.verdict == ALLOW, f"a call's tell asked for a yes: {dec}")
+        dec = pol.decide("Bash", {"command": f'python3 "{ROOT}/routine/jobs.py" notes 12'})
+        need(dec.verdict != ALLOW, "a call may read a job's notes as read (only the job's own chat)")
+        sys.path.insert(0, str(ROOT / "routine"))
+        import role
+        need("tell" in role.WRITES["jobs"], "the backup doesn't hand a tell on to the main")
+        need("jobs.py\" tell" in config.TEAM_RULE, "the call rules don't say how to tell the team")
+        return f"jobs {a} and {b}: notes told, read, the push and release held until read, shown on the status page"
+
     async def flow162(self) -> str:
         """H280, no Claude: Moneypenny starts every call knowing how HQ works. On a throwaway workspace with 35 team
         notes: her start has the newest 30 and not the older ones; on the real folder her session has the build notes
@@ -19774,6 +19861,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    164: ("H283: a note for the team while they work: jobs.py tell N to a running or waiting job, read with notes N after each step; push.py and release.py wait while a note is unread; the first prompt carries a waiting job's notes; the status page shows them; a call tells without a yes", False, "flow164"),
     163: ("H282: Moneypenny checks everything before she answers: her craft's new lines with his words (complete picture, confirmed twice, the team's line read back, the minutes it needs), not cut short; effort high for her calls and texts, Pepper and Donna as before; the build call's checking rule", False, "flow163"),
     162: ("H280: Moneypenny starts every call knowing how HQ works: the build notes in full, Claude's memory index, the 30 newest team notes; a build call writes the memory without a yes", False, "flow162"),
     161: ("H281: every read-only look on a call is free for every agent (sed -n, awk, cut, jq, git describe and tag -l, dpkg -l, systemctl status, journalctl --user, Claude's memory folder); writing, code from text, the outside and sudo still ask", False, "flow161"),

@@ -292,6 +292,8 @@ def main(argv: list[str]) -> int:
         s = status()
         print(json.dumps(s, indent=1) if "--json" in argv else words(s))
         return 0
+    if cmd in ("nightly", "main") and push.notes_waiting():  # H283: the running job reads its notes first
+        return 3
     if cmd == "nightly" and len(argv) >= 2:
         return cmd_nightly(" ".join(argv[1:]))
     if cmd == "main":

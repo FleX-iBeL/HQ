@@ -131,6 +131,8 @@ def resume_prompt(n, where, p, text_of_job, past_note=""):
             "in HQ and the workspace, the status block) against where you were, then carry on from there to the "
             "end; don't redo what's done. Same as before: read the usage before the first step and at every "
             "status block rewrite, hold again on STOP, and finish with the done mark as the very last step. "
+            f"Read your notes first, then after each step and always before any push or release: python3 "
+            f"{os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jobs.py')} notes {n} (H283). "
             f"The job, as agreed on the call: {text_of_job}" + (f"\n\n{past_note}" if past_note else ""))
 
 
