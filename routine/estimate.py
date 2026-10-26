@@ -210,6 +210,7 @@ KINDS = {
     "transcribe": "transcribing recordings",
     "maintenance": "the routine's own maintenance (the nightly run, the weekly sweep, the rules check)",  # H220
     "release": "a release",            # F34: a few minutes, nothing built
+    "qa": "QA of the team's work (Moneypenny tries every done example for real; nothing built)",  # F56
     "merge": "merging a sync conflict",  # F34: a minute or two; kept apart so they don't pull other kinds down
     "other": "other (none of these)",
 }
@@ -219,7 +220,7 @@ KINDS = {
 OLD_KINDS = {"call": "build", "big": "bigbuild"}
 # F34: a kind set by hand (a call's --kind) wins over the guess, except over these: the routine's own wording says
 # them for sure, and a call has no word for them.
-SURE = ("merge", "release", "maintenance")
+SURE = ("merge", "release", "maintenance", "qa")
 BUILDS = ("build", "bigbuild")  # H215: the two sizes of a build
 # H215: the words a call can give for a build's size. A plain "build" (the word the call rules used before H215) says
 # a build without its size: it's sorted into small or big like a guess (build_size). Only these say the size for sure.
@@ -280,6 +281,8 @@ def _sure(t):
     names them further on (building them, or a release that follows the nightly run) isn't one."""
     if re.search(r"^sync conflict|\bsync conflict \(h56\.4\), found by the routine\b", t):
         return "merge"
+    if re.search(r"^qa of [hf]\d+", t):  # F56: the QA job qa.py queues
+        return "qa"
     if re.search(r"(^|: )(do |build )?release hq \d|^(h\d+ on the (hq )?roadmap: )?release (hq \d|hq now|now)\b"
                  r"|^h\d+(?: and h\d+)*, the daily release\b|^h\d+ on the (hq )?roadmap, once, now, then the release\b", t):
         return "release"

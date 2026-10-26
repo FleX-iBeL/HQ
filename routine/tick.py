@@ -316,6 +316,7 @@ def start(job):
             f"{json.dumps(os.path.join(HERE, 'jobs.py'))} notes {n}, and follow what's new (H283). "
             + past_note
             + importlib.import_module("jobs").notes_for_prompt(job)
+            + importlib.import_module("qa").prompt_extra(job["text"])  # F56: a QA job runs as Moneypenny
         )
     chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")
     # The job's settings (its status line) with this HQ's path, written fresh each time.

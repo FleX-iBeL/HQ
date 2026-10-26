@@ -16,7 +16,10 @@ The daily release (H178, a repeating planned item at 2:05) runs after the nightl
                                                dev against nightly and main, and the suggestion: sure, again or hesitate
   python3 "routine/release.py" nightly "WHY"   hesitating: the privacy check, then dev to nightly only; main stays
   python3 "routine/release.py" main            sure: the privacy check, dev to nightly, then the next small version
-                                               the H90 way (Coming next becomes it, VERSION, tag, main, back to dev)
+                                               the H90 way (Coming next becomes it, VERSION, tag, main, back to dev);
+                                               only the work whose row says QA passed (F56, qa.py): from the first
+                                               commit for a row without it, the rest stays on dev and nightly;
+                                               --without-qa only on his explicit say-so on a call
   python3 "routine/release.py" log "LINE"      one line in the H178 row's Releases, newest first
 
 The night works in rounds (H226, 22 October 2026): round 1 is the full run; not green, everything it found is fixed and
@@ -40,6 +43,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import push  # noqa: E402
+import qa  # noqa: E402  F56: the release only takes work that passed QA
 
 ROOT = HERE.parent
 ROW = "H178"
@@ -123,7 +127,15 @@ def status() -> dict:
             "run": run, "tonight": tonight, "changed": changed,
             "dev_ahead_of_main": ahead(push.WORK_BRANCH, push.RELEASE_BRANCH),
             "dev_ahead_of_nightly": ahead(push.WORK_BRANCH, push.NIGHTLY_BRANCH),
-            "coming_next": coming_next(), "suggest": verdict, "why": why}
+            "coming_next": coming_next(), "suggest": verdict, "why": why, "qa": qa_hold()}
+
+
+def qa_hold() -> dict:
+    """F56: what the release would take and hold, by QA (qa.hold); empty when it can't be read."""
+    try:
+        return qa.hold(str(ROOT), push.RELEASE_BRANCH, push.WORK_BRANCH)
+    except Exception as e:
+        return {"to": None, "tip": None, "taken": [], "held": [], "behind": [], "all": False, "error": repr(e)}
 
 
 def version() -> str:
@@ -182,7 +194,7 @@ def cmd_nightly(why: str) -> int:
     return 0
 
 
-def cmd_main(today: dt.date | None = None) -> int:
+def cmd_main(today: dt.date | None = None, without_qa: bool = False) -> int:
     no = _ready()
     if no:
         print(f"No release: {no}.")
@@ -193,6 +205,14 @@ def cmd_main(today: dt.date | None = None) -> int:
     if not ahead(push.WORK_BRANCH, push.RELEASE_BRANCH):
         print(f"No release: nothing new on {push.WORK_BRANCH} since {version()}.")
         return 0
+    if not without_qa:  # F56: only work whose row says QA passed goes out
+        h = qa.hold(str(ROOT), push.RELEASE_BRANCH, push.WORK_BRANCH)
+        if not h["all"]:
+            print(qa.hold_words(h))
+            if not h["to"]:
+                print(f"No release: nothing new has passed QA yet; it stays on {push.NIGHTLY_BRANCH}, main stays at {version()}.")
+                return 0
+            return cmd_part(h, today)
     if not coming_next():
         print("No release: the changelog's Coming next is empty; write what's new for friends first, commit, then again.")
         return 2
@@ -230,6 +250,102 @@ def cmd_main(today: dt.date | None = None) -> int:
         return _undo(old_main, tag, committed=True) or r
     r = push.push_branch(push.WORK_BRANCH) or push.push_nightly(push.WORK_BRANCH, [])
     print(f"Released {v} ({tag}) on {push.RELEASE_BRANCH}; {push.NIGHTLY_BRANCH} and {push.WORK_BRANCH} have it too.")
+    return r
+
+
+def _coming(text: str) -> list[str]:
+    m = re.search(r"^## Coming next\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    return [ln for ln in (m.group(1) if m else "").splitlines() if ln.strip().startswith("-")]
+
+
+def _versioned(text: str, v: str, today: dt.date, lines: list[str]) -> str:
+    """The changelog with the given lines out of Coming next and under a new version heading; the rest stays."""
+    m = re.search(r"^## Coming next\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    keep = [ln for ln in _coming(text) if ln not in lines]
+    body = "".join(f"\n{ln}\n" for ln in keep)
+    new = f"## Coming next\n{body}\n## {v} · {today.day} {today:%B %Y}\n\n" + "\n".join(lines) + "\n\n"
+    return text[:m.start()] + new + text[m.end():].lstrip("\n")
+
+
+def cmd_part(h: dict, today: dt.date | None = None) -> int:
+    """F56: release only up to the last commit before the first one whose row hasn't passed QA (h["to"]). The version
+    commit goes on top of that commit, in a worktree of its own; main and the tag go there; dev gets it merged back
+    (its tree kept, the released lines moved under the version), so main stays an ancestor of dev."""
+    today = today or dt.date.today()
+    to = h["to"]
+    at_to = out("show", f"{to}:CHANGELOG.md")
+    lines = _coming(at_to)
+    if not lines:
+        print("No release: the work that passed QA has nothing in the changelog's Coming next; it stays on "
+              f"{push.NIGHTLY_BRANCH}, main stays at {version()}.")
+        return 0
+    old_main, old_dev = out("rev-parse", push.RELEASE_BRANCH), out("rev-parse", push.WORK_BRANCH)
+    old = version()
+    v = next_version(old)
+    tag = f"v{v}"
+    if not git("rev-parse", "-q", "--verify", f"refs/tags/{tag}").returncode:
+        print(f"No release: the tag {tag} is already here.")
+        return 2
+    import shutil
+    import tempfile
+    wt = Path(tempfile.mkdtemp(prefix="hq-release-")) / "wt"
+    msg = (f"HQ {v}: the changelog's Coming next becomes {v} ({today.day} {today:%B %Y}) for the work that passed QA, "
+           f"VERSION {v}, the README's version (H186, F56)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
+
+    def back(why: str) -> int:
+        print(f"No release: {why}")
+        git("merge", "--abort")
+        git("checkout", "-q", push.WORK_BRANCH)
+        git("reset", "-q", "--keep", old_dev)
+        git("tag", "-d", tag)
+        git("branch", "-f", push.RELEASE_BRANCH, old_main)
+        git("worktree", "remove", "--force", str(wt))
+        shutil.rmtree(wt.parent, ignore_errors=True)
+        return 2
+
+    if git("worktree", "add", "-q", "--detach", str(wt), to).returncode:
+        shutil.rmtree(wt.parent, ignore_errors=True)
+        print("No release: git couldn't make a worktree for it.")
+        return 2
+
+    def w(*a):
+        return subprocess.run(["git", "-C", str(wt), *a], text=True, capture_output=True)
+    (wt / "CHANGELOG.md").write_text(_versioned(at_to, v, today, lines), encoding="utf8")
+    (wt / "VERSION").write_text(v + "\n")
+    files = ["CHANGELOG.md", "VERSION"]
+    if (wt / "README.md").exists():
+        files.append("README.md")
+        (wt / "README.md").write_text((wt / "README.md").read_text(encoding="utf8").replace(f"**{old}**", f"**{v}**", 1), encoding="utf8")
+    if w("add", *files).returncode or w("commit", "-q", "-m", msg).returncode:
+        return back("git couldn't commit the version.")
+    rel = w("rev-parse", "HEAD").stdout.strip()
+    for step in (("branch", "-f", push.RELEASE_BRANCH, rel), ("tag", "-a", tag, "-m", f"HQ {v}", rel)):
+        if git(*step).returncode:
+            return back(f"git {step[0]} failed.")
+    # dev: merge the release in, keeping dev's own tree, then the same version change on dev's changelog.
+    if git("merge", "-q", "--no-ff", "--no-commit", "-s", "ours", rel).returncode:
+        return back("git couldn't merge the release back into dev.")
+    log = ROOT / "CHANGELOG.md"
+    log.write_text(_versioned(log.read_text(encoding="utf8"), v, today, lines), encoding="utf8")
+    (ROOT / "VERSION").write_text(v + "\n")
+    readme = ROOT / "README.md"
+    if readme.exists():
+        readme.write_text(readme.read_text(encoding="utf8").replace(f"**{old}**", f"**{v}**", 1), encoding="utf8")
+    if git("add", *files).returncode or git("commit", "-q", "-m", f"HQ {v} back into dev: what's held stays under "
+                                             f"Coming next (F56)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>").returncode:
+        return back("git couldn't commit the merge on dev.")
+    git("worktree", "remove", "--force", str(wt))
+    shutil.rmtree(wt.parent, ignore_errors=True)
+    r = push.push_branch(push.RELEASE_BRANCH, release=True)
+    if r:
+        print("No release: GitHub refused main or the tags; put back as it was.")
+        git("reset", "-q", "--keep", old_dev)
+        git("tag", "-d", tag)
+        git("branch", "-f", push.RELEASE_BRANCH, old_main)
+        return 2
+    r = push.push_branch(push.WORK_BRANCH) or push.push_nightly(push.WORK_BRANCH, [])
+    print(f"Released {v} ({tag}) on {push.RELEASE_BRANCH}, with the work that passed QA; what's held stays on "
+          f"{push.WORK_BRANCH} and {push.NIGHTLY_BRANCH}.")
     return r
 
 
@@ -283,6 +399,8 @@ def words(s: dict) -> str:
     lines.append(f"dev is {s['dev_ahead_of_main']} ahead of main and {s['dev_ahead_of_nightly']} ahead of nightly; "
                  f"Coming next has {len(s['coming_next'])} lines")
     lines.append(f"Suggestion: {s['suggest']} ({s['why']})")
+    h = s.get("qa") or {}
+    lines.append(f"QA cannot be read: {h['error']}" if h.get("error") else qa.hold_words(h))
     return "\n".join(lines)
 
 
@@ -297,7 +415,8 @@ def main(argv: list[str]) -> int:
     if cmd == "nightly" and len(argv) >= 2:
         return cmd_nightly(" ".join(argv[1:]))
     if cmd == "main":
-        return cmd_main()
+        # F56: --without-qa only on his explicit say-so on a call; it releases everything on dev.
+        return cmd_main(without_qa="--without-qa" in argv)
     if cmd == "log" and len(argv) >= 2:
         if not add_line(" ".join(argv[1:])):
             print(f"No {ROW} row on the roadmap.")

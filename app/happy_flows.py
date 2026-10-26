@@ -13279,6 +13279,178 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("H282" in (ROOT / "CHANGELOG.md").read_text(encoding="utf8"), "H282: not in the changelog")
         return f"her craft {len(m['craft'])} characters whole, effort high (Pepper and Donna {config.effort_for(opus)}), the build call's checking rule"
 
+    async def flow165(self) -> str:
+        """F56 piece 1, no Claude, no network: QA as a real step, and the release only taking work that passed it.
+        On a copy of the roadmap (F17): a build job for a Features row marked done queues a QA job by itself (kind qa,
+        its first prompt Moneypenny's character and craft); a maintenance row's doesn't. qa.py fail writes "QA failed"
+        in the row and queues a fix job; the fix done queues QA again; after three fails in a row no fix job comes.
+        qa.py pass writes "QA passed". Then release.py against a throwaway HQ (as flow 109): commits for H281 (passed),
+        H282 (no QA) and H283 (passed): the release takes only H281's work as 0.4.5 (its changelog line, its tag on main),
+        holds H282 and H283 on nightly and dev, says why, and merges the release back so main stays under dev; once H282
+        passes too the next release takes the rest as 0.4.6 by a plain fast-forward. --without-qa takes everything."""
+        import datetime as _dt
+        import importlib
+        import subprocess as sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        rm = self.tmp / "roadmap-F56.md"
+        rm.write_text(ROADMAP.read_text())
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1"}
+        def run(*a, ok=True):
+            r = sp.run(["python3", *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            if ok:
+                need(r.returncode == 0, f"{a} failed: {r.stdout}{r.stderr}")
+            return r
+        def jobs(*a, ok=True):
+            return run(str(ROOT / "routine/jobs.py"), *a, ok=ok)
+        def qa_(*a, ok=True):
+            return run(str(ROOT / "routine/qa.py"), *a, ok=ok)
+        def queue():
+            return json.loads(jobs("next").stdout)
+        def waiting_text(start):
+            return [j for j in queue()["waiting"] if j["text"].startswith(start)]
+        q0 = queue()
+        for j in q0["running"]:
+            jobs("mark", str(j["n"]), "done 00:00")
+        for j in q0["waiting"]:
+            jobs("stop", str(j["n"]))
+
+        # A build for a Features row, done: QA follows by itself, as Moneypenny.
+        jobs("add", "H282 on the HQ roadmap: build it as it says, push to dev with push.py", "--not-ready", "--kind", "small")
+        n = queue()["ready"][-1]["n"]
+        jobs("mark", str(n), "running since 12:00")
+        out = jobs("done", str(n)).stdout
+        qa_jobs = waiting_text("QA of H282")
+        need(len(qa_jobs) == 1 and "QA of what job" in out, f"a finished build got no QA job: {out}")
+        r = run("-c", "import sys; sys.path.insert(0, 'routine'); import estimate, qa; "
+                f"t = {qa_jobs[0]['text']!r}; print(estimate.kind_of(t)); print(qa.prompt_extra(t))")
+        need(r.stdout.startswith("qa\n") and "You are Moneypenny" in r.stdout and "definition of done" in r.stdout,
+             f"the QA job isn't kind qa run as Moneypenny: {r.stdout[:300]}")
+        need("prompt_extra(job[\"text\"])" in (ROOT / "routine/tick.py").read_text(), "the routine doesn't give a QA job her craft")
+        # A second done for the same row doesn't queue a second QA; a maintenance row's build gets none.
+        jobs("add", "H178 on the HQ roadmap: fix the release text", "--kind", "small")
+        m = queue()["ready"][-1]["n"]
+        jobs("mark", str(m), "running since 12:10")
+        jobs("done", str(m))
+        need(not waiting_text("QA of H178"), "a maintenance row's build got a QA job")
+        # QA fails: the mark in the row, and a fix job; the fix done brings QA again.
+        jobs("mark", str(qa_jobs[0]["n"]), "running since 12:20")
+        out = qa_("fail", "H282", "the status doesn't come back to the sender", "--job", str(qa_jobs[0]["n"])).stdout
+        jobs("done", str(qa_jobs[0]["n"]))
+        fix = waiting_text("Fix for H282")
+        need(len(fix) == 1 and "the fix" in out, f"a failed QA made no fix job: {out}")
+        need(re.search(r"QA failed \(job \d+, \d+ \w+ 20\d\d \d\d:\d\d\): the status doesn't come back", rm.read_text()),
+             "the row lacks its QA failed line")
+        need("failed" in qa_("state", "H282").stdout, "qa.py state doesn't say failed")
+        jobs("mark", str(fix[0]["n"]), "running since 12:30")
+        jobs("done", str(fix[0]["n"]))
+        need(len(waiting_text("QA of H282")) == 1, "the fix done didn't bring QA again")
+        # Three fails in a row: no more fix jobs by itself.
+        for i in range(2):
+            qa_("fail", "H282", f"still off {i}")
+            for j in waiting_text("Fix for H282"):
+                jobs("stop", str(j["n"]))
+        out = qa_("fail", "H282", "third time off").stdout
+        need("waits for a call" in out and not waiting_text("Fix for H282"), f"a third fail still made a fix job: {out}")
+        for j in queue()["waiting"]:
+            jobs("stop", str(j["n"]))
+
+        # The release gate.
+        import incidents as inc
+        import push as pu
+        import release as rl
+        import qa as qm
+        import update as up
+        importlib.reload(pu)
+        importlib.reload(qm)
+        importlib.reload(rl)
+        tmp = Path(tempfile.mkdtemp(prefix="hq-flow165-"))
+        real = (inc.FILE, pu.ROOT, rl.ROOT, rl.is_main, qm.q.ROADMAP)
+        try:
+            def g(*a, cwd=tmp):
+                return subprocess.run(["git", *a], cwd=cwd, text=True, capture_output=True, check=True)
+            hub = tmp / "hub.git"
+            g("init", "-q", "--bare", "-b", "dev", str(hub))
+            g("clone", "-q", str(hub), str(tmp / "hq"))
+            hq = tmp / "hq"
+            g("checkout", "-q", "-b", "dev", cwd=hq)
+            g("config", "user.name", "t", cwd=hq)
+            g("config", "user.email", "t@example.com", cwd=hq)
+            (hq / "app").mkdir()
+            (hq / "app" / "privacy.py").write_text("print('Nothing personal found.')\n")
+            (hq / "CHANGELOG.md").write_text("# Changelog\n\n## Coming next\n\n## 0.4.4 · 17 October 2026\n\n- old\n")
+            (hq / "VERSION").write_text("0.4.4\n")
+            (hq / "README.md").write_text("# HQ\n\nHQ is at version **0.4.4** (what's new).\n")
+            g("add", ".", cwd=hq)
+            g("commit", "-q", "-m", "0.4.4", cwd=hq)
+            g("tag", "-a", "v0.4.4", "-m", "HQ 0.4.4", cwd=hq)
+            g("branch", "main", cwd=hq)
+            g("push", "-q", "origin", "dev", "main", "--tags", cwd=hq)
+            inc.FILE = str(tmp / "incidents.json")
+            rl.ROOT = hq
+            rl.is_main = lambda: True
+            qm.q.ROADMAP = str(rm)
+            remote = lambda ref: subprocess.run(["git", "-C", str(hub), "rev-parse", "-q", "--verify", ref],
+                                                text=True, capture_output=True).stdout.strip()
+            def work(label, name):
+                (hq / f"{name}.py").write_text(f"{name} = 1\n")
+                log = (hq / "CHANGELOG.md").read_text()
+                (hq / "CHANGELOG.md").write_text(log.replace("## Coming next\n", f"## Coming next\n\n- {name.upper()} ({label}).\n", 1))
+                g("add", ".", cwd=hq)
+                g("commit", "-q", "-m", f"{label}: {name}", cwd=hq)
+                return g("rev-parse", "HEAD", cwd=hq).stdout.strip()
+            a = work("H281", "a")
+            work("H282", "b")
+            work("H283", "c")
+            g("commit", "-q", "--allow-empty", "-m", "Nightly 27 October (H169): a test follows", cwd=hq)
+            qm.mark("H281", True, "every example tried", 1)
+            qm.mark("H283", True, "every example tried", 3)
+            h = qm.hold(str(hq), "main", "dev")
+            need(h["to"] == a and h["taken"] == ["H281"] and [x["label"] for x in h["held"]] == ["H282"]
+                 and h["behind"] == ["H283"] and "QA failed" in h["held"][0]["why"], f"the gate isn't as agreed: {h}")
+            words = qm.hold_words(h)
+            need("H282" in words and "held on nightly" in words and "H283" in words, f"the hold isn't said plainly: {words}")
+            dev_before = g("rev-parse", "dev", cwd=hq).stdout.strip()
+            need(rl.cmd_main(_dt.date(2026, 10, 27)) == 0, "the release with a held row failed")
+            main_now = remote("refs/heads/main")
+            need(g("rev-parse", f"{main_now}^", cwd=hq).stdout.strip() == a, "main isn't H281's work plus the version")
+            rel_log = g("show", f"{main_now}:CHANGELOG.md", cwd=hq).stdout
+            need("## 0.4.5 · 27 October 2026\n\n- A (H281).\n" in rel_log and "B (H282)" not in rel_log and "C (H283)" not in rel_log,
+                 f"the released changelog isn't only H281's: {rel_log!r}")
+            need(remote("refs/tags/v0.4.5^{commit}") == main_now and up.remote_newest(str(hub)) == "v0.4.5", "the tag isn't on the release")
+            devlog = (hq / "CHANGELOG.md").read_text()
+            need(re.search(r"## Coming next\n\n- C \(H283\)\.\n\n- B \(H282\)\.\n\n## 0\.4\.5 · 27 October 2026\n\n- A \(H281\)\.\n", devlog),
+                 f"dev's changelog doesn't keep the held lines under Coming next: {devlog!r}")
+            need((hq / "VERSION").read_text().strip() == "0.4.5" and (hq / "b.py").exists() and (hq / "c.py").exists(), "dev lost its work or version")
+            need(subprocess.run(["git", "-C", str(hq), "merge-base", "--is-ancestor", "main", "dev"]).returncode == 0
+                 and g("merge-base", "--is-ancestor", dev_before, "dev", cwd=hq).returncode == 0, "main isn't under dev any more")
+            need(remote("refs/heads/nightly") == remote("refs/heads/dev") == g("rev-parse", "dev", cwd=hq).stdout.strip(),
+                 "the held work isn't on dev and nightly")
+            need(g("branch", "--show-current", cwd=hq).stdout.strip() == "dev" and not g("worktree", "list", cwd=hq).stdout.count("\n") > 1,
+                 "not back on dev, or the release's worktree is left")
+            # Nothing new passed QA: no release, all on nightly.
+            need(rl.cmd_main() == 0 and remote("refs/heads/main") == main_now, "a release went out with nothing newly passed")
+            # H282 passes: the rest goes out as 0.4.6, a plain fast-forward.
+            qm.mark("H282", True, "the status comes back now", 4)
+            need(qm.hold(str(hq), "main", "dev")["all"], "with all passed the gate still holds")
+            need(rl.cmd_main(_dt.date(2026, 10, 28)) == 0 and remote("refs/heads/main") == g("rev-parse", "dev", cwd=hq).stdout.strip(),
+                 "the rest didn't go out once it passed QA")
+            log2 = (hq / "CHANGELOG.md").read_text()
+            need("## 0.4.6 · 28 October 2026\n\n- C (H283).\n\n- B (H282).\n" in log2 and "## 0.4.5" in log2, f"0.4.6's changelog: {log2!r}")
+            # His say-so on a call: --without-qa takes it all.
+            (hq / "CHANGELOG.md").write_text(log2.replace("## Coming next\n", "## Coming next\n\n- D (H280).\n", 1))
+            g("commit", "-q", "-am", "H280: d", cwd=hq)
+            main6 = remote("refs/heads/main")
+            need(rl.cmd_main() == 0 and remote("refs/heads/main") == main6, "a row without QA went out")
+            need(rl.cmd_main(_dt.date(2026, 10, 29), without_qa=True) == 0
+                 and remote("refs/heads/main") == g("rev-parse", "dev", cwd=hq).stdout.strip(), "--without-qa didn't take it all")
+            need("QA" in rl.words(rl.status()), "release.py status doesn't say what QA holds")
+        finally:
+            inc.FILE, pu.ROOT, rl.ROOT, rl.is_main, qm.q.ROADMAP = real
+            shutil.rmtree(tmp, ignore_errors=True)
+        return ("a finished build queues QA as Moneypenny (not for maintenance); a fail writes its line and a fix job, QA after the fix, "
+                "no fix job after three; the release takes only H281 (passed) as 0.4.5, holds H282 (failed) and H283 (behind it) on "
+                "nightly and dev, merged back under dev; once H282 passes, 0.4.6 takes the rest; --without-qa takes it all")
+
     async def flow164(self) -> str:
         """H283, no Claude: a note for the team while they work. On a copy of the roadmap (F17): jobs.py tell N adds a
         note to a running job and to a waiting one, without changing the job's own text; push.py and release.py refuse
@@ -19861,6 +20033,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     164: ("H283: a note for the team while they work: jobs.py tell N to a running or waiting job, read with notes N after each step; push.py and release.py wait while a note is unread; the first prompt carries a waiting job's notes; the status page shows them; a call tells without a yes", False, "flow164"),
     163: ("H282: Moneypenny checks everything before she answers: her craft's new lines with his words (complete picture, confirmed twice, the team's line read back, the minutes it needs), not cut short; effort high for her calls and texts, Pepper and Donna as before; the build call's checking rule", False, "flow163"),
     162: ("H280: Moneypenny starts every call knowing how HQ works: the build notes in full, Claude's memory index, the 30 newest team notes; a build call writes the memory without a yes", False, "flow162"),

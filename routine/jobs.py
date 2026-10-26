@@ -36,7 +36,8 @@ usage (from the workspace):
   python3 "routine/jobs.py" overrule N                     job N may go past the 5-hour line (the weekly line still counts)
   python3 "routine/jobs.py" move N top|up|down|bottom      move waiting job N in the line (H39)
   python3 "routine/jobs.py" move N before|after M          put waiting job N just before or after job M
-  python3 "routine/jobs.py" done N                         the job's own chat, when it's finished
+  python3 "routine/jobs.py" done N                         the job's own chat, when it's finished; a build for a row
+                                                           in Bugs or Features then gets a QA job by itself (F56, qa.py)
   python3 "routine/jobs.py" guess N MINUTES                the job's own chat, at its start after reading its row: its
                                                            own guess of how many minutes it takes (H168), kept next to
                                                            the computed estimate and, at done, the real time
@@ -736,8 +737,21 @@ def main(argv):
             # H187: an update that ended the job's chat holds it with its own reason (held N an update ...).
             why = one_line(" ".join(args[1:])).replace("·", "-") if cmd == "held" else ""
             j["state"] = f"done {now}" if cmd == "done" else f"held: {why or 'usage over the line'}"
+            qa_job = None
+            if cmd == "done" and not was.startswith("done"):
+                # F56: a finished build for a row in Bugs or Features gets a QA job, run as Moneypenny.
+                try:
+                    import estimate as est_
+                    import qa
+                    kind = (est_._load_state().get(str(j["n"])) or {}).get("kind") or est_.kind_of(j["text"])
+                    qa_job = qa.on_done(jobs, j, text, kind)
+                except Exception as e:
+                    print(f"(couldn't queue its QA: {e!r})", file=sys.stderr)
             write(text, jobs, on)
             print(show(j))
+            if qa_job:
+                estimate("on_add", qa_job["n"], qa_job["text"], "qa")
+                print(f"Job {qa_job['n']} is ready: QA of what job {j['n']} built (F56).")
             if cmd == "held":
                 # H113: when and at about which step, so the next start carries on from there.
                 try:
