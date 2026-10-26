@@ -16,7 +16,7 @@
 
 ## The queue
 
-Jobs agreed on a call, run one at a time on the MacBook by the routine (phase L). A call's let's go adds a job here as ready; within about a minute the routine starts the waiting job highest on this list in a Terminal window, as a normal chat with let's go, and starts the next one only when that one is done. Kept by the routine's queue script; the lines are not edited by hand. A call can move a waiting job up or down.
+Jobs agreed on a call, run one at a time on the main computer by the routine (phase L). A call's let's go adds a job here as ready; within about a minute the routine starts the waiting job highest on this list in a window of its own (a Terminal on a Mac, tmux on a server), as a normal chat with let's go, and starts the next one only when that one is done. Kept by the routine's queue script; the lines are not edited by hand. A call can move a waiting job up or down.
 
 **Routine:** on
 
