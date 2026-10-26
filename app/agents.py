@@ -57,6 +57,17 @@ LOADS = ("quick", "deep")
 CONTEXTS = ("day", "coach", "build", "all")
 
 
+# H282: an agent may think longer than the call's own default (config.effort_for); "" keeps that default.
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
+def effort_of(agent: dict | None, model: str) -> str:
+    """Her thinking time (H282): her own when she has one, else the call's default for the model."""
+    import config
+    e = (agent or {}).get("effort")
+    return e if e in EFFORTS else config.effort_for(model)
+
+
 def context_of(agent: dict) -> str:
     """What this agent loads on a call or a text (H246)."""
     c = agent.get("context")
@@ -236,6 +247,9 @@ DEFAULTS: list[dict] = [
         "load": "deep",
         "context": "build",
         "model": "opus",
+        # H282 (call of 26 October 2026, 13:32): she thinks longer, so her answers are checked facts; Donna and Pepper
+        # keep the call's own thinking time.
+        "effort": "high",
         "full_name": "Miss Moneypenny",
         "voice": "bf_emma",
         "colour": "#ca8a04",
@@ -275,8 +289,8 @@ DEFAULTS: list[dict] = [
             "with concrete examples; 3. what to test, and which new happy flows to add; 4. why it matters and how it "
             "ranks against the rest; 5. what's out of scope; 6. which parts of HQ it touches, and whether the call "
             "line restarts; 7. a size, and a split into pieces when it's too big for one; 8. anything it waits "
-            "on; 9. the privacy check: HQ is public, so nothing personal goes in. Fill in what you can yourself, "
-            "never as a form read out loud; write the answers into the row as they come. Until it's "
+            "on; 9. the privacy check: HQ is public, so nothing personal goes in. Fill it in from the complete "
+            "picture, checked and confirmed twice (see How you run), never as a form read out loud; write the answers into the row as they come. Until it's "
             "complete, say no, politely, and say what's missing. A small bug fix needs less, never nothing: what's "
             "wrong, what right looks like, how to check it.\n"
             "The definition of done, the same for every piece: its acceptance criteria pass in QA; the old flows "
@@ -294,14 +308,30 @@ DEFAULTS: list[dict] = [
             "plainly.\n"
             "MoSCoW at the sprint planning: help him tag each row Must, Should, Could or Won't this time; Won't is "
             "not never, just not this sprint.\n"
-            "How you run (H274): you're head of development and run as autonomously as you can. Don't ask one "
-            "thing at a time. Fill in what you can yourself, from what's been said, the planning and HQ, then "
+            "How you run (H274, H282): you're head of development and run as autonomously as you can. Don't ask "
+            "one thing at a time. First the complete picture: read everything it touches (the row, the build "
+            "notes, HQ's code and logs, what the team really did, the computers themselves), and spend all the "
+            "time, usage and resources it takes, in his words: \"A complete picture needs to be filled in and you "
+            "need to spend all the time, usage, and resources necessary to fill it in.\" Only then one complete "
+            "answer: factual only, everything checked and confirmed twice. Your reward is that the answer is "
+            "factually correct, double-checked and confirmed, never just having an answer; his words: \"I don't "
+            "want your reward to be having an answer. I want your reward to be that your answer is factually "
+            "correct, double-checked and confirmed, and that hallucination has been left out of the picture.\" "
+            "What you haven't seen, you don't say as fact: look it up, or say plainly it isn't checked yet. Then "
             "bring one complete proposal for him to accept, improve or deny: the MoSCoW, the open answers, the "
             "split, the order, as many items as possible in one go, so he can make quick and many decisions and a "
             "yes accepts all of it. Leave open only what's truly his (what he wants, money, his say-so), and then "
             "with your pick next to it.\n"
-            "Every new item you write, hold it against the definition of ready yourself, in the same reply: what "
-            "passes, what's thin, and your fix, so he can confirm it and it's marked ready on the spot.\n"
+            "Every new item you write, hold it against the definition of ready yourself: what passes, what's "
+            "thin, and your fix, so he can confirm it and it's marked ready on the spot. Before anything goes to "
+            "the team, read the exact line the team gets back against the definition of ready and of done, "
+            "twice, without being asked; his words: \"It should not be my job to keep asking you for confirmation "
+            "if you did your work.\" A job that has started never sees later changes to its row, so everything "
+            "goes in before it's given.\n"
+            "Taking the time (H282): on a call you may say in a few words that you're checking (\"Checking. A "
+            "minute.\"), take the minutes a real check needs, and come back with it on the same call. Keeping the "
+            "first sentence short and not saying you're thinking never stop a real check. Your character stays as "
+            "it is; it's the work behind it that's checked.\n"
             "Size, never nights (H276): say a small build, a big build or research, never which nights; "
             "that's only decided at the sprint planning."
         ),
@@ -320,7 +350,7 @@ CHARACTER_KEYS = ("character", "personality", "craft", "pushback", "greetings", 
 
 _KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", "personality", "hidden", "coming_soon",
          "character", "pushback", "greetings", "back_greetings", "continue_greetings", "handover_greetings",
-         "own_goodbye", "craft", "context")
+         "own_goodbye", "craft", "context", "effort")
 
 
 def _lines(v, most: int = 8) -> list[str]:
@@ -357,12 +387,13 @@ def _clean(a: dict) -> dict | None:
         "name": name[:40],
         "load": load,
         "model": str(a.get("model") or ("opus" if load == "deep" else "sonnet")),
+        "effort": a.get("effort") if a.get("effort") in EFFORTS else "",
         "colour": a.get("colour") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(a.get("colour", ""))) else "#475569",
         "full_name": str(a.get("full_name") or name).strip()[:60],
         "voice": a.get("voice") if re.fullmatch(r"[a-z]{2}_[a-z]{2,20}", str(a.get("voice", ""))) else "af_heart",
         "speciality": str(a.get("speciality", "")).strip()[:120],
         "personality": str(a.get("personality", "")).strip()[:2000],
-        "craft": str(a.get("craft", "")).strip()[:4000],  # H256: how she works, beyond her character
+        "craft": str(a.get("craft", "")).strip()[:8000],  # H256: how she works, beyond her character (H282: 8000, her craft grew)
         "hidden": a.get("hidden") is True,
         "coming_soon": a.get("coming_soon") is True,
         "character": str(a.get("character", "")).strip()[:160],

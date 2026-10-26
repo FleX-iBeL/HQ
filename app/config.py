@@ -695,6 +695,15 @@ def without_building(rules: str) -> str:
     return rules
 
 
+# H282 (call of 26 October 2026, 13:32, Moneypenny's craft): on a build call a real check may take minutes; the short
+# first sentence and "don't say you're thinking" never stop it. Only on build calls (her context).
+BUILD_CHECK_RULE = """- On this call checking comes before answering (H282): before you say how something is (built, done, \
+ready, what a job sees), look it up in the planning, the build notes, HQ's code and logs or the computers, and confirm it \
+twice. Say in a few words that you're checking ("Checking. A minute.") and take the minutes a real check needs; come back \
+with it on the same call. Keeping the first sentence short and not saying you're thinking don't stop that. What you \
+haven't checked, you don't say as fact."""
+
+
 def voice_rules(context: str = "all") -> str:
     """The call rules with the workflows as they are now (job 257): Life coaching switched in Settings counts from the
     next call, no restart of the call line. H205: and what they turned off in What HQ helps you with. H235: and their
@@ -725,6 +734,8 @@ def voice_rules(context: str = "all") -> str:
         nw = ""
     if context == "coach":
         rules = without_building(rules)
+    elif context == "build":
+        rules += "\n" + BUILD_CHECK_RULE + "\n"
     return (rules + ("\n" + off + "\n" if off else "") + ("\n" + nw + "\n" if nw else "")
             + ("\n" + ext + "\n" if ext else ""))
 

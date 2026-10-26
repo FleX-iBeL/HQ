@@ -122,7 +122,9 @@ class Call:
             context = agents.context_of(self.agent)
             self.context = "all" if context == "day" and self.load == "deep" else context
             self.policy.memory_writes = self.context == "build"  # H280: her lessons stay
-            self.brain = make_brain(self.model, self.policy, load=self.load, persona=persona, context=self.context)
+            # H282: her own thinking time (Moneypenny high), the rest as before; a three-way keeps the first one's
+            self.brain = make_brain(self.model, self.policy, load=self.load, persona=persona, context=self.context,
+                                    effort=agents.effort_of(self.agent, self.model))
         self.stt = make_stt(quiet=free)
         self.voice = voice if voice in config.VOICES else config.VOICE
         self.voices.setdefault(self.agent["id"], self.voice)

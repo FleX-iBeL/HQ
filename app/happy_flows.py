@@ -4489,11 +4489,20 @@ window.addEventListener('load', () => setTimeout(() => {
                   "truly his", "your pick next to it", "Every new item you write", "what's thin", "marked ready on the spot"):
             need(w in pm, f"her persona misses {w!r} of how she runs (H274)")
         need("one point at a time" not in pm, "her craft still asks one point at a time")
+        # H282: the complete picture first, checked and confirmed twice, the time it takes; no "fill in what you can yourself".
+        need("fill in what you can yourself" not in pm.lower(), "H282: her craft still says fill in what you can yourself")
+        for w in ("First the complete picture", "spend all the time, usage, and resources necessary", "confirmed twice",
+                  "never just having an answer", "hallucination has been left out of the picture",
+                  "read the exact line the team gets back against the definition of ready and of done",
+                  "never sees later changes to its row", "Taking the time (H282)", "take the minutes a real check needs"):
+            need(w in pm, f"H282: her persona misses {w!r}")
+        need("in the same reply" not in m["craft"], "H282: her craft still checks a new item 'in the same reply'")
         # H276: she says how big, never which nights, while making an item ready; the nights are the sprint planning's.
         need("Size, never nights" in pm and "a small build, a big build or research" in pm and "only decided at the sprint planning" in pm
              and "won't fit one night" not in pm, "H276: her craft still sizes work into nights while readying it")
         tourtext = (Path(__file__).parent / "web" / "tour.json").read_text(encoding="utf8")
         need("one whole proposal" in tourtext and "on the spot" in tourtext, "the tutorial's Moneypenny step doesn't say how she runs (H274)")
+        need("checked twice" in tourtext and "takes the minutes" in tourtext, "H282: the tutorial's Moneypenny step doesn't say she checks first")
         need("MoSCoW first, then bugs before features" in pm and "a Must feature stays above a Should bug" in pm,
              "F53: her persona doesn't put MoSCoW before bugs first")
         need("a Must feature stays above a Should bug" in tourtext and "bugs always go first" not in tourtext,
@@ -10014,7 +10023,7 @@ setTimeout(() => {
         c = mp.get("craft", "")
         need("MoSCoW first, then bugs before features" in c and "a Must feature stays above a Should bug" in c
              and "always" not in c.split("MoSCoW first")[1][:200] and "tech debt" in c and "interest on a loan" in c and "Features and Bugs" in c
-             and "bug check" in c and "MoSCoW" in c and len(c) <= 3000, "H271: Moneypenny's craft doesn't put bugs first, explain tech debt, keep them apart and suggest a bug check")
+             and "bug check" in c and "MoSCoW" in c and len(c) <= 6000, "H271: Moneypenny's craft doesn't put bugs first, explain tech debt, keep them apart and suggest a bug check")
         need("bugs before features" in agents.persona(mp).lower() if hasattr(agents, "persona") else True, "H271: her persona doesn't carry it")
         fresh = (ROOT / "template/HQ/roadmap.md").read_text()
         need("## Phase F · Bugs" in fresh and "## Phase H · Features" in fresh and "tech debt" in fresh, "H271: a fresh roadmap doesn't keep Bugs and Features apart")
@@ -13226,6 +13235,49 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         finally:
             srv.terminate()
         return f"four totals ({T['not_ready']['count']} not ready, 2 ready, 2 planned, {T['total']['count']} in all) that add up; the list says them; a fold at the top of Sprint planning"
+
+    async def flow163(self) -> str:
+        """H282, no Claude: Moneypenny checks everything before she answers. Her craft has the complete picture first
+        (his words kept, confirmed twice, no "fill in what you can yourself", the line the team gets read back twice,
+        the minutes a real check needs) and isn't cut short; her calls and texts run with effort high, Pepper's and
+        Donna's as before; a build call's rules say checking comes first and a few minutes is fine, the others don't."""
+        import agents
+        from pipeline import make_brain
+        from policy import Policy
+
+        every = {a["id"]: a for a in agents.load(config.FOLDER)}
+        m, p, d = every["moneypenny"], every["pepper"], every["donna"]
+        base = next(a for a in agents.DEFAULTS if a["id"] == "moneypenny")
+        need(m["craft"] == base["craft"].strip(), f"H282: her craft is cut short when loaded ({len(m['craft'])} of {len(base['craft'])})")
+        need("fill in what you can yourself" not in m["craft"].lower() and "confirmed twice" in m["craft"]
+             and "I want your reward to be that your answer is factually correct" in m["craft"]
+             and "It should not be my job to keep asking you for confirmation" in m["craft"],
+             "H282: her craft doesn't have the new lines with his words")
+        need(m["personality"] == base["personality"].strip(), "H282: her character changed")
+        opus = config.MODEL_ALIASES["opus"]
+        need(m.get("effort") == "high" and agents.effort_of(m, opus) == "high", "H282: Moneypenny doesn't think on high")
+        for who in (p, d):
+            need(agents.effort_of(who, opus) == config.effort_for(opus)
+                 and agents.effort_of(who, config.MODEL_ALIASES["sonnet"]) == config.effort_for(config.MODEL_ALIASES["sonnet"]),
+                 f"H282: {who['name']}'s thinking time changed")
+        pol = Policy(config.FOLDER, dry_run=True)
+        mo = make_brain(opus, pol, context="build", effort=agents.effort_of(m, opus))._options
+        po = make_brain(opus, pol, context="coach", effort=agents.effort_of(p, opus))._options
+        do = make_brain(opus, pol, context="day", effort=agents.effort_of(d, opus))._options
+        need(mo.effort == "high" and po.effort == config.effort_for(opus) and do.effort == config.effort_for(opus),
+             f"H282: the sessions' effort is off ({mo.effort}, {po.effort}, {do.effort})")
+        need(make_brain(opus, pol, context="build")._options.effort == config.effort_for(opus), "H282: without an effort the default isn't kept")
+        callsrc = (Path(__file__).parent / "call.py").read_text(encoding="utf8")
+        need("effort=agents.effort_of(self.agent, self.model)" in callsrc, "H282: a call doesn't pass her thinking time")
+        dlsrc = (Path(__file__).parent / "direct_line.py").read_text(encoding="utf8")
+        need("effort=_agents.effort_of(a, a[\"model\"])" in dlsrc, "H282: her texts don't pass her thinking time")
+        b, c, dy = config.voice_rules("build"), config.voice_rules("coach"), config.voice_rules("day")
+        need(config.BUILD_CHECK_RULE in b and "take the minutes a real check needs" in b and "confirm it" in b,
+             "H282: a build call's rules don't let her check first")
+        need(config.BUILD_CHECK_RULE not in c and config.BUILD_CHECK_RULE not in dy and config.BUILD_CHECK_RULE not in config.voice_rules("all"),
+             "H282: the checking rule reached Pepper's or Donna's calls")
+        need("H282" in (ROOT / "CHANGELOG.md").read_text(encoding="utf8"), "H282: not in the changelog")
+        return f"her craft {len(m['craft'])} characters whole, effort high (Pepper and Donna {config.effort_for(opus)}), the build call's checking rule"
 
     async def flow162(self) -> str:
         """H280, no Claude: Moneypenny starts every call knowing how HQ works. On a throwaway workspace with 35 team
@@ -19722,6 +19774,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    163: ("H282: Moneypenny checks everything before she answers: her craft's new lines with his words (complete picture, confirmed twice, the team's line read back, the minutes it needs), not cut short; effort high for her calls and texts, Pepper and Donna as before; the build call's checking rule", False, "flow163"),
     162: ("H280: Moneypenny starts every call knowing how HQ works: the build notes in full, Claude's memory index, the 30 newest team notes; a build call writes the memory without a yes", False, "flow162"),
     161: ("H281: every read-only look on a call is free for every agent (sed -n, awk, cut, jq, git describe and tag -l, dpkg -l, systemctl status, journalctl --user, Claude's memory folder); writing, code from text, the outside and sudo still ask", False, "flow161"),
     160: ("H247 (b): the pages: no Feedback tab until connected, Connect in Settings, the link connects in one tap, the texts' switch; the status page's Invite someone to send feedback", False, "flow160"),

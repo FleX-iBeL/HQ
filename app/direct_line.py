@@ -766,7 +766,7 @@ def _answer(words: str) -> str:
         rules = _config.without_building(rules)
     opts = _brain.call_session_options(
         model=a["model"], folder=_config.FOLDER, voice_rules=rules, policy=pol, cli_path=_config.CLAUDE_CLI,
-        effort=_config.effort_for(a["model"]),
+        effort=_agents.effort_of(a, a["model"]),  # H282: her own thinking time
         quick_context=quick_context.build(_config.FOLDER, context=ctx) if ctx != "all" else None)
     b = _brain.ClaudeBrain(model=a["model"], system_prompt="", cwd=_config.FOLDER, options=opts)
     prompt = (f"The chat so far, newest last:\n{history}\n\n" if history else "") + f"His new text:\n{words}"
