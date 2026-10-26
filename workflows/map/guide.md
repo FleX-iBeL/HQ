@@ -11,7 +11,7 @@ The map is an upside-down pyramid. On top, wide: the life they want three to fiv
 3. The six-week game: one simple game they can win, six weeks at a time, so the year gets played in pieces they can feel.
 4. The ideal week: the shape of a good week, a template.
 5. The real week: this week, poured into that template.
-6. Looking back: every day a little, every week properly, after every game, and a bigger check-in every few months; what changes.
+6. Looking back: every day a little, every week properly, after every game, and a bigger check-in every eight weeks, in step with the games; what changes.
 
 This is a big piece of work and it's worth the time. Never rush it and never skip a layer's questions to get to the end: every question below is on a checklist in their map, and none goes unmarked. One sitting is one layer, or part of one; most people need five or six sittings for the first time through, and that's fine.
 
@@ -358,7 +358,7 @@ Offer to set the template up as recurring blocks in their calendar; only with th
 
 ## 6. Looking back
 
-**What it is.** The step that keeps the map alive. Each day a short look, each week a proper one, a debrief after every game, and every few months a bigger check-in. This is where the ideal week, the game and the year get adjusted, so the plan learns. The vision only changes when they say so.
+**What it is.** The step that keeps the map alive. Each day a short look, each week a proper one, a debrief after every game, and every eight weeks a bigger check-in, in each game's look-back week, in the same rhythm as the games. This is where the ideal week, the game and the year get adjusted, so the plan learns. The vision only changes when they say so.
 
 **Each day,** five to ten minutes, in the evening, ideally on paper:
 1. What were the three best things about today: wins, good moments, things you're grateful for?
@@ -387,14 +387,14 @@ Keep a short weekly note somewhere that lasts (a journal, or under this layer), 
 5. Is the long game still the right one: could you keep doing this for years without forcing it?
 6. What's the next game? Then back to layer 3.
 
-**Every three to six months,** an hour, the check-in, in three steps:
+**Every eight weeks,** an hour, the check-in, in three steps. It comes in each game's look-back week (a game is eight weeks with its setup and look-back week), next to the game's debrief but as its own session; without a game, every eight weeks from the last one:
 1. What: look honestly at how it's going. Go back through the year's looking-back questions (wins, the goals, effort and results, stop, keep, start) and the line: where are you now?
 2. So what: what does that mean for you? Make the love list and the hate list again; is the week moving towards the love column? Is the season still the same, simplify or multiply? Is the dial you turned up still the right one?
 3. Now what: what will you do about it? Adjust the year, the game, the ideal week. Give a new approach about three honest tries before you change it; and ask of everything in the plan: is it working, and does it work for me, for who I am and the season I'm in? Then the twenty-year test once more: would you keep running your life and work like this for twenty years?
 
 **Once a year,** read the vision together. Is it still theirs? Only they decide if it changes.
 
-**In HQ.** HQ keeps the check-ins for them and shows a red dot in the app's Coaching place when one is due, so nobody has to remember: the weekly look back, each game's debrief and the bigger check-in. Once the weekly moment is set (in the ideal week) and how often the bigger check-in comes, write it on one line under this layer, in their words: `Check-ins: the weekly look back on Friday morning; the bigger check-in every 3 months.` (a day, and a part of the day or a time; every three to six months). Change it whenever they do. Each check-in is its own call, started from the Coaching place, and it's marked done at the end.
+**In HQ.** HQ keeps the check-ins for them and shows a red dot in the app's Coaching place when one is due, so nobody has to remember: the weekly look back, each game's debrief and the bigger check-in. Once the weekly moment is set (in the ideal week) write it on one line under this layer, in their words: `Check-ins: the weekly look back on Friday morning; the bigger check-in every eight weeks, in each game's look-back week.` (a day, and a part of the day or a time). The bigger check-in follows the games for everyone; only without a game does an "every N weeks" on that line set how often. Change it whenever they do. Each check-in is its own call, started from the Coaching place, and it's marked done at the end.
 
 **What it makes.** Short notes per look under this layer in `map.md` (date, what came out, what changes), each game's debrief under the game, and the changes themselves in the layer they belong to, on their yes.
 
@@ -402,4 +402,4 @@ Keep a short weekly note somewhere that lasts (a journal, or under this layer), 
 
 ## In short
 
-Every layer: every question on the checklist, marked answered, parked, later or open, and checked against this guide before it's done. Vision: the why, its own name, a day in that life, the deeper truth, a motto, what enough looks like on the three dials, home base and trips, the twenty-year test, a few action steps. The year: look back, the season and the dial, life first (the challenge, adventures, time off, home and away, the wants), then the money (the line, the rhythm of the month, a push for each want, capacity, money that runs itself), three dated goals, one habit out and one in, the stress test and the block. The six-week game: one simple game you can win, your rules, a score, a win is fun, useful and learned, a debrief. The ideal week: where the time goes, the love and hate list, what works and what feels forced, their energy, the ingredients, the week squeezed, what an hour is worth and the two-days test, one hat per day, a deep block and a day on the business, recharge and earning first, margin, the rules of the house and the energy basics. The real week: the template meets this week, three focuses, the game's part, important but not urgent first. The real week also gets tomorrow scripted each evening. Looking back: the evening look and tomorrow's script, a monthly money look, weekly proper, a debrief after each game, a check-in every few months, and it changes the layers above.
+Every layer: every question on the checklist, marked answered, parked, later or open, and checked against this guide before it's done. Vision: the why, its own name, a day in that life, the deeper truth, a motto, what enough looks like on the three dials, home base and trips, the twenty-year test, a few action steps. The year: look back, the season and the dial, life first (the challenge, adventures, time off, home and away, the wants), then the money (the line, the rhythm of the month, a push for each want, capacity, money that runs itself), three dated goals, one habit out and one in, the stress test and the block. The six-week game: one simple game you can win, your rules, a score, a win is fun, useful and learned, a debrief. The ideal week: where the time goes, the love and hate list, what works and what feels forced, their energy, the ingredients, the week squeezed, what an hour is worth and the two-days test, one hat per day, a deep block and a day on the business, recharge and earning first, margin, the rules of the house and the energy basics. The real week: the template meets this week, three focuses, the game's part, important but not urgent first. The real week also gets tomorrow scripted each evening. Looking back: the evening look and tomorrow's script, a monthly money look, weekly proper, a debrief after each game, a check-in every eight weeks with the games, and it changes the layers above.

@@ -16,8 +16,9 @@ their workspace.
         week     the weekly look back, on the day and part of the day their map's `Check-ins:` line says (written in
                  the looking-back layer; without it, a line of their map that puts the look back on a weekday)
         game     each six-week game's debrief, from its look-back week on (games.py)
-        checkin  the bigger check-in, every few months (the `Check-ins:` line's "every N months", else three),
-                 counted from the last one, or from when HQ first kept their check-ins
+        checkin  the bigger check-in, every eight weeks in step with the games (H251): in each game's look-back week,
+                 next to its debrief but its own session; without a game, every eight weeks (or the `Check-ins:`
+                 line's "every N weeks" or "every N months") from the last one, or from when HQ first kept them
       One that's due shows a red dot on the Coaching button, until it's done (a call does it at the end, or Done in the
       app) or put off until tomorrow (Not now). No push notification.
     - The coaching line: a thread with the agent the workflow is best with (Pepper by default), like the direct line,
@@ -55,7 +56,7 @@ import workflows  # noqa: E402
 FILE = "HQ/coaching.json"  # in the workspace
 LINE_DIR = "HQ/coaching-line"  # the coaching line's thread, in the workspace
 WID = "map"
-EVERY_MONTHS = 3  # the bigger check-in, when their map doesn't say
+EVERY_WEEKS = 8  # the bigger check-in (H251): the games' rhythm, a setup week, six weeks and a look-back week
 PARTS = {"morning": 9, "afternoon": 14, "evening": 19, "night": 21}  # a part of the day starts at
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 _lock = threading.Lock()
@@ -128,22 +129,24 @@ def _time_of(text: str) -> tuple[int, int] | None:
 
 
 def moments(text: str) -> dict:
-    """The check-ins their map sets: {"week": {"day", "part", "at", "said", "from"} | None, "months", "said"}.
+    """The check-ins their map sets: {"week": {"day", "part", "at", "said", "from"} | None, "every": (n, "weeks"|"months"), "said"}.
 
     First the `Check-ins:` line (the guide's looking-back layer, In HQ); without one, a line elsewhere in the map
     that puts the weekly look back on a weekday. Nothing found: no weekly moment yet."""
-    out = {"week": None, "months": EVERY_MONTHS, "months_from": "default", "said": ""}
+    out = {"week": None, "every": (EVERY_WEEKS, "weeks"), "every_from": "default", "said": ""}
     line = next((l for l in text.splitlines() if l.strip().lower().startswith("check-ins:")), "")
     cands = []
     if line:
         out["said"] = line.split(":", 1)[1].strip()
         body = re.sub(r"\[.*?\]", "", out["said"])
-        m = re.search(r"every\s+(\w+)\s+months?", body, re.I)
+        m = re.search(r"every\s+(\w+)\s+(weeks?|months?)", body, re.I)
         if m:
             word = m.group(1).lower()
-            n = int(word) if word.isdigit() else {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6}.get(word)
-            if n and 1 <= n <= 12:
-                out["months"], out["months_from"] = n, "map"
+            n = int(word) if word.isdigit() else {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+                                                  "eight": 8, "nine": 9, "ten": 10, "twelve": 12}.get(word)
+            unit = "weeks" if m.group(2).lower().startswith("week") else "months"
+            if n and 1 <= n <= (52 if unit == "weeks" else 12):
+                out["every"], out["every_from"] = (n, unit), "map"
         for part in re.split(r";|\.\s", body):
             if re.search(r"week|look ?back", part, re.I):
                 cands.append((part, "line"))
@@ -209,6 +212,11 @@ def _at_words(at: datetime, now: datetime, part: str) -> str:
     return f"{day} at {part}"
 
 
+def _num(n: int) -> str:
+    return {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine",
+            10: "ten", 12: "twelve"}.get(n, str(n))
+
+
 def _games() -> list[dict]:
     try:
         import games as _g
@@ -267,14 +275,27 @@ def checkins(d: dict, text: str, now: datetime | None = None, games: list | None
     if not re.search(r"^Status: done", text, re.M):
         return out  # the bigger check-in counts from the first layer that's done: a fresh map has none
     base = datetime.fromisoformat(max([v for k, v in done.items() if k.startswith("checkin:")] or [first.isoformat()]))
-    due_at = datetime.combine(_add_months(base.date(), mo["months"]), datetime.min.time()).replace(hour=PARTS["morning"])
+    n, unit = mo["every"]
+    every = f"{_num(n)} {unit if n != 1 else unit[:-1]}"
+    # H251: in step with the games: the start of each game's look-back week, after the last one and after HQ first
+    # kept their check-ins; its own key, apart from the game's debrief. No game ahead: every eight weeks.
+    lbs = sorted({datetime.combine(date.fromisoformat(g["end"]) + timedelta(days=1), datetime.min.time())
+                  .replace(hour=PARTS["morning"]) for g in (games if games is not None else _games()) if g.get("end")})
+    lbs = [t for t in lbs if t.date() >= first.date() and t.date() > base.date() and f"checkin:{t.date().isoformat()}" not in done]
+    if lbs:
+        due_at, game = lbs[0], True
+    else:
+        nxt = _add_months(base.date(), n) if unit == "months" else base.date() + timedelta(weeks=n)
+        due_at, game = datetime.combine(nxt, datetime.min.time()).replace(hour=PARTS["morning"]), False
     key = f"checkin:{due_at.date().isoformat()}"
     st = state(key, due_at)
     out.append({"key": key, "kind": "checkin", "title": "The bigger check-in", **st,
-                "from": due_at.isoformat(timespec="minutes"), "every": mo["months"],
-                "when": f"Every {mo['months']} months",
-                "line": ("It's been " + str(mo["months"]) + " months" if st["due"] else
-                         f"Next: {_day_words(due_at, now)}"), "layer": 6, "group": "check-in"})
+                "from": due_at.isoformat(timespec="minutes"), "every": n, "unit": unit, "with_game": game,
+                "when": "Every eight weeks, in each game's look-back week" if game else f"Every {every}",
+                "line": (("A game's six weeks are through" if game else f"It's been {every}") if st["due"] else
+                         "Not now: back tomorrow morning" if st.get("later") else
+                         f"Next: {_day_words(due_at, now)}" + (", in the game's look-back week" if game else "")),
+                "layer": 6, "group": "check-in"})
     return out
 
 
@@ -357,7 +378,8 @@ def refresh(f: Path | None = None, now: datetime | None = None, games: list | No
 LAND = {"week": ["Time for our weekly look back. Tap Start when you're ready, and we'll go through the week together.",
                  "It's that moment again: the weekly look back. Start it here whenever you're ready."],
         "game": ["{title}: the six weeks are through. Shall we look back on it? Tap Start when you're ready."],
-        "checkin": ["It's been a few months: time for the bigger check-in on the whole picture. Tap Start when you're ready."]}
+        "checkin": ["Eight weeks are through: time for the bigger check-in on the whole picture. It's its own session, apart "
+                    "from the game's debrief. Tap Start when you're ready."]}
 
 
 def _score(games: list | None = None) -> list[str]:
@@ -541,7 +563,7 @@ def call_note(e: dict, user: str = "the user") -> str:
     open_ = [f"{i['key']}: {i['q']}" for i in lay.get("items", []) if i["mark"] == "open"]
     if e.get("what") == "checkin":
         c = e["checkin"]
-        part = {"week": "Each week", "game": "After every game", "checkin": "Every three to six months"}[c["kind"]]
+        part = {"week": "Each week", "game": "After every game", "checkin": "Every eight weeks"}[c["kind"]]
         extra = ""
         if c["kind"] == "game":
             extra = (f" The game: python3 \"{HERE / 'games.py'}\" show --game {c.get('game', '')} (its score, notes "

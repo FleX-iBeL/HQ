@@ -15168,9 +15168,9 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
                  "a fresh install has a check-in")
             # the moments
             m = co.moments("x\nCheck-ins: the weekly look back on Sunday evening; the bigger check-in every four months.\n")
-            need(m["week"] and m["week"]["day"] == 6 and m["week"]["at"] == "19:00" and m["months"] == 4, f"the Check-ins line: {m}")
+            need(m["week"] and m["week"]["day"] == 6 and m["week"]["at"] == "19:00" and m["every"] == (4, "months"), f"the Check-ins line: {m}")
             m = co.moments("Check-ins: weekly look back Tuesdays at 7:30\n")
-            need(m["week"]["day"] == 1 and m["week"]["at"] == "07:30" and m["months"] == co.EVERY_MONTHS, f"a time on the line: {m}")
+            need(m["week"]["day"] == 1 and m["week"]["at"] == "07:30" and m["every"] == (co.EVERY_WEEKS, "weeks"), f"a time on the line: {m}")
             m = co.moments("- Monday: deep work in the morning\n- Saturday: the weekly look back, after lunch.\n")
             need(m["week"]["day"] == 5 and m["week"]["part"] == "afternoon" and m["week"]["from"] == "map", f"from the ideal week: {m}")
             need(co.moments("- Monday: redone at the look back when something changes\n")["week"] is None, "a passing look back became the moment")
@@ -15207,6 +15207,30 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
             big = next(c for c in co.read(now=M, games=[])["checkins"] if c["kind"] == "checkin")
             need(not big["due"] and big["key"] == "checkin:2026-07-04" and big["every"] == 4, f"the bigger check-in: {big}")
             need(next(c for c in co.read(now=_dt(2026, 7, 4, 9, 30), games=[])["checkins"] if c["kind"] == "checkin")["due"], "the bigger check-in isn't due after 4 months")
+            # H251: every eight weeks for everyone, in step with the games: due in a game's look-back week, its own
+            # session apart from the debrief; without a game every eight weeks from the last one
+            m8 = co.moments("x\nCheck-ins: the weekly look back on Friday morning.\n")
+            need(m8["every"] == (8, "weeks") and co.EVERY_WEEKS == 8, f"the default isn't eight weeks: {m8}")
+            t8 = text.replace("the bigger check-in every 4 months.", "the bigger check-in every eight weeks.", 1)
+            kept = (cdir / "HQ" / "coaching.json").read_text()
+            (cdir / "map.md").write_text(t8)
+            (cdir / "HQ" / "coaching.json").write_text(json.dumps({"first": "2026-03-01T10:00"}))
+            ng = next(c for c in co.read(now=M, games=[])["checkins"] if c["kind"] == "checkin")
+            need(ng["key"] == "checkin:2026-04-26" and ng["every"] == 8 and ng["unit"] == "weeks" and not ng["with_game"],
+                 f"without a game it isn't eight weeks on: {ng}")
+            g8 = {"id": "run", "name": "Run", "phase": "playing", "end": "2026-04-19", "look_end": "2026-04-26", "debrief": ""}
+            bg = next(c for c in co.read(now=M, games=[g8])["checkins"] if c["kind"] == "checkin")
+            need(bg["key"] == "checkin:2026-04-20" and bg["with_game"] and not bg["due"], f"not in the game's look-back week: {bg}")
+            lb = co.read(now=_dt(2026, 4, 20, 10), games=[{**g8, "phase": "looking back"}])["checkins"]
+            need(next(c for c in lb if c["kind"] == "checkin")["due"] and next(c for c in lb if c["kind"] == "game")["due"]
+                 and len({c["key"] for c in lb if c["kind"] in ("game", "checkin")}) == 2,
+                 f"the debrief and the bigger check-in aren't two sessions in the look-back week: {lb}")
+            (cdir / "HQ" / "coaching.json").write_text(json.dumps({"first": "2026-03-01T10:00", "done": {"checkin:2026-04-20": "2026-04-21T10:00"}}))
+            nx = next(c for c in co.read(now=_dt(2026, 4, 21, 11), games=[{**g8, "phase": "past"}])["checkins"] if c["kind"] == "checkin")
+            need(nx["key"] == "checkin:2026-06-16" and not nx["due"], f"after the game's check-in, not eight weeks on: {nx}")
+            need("**Every eight weeks,**" in (co.ROOT / "workflows" / "map" / "guide.md").read_text(), "the guide's check-in isn't every eight weeks")
+            (cdir / "map.md").write_text(text)
+            (cdir / "HQ" / "coaching.json").write_text(kept)
             # a call about a layer or a check-in: only that
             import call as _call_mod
             import transcript as _tr
@@ -15392,7 +15416,7 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
             shutil.rmtree(lf, ignore_errors=True)
         return ("Life coaching's own place: a fresh install all open with no check-in; the moments from the map's Check-ins line "
                 "or its ideal week, the weekly look back due until done (not now until the morning), a game's debrief, the "
-                "bigger check-in every few months, each landing once on the coaching line; a call about one layer or one "
+                "bigger check-in every eight weeks in step with the games (H251), each landing once on the coaching line; a call about one layer or one "
                 "check-in only; the rules, guide, policy, hand-over and switch; the server's own copy and her reply on the "
                 "coaching line; in the app the Coaching button with its dot, the due check-in, the layers and their "
                 "checklist, the coaching line, Done taking the dot away (" + ", ".join(seen) + ")")

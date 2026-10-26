@@ -167,7 +167,7 @@ def listing(folder: Path, base: Path = SHIPPED) -> list[dict]:
 
 # H224: the checklist. The guide's layers are its "## N. Name" headings; within one, a bold lead starts a group.
 GROUPS = {"**The questions,**": "", "**Check it with them,**": "check", "**Each day,**": "day", "**Each week,**": "week",
-          "**After every game,**": "game", "**Every three to six months,**": "check-in"}
+          "**After every game,**": "game", "**Every eight weeks,**": "check-in"}
 MARKS = ("answered", "parked", "later", "open")
 LINE = re.compile(r"^- (answered|parked|later|open) · ((?:check-in|check|day|week|game) )?(\d+) · (.*)$")
 
@@ -310,9 +310,9 @@ def rule(folder: Path, base: Path = SHIPPED) -> str:
 # H225 (21 October 2026, call at 12:29), in the user's words: "in the background it gets tracked when those moments
 # should be ... It guarantees that we have those points of contact. Otherwise it might just drift away."
 CHECKIN_RULE = (" The check-ins and the Coaching place (H225): HQ keeps their check-ins (the weekly look back, each "
-                "game's debrief, the bigger check-in every few months) and shows a red dot in the app's Coaching place "
+                "game's debrief, the bigger check-in every eight weeks, in each game's look-back week) and shows a red dot in the app's Coaching place "
                 "when one is due; the moments come from the looking-back layer's `Check-ins:` line in their map.md "
-                "(\"Check-ins: the weekly look back on Friday morning; the bigger check-in every 3 months.\"). When the "
+                "(\"Check-ins: the weekly look back on Friday morning; the bigger check-in every eight weeks, in each game's look-back week.\"). When the "
                 "weekly moment or the rhythm of the bigger check-in is set or changes, write that line in their words. "
                 f"What's due: python3 {ROOT / 'app' / 'coaching.py'} due. A call or chat that went through one marks it "
                 "at the end: coaching.py done KEY (not now: later KEY); never while it's halfway. A call started from "
