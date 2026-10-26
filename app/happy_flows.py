@@ -13227,6 +13227,62 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             srv.terminate()
         return f"four totals ({T['not_ready']['count']} not ready, 2 ready, 2 planned, {T['total']['count']} in all) that add up; the list says them; a fold at the top of Sprint planning"
 
+    async def flow162(self) -> str:
+        """H280, no Claude: Moneypenny starts every call knowing how HQ works. On a throwaway workspace with 35 team
+        notes: her start has the newest 30 and not the older ones; on the real folder her session has the build notes
+        in full (every section's body, no "Not loaded" line) and Claude's memory index for the workspace; a build call
+        writes a memory note without a yes, a Donna or Pepper call (and a file that isn't a note) still asks; the call
+        sets it from her context. Pepper's and Donna's starts don't get the build notes or the memory index."""
+        import brain as brain_
+        import quick_context
+        from pipeline import make_brain
+        from policy import ALLOW, ASK, Policy
+
+        ws = self.tmp / "h280"
+        (ws / "coaching").mkdir(parents=True, exist_ok=True)
+        (ws / "HQ").mkdir(parents=True, exist_ok=True)
+        (ws / "CLAUDE.md").write_text("# Life\n\n- @rules.md\n")
+        (ws / "rules.md").write_text("# Rules\n")
+        (ws / "HQ" / "roadmap.md").write_text("# 🔨 BUILDING\n\n## The queue\n\n")
+        (ws / "HQ" / "CLAUDE.md").write_text("# HQ: build notes\n\n## A part\n\nBODY-PROBE\n")
+        (ws / "coaching" / "log.md").write_text("# Coaching Log\n\n## Open commitments\n\n" + "".join(
+            f"- 25 October 2026, 20:{59 - i:02d}, job {400 - i} (H1): NOTE-{i:02d}.\n\n" for i in range(35)))
+        build = quick_context.build(ws, context="build")
+        need(all(f"NOTE-{i:02d}" in build for i in range(30)), "Moneypenny misses some of the newest 30 team notes")
+        need(not any(f"NOTE-{i:02d}" in build for i in range(30, 35)), "Moneypenny has more than 30 team notes")
+        need("BODY-PROBE" in build and "build notes, in full" in build, "the build notes aren't loaded in full")
+        need("Not loaded; read the section" not in build, "the build notes still say they're not loaded")
+        # The real folder: the session a call with her makes.
+        pol = Policy(config.FOLDER, dry_run=True)
+        txt = brain_.prompt_text(make_brain(config.MODEL_ALIASES["opus"], pol, context="build")._options)
+        notes = (config.FOLDER / "HQ" / "CLAUDE.md")
+        if notes.exists():
+            heads = [l for l in notes.read_text().splitlines() if l.startswith("## ")]
+            last = notes.read_text().strip().splitlines()[-1]
+            need(all(h in txt for h in heads) and last in txt, "her session doesn't carry the whole build notes")
+        mem = quick_context.memory_dir(config.FOLDER)
+        index = (mem / "MEMORY.md").read_text().strip() if (mem / "MEMORY.md").exists() else ""
+        need(str(mem) in txt and (not index or index.splitlines()[0] in txt), "her session misses the memory index")
+        for c in ("day", "coach"):
+            other = brain_.prompt_text(make_brain(config.MODEL_ALIASES["opus"], pol, context=c)._options)
+            need("The build notes, in full" not in other, f"{c} got the build notes")
+        # Writing the memory: free on a build call, asked on the others.
+        note = str(mem / "h280-flow-probe.md")
+        build_pol = Policy(config.FOLDER, memory_writes=True)
+        for tool in ("Write", "Edit"):
+            d = build_pol.decide(tool, {"file_path": note, "content": "x", "old_string": "a", "new_string": "b"})
+            need(d.verdict == ALLOW, f"a build call's {tool} to the memory asks: {d.why}")
+        d = build_pol.decide("Write", {"file_path": str(mem / "x.sh"), "content": "x"})
+        need(d.verdict == ASK, "a build call writes a file in the memory that isn't a note")
+        d = Policy(config.FOLDER).decide("Write", {"file_path": note, "content": "x"})
+        need(d.verdict == ASK, "a call that isn't about building writes the memory without a yes")
+        need(Policy(config.FOLDER, dry_run=True, memory_writes=True).decide(
+            "Write", {"file_path": note, "content": "x"}).verdict != ALLOW, "a test run may write the memory")
+        need('self.policy.memory_writes = self.context == "build"' in (config.ROOT / "app" / "call.py").read_text(),
+             "the call doesn't set the memory writes from her context")
+        return (f"her start: 30 team notes, the build notes in full, the memory index; {len(txt) // 1000} KB on this "
+                "folder; memory writes free on a build call only")
+
     async def flow152(self) -> str:
         """H246, no Claude: each agent loads what fits her role. On a throwaway workspace with a life file, a vision, a
         to-do list, a mail list and a log with a life note, a team note and a Moneypenny call: Donna ("day") has the
@@ -13273,10 +13329,11 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             need(probe in coach, f"Pepper misses {probe}")
         for probe in ("TEAM-PROBE", "PENNY-PROBE", "CHECK-PROBE", "STATUS-PROBE", "NOTES-BODY"):
             need(probe not in coach, f"Pepper has {probe}")
-        for probe in ("RULES-PROBE", "TEAM-PROBE", "PENNY-PROBE", "STATUS-PROBE", "OPEN-JOB", "Where the code is"):
+        for probe in ("RULES-PROBE", "TEAM-PROBE", "PENNY-PROBE", "STATUS-PROBE", "OPEN-JOB", "Where the code is",
+                      "NOTES-BODY"):  # H280: the build notes in full
             need(probe in build, f"Moneypenny misses {probe}")
         for probe in ("VISION-PROBE", "SITUATION-PROBE", "TODO-PROBE", "VERY-PROBE", "CHECK-PROBE", "LIFE-PROBE",
-                      "OLD-JOB", "ROW-PROBE", "NOTES-BODY"):
+                      "OLD-JOB", "ROW-PROBE"):
             need(probe not in build, f"Moneypenny has {probe}")
         # Who loads what, from HQ's own agents, and one of the workspace's own without a context.
         by = {a["id"]: agents.context_of(a) for a in agents.DEFAULTS}
@@ -13303,7 +13360,10 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             make_brain(config.MODEL_ALIASES["opus"], pol, context="build")._options), "Moneypenny's session misses her text")
         whole_folder = sum(len((config.FOLDER / m).read_text()) for m in re.findall(
             r"@([\w./-]+\.md)", (config.FOLDER / "CLAUDE.md").read_text()) if (config.FOLDER / m).exists())
-        need(sizes["build"] < whole_folder / 4, f"Moneypenny's text isn't light: {sizes['build']} of {whole_folder}")
+        # H280: her start carries the build notes in full on purpose; without them it's still light.
+        notes = len((config.FOLDER / "HQ" / "CLAUDE.md").read_text()) if (config.FOLDER / "HQ" / "CLAUDE.md").exists() else 0
+        need(sizes["build"] - notes < whole_folder / 4,
+             f"Moneypenny's text isn't light without the build notes: {sizes['build'] - notes} of {whole_folder}")
         return (f"Donna day, Pepper coach, Moneypenny build; Moneypenny's session {sizes['build'] // 1000} KB against "
                 f"the whole folder's {whole_folder // 1000} KB, Pepper {sizes['coach'] // 1000} KB, Donna "
                 f"{sizes['day'] // 1000} KB; Pepper's rules without the building")
@@ -19662,6 +19722,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    162: ("H280: Moneypenny starts every call knowing how HQ works: the build notes in full, Claude's memory index, the 30 newest team notes; a build call writes the memory without a yes", False, "flow162"),
     161: ("H281: every read-only look on a call is free for every agent (sed -n, awk, cut, jq, git describe and tag -l, dpkg -l, systemctl status, journalctl --user, Claude's memory folder); writing, code from text, the outside and sudo still ask", False, "flow161"),
     160: ("H247 (b): the pages: no Feedback tab until connected, Connect in Settings, the link connects in one tap, the texts' switch; the status page's Invite someone to send feedback", False, "flow160"),
     159: ("H247 (b) and (c): feedback from someone else's HQ to the maker's mailbox, end to end with two HQs: invite, connect, typed and call sends, status back, texts switch, offline retry, limits, a taken-back key", False, "flow159"),

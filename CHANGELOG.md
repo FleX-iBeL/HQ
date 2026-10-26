@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Moneypenny starts every call knowing how HQ works: the notes on how it's built, in full, the team's last 30 pieces of work, and the lessons learned before. When she learns something new on a call about building, she writes it down herself without asking, so the next call starts with it. Her calls start a bit heavier for it, on purpose. Donna's and Pepper's stay as they were (H280).
+
 - Looking things up never waits for your yes. On a call or in a text, Donna, Pepper and Moneypenny now read your files, HQ, its logs and their own memory, and look at the computer (what's installed, what's running, the disk), without asking first, so they can check before they answer instead of guessing. Anything that changes something, runs a program from text, reaches the internet or needs sudo still asks, as before (H281).
 
 ## 0.4.15 · 26 October 2026

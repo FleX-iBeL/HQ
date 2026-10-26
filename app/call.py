@@ -121,6 +121,7 @@ class Call:
             # H246: she loads what fits her role; a Deep call with the day's agent keeps the whole folder, as before
             context = agents.context_of(self.agent)
             self.context = "all" if context == "day" and self.load == "deep" else context
+            self.policy.memory_writes = self.context == "build"  # H280: her lessons stay
             self.brain = make_brain(self.model, self.policy, load=self.load, persona=persona, context=self.context)
         self.stt = make_stt(quiet=free)
         self.voice = voice if voice in config.VOICES else config.VOICE

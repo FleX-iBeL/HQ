@@ -167,6 +167,9 @@ class Policy:
     events: dict[str, tuple[bool, str]] = field(default_factory=dict)
     # H277: where a cd earlier in the same command went, so `cd HQ && python3 routine/sprint.py …` is known.
     _cwd: Path | None = None
+    # H280: a call about building HQ (Moneypenny's context "build") writes Claude's memory for the workspace without
+    # a yes, so a lesson she learns is there at the next call's start.
+    memory_writes: bool = False
 
     def __post_init__(self):
         self.folder = Path(os.path.realpath(self.folder))
@@ -296,6 +299,8 @@ class Policy:
         if not path:
             return Decision(DENY, "no file named")
         if not self.inside(path):
+            if self.memory_writes and in_memory(path, self.folder) and Path(path).suffix == ".md":
+                return Decision(ALLOW, "writing Claude's memory for this workspace (a call about building HQ)")
             if self.in_hq(path):
                 return _ask(f"change {Path(path).name} in HQ", "a change in HQ")
             return _ask(f"change {Path(path).name}, outside your workspace", "a file outside the folder")

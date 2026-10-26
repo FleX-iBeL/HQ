@@ -65,13 +65,13 @@ def memory_dir(folder: Path) -> Path:
 
 # H246: what each role loads. "day" (Donna) is Quick plus where he stands now; "coach" (Pepper) every file the folder's
 # CLAUDE.md loads, but the notes without the team's work and only the very important mail; "build" (Moneypenny) none of
-# the life files: the planning, the team's notes, the build notes' sections to read when needed.
+# the life files: the planning, the team's notes, the build notes in full and Claude's memory index (H280).
 DAY_FILES = QUICK_FILES + ["current-situation.md"]
 BUILD_FILES = ["rules.md"]
 # A note in the log about the team's work: "- 25 October 2026, 20:15, job 345 (H244): ...".
 # A call with Moneypenny is about building too.
 _TEAM_NOTE = re.compile(r"^- \d{1,2} \w+ \d{4}, [\d:]+, (job \d+|call \(Moneypenny\b)")
-TEAM_NOTES_MOST = 12
+TEAM_NOTES_MOST = 30  # H280: was 12
 
 
 def _notes(text: str) -> list[tuple[str, list[str]]]:
@@ -147,15 +147,29 @@ def _planning(folder: Path) -> str:
 
 
 def _build_notes(folder: Path) -> str:
-    """The build notes' sections, by name only (H246): Moneypenny reads the one she needs."""
+    """The build notes in full (H280; only their headings before): how HQ works, so she never has to guess."""
     path = folder / "HQ" / "CLAUDE.md"
     try:
-        heads = [l[3:].strip() for l in path.read_text().splitlines() if l.startswith("## ")]
+        text = path.read_text()
     except OSError:
         return ""
-    return (f"The build notes ({path}): how HQ is built and kept, one section per part. Not loaded; read the section "
-            "you need with the Read tool (grep for its heading). Its sections:\n"
-            + "\n".join(f"- {h}" for h in heads))
+    return f"The build notes, in full ({path}): how HQ is built and kept, one section per part.\n\n{text.strip()}"
+
+
+def _memory_index(folder: Path) -> str:
+    """H280: Claude's memory index for the workspace on a build call, so the lessons learned before are there.
+    The notes it points to are read with the Read tool; a new lesson is a new note there, and a line in the index."""
+    mem = memory_dir(folder)
+    try:
+        index = (mem / "MEMORY.md").read_text().strip()
+    except OSError:
+        index = ""
+    return (f"Claude's memory for this workspace ({mem}): lessons from earlier chats and calls. Its index is below; "
+            "read a note it points to with the Read tool when it matters. When you learn a lesson on this call "
+            "(something that went wrong, how HQ really works, how he wants the building done), write it there "
+            "without asking: one note per lesson, a file with a short frontmatter (name, description, type), and a "
+            "line for it in MEMORY.md. Never anything of his life in it.\n\n"
+            + (index or "(MEMORY.md has nothing yet.)"))
 
 
 def build(folder: Path, today: datetime.date | None = None, context: str = "day") -> str:
@@ -196,7 +210,7 @@ def build(folder: Path, today: datetime.date | None = None, context: str = "day"
     elif context == "build":
         head = ["# This is a call about building HQ",
                 f"Only what building HQ needs is loaded: the roadmap's status block and queue, the planning, the "
-                f"team's latest work and where the build notes are. None of {config.USER}'s life files (the vision, "
+                f"team's latest work, the build notes in full and Claude's memory index. None of {config.USER}'s life files (the vision, "
                 "the map, the to-do list, the mail, his notes) are loaded, and they aren't needed: for his life, "
                 "put Donna or Pepper on."]
     else:
@@ -219,7 +233,7 @@ def build(folder: Path, today: datetime.date | None = None, context: str = "day"
             parts.append(f"The team's latest work, the newest {TEAM_NOTES_MOST} notes about it from "
                          f"{folder / 'coaching' / 'log.md'} (the rest of that file is {config.USER}'s life; leave it):"
                          f"\n\n{team_notes(log)}")
-        for extra in (_planning(folder), _build_notes(folder)):
+        for extra in (_planning(folder), _build_notes(folder), _memory_index(folder)):
             if extra:
                 parts.append(extra)
         return "\n\n".join(parts)
