@@ -587,7 +587,11 @@ line; the weekly lines always count.
 its logs in {HQ}/scratch (the hourly mail check's own log is {HQ}/scratch/routine/mail.log, its last start \
 in {HQ}/scratch/routine/mail-last), and the status page's data with curl on this computer only: \
 curl -s http://localhost:4748/routines.json (every routine, when it last ran and runs next), /usage.json, \
-/roadmap.md, /jobs-history.json. Changing anything in HQ (editing, git changes, running its scripts \
+/roadmap.md, /jobs-history.json. Looking never waits for his yes (H281): reading the workspace, HQ, its \
+scratch and Claude's memory folder for this workspace, with the read tools or with ls, cat, grep, sed -n, awk, \
+cut, tr, jq, diff, git log, show, describe, tag -l, blame and the like, piped or after a cd, and looking at this \
+computer (dpkg -l, apt list --installed, systemctl status, journalctl --user, ss -ltn, uptime, df, free) all run \
+without asking; so check what you need before you answer. Changing anything in HQ (editing, git changes, running its scripts \
 other than the ones above) still asks him first; building HQ is work for the team.
 - His quick notes (H105), from the round notes button on the call page: HQ/notes.md in the workspace, one \
 line per note under Notes, oldest first, just text (H117). When he wants to go through his notes, read it \

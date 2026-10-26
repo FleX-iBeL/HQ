@@ -13507,6 +13507,86 @@ window.fetch = async (url, opt) => {
                 "an appointment without a kind always shown, the kind in the appointment, Edit renaming one and back to HQ's own, no "
                 "row when nothing has a kind's colour")
 
+    async def flow161(self) -> str:
+        """H281: every read-only look on a call is free, for every agent: the done examples of the row and more looks
+        at files (sed -n, awk, cut, jq, diff …), git (describe, tag -l, rev-list, cat-file, blame), this computer (dpkg,
+        apt list, systemctl status, journalctl --user, ss, uptime, df) and Claude's memory folder for the workspace run
+        without a yes; writing, running code from text, the outside and sudo still ask. No Claude."""
+        from policy import Policy, ALLOW, in_memory
+        pol = Policy(config.FOLDER)
+        hq = Path(os.path.realpath(ROOT))
+        mem = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects" / \
+            re.sub(r"[^A-Za-z0-9]", "-", str(Path(os.path.realpath(config.FOLDER)))) / "memory" / "MEMORY.md"
+        def v(tool, inp):
+            d = pol.decide(tool, inp)
+            pol.pending.clear()
+            return d.verdict
+        allow = [
+            "grep -n X HQ/roadmap.md | cut -c1-200",
+            "sed -n 10,20p HQ/CLAUDE.md",
+            f"git -C {hq} describe --tags",
+            "dpkg -l php",
+            "dpkg -s php",
+            "awk '{print $1}' HQ/roadmap.md",
+            "awk -F'|' 'NR==3 {print $2}' HQ/roadmap.md | cut -c1-80",
+            "sed -n '/^| H281/p' HQ/roadmap.md",
+            "sed 's/a/b/g;/x/p' HQ/notes.md",
+            f"cd {hq} && git tag -l | tail -3 && git rev-list --count HEAD && git log --oneline -3",
+            f"git -C {hq} cat-file -p HEAD | head -5",
+            f"git -C {hq} blame app/policy.py | head",
+            f"git -C {hq} ls-remote origin",
+            f"grep -n calendar {mem}",
+            f"cat {hq}/scratch/routine/mail.log | tail -3",
+            "jq .on HQ/feedback-box.json",
+            "diff HQ/notes.md HQ/notes.md && cmp HQ/notes.md HQ/notes.md",
+            "nl HQ/notes.md | column -t | tr a-z A-Z",
+            "basename HQ/notes.md && dirname HQ/notes.md && realpath HQ && readlink HQ",
+            "apt list --installed php",
+            "systemctl --user status hq-call --no-pager",
+            "systemctl is-active ssh",
+            "journalctl --user -n 50 --no-pager",
+            "ss -ltn",
+            "uptime && df -h && free -m && uname -a && id",
+        ]
+        for c in allow:
+            need(v("Bash", {"command": c}) == ALLOW, f"a call still asks a yes for a look: {c}")
+        need(v("Read", {"file_path": str(mem)}) == ALLOW, "reading Claude's memory for the workspace asks")
+        need(in_memory(str(mem), config.FOLDER) and not in_memory(str(mem.parent.parent / "x" / "a.md"), config.FOLDER),
+             "Claude's memory folder isn't told apart from the rest of its folders")
+        ask = [
+            "sed -i s/a/b/ HQ/notes.md",
+            "sed -n '1w out' HQ/notes.md",
+            "sed -n 1p ~/.ssh/config",
+            "awk '{system(\"rm x\")}' HQ/notes.md",
+            "awk '{print > \"f\"}' HQ/notes.md",
+            "awk '\"date\" | getline d' HQ/notes.md",
+            "awk '{print}' HQ/notes.md > file",
+            "awk -f prog.awk HQ/notes.md",
+            "jq -n env",
+            "jq . /etc/passwd",
+            "curl https://example.com",
+            "cat ~/.ssh/config",
+            "git branch -D x",
+            "git tag v9",
+            "git -c core.pager=sh log",
+            "git diff --output=x",
+            f"git -C {hq} commit -m x",
+            "sort -o x HQ/notes.md",
+            "uniq HQ/notes.md out",
+            "sudo ls",
+            "dpkg -i x.deb",
+            "apt install php",
+            "systemctl --user restart hq-call",
+            "journalctl -n 5",
+            "ss -K",
+            "find . -fprint x",
+        ]
+        for c in ask:
+            need(v("Bash", {"command": c}) != ALLOW, f"a call may run without a yes: {c}")
+        need("H281" in config.VOICE_RULES,
+             "the call rules don't say the looks are free")
+        return f"{len(allow)} read-only looks go without a yes; {len(ask)} that write, run code or reach out still ask"
+
     async def flow155(self) -> str:
         """H277: a call runs the planning and team commands its rules allow without a yes, also chained, after a cd
         into HQ, in a plain for loop over labels, and reading the long output it saved itself; anything else still
@@ -19582,6 +19662,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    161: ("H281: every read-only look on a call is free for every agent (sed -n, awk, cut, jq, git describe and tag -l, dpkg -l, systemctl status, journalctl --user, Claude's memory folder); writing, code from text, the outside and sudo still ask", False, "flow161"),
     160: ("H247 (b): the pages: no Feedback tab until connected, Connect in Settings, the link connects in one tap, the texts' switch; the status page's Invite someone to send feedback", False, "flow160"),
     159: ("H247 (b) and (c): feedback from someone else's HQ to the maker's mailbox, end to end with two HQs: invite, connect, typed and call sends, status back, texts switch, offline retry, limits, a taken-back key", False, "flow159"),
     158: ("H248: one alert per event, not per mail: the mail check keeps one line per event with how many mails and when, a later mail into its line, and skips what's Closed; Closed on the mail list and in the call and chat rules; Donna texts once for two lines from one sender on one day", False, "flow158"),

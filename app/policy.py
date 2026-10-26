@@ -136,8 +136,17 @@ CALL_UNFRIENDLY = [
 # Read-only shell commands that may run without asking, as long as every path they touch
 # is inside the folder.
 SAFE_READ_COMMANDS = {"ls", "grep", "rg", "find", "wc", "head", "tail", "cat", "pwd", "date", "stat", "file",
-                      "ps", "pgrep", "which", "echo", "sort", "uniq", "du"}
-SAFE_GIT_READ = {"status", "log", "diff", "show", "rev-parse", "branch", "ls-files"}
+                      "ps", "pgrep", "which", "echo", "sort", "uniq", "du",
+                      # H281 (26 October 2026, call at 13:32, Moneypenny): "If you need user rights we will give you
+                      # user rights." More looks that only read, for every agent; writing, running code from text
+                      # and the outside still ask.
+                      "cut", "diff", "cmp", "column", "nl"}
+# H281: commands that read only their own text or tell about this computer; no file of his goes through them.
+INFO_COMMANDS = {"tr", "basename", "dirname", "realpath", "readlink", "uptime", "df", "free", "uname", "id"}
+# H281: a program in the first word after the options (sed's script, awk's program, jq's filter), checked on its own.
+PROGRAM_COMMANDS = {"sed", "awk", "jq"}
+SAFE_GIT_READ = {"status", "log", "diff", "show", "rev-parse", "branch", "ls-files",
+                 "describe", "rev-list", "ls-remote", "cat-file", "blame", "tag"}  # H281
 
 
 def gmail_never_tool_names(prefixes: tuple[str, ...] = ("mcp__claude_ai_Gmail__",)) -> list[str]:
@@ -228,6 +237,8 @@ class Policy:
                 return Decision(ALLOW, "reading in HQ")
             if tool_output(path, self.folder):
                 return Decision(ALLOW, "reading this call's own saved output")
+            if in_memory(path, self.folder):
+                return Decision(ALLOW, "reading Claude's memory for this workspace")
             return _ask(f"read {Path(path).name} outside your workspace", "reading outside the folder")
         if tool in EDIT_TOOLS:
             return self._edit(inp.get("file_path") or "", tool, inp)
@@ -346,6 +357,7 @@ class Policy:
             return Decision(DENY, "empty command")
         # Only plain commands, joined by && or |. No redirection into files, no
         # subshells, variables or here-documents (quoted text may contain anything).
+        cmd = _hide_quoted_dollars(cmd)  # H281: awk's $1 and sed's $p in single quotes are text, not variables
         if re.search(r"`|\$\(|\$\{|<<", cmd):
             return _ask("run a shell command", "a complex shell command")
         cmd = re.sub(r"\s2>\s*/dev/null|\s2>&1", " ", cmd)
@@ -375,7 +387,7 @@ class Policy:
                 if any("$" in w for w in seg):
                     results.append(_ask("run a shell command", "a shell command with a variable"))
                     continue
-                d = self._bash_one(seg)
+                d = self._bash_one([w.replace(_DOLLAR, "$") for w in seg])
                 results.append(d)
                 if seg and seg[0] == "cd" and d.verdict == ALLOW:
                     target = Path(seg[1]).expanduser() if len(seg) > 1 else Path.home()
@@ -400,6 +412,8 @@ class Policy:
                 return Decision(ALLOW, "moving within the folder")
             if self.in_hq(target):
                 return Decision(ALLOW, "moving within HQ")
+            if in_memory(target, self.folder):
+                return Decision(ALLOW, "moving into Claude's memory for this workspace")
             return _ask("go outside your workspace", "a folder outside")
         if prog == "date":
             return Decision(ALLOW, "the date")
@@ -583,18 +597,37 @@ class Policy:
             if len(args) == 1 or (len(args) == 2 and args[1] in ("on", "off")):
                 return Decision(ALLOW, "the lid-closed sleep switch")
             return Decision(DENY, "the lid-closed sleep switch takes only on or off")
+        if prog in INFO_COMMANDS:
+            return Decision(ALLOW, "a look at this computer")
+        if prog in ("dpkg", "apt", "systemctl", "journalctl", "ss"):
+            return _system_look(prog, args)
+        if prog in PROGRAM_COMMANDS:
+            files = _program_files(prog, args)
+            if isinstance(files, Decision):
+                return files
+            return self._read_paths(files, plain=True)
         if prog in SAFE_READ_COMMANDS:
-            if prog == "find" and any(a in ("-exec", "-execdir", "-delete", "-ok", "-okdir", "-fprint") for a in args):
+            if prog == "find" and any(a in ("-exec", "-execdir", "-delete", "-ok", "-okdir", "-fprint", "-fprint0",
+                                            "-fprintf", "-fls") for a in args):
                 return _ask("run a find command that changes files", "find with actions")
-            paths = [a for a in args if not a.startswith("-") and ("/" in a or Path(self._base(), a).exists())]
-            if all(self.inside(p) for p in paths):
-                return Decision(ALLOW, "reading in the folder")
-            if all(self.inside(p) or self.in_hq(p) for p in paths):
-                return Decision(ALLOW, "reading in HQ")
-            if all(self.inside(p) or self.in_hq(p) or tool_output(p, self.folder) for p in paths):
-                return Decision(ALLOW, "reading this call's own saved output")
-            return _ask("look at something outside your workspace", "reading outside the folder")
+            if prog == "sort" and any(a in ("-o", "--output") or a.startswith(("--output=", "-o")) for a in args):
+                return _ask("write sorted lines into a file", "sort into a file")  # H281: sort -o writes
+            if prog == "uniq" and len([a for a in args if not a.startswith("-")]) > 1:
+                return _ask("write lines into a file", "uniq into a file")  # H281: uniq's second name is written
+            return self._read_paths(args)
         return _ask(f"run the command {prog}", "a shell command")
+
+    def _read_paths(self, args: list[str], plain: bool = False) -> Decision:
+        """Every path a read-only command touches must be readable here (plain: args are all names, H281)."""
+        paths = [a for a in args if plain or (not a.startswith("-") and ("/" in a or Path(self._base(), a).exists()))]
+        if all(self.inside(p) for p in paths):
+            return Decision(ALLOW, "reading in the folder")
+        if all(self.inside(p) or self.in_hq(p) for p in paths):
+            return Decision(ALLOW, "reading in HQ")
+        if all(self.inside(p) or self.in_hq(p) or tool_output(p, self.folder) or in_memory(p, self.folder)
+               for p in paths):
+            return Decision(ALLOW, "reading this call's own saved output or Claude's memory for this workspace")
+        return _ask("look at something outside your workspace", "reading outside the folder")
 
     def _curl(self, args: list[str]) -> Decision:
         """H65: reading the status page's data (GET on this computer's status server); anything else asks."""
@@ -621,7 +654,13 @@ class Policy:
     def _git(self, args: list[str]) -> Decision:
         # "git -C <dir> …" must point inside the folder; in HQ (H65) only to look.
         in_hq = False
-        while args and args[0] in ("-C", "-c"):
+        while args and args[0] in ("-C", "-c", "--no-pager"):
+            if args[0] == "--no-pager":
+                args = args[1:]
+                continue
+            if args[0] == "-c":
+                # H281: a setting for one git command can make it run a program (a pager, an external diff).
+                return _ask("run git with a setting of its own", "git -c")
             if args[0] == "-C" and len(args) > 1 and not self.inside(args[1]):
                 if not self.in_hq(args[1]):
                     return _ask("run git outside your workspace", "git elsewhere")
@@ -631,6 +670,9 @@ class Policy:
             return Decision(ALLOW, "git")
         sub, rest = args[0], args[1:]
         if sub in SAFE_GIT_READ:
+            why = _git_writes(sub, rest)
+            if why:
+                return _ask(f"run git {sub} that way", why)
             return Decision(ALLOW, "looking at git")
         if in_hq:
             return _ask(f"run git {sub} in HQ", "a git change in HQ")
@@ -769,6 +811,193 @@ def _loops(segments: list[list[str]]) -> list[list[str]] | None:
                 out.append([pat.sub(v, w) for w in b])
         i = j + 1
     return out
+
+
+_DOLLAR = "\x00"
+
+
+def _hide_quoted_dollars(cmd: str) -> str:
+    """H281: a $ inside single quotes is plain text to the shell; hide it so it isn't taken for a variable."""
+    out, single, double, i = [], False, False, 0
+    while i < len(cmd):
+        c = cmd[i]
+        if c == "\\" and not single and i + 1 < len(cmd):
+            out.append(cmd[i:i + 2])
+            i += 2
+            continue
+        if c == "'" and not double:
+            single = not single
+        elif c == '"' and not single:
+            double = not double
+        out.append(_DOLLAR if (c == "$" and single) else c)
+        i += 1
+    return "".join(out)
+
+
+def in_memory(path: str, folder: Path) -> bool:
+    """H281: Claude's memory folder for this workspace (…/projects/<the workspace>/memory). Reading it is free."""
+    try:
+        real = Path(os.path.realpath(Path(path).expanduser()))
+        base = Path(os.path.realpath(Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"))
+        rel = real.relative_to(base).parts
+    except (ValueError, OSError):
+        return False
+    slugs = {_slug(folder), _slug(Path(os.path.realpath(folder))), _slug(HQ_ROOT / "workspace")}
+    return len(rel) >= 2 and rel[0] in slugs and rel[1] == "memory" and ".." not in rel
+
+
+# H281: git's looks that can still write: an option that writes a file, or a branch or tag made or removed.
+_GIT_OUTPUT = ("--output", "-o")
+_BRANCH_LIST = {"-l", "--list", "-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--contains",
+                "--no-contains", "--merged", "--no-merged", "--points-at", "--show-current", "--column", "--no-column"}
+_TAG_LIST = {"-l", "--list", "--contains", "--no-contains", "--merged", "--no-merged", "--points-at", "-i",
+             "--ignore-case", "--column", "--no-column"}
+
+
+def _git_writes(sub: str, rest: list[str]) -> str:
+    """Why this git look would change something, or "" when it only looks."""
+    if any(a == "--output" or a.startswith("--output=") or (sub in ("diff", "log", "show") and a == "-o") for a in rest):
+        return "git writing into a file"
+    if any(a in ("--ext-diff", "--textconv") for a in rest):
+        return "git running a program of its own"
+    if sub in ("branch", "tag"):
+        listing = _BRANCH_LIST if sub == "branch" else _TAG_LIST
+        flags = [a for a in rest if a.startswith("-")]
+        names = [a for a in rest if not a.startswith("-")]
+        ok_flag = all(a.split("=")[0] in listing or a.startswith(("--sort", "--format", "-n", "--abbrev", "--color"))
+                      for a in flags)
+        lists = any(a.split("=")[0] in ("-l", "--list", "--contains", "--merged", "--no-merged", "--no-contains",
+                                       "--points-at", "-a", "--all", "-r", "--remotes") for a in flags)
+        if not ok_flag or (names and not lists):
+            return f"a git {sub} made, moved or removed"
+    return ""
+
+
+# H281: sed's own commands that only print. One command each, after an optional address or range and !:
+# p P l = q Q d D n N g G h H x z, s/…/…/ with g p i I m M or a number, y/…/…/. No w, W, e, r, R, braces or a file.
+_SED_ADDR = r"(?:\d+(?:~\d+)?|\$|/(?:[^/\\\n]|\\.)*/[IM]*)"
+_SED_CMD = re.compile(
+    r"\s*(?:" + _SED_ADDR + r"(?:\s*,\s*(?:" + _SED_ADDR + r"|[+~]\d+))?)?\s*!?\s*"
+    r"(?:[pPl=qQdDnNgGhHxz]|s(?P<d>[^\s\\\n])(?:(?!(?P=d))[^\\\n]|\\.)*(?P=d)(?:(?!(?P=d))[^\\\n]|\\.)*(?P=d)"
+    r"[gpiImM0-9]*|y(?P<e>[^\s\\\n])(?:(?!(?P=e))[^\\\n]|\\.)*(?P=e)(?:(?!(?P=e))[^\\\n]|\\.)*(?P=e))"
+    r"\s*(?:;|\n|$)")
+
+
+def _sed_only_prints(script: str) -> bool:
+    pos = 0
+    if not script.strip():
+        return False
+    while pos < len(script):
+        m = _SED_CMD.match(script, pos)
+        if not m or m.end() == pos:
+            return False
+        pos = m.end()
+    return True
+
+
+# awk: no system(), no getline, no > or | (writing to a file or a command), no ENVIRON, no loading code.
+_AWK_BAD = re.compile(r"system\s*\(|getline|[>|]|ENVIRON|PROCINFO|@load|@include|close\s*\(|fflush")
+_JQ_BAD = re.compile(r"\b(env|import|include|input_filename|\$__loc__|halt_error)\b|\$ENV")
+
+
+def _program_files(prog: str, args: list[str]):
+    """H281: for sed, awk and jq, check the program and give back the files they read; a Decision when it asks."""
+    scripts, files, i = [], [], 0
+    takes = {"sed": {"-e", "--expression", "-l", "--line-length"},
+             "awk": {"-F", "-v", "--field-separator", "--assign"},
+             "jq": {"--arg", "--argjson", "--indent"}}[prog]
+    plain = {"sed": {"-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended", "-s", "--separate", "-z",
+                     "--null-data", "-u", "--unbuffered", "--posix", "--debug"},
+             "awk": {"--posix", "--traditional"},
+             "jq": {"-r", "-c", "-n", "-s", "-e", "-S", "-j", "-a", "-C", "-M", "--raw-output", "--compact-output",
+                    "--null-input", "--slurp", "--sort-keys", "--tab", "--join-output", "--ascii-output",
+                    "--exit-status", "--color-output", "--monochrome-output", "--raw-input", "-R"}}[prog]
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            files += args[i + 1:]
+            break
+        if a.startswith("-") and a != "-":
+            name = a.split("=")[0]
+            if prog == "sed" and (a.startswith(("-i", "--in-place")) or name in ("-f", "--file")):
+                return _ask("let sed change a file or read a script" if a.startswith(("-i", "--in")) else
+                            "let sed run a script from a file", "sed that writes or runs a file")
+            if prog == "awk" and (name in ("-f", "--file", "-i", "--include", "-l", "--load", "-E", "--exec")
+                                  or a.startswith(("-f", "-i", "-l", "-E"))):
+                return _ask("let awk run code from a file or load something", "awk that loads code")
+            if name in takes:
+                n = 2 if (prog == "jq" and name in ("--arg", "--argjson")) else 1
+                if prog == "sed" and name in ("-e", "--expression"):
+                    scripts.append(a.split("=", 1)[1] if "=" in a else (args[i + 1] if i + 1 < len(args) else ""))
+                if "=" in a and a.startswith("--"):
+                    n = 0
+                i += 1 + n
+                continue
+            if prog == "awk" and (a.startswith("-F") or a.startswith("-v")) and len(a) > 2:
+                i += 1
+                continue
+            if prog == "sed" and a.startswith("-") and not a.startswith("--") and set(a[1:]) <= set("nErsuz"):
+                i += 1
+                continue
+            if name in plain:
+                i += 1
+                continue
+            return _ask(f"run {prog} with {a}", f"{prog} with options")
+        if not scripts and not (prog == "sed" and any(x in ("-e", "--expression") or x.startswith("--expression=")
+                                                      for x in args)):
+            scripts.append(a)
+        elif prog == "awk" and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", a):
+            pass  # an awk assignment between the files
+        else:
+            files.append(a)
+        i += 1
+    if not scripts:
+        return _ask(f"run {prog}", f"{prog} without a program")
+    for sc in scripts:
+        if prog == "sed" and not _sed_only_prints(sc):
+            return _ask("run sed with more than printing", "a sed script that may write or run something")
+        if prog == "awk" and _AWK_BAD.search(sc):
+            return _ask("run awk with something that writes or runs a program", "an awk program that writes or runs")
+        if prog == "jq" and _JQ_BAD.search(sc):
+            return _ask("run jq that way", "a jq filter that reads the environment or loads code")
+    return [f for f in files if f != "-"]
+
+
+def _system_look(prog: str, args: list[str]) -> Decision:
+    """H281: looks at what's installed and running on this computer; anything that changes it asks."""
+    look = Decision(ALLOW, "a look at this computer")
+    if prog == "dpkg" and args and args[0] in ("-l", "-s", "--list", "--status"):
+        return look
+    if prog == "apt" and args[:1] == ["list"] and "--installed" in args and all(
+            not a.startswith("-") or a in ("--installed",) for a in args[1:]):
+        return look
+    if prog == "systemctl":
+        flags = [a for a in args if a.startswith("-")]
+        words = [a for a in args if not a.startswith("-")]
+        if words and words[0] in ("status", "is-active", "is-enabled") and all(
+                a in ("--user", "--system", "--no-pager", "-l", "--full", "-q", "--quiet") or a.startswith("--lines=")
+                for a in flags):
+            return look
+    if prog == "journalctl" and "--user" in args:
+        ok, i = True, 0
+        while i < len(args):
+            a = args[i]
+            if a in ("-n", "--lines", "-u", "--user-unit", "--unit", "-o", "--output", "--since", "--until", "-p",
+                     "--priority"):
+                i += 2
+                continue
+            if a in ("--user", "--no-pager", "-q", "--quiet", "-r", "--reverse", "-x", "--no-hostname") or \
+                    a.startswith(("--lines=", "--since=", "--until=", "--user-unit=", "--unit=", "--output=",
+                                  "--priority=")) or re.fullmatch(r"-n\d+", a):
+                i += 1
+                continue
+            ok = False
+            break
+        if ok:
+            return look
+    if prog == "ss" and args and all(re.fullmatch(r"-[ltnupaxwe46]+", a) for a in args):
+        return look
+    return _ask(f"run {prog} that way", f"{prog} beyond a look")
 
 
 def is_clear_yes(words: str) -> bool:

@@ -32,7 +32,7 @@
         {"target": "chatbtn", "title": "What was said", "text": "The chat shows the whole call as text while it happens. Lists and bold words show up there, but she never reads the marks out loud."},
         {"target": "chatbtn", "title": "Type instead of talking", "text": "On a train or in a library? Type in the chat and she answers out loud and in the chat. After a call, Call back and continue picks up where you left off.",
          "demo": {"kind": "chat", "items": [["you", "Remind me to buy coffee tomorrow"], ["agent", "Done. I'll text you tomorrow morning at nine."]]}},
-        {"target": "chatbtn", "title": "A quick yes", "text": "She asks for your yes before some things. With nothing typed, hold the grey Send button, slide up onto Yes and let go. That sends a yes without typing a word."},
+        {"target": "chatbtn", "title": "A quick yes", "text": "Looking things up never waits for you: she reads your files, HQ and this computer by herself, so she checks before she answers. She asks for your yes before she changes something. With nothing typed, hold the grey Send button, slide up onto Yes and let go. That sends a yes without typing a word."},
         {"target": "chatbtn", "title": "Links you can tap", "text": "When she gives you a web link, it opens with one tap: in the call's chat, in past calls and in {donna}'s chat. The call keeps going in the meantime. She never reads a link out loud."},
         {"target": "voicebtn", "title": "Turn her voice off", "text": "Turns her voice off and on again, for when you'd rather read. She keeps answering in the chat."}
       ]
