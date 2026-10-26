@@ -21,6 +21,17 @@ what starts off ("default": "off": Driving, H230, which needs their own key); tu
     python3 app/features.py                 every switch, on or off
     python3 app/features.py on calendar     turn one on
     python3 app/features.py off calendar    turn one off
+    python3 app/features.py pieces          the features still being built in pieces (F56, piece 2)
+    python3 app/features.py ship ID         a feature in pieces goes on for everyone (by hand; qa.py does it itself)
+
+F56, piece 2 (26 October 2026). His words on the call at 13:32 (Moneypenny), after 0.4.14 shipped a third of the
+feedback feature to a friend: "Now we shipped out something that is a feature that I did not want to have at all and
+now [a friend] has it in her updated version." A feature built in pieces is listed in `app/features-in-pieces.json`
+(HQ_FEATURES_PIECES is a test's copy) from its first piece: {"id", "name", "line", "buttons", "row", "pieces"}. While
+it's there it is off and invisible on every HQ (no row in Settings, its buttons gone, is_on False), except the maker's:
+the workspace's features.json says "maker": true (or HQ_MAKER=1 on that computer), and there it shows in Settings as
+still being built, on until switched off, to try it. When the row's last piece passes QA (the row is done and qa.py
+pass marks it), qa.py takes it off the list (`ship`), so the next release turns it on for everyone.
 """
 from __future__ import annotations
 
@@ -61,6 +72,61 @@ FEATURES = [
     {"id": "coaching", "name": "Life coaching", "line": "", "buttons": ["gamebtn", "coachbtn"], "workflow": "map"},
 ]
 IDS = [f["id"] for f in FEATURES]
+PIECES_FILE = ROOT / "app" / "features-in-pieces.json"
+
+
+def _pieces_path() -> Path:
+    return Path(os.environ.get("HQ_FEATURES_PIECES") or PIECES_FILE)
+
+
+def in_pieces() -> list[dict]:
+    """F56: the features still being built in pieces, each with its row; hidden from everyone but the maker."""
+    try:
+        d = json.loads(_pieces_path().read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for f in (d.get("features") if isinstance(d, dict) else None) or []:
+        if isinstance(f, dict) and isinstance(f.get("id"), str) and f["id"] not in IDS:
+            out.append({"buttons": [], "line": "", **f, "name": f.get("name") or f["id"], "in_pieces": True})
+    return out
+
+
+def everything() -> list[dict]:
+    return FEATURES + in_pieces()
+
+
+def ids() -> list[str]:
+    return [f["id"] for f in everything()]
+
+
+def maker(base: Path | None = None) -> bool:
+    """The maker's own HQ (F56): the one that builds HQ, where a feature in pieces can be tried before it's whole."""
+    if os.environ.get("HQ_MAKER") in ("0", "1"):
+        return os.environ["HQ_MAKER"] == "1"
+    return _state(base).get("maker") is True
+
+
+def ship(fid: str) -> str:
+    """Takes a feature off the in-pieces list: from the next release it's a normal switch, on for everyone."""
+    p = _pieces_path()
+    try:
+        d = json.loads(p.read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return f"{fid} isn't being built in pieces."
+    left = [f for f in d.get("features") or [] if not (isinstance(f, dict) and f.get("id") == fid)]
+    if len(left) == len(d.get("features") or []):
+        return f"{fid} isn't being built in pieces."
+    d["features"] = left
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(d, indent=2) + "\n", encoding="utf8")
+    os.replace(tmp, p)
+    return f"{fid} is whole: from the next release it's on for everyone."
+
+
+def for_row(label: str) -> list[str]:
+    """The features in pieces that a roadmap row builds."""
+    return [f["id"] for f in in_pieces() if str(f.get("row", "")).upper() == label.upper()]
 
 
 def folder() -> Path:
@@ -89,17 +155,23 @@ def turned_off(base: Path | None = None) -> list[str]:
     """The switches that are off: turned off, or starting off and never turned on (H230)."""
     d = _state(base)
     off, on = d.get("off") or [], d.get("on") or []
-    return [x["id"] for x in FEATURES if x["id"] in off or (x.get("default") == "off" and x["id"] not in on)]
+    mk = maker(base)
+    return [x["id"] for x in everything() if x["id"] in off or (x.get("default") == "off" and x["id"] not in on)
+            or (x.get("in_pieces") and not mk)]
 
 
 def _save(base: Path, off: list[str]) -> None:
     p = base / STATE
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
-    d = {"off": [x["id"] for x in FEATURES if x["id"] in off and x.get("default") != "off"]}
+    old = _state(base)
+    d = {"off": [x["id"] for x in everything() if x["id"] in off and x.get("default") != "off"
+                 and not (x.get("in_pieces") and not maker(base))]}
     on = [x["id"] for x in FEATURES if x.get("default") == "off" and x["id"] not in off]
     if on:
         d["on"] = on
+    if old.get("maker") is True:  # F56: kept, never set here
+        d["maker"] = True
     tmp.write_text(json.dumps(d, indent=2) + "\n", encoding="utf8")
     os.replace(tmp, p)
 
@@ -148,9 +220,11 @@ def _wf_folder() -> Path:
 
 def is_on(fid: str, base: Path | None = None) -> bool:
     """Whether a switch is on, with what it needs. The cheap ones (no roadmap, no workflow) are read on every look."""
-    f = next((x for x in FEATURES if x["id"] == fid), None)
+    f = next((x for x in everything() if x["id"] == fid), None)
     if not f:
         return True
+    if f.get("in_pieces") and not maker(base):  # F56: not whole yet, hidden here
+        return False
     if _computer_off(f):
         return False
     if f.get("workflow"):
@@ -165,10 +239,20 @@ def is_on(fid: str, base: Path | None = None) -> bool:
 def listing(base: Path | None = None) -> list[dict]:
     """For Settings: each switch, on or off, its line, what it needs, and which buttons go when it's off."""
     base = base or folder()
-    off, agent, out = turned_off(base), _agent(), []
-    for f in FEATURES:
+    off, agent, out, mk = turned_off(base), _agent(), [], maker(base)
+    for f in everything():
         item = {"id": f["id"], "name": f["name"].replace("{agent}", agent), "line": f["line"].replace("{agent}", agent),
                 "buttons": f["buttons"]}
+        if f.get("in_pieces"):  # F56: still being built; only the maker sees it, everyone else only loses its buttons
+            item["on"] = mk and f["id"] not in off
+            if mk:
+                item["pieces"] = f"Still being built ({f.get('row') or 'no row'}"
+                item["pieces"] += f", {f['pieces']})" if f.get("pieces") else ")"
+                item["pieces"] += ": only on your HQ until its last piece passes QA"
+            else:
+                item["hidden"] = True
+            out.append(item)
+            continue
         if f.get("workflow"):
             w = _workflows().find(f["workflow"])
             if not w:
@@ -184,7 +268,7 @@ def listing(base: Path | None = None) -> list[dict]:
         else:
             item["on"] = f["id"] not in off
         if f.get("needs"):
-            need = next(x for x in FEATURES if x["id"] == f["needs"])
+            need = next(x for x in everything() if x["id"] == f["needs"])
             item["needs"] = need["id"]
             item["needs_name"] = need["name"].replace("{agent}", agent)
         if _computer_off(f):
@@ -207,9 +291,9 @@ def listing(base: Path | None = None) -> list[dict]:
 
 def switch(fid: str, on: bool, base: Path | None = None) -> str:
     base = base or folder()
-    f = next((x for x in FEATURES if x["id"] == fid), None)
+    f = next((x for x in everything() if x["id"] == fid and not (x.get("in_pieces") and not maker(base))), None)
     if not f:
-        return f"No switch {fid}. There are: {', '.join(IDS)}."
+        return f"No switch {fid}. There are: {', '.join(i for i in ids() if is_on(i, base) or i in IDS)}."
     if f.get("workflow"):
         wf = _workflows()
         return wf.turn_on(_wf_folder(), f["workflow"]) if on else wf.turn_off(_wf_folder(), f["workflow"])
@@ -230,7 +314,8 @@ def switch(fid: str, on: bool, base: Path | None = None) -> str:
 def rule(base: Path | None = None) -> str:
     """The call rule for what they turned off; empty when everything's on."""
     quiet = {f["id"] for f in FEATURES if f.get("default") == "off"}  # starts off: not something they turned off
-    names = [i["name"] for i in listing(base) if not i["on"] and i["id"] != "coaching" and i["id"] not in quiet]
+    names = [i["name"] for i in listing(base) if not i["on"] and i["id"] != "coaching" and i["id"] not in quiet
+             and not i.get("hidden") and not i.get("pieces")]
     if not names:
         return ""
     return ("- Turned off in What HQ helps you with (H205): " + ", ".join(names) + ". Don't bring those up or offer "
@@ -240,9 +325,22 @@ def rule(base: Path | None = None) -> str:
 def main(argv: list[str]) -> int:
     if not argv:
         for i in listing():
+            if i.get("hidden"):
+                continue
             print(f"{i['id']}: {i['name']}, {'on' if i['on'] else 'off'}"
                   + (f" (needs {i['needs_name']})" if i.get("needs") else "") + (f" ({i['fixed']})" if i.get("fixed") else "")
                   + f". {i['line']}")
+        return 0
+    if argv[0] == "pieces":
+        fs = in_pieces()
+        print("\n".join(f"{f['id']}: {f['name']} ({f.get('row') or 'no row'}"
+                        + (f", {f['pieces']}" if f.get("pieces") else "") + ")" for f in fs)
+              or "Nothing is being built in pieces.")
+        print(f"This HQ is {'the maker' if maker() else 'not the maker'}: "
+              + ("it sees them." if maker() else "they're hidden here."))
+        return 0
+    if argv[0] == "ship" and len(argv) == 2:
+        print(ship(argv[1]))
         return 0
     if argv[0] in ("on", "off") and len(argv) == 2:
         print(switch(argv[1], argv[0] == "on"))

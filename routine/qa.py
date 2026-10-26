@@ -291,10 +291,44 @@ def hold_words(h: dict) -> str:
     return "QA: " + ". ".join(parts) + "."
 
 
+def _features():
+    sys.path.insert(0, os.path.join(ROOT, "app"))
+    import features
+    return features
+
+
+def ship_whole(label: str, row: str) -> list[str]:
+    """F56, piece 2: a feature built in pieces stays hidden (app/features-in-pieces.json) until its last piece passes
+    QA. The last piece is the one that marks the row done (✅); a pass on a row still open leaves it hidden."""
+    try:
+        fs = _features()
+        fids = fs.for_row(label)
+    except Exception:
+        return []
+    if not fids:
+        return []
+    if not (row or "").lstrip("| ").startswith("✅"):
+        return [f"{', '.join(fids)} stays switched off for everyone but the maker: {label} isn't done yet "
+                "(more pieces to come)."]
+    out = [fs.ship(f) for f in fids]
+    out.append("Commit app/features-in-pieces.json with the row's label first, and push.")
+    return out
+
+
 def prompt_extra(text: str) -> str:
-    """The QA job's first prompt gets Moneypenny's character and craft (F56)."""
+    """The QA job's first prompt gets Moneypenny's character and craft (F56). A build of a piece of a feature gets
+    the in-pieces rule (F56, piece 2)."""
     if not is_qa(text):
-        return ""
+        m = re.search(r"\bpiece (\d+) of (\d+)\b", text or "", re.I)
+        if not m or int(m.group(2)) < 2 or not job_label(text):
+            return ""
+        return ("\n\nThis is a piece of a feature built in pieces (F56, piece 2). A feature people would see or use, "
+                "built in pieces, ships switched off until its last piece passes QA: if this piece brings a new switch, "
+                "button or screen and it isn't in app/features-in-pieces.json yet, add it there "
+                '({"id", "name", "line", "buttons", "row", "pieces"}, the row is its label), and gate it with '
+                "features.is_on(id) on the server and its buttons in the list, so only the maker's HQ shows it. "
+                "QA takes it off that list when the last piece passes. Not for a piece that only changes the routine or "
+                "HQ's own working (no one else sees it).\n")
     try:
         from pathlib import Path
         sys.path.insert(0, os.path.join(ROOT, "app"))
@@ -304,7 +338,10 @@ def prompt_extra(text: str) -> str:
     except Exception as e:
         body = f"(Her character couldn't be loaded here: {e!r}. Work as head of development: the definition of done is the gate.)\n"
     return ("\n\nThis is a QA job (F56). You are Moneypenny, head of development, checking the team's work before it "
-            "reaches anyone; not done is not done.\n" + body)
+            "reaches anyone; not done is not done.\n" + body
+            + "A feature built in pieces (F56, piece 2): from its first piece it's in app/features-in-pieces.json, so "
+            "only the maker's HQ shows it. Check that it is, while pieces are left (HQ_MAKER=0 hides it); when the "
+            "row's last piece passes, qa.py pass takes it off that list: commit that file too.\n")
 
 
 def main(argv: list[str]) -> int:
@@ -322,8 +359,10 @@ def main(argv: list[str]) -> int:
         print("Which row? Give its label, like H247.")
         return 2
     if cmd == "pass":
-        mark(label, True, " ".join(args[1:]), job)
+        row = mark(label, True, " ".join(args[1:]), job)
         print(f"QA passed for {label}, in its row; the release may take it.")
+        for said in ship_whole(label, row):
+            print(said)
         return 0
     if cmd == "fail":
         print(fail(label, " ".join(args[1:]), job))

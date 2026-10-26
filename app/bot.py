@@ -1106,7 +1106,7 @@ if __name__ == "__main__":
             ask = None
         if not isinstance(ask, dict) or not isinstance(ask.get("id"), str) or not isinstance(ask.get("on"), bool):
             return JSONResponse({"error": "no change asked"}, status_code=400)
-        if ask["id"] not in _feat.IDS:
+        if ask["id"] not in _feat.ids():
             return JSONResponse({"error": "no such switch"}, status_code=404)
         try:
             said = await asyncio.to_thread(_feat.switch, ask["id"], ask["on"], _feat_folder())

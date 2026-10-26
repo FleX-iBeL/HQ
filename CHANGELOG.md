@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Half-built stays hidden. A feature built in pieces now ships switched off until its last piece has passed Moneypenny's check: on everyone else's HQ there's no button, no switch and no mention of it yet. Only the HQ that builds it shows it, in Settings under What HQ helps you with, marked as still being built, to try it early. When the last piece passes, it's on for everyone from the next update (F56).
+
 - Checked before it goes out. When the team finishes a piece, Moneypenny checks it herself first: every example of what done should look like, tried for real. The item then says QA passed, or what's off, and a fix goes back to the team by itself. The nightly update only takes what passed; the rest waits for the next night, and the morning text says what waited and why. Your own try at the sprint planning stays, but the update doesn't wait for it (F56).
 
 - Tell the team something while they work. On a call, a change or an extra for work the team already has ("don't release before it's checked") goes to it as a note; they read their notes after every step and always before they put anything out, and nothing goes out while a note is unread. A note for work still waiting is read when it starts. The Status page shows each note under the work, and when it was read. Before, a change after the team had started meant stopping the work and giving it again whole (H283).

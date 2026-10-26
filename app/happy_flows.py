@@ -13451,6 +13451,126 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 "no fix job after three; the release takes only H281 (passed) as 0.4.5, holds H282 (failed) and H283 (behind it) on "
                 "nightly and dev, merged back under dev; once H282 passes, 0.4.6 takes the rest; --without-qa takes it all")
 
+    async def flow166(self) -> str:
+        """F56 piece 2, no Claude: a feature built in pieces ships switched off until its last piece passes QA. A
+        throwaway in-pieces list (HQ_FEATURES_PIECES) holds a demo feature for row H900 with a button. On a friend's
+        HQ (no maker mark) it's off, not in Settings' listing, not switchable, out of the call rule, and on the page
+        it has no row while its button is gone; on the maker's HQ (features.json "maker": true) it's on, listed as
+        still being built, switchable, and the page shows its row and button. A switch on the maker's keeps the mark.
+        A piece's build prompt gets the rule; a QA prompt says to check it. qa.py pass on the row while it's open
+        keeps it hidden; once the row is done (its last piece), pass takes it off the list: on for everyone. HQ's own
+        list is valid JSON, and the blank template carries no maker mark."""
+        import features as ft
+        import importlib
+        import subprocess as sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        tmp = self.tmp / "f56b"
+        friend, mkr = tmp / "friend", tmp / "maker"
+        for d in (friend, mkr):
+            (d / "HQ").mkdir(parents=True)
+        (mkr / "HQ/features.json").write_text('{"off": [], "maker": true}\n')
+        pieces = tmp / "in-pieces.json"
+        demo = {"id": "demo", "name": "Demo feature", "line": "Something new", "buttons": ["demobtn"],
+                "row": "H900", "pieces": "piece 1 of 2"}
+        pieces.write_text(json.dumps({"features": [demo]}))
+        need(json.loads((ROOT / "app/features-in-pieces.json").read_text()).get("features") is not None,
+             "HQ's own in-pieces list isn't valid")
+        need(not any("maker" in p.read_text() for p in (ROOT / "template").rglob("features.json")),
+             "the blank template carries the maker mark")
+        keep = {k: os.environ.get(k) for k in ("HQ_FEATURES_PIECES", "HQ_MAKER", "HQ_WORKFLOWS_FOLDER")}
+        try:
+            os.environ["HQ_FEATURES_PIECES"] = str(pieces)
+            os.environ.pop("HQ_MAKER", None)
+            os.environ["HQ_WORKFLOWS_FOLDER"] = str(tmp)
+            fl = {i["id"]: i for i in ft.listing(friend)}
+            need(not ft.maker(friend) and not ft.is_on("demo", friend), "the friend's HQ has the half-built feature on")
+            need(fl["demo"].get("hidden") and not fl["demo"]["on"] and "pieces" not in fl["demo"],
+                 f"the friend's listing shows it: {fl['demo']}")
+            need(ft.switch("demo", True, friend).startswith("No switch") and not ft.is_on("demo", friend),
+                 "the friend could switch it on")
+            need("Demo" not in ft.rule(friend), "the friend's calls hear about it")
+            ml = {i["id"]: i for i in ft.listing(mkr)}
+            need(ft.maker(mkr) and ft.is_on("demo", mkr) and ml["demo"]["on"] and not ml["demo"].get("hidden")
+                 and "Still being built (H900, piece 1 of 2)" in ml["demo"].get("pieces", ""),
+                 f"the maker's HQ doesn't show it: {ml['demo']}")
+            ft.switch("demo", False, mkr)
+            st = json.loads((mkr / "HQ/features.json").read_text())
+            need(not ft.is_on("demo", mkr) and st.get("maker") is True and "demo" in st["off"], f"the maker's switch: {st}")
+            ft.switch("demo", True, mkr)
+            os.environ["HQ_MAKER"] = "0"
+            need(not ft.is_on("demo", mkr), "HQ_MAKER=0 doesn't hide it")
+            os.environ.pop("HQ_MAKER")
+            # the page: the friend's listing hides row and button; the maker's shows both
+            listings = {"friend": ft.listing(friend), "maker": ft.listing(mkr)}
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        for who, items in listings.items():
+            harness = """<script>
+(async () => {
+  const wait = ms => new Promise(r => setTimeout(r, ms)), $ = id => document.getElementById(id), out = [];
+  const b = document.createElement("button"); b.id = "demobtn"; b.textContent = "Demo"; $("dock").append(b);
+  await wait(300);
+  showWorkflows(ITEMS);
+  const row = document.querySelector('#wfrows .row[data-feature="demo"]');
+  out.push("row:" + (row ? (row.classList.contains("pieces") && /Still being built/.test(row.textContent) ? "pieces" : "plain") : "none"));
+  out.push("button:" + (b.classList.contains("featoff") ? "gone" : "there"));
+  out.push("count:" + $("featcount").textContent);
+  const pre = document.createElement("pre"); pre.id = "f56"; pre.textContent = "F56RESULT " + out.join(" | ") + " END"; document.body.append(pre);
+})();
+</script>""".replace("ITEMS", json.dumps(items))
+            pf = self.tmp / f"f56b-{who}.html"
+            pf.write_text(page.replace("</body>", harness + "</body>", 1))
+            args = [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                    f"--user-data-dir={self.tmp / 'f56b-profile'}", "--window-size=390,844", "--virtual-time-budget=10000",
+                    "--dump-dom", pf.as_uri()]
+            r = await asyncio.to_thread(run, args, timeout=120)
+            mm = re.search(r'<pre id="f56">F56RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{who}: the page test didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(p.split(":", 1) for p in mm.group(1).split(" | "))
+            say(f"   {who}'s HQ: {mm.group(1)}")
+            shown = len([i for i in items if not i.get("hidden")])
+            if who == "friend":
+                need(res["row"] == "none" and res["button"] == "gone" and res["count"].endswith(f"of {shown} on"),
+                     f"the friend's page shows the half-built feature: {mm.group(1)}")
+            else:
+                need(res["row"] == "pieces" and res["button"] == "there", f"the maker's page doesn't show it: {mm.group(1)}")
+        # the prompts: a piece's build gets the rule, QA is told to check it
+        qa = importlib.import_module("qa")
+        need("features-in-pieces.json" in qa.prompt_extra("H900 piece 1 of 2: build the first part"),
+             "a piece's build isn't told the rule")
+        need(qa.prompt_extra("H900 on the HQ roadmap: build it") == "", "a whole build got the pieces rule")
+        need("only the maker's HQ shows it" in qa.prompt_extra("QA of H900 (F56): check it"), "QA isn't told to check it")
+        # qa.py pass: open row keeps it hidden, the last piece (row done) ships it
+        rm = tmp / "roadmap.md"
+        rm.write_text("# HQ\n\n## The queue\n\n**Routine:** on\n\n## The schedule\n\nNothing.\n\n## Phase H · Features\n\n"
+                      "| | What | Detail | For | Result | |\n|---|---|---|---|---|---|\n"
+                      "| ⬜ | H900 Demo feature | in two pieces | to try | Piece 1 built. |  |\n")
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1", "HQ_FEATURES_PIECES": str(pieces)}
+        def qa_(*a):
+            return sp.run(["python3", str(ROOT / "routine/qa.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        r = qa_("pass", "H900", "piece 1 tried", "--job", "1")
+        need(r.returncode == 0 and "stays switched off" in r.stdout
+             and json.loads(pieces.read_text())["features"], f"a pass on an open row shipped it: {r.stdout}{r.stderr}")
+        rm.write_text(rm.read_text().replace("| ⬜ | H900", "| ✅ | H900"))
+        r = qa_("pass", "H900", "piece 2 tried, the whole feature", "--job", "2")
+        need(r.returncode == 0 and "on for everyone" in r.stdout and json.loads(pieces.read_text())["features"] == [],
+             f"the last piece's pass didn't ship it: {r.stdout}{r.stderr}")
+        os.environ["HQ_FEATURES_PIECES"] = str(pieces)
+        try:
+            need(not any(i["id"] == "demo" for i in ft.listing(friend)), "shipped, but still in pieces")
+        finally:
+            os.environ.pop("HQ_FEATURES_PIECES", None)
+        return "a feature in pieces: hidden on a friend's HQ, shown on the maker's; QA ships it once the last piece passes"
+
     async def flow164(self) -> str:
         """H283, no Claude: a note for the team while they work. On a copy of the roadmap (F17): jobs.py tell N adds a
         note to a running job and to a waiting one, without changing the job's own text; push.py and release.py refuse
@@ -20033,6 +20153,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     164: ("H283: a note for the team while they work: jobs.py tell N to a running or waiting job, read with notes N after each step; push.py and release.py wait while a note is unread; the first prompt carries a waiting job's notes; the status page shows them; a call tells without a yes", False, "flow164"),
     163: ("H282: Moneypenny checks everything before she answers: her craft's new lines with his words (complete picture, confirmed twice, the team's line read back, the minutes it needs), not cut short; effort high for her calls and texts, Pepper and Donna as before; the build call's checking rule", False, "flow163"),

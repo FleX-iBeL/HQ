@@ -1447,9 +1447,9 @@ const wfRows = document.getElementById("wfrows"), featPage = document.getElement
       featCount = document.getElementById("featcount");
 let featItems = [];
 function applyFeatures(items) {
-  featItems = items || [];
-  for (const f of featItems)
+  for (const f of items || [])
     for (const id of f.buttons || []) { const el = document.getElementById(id); if (el) el.classList.toggle("featoff", !f.on); }
+  featItems = (items || []).filter(f => !f.hidden);  // F56: a feature still in pieces, not on this HQ: no row at all
   const on = featItems.filter(f => f.on).length;
   if (featItems.length) featCount.textContent = `${on} of ${featItems.length} on`;
 }
@@ -1465,11 +1465,13 @@ function showWorkflows(items) {
   wfRows.replaceChildren(...featItems.map(w => {
     const row = document.createElement("div"), span = document.createElement("span"), small = document.createElement("small"),
           b = document.createElement("button");
-    row.className = "row" + (w.waiting ? " waiting" : "") + (w.fixed ? " fixed" : ""); row.dataset.feature = w.id;
+    row.className = "row" + (w.waiting ? " waiting" : "") + (w.fixed ? " fixed" : "") + (w.pieces ? " pieces" : "");
+    row.dataset.feature = w.id;
     if (w.id === "coaching") row.dataset.wf = "map";
     span.textContent = w.name;
     small.textContent = w.line + (w.line && !/[.!?]$/.test(w.line) ? "." : "")
-      + (w.fixed ? " " + w.fixed + "." : w.waiting ? ` Needs ${w.needs_name}: turn that on first.` : w.needs ? ` Needs ${w.needs_name}.` : "");
+      + (w.fixed ? " " + w.fixed + "." : w.waiting ? ` Needs ${w.needs_name}: turn that on first.` : w.needs ? ` Needs ${w.needs_name}.` : "")
+      + (w.pieces ? (w.line ? " " : "") + w.pieces + "." : "");  // F56: the maker's own HQ
     span.append(small);
     b.type = "button"; b.className = "sw" + (w.on ? " on" : ""); b.textContent = w.on ? "On" : "Off";
     b.disabled = !!(w.waiting || w.fixed);
