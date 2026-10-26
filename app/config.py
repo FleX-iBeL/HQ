@@ -1,4 +1,5 @@
 """HQ settings, in one place. Override any of them with an environment variable."""
+import json
 import re
 import os
 from pathlib import Path
@@ -621,6 +622,37 @@ PINGS_RULE = PINGS_RULE.replace("{HQ}", str(ROOT)).replace("{agent}", _direct_ag
 APPT_NOTES_RULE = APPT_NOTES_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TEAM_RULE = TEAM_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TODO_RULE = TODO_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
+
+# H247 (c): on a call or in a text, "let <the maker> know …": written up in their words, read back, sent after their yes
+# (feedback.py send --via agent), the same way as the Feedback tab. Only on an HQ connected to a maker, or a maker's own.
+FEEDBACK_RULE = """- Feedback for HQ (H247): when {user} asks you to pass something on to {maker} ("let {maker} know …", "tell \
+{maker} that … doesn't work", a bug, a wish or an idea about HQ itself), write it up in one or two sentences in their \
+own words, read it back exactly as it will go, and only after their clear yes send it: python3 "{HQ}/app/feedback.py" \
+send "THE WORDS" --via agent (add --bug when something doesn't work). Never without that yes, never more than they \
+said, never their files, notes or anything else of theirs; at most 2000 characters. Then say it's sent, or, when the \
+answer says it waits, that it goes by itself as soon as the other HQ answers. python3 "{HQ}/app/feedback.py" lists \
+what they sent with each one's status, when they ask; texts on or off sets whether they get a text when a status \
+changes."""
+
+
+def _feedback_rule() -> str:
+    try:
+        m = json.loads((DATA / "feedback-maker.json").read_text())
+        maker = " ".join(str(m.get("name") or "").split())[:60] if m.get("url") and m.get("key") else ""
+    except (OSError, ValueError, AttributeError):
+        maker = ""
+    if not maker:
+        try:
+            if json.loads((DATA / "feedback-box.json").read_text()).get("on"):
+                maker = "the person who makes HQ (that's {user}: it lands on their own planning)"
+        except (OSError, ValueError, AttributeError):
+            pass
+    if not maker:
+        return ""
+    return FEEDBACK_RULE.replace("{maker}", maker).replace("{HQ}", str(ROOT)).replace("{user}", USER)
+
+
+TODO_RULE = TODO_RULE + ("\n" + _feedback_rule() if _feedback_rule() else "")
 GAMES_RULE = GAMES_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TRAVEL_RULE = TRAVEL_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 MAIL_FAST_RULE = MAIL_FAST_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)

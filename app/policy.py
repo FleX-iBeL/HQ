@@ -485,6 +485,12 @@ class Policy:
                 return Decision(ALLOW, "the to-do list")
             return Decision(DENY, "the to-do script takes summary, json, add, done, letgo, move, tick, untick, order, "
                                   "rename, undo, blocks, plan, unplan or repeat")
+        # H247 (c): feedback for HQ, sent after their yes on a call or in a text (the rule reads it back first), the list
+        # with each one's status, and the texts' switch. Connecting to a maker is only by the link they send.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "feedback.py"):
+            if len(args) == 1 or args[1] in ("send", "texts"):
+                return Decision(ALLOW, "feedback for HQ, after their yes")
+            return Decision(DENY, "the feedback script takes send (after their yes) or texts; connecting is by the link")
         # H222: the six-week games, the workspace's own HQ/games.json: read, tick a day, count, a note, the diary, a
         # week's look back, the debrief, undo. Making a game or changing its design is the team's (new, spec), from
         # the design written in their map.

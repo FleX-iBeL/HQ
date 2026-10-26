@@ -157,6 +157,21 @@ function sprint() {
   });
 }
 
+// H247 (b): who may send feedback to this HQ's mailbox (app/feedback_box.py list); asked at most every 20 seconds.
+let senders = { at: 0, data: null };
+function feedbackBox(args, cacheMs = 0) {
+  if (cacheMs && Date.now() - senders.at < cacheMs) return Promise.resolve(senders.data);
+  return new Promise((resolve) => {
+    execFile('/usr/bin/python3', [join(root, 'app/feedback_box.py'), ...args], { timeout: 30000, cwd: root }, (err, out) => {
+      let data = null;
+      try { data = JSON.parse(String(out)); } catch {}
+      if (args[0] === 'list') senders = { at: Date.now(), data };
+      else senders.at = 0;
+      resolve(data);
+    });
+  });
+}
+
 // H184: the usage from the other HQ. Paired (role.json with a peer), this page asks the other's own reading
 // (GET /usage.json?own=1, its saved file only, so two pages never ask each other in a loop) and shows whichever
 // was read last; when the other can't be reached, or has no reading, its own. Only the usage: everything else on
@@ -265,8 +280,8 @@ async function routines() {
   const stats = await read(join(root, '.status/stats.json'));
   // H45: whether the laptop keeps working with the lid closed (routine/lidsleep.py, every minute).
   const lidsleep = await read(join(root, '.status/lidsleep.json'));
-  const [estimate, planning] = await Promise.all([estimates(), sprint()]);
-  return { now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning };
+  const [estimate, planning, feedback] = await Promise.all([estimates(), sprint(), feedbackBox(['list'], 20000)]);
+  return { now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback };
 }
 
 // H23: every minute the state of each routine is written down, also when the helper is gone (its lines then
@@ -517,6 +532,26 @@ const server = createServer(async (req, res) => {
       const said = String(err ? errOut || out : out).trim();
       res.writeHead(err ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ ok: !err, said }));
     });
+    return;
+  }
+  // H247 (b): "Invite someone to send feedback": a key for one person and the link to send them, or a key taken back
+  // (app/feedback_box.py invite NAME, revoke ID). Only with the mailbox on; the POST needs the x-hq header.
+  if (path0 === '/api/feedback-senders' && req.method === 'POST') {
+    if (req.headers['x-hq'] !== 'feedback') {
+      res.writeHead(403).end('Only the HQ page can invite or take a key back');
+      return;
+    }
+    let body = {};
+    try { body = JSON.parse(await readBody(req)); } catch {}
+    const name = String(body.invite ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    const id = String(body.revoke ?? '').trim();
+    if (!name && !/^k[0-9a-f]{8}$/.test(id)) {
+      res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'A name to invite, or a key to take back.' }));
+      return;
+    }
+    const out = await feedbackBox(name ? ['invite', name] : ['revoke', id]);
+    res.writeHead(out && !out.error ? 200 : 400, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      .end(JSON.stringify(out ?? { error: 'It didn\'t answer.' }));
     return;
   }
   // H271: a row's MoSCoW tag from the sprint view (Must, Should, Could, Won't this time, or off), through

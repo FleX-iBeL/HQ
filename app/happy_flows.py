@@ -16196,6 +16196,264 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
                 os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
         return "one line per event in the mail check, Closed on the mail list and in the rules, readers fine, one text per event"
 
+    async def flow159(self) -> str:
+        """H247 pieces (b) and (c), no Claude: feedback from someone else's HQ to the maker's, end to end, with two HQs
+        on this computer (never the real planning, F17). The maker's mailbox (feedback_box.py) runs on its own port with
+        a throwaway planning; the sender is a second HQ (its own feedback list and maker settings). Before a link the
+        sender has no Feedback tab; the invite makes one key (only its hash kept) and a link; connecting checks it with
+        the mailbox; what the sender had sent on its own planning goes across; a typed send and a send from a call
+        (--via agent, a bug) land as U rows with the name the maker gave, never the sender's own claim; the status
+        comes back (looked at, planned) with a text when it changes, none with the switch off; offline it waits and
+        goes later; a retry never makes a second row; too long and too many are refused; a wrong or taken-back key gets
+        nothing in; only the mailbox's own paths answer. The call and text rule (read back, a yes, --via agent) and
+        the policy (send and texts, never connect from a call)."""
+        import socket
+        import feedback as fbk
+        import feedback_box as box
+        d = self.tmp / "h247b"
+        shutil.rmtree(d, ignore_errors=True)
+        (d / "maker").mkdir(parents=True)
+        (d / "sender").mkdir(parents=True)
+        mrm = d / "maker" / "roadmap.md"
+        mrm.write_text((APP.parent / "template" / "HQ" / "roadmap.md").read_text())
+        srm = d / "sender" / "roadmap.md"
+        srm.write_text((APP.parent / "template" / "HQ" / "roadmap.md").read_text())
+        with socket.socket() as so:
+            so.bind(("127.0.0.1", 0))
+            port = so.getsockname()[1]
+        url = f"http://127.0.0.1:{port}/hq/feedback"
+        menv = {**os.environ, "HQ_FEEDBACK_BOX": str(d / "maker" / "box.json"), "HQ_FEEDBACK_KEYS": str(d / "maker" / "keys.json"),
+                "HQ_FEEDBACK_ROADMAP": str(mrm), "HQ_ROADMAP": str(mrm), "HQ_SPRINT": str(d / "maker" / "sprint.json"),
+                "HQ_USER_NAME": "Maker", "HQ_ROLE_HERE": "1"}
+        (d / "maker" / "box.json").write_text(json.dumps({"on": True, "url": url, "port": port}))
+        def start_box():
+            pr = subprocess.Popen([sys.executable, str(APP / "feedback_box.py"), "serve", "--port", str(port)], env=menv,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for _ in range(50):
+                with socket.socket() as so:
+                    if so.connect_ex(("127.0.0.1", port)) == 0:
+                        return pr
+                time.sleep(0.1)
+            pr.kill()
+            raise AssertionError("the mailbox didn't start")
+        def mb(*a):
+            r = run([sys.executable, str(APP / "feedback_box.py"), *a], env=menv, timeout=60)
+            return json.loads(r.stdout or "{}")
+        def raw(path, body, key="", length=None):
+            data = body if isinstance(body, bytes) else json.dumps(body).encode()
+            req = urllib.request.Request(url + path, data=data, method="POST",
+                                         headers={"content-type": "application/json", "authorization": f"Bearer {key}"})
+            try:
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read() or b"{}")
+        keep = {k: os.environ.get(k) for k in ("HQ_FEEDBACK", "HQ_FEEDBACK_MAKER", "HQ_FEEDBACK_BOX", "HQ_FEEDBACK_ROADMAP",
+                                                 "HQ_ROADMAP", "HQ_SPRINT", "HQ_FEEDBACK_INSECURE", "HQ_USER_NAME", "HQ_ROLE_HERE")}
+        os.environ.update({"HQ_FEEDBACK": str(d / "sender" / "feedback.json"), "HQ_FEEDBACK_MAKER": str(d / "sender" / "maker.json"),
+                           "HQ_FEEDBACK_BOX": str(d / "sender" / "no-box.json"), "HQ_FEEDBACK_ROADMAP": str(srm),
+                           "HQ_ROADMAP": str(srm), "HQ_SPRINT": str(d / "sender" / "sprint.json"), "HQ_FEEDBACK_INSECURE": "1",
+                           "HQ_USER_NAME": "Mel's own claim", "HQ_ROLE_HERE": "1"})
+        texts = []
+        say = lambda why, facts: texts.append((why, facts))
+        pr = start_box()
+        try:
+            r0 = fbk.read()
+            need(not r0["shown"] and not r0["connected"], f"an HQ that isn't connected shows the Feedback tab: {r0}")
+            early = fbk.send("Sent before the link")  # on its own planning, as piece (a) did
+            need(early.get("row") == "U1" and "U1 Sent before the link" in srm.read_text(), f"the local send before a link: {early}")
+            inv = mb("invite", "Mel")
+            link = inv.get("link", "")
+            need(link.startswith(url + "/join#t=") and inv.get("id", "").startswith("k"), f"the invite gives no link: {inv}")
+            kdata = (d / "maker" / "keys.json").read_text()
+            key = fbk._read_link(link)["k"]
+            need(key not in kdata and box._hash(key) in kdata, "the key itself is kept on the maker's HQ (only its hash may be)")
+            need(oct(os.stat(d / "maker" / "keys.json").st_mode)[-3:] == "600", "the keys file can be read by others")
+            # only the mailbox's own paths answer; a wrong key gets nothing
+            with urllib.request.urlopen(url + "/join", timeout=10) as r:
+                jp = r.read().decode()
+                need(r.status == 200 and "default-src 'none'" in r.headers.get("content-security-policy", ""), "the join page has no CSP")
+            need("textContent" in jp and "innerHTML" not in jp, "the join page puts the link's words in as HTML")
+            for bad in ("/", "/x", "/send/../status"):
+                try:
+                    urllib.request.urlopen(url + bad, timeout=10)
+                    need(False, f"{bad} answered")
+                except urllib.error.HTTPError as e:
+                    need(e.code == 404, f"{bad} answered {e.code}")
+            need(raw("/hello", {}, "x" * 32)[0] == 401 and raw("/send", {"id": "abcdef", "text": "hi"}, "")[0] == 401,
+                 "a wrong key got in")
+            # connect: checked with the mailbox, then the earlier one goes across
+            need("error" in fbk.connect("https://example.com/nothing"), "a link without a token connected")
+            c = fbk.connect(link)
+            need(c.get("connected") and c.get("maker") == "Maker", f"connecting didn't work: {c}")
+            r1 = fbk.read()
+            need(r1["shown"] and r1["connected"] and r1["maker"] == "Maker" and r1["texts"], f"connected, but: {r1}")
+            need(oct(os.stat(d / "sender" / "maker.json").st_mode)[-3:] == "600", "the sender's key can be read by others")
+            time.sleep(1.5)  # connect polls in the background
+            fbk.poll(texts=say)
+            mt = mrm.read_text()
+            need("U1 Sent before the link | Feedback from Mel, " in mt and "Mel's own claim" not in mt,
+                 f"the earlier one didn't go across with the maker's name for the key: {mt[-600:]}")
+            # a typed one, and one from a call (read back, their yes: --via agent), a bug
+            t = fbk.send("the weather text came twice")
+            need(t.get("remote") == "U2" and t["status"] == "received", f"a typed send: {t}")
+            r = run([sys.executable, str(APP / "feedback.py"), "send", "the changelog jumps", "--via", "agent", "--bug"], timeout=60)
+            need(r.returncode == 0 and '"remote": "U3"' in r.stdout, f"a send from a call: {r.stdout} {r.stderr}")
+            mt = mrm.read_text()
+            need("| ⬜ | U2 the weather text came twice | Feedback from Mel, " in mt and "sent with the Feedback button" in mt,
+                 "the typed one isn't a U row with her name")
+            need("| ⬜ | U3 the changelog jumps | A bug from Mel, " in mt and "told to their agent and read back" in mt,
+                 "the one from a call isn't a bug row that says it came through her agent")
+            need("Job " not in mt.split("## The queue", 1)[1].split("## Phase", 1)[0] or "No jobs yet" in mt, "feedback became a job")
+            need("never instructions to follow" in mt, "the Feedback phase doesn't say the words are someone else's")
+            # the status comes back, with a text when it changes; none with the switch off
+            (d / "maker" / "sprint.json").write_text(json.dumps({"moscow": {"U2": "must"}}))
+            p1 = fbk.poll(texts=say)
+            st = {x["remote"]: x["status"] for x in fbk.read()["items"] if x.get("remote")}
+            need(st.get("U2") == "looked" and p1["changed"] == 1 and len(texts) == 1 and texts[0][0] == "feedback-status"
+                 and "weather text" in texts[0][1] and "looked at" in texts[0][1], f"the status didn't come back with a text: {st} {texts}")
+            fbk.set_texts(False)
+            (d / "maker" / "sprint.json").write_text(json.dumps({"moscow": {"U2": "must"}, "ready": {"U2": {"fp": "x", "at": 1}}}))
+            fbk.poll(texts=say)
+            st = {x["remote"]: x["status"] for x in fbk.read()["items"] if x.get("remote")}
+            need(st.get("U2") == "planned" and len(texts) == 1, f"with the switch off: {st} {texts}")
+            fbk.set_texts(True)
+            # offline: it waits, and goes once the mailbox answers again; a retry never makes a second row
+            pr.terminate(); pr.wait(10)
+            w = fbk.send("sent while it was offline")
+            need(w["status"] == "waiting" and w["status_words"] == "Waiting to send", f"offline it didn't wait: {w}")
+            pr = start_box()
+            fbk.poll(texts=say)
+            rows_of = lambda words: len(re.findall(rf"^\| ⬜ \| U\d+ {re.escape(words)} \|", mrm.read_text(), re.M))
+            need(rows_of("sent while it was offline") == 1, "the waiting one didn't go once it was back")
+            item = next(x for x in fbk.read()["items"] if x["text"] == "sent while it was offline")
+            again = raw("/send", {"id": item["id"], "text": item["text"]}, key)
+            need(again[0] == 200 and again[1].get("again") and rows_of("sent while it was offline") == 1,
+                 f"a retry made a second row: {again}")
+            # too long, too many
+            need("error" in fbk.send("x" * 2001), "more than 2000 characters was taken by the sender")
+            need(raw("/send", {"id": "abcdef0123", "text": "y" * 2001}, key)[0] == 413, "the mailbox took more than 2000 characters")
+            need(raw("/send", b"{" + b" " * 9000 + b"}", key)[0] == 413, "the mailbox read a body over its limit")
+            kd = json.loads((d / "maker" / "keys.json").read_text())
+            kd["keys"][0]["days"] = {time.strftime("%Y-%m-%d"): 20}
+            (d / "maker" / "keys.json").write_text(json.dumps(kd))
+            need(raw("/send", {"id": "abcdef0124", "text": "the 21st"}, key)[0] == 429 and "the 21st" not in mrm.read_text(),
+                 "a 21st message in a day got in")
+            kd["keys"][0]["days"] = {}
+            (d / "maker" / "keys.json").write_text(json.dumps(kd))
+            # a message is words only: a control character or a | can't break the planning's table
+            raw("/send", {"id": "abcdef0125", "text": "a | b\x00c <script>x</script>"}, key)
+            need("a / b c <script>x</script> |" in mrm.read_text(), "a message with a | or a control character broke the row")
+            # taken back: nothing more gets in, and the sender is told
+            rv = mb("revoke", "Mel")
+            need(rv.get("names") == ["Mel"], f"taking the key back: {rv}")
+            before = mrm.read_text()
+            g = fbk.send("after it was taken back")
+            need(g["status"] == "waiting" and "taken back" in (g.get("error") or ""), f"a taken-back key wasn't told: {g}")
+            need(mrm.read_text() == before, "a taken-back key got something in")
+            need(raw("/hello", {}, key)[0] == 401, "a taken-back key still says hello")
+            lst = mb("list")
+            need(lst["keys"][0]["revoked"] and lst["keys"][0]["sent"] >= 5, f"the list of senders: {lst}")
+        finally:
+            pr.terminate()
+            for k, v in keep.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        # (c): the call and text rule, and what a call may run
+        import config
+        (d / "rule").mkdir(exist_ok=True)
+        saved = config.DATA
+        try:
+            config.DATA = d / "rule"
+            need(config._feedback_rule() == "", "the rule is there for an HQ that isn't connected")
+            (d / "rule" / "feedback-maker.json").write_text(json.dumps({"name": "Maker", "url": "https://x.example/hq/feedback", "key": "k" * 32}))
+            rule = config._feedback_rule()
+        finally:
+            config.DATA = saved
+        need('"let Maker know' in rule and "read it back" in rule and "clear yes" in rule and "--via agent" in rule
+             and "never their files" in rule, f"the call rule for feedback is wrong: {rule}")
+        import policy
+        pol = policy.Policy(folder=self.tmp)
+        ok = pol.decide("Bash", {"command": f'python3 "{APP}/feedback.py" send "the changelog jumps" --via agent'})
+        no = pol.decide("Bash", {"command": f'python3 "{APP}/feedback.py" connect "https://x"'})
+        need(ok.verdict == policy.ALLOW and no.verdict == policy.DENY, f"the policy: send {ok}, connect {no}")
+        return ("two HQs: invite, connect, the earlier one across, typed and call sends as U rows with the maker's name, the "
+                "status back with a text (none when off), offline waits, no second row on a retry, limits, words only, a "
+                "taken-back key gets nothing; the rule reads back and waits for a yes; a call may send, never connect")
+
+    async def flow160(self) -> str:
+        """H247 (b), no Claude: the pages. The real call page in a headless browser (phone size), its fetches stubbed:
+        not connected and not a maker, the notes sheet has no Feedback tab and Settings offers Connect; connected, the
+        tab shows, the feedback list has the texts' switch and a waiting one says so; opened with ?feedback-join=… (the
+        maker's link, tapped), one OK connects it (a POST with that link) and the address is cleaned. The status page
+        draws "Invite someone to send feedback" with Take back only when the mailbox is on, and its server takes an
+        invite only from the page (the x-hq header)."""
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the call page in")
+        page = (APP / "web/index.html").read_text()
+        stub = r"""<script>
+window.__posts = [];
+window.confirm = () => true; window.alert = () => {};
+const __on = location.search.includes("connected");
+const __fb = () => ({ items: __on ? [{ id: "abc123", when: "2026-10-26 14:00", text: "the weather text came twice", status: "waiting", status_words: "Waiting to send", to: "Maker" }] : [],
+                      connected: __on, maker: __on ? "Maker" : "", texts: true, is_maker: false, shown: __on });
+window.fetch = async (u, o) => {
+  if (String(u).includes("api/feedback")) {
+    if (o && o.method === "POST") { window.__posts.push(o.body); return { ok: true, json: async () => ({ done: { connected: true }, ...__fb(), connected: true, shown: true, maker: "Maker" }) }; }
+    return { ok: true, json: async () => __fb() };
+  }
+  return { ok: true, json: async () => ({ lines: [], calls: [], items: [], events: [], calendars: [] }) };
+};</script>"""
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms)), q = location.search;
+  await wait(900);
+  const tab = document.getElementById("notesmode"), row = document.getElementById("fbrow");
+  if (q.includes("join")) {
+    const p = window.__posts.map(b => JSON.parse(b));
+    out.push("join-posts:" + (p.length === 1 && p[0].connect && p[0].connect.length > 20 ? "ok" : "WRONG " + JSON.stringify(p)));
+    out.push("join-cleaned:" + (!location.search.includes("feedback-join") ? "ok" : "WRONG " + location.search));
+    out.push("join-tab:" + (!tab.hidden ? "ok" : "WRONG"));
+  } else if (q.includes("connected")) {
+    out.push("tab-shown:" + (!tab.hidden ? "ok" : "WRONG"));
+    out.push("settings-stop:" + (document.getElementById("fbconn").textContent === "Stop" && /Maker/.test(document.getElementById("fbrownote").textContent) ? "ok" : "WRONG"));
+    showNotes(true); await wait(100); setNotesMode("feedback"); await wait(400);
+    const st = document.querySelector("#noteslist .fbstat");
+    out.push("texts-switch:" + (document.getElementById("fbtexts") ? "ok" : "WRONG"));
+    out.push("waiting:" + (st && st.classList.contains("waiting") && st.textContent === "Waiting to send" ? "ok" : "WRONG " + (st && st.outerHTML)));
+  } else {
+    out.push("tab-hidden:" + (tab.hidden && getComputedStyle(tab).display === "none" ? "ok" : "WRONG"));
+    out.push("settings-connect:" + (!row.hidden && document.getElementById("fbconn").textContent === "Connect" ? "ok" : "WRONG"));
+    document.getElementById("fbconn").click(); await wait(50);
+    out.push("paste-row:" + (!document.getElementById("fbpasterow").hidden ? "ok" : "WRONG"));
+  }
+  const pre = document.createElement("pre"); pre.textContent = "H247RESULT " + out.join(" | ") + " END";
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        f2 = self.tmp / "h247b.html"
+        f2.write_text(page.replace('<link rel="manifest"', stub + '<link rel="manifest"', 1).replace("</body>", harness + "</body>", 1))
+        tok = "eyJ2IjoxLCJ1IjoiaHR0cHM6Ly94LmV4YW1wbGUvaHEvZmVlZGJhY2siLCJrIjoia2tra2tra2tra2tra2tra2tra2tra2trayIsIm4iOiJNYWtlciJ9"
+        said = []
+        for name, q in (("plain", "?plain"), ("connected", "?connected"), ("join", f"?join&feedback-join={tok}")):
+            r = run([chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                     "--window-size=390,844", f"--user-data-dir={self.tmp / ('h247b-' + name)}", "--virtual-time-budget=20000",
+                     "--dump-dom", f2.as_uri() + q], timeout=120)
+            m = re.search(r"H247RESULT (.*?) END", r.stdout)
+            need(m, f"the page didn't run ({name}): {r.stderr[-400:]}")
+            need("WRONG" not in m.group(1), f"{name}: {m.group(1)}")
+            said.append(m.group(1))
+        st = (ROOT / "status" / "index.html").read_text()
+        for bit in ("function drawSenders", "Invite someone to send feedback", "'Take back'", "routines?.feedback?.on", "'x-hq': 'feedback'"):
+            need(bit in st, f"the status page misses {bit}")
+        sv = (ROOT / "status" / "server.mjs").read_text()
+        need("/api/feedback-senders" in sv and "req.headers['x-hq'] !== 'feedback'" in sv and "feedbackBox(['list'], 20000)" in sv,
+             "the status server doesn't take invites only from the page")
+        return "the call page: no tab until connected, Connect in Settings, the tab and the texts' switch when connected, the link connects in one OK; the status page's invite"
+
     async def flow157(self) -> str:
         """H247, piece (a): feedback straight onto the planning in its own phase. No Claude turns. On a throwaway copy
         of a fresh roadmap: jobs.py feedback makes Phase U · Feedback (before Parked, or at the end) and a row each,
@@ -19324,6 +19582,8 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    160: ("H247 (b): the pages: no Feedback tab until connected, Connect in Settings, the link connects in one tap, the texts' switch; the status page's Invite someone to send feedback", False, "flow160"),
+    159: ("H247 (b) and (c): feedback from someone else's HQ to the maker's mailbox, end to end with two HQs: invite, connect, typed and call sends, status back, texts switch, offline retry, limits, a taken-back key", False, "flow159"),
     158: ("H248: one alert per event, not per mail: the mail check keeps one line per event with how many mails and when, a later mail into its line, and skips what's Closed; Closed on the mail list and in the call and chat rules; Donna texts once for two lines from one sender on one day", False, "flow158"),
     157: ("H247, piece (a): feedback straight onto the planning in its own phase (Phase U), one row each with who and when, bugs as bugs, never a job; each one's status back to the sender; the server and the notes sheet's Feedback tab", False, "flow157"),
     156: ("H245: items that come back: a rule set loosely, ticked off back at its place with its next date and notes, undo, let go and off; calls, the backup, the server and the item's Comes back on the phone", False, "flow156"),

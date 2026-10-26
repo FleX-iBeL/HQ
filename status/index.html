@@ -297,6 +297,12 @@
       .team-send { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
       .team-send .chip[data-armed="yes"] { border-color: var(--accent, var(--ink)); font-weight: 600; }
       .team-send .said { font-size: 13px; color: var(--soft); }
+      /* H247 (b): who may send feedback, and the invite link to send them. */
+      .senders .row { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--rule); }
+      .senders .row .what { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+      .senders form { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; }
+      .senders input { flex: 1; min-width: 10em; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--rule); background: transparent; color: inherit; font: inherit; }
+      .senders .link { font-size: 13px; overflow-wrap: anywhere; user-select: all; padding: 8px 10px; border: 1px dashed var(--rule); border-radius: 10px; margin: 6px 0; }
       /* H269: the sprint view: the planning's rows to tick, laid over the nights, a line where the room runs out. */
       .sprint-pick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 10px; }
       .sprint-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--rule); }
@@ -1157,6 +1163,64 @@
         card.append(el('p', 'soft', 'Ready leaves out what\'s already planned, so the three add up to the total. Planned is with the team or planned for a night.'));
         fold.append(card);
         return fold;
+      }
+      // H247 (b): the feedback mailbox's senders. Invite makes one key for one person and shows the link to send them
+      // yourself (WhatsApp, a message); tapping it with their HQ open connects it, nothing to type. Take back stops a key.
+      let invited = null, senderName = '';
+      function drawSenders(F) {
+        const box = el('section', 'senders');
+        const live = (F.keys || []).filter((k) => !k.revoked);
+        const fold = foldPart('senders', false, 'Feedback from others', `${live.length} can send feedback${live.length ? '' : ' yet'}`);
+        const card = el('div', 'card');
+        const form = el('form');
+        const name = el('input');
+        name.placeholder = 'Their name'; name.maxLength = 60; name.value = senderName;
+        name.addEventListener('input', () => { senderName = name.value; }); name.setAttribute('aria-label', 'Their name');
+        const go = el('button', 'chip', 'Invite someone to send feedback');
+        go.type = 'submit';
+        const said = el('div', 'soft');
+        form.append(name, go);
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          if (!name.value.trim()) { said.textContent = 'Their name first.'; return; }
+          go.disabled = true;
+          try {
+            const r = await fetch('/api/feedback-senders', { method: 'POST', headers: { 'x-hq': 'feedback', 'content-type': 'application/json' }, body: JSON.stringify({ invite: name.value }) });
+            const d = await r.json().catch(() => null);
+            if (r.ok && d?.link) { invited = d; senderName = ''; said.textContent = ''; last = ''; tick(); return; }
+            said.textContent = d?.error || 'That didn\'t work. Try again.';
+          } catch { said.textContent = 'That didn\'t work. Try again.'; }
+          go.disabled = false;
+        });
+        card.append(el('div', 'soft', 'Make a link for one person and send it to them yourself. When they tap it with their HQ open, its Feedback tab appears, and what they send lands here on the planning under Feedback, with their name.'), form, said);
+        if (invited) {
+          card.append(el('div', '', `The link for ${invited.name}, send it to them yourself:`));
+          const l = el('div', 'link', invited.link);
+          const copy = el('button', 'chip', 'Copy the link');
+          copy.addEventListener('click', () => navigator.clipboard?.writeText(invited.link).then(() => { copy.textContent = 'Copied'; }, () => { copy.textContent = 'Select it above and copy'; }));
+          card.append(l, copy);
+        }
+        for (const k of F.keys || []) {
+          const row = el('div', 'row');
+          const what = el('div', 'what', k.name);
+          what.append(el('div', 'soft', k.revoked ? `Taken back ${k.revoked}` : `Invited ${k.made} · ${k.sent ? `${k.sent} sent${k.last ? `, last ${k.last}` : ''}` : 'nothing sent yet'}`));
+          row.append(what);
+          if (!k.revoked) {
+            const b = el('button', 'chip', 'Take back');
+            b.addEventListener('click', async () => {
+              if (b.dataset.armed !== 'yes') { b.dataset.armed = 'yes'; b.textContent = 'Take it back?'; return; }
+              b.disabled = true;
+              const r = await fetch('/api/feedback-senders', { method: 'POST', headers: { 'x-hq': 'feedback', 'content-type': 'application/json' }, body: JSON.stringify({ revoke: k.id }) }).catch(() => null);
+              b.textContent = r?.ok ? 'Taken back' : 'That didn\'t work';
+              if (r?.ok) setTimeout(() => { last = ''; tick(); }, 500);
+            });
+            row.append(b);
+          }
+          card.append(row);
+        }
+        fold.append(card);
+        box.append(fold);
+        return box;
       }
       function drawSprint(P) {
         const box = el('section', 'sprint');
@@ -2209,6 +2273,8 @@
         // when it should be done and its share of the 5-hour and weekly room, and a line where the room runs out. Plan
         // the sprint plans the ticked rows for the team in that order from the night picked (a second tap to be sure).
         if (routines?.planning?.rows) app.append(drawSprint(routines.planning));
+        // H247 (b): with this HQ's feedback mailbox on, who may send feedback, and "Invite someone to send feedback".
+        if (routines?.feedback?.on) app.append(drawSenders(routines.feedback));
 
         // H15: Recent activity folds open and closed, like the job list.
         if (s.log.length) {
@@ -2338,7 +2404,7 @@
           // Also once a minute, so "read 4 min ago" and "resets in" stay true.
           let routines = null;
           try { routines = JSON.parse(routinesText); } catch { routines = null; }
-          const lines = routines ? JSON.stringify([routines.routines, routines.incidents, routines.temperature, routines.battery, routines.stats, routines.lidsleep, routines.estimate, routines.planning]) : '';
+          const lines = routines ? JSON.stringify([routines.routines, routines.incidents, routines.temperature, routines.battery, routines.stats, routines.lidsleep, routines.estimate, routines.planning, routines.feedback]) : '';
           const key = `${text}\n${usageText}\n${lines}\n${Math.floor(Date.now() / 60000)}`;
           // H23: the graph's history, once a minute (and when the time span or a routine is switched).
           if (key !== last) { await loadUptime(); await loadTemp(); }

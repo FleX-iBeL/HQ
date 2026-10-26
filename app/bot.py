@@ -591,7 +591,17 @@ if __name__ == "__main__":
             ask = await request.json()
         except Exception:
             ask = None
-        if not isinstance(ask, dict) or not isinstance(ask.get("text"), str):
+        if not isinstance(ask, dict):
+            return JSONResponse({"error": "nothing to send"}, status_code=400)
+        # H247 (b): connect to a maker with their link (after a tap on Connect), stop, or the texts' switch
+        if isinstance(ask.get("connect"), str) or ask.get("disconnect") is True or isinstance(ask.get("texts"), bool):
+            res = await asyncio.to_thread(_feedback.connect, ask["connect"]) if isinstance(ask.get("connect"), str) else \
+                await asyncio.to_thread(_feedback.disconnect) if ask.get("disconnect") is True else \
+                await asyncio.to_thread(_feedback.set_texts, ask["texts"])
+            if "error" in res:
+                return JSONResponse(res, status_code=400)
+            return JSONResponse({"done": res, **(await asyncio.to_thread(_feedback.read))}, headers=_NO_CACHE)
+        if not isinstance(ask.get("text"), str):
             return JSONResponse({"error": "nothing to send"}, status_code=400)
         res = await asyncio.to_thread(_feedback.send, ask["text"], ask.get("bug") is True)
         if "error" in res:

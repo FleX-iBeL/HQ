@@ -390,6 +390,7 @@ PLAIN = {
     "game": ["Your game today: {facts}",
              "Quick one about your game: {facts}"],
     "game-away": ["Heads up, today's a bit different: {facts}"],
+    "feedback-status": ["News on your feedback: {facts}"],  # H247 (c)
     "travel": ["Heads up for your trip: {facts}",
                "Change on your way there: {facts}"],
     "missed-call": ["Missed call. {facts}",
@@ -497,6 +498,9 @@ def _extensions_rule() -> str:
 # Her kinds of texts, what each is for. H235: an extension's own kind is looked up after these (extensions.text_kind),
 # so HQ's own always lead; the update's clash check reads these names.
 KINDS = {
+    "feedback-status": "Feedback he sent to the person who makes HQ has a new status (the facts say what he sent and "
+                       "what it is now: received, looked at, planned, being built, done or not doing it). One short, "
+                       "warm line saying so, in his words for what he sent, no numbers or codes.",
     "jobs": "The dev team at HQ (the specialists he hands his builds to) just finished up everything they had. "
             "Text him one short, cool line that the team's done, like a colleague passing it on. In his words: "
             "\"When they are done building, there should be a cool message, something about how they finished "

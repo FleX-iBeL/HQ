@@ -172,6 +172,10 @@ What works the same everywhere: the call page, the voice (Kokoro), Claude Code, 
 
 ---
 
+## Feedback from the people using your HQ (for the one who makes it)
+
+Only for the person who builds HQ for others. `python3 app/feedback_box.py setup` turns on a small feedback mailbox on this computer: it listens on this computer only and is reached from the internet through Tailscale Funnel on one HTTPS path (`https://<this computer>.<tailnet>.ts.net:10000/hq/feedback`), nothing else; Funnel must be allowed for this machine in the Tailscale admin, and whatever port 10000 served inside the tailnet before is taken off it, so check it isn't in use. The routine keeps it running. On the Status page, Feedback from others, Invite someone to send feedback makes one link per person; they tap it with their HQ open and it connects itself. `python3 app/feedback_box.py off` closes it again. The keys are kept in the workspace, only as hashes.
+
 ## Sharing changes: the privacy check
 
 HQ is public, so nothing of anyone's own may go in it: their notes stay in `workspace/`. Before pushing a change to HQ, run

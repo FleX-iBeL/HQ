@@ -637,6 +637,11 @@
   #noteslist .fbstat { flex-shrink:0; align-self:center; font-size:12px; font-weight:600; padding:3px 8px; border-radius:999px; background:color-mix(in srgb, var(--accent) 16%, var(--bg)); color:var(--fg); }
   #noteslist .fbstat.done { background:color-mix(in srgb, #16a34a 22%, var(--bg)); }
   #noteslist .fbstat.wont { background:color-mix(in srgb, var(--fg) 8%, var(--bg)); color:var(--muted); }
+  #notesmode[hidden], #fbrow[hidden], #fbpasterow[hidden] { display:none; }
+  #fbpaste { flex:1; min-width:0; padding:8px 10px; border-radius:10px; border:1px solid color-mix(in srgb, var(--fg) 18%, var(--bg)); background:transparent; color:var(--fg); font:15px -apple-system,sans-serif; }
+  #noteslist .fbstat.waiting { background:color-mix(in srgb, var(--fg) 8%, var(--bg)); color:var(--muted); }
+  #noteslist .fberr { display:block; color:#b45309; font-size:12px; }
+  #noteslist .fbtexts { display:flex; justify-content:space-between; align-items:center; gap:10px; color:var(--muted); font-size:14px; padding:4px; }
   #noteslist .fbintro { color:var(--muted); font-size:14px; padding:4px; line-height:1.35; }
   #notesnote { color:var(--muted); font-size:13px; min-height:0; text-align:center; }
   #notesnote:empty { display:none; }
@@ -1090,6 +1095,8 @@
   <div class="row devrow" id="nosinkrow" hidden><span>Sound<small id="nosinknote">This browser can't choose where her voice plays</small></span></div>
   <div class="row"><span>Thinking sound<small>A soft tick while she thinks</small></span><button id="sound" class="sw" type="button" aria-pressed="true">On</button></div>
   <div class="row" id="lookrow"><span>Look<small id="looknote">Light or dark, or the same as this device</small></span><select id="look" class="dev" aria-label="Look"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
+  <div class="row" id="fbrow"><span>Feedback<small id="fbrownote">Got a feedback link from the person who makes your HQ? Connect it here</small></span><button id="fbconn" class="sw" type="button">Connect</button></div>
+  <div class="row" id="fbpasterow" hidden><input id="fbpaste" type="url" placeholder="Paste the link" aria-label="The feedback link" autocomplete="off" spellcheck="false"><button id="fbpastego" class="sw" type="button">Connect</button></div>
   <div class="row" id="featrow"><span>What HQ helps you with<small id="featcount">Turn on what you want to use</small></span><button id="featopen" class="sw" type="button" aria-controls="featpage" aria-label="What HQ helps you with">Open ›</button></div>
   <div id="featpage" hidden><button id="featback" type="button">‹ Settings</button>
     <p id="featintro">Turn on what you want HQ to help you with. Off takes its button away and the rest moves up; turn it back on any time.</p>
@@ -1102,7 +1109,7 @@
 <div id="statsheet" role="dialog" aria-label="Status"><div id="stathead"><h2>Status</h2><button id="statclose" type="button">Close</button></div><iframe id="statframe" title="Status" src="about:blank"></iframe></div>
 <div id="histsheet" role="dialog" aria-label="Past calls"><div id="histhead"><button id="histback" type="button">‹ Calls</button><h2 id="histtitle">Past calls</h2><button id="histclose" type="button">Close</button></div><div id="histlist"></div><div id="histlog"></div><div id="histfoot"><button id="histcont" type="button">Continue this call</button><small id="histcontnote"></small></div></div>
 <div id="notesheet" role="dialog" aria-label="Notes"><div id="noteshead"><h2>Notes</h2><button id="notesclose" type="button">Close</button></div>
-  <div id="notesmode" role="tablist" aria-label="Notes or feedback"><button type="button" role="tab" data-mode="notes" aria-selected="true">My notes</button><button type="button" role="tab" data-mode="feedback" aria-selected="false">Feedback</button></div>
+  <div id="notesmode" role="tablist" aria-label="Notes or feedback" hidden><button type="button" role="tab" data-mode="notes" aria-selected="true">My notes</button><button type="button" role="tab" data-mode="feedback" aria-selected="false">Feedback</button></div>
   <div id="noteslist"></div>
   <div id="notesundo" role="status" hidden><span id="notesundotxt"></span><button id="notesundobtn" type="button">Undo</button></div>
   <label id="fbbug" hidden><input type="checkbox" id="fbbugin"> It's a bug, something that doesn't work</label>
@@ -2466,16 +2473,83 @@ function setNotesMode(m) {
   notesList.innerHTML = ""; loadNotes();
 }
 for (const b of document.querySelectorAll("#notesmode button")) b.addEventListener("click", () => { if (b.dataset.mode !== notesMode) setNotesMode(b.dataset.mode); });
+// H247 (b): until this HQ is connected to a maker (the link they send) or is a maker itself (its mailbox on), the
+// Feedback tab doesn't show at all. Connected, what's sent goes to the maker's planning, and waits here when offline.
+const fbMode = document.getElementById("notesmode"), fbRow = document.getElementById("fbrow"), fbRowNote = document.getElementById("fbrownote");
+const fbConn = document.getElementById("fbconn"), fbPasteRow = document.getElementById("fbpasterow"), fbPaste = document.getElementById("fbpaste");
+let fbState = null;
+function fbApply(d) {
+  if (!d || !Array.isArray(d.items)) return;
+  fbState = d;
+  fbMode.hidden = !d.shown;
+  if (!d.shown && notesMode === "feedback") setNotesMode("notes");
+  fbRow.hidden = !!d.is_maker && !d.connected;
+  fbRowNote.textContent = d.connected ? `Connected: what you send in the Feedback tab goes to ${d.maker}`
+    : "Got a feedback link from the person who makes your HQ? Connect it here";
+  fbConn.textContent = d.connected ? "Stop" : "Connect";
+  if (d.connected) fbPasteRow.hidden = true;
+}
+async function fbLoad() {
+  const d = await fetch("api/feedback", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
+  fbApply(d); return d;
+}
+async function fbPost(body) {
+  try {
+    const r = await fetch("api/feedback", { method: "POST", cache: "no-store", headers: { "x-hq": "feedback", "content-type": "application/json" },
+                                            body: JSON.stringify(body) });
+    const d = await r.json().catch(() => null);
+    if (r.ok && d) fbApply(d);
+    return d || { error: "That didn't work. Try again." };
+  } catch (e) { return { error: "That didn't work. Try again." }; }
+}
+async function fbConnect(link) {
+  const d = await fbPost({ connect: link });
+  if (d.error) { fbRowNote.textContent = d.error; return false; }
+  fbPaste.value = ""; return true;
+}
+fbConn.addEventListener("click", async () => {
+  if (fbState && fbState.connected) {
+    if (!confirm(`Stop sending feedback to ${fbState.maker}? What you sent stays in your list.`)) return;
+    await fbPost({ disconnect: true }); return;
+  }
+  fbPasteRow.hidden = !fbPasteRow.hidden; if (!fbPasteRow.hidden) fbPaste.focus();
+});
+document.getElementById("fbpastego").addEventListener("click", () => { if (fbPaste.value.trim()) fbConnect(fbPaste.value.trim()); });
+// The link from the maker opens this page with ?feedback-join=…: one tap on OK connects it, nothing to type.
+(function fbJoin() {
+  const m = (location.search + location.hash).match(/[?&#]feedback-join=([A-Za-z0-9_-]{20,})/);
+  fbLoad();
+  if (!m) return;
+  history.replaceState(null, "", location.pathname);
+  let who = "", where = "";
+  try { const j = JSON.parse(atob(m[1].replace(/-/g, "+").replace(/_/g, "/"))); who = String(j.n || "").slice(0, 60); where = new URL(j.u).hostname; } catch (e) {}
+  setTimeout(async () => {
+    if (!confirm(`Send your feedback for HQ to ${who || "the person who makes it"}?\n\nOnly what you type in the Feedback tab, or ask your agent to pass on, goes to them (${where}). Nothing else.`)) return;
+    alert(await fbConnect(m[1]) ? "Connected. The Feedback tab is in your notes now." : fbRowNote.textContent);
+  }, 400);
+})();
 function showFeedback(data) {
   if (!data || !Array.isArray(data.items)) { histNote(notesList, "Couldn't load your feedback. Try again."); return; }
+  fbApply(data);
   notesList.innerHTML = "";
   const intro = document.createElement("div"); intro.className = "fbintro";
-  intro.textContent = "Found a bug, or wish HQ did something? Send it here. It goes onto the planning, and you'll see here what happens with it.";
+  intro.textContent = data.connected
+    ? `Found a bug, or wish HQ did something? Send it here. It goes to ${data.maker}'s planning, and you'll see here what happens with it. You can also tell your agent on a call: "let ${data.maker} know".`
+    : "Found a bug, or wish HQ did something? Send it here. It goes onto the planning, and you'll see here what happens with it.";
   notesList.appendChild(intro);
+  if (data.connected) {
+    const tx = document.createElement("div"); tx.className = "fbtexts";
+    const lab = document.createElement("span"); lab.textContent = "A text when its status changes";
+    const sw = document.createElement("button"); sw.type = "button"; sw.className = "sw"; sw.id = "fbtexts";
+    sw.setAttribute("aria-pressed", String(!!data.texts)); sw.textContent = data.texts ? "On" : "Off";
+    sw.addEventListener("click", async () => { const d = await fbPost({ texts: !data.texts }); if (!d.error) showFeedback(d); });
+    tx.append(lab, sw); notesList.appendChild(tx);
+  }
   for (const it of data.items) {
     const row = document.createElement("div"); row.className = "note fb";
     const t = document.createElement("div"); t.className = "txt"; t.textContent = it.text;
     const w = document.createElement("small"); w.className = "when"; w.textContent = (it.bug ? "A bug · " : "") + String(it.when || "").slice(0, 16); t.appendChild(w);
+    if (it.error) { const er = document.createElement("small"); er.className = "fberr"; er.textContent = it.error; t.appendChild(er); }
     const st = document.createElement("span"); st.className = "fbstat " + (it.status || ""); st.textContent = it.status_words || "Received";
     row.append(t, st); notesList.appendChild(row);
   }
@@ -2485,7 +2559,8 @@ async function fbSend(text, bug) {
     const r = await fetch("api/feedback", { method: "POST", cache: "no-store", headers: { "x-hq": "feedback", "content-type": "application/json" },
                                             body: JSON.stringify({ text, bug }) });
     const d = await r.json().catch(() => null);
-    if (r.ok && d) { notesNote.textContent = "Sent. It's on the planning now."; return d; }
+    if (r.ok && d) { notesNote.textContent = d.sent && d.sent.status === "waiting" ? "Saved. It goes as soon as the other HQ answers."
+                                             : d.connected ? `Sent to ${d.maker}.` : "Sent. It's on the planning now."; return d; }
     notesNote.textContent = (d && d.error) || "Couldn't send that. Try again.";
   } catch (e) { notesNote.textContent = "Couldn't send that. Try again."; }
   return null;
@@ -2498,6 +2573,7 @@ async function loadNotes() {
     if (ask !== notesAsk || !notesOpen() || notesMode !== "feedback") return;
     showFeedback(fb); return;
   }
+  fbLoad();  // H247 (b): the Feedback tab shows once this HQ is connected to a maker
   const data = await histGet("api/notes");
   if (ask !== notesAsk || !notesOpen() || notesMode !== "notes") return;
   showNoteItems(data);

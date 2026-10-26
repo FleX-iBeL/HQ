@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Feedback goes to the people who make HQ now. The person who makes your HQ sends you a link; tap it with your HQ open, press OK, and your HQ connects itself, nothing to type. Then the notes have a Feedback tab: what you send lands on their planning, with your name, and next to it you see what happens with it (received, looked at, planned, being built, done, or not doing it). No connection? It waits and goes by itself later; what you sent before goes across too. You can also tell your agent on a call or in a text, like "let them know the weather text came twice": she reads it back and sends it after your yes. A switch in the Feedback tab texts you when a status changes. Until your HQ is connected the Feedback tab doesn't show. For the person who makes HQ: a small feedback mailbox on their server, reached over HTTPS through Tailscale Funnel on one path only, takes short text (at most 2,000 characters, 20 a day) and only with a key per person; on the Status page, Invite someone to send feedback makes that person's link, and Take back stops it (H247).
+
 ## 0.4.14 · 26 October 2026
 
 - The bigger check-in comes every eight weeks, in step with your six-week games. It's due in each game's look-back week, next to the game's debrief but as its own session. Without a game it comes every eight weeks from the last one.

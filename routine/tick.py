@@ -1101,6 +1101,57 @@ def log_move():
         f"; commit failed ({r.returncode}): {(r.stderr or r.stdout).strip()[:200]}"))
 
 
+def _app_py():
+    venv = os.path.join(JV, ".venv", "bin", "python")
+    return venv if os.path.exists(venv) else PY
+
+
+def feedback_minute():
+    """H247 (b): on the main only. A maker's mailbox (feedback_box.py, on when its settings say so) keeps running and
+    its one HTTPS path stays open (looked at every ten minutes); an HQ connected to a maker sends what waits and reads
+    the statuses back (feedback.py poll, in the background, one at a time)."""
+    if role.acting() != "main":
+        return
+    data = os.path.join(FOLDER, "HQ")
+    box = os.environ.get("HQ_FEEDBACK_BOX") or os.path.join(data, "feedback-box.json")
+    try:
+        b = json.load(open(box))
+    except (OSError, ValueError):
+        b = {}
+    if b.get("on"):
+        port = int(b.get("port") or 4791)
+        script = os.path.join(JV, "app", "feedback_box.py")
+        if not listening(port):
+            subprocess.Popen([_app_py(), script, "serve"], cwd=JV, stdout=subprocess.DEVNULL, stderr=open(
+                os.path.join(RUN, "feedback-box.log"), "a"), start_new_session=True)
+            log("feedback mailbox started")
+        mark = os.path.join(RUN, "feedback-box.checked")
+        if not os.path.exists(mark) or time.time() - os.path.getmtime(mark) > 600:
+            open(mark, "w").close()
+            r = subprocess.run([_app_py(), script, "check"], capture_output=True, text=True, timeout=90, cwd=JV)
+            try:
+                ok = json.loads(r.stdout).get("open")
+            except ValueError:
+                ok = False
+            if not ok:
+                sys.path.insert(0, os.path.join(JV, "app"))
+                import feedback_box
+                log("feedback mailbox: its path wasn't open; opened again: " + feedback_box.open_path()[-120:])
+            routines.beat("feedback", state="ok" if listening(port) else "down", last=time.time(), next=time.time() + 600,
+                          every=600, text="The feedback mailbox is up" if listening(port) else "The feedback mailbox isn't running")
+    maker = os.environ.get("HQ_FEEDBACK_MAKER") or os.path.join(data, "feedback-maker.json")
+    if os.path.exists(maker):
+        pidf = os.path.join(RUN, "feedback-poll.pid")
+        try:
+            if alive(int(open(pidf).read().strip())):
+                return
+        except (OSError, ValueError):
+            pass
+        p = subprocess.Popen([_app_py(), os.path.join(JV, "app", "feedback.py"), "poll"], cwd=JV,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        open(pidf, "w").write(str(p.pid))
+
+
 def direct_watch():
     """H80: Donna texts on HQ's own direct line when the job list is finished, a very important mail comes in, or
     something stays down (and again when it's back). On the backup only this computer's own incidents (a takeover
@@ -1428,6 +1479,10 @@ if __name__ == "__main__":
             direct_watch()
         except Exception as e:
             log(f"direct line: {e!r}")
+        try:
+            feedback_minute()
+        except Exception as e:
+            log(f"feedback: {e!r}")
         try:
             extensions_minute()
         except Exception as e:
