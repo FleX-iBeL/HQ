@@ -72,6 +72,14 @@ LOOKS_AT_ONCE = 1  # Claude's choice: one look at a time, so the first pass over
 
 def open_rows(text=None):
     """The open rows of the planning, in the roadmap's order: [{"label", "title", "line", "phase"}]."""
+    if text is None:  # Fable, 27 October 2026: from the planning index when it's on and as new as the file
+        try:
+            import planning_index
+            got = planning_index.open_rows()
+            if got is not None:
+                return got
+        except Exception:
+            pass
     text = q.read()[0] if text is None else text
     out, phase = [], ""
     for line in text.split("\n"):
@@ -99,6 +107,14 @@ SHOW_MOST = 12000  # about one of the biggest rows; past that the rest is pointe
 def row_of(label, text=None):
     """Any row of the roadmap with this label, open or closed, in any phase (Fable clean-up, 27 October 2026):
     {"label", "title", "state", "phase", "cells", "line", "n"} (n: its line number), or None."""
+    if text is None:  # Fable, 27 October 2026: by its place in the file, from the planning index, when it can be used
+        try:
+            import planning_index
+            got = planning_index.row(label)
+            if got is not None:
+                return None if got.get("missing") else got
+        except Exception:
+            pass
     text = q.read()[0] if text is None else text
     label = label.strip().upper()
     phase = ""

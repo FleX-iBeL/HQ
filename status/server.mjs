@@ -15,7 +15,16 @@ import { request as httpsRequest } from 'node:https';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseRoadmap } from './parse.mjs';
+import { parseRoadmap as parseRoadmapRaw } from './parse.mjs';
+// Fable, 27 October 2026: the planning file is over a megabyte and was parsed on every read (every three seconds, and
+// once more for the jobs line). Now it's parsed once per change of the file: the same text gives the same result.
+let parsedCache = { text: null, out: null };
+function parseRoadmap(text) {
+  if (parsedCache.text === text) return parsedCache.out;
+  const out = parseRoadmapRaw(text);
+  parsedCache = { text, out };
+  return out;
+}
 import { ROADMAP } from './paths.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');

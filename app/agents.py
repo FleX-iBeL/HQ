@@ -340,7 +340,7 @@ CHARACTER_KEYS = ("character", "personality", "craft", "pushback", "greetings", 
 
 _KEYS = ("name", "full_name", "voice", "load", "model", "colour", "speciality", "personality", "hidden", "coming_soon",
          "character", "pushback", "greetings", "back_greetings", "continue_greetings", "handover_greetings",
-         "own_goodbye", "craft", "context", "effort")
+         "own_goodbye", "craft", "context", "effort", "department")  # department: Fable, 27 October 2026 (app/departments.py)
 
 
 def _lines(v, most: int = 8) -> list[str]:
@@ -394,6 +394,7 @@ def _clean(a: dict) -> dict | None:
         "handover_greetings": _lines(a.get("handover_greetings")),
         "own_goodbye": a.get("own_goodbye") is True,
         "context": a.get("context") if a.get("context") in CONTEXTS else ("day" if load == "quick" else "all"),
+        "department": a.get("department") if isinstance(a.get("department"), dict) else {},
     }
 
 

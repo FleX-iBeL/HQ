@@ -15,6 +15,7 @@ how to handle calendar events), so those notes are added here too.
 from __future__ import annotations
 
 import datetime
+import os
 import re
 import sys
 from pathlib import Path
@@ -174,10 +175,81 @@ def _planning(folder: Path) -> str:
     return "\n\n".join(out)
 
 
+IDENTITY_FILES = {"day": ["rules.md", "where-things-go.md"],
+                  "coach": ["rules.md", "where-things-go.md", "day-in-the-life.md"],
+                  "build": ["rules.md"]}
+
+
+def briefed(folder: Path, context: str = "day", today: datetime.date | None = None) -> str:
+    """A call's start with the backend switch `briefing` on (Fable, 27 October 2026): her identity (the rules, where
+    things go, for the coach the vision's day whole, so the vision is never on demand), the briefing the routine
+    writes every minute (routine/briefing.py: the day, the open things, the planning), and how to open the rest.
+    Measured on the maker's folder: Pepper's start from about 367 KB to about 40 KB."""
+    import subprocess
+    import sys as _s
+    today = today or datetime.date.today()
+    parts = []
+    if context == "coach":
+        head = ["# This is a coaching call",
+                f"You start with a briefing, not the whole folder: what's current today, the open things, and the map's "
+                f"status lines; {config.USER}'s vision of the day he's building towards (day-in-the-life.md) is loaded whole. The rest is the "
+                "library, opened when a turn needs it: a layer of the map is python3 \""
+                f"{config.ROOT / 'routine' / 'briefing.py'}\" layer N (1 the vision, 2 the year, 3 the six-week game, "
+                "4 the ideal week, 5 the real week, 6 looking back); his answers to the vision questions are my-answers.md (grep -n '^## ' "
+                "for the questions, sed -n for one); a to-do item with its details is python3 \""
+                f"{config.ROOT / 'app' / 'todo.py'}\" show \"a few words of it\"; the whole mail list is inbox.md; "
+                "earlier notes are coaching/log-archive.md (grep for a day or a word). Nothing from building HQ is here "
+                "(the planning, the team, the build notes): that's Moneypenny's. When he wants something built or put "
+                "on the planning, put her on or bring her in."]
+    elif context == "build":
+        head = ["# This is a call about building HQ",
+                "You start with a briefing, not the folder: the roadmap's status block, the team's open jobs and the open "
+                f"items of the planning. You talk about building HQ only, never {config.USER}'s life (his vision, his "
+                "mail, his to-do list and where he stands are not loaded for you; Donna or Pepper have them). The "
+                "planning file (HQ/roadmap.md) and the build notes (HQ/CLAUDE.md) are never read whole, they're far too "
+                f"big for a call: one row, open or closed, is python3 \"{config.ROOT / 'routine' / 'sprint.py'}\" show "
+                "LABEL, the open items are sprint.py open, and a section of the build notes is read with grep -n for "
+                "its heading and sed -n for its lines."]
+    else:
+        head = ["# This is a Quick call",
+                f"{config.USER} picked Quick: calendar, mail and small orders. You start with a briefing, not the "
+                "folder: today and tomorrow, the very important mail, the open commitments, the to-do list one line "
+                "each, the open nudges, the game. The rest is the library, opened when a question needs it: a to-do "
+                f"item with its details is python3 \"{config.ROOT / 'app' / 'todo.py'}\" show \"a few words of it\"; "
+                "the whole mail list is inbox.md; earlier notes are coaching/log-archive.md. For sparring, planning or "
+                "coaching, Pepper has the vision."]
+    parts += head
+    for rel in IDENTITY_FILES.get(context, IDENTITY_FILES["day"]):
+        if (folder / rel).exists():
+            parts.append(f"Contents of {folder / rel}:\n\n{(folder / rel).read_text()}")
+    try:
+        r = subprocess.run([_s.executable, str(config.ROOT / "routine" / "briefing.py"), "fresh", context],
+                           capture_output=True, text=True, timeout=60,
+                           env={**os.environ, "HQ_WORKSPACE": str(folder)})
+        brief = r.stdout if r.returncode == 0 and r.stdout.strip() else ""
+    except Exception:
+        brief = ""
+    if not brief:
+        brief = "The briefing couldn't be made just now; read what you need from the files."
+    parts.append(brief.rstrip())
+    mem = memory_dir(folder)
+    if (mem / "MEMORY.md").exists():
+        parts.append("Claude's memory for this folder (the index; a note is read when it's needed):\n\n"
+                     + (mem / "MEMORY.md").read_text().strip())
+    return "\n\n".join(parts) + "\n"
+
+
 def build(folder: Path, today: datetime.date | None = None, context: str = "day") -> str:
     """A call's instructions: CLAUDE.md with only the files its role loads pulled in (B1, H246).
-    context "day" (Quick, Donna), "coach" (Pepper) or "build" (Moneypenny); see agents.CONTEXTS."""
+    context "day" (Quick, Donna), "coach" (Pepper) or "build" (Moneypenny); see agents.CONTEXTS.
+    With the backend switch `briefing` on (app/backend.py), the briefed start instead."""
     today = today or datetime.date.today()
+    try:
+        import backend
+        if backend.on("briefing") and context in IDENTITY_FILES:
+            return briefed(folder, context, today)
+    except Exception:
+        pass
     claude_md = (folder / "CLAUDE.md").read_text()
     pulled: list[str] = []
     wanted = DAY_FILES if context == "day" else None

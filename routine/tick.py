@@ -324,6 +324,12 @@ def start(job):
         prompt += (f"\n\nWhen the job is finished: the status block, then python3 {json.dumps(os.path.join(HERE, 'jobs.py'))} "
                    f"done {n} as the very last step, nothing after it (after any restart of the routine or the call line, "
                    "after any push, after your last report); the job isn't over until that has run.")
+    headless = _headless()
+    if headless:
+        prompt += ("\n\nThis job runs headless (Fable, 27 October 2026): nobody types into its window, its end is "
+                   "the end of this run, and when you end with the job finished the done mark is run for you; still "
+                   "run it yourself as the last step, as above. Everything you need is in this prompt and the files.")
+        open(pfile, "w").write(prompt)
     chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")
     # The job's settings (its status line) with this HQ's path, written fresh each time.
     settings = os.path.join(RUN, "job-settings.json")
@@ -333,7 +339,10 @@ def start(job):
     pfile = os.path.join(RUN, f"job-{n}.prompt")
     open(pfile, "w").write(prompt)
     cmd = os.path.join(RUN, f"job-{n}.command")
-    open(cmd, "w").write(job_script_tmux(n, settings, pfile, chat) if LINUX_WINDOWS else f"""#!/bin/zsh
+    if headless:
+        open(cmd, "w").write(job_script_headless(n, chat))
+    else:
+        open(cmd, "w").write(job_script_tmux(n, settings, pfile, chat) if LINUX_WINDOWS else f"""#!/bin/zsh
 # Job {n}, started by the HQ routine (phase L).
 cd {json.dumps(FOLDER)} || exit 1
 # 9 October 2026: the windows shouldn't take over the screen. Opened in the background,
@@ -364,6 +373,33 @@ JT=$(tty)
     status("BUILDING", f"Job {n} · " + (how or "started by the routine") + f" in {where}{watch_line(n)}",
            f"job {n} {how or 'started by the routine'}: {job['text'][:90]}")
     log(f"started job {n}" + (f" ({plan['mode']}, chat {plan['session']})" if how else ""))
+
+
+def _headless() -> bool:
+    """Fable, 27 October 2026: the backend switch `headless_jobs` (app/backend.py)."""
+    try:
+        sys.path.insert(0, os.path.join(JV, "app"))
+        import backend
+        return backend.on("headless_jobs")
+    except Exception as e:
+        log(f"backend switches: {e!r}")
+        return False
+
+
+def job_script_headless(n, chat=""):
+    """Fable, 27 October 2026: job n as a process (routine/runjob.py) in the same window or tmux session as before,
+    so it can still be watched; no nudge, nothing typed. The window closes itself when the run ends, as before."""
+    shell = "#!/bin/bash" if LINUX_WINDOWS else "#!/bin/zsh"
+    close = CLOSE_WINDOW_TMUX if LINUX_WINDOWS else CLOSE_WINDOW
+    mini = "" if LINUX_WINDOWS else "printf '\\e[2t'\nprintf '\\e]0;HQ job " + str(n) + "\\a'\n"
+    return f"""{shell}
+# Job {n}, started by the HQ routine (phase L), headless (Fable, 27 October 2026).
+cd {json.dumps(FOLDER)} || exit 1
+{mini}echo "HQ · job {n}, started by the routine at $(date +%H:%M), headless: this window only shows its steps."
+echo
+echo $$ > {json.dumps(PIDFILE)}
+{json.dumps(PY)} {json.dumps(os.path.join(HERE, 'runjob.py'))} {n} {chat}
+""" + close
 
 
 def job_script_tmux(n, settings, pfile, chat=""):
@@ -1097,6 +1133,15 @@ def became_main():
             log(f"role: {out.strip()}")
 
 
+def briefing_minute():
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
+    import backend
+    if not backend.on("briefing"):
+        return
+    import briefing
+    briefing.write()
+
+
 def log_move():
     """H100: on the main, move the log's entries older than three hours to its archive, and commit both through
     the lock. A test never moves the real workspace's log."""
@@ -1280,6 +1325,17 @@ def tick():
         usagecost.tokens_once(log=log)  # H173: the past jobs' own tokens, and the rate
     except Exception as e:
         log(f"usage: backfill: {e!r}")
+    # Fable, 27 October 2026: the briefing an agent starts with (backend switch `briefing`), made every minute from the
+    # files, on both computers (each one's calls read its own), no Claude.
+    try:
+        briefing_minute()
+    except Exception as e:
+        log(f"briefing: {e!r}")
+    try:  # Fable, 27 October 2026: the planning index (only rewritten when the planning file changed)
+        import planning_index
+        planning_index.write()
+    except Exception as e:
+        log(f"planning index: {e!r}")
     if r["acting"] == "backup":
         stale_job_here()
         on_backup()
@@ -1360,6 +1416,8 @@ def tick():
                 return
         except Exception as e:
             log(f"usage count: {e!r}")
+        if _headless():
+            return  # a headless run ends by itself; there's no chat to wake up
         try:
             # H36: gone quiet? Then continue is typed into its own window, and a stuck job shows as stuck.
             quiet.check(n, s, lambda x: json.dump(x, open(STATE, "w")), status,

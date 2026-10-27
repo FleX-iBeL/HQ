@@ -34,6 +34,7 @@ usage (from the workspace):
                                                 share the workspace and the memory with PEER (its Syncthing
                                                 device ID, or its name in this Syncthing); run on both computers
   python3 "routine/sync.py" remove              stop syncing (the folders leave Syncthing; the files stay)
+  python3 "routine/sync.py" direction main|backup|two-way   the folders' direction on this computer (one-way sync)
 Used by HQ itself: tick [--main|--backup] (the routine, every minute), align (an HQ that just became main), json.
 For tests: HQ_SYNCTHING_HOME (Syncthing's config folder), HQ_SYNC_GIT=0 (no commits, no align).
 """
@@ -281,6 +282,84 @@ def remove():
     return 0
 
 
+# --- one-way sync (Fable, 27 October 2026; the backend switch one_way_sync) ------------------------------------------
+
+DIRECTIONS = {"main": "sendonly", "backup": "receiveonly", "two-way": "sendreceive"}
+
+
+def direction(mode: str, log=print) -> list[str]:
+    """Set every synced folder's type on this computer: the main sends only, the backup only receives (so the two
+    never make a conflict copy: by construction), or two-way as before. Idempotent: a folder already set is left.
+    Returns the folders changed. His F58 (26 October 2026): "we keep getting conflicts. I also want this logged as a
+    bug with must as rank, im sick of these merges while i do nothing"."""
+    want = DIRECTIONS[mode]
+    changed = []
+    for f in config().get("folders", []):
+        try:
+            cur = api(f"/rest/config/folders/{f['id']}")
+        except Exception as e:
+            log(f"sync: direction: couldn't read {f['id']}: {e}")
+            continue
+        if not isinstance(cur, dict) or cur.get("type") == want:
+            continue
+        cur["type"] = want
+        try:
+            api(f"/rest/config/folders/{f['id']}", "PUT", cur)
+            changed.append(f["what"])
+            log(f"sync: {f['what']} is now {want}")
+        except Exception as e:
+            log(f"sync: direction: couldn't set {f['id']}: {e}")
+    return changed
+
+
+def revert_local(log=print) -> list[str]:
+    """On a receive-only folder, drop what was changed locally and take the main's copy (Syncthing's revert): the
+    backup never keeps its own version of a synced file; a change it makes goes to the main by hand-over first."""
+    out = []
+    for f in config().get("folders", []):
+        try:
+            st = api(f"/rest/db/status?folder={f['id']}")
+            if isinstance(st, dict) and st.get("receiveOnlyTotalItems"):
+                api(f"/rest/db/revert?folder={f['id']}", "POST", {})
+                out.append(f["what"])
+                log(f"sync: reverted {st['receiveOnlyTotalItems']} local change(s) on {f['what']} to the main's copy")
+        except Exception as e:
+            log(f"sync: revert: {e}")
+    return out
+
+
+def one_way_on() -> bool:
+    try:
+        sys.path.insert(0, os.path.join(hqpaths.HQ, "app"))
+        import backend
+        return backend.on("one_way_sync")
+    except Exception:
+        return False
+
+
+def tick_direction(acting: str, log=print) -> None:
+    """Every minute: with the switch on, this computer's folders point the way its role says; switched off again,
+    back to two-way (once, remembered in the state)."""
+    if not config().get("folders"):
+        return
+    try:
+        st = json.load(open(STATE))
+    except (OSError, ValueError):
+        st = {}
+    if one_way_on():
+        mode = "main" if acting == "main" else "backup"
+        if st.get("direction") != mode:
+            direction(mode, log)
+            st["direction"] = mode
+            _save(STATE, st)
+        # No automatic revert on the backup: a local addition (a transcript of a call taken here, a note from the page)
+        # stays until it's handed over; `sync.py revert` does it by hand when the main has everything.
+    elif st.get("direction") in ("main", "backup"):
+        direction("two-way", log)
+        st["direction"] = "two-way"
+        _save(STATE, st)
+
+
 # --- what the routine does every minute ----------------------------------------------------------------------
 
 def conflicts():
@@ -498,6 +577,10 @@ def tick(main=True, log=print, routines=None, incidents=None):
         return None
     cfg = config()
     peer = cfg.get("peer_name") or "the other HQ"
+    try:  # Fable, 27 October 2026: one-way sync, when its switch is on
+        tick_direction("main" if main else "backup", log)
+    except Exception as e:
+        log(f"sync: direction: {e!r}")
     state = _load(STATE, {})
     seen = look()
     if seen.get("peer_up"):
@@ -583,6 +666,11 @@ def main(argv):
         return setup(argv[1:])
     elif cmd == "remove":
         return remove()
+    elif cmd == "direction" and len(argv) == 2 and argv[1] in DIRECTIONS:
+        changed = direction(argv[1])
+        print("Changed: " + (", ".join(changed) if changed else "nothing (already so)"))
+    elif cmd == "revert":
+        print("Reverted: " + (", ".join(revert_local()) or "nothing"))
     elif cmd == "tick":
         import incidents, routines
         r = tick(main="--backup" not in argv, routines=routines, incidents=incidents)

@@ -81,9 +81,41 @@ def edit(rel: str, payload: str) -> int:
     return 0
 
 
+PUT_MOST = 100_000
+
+
+def put(rel: str, payload: str) -> int:
+    """Fable, 27 October 2026 (one-way sync): a whole small file from the backup, written by the main as it is: a
+    new file, or one the backup made whole (a call's transcript at its end, a note). The payload is {"text": …}."""
+    rel = rel.replace(os.sep, "/").lstrip("./")
+    if ".." in rel.split("/") or rel.startswith(".git") or not rel:
+        print(f"Refused: {rel} can't be written.")
+        return 2
+    try:
+        text = json.loads(payload).get("text")
+        assert isinstance(text, str)
+    except Exception:
+        print("Refused: no text given.")
+        return 2
+    if len(text.encode("utf8")) > PUT_MOST:
+        print(f"Refused: {rel} is over {PUT_MOST // 1000} KB; make it as Edits.")
+        return 2
+    path = hqpaths.ROADMAP if rel == "HQ/roadmap.md" else os.path.join(hqpaths.FOLDER, rel)
+    with _lock(rel):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.handover.{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    print(f"Written by the main: {rel} (whole).")
+    return 0
+
+
 def main(argv):
     if len(argv) == 3 and argv[0] == "edit":
         return edit(argv[1], argv[2])
+    if len(argv) == 3 and argv[0] == "put":
+        return put(argv[1], argv[2])
     print(__doc__)
     return 2
 

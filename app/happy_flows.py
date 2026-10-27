@@ -13523,6 +13523,157 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("resume" in _P(B.__file__).read_text(), "a reopened session isn't resumed")
         return "F60: a big read is cut to a part; a dead session says so, reopens and answers the same turn"
 
+    async def flow169(self) -> str:
+        """Fable, 27 October 2026, no Claude: the backend behind switches. The switches read and flip (a fresh
+        install all off); the briefing is made from a workspace's files without Claude and is small; a briefed start
+        carries the identity, the briefing and the library lines, and the switch off gives the old start; the open
+        line keeps a session per agent and rolls it over (quiet, old, too big, reset); the log cycle lifts a dated
+        bullet under Open commitments into a dated entry and archives it; the planning index gives the same row and
+        open rows as parsing the file; a headless job run against a fake claude logs its steps and runs the done mark
+        when the roadmap still says running, and a stop signal marks nothing; the policy lets a call run the lookups."""
+        import datetime as _dt
+        import importlib
+        import os as _os
+        import shutil
+        import signal as _sig
+        import subprocess as _sp
+        import sys as _sys
+        import time as _time
+        from pathlib import Path as _P
+        root = _P(__file__).resolve().parent.parent
+        ws = self.tmp / "f169ws"
+        shutil.copytree(root / "template", ws)
+        (ws / "HQ").mkdir(exist_ok=True)
+        status = self.tmp / "f169status"
+        status.mkdir()
+        env = {**_os.environ, "HQ_WORKSPACE": str(ws), "HQ_ROADMAP": str(ws / "HQ" / "roadmap.md"),
+               "HQ_STATUS_DIR": str(status), "HQ_BACKEND": str(ws / "HQ" / "backend.json"),
+               "HQ_LINES": str(status / "lines.json"), "HQ_PLANNING_INDEX": str(status / "planning-index.json"),
+               "HQ_ACTIVITY": str(status / "job-activity.json")}
+        for k in ("HQ_BACKEND_BRIEFING", "HQ_BACKEND_OPEN_LINE", "HQ_BACKEND_HEADLESS_JOBS", "HQ_BACKEND_ONE_WAY_SYNC",
+                  "HQ_BACKEND_PLANNING_INDEX"):
+            env.pop(k, None)
+        py = _sys.executable
+
+        def sh(*args, extra=None, timeout=120):
+            return _sp.run([py, *args], capture_output=True, text=True, timeout=timeout, env={**env, **(extra or {})})
+
+        # 1. the switches: all off on a fresh install; on, off, listed; a computer's own setting wins
+        r = sh(root / "app" / "backend.py")
+        need(r.returncode == 0 and r.stdout.count(": off.") == 5, f"a fresh install isn't all off: {r.stdout}")
+        need(sh(root / "app" / "backend.py", "on", "briefing").returncode == 0, "the switch couldn't be turned on")
+        need(": on." in sh(root / "app" / "backend.py").stdout, "the switch doesn't show on")
+        need(sh(root / "app" / "backend.py", "on", "nonsense").returncode == 2, "an unknown switch was accepted")
+        r = sh(root / "app" / "backend.py", extra={"HQ_BACKEND_BRIEFING": "0"})
+        need("briefing: off (set on this computer)" in r.stdout, f"the computer's own setting doesn't win: {r.stdout}")
+        # 2. the briefing from the files, without Claude, small; written to .status; fresh reads it
+        (ws / "coaching" / "log.md").write_text("# Coaching Log\n\n## Open commitments\n\n- keep the promise\n\n"
+                                               f"## {_dt.datetime.now():%Y-%m-%d %H:%M} · call (Tester)\n\n- we talked\n")
+        r = sh(root / "routine" / "briefing.py", "coach")
+        need(r.returncode == 0 and "The briefing, written by HQ's routine" in r.stdout, f"no briefing: {r.stderr[-300:]}")
+        need("keep the promise" in r.stdout and "we talked" in r.stdout, "the open commitment or the recent note is missing")
+        need(len(r.stdout) < 60_000, f"the briefing is big: {len(r.stdout)}")
+        r = sh(root / "routine" / "briefing.py", "write")
+        need(r.returncode == 0 and (status / "briefing-day.md").exists() and (status / "briefing-build.md").exists(),
+             f"the briefings weren't written: {r.stdout} {r.stderr[-200:]}")
+        need("keep the promise" in sh(root / "routine" / "briefing.py", "fresh", "day").stdout, "fresh doesn't give the written one")
+        need(sh(root / "routine" / "briefing.py", "layer", "1").returncode == 0, "a map layer couldn't be read")
+        # 3. the briefed start, and the old start with the switch off
+        code = ("import sys; sys.path.insert(0, %r); import quick_context as q; from pathlib import Path; "
+                "print(q.build(Path(%r), context=sys.argv[1]))" % (str(root / "app"), str(ws)))
+        on = _sp.run([py, "-c", code, "coach"], capture_output=True, text=True, env={**env, "HQ_BACKEND_BRIEFING": "1"}).stdout
+        off = _sp.run([py, "-c", code, "coach"], capture_output=True, text=True, env={**env, "HQ_BACKEND_BRIEFING": "0"}).stdout
+        need("You start with a briefing" in on and "briefing.py" in on and "The briefing, written" in on, "the briefed start is missing its parts")
+        need("You start with a briefing" not in off and "Contents of" in off, "the switch off doesn't give the old start")
+        need("day-in-the-life" in on or "vision" in on, "the coach's identity lacks the vision file")
+        bld = _sp.run([py, "-c", code, "build"], capture_output=True, text=True, env={**env, "HQ_BACKEND_BRIEFING": "1"}).stdout
+        need("building HQ only" in bld and "keep the promise" not in bld, "the build start carries his life")
+        # 4. the open line
+        code = ("import sys, time; sys.path.insert(0, %r); import lines as L; "
+                "assert L.session_for('a') is None; L.note('a', 's1', 1000); assert L.session_for('a') == 's1'; "
+                "L.note('a', 's1', L.BUDGET_TOKENS + 1); assert L.session_for('a') is None; "
+                "L.note('b', 's2', 10); L.reset('b'); assert L.session_for('b') is None; L.note('b', 's3', 10); "
+                "assert L.session_for('b') == 's3'; "
+                "assert L.why_fresh({'session': 'x', 'last': time.time() - 9 * 3600, 'since': time.time()}); print('lines ok')"
+                % str(root / "app"))
+        r = _sp.run([py, "-c", code], capture_output=True, text=True, env={**env, "HQ_BACKEND_OPEN_LINE": "1"})
+        need("lines ok" in r.stdout, f"the open line: {r.stderr[-300:]}")
+        r = _sp.run([py, "-c", "import sys; sys.path.insert(0, %r); import lines as L; L.note('c', 's9', 1); "
+                     "print(L.session_for('c'))" % str(root / "app")], capture_output=True, text=True,
+                    env={**env, "HQ_BACKEND_OPEN_LINE": "0"})
+        need(r.stdout.strip() == "None", "with the switch off a session was resumed")
+        # 5. the log lift
+        lifted = ws / "f169log"
+        (lifted / "coaching").mkdir(parents=True)
+        (lifted / "coaching" / "log.md").write_text("# Coaching Log\n\n## Open commitments\n\n- a real promise\n\n"
+                                                    "- 20 October 2026, 10:00, call (Tester): an old note.\n  more of it\n\n"
+                                                    "## Open commitments (older)\n\n- older one\n")
+        code = ("import sys, datetime; sys.path.insert(0, %r); import log_cycle as lc; from pathlib import Path; "
+                "print(lc.move(Path(%r), now=datetime.datetime(2026, 10, 27, 12, 0)))" % (str(root / "routine"), str(lifted)))
+        r = _sp.run([py, "-c", code], capture_output=True, text=True, env=env)
+        need(r.stdout.strip() == "1", f"the dated bullet wasn't lifted and moved: {r.stdout} {r.stderr[-200:]}")
+        log_now = (lifted / "coaching" / "log.md").read_text()
+        arch = (lifted / "coaching" / "log-archive.md").read_text()
+        need("a real promise" in log_now and "older one" in log_now and "an old note" not in log_now, "the lift moved the wrong lines")
+        need("## 2026-10-20 10:00 · call (Tester)" in arch and "more of it" in arch, "the archived entry lost its shape or body")
+        # 6. the planning index: the same row and open rows as parsing
+        road = ws / "HQ" / "roadmap.md"
+        road.write_text("# WAITING FOR YOU\n\n## nothing\n\n**Next:** none\n\n| Phase T | T1 ⬜ |\n|---|---|\n\n*Updated 10:00*\n\n---\n\n"
+                        "## The queue\n\n**Routine:** on\n\n## Phase F · Bugs\n\n| State | Item | Result |\n|---|---|---|\n"
+                        "| ⬜ | F9 A bug · with a dot in it | not yet |\n| ✅ | F8 Done bug | fixed |\n\n"
+                        "## Phase H · Features\n\n| State | Item | Result |\n|---|---|---|\n| ⬜ | H7 A feature | |\n"
+                        "| 🔁 | H6 Repeats | |\n\n## Phase P · Parked\n\n| State | Item | Result |\n|---|---|---|\n| ⬜ | H5 Parked | |\n")
+        code = ("import sys, os; sys.path.insert(0, %r); import planning_index as pi, sprint; idx = pi.write(); "
+                "assert idx['counts']['open'] == 2 and idx['counts']['done'] == 1, idx['counts']; "
+                "os.environ['HQ_BACKEND_PLANNING_INDEX'] = '1'; a = sprint.row_of('F9'); b = sprint.open_rows(); "
+                "assert pi.read() is not None, 'the index is not used'; "
+                "os.environ['HQ_BACKEND_PLANNING_INDEX'] = '0'; c = sprint.row_of('F9'); d = sprint.open_rows(); "
+                "assert a['line'] == c['line'] and a['n'] == c['n'] and a['cells'] == c['cells'], (a, c); "
+                "assert [x['label'] for x in b] == [x['label'] for x in d] == ['F9', 'H7'], (b, d); "
+                "assert sprint.row_of('H5')['phase'].startswith('Phase P'); print('index ok')" % str(root / "routine"))
+        r = _sp.run([py, "-c", code], capture_output=True, text=True, env=env)
+        need("index ok" in r.stdout, f"the planning index: {r.stderr[-400:]}")
+        # 7. a headless job against a fake claude: the steps logged, the done mark run; a stop signal marks nothing
+        fake = self.tmp / "f169claude.py"
+        fake.write_text("#!/usr/bin/env python3\nimport json, sys, time, signal\nsys.stdin.read()\n"
+                        "def out(d): print(json.dumps(d), flush=True)\n"
+                        "out({'type': 'system', 'subtype': 'init', 'session_id': 's-fake'})\n"
+                        "out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Read', 'input': {'file_path': '/a/b.md'}}]}})\n"
+                        "import os\n"
+                        "if os.environ.get('F169_SLOW'):\n    signal.signal(signal.SIGTERM, lambda *a: sys.exit(143)); time.sleep(30)\n"
+                        "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Done.'})\n")
+        fake.chmod(0o755)
+        run_dir = self.tmp / "f169run"
+        run_dir.mkdir()
+        (run_dir / "job-9.prompt").write_text("test\n")
+        road.write_text(road.read_text().replace("**Routine:** on", "**Routine:** on\n\n- Job 9 · running since 10:00 · agreed 2026-10-27 09:55 · A test job"))
+        code = ("import sys, os; sys.path.insert(0, %r); import runjob; runjob.RUN = %r; "
+                "sys.exit(runjob.main(['9', '--session-id', 'abc']))" % (str(root / "routine"), str(run_dir)))
+        r = _sp.run([py, "-c", code], capture_output=True, text=True, timeout=120, env={**env, "HQ_CLAUDE": str(fake), "HQ_ROLE_HERE": "1"})
+        need(r.returncode == 0 and "Read /a/b.md" in r.stdout and "the done mark is run for it" in r.stdout,
+             f"the headless run: {r.stdout[-400:]} {r.stderr[-300:]}")
+        need("- Job 9 · done " in road.read_text(), "the job wasn't marked done by the run")
+        need((run_dir / "job-9.stream.log").exists() and (status / "job-activity.json").exists(), "no stream log or activity")
+        road.write_text(road.read_text().replace("- Job 9 · done", "- Job 9 · running since 10:00"))
+        p = _sp.Popen([py, "-c", code], stdout=_sp.PIPE, stderr=_sp.PIPE, text=True,
+                      env={**env, "HQ_CLAUDE": str(fake), "HQ_ROLE_HERE": "1", "F169_SLOW": "1"})
+        _time.sleep(2)
+        p.send_signal(_sig.SIGTERM)
+        out, _ = p.communicate(timeout=30)
+        need("nothing marked" in out and "running since" in road.read_text(), f"a stopped run marked something: {out[-300:]}")
+        # 8. the policy: the lookups are free on a call, flipping a switch asks
+        import policy as PO
+        pol = PO.Policy(ws)
+        need(pol.decide("Bash", {"command": f"python3 {root / 'routine' / 'briefing.py'} layer 2"}).verdict == PO.ALLOW, "a map layer asks")
+        need(pol.decide("Bash", {"command": f"python3 {root / 'app' / 'todo.py'} show \"a thing\""}).verdict == PO.ALLOW, "todo show asks")
+        need(pol.decide("Bash", {"command": f"python3 {root / 'app' / 'backend.py'}"}).verdict == PO.ALLOW, "listing the switches asks")
+        need(pol.decide("Bash", {"command": f"python3 {root / 'app' / 'backend.py'} off briefing"}).verdict == PO.ASK, "flipping a switch doesn't ask")
+        need(pol.decide("Bash", {"command": f"python3 {root / 'routine' / 'briefing.py'} write"}).verdict == PO.DENY, "writing the briefings from a call was allowed")
+        # 9. departments: the three, with a recipe each
+        r = sh(root / "app" / "departments.py")
+        need(r.returncode == 0 and "briefing:" in r.stdout and "development" in r.stdout, f"departments: {r.stderr[-200:]}")
+        return "the switches, the briefing, the briefed start, the open line, the log lift, the planning index, a headless job, the policy and the departments"
+
     async def flow167(self) -> str:
         """F57, no Claude: a job that ends its turn without the done mark is caught and told. The nudge names the job and
         the done mark; a shell under the chat (a wait loop that can never end, a pgrep -f finding itself) counts as work
@@ -20317,6 +20468,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    169: ("Fable, 27 October 2026: the backend behind switches: the switches, the briefing made without Claude and the briefed start (the old one with the switch off), the open line's sessions and rollover, the log lift, the planning index against parsing, a headless job against a fake claude (done mark, stop signal), the lookups free on a call, the departments", False, "flow169"),
     168: ("F60: a big read on a call is cut to a part (Read and cat), the SDK buffer is raised, a session that dies mid-turn says so, reopens and answers the same turn", False, "flow168"),
     167: ("F57: a finished job without its done mark is nudged by name; a never-ending wait loop stops counting after 15 minutes; every job text ends with the done mark; done N --at HH:MM, also from a call", False, "flow167"),
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),

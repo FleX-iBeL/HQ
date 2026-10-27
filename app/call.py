@@ -25,6 +25,7 @@ J2: the warm-up message carries the very important open items from his mail list
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from pathlib import Path
@@ -131,7 +132,8 @@ class Call:
             self.policy.memory_writes = self.context == "build"  # H280: her lessons stay
             # H282: her own thinking time (Moneypenny high), the rest as before; a three-way keeps the first one's
             self.brain = make_brain(self.model, self.policy, load=self.load, persona=persona, context=self.context,
-                                    effort=agents.effort_of(self.agent, self.model))
+                                    effort=agents.effort_of(self.agent, self.model),
+                                    resume=self._line_for(self.agent))
         self.brains[self.agent["id"]] = self.brain
         self.stt = make_stt(quiet=free)
         self.voice = voice if voice in config.VOICES else config.VOICE
@@ -251,6 +253,55 @@ class Call:
                 f"said so far if it fits. Your own words, never a set greeting, never the same line as before. Just that "
                 f"line, no question to answer, no marks; then he goes on.]"]
 
+    def _line_for(self, who: dict) -> str | None:
+        """The open line (app/lines.py): her last session on this computer, resumed when the switch is on and the
+        line is fresh enough; a free or demo call never resumes."""
+        if self.free or self.demo:
+            return None
+        try:
+            import lines
+            sid = lines.session_for(who["id"])
+            if sid:
+                logger.info(f"{who['name']}'s line is open: resuming session {sid[:8]}")
+            return sid
+        except Exception as e:
+            logger.warning(f"The open line: {e!r}")
+            return None
+
+    def _hand_transcript(self) -> None:
+        """One-way sync (Fable, 27 October 2026): a call taken on the backup leaves its transcript here, which a
+        receive-only folder never sends; so at the end it goes to the main whole, by hand-over."""
+        try:
+            import sys as _s
+            if str(config.ROOT / "routine") not in _s.path:
+                _s.path.insert(0, str(config.ROOT / "routine"))
+            import role
+            p = self.transcript.path
+            if p is None or not p.exists() or not role.is_backup() or not role.one_way():
+                return
+            rel = p.relative_to(config.FOLDER).as_posix() if config.FOLDER in p.parents else None
+            if not rel:
+                return
+            text = p.read_text(encoding="utf8")
+            if len(text.encode("utf8")) > 100_000:
+                logger.warning("The transcript is too big to hand over whole; the main gets it when this HQ is main")
+                return
+            code, out, err, how = role.hand("handover", ["put", rel, json.dumps({"text": text}, ensure_ascii=False)])
+            logger.info(f"Transcript handed to the main ({how}): {(out or err).strip()[:120]}")
+        except Exception as e:
+            logger.warning(f"Handing the transcript to the main: {e!r}")
+
+    def _note_lines(self) -> None:
+        """After the call: every agent's session on it, and how big its context got, for the next start."""
+        try:
+            import lines
+            for aid, b in self.brains.items():
+                if b is not None and getattr(b, "session_id", None):
+                    lt = getattr(b, "last_turn", None)
+                    lines.note(aid, b.session_id, getattr(lt, "context_tokens", None), "call")
+        except Exception as e:
+            logger.warning(f"The open line: noting the sessions: {e!r}")
+
     async def _brain_for(self, who: dict):
         """Her own Claude session on this call (Fable clean-up): made the first time she answers, with her own context
         (H246), persona and model, and primed with what was said on the call so far, the way Continue does (H60)."""
@@ -265,7 +316,7 @@ class Call:
         context = "all" if context == "day" and who["load"] == "deep" else context
         model = config.MODEL_ALIASES.get(agents.runs_on(who["model"]), who["model"])
         b = make_brain(model, self.policy, load=who["load"], persona=persona, context=context,
-                       effort=agents.effort_of(who, model))
+                       effort=agents.effort_of(who, model), resume=self._line_for(who))
         self.brains[who["id"]] = b
         t = time.perf_counter()
         await b.start()
@@ -450,5 +501,8 @@ class Call:
         except Exception as e:
             logger.error(f"After-call work failed: {e!r}")
         finally:
+            if not self.free:
+                self._note_lines()
+                self._hand_transcript()
             for b in self.brains.values() or [self.brain]:
                 await b.stop()

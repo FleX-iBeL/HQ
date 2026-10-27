@@ -1231,6 +1231,27 @@ def call_note(it: dict, user: str = "the user") -> str:
     )
 
 
+def show(want: str, p: Path | None = None) -> str:
+    """One item in full, in their own words (Fable, 27 October 2026: the library behind the briefing): its list, every
+    field it has, and its details paragraph(s)."""
+    d = read(p)
+    if d.get("missing"):
+        return f"There's no to-do list yet ({d['file']} in the workspace)."
+    lst, it = find_item(d, want)
+    out = [f"{it['title']} (on {lst['num']}. {lst['name']}" if lst.get("num") is not None else f"{it['title']} (on {lst['name']}"]
+    out[0] += f"; id {it['id']})"
+    for c, v in it.get("fields") or []:
+        out.append(f"- {c}: {v}")
+    if it.get("repeats"):
+        out.append(f"- repeats: {it['repeats']}")
+    if it.get("planned") and it["planned"].get("short"):
+        out.append(f"- planned: {it['planned']['short']}")
+    for para in it.get("details") or []:
+        out.append("")
+        out.append(para)
+    return "\n".join(out)
+
+
 def summary(p: Path | None = None) -> str:
     """The list in a few lines: each list with how many are on it and the first few, the matrix first."""
     d = read(p)
@@ -1283,6 +1304,8 @@ def main(argv: list[str]) -> int:
             print(summary())
         elif cmd == "json":
             print(json.dumps(read(), ensure_ascii=False, indent=1))
+        elif cmd == "show" and len(args) >= 2:
+            print(show(" ".join(args[1:])))
         elif cmd == "add" and len(args) >= 3:
             notes, deadline, type_, for_ = (_opt(args, "--notes"), _opt(args, "--deadline"), _opt(args, "--type"),
                                             _opt(args, "--for"))

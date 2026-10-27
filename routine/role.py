@@ -82,7 +82,7 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "pings": {"appt", "remind", "cancel", "note", "note-clear", "watch", "unwatch", "out", "out-stop", "nudge", "nudge-done", "nudge-later", "call", "call-cancel", "answered"},
           "games": {"new", "spec", "tick", "count", "note", "diary", "week", "debrief", "undo"},
           "coaching": {"done", "later"},
-          "handover": {"edit"}}
+          "handover": {"edit", "put"}}  # put (Fable, 27 October 2026): a whole small file, with one-way sync
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
            "coaching": os.path.join(os.path.dirname(HERE), "app", "coaching.py")}  # H225; the rest are routine/<script>.py
@@ -98,12 +98,31 @@ ONE_WRITER = ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "
               "HQ/calendar-todo.json")  # H243: which block a to-do is planned in
 
 
+LOCAL_ON_BACKUP = ("HQ/calls/", "HQ/direct-line/", "HQ/notes.md", "HQ/calendar.json")  # the backup's own, until handed over
+
+
+def one_way() -> bool:
+    """Fable, 27 October 2026: the backend switch one_way_sync (app/backend.py)."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "app"))
+        import backend
+        return backend.on("one_way_sync")
+    except Exception:
+        return False
+
+
 def one_writer(rel: str) -> bool:
-    """H203: a workspace file only the main writes (the three, the to-do list, and an agent's own notes)."""
+    """H203: a workspace file only the main writes (the three, the to-do list, and an agent's own notes). With one-way
+    sync on (Fable, 27 October 2026), every synced file: the backup only receives, so a change it makes goes to the
+    main by hand-over; the files it must keep locally (a call's transcript, the texts, the quick notes) excepted."""
     rel = rel.replace(os.sep, "/").lstrip("./")
     if rel in ONE_WRITER:
         return True
-    return rel.startswith("HQ/notes-") and rel.endswith(".md") and "/" not in rel[len("HQ/"):]
+    if rel.startswith("HQ/notes-") and rel.endswith(".md") and "/" not in rel[len("HQ/"):]:
+        return True
+    if one_way() and not rel.startswith(".git") and not any(rel.startswith(x) for x in LOCAL_ON_BACKUP):
+        return True
+    return False
 
 
 def _load(path, default):

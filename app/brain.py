@@ -122,6 +122,7 @@ def call_session_options(
     cli_path: str | None = None,
     effort: str | None = "low",
     quick_context: str | None = None,
+    resume: str | None = None,
 ) -> ClaudeAgentOptions:
     """A3: the same Claude as the user's chats in their workspace.
 
@@ -172,6 +173,9 @@ def call_session_options(
         include_partial_messages=True,
         effort=effort,
         max_buffer_size=MAX_BUFFER,  # F60
+        # Fable, 27 October 2026 (the open line, app/lines.py): the agent's last session picked up again, with
+        # this fresh system prompt (her identity and the briefing) on top of what she remembers.
+        **({"resume": resume} if resume else {}),
         # No CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC here: it also switches off the
         # claude.ai connectors (Calendar, Gmail), checked 8 October 2026.
         # Tool search off: the connector tools are loaded up front instead of through a
@@ -213,6 +217,7 @@ class TurnStats:
     is_error: bool = False
     terminal_reason: str | None = None
     model_usage: list[str] = field(default_factory=list)
+    context_tokens: int | None = None  # the open line: what the turn carried as context (lines.context_tokens_of)
     tools: list[str] = field(default_factory=list)
     events: list[tuple[float, str]] = field(default_factory=list)  # (seconds, what) for timing
 
@@ -412,6 +417,11 @@ class ClaudeBrain:
                         stats.is_error = msg.is_error
                         stats.terminal_reason = msg.terminal_reason
                         stats.model_usage = list((msg.model_usage or {}).keys())
+                        try:
+                            import lines as _lines
+                            stats.context_tokens = _lines.context_tokens_of(msg.usage)
+                        except Exception:
+                            pass
                         if msg.is_error and not streamed:
                             logger.error(f"Claude turn failed: {msg.result}")
                             yield "Sorry, something went wrong on my side. Can you say that again?"

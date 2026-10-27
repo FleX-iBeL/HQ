@@ -369,6 +369,11 @@ class Policy:
         """H203: on the backup, a change to a file only the main writes goes to the main, which makes it on its own
         copy; the sync brings it back here. Nothing is written here, so the two never make conflict copies."""
         if tool == "Write":
+            content = inp.get("content") if isinstance(inp.get("content"), str) else None
+            if content is not None and len(content.encode("utf8")) <= 90_000 and self._one_way():
+                if self.dry_run:
+                    return Decision(DENY, f"test run: on the backup this file {rel} would go to the main whole")
+                return self._hand("put", rel, json.dumps({"text": content}, ensure_ascii=False))
             return Decision(DENY, f"this HQ is the backup, and {rel} is written only by the main: make the change as "
                                   "an Edit (only the part that changes), so the main can make it on its own copy",
                             retry=True)
@@ -380,12 +385,22 @@ class Policy:
                                   "to send in one go: make it as a few smaller Edits", retry=True)
         if self.dry_run:
             return Decision(DENY, f"test run: on the backup this change to {rel} would go to the main")
+        return self._hand("edit", rel, json.dumps({"edits": edits}, ensure_ascii=False))
+
+    def _one_way(self) -> bool:
+        try:
+            import backend
+            return backend.on("one_way_sync")
+        except Exception:
+            return False
+
+    def _hand(self, what: str, rel: str, payload: str) -> Decision:
         try:
             import sys
             if str(HQ_ROUTINE) not in sys.path:
                 sys.path.insert(0, str(HQ_ROUTINE))
             import role
-            code, out, err, how = role.hand("handover", ["edit", rel, json.dumps({"edits": edits}, ensure_ascii=False)])
+            code, out, err, how = role.hand("handover", [what, rel, payload])
         except Exception as e:
             code, out, err, how = 3, "", repr(e), "error"
         said = " ".join((out + " " + err).split())[:300]
@@ -559,6 +574,15 @@ class Policy:
             return Decision(DENY, "from a call, the appointment notes script only reads them")
         # H263: his quick notes: read, clear one (kept, so it can come back), the cleared ones, bring one back. The
         # notes file is in the workspace, which a call may edit anyway; this way a cleared note is never lost.
+        # Fable, 27 October 2026: the briefing and the library behind it, read only (a layer of the map, a briefing).
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "briefing.py"):
+            if len(args) == 1 or args[1] in ("day", "coach", "build", "layer", "fresh"):
+                return Decision(ALLOW, "the briefing, or a layer of the map")
+            return Decision(DENY, "the briefing script takes day, coach, build, fresh or layer N on a call")
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "backend.py"):
+            if len(args) == 1 or args[1] in ("list", "show"):
+                return Decision(ALLOW, "the backend switches")
+            return _ask(f"flip the backend switch {' '.join(args[1:3])}", "a backend switch")
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "notes.py"):
             if len(args) == 1 or args[1] in ("clear", "cleared", "restore"):
                 return Decision(ALLOW, "his quick notes")
@@ -566,7 +590,7 @@ class Policy:
         # H200: the to-do list, the user's own file in the workspace: read, add, done, let go, move, undo. Each change is
         # one table row and its log line, the same as editing the file by hand, which a call may do anyway.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "todo.py"):
-            if len(args) == 1 or args[1] in ("summary", "json", "add", "done", "letgo", "move", "tick", "untick",
+            if len(args) == 1 or args[1] in ("summary", "json", "show", "add", "done", "letgo", "move", "tick", "untick",
                                                   "order", "rename", "undo", "blocks", "plan", "unplan",
                                                   "repeat"):
                 return Decision(ALLOW, "the to-do list")
