@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 0.4.18 · 27 October 2026
+
 - The backend rebuilt behind switches (HQ/backend.json in your folder; `app/backend.py` shows and flips them; every switch starts off on a fresh install, so nothing changes for you until you turn one on):
   - The briefing. An agent starts with a small briefing the routine writes every minute from your files (today and tomorrow, the very important mail, the open commitments and the last hours' notes, the to-do list one line each, the open nudges, the game, the map's status lines; for a build call the planning's status block, open jobs and open items) plus her identity, and opens the rest when a turn needs it (`briefing.py layer N` for a layer of the map, `todo.py show` for one item, `sprint.py show` for one planning row). Measured: a coaching call's start from about 367 KB to about 47 KB, a build call's from 239 KB to 11 KB.
   - The open line. Each agent keeps one Claude session between calls and texts on a computer, resumed with a fresh briefing on top, rolled over after eight quiet hours, a day and a half, or when its context grows too big; `lines.py reset` starts them fresh.
