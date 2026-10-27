@@ -14066,12 +14066,17 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
         for probe in ("TEAM-PROBE", "PENNY-PROBE", "CHECK-PROBE", "STATUS-PROBE", "NOTES-BODY"):
             need(probe not in coach, f"Pepper has {probe}")
         # 26 October 2026: her load is Pepper's old one (the folder like a chat), minus the vision files.
-        for probe in ("RULES-PROBE", "TEAM-PROBE", "PENNY-PROBE", "VISION-PROBE", "LIFE-PROBE"):
+        for probe in ("RULES-PROBE", "TEAM-PROBE", "PENNY-PROBE", "VISION-PROBE"):
             need(probe in build, f"Moneypenny misses {probe}")
-        # 27 October 2026 (Pepper's green light): no mail list, to-do list or current situation for her either.
-        for probe in ("MAP-PROBE", "STATUS-PROBE", "OPEN-JOB", "NOTES-BODY", "OLD-JOB", "ROW-PROBE", "SITUATION-PROBE",
-                      "TODO-PROBE", "CHECK-PROBE", "VERY-PROBE"):
+        # 27 October 2026 (Pepper's green light): no mail list, to-do list or current situation for her either; and
+        # (Fable, the same evening) the log's life coaching notes stay out of her start too, only the team's and the
+        # notes about building. The status block, the open jobs and the open items are hers (quick_context._planning),
+        # the planning file and the build notes never whole.
+        for probe in ("MAP-PROBE", "NOTES-BODY", "OLD-JOB", "ROW-PROBE", "SITUATION-PROBE",
+                      "TODO-PROBE", "CHECK-PROBE", "VERY-PROBE", "LIFE-PROBE"):
             need(probe not in build, f"Moneypenny has {probe}")
+        for probe in ("STATUS-PROBE", "OPEN-JOB"):
+            need(probe in build, f"Moneypenny misses {probe}")
         need("MAP-PROBE" in coach, "Pepper misses the map")
         # Who loads what, from HQ's own agents, and one of the workspace's own without a context.
         by = {a["id"]: agents.context_of(a) for a in agents.DEFAULTS}

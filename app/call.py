@@ -226,9 +226,14 @@ class Call:
         notes = []
         joined, self._joined = getattr(self, "_joined", None), None
         if joined is not None and joined is not who:
-            notes.append(f"[Call system: {joined['name']} ({joined['speciality']}) is on this call too now, a "
+            notes.append(f"[Call system: {joined['name']} ({joined['speciality']}) is now on this call too, a "
                          f"{agents.way(self.panel)} call. She has her own line and answers when he speaks to her; you "
                          f"only answer the turns the call system gives you.]")
+        elif joined is not None:  # she answers first: told she's the one now on this call too, next to the others
+            others = ", ".join(a["name"] for a in self.panel if a is not who)
+            notes.append(f"[Call system: you, {who['name']}, are now on this call too, a {agents.way(self.panel)} call "
+                         f"with {others}. Each of you has her own line; you only answer the turns the call system "
+                         "gives you.]")
         was = self.speaker
         await self._switch_to(who)
         notes += self._catch_up(who, words, tell=who is not was)
