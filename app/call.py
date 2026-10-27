@@ -236,10 +236,11 @@ class Call:
                          "gives you.]")
         was = self.speaker
         await self._switch_to(who)
-        notes += self._catch_up(who, words, tell=who is not was)
+        since = self._catch_up(who, words, tell=who is not was)  # one note: what she missed, and that she answers
         rest = ", ".join(a["name"] for a in self.panel if a is not who)
-        notes.append(f"[Call system: {agents.way(self.panel)} call with {rest} and {config.USER}. {who['name']} answers "
-                     "this turn: answer as yourself, in your own character.]")
+        notes.append(f"[Call system: {agents.way(self.panel)} call with {rest} and {config.USER}."
+                     + (f" Since your last turn on this call, oldest first:\n{since}\n" if since else " ")
+                     + f"{who['name']} answers this turn: answer as yourself, in your own character.]")
         return notes + self._goodbye_note(who, words)
 
     async def _joined_hi(self, other_id: str) -> list[str]:
@@ -350,22 +351,22 @@ class Call:
         except OSError:
             return []
 
-    def _catch_up(self, who: dict, words: str, tell: bool) -> list[str]:
-        """What the others and he said since her last turn (her own session didn't hear it), as a note for this turn;
-        [] when nothing, or when she answered the turn before. Always moves her mark to now."""
+    def _catch_up(self, who: dict, words: str, tell: bool) -> str:
+        """What the others and he said since her last turn (her own session didn't hear it), as lines for this turn's
+        note; "" when nothing, or when she answered the turn before. Always moves her mark to now."""
         lines = self._lines()
         seen, self._seen[who["id"]] = self._seen.get(who["id"], 0), len(lines)
         if not tell:
-            return []
+            return ""
         new = [ln for ln in lines[seen:] if ln["who"] != "filler" and not ln.get("cancelled")
                and not (ln["who"] == "hq" and ln.get("agent", self.agent["name"]) == who["name"])]
         if new and new[-1]["who"] == "user" and words and transcript._one_line(words) == new[-1]["text"]:
             new = new[:-1]  # the words of this turn come with it, not here
         if not new:
-            return []
+            return ""
         rows = [f"{config.USER_LABEL if ln['who'] == 'user' else ln.get('agent') or self.agent['name']}: "
                 f"{transcript._one_line(ln['text'])}" for ln in new]
-        return [f"[Call system: since your last turn on this call, oldest first:\n" + "\n".join(rows) + "]"]
+        return "\n".join(rows)
 
     async def _switch_to(self, who: dict) -> None:
         """H79: from now on she answers: her own session (her model with it) and her voice."""
