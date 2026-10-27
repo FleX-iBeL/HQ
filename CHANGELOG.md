@@ -4,6 +4,16 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- A turn never ends in silence. When an agent's turn came to its end without a word (every look done, a step refused, a question for you never put into words), you heard nothing and the thinking sound just stopped. Now she's asked once more in the same turn to say what she did and what's next, and to ask you in words when a step still needs your yes.
+
+- A question stays open until you answer it. When an agent asked for your yes and your next words were something else (a question back, "is it complete? then yes", another subject), the question was dropped and she was told you'd said no. Now it stays open for your next words, your next clear yes approves it, and a clear no or two turns of something else drops it.
+
+- A refusal names the step. A chained command refused for one of its parts was refused whole, and the agent read it as "I can't do this at all". Now the refusal names that one step and says the rest runs without it.
+
+- Each agent on a three-way call has her own line. When you brought a second agent into a call, she shared the first one's conversation and so saw everything the first one had loaded. Now each one has her own session with only her own context, and whoever takes a turn is told what the others said since her last.
+
+- The planning is read a row at a time. A call now reads one row with `sprint.py show LABEL` and the open items with `sprint.py open`; a build call starts with the status block, the open jobs and the open items already in front of her; a read of a few hundred kilobytes in one go is refused with the way to read less; and a build call's notes leave out the life coaching calls.
+
 - A long look on a call no longer loses the answer. Before, when an agent read a very big file on a call, her line died without a word and you heard nothing. Now a whole read of a huge file is cut to a part (she's told to read a piece or search for the line), the line can carry far more, and if it dies anyway you hear "Lost my line, one moment", it reopens with the call so far and the same question is answered without you typing again.
 
 ## 0.4.16 · 27 October 2026

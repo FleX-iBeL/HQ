@@ -295,6 +295,14 @@ class ClaudeSessionLLMService(LLMService):
                     f"[Call system: {config.USER} said yes to your question ({asked}). Approved once: "
                     "make exactly the same call again now.]"
                 )
+            elif yes is None:
+                # Fable clean-up (27 October 2026): his words were neither a yes nor a no (a question back, a condition,
+                # another subject), so the question stays open instead of being dropped as a no.
+                notes.append(
+                    f"[Call system: {config.USER} hasn't answered your question yet ({asked}): what he just said is "
+                    "neither a yes nor a no to it. Answer what he said. If the question still matters, ask it again in "
+                    "one short sentence; it stays open, and his next clear yes approves it.]"
+                )
             else:
                 notes.append(
                     f"[Call system: {config.USER} did not give a clear yes to your question ({asked}), "
@@ -302,7 +310,8 @@ class ClaudeSessionLLMService(LLMService):
                     "just respond to what he said.]"
                 )
             if self.transcript:
-                self.transcript.note((f"{config.USER} said yes to: " if yes else "not approved: ") + asked)
+                self.transcript.note((f"{config.USER} said yes to: " if yes else "not answered yet: " if yes is None
+                                      else "not approved: ") + asked)
         if self.before_turn is not None:
             try:
                 notes = list(await self.before_turn(words)) + notes
@@ -342,7 +351,6 @@ class ClaudeSessionLLMService(LLMService):
             self._tell_cancellable(True)  # H38: the Cancel button's own line isn't offered for cancelling
         reply = self.brain.ask(text)
         watch = self.create_task(self._watch_for_fillers(turn), "filler-watch") if self.fillers else None
-        open_text = False  # text pushed since the last response start (for flushing at a tool)
         # H75: her hang-up mark is never spoken; H79: nor the marks that bring in another agent
         mark = Marks([config.HANGUP_MARK, config.CALLBACK_MARK, *self.switch_marks])  # H238: nor the call-back one
         speech = SpeechFilter()  # H82: bold and list marks are for the chat, never spoken
@@ -350,43 +358,24 @@ class ClaudeSessionLLMService(LLMService):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()
-            async for piece in reply:
-                if isinstance(piece, ToolStarted):
-                    turn["tools"].append((time.perf_counter() - t0, piece.name))
-                    turn["tool_pending"] = True
-                    turn["tool_kind"] = config.tool_kind(piece.name)
-                    if open_text:
-                        # Say what came before the tool now, instead of holding the last
-                        # sentence until the tool is done (the voice waits for more text
-                        # to be sure a sentence ended).
-                        await self.push_frame(LLMFullResponseEndFrame())
-                        await self.push_frame(LLMFullResponseStartFrame())
-                        open_text = False
-                    continue
-                piece = mark.feed(piece)
-                if not piece:
-                    continue
-                if turn["first_text_s"] is None:
-                    turn["first_text_s"] = time.perf_counter() - t0
-                    await self.stop_ttfb_metrics()
-                if piece.strip():
-                    self._tell_cancellable(False)  # H31: she has started answering
-                if turn["reply"] and not turn["reply"][-1].isspace() and piece and not piece[0].isspace() and turn.get("tool_pending") is not None:
-                    piece = " " + piece  # a new message after a tool: keep the words apart
-                turn["reply"] += piece
-                turn["tool_pending"] = None
-                turn["last_text"] = time.perf_counter()
-                if piece.strip():
-                    open_text = True
-                said = speech.feed(piece)
-                if said:
-                    await self._push_llm_text(said)
-            tail = mark.flush()
-            if tail:
-                turn["reply"] += tail
-            said = speech.feed(tail) + speech.flush()
-            if said:
-                await self._push_llm_text(said)
+            await self._stream(reply, turn, t0, mark, speech)
+            if self._ended_silent(turn):
+                # Fable clean-up (27 October 2026): a turn that ends without a word to him (every tool done, nothing said;
+                # a step refused or asking for his yes and no question put to him) is asked once more, in the same
+                # turn, so he never sits in silence with the thinking sound gone. His words, 16:11: "I had to ask you
+                # two three times, 'What is your response?' because there is no response."
+                logger.warning("The turn ended without a word to him; asking once more")
+                if self.transcript:
+                    self.transcript.note("her turn ended without a word to him; asked once more")
+                turn["nudged"] = True
+                await reply.aclose()
+                pending = " ".join(q for _, _, q in self.policy.pending) if self.policy else ""
+                reply = self.brain.ask(self.SILENT_NUDGE.format(
+                    user=config.USER,
+                    asked=f" You still have a question for him that needs his yes ({pending}): ask it now, in words."
+                    if pending else ""))
+                mark, speech = Marks([config.HANGUP_MARK, config.CALLBACK_MARK, *self.switch_marks]), SpeechFilter()
+                await self._stream(reply, turn, t0, mark, speech)
             asked = [self.switch_marks[m] for m in self.switch_marks if mark.found(m)]
             if mark.found(config.CALLBACK_MARK) and not mark.found(config.HANGUP_MARK):
                 # H238: he asked her to hang up and call him right back
@@ -437,6 +426,60 @@ class ClaudeSessionLLMService(LLMService):
                 self.transcript.reply(turn["reply"], cut_off=turn["interrupted"])
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
+
+    SILENT_NUDGE = ("[Call system: your turn ended without a single word to {user}. He heard nothing, and the thinking "
+                    "sound stopped. Say now, in one or two short spoken sentences, what you did or found and what comes "
+                    "next; if a step was refused, say so plainly.{asked} Never end a turn without a word to him.]")
+
+    async def _stream(self, reply, turn: dict, t0: float, mark: "Marks", speech: "SpeechFilter") -> None:
+        """One reply from the brain into the turn: spoken as it streams in, written for the chat, the marks taken out."""
+        open_text = False  # text pushed since the last response start (for flushing at a tool)
+        async for piece in reply:
+            if isinstance(piece, ToolStarted):
+                turn["tools"].append((time.perf_counter() - t0, piece.name))
+                turn["tool_pending"] = True
+                turn["tool_kind"] = config.tool_kind(piece.name)
+                if open_text:
+                    # Say what came before the tool now, instead of holding the last
+                    # sentence until the tool is done (the voice waits for more text
+                    # to be sure a sentence ended).
+                    await self.push_frame(LLMFullResponseEndFrame())
+                    await self.push_frame(LLMFullResponseStartFrame())
+                    open_text = False
+                continue
+            piece = mark.feed(piece)
+            if not piece:
+                continue
+            if turn["first_text_s"] is None:
+                turn["first_text_s"] = time.perf_counter() - t0
+                await self.stop_ttfb_metrics()
+            if piece.strip():
+                self._tell_cancellable(False)  # H31: she has started answering
+            if turn["reply"] and not turn["reply"][-1].isspace() and piece and not piece[0].isspace() and turn.get("tool_pending") is not None:
+                piece = " " + piece  # a new message after a tool: keep the words apart
+            turn["reply"] += piece
+            turn["tool_pending"] = None
+            turn["last_text"] = time.perf_counter()
+            if piece.strip():
+                open_text = True
+            said = speech.feed(piece)
+            if said:
+                await self._push_llm_text(said)
+        tail = mark.flush()
+        if tail:
+            turn["reply"] += tail
+        said = speech.feed(tail) + speech.flush()
+        if said:
+            await self._push_llm_text(said)
+
+    def _ended_silent(self, turn: dict) -> bool:
+        """The reply came to its end (a result, not a cut-in, not a dead line) and she said nothing at all."""
+        if turn["reply"].strip() or turn.get("cancelled") or turn.get("hi") or turn.get("nudged"):
+            return False
+        last = self.brain.last_turn
+        if last is None or last.total_s is None or last.interrupted or last.is_error:
+            return False
+        return True
 
     # -- H75: she hangs up after his goodbye -------------------------------------
 

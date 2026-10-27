@@ -92,6 +92,71 @@ def open_rows(text=None):
     return out
 
 
+STATES = {"⬜": "open", "✅": "done", "🔨": "being built", "🔁": "repeats"}
+SHOW_MOST = 12000  # about one of the biggest rows; past that the rest is pointed at, never the whole planning
+
+
+def row_of(label, text=None):
+    """Any row of the roadmap with this label, open or closed, in any phase (Fable clean-up, 27 October 2026):
+    {"label", "title", "state", "phase", "cells", "line", "n"} (n: its line number), or None."""
+    text = q.read()[0] if text is None else text
+    label = label.strip().upper()
+    phase = ""
+    for n, line in enumerate(text.split("\n"), 1):
+        if line.startswith("## "):
+            phase = line[3:].strip()
+            continue
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.split("|")[1:-1]]
+        if len(cells) < 2:
+            continue
+        head = cells[1].split(" ", 1)
+        if head[0] != label:
+            continue
+        return {"label": label, "title": head[1].strip() if len(head) > 1 else "", "state": cells[0],
+                "phase": phase, "cells": cells[2:], "line": line, "n": n}
+    return None
+
+
+def show_words(labels, text=None):
+    """`show LABEL …` (Fable clean-up, 27 October 2026): one row's cells, plainly, so a call never reads or greps the
+    whole planning (over 1 MB: a whole read killed the call's line, F60) to see one row, open or closed."""
+    text = q.read()[0] if text is None else text
+    out = []
+    for label in labels:
+        r = row_of(label, text)
+        if r is None:
+            out.append(f"{label.strip().upper()} isn't a row on the planning.")
+            continue
+        s = f"{r['label']} ({STATES.get(r['state'], r['state'] or 'no mark')}; {r['phase']}): {r['title']}"
+        for i, c in enumerate(r["cells"], 1):
+            if c:
+                s += f"\n\n[{i}] {c}"
+        if len(s) > SHOW_MOST:
+            s = s[:SHOW_MOST] + (f"\n\n[… {len(s) - SHOW_MOST:,} more characters. The whole row is line {r['n']} of "
+                                 f"the roadmap: sed -n {r['n']}p HQ/roadmap.md | cut -c{SHOW_MOST}-{SHOW_MOST + 8000}]")
+        out.append(s)
+    return "\n\n".join(out)
+
+
+def open_words(text=None):
+    """`open` (H288, Fable clean-up): the open items only, one line each, with their tag, mark, rank and whether it's a
+    bug; a closed one only when asked for by name (show). Small enough to load at a call's start."""
+    rows = open_rows(text)
+    tags, readies, ranked = moscow_of(rows), ready_of(rows), order(rows)
+    out = [f"{len(rows)} open items on the planning (one row whole: sprint.py show LABEL; closed rows the same way):"]
+    for r in rows:
+        bits = [MOSCOW_NAMES[tags[r["label"]]]] if r["label"] in tags else []
+        bits.append({"ready": "ready", "changed": "changed since ready"}.get(readies.get(r["label"]), "not ready"))
+        if r["label"] in ranked:
+            bits.append(f"rank {ranked.index(r['label']) + 1}")
+        if is_bug(r):
+            bits.append("bug")
+        out.append(f"- {r['label']} ({', '.join(bits)}): {q.one_line(r['title'])[:160]}")
+    return "\n".join(out)
+
+
 def job_text(label, title):
     """The row as the job it would become, the same words jobs.py send-row gives it."""
     title = q.one_line(title).replace("·", "-").rstrip(".")
@@ -878,6 +943,12 @@ def main(argv):
         rows = {r["label"]: r for r in open_rows()}
         for l in [a.strip().upper() for a in argv[1:]]:
             print((not_ready_why(rows[l]) or f"{l} is ready.") if l in rows else f"{l} isn't an open row on the planning.")
+    elif cmd == "show":  # Fable clean-up: one row, open or closed, never the whole planning
+        if len(argv) < 2:
+            sys.exit("show LABEL [LABEL …]")
+        print(show_words([a.strip().upper() for a in argv[1:]]))
+    elif cmd == "open":  # H288: the open items only
+        print(open_words())
     elif cmd == "lay":
         labels, night, as_json = _args(argv[1:])
         L = lay(labels, night)

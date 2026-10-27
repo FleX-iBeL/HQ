@@ -44,15 +44,38 @@ def _slug(path) -> str:
 BIG_FILE_BYTES = 400_000
 
 
-def _too_big(path: str) -> str | None:
+def _too_big(path: str, inp: dict | None = None) -> str | None:
     try:
         size = os.path.getsize(path)
     except OSError:
         return None
     if size <= BIG_FILE_BYTES:
         return None
+    limit = (inp or {}).get("limit")
+    if limit:
+        # Fable clean-up (27 October 2026): a Read with offset and limit is judged on the bytes of those lines, not the
+        # whole file. The planning's rows are up to 10 KB each, so "a few hundred lines" of it is still most of the file.
+        try:
+            offset, limit = max(int((inp or {}).get("offset") or 1), 1), int(limit)
+            got = 0
+            with open(path, "rb") as f:
+                for n, line in enumerate(f, 1):
+                    if n < offset:
+                        continue
+                    if n >= offset + limit:
+                        break
+                    got += len(line)
+        except (OSError, ValueError, TypeError):
+            got = size
+        if got <= BIG_FILE_BYTES:
+            return None
+        fit = max(1, int(limit * BIG_FILE_BYTES / got))
+        return (f"{Path(path).name}: those {limit} lines are {got // 1000} KB, too much for one read on a call (the "
+                f"lines are long). Read at most about {fit} lines at a time, or get just the row you need: a planning "
+                f"row is python3 \"{HQ_ROUTINE / 'sprint.py'}\" show LABEL, the open items are sprint.py open.")
     return (f"{Path(path).name} is {size // 1000} KB, too big to read whole on a call. Cut to a part: "
-            f"read it with offset and limit (a few hundred lines), or grep the line you need.")
+            f"read it with offset and limit (a few hundred lines), or grep the line you need; a planning row is "
+            f"python3 \"{HQ_ROUTINE / 'sprint.py'}\" show LABEL, the open items are sprint.py open.")
 
 
 def tool_output(path: str, folder: Path) -> bool:
@@ -188,6 +211,7 @@ class Policy:
     # H280: a call about building HQ (Moneypenny's context "build") writes Claude's memory for the workspace without
     # a yes, so a lesson she learns is there at the next call's start.
     memory_writes: bool = False
+    pending_turns: int = 0  # how many of his turns the pending questions have waited (answer, PENDING_TURNS)
 
     def __post_init__(self):
         self.folder = Path(os.path.realpath(self.folder))
@@ -214,6 +238,7 @@ class Policy:
             else:
                 if not any(p[0] == tool and p[1] == key for p in self.pending):
                     self.pending.append((tool, key, d.question))
+                    self.pending_turns = 0
         summary = summarize(tool, inp or {})
         self.log.append((tool, summary, d))
         if callable(self.listener):
@@ -252,8 +277,8 @@ class Policy:
             return Decision(ALLOW, "session helper")
         if tool in READ_TOOLS:
             path = inp.get("file_path") or inp.get("path") or str(self.folder)
-            if tool == "Read" and not inp.get("limit"):
-                big = _too_big(path)
+            if tool == "Read":
+                big = _too_big(path, inp)
                 if big:
                     return Decision(DENY, big)
             if self.inside(path):
@@ -410,15 +435,15 @@ class Policy:
         if segments is None:
             return _ask("run a shell command", "a shell loop it can't follow")
         # H277: several steps chained count as one; a cd carries over to the steps after it.
-        results = []
+        results: list[tuple[list[str], Decision]] = []
         self._cwd = None
         try:
             for seg in segments:
                 if any("$" in w for w in seg):
-                    results.append(_ask("run a shell command", "a shell command with a variable"))
+                    results.append((seg, _ask("run a shell command", "a shell command with a variable")))
                     continue
                 d = self._bash_one([w.replace(_DOLLAR, "$") for w in seg])
-                results.append(d)
+                results.append((seg, d))
                 if seg and seg[0] == "cd" and d.verdict == ALLOW:
                     target = Path(seg[1]).expanduser() if len(seg) > 1 else Path.home()
                     if not target.is_absolute():
@@ -427,10 +452,18 @@ class Policy:
         finally:
             self._cwd = None
         for verdict in (DENY, ASK):
-            for d in results:
+            for seg, d in results:
                 if d.verdict == verdict:
+                    if len(results) > 1:
+                        # Fable clean-up (27 October 2026): a chained command is refused whole when one step is, and the
+                        # agent read that as "I can't do this at all" (Moneypenny, 17:38: "From a call I can't put it in
+                        # their line"). So the refusal names the step, and that the rest would run without it.
+                        step = " ".join(w.replace(_DOLLAR, "$") for w in seg)[:90]
+                        d = Decision(d.verdict, f"only the step `{step}`: {d.why}. The other steps of that command "
+                                                f"are fine on their own: run them again without this step",
+                                     question=d.question, retry=d.retry, handed=d.handed)
                     return d
-        return Decision(ALLOW, "; ".join(dict.fromkeys(d.why for d in results)))
+        return Decision(ALLOW, "; ".join(dict.fromkeys(d.why for _, d in results)))
 
     def _bash_one(self, words: list[str]) -> Decision:
         if not words:
@@ -481,9 +514,11 @@ class Policy:
         # piece 2: lay a sprint over the nights, and plan it for the team (the schedule, as schedule.py add would).
         if prog in ("python3", "python") and args and self.hq_script(args[0], "sprint.py"):
             sub = args[1] if len(args) > 1 else "list"
-            if sub in ("list", "json", "rank", "lay", "plan", "moscow", "ready", "check"):  # H271: moscow; H272: ready, check
+            if sub in ("list", "json", "rank", "lay", "plan", "moscow", "ready", "check",  # H271: moscow; H272: ready, check
+                       "show", "open"):  # Fable clean-up: one row, and the open items only (H288)
                 return Decision(ALLOW, "the planning's ranks and estimates, and the sprint")
-            return Decision(DENY, "from a call, the sprint script takes list, json, rank, moscow, ready, check, lay or plan")
+            return Decision(DENY, "from a call, the sprint script takes list, json, rank, moscow, ready, check, lay, plan, "
+                                  "show or open")
         # H173: the usage counts, read only: what a job or a call cost on its own tokens, the rate, the room now.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usagecost.py"):
             sub = args[1] if len(args) > 1 else ""
@@ -743,14 +778,25 @@ class Policy:
     def has_pending(self) -> bool:
         return bool(self.pending)
 
-    def answer(self, words: str) -> tuple[bool, list[str]]:
-        """The user's next words after a question. Returns (approved, questions)."""
+    # Fable clean-up (27 October 2026): a question stays open for this many of his turns when his words neither
+    # approve nor refuse it (a question back, "Is the checklist complete? Then yes", something else entirely); before,
+    # any other words dropped the question for good and were told to the agent as a no, so he had to say yes over and
+    # over and she asked again from scratch.
+    PENDING_TURNS = 2
+
+    def answer(self, words: str) -> tuple[bool | None, list[str]]:
+        """The user's next words after a question. Returns (answer, questions): True a clear yes (approved once),
+        False a clear no (dropped), None neither (the question stays pending for his next words, PENDING_TURNS at most)."""
         questions = [q for _, _, q in self.pending]
-        yes = is_clear_yes(words)
-        if yes:
+        if is_clear_yes(words):
             self.approved |= {(t, k) for t, k, _ in self.pending}
-        self.pending.clear()
-        return yes, questions
+            self.pending.clear()
+            return True, questions
+        self.pending_turns += 1
+        if is_clear_no(words) or self.pending_turns >= self.PENDING_TURNS:
+            self.pending.clear()
+            return False, questions
+        return None, questions
 
     def end_of_turn(self) -> None:
         """A yes counts for the turn right after it, not for later."""
@@ -1045,6 +1091,19 @@ def is_clear_yes(words: str) -> bool:
     w = re.sub(r"[^a-z' ]", " ", words.lower())
     w = re.sub(r"^\s*(hq|um+|uh+|hmm+|well)\s+", "", " ".join(w.split()))
     return bool(_YES.match(w)) and not _NOT.search(_HARMLESS.sub(" ", w))
+
+
+_NO = re.compile(r"^(no|nope|nah|nee|don't|dont|do not|not now|never mind|nevermind|stop|wait|hold on|cancel|leave it|skip it|forget it)\b")
+
+
+def is_clear_no(words: str) -> bool:
+    """A clear no, a stop, or a yes with a change ("yes, but make it seven"): the question is dropped. Anything else
+    (a question back, another subject) isn't an answer to it."""
+    w = re.sub(r"[^a-z' ]", " ", words.lower())
+    w = re.sub(r"^\s*(hq|um+|uh+|hmm+|well|oh|okay|ok)\s+", "", " ".join(w.split()))
+    if _NO.match(w):
+        return True
+    return bool(_YES.match(w)) and bool(_NOT.search(_HARMLESS.sub(" ", w)))
 
 
 def _ask(question: str, why: str) -> Decision:

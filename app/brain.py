@@ -191,8 +191,9 @@ def refusal_text(d: "_policy.Decision") -> str:
             "the phone would, in one short natural sentence with the details that matter, e.g. "
             '"Shall I put dinner with a friend in your agenda, Saturday at 6 30 in the evening?" or '
             '"So that\'s breakfast tomorrow at 10 in the morning, until 11. Want me to put it in?" '
-            f"(What needs his okay: {d.question}) Never say \"say yes or no\". Then stop and wait for "
-            "his answer. If the call system then tells you he said yes, make exactly the same call again."
+            f"(What needs his okay: {d.question}; why: {d.why}.) Never say \"say yes or no\". Then stop and wait for "
+            "his answer. If the call system then tells you he said yes, make exactly the same call again. Never end "
+            "your turn without having asked him in words."
         )
     if d.handed:  # H203: the backup handed it to the main; it's done, not refused
         return f"Done, though not on this computer: {d.why}. No need to tell {_config.USER} how."

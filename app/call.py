@@ -96,6 +96,13 @@ class Call:
             persona += tour.rules(demo_topic, self.agent["name"], {a["id"]: a["name"] for a in agents.visible(config.FOLDER)})
         self.panel: list[dict] = [self.agent]  # H79: who's on the call; two on a three-way call, three on a four-way (H121)
         self.speaker = self.agent  # H79: who answers now
+        # Fable clean-up (27 October 2026): on a three-way call each agent has her own Claude session (_brain_for), with
+        # only her own context, persona and model. Before, both shared the caller's session, so whoever was brought in
+        # sat on the caller's whole context (Moneypenny on Pepper's, his vision included; his words: "How the fuck
+        # would money penny know my vision?!"). The one who takes a turn is told what the others said since her last.
+        self.brains: dict = {}
+        self._seen: dict[str, int] = {}  # per agent: how many lines of the transcript she has had
+        self._calls_dir = calls_dir
         self.voices: dict[str, str] = {k: str(v) for k, v in (voices or {}).items()}  # H79: each agent's voice from the page
         self.switched_to: dict | None = None  # H79: she handed the call over to this one
         self.wrap_up_mode = "off" if free else wrap_up  # "on", "dry" or "off"
@@ -125,6 +132,7 @@ class Call:
             # H282: her own thinking time (Moneypenny high), the rest as before; a three-way keeps the first one's
             self.brain = make_brain(self.model, self.policy, load=self.load, persona=persona, context=self.context,
                                     effort=agents.effort_of(self.agent, self.model))
+        self.brains[self.agent["id"]] = self.brain
         self.stt = make_stt(quiet=free)
         self.voice = voice if voice in config.VOICES else config.VOICE
         self.voices.setdefault(self.agent["id"], self.voice)
@@ -209,47 +217,105 @@ class Call:
         self.fillers._voice = v
 
     async def _before_turn(self, words: str) -> list[str]:
-        """On a three-way call: who answers this turn, her model and voice, and a note saying so."""
+        """On a three-way call: who answers this turn, her own session, model and voice, and a note saying so."""
         if len(self.panel) < 2:
             return self._goodbye_note(self.speaker, words)
         who = agents.pick(self.panel, words, self.speaker["id"])
         notes = []
         joined, self._joined = getattr(self, "_joined", None), None
-        if joined is not None:
-            notes.append(f"[Call system: {joined['name']} is now on this call too, a {agents.way(self.panel)} call. Who she is:"
-                         f"{agents.persona(joined, config.USER)}]")
+        if joined is not None and joined is not who:
+            notes.append(f"[Call system: {joined['name']} ({joined['speciality']}) is on this call too now, a "
+                         f"{agents.way(self.panel)} call. She has her own line and answers when he speaks to her; you "
+                         f"only answer the turns the call system gives you.]")
+        was = self.speaker
         await self._switch_to(who)
+        notes += self._catch_up(who, words, tell=who is not was)
         rest = ", ".join(a["name"] for a in self.panel if a is not who)
-        notes.append(f"[Call system: {agents.way(self.panel)} call with {rest}. {who['name']} answers this turn: answer as "
-                     f"{who['name']}, in her character, and only as her.]")
+        notes.append(f"[Call system: {agents.way(self.panel)} call with {rest} and {config.USER}. This turn is yours, "
+                     f"{who['name']}: answer as yourself, in your own character.]")
         return notes + self._goodbye_note(who, words)
 
     async def _joined_hi(self, other_id: str) -> list[str]:
-        """H130: once the line bringing her in has been heard, the one who joined says hi: her model and voice from
-        now on, and the note for her own first line. [] when she isn't the one who just joined (he spoke first)."""
+        """H130: once the line bringing her in has been heard, the one who joined says hi: her own session, model and
+        voice from now on, and the note for her own first line. [] when she isn't the one who just joined (he spoke first)."""
         joined = getattr(self, "_joined", None)
         if joined is None or joined["id"] != other_id or len(self.panel) < 2:
             return []
         self._joined = None
         await self._switch_to(joined)
+        self._catch_up(joined, "", tell=False)
         rest = ", ".join(a["name"] for a in self.panel if a is not joined)
-        return [f"[Call system: {joined['name']} has just been brought in: a {agents.way(self.panel)} call with {rest} "
-                f"and {config.USER}. Who she is:{agents.persona(joined, config.USER)}]",
-                f"[Call system: you are {joined['name']}. Nobody has asked you anything yet: say one short line of your "
-                f"own that you're there now, the way a person joining a call says hi, in your character, picking up on "
-                f"what was said so far if it fits. Your own words, never a set greeting, never the same line as before. "
-                f"Just that line, no question to answer, no marks; then he goes on.]"]
+        return [f"[Call system: you, {joined['name']}, have just been brought in: a {agents.way(self.panel)} call with "
+                f"{rest} and {config.USER}. Nobody has asked you anything yet: say one short line of your own that "
+                f"you're there now, the way a person joining a call says hi, in your character, picking up on what was "
+                f"said so far if it fits. Your own words, never a set greeting, never the same line as before. Just that "
+                f"line, no question to answer, no marks; then he goes on.]"]
+
+    async def _brain_for(self, who: dict):
+        """Her own Claude session on this call (Fable clean-up): made the first time she answers, with her own context
+        (H246), persona and model, and primed with what was said on the call so far, the way Continue does (H60)."""
+        b = self.brains.get(who["id"])
+        if b is not None:
+            return b
+        on_call = {a["id"] for a in self.panel}
+        others = [a for a in agents.visible(config.FOLDER) + agents.soon(config.FOLDER)
+                  if a["id"] != who["id"] and a["id"] not in on_call]
+        persona = agents.persona(who, config.USER) + agents.switch_rules(who, others, config.USER)
+        context = agents.context_of(who)
+        context = "all" if context == "day" and who["load"] == "deep" else context
+        model = config.MODEL_ALIASES.get(agents.runs_on(who["model"]), who["model"])
+        b = make_brain(model, self.policy, load=who["load"], persona=persona, context=context,
+                       effort=agents.effort_of(who, model))
+        self.brains[who["id"]] = b
+        t = time.perf_counter()
+        await b.start()
+        so_far = ""
+        if self.transcript.path is not None:
+            c = transcript.continue_from(self.transcript.path.stem, self._calls_dir, me=who["name"])
+            if c:
+                so_far = (" What was said on this call so far, oldest first (\"You\" is you; the other lines carry "
+                          f"their names):\n<call-so-far>\n{c['text']}\n</call-so-far>")
+        stamp = now().strftime("%A %-d %B %Y, %H:%M")
+        with_ = ", ".join(a["name"] for a in self.panel if a is not who) or "nobody else"
+        text = (f"[Call system: {config.USER} is on a live call on HQ with {with_}, and you, {who['name']}, have just "
+                f"been brought in: a {agents.way(self.panel)} call. It is {stamp}.{so_far}\n"
+                "Don't do anything yet and use no tools. Reply with only the word: ready]")
+        async for _ in b.ask(text):
+            pass
+        logger.info(f"{who['name']}'s own session is open and primed in {time.perf_counter() - t:.1f}s")
+        self._seen[who["id"]] = len(self._lines())
+        return b
+
+    def _lines(self) -> list[dict]:
+        if self.transcript.path is None:
+            return []
+        try:
+            return transcript.read_lines(self.transcript.path)
+        except OSError:
+            return []
+
+    def _catch_up(self, who: dict, words: str, tell: bool) -> list[str]:
+        """What the others and he said since her last turn (her own session didn't hear it), as a note for this turn;
+        [] when nothing, or when she answered the turn before. Always moves her mark to now."""
+        lines = self._lines()
+        seen, self._seen[who["id"]] = self._seen.get(who["id"], 0), len(lines)
+        if not tell:
+            return []
+        new = [ln for ln in lines[seen:] if ln["who"] != "filler" and not ln.get("cancelled")
+               and not (ln["who"] == "hq" and ln.get("agent", self.agent["name"]) == who["name"])]
+        if new and new[-1]["who"] == "user" and words and transcript._one_line(words) == new[-1]["text"]:
+            new = new[:-1]  # the words of this turn come with it, not here
+        if not new:
+            return []
+        rows = [f"{config.USER_LABEL if ln['who'] == 'user' else ln.get('agent') or self.agent['name']}: "
+                f"{transcript._one_line(ln['text'])}" for ln in new]
+        return [f"[Call system: since your last turn on this call, oldest first:\n" + "\n".join(rows) + "]"]
 
     async def _switch_to(self, who: dict) -> None:
-        """H79: from now on she answers: her model and her voice."""
+        """H79: from now on she answers: her own session (her model with it) and her voice."""
         if who is not self.speaker:
-            model = config.MODEL_ALIASES.get(agents.runs_on(who["model"]), who["model"])
-            if self.brain._client and model != self.brain.model:
-                try:
-                    await self.brain._client.set_model(model)
-                    self.brain.model = model
-                except Exception as e:
-                    logger.warning(f"H79: model switch to {model} failed: {e!r}")
+            self.llm.brain = await self._brain_for(who)
+            self.policy.memory_writes = agents.context_of(who) == "build"  # H280: her lessons, on her turns
             self._speak_as(who)
             self.speaker = who
         self.transcript.speaker = who["name"]
@@ -383,4 +449,5 @@ class Call:
         except Exception as e:
             logger.error(f"After-call work failed: {e!r}")
         finally:
-            await self.brain.stop()
+            for b in self.brains.values() or [self.brain]:
+                await b.stop()

@@ -106,6 +106,25 @@ def life_notes(text: str) -> str:
     return "\n".join("\n".join(ls) for _, ls in _notes(text) if not is_team_note(ls)).rstrip() + "\n"
 
 
+_ABOUT_HQ = re.compile(r"\b[HFMLJKABGRUP]\d{1,3}(?:\.\d+)?\b|\bjob \d+|\bthe team\b|\bHQ\b|\bMoneypenny\b", re.I)
+_LIFE_NOTE = re.compile(r"life coaching|coaching place|look back|the map\b|the year\b|ideal week|real week|six-week game", re.I)
+
+
+def build_notes(text: str) -> str:
+    """The log for a build call (Fable clean-up, 27 October 2026): the team's notes and the call notes about building
+    HQ (a roadmap label, a job, the team, Moneypenny in the first line), never a life coaching call, so a build call
+    knows what was built and said about it and nothing of his life it doesn't need: "you talk about building HQ only,
+    never his life". The section headings stay."""
+    keep = []
+    for _, ls in _notes(text):
+        if ls and ls[0].startswith("- ") and not is_team_note(ls):
+            head = ls[0][:400]
+            if _LIFE_NOTE.search(head) or not _ABOUT_HQ.search(head):
+                continue
+        keep.append("\n".join(ls))
+    return "\n".join(keep).rstrip() + "\n"
+
+
 def team_notes(text: str, most: int = TEAM_NOTES_MOST) -> str:
     """Only the newest notes about the team's work (H246: what Moneypenny needs of the log)."""
     got = [ls for _, ls in _notes(text) if is_team_note(ls)][:most]
@@ -124,6 +143,37 @@ def very_important(text: str) -> str:
             "he asks.]\n") if out else "(No very important mail.)\n"
 
 
+def _planning(folder: Path) -> str:
+    """The roadmap's status block, the team's open jobs and the open items of the planning, for a build call
+    (Fable clean-up, 27 October 2026). Before Sunday 25 October Pepper had these at hand on every call; the split took
+    them away, and Moneypenny had to dig in a planning file over 1 MB, which killed the call's line (F60). The open
+    items come from sprint.py open (H288): a closed row only when asked for, with sprint.py show LABEL."""
+    out = []
+    try:
+        road = (folder / "HQ" / "roadmap.md").read_text()
+        qpos = road.find("\n## The queue")
+        block = road[:qpos if qpos > 0 else 8000].rstrip()
+        rest = road[qpos:road.find("\n# ", qpos + 1)] if qpos > 0 else ""
+        jobs = [l[:300] for l in rest.splitlines() if l.startswith("- Job ") and "· done" not in l]
+        out.append("The HQ roadmap's status block (never read HQ/roadmap.md whole: it's over 1 MB; one row is "
+                   f"python3 \"{config.ROOT / 'routine' / 'sprint.py'}\" show LABEL):\n\n" + block)
+        out.append("The team's open jobs (python3 \"" + str(config.ROOT / "routine" / "jobs.py") + "\" list for the "
+                   "whole queue):\n" + ("\n".join(jobs) if jobs else "(none)"))
+    except OSError:
+        pass
+    try:
+        import os
+        import subprocess
+        r = subprocess.run([sys.executable, str(config.ROOT / "routine" / "sprint.py"), "open"],
+                           capture_output=True, text=True, timeout=30, env={**os.environ, "HQ_WORKSPACE": str(folder)})
+        if r.stdout.strip():
+            out.append("The open items of the planning now (python3 \"" + str(config.ROOT / "routine" / "sprint.py")
+                       + "\" open; the whole of one: show LABEL):\n\n" + r.stdout.strip()[:16000])
+    except Exception:
+        pass
+    return "\n\n".join(out)
+
+
 def build(folder: Path, today: datetime.date | None = None, context: str = "day") -> str:
     """A call's instructions: CLAUDE.md with only the files its role loads pulled in (B1, H246).
     context "day" (Quick, Donna), "coach" (Pepper) or "build" (Moneypenny); see agents.CONTEXTS."""
@@ -136,7 +186,7 @@ def build(folder: Path, today: datetime.date | None = None, context: str = "day"
         text = (folder / rel).read_text()
         if rel == "coaching/log.md":
             text = trim_log(text, today)
-            return text if context == "build" else life_notes(text)  # H246: the team's work is Moneypenny's
+            return build_notes(text) if context == "build" else life_notes(text)  # H246: the team's work is Moneypenny's
         if rel == "inbox.md" and context == "coach":
             return very_important(text)
         return text
@@ -164,8 +214,12 @@ def build(folder: Path, today: datetime.date | None = None, context: str = "day"
         head = ["# This is a call about building HQ",
                 f"The folder is loaded like a chat, with Claude's memory, except {config.USER}'s vision (the vision "
                 "files and the map), his mail list, his to-do list and where he stands now: you talk about building "
-                "HQ only, never his life. For his life, put Donna or Pepper on. The roadmap's rows, the planning, the queue and the build notes are not loaded in full: "
-                "read the section or the row you need with grep or sed -n, never the whole file."]
+                "HQ only, never his life. For his life, put Donna or Pepper on. The roadmap's status block, the team's "
+                "open jobs and the open items of the planning are below; the planning file itself (HQ/roadmap.md) and "
+                "the build notes (HQ/CLAUDE.md) are never read whole, they're far too big for a call: one row of the "
+                f"planning, open or closed, is python3 \"{config.ROOT / 'routine' / 'sprint.py'}\" show LABEL, the open "
+                "items are sprint.py open, and a section of the build notes is read with grep -n for its heading and "
+                "sed -n for its lines."]
     else:
         head = ["# This is a Quick call",
                 f"{config.USER} picked Quick: calendar, mail and small orders. Only part of the folder is loaded: "
@@ -180,6 +234,10 @@ def build(folder: Path, today: datetime.date | None = None, context: str = "day"
     parts = head + [f"Contents of {folder / 'CLAUDE.md'} (project instructions):\n\n{body}"]
     for rel in pulled:
         parts.append(f"Contents of {folder / rel}:\n\n{file_text(rel)}")
+    if context == "build":
+        extra = _planning(folder)
+        if extra:
+            parts.append(extra)
     mem = memory_dir(folder)
     if (mem / "MEMORY.md").exists():
         notes = [mem / "MEMORY.md"] + sorted(p for p in mem.glob("*.md") if p.name != "MEMORY.md")
