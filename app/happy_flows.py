@@ -6521,7 +6521,8 @@ print(json.dumps(o))
             r = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=env2)
             need((r.returncode == 0) == ok, f"jobs.py {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
             return r.stdout + r.stderr
-        for j in json.loads(jobs2("next"))["waiting"]:
+        nx = json.loads(jobs2("next"))
+        for j in nx["waiting"] + nx.get("running", []):  # the copy carries the live queue; a live running job would move the plan's start
             jobs2("mark", str(j["n"]), "cancelled 12:00")
         t0 = time.time()
         usage_now(10, 20, t0 + 3 * 3600, t0 + 4 * 86400)
@@ -6604,6 +6605,8 @@ print(json.dumps(o, default=str))
         need(str(u1) not in json.loads((est_dir / "job-usage.json").read_text()), "H172: a finished job's count stays")
         # When it fits, in the plan, jobs.py list and the page: the 5-hour line full until its reset in 30 minutes.
         usage_now(99, 21, t0 + 1800, t0 + 4 * 86400)
+        for j in json.loads(jobs2("next"))["waiting"]:  # F56: finishing the build above queued its QA check; it would go first
+            jobs2("mark", str(j["n"]), "cancelled 12:00")
         w1 = int(jobs2("add", "Build H8, flow 54, after the reset", "--kind=build").split()[1])
         pl = json.loads(sp.run(["python3", str(jv / "routine/estimate.py"), "plan"], capture_output=True, text=True, env=env2).stdout)
         e8 = pl["jobs"][str(w1)]
@@ -6776,7 +6779,7 @@ print(json.dumps(o))
              and "--land-planned" in page72 and "--land-repeat" in page72, "H176: the status page doesn't draw where the usage will land")
         srv = (jv / "status/server.mjs").read_text()
         page = (jv / "status/index.html").read_text()
-        need("routine/estimate.py" in srv and ("estimate };" in srv or "estimate, planning };" in srv), "the status server doesn't serve the estimates")
+        need("routine/estimate.py" in srv and ("estimate };" in srv or "estimate, planning };" in srv or "estimate, planning, feedback };" in srv), "the status server doesn't serve the estimates")
         need("function etaWords" in page and "etaTotal(E)" in page and "etaAccuracy(E.accuracy)" in page and "(estimate)" in page,
              "the status page doesn't show the estimates")
         # H174: under each heading what its total counts; the total says it's the computed estimate; the team's guess on its own quiet line.
