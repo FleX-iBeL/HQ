@@ -140,6 +140,11 @@ def is_qa(text: str) -> bool:
     return " ".join((text or "").split()).startswith(QA_START)
 
 
+# F57: the end of every job's text; the done mark is the one thing that is always the very last step.
+DONE_LAST = ("Then the status block, then python3 routine/jobs.py done N as the very last step, nothing after it, "
+             "within a minute of the result.")
+
+
 def qa_text(label: str, after: str) -> str:
     return (f"{QA_START}{label} (F56): {after} Read the {label} row whole and check the work against it as Moneypenny, "
             "with her craft (her character and definition of done are in this prompt). Pull dev first. Try every "
@@ -148,14 +153,14 @@ def qa_text(label: str, after: str) -> str:
             "nothing, except a one-line fix in a test when the test itself is wrong (then say so). Then write the "
             f"result: python3 routine/qa.py pass {label} \"what was tried\" --job N, or python3 routine/qa.py fail {label} "
             "\"what's off, plainly\" --job N (a fail queues a fix job by itself). No helpers fanned out (F55). Nothing to push "
-            "unless a test was fixed; the call line isn't restarted.")
+            "unless a test was fixed; the call line isn't restarted. " + DONE_LAST)
 
 
 def fix_text(label: str, what: str, qa_job: int | None) -> str:
     return (f"Fix for {label} (F56): QA failed{f' in job {qa_job}' if qa_job else ''}: {what}. Read the {label} row whole and "
             "its newest QA failed line, fix what's off so every done example holds, run its flows and the ones around it, "
             f"privacy check, tutorial and changelog where they change, push to dev with push.py, write under the {label} row "
-            "what was fixed. A QA job follows by itself when this one is done.")
+            "what was fixed. A QA job follows by itself when this one is done. " + DONE_LAST)
 
 
 def _waiting_for(jobs: list, label: str, qa: bool) -> dict | None:

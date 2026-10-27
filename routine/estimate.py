@@ -1566,14 +1566,15 @@ def guess_detail(e):
     return {k: e[k] for k, _ in GUESSES if isinstance(e.get(k), (int, float)) and e[k] > 0}
 
 
-def on_done(n, text="", started_hhmm=None):
-    """Write the job's estimate next to how long it really took. Returns the record."""
+def on_done(n, text="", started_hhmm=None, at=None):
+    """Write the job's estimate next to how long it really took. Returns the record. `at` (F57): the epoch second it
+    really finished, when it was ticked off later by hand; then the time is start to `at`, not the idle time."""
     st = _load_state()
     e = st.get(str(n)) or known(n)
     if not e.get("kind"):
         e = {**e, "kind": kind_of(text)}
-    now = time.time()
-    seen = _minutes_seen(n)
+    now = at or time.time()
+    seen = 0 if at else _minutes_seen(n)
     started = e.get("started") or _from_hhmm(started_hhmm, now)
     wall = round((now - started) / 60) if started else None
     actual = seen if seen else wall

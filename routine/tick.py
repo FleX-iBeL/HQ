@@ -318,6 +318,12 @@ def start(job):
             + importlib.import_module("jobs").notes_for_prompt(job)
             + importlib.import_module("qa").prompt_extra(job["text"])  # F56: a QA job runs as Moneypenny
         )
+    # F57: the done mark is always the very last step, after any restart; a job that said it was finished and
+    # never ran it sat idle for over an hour (jobs 377 and 393, QA job 389).
+    if plan["mode"] != "resume":  # the resume prompt already ends its rules with the done mark
+        prompt += (f"\n\nWhen the job is finished: the status block, then python3 {json.dumps(os.path.join(HERE, 'jobs.py'))} "
+                   f"done {n} as the very last step, nothing after it (after any restart of the routine or the call line, "
+                   "after any push, after your last report); the job isn't over until that has run.")
     chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")
     # The job's settings (its status line) with this HQ's path, written fresh each time.
     settings = os.path.join(RUN, "job-settings.json")

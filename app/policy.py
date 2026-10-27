@@ -442,6 +442,8 @@ class Policy:
                        "mail-fast", "mail-hourly"):  # H149: the mail check every 15 minutes for a while he names
 
                 return Decision(ALLOW, "the queue for the computer")
+            if sub == "done" and "--at" in args:  # F57: tick off a running job whose work is checked done, on his say-so
+                return Decision(ALLOW, "ticking off a running job at the time it really finished")
             return Decision(DENY, "that part of the queue is only for the computer itself")
         # H43: the scheduler. Adding, listing, moving and cancelling planned items only writes the schedule on
         # the roadmap, like the queue; promote and status are the routine's own.

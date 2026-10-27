@@ -2500,7 +2500,7 @@ window.fetch = async (url) => ({ ok: true, json: async () => (stubEmpty ? { line
         json.dump({"n": 7, "at": t0 + 12 * M + 3, "ok": True, "said": "typed"}, open(Q.RESULT, "w"))
         Q.clear_request()
         need(look(t0 + 13 * M, True) == "wait", "it should wait four minutes between tries")
-        need(any("Typed continue into job 7's window (try 1 of 3)" in w for c, w in inc.calls), "the nudge's answer isn't logged")
+        need(any("Nudged job 7 in its window (try 1 of 3)" in w for c, w in inc.calls), "the nudge's answer isn't logged")
         need(look(t0 + 16 * M, True) == "nudge" and look(t0 + 20 * M, True) == "nudge", "tries 2 and 3 didn't come")
         need(s["nudges"] == 3, f"{s['nudges']} tries, wanted 3")
         need(look(t0 + 24 * M, True) == "stuck", "still quiet after 3 tries should be stuck")
@@ -2975,7 +2975,7 @@ echo "OK the mail check ran hidden in its own tmux session, ended by itself, and
 sleep 2
 python3 -c "import sys; sys.path.insert(0, 'routine'); import quiet; quiet.request($N)"
 timeout 30 bash -c "until [ -s '$T/typed' ]; do sleep 1; done" || fail "continue wasn't typed into the job's pane"
-grep -qx continue "$T/typed" || fail "something else was typed: $(cat $T/typed)"
+grep -q "marked job .* done" "$T/typed" || fail "something else was typed: $(cat $T/typed)"
 grep -q '"ok": true' scratch/routine/nudge-result.json || fail "nudge.py didn't say it typed"
 echo "OK continue is typed into the job's own pane"
 timeout 20 bash -c "until grep -q 'Job $N · done' workspace/HQ/roadmap.md; do sleep 1; done" || fail "the job's done mark didn't land: $(cat $T/done.out)"
@@ -13446,6 +13446,83 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 "no fix job after three; the release takes only H281 (passed) as 0.4.5, holds H282 (failed) and H283 (behind it) on "
                 "nightly and dev, merged back under dev; once H282 passes, 0.4.6 takes the rest; --without-qa takes it all")
 
+    async def flow167(self) -> str:
+        """F57, no Claude: a job that ends its turn without the done mark is caught and told. The nudge names the job and
+        the done mark; a shell under the chat (a wait loop that can never end, a pgrep -f finding itself) counts as work
+        for 15 minutes after the chat's last step, then only while output keeps coming; every job's text ends with the
+        done mark as the very last step; jobs.py done N --at HH:MM ticks off a running job at the time it really
+        finished (the estimate learns that), a call may on his say-so and not done without --at."""
+        import subprocess as sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        import quiet as Q
+        import qa as QA
+        from policy import Policy, ALLOW, DENY
+        tmp = self.tmp / "f57"
+        tmp.mkdir()
+        Q.REQUEST, Q.RESULT, Q.ACTIVITY = str(tmp / "nudge-request.json"), str(tmp / "nudge-result.json"), str(tmp / "act.json")
+        M = 60
+        # 1. The nudge names the job and the done mark.
+        t = Q.nudge_text(393)
+        need("job 393" in t and "done 393" in t and "very last step" in t and "jobs.py" in t, f"the nudge doesn't name the done mark: {t}")
+        Q.request(5)
+        need(Q.pending(5) and "done 5" in Q.pending(5)["text"], "the request doesn't carry the naming text")
+        Q.clear_request()
+        # 2. A shell under the chat: a real never-ending wait loop (a pgrep -f finding its own shell).
+        loop = sp.Popen(["bash", "-c", "until ! pgrep -f x167waitloop >/dev/null; do sleep 1; done  # x167waitloop"])
+        keep_out = Q.output_recent
+        try:
+            time.sleep(1)
+            me = os.getpid()
+            Q.output_recent = lambda session, now: False
+            need(Q.busy(me), "the test's own wait loop isn't seen as a shell under the chat")
+            s = {"n": 7, "pid": None, "started": 1000.0}
+            now = 1000.0 + 14 * M
+            need(Q.last_sign(s, me, now) == now, "a shell under the chat didn't count in the first 15 minutes")
+            now = 1000.0 + 16 * M
+            need(Q.last_sign(s, me, now) == 1000.0, "a wait loop that never ends still counts as work after 15 minutes")
+            need(Q.decide(now, Q.last_sign(s, me, now), 0, 0, True) == "nudge", "the finished job with the endless loop isn't nudged")
+            Q.output_recent = lambda session, now: True  # a background command that keeps writing
+            need(Q.last_sign(s, me, now) == now, "a shell with fresh output didn't count as work")
+        finally:
+            Q.output_recent = keep_out
+            loop.terminate()
+            loop.wait(timeout=5)
+        # No shell: a chat waiting at its prompt is nudged after 10 minutes.
+        need(Q.last_sign({"started": 1000.0}, None, 1000.0 + 11 * M) == 1000.0
+             and Q.decide(1000.0 + 11 * M, 1000.0, 0, 0, True) == "nudge", "a chat waiting at its prompt isn't nudged after 10 minutes")
+        # 3. Every job's text ends with the done mark.
+        for txt in (QA.qa_text("H1", "x"), QA.fix_text("H1", "y", 3)):
+            need(txt.rstrip().endswith("nothing after it, within a minute of the result."), f"a QA text doesn't end with the done mark: {txt[-120:]}")
+        tick = (ROOT / "routine/tick.py").read_text()
+        need("done {n} as the very last step" in tick, "the routine's first prompt doesn't end with the done mark")
+        # 4. done N --at HH:MM.
+        rm = self.tmp / "roadmap-F57.md"
+        rm.write_text(ROADMAP.read_text())
+        env = {**os.environ, "HQ_ROADMAP": str(rm)}
+        def jobs(*a, ok=True):
+            r = sp.run(["python3", str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
+            need((r.returncode == 0) == ok, f"jobs.py {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
+            return r.stdout + r.stderr
+        n = int(jobs("add", "flow 167 job").split()[1])
+        jobs("done", str(n), "--at", "12:00", ok=False)  # not running
+        t0 = time.time()
+        jobs("mark", str(n), "running since " + time.strftime("%H:%M", time.localtime(t0 - 40 * M)))
+        stf = Path(os.path.splitext(str(rm))[0] + "-estimates") / "job-estimates.json"
+        st = json.loads(stf.read_text())  # the start the status server noted when it was marked: forty minutes ago
+        st[str(n)]["started"] = t0 - 40 * M
+        stf.write_text(json.dumps(st))
+        jobs("done", str(n), "--at", "25:99", ok=False)
+        out = jobs("done", str(n), "--at", time.strftime("%H:%M", time.localtime(t0 - 10 * M)))
+        need(f"done {time.strftime('%H:%M', time.localtime(t0 - 10 * M))}" in out and ("Took 30 min" in out or "Took 29 min" in out),
+             f"done --at didn't tick it off at the time it finished: {out}")
+        # A call may, on his say-so, and only with --at.
+        pol = Policy(config.FOLDER)
+        q_ = f'python3 "{ROOT}/routine/jobs.py"'
+        need(pol.decide("Bash", {"command": f"{q_} done 377 --at 15:22"}).verdict == ALLOW, "a call can't tick off a job with --at")
+        need(pol.decide("Bash", {"command": f"{q_} done 377"}).verdict == DENY, "a call may mark a job done without --at")
+        need("done N --at HH:MM" in config.VOICE_RULES, "the call rules don't say how to tick off a job")
+        return "the nudge names the done mark; a never-ending wait loop stops counting after 15 minutes, output keeps a shell alive; every job's text ends with the done mark; done --at ticks off at the real time"
+
     async def flow166(self) -> str:
         """F56 piece 2, no Claude: a feature built in pieces ships switched off until its last piece passes QA. A
         throwaway in-pieces list (HQ_FEATURES_PIECES) holds a demo feature for row H900 with a button. On a friend's
@@ -20163,6 +20240,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    167: ("F57: a finished job without its done mark is nudged by name; a never-ending wait loop stops counting after 15 minutes; every job text ends with the done mark; done N --at HH:MM, also from a call", False, "flow167"),
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     164: ("H283: a note for the team while they work: jobs.py tell N to a running or waiting job, read with notes N after each step; push.py and release.py wait while a note is unread; the first prompt carries a waiting job's notes; the status page shows them; a call tells without a yes", False, "flow164"),

@@ -36,6 +36,9 @@ usage (from the workspace):
   python3 "routine/jobs.py" overrule N                     job N may go past the 5-hour line (the weekly line still counts)
   python3 "routine/jobs.py" move N top|up|down|bottom      move waiting job N in the line (H39)
   python3 "routine/jobs.py" move N before|after M          put waiting job N just before or after job M
+  python3 "routine/jobs.py" done N [--at HH:MM]            F57: --at is for a call, on his say-so, to tick off a running
+                                                           job whose work is checked done, with the time it really
+                                                           finished (the estimates learn that, not the idle time)
   python3 "routine/jobs.py" done N                         the job's own chat, when it's finished; a build for a row
                                                            in Bugs or Features then gets a QA job by itself (F56, qa.py)
   python3 "routine/jobs.py" guess N MINUTES                the job's own chat, at its start after reading its row: its
@@ -444,7 +447,7 @@ def main(argv):
     # H56.3: on the backup HQ, a call's change to the queue goes to the main one as a request, so only
     # one HQ ever writes it. HQ_ROLE_HERE is set when the main runs such a request itself.
     import role
-    if cmd in role.WRITES["jobs"] and not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
+    if (cmd in role.WRITES["jobs"] or (cmd == "done" and "--at" in argv)) and not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
         sys.exit(role.forward("jobs", list(argv)))
     now = time.strftime("%H:%M")
     with locked():
@@ -734,6 +737,20 @@ def main(argv):
         if cmd in ("done", "held"):
             j = find(jobs, int(args[0]))
             was = j["state"]
+            at_epoch = None
+            if cmd == "done" and "--at" in args:  # F57: the time it really finished, not now
+                i = args.index("--at")
+                m_at = re.fullmatch(r"(\d{1,2}):(\d\d)", args[i + 1]) if i + 1 < len(args) else None
+                if not m_at or int(m_at.group(1)) > 23 or int(m_at.group(2)) > 59:
+                    sys.exit("Usage: done N --at HH:MM")
+                if not was.startswith("running since"):
+                    sys.exit(f"Job {j['n']} is {was}; --at is only for a running job.")
+                lt = time.localtime()
+                at_epoch = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, int(m_at.group(1)), int(m_at.group(2)), 0, 0, 0, -1))
+                if at_epoch > time.time():
+                    at_epoch -= 86400
+                now = f"{int(m_at.group(1)):02d}:{m_at.group(2)}"
+                args = args[:i] + args[i + 2:]
             # H187: an update that ended the job's chat holds it with its own reason (held N an update ...).
             why = one_line(" ".join(args[1:])).replace("·", "-") if cmd == "held" else ""
             j["state"] = f"done {now}" if cmd == "done" else f"held: {why or 'usage over the line'}"
@@ -767,7 +784,7 @@ def main(argv):
             if cmd == "done" and not was.startswith("done"):
                 # H61: its estimate next to how long it really took, so the next estimates learn.
                 m = re.match(r"running since (\d\d:\d\d)", was)
-                r = estimate("on_done", j["n"], j["text"], m.group(1) if m else None)
+                r = estimate("on_done", j["n"], j["text"], m.group(1) if m else None, at_epoch)
                 if r:
                     print(f"Took {r['actual']} min" + (f"; the estimate was {r['est']} min." if r.get("est") else "."))
             return
