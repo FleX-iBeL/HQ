@@ -13433,6 +13433,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             # His say-so on a call: --without-qa takes it all.
             (hq / "CHANGELOG.md").write_text(log2.replace("## Coming next\n", "## Coming next\n\n- D (H280).\n", 1))
             g("commit", "-q", "-am", "H280: d", cwd=hq)
+            qm.mark("H280", False, "not passed in this test", 5)  # the copied live roadmap may already say H280 passed
             main6 = remote("refs/heads/main")
             need(rl.cmd_main() == 0 and remote("refs/heads/main") == main6, "a row without QA went out")
             need(rl.cmd_main(_dt.date(2026, 10, 29), without_qa=True) == 0
