@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- A long look on a call no longer loses the answer. Before, when an agent read a very big file on a call, her line died without a word and you heard nothing. Now a whole read of a huge file is cut to a part (she's told to read a piece or search for the line), the line can carry far more, and if it dies anyway you hear "Lost my line, one moment", it reopens with the call so far and the same question is answered without you typing again.
+
 ## 0.4.16 · 27 October 2026
 
 - A finished job always signs off. When the team's work finishes and says so but never gives its done mark, the helper now nudges it by name within about ten minutes ("You haven't marked job N done") instead of a bare "continue", and a waiting shell under it, such as a wait loop that can never end, no longer hides it after fifteen minutes. Every job's instructions, the checks by Moneypenny and their fixes end with the done mark as the very last step. On a call, a running job whose work is checked done can be ticked off at the time it really finished, so the estimates learn the real time.

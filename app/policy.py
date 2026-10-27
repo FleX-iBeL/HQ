@@ -39,6 +39,22 @@ def _slug(path) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
+# F60: a call's tool answer over the Claude SDK's message limit kills the session without a word. A whole
+# read of a file over this size is cut to a part instead: the refusal says so and how to read a part.
+BIG_FILE_BYTES = 400_000
+
+
+def _too_big(path: str) -> str | None:
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return None
+    if size <= BIG_FILE_BYTES:
+        return None
+    return (f"{Path(path).name} is {size // 1000} KB, too big to read whole on a call. Cut to a part: "
+            f"read it with offset and limit (a few hundred lines), or grep the line you need.")
+
+
 def tool_output(path: str, folder: Path) -> bool:
     """H277: a file where a call's Claude session saved a long tool output (…/<session>/tool-results/…), under
     the projects folder of the workspace or HQ. Reading it back is reading what the call already read."""
@@ -236,6 +252,10 @@ class Policy:
             return Decision(ALLOW, "session helper")
         if tool in READ_TOOLS:
             path = inp.get("file_path") or inp.get("path") or str(self.folder)
+            if tool == "Read" and not inp.get("limit"):
+                big = _too_big(path)
+                if big:
+                    return Decision(DENY, big)
             if self.inside(path):
                 return Decision(ALLOW, "reading in the folder")
             if self.in_hq(path):
@@ -427,6 +447,11 @@ class Policy:
             return _ask("go outside your workspace", "a folder outside")
         if prog == "date":
             return Decision(ALLOW, "the date")
+        if prog == "cat":
+            for a in args:
+                big = None if a.startswith("-") else _too_big(a if os.path.isabs(a) else str(Path(self.folder) / a))
+                if big:
+                    return Decision(DENY, big)
         if prog == "git":
             return self._git(args)
         if prog == "curl":

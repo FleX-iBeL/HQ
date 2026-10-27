@@ -13460,6 +13460,69 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 "no fix job after three; the release takes only H281 (passed) as 0.4.5, holds H282 (failed) and H283 (behind it) on "
                 "nightly and dev, merged back under dev; once H282 passes, 0.4.6 takes the rest; --without-qa takes it all")
 
+    async def flow168(self) -> str:
+        """F60, no Claude: a call's big tool answer never kills the session. The SDK's buffer is far above what a
+        call can read; a whole Read or cat of a file over the size is refused with a line saying to read a part, a Read
+        with a limit still goes; a session that dies mid-turn is announced at once, reopened (resumed) and the same
+        turn is answered without him typing again; a second death says so plainly, never silence."""
+        import brain as B
+        import policy as PO
+        from pathlib import Path as _P
+        from claude_agent_sdk import ResultMessage
+        tmp = self.tmp / "f60"
+        tmp.mkdir()
+        big, small = tmp / "big.md", tmp / "small.md"
+        big.write_text("x" * (PO.BIG_FILE_BYTES + 10))
+        small.write_text("hello")
+        pol = PO.Policy(tmp)
+        need(pol.decide("Read", {"file_path": str(big)}).verdict == PO.DENY, "a whole Read of a big file was allowed")
+        need("offset and limit" in pol.decide("Read", {"file_path": str(big)}).why, "the refusal doesn't say how to read a part")
+        need(pol.decide("Read", {"file_path": str(big), "limit": 100}).verdict == PO.ALLOW, "a Read with a limit was refused")
+        need(pol.decide("Read", {"file_path": str(small)}).verdict == PO.ALLOW, "a small Read was refused")
+        need(pol.decide("Bash", {"command": f"cat {big}"}).verdict == PO.DENY, "a cat of a big file was allowed")
+        need(pol.decide("Bash", {"command": f"cat {small}"}).verdict == PO.ALLOW, "a cat of a small file was refused")
+        need(B.MAX_BUFFER >= 16 * 1024 * 1024, "the SDK's buffer is still small")
+        need(B.call_session_options(model="m", folder=tmp, voice_rules="v", policy=pol).max_buffer_size == B.MAX_BUFFER,
+             "the call's options don't raise the buffer")
+
+        class Fake:
+            def __init__(s, b, die):
+                s.b, s.die = b, die
+
+            async def query(s, t):
+                s.b.sent.append(t)
+                if s.die():
+                    await s.b._queue.put(RuntimeError("JSON message exceeded maximum buffer size"))
+                else:
+                    await s.b._queue.put(ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+                                                       num_turns=1, session_id="s", result="ok"))
+
+        async def run(deaths):
+            b = B.ClaudeBrain(model="m", system_prompt="", cwd=tmp / "cwd")
+            b.sent, b.session_id, left = [], "sid", [deaths]
+
+            def die():
+                left[0] -= 1
+                return left[0] >= 0
+            b._client = Fake(b, die)
+
+            async def reopen():
+                b._queue = asyncio.Queue()
+                b._dead = False
+                b._idle.set()
+                b.reopened = getattr(b, "reopened", 0) + 1
+                b._client = Fake(b, die)
+            b._reconnect = reopen
+            return b, [p async for p in b.ask("hello")]
+        b, out = await run(1)
+        need(out and out[0] == B.LOST_LINE, f"no line when the session died: {out}")
+        need(b.sent == ["hello", "hello"] and b.reopened == 1, f"the turn wasn't asked again on a reopened session: {b.sent}")
+        need(b._idle.is_set(), "the brain stays busy after a dead turn")
+        b, out = await run(2)
+        need(out[0] == B.LOST_LINE and "lost my line again" in out[-1], f"a second death was silent: {out}")
+        need("resume" in _P(B.__file__).read_text(), "a reopened session isn't resumed")
+        return "F60: a big read is cut to a part; a dead session says so, reopens and answers the same turn"
+
     async def flow167(self) -> str:
         """F57, no Claude: a job that ends its turn without the done mark is caught and told. The nudge names the job and
         the done mark; a shell under the chat (a wait loop that can never end, a pgrep -f finding itself) counts as work
@@ -20254,6 +20317,7 @@ FLOWS = {
     145: ("H269: the sprint view's layout: ticked rows in rank order over the nights (the team's room 22:00 to 8), each its times and share of the 5-hour and weekly, a night full sending the next on, the line where the room runs out", False, "flow145"),
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
+    168: ("F60: a big read on a call is cut to a part (Read and cat), the SDK buffer is raised, a session that dies mid-turn says so, reopens and answers the same turn", False, "flow168"),
     167: ("F57: a finished job without its done mark is nudged by name; a never-ending wait loop stops counting after 15 minutes; every job text ends with the done mark; done N --at HH:MM, also from a call", False, "flow167"),
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),

@@ -23,6 +23,7 @@ Design:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import os
 import time
@@ -99,6 +100,12 @@ def prompt_text(options: ClaudeAgentOptions) -> str:
     return Path(path).read_text(encoding="utf8") if path else (sp if isinstance(sp, str) else "")
 
 
+# F60: the Claude SDK kills the session when one message from the CLI is over its buffer (1 MB by default),
+# and it did so silently when a call read a very big file. Well above what a call can read (policy.BIG_FILE_BYTES).
+MAX_BUFFER = 64 * 1024 * 1024
+LOST_LINE = "Lost my line, one moment. "
+
+
 @dataclass
 class ToolStarted:
     """Yielded by ask() when Claude starts a tool call mid-reply (for a filler)."""
@@ -164,6 +171,7 @@ def call_session_options(
         can_use_tool=can_use_tool,
         include_partial_messages=True,
         effort=effort,
+        max_buffer_size=MAX_BUFFER,  # F60
         # No CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC here: it also switches off the
         # claude.ai connectors (Calendar, Gmail), checked 8 October 2026.
         # Tool search off: the connector tools are loaded up front instead of through a
@@ -237,6 +245,7 @@ class ClaudeBrain:
             strict_mcp_config=True,
             include_partial_messages=True,
             effort=effort,
+            max_buffer_size=MAX_BUFFER,  # F60
             # No side calls (the CLI otherwise runs small Haiku jobs next to each turn).
             env={"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
             stderr=lambda line: logger.debug(f"claude cli: {line}"),
@@ -322,7 +331,7 @@ class ClaudeBrain:
 
     # -- turns ---------------------------------------------------------------
 
-    async def ask(self, text: str) -> AsyncIterator["str | ToolStarted"]:
+    async def ask(self, text: str, _retry: bool = False) -> AsyncIterator["str | ToolStarted"]:
         """Send one user turn and yield the reply as text pieces, as they arrive.
 
         If the caller is cancelled mid-reply (the user cut in) or closes the generator
@@ -348,13 +357,18 @@ class ClaudeBrain:
             t0 = time.perf_counter()
             streamed = False
             got_result = False
+            died = False
             try:
                 await self._client.query(text)
                 while True:
                     msg = await self._queue.get()
                     if isinstance(msg, Exception):
+                        # F60: the session died mid-turn. Not raised: he hears it at once, the session
+                        # reopens and this same turn is answered (below, outside the lock).
                         self._dead = True
-                        raise msg
+                        died = True
+                        logger.error(f"F60: Claude's session died mid-turn: {msg!r}")
+                        break
                     if isinstance(msg, StreamEvent):
                         ev = msg.event
                         if ev.get("type") == "content_block_start":
@@ -406,11 +420,19 @@ class ClaudeBrain:
                 # caller closes the generator early. Without a ResultMessage the reply is
                 # still running in the CLI: interrupt it and drop the rest, in the background.
                 self._answering = False
-                if got_result:
+                if got_result or died:
                     self._idle.set()
                 else:
                     stats.interrupted = True
                     self._start_drain()
+
+        if died:
+            if _retry:
+                yield "Sorry, I lost my line again. Can you say that again?"
+                return
+            yield LOST_LINE
+            async for piece in self.ask(text, _retry=True):  # reopens the session (resumed) and answers
+                yield piece
 
     def cancel_turn(self) -> None:
         """Interrupt the running reply, if there is one, and drop what's left of it.
@@ -455,7 +477,11 @@ class ClaudeBrain:
             self._idle.set()
 
     async def _reconnect(self) -> None:
+        sid = self.session_id
         await self.stop()
+        if sid and self._dead:
+            # F60: reopen with the call so far, not an empty start
+            self._options = dataclasses.replace(self._options, resume=sid)
         self._queue = asyncio.Queue()
         self._dead = False
         self._idle.set()
