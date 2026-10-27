@@ -233,8 +233,8 @@ class Call:
         await self._switch_to(who)
         notes += self._catch_up(who, words, tell=who is not was)
         rest = ", ".join(a["name"] for a in self.panel if a is not who)
-        notes.append(f"[Call system: {agents.way(self.panel)} call with {rest} and {config.USER}. This turn is yours, "
-                     f"{who['name']}: answer as yourself, in your own character.]")
+        notes.append(f"[Call system: {agents.way(self.panel)} call with {rest} and {config.USER}. {who['name']} answers "
+                     "this turn: answer as yourself, in your own character.]")
         return notes + self._goodbye_note(who, words)
 
     async def _joined_hi(self, other_id: str) -> list[str]:

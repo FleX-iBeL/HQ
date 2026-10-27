@@ -38,27 +38,30 @@ def _folder() -> Path:
     return Path(ws).expanduser().resolve() if ws else (Path(__file__).resolve().parent.parent / "workspace").resolve()
 
 
-def file() -> Path:
+def file(folder: Path | None = None) -> Path:
+    if folder is not None:
+        return Path(folder) / "HQ" / "backend.json"
     env = os.environ.get("HQ_BACKEND")
     return Path(env).expanduser() if env else _folder() / "HQ" / "backend.json"
 
 
-def _read() -> dict:
+def _read(folder: Path | None = None) -> dict:
     try:
-        d = json.loads(file().read_text(encoding="utf8"))
+        d = json.loads(file(folder).read_text(encoding="utf8"))
         return d if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
 
 
-def on(name: str) -> bool:
-    """Whether the switch is on: the computer's own setting first, then the workspace's file."""
+def on(name: str, folder: Path | None = None) -> bool:
+    """Whether the switch is on: the computer's own setting first, then the workspace's file (that of `folder` when
+    one is given: a flow's own workspace has its own switches, all off unless it writes them)."""
     if name not in SWITCHES:
         raise KeyError(name)
     env = os.environ.get(f"HQ_BACKEND_{name.upper()}")
     if env in ("0", "1"):
         return env == "1"
-    return name in (_read().get("on") or [])
+    return name in (_read(folder).get("on") or [])
 
 
 def listing() -> list[dict]:

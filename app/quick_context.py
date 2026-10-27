@@ -246,7 +246,7 @@ def build(folder: Path, today: datetime.date | None = None, context: str = "day"
     today = today or datetime.date.today()
     try:
         import backend
-        if backend.on("briefing") and context in IDENTITY_FILES:
+        if backend.on("briefing", folder) and context in IDENTITY_FILES:
             return briefed(folder, context, today)
     except Exception:
         pass

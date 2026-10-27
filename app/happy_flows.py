@@ -13472,12 +13472,18 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         tmp = self.tmp / "f60"
         tmp.mkdir()
         big, small = tmp / "big.md", tmp / "small.md"
-        big.write_text("x" * (PO.BIG_FILE_BYTES + 10))
+        big.write_text(("x" * 100 + "\n") * (PO.BIG_FILE_BYTES // 100 + 10))
         small.write_text("hello")
         pol = PO.Policy(tmp)
         need(pol.decide("Read", {"file_path": str(big)}).verdict == PO.DENY, "a whole Read of a big file was allowed")
         need("offset and limit" in pol.decide("Read", {"file_path": str(big)}).why, "the refusal doesn't say how to read a part")
         need(pol.decide("Read", {"file_path": str(big), "limit": 100}).verdict == PO.ALLOW, "a Read with a limit was refused")
+        # Fable clean-up: a limit counts the bytes of those lines, so a few very long lines are refused with how many fit
+        long = tmp / "long.md"
+        long.write_text(("x" * (PO.BIG_FILE_BYTES // 4) + "\n") * 8)
+        d = pol.decide("Read", {"file_path": str(long), "limit": 8})
+        need(d.verdict == PO.DENY and "lines at a time" in d.why, f"a limit over long lines wasn't cut: {d.why}")
+        need(pol.decide("Read", {"file_path": str(long), "limit": 2}).verdict == PO.ALLOW, "a small limit over long lines was refused")
         need(pol.decide("Read", {"file_path": str(small)}).verdict == PO.ALLOW, "a small Read was refused")
         need(pol.decide("Bash", {"command": f"cat {big}"}).verdict == PO.DENY, "a cat of a big file was allowed")
         need(pol.decide("Bash", {"command": f"cat {small}"}).verdict == PO.ALLOW, "a cat of a small file was refused")
