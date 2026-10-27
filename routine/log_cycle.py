@@ -74,9 +74,61 @@ def recent(text: str, now: dt.datetime, hours: float = HOURS) -> str:
     return "\n\n".join(k for k in keep if k) + "\n"
 
 
+_MONTHS = {m: i for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july", "august",
+                                          "september", "october", "november", "december"), 1)}
+_BULLET = re.compile(r"^- (\d{1,2}) ([A-Za-z]+) (\d{4}), (\d{1,2}):(\d{2})(?:,| ·)\s*(.*)$")
+_LABEL_MOST = 70
+
+
+def _label(rest: str) -> str:
+    """The heading's label from what follows the date: up to the first colon or semicolon, at most _LABEL_MOST
+    characters cut at a word, an opened bracket closed."""
+    label = re.split(r"[:;]", re.sub(r"\*\*", "", rest), 1)[0].strip()
+    if len(label) > _LABEL_MOST:
+        label = label[:_LABEL_MOST].rsplit(" ", 1)[0].rstrip(" ,(")
+    if label.count("(") > label.count(")"):
+        label += ")"
+    return label
+
+
+def lift(text: str) -> tuple[str, int]:
+    """Fable clean-up, 27 October 2026: a call or job note written as a dated top-level bullet under an undated
+    section ("- 27 October 2026, 19:09, call (Pepper): …" under Open commitments) is one the three-hour cycle never
+    saw: 292 of them, 280 KB, rode along on every call and text. Each becomes its own dated section
+    (`## YYYY-MM-DD HH:MM · call (Pepper)`), the bullet kept whole as its body, so the cycle archives it like any entry.
+    A bullet that doesn't start with a date (a real open commitment) stays where it is. Returns the text and how
+    many were lifted."""
+    head, sections = split(text)
+    out, n = [_join(head)], 0
+    for t, lines in sections:
+        if t is not None:
+            out.append(_join(lines)); continue
+        keep, lifted, i = [lines[0]], [], 1
+        while i < len(lines):
+            m = _BULLET.match(lines[i])
+            if m and m.group(2).lower() in _MONTHS:
+                body = [lines[i]]; i += 1
+                while i < len(lines) and not lines[i].startswith("- ") and not lines[i].startswith("## "):
+                    body.append(lines[i]); i += 1
+                while body and not body[-1].strip():
+                    body.pop()
+                when = f"{int(m.group(3)):04d}-{_MONTHS[m.group(2).lower()]:02d}-{int(m.group(1)):02d} {int(m.group(4)):02d}:{m.group(5)}"
+                lifted.append(f"## {when} · {_label(m.group(6))}")
+                lifted.append(_join(body)); n += 1
+            else:
+                keep.append(lines[i]); i += 1
+        out.append(_join(keep))  # the section (Open commitments) keeps its place, with what wasn't a dated note
+        out.extend(lifted)
+    if not n:
+        return text, 0
+    return "\n\n".join(x for x in out if x.strip()) + "\n", n
+
+
 def plan(log_text: str, archive_text: str, now: dt.datetime, hours: float = HOURS) -> tuple[str, str, int]:
-    """The new log and archive, and how many entries moved. Nothing moves: the texts come back unchanged."""
+    """The new log and archive, and how many entries moved. Nothing moves: the texts come back unchanged.
+    Dated bullets under an undated section are lifted into their own sections first (`lift`)."""
     first = now - dt.timedelta(hours=hours)
+    log_text, lifted = lift(log_text)
     head, sections = split(log_text)
     old = [(t, lines) for t, lines in sections if t is not None and t < first]
     if not old:
@@ -105,8 +157,12 @@ def move(folder: Path | str, now: dt.datetime | None = None, hours: float = HOUR
     before = log_p.read_text()
     arch = arch_p.read_text() if arch_p.exists() else ""
     new_log, new_arch, n = plan(before, arch, now, hours)
-    if not n or dry:
+    if dry or (not n and new_log == before):
         return n
+    if not n:  # only lifted: the log changes, the archive doesn't
+        if log_p.read_text() == before:
+            _write(log_p, new_log)
+        return 0
     # Words go into the archive first, so an entry is never in neither file; and the log is only replaced if
     # nobody wrote to it in the meantime (a call's notes), else this waits for the next minute.
     _write(arch_p, new_arch)

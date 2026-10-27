@@ -757,8 +757,10 @@ def voice_rules(context: str = "all") -> str:
 WRAP_UP_PROMPT = """[Call system: @USER@ has hung up. The call is over, and nothing you write now is spoken.
 Do the after-call work, quietly and fully, as in a normal chat:
 1. Write what matters from this call into the right places, as where-things-go.md says, in his words. \
-At least one entry in coaching/log.md, newest first, headed with today's date, the time the call \
-started ({start}) and the type "call", with his own words from the call and any commitments or follow-ups. \
+At least one entry in coaching/log.md, newest first, as its own section headed `## {day} {start} · call (<your name>)` \
+(the first dated section in the file, right under Open commitments), with his own words from the call and any \
+commitments or follow-ups. Never as a bullet under Open commitments: that section is only for short open commitments, \
+one line each, and the cycle that keeps the log small never moves it. \
 HQ has already kept the new things you and any other agent on this call said about yourselves (H232), so add \
 every HQ/agents/*-about-herself.md that git shows as changed to the commit. Only if one is clearly missing, keep it \
 with python3 "@HQ@/app/about_self.py" add <her name> "<the fact, one short line>" (H132; it skips a repeat).

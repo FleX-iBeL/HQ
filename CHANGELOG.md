@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- The coaching log stays small again. A call's note that was filed as a bullet under Open commitments (which the three-hour cycle never touches) is lifted into its own dated entry every minute and archived like any other; Open commitments keeps only the one-liners. On one folder 273 such notes had piled up and rode along on every call and text.
+
 - A turn never ends in silence. When an agent's turn came to its end without a word (every look done, a step refused, a question for you never put into words), you heard nothing and the thinking sound just stopped. Now she's asked once more in the same turn to say what she did and what's next, and to ask you in words when a step still needs your yes.
 
 - A question stays open until you answer it. When an agent asked for your yes and your next words were something else (a question back, "is it complete? then yes", another subject), the question was dropped and she was told you'd said no. Now it stays open for your next words, your next clear yes approves it, and a clear no or two turns of something else drops it.

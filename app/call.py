@@ -407,6 +407,7 @@ class Call:
             rel = self.transcript.path.relative_to(config.FOLDER) if config.FOLDER in self.transcript.path.parents else self.transcript.path
             prompt = template.format(
                 start=self.transcript.start_hhmm,
+                day=self.transcript.started.strftime("%Y-%m-%d"),
                 start_short=self.transcript.started.strftime("%Y-%m-%d %H:%M"),
                 transcript=rel,
             )
