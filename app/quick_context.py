@@ -66,8 +66,14 @@ def memory_dir(folder: Path) -> Path:
 # H246: what each role loads. "day" (Donna) is Quick plus where he stands now; "coach" (Pepper) every file the folder's
 # CLAUDE.md loads, but the notes without the team's work and only the very important mail; "build" (Moneypenny) none of
 # the life files: the planning, the team's notes, the build notes in full and Claude's memory index (H280).
+# 26 October 2026 (his call with Pepper, moneypenny-fix): "build" is Pepper's old load again, the whole folder and
+# Claude's memory like a chat, minus the vision (VISION_FILES), which is Pepper's.
 DAY_FILES = QUICK_FILES + ["current-situation.md"]
-BUILD_FILES = ["rules.md"]
+VISION_FILES = ["my-answers.md", "day-in-the-life.md", "lifestyle-design.md", "map.md"]
+# 27 October 2026 (Pepper's green light on the fix): Moneypenny talks about building only, never his life: no mail list,
+# no to-do list, no current situation either.
+LIFE_FILES = ["inbox.md", "challenges.md", "current-situation.md"]
+NOT_FOR_BUILD = VISION_FILES + LIFE_FILES
 # A note in the log about the team's work: "- 25 October 2026, 20:15, job 345 (H244): ...".
 # A call with Moneypenny is about building too.
 _TEAM_NOTE = re.compile(r"^- \d{1,2} \w+ \d{4}, [\d:]+, (job \d+|call \(Moneypenny\b)")
@@ -118,85 +124,32 @@ def very_important(text: str) -> str:
             "he asks.]\n") if out else "(No very important mail.)\n"
 
 
-def _planning(folder: Path) -> str:
-    """The roadmap's status block, the queue's open jobs and the planning list (H246, for Moneypenny)."""
-    out = []
-    try:
-        road = (folder / "HQ" / "roadmap.md").read_text()
-        q = road.find("\n## The queue")
-        block = road[:q if q > 0 else 8000].rstrip()
-        rest = road[q:road.find("\n# ", q + 1)] if q > 0 else ""
-        jobs = [l[:300] for l in rest.splitlines() if l.startswith("- Job ") and "· done" not in l]
-        out.append("The HQ roadmap's status block (the rest of HQ/roadmap.md, the phases and every row, read with "
-                   "grep or the Read tool when needed):\n\n" + block)
-        out.append("The team's open jobs (python3 \"" + str(config.ROOT / "routine" / "jobs.py") + "\" list for the "
-                   "whole queue):\n" + ("\n".join(jobs) if jobs else "(none)"))
-    except OSError:
-        pass
-    try:
-        import os
-        import subprocess
-        r = subprocess.run([sys.executable, str(config.ROOT / "routine" / "sprint.py"), "list"],
-                           capture_output=True, text=True, timeout=30, env={**os.environ, "HQ_WORKSPACE": str(folder)})
-        if r.stdout.strip():
-            out.append("The planning now (python3 \"" + str(config.ROOT / "routine" / "sprint.py") + "\" list):\n\n"
-                       + r.stdout.strip()[:12000])
-    except Exception:
-        pass
-    return "\n\n".join(out)
-
-
-def _build_notes(folder: Path) -> str:
-    """The build notes in full (H280; only their headings before): how HQ works, so she never has to guess."""
-    path = folder / "HQ" / "CLAUDE.md"
-    try:
-        text = path.read_text()
-    except OSError:
-        return ""
-    return f"The build notes, in full ({path}): how HQ is built and kept, one section per part.\n\n{text.strip()}"
-
-
-def _memory_index(folder: Path) -> str:
-    """H280: Claude's memory index for the workspace on a build call, so the lessons learned before are there.
-    The notes it points to are read with the Read tool; a new lesson is a new note there, and a line in the index."""
-    mem = memory_dir(folder)
-    try:
-        index = (mem / "MEMORY.md").read_text().strip()
-    except OSError:
-        index = ""
-    return (f"Claude's memory for this workspace ({mem}): lessons from earlier chats and calls. Its index is below; "
-            "read a note it points to with the Read tool when it matters. When you learn a lesson on this call "
-            "(something that went wrong, how HQ really works, how he wants the building done), write it there "
-            "without asking: one note per lesson, a file with a short frontmatter (name, description, type), and a "
-            "line for it in MEMORY.md. Never anything of his life in it.\n\n"
-            + (index or "(MEMORY.md has nothing yet.)"))
-
-
 def build(folder: Path, today: datetime.date | None = None, context: str = "day") -> str:
     """A call's instructions: CLAUDE.md with only the files its role loads pulled in (B1, H246).
     context "day" (Quick, Donna), "coach" (Pepper) or "build" (Moneypenny); see agents.CONTEXTS."""
     today = today or datetime.date.today()
     claude_md = (folder / "CLAUDE.md").read_text()
     pulled: list[str] = []
-    wanted = (DAY_FILES if context == "day" else BUILD_FILES if context == "build" else None)
+    wanted = DAY_FILES if context == "day" else None
 
     def file_text(rel: str) -> str:
         text = (folder / rel).read_text()
         if rel == "coaching/log.md":
             text = trim_log(text, today)
-            return life_notes(text)  # H246: the team's work is Moneypenny's
+            return text if context == "build" else life_notes(text)  # H246: the team's work is Moneypenny's
         if rel == "inbox.md" and context == "coach":
             return very_important(text)
         return text
 
     def swap(m: re.Match) -> str:
         rel = m.group(1)
-        if (wanted is None or rel in wanted) and (folder / rel).exists():
+        if (wanted is None or rel in wanted) and not (context == "build" and rel in NOT_FOR_BUILD) \
+                and (folder / rel).exists():
             if rel not in pulled:
                 pulled.append(rel)
             return f"`{rel}` (loaded, below)"
-        if context == "build":
-            return f"`{rel}` (not loaded for building HQ; it's {config.USER}'s own life, not needed here)"
+        if context == "build" and rel in NOT_FOR_BUILD:
+            return f"`{rel}` (not loaded for you: {config.USER}'s life is not your business, only building HQ; Donna or Pepper have it)"
         where = "a Quick call" if context == "day" else "this call"
         return f"`{rel}` (not loaded on {where}; read it with the Read tool when it's needed)"
 
@@ -209,10 +162,10 @@ def build(folder: Path, today: datetime.date | None = None, context: str = "day"
                 "or put on the planning, put her on or bring her in."]
     elif context == "build":
         head = ["# This is a call about building HQ",
-                f"Only what building HQ needs is loaded: the roadmap's status block and queue, the planning, the "
-                f"team's latest work, the build notes in full and Claude's memory index. None of {config.USER}'s life files (the vision, "
-                "the map, the to-do list, the mail, his notes) are loaded, and they aren't needed: for his life, "
-                "put Donna or Pepper on."]
+                f"The folder is loaded like a chat, with Claude's memory, except {config.USER}'s vision (the vision "
+                "files and the map), his mail list, his to-do list and where he stands now: you talk about building "
+                "HQ only, never his life. For his life, put Donna or Pepper on. The roadmap's rows, the planning, the queue and the build notes are not loaded in full: "
+                "read the section or the row you need with grep or sed -n, never the whole file."]
     else:
         head = ["# This is a Quick call",
                 f"{config.USER} picked Quick: calendar, mail and small orders. Only part of the folder is loaded: "
@@ -227,16 +180,6 @@ def build(folder: Path, today: datetime.date | None = None, context: str = "day"
     parts = head + [f"Contents of {folder / 'CLAUDE.md'} (project instructions):\n\n{body}"]
     for rel in pulled:
         parts.append(f"Contents of {folder / rel}:\n\n{file_text(rel)}")
-    if context == "build":
-        if (folder / "coaching" / "log.md").exists():
-            log = (folder / "coaching" / "log.md").read_text()
-            parts.append(f"The team's latest work, the newest {TEAM_NOTES_MOST} notes about it from "
-                         f"{folder / 'coaching' / 'log.md'} (the rest of that file is {config.USER}'s life; leave it):"
-                         f"\n\n{team_notes(log)}")
-        for extra in (_planning(folder), _build_notes(folder), _memory_index(folder)):
-            if extra:
-                parts.append(extra)
-        return "\n\n".join(parts)
     mem = memory_dir(folder)
     if (mem / "MEMORY.md").exists():
         notes = [mem / "MEMORY.md"] + sorted(p for p in mem.glob("*.md") if p.name != "MEMORY.md")

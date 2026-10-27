@@ -700,13 +700,12 @@ def without_building(rules: str) -> str:
     return rules
 
 
-# H282 (call of 26 October 2026, 13:32, Moneypenny's craft): on a build call a real check may take minutes; the short
-# first sentence and "don't say you're thinking" never stop it. Only on build calls (her context).
-BUILD_CHECK_RULE = """- On this call checking comes before answering (H282): before you say how something is (built, done, \
-ready, what a job sees), look it up in the planning, the build notes, HQ's code and logs or the computers, and confirm it \
-twice. Say in a few words that you're checking ("Checking. A minute.") and take the minutes a real check needs; come back \
-with it on the same call. Keeping the first sentence short and not saying you're thinking don't stop that. What you \
-haven't checked, you don't say as fact."""
+# 27 October 2026 (Pepper's green light on the moneypenny fix): Moneypenny talks about building only, never his life, so
+# the call system gives her no mail heads-up (call.py) and her rules don't tell her to bring one up.
+MAIL_HEADSUP_RULE = (""" Answer what he says first. The one thing you do bring up \
+yourself: the very important open items from his mail list, which the call system gives you when \
+he calls. Name them in your first reply, after answering him, every call, until he says they're \
+resolved or not that important.""")
 
 
 def voice_rules(context: str = "all") -> str:
@@ -740,7 +739,8 @@ def voice_rules(context: str = "all") -> str:
     if context == "coach":
         rules = without_building(rules)
     elif context == "build":
-        rules += "\n" + BUILD_CHECK_RULE + "\n"
+        rules = rules.replace(MAIL_HEADSUP_RULE, " Answer what he says first. You talk about building HQ only, never his life: "
+                              "no mail, no to-do list, no appointments of his unless he asks.")
     return (rules + ("\n" + off + "\n" if off else "") + ("\n" + nw + "\n" if nw else "")
             + ("\n" + ext + "\n" if ext else ""))
 

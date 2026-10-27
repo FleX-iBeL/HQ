@@ -4484,34 +4484,31 @@ window.addEventListener('load', () => setTimeout(() => {
                   "call line restarts", "split into pieces", "privacy check", "definition of done", "old flows",
                   "tutorial and the changelog", "you first, in QA", "sprint planning"):
             need(w in pm, f"her persona misses {w!r} of the definition of ready and done")
-        # H274: she runs as autonomously as she can, with whole proposals, and checks every new item herself.
-        for w in ("as autonomously as you can", "one complete proposal", "accept, improve or deny", "as many items as possible in one go",
-                  "truly his", "your pick next to it", "Every new item you write", "what's thin", "marked ready on the spot"):
-            need(w in pm, f"her persona misses {w!r} of how she runs (H274)")
+        # 26 October 2026, his definition of how she runs (replaces H274 and H282): she works out the answers herself,
+        # executes towards the planning, and brings proposals for a yes or a "yes but x y z".
+        for w in ("you don't ask questions one at a time", "work out the right answers yourself",
+                  "execute towards the team planning yourself", "mark them ready", "proposed solution",
+                  "as many as possible in one go", "yes but x y z", "without asking again", "The ready check",
+                  "nine points", "looking something up never needs his yes"):
+            need(w in pm, f"her persona misses {w!r} of how she runs")
         need("one point at a time" not in pm, "her craft still asks one point at a time")
-        # H282: the complete picture first, checked and confirmed twice, the time it takes; no "fill in what you can yourself".
-        need("fill in what you can yourself" not in pm.lower(), "H282: her craft still says fill in what you can yourself")
-        for w in ("First the complete picture", "spend all the time, usage, and resources necessary", "confirmed twice",
-                  "never just having an answer", "hallucination has been left out of the picture",
-                  "read the exact line the team gets back against the definition of ready and of done",
-                  "never sees later changes to its row", "Taking the time (H282)", "take the minutes a real check needs"):
-            need(w in pm, f"H282: her persona misses {w!r}")
-        need("in the same reply" not in m["craft"], "H282: her craft still checks a new item 'in the same reply'")
+        need("fill in what you can yourself" not in pm.lower(), "her craft still says fill in what you can yourself")
+        need("in the same reply" not in m["craft"], "her craft still checks a new item 'in the same reply'")
         # H276: she says how big, never which nights, while making an item ready; the nights are the sprint planning's.
         need("Size, never nights" in pm and "a small build, a big build or research" in pm and "only decided at the sprint planning" in pm
              and "won't fit one night" not in pm, "H276: her craft still sizes work into nights while readying it")
         tourtext = (Path(__file__).parent / "web" / "tour.json").read_text(encoding="utf8")
-        need("one whole proposal" in tourtext and "on the spot" in tourtext, "the tutorial's Moneypenny step doesn't say how she runs (H274)")
-        need("checked twice" in tourtext and "takes the minutes" in tourtext, "H282: the tutorial's Moneypenny step doesn't say she checks first")
+        need("works out the right answers herself" in tourtext
+             and "yes but" in tourtext and "checked twice" not in tourtext, "the tutorial's Moneypenny step doesn't say how she runs")
         need("MoSCoW first, then bugs before features" in pm and "a Must feature stays above a Should bug" in pm,
              "F53: her persona doesn't put MoSCoW before bugs first")
         need("a Must feature stays above a Should bug" in tourtext and "bugs always go first" not in tourtext,
              "F53: the tutorial's Bugs before features piece doesn't put MoSCoW first")
         need("definition of ready" not in agents.persona(every["donna"], "Alex") and "definition of ready" not in agents.persona(every["pepper"], "Alex"),
              "Donna or Pepper got Moneypenny's craft")
-        # H270: a touch warmer when it's late or he's tired, the rest of her as it is.
-        need("Good work tonight" in m["personality"] and "when he sounds tired" in m["personality"]
-             and "no exclamation marks" in m["personality"], "H270: Moneypenny's touch of warmth late or when he's tired is missing")
+        # H270, 26 October 2026: a touch of warmth always, not only late at night; the rest of her as it is.
+        need("not only late at night" in m["personality"] and "Good work tonight" not in m["personality"]
+             and "no exclamation marks" in m["personality"], "H270: Moneypenny's touch of warmth, always, is missing")
         need(m.get("own_goodbye") and "gatekeeper" in m["personality"] and "Clearance pending" not in m["speciality"],
              f"her H250 character or own goodbye is missing: {m['speciality']}")
         # Handed over to and brought in, like the others (H79, H121).
@@ -13237,47 +13234,44 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         return f"four totals ({T['not_ready']['count']} not ready, 2 ready, 2 planned, {T['total']['count']} in all) that add up; the list says them; a fold at the top of Sprint planning"
 
     async def flow163(self) -> str:
-        """H282, no Claude: Moneypenny checks everything before she answers. Her craft has the complete picture first
-        (his words kept, confirmed twice, no "fill in what you can yourself", the line the team gets read back twice,
-        the minutes a real check needs) and isn't cut short; her calls and texts run with effort high, Pepper's and
-        Donna's as before; a build call's rules say checking comes first and a few minutes is fine, the others don't."""
+        """H282, changed 26 October 2026 (moneypenny-fix), no Claude: Moneypenny's craft has the ready and done lists
+        and his definition of how she runs (works out the answers herself, executes towards the planning, brings
+        proposals for a yes or a "yes but"), none of the H274 and H282 wording about all the time and confirming
+        twice; her calls and texts think as long as Pepper's and Donna's; her call rules are the full ones."""
         import agents
-        from pipeline import make_brain
-        from policy import Policy
 
         every = {a["id"]: a for a in agents.load(config.FOLDER)}
         m, p, d = every["moneypenny"], every["pepper"], every["donna"]
         base = next(a for a in agents.DEFAULTS if a["id"] == "moneypenny")
-        need(m["craft"] == base["craft"].strip(), f"H282: her craft is cut short when loaded ({len(m['craft'])} of {len(base['craft'])})")
-        need("fill in what you can yourself" not in m["craft"].lower() and "confirmed twice" in m["craft"]
-             and "I want your reward to be that your answer is factually correct" in m["craft"]
-             and "It should not be my job to keep asking you for confirmation" in m["craft"],
-             "H282: her craft doesn't have the new lines with his words")
-        need(m["personality"] == base["personality"].strip(), "H282: her character changed")
+        need(m["craft"] == base["craft"].strip(), f"her craft is cut short when loaded ({len(m['craft'])} of {len(base['craft'])})")
+        for w in ("spend all the time, usage", "confirmed twice", "read everything it touches", "Taking the time (H282)",
+                  "twice, without being asked"):
+            need(w not in m["craft"], f"her craft still has {w!r}")
+        need(m["personality"] == base["personality"].strip(), "her character changed")
         opus = config.MODEL_ALIASES["opus"]
-        need(m.get("effort") == "high" and agents.effort_of(m, opus) == "high", "H282: Moneypenny doesn't think on high")
-        for who in (p, d):
-            need(agents.effort_of(who, opus) == config.effort_for(opus)
-                 and agents.effort_of(who, config.MODEL_ALIASES["sonnet"]) == config.effort_for(config.MODEL_ALIASES["sonnet"]),
-                 f"H282: {who['name']}'s thinking time changed")
-        pol = Policy(config.FOLDER, dry_run=True)
-        mo = make_brain(opus, pol, context="build", effort=agents.effort_of(m, opus))._options
-        po = make_brain(opus, pol, context="coach", effort=agents.effort_of(p, opus))._options
-        do = make_brain(opus, pol, context="day", effort=agents.effort_of(d, opus))._options
-        need(mo.effort == "high" and po.effort == config.effort_for(opus) and do.effort == config.effort_for(opus),
-             f"H282: the sessions' effort is off ({mo.effort}, {po.effort}, {do.effort})")
-        need(make_brain(opus, pol, context="build")._options.effort == config.effort_for(opus), "H282: without an effort the default isn't kept")
+        for who in (m, p, d):
+            need(not who.get("effort") and agents.effort_of(who, opus) == config.effort_for(opus),
+                 f"{who['name']}'s thinking time isn't the default")
+        every_rule = config.voice_rules("build")
+        need(config.voice_rules("all").replace(config.MAIL_HEADSUP_RULE, "") .split() == every_rule.replace(
+            " Answer what he says first. You talk about building HQ only, never his life: no mail, no to-do list, "
+            "no appointments of his unless he asks.", "").split(), "her call rules aren't the full ones")
+        need(config.NO_BUILDING_RULE not in every_rule and config.TEAM_RULE in every_rule,
+             "her call rules lack the team and planning rules")
+        need("not only late at night" in m["personality"], "her warmth is still only late at night")
+        # 27 October 2026 (Pepper's green light): she talks about building only, never his life. No mail heads-up from
+        # the call system and none in her rules; Donna's, Pepper's and the plain rules keep it.
+        for c in ("all", "coach", "day"):
+            need("very important open items" in config.voice_rules(c), f"the {c} rules lost the mail heads-up")
+        need("very important open items" not in every_rule, "her call rules still bring up the mail")
+        need("never his life" in every_rule, "her call rules don't say building only")
         callsrc = (Path(__file__).parent / "call.py").read_text(encoding="utf8")
-        need("effort=agents.effort_of(self.agent, self.model)" in callsrc, "H282: a call doesn't pass her thinking time")
-        dlsrc = (Path(__file__).parent / "direct_line.py").read_text(encoding="utf8")
-        need("effort=_agents.effort_of(a, a[\"model\"])" in dlsrc, "H282: her texts don't pass her thinking time")
-        b, c, dy = config.voice_rules("build"), config.voice_rules("coach"), config.voice_rules("day")
-        need(config.BUILD_CHECK_RULE in b and "take the minutes a real check needs" in b and "confirm it" in b,
-             "H282: a build call's rules don't let her check first")
-        need(config.BUILD_CHECK_RULE not in c and config.BUILD_CHECK_RULE not in dy and config.BUILD_CHECK_RULE not in config.voice_rules("all"),
-             "H282: the checking rule reached Pepper's or Donna's calls")
-        need("H282" in (ROOT / "CHANGELOG.md").read_text(encoding="utf8"), "H282: not in the changelog")
-        return f"her craft {len(m['craft'])} characters whole, effort high (Pepper and Donna {config.effort_for(opus)}), the build call's checking rule"
+        need('getattr(self, "context", "") == "build"' in callsrc and "open_loops.call_note" in callsrc,
+             "the call still gives her the mail heads-up")
+        need(agents.context_of(next(a for a in agents.DEFAULTS if a["id"] == "donna")) == "day"
+             and agents.context_of(next(a for a in agents.DEFAULTS if a["id"] == "pepper")) == "coach",
+             "Donna's or Pepper's context changed")
+        return f"her craft {len(m['craft'])} characters, default thinking time, full call rules"
 
     async def flow165(self) -> str:
         """F56 piece 1, no Claude, no network: QA as a real step, and the release only taking work that passed it.
@@ -13659,11 +13653,11 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
         return f"jobs {a} and {b}: notes told, read, the push and release held until read, shown on the status page"
 
     async def flow162(self) -> str:
-        """H280, no Claude: Moneypenny starts every call knowing how HQ works. On a throwaway workspace with 35 team
-        notes: her start has the newest 30 and not the older ones; on the real folder her session has the build notes
-        in full (every section's body, no "Not loaded" line) and Claude's memory index for the workspace; a build call
-        writes a memory note without a yes, a Donna or Pepper call (and a file that isn't a note) still asks; the call
-        sets it from her context. Pepper's and Donna's starts don't get the build notes or the memory index."""
+        """H280, changed 26 October 2026 (moneypenny-fix), no Claude: Moneypenny starts a call like Pepper did before the
+        split: the folder and Claude's memory like a chat, minus the vision, no build notes loaded in full and no
+        planning block. On a throwaway workspace: her start has the folder's files and the whole log, not the vision
+        files; on the real folder her session has the memory notes; a build call writes a memory note without a yes, a
+        Donna or Pepper call (and a file that isn't a note) still asks; the call sets it from her context."""
         import brain as brain_
         import quick_context
         from pipeline import make_brain
@@ -13672,31 +13666,29 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
         ws = self.tmp / "h280"
         (ws / "coaching").mkdir(parents=True, exist_ok=True)
         (ws / "HQ").mkdir(parents=True, exist_ok=True)
-        (ws / "CLAUDE.md").write_text("# Life\n\n- @rules.md\n")
-        (ws / "rules.md").write_text("# Rules\n")
-        (ws / "HQ" / "roadmap.md").write_text("# 🔨 BUILDING\n\n## The queue\n\n")
+        (ws / "CLAUDE.md").write_text("# Life\n\n- @rules.md\n- @map.md\n- @my-answers.md\n- @day-in-the-life.md\n"
+                                      "- @lifestyle-design.md\n- @challenges.md\n")
+        for f, probe in (("rules.md", "RULES-PROBE"), ("map.md", "MAP-PROBE"), ("my-answers.md", "ANSWERS-PROBE"),
+                         ("day-in-the-life.md", "DAY-PROBE"), ("lifestyle-design.md", "STYLE-PROBE"),
+                         ("challenges.md", "TODO-PROBE")):
+            (ws / f).write_text(f"# {f}\n{probe}\n")
         (ws / "HQ" / "CLAUDE.md").write_text("# HQ: build notes\n\n## A part\n\nBODY-PROBE\n")
-        (ws / "coaching" / "log.md").write_text("# Coaching Log\n\n## Open commitments\n\n" + "".join(
-            f"- 25 October 2026, 20:{59 - i:02d}, job {400 - i} (H1): NOTE-{i:02d}.\n\n" for i in range(35)))
         build = quick_context.build(ws, context="build")
-        need(all(f"NOTE-{i:02d}" in build for i in range(30)), "Moneypenny misses some of the newest 30 team notes")
-        need(not any(f"NOTE-{i:02d}" in build for i in range(30, 35)), "Moneypenny has more than 30 team notes")
-        need("BODY-PROBE" in build and "build notes, in full" in build, "the build notes aren't loaded in full")
-        need("Not loaded; read the section" not in build, "the build notes still say they're not loaded")
+        need("RULES-PROBE" in build, "Moneypenny misses the folder's own files")
+        for probe in ("MAP-PROBE", "ANSWERS-PROBE", "DAY-PROBE", "STYLE-PROBE", "BODY-PROBE", "TODO-PROBE"):
+            need(probe not in build, f"Moneypenny has {probe}")
+        need("MAP-PROBE" in quick_context.build(ws, context="coach"), "Pepper misses the map")
         # The real folder: the session a call with her makes.
         pol = Policy(config.FOLDER, dry_run=True)
         txt = brain_.prompt_text(make_brain(config.MODEL_ALIASES["opus"], pol, context="build")._options)
-        notes = (config.FOLDER / "HQ" / "CLAUDE.md")
-        if notes.exists():
-            heads = [l for l in notes.read_text().splitlines() if l.startswith("## ")]
-            last = notes.read_text().strip().splitlines()[-1]
-            need(all(h in txt for h in heads) and last in txt, "her session doesn't carry the whole build notes")
         mem = quick_context.memory_dir(config.FOLDER)
         index = (mem / "MEMORY.md").read_text().strip() if (mem / "MEMORY.md").exists() else ""
-        need(str(mem) in txt and (not index or index.splitlines()[0] in txt), "her session misses the memory index")
-        for c in ("day", "coach"):
-            other = brain_.prompt_text(make_brain(config.MODEL_ALIASES["opus"], pol, context=c)._options)
-            need("The build notes, in full" not in other, f"{c} got the build notes")
+        need(not index or index.splitlines()[0] in txt, "her session misses Claude's memory")
+        for f in quick_context.VISION_FILES:
+            if (config.FOLDER / f).exists():
+                first = (config.FOLDER / f).read_text().strip().splitlines()[-1]
+                need(first not in txt or first in (config.FOLDER / "CLAUDE.md").read_text(),
+                     f"her session carries {f}")
         # Writing the memory: free on a build call, asked on the others.
         note = str(mem / "h280-flow-probe.md")
         build_pol = Policy(config.FOLDER, memory_writes=True)
@@ -13711,15 +13703,15 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
             "Write", {"file_path": note, "content": "x"}).verdict != ALLOW, "a test run may write the memory")
         need('self.policy.memory_writes = self.context == "build"' in (config.ROOT / "app" / "call.py").read_text(),
              "the call doesn't set the memory writes from her context")
-        return (f"her start: 30 team notes, the build notes in full, the memory index; {len(txt) // 1000} KB on this "
-                "folder; memory writes free on a build call only")
+        return (f"her start: the folder and memory minus the vision, no build notes in full; {len(txt) // 1000} KB on "
+                "this folder; memory writes free on a build call only")
 
     async def flow152(self) -> str:
         """H246, no Claude: each agent loads what fits her role. On a throwaway workspace with a life file, a vision, a
         to-do list, a mail list and a log with a life note, a team note and a Moneypenny call: Donna ("day") has the
         list, the mail and where he stands but no vision; Pepper ("coach") has the vision but none of the team's
         notes, only the very important mail, and call and text rules without the building; Moneypenny ("build") has
-        the team's notes and the planning, none of the life files. Then the real sessions as a call builds them, and
+        the team's notes, none of the vision files (26 October 2026). Then the real sessions as a call builds them, and
         Moneypenny's text well under the whole folder's."""
         import agents
         import brain as brain_
@@ -13733,11 +13725,12 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
         (ws / "HQ").mkdir(parents=True, exist_ok=True)
         files = {
             "CLAUDE.md": "# Life\n\n" + "".join(f"- {chr(64)}{m}\n" for m in (
-                "rules.md", "where-things-go.md", "vision.md", "current-situation.md", "challenges.md",
+                "rules.md", "where-things-go.md", "vision.md", "map.md", "current-situation.md", "challenges.md",
                 "coaching/log.md", "inbox.md")),
             "rules.md": "# Rules\nRULES-PROBE\n",
             "where-things-go.md": "# Where\nWHERE-PROBE\n",
             "vision.md": "# Vision\nVISION-PROBE\n",
+            "map.md": "# Map\nMAP-PROBE\n",
             "current-situation.md": "# Now\nSITUATION-PROBE\n",
             "challenges.md": "# Challenges\nTODO-PROBE\n",
             "inbox.md": "# Mail\n\n## Very important\n\n- VERY-PROBE\n\n## To check\n\n- CHECK-PROBE\n",
@@ -13760,12 +13753,14 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
             need(probe in coach, f"Pepper misses {probe}")
         for probe in ("TEAM-PROBE", "PENNY-PROBE", "CHECK-PROBE", "STATUS-PROBE", "NOTES-BODY"):
             need(probe not in coach, f"Pepper has {probe}")
-        for probe in ("RULES-PROBE", "TEAM-PROBE", "PENNY-PROBE", "STATUS-PROBE", "OPEN-JOB", "Where the code is",
-                      "NOTES-BODY"):  # H280: the build notes in full
+        # 26 October 2026: her load is Pepper's old one (the folder like a chat), minus the vision files.
+        for probe in ("RULES-PROBE", "TEAM-PROBE", "PENNY-PROBE", "VISION-PROBE", "LIFE-PROBE"):
             need(probe in build, f"Moneypenny misses {probe}")
-        for probe in ("VISION-PROBE", "SITUATION-PROBE", "TODO-PROBE", "VERY-PROBE", "CHECK-PROBE", "LIFE-PROBE",
-                      "OLD-JOB", "ROW-PROBE"):
+        # 27 October 2026 (Pepper's green light): no mail list, to-do list or current situation for her either.
+        for probe in ("MAP-PROBE", "STATUS-PROBE", "OPEN-JOB", "NOTES-BODY", "OLD-JOB", "ROW-PROBE", "SITUATION-PROBE",
+                      "TODO-PROBE", "CHECK-PROBE", "VERY-PROBE"):
             need(probe not in build, f"Moneypenny has {probe}")
+        need("MAP-PROBE" in coach, "Pepper misses the map")
         # Who loads what, from HQ's own agents, and one of the workspace's own without a context.
         by = {a["id"]: agents.context_of(a) for a in agents.DEFAULTS}
         need(by == {"donna": "day", "pepper": "coach", "moneypenny": "build"}, f"the roles' contexts: {by}")
@@ -13791,10 +13786,12 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
             make_brain(config.MODEL_ALIASES["opus"], pol, context="build")._options), "Moneypenny's session misses her text")
         whole_folder = sum(len((config.FOLDER / m).read_text()) for m in re.findall(
             r"@([\w./-]+\.md)", (config.FOLDER / "CLAUDE.md").read_text()) if (config.FOLDER / m).exists())
-        # H280: her start carries the build notes in full on purpose; without them it's still light.
-        notes = len((config.FOLDER / "HQ" / "CLAUDE.md").read_text()) if (config.FOLDER / "HQ" / "CLAUDE.md").exists() else 0
-        need(sizes["build"] - notes < whole_folder / 4,
-             f"Moneypenny's text isn't light without the build notes: {sizes['build'] - notes} of {whole_folder}")
+        # 26 October 2026: no build notes loaded in full any more, she reads a section when she needs it.
+        notes = (config.FOLDER / "HQ" / "CLAUDE.md")
+        if notes.exists():
+            need(notes.read_text().strip().splitlines()[-1] not in brain_.prompt_text(make_brain(
+                config.MODEL_ALIASES["opus"], pol, load="deep", context="build")._options),
+                 "her session carries the build notes in full again")
         return (f"Donna day, Pepper coach, Moneypenny build; Moneypenny's session {sizes['build'] // 1000} KB against "
                 f"the whole folder's {whole_folder // 1000} KB, Pepper {sizes['coach'] // 1000} KB, Donna "
                 f"{sizes['day'] // 1000} KB; Pepper's rules without the building")
@@ -14074,6 +14071,18 @@ window.fetch = async (url, opt) => {
         ]
         for c in ask:
             need(v("Bash", {"command": c}) != ALLOW, f"a call may run without a yes: {c}")
+        # 27 October 2026 (test of Moneypenny's profile): three looks still asked on her call: rev, and a $ that is only
+        # an end anchor in a regex ("^$", "[^|]*|$"). A real variable or substitution still asks.
+        lone = [f'cd {hq} && git log -3 --stat --format=\'--- %h\' | grep -v "^$" | head -40',
+                f'cd {hq} && grep -n "x" CLAUDE.md | grep -o "[^|]*| [^|]*|$" | cut -c1-80',
+                f'cd {hq} && grep -n "x" CLAUDE.md | rev | cut -c1-80 | rev']
+        for c in lone:
+            need(v("Bash", {"command": c}) == ALLOW, f"a look with a lone $ or rev still asks: {c}")
+        loopy = f'cd {hq} && for n in 3 5; do echo "== line $n"; sed -n "${{n}}p" CLAUDE.md | tail -c 300; done'
+        need(v("Bash", {"command": loopy}) == ALLOW, "a for loop's ${n} still asks")
+        need(v("Bash", {"command": 'for n in 3; do echo "${HOME}"; done'}) != ALLOW, "a ${var} that isn't the loop's runs")
+        for c in ('echo $HOME', 'echo "$HOME"', 'echo "$(id)"', 'echo "${HOME}"', 'cat "$F"'):
+            need(v("Bash", {"command": c}) != ALLOW, f"a real variable runs without a yes: {c}")
         need("H281" in config.VOICE_RULES,
              "the call rules don't say the looks are free")
         return f"{len(allow)} read-only looks go without a yes; {len(ask)} that write, run code or reach out still ask"
@@ -20156,8 +20165,8 @@ FLOWS = {
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     164: ("H283: a note for the team while they work: jobs.py tell N to a running or waiting job, read with notes N after each step; push.py and release.py wait while a note is unread; the first prompt carries a waiting job's notes; the status page shows them; a call tells without a yes", False, "flow164"),
-    163: ("H282: Moneypenny checks everything before she answers: her craft's new lines with his words (complete picture, confirmed twice, the team's line read back, the minutes it needs), not cut short; effort high for her calls and texts, Pepper and Donna as before; the build call's checking rule", False, "flow163"),
-    162: ("H280: Moneypenny starts every call knowing how HQ works: the build notes in full, Claude's memory index, the 30 newest team notes; a build call writes the memory without a yes", False, "flow162"),
+    163: ("H282 (26 October 2026, changed): Moneypenny's craft has the ready and done lists and his definition of how she runs, none of the confirmed-twice and all-the-time wording; the default thinking time; the full call rules", False, "flow163"),
+    162: ("H280 (26 October 2026, changed): Moneypenny starts a call like Pepper before the split: the folder and Claude's memory minus the vision, no build notes in full; a build call writes the memory without a yes", False, "flow162"),
     161: ("H281: every read-only look on a call is free for every agent (sed -n, awk, cut, jq, git describe and tag -l, dpkg -l, systemctl status, journalctl --user, Claude's memory folder); writing, code from text, the outside and sudo still ask", False, "flow161"),
     160: ("H247 (b): the pages: no Feedback tab until connected, Connect in Settings, the link connects in one tap, the texts' switch; the status page's Invite someone to send feedback", False, "flow160"),
     159: ("H247 (b) and (c): feedback from someone else's HQ to the maker's mailbox, end to end with two HQs: invite, connect, typed and call sends, status back, texts switch, offline retry, limits, a taken-back key", False, "flow159"),
@@ -20167,7 +20176,7 @@ FLOWS = {
     155: ("H277: a call runs the planning and team commands without a yes, chained, after a cd into HQ, in a for loop, and reading its own saved output; anything else still asks", False, "flow155"),
     154: ("H258: light or dark in one tap: the sun and moon at the top right flips it and keeps it after reopening, Settings' Look (System, Light, Dark), System following the device, the status page and Donna's chat in their sheets taking the same; phone and the Mac app", False, "flow154"),
     153: ("H243: to-do items planned in a calendar block by hand (by id, or words with a day and a time), several in one block, a moved block showing its new time, unplan, rename and undo; the row's mark, the filter (all, planned, not planned) and the block picker; phone and desktop app, dark", False, "flow153"),
-    152: ("H246: each agent loads what fits her role: Donna the day (no vision), Pepper the vision and coaching (no building, in her files or rules), Moneypenny the building (none of the life files), well under the whole folder", False, "flow152"),
+    152: ("H246: each agent loads what fits her role: Donna the day (no vision), Pepper the vision and coaching (no building, in her files or rules), Moneypenny the folder minus the vision files", False, "flow152"),
     151: ("H244: the five kinds of the week in colour in the app's calendar, a tap hides or shows a kind, Edit renames one; Google's own colour of an appointment kept", False, "flow151"),
     149: ("H275: the sprint planning's totals: not ready, ready and not planned yet, planned (with the team or for a night), and the total, adding up in rows, time and usage; the list a call reads; a fold at the top of Sprint planning", False, "flow149"),
     148: ("H272: the Ready mark on every planning row: set and taken off (a call may, the backup hands it on), next to the rank and tag, changed since ready on new words, Plan the sprint and Send to the team leave out unready rows and say why, a call's add only on his say-so, the page's tick", False, "flow148"),

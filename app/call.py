@@ -279,7 +279,9 @@ class Call:
         async def prime():
             await self.brain.start()
             stamp = now().strftime("%A %-d %B %Y, %H:%M")
-            note = "" if self.free else open_loops.call_note(self._loops or open_loops.read(config.FOLDER))
+            # 27 October 2026: Moneypenny (context "build") talks about building only, so no mail heads-up for her
+            note = "" if self.free or getattr(self, "context", "") == "build" else open_loops.call_note(
+                self._loops or open_loops.read(config.FOLDER))
             self.open_loops_note = note
             text = (
                 f"[Call system: {config.USER} is calling you now on HQ, the voice call. It is {stamp}. "

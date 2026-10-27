@@ -140,7 +140,9 @@ SAFE_READ_COMMANDS = {"ls", "grep", "rg", "find", "wc", "head", "tail", "cat", "
                       # H281 (26 October 2026, call at 13:32, Moneypenny): "If you need user rights we will give you
                       # user rights." More looks that only read, for every agent; writing, running code from text
                       # and the outside still ask.
-                      "cut", "diff", "cmp", "column", "nl"}
+                      "cut", "diff", "cmp", "column", "nl",
+                      # 27 October 2026 (test of Moneypenny's profile): `rev` asked; it only reads, like cut.
+                      "rev"}
 # H281: commands that read only their own text or tell about this computer; no file of his goes through them.
 INFO_COMMANDS = {"tr", "basename", "dirname", "realpath", "readlink", "uptime", "df", "free", "uname", "id"}
 # H281: a program in the first word after the options (sed's script, awk's program, jq's filter), checked on its own.
@@ -363,7 +365,10 @@ class Policy:
         # Only plain commands, joined by && or |. No redirection into files, no
         # subshells, variables or here-documents (quoted text may contain anything).
         cmd = _hide_quoted_dollars(cmd)  # H281: awk's $1 and sed's $p in single quotes are text, not variables
-        if re.search(r"`|\$\(|\$\{|<<", cmd):
+        # 27 October 2026: ${n} of a plain for loop (for n in 1 2; do sed -n "${n}p" …) is filled in by _loops below.
+        loop_vars = re.findall(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b", cmd)
+        probe = re.sub(r"\$\{(%s)\}" % "|".join(map(re.escape, loop_vars)), "", cmd) if loop_vars else cmd
+        if re.search(r"`|\$\(|\$\{|<<", probe):
             return _ask("run a shell command", "a complex shell command")
         cmd = re.sub(r"\s2>\s*/dev/null|\s2>&1", " ", cmd)
         lex = shlex.shlex(cmd, posix=True, punctuation_chars="();<>|&\n")
@@ -823,7 +828,9 @@ _DOLLAR = "\x00"
 
 
 def _hide_quoted_dollars(cmd: str) -> str:
-    """H281: a $ inside single quotes is plain text to the shell; hide it so it isn't taken for a variable."""
+    """H281: a $ inside single quotes is plain text to the shell; hide it so it isn't taken for a variable.
+    27 October 2026: so is a $ that no name can follow (before a closing quote, a space, a pipe or the end), like the
+    end anchor in grep -v "^$"."""
     out, single, double, i = [], False, False, 0
     while i < len(cmd):
         c = cmd[i]
@@ -835,7 +842,8 @@ def _hide_quoted_dollars(cmd: str) -> str:
             single = not single
         elif c == '"' and not single:
             double = not double
-        out.append(_DOLLAR if (c == "$" and single) else c)
+        lone = c == "$" and (i + 1 == len(cmd) or cmd[i + 1] in " \t\n\"'|)\\")
+        out.append(_DOLLAR if (c == "$" and (single or lone)) else c)
         i += 1
     return "".join(out)
 
