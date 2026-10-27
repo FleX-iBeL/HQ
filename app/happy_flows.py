@@ -235,6 +235,13 @@ Q_LATE_CANCEL = "Count slowly from one to forty in words, one number per sentenc
 
 # -- reporting ---------------------------------------------------------------------------
 
+def _free_port():
+    import socket as _s
+    with _s.socket() as s_:
+        s_.bind(("127.0.0.1", 0))
+        return s_.getsockname()[1]
+
+
 class Failed(Exception):
     """A flow did not pass; the message says why in one plain line."""
 
@@ -1936,7 +1943,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         (site / ".status/jobs-backfill.json").write_text(json.dumps({"segments": [
             {"n": 97, "st": "STOPPED", "start": now - 3600, "end": now - 2700},
             {"n": 97, "st": "BUILDING", "start": now - 600, "end": now - 300}], "texts": {"97": "Build H23 on the roadmap"}}))
-        port = 4791
+        port = _free_port()  # not 4791: the feedback mailbox holds it
         env = {**os.environ, "HQ_STATUS_PORT": str(port)}
         proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -6432,7 +6439,9 @@ print(json.dumps(o))
         p9 = json.loads(estL("plan"))["jobs"][str(n9)]
         need(p9.get("guess_look") == 12 and p9.get("guess_call") == 30, f"H190: the plan doesn't carry a waiting job's guesses: {p9}")
         jobsL("move", str(n9), "top")
-        need("Nothing to look at again" in estL("relook", look="40"), "H190: a move starts a new look")
+        rl = estL("relook", look="40")
+        need(f"job {n9}" not in rl,
+             f"H190: a move starts a new look: {rl}")  # another waiting job in the copy may get its own look
         rmt = rm.read_text()
         rm.write_text(rmt.replace("Build H9, flow 54, the first look", "Build H9, flow 54, the first look, other words"))
         need(f"job {n9}" in estL("relook", look="25"), "H190: changed words don't start a new look")
@@ -9612,6 +9621,7 @@ setTimeout(() => {
         env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_SPRINT": str(self.tmp / f"sprint-{tag}.json"), "HQ_LOOK_FAKE": "37"}
         for k in ("HQ_ESTIMATES", "HQ_ROUTINES_HISTORY", "HQ_ROLE_HERE"):
             env.pop(k, None)
+        env["HQ_ROUTINES_HISTORY"] = str(self.tmp / f"no-history-{tag}.json")  # not this computer's real jobs: the estimates stay the same everywhere
         return rm, env
 
     def _sprint(self, env, *args):
@@ -9721,12 +9731,12 @@ setTimeout(() => {
         e = js.loads(est.read_text())["H9001"]
         need(e["fp"] == fp and e.get("look_at") == at and e.get("look_fp") == fp, f"H269: a move or a rank made the estimate again: {e}")
         # new words: a new size and a new look
+        env["HQ_LOOK_FAKE"] = "52"  # before the refresh, which starts the look in the background
         rm.write_text(rm.read_text().replace("Tap to send feedback from the call page",
                                              "Tap to send feedback from the call page, with a screenshot, the status page and happy flows 10 and 106"))
         refresh()
         e = js.loads(est.read_text())["H9001"]
         need(e["fp"] != fp, "H269: new words didn't make the estimate again")
-        env["HQ_LOOK_FAKE"] = "52"
         e = wait_look("H9001")
         need(e.get("guess_look") == 52 and e.get("look_at") != at, f"H269: new words didn't get a new look: {e}")
         # a row no longer open is let go
@@ -9736,8 +9746,8 @@ setTimeout(() => {
         # the status server serves it, the page draws it
         srv = (ROOT / "status" / "server.mjs").read_text()
         page = (ROOT / "status" / "index.html").read_text()
-        need("routine/sprint.py'), 'json'" in srv and "estimate, planning }" in srv, "H269: the status server doesn't serve the planning")
-        need("function planLine(" in page and "planLine(routines?.planning, label)" in page and "routines.planning])" in page,
+        need("routine/sprint.py'), 'json'" in srv and "estimate, planning" in srv, "H269: the status server doesn't serve the planning")
+        need("function planLine(" in page and "planLine(routines?.planning, label)" in page and "routines.planning" in page,
              "H269: the status page doesn't show the rank and estimate on the planning's items")
         tick = (ROOT / "routine" / "tick.py").read_text()
         need("sprint.refresh(log=log)" in tick, "H269: the routine doesn't refresh the planning's estimates")
@@ -9757,6 +9767,7 @@ setTimeout(() => {
         t = "\n".join(l for l in t.split("\n") if not l.startswith(("- Job ", "- Item ")))
         t = t.replace("| ⬜ | H9004 A made-up export", "| ⬜ | H9006 A made-up sixth row | Something | | |\n"
                       "| ⬜ | H9007 A made-up seventh row | Something else | | |\n| ⬜ | H9004 A made-up export")
+        t = t.replace("**5-hour line: fixed.**", "**5-hour line: moving.**")  # not this computer's live setting
         if fixed is not None:
             t = re.sub(r"\*\*Weekly line: [^*]*\*\*", f"**Weekly line: fixed at {fixed}%.**", t)
         rm.write_text(t)
@@ -9789,7 +9800,7 @@ setTimeout(() => {
              f"H269: the ticked rows aren't in rank order: {[x['label'] for x in rows]}")
         need(L["left_out"] == [{"label": "H9003", "why": "not an open row on the planning"}], f"H269: a done row wasn't left out: {L['left_out']}")
         mon, tue = "2026-10-26", "2026-10-27"
-        need([x["night"] for x in rows] == [mon] * 4 + [tue], f"H269: the nights don't fill (four Monday, the fifth Tuesday): {[x['night'] for x in rows]}")
+        need([x["night"] for x in rows] == [mon] * 4 + [tue], f"H269: the nights don't fill (four Monday, the fifth Tuesday): {[(x['night'], x['est']) for x in rows]} {L['nights'][0]}")
         import datetime as _dt
         start = _dt.datetime(2026, 10, 26, 22, 0).timestamp()
         need(rows[0]["start"] == int(start) and all(rows[k]["start"] >= rows[k - 1]["eta"] for k in range(1, 4))
@@ -11046,7 +11057,7 @@ setTimeout(() => {
                  "the routine doesn't look every minute, or would text from a test on the real workspace")
             # The status server: the chat, its service worker, the HQ header, a phone signing up, texting her back.
             node = shutil.which("node") or "/opt/homebrew/bin/node"
-            port = 4791
+            port = _free_port()  # not 4791: the feedback mailbox holds it
             env = dict(os.environ, HQ_STATUS_PORT=str(port), HQ_FIX_DRY="1")
             log = open(self.tmp / "h80-server.log", "w")
             srv = subprocess.Popen([node, str(ROOT / "status/server.mjs"), "--quiet"], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -17230,7 +17241,7 @@ window.fetch = async (u, o) => {
                     await asyncio.sleep(0.2)
             return srv, get
 
-        srv, get = await serve(4791, "")
+        srv, get = await serve(_free_port(), "")
         try:
             for path, n in names.items():
                 need(await asyncio.to_thread(get, path) == house[n], f"a fresh install's {path} isn't HQ's house")
