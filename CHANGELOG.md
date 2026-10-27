@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 0.4.16 · 27 October 2026
+
 - A finished job always signs off. When the team's work finishes and says so but never gives its done mark, the helper now nudges it by name within about ten minutes ("You haven't marked job N done") instead of a bare "continue", and a waiting shell under it, such as a wait loop that can never end, no longer hides it after fifteen minutes. Every job's instructions, the checks by Moneypenny and their fixes end with the done mark as the very last step. On a call, a running job whose work is checked done can be ticked off at the time it really finished, so the estimates learn the real time.
 
 - Half-built stays hidden. A feature built in pieces now ships switched off until its last piece has passed Moneypenny's check: on everyone else's HQ there's no button, no switch and no mention of it yet. Only the HQ that builds it shows it, in Settings under What HQ helps you with, marked as still being built, to try it early. When the last piece passes, it's on for everyone from the next update (F56).
