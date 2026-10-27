@@ -253,11 +253,12 @@ class Call:
         await self._switch_to(joined)
         self._catch_up(joined, "", tell=False)
         rest = ", ".join(a["name"] for a in self.panel if a is not joined)
-        return [f"[Call system: you, {joined['name']}, have just been brought in: a {agents.way(self.panel)} call with "
-                f"{rest} and {config.USER}. Nobody has asked you anything yet: say one short line of your own that "
-                f"you're there now, the way a person joining a call says hi, in your character, picking up on what was "
-                f"said so far if it fits. Your own words, never a set greeting, never the same line as before. Just that "
-                f"line, no question to answer, no marks; then he goes on.]"]
+        return [f"[Call system: {joined['name']} has just been brought in: a {agents.way(self.panel)} call with "
+                f"{rest} and {config.USER}.]",
+                f"[Call system: you are {joined['name']}, on your own line. Nobody has asked you anything yet: say one "
+                f"short line of your own that you're there now, the way a person joining a call says hi, in your "
+                f"character, picking up on what was said so far if it fits. Your own words, never a set greeting, never "
+                f"the same line as before. Just that line, no question to answer, no marks; then he goes on.]"]
 
     def _line_for(self, who: dict) -> str | None:
         """The open line (app/lines.py): her last session on this computer, resumed when the switch is on and the
