@@ -590,6 +590,12 @@ class Policy:
             if self.team_texts:
                 return Decision(ALLOW, "Moneypenny texts him on her own line")
             return Decision(DENY, "only Moneypenny texts on her own line")
+        # H279: an old text on the chat line she answers on, found in the thread or, past the 400, in its git history.
+        # Read only; --dir (a test's own folder) isn't for a call or a text.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "thread_search.py"):
+            if not any(x == "--dir" or x.startswith("--dir=") for x in args[1:]):
+                return Decision(ALLOW, "looking up an old text on this chat")
+            return Decision(DENY, "the text search looks only on the chat line she answers on")
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "notes.py"):
             if len(args) == 1 or args[1] in ("clear", "cleared", "restore"):
                 return Decision(ALLOW, "his quick notes")

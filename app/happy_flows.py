@@ -14671,6 +14671,97 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
                 else:
                     os.environ[k] = v
 
+    async def flow179(self) -> str:
+        """H279, no Claude: ask Donna or Pepper about an old text, and they find it. A throwaway line in its own git repo,
+        filled over many commits past the 400 the thread keeps: a text past the last 15 (still in the file) and one
+        past the 400 (only in git) are both found by words and by day, each once, the older one marked; the same on a
+        coaching line; the text rules (Donna's and the coaching line's) tell her to look before she answers; a call or
+        a text may run the search without a yes, never on another folder."""
+        import subprocess as sp
+        import direct_line as dl
+        import thread_search as ts
+        from policy import Policy, ALLOW, DENY
+        base = time.mktime(time.strptime("2026-10-01 09:00", "%Y-%m-%d %H:%M"))
+        repo = self.tmp / "h279"
+        lines = {"donna": repo / "HQ" / "direct-line", "pepper": repo / "HQ" / "coaching-line"}
+        for f in lines.values():
+            f.mkdir(parents=True)
+        git = lambda *a: sp.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True)
+        git("init", "-q")
+        git("config", "user.email", "test@example.com")
+        git("config", "user.name", "test")
+        saved = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR",)}
+        try:
+            for who, f in lines.items():
+                os.environ["HQ_DIRECT_DIR"] = str(f)
+                for i in range(460):  # one text an hour; a commit every 20, as the workspace commits
+                    at = base + i * 3600
+                    if i == 3:
+                        text, sender = "The parcel from the bike shop comes on Thursday", "me"
+                    elif i == 430:
+                        text, sender = "Put the plant pot on the list please", "me"
+                    else:
+                        text, sender = f"Small talk number {i} with {who}", ("me" if i % 2 else "agent")
+                    m = dl.add(sender, text)
+                    rows = (f / "thread.jsonl").read_text().splitlines()  # the text's own time, so a day can be asked
+                    rows[-1] = json.dumps({**m, "at": at}, ensure_ascii=False)
+                    (f / "thread.jsonl").write_text("\n".join(rows) + "\n")
+                    if i % 20 == 19:
+                        git("add", "-A")
+                        git("commit", "-q", "-m", f"{who} {i}")
+                now = dl.thread()
+                need(len(now) == dl.KEEP and not any("parcel" in m["text"] for m in now),
+                     f"H279: the test line isn't past the 400 ({len(now)}), or the old text is still in the file")
+                need(not any("plant pot" in m["text"] for m in now[-15:]) and any("plant pot" in m["text"] for m in now),
+                     "H279: the newer text isn't between the last 15 and the 400")
+                # past the 400: only in git, found by words (any case), once, marked older
+                old = ts.search(["PARCEL", "thursday"], f)
+                need(len(old) == 1 and old[0]["older"] and old[0]["from"] == "me" and old[0]["at"] == base + 3 * 3600,
+                     f"H279: the text past the 400 isn't found once from git on {who}'s line: {old}")
+                # past the last 15, still in the file: found, not marked older
+                mid = ts.search(["plant", "pot"], f)
+                need(len(mid) == 1 and not mid[0]["older"], f"H279: the text past the last 15 isn't found on {who}'s line: {mid}")
+                # by day: every text of 1 October, newest first, each once (the day's texts were in several commits)
+                d1 = (ts._day("2026-10-01"), ts._day("2026-10-01", end=True))
+                day = ts.search([], f, since=d1[0], until=d1[1], most=50)
+                need(len(day) == 15 and day[0]["at"] > day[-1]["at"] and all(m["older"] for m in day),
+                     f"H279: a day's texts on {who}'s line: {len(day)}")
+                need(len(ts.search([], f, since=d1[0], until=d1[1], who="me", most=50)) == 7,
+                     "H279: only his texts of a day")
+                need(ts.search(["nothing like this"], f) == [], "H279: words that aren't there found something")
+                # the command, as she runs it: the line is the reply's own folder
+                out = sp.run([sys.executable, str(ROOT / "app/thread_search.py"), "parcel"], capture_output=True,
+                             text=True, env={**os.environ, "HQ_DIRECT_DIR": str(f)}, timeout=60).stdout
+                need("Thu 01 Oct 2026 12:00 · Him · (older, from the backup): The parcel" in out,
+                     f"H279: the search command's answer on {who}'s line: {out[:300]}")
+            # each line finds only its own
+            need(not ts.search(["with", "donna"], lines["pepper"]), "H279: the coaching line found Donna's texts")
+            # the rules tell her to look, on Donna's line and on the coaching line (without the building rules)
+            os.environ.pop("HQ_DIRECT_DIR", None)
+            rules = dl._text_rules()
+            need("Older texts (H279)" in rules and "/app/thread_search.py" in rules,
+                 "H279: Donna's text rules don't tell her to look up an old text")
+            need("thread_search.py" in config.without_building(rules), "H279: the coaching line's rules lost the search")
+            # a call or a text may run it without a yes, never on another folder
+            pol = Policy(config.FOLDER)
+            hq = os.path.realpath(ROOT)
+            for cmd, want in ((f'python3 "{hq}/app/thread_search.py" parcel', ALLOW),
+                              (f'python3 "{hq}/app/thread_search.py" --on 2026-10-15', ALLOW),
+                              (f'python3 "{hq}/app/thread_search.py" --who me --from 2026-10-01 --to 2026-10-03 bike', ALLOW),
+                              (f'python3 "{hq}/app/thread_search.py" --dir /tmp parcel', DENY),
+                              (f'python3 "{hq}/app/thread_search.py" --dir=/tmp parcel', DENY)):
+                d = pol.decide("Bash", {"command": cmd})
+                pol.pending.clear()
+                need(d.verdict == want, f"H279: {cmd!r} got {d.verdict}, not {want}")
+            return ("an old text past the last 15 and one past the 400 found by words and by day on Donna's line and "
+                    "the coaching line; the rules say to look; a call or a text may run it")
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
     async def flow177(self) -> str:
         """H286, no Claude: the status page says in plain words what the team is doing, and a job that has to start
         fixing redoes its own estimate. On a copy of the roadmap (F17), a stand-in for a release whose check fails on
@@ -21322,6 +21413,7 @@ FLOWS = {
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     177: ("H286: the status page says in plain words what the team is doing (never the commands), a job that has to start fixing redoes its own estimate once with why, and a job that ran long through its own mistake is tagged, kept out of the estimates and listed", False, "flow177"),
+    179: ("H279: ask Donna or Pepper about an old text and she finds it: a text past the last 15 and one past the 400 (only in git) found by words and by day on Donna's line and the coaching line, each once; the text rules say to look first; a call or a text runs the search without a yes, never on another folder", False, "flow179"),
     178: ("H266: Moneypenny's own line: the team's news (done, paused, the night's check, the Friday estimates, a failed QA, a held release, her own) comes from her, pushed to the same phone; she answers his texts there; Donna's line unchanged", False, "flow178"),
     164: ("H283: a note for the team while they work: jobs.py tell N to a running or waiting job, read with notes N after each step; push.py and release.py wait while a note is unread; the first prompt carries a waiting job's notes; the status page shows them; a call tells without a yes", False, "flow164"),
     163: ("H282 (26 October 2026, changed): Moneypenny's craft has the ready and done lists and his definition of how she runs, none of the confirmed-twice and all-the-time wording; the default thinking time; the full call rules", False, "flow163"),
