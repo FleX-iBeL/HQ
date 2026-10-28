@@ -13554,6 +13554,80 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("resume" in _P(B.__file__).read_text(), "a reopened session isn't resumed")
         return "F60: a big read is cut to a part; a dead session says so, reopens and answers the same turn"
 
+    async def flow171(self) -> str:
+        """F67, no Claude: HQ's own commits carry the public identity on every computer that pushes with HQ's key. On
+        27 October the laptop's HQ repo had no name of its own, so git took the global one and his real name and mail
+        went up in 8 commits. Here: a repo whose remote is HQ's key alias (github.com-hq) and a global identity with a
+        real-looking name; push.own_identity() sets FleX-iBeL with the noreply address in the repo, a commit made
+        after it carries that (author and committer), a second call changes nothing; a friend's HQ (an https remote)
+        is left alone; push.py calls it at --pull and before a push."""
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        import push as _push
+        glob = self.tmp / "F67-gitconfig"
+        glob.write_text("[user]\n\tname = Real Person\n\temail = real.person@example.com\n")
+        env = {**os.environ, "GIT_CONFIG_GLOBAL": str(glob), "GIT_CONFIG_NOSYSTEM": "1"}
+        def g(repo, *a):
+            return _sp.run(["git", "-C", str(repo), *a], capture_output=True, text=True, env=env)
+        old_root, old_env = _push.ROOT, dict(os.environ)
+        try:
+            os.environ.update({"GIT_CONFIG_GLOBAL": str(glob), "GIT_CONFIG_NOSYSTEM": "1"})
+            maker = self.tmp / "F67-maker"
+            maker.mkdir(exist_ok=True)
+            g(maker, "init", "-q")
+            g(maker, "remote", "add", "origin", "@".join(["git", "github.com-hq:FleX-iBeL/HQ.git"]))
+            _push.ROOT = maker
+            said = _push.own_identity()
+            need("FleX-iBeL" in said and "unset" in said, f"own_identity on a fresh repo said: {said!r}")
+            need(g(maker, "config", "--local", "user.email").stdout.strip() == _push.PUBLIC_EMAIL, "the noreply address isn't set")
+            (maker / "a.txt").write_text("a")
+            g(maker, "add", "a.txt")
+            c = g(maker, "commit", "-q", "-m", "one")
+            need(c.returncode == 0, f"commit: {c.stderr}")
+            who = g(maker, "log", "-1", "--format=%an|%ae|%cn|%ce").stdout.strip()
+            need(who == f"{_push.PUBLIC_NAME}|{_push.PUBLIC_EMAIL}|{_push.PUBLIC_NAME}|{_push.PUBLIC_EMAIL}", f"the commit carries {who}")
+            need(_push.own_identity() == "", "a second call changed something")
+            g(maker, "config", "--local", "user.name", "Real Person")
+            need("was Real Person" in _push.own_identity(), "a wrong local name isn't put right")
+            friend = self.tmp / "F67-friend"
+            friend.mkdir(exist_ok=True)
+            g(friend, "init", "-q")
+            g(friend, "remote", "add", "origin", "https://github.com/FleX-iBeL/HQ.git")
+            _push.ROOT = friend
+            need(_push.own_identity() == "" and not g(friend, "config", "--local", "user.name").stdout.strip(),
+                 "a friend's HQ (https remote) got the public identity")
+        finally:
+            _push.ROOT = old_root
+            os.environ.clear(); os.environ.update(old_env)
+        # The laptop still on the old commits: a pull moves it onto their rewritten versions (a stand-in pair here).
+        up, lap = self.tmp / "F67-up", self.tmp / "F67-lap"
+        for d in (up, lap):
+            d.mkdir(exist_ok=True)
+        pub = ["-c", f"user.name={_push.PUBLIC_NAME}", "-c", f"user.email={_push.PUBLIC_EMAIL}"]
+        g(up, "init", "-q", "-b", "dev"); (up / "a.txt").write_text("a"); g(up, "add", "a.txt"); g(up, *pub, "commit", "-q", "-m", "a")
+        g(lap, "clone", "-q", str(up), "."); (lap / "b.txt").write_text("b"); g(lap, "add", "b.txt")
+        g(lap, "-c", "user.name=Real Person", "-c", "user.email=real.person@example.com", "commit", "-q", "-m", "b")
+        oldb = g(lap, "rev-parse", "HEAD").stdout.strip()
+        g(up, "fetch", "-q", str(lap), "dev:side"); g(up, "checkout", "-q", "side")
+        g(up, *pub, "commit", "-q", "--amend", "--no-edit", "--reset-author"); newb = g(up, "rev-parse", "HEAD").stdout.strip()
+        g(up, "checkout", "-q", "dev"); g(up, "reset", "-q", "--hard", newb); (up / "c.txt").write_text("c"); g(up, "add", "c.txt"); g(up, *pub, "commit", "-q", "-m", "c")
+        (lap / "a.txt").write_text("a, not committed")
+        old_map, old_r, old_w = _push.REWRITTEN, _push.refused, _push.went_through
+        try:
+            _push.ROOT, _push.REWRITTEN = lap, {oldb: newb}
+            _push.refused = _push.went_through = lambda *a, **k: None
+            got = _push.pull()
+        finally:
+            _push.ROOT, _push.REWRITTEN, _push.refused, _push.went_through = old_root, old_map, old_r, old_w
+        need(got == 0, "the pull across the rewrite was refused")
+        need(g(lap, "rev-parse", "HEAD").stdout.strip() == g(up, "rev-parse", "dev").stdout.strip(), "the laptop isn't on the new dev")
+        need("Real Person" not in g(lap, "log", "--format=%an %cn").stdout, "the old name is still in the laptop's history")
+        need((lap / "a.txt").read_text() == "a, not committed", "an uncommitted change was lost")
+        need(len(_push.REWRITTEN) == 8, "the 8 rewritten commits aren't all mapped")
+        src = (ROOT / "routine/push.py").read_text()
+        need(src.count("own_identity()") >= 3, "push.py doesn't call own_identity at --pull and before a push")
+        return "the key's repo commits as FleX-iBeL with the noreply address (author and committer), once; a wrong name put right; a friend's HQ left alone; called at --pull and push; a computer on the old commits pulls onto the rewritten ones, its uncommitted change kept"
+
     async def flow170(self) -> str:
         """F65, no Claude: a job started through the routine's own start (tick.start) with the headless switch on.
         Commit 2856f05 wrote the prompt before its file was named, so every headless start failed from 02:00 to
@@ -20572,6 +20646,7 @@ FLOWS = {
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
     169: ("Fable, 27 October 2026: the backend behind switches: the switches, the briefing made without Claude and the briefed start (the old one with the switch off), the open line's sessions and rollover, the log lift, the planning index against parsing, a headless job against a fake claude (done mark, stop signal), the lookups free on a call, the departments", False, "flow169"),
+    171: ("F67: HQ's own commits carry the public identity: a computer with HQ's key sets FleX-iBeL and the noreply address in HQ's repo (at --pull and before a push), so the global name never goes up; a friend's HQ is left alone", False, "flow171"),
     170: ("F65: a job started through the routine's own start with the headless switch on: job-N.prompt and job-N.command written, the script runs runjob.py against a fake claude, the job runs and is marked done; the switch off gives the old chat script", False, "flow170"),
     168: ("F60: a big read on a call is cut to a part (Read and cat), the SDK buffer is raised, a session that dies mid-turn says so, reopens and answers the same turn", False, "flow168"),
     167: ("F57: a finished job without its done mark is nudged by name; a never-ending wait loop stops counting after 15 minutes; every job text ends with the done mark; done N --at HH:MM, also from a call", False, "flow167"),

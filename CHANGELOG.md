@@ -4,6 +4,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- HQ's own commits always carry its public name. A computer that pushes with HQ's key now sets HQ's public GitHub name and its noreply address in HQ's own repo by itself (at every pull and before every push), so a computer's own git name can never end up in HQ's history again. Eight commits from 27 October that carried a personal name were rewritten to the public name: the code is exactly the same, and updating from 0.4.18 goes through as normal (anything you changed or committed yourself is kept on a backup branch, as always). A new check (happy flow 171).
 - Fix: with the headless jobs switch on, no team job could start (from 0.4.18): the start wrote the job's prompt before it had named the file, so it failed every minute. Fixed, and a new check (happy flow 170) starts a job the routine's own way with the switch on, against a stand-in Claude, so this can't slip through again. The switch is off unless you turned it on, so most HQs never saw it.
 - Moneypenny delegates and checks, she never builds. Her way of working now says it plainly: she never edits, commits or pushes HQ's code and never runs a fix herself, also not on your yes on a call. Any change becomes an item for the team, and she checks it in QA. Asked to fix something, she says the team has it and writes the item. The tutorial says it too.
 

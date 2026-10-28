@@ -12,6 +12,7 @@ anything goes up, `app/privacy.py --history` must say nothing personal; one hit 
     python3 routine/push.py --dry-run  the same, but git only shows what it would push
     python3 routine/push.py --check    only checks that GitHub accepts HQ's key; pushes nothing
     python3 routine/push.py --pull     brings HQ up to date with dev from GitHub (fast-forward only), at a job's start
+    F67: on a computer with HQ's key, every pull and push first sets HQ's repo to commit as the public identity (own_identity).
     Every push (and release.py) waits while the running job has a note it hasn't read (H283, jobs.py notes N).
 
 Exits 0 when pushed (or pulled, or the check passed), 1 when the privacy check found something, 2 when git failed.
@@ -31,6 +32,23 @@ REMOTE = "origin"
 WORK_BRANCH = "dev"      # H90: every job's commits go here
 RELEASE_BRANCH = "main"  # H90: only on a release, with the version tags
 NIGHTLY_BRANCH = "nightly"  # H186: the night's work, always; main only when the team is sure
+# F67 (28 October 2026): the public identity HQ's own commits carry. A computer with HQ's key (the remote is the
+# SSH alias below) commits as this in HQ's repo, never as the global git identity (the laptop's real name went up).
+KEY_HOST = "github.com-hq"
+PUBLIC_NAME = "FleX-iBeL"
+PUBLIC_EMAIL = "5278158+FleX-iBeL@users.noreply.github.com"
+# F67: the 8 commits of 27 October rewritten to the public identity on 28 October (old: new, same tree each). A
+# computer still holding the old ones (the laptop) can't fast-forward; pull() moves what it has onto the new ones.
+REWRITTEN = {
+    "db56d12490dded11f8fc074a0378a66e20fa0dc3": "365d76bd61cf12a2514fe12eb6e7538ec3326014",
+    "1c082c5b0a2aeceacfd86ea1da83c494a4e58310": "053cd302af62fa6fa6bd92e4f20ad61c9d3ee586",
+    "2856f05d39ec0349f815d64dfc58a6ddcbbb1a68": "6a1b5615bc00c00eb877cebd25cd20a5b77c7907",
+    "66821c5e11a4f198c7357b6be63001fcc1d72cbd": "55f6e750df50d36efc5edc0fa2744b7ce26d518c",
+    "c9d480fc105051adf190c9705895a0fbdf42f84a": "db7b603f8d58a821702536bce118c2d084eab87f",
+    "53306bf9bb6d43494acca30e63041b3088a8aa23": "1c510a9cfdd63cb37a51ed8e96e584f9de763916",
+    "177f6420381cb773252c5818ecd52c3f00369f49": "e9dee995e82ce60b17d9c15c619c5e93a8466cf1",
+    "45c9ccafa7dd0ad555e869380e5f816e1563757a": "9bdbf133a16c3b5101133c7d4c11952f29280f17",
+}
 
 
 def git(*args: str) -> subprocess.CompletedProcess:
@@ -59,6 +77,44 @@ def went_through(what: str) -> None:
         pass
 
 
+def own_identity() -> str:
+    """F67: on a computer that pushes with HQ's key, HQ's repo commits as the public identity; set it in the repo's own
+    config when it's missing or different (a missing one falls back to the global name and mail). Says what it did, or ""."""
+    if ssh_host() != KEY_HOST:
+        return ""
+    name = git("config", "--local", "user.name").stdout.strip()
+    mail = git("config", "--local", "user.email").stdout.strip()
+    if (name, mail) == (PUBLIC_NAME, PUBLIC_EMAIL):
+        return ""
+    git("config", "--local", "user.name", PUBLIC_NAME)
+    git("config", "--local", "user.email", PUBLIC_EMAIL)
+    msg = f"HQ's repo now commits as {PUBLIC_NAME} with the GitHub noreply address (F67; it was {name or 'unset'})."
+    print(msg)
+    return msg
+
+
+def across_rewrite() -> str:
+    """F67: when HQ still holds rewritten commits, its own commits after the newest of them are moved onto that one's
+    new version (the trees are the same), with the public identity; uncommitted changes are kept (autostash). Says
+    what it did, or "" when there was nothing to do or it couldn't (then nothing is changed)."""
+    old = next((o for o in reversed(list(REWRITTEN)) if git("merge-base", "--is-ancestor", o, "HEAD").returncode == 0), "")
+    new = REWRITTEN.get(old, "")
+    if not old or git("cat-file", "-e", f"{new}^{{commit}}").returncode != 0:
+        return ""
+    own = int(git("rev-list", "--count", f"{old}..HEAD").stdout.strip() or 0)
+    fix = (f'test "$(git log -1 --format=%an%ae)" = "{PUBLIC_NAME}{PUBLIC_EMAIL}" || '
+           f'git -c user.name={PUBLIC_NAME} -c user.email={PUBLIC_EMAIL} commit -q --amend --no-edit --reset-author')
+    r = git("-c", f"user.name={PUBLIC_NAME}", "-c", f"user.email={PUBLIC_EMAIL}", "rebase", "-q", "--autostash",
+            "--exec", fix, "--onto", new, old)
+    if r.returncode != 0:
+        git("rebase", "--abort")
+        print(f"Couldn't move HQ's own commits across the F67 rewrite:\n{(r.stdout + r.stderr).strip()}")
+        return ""
+    msg = f"Moved HQ onto the rewritten history (F67): {own} commit(s) of its own carried over."
+    print(msg)
+    return msg
+
+
 def pull() -> int:
     """F31: a job's start: dev from GitHub, fast-forward only. Uncommitted changes are left alone (git refuses
     only when they'd be overwritten, and then says which)."""
@@ -66,7 +122,10 @@ def pull() -> int:
     if branch != WORK_BRANCH:
         print(f"Not pulled: HQ is on {branch or 'no branch'}, not {WORK_BRANCH}. Switch first: git -C <HQ> checkout {WORK_BRANCH}")
         return 2
+    own_identity()
     r = git("pull", "--ff-only", REMOTE, WORK_BRANCH)
+    if r.returncode != 0 and across_rewrite():  # F67: the laptop still on the old 8 commits
+        r = git("pull", "--ff-only", REMOTE, WORK_BRANCH)
     out = (r.stdout + r.stderr).strip()
     if r.returncode != 0:
         print(f"Pulling {WORK_BRANCH} failed:\n{out}")
@@ -160,6 +219,7 @@ def main() -> int:
         return pull()
     if notes_waiting():
         return 3
+    own_identity()
     dry = ["--dry-run"] if "--dry-run" in sys.argv else []
 
     if not privacy_ok(bool(dry)):
