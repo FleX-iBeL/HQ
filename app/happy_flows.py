@@ -14012,6 +14012,105 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
         need(src.count("own_identity()") >= 3, "push.py doesn't call own_identity at --pull and before a push")
         return "the key's repo commits as FleX-iBeL with the noreply address (author and committer), once; a wrong name put right; a friend's HQ left alone; called at --pull and push; a computer on the old commits pulls onto the rewritten ones, its uncommitted change kept"
 
+    async def flow183(self) -> str:
+        """F67 (job 435), no Claude, no network: the laptop's way onto the rewritten history, starting from the code it
+        has. QA (job 421) found flow 171 only tried the new push.py, while the laptop runs the one from before, which
+        only fast-forwards. Here: a stand-in GitHub reached through HQ's key alias (github.com-hq, answered by a fake
+        ssh from a local folder), its dev carrying the old push.py (from the rewritten 0.4.18 in this repo's own
+        history); a stand-in laptop cloned from it with HQ's key remote, a commit of its own under a real-looking name,
+        a local main and nightly on it, an uncommitted change. GitHub then rewrites that commit to the public name and
+        puts the new push.py on dev (its REWRITTEN map pointed at the stand-in pair), main and a tag on the rewritten
+        one. The laptop's own pull is refused and opens the github incident (a stand-in incidents module); then the
+        one-time start as written (push.BOOTSTRAP, the same line as in the build notes) lands it on the new dev:
+        its repo commits as FleX-iBeL, a new commit carries it, no ref holds the old name, the uncommitted change
+        kept, the incident closed, and the pull after works."""
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        import push as _push
+        base = self.tmp / "F183"
+        if base.exists():
+            import shutil; shutil.rmtree(base)
+        srv, ws, lap, up = base / "srv", base / "ws", base / "HQ", base / "up"
+        for d in (srv, ws, up):
+            d.mkdir(parents=True)
+        glob = base / "gitconfig"
+        glob.write_text("[user]\n\tname = Real Person\n\temail = real.person@example.com\n[advice]\n\tdetachedHead = false\n")
+        ssh = base / "fake-ssh"
+        ssh.write_text(f'#!/bin/sh\nfor a; do last="$a"; done\ncd "{srv}" && exec sh -c "$last"\n')
+        ssh.chmod(0o755)
+        env = {**os.environ, "GIT_CONFIG_GLOBAL": str(glob), "GIT_CONFIG_NOSYSTEM": "1", "GIT_SSH_COMMAND": str(ssh)}
+        env.pop("GIT_DIR", None)
+        def g(repo, *a):
+            return _sp.run(["git", "-C", str(repo), *a], capture_output=True, text=True, env=env)
+        pub = ["-c", f"user.name={_push.PUBLIC_NAME}", "-c", f"user.email={_push.PUBLIC_EMAIL}"]
+        old_push = g(ROOT, "show", f"{_push.REWRITTEN['45c9ccafa7dd0ad555e869380e5f816e1563757a']}:routine/push.py")
+        need(old_push.returncode == 0 and "across_rewrite" not in old_push.stdout, "the old push.py isn't in HQ's history")
+        stub = ("import json, os\nF = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'incidents-f183.json')\n"
+                "def _r():\n    try:\n        return json.load(open(F))\n    except Exception:\n        return {}\n"
+                "def _w(d):\n    json.dump(d, open(F, 'w'))\n"
+                "def down(k, why, detail=None):\n    d = _r(); d[k] = why; _w(d)\n"
+                "def is_down(k):\n    return k in _r()\n"
+                "def fix(k, what):\n    pass\n"
+                "def up(k):\n    d = _r(); d.pop(k, None); _w(d)\n")
+        _sp.run(["git", "init", "-q", "--bare", "-b", "dev", str(srv / "FleX-iBeL/HQ.git")], env=env, check=True)
+        g(up, "init", "-q", "-b", "dev")
+        (up / "routine").mkdir()
+        (up / "routine/push.py").write_text(old_push.stdout)
+        (up / "routine/incidents.py").write_text(stub)
+        (up / ".gitignore").write_text("incidents-f183.json\n__pycache__/\n")
+        (up / "a.txt").write_text("a")
+        g(up, "add", "-A"); g(up, *pub, "commit", "-q", "-m", "a")
+        remote = "@".join(["git", f"{_push.KEY_HOST}:FleX-iBeL/HQ.git"])
+        g(up, "remote", "add", "origin", remote)
+        need(g(up, "push", "-q", "origin", "dev").returncode == 0, f"the stand-in GitHub can't be reached: {g(up, 'push', 'origin', 'dev').stderr}")
+        need(g(base, "clone", "-q", "-b", "dev", remote, str(lap)).returncode == 0, "the laptop can't clone through the key alias")
+        (lap / "b.txt").write_text("b"); g(lap, "add", "b.txt"); g(lap, "commit", "-q", "-m", "b")
+        need("Real Person" in g(lap, "log", "-1", "--format=%an").stdout, "the stand-in laptop didn't commit with the global name")
+        oldb = g(lap, "rev-parse", "HEAD").stdout.strip()
+        need(g(lap, "push", "-q", "origin", "dev").returncode == 0, "the laptop's commit didn't go up")
+        g(lap, "branch", "main"); g(lap, "branch", "nightly")
+        # GitHub's side: the commit rewritten to the public name, the new push.py on dev, main and a tag on the rewritten one.
+        g(up, "pull", "-q", "origin", "dev")
+        g(up, *pub, "commit", "-q", "--amend", "--no-edit", "--reset-author")
+        newb = g(up, "rev-parse", "HEAD").stdout.strip()
+        need(newb != oldb and "Real Person" not in g(up, "log", "--format=%an %cn").stdout, "the stand-in rewrite didn't take")
+        new_src = (ROOT / "routine/push.py").read_text()
+        start, end = new_src.index("REWRITTEN = {"), new_src.index("}\n", new_src.index("REWRITTEN = {")) + 2
+        (up / "routine/push.py").write_text(new_src[:start] + f'REWRITTEN = {{"{oldb}": "{newb}"}}\n' + new_src[end:])
+        g(up, "add", "-A"); g(up, *pub, "commit", "-q", "-m", "the new push.py")
+        need(g(up, "push", "-q", "-f", "origin", "dev", f"{newb}:refs/heads/main").returncode == 0, "the rewrite didn't go up")
+        g(up, "tag", "-a", "v9.9", "-m", "v9.9", newb); g(up, "push", "-q", "origin", "v9.9")
+        (lap / "a.txt").write_text("a, not committed")
+        # The laptop's own pull, with the code it has: refused, the incident opened.
+        old = _sp.run([sys.executable, str(lap / "routine/push.py"), "--pull"], capture_output=True, text=True, env=env, cwd=str(ws))
+        need(old.returncode == 2 and "incident" in old.stdout, f"the old pull wasn't refused: {old.stdout}{old.stderr}")
+        inc = lap / "incidents-f183.json"
+        need("github" in json.loads(inc.read_text()), "the refused pull opened no incident")
+        # The one-time start, as written, from the workspace next to HQ.
+        boot = _sp.run(["sh", "-c", _push.BOOTSTRAP], capture_output=True, text=True, env=env, cwd=str(ws))
+        said = boot.stdout + boot.stderr
+        need(boot.returncode == 0, f"the one-time start failed: {said}")
+        need(g(lap, "rev-parse", "HEAD").stdout.strip() == g(up, "rev-parse", "HEAD").stdout.strip(), f"the laptop isn't on the new dev: {said}")
+        need(g(lap, "config", "--local", "user.name").stdout.strip() == _push.PUBLIC_NAME
+             and g(lap, "config", "--local", "user.email").stdout.strip() == _push.PUBLIC_EMAIL, "the laptop's repo has no public name")
+        need("Real Person" not in g(lap, "log", "--all", "--format=%an %ae %cn %ce").stdout, f"a ref still holds the old name: {said}")
+        need(g(lap, "rev-parse", "main").stdout.strip() == newb and g(lap, "rev-parse", "nightly").stdout.strip() == newb,
+             "main and nightly weren't moved onto the rewritten commit")
+        need(g(lap, "rev-parse", "v9.9^{commit}").stdout.strip() == newb, "GitHub's tag didn't come")
+        need((lap / "a.txt").read_text() == "a, not committed", "the uncommitted change was lost")
+        need(not (lap / "routine/push_f67.py").exists(), "the one-time start left its copy behind")
+        need("github" not in json.loads(inc.read_text()), "the github incident is still open")
+        (lap / "c.txt").write_text("c"); g(lap, "add", "c.txt"); g(lap, "commit", "-q", "-m", "c")
+        who = g(lap, "log", "-1", "--format=%an|%ae|%cn|%ce").stdout.strip()
+        need(who == "|".join([_push.PUBLIC_NAME, _push.PUBLIC_EMAIL] * 2), f"a new commit carries {who}")
+        again = _sp.run([sys.executable, str(lap / "routine/push.py"), "--pull"], capture_output=True, text=True, env=env, cwd=str(ws))
+        need(again.returncode == 0, f"the pull after the one-time start was refused: {again.stdout}{again.stderr}")
+        notes = ROOT / "workspace/HQ/CLAUDE.md"
+        if notes.exists() and "The laptop's one-time start after the rewrite (F67)" in notes.read_text():
+            need(_push.BOOTSTRAP in notes.read_text(), "the build notes' one-time start isn't push.BOOTSTRAP")
+        return ("the old pull refused with an incident; the one-time start lands it on the new dev, commits as FleX-iBeL, "
+                "no ref with the old name (main, nightly, the tag), the uncommitted change kept, the incident closed, the next pull works")
+
     async def flow170(self) -> str:
         """F65, no Claude: a job started through the routine's own start (tick.start) with the headless switch on.
         Commit 2856f05 wrote the prompt before its file was named, so every headless start failed from 02:00 to
@@ -21781,6 +21880,7 @@ FLOWS = {
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     177: ("H286: the status page says in plain words what the team is doing (never the commands), a job that has to start fixing redoes its own estimate once with why, and a job that ran long through its own mistake is tagged, kept out of the estimates and listed", False, "flow177"),
     182: ("F77: the automatic review of new or changed planning rows: the flag, the refused and lost Ready mark, team notes start nothing, the quiet wait, once per wording, retries, the day's budget, first on Moneypenny's calls only", False, "flow182"),
+    183: ("F67: the laptop's one-time start onto the rewritten history, from the old push.py it has: refused at first, then on the new dev with the public name everywhere", False, "flow183"),
     181: ("H295: the game's weeks Monday to Sunday along the top, the days before the start and after the end greyed, each box its date, today outlined and named, a tick lands on the day it says", False, "flow181"),
     180: ("H285: reminders that come back by themselves: every N hours between two times, every day or set days, never at night, stopped on one word in one go or with its to-do item", False, "flow180"),
     179: ("H279: ask Donna or Pepper about an old text and she finds it: a text past the last 15 and one past the 400 (only in git) found by words and by day on Donna's line and the coaching line, each once; the text rules say to look first; a call or a text runs the search without a yes, never on another folder", False, "flow179"),
