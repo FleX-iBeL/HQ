@@ -52,6 +52,12 @@
   #gamebody .ggrid .c.later { opacity:.35; cursor:default; }
   #gamebody .ggrid .c.today { outline:2px solid var(--fg); outline-offset:1px; }
   #gamebody .ggrid .c.noted::after { content:"•"; }
+  #gamebody .ggrid .wd { text-align:center; font-weight:700; }
+  #gamebody .ggrid .c small { display:block; font-size:8px; font-weight:600; opacity:.8; margin-top:1px; }
+  #gamebody .ggrid .c0 { aspect-ratio:1; border-radius:6px; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+                         background:repeating-linear-gradient(135deg, color-mix(in srgb, var(--muted) 10%, transparent) 0 3px, transparent 3px 6px);
+                         font:600 11px/1 -apple-system,sans-serif; color:var(--muted); opacity:.45; text-decoration:line-through; }
+  #gamebody .ggrid .c0 small { display:block; font-size:8px; text-decoration:none; margin-top:1px; }
   #gamebody svg.ggraph { width:100%; height:120px; display:block; margin-top:6px; }
   #gamebody .gentry { border-top:1px solid color-mix(in srgb, var(--muted) 22%, transparent); padding:7px 0 2px; overflow-wrap:anywhere; }
   #gamebody .gentry:first-of-type { border-top:0; }
@@ -66,6 +72,10 @@
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const btn = (text, cls, fn) => { const b = el("button", "gbtn" + (cls ? " " + cls : ""), text); b.type = "button"; b.addEventListener("click", fn); return b; };
   const fmt = iso => { try { return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" }); } catch (e) { return iso; } };
+  // H295: a day as he reads it on the grid and in Today, "Wed 28 Oct"; the weekday of a date, Monday 0 to Sunday 6.
+  const fmtDay = iso => { try { return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }); } catch (e) { return iso; } };
+  const dow = iso => (new Date(iso + "T12:00:00").getDay() + 6) % 7;
+  const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6].map(i => new Date(2024, 0, 1 + i, 12).toLocaleDateString(undefined, { weekday: "short" }));
   const pct = x => x == null ? "" : Math.round(x * 100) + "%";
   const addDays = (iso, n) => { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
   const label = t => t.label || t.id;
@@ -74,7 +84,7 @@
   function say(text, undo) {
     gameNote.innerHTML = "";
     if (!text) return;
-    gameNote.appendChild(el("span", "", text));
+    gameNote.appendChild(el("span", "", text.replace(/\b\d{4}-\d{2}-\d{2}\b/g, fmtDay)));  // H295: the day as on the grid
     if (undo) gameNote.appendChild(btn("Undo", "", async ev => { ev.target.disabled = true; if (await send({ undo: true })) draw(); }));
   }
   async function send(body) {
@@ -102,19 +112,35 @@
     },
     days(g, t, box) {
       const grid = el("div", "ggrid"); grid.setAttribute("role", "group"); grid.setAttribute("aria-label", label(t) + ", day by day");
-      for (let w = 0; w < g.weeks; w++) {
+      // H295: whole weeks, Monday to Sunday along the top; the days before the start and after the end greyed and
+      // crossed; each box its date (the month on the first box and on the 1st), today outlined and named under it.
+      grid.appendChild(el("span"));
+      for (const w of WEEKDAYS) grid.appendChild(el("span", "wd", w));
+      const first = addDays(g.start, -dow(g.start)), last = addDays(g.end, 6 - dow(g.end));
+      const dayNum = (box, day, top) => {
+        box.appendChild(document.createTextNode(String(Number(day.slice(8)))));
+        if (top || day.slice(8) === "01") box.appendChild(el("small", "", new Date(day + "T12:00:00").toLocaleDateString(undefined, { month: "short" })));
+      };
+      for (let w = 0, day = first; day <= last; w++) {
         grid.appendChild(el("span", "", "W" + (w + 1)));
-        for (let i = 0; i < 7; i++) {
-          const day = addDays(g.start, w * 7 + i), v = (g.days[day] || {})[t.id], later = day > g.today;
+        for (let i = 0; i < 7; i++, day = addDays(day, 1)) {
+          const top = day === first, d = day;  // its own copy: the loop's day moves on before a tap
+          if (day < g.start || day > g.end) {
+            const o = el("span", "c0"); o.title = fmtDay(day) + ": not part of the game"; o.setAttribute("aria-label", o.title);
+            dayNum(o, day, top); grid.appendChild(o); continue;
+          }
+          const v = (g.days[day] || {})[t.id], later = day > g.today;
           const c = el("button", "c" + (v ? " " + v : "") + (later ? " later" : "") + (day === g.today ? " today" : "") + ((g.days[day] || {}).note ? " noted" : ""));
-          c.type = "button"; c.title = fmt(day) + (v ? ": " + (v === "done" ? "done" : "X") : "") + ((g.days[day] || {}).note ? " · " + g.days[day].note : "");
-          c.setAttribute("aria-label", c.title);
-          if (!later) c.addEventListener("click", () => change(g, { tick: v === "done" ? "x" : v === "x" ? "clear" : "done", track: t.id, day }));
+          c.type = "button"; c.title = fmtDay(day) + (day === g.today ? " (today)" : "") + (v ? ": " + (v === "done" ? "done" : "X") : "") + ((g.days[day] || {}).note ? " · " + g.days[day].note : "");
+          c.setAttribute("aria-label", c.title); c.dataset.day = day;
+          dayNum(c, day, top);
+          if (!later) c.addEventListener("click", () => change(g, { tick: v === "done" ? "x" : v === "x" ? "clear" : "done", track: t.id, day: d }));
           else c.disabled = true;
           grid.appendChild(c);
         }
       }
       box.appendChild(grid);
+      if (g.today >= g.start && g.today <= g.end) box.appendChild(el("div", "gsub", "Today is " + fmtDay(g.today) + ", the outlined box."));
     }
   };
   KINDS.count = KINDS.count || {
@@ -235,7 +261,7 @@
       if (how) c.appendChild(el("div", "gsub", how));
     }
     if (g.phase === "playing") {
-      const c = card("Today · " + fmt(g.today));
+      const c = card("Today · " + fmtDay(g.today));
       for (const t of g.tracks) kind(t).today(g, t, c);
       const note = (g.days[g.today] || {}).note;
       if (note) c.appendChild(el("div", "gsub", "Noted: " + note));

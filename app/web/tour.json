@@ -189,7 +189,7 @@
       "id": "game", "title": "Your six-week game", "line": "One simple game you can win, six weeks at a time",
       "steps": [
         {"target": "gamebtn", "title": "A game you can win", "text": "In Life coaching you design a six-week game with {pepper}: one simple thing, like moving every day. Once it's set up, this button shows where you are, the win line, and how far along you are."},
-        {"target": "gamebtn", "title": "Tick it off", "text": "Tick today off here, or just say it on a call or text {donna}. Add how it felt, or a note, when you want. {donna} can nudge you in the evening if today's tick isn't in yet.",
+        {"target": "gamebtn", "title": "Tick it off", "text": "Tick today off here, or just say it on a call or text {donna}. The weeks run Monday to Sunday with each day's date; today is outlined, and days outside the game are greyed. Add how it felt, or a note, when you want. {donna} can nudge you in the evening if today's tick isn't in yet.",
          "demo": {"kind": "list", "items": [["Today", "A walk outside · ticked"], ["This week", "5 of 7 days"], ["Win line", "90% of the days · on track"]]}},
         {"target": "gamebtn", "title": "Look back and keep it", "text": "Every week you look back on it, and at the end there's a short debrief: was it fun, was it useful, what did you learn. Past games are kept, so you can open them again."}
       ]

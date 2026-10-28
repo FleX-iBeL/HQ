@@ -14671,6 +14671,93 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
                 else:
                     os.environ[k] = v
 
+    async def flow181(self) -> str:
+        """H295, no Claude, no server: the game's weeks as he reads them. The game page (web/games.js) on a page of its
+        own, its data from games.py's own view of a made-up game started on a Wednesday, today the Wednesday after: whole
+        weeks Monday to Sunday along the top, the Monday and Tuesday before the start and the days after the end greyed
+        and crossed and not tappable, every box its date (the month on the first and on the 1st), today outlined, named
+        "(today)" and under the grid, Today's card with its weekday, and a tap on yesterday ticks yesterday; the said
+        line names the day the same way. On the phone, a small phone and wide."""
+        import games as gm
+        from datetime import date as _d
+        g = {"id": "walk", "name": "Walk the dog", "start": "2026-03-04", "weeks": 6, "win": {"track": "walked", "share": 0.9},
+             "tracks": [{"id": "walked", "kind": "tick", "label": "Walked"}], "days": {"2026-03-05": {"walked": "done"}}}
+        data = {"games": [gm.view(g, _d(2026, 3, 11))]}
+        need(data["games"][0]["end"] == "2026-04-14" and data["games"][0]["phase"] == "playing", f"the made-up game's dates are off: {data}")
+        after = json.loads(json.dumps(data))
+        after["games"][0]["days"]["2026-03-10"] = {"walked": "done"}
+        after["said"] = "Walk the dog, 2026-03-10: done. So far 2 of 7 days done"
+        js = (APP / "web" / "games.js").read_text()
+        need("H295" in js, "the game page doesn't have the week layout")
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the game page in")
+        page = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<style>:root{--bg:#fff;--fg:#111;--muted:#666;--soft:#eee;--accent:#2a9;--stop:#c33}</style></head><body>
+<button id="gamebtn">Game</button>
+<div id="gamesheet" data-view="list"><div id="gamehead"><button id="gameback">Games</button><h2 id="gametitle"></h2><button id="gameclose">Close</button></div>
+<div id="gamebody"></div><div id="gamenote"></div></div>
+<script>
+const DATA = __DATA__, AFTER = __AFTER__, sent = [];
+const no = () => false, histGet = async () => DATA, histNote = (e, t) => { e.textContent = t; };
+const sheetPull = () => {}, backSwipe = () => {}, showLayout = () => {}, showDirect = () => {}, closeWx = () => {};
+const chatOpen = no, statOpen = no, histOpen = no, notesOpen = no, calOpen = no, todoOpen = no, setEl = { classList: { contains: no } };
+function gameOpen() { return document.getElementById("gamesheet").classList.contains("open"); }
+window.fetch = async (u, o) => { sent.push(JSON.parse(o.body)); return { ok: true, json: async () => AFTER }; };
+</script>
+<script>__JS__</script>
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms)), q = s => [...document.querySelectorAll("#gamebody " + s)];
+  showGame(true); await wait(100);
+  out.push("head:" + q(".ggrid .wd").map(e => e.textContent).join(","));
+  out.push("cells:" + q(".ggrid .c").length + "/" + q(".ggrid .c0").length);
+  const off = q(".ggrid .c0");
+  out.push("before:" + off.slice(0, 2).map(e => e.textContent).join(",") + "/" + (off[0] && off[0].tagName));
+  const t = q(".ggrid .c.today");
+  out.push("today:" + t.length + "/" + (t[0] && t[0].dataset.day) + "/" + (t[0] && t[0].getAttribute("aria-label")));
+  out.push("todayline:" + q(".gsub").map(e => e.textContent).filter(x => /^Today is/.test(x)).join(""));
+  out.push("card:" + q(".gcard > b").map(e => e.textContent).filter(x => /^Today/.test(x)).join(""));
+  out.push("first:" + (q(".ggrid .c")[0] ? q(".ggrid .c")[0].dataset.day + "=" + q(".ggrid .c")[0].textContent : ""));
+  out.push("done:" + q(".ggrid .c.done").map(e => e.dataset.day).join(","));
+  q('.ggrid .c[data-day="2026-03-10"]')[0].click(); await wait(100);
+  out.push("sent:" + sent.map(b => b.day + "=" + b.tick).join(","));
+  out.push("after:" + q(".ggrid .c.done").map(e => e.dataset.day).join(","));
+  out.push("said:" + document.getElementById("gamenote").textContent);
+  out.push("wide:" + (document.documentElement.scrollWidth <= innerWidth + 1 ? "ok" : "too wide"));
+  const pre = document.createElement("pre"); pre.id = "h295"; pre.textContent = "H295RESULT " + out.join(" | ") + " END"; document.body.append(pre);
+})();
+</script></body></html>"""
+        page = page.replace("__DATA__", json.dumps(data)).replace("__AFTER__", json.dumps(after)).replace("__JS__", js.replace("</script", "<\\/script"))
+        seen = []
+        for name, size in (("the phone", "390,844"), ("a small phone", "320,640"), ("wide", "1180,780")):
+            pf = self.tmp / f"h295-{name.replace(' ', '-')}.html"
+            pf.write_text(page)
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", "--lang=en-GB",
+                                              *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / 'h295-profile'}", f"--window-size={size}",
+                                              "--virtual-time-budget=5000", "--dump-dom", pf.as_uri()], timeout=90)
+            mm = re.search(r'<pre id="h295">H295RESULT (.*?) END</pre>', r.stdout)
+            need(mm, f"{name}: the game page didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = dict(part.split(":", 1) for part in mm.group(1).split(" | "))
+            say(f"   {name} ({size}): {mm.group(1)}")
+            need(res["head"].split(",")[0].startswith("Mon") and res["head"].split(",")[-1].startswith("Sun") and len(res["head"].split(",")) == 7,
+                 f"{name}: the top isn't Monday to Sunday: {res}")
+            need(res["cells"] == "42/7", f"{name}: not 42 days to tick and 7 greyed (Monday, Tuesday before, five after): {res}")
+            need(res["before"].startswith("2Mar,3/") and res["before"].endswith("SPAN"), f"{name}: the days before the start aren't greyed with their date: {res}")
+            need(res["today"].startswith("1/2026-03-11/") and "Wed" in res["today"] and "(today)" in res["today"], f"{name}: today isn't marked with its day: {res}")
+            need("Wed" in res["todayline"] and "11" in res["todayline"] and "Mar" in res["todayline"], f"{name}: today isn't named under the grid: {res}")
+            need("Wed" in res["card"], f"{name}: Today's card doesn't say which day: {res}")
+            need(res["first"] == "2026-03-04=4", f"{name}: the first day of the game isn't its Wednesday with its date: {res}")
+            need(res["done"] == "2026-03-05" and res["sent"] == "2026-03-10=done" and res["after"] == "2026-03-05,2026-03-10",
+                 f"{name}: a tap on yesterday didn't tick yesterday: {res}")
+            need("2026-03-10" not in res["said"] and "Tue" in res["said"], f"{name}: the said line doesn't name the day as the grid does: {res}")
+            need(res["wide"] == "ok", f"{name}: something is wider than the screen: {res}")
+            seen.append(name)
+        return ("the game's weeks Monday to Sunday on top, the days outside the game greyed and crossed, each box its date, "
+                "today outlined and named, a tap on yesterday ticks yesterday (" + ", ".join(seen) + ")")
+
     async def flow180(self) -> str:
         """H285, no Claude, no network: reminders that come back by themselves. routine/pings.py on its own copies:
         "remind me to drink water every two hours from 10 to 8" goes at 10, 12, 2, 4, 6 and 8 on two days without being
@@ -21522,6 +21609,7 @@ FLOWS = {
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     177: ("H286: the status page says in plain words what the team is doing (never the commands), a job that has to start fixing redoes its own estimate once with why, and a job that ran long through its own mistake is tagged, kept out of the estimates and listed", False, "flow177"),
+    181: ("H295: the game's weeks Monday to Sunday along the top, the days before the start and after the end greyed, each box its date, today outlined and named, a tick lands on the day it says", False, "flow181"),
     180: ("H285: reminders that come back by themselves: every N hours between two times, every day or set days, never at night, stopped on one word in one go or with its to-do item", False, "flow180"),
     179: ("H279: ask Donna or Pepper about an old text and she finds it: a text past the last 15 and one past the 400 (only in git) found by words and by day on Donna's line and the coaching line, each once; the text rules say to look first; a call or a text runs the search without a yes, never on another folder", False, "flow179"),
     178: ("H266: Moneypenny's own line: the team's news (done, paused, the night's check, the Friday estimates, a failed QA, a held release, her own) comes from her, pushed to the same phone; she answers his texts there; Donna's line unchanged", False, "flow178"),
