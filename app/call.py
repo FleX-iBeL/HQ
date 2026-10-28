@@ -131,6 +131,7 @@ class Call:
             context = agents.context_of(self.agent)
             self.context = "all" if context == "day" and self.load == "deep" else context
             self.policy.memory_writes = self.context == "build"  # H280: her lessons stay
+            self.policy.team_texts = self.context == "build"  # H266: she texts him on her own line
             # H282: her own thinking time (Moneypenny high), the rest as before; a three-way keeps the first one's
             self.brain = make_brain(self.model, self.policy, load=self.load, persona=persona, context=self.context,
                                     effort=agents.effort_of(self.agent, self.model),
@@ -376,6 +377,7 @@ class Call:
         if who is not self.speaker:
             self.llm.brain = await self._brain_for(who)
             self.policy.memory_writes = agents.context_of(who) == "build"  # H280: her lessons, on her turns
+            self.policy.team_texts = agents.context_of(who) == "build"  # H266: her own line, on her turns
             self._speak_as(who)
             self.speaker = who
         self.transcript.speaker = who["name"]

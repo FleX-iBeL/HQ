@@ -15,7 +15,7 @@ maintenance moments because we just do it daily whenever we have space." and "Ma
                                             left: exit 1 (fix all again). Still failing after round 3: exit 3 (hold).
   python3 "routine/nightly.py" set          which flows this computer runs
   python3 "routine/nightly.py" log "LINE"   one line in the H169 row's nights (the job, after its fix)
-  python3 "routine/nightly.py" morning "TEXT"  a short plain line Donna texts him at 08:00 (the next one)
+  python3 "routine/nightly.py" morning "TEXT"  a short plain line Moneypenny texts him at 08:00 (H266; Donna without her) (the next one)
   python3 "routine/nightly.py" tutorial     after the flows, every night (H227): what changed in HQ since the last
                                             tutorial read (commits and the files they touched), and where the
                                             tutorial is, to read it against what HQ does now
@@ -62,7 +62,7 @@ MARK = "Nights:"
 KEEP_NIGHTS = 7
 KEEP_LOGS = 14
 OUT = os.path.join(HQ, "scratch", "nightly")
-MORNING = (8, 0)  # when Donna texts the line for the morning
+MORNING = (8, 0)  # when Moneypenny (H266) texts the line for the morning
 ROUNDS = 3  # H226: at most three full runs a night
 NIGHT_HOURS = 12  # a round belongs to tonight when tonight's round 1 started less than this long ago [Claude's choice]
 
@@ -121,7 +121,7 @@ def add_night(line: str, roadmap: str | None = None) -> bool:
 
 
 def morning(text: str, now: dt.datetime | None = None) -> dict:
-    """Donna texts it at the next 08:00, in her own words (pings.py, why nightly)."""
+    """Moneypenny texts it on her own line at the next 08:00 (H266), in her own words (pings.py, why nightly)."""
     import pings
     now = now or dt.datetime.now()
     at = now.replace(hour=MORNING[0], minute=MORNING[1], second=0, microsecond=0)
@@ -268,7 +268,7 @@ def main(argv: list[str]) -> int:
         return 0
     if cmd == "morning" and len(argv) >= 2:
         r = morning(" ".join(argv[1:]))
-        print(f"Donna texts it at {r['at']}: {r['text']}")
+        print(f"Moneypenny texts it at {r['at']}: {r['text']}")
         return 0
     print(__doc__)
     return 2

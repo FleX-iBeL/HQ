@@ -1047,7 +1047,7 @@ def job_need(job):
 def usage_overrun(job, s):
     """H172: every minute while a job runs, its usage so far from the newest reading. At about four times the top of its estimate
     (H220: the estimate times how unsure it is, at most twice; H221 four times the estimate; twice before) it's
-    paused for good: its chat ends, it isn't started again by itself (a call resumes or drops it), and Donna texts him.
+    paused for good: its chat ends, it isn't started again by itself (a call resumes or drops it), and Moneypenny texts him (H266).
     True when it paused it. The stop at the line itself stays the job's own (H113)."""
     import usagecost
     n = job["n"]
@@ -1071,7 +1071,7 @@ def usage_overrun(job, s):
            f"a call resumes it (jobs.py resume {n}) or drops it (jobs.py stop {n})")
     status("STOPPED", f"Job {n} paused: it used about four times the top of its estimated usage", f"job {n} {why}")
     incidents.past("jobs", time.time(), time.time(), f"Job {n} {why}",
-                   [(time.time(), "Ended its chat; it waits for a call, and Donna told him")])
+                   [(time.time(), "Ended its chat; it waits for a call, and Moneypenny told him")])
     log(f"job {n} paused: {why}")
     try:
         import pings
@@ -1260,12 +1260,12 @@ def direct_watch():
         log(f"direct line: {e!r}")
     # H120: the weather every three hours in the day, on the main; she texts only when there's something to say.
     if main:
-        # F66: every Friday morning, before the sprint planning, how the week's estimates held (through Donna until
-        # Moneypenny has her own line, H266).
+        # F66: every Friday morning, before the sprint planning, how the week's estimates held (H266: from
+        # Moneypenny, on her own line).
         try:
             import estimate
             if estimate.friday_due():
-                direct_line.text("the team's estimates this week, before the sprint planning (F66)", estimate.friday_report())
+                direct_line.text("estimates", estimate.friday_report())
                 log("direct line: the Friday report on the estimates")
         except Exception as e:
             log(f"the Friday estimates report: {e!r}")

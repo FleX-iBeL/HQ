@@ -31,7 +31,7 @@ What it does:
   - The stop at the line for a running job stays as it is (H113). New: a job whose real cost reaches about four times
     the top of its estimate (OVER times; twice the estimate itself until H221, four times until H220; and at least
     OVER_MIN points more than the estimate, so a rounding of the readings doesn't do it) is paused for good: its chat
-    ends, it isn't started again by itself, and Donna texts him in plain words. A call lets it carry on (jobs.py resume
+    ends, it isn't started again by itself, and Moneypenny texts him (H266) in plain words. A call lets it carry on (jobs.py resume
     N, in its own chat, H113) or cancels it (jobs.py stop N).
   - H220 (21 October 2026): how sure the estimate is counts. Every pause so far (jobs 211, 248, 266, 281, 292) was a
     job whose usage was estimated from its computed minutes alone, while the first look, the call and the team itself
@@ -656,7 +656,7 @@ def short_what(text):
 
 
 def paused_words(n, text, o):
-    """Donna's facts for a paused job: plain, everyday words (the text is sent as it is when she can't compose)."""
+    """Moneypenny's facts (H266) for a paused job: plain, everyday words (the text is sent as it is when she can't compose)."""
     line = "the five-hour usage" if o["line"] == "five" else "the weekly usage"
     return (f"Heads up: I paused one of the team's jobs, {short_what(text)}. It had used about {o['used']:g}% of "
             f"{line}, roughly four times the most it was expected to take, so I stopped it before it burns more. It won't start "

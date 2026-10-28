@@ -268,11 +268,44 @@ def queue(label: str, after: str = "") -> str:
     return f"Job {j['n']} is ready: QA of {label}."
 
 
+def title_of(label: str, text: str | None = None) -> str:
+    """The row's name without its label, for a text in everyday words."""
+    try:
+        line = rows(q.read()[0] if text is None else text).get(label, ("",))[0]
+    except Exception:
+        return ""
+    cells = [c.strip() for c in line.split("|")]
+    name = cells[2] if len(cells) > 2 else ""
+    return re.sub(rf"^{re.escape(label)}\s*", "", name)[:160]
+
+
+def tell(why: str, facts: str) -> list[str] | None:
+    """H266: Moneypenny texts him on her own line (direct_line.py text WHY, detached; the team's kinds go to her).
+    Never from a test on the real line: only when the test gave its own (HQ_DIRECT_DIR)."""
+    if hqpaths.under_test() and not os.environ.get("HQ_DIRECT_DIR"):
+        return None
+    py = os.path.join(ROOT, ".venv", "bin", "python")
+    cmd = [py if os.path.exists(py) else sys.executable, os.path.join(ROOT, "app", "direct_line.py"), "text", why, facts]
+    try:
+        os.makedirs(os.path.join(ROOT, "scratch"), exist_ok=True)
+        log = open(os.path.join(ROOT, "scratch", "direct-line.log"), "a")
+        subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError as e:
+        print(f"the text about it: {e!r}", file=sys.stderr)
+        return None
+    return cmd
+
+
 def fail(label: str, what: str, job: int | None = None) -> str:
     row = mark(label, False, what, job)
+    name = title_of(label)
     if fails_in_a_row(row) >= MAX_FAILS:
+        tell("qa-failed", f"What: {name}\nWhat's off: {what}\nIt didn't pass {MAX_FAILS} times in a row, so no fix "
+                          "goes to the team by itself: it waits for him, on a call or here.")
         return (f"QA failed for {label}, {MAX_FAILS} times in a row now: no fix job by itself; it waits for a call, "
                 "and the release holds it.")
+    tell("qa-failed", f"What: {name}\nWhat's off: {what}\nIt went back to the team for a fix; your check follows by itself.")
     with q.locked():
         text, jobs, on = q.read()
         w = _waiting_for(jobs, label, qa=False)

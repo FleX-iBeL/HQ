@@ -2833,7 +2833,7 @@ def main(argv):
         days = int(argv[1]) if len(argv) > 1 else REPLAY_DAYS
         print(replay_words(replay(days=days, steps=False), "Without the named steps"))
         print(replay_words(replay(days=days, steps=True), "With the named steps (now)"))
-    elif cmd == "friday-report":  # F66: the words Donna texts on Friday morning
+    elif cmd == "friday-report":  # F66: the words Moneypenny texts (H266) on Friday morning
         print(friday_report())
     elif cmd == "steps":  # F66: the steps a job's words name, and its estimate with its range
         d = estimate_detail(" ".join(argv[1:]))

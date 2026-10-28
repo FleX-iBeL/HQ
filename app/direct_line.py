@@ -881,6 +881,7 @@ def _answer(words: str) -> str:
     if on_team_line():  # H266: Moneypenny's own line
         rules += "\n\n" + TEAM_LINE_RULE
     ctx = _agents.context_of(a)  # H246: what her role loads
+    pol.team_texts = ctx == "build"  # H266: Moneypenny may text on her own line from a chat too
     if ctx == "coach":  # nothing from the building in her rules either
         rules = _config.without_building(rules)
     try:  # the open line (app/lines.py): her last session, when the switch is on and it's fresh enough
@@ -1074,6 +1075,8 @@ def info() -> dict:
 
 if __name__ == "__main__":
     args = sys.argv[1:]
+    if args[:1] == ["team"] and VENV_PY.exists() and Path(sys.executable).resolve() != VENV_PY.resolve():
+        os.execv(str(VENV_PY), [str(VENV_PY), str(Path(__file__).resolve()), *args])  # her words need Claude (H266)
     if "--team" in args:  # H266: the same commands on Moneypenny's own line (the status server's /direct?line=team)
         args.remove("--team")
         if team_on():

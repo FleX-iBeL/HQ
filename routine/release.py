@@ -209,6 +209,11 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False) -> int:
         h = qa.hold(str(ROOT), push.RELEASE_BRANCH, push.WORK_BRANCH)
         if not h["all"]:
             print(qa.hold_words(h))
+            if h["held"]:  # H266: Moneypenny tells him on her own line what's held and why
+                qa.tell("release-held", "Held back, not passed my check yet: " + "; ".join(
+                    f"{qa.title_of(x['label']) or x['label']} ({x['why']})" for x in h["held"])
+                    + (". Goes out now: " + ", ".join(qa.title_of(l) or l for l in h["taken"]) if h["to"] else
+                       ". Nothing new goes out this time."))
             if not h["to"]:
                 print(f"No release: nothing new has passed QA yet; it stays on {push.NIGHTLY_BRANCH}, main stays at {version()}.")
                 return 0

@@ -211,6 +211,7 @@ class Policy:
     # H280: a call about building HQ (Moneypenny's context "build") writes Claude's memory for the workspace without
     # a yes, so a lesson she learns is there at the next call's start.
     memory_writes: bool = False
+    team_texts: bool = False  # H266: Moneypenny (context build) texts him on her own line without a yes
     pending_turns: int = 0  # how many of his turns the pending questions have waited (answer, PENDING_TURNS)
 
     def __post_init__(self):
@@ -583,6 +584,12 @@ class Policy:
             if len(args) == 1 or args[1] in ("list", "show"):
                 return Decision(ALLOW, "the backend switches")
             return _ask(f"flip the backend switch {' '.join(args[1:3])}", "a backend switch")
+        # H266: Moneypenny texts him on her own line, on her own, without waiting for a call (direct_line.py team).
+        if (prog in ("python3", "python") and len(args) >= 3 and self.hq_app_script(args[0], "direct_line.py")
+                and args[1] == "team"):
+            if self.team_texts:
+                return Decision(ALLOW, "Moneypenny texts him on her own line")
+            return Decision(DENY, "only Moneypenny texts on her own line")
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "notes.py"):
             if len(args) == 1 or args[1] in ("clear", "cleared", "restore"):
                 return Decision(ALLOW, "his quick notes")
