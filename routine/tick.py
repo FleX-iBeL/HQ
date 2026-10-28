@@ -315,6 +315,8 @@ def start(job):
             # H283: a note can come while the job runs; it reads them after each step and always before a push or release.
             f"After each step, and always before any push or release, read your notes: python3 "
             f"{json.dumps(os.path.join(HERE, 'jobs.py'))} notes {n}, and follow what's new (H283). "
+            # H286: the status page says in plain words what the job is doing, and the end time moves once, with why.
+            + plain_rule(n)
             + past_note
             + importlib.import_module("jobs").notes_for_prompt(job)
             + importlib.import_module("qa").prompt_extra(job["text"])  # F56: a QA job runs as Moneypenny
@@ -392,6 +394,19 @@ def _steps_extra(job, plan):
     except Exception as ex:
         log(f"steps rule: {ex!r}")
     return ""
+
+
+def plain_rule(n) -> str:
+    """H286, his words of 27 October 2026: "I want to know, for example, that it found the fix for a bug like that and
+    it's fixing it and that's why it's taking longer." """
+    jp = json.dumps(os.path.join(HERE, "jobs.py"))
+    return (f"At each step, say on the status page in one plain line what you're doing now and why: python3 {jp} doing "
+            f"{n} \"a check failed in the night run; found why, fixing it, then every check again\" (the work, never the "
+            f"commands, paths or his personal things; HQ is public) (H286). If you have to start fixing something that "
+            f"will make the job take longer than planned, redo your estimate once, as minutes more from now, with why: "
+            f"python3 {jp} redo {n} MINUTES \"WHY\". If it ran long through your own mistake (a check you broke "
+            f"yourself, a wrong first try), tag it before the done mark: python3 {jp} mistake {n} \"WHAT WENT "
+            f"WRONG\", so it's kept out of the estimates and the team learns from it. ")
 
 
 def _headless() -> bool:

@@ -14514,6 +14514,109 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
         need("jobs.py\" tell" in config.TEAM_RULE, "the call rules don't say how to tell the team")
         return f"jobs {a} and {b}: notes told, read, the push and release held until read, shown on the status page"
 
+    async def flow177(self) -> str:
+        """H286, no Claude: the status page says in plain words what the team is doing, and a job that has to start
+        fixing redoes its own estimate. On a copy of the roadmap (F17), a stand-in for a release whose check fails on
+        purpose: a doing line that's a command or a path is refused, a plain one is kept on the job's line without
+        changing its text, and the status page reads it; redo moves the estimate once (minutes so far plus the minutes
+        given), says why, and a second redo is refused without --again; a mistake tag on the running job goes into its
+        line in the history at done, next to the redone estimate; tagged jobs are kept out of the next estimate, listed
+        (jobs.py mistakes, the plan the page reads) and said apart in the Friday report; --off takes a tag back; the
+        job's first prompt carries the rule, the page draws the line, the redone estimate and the list."""
+        import subprocess as sp
+        rm = self.tmp / "roadmap-H286.md"
+        rm.write_text(ROADMAP.read_text())
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1", "HQ_LOOK": "0"}
+        def run(*a, ok=True):
+            r = sp.run(["python3", *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            if ok:
+                need(r.returncode == 0, f"{a} failed: {r.stdout}{r.stderr}")
+            return r
+        def jobs(*a, ok=True):
+            return run(str(ROOT / "routine/jobs.py"), *a, ok=ok)
+        def py(code):
+            r = run("-c", "import json, sys, time; sys.path.insert(0, 'routine'); import estimate as E, jobs as J\n" + code)
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        text = "flow 177 the daily release, after the nightly run"
+        jobs("add", text)
+        q = json.loads(jobs("next").stdout)
+        a = q["ready"][-1]["n"]
+        for j in q["running"]:
+            jobs("mark", str(j["n"]), "done 00:00")
+        started = time.strftime("%H:%M", time.localtime(time.time() - 10 * 60))
+        jobs("mark", str(a), f"running since {started}")
+        py(f"E.on_start({a}, {json.dumps(text)}); print(1)")
+        # The plain line: never the commands.
+        for bad in ("Bash cd /home/x && python3 routine/nightly.py", "python3 routine/nightly.py --full", "ok"):
+            r = jobs("doing", str(a), bad, ok=False)
+            need(r.returncode != 0 and "Not written" in (r.stdout + r.stderr), f"a doing line like {bad!r} was kept: {r.stdout}")
+        plain = "a check failed in the night run; found why, fixing it, then every check again"
+        need(plain in jobs("doing", str(a), plain).stdout, "the plain line wasn't kept")
+        d = py(f"_, js, _ = J.read(); j = next(x for x in js if x['n'] == {a}); print(json.dumps(j))")
+        need(d["text"] == text and d["now"]["text"] == plain, f"the doing line changed the job's text or wasn't read: {d}")
+        before = py(f"print(json.dumps(E.plan()['jobs']['{a}']))")
+        need(before.get("doing", {}).get("text") == plain, f"the plan the page reads lacks the doing line: {before}")
+        # Redo once: minutes so far plus the ones given, with why; the end time moves once.
+        why = "the night run had failed a check it broke; fixing it, then every check again"
+        out = jobs("redo", str(a), "25", why).stdout
+        need("25 more from now" in out, f"redo said: {out}")
+        after = py(f"print(json.dumps(E.plan()['jobs']['{a}']))")
+        need(after["redone"]["est"] == after["so_far"] + 25 and after["est"] == after["redone"]["est"] and not after["over"]
+             and after["redone"]["why"] == why and after["redone"]["was"] == before["est"],
+             f"the redone estimate isn't what the plan counts: before {before}, after {after}")
+        need(after["left"] == 25 or after["left"] == 24, f"the minutes left after the redo: {after}")
+        r = jobs("redo", str(a), "40", "again", ok=False)
+        need(r.returncode != 0 and "Once is the rule" in (r.stdout + r.stderr), f"a second redo went through: {r.stdout}")
+        jobs("redo", str(a), "30", why, "--again")
+        # The status page reads the line and the redone estimate apart from the text.
+        js = f"""import {{ parseRoadmap }} from {json.dumps(str(ROOT / 'status/parse.mjs'))};
+import {{ readFileSync }} from 'node:fs';
+const r = parseRoadmap(readFileSync({json.dumps(str(rm))}, 'utf8'));
+console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) => j.n === {a})}}));"""
+        d = json.loads(sp.run(["node", "--input-type=module", "-e", js], capture_output=True, text=True).stdout)
+        need(not d["problems"] and d["job"]["text"] == text and d["job"]["redone"]["why"] == why
+             and d["job"]["redone"]["was"] > 0 and d["job"]["now"]["text"].startswith("the estimate redone: 30 min more"),
+             f"the status page reads the job's line wrong: {d}")
+        # A note still reads apart from them.
+        jobs("tell", str(a), "QA first")
+        d = py(f"_, js, _ = J.read(); j = next(x for x in js if x['n'] == {a}); print(json.dumps(j))")
+        need(d["text"] == text and d["notes"][0]["text"] == "QA first" and d["redone"]["why"] == why, f"a note mixed with the marks: {d}")
+        jobs("notes", str(a))
+        # The mistake tag: into the history at done, next to the redone estimate.
+        out = jobs("mistake", str(a), "a check it broke itself").stdout
+        need("tagged" in out, f"mistake said: {out}")
+        jobs("done", str(a))
+        h = py(f"print(json.dumps(next(x for x in E.history() if x['n'] == {a})))")
+        need(h.get("mistake", {}).get("what") == "a check it broke itself" and h.get("redone", {}).get("est"),
+             f"the finished job lacks its tag or its redone estimate: {h}")
+        ms = jobs("mistakes").stdout
+        need(f"Job {a}" in ms and "a check it broke itself" in ms, f"jobs.py mistakes lacks it: {ms}")
+        p = py("print(json.dumps(E.plan().get('mistakes')))")
+        need(p and p[0]["n"] == a and p[0]["what"] == "a check it broke itself", f"the plan the page reads lacks the list: {p}")
+        rep = py("print(json.dumps(E.friday_report()))")
+        need("own mistake" in rep and f"job {a}" in rep and "no finished jobs" in rep, f"the Friday report doesn't say it apart: {rep}")
+        # Kept out of the estimates: three short releases and four long through their own mistake.
+        d = py(f"""base = [dict(n=900 + i, kind='release', est=10, actual=10, done=time.time() - 3600 * (5 - i), how='seen', machine='t') for i in range(3)]
+longs = [dict(n=910 + i, kind='release', est=10, actual=120, done=time.time() - 60 * (5 - i), how='seen', machine='t') for i in range(4)]
+t = {json.dumps(text)}
+print(json.dumps([E.estimate_detail(t, hist=base + longs, kind='release')['est'],
+                  E.estimate_detail(t, hist=base + [dict(x, mistake=dict(what='x')) for x in longs], kind='release')['est'],
+                  E.estimate_detail(t, hist=base, kind='release')['est']]))""")
+        need(d[1] == d[2] and d[0] > d[1], f"a tagged job still raised the estimate: with it {d[0]}, tagged {d[1]}, without {d[2]}")
+        # --off takes it back.
+        jobs("mistake", str(a), "--off")
+        need("No job is tagged" in jobs("mistakes").stdout, "--off didn't take the tag back")
+        r = jobs("mistake", "99999", "nothing", ok=False)
+        need(r.returncode != 0, "a job nobody knows got tagged")
+        # The rule in every first prompt, and the page.
+        tick = (ROOT / "routine/tick.py").read_text()
+        need("plain_rule(n)" in tick and "never the " in tick and " redo " in tick and " mistake " in tick,
+             "the job's first prompt lacks the H286 rule")
+        page = (ROOT / "status/index.html").read_text()
+        need("jobnow" in page and "jobredone" in page and "E?.mistakes" in page and "Job ${j.n} now" in page,
+             "the status page doesn't draw the plain line, the redone estimate or the list")
+        return f"job {a}: a plain line kept (commands refused), the estimate redone once with why, tagged, kept out, listed"
+
     async def flow162(self) -> str:
         """H280, changed 26 October 2026 (moneypenny-fix), no Claude: Moneypenny starts a call like Pepper did before the
         split: the folder and Claude's memory like a chat, minus the vision, no build notes loaded in full and no
@@ -21061,6 +21164,7 @@ FLOWS = {
     167: ("F57: a finished job without its done mark is nudged by name; a never-ending wait loop stops counting after 15 minutes; every job text ends with the done mark; done N --at HH:MM, also from a call", False, "flow167"),
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
+    177: ("H286: the status page says in plain words what the team is doing (never the commands), a job that has to start fixing redoes its own estimate once with why, and a job that ran long through its own mistake is tagged, kept out of the estimates and listed", False, "flow177"),
     164: ("H283: a note for the team while they work: jobs.py tell N to a running or waiting job, read with notes N after each step; push.py and release.py wait while a note is unread; the first prompt carries a waiting job's notes; the status page shows them; a call tells without a yes", False, "flow164"),
     163: ("H282 (26 October 2026, changed): Moneypenny's craft has the ready and done lists and his definition of how she runs, none of the confirmed-twice and all-the-time wording; the default thinking time; the full call rules", False, "flow163"),
     162: ("H280 (26 October 2026, changed): Moneypenny starts a call like Pepper before the split: the folder and Claude's memory minus the vision, no build notes in full; a build call writes the memory without a yes", False, "flow162"),
