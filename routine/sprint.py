@@ -277,22 +277,59 @@ BUG_POINTS = (  # a small bug fix is ready with what's wrong, what right looks l
 )
 
 
+# F77 (28 October 2026, call at 16:57, Moneypenny), in the user's words: "we do need to make sure that when the team
+# actually works on it and just change the status of it, right, that then it doesn't check it again. Otherwise, we are
+# burning usage and then it changes things." The ask of a row is its title and its description (the Step cell and the
+# one after it), what he and Moneypenny write; never its status mark, the team's built or done notes, QA lines, the
+# other cells, the rank, the tag, the ready mark or the flag (those live in sprint.json). A team note written into the
+# description cell itself ("Built (job 432, …): …", "QA passed (job …", "Done (job …") is cut off from where it starts.
+# One meaning for both the Ready mark and the automatic review (routine/review.py), on bug rows and feature rows alike.
+TEAM_NOTE = re.compile(r"(?:\b(?:Built|Done|Fixed|Shipped|Released|Merged|Finished)(?: and pushed)? \((?:by hand|jobs? \d+)"
+                       r"|\bQA (?:passed|failed) \((?:by hand|job \d+))")
+
+
+def ask_of(line):
+    """A row's ask in words: its Step cell (label and title) and its description, without the team's notes."""
+    cells = [c.strip() for c in line.split("|")[1:-1]]
+    desc = cells[2] if len(cells) > 2 else ""
+    m = TEAM_NOTE.search(desc)
+    if m:
+        desc = desc[:m.start()]
+    return (cells[1] if len(cells) > 1 else "") + " | " + desc.strip()
+
+
+def ask_fp(line):
+    """The fingerprint of a row's ask (F77): what the Ready mark and the review hold on to."""
+    return _fp(ask_of(line))
+
+
 def row_words_fp(line):
-    """The row's words, without its mark and its result column: what the Ready mark holds on to."""
+    """Before F77: the row's cells 1 to 3, which on a feature row took the team's notes in too. Kept only to read a
+    Ready mark given before F77 (its "fp"); a mark given since holds the ask ("ask")."""
     cells = [c.strip() for c in line.split("|")[1:-1]]
     return _fp(" | ".join(cells[1:4]))
 
 
+def mark_holds(m, line):
+    """Whether a Ready mark still holds on this row: its ask unchanged (F77), or, for a mark from before F77, the old
+    words unchanged."""
+    if not isinstance(m, dict):
+        return False
+    if m.get("ask"):
+        return m["ask"] == ask_fp(line)
+    return m.get("fp") == row_words_fp(line)
+
+
 def ready_of(rows=None):
-    """{label: "ready" | "changed"} for the open rows with a mark: ready while the words are the ones it was given on,
-    changed when they've changed since."""
+    """{label: "ready" | "changed"} for the open rows with a mark: ready while the ask is the one it was given on,
+    changed when it's changed since."""
     rows = open_rows() if rows is None else rows
     marks = _load(RANKS).get("ready") or {}
     out = {}
     for r in rows:
         m = marks.get(r["label"])
         if isinstance(m, dict):
-            out[r["label"]] = "ready" if m.get("fp") == row_words_fp(r["line"]) else "changed"
+            out[r["label"]] = "ready" if mark_holds(m, r["line"]) else "changed"
     return out
 
 
@@ -329,7 +366,7 @@ def set_ready(label, on=True):
     have = {r["label"] for r in rows}
     m = {l: v for l, v in (d.get("ready") or {}).items() if l in have}
     if on:
-        m[label] = {"fp": row_words_fp(row["line"]), "at": int(time.time())}
+        m[label] = {"ask": ask_fp(row["line"]), "at": int(time.time())}
     else:
         m.pop(label, None)
     d["ready"] = m
