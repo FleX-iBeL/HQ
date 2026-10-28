@@ -50,6 +50,13 @@ REWRITTEN = {
     "177f6420381cb773252c5818ecd52c3f00369f49": "e9dee995e82ce60b17d9c15c619c5e93a8466cf1",
     "45c9ccafa7dd0ad555e869380e5f816e1563757a": "9bdbf133a16c3b5101133c7d4c11952f29280f17",
 }
+# F67 (job 435): the laptop's one-time start, from the workspace folder next to HQ. Its own push.py is the
+# one from before, which only fast-forwards, so its pull is refused and the new one never arrives that way; this takes
+# the new push.py from GitHub's dev next to the old one and runs its pull. Written the same in the build notes ("The
+# laptop's one-time start after the rewrite (F67)"); happy flow 183 runs it on a stand-in that starts from the old one.
+BOOTSTRAP = ("git -C ../HQ checkout dev && git -C ../HQ fetch origin dev && "
+             "git -C ../HQ show origin/dev:routine/push.py > ../HQ/routine/push_f67.py && "
+             "python3 ../HQ/routine/push_f67.py --pull; rm -f ../HQ/routine/push_f67.py")
 
 
 def git(*args: str) -> subprocess.CompletedProcess:
