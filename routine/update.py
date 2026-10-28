@@ -612,6 +612,70 @@ def helper_pids() -> list[int]:
             if p.isdigit() and c.strip().endswith(ends)]
 
 
+# F68, his quick note of 25 October 2026: "there's still a bug on the laptop if you update then the gui doesnt
+# restart, i need a full reboot of everything, backend and front end processes including the app itself". The HQ app
+# keeps its strip (shell.html, read once), the status page and the call page loaded from the old call line and status
+# server, with the old code in them, and the update only said "close the HQ app and open it again". Now restart()
+# ends it last, by its exact pid, and opens it again, so it loads everything from the new version.
+# HQ_APP_BUNDLE: a test's stand-in bundle (its Contents/MacOS/HQ), also off a Mac.
+def app_bundles() -> list[str]:
+    own = os.environ.get("HQ_APP_BUNDLE")
+    return [own] if own else [os.path.expanduser("~/Applications/HQ.app"), os.path.join(HQ, "scratch", "desktop", "HQ.app")]
+
+
+def app_pids() -> list[tuple[int, str]]:
+    """The HQ app running now: (exact pid, its bundle), the process whose program is the bundle's own HQ."""
+    if platform() != "darwin" and not os.environ.get("HQ_APP_BUNDLE"):
+        return []
+    exes = {os.path.join(b, "Contents", "MacOS", "HQ"): b for b in app_bundles()}
+    r = subprocess.run(["ps", "-ax", "-o", "pid=,command="], capture_output=True, text=True)
+    out = []
+    for ln in r.stdout.splitlines():
+        p, _, c = ln.strip().partition(" ")
+        c = c.strip()
+        for exe, b in exes.items():
+            if p.isdigit() and (c == exe or c.startswith(exe + " ")):
+                out.append((int(p), b))
+    return out
+
+
+def open_app(bundle: str) -> bool:
+    if platform() == "darwin" and not os.environ.get("HQ_APP_BUNDLE"):
+        cmd = ["open", "-g", bundle]
+    else:  # a test's stand-in: its program, on its own
+        cmd = [os.path.join(bundle, "Contents", "MacOS", "HQ"), "600"]
+    try:
+        subprocess.Popen(cmd, cwd=HQ, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        return True
+    except OSError:
+        return False
+
+
+def restart_app() -> tuple[list[str], list[str]]:
+    """F68: the HQ app, when it runs, closed by its exact pid and opened again; counted only on a new pid."""
+    done, todo = [], []
+    if os.environ.get("HQ_UPDATE_ROUTINE") == "0" and not os.environ.get("HQ_APP_BUNDLE"):
+        return done, todo  # a test on a Mac: never the real app of the computer running it
+    olds = app_pids()
+    if not olds:
+        return done, todo
+    stuck = [p for p, _ in olds if not stop_pid(p)]
+    if stuck:
+        return done, [f"the HQ app (pid {stuck[0]}) wouldn't close: close it and open it again"]
+    if not open_app(olds[0][1]):
+        return done, ["the HQ app was closed but didn't open again: open it by hand"]
+    end, new = time.time() + 30, []
+    while time.time() < end and not new:
+        new = [p for p, _ in app_pids() if p not in {o for o, _ in olds}]
+        time.sleep(0.5)
+    if new:
+        done.append(f"restarted the HQ app (pid {olds[0][0]} → {new[0]}): its strip, status page and call page are the new version")
+    else:
+        todo.append("the HQ app was closed but didn't open again: open it by hand")
+    return done, todo
+
+
 def code_of(changed: list[str]) -> dict:
     """Which parts' code the changed files are (H187): what needs more than a restart, and what to say."""
     return {
@@ -633,6 +697,7 @@ def parts() -> dict:
     return {"call": {"port": cp, "pid": pid_on(cp, CALL_MARK), "code": "app/, routine/*.py"},
             "status": {"port": sp, "pid": pid_on(sp, STATUS_MARK), "code": "status/*.mjs"},
             "helper": helper_pids() if platform() == "darwin" else None,
+            "app": app_pids(),
             "job": {"n": running_job(), "pid": window_pid("job.json", "job.pid")},
             "mail": {"pid": window_pid("mail.json", "mail.pid")},
             "fresh": "the routine (tick.py), the watchdog on Linux, jobs, the mail check, the helpers: started anew each time"}
@@ -691,9 +756,7 @@ def restart(changed: list[str], was_running: dict) -> tuple[list[str], list[str]
         if mac and os.path.isdir(app):
             if ran(["/bin/zsh", os.path.join(HQ, "desktop", "build.sh"), "--install"], "reinstalled the Mac app"):
                 done.append("reinstalled the Mac app")
-                todo.append("close the HQ app and open it again, to use the new one")
-    elif code["strip"] and mac and os.path.isdir(os.path.expanduser("~/Applications/HQ.app")):
-        todo.append("the HQ app's strip changed: close the HQ app and open it again to see it")
+    # F68: the app itself (a new build, a changed strip, the pages) is opened again at the end, restart_app.
 
     # The call line: app/bot.py holds app/ and routine/ in memory. Always restarted when it ran (a call drops).
     cport = hqpaths.call_port()
@@ -784,7 +847,9 @@ def restart(changed: list[str], was_running: dict) -> tuple[list[str], list[str]
                     done.append(f"restarted the status page (pid {old} → {new})" if old else f"restarted the status page (pid {new})")
                 elif not any(t.startswith("restarted the status page") for t in todo):
                     todo.append("restarted the status page: it didn't come back; the routine starts it again within a minute")
-    return done, todo
+    # F68: the HQ app last, so it opens on the new call line and status page; never the computer.
+    d, t = restart_app()
+    return done + d, todo + t
 
 
 def notes(old: str, new: str, saved: dict, changed: list[str], done: list[str], todo: list[str]) -> str:

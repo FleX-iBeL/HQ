@@ -15550,6 +15550,14 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
                 time.sleep(0.5)
             need(False, f"the update didn't get there in time: {upd('status')['run']}")
         decoy = sp.Popen(["python3", "-c", "import time; time.sleep(600)", str(me / "app/bot.py")], start_new_session=True)
+        # F68: a stand-in HQ app (its Contents/MacOS/HQ is sleep), running; the restart closes it by exact pid and
+        # opens it again last. On a Mac too, the real app is never touched (HQ_APP_BUNDLE names only this one).
+        bundle = base / "HQ.app"
+        (bundle / "Contents/MacOS").mkdir(parents=True)
+        (bundle / "Contents/MacOS/HQ").write_text('#!/bin/bash\nexec -a "$0" sleep "$@"\n')  # its own name in ps
+        os.chmod(bundle / "Contents/MacOS/HQ", 0o755)
+        env["HQ_APP_BUNDLE"] = str(bundle)
+        app0 = sp.Popen([str(bundle / "Contents/MacOS/HQ"), "600"], start_new_session=True)
         try:
             for f in ("app/start.sh" if sys.platform == "darwin" else "app/start-linux.sh", "status/phone.sh"):
                 need(sp.run([str(me / f)], env=env, capture_output=True, timeout=30).returncode == 0, f"{f} didn't start")
@@ -15578,6 +15586,11 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
             need(any(f"{c0} → {c1}" in d for d in r["done"]) and any(f"{s0} → {s1}" in d for d in r["done"]) and not r["todo"],
                  f"what it did doesn't say the pids: {r}")
             need(decoy.poll() is None, "the decoy with app/bot.py in its command line was stopped")
+            # F68: the app itself came back on a new pid, the old one gone, and it's said.
+            app0.wait(5)
+            apps = [p for p, _ in upd("parts").get("app") or []]
+            need(len(apps) == 1 and apps[0] != app0.pid and any(f"restarted the HQ app (pid {app0.pid} → {apps[0]})" in d for d in r["done"]),
+                 f"F68: the HQ app wasn't closed and opened again on a new pid: {apps}; {r}")
             if linux_units:
                 need(all(b and a != b for a, b in zip(t0, [since(t) for t in timers]))
                      and any("hqflow108-routine.timer" in d for d in r["done"]),
@@ -15614,6 +15627,12 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
         finally:
             srv.shutdown()
             decoy.kill()
+            app0.kill()
+            try:  # the stand-in app the restarts opened, by exact pid
+                for p, _ in json.loads(sp.run(["python3", upd_py, "parts"], capture_output=True, text=True, env=env).stdout).get("app") or []:
+                    os.kill(p, 9)
+            except Exception:
+                pass
             if linux_units:
                 sp.run(["systemctl", "--user", "stop", *timers], capture_output=True)
                 for t in timers:
@@ -15635,6 +15654,7 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
         return ("an update doesn't wait: a call, a job and a mail check are ended by exact pid (the job held to carry on), "
                 "the call line and the status page restart on new pids even for a docs change (the decoy untouched)"
                 + (", the routine's and the watchdog's timers too" if linux_units else "")
+                + "; the HQ app closed and opened again on a new pid (F68)"
                 + "; the whole update uses the new version's rules; one that doesn't come back is on the to-do list")
 
 
@@ -20994,7 +21014,7 @@ FLOWS = {
     105: ("H149: mail more often for a while he names: his words as an end time, every quarter until then, hourly again by itself", False, "flow105"),
     106: ("H160, H182, H183: the team's work from the status page: an open roadmap item sent to the team, move and cancel, without a call; add-row for calls; the repeating rows in Maintenance", False, "flow106"),
     107: ("H184: the laptop's status page shows the server's usage when it's newer, its own when the server can't be reached", False, "flow107"),
-    108: ("H187: an update ends what runs (a call, a job, the mail check) and restarts every background part, by exact pid, with the new version's rules", False, "flow108"),
+    108: ("H187: an update ends what runs (a call, a job, the mail check) and restarts every background part, by exact pid, with the new version's rules; F68: the HQ app closed and opened again", False, "flow108"),
     109: ("H186: the nightly line: the night's work always on nightly, on to main as the next version only when sure; a privacy hit pushes nothing", False, "flow109"),
     110: ("F38: a Quick session starts with a text over 200 KB: handed over by file, never on the command line", True, "flow110"),
     111: ("H202: the map as a guided workflow: six layers with their questions, nothing private or named; turned on, its blank map and line, never over theirs", False, "flow111"),
