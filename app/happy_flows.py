@@ -13554,6 +13554,47 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("resume" in _P(B.__file__).read_text(), "a reopened session isn't resumed")
         return "F60: a big read is cut to a part; a dead session says so, reopens and answers the same turn"
 
+    async def flow172(self) -> str:
+        """F71, no Claude: a QA pass names every done example of its row with its evidence. On 28 October the QA jobs
+        since 27 October mostly took a minute or two and wrote what was tried as a whole; one passed on its flows
+        alone. On a throwaway roadmap: qa.py pass with only a summary is refused (exit 2, nothing in the row); an
+        example without its --ran or --got, or a --ran before any --example, is refused too; a pass with two examples
+        writes "QA passed" with "Tried: (1) ...: ran ..., got ...; (2) ..." and qa.py state reads it back; a fail may
+        carry evidence but doesn't need it; the QA job's own text and Moneypenny's craft ask for it."""
+        import subprocess as sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        import qa
+        rm = self.tmp / "roadmap-F71.md"
+        rm.write_text("# HQ\n\n## The queue\n\n**Routine:** on\n\n## The schedule\n\nNothing.\n\n## Phase F · Bugs\n\n"
+                      "| | What | Detail | For | Result | |\n|---|---|---|---|---|---|\n"
+                      "| ⬜ | F900 Demo bug | two examples | to try | Built. |  |\n")
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1"}
+        def qa_(*a):
+            return sp.run(["python3", str(ROOT / "routine/qa.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        before = rm.read_text()
+        for bad in (["all fine"], ["x", "--example", "a", "--ran", "b"], ["x", "--ran", "b", "--example", "a", "--ran", "b", "--got", "c"],
+                    ["x", "--example", "a", "--got", "c", "--ran", "b"], ["x", "--example", "", "--ran", "b", "--got", "c"]):
+            r = qa_("pass", "F900", *bad, "--job", "9")
+            need(r.returncode == 2 and "Refused" in r.stdout and rm.read_text() == before,
+                 f"a pass without its evidence went through ({bad}): {r.stdout}{r.stderr}")
+        r = qa_("pass", "F900", "Pulled dev", "--example", "the status shows", "--ran", "curl :4748/api/status",
+                "--got", "200, the row there", "--example", "a | pipe stays one cell", "--ran", "flow 172", "--got", "PASS", "--job", "9")
+        line = next(l for l in rm.read_text().split("\n") if "F900" in l)
+        need(r.returncode == 0 and re.search(r"QA passed \(job 9, [^)]*\): Pulled dev\. Tried: \(1\) the status shows: ran "
+                                             r"curl :4748/api/status, got 200, the row there; \(2\) a / pipe stays one cell: ran flow 172, got PASS\.", line)
+             and line.count("|") == 7, f"the pass with evidence isn't in the row as it should be: {r.stdout}{r.stderr} {line}")
+        need("Tried: (1) the status shows" in qa_("state", "F900").stdout, "qa.py state doesn't read the evidence back")
+        r = qa_("fail", "F900", "the second one doesn't hold", "--job", "10")
+        need(r.returncode == 0 and "QA failed (job 10" in rm.read_text(), f"a fail without evidence was refused: {r.stdout}{r.stderr}")
+        r = qa_("fail", "F900", "still off", "--example", "a", "--ran", "b")
+        need(r.returncode == 2, "a fail with half an example went through")
+        t = qa.qa_text("F900", "the team finished job 1 for it.")
+        need("--example" in t and "--ran" in t and "--got" in t and "F71" in t, "the QA job's text doesn't ask for the evidence")
+        import agents
+        mp = next(a for a in agents.DEFAULTS if a["id"] == "moneypenny")
+        need("--example, --ran and --got" in mp.get("craft", ""), "Moneypenny's craft doesn't say a pass carries its evidence")
+        return "a pass without each example's evidence is refused; with it, the row keeps (1) example: ran, got; fails stay free"
+
     async def flow171(self) -> str:
         """F67, no Claude: HQ's own commits carry the public identity on every computer that pushes with HQ's key. On
         27 October the laptop's HQ repo had no name of its own, so git took the global one and his real name and mail
@@ -14029,11 +14070,12 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1", "HQ_FEATURES_PIECES": str(pieces)}
         def qa_(*a):
             return sp.run(["python3", str(ROOT / "routine/qa.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
-        r = qa_("pass", "H900", "piece 1 tried", "--job", "1")
+        ev = ["--example", "the piece shows", "--ran", "the maker's page", "--got", "shown"]  # F71: a pass carries its evidence
+        r = qa_("pass", "H900", "piece 1 tried", *ev, "--job", "1")
         need(r.returncode == 0 and "stays switched off" in r.stdout
              and json.loads(pieces.read_text())["features"], f"a pass on an open row shipped it: {r.stdout}{r.stderr}")
         rm.write_text(rm.read_text().replace("| ⬜ | H900", "| ✅ | H900"))
-        r = qa_("pass", "H900", "piece 2 tried, the whole feature", "--job", "2")
+        r = qa_("pass", "H900", "piece 2 tried, the whole feature", *ev, "--job", "2")
         need(r.returncode == 0 and "on for everyone" in r.stdout and json.loads(pieces.read_text())["features"] == [],
              f"the last piece's pass didn't ship it: {r.stdout}{r.stderr}")
         os.environ["HQ_FEATURES_PIECES"] = str(pieces)
@@ -20646,6 +20688,7 @@ FLOWS = {
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
     169: ("Fable, 27 October 2026: the backend behind switches: the switches, the briefing made without Claude and the briefed start (the old one with the switch off), the open line's sessions and rollover, the log lift, the planning index against parsing, a headless job against a fake claude (done mark, stop signal), the lookups free on a call, the departments", False, "flow169"),
+    172: ("F71: a QA pass names every done example of its row with what was run and what came out; without it the pass is refused, nothing written", False, "flow172"),
     171: ("F67: HQ's own commits carry the public identity: a computer with HQ's key sets FleX-iBeL and the noreply address in HQ's repo (at --pull and before a push), so the global name never goes up; a friend's HQ is left alone", False, "flow171"),
     170: ("F65: a job started through the routine's own start with the headless switch on: job-N.prompt and job-N.command written, the script runs runjob.py against a fake claude, the job runs and is marked done; the switch off gives the old chat script", False, "flow170"),
     168: ("F60: a big read on a call is cut to a part (Read and cat), the SDK buffer is raised, a session that dies mid-turn says so, reopens and answers the same turn", False, "flow168"),

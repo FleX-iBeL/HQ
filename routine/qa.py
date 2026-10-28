@@ -22,8 +22,15 @@ How it goes:
   before it, the rest stays on dev and nightly, and the morning text names what was held and why (hold()).
   A commit without a row (a version, a nightly test fix, a merge) or for a row elsewhere (maintenance) goes along.
 
+F71 (28 October 2026): QA jobs since 27 October mostly took one or two minutes, and their write-ups said what was
+tried as a whole, not each done example with what was run and what came out; one passed on its flows alone. A pass
+now names every done example of the row with its evidence, three flags each, in order: --example (the row's own
+example), --ran (the command, page or step really run for it) and --got (what came out). A pass without them, or
+with an example missing its ran or got, is refused and nothing is written. The mark keeps them: "Tried: (1) ...".
+
 usage:
-  python3 routine/qa.py pass LABEL "WHAT WAS TRIED" [--job N]   QA passed, in the row
+  python3 routine/qa.py pass LABEL "SUMMARY" --example E --ran R --got G [--example ... ] [--job N]
+                                                                QA passed, in the row, each example with its evidence
   python3 routine/qa.py fail LABEL "WHAT'S OFF" [--job N]       QA failed, in the row; a fix job for the team
   python3 routine/qa.py state LABEL                             passed, failed or none, with the newest mark
   python3 routine/qa.py queue LABEL                             a QA job for the row now (a call, or by hand)
@@ -120,6 +127,51 @@ def mark(label: str, passed: bool, what: str, job: int | None = None, now: dt.da
         return row2
 
 
+EVIDENCE = ("--example", "--ran", "--got")
+
+
+def evidence(args: list[str]) -> tuple[list[str], list[tuple[str, str, str]], str | None]:
+    """F71: takes the --example, --ran and --got flags out of args. Returns (the rest, [(example, ran, got)], what's
+    wrong or None). Each example needs its ran and its got, in that order, none empty."""
+    rest, got, cur, err = [], [], None, None
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in EVIDENCE:
+            v = " ".join((args[i + 1] if i + 1 < len(args) else "").split()).replace("|", "/")
+            i += 2
+            if not v:
+                err = err or f"{a} needs a text after it."
+                continue
+            if a == "--example":
+                if cur is not None:
+                    err = err or f"The example \"{cur[0]}\" has no --ran and --got."
+                cur = [v]
+            elif cur is None or len(cur) != EVIDENCE.index(a):
+                err = err or f"{a} \"{v}\" comes without its --example first (each example: --example, --ran, --got)."
+            else:
+                cur.append(v)
+                if len(cur) == 3:
+                    got.append(tuple(cur))
+                    cur = None
+            continue
+        rest.append(a)
+        i += 1
+    if cur is not None:
+        err = err or f"The example \"{cur[0]}\" has no " + (" and ".join(EVIDENCE[len(cur):])) + "."
+    return rest, got, err
+
+
+def tried_words(ev: list[tuple[str, str, str]]) -> str:
+    return "Tried: " + "; ".join(f"({i}) {e.rstrip('.;')}: ran {r.rstrip('.;')}, got {g.rstrip('.;')}"
+                                 for i, (e, r, g) in enumerate(ev, 1))
+
+
+PASS_REFUSED = ("Refused: a pass names every done example of the row with its evidence (F71). For each one: "
+                "--example \"the row's example\" --ran \"what was really run for it\" --got \"what came out\". "
+                "An example that couldn't be tried is a fail, or said in the summary as not tried, with why. Nothing written.")
+
+
 def job_label(text: str) -> str | None:
     """The row a job is for: its QA or fix wording, "LABEL on the roadmap", "read the LABEL row", or a label first."""
     import estimate as est_
@@ -151,7 +203,11 @@ def qa_text(label: str, after: str) -> str:
             "\"done means\" example of the row for real, end to end, the way someone using HQ would (a second HQ, a "
             "phone-sized page, a real command), and run the new flows it names and the old ones around it. Build "
             "nothing, except a one-line fix in a test when the test itself is wrong (then say so). Then write the "
-            f"result: python3 routine/qa.py pass {label} \"what was tried\" --job N, or python3 routine/qa.py fail {label} "
+            f"result: python3 routine/qa.py pass {label} \"a line on the whole\" --job N, followed by every done example "
+            "of the row with its evidence, three flags each: --example \"the row's example\" --ran \"the command, "
+            "page or step you really ran for it\" --got \"what came out\" (F71: a pass without them is refused; "
+            "reading the team's notes or the code is not running it, and the flows alone don't stand in for the "
+            f"examples), or python3 routine/qa.py fail {label} "
             "\"what's off, plainly\" --job N (a fail queues a fix job by itself). No helpers fanned out (F55). Nothing to push "
             "unless a test was fixed; the call line isn't restarted. " + DONE_LAST)
 
@@ -363,6 +419,15 @@ def main(argv: list[str]) -> int:
     if cmd in ("pass", "fail", "state", "queue") and not LABEL.fullmatch(label):
         print("Which row? Give its label, like H247.")
         return 2
+    if cmd in ("pass", "fail"):
+        args, ev, err = evidence(args)
+        if err or (cmd == "pass" and not ev):
+            print(f"{err} " if err else "", end="")
+            print(PASS_REFUSED if cmd == "pass" else "Each example needs --example, --ran and --got, in that order. Nothing written.")
+            return 2
+        if ev:
+            summary = " ".join(" ".join(args[1:]).split()).rstrip(".")
+            args = args[:1] + [(summary + ". " if summary else "") + tried_words(ev)]
     if cmd == "pass":
         row = mark(label, True, " ".join(args[1:]), job)
         print(f"QA passed for {label}, in its row; the release may take it.")
