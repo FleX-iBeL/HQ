@@ -117,16 +117,63 @@ def state_file() -> Path:
     return Path(os.environ.get("HQ_DIRECT_DIR") or os.path.join(hqpaths.DATA, "direct-line")) / "weather.json"
 
 
-def _read() -> dict:
+# F58 (28 October 2026): the test of one-way sync failed on the laptop at 14:26, his words: "I did see both computers
+# tweak the weather settings at the same moment so HQ kept both versions". The root: the main's look writes
+# weather.json every few minutes, and on the backup the app's weather (the sheet's read, the phone's spot) wrote the
+# same synced file. Now the backup keeps what the app reads there in a file of its own on this computer (never
+# synced), read over the main's; the main stays the only one that writes weather.json.
+APP_KEYS = ("app", "here", "spots", "where")  # what the app's weather writes; the looks' own keys stay the main's
+
+
+def _backup() -> bool:
+    """This HQ is the backup of a pair (role.py); a test or a lone HQ is the main."""
+    if os.environ.get("HQ_ROLE_HERE"):
+        return False
     try:
-        s = json.loads(state_file().read_text(encoding="utf8"))
+        import role
+        return role.is_backup()
+    except Exception:
+        return False
+
+
+def local_file() -> Path:
+    """The backup's own weather, outside the synced workspace (HQ's memory on this computer)."""
+    return Path(os.environ.get("HQ_WEATHER_LOCAL") or os.path.join(hqpaths.SUPPORT, "weather-here.json"))
+
+
+def _json(p: Path) -> dict:
+    try:
+        s = json.loads(p.read_text(encoding="utf8"))
         return s if isinstance(s, dict) else {}
     except (OSError, ValueError):
         return {}
 
 
-def _write(s: dict) -> None:
-    p = state_file()
+def _newer(mine, theirs, at: str) -> bool:
+    return isinstance(mine, dict) and (not isinstance(theirs, dict) or float(mine.get(at) or 0) >= float(theirs.get(at) or 0))
+
+
+def _read(backup: bool | None = None) -> dict:
+    s = _json(state_file())
+    if not (_backup() if backup is None else backup):
+        return s
+    mine = _json(local_file())
+    if _newer(mine.get("app"), s.get("app"), "looked"):
+        s["app"] = mine["app"]
+    if _newer(mine.get("here"), s.get("here"), "at"):
+        s["here"] = mine["here"]
+    if isinstance(mine.get("spots"), dict):
+        s["spots"] = (s.get("spots") if isinstance(s.get("spots"), dict) else {}) | mine["spots"]
+    if mine.get("where") and not s.get("where"):
+        s["where"] = mine["where"]
+    return s
+
+
+def _write(s: dict, backup: bool | None = None) -> None:
+    if _backup() if backup is None else backup:
+        p, s = local_file(), {k: s[k] for k in APP_KEYS if s.get(k)}
+    else:
+        p = state_file()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(s, indent=1, ensure_ascii=False) + "\n", encoding="utf8")

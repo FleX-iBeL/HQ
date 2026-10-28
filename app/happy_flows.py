@@ -13559,6 +13559,58 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("resume" in _P(B.__file__).read_text(), "a reopened session isn't resumed")
         return "F60: a big read is cut to a part; a dead session says so, reopens and answers the same turn"
 
+    async def flow175(self) -> str:
+        """F58, no network, no Syncthing: the backup never writes the synced weather file. The test of one-way sync
+        (28 October 2026) failed on the laptop at 14:26, both computers wrote the weather settings at once. On a
+        throwaway direct-line folder and a throwaway file of the backup's own: as the backup, the app's weather read
+        (the sheet and the phone's spot) leaves weather.json byte for byte as it was and keeps its read in its own
+        file, and the next read shows it; as the main, the same read writes weather.json and nothing of its own."""
+        import subprocess as sp
+        d = self.tmp / "weather-F58"
+        (d / "synced").mkdir(parents=True, exist_ok=True)
+        synced, own = d / "synced" / "weather.json", d / "own.json"
+        code = r"""
+import json, os, sys, time
+sys.path.insert(0, sys.argv[1] + "/app"); sys.path.insert(0, sys.argv[1] + "/routine")
+import weather as W, role
+role.is_backup = lambda: sys.argv[2] == "backup"
+W.on = lambda: True
+W.place = lambda: "Amsterdam"
+W.where = lambda s, region=False: {"place": "Amsterdam", "lat": 52.37, "lon": 4.9, "tz": "Europe/Amsterdam", "name": "Amsterdam"}
+W.reverse = lambda lat, lon: {"name": "Amsterdam", "region": "Noord-Holland", "country": "NL"}
+W.app_forecast = lambda w: {"timezone": "Europe/Amsterdam"}
+W.rain_text = lambda w: []
+W.warnings = lambda w, loc: ([], "test")
+W.build_view = lambda *a: {"now": {"t": 12}}
+W.alert_state = lambda: {"on": False}
+print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._read()}))
+"""
+        def run(who):
+            if own.exists():
+                own.unlink()
+            synced.write_text(json.dumps({"looked": 1, "told": {"2026-10-28": ["sun"]}}, indent=1) + "\n")
+            before = synced.read_bytes()
+            env = {k: v for k, v in os.environ.items() if k != "HQ_ROLE_HERE"}
+            env.update(HQ_DIRECT_DIR=str(d / "synced"), HQ_WEATHER_LOCAL=str(own))
+            r = sp.run([sys.executable, "-c", code, str(ROOT), who], capture_output=True, text=True, env=env, timeout=60)
+            need(r.returncode == 0, f"F58: the weather read as the {who} didn't run: {r.stderr[-800:]}")
+            return before, json.loads(r.stdout.strip().splitlines()[-1])
+        before, out = run("backup")
+        need(synced.read_bytes() == before, f"F58: as the backup, the app's weather wrote the synced weather.json: {synced.read_text()}")
+        need(own.exists() and json.loads(own.read_text()).get("app", {}).get("now") == {"t": 12},
+             f"F58: as the backup, the read isn't kept in its own file: {own.read_text() if own.exists() else 'no file'}")
+        need(set(json.loads(own.read_text())) <= {"app", "here", "spots", "where"} and "told" not in own.read_text(),
+             f"F58: the backup's own file holds more than the app's weather: {own.read_text()}")
+        need(out["read"].get("app", {}).get("now") == {"t": 12} and out["read"].get("told") == {"2026-10-28": ["sun"]},
+             f"F58: as the backup, the next read doesn't show its own read over the main's file: {out['read']}")
+        need(out["read"].get("here", {}).get("key") == "gps:52.37,4.90", f"F58: the phone's spot isn't kept on the backup: {out['read']}")
+        before, out = run("main")
+        need(synced.read_bytes() != before and json.loads(synced.read_text()).get("app", {}).get("now") == {"t": 12}
+             and json.loads(synced.read_text()).get("told") == {"2026-10-28": ["sun"]},
+             f"F58: as the main, the read isn't written to weather.json with the looks' own lines kept: {synced.read_text()}")
+        need(not own.exists(), "F58: as the main, the read wrote a file of its own too")
+        return "F58: the backup's weather read writes nothing synced, keeps its own; the main writes weather.json"
+
     async def flow174(self) -> str:
         """F72, no Claude, no window: big work is cut into steps that are saved as they go, so a stop or a crash
         picks up at the next step, not the top. On a copy of the roadmap, its own carry-on folder, a throwaway git
@@ -20900,6 +20952,7 @@ FLOWS = {
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
     169: ("Fable, 27 October 2026: the backend behind switches: the switches, the briefing made without Claude and the briefed start (the old one with the switch off), the open line's sessions and rollover, the log lift, the planning index against parsing, a headless job against a fake claude (done mark, stop signal), the lookups free on a call, the departments", False, "flow169"),
     172: ("F71: a QA pass names every done example of its row with what was run and what came out; without it the pass is refused, nothing written", False, "flow172"),
+    175: ("F58: the backup never writes the synced weather file: what the app reads there is kept in a file of its own and read over the main one; the main writes weather.json", False, "flow175"),
     174: ("F72: big work in steps saved as they go: a stop or a crash carries on at the next step (its own chat, a fresh one, a crash rerun), the done steps untouched, the time counted once", False, "flow174"),
     173: ("F66: the estimate counts the steps the work names (the full test run, a history rewrite, flow 44) and every estimate is a range: the gate, the nights and the status page go by the latest end; the Friday report", False, "flow173"),
     171: ("F67: HQ's own commits carry the public identity: a computer with HQ's key sets FleX-iBeL and the noreply address in HQ's repo (at --pull and before a push), so the global name never goes up; a friend's HQ is left alone", False, "flow171"),
