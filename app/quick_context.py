@@ -150,6 +150,15 @@ def _planning(folder: Path) -> str:
     them away, and Moneypenny had to dig in a planning file over 1 MB, which killed the call's line (F60). The open
     items come from sprint.py open (H288): a closed row only when asked for, with sprint.py show LABEL."""
     out = []
+    try:  # F77: the rows the automatic review flagged, first, so she raises them before anything else (her calls only)
+        import os
+        import subprocess
+        r = subprocess.run([sys.executable, str(config.ROOT / "routine" / "review.py"), "flags"],
+                           capture_output=True, text=True, timeout=30, env={**os.environ, "HQ_WORKSPACE": str(folder)})
+        if r.returncode == 0 and r.stdout.startswith("FLAGGED"):
+            out.append(r.stdout.strip()[:8000])
+    except Exception:
+        pass
     try:
         road = (folder / "HQ" / "roadmap.md").read_text()
         qpos = road.find("\n## The queue")

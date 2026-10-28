@@ -335,6 +335,9 @@
       .ready-tick input { margin: 0; width: 16px; height: 16px; }
       .ready-note { color: var(--red); font-size: 13px; }
       .mo-bug { font-size: 12px; font-weight: 600; padding: 0 5px; border-radius: 4px; border: 1px solid var(--red); color: var(--red); margin-left: 4px; }
+      /* F77: the automatic review's flag on a planning row, and a review that didn't run */
+      .mo-flag { font-size: 12px; font-weight: 700; padding: 0 5px; border-radius: 4px; background: var(--red); color: #fff; margin-left: 4px; }
+      .mo-flag.norun { background: none; border: 1px dashed var(--red); color: var(--red); font-weight: 600; }
       /* H275: the sprint planning's totals */
       .sprint-total { display: flex; flex-wrap: wrap; gap: 2px 12px; justify-content: space-between; padding: 10px 20px; }
       .sprint-total .name { font-weight: 600; }
@@ -1327,6 +1330,9 @@
           const what = el('span', 'what');
           what.append(el('strong', '', `${x.rank ? `${x.rank}. ` : ''}${x.label}`));
           if (x.bug) what.append(el('span', 'mo-bug', 'bug'));
+          // F77: the review flagged it (the findings are in its not-ready line), or the review didn't run
+          if (x.review === 'flagged') what.append(el('span', 'mo-flag', 'flagged'));
+          else if (x.review === 'didnt_run') what.append(el('span', 'mo-flag norun', "review didn't run"));
           what.append(document.createTextNode(` ${x.title}`));
           const how = x.team ? `With the team: job ${x.team}` : x.planned ? `Planned for the team: item ${x.planned.n}, ${x.planned.at}` : planLine(P, x.label);
           what.append(el('span', 'soft', ` · ${how}`));
