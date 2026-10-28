@@ -535,6 +535,12 @@ class Policy:
                 return Decision(ALLOW, "the planning's ranks and estimates, and the sprint")
             return Decision(DENY, "from a call, the sprint script takes list, json, rank, moscow, ready, check, lay, plan, "
                                   "show or open")
+        # F77: the automatic review of the planning's rows: read it, and take a flag off on his say-so (sprint.json only).
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "review.py"):
+            sub = args[1] if len(args) > 1 else "list"
+            if sub in ("list", "flags", "clear"):
+                return Decision(ALLOW, "the planning's review and its flags")
+            return Decision(DENY, "from a call, the review script takes list, flags or clear")
         # H173: the usage counts, read only: what a job or a call cost on its own tokens, the rate, the room now.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usagecost.py"):
             sub = args[1] if len(args) > 1 else ""

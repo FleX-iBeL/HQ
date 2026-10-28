@@ -146,6 +146,17 @@ def show_words(labels, text=None):
             out.append(f"{label.strip().upper()} isn't a row on the planning.")
             continue
         s = f"{r['label']} ({STATES.get(r['state'], r['state'] or 'no mark')}; {r['phase']}): {r['title']}"
+        if r["state"] == "⬜":  # F77: the review's state, kept outside the row
+            try:
+                import review
+                st = review.states([r]).get(r["label"]) or {}
+                s += f"\n\nThe review: {review.STATE_WORDS.get(st.get('state'), st.get('state'))}"
+                if st.get("findings"):
+                    s += ": " + "; ".join(st["findings"])
+                if st.get("cleared_words"):
+                    s += f' (his words: "{st["cleared_words"]}")'
+            except Exception:
+                pass
         for i, c in enumerate(r["cells"], 1):
             if c:
                 s += f"\n\n[{i}] {c}"
@@ -161,6 +172,11 @@ def open_words(text=None):
     bug; a closed one only when asked for by name (show). Small enough to load at a call's start."""
     rows = open_rows(text)
     tags, readies, ranked = moscow_of(rows), ready_of(rows), order(rows)
+    try:  # F77
+        import review
+        reviews = review.states(rows)
+    except Exception:
+        reviews = {}
     out = [f"{len(rows)} open items on the planning (one row whole: sprint.py show LABEL; closed rows the same way):"]
     for r in rows:
         bits = [MOSCOW_NAMES[tags[r["label"]]]] if r["label"] in tags else []
@@ -169,6 +185,11 @@ def open_words(text=None):
             bits.append(f"rank {ranked.index(r['label']) + 1}")
         if is_bug(r):
             bits.append("bug")
+        st = reviews.get(r["label"]) or {}
+        if st.get("state") == "flagged":  # F77
+            bits.append("FLAGGED by the review: " + "; ".join(st.get("findings") or []))
+        elif st.get("state") == "didnt_run":
+            bits.append("the review didn't run")
         out.append(f"- {r['label']} ({', '.join(bits)}): {q.one_line(r['title'])[:160]}")
     return "\n".join(out)
 
@@ -345,6 +366,9 @@ def not_ready_why(row, state=None):
     state = ready_of([row]).get(row["label"]) if state is None else state
     if state == "ready":
         return None
+    why = _review_why(row)  # F77: a flag, or a review that hasn't passed the new words yet
+    if why:
+        return why
     if state == "changed":
         return f"{row['label']} isn't ready: its words changed since it was marked ready, so it needs the mark again"
     miss = missing_points(row)
@@ -355,13 +379,28 @@ def not_ready_why(row, state=None):
     return f"{row['label']} isn't ready: it isn't marked ready yet (its points seem to be there, it only needs the mark)"
 
 
+def _review_why(row):
+    """F77: why the automatic review keeps this row from the Ready mark (flagged, or new or changed and not passed
+    yet), or None. None too when the review isn't there (an old copy)."""
+    try:
+        import review
+        return review.why_not_ready(row)
+    except Exception:
+        return None
+
+
 def set_ready(label, on=True):
-    """Row LABEL's Ready mark on (on its words as they are now) or off. Returns True for on. Exits with why."""
+    """Row LABEL's Ready mark on (on its words as they are now) or off. Returns True for on. Exits with why: on F77,
+    also when the review flagged the row, or hasn't passed its new or changed words yet."""
     label = label.strip().upper()
     rows = open_rows()
     row = next((r for r in rows if r["label"] == label), None)
     if not row:
         sys.exit(f"{label} isn't an open row on the planning (done, parked, repeating or not there), so it gets no Ready mark.")
+    if on:
+        why = _review_why(row)
+        if why:
+            sys.exit(why + ". (On his explicit say-so a call can still give it to the team with --not-ready.)")
     d = _load(RANKS)
     have = {r["label"] for r in rows}
     m = {l: v for l, v in (d.get("ready") or {}).items() if l in have}
@@ -545,6 +584,11 @@ def plan():
     tags = moscow_of(rows)  # H271
     readies = ready_of(rows)  # H272
     roadmap_place = {r["label"]: i for i, r in enumerate(rows)}
+    try:  # F77: the automatic review's state of each row
+        import review
+        reviews = review.states(rows)
+    except Exception:
+        reviews = {}
     d = _load(ESTS)
     hist = E.all_history()
     fits = E.guess_fits(hist)
@@ -568,6 +612,11 @@ def plan():
         x = {"label": r["label"], "title": r["title"], "phase": r["phase"], "rank": place.get(r["label"]),
              "est": est, "kind": det["kind"], "moscow": tags.get(r["label"]), "bug": is_bug(r),
              "ready": readies.get(r["label"])}
+        rvw = reviews.get(r["label"]) or {}
+        if rvw.get("state") in ("flagged", "waiting", "didnt_run"):
+            x["review"] = rvw["state"]
+            if rvw.get("findings") and rvw["state"] == "flagged":
+                x["findings"] = rvw["findings"]
         if readies.get(r["label"]) != "ready":
             x["not_ready"] = not_ready_why(r, readies.get(r["label"]))
         if est != computed:
@@ -654,6 +703,8 @@ def words(p):
         team = (f" (with the team: job {x['team']})" if x.get("team") else
                 f" (planned for the team: item {x['planned']['n']}, {x['planned']['at']})" if x.get("planned") else "")
         mark = {"ready": " [ready]", "changed": " [changed since ready]"}.get(x.get("ready"), " [not ready]")  # H272
+        mark += {"flagged": " [FLAGGED: " + "; ".join(x.get("findings") or []) + "]",
+                 "didnt_run": " [the review didn't run]"}.get(x.get("review"), "")  # F77
         lines.append(f"{where} {x['label']} {q.one_line(x['title'])[:90]}: {row_words(x)}{team}{mark}")
     if not lines:
         return "Nothing open on the planning."

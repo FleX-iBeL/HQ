@@ -1398,6 +1398,12 @@ def tick():
         sprint.refresh(log=log)
     except Exception as e:
         log(f"sprint: refresh: {e!r}")
+    # F77: a fresh reviewer for every row whose ask is new or changed, once it's been quiet a few minutes (main only).
+    try:
+        import review
+        review.tick(log=log)
+    except Exception as e:
+        log(f"review: {e!r}")
     handing_back = r.get("handing_back")
     q = json.loads(jobs("next"))
     jobs_line(q)

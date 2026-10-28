@@ -82,7 +82,8 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "pings": {"appt", "remind", "remind-every", "remind-stop", "cancel", "note", "note-clear", "watch", "unwatch", "out", "out-stop", "nudge", "nudge-done", "nudge-later", "call", "call-cancel", "answered"},
           "games": {"new", "spec", "tick", "count", "note", "diary", "week", "debrief", "undo"},
           "coaching": {"done", "later"},
-          "handover": {"edit", "put"}}  # put (Fable, 27 October 2026): a whole small file, with one-way sync
+          "handover": {"edit", "put"},
+          "review": {"clear"}}  # F77: a flag taken off on his say-so goes to the main, which writes sprint.json  # put (Fable, 27 October 2026): a whole small file, with one-way sync
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
            "coaching": os.path.join(os.path.dirname(HERE), "app", "coaching.py")}  # H225; the rest are routine/<script>.py
