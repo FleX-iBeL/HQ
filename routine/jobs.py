@@ -57,6 +57,10 @@ usage (from the workspace):
                                                            line, read by the job after each step and always before a
                                                            push or release; push.py and release.py refuse while the
                                                            running job has a note it hasn't read
+  python3 "routine/jobs.py" doing N "TEXT"                the running job says in plain words what it's doing now and
+                                                           why (H286), shown on the status page; never a command
+  python3 "routine/jobs.py" redo N MINUTES "WHY"           the running job had to start fixing: its estimate redone once,
+                                                           MINUTES more from now, with why (H286); --again for a second
   python3 "routine/jobs.py" notes N                        the job's own chat (H283): its notes, the new ones marked
                                                            read (with the time); "No notes." when there are none
   python3 "routine/jobs.py" resume N                       a job paused for using about four times the top of its estimated usage
@@ -103,21 +107,57 @@ FAST_RE = re.compile(r"every 15 minutes from (\d{4}-\d\d-\d\d \d\d:\d\d(?:[+-]\d
 
 # H283: notes for a job while it runs or waits, kept at the end of its line, so the job's own text (its estimate,
 # its kind, its first look) never changes by a note: " ⟪note 2026-10-26 16:50⟫ TEXT", read: "⟪note … · read 16:52⟫".
-NOTE = re.compile(r" ⟪note (\d{4}-\d\d-\d\d \d\d:\d\d)(?: · read (\d\d:\d\d))?⟫ (.*?)(?= ⟪note |$)")
+# H286: the same place keeps what the job says it's doing now, in plain words, " ⟪now 19:58⟫ TEXT" (one, the newest),
+# and the estimate it redid when it had to start fixing, " ⟪redone 20:04 · 45 min · was 30 min⟫ WHY" (one).
+NOTE = re.compile(r" ⟪note (\d{4}-\d\d-\d\d \d\d:\d\d)(?: · read (\d\d:\d\d))?⟫ (.*?)(?= ⟪(?:note|now|redone) |$)")
 NOTE_START = " ⟪note "
+MARK = re.compile(r" ⟪(note|now|redone) ([^⟫]*)⟫ (.*?)(?= ⟪(?:note|now|redone) |$)")
+MARK_START = re.compile(r" ⟪(?:note|now|redone) ")
+REDONE = re.compile(r"(\d\d:\d\d) · (\d+) min · was (\d+) min$")
+
+
+def split_marks(rest):
+    """(text, notes, now, redone) from what follows "agreed …· " on a job's line. now: {"at", "text"} or None;
+    redone: {"at", "est", "was", "why"} or None (H286)."""
+    m0 = MARK_START.search(rest)
+    if not m0:
+        return rest, [], None, None
+    notes, now, redone = [], None, None
+    for m in MARK.finditer(rest[m0.start():]):
+        kind, head, body = m.group(1), m.group(2), m.group(3)
+        if kind == "note":
+            h = re.fullmatch(r"(\d{4}-\d\d-\d\d \d\d:\d\d)(?: · read (\d\d:\d\d))?", head)
+            if h:
+                notes.append({"at": h.group(1), "read": h.group(2), "text": body})
+        elif kind == "now":
+            now = {"at": head, "text": body}
+        else:
+            r = REDONE.fullmatch(head)
+            if r:
+                redone = {"at": r.group(1), "est": int(r.group(2)), "was": int(r.group(3)), "why": body}
+    return rest[:m0.start()], notes, now, redone
 
 
 def split_notes(rest):
     """(text, notes) from what follows "agreed …· " on a job's line."""
-    i = rest.find(NOTE_START)
-    if i < 0:
-        return rest, []
-    return rest[:i], [{"at": m.group(1), "read": m.group(2), "text": m.group(3)} for m in NOTE.finditer(rest[i:])]
+    body, notes, _, _ = split_marks(rest)
+    return body, notes
+
+
+def clean_mark(text):
+    """A job's own words for its line: one line, without the marks' brackets."""
+    return one_line(text).replace("⟪", "(").replace("⟫", ")")
 
 
 def notes_text(j):
-    return "".join(f"{NOTE_START}{x['at']}{' · read ' + x['read'] if x.get('read') else ''}⟫ {x['text']}"
-                   for x in j.get("notes") or [])
+    out = ""
+    if j.get("now"):  # H286
+        out += f" ⟪now {j['now']['at']}⟫ {j['now']['text']}"
+    if j.get("redone"):
+        r = j["redone"]
+        out += f" ⟪redone {r['at']} · {r['est']} min · was {r['was']} min⟫ {r['why']}"
+    return out + "".join(f"{NOTE_START}{x['at']}{' · read ' + x['read'] if x.get('read') else ''}⟫ {x['text']}"
+                         for x in j.get("notes") or [])
 
 
 def unread_running():
@@ -164,9 +204,10 @@ def read():
             if m:
                 state = m.group(2)
                 past = state.endswith(PAST)
-                body, notes = split_notes(m.group(4))
+                body, notes, doing, redone = split_marks(m.group(4))
                 jobs.append({"n": int(m.group(1)), "state": state[: -len(PAST)] if past else state,
-                             "past": past, "agreed": m.group(3), "text": body, "notes": notes})
+                             "past": past, "agreed": m.group(3), "text": body, "notes": notes,
+                             "now": doing, "redone": redone})
             elif l.startswith("**Routine:**"):
                 on = "off" not in l.lower()
             elif l.startswith("**Mail check:**"):
@@ -350,6 +391,20 @@ def line_up(jobs):
 
 def one_line(s):
     return " ".join(s.split())
+
+
+# H286: "Now it just says it runs terminal commands on Linux. That doesn't help me at all." A doing line that's only a
+# command, a path or a tool's name is refused, so the page never shows the commands a job runs.
+_CMDISH = re.compile(r"^(?:\$ |(?:Bash|Read|Edit|Write|Grep|Glob|Task|Agent)\b|(?:cd|python3?|node|git|grep|sed|cat|ls|bash|sh|npm)\s)")
+
+
+def plain_words_problem(words):
+    w = words.strip()
+    if len(w) < 12 or len(w.split()) < 3:
+        return "too short to say what's going on"
+    if _CMDISH.match(w) or "&&" in w or re.search(r"(?:^|\s)(?:/[\w.-]+){2,}", w) or re.search(r"\s--?[a-z]", w):
+        return "it reads like a command or a path, not plain words"
+    return ""
 
 
 def find(jobs, n):
@@ -724,6 +779,47 @@ def main(argv):
                       "or releases.")
             else:
                 print(f"Job {j['n']} has the note in its line; it reads it when it starts.")
+            return
+        if cmd in ("doing", "redo"):
+            # H286: his words of 27 October 2026, "I want to know, for example, that it found the fix for a bug like that
+            # and it's fixing it and that's why it's taking longer." The running job says what it's doing in plain words
+            # at each step; when it has to start fixing, it redoes its own estimate once, with why.
+            usage = 'Usage: doing N "WHAT AND WHY, IN PLAIN WORDS"' if cmd == "doing" else 'Usage: redo N MINUTES_FROM_NOW "WHY" [--again]'
+            again = "--again" in args
+            args = [a for a in args if a != "--again"]
+            if len(args) < 2 or not args[0].isdigit() or (cmd == "redo" and not args[1].isdigit()):
+                sys.exit(usage)
+            j = find(jobs, int(args[0]))
+            if not j["state"].startswith(("running", "stop asked")):
+                sys.exit(f"Job {j['n']} is {j['state']}; this is for the job that runs.")
+            words = clean_mark(" ".join(args[1 if cmd == "doing" else 2:]))[:300]
+            if not words:
+                sys.exit(usage)
+            if cmd == "doing":
+                bad = plain_words_problem(words)
+                if bad:
+                    sys.exit(f"Not written: {bad}. Say what the work is and why, like: \"a check failed in the night run; "
+                             "found why, fixing it, then every check again\".")
+                j["now"] = {"at": now, "text": words}
+                write(text, jobs, on)
+                print(f"Job {j['n']}, on the status page: {words}")
+                return
+            if j.get("redone") and not again:
+                sys.exit(f"Job {j['n']} already redid its estimate at {j['redone']['at']} ({j['redone']['why']}). Once is "
+                         "the rule; only when something new and big comes up, redo it with --again.")
+            more = int(args[1])
+            if not 1 <= more <= 600:
+                sys.exit("MINUTES_FROM_NOW is how many more minutes from now, 1 to 600.")
+            try:
+                import estimate as est_
+                r = est_.on_redo(j["n"], more, j["text"], j["state"], why=words)
+            except Exception as e:
+                sys.exit(f"Job {j['n']}: the estimate couldn't be redone ({e!r}).")
+            j["redone"] = {"at": now, "est": r["est"], "was": r["was"], "why": words}
+            j["now"] = {"at": now, "text": f"the estimate redone: {more} min more from now ({words})"}
+            write(text, jobs, on)
+            print(f"Job {j['n']}: the estimate is now {r['est']} min in all (it was {r['was']}), {more} more from now, "
+                  f"because {words}. The status page says so; the end time moves this once instead of creeping.")
             return
         if cmd == "notes":
             # H283: the job's own chat reads its notes after each step and before any push or release.

@@ -1434,6 +1434,35 @@ def on_guess(n, minutes, text=""):
     return e
 
 
+def so_far(n, state="", e=None, now=None):
+    """Minutes job n has run (what the status server saw, else since it started)."""
+    now = time.time() if now is None else now
+    e = e if e is not None else (_load_state().get(str(n)) or known(n))
+    m = re.match(r"running since (\d\d:\d\d)", state or "")
+    started = e.get("started") or _from_hhmm(m.group(1) if m else None, now)
+    return _minutes_seen(n) or (round((now - started) / 60) if started else 0)
+
+
+def on_redo(n, more, text="", state="", why="", now=None):
+    """H286: the running job had to start fixing and redid its own estimate: `more` minutes from now. Kept with its
+    estimate (the line on the planning says it too), so the end time moves once instead of creeping. The estimate it
+    started with stays what's learned from; the redone one goes into the history next to it."""
+    now = time.time() if now is None else now
+    st = _load_state()
+    if str(n) not in st:
+        k = known(n)
+        on_add(n, text, k.get("kind"), True if k.get("by_hand") else False)
+        st = _load_state()
+    e = st[str(n)]
+    done_min = so_far(n, state, e, now)
+    g, _, fit = pick_guess(e, guess_fits(all_history()))
+    was = (e.get("redone") or {}).get("est") or with_guess(e.get("est") or 0, g, fit)
+    e["redone"] = {"est": int(done_min + more), "was": int(was), "at": int(now), "why": why[:300]}
+    st[str(n)] = e
+    _save_state(st)
+    return e["redone"]
+
+
 def guess_fit(hist=None, key="guess"):
     """H168: how far the team's own guesses were off, next to the computed estimates, on the finished jobs that had
     both. {"count", "need", "ready", "guess_off", "est_off", "bias", "weight"}: bias, how many times as long the jobs
@@ -1774,6 +1803,10 @@ def on_done(n, text="", started_hhmm=None, at=None):
     rec.update({k: v for k, v in guess_detail(e).items() if k != "guess"})  # H190: the call's and the look's, apart
     if e.get("look_cost") is not None:
         rec["look_cost"] = e["look_cost"]
+    if isinstance(e.get("redone"), dict):  # H286: the estimate it redid when it had to start fixing
+        rec["redone"] = e["redone"]
+    if e.get("mistake"):  # H286: it ran long through its own mistake: kept out of the estimates, listed to learn from
+        rec["mistake"] = e["mistake"]
     try:
         g, key, fit = pick_guess(e, guess_fits(all_history()))
         w = with_guess(rec["est"], g, fit)
@@ -1973,6 +2006,12 @@ def plan(now=None):
         computed = est
         guess, gkey, gf = pick_guess(e, gfits)  # H168, H190: the team's, else the call's, else the look's, once it has a record
         est = with_guess(est, guess, gf)
+        # H286: a job that had to start fixing redid its own estimate (its line on the planning says so, also on the
+        # other computer); that one counts from then on, so the end time moved once, with why.
+        redone = j.get("redone") or ({"est": e["redone"]["est"], "was": e["redone"].get("was"), "why": e["redone"].get("why", "")}
+                                     if isinstance(e.get("redone"), dict) else None)
+        if redone and redone.get("est"):
+            est, guess = int(redone["est"]), None
         samples = _samples() if samples is None else samples
         seen = _minutes_seen(j["n"], samples)
         m = re.match(r"running since (\d\d:\d\d)", j["state"])
@@ -1993,6 +2032,11 @@ def plan(now=None):
                                     "left": left, "over": over, "eta": None if waits else int(cursor),
                                     "latest": lat, "eta_latest": None if waits else int(now + late_total * 60)}
         out["jobs"][str(j["n"])].update(guess_detail(e))  # H168, H190
+        if redone and redone.get("est"):
+            out["jobs"][str(j["n"])]["redone"] = {"est": int(redone["est"]), "was": redone.get("was"), "why": redone.get("why", ""),
+                                                  "at": redone.get("at")}
+        if j.get("now"):  # H286: what it says it's doing, in plain words
+            out["jobs"][str(j["n"])]["doing"] = j["now"]
         if guess and est != computed:
             out["jobs"][str(j["n"])].update({"computed": computed, "guess_used": gkey})
         if U:  # H172: its estimated usage, what it has used so far, and what's left of it before the next can start

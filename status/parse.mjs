@@ -143,10 +143,24 @@ export function parseRoadmap(markdown) {
       const m = /^- Job (\d+) · (.+?) · agreed (\S+ \S+) · (.*)$/.exec(line);
       if (m) {
         // H283: notes for a job while it runs or waits sit at the end of its line: " ⟪note DATE TIME[ · read HH:MM]⟫ TEXT".
-        const at = m[4].indexOf(' ⟪note ');
-        const notes = at < 0 ? [] : [...m[4].slice(at).matchAll(/ ⟪note (\S+ \S+?)(?: · read (\S+))?⟫ (.*?)(?= ⟪note |$)/g)]
-          .map((x) => ({ at: x[1], read: x[2] ?? null, text: plain(x[3]) }));
-        queue.jobs.push({ n: Number(m[1]), state: m[2], agreed: m[3], text: plain(at < 0 ? m[4] : m[4].slice(0, at)), notes });
+        // H286: and what it says it's doing now, " ⟪now HH:MM⟫ TEXT", and its redone estimate, " ⟪redone HH:MM · N min · was M min⟫ WHY".
+        const first = m[4].search(/ ⟪(?:note|now|redone) /);
+        const notes = [];
+        let now = null;
+        let redone = null;
+        if (first >= 0) {
+          for (const x of m[4].slice(first).matchAll(/ ⟪(note|now|redone) ([^⟫]*)⟫ (.*?)(?= ⟪(?:note|now|redone) |$)/g)) {
+            if (x[1] === 'note') {
+              const h = /^(\S+ \S+?)(?: · read (\S+))?$/.exec(x[2]);
+              if (h) notes.push({ at: h[1], read: h[2] ?? null, text: plain(x[3]) });
+            } else if (x[1] === 'now') now = { at: x[2], text: plain(x[3]) };
+            else {
+              const r = /^(\d\d:\d\d) · (\d+) min · was (\d+) min$/.exec(x[2]);
+              if (r) redone = { at: r[1], est: Number(r[2]), was: Number(r[3]), why: plain(x[3]) };
+            }
+          }
+        }
+        queue.jobs.push({ n: Number(m[1]), state: m[2], agreed: m[3], text: plain(first < 0 ? m[4] : m[4].slice(0, first)), notes, now, redone });
       }
     }
     // H39: the waiting jobs (ready or held) run in the order they stand on the list; number their place.

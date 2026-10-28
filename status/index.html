@@ -288,6 +288,8 @@
       .job.all { display: block; }
       .jobnote { display: block; margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--accent, #c80); font-size: 0.9em; }
       .jobnote.read { opacity: 0.7; }
+      .jobnow { display: block; margin-top: 4px; font-weight: 600; }
+      .jobredone { display: block; margin-top: 2px; font-size: 0.9em; color: var(--soft); }
       /* H61: each job's estimate, under its text, and how close the estimates have been. */
       .jobtext { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
       .eta { font-size: 13px; color: var(--soft); }
@@ -2150,8 +2152,15 @@
           for (const p of s.problems) ul.append(el('li', '', p));
           now.append(ul);
         }
-        if (s.notes.length) {
+        // H286: "I want to be able to see in a clear quick overview what's going on." The running job's own plain line
+        // (and its redone estimate) on top, next to the status block's notes.
+        const doingJobs = (s.queue?.jobs ?? []).filter((j) => /^(running|stop asked)/.test(j.state) && (j.now || j.redone));
+        if (s.notes.length || doingJobs.length) {
           const notes = el('dl', 'notes');
+          for (const j of doingJobs) {
+            if (j.now) notes.append(el('dt', '', `Job ${j.n} now`), el('dd', '', `${j.now.text.charAt(0).toUpperCase() + j.now.text.slice(1)} (${j.now.at})`));
+            if (j.redone) notes.append(el('dt', '', 'Estimate redone'), el('dd', '', `At ${j.redone.at}: ${j.redone.est} min in all, was ${j.redone.was}, because ${j.redone.why}`));
+          }
           for (const n of s.notes) notes.append(el('dt', '', n.label), el('dd', '', n.text.charAt(0).toUpperCase() + n.text.slice(1)));
           now.append(notes);
         }
@@ -2213,6 +2222,9 @@
               left.append(text);
               // H283: the notes given to the job while it runs or waits, and whether it has read them.
               for (const nt of j.notes ?? []) left.append(el('span', `jobnote${nt.read ? ' read' : ''}`, `Note ${nt.at.slice(11)}: ${nt.text}${nt.read ? ` · read ${nt.read}` : ' · not read yet'}`));
+              // H286: what the running job says it's doing, in plain words, and the estimate it redid when it had to start fixing.
+              if (j.now && g === 'running') left.append(el('span', 'jobnow', `Now (${j.now.at}): ${j.now.text.charAt(0).toUpperCase() + j.now.text.slice(1)}`));
+              if (j.redone && g === 'running') left.append(el('span', 'jobredone', `Estimate redone at ${j.redone.at}: ${etaDur(j.redone.est)} in all, was ${etaDur(j.redone.was)}, because ${j.redone.why}`));
               const w = etaWords(E, j.n);
               if (w) left.append(etaSpan(`eta${E.jobs[j.n].over ? ' over' : ''}`, w, E.jobs[j.n]));
               const gw = etaGuess(E, j.n);
