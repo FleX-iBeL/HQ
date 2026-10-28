@@ -1115,7 +1115,8 @@ def estimate_detail(text, hist=None, kind=None, machine=None, tags=None, about=N
     hist = all_history() if hist is None else hist
     kind = kind_for(text, kind)
     machine = machine or runner()["name"]
-    real = [{**h, "machine": h.get("machine") or machine} for h in _real(hist)]
+    # H286: a job that ran long through its own mistake doesn't raise the next ones' estimates
+    real = [{**h, "machine": h.get("machine") or machine} for h in _real(hist) if not mistake(h)]
     scale = {}
 
     def scaled(h, k):
@@ -1226,6 +1227,73 @@ def mistake(h):
     return bool(h.get("mistake"))
 
 
+def mistake_what(h):
+    m = h.get("mistake")
+    return (m.get("what") if isinstance(m, dict) else (m if isinstance(m, str) else "")) or ""
+
+
+def tag_mistake(n, what, off=False, now=None):
+    """H286, his words of 27 October 2026: "if they are expanded because they made mistakes, we should also tag them for
+    when they did that (so we can learn from those and improve from those)". Job n ran long through its own mistake:
+    a running job carries the tag into its line in the history at done; a finished one's line here is tagged now.
+    off: the tag taken back. Returns "running", "finished", or None when job n isn't known on this computer."""
+    now = time.time() if now is None else now
+    tag = None if off else {"what": what[:300], "at": int(now)}
+    st = _load_state()
+    if str(n) in st:
+        if tag:
+            st[str(n)]["mistake"] = tag
+        else:
+            st[str(n)].pop("mistake", None)
+        _save_state(st)
+        return "running"
+    lines, found = [], False
+    try:
+        raw = open(HISTORY, encoding="utf8").read().splitlines()
+    except FileNotFoundError:
+        raw = []
+    for l in raw:
+        try:
+            h = json.loads(l)
+        except Exception:
+            lines.append(l)
+            continue
+        if h.get("n") == n:
+            found = True
+            if tag:
+                h["mistake"] = tag
+            else:
+                h.pop("mistake", None)
+            l = json.dumps(h)
+        lines.append(l)
+    if not found:
+        return None
+    tmp = HISTORY + ".tmp"
+    open(tmp, "w", encoding="utf8").write("\n".join(lines) + "\n")
+    os.replace(tmp, HISTORY)
+    _SPREAD.clear()
+    return "finished"
+
+
+def mistakes(hist=None, most=20):
+    """H286: the finished jobs tagged as having run long through their own mistake, newest first, for the list the
+    team learns from (the status page, jobs.py mistakes, the Friday report)."""
+    hist = all_history() if hist is None else hist
+    out = [{"n": h.get("n"), "kind": h.get("kind"), "est": h.get("with_guess") or h.get("est"), "actual": h.get("actual"),
+            "redone": (h.get("redone") or {}).get("est") if isinstance(h.get("redone"), dict) else None,
+            "what": mistake_what(h), "done": h.get("done"), "machine": h.get("machine")}
+           for h in hist if mistake(h)]
+    return sorted(out, key=lambda x: x.get("done") or 0, reverse=True)[:most]
+
+
+def mistakes_words(ms):
+    if not ms:
+        return "No job is tagged as having run long through its own mistake."
+    return "\n".join(f"Job {m['n']} ({m['kind'] or 'other'}, estimated {m['est']} min, took {m['actual']}"
+                     f"{', redone to ' + str(m['redone']) if m.get('redone') else ''}"
+                     f", {time.strftime('%d %b', time.localtime(m['done'])) if m.get('done') else '?'}): {m['what']}" for m in ms)
+
+
 _SPREAD = {}
 
 
@@ -1325,8 +1393,12 @@ def friday_report(hist=None, now=None):
     hist = all_history() if hist is None else hist
     now = time.time() if now is None else now
     week = [h for h in _real(hist) if (h.get("done") or 0) >= now - 7 * 86400 and h.get("est")]
+    own = [h for h in week if mistake(h)]  # H286: kept out of the share, said on their own
+    week = [h for h in week if not mistake(h)]
+    own_words = ("" if not own else f" {len(own)} ran long through their own mistake and aren't counted: "
+                 + "; ".join(f"job {h.get('n')}, {mistake_what(h) or 'no reason written'}" for h in own) + ".")
     if not week:
-        return "The team's estimates this week: no finished jobs to hold them against."
+        return "The team's estimates this week: no finished jobs to hold them against." + own_words
     inside, kinds = 0, {}
     for h in week:
         est = h.get("with_guess") or h["est"]
@@ -1345,7 +1417,7 @@ def friday_report(hist=None, now=None):
         words += " That's below eight in ten, so the estimates aren't good enough yet."
     if missed:
         words += " Missed most: " + "; ".join(missed) + "."
-    return words
+    return words + own_words
 
 
 def estimate_for(text, hist=None, kind=None, machine=None, size=None):
@@ -2122,6 +2194,10 @@ def plan(now=None):
                         "usage_wait": held_wait,
                         "paused": sum(1 for j in js if j["state"].startswith("paused"))}
         out["total"]["counts"] = total_counts(out["total"], bool(U))
+    try:  # H286: the jobs that ran long through their own mistake, for the list on the status page
+        out["mistakes"] = mistakes(hist, 10)
+    except Exception:
+        out["mistakes"] = []
     out["items"] = _plan_items(cursor, waits, on, hist, run, run_end, proj, U, gfits)
     out["items_total"] = _items_total(out["items"], waits, on)
     return out

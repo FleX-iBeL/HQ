@@ -334,7 +334,7 @@ def rates(text="", kind=None, hist=None, about=None):
     hist = E.all_history() if hist is None else hist
     kind = E.kind_for(text, kind) if text or kind else kind
     about = E._about(text) if about is None else about
-    real = E._real(hist)
+    real = [h for h in E._real(hist) if not E.mistake(h)]  # H286: a job's own mistake doesn't teach the rate
     model = load_rate()
     if model:
         tok = [h for h in real if isinstance(h.get("tokens"), dict) and h["tokens"] and h.get("actual")]

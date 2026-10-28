@@ -289,6 +289,7 @@
       .jobnote { display: block; margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--accent, #c80); font-size: 0.9em; }
       .jobnote.read { opacity: 0.7; }
       .jobnow { display: block; margin-top: 4px; font-weight: 600; }
+      .mistakes .mistake { display: block; margin-top: 2px; }
       .jobredone { display: block; margin-top: 2px; font-size: 0.9em; color: var(--soft); }
       /* H61: each job's estimate, under its text, and how close the estimates have been. */
       .jobtext { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -2245,6 +2246,13 @@
             if (!jobs.length) card.append(el('div', 'row soft', g === 'finished' ? 'None kept.' : `Nothing ${g}.`));
             if (g === 'finished' && E) card.append(el('div', 'row soft eta-sum', etaAccuracy(E.accuracy)));
             if (g === 'finished' && E?.guesses?.words) card.append(el('div', 'row soft eta-sum', E.guesses.words));  // H168
+            // H286: the jobs that ran long through their own mistake, kept out of the estimates, in one list to learn from.
+            if (g === 'finished' && E?.mistakes?.length) {
+              const box = el('div', 'row soft eta-sum mistakes');
+              box.append(el('b', '', 'Ran long through their own mistake (kept out of the estimates):'));
+              for (const x of E.mistakes) box.append(el('span', 'mistake', `Job ${x.n} · ${x.kind ?? 'other'} · estimated ${etaDur(x.est)}, took ${etaDur(x.actual)}${x.redone ? `, redone to ${etaDur(x.redone)}` : ''}: ${x.what || 'no reason written'}`));
+              card.append(box);
+            }
             if (g === 'finished' && etaLearned(E)) card.append(el('div', 'row soft eta-sum', etaLearned(E)));
             part.append(card);
             parts.append(part);

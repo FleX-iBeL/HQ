@@ -61,6 +61,8 @@ usage (from the workspace):
                                                            why (H286), shown on the status page; never a command
   python3 "routine/jobs.py" redo N MINUTES "WHY"           the running job had to start fixing: its estimate redone once,
                                                            MINUTES more from now, with why (H286); --again for a second
+  python3 "routine/jobs.py" mistake N "WHAT" [--off]       job N ran long through its own mistake (H286): tagged with what
+                                                           went wrong, kept out of the estimates; mistakes lists them
   python3 "routine/jobs.py" notes N                        the job's own chat (H283): its notes, the new ones marked
                                                            read (with the time); "No notes." when there are none
   python3 "routine/jobs.py" resume N                       a job paused for using about four times the top of its estimated usage
@@ -779,6 +781,31 @@ def main(argv):
                       "or releases.")
             else:
                 print(f"Job {j['n']} has the note in its line; it reads it when it starts.")
+            return
+        if cmd in ("mistake", "mistakes"):
+            # H286, his words of 27 October 2026: "they will just make the same mistakes over and over again and they just
+            # ruin the estimates for jobs that don't make mistakes. Include that as well." A job that ran long through its
+            # own mistake is tagged with what went wrong, kept out of the estimates, and listed to learn from.
+            import estimate as est_
+            if cmd == "mistakes":
+                print(est_.mistakes_words(est_.mistakes()))
+                return
+            off = "--off" in args
+            args = [a for a in args if a != "--off"]
+            if not args or not args[0].isdigit() or (not off and len(args) < 2):
+                sys.exit('Usage: mistake N "WHAT WENT WRONG" (or mistake N --off)')
+            n = int(args[0])
+            what = clean_mark(" ".join(args[1:]))[:300]
+            where = est_.tag_mistake(n, what, off=off)
+            if not where:
+                sys.exit(f"Job {n} isn't known to the estimates on this computer (not running, not finished here).")
+            if off:
+                print(f"Job {n}: the mistake tag is taken back; it counts in the estimates again.")
+            elif where == "running":
+                print(f"Job {n} is tagged: {what}. When it's done its time is kept out of the estimates and it's in "
+                      "the list of mistakes (jobs.py mistakes, the status page).")
+            else:
+                print(f"Job {n} (finished) is tagged: {what}. Its time is kept out of the estimates from now on.")
             return
         if cmd in ("doing", "redo"):
             # H286: his words of 27 October 2026, "I want to know, for example, that it found the fix for a bug like that
