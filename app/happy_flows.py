@@ -9805,7 +9805,7 @@ setTimeout(() => {
         u.write_text(json.dumps({"readable": True, "limits": [
             {"label": "5-hour limit", "percent": 0, "resetsAt": iso(now + 3600)},
             {"label": "Weekly · all models", "percent": weekly, "resetsAt": iso(now + 5 * 86400)}]}))
-        env.update({"HQ_LOOK": "0", "HQ_USAGE": str(u), "HQ_SPRINT_NOW": str(int(now)), "HQ_SPRINT_ROOM": "22-23"})
+        env.update({"HQ_LOOK": "0", "HQ_USAGE": str(u), "HQ_SPRINT_NOW": str(int(now)), "HQ_SPRINT_ROOM": "22-0"})  # F66: two hours, so four rows fit at their latest end (30 each with no history)
         return rm, env, now
 
     async def flow145(self) -> str:
@@ -9828,30 +9828,35 @@ setTimeout(() => {
              f"H269: the ticked rows aren't in rank order: {[x['label'] for x in rows]}")
         need(L["left_out"] == [{"label": "H9003", "why": "not an open row on the planning"}], f"H269: a done row wasn't left out: {L['left_out']}")
         mon, tue = "2026-10-26", "2026-10-27"
-        need([x["night"] for x in rows] == [mon] * 4 + [tue], f"H269: the nights don't fill (four Monday, the fifth Tuesday): {[(x['night'], x['est']) for x in rows]} {L['nights'][0]}")
+        # F66: the nights fill by each row's latest end and its usage at the latest: two on Monday, the rest on Tuesday
+        need([x["night"] for x in rows] == [mon] * 2 + [tue] * 3, f"H269: the nights don't fill (two Monday, the rest Tuesday): {[(x['night'], x['est']) for x in rows]} {L['nights'][0]}")
         import datetime as _dt
         start = _dt.datetime(2026, 10, 26, 22, 0).timestamp()
-        need(rows[0]["start"] == int(start) and all(rows[k]["start"] >= rows[k - 1]["eta"] for k in range(1, 4))
-             and all(x["eta"] == x["start"] + x["est"] * 60 for x in rows) and rows[3]["eta"] <= start + 3600
-             and rows[4]["start"] == int(start + 86400),
+        need(rows[0]["start"] == int(start) and all(rows[k]["start"] >= rows[k - 1]["eta"] for k in range(1, 2))
+             and all(x["eta"] == x["start"] + x["est"] * 60 for x in rows) and rows[1]["eta_latest"] <= start + 7200
+             and all(rows[k]["start"] >= rows[k - 1]["start"] + rows[k - 1]["latest"] * 60 for k in (1, 3, 4))
+             and rows[2]["start"] == int(start + 86400),
              f"H269: the rows don't follow each other inside the night's room: {[(x['start'], x['eta']) for x in rows]}")
         need(all(x["cost"].get("five") and x["cost"].get("weekly") is not None and x["est"] > 0 for x in rows),
              f"H269: a laid row has no time or usage share: {rows[0]}")
-        need(L["line"] is None and not any(x["past"] for x in rows), f"H269: a line while everything fits: {L['line']}")
+        # F66: at their latest the 5-hour room holds two a night, so the line says the rest moves on by the usage; none past
+        need((L["line"] is None or (L["line"]["before"] == "H9001" and "usage room" in L["line"]["why"])) and not any(x["past"] for x in rows[:2])
+             and all(x.get("night") for x in rows),
+             f"H269: a line while everything fits: {L['line']}")
         n0 = L["nights"][0]
-        need(n0["day"] == mon and n0["rows"] == ["H9004", "H9007", "H9001", "H9002"]
-             and n0["minutes"] == sum(x["est"] for x in rows[:4]) and abs(n0["five"] - sum(x["cost"]["five"] for x in rows[:4])) < 0.2,
+        need(n0["day"] == mon and n0["rows"] == ["H9004", "H9007"]
+             and n0["minutes"] == sum(x["est"] for x in rows[:2]) and abs(n0["five"] - sum(x["cost"]["five"] for x in rows[:2])) < 0.2,
              f"H269: Monday night's sums are off: {n0}")
         words = self._sprint(env, "lay", "H9004", "H9007", "H9001", "H9002", "H9006").stdout
-        need("Tonight (2026-10-26): 4 rows, about" in words and "Tomorrow night (2026-10-27): 1 row" in words
-             and "1. H9004 A made-up export: about" in words and "starts around 22:00" in words and "Everything ticked fits" in words,
+        need("Tonight (2026-10-26): 2 rows, about" in words and "Tomorrow night (2026-10-27): 3 rows" in words
+             and "1. H9004 A made-up export: about" in words and "starts around 22:00" in words,  # F66: by the latest the usage line moves the rest on, so no "Everything ticked fits"
              f"H269: the words a call reads aren't night by night: {words[:600]}")
         # a later night picked
         L2 = js.loads(self._sprint(env, "lay", "H9004", "H9007", "--night", "thursday", "--json").stdout)
         need(L2["night"] == "2026-10-29" and all(x["night"] == "2026-10-29" for x in L2["rows"]), f"H269: the night picked isn't where it starts: {L2['night']}")
         need(self._sprint(env, "lay", "H9004", "--night", "nonsense").returncode != 0, "H269: a night that isn't one was taken")
-        # the weekly room nearly gone (a fixed line at 30%, at 27% now): the first row fits, then the room runs out
-        rm2, env2, _ = self._sprint_lay_env("H269w", weekly=27, fixed=30)
+        # the weekly room nearly gone (a fixed line at 30%, at 26% now): the first row fits, then the room runs out
+        rm2, env2, _ = self._sprint_lay_env("H269w", weekly=26, fixed=30)  # F66: 26, so the first fits at its latest
         L3 = js.loads(self._sprint(env2, "lay", "H9001", "H9002", "H9004", "--json").stdout)
         r3 = L3["rows"]
         need(r3[0]["night"] == mon and not r3[0]["past"] and L3["line"] and L3["line"]["before"] == r3[1]["label"]
@@ -9896,7 +9901,7 @@ setTimeout(() => {
         got = [(re.match(r"(H\d+)", i["text"]).group(1), i["at"]) for i in items]
         d1, d2 = tomorrow.isoformat(), (tomorrow + _dt.timedelta(days=1)).isoformat()
         # H9002 ranked first, then the roadmap's order (H9006 and H9007 stand above H9004 on it)
-        need(got == [("H9002", f"{d1} 22:00"), ("H9001", f"{d1} 22:01"), ("H9006", f"{d1} 22:02"), ("H9007", f"{d1} 22:03"), ("H9004", f"{d2} 22:00")],
+        need(got == [("H9002", f"{d1} 22:00"), ("H9001", f"{d1} 22:01"), ("H9006", f"{d1} 22:02"), ("H9007", f"{d2} 22:00"), ("H9004", f"{d2} 22:01")],  # F66: by the latest end
              f"H269: the sprint isn't planned in rank order at its nights: {got}")
         need(all("on the HQ roadmap, planned for the team at the sprint planning" in i["text"] and "Read the" in i["text"] for i in items),
              f"H269: a planned row doesn't read its row: {items[0]['text']}")
@@ -13553,6 +13558,76 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need(out[0] == B.LOST_LINE and "lost my line again" in out[-1], f"a second death was silent: {out}")
         need("resume" in _P(B.__file__).read_text(), "a reopened session isn't resumed")
         return "F60: a big read is cut to a part; a dead session says so, reopens and answers the same turn"
+
+    async def flow173(self) -> str:
+        """F66, no Claude: the estimate counts the steps the work names, each with its own known time, and every
+        estimate is a range. On 27 and 28 October the daily release that had to run the full test set first was
+        estimated at 4 and took 36, F67's history rewrite at 16 and took 47, the QA of F63 (flow 44 alone, 358 s) at 2
+        and took 29. On a throwaway roadmap with no finished jobs: a job naming a full nightly.py run is at least the
+        test run's 18 minutes plus 5; the plain daily release ("after the nightly run") names no step; a history
+        rewrite with flow 44 comes to 30 or more; a QA job takes only the row's flow 44, not its other steps; every
+        estimate has a latest end above it and at most three times it; the Friday report is due once on a Friday
+        morning and never on a Thursday; the status page draws the faded tail and the fainter dotted line, its landing
+        carries the range in its words, and the gate goes by the latest end."""
+        import subprocess as sp
+        rm = self.tmp / "roadmap-F66.md"
+        rm.write_text("# HQ\n\n## The queue\n\n**Routine:** on\n\n## Phase F · Bugs\n\n"
+                      "| | What | Detail | For | Result | |\n|---|---|---|---|---|---|\n"
+                      "| ⬜ | F901 Demo rewrite | rewrite the history with filter-repo, then flow 44 | the full test run after | |  |\n"
+                      "| ⬜ | F902 Demo privacy | flow 44 gets its own limit; the nightly's full test run checks it | to try | |  |\n")
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1"}
+        r = sp.run(["python3", "-c", """
+import json, sys, time
+sys.path.insert(0, 'routine')
+import estimate as E
+d = lambda t: E.estimate_detail(t, hist=[])
+out = {
+ 'again': d('The daily release again: there was no run last night, so first do a full python3 ../HQ/routine/nightly.py run, then release.py status'),
+ 'daily': d('H178 and H186, the daily release on the nightly line: every night after the nightly run'),
+ 'rewrite': d('F901 on the HQ planning: read the F901 row whole and do what it says'),
+ 'qa': d('QA of F902 (F56): the team finished job 9 for it. read the F902 row whole'),
+ 'plain': d('H900 on the HQ roadmap: a small change to a button'),
+}
+fri = time.mktime((2026, 10, 30, 9, 0, 0, 0, 0, -1)); thu = time.mktime((2026, 10, 29, 9, 0, 0, 0, 0, -1))
+out['due'] = [E.friday_due(thu), E.friday_due(fri), E.friday_due(fri + 60)]
+out['report'] = E.friday_report(hist=[], now=fri)
+print(json.dumps({k: (v if not isinstance(v, dict) else {x: v.get(x) for x in ('est', 'latest', 'steps')}) for k, v in out.items()}))
+"""], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"the estimate check didn't run: {r.stderr[-800:]}")
+        o = json.loads(r.stdout.strip().split("\n")[-1])
+        need(o["again"]["est"] >= 23 and "the full test run" in (o["again"]["steps"] or []),
+             f"a release that runs the full test set first isn't at least the test run's time: {o['again']}")
+        need(not o["daily"]["steps"], f"the plain daily release counts a test run it doesn't do: {o['daily']}")
+        need(o["rewrite"]["est"] >= 30 and "a history rewrite" in o["rewrite"]["steps"], f"a history rewrite isn't 30 or more: {o['rewrite']}")
+        need(o["qa"]["est"] >= 10 and o["qa"]["steps"] == ["the privacy check over the whole history"],
+             f"a QA job that runs flow 44 isn't 10 or more, or takes the row's other steps: {o['qa']}")
+        for k, v in o.items():
+            if isinstance(v, dict):
+                need(v["est"] < v["latest"] <= 3 * v["est"] + 1, f"the range is off for {k}: {v}")
+        need(o["plain"]["steps"] is None, f"a plain job names steps: {o['plain']}")
+        need(o["due"] == [False, True, False], f"the Friday report isn't due once on a Friday morning: {o['due']}")
+        need("no finished jobs" in o["report"], f"the Friday report with nothing finished: {o['report']}")
+        r = sp.run(["node", "--input-type=module", "-e", """
+import { landing, landingWords, lineSettings } from './status/usage.mjs';
+const now = Date.now() / 1000;
+const E = { jobs: { '1': { est: 10, left: 8, so_far: 2, eta: now + 480, eta_latest: now + 1200, cost: { five: 4, weekly: 1 },
+  cost_latest: { five: 8, weekly: 2 } }, '2': { est: 10, eta: now + 1140, eta_latest: now + 2400, cost: { five: 3, weekly: 1 },
+  cost_latest: { five: 5, weekly: 1 } } } };
+const L = landing({ label: '5-hour limit', percent: 20, resetsAt: new Date((now + 3 * 3600) * 1000).toISOString() }, lineSettings(''), E);
+console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map((p) => p.latest), words: landingWords(L, (t) => 'T') }));
+"""], capture_output=True, text=True, cwd=str(ROOT))
+        need(r.returncode == 0, f"the landing check didn't run: {r.stderr[-600:]}")
+        L = json.loads(r.stdout)
+        need(L["to"] == 27 and L["toLatest"] == 33 and L["late"] == [8, 5] and "at the latest" in L["words"] and "faded tail" in L["words"],
+             f"the landing doesn't carry the range: {L}")
+        page = (ROOT / "status" / "index.html").read_text()
+        need("'land tail'" in page and "then-late" in page and "land-range" in page and "eta_latest" in page,
+             "the status page doesn't draw the faded tail, the second dotted line or a block's own range")
+        tick = (ROOT / "routine" / "tick.py").read_text()
+        need("latest=True" in tick and "friday_due" in tick, "the gate doesn't go by the latest end, or the Friday report isn't sent")
+        sprint = (ROOT / "routine" / "sprint.py").read_text()
+        need('x.get("cost_latest")' in sprint, "the sprint nights aren't filled by the latest end")
+        return "named steps bring their own time (full test run, history rewrite, flow 44; QA only flow 44); every estimate a range; Friday report once; tail and second dotted line on the page; gate and nights by the latest"
 
     async def flow172(self) -> str:
         """F71, no Claude: a QA pass names every done example of its row with its evidence. On 28 October the QA jobs
@@ -20689,6 +20764,7 @@ FLOWS = {
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
     169: ("Fable, 27 October 2026: the backend behind switches: the switches, the briefing made without Claude and the briefed start (the old one with the switch off), the open line's sessions and rollover, the log lift, the planning index against parsing, a headless job against a fake claude (done mark, stop signal), the lookups free on a call, the departments", False, "flow169"),
     172: ("F71: a QA pass names every done example of its row with what was run and what came out; without it the pass is refused, nothing written", False, "flow172"),
+    173: ("F66: the estimate counts the steps the work names (the full test run, a history rewrite, flow 44) and every estimate is a range: the gate, the nights and the status page go by the latest end; the Friday report", False, "flow173"),
     171: ("F67: HQ's own commits carry the public identity: a computer with HQ's key sets FleX-iBeL and the noreply address in HQ's repo (at --pull and before a push), so the global name never goes up; a friend's HQ is left alone", False, "flow171"),
     170: ("F65: a job started through the routine's own start with the headless switch on: job-N.prompt and job-N.command written, the script runs runjob.py against a fake claude, the job runs and is marked done; the switch off gives the old chat script", False, "flow170"),
     168: ("F60: a big read on a call is cut to a part (Read and cat), the SDK buffer is raised, a session that dies mid-turn says so, reopens and answers the same turn", False, "flow168"),

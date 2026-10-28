@@ -543,6 +543,8 @@ def plan():
             c = U.cost_for(est, t, det["kind"], hist)
             x["cost"] = {k: c[k] for k in U.KEYS}
             x["cost_how"] = c["how"]
+            x["latest"] = E.latest_of(est, det["kind"], hist)  # F66: the nights are filled by the latest end
+            x["cost_latest"] = U.at_latest(c, est, x["latest"])
         except Exception:
             pass
         j = q.with_team(jobs, r["label"])
@@ -764,9 +766,10 @@ def lay(labels, night=None, now=None):
     out, line = [], None
     k = 0
     for x in picked:
-        cost = x.get("cost") or {}
+        cost = x.get("cost_latest") or x.get("cost") or {}  # F66: by the latest end
         need = {kk: cost.get(kk, 0) for kk in ("five", "weekly")}
-        r = {"label": x["label"], "title": x["title"], "rank": x["rank"], "est": x["est"], "cost": cost, "kind": x.get("kind"),
+        span = x.get("latest") or x["est"]
+        r = {"label": x["label"], "title": x["title"], "rank": x["rank"], "est": x["est"], "cost": x.get("cost") or {}, "kind": x.get("kind"), "latest": span,
              "moscow": x.get("moscow"), "bug": x.get("bug"), "ready": x.get("ready"), "not_ready": x.get("not_ready")}
         placed = False
         first_k = k
@@ -780,7 +783,7 @@ def lay(labels, night=None, now=None):
                 r["why"] = "it doesn't fit under the usage lines as they're set (a fixed line)"
                 break
             t = max(t, n["cursor"])
-            fits = t + x["est"] * 60 <= n["end"]
+            fits = t + span * 60 <= n["end"]
             if t >= n["end"] or (not fits and n["rows"]):
                 if t > n["cursor"] + 59 and k == first_k:
                     r["usage"] = True  # the usage, not the night's length, pushed it on
@@ -788,10 +791,11 @@ def lay(labels, night=None, now=None):
                 continue
             if proj:
                 proj.add(need, t)
-            r.update({"night": n["day"], "start": int(t), "eta": int(t + x["est"] * 60), "waits": t > n["cursor"] + 59})
+            r.update({"night": n["day"], "start": int(t), "eta": int(t + x["est"] * 60), "eta_latest": int(t + span * 60),
+                      "waits": t > n["cursor"] + 59})
             if t > n["cursor"] + 59:
                 r["usage"] = True
-            n["cursor"] = t + x["est"] * 60
+            n["cursor"] = t + span * 60
             n["rows"].append(x["label"])
             placed = True
             break

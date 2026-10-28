@@ -371,11 +371,20 @@ def cost_for(minutes, text="", kind=None, hist=None, about=None):
     return out
 
 
-def job_cost(n, text, hist=None):
+def at_latest(cost, minutes, latest):
+    """F66: the usage of work at its latest end: each line's estimate times latest over likely minutes."""
+    f = (latest / minutes) if minutes else 1
+    return {k: round(float((cost or {}).get(k, 0)) * f, 1) for k in KEYS}
+
+
+def job_cost(n, text, hist=None, latest=False):
     """A waiting job's estimated minutes and usage, from its estimate now (F34, H166)."""
     E = _est()
     d = E.job_estimate(n, text, hist)
-    return d["est"], cost_for(d["est"], text, d.get("kind"), hist)
+    c = cost_for(d["est"], text, d.get("kind"), hist)
+    if latest:  # F66: the gate lets a job start only when its latest end fits under the stop lines
+        return d["latest"], {**c, **at_latest(c, d["est"], d["latest"])}
+    return d["est"], c
 
 
 # ---------- the real cost of a running job ----------

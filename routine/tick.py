@@ -1003,7 +1003,7 @@ def job_need(job):
     H141's room for 10 minutes)."""
     try:
         import usagecost
-        m, c = usagecost.job_cost(job["n"], job.get("text", ""))
+        m, c = usagecost.job_cost(job["n"], job.get("text", ""), latest=True)  # F66: by its latest end
         return ["--minutes", str(max(1, int(round(m)))), "--need", f"five={c['five']},weekly={c['weekly']}"]
     except Exception as e:
         log(f"estimate for the usage gate: {e!r}")
@@ -1226,6 +1226,15 @@ def direct_watch():
         log(f"direct line: {e!r}")
     # H120: the weather every three hours in the day, on the main; she texts only when there's something to say.
     if main:
+        # F66: every Friday morning, before the sprint planning, how the week's estimates held (through Donna until
+        # Moneypenny has her own line, H266).
+        try:
+            import estimate
+            if estimate.friday_due():
+                direct_line.text("the team's estimates this week, before the sprint planning (F66)", estimate.friday_report())
+                log("direct line: the Friday report on the estimates")
+        except Exception as e:
+            log(f"the Friday estimates report: {e!r}")
         try:
             import weather
             if weather.start():

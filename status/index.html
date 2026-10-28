@@ -171,6 +171,13 @@
       .bar s.then.near-end::after { left: auto; right: -3px; transform: none; }
       /* H181: the green one, with the repeating work: the same dotted line, nothing under it; its time and percent show
          while the mouse is on it, or after a tap (a second tap hides it). */
+      /* F66: the range: a faded tail from the likely end to the latest, a tapped block's own range, a fainter dotted line */
+      .bar i.land.tail { background: linear-gradient(90deg, var(--land-team), transparent); opacity: .45; border-left: 0; }
+      .bar i.land-range { position: absolute; top: -2px; height: calc(100% + 4px); background: var(--land-team); opacity: .25; pointer-events: none; z-index: 1; }
+      .bar s.then-late { z-index: 2; top: -8px; height: 24px; width: 0; background: transparent; border-left: 2px dotted var(--then); opacity: .45; }
+      .bar s.then-late::after { opacity: 1; top: calc(100% + 1px); bottom: auto; background: transparent; color: var(--then); padding: 0; font-size: 12px; }
+      .bar s.then-late.near-start::after { left: -3px; transform: none; }
+      .bar s.then-late.near-end::after { left: auto; right: -3px; transform: none; }
       .bar s.then-all { z-index: 2; top: -8px; height: 24px; width: 0; background: transparent; border-left: 3px dotted var(--then-all); cursor: pointer; }
       .bar s.then-all::after { background: var(--then-all); color: var(--card); }
       .bar s.then-all.open::after { opacity: 1; }
@@ -783,8 +790,31 @@
           const i = el('i', `land ${r.kind}${r.priority ? ' priority' : ''}`);
           i.style.left = `${from}%`;
           i.style.width = `${to - from}%`;
-          i.title = r.items.map((p) => `${p.what}${p.priority ? ' (priority)' : ''}: about ${p.add}%, at ${p.to}% around ${clock(p.lands * 1000)}`).join('\n');
+          i.title = r.items.map((p) => `${p.what}${p.priority ? ' (priority)' : ''}: about ${p.add}%${p.latest > p.add + 0.05 ? ` (${p.latest}% at the latest)` : ''}, at ${p.to}% around ${clock(p.lands * 1000)}${p.landsLatest && p.landsLatest > p.lands + 30 ? `, at the latest ${clock(p.landsLatest * 1000)}` : ''}`).join('\n');
+          // F66: a tap on a block shows its own range, likely to latest, as a light overlay
+          i.addEventListener('click', () => {
+            const was = box.querySelector('i.land-range');
+            if (was) { was.remove(); if (was.dataset.from === String(r.from)) return; }
+            const top = r.from + r.items.reduce((a, p) => a + (p.latest ?? p.add), 0);
+            const o = el('i', 'land-range');
+            o.dataset.from = String(r.from);
+            o.style.left = `${from}%`;
+            o.style.width = `${Math.max(0, Math.min(100, top) - from)}%`;
+            box.append(o);
+          });
           box.insertBefore(i, box.querySelector('s'));  // under the stop line, which stays on top
+        }
+        // F66: one faded tail after the last block, up to where everything lands at its latest (every job's latest added up)
+        if (L.toLatest > L.to + 0.05) {
+          const from = Math.min(100, Math.max(0, L.to));
+          const to = Math.min(100, Math.max(0, L.toLatest));
+          if (to > from) {
+            const i = el('i', 'land tail');
+            i.style.left = `${from}%`;
+            i.style.width = `${to - from}%`;
+            i.title = `At the latest: ${L.toLatest}%${L.landsLatest ? ` around ${clock(L.landsLatest * 1000)}` : ''}`;
+            box.insertBefore(i, box.querySelector('s'));
+          }
         }
         // H177: a moving line: where it will stand when the last piece lands, a dotted line with its time and percent.
         if (L.lineThen !== null && L.lineThen !== undefined) {
@@ -807,6 +837,15 @@
           g.title = `With the repeating work too, everything should land around ${clock(L.allLands * 1000)}; the stop line will be at ${Math.round(L.lineAll * 10) / 10}% by then`;
           g.addEventListener('click', () => { if (!allOpen.delete(L.key)) allOpen.add(L.key); g.classList.toggle('open', allOpen.has(L.key)); });
           box.append(g);
+        }
+        // F66: the fainter second dotted line, where the stop line will be when everything has landed at its latest.
+        if (L.lineLatest !== null && L.lineLatest !== undefined) {
+          const x = Math.min(100, Math.max(0, L.lineLatest));
+          const t = el('s', `then-late${x < 12 ? ' near-start' : x > 88 ? ' near-end' : ''}`);
+          t.style.left = `${x}%`;
+          t.dataset.pct = `latest ${clock(L.latestAt * 1000)}`;
+          t.title = `If everything takes its latest: the stop line will be at ${Math.round(L.lineLatest * 10) / 10}% around ${clock(L.latestAt * 1000)}`;
+          box.append(t);
         }
         // The used part keeps its round end only where nothing follows it.
         if (L.pieces.length) fill.style.borderRadius = '4px 0 0 4px';
@@ -1095,10 +1134,11 @@
         let s = 'left' in e
           ? (e.over ? `Estimated ${etaDur(e.est)}, running ${etaDur(e.so_far)}: taking longer than estimated` : `About ${etaDur(e.left)} left of ${etaDur(e.est)}`)
           : `About ${etaDur(e.est)}`;
-        if (e.cost) s += ` · ${etaCost(e.cost)}${e.used ? ` (${etaUsed(e.used)} so far)` : ''}`;
+        if (e.latest && !e.over) s += ` to ${etaDur(e.latest)} at the latest`;  // F66: a range, likely and at the latest
+        if (e.cost) s += ` · ${etaCost(e.cost)}${e.cost_latest ? ` (${etaPct(e.cost_latest.five ?? 0)} and ${etaPct(e.cost_latest.weekly ?? 0)} at the latest)` : ''}${e.used ? ` (${etaUsed(e.used)} so far)` : ''}`;
         if (e.start) s += ` · starts around ${etaAt(e.start)} ${USAGE_START}`;
         if (e.never) s += ' · it doesn\'t fit under the usage lines as they\'re set (a fixed line), so no time';
-        else if (e.eta) s += ` · done around ${etaAt(e.eta)}`;
+        else if (e.eta) s += ` · done around ${etaAt(e.eta)}${e.eta_latest && e.eta_latest > e.eta + 30 ? `, at the latest ${etaAt(e.eta_latest)}` : ''}`;
         else if (e.waits === 'usage') s += ' · when it\'s done waits on the usage';
         else if (e.waits === 'off') s += ' · the routine is off';
         return `${s} (estimate)`;
@@ -1431,7 +1471,7 @@
         if (!t) return '';
         // H174: the time and the 5-hour usage everything still takes, then when it's all done; what it counts is under the heading.
         const use = 'five' in t ? ` and ${etaPct(t.five)} of the 5-hour` : '';
-        if (t.eta) return `about ${etaDur(t.minutes)}${use}, all done around ${etaTime(t.eta)} (computed estimate)`;
+        if (t.eta) return `about ${etaDur(t.minutes)}${use}, all done around ${etaTime(t.eta)}${t.eta_latest && t.eta_latest > t.eta + 30 ? `, at the latest ${etaAt(t.eta_latest)}` : ''} (computed estimate)`;
         return `about ${etaDur(t.minutes)}${use} (computed estimate; ${t.waits === 'usage' ? 'waits on the usage' : 'the routine is off'})`;
       }
       /** H107: all planned items together, the same way etaTotal does it for the job list. */

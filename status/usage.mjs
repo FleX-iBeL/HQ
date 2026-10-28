@@ -237,7 +237,9 @@ export function landing(l, lines, E, now = new Date(), { from = null, to = null 
     const add = Math.max(0, Number(e.cost[key] ?? 0) - (running ? Number(e.used?.[key] ?? 0) : 0));
     const end = e.eta ?? null;
     const start = running ? t : (e.start ?? (end ? end - (e.est ?? 0) * 60 : null));
-    put({ kind: 'team', what: `Job ${n}`, add, start, end, priority: false, running, waits: e.waits === 'usage' && !running });
+    // F66: its range: the usage and the time at its latest end, next to the likely ones.
+    const late = Math.max(add, Number(e.cost_latest?.[key] ?? e.cost[key] ?? 0) - (running ? Number(e.used?.[key] ?? 0) : 0));
+    put({ kind: 'team', what: `Job ${n}`, add, late, start, end, endLatest: e.eta_latest ?? end, priority: false, running, waits: e.waits === 'usage' && !running });
   }
   for (const [n, e] of Object.entries(E.items ?? {})) {
     if (!e.cost) continue;
@@ -250,6 +252,8 @@ export function landing(l, lines, E, now = new Date(), { from = null, to = null 
   let next = 0;
   let nextSoon = 0;
   let cross = null;
+  let extra = 0;  // F66: how much more lands if every piece takes its latest
+  let landsLatest = null;
   const pieces = [];
   const kinds = { team: 0, planned: 0, repeat: 0 };
   for (const w of work) {
@@ -267,7 +271,12 @@ export function landing(l, lines, E, now = new Date(), { from = null, to = null 
     const start = at;
     at += here;
     const lands = cut === null ? w.end : Math.min(w.end, cut);
-    pieces.push({ kind: w.kind, what: w.what, add: r1(here), from: r1(start), to: r1(at), start: w.start, lands, priority: w.priority, waits: !!w.waits });
+    const lateHere = (w.late ?? w.add) * frac;
+    extra += Math.max(0, lateHere - here);
+    const landsLate = cut === null ? (w.endLatest ?? w.end) : Math.min(w.endLatest ?? w.end, cut);
+    landsLatest = Math.max(landsLatest ?? 0, landsLate);
+    pieces.push({ kind: w.kind, what: w.what, add: r1(here), from: r1(start), to: r1(at), start: w.start, lands, priority: w.priority, waits: !!w.waits,
+      latest: r1(lateHere), landsLatest: landsLate });
     kinds[w.kind] += here;
     const sl = stopLine(l, lines, new Date(1000 * (cut === null ? lands : Math.min(lands, cut - 60))));
     if (!cross && sl && r1(at) > sl.line) cross = { what: w.what, at: lands, pct: r1(at), line: sl.line };
@@ -287,6 +296,9 @@ export function landing(l, lines, E, now = new Date(), { from = null, to = null 
   const allAt = readAt(allLands);
   const all = allAt !== thenAt ? lineAt(allAt) : null;
   const moves = (x) => !!x && x.line !== line.line;
+  // F66: the fainter second dotted line, where the stop line stands when everything has landed at its latest.
+  const latestAt = landsLatest && landsLatest > (allLands ?? 0) + 30 ? readAt(landsLatest) : null;
+  const atLatest = lineAt(latestAt);
   for (const k of Object.keys(kinds)) kinds[k] = r1(kinds[k]);
   return {
     key, now: Number(l.percent), to: r1(at), lands: allLands, reset,
@@ -294,6 +306,8 @@ export function landing(l, lines, E, now = new Date(), { from = null, to = null 
     lineThen: moves(then) ? then.line : null, thenAt: moves(then) ? thenAt : null, thenLands: moves(then) ? thenLands : null,
     lineAll: moves(all) ? all.line : null, allAt: moves(all) ? allAt : null, allLands: moves(all) ? allLands : null,
     pieces, kinds, next: r1(next), nextSoon: r1(nextSoon), untimed, cross,
+    toLatest: r1(at + extra), landsLatest: latestAt ? landsLatest : null,
+    lineLatest: moves(atLatest) ? atLatest.line : null, latestAt: moves(atLatest) ? latestAt : null,
   };
 }
 
@@ -311,6 +325,10 @@ export function landingWords(L, clock) {
       s.push(L.thenLands && L.thenLands !== L.lands
         ? `The one-off work lands around ${clock(L.thenLands)}; by then the stop line will be at ${L.lineThen}% (the dotted line).`
         : `By then the stop line will be at ${L.lineThen}% (the dotted line).`);
+    }
+    // F66: the range: the faded tail on the bar, and the fainter dotted line.
+    if (L.toLatest > L.to + 0.05) {
+      s.push(`Done around ${clock(L.lands)}, at the latest ${clock(L.landsLatest ?? L.lands)}: at the latest it lands at ${L.toLatest}% (the faded tail)${L.lineLatest !== null && L.lineLatest !== undefined ? `, with the stop line at ${L.lineLatest}% by then (the fainter dotted line)` : ''}.`);
     }
     if (L.cross) s.push(`That goes past the stop line: around ${clock(L.cross.at)}, ${L.cross.what} takes it to ${L.cross.pct}% while the line is at ${L.cross.line}%.`);
     else if (L.line !== null) s.push(L.moving ? 'It stays under the stop line as the line climbs.' : 'It stays under the stop line.');

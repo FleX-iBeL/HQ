@@ -1105,7 +1105,8 @@ def patterns(real):
     return out
 
 
-def estimate_detail(text, hist=None, kind=None, machine=None, tags=None, about=None, alike=True, sized=True, size=None):
+def estimate_detail(text, hist=None, kind=None, machine=None, tags=None, about=None, alike=True, sized=True, size=None,
+                    steps=True):
     """H81: the estimate with how it came about: {"est", "kind", "based", "machine", "own", "other", "scaled",
     "tags", "pattern", "by_kind", "similar"}. hist: all finished jobs (all_history()); machine: the computer it's for
     (runner()). tags, about: given instead of read from the text (F34, H166: estimating finished jobs back from their
@@ -1163,7 +1164,188 @@ def estimate_detail(text, hist=None, kind=None, machine=None, tags=None, about=N
         out["by_similar"] = out["est"]
         out["est"] = max(1, round(out["est"] * mult))
         out["size"], out["size_mult"] = size, round(mult, 2)
+    # F66: the steps the work names, each with its own known time, on top of the kind.
+    if steps:
+        named = steps_of(_about(text) if about is None else about)
+        if named:
+            out["steps"] = [n for n, _ in named]
+            out["by_steps"] = with_steps(out["est"], named)
+            out["est"] = out["by_steps"]
+    out["latest"] = latest_of(out["est"], kind, hist)
     return out
+
+
+# ---------- F66: the steps the work names, the range, the replay ----------
+# The call of 28 October 2026 (call at 13:00, Moneypenny): "If those estimates are not correct, We are on calls and we're
+# saying, oh yeah, it's done in 30 minutes. And five hours later, I'm still talking with agents". The daily release
+# was estimated at 4 and took 36 (it starts with the full test run, 17 to 18 minutes); F67's history rewrite at 16
+# and took 47. A kind's past times can't see a step that only some of its jobs take, so the steps a job (or the row
+# it names) asks for each bring their own known time, and the estimate is at least their sum plus STEP_OVERHEAD.
+
+STEPS = (  # (name, words, minutes): measured on the jobs of 27 and 28 October 2026
+    # Not the daily release's own words ("every night after the nightly run"): the night's run is a job of its own,
+    # and only a release that has to run it again (it wasn't green, or there was none) takes it; that one says so.
+    ("the full test run", r"\bfull (?:test|flow) (?:run|set)\b|\bwhole (?:test|flow) set\b|\ball (?:the )?happy flows\b"
+                          r"|\bfull\b.{0,60}?nightly\.py run\b|\bnightly\.py again\b", 18),
+    ("a history rewrite", r"\bhistory (?:rewrite|rewritten)\b|\brewrit\w* (?:hq's |the |its )?(?:whole |git )?history\b"
+                          r"|\bfilter-repo\b|\bforce[- ]push", 20),
+    ("the privacy check over the whole history", r"\bflow 44\b|\bprivacy check over (?:every file|the whole history)", 6),
+)
+QA_STEPS = ("the privacy check over the whole history",)  # F66: a QA job runs the row's flows, not its other steps
+STEP_OVERHEAD = 5   # F66: minutes around the named steps (reading the row, writing it down, the push)
+RANGE_Q = 0.8       # F66: the latest end is where 8 in 10 jobs of its kind landed against their estimate
+RANGE_MIN, RANGE_MAX = 1.4, 3.0  # F66: the latest end is this many times the likely one, at least and at most
+RANGE_LAST = 30     # F66: the last finished jobs of a kind the spread is taken from
+REPLAY_DAYS = 14
+
+
+@functools.lru_cache(maxsize=4096)
+def _steps_cached(about, _key):
+    t = (about or "").lower()
+    r = re.search(r"\b([hfmlj]\d+(?:\.\d+)?) on the (?:hq )?(?:roadmap|planning)|\bread the ([hfmlj]\d+(?:\.\d+)?) row"
+                  r"|^qa of ([hfmlj]\d+(?:\.\d+)?)\b|^fix for ([hfmlj]\d+(?:\.\d+)?)\b", t)
+    row = _rows().get(next(g for g in r.groups() if g), "") if r else ""
+    qa = bool(r and r.group(3))
+    return tuple((name, m) for name, rx, m in STEPS
+                 if re.search(rx, t) or (re.search(rx, row) and (not qa or name in QA_STEPS)))
+
+
+def steps_of(about):
+    """F66: [(step, minutes)] the work names, in its own words or its roadmap row's."""
+    return list(_steps_cached(about or "", _rows_key()))
+
+
+def with_steps(est, named):
+    """F66: an estimate at least as long as the named steps' own times together, plus STEP_OVERHEAD."""
+    return max(est, sum(m for _, m in named) + STEP_OVERHEAD) if named else est
+
+
+def mistake(h):
+    """F66: a finished job that ran long through its own mistake (H286's tags plug in here: "mistake" on its line)
+    doesn't teach the estimates or the range."""
+    return bool(h.get("mistake"))
+
+
+_SPREAD = {}
+
+
+def spread(kind, hist=None):
+    """F66: how much later than its likely end a job of this kind lands, at the latest: the RANGE_Q quantile of real
+    over estimated time (the estimate with its steps) of its kind's last RANGE_LAST jobs, between RANGE_MIN and RANGE_MAX."""
+    hist = all_history() if hist is None else hist
+    key = (id(hist), len(hist), kind)
+    if key in _SPREAD:
+        return _SPREAD[key]
+    rs = []
+    for h in _real(hist):
+        if h.get("kind") != kind or mistake(h) or not h.get("est"):
+            continue
+        rs.append(h["actual"] / with_steps(h["est"], steps_of(h.get("about") or "")))
+    rs = sorted(rs[-RANGE_LAST:])
+    f = rs[min(len(rs) - 1, int(RANGE_Q * len(rs)))] if len(rs) >= MIN_KIND else 2.0
+    _SPREAD.clear() if len(_SPREAD) > 64 else None
+    _SPREAD[key] = round(min(RANGE_MAX, max(RANGE_MIN, f)), 2)
+    return _SPREAD[key]
+
+
+def latest_of(est, kind, hist=None):
+    """F66: the latest end of an estimate, in minutes: likely times the kind's spread."""
+    return max(est + 1, math.ceil(est * spread(kind, hist)))
+
+
+def replay(hist=None, days=REPLAY_DAYS, steps=True, now=None, guesses=True):
+    """F66: every finished job of the last `days` days estimated back from only the jobs before it (as backtest), with
+    or without the named steps: how many land between half and double their estimate, per kind, and how many inside
+    their range (likely to latest). Numbers and kinds only, never the jobs' words. {"count", "within", "share",
+    "in_range", "kinds": {kind: {"count", "within", "median"}}}"""
+    hist = all_history() if hist is None else hist
+    now = time.time() if now is None else now
+    out = {"count": 0, "within": 0, "in_range": 0, "kinds": {}}
+    for i, h in enumerate(hist):
+        if (h.get("done") or 0) < now - days * 86400 or h not in _real([h]) or mistake(h):
+            continue
+        prior = [x for x in hist[:i] if not mistake(x)]
+        if not _real(prior):
+            continue
+        d = estimate_detail("", prior, h.get("kind"), h["machine"], h.get("tags") or [], h.get("about") or "", True,
+                            sized=False, steps=steps)
+        est, a = d["est"], h["actual"]
+        if guesses:  # the guesses as they stood then (the team's, the call's, the look's), as the live estimate takes them
+            g, _, gf = pick_guess(h, guess_fits(prior))
+            est = max(with_guess(est, g, gf), with_steps(1, d.get("steps") and [(n, m) for n, _, m in STEPS if n in d["steps"]]))
+            d["latest"] = latest_of(est, h.get("kind"), prior)
+        k = out["kinds"].setdefault(h.get("kind") or "?", {"count": 0, "within": 0, "ratios": []})
+        ok = est / 2 <= a <= est * 2
+        k["count"] += 1
+        k["within"] += ok
+        k["ratios"].append(a / est)
+        out["count"] += 1
+        out["within"] += ok
+        out["in_range"] += a <= d["latest"]
+    for k in out["kinds"].values():
+        k["median"] = round(statistics.median(k.pop("ratios")), 2)
+    out["share"] = round(out["within"] / out["count"], 2) if out["count"] else None
+    return out
+
+
+def replay_words(r, title="The replay"):
+    if not r.get("count"):
+        return f"{title}: no finished jobs in the window."
+    kinds = "; ".join(f"{k} {v['within']} of {v['count']} (real {v['median']} times the estimate in the middle)"
+                      for k, v in sorted(r["kinds"].items(), key=lambda kv: -kv[1]["count"]))
+    return (f"{title}: {r['within']} of {r['count']} jobs ({round(100 * r['share'])}%) landed between half and double "
+            f"their estimate, {r['in_range']} by their latest end. Per kind: {kinds}.")
+
+
+REPORT_STATE = os.path.join(DIR, "estimates-friday-report.json")  # F66: the Friday the report last went out
+REPORT_HOURS = (8, 12)  # F66: Friday morning, before the sprint planning after lunch
+
+
+def friday_due(now=None):
+    """F66: True once each Friday morning (REPORT_HOURS, local time) while it hasn't gone out that day; marks it sent."""
+    now = time.time() if now is None else now
+    t = time.localtime(now)
+    if t.tm_wday != 4 or not (REPORT_HOURS[0] <= t.tm_hour < REPORT_HOURS[1]):
+        return False
+    day = time.strftime("%Y-%m-%d", t)
+    try:
+        if json.load(open(REPORT_STATE)).get("sent") == day:
+            return False
+    except Exception:
+        pass
+    os.makedirs(os.path.dirname(REPORT_STATE), exist_ok=True)
+    json.dump({"sent": day}, open(REPORT_STATE, "w"))
+    return True
+
+
+def friday_report(hist=None, now=None):
+    """F66 (call of 28 October 2026, 14:20, his words: "I like the idea about Friday sending me a report"): the week's
+    jobs against their own estimates as they were given (likely and latest), per kind, plainly; below 8 in 10 it says
+    so. Plain words for Donna's text."""
+    hist = all_history() if hist is None else hist
+    now = time.time() if now is None else now
+    week = [h for h in _real(hist) if (h.get("done") or 0) >= now - 7 * 86400 and h.get("est")]
+    if not week:
+        return "The team's estimates this week: no finished jobs to hold them against."
+    inside, kinds = 0, {}
+    for h in week:
+        est = h.get("with_guess") or h["est"]
+        late = h.get("latest") or latest_of(est, h.get("kind"), hist)
+        ok = h["actual"] <= late and h["actual"] >= est / 2
+        inside += ok
+        k = kinds.setdefault(h.get("kind") or "other", [0, 0, 0])
+        k[0] += 1
+        k[1] += ok
+        k[2] += h["actual"] > late
+    share = inside / len(week)
+    missed = [f"{n} ({v[0] - v[1]} of {v[0]} outside, {v[2]} of them later than their latest)"
+              for n, v in sorted(kinds.items()) if v[1] < v[0]]
+    words = f"The team's estimates this week: {inside} of {len(week)} jobs landed inside their range."
+    if share < 0.8:
+        words += " That's below eight in ten, so the estimates aren't good enough yet."
+    if missed:
+        words += " Missed most: " + "; ".join(missed) + "."
+    return words
 
 
 def estimate_for(text, hist=None, kind=None, machine=None, size=None):
@@ -1601,6 +1783,10 @@ def on_done(n, text="", started_hhmm=None, at=None):
         pass
     if _about(text):
         rec["about"] = _about(text)[:ABOUT_MAX]  # H166: its words, so later jobs can find it as similar
+    try:  # F66: its range as it was given (the guesses taken in), for the Friday report
+        rec["latest"] = latest_of(rec.get("with_guess") or rec["est"], rec["kind"])
+    except Exception:
+        pass
     try:  # H172: its real usage next to its time, and the usage it was estimated to take
         import usagecost
         u = usagecost.finish(n, now)
@@ -1767,6 +1953,7 @@ def plan(now=None):
                                     **guess_detail(h)}  # H168, H190: the team's, the call's and the look's
     samples = None
     cursor, left_total, waits = now, 0, not on
+    late_total = 0  # F66: the same line at every job's latest end
     # H172: the usage each piece of work should take, and when it fits under the stop lines (the reading now, the
     # moving lines, the resets and the work before it). No reading or no stop lines: the times as before.
     proj, U = None, None
@@ -1798,10 +1985,13 @@ def plan(now=None):
         nxt = left if left > 0 else 2  # running longer than estimated: a couple of minutes more, at least
         cursor += nxt * 60
         left_total += nxt
+        lat = latest_of(est, kind_for(j["text"], e.get("kind")), hist)  # F66
+        late_total += max(lat - done_min, nxt)
         parts["running_min"] += nxt
         parts["guess_in"] |= bool(guess) and est != computed
         out["jobs"][str(j["n"])] = {"est": est, "kind": kind_for(j["text"], e.get("kind")), "so_far": done_min,
-                                    "left": left, "over": over, "eta": None if waits else int(cursor)}
+                                    "left": left, "over": over, "eta": None if waits else int(cursor),
+                                    "latest": lat, "eta_latest": None if waits else int(now + late_total * 60)}
         out["jobs"][str(j["n"])].update(guess_detail(e))  # H168, H190
         if guess and est != computed:
             out["jobs"][str(j["n"])].update({"computed": computed, "guess_used": gkey})
@@ -1810,6 +2000,9 @@ def plan(now=None):
             c = rec.get("est") or U.cost_for(est, j["text"], e.get("kind"), hist)
             used = U._so_far(rec) if rec.get("seg") else {}
             out["jobs"][str(j["n"])]["cost"] = {k: c.get(k, 0) for k in U.KEYS}
+            out["jobs"][str(j["n"])]["cost_latest"] = U.at_latest(c, est, lat)  # F66
+            for k in ("five", "weekly"):
+                parts[k + "_latest"] = parts.get(k + "_latest", 0.0) + max(0.0, out["jobs"][str(j["n"])]["cost_latest"][k] - round(used.get(k, 0), 1)) if used else parts.get(k + "_latest", 0.0) + out["jobs"][str(j["n"])]["cost_latest"][k]
             if used:
                 out["jobs"][str(j["n"])]["used"] = used
             for k, w in (("five", "five"), ("weekly", "weekly")):  # H174: what's still to come of it, as the lines show it
@@ -1832,14 +2025,19 @@ def plan(now=None):
         if running or j is not line[0] or cursor > now:
             cursor += GAP * 60
             left_total += GAP
+            late_total += GAP
             parts["gaps"] += GAP
         parts["waiting_min"] += est
         parts["held"] += j["state"].startswith("held")
         cost = U.cost_for(est, j["text"], kind, hist) if U else None
+        lat = latest_of(est, kind, hist)  # F66: whether it may start goes by its latest end
+        late = U.at_latest(cost, est, lat) if cost else None
         if cost:
             parts["five"] += round(cost.get("five", 0), 1)
             parts["weekly"] += round(cost.get("weekly", 0), 1)
-        fits = proj.fits_at(cost, cursor, weekly_only=j.get("past")) if proj else None
+            parts["five_latest"] = parts.get("five_latest", 0.0) + late["five"]
+            parts["weekly_latest"] = parts.get("weekly_latest", 0.0) + late["weekly"]
+        fits = proj.fits_at(late, cursor, weekly_only=j.get("past")) if proj else None
         start = None
         if proj and fits is None:
             waits = True  # it never fits as the lines stand (a fixed line without a reset time): no time from here on
@@ -1848,11 +2046,14 @@ def plan(now=None):
             held_wait = True
         if proj and fits is not None:
             proj.add(cost, cursor)
+        late_total = max(late_total, (cursor - now) / 60) + lat
         cursor += est * 60
         left_total += est
         out["jobs"][str(j["n"])] = {"est": est, "kind": kind, "eta": int(cursor) if on and not (proj and waits) else None,
                                     "waits": "usage" if (waits or start) and on else ("off" if not on else None),
-                                    **guess_detail(ke)}  # H190
+                                    "latest": lat, **guess_detail(ke)}  # H190
+        if on and not (proj and waits):
+            out["jobs"][str(j["n"])]["eta_latest"] = int(now + late_total * 60)
         if est != computed:
             out["jobs"][str(j["n"])].update({"computed": computed, "guess_used": gkey})
         if ke.get("look_pending") and time.time() - ke["look_pending"] < LOOK_PENDING:
@@ -1860,6 +2061,7 @@ def plan(now=None):
         if cost:
             out["jobs"][str(j["n"])]["cost"] = {k: cost[k] for k in U.KEYS}
             out["jobs"][str(j["n"])]["cost_how"] = cost["how"]
+            out["jobs"][str(j["n"])]["cost_latest"] = late
         if start:
             out["jobs"][str(j["n"])]["start"] = int(start)
         if proj and waits:
@@ -1870,6 +2072,9 @@ def plan(now=None):
                         "waits": ("usage" if on else "off") if waits or held_wait else None,
                         "running": len(running), "waiting": len(line), **parts,
                         "five": round(parts["five"], 1), "weekly": round(parts["weekly"], 1),
+                        "five_latest": round(parts.get("five_latest", 0), 1), "weekly_latest": round(parts.get("weekly_latest", 0), 1),
+                        "minutes_latest": round(late_total),
+                        "eta_latest": int(now + late_total * 60) if on and not (proj and waits) else None,
                         "usage_wait": held_wait,
                         "paused": sum(1 for j in js if j["state"].startswith("paused"))}
         out["total"]["counts"] = total_counts(out["total"], bool(U))
@@ -2504,6 +2709,16 @@ def main(argv):
         print(p["guesses"]["words"])  # H168
         for l in p.get("learned") or []:
             print(l)
+    elif cmd == "replay":  # F66: the last two weeks' jobs estimated back, without and with the named steps
+        days = int(argv[1]) if len(argv) > 1 else REPLAY_DAYS
+        print(replay_words(replay(days=days, steps=False), "Without the named steps"))
+        print(replay_words(replay(days=days, steps=True), "With the named steps (now)"))
+    elif cmd == "friday-report":  # F66: the words Donna texts on Friday morning
+        print(friday_report())
+    elif cmd == "steps":  # F66: the steps a job's words name, and its estimate with its range
+        d = estimate_detail(" ".join(argv[1:]))
+        print(f"{d['kind']}: about {d['est']} min, at the latest {d['latest']} min"
+              + (f"; named steps: {', '.join(d['steps'])}" if d.get("steps") else "; no named steps"))
     elif cmd == "look-run":  # H190: the background look
         look_run(argv[1], int(argv[2]))
     elif cmd == "relook":
