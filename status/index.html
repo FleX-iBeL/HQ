@@ -1139,7 +1139,10 @@
         if (e.finished) return (e.est ? `Estimated ${etaDur(e.est)}, took ${etaDur(e.actual)}` : `Took ${etaDur(e.actual)}`) + (e.cost ? ` · ${etaUsed(e.cost)}` : '');
         let s = 'left' in e
           ? (e.over ? `Estimated ${etaDur(e.est)}, running ${etaDur(e.so_far)}: taking longer than estimated` : `About ${etaDur(e.left)} left of ${etaDur(e.est)}`)
-          : `About ${etaDur(e.est)}`;
+          : e.held
+            // F78: a held job waits on what's left of it, the same figure the start check uses
+            ? `About ${etaDur(e.est)} left (held after ${etaDur(e.held.so_far)} of ${etaDur(e.held.of)}, counted on what's left of it${e.held.floor?.length ? ', at least what a picked-up turn costs' : ''})`
+            : `About ${etaDur(e.est)}`;
         if (e.latest && !e.over) s += ` to ${etaDur(e.latest)} at the latest`;  // F66: a range, likely and at the latest
         if (e.cost) s += ` · ${etaCost(e.cost)}${e.cost_latest ? ` (${etaPct(e.cost_latest.five ?? 0)} and ${etaPct(e.cost_latest.weekly ?? 0)} at the latest)` : ''}${e.used ? ` (${etaUsed(e.used)} so far)` : ''}`;
         if (e.start) s += ` · starts around ${etaAt(e.start)} ${USAGE_START}`;

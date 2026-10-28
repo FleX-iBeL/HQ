@@ -500,6 +500,7 @@ def hold(n, now=None):
         rec["spent"] = _read_so_far(rec) or rec["spent"]
         rec["seg"] = {k: list(v) for k, v in rec["last"].items()}
         rec["running"] = False
+        _own(rec, n)  # F78: what it used up to the hold, from its own chats, for the start check of what's left
         _save(d)
     return rec
 
@@ -1141,6 +1142,121 @@ def rate_words(model):
     r = model["rate"]
     return (f"{mtok(r.get('five'))} weighted tokens a point of the 5-hour, {mtok(r.get('weekly'))} a point of the week, "
             f"from {model['based']} jobs ({model.get('nightly', 0)} nightly), {len(model.get('left_out') or [])} left out")
+
+
+# ---------- F78: a held job is checked on what's left of it ----------
+# The user, 28 October 2026 (call at 17:36, Moneypenny): "I also think it's a bug that it didn't start. The job that was
+# paused again. It doesn't make sense to me." A held job that carries on in its own chat needs room for what's left of
+# it, never less than what one picked-up turn costs (the first request after the resume reloads the whole chat).
+
+RESUME_FLOOR = 2.0  # points of the 5-hour, before any picked-up turn has been measured (Moneypenny's, on the row)
+RESUMES = os.path.join(DIR, "job-resume-turns.json")
+_RESUME = re.compile(r"^let's go again\. This is job (\d+) from the queue")
+
+
+def _resume_scan(path, rec):
+    """Read a session file on from where it was read last: each resume prompt, and the tokens of the first request
+    after it (the reload of the chat). Only whole lines; the offset moves to the last one."""
+    try:
+        f = open(path, "rb")
+    except OSError:
+        return rec
+    with f:
+        f.seek(rec.get("off", 0))
+        data = f.read()
+    end = data.rfind(b"\n") + 1
+    pending = rec.get("pending")
+    for raw in data[:end].splitlines():
+        if b'"user"' not in raw and b'"usage"' not in raw:
+            continue
+        try:
+            d = json.loads(raw)
+        except ValueError:
+            continue
+        if d.get("type") == "user" and not d.get("isMeta"):
+            c = (d.get("message") or {}).get("content")
+            if not isinstance(c, str):
+                c = " ".join(x.get("text", "") for x in c or [] if isinstance(x, dict))
+            m = _RESUME.match((c or "").strip())
+            if m:
+                pending = {"job": int(m.group(1)), "at": _iso(d.get("timestamp"))}
+        elif d.get("type") == "assistant" and pending:
+            msg = d.get("message") or {}
+            u = msg.get("usage")
+            if not isinstance(u, dict) or msg.get("model") == "<synthetic>":
+                continue
+            t = {family(msg.get("model")): [int(u.get("input_tokens") or 0), int(u.get("output_tokens") or 0),
+                                            int(u.get("cache_read_input_tokens") or 0),
+                                            int(u.get("cache_creation_input_tokens") or 0)]}
+            rec.setdefault("turns", []).append({**pending, "tokens": t})
+            pending = None
+    rec["off"] = rec.get("off", 0) + end
+    rec["pending"] = pending
+    return rec
+
+
+def resume_turns(idx=None):
+    """Every picked-up turn of a held job on this computer so far: [{"job", "at", "tokens"}], oldest first. Each
+    session file is read once, then only what's new in it (job-resume-turns.json)."""
+    idx = sessions() if idx is None else idx
+    try:
+        seen = json.load(open(RESUMES))
+    except (OSError, ValueError):
+        seen = {}
+    changed = False
+    for p, v in idx.items():
+        if v.get("job") is None:
+            continue
+        try:
+            size = os.path.getsize(p)
+        except OSError:
+            continue
+        rec = seen.get(p) or {}
+        if size > rec.get("off", 0):
+            seen[p] = _resume_scan(p, dict(rec))
+            changed = seen[p] != rec or changed
+    if changed:
+        os.makedirs(DIR, exist_ok=True)
+        tmp = RESUMES + ".tmp"
+        json.dump(seen, open(tmp, "w"))
+        os.replace(tmp, RESUMES)
+    return sorted((t for r in seen.values() for t in r.get("turns") or []), key=lambda t: t.get("at") or 0)
+
+
+def resume_floor(turns=None, model=None):
+    """The least a held job needs to carry on: what a picked-up turn usually costs (the middle of the ones measured,
+    by the learned rate), else RESUME_FLOOR of the 5-hour, the week's share by the rate. {"five", "weekly", "how",
+    "count"}; how is "learned" or "default"."""
+    model = model or load_rate()
+    try:
+        turns = resume_turns() if turns is None else turns
+    except Exception:
+        turns = []
+    costs = [c for c in (own_cost(t["tokens"], model) for t in turns) if c] if model else []
+    if costs:
+        return {**{k: round(statistics_median([c.get(k, 0) for c in costs]), 2) for k in KEYS},
+                "how": "learned", "count": len(costs)}
+    r = (model or {}).get("rate") or {}
+    week = RESUME_FLOOR * (r["five"] / r["weekly"] if r.get("five") and r.get("weekly")
+                           else FALLBACK["weekly"] / FALLBACK["five"])
+    return {"five": RESUME_FLOOR, "weekly": round(week, 2), "how": "default", "count": 0}
+
+
+def statistics_median(xs):
+    xs = sorted(xs)
+    if not xs:
+        return 0.0
+    m = len(xs) // 2
+    return float(xs[m]) if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2
+
+
+def held_used(n):
+    """F78: what held job n has used so far over all its runs (its own chats' tokens over the rate, else the rise in
+    the readings), and its count; None when it isn't a held job with a count here."""
+    rec = _load().get(str(n))
+    if not rec or rec.get("running", True):
+        return None
+    return {"used": _so_far(rec), "est": rec.get("est"), "rec": rec}
 
 
 # ---------- in words ----------

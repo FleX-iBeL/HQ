@@ -1515,6 +1515,63 @@ def so_far(n, state="", e=None, now=None):
     return _minutes_seen(n) or (round((now - started) / 60) if started else 0)
 
 
+def held_left(j, hist=None, samples=None):
+    """F78: what's left of a job the usage line held, when it carries on in its own chat; None for any other job
+    (it never ran, or it has to start over in a fresh chat: those are checked on their whole estimate, as before).
+    The time left is its estimate (as it ran: the team's guess, a redone one) minus the minutes it already ran; the
+    usage left is its estimated usage minus what its own chats used so far over all its runs (the tokens over the
+    learned rate, H173, the same as a running job's line), each at least the floor: what a picked-up turn costs.
+    {"est", "latest", "of", "of_latest", "so_far", "cost", "cost_latest", "used", "floor": [lines at the floor],
+    "floor_how", "floor_cost"}"""
+    if not str(j.get("state", "")).startswith("held"):
+        return None
+    try:
+        import usagecost as U
+        import carryon
+    except Exception:
+        return None
+    h = U.held_used(j["n"])
+    if not h:
+        return None
+    try:
+        if carryon.plan(j, "")["mode"] != "resume":
+            return None  # F78 (f): its chat can't be picked up again, so it starts over: the whole estimate
+    except Exception:
+        return None
+    hist = all_history() if hist is None else hist
+    e = _load_state().get(str(j["n"])) or known(j["n"])
+    est = e.get("est") or job_estimate(j["n"], j.get("text", ""), hist)["est"]
+    g, _, gf = pick_guess(e, guess_fits(hist))
+    est = with_guess(est, g, gf)
+    if isinstance(e.get("redone"), dict) and e["redone"].get("est"):
+        est = int(e["redone"]["est"])
+    kind = kind_for(j.get("text", ""), e.get("kind"))
+    lat = latest_of(est, kind, hist)
+    seen = _minutes_seen(j["n"], samples)
+    c = h["est"] or U.cost_for(est, j.get("text", ""), e.get("kind"), hist)
+    c = {k: float(c.get(k, 0)) for k in U.KEYS}
+    cl = U.at_latest(c, est, lat)
+    used = {k: round(float((h["used"] or {}).get(k, 0)), 1) for k in U.KEYS}
+    fl = U.resume_floor()
+    left = {k: round(max(c[k] - used[k], fl[k]), 1) for k in U.KEYS}
+    left_l = {k: round(max(cl[k] - used[k], fl[k]), 1) for k in U.KEYS}
+    floor = [k for k in U.KEYS if cl[k] - used[k] < fl[k]]  # where the start check (at the latest) asks for the floor
+    m = max(est - seen, 2)
+    return {"est": m, "latest": max(lat - seen, m), "of": est, "of_latest": lat, "so_far": seen, "cost": left,
+            "cost_latest": left_l, "used": used, "floor": floor, "floor_how": fl["how"],
+            "floor_cost": {k: fl[k] for k in U.KEYS}}
+
+
+def held_words(x):
+    """F78: a held job's left-over in a few words, for its waiting line."""
+    if not x:
+        return ""
+    s = f"held after {dur(x['so_far'])} of {dur(x['of'])}, counted on what's left of it"
+    if x["floor"]:
+        s += (", at least what a picked-up turn costs" + (" (measured)" if x["floor_how"] == "learned" else " (2%, none measured yet)"))
+    return s
+
+
 def on_redo(n, more, text="", state="", why="", now=None):
     """H286: the running job had to start fixing and redid its own estimate: `more` minutes from now. Kept with its
     estimate (the line on the planning says it too), so the end time moves once instead of creeping. The estimate it
@@ -2135,6 +2192,13 @@ def plan(now=None):
         ke = known(j["n"])
         guess, gkey, gf = pick_guess(ke, gfits)  # H190: a waiting job's guesses are in its estimate from the start
         computed, est = est, with_guess(est, guess, gf)
+        try:  # F78: a held job that carries on in its own chat counts what's left of it, as the gate does
+            samples = _samples() if samples is None else samples
+            hl = held_left(j, hist, samples)
+        except Exception:
+            hl = None
+        if hl:
+            est, computed, guess = hl["est"], hl["est"], None
         parts["guess_in"] |= bool(guess) and est != computed
         if j["state"].startswith("held") and not proj:
             waits = True
@@ -2148,6 +2212,9 @@ def plan(now=None):
         cost = U.cost_for(est, j["text"], kind, hist) if U else None
         lat = latest_of(est, kind, hist)  # F66: whether it may start goes by its latest end
         late = U.at_latest(cost, est, lat) if cost else None
+        if hl and cost:  # F78: what's left of it, at least a picked-up turn
+            cost = {**cost, **hl["cost"], "how": "left"}
+            lat, late = hl["latest"], dict(hl["cost_latest"])
         if cost:
             parts["five"] += round(cost.get("five", 0), 1)
             parts["weekly"] += round(cost.get("weekly", 0), 1)
@@ -2168,6 +2235,9 @@ def plan(now=None):
         out["jobs"][str(j["n"])] = {"est": est, "kind": kind, "eta": int(cursor) if on and not (proj and waits) else None,
                                     "waits": "usage" if (waits or start) and on else ("off" if not on else None),
                                     "latest": lat, **guess_detail(ke)}  # H190
+        if hl:  # F78: the status page and the list say it's what's left of a held job
+            out["jobs"][str(j["n"])]["held"] = {k: hl[k] for k in ("of", "of_latest", "so_far", "used", "floor",
+                                                                   "floor_how", "floor_cost")}
         if on and not (proj and waits):
             out["jobs"][str(j["n"])]["eta_latest"] = int(now + late_total * 60)
         if est != computed:
@@ -2413,9 +2483,13 @@ def words(n, p):
             s = f"estimated {dur(e['est'])}{g}, running {dur(e['so_far'])}: taking longer than estimated"
         else:
             s = f"about {dur(e['left'])} left of {dur(e['est'])}{g}"
+    elif e.get("held"):  # F78: what's left of a held job, the figure the start check uses
+        s = f"about {dur(e['est'])} left ({held_words({**e['held'], 'of': e['held']['of']})})"
     else:
         s = f"about {dur(e['est'])}{g}"  # H190: a waiting job's guesses too
     s += _cost_words(e)
+    if e.get("held") and e.get("cost_latest"):  # F78: the figure the start check needs room for
+        s += f", it needs room for {e['cost_latest'].get('five', 0):g}% of the 5-hour (what's left at the latest)"
     if e.get("start"):  # H172: when the usage should leave room for it
         s += f", starts around {_day(e['start'], p['now'])}{hhmm(e['start'])} {USAGE_START}"
     if e.get("never"):

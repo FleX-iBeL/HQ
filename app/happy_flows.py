@@ -13691,6 +13691,146 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         need(not own.exists(), "F58: as the main, the read wrote a file of its own too")
         return "F58: the backup's weather read writes nothing synced, keeps its own; the main writes weather.json"
 
+    async def flow184(self) -> str:
+        """F78, no Claude, no window: a job held by the usage line is checked on what's left of it when it carries on
+        in its own chat. On 28 October job 424 was held at 16:30 with about 5.8% of the 5-hour left, yet every minute
+        the start check counted it as the whole job (21.1%), so with the line at 100% and 14% of room it didn't start.
+        In a child python on a copy of the roadmap (its 5-hour line fixed at 100%), with stand-in estimates, readings,
+        a usage count and chats of its own: (a) a held job with 5.8% left at its latest and 14% of room fits, the
+        start check asks for 5.8%, not the whole job; (b) with 3% of room it waits, and its waiting line names 5.8%;
+        (c) one that used more than its estimate needs the floor: 2% before any picked-up turn is measured, then what
+        a measured one cost; (d) a job held twice counts what both its chats used; (e) a fresh job is checked on its
+        whole estimate, as before; (f) a held job whose chat is gone starts over, so its whole estimate again."""
+        import subprocess as sp
+        jv = ROOT
+        d = self.tmp / "F78"
+        d.mkdir(exist_ok=True)
+        rm = d / "roadmap.md"
+        text = ROADMAP.read_text()
+        text = re.sub(r"\*\*Usage limit:\s*\d+%", "**Usage limit: 100%", text, count=1)
+        text = re.sub(r"\*\*5-hour line:\s*moving", "**5-hour line: fixed", text, count=1)
+        rm.write_text(text)
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ESTIMATES": str(d / "est"), "HQ_USAGE": str(d / "usage.json"),
+               "HQ_CARRYON": str(d / "carryon"), "HQ_CLAUDE_PROJECTS": str(d / "chats"),
+               "HQ_ROUTINES_HISTORY": str(d / "samples.jsonl"), "HQ_LOOK": "0", "HQ_USAGE_LOG": str(d / "usage.log")}
+        child = r'''
+import json, os, subprocess, sys, time
+sys.path.insert(0, sys.argv[1] + "/routine")
+D, JV = sys.argv[2], sys.argv[1]
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+def jobs(*a):
+    r = subprocess.run(["python3", JV + "/routine/jobs.py", *a], capture_output=True, text=True)
+    need(r.returncode == 0, f"jobs.py {a}: {r.stdout} {r.stderr}")
+    return r.stdout
+for j in json.loads(jobs("next"))["waiting"]:
+    jobs("stop", str(j["n"]))
+for j in json.loads(jobs("next"))["running"]:
+    jobs("mark", str(j["n"]), "stopped 00:00")
+import usagecost as U, estimate as E, carryon as C, tick
+os.makedirs(U.DIR, exist_ok=True)
+iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+now = time.time()
+def usage(five):
+    json.dump({"readable": True, "checkedAt": iso(now), "limits": [
+        {"label": "5-hour limit", "percent": five, "resetsAt": iso(now + 3 * 3600)},
+        {"label": "Weekly · all models", "percent": 10, "resetsAt": iso(now + 3 * 86400)}]}, open(U.USAGE, "w"))
+def gate(job):
+    a = tick.job_need(job)
+    need_ = dict(x.split("=") for x in a[a.index("--need") + 1].split(","))
+    return int(a[a.index("--minutes") + 1]), {k: float(v) for k, v in need_.items()}
+def job(n):
+    return next(j for j in json.loads(jobs("next"))["waiting"] if j["n"] == n)
+held = int(jobs("add", "flow 184 held job: a stand-in build that the usage line held").split()[1])
+fresh = int(jobs("add", "flow 184 fresh job: a stand-in build that never ran").split()[1])
+# It ran 24 minutes before the hold (the status server's samples).
+open(E.SAMPLES, "w").write("".join(json.dumps({"t": now - 3600 + i * 60, "j": [{"n": held, "st": "BUILDING"}]}) + "\n" for i in range(24)))
+lat = E.latest_of(30, "build")
+c = {"five": 15.0, "weekly": 1.5}
+cl = U.at_latest(c, 30, lat)
+def count(own, running=False):
+    snap = {"five": [70.0, now + 3 * 3600], "weekly": [10.0, now + 3 * 86400]}
+    d = U._load()
+    d[str(held)] = {"n": held, "started": int(now - 3600), "running": running, "spent": {"five": 0, "weekly": 0},
+                    "seg": snap, "last": snap, "est": {**c, "minutes": 30, "how": "similar"}, **({"own": own} if own else {})}
+    U._save(d)
+# Held in its own chat, still on this computer.
+sid = "f78-own-chat"
+os.makedirs(os.path.join(D, "chats", "p"), exist_ok=True)
+open(os.path.join(D, "chats", "p", sid + ".jsonl"), "w").write("{}\n")
+jobs("mark", str(held), "running since 12:00")
+jobs("held", str(held))
+st = E._load_state()
+st[str(held)].update(est=30, kind="build", started=int(now - 3600))
+E._save_state(st)
+C.save(held, {"session": sid, "held": "16:30", "step": "the write-up"})
+count({"five": round(cl["five"] - 5.8, 2), "weekly": round(cl["weekly"] - 0.3, 2)})
+# (e) the fresh job: its whole estimate, exactly as before.
+m, need_ = gate(job(fresh))
+fm, fc = U.job_cost(fresh, job(fresh)["text"], latest=True)
+need(E.held_left(job(fresh)) is None and m == max(1, round(fm)) and need_["five"] == fc["five"],
+     f"(e) a fresh job isn't checked on its whole estimate: {m} {need_} against {fm} {fc}")
+full = U.job_cost(held, job(held)["text"], latest=True)[1]
+# (a) 5.8% left, 14% of room: it fits, and the start check asks for what's left.
+usage(86)
+m, need_ = gate(job(held))
+need(need_["five"] == 5.8 and m == lat - 24, f"(a) the start check doesn't ask for what's left: {m} min {need_} (whole job {full}) lat {lat} {E.held_left(job(held))} seen {E._minutes_seen(held)}")
+P = U.Projection.here()
+need(P and P.fits(need_, time.time()), f"(a) 5.8% doesn't fit in 14% of room: {P and P.room('five', time.time())}")
+p = E.plan()
+e = p["jobs"][str(held)]
+need(not e.get("start") and e.get("waits") != "usage" and e["cost_latest"]["five"] == 5.8 and e.get("held"),
+     f"(a) the list doesn't count what's left or still holds it: {e}")
+# (b) 3% of room: it waits, and its waiting line names 5.8%, not the whole job.
+usage(97)
+P = U.Projection.here()
+need(not P.fits(gate(job(held))[1], time.time()), "(b) 5.8% fits in 3% of room")
+p = E.plan()
+w = E.words(held, p)
+need("5.8%" in w and f"{full['five']:g}%" not in w and "what's left" in w and p["jobs"][str(held)].get("start"),
+     f"(b) the waiting line doesn't name what's left: {w}")
+# (c) it used more than its estimate: the floor, 2% before a picked-up turn is measured ...
+count({"five": cl["five"] + 3, "weekly": cl["weekly"] + 1})
+x = E.held_left(job(held))
+need(x["cost_latest"]["five"] == 2.0 and x["floor"] and x["floor_how"] == "default", f"(c) no 2% floor: {x}")
+need("picked-up turn" in E.words(held, E.plan()), "(c) the waiting line doesn't say it's the floor")
+# ... then what a picked-up turn really cost (here 1.6% of the 5-hour, by a stand-in rate).
+json.dump({"rate": {"five": 100000, "weekly": 1000000}}, open(U.RATE_FILE, "w"))
+rows = [{"type": "user", "timestamp": iso(now - 600), "message": {"role": "user", "content": f"let's go. This is job {held} from the queue on the HQ roadmap"}},
+        {"type": "assistant", "timestamp": iso(now - 590), "message": {"id": "m1", "model": "claude-opus-5-5", "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 50000}}},
+        {"type": "user", "timestamp": iso(now - 300), "message": {"role": "user", "content": f"let's go again. This is job {held} from the queue on the HQ roadmap, started again"}},
+        {"type": "assistant", "timestamp": iso(now - 290), "message": {"id": "m2", "model": "claude-opus-5-5", "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 100000}}},
+        {"type": "assistant", "timestamp": iso(now - 280), "message": {"id": "m3", "model": "claude-opus-5-5", "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 900000}}}]
+open(os.path.join(D, "chats", "p", sid + ".jsonl"), "w").write("".join(json.dumps(r) + "\n" for r in rows))
+fl = U.resume_floor()
+need(fl["how"] == "learned" and fl["five"] == 1.6 and fl["count"] == 1, f"(c) the floor isn't the measured picked-up turn: {fl}")
+x = E.held_left(job(held))
+need(x["cost_latest"]["five"] == 1.6 and x["floor_how"] == "learned", f"(c) the held job doesn't wait for the measured floor: {x}")
+# (d) held twice: a fresh chat ran in between; what both chats used counts together.
+rows2 = [{"type": "user", "timestamp": iso(now - 200), "message": {"role": "user", "content": f"let's go. This is job {held} from the queue, started again after the usage hold"}},
+         {"type": "assistant", "timestamp": iso(now - 190), "message": {"id": "m4", "model": "claude-opus-5-5", "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 400000}}}]
+open(os.path.join(D, "chats", "p", "f78-second-run.jsonl"), "w").write("".join(json.dumps(r) + "\n" for r in rows2))
+count(None, running=True)
+U.hold(held)
+x = E.held_left(job(held))
+both = round(1.6 * (50000 + 100000 + 900000 + 400000) / 100000, 1)
+need(x["used"]["five"] == both, f"(d) a job held twice doesn't count both runs: used {x['used']}, both {both}")
+need(x["cost_latest"]["five"] == round(max(cl["five"] - both, 1.6), 1), f"(d) what's left isn't the estimate minus both runs: {x}")
+# (f) its own chat is gone: it starts over, so its whole estimate again.
+for f in os.listdir(os.path.join(D, "chats", "p")):
+    if f.startswith(sid):
+        os.remove(os.path.join(D, "chats", "p", f))
+m, need_ = gate(job(held))
+need(E.held_left(job(held)) is None and need_["five"] == full["five"], f"(f) a held job that starts over isn't checked on its whole estimate: {need_} {full}")
+print("OK")
+'''
+        r = sp.run(["python3", "-c", child, str(jv), str(d)], capture_output=True, text=True, env=env, timeout=240)
+        need(r.returncode == 0 and r.stdout.strip().endswith("OK"), f"F78: {r.stdout[-1500:]} {r.stderr[-1500:]}")
+        return ("a held job is checked on what's left of it: 5.8% fits in 14% of room and waits with 3%, its line names "
+                "5.8%; over its estimate it waits for the floor (2%, then the measured picked-up turn); held twice it "
+                "counts both runs; a fresh job and one that starts over are checked on the whole estimate")
+
     async def flow174(self) -> str:
         """F72, no Claude, no window: big work is cut into steps that are saved as they go, so a stop or a crash
         picks up at the next step, not the top. On a copy of the roadmap, its own carry-on folder, a throwaway git
@@ -21880,6 +22020,7 @@ FLOWS = {
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     177: ("H286: the status page says in plain words what the team is doing (never the commands), a job that has to start fixing redoes its own estimate once with why, and a job that ran long through its own mistake is tagged, kept out of the estimates and listed", False, "flow177"),
     182: ("F77: the automatic review of new or changed planning rows: the flag, the refused and lost Ready mark, team notes start nothing, the quiet wait, once per wording, retries, the day's budget, first on Moneypenny's calls only", False, "flow182"),
+    184: ("F78: a job held by the usage line is checked on what's left of it when it carries on in its own chat (time and usage, at least what a picked-up turn costs, all its runs counted), its waiting line says so; a fresh job and one that starts over on the whole estimate", False, "flow184"),
     183: ("F67: the laptop's one-time start onto the rewritten history, from the old push.py it has: refused at first, then on the new dev with the public name everywhere", False, "flow183"),
     181: ("H295: the game's weeks Monday to Sunday along the top, the days before the start and after the end greyed, each box its date, today outlined and named, a tick lands on the day it says", False, "flow181"),
     180: ("H285: reminders that come back by themselves: every N hours between two times, every day or set days, never at night, stopped on one word in one go or with its to-do item", False, "flow180"),

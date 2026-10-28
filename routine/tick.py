@@ -1038,6 +1038,14 @@ def job_need(job):
     try:
         import usagecost
         m, c = usagecost.job_cost(job["n"], job.get("text", ""), latest=True)  # F66: by its latest end
+        try:  # F78: a held job that carries on in its own chat needs room for what's left of it, not the whole job
+            import estimate
+            hl = estimate.held_left(job)
+        except Exception as e:
+            hl = None
+            log(f"what's left of held job {job['n']}: {e!r}")
+        if hl:
+            m, c = hl["latest"], hl["cost_latest"]
         return ["--minutes", str(max(1, int(round(m)))), "--need", f"five={c['five']},weekly={c['weekly']}"]
     except Exception as e:
         log(f"estimate for the usage gate: {e!r}")
