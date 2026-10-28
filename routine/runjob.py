@@ -29,7 +29,8 @@ import hqpaths  # noqa: E402
 import usagelive  # noqa: E402
 
 FOLDER = hqpaths.FOLDER
-RUN = os.path.join(hqpaths.HQ, "scratch", "routine")
+# F65: HQ_JOB_RUN gives a test its own run folder (the prompt, the stream log, the activity), as tick.py does.
+RUN = os.environ.get("HQ_JOB_RUN") or os.path.join(hqpaths.HQ, "scratch", "routine")
 CLAUDE = hqpaths.tool("claude", "/opt/homebrew/bin/claude")
 PY = sys.executable
 ACTIVITY = os.environ.get("HQ_ACTIVITY") or os.path.join(RUN, "job-activity.json")

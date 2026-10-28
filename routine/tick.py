@@ -53,7 +53,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
 import hqpaths  # M1: HQ is the app; the user's files are in workspace
 FOLDER = hqpaths.FOLDER
-RUN = os.path.join(JV, "scratch", "routine")
+# F65: HQ_JOB_RUN gives a test its own run folder; the headless run (runjob.py) reads the same one.
+RUN = os.environ.get("HQ_JOB_RUN") or os.path.join(JV, "scratch", "routine")
 STATE = os.path.join(RUN, "job.json")  # the running job: {"n", "pid", "started"}
 PIDFILE = os.path.join(RUN, "job.pid")  # written by the job's Terminal window
 GATE_NOTE = os.path.join(RUN, "gate-note")

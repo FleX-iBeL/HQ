@@ -13554,6 +13554,73 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("resume" in _P(B.__file__).read_text(), "a reopened session isn't resumed")
         return "F60: a big read is cut to a part; a dead session says so, reopens and answers the same turn"
 
+    async def flow170(self) -> str:
+        """F65, no Claude: a job started through the routine's own start (tick.start) with the headless switch on.
+        Commit 2856f05 wrote the prompt before its file was named, so every headless start failed from 02:00 to
+        11:07 on 28 October and no flow caught it: flow 88 starts jobs with the switch as the computer has it, flow
+        169 runs runjob.py on a prompt it wrote itself. Here, in its own process: a copy of the queue with one ready
+        job, HQ_BACKEND_HEADLESS_JOBS=1, a run folder of its own (HQ_JOB_RUN) and a fake claude; tick.start writes
+        job-N.prompt and job-N.command (the headless script, runjob.py), the script is run as the window would run it,
+        the fake claude gets the prompt, the steps are logged and the done mark is run; with the switch off the same
+        start writes the old chat script that reads the prompt file."""
+        import subprocess as _sp
+        jv = ROOT
+        rm = self.tmp / "roadmap-F65.md"
+        rm.write_text(ROADMAP.read_text())
+        run_dir, co_dir, chats = self.tmp / "run-F65", self.tmp / "carryon-F65", self.tmp / "claude-projects-F65"
+        run_dir.mkdir(exist_ok=True)
+        got = self.tmp / "F65-prompt-seen.txt"
+        fake = self.tmp / "F65claude.py"
+        fake.write_text("#!/usr/bin/env python3\nimport json, sys, os\nopen(os.environ['F65_GOT'], 'w').write(sys.stdin.read())\n"
+                        "def out(d): print(json.dumps(d), flush=True)\n"
+                        "out({'type': 'system', 'subtype': 'init', 'session_id': 's-f65'})\n"
+                        "out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'echo flow 170'}}]}})\n"
+                        "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Done.'})\n")
+        fake.chmod(0o755)
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_CARRYON": str(co_dir), "HQ_CLAUDE_PROJECTS": str(chats),
+               "HQ_JOB_RUN": str(run_dir), "HQ_CLAUDE": str(fake), "HQ_ROLE_HERE": "1", "F65_GOT": str(got)}
+        def jobs(*a):
+            r = _sp.run([sys.executable, str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
+            need(r.returncode == 0, f"jobs.py {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
+            return r.stdout + r.stderr
+        for j in json.loads(jobs("next"))["waiting"]:
+            jobs("stop", str(j["n"]))
+        for j in json.loads(jobs("next"))["running"]:
+            jobs("mark", str(j["n"]), "stopped 00:00")
+        def start(switch: str) -> tuple[int, str]:
+            n = int(jobs("add", f"flow 170 job, headless {switch}").split()[1])
+            code = ("import sys, os, json, subprocess; sys.path.insert(0, %r); import tick; "
+                    "tick.LINUX_WINDOWS = True; opened = []; tick.open_window = lambda cmd, name='': opened.append(cmd); "
+                    "job = next(j for j in json.loads(tick.jobs('next'))['waiting'] if j['n'] == %d); tick.start(job); "
+                    "assert opened, 'no window opened'; print('OPENED', opened[0]); "
+                    "r = subprocess.run(['bash', opened[0]], capture_output=True, text=True, timeout=120) if %r == '1' else None; "
+                    "print(r.stdout[-1500:] + r.stderr[-500:] if r else '')") % (str(jv / "routine"), n, switch)
+            r = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=180,
+                        env={**env, "HQ_BACKEND_HEADLESS_JOBS": switch})
+            need(r.returncode == 0 and "OPENED" in r.stdout, f"tick.start with headless {switch}: {r.stdout[-600:]} {r.stderr[-900:]}")
+            return n, r.stdout
+        # Headless on: the start writes both files, the script runs runjob.py, the job runs and is marked done.
+        n, out = start("1")
+        pfile, cmd = run_dir / f"job-{n}.prompt", run_dir / f"job-{n}.command"
+        need(pfile.exists() and cmd.exists(), f"job-{n}.prompt or job-{n}.command wasn't written: {sorted(p.name for p in run_dir.iterdir())}")
+        prompt, script = pfile.read_text(), cmd.read_text()
+        need(prompt.startswith(f"let's go. This is job {n} from the queue") and "This job runs headless" in prompt,
+             f"the headless prompt: {prompt[:300]}")
+        need("runjob.py" in script and f" {n} --session-id " in script and "nudge.py" not in script,
+             f"the headless script doesn't run runjob.py: {script}")
+        need(got.exists() and got.read_text() == prompt, "the fake claude didn't get the job's prompt")
+        log = (run_dir / f"job-{n}.stream.log").read_text() if (run_dir / f"job-{n}.stream.log").exists() else ""
+        need("Bash echo flow 170" in log and "the done mark is run for it" in log, f"the run's steps: {log[-500:]} {out[-500:]}")
+        need(re.search(rf"^- Job {n} · done ", rm.read_text(), re.M), f"job {n} wasn't marked done")
+        # Headless off: the old chat script, reading the prompt file; not run.
+        m, _ = start("0")
+        script0 = (run_dir / f"job-{m}.command").read_text()
+        need((run_dir / f"job-{m}.prompt").exists() and str(run_dir / f"job-{m}.prompt") in script0
+             and "runjob.py" not in script0 and "This job runs headless" not in (run_dir / f"job-{m}.prompt").read_text(),
+             f"the start with the switch off: {script0}")
+        return (f"headless on: job {n}'s prompt and command written, the script ran runjob.py, the fake claude got the prompt, "
+                f"its step was logged and the done mark run; switch off: job {m} gets the old chat script")
+
     async def flow169(self) -> str:
         """Fable, 27 October 2026, no Claude: the backend behind switches. The switches read and flip (a fresh
         install all off); the briefing is made from a workspace's files without Claude and is small; a briefed start
@@ -20505,6 +20572,7 @@ FLOWS = {
     147: ("H271: bugs before features and the sprint by MoSCoW: a tag per row (a call may, the backup hands it on), grouped Must first with bugs first then the rank, laid in that order, the page in colours light and dark with a legend and a picker; Moneypenny's craft; a fresh roadmap's Bugs and Features", False, "flow147"),
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
     169: ("Fable, 27 October 2026: the backend behind switches: the switches, the briefing made without Claude and the briefed start (the old one with the switch off), the open line's sessions and rollover, the log lift, the planning index against parsing, a headless job against a fake claude (done mark, stop signal), the lookups free on a call, the departments", False, "flow169"),
+    170: ("F65: a job started through the routine's own start with the headless switch on: job-N.prompt and job-N.command written, the script runs runjob.py against a fake claude, the job runs and is marked done; the switch off gives the old chat script", False, "flow170"),
     168: ("F60: a big read on a call is cut to a part (Read and cat), the SDK buffer is raised, a session that dies mid-turn says so, reopens and answers the same turn", False, "flow168"),
     167: ("F57: a finished job without its done mark is nudged by name; a never-ending wait loop stops counting after 15 minutes; every job text ends with the done mark; done N --at HH:MM, also from a call", False, "flow167"),
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),

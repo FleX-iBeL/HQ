@@ -4,6 +4,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Fix: with the headless jobs switch on, no team job could start (from 0.4.18): the start wrote the job's prompt before it had named the file, so it failed every minute. Fixed, and a new check (happy flow 170) starts a job the routine's own way with the switch on, against a stand-in Claude, so this can't slip through again. The switch is off unless you turned it on, so most HQs never saw it.
 - Moneypenny delegates and checks, she never builds. Her way of working now says it plainly: she never edits, commits or pushes HQ's code and never runs a fix herself, also not on your yes on a call. Any change becomes an item for the team, and she checks it in QA. Asked to fix something, she says the team has it and writes the item. The tutorial says it too.
 
 ## 0.4.18 · 27 October 2026
