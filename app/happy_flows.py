@@ -13066,7 +13066,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need(self._sprint(env, "ready", "H9006", "maybe").returncode != 0, "H272: a Ready mark that isn't on or off was taken")
         d = js.loads(Path(env["HQ_SPRINT"]).read_text())
         need(d.get("order") == ["H9006"] and d.get("moscow") == {"H9006": "must"} and set(d.get("ready", {})) == {"H9006"}
-             and "fp" in d["ready"]["H9006"], f"H272: the mark isn't kept next to the rank and the tag: {d}")
+             and "ask" in d["ready"]["H9006"], f"H272: the mark isn't kept next to the rank and the tag: {d}")
         need("H9006" in rm.read_text() and "ready" not in next(l for l in rm.read_text().split("\n") if "| H9006 " in l).split("|")[1],
              "H272: the mark was written into the row")
         p = js.loads(self._sprint(env, "json").stdout)
@@ -14670,6 +14670,177 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
                     os.environ.pop(k, None)
                 else:
                     os.environ[k] = v
+
+    async def flow182(self) -> str:
+        """F77, no Claude: the automatic review of new or changed planning rows, with a stand-in reviewer (HQ_REVIEW_FAKE:
+        a row whose ask holds "HOLE: …" is flagged with that finding, the rest pass; "fail" never answers) and a made-up
+        clock. The first start reviews nothing; a team note (a built note in the description, a QA line, a note in the
+        third or fifth cell, on a feature row and a bug row) starts no review and leaves the Ready mark; a new row waits
+        until it's been quiet five minutes (written in steps, it's reviewed once), can't be marked ready before its
+        review, is flagged with the finding, refused the mark with why, and reviewed once per wording; a ready row that
+        gets the flag loses its mark; fixed, the next review takes the flag off; his say-so clears it with his words
+        kept outside the row; a review that doesn't run leaves no flag, is tried again, and from the second failure says
+        so; past the day's budget the rest waits for the night; the flag is first in Moneypenny's briefing and in no
+        other; the old planning flows' layouts hold."""
+        import datetime as _dt
+        import json as js
+        import shutil
+        import subprocess as sp
+        import time as _t
+        rm, env = self._sprint_env("F77")
+        rm.write_text(rm.read_text().replace(
+            "| ⬜ | H9004 A made-up export | Export the to-do list | | |",
+            "| ⬜ | H9004 A made-up export | Export the to-do list | | |\n"
+            "| ⬜ | F9001 A made-up bug | What's wrong: the button fails. What right looks like: it works. How to check: flow 9. | | | |"))
+        t0 = _dt.datetime(2026, 10, 26, 12, 0).timestamp()
+        env.update({"HQ_LOOK": "0", "HQ_ROLE_HERE": "1", "HQ_REVIEW_FAKE": "auto", "HQ_REVIEW_NOW": str(int(t0))})
+        env.pop("HQ_REVIEW_QUIET", None)
+        sjson = Path(env["HQ_SPRINT"])
+        rv = lambda *a, **kw: sp.run(["python3", str(ROOT / "routine" / "review.py"), *a], capture_output=True, text=True,  # noqa: E731
+                                     env={**env, **kw}, timeout=60)
+        st = lambda: js.loads(sjson.read_text()).get("review", {}).get("rows", {})  # noqa: E731
+        ok = lambda r, what: need(r.returncode == 0, f"F77: {what}: {r.stdout[-400:]} {r.stderr[-600:]}")  # noqa: E731
+        costs = rm.parent / (rm.stem + "-estimates") / "reviews.jsonl"
+        nrev = lambda l: sum(1 for x in (costs.read_text().splitlines() if costs.exists() else []) if js.loads(x)["row"] == l)  # noqa: E731
+
+        def tick(at, **kw):
+            r = rv("tick", HQ_REVIEW_NOW=str(int(at)), **kw)
+            ok(r, "tick")
+            for _ in range(100):  # the review runs in the background: wait until it's written
+                if not any(v.get("pending") for v in st().values()):
+                    break
+                _t.sleep(0.1)
+            return r.stdout
+
+        def edit(old, new):
+            t = rm.read_text()
+            need(old in t, f"F77 (the flow itself): {old!r} isn't in the test planning")
+            rm.write_text(t.replace(old, new))
+        # the first start: every open row taken as reviewed, nothing run
+        out = tick(t0)
+        need("no review started" in out and set(st()) >= {"H9001", "H9002", "H9004", "F9001"}
+             and all(v.get("verdict") == "baseline" for v in st().values()) and not costs.exists(),
+             f"F77: the first start reviewed something: {out} {st()}")
+        for l in ("H9002", "H9004", "F9001"):
+            ok(self._sprint(env, "ready", l), f"ready {l} after the first start")
+        # the team's notes: no review, the marks hold (description, QA line, the third and fifth cell; feature and bug)
+        edit("| ⬜ | H9002 A made-up colour change | The calendar's colours | | |",
+             "| ⬜ | H9002 A made-up colour change | The calendar's colours Built (job 5, 26 October 2026): blue now. QA passed (job 6, 26 October 2026 13:00): tried. | Built (job 5): the note | |")
+        edit("| ⬜ | H9004 A made-up export | Export the to-do list | | |", "| ⬜ | H9004 A made-up export | Export the to-do list | Built (job 7, 26 October 2026): done. | |")
+        edit("How to check: flow 9. | | | |", "How to check: flow 9. | | | Fixed (job 8, 26 October 2026): it works. QA failed (job 9, 26 October 2026 14:00): no. |")
+        out = tick(t0 + 900)
+        p = js.loads(self._sprint(env, "json").stdout)
+        by = {x["label"]: x for x in p["rows"]}
+        need("no review started" in out and not costs.exists() and all(by[l]["ready"] == "ready" for l in ("H9002", "H9004", "F9001")),
+             f"F77: a team note started a review or took a Ready mark off: {out} {[(l, by[l]['ready']) for l in ('H9002', 'H9004', 'F9001')]}")
+        # a ✅ tick: no review, the row lets go
+        edit("| ⬜ | H9004 A made-up export", "| ✅ | H9004 A made-up export")
+        tick(t0 + 960)
+        need("H9004" not in st() and not costs.exists(), f"F77: a done row was reviewed or kept: {st().get('H9004')}")
+        # a new row, written in steps: waits until quiet, can't be marked before, reviewed once, flagged
+        t1 = t0 + 1200
+        new = "| ⬜ | H9010 A made-up new row | What's asked: a pause button. HOLE: no word on a second stop | | |"
+        edit("| ✅ | H9003 A made-up done row", new + "\n| ✅ | H9003 A made-up done row")
+        tick(t1)
+        r = self._sprint(env, "ready", "H9010")
+        need(r.returncode != 0 and "its review hasn't passed yet" in r.stdout + r.stderr, f"F77: a row not reviewed yet got the Ready mark: {r.stdout}{r.stderr}")
+        edit("HOLE: no word on a second stop |", "Why: he asked. HOLE: no word on a second stop |")  # its second step, two minutes on
+        tick(t1 + 120)
+        tick(t1 + 120 + 290)
+        need(nrev("H9010") == 0, "F77: a row was reviewed before it had been quiet five minutes")
+        out = tick(t1 + 120 + 310)
+        need("H9010" in out and nrev("H9010") == 1 and st()["H9010"]["verdict"] == "flag" and st()["H9010"]["findings"] == ["no word on a second stop"],
+             f"F77: the new row wasn't reviewed once and flagged: {out} {st().get('H9010')}")
+        need("HOLE" in rm.read_text() and "flag" not in next(l for l in rm.read_text().split("\n") if "| H9010 " in l).lower(),
+             "F77: the flag or its findings were written into the row")
+        r = self._sprint(env, "ready", "H9010")
+        need(r.returncode != 0 and "the review flagged it" in r.stdout + r.stderr and "second stop" in r.stdout + r.stderr,
+             f"F77: a flagged row got the Ready mark, or not with why: {r.stdout}{r.stderr}")
+        p = js.loads(self._sprint(env, "json").stdout)
+        x = next(x for x in p["rows"] if x["label"] == "H9010")
+        need(x.get("review") == "flagged" and "second stop" in (x.get("not_ready") or "") and "[FLAGGED: no word on a second stop]" in self._sprint(env, "list").stdout
+             and "FLAGGED by the review" in self._sprint(env, "open").stdout and "FLAGGED by the review" in self._sprint(env, "show", "H9010").stdout,
+             f"F77: the planning doesn't show the flag: {x}")
+        tick(t1 + 3600)
+        tick(t1 + 7200)
+        need(nrev("H9010") == 1, "F77: the same words were reviewed twice")
+        # a ready row whose ask changes and gets the flag: it loses its mark
+        edit("| ⬜ | H9002 A made-up colour change | The calendar's colours", "| ⬜ | H9002 A made-up colour change | The calendar's colours, HOLE: where the 12 comes from.")
+        t2 = t1 + 8000
+        tick(t2)
+        tick(t2 + 301)
+        d = js.loads(sjson.read_text())
+        need(st()["H9002"]["verdict"] == "flag" and "H9002" not in d.get("ready", {}), f"F77: a flagged row kept its Ready mark: {st()['H9002']} {d.get('ready')}")
+        # fixed: the next review takes the flag off; then the mark is allowed
+        edit("HOLE: no word on a second stop", "If stopped twice, the second stop does the same")
+        tick(t2 + 400)
+        tick(t2 + 400 + 301)
+        need(st()["H9010"]["verdict"] == "pass" and nrev("H9010") == 2, f"F77: the fixed row's review didn't take the flag off: {st()['H9010']}")
+        ok(self._sprint(env, "ready", "H9010"), "ready once its review passed")
+        # his say-so: the flag off, his words kept outside the row
+        r = rv("clear", "H9002", "It's fine, the 12 is the hours in the room")
+        ok(r, "clear")
+        need(st()["H9002"]["verdict"] == "cleared" and "hours in the room" in st()["H9002"]["cleared_words"]
+             and "hours in the room" not in rm.read_text() and "his words" in self._sprint(env, "show", "H9002").stdout, f"F77: clear didn't keep his words: {st()['H9002']}")
+        ok(self._sprint(env, "ready", "H9002"), "ready after his say-so")
+        need(rv("clear", "H9001", "no").returncode != 0, "F77: clear took a row with no flag")
+        # a review that doesn't run: no flag, tried again later, then says so
+        edit("| ✅ | H9003 A made-up done row", "| ⬜ | H9011 A made-up eleventh row | What's asked: a fourth thing. |\n| ✅ | H9003 A made-up done row")
+        t3 = t2 + 2000
+        tick(t3, HQ_REVIEW_FAKE="fail")
+        tick(t3 + 301, HQ_REVIEW_FAKE="fail")
+        need(st()["H9011"].get("verdict") is None and st()["H9011"]["tries"][1] == 1, f"F77: a review that didn't run left a verdict: {st()['H9011']}")
+        tick(t3 + 600, HQ_REVIEW_FAKE="fail")
+        need(st()["H9011"]["tries"][1] == 1, "F77: a failed review was tried again at once")
+        tick(t3 + 301 + 1801, HQ_REVIEW_FAKE="fail")
+        x = next(x for x in js.loads(self._sprint(env, "json").stdout)["rows"] if x["label"] == "H9011")
+        need(st()["H9011"]["tries"][1] == 2 and x.get("review") == "didnt_run" and "[the review didn't run]" in self._sprint(env, "list").stdout
+             and "review didn't run" in rv("list").stdout, f"F77: two failed reviews don't say the review didn't run: {x}")
+        r = self._sprint(env, "ready", "H9011")
+        need(r.returncode != 0 and "didn't run" in r.stdout + r.stderr, "F77: a row whose review didn't run got the mark")
+        tick(t3 + 301 + 3700)
+        need(st()["H9011"]["verdict"] == "pass", f"F77: the review wasn't tried again after it failed: {st()['H9011']}")
+        # the day's budget: past it, the rest waits for the night
+        edit("| ✅ | H9003 A made-up done row", "| ⬜ | H9012 A made-up twelfth row | What's asked: twelve. |\n| ⬜ | H9013 A made-up thirteenth row | What's asked: thirteen. |\n| ✅ | H9003 A made-up done row")
+        t4 = _dt.datetime(2026, 10, 27, 12, 0).timestamp()
+        kw = {"HQ_REVIEW_DAY_USD": "0.01", "HQ_REVIEW_FAKE_COST": "0.02"}
+        tick(t4, **kw)
+        tick(t4 + 301, **kw)
+        tick(t4 + 400, **kw)
+        tick(t4 + 500, **kw)
+        done_day = [l for l in ("H9012", "H9013") if st()[l].get("verdict")]
+        need(len(done_day) == 1, f"F77: the day's budget didn't hold the second review: {done_day}")
+        night = _dt.datetime(2026, 10, 27, 22, 30).timestamp()
+        tick(night, **kw)
+        need(all(st()[l].get("verdict") == "pass" for l in ("H9012", "H9013")), "F77: the waiting review didn't run at night")
+        # Moneypenny's briefing has the flags first; the coach's and the day's none
+        edit("What's asked: thirteen. |", "What's asked: thirteen. HOLE: no test named |")
+        tick(night + 60)
+        tick(night + 400)
+        ws = self.tmp / "ws-F77"
+        (ws / "HQ").mkdir(parents=True, exist_ok=True)
+        shutil.copy(rm, ws / "HQ" / "roadmap.md")
+        keep = {k: os.environ.get(k) for k in ("HQ_ROADMAP", "HQ_SPRINT", "HQ_REVIEW_FAKE", "HQ_ROUTINES_HISTORY")}
+        os.environ.update({k: env[k] for k in keep})
+        try:
+            import sys as _s
+            _s.path.insert(0, str(ROOT / "routine"))
+            import briefing
+            b = briefing.build("build", folder=ws)
+            c, dd = briefing.build("coach", folder=ws), briefing.build("day", folder=ws)
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        need("FLAGGED ON THE PLANNING" in b and "H9013" in b and "no test named" in b and "Raise them first" in b
+             and b.find("FLAGGED ON THE PLANNING") < b.find("status block"), f"F77: Moneypenny's briefing doesn't open with the flagged rows: {b[:900]}")
+        need("FLAGGED" not in c and "FLAGGED" not in dd, "F77: a Pepper or Donna briefing carries the flags")
+        return ("the first start reviews nothing; team notes start nothing and keep the mark (feature and bug rows); a new row "
+                "waits until quiet, is reviewed once, flagged, refused the mark with why, loses it, the fix takes the flag off, "
+                "his say-so clears it; a failed review is tried again and says so; the day's budget waits for the night; "
+                "the flags first in Moneypenny's briefing only")
 
     async def flow181(self) -> str:
         """H295, no Claude, no server: the game's weeks as he reads them. The game page (web/games.js) on a page of its
@@ -21609,6 +21780,7 @@ FLOWS = {
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     177: ("H286: the status page says in plain words what the team is doing (never the commands), a job that has to start fixing redoes its own estimate once with why, and a job that ran long through its own mistake is tagged, kept out of the estimates and listed", False, "flow177"),
+    182: ("F77: the automatic review of new or changed planning rows: the flag, the refused and lost Ready mark, team notes start nothing, the quiet wait, once per wording, retries, the day's budget, first on Moneypenny's calls only", False, "flow182"),
     181: ("H295: the game's weeks Monday to Sunday along the top, the days before the start and after the end greyed, each box its date, today outlined and named, a tick lands on the day it says", False, "flow181"),
     180: ("H285: reminders that come back by themselves: every N hours between two times, every day or set days, never at night, stopped on one word in one go or with its to-do item", False, "flow180"),
     179: ("H279: ask Donna or Pepper about an old text and she finds it: a text past the last 15 and one past the 400 (only in git) found by words and by day on Donna's line and the coaching line, each once; the text rules say to look first; a call or a text runs the search without a yes, never on another folder", False, "flow179"),

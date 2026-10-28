@@ -16,7 +16,7 @@ Run the low usage Claude prompt check if your checklist passes."
     written in steps on a call is reviewed once), at most AT_ONCE at a time, each wording once.
   - The first start: every open row's ask is taken as already reviewed, without a review ("baseline"), so there's no
     burst; only what's added or changed after that is reviewed.
-  - The reviewer: a small Claude run (MODEL, the lightest that does it, low effort, no tools: it reads only the row it's
+  - The reviewer: a small Claude run (MODEL, the lightest that does it well: Sonnet, low effort, no tools: it reads only the row it's
     given and can't change anything) holds the row against the nine ready points (a bug row with an F label: the three
     points of a small fix) and hunts holes per point. It answers pass, or flag with a few plain findings.
   - The flag and its findings are kept in sprint.json ("review"), next to the Ready mark, never in the row (or they'd
@@ -52,7 +52,10 @@ import estimate as E  # noqa: E402
 import jobs as q  # noqa: E402
 import sprint as S  # noqa: E402
 
-MODEL = os.environ.get("HQ_REVIEW_MODEL") or "haiku"  # the lightest model that does it (his "low usage Claude prompt")
+# The lightest model that does it (his "low usage Claude prompt"). Tried on real rows on 28 October 2026 (job 438):
+# Haiku flagged H297 as first written but missed its second stop, and flagged its whole version too; Sonnet at low
+# effort found both holes and passed the whole one, about a cent a review.
+MODEL = os.environ.get("HQ_REVIEW_MODEL") or "sonnet"
 QUIET = int(os.environ.get("HQ_REVIEW_QUIET") or 300)  # seconds a row's ask must stay the same before it's reviewed
 AT_ONCE = 1
 TIMEOUT = 180  # seconds for one review
@@ -68,17 +71,19 @@ COSTS = os.path.join(E.DIR, "reviews.jsonl")  # one line per review: the row, th
 SYSTEM = (
     "You review one item of a software project's planning before it may be marked ready for the build team. You did "
     "not write it. You read only the item you're given; you have no tools and change nothing. Hold it against the "
-    "points of the checklist you're given and hunt for holes per point, as a reviewer who wants the team to build the "
-    "right thing the first time: an edge case nobody said what happens in (a second stop, a run that stops halfway, "
-    "a run twice, an empty or missing input, two things at once), a number with no source for where it comes from, a "
-    "'done means' example nobody could actually try, a point that is named but says nothing. Don't flag style, length "
-    "or wording, don't ask for things the item rightly puts out of scope, and don't invent requirements. Pass an item "
-    "that is whole enough for a careful team to build and test without guessing. Answer with JSON only, nothing else: "
+    "points of the checklist and hunt for real holes, as a reviewer who wants the team to build or check the right "
+    "thing the first time. Look hardest at: what happens when the thing it's about happens more than once (a second "
+    "stop, a second run, a retry), stops halfway, or meets an empty or missing input; where each number it asks for or "
+    "gives actually comes from, and whether the team could get it; whether each 'done means' example could really be "
+    "tried; a point that is named but says nothing. A hole is something that would make a careful team build, measure "
+    "or check the wrong thing, or leave them unable to tell whether it's done. Not a hole: a detail a careful team would "
+    "settle the obvious way, style, length, wording, something the item rightly puts out of scope, or a requirement "
+    "you invent. When in doubt, pass. Answer with JSON only, nothing else: "
     '{"pass": true, "findings": []} or {"pass": false, "findings": ["one plain sentence per hole, naming the point", '
-    '...]}, at most five findings, the most important first.')
+    '...]}, at most four findings, the most important first.')
 
 NINE = ("1. what's asked; 2. what done means, with examples someone can try; 3. the test (which flow, what it covers); "
-        "4. why; 5. out of scope; 6. what it touches (and the usage it costs); 7. its size; 8. what it waits on; "
+        "4. why; 5. out of scope; 6. what it touches; 7. its size; 8. what it waits on; "
         "9. the privacy check")
 THREE = "1. what's wrong; 2. what right looks like; 3. how to check it's fixed"
 
