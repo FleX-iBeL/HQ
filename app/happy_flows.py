@@ -20677,6 +20677,17 @@ FLOWS = {
 }
 
 
+# F63: every flow stops at six minutes, except those named here. Flow 44 reads every file and HQ's whole git
+# history, which grows every day (217 s on 23 October, 360 s on 27 October), and checks all of it: it gets
+# twenty minutes instead of checking less. Its time is in the summary, next to its limit, so a climb shows.
+FLOW_LIMIT = 360
+FLOW_LIMITS = {44: 1200}
+
+
+def limit_of(n: int) -> int:
+    return FLOW_LIMITS.get(n, FLOW_LIMIT)
+
+
 async def main(args) -> bool:
     chosen = sorted(int(x) for x in args.only.split(",")) if args.only else sorted(FLOWS)
     bad = [n for n in chosen if n not in FLOWS]
@@ -20708,12 +20719,12 @@ async def main(args) -> bool:
             print(f"\n-- {n} · {name}", flush=True)
             t = time.perf_counter()
             try:
-                res.note = await asyncio.wait_for(getattr(run_, method)(), timeout=360)
+                res.note = await asyncio.wait_for(getattr(run_, method)(), timeout=limit_of(n))
                 res.status = "PASS"
             except Failed as e:
                 res.status, res.note = "FAIL", str(e)
-            except asyncio.TimeoutError as e:  # a wait inside the flow, or the six-minute limit
-                res.status, res.note = "FAIL", str(e) or "took longer than six minutes"
+            except asyncio.TimeoutError as e:  # a wait inside the flow, or the flow's limit (six minutes, F63)
+                res.status, res.note = "FAIL", str(e) or f"took longer than its limit of {limit_of(n) // 60} minutes"
             except Exception as e:  # a crash in a flow is a failed flow, not a failed run
                 res.status, res.note = "FAIL", f"{type(e).__name__}: {e}"
             res.secs = time.perf_counter() - t
@@ -20733,7 +20744,8 @@ async def main(args) -> bool:
 
     print("\n== Result")
     for r in results:
-        print(f" {r.num:>2}  {r.name:<58} {r.status:<5} {r.secs:5.0f} s" if r.status != "SKIP"
+        own = f" (limit {limit_of(r.num) // 60} min)" if r.num in FLOW_LIMITS else ""
+        print(f" {r.num:>2}  {r.name:<58} {r.status:<5} {r.secs:5.0f} s{own}" if r.status != "SKIP"
               else f" {r.num:>2}  {r.name:<58} SKIP")
     ran = [r for r in results if r.status != "SKIP"]
     failed = [r for r in ran if r.status == "FAIL"]
