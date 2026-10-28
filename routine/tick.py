@@ -329,7 +329,6 @@ def start(job):
         prompt += ("\n\nThis job runs headless (Fable, 27 October 2026): nobody types into its window, its end is "
                    "the end of this run, and when you end with the job finished the done mark is run for you; still "
                    "run it yourself as the last step, as above. Everything you need is in this prompt and the files.")
-        open(pfile, "w").write(prompt)
     chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")
     # The job's settings (its status line) with this HQ's path, written fresh each time.
     settings = os.path.join(RUN, "job-settings.json")
