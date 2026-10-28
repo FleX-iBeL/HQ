@@ -26,6 +26,12 @@ first, then each text starts detached (direct_line.py text appt|remind FACTS, or
     python3 routine/pings.py remind "WHEN" "TEXT"        WHEN: in 20 minutes, today 15:00, tomorrow 9:30,
                                                          friday 15:00, 2026-10-14 15:00
     python3 routine/pings.py cancel N                    cancel reminder N
+    python3 routine/pings.py remind-every "EVERY" "TEXT" --between 10:00-20:00 [--days monday,friday|weekdays]
+    python3 routine/pings.py remind-every day "TEXT" --at 9:00 [--days …]
+                                                         H285: comes back by itself (EVERY: 2 hours, 90 minutes,
+                                                         day), every day or the days given, never in his night
+                                                         (his Sleep block), until he says stop
+    python3 routine/pings.py remind-stop "WORDS"|N|all   stop every waiting reminder like WORDS in one go
     python3 routine/pings.py note "TEXT"                 add a note to her own list
     python3 routine/pings.py note-clear "ID or words"    remove one of her notes
     python3 routine/pings.py due                         what would be texted now (nothing is sent)
@@ -297,6 +303,147 @@ def remind(at: dt.datetime, text: str, by: str = "", why: str = "remind") -> dic
         s["last_n"] = n
         _write(s)
     return r
+
+
+# -- H285: reminders that come back by themselves -------------------------------------------------------
+
+def every_of(words: str) -> int:
+    """'2 hours', 'every 2 hours', '90 minutes', 'hour', 'day' to minutes (a day is 1440). ValueError otherwise."""
+    s = " ".join(str(words).lower().split())
+    s = re.sub(r"^every ", "", s)
+    if s in ("day", "daily"):
+        return 1440
+    if s in ("hour", "hourly"):
+        return 60
+    m = re.fullmatch(r"(\d+(?:[.,]5)?) ?(m|min|mins|minute|minutes|h|hr|hrs|hour|hours)", s)
+    if not m:
+        raise ValueError("How often? Like 2 hours, 90 minutes, or day.")
+    n = float(m.group(1).replace(",", "."))
+    mins = int(round(n * 60)) if m.group(2).startswith("h") else int(n)
+    if mins < 15:
+        raise ValueError("Every 15 minutes is the most often a reminder can come back.")
+    if mins > 1440:
+        raise ValueError("Longer than a day: give the days instead (--days).")
+    return mins
+
+
+def days_of(words: str) -> list[int]:
+    """'monday,wednesday', 'mon wed fri', 'weekdays', 'weekend' to weekday numbers ([] is every day)."""
+    s = " ".join(str(words).lower().replace(",", " ").split())
+    if not s or s in ("every day", "daily", "all"):
+        return []
+    if s == "weekdays":
+        return [0, 1, 2, 3, 4]
+    if s in ("weekend", "weekends"):
+        return [5, 6]
+    out = []
+    for w in s.split():
+        hit = [i for i, d in enumerate(DAYS) if len(w) >= 2 and d.startswith(w)]
+        if len(hit) != 1:
+            raise ValueError(f"Which day is {w}? Like monday,wednesday, weekdays or weekend.")
+        out.append(hit[0])
+    return sorted(set(out))
+
+
+def _slots(rep: dict, day: dt.date) -> list[dt.datetime]:
+    """The times on DAY a repeating reminder goes out (the night not left out yet)."""
+    if rep.get("days") and day.weekday() not in rep["days"]:
+        return []
+    a = dt.datetime.combine(day, dt.time(*map(int, rep["from"].split(":"))))
+    b = (dt.datetime.combine(day + dt.timedelta(days=1), dt.time(0)) if rep["to"] == "24:00"
+         else dt.datetime.combine(day, dt.time(*map(int, rep["to"].split(":")))))
+    out, t = [], a
+    while t <= b:
+        out.append(t)
+        if rep["every"] >= 1440:
+            break
+        t += dt.timedelta(minutes=rep["every"])
+    return out
+
+
+def next_slot(rep: dict, after: dt.datetime, asleep=None) -> dt.datetime | None:
+    """The first slot after AFTER that isn't inside his night (ASLEEP(ts) -> bool; default _asleep). Looks 8 days."""
+    asleep = _asleep if asleep is None else asleep
+    for k in range(9):
+        for t in _slots(rep, after.date() + dt.timedelta(days=k)):
+            if t > after and not asleep(time.mktime(t.timetuple())):
+                return t
+    return None
+
+
+def repeat_add(every: int, text: str, span: str = "", at: str = "", days: list[int] | None = None, by: str = "",
+               now: dt.datetime | None = None, asleep=None) -> dict:
+    """A reminder that comes back by itself (H285): every EVERY minutes between SPAN's times ('10:00-20:00'), or
+    once a day AT a time; on DAYS (default every day); never inside his night. Until he says stop."""
+    now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
+    if every >= 1440:
+        if not at and span:
+            at = out_range(span)[0]
+        m = re.fullmatch(r"(\d{1,2})(?:[:.](\d\d))?", at.strip())
+        if not m or int(m.group(1)) > 23 or int(m.group(2) or 0) > 59:
+            raise ValueError("Every day at what time? Like --at 9:00.")
+        a = f"{int(m.group(1)):02d}:{m.group(2) or '00'}"
+        rep = {"every": 1440, "from": a, "to": a}
+    else:
+        if not span:
+            raise ValueError("Between which times? Like --between 10:00-20:00 (24-hour).")
+        a, b = out_range(span)
+        rep = {"every": every, "from": a, "to": b}
+    rep["days"] = days or []
+    first = next_slot(rep, now - dt.timedelta(minutes=1), asleep)
+    if not first:
+        raise ValueError("Those times all fall inside his night, so it would never go out.")
+    text = " ".join(str(text).split())[:500]
+    if not text:
+        raise ValueError("What should she remind him of?")
+    with _Lock():
+        s = read()
+        n = max([int(r.get("n") or 0) for r in s["reminders"]] + [int(s.get("last_n") or 0)]) + 1
+        r = {"n": n, "at": first.strftime(FMT), "text": text, "added": now.strftime(FMT), "by": by, "repeat": rep}
+        s["reminders"].append(r)
+        s["last_n"] = n
+        _write(s)
+    return r
+
+
+def repeat_says(rep: dict) -> str:
+    e = rep["every"]
+    if e >= 1440:
+        how = "every day at " + rep["from"]
+    else:
+        unit = ("every hour" if e == 60 else f"every {e // 60} hours" if e % 60 == 0 else f"every {e} minutes")
+        how = f"{unit} from {rep['from']} to {rep['to']}"
+    d = rep.get("days") or []
+    if d:
+        how += (" on weekdays" if d == [0, 1, 2, 3, 4] else " at the weekend" if d == [5, 6] else
+                " on " + ", ".join(DAYS[i] for i in d))
+    return how
+
+
+def remind_stop(words: str) -> list[dict]:
+    """He says stop ("stop the water reminders"): every waiting reminder like WORDS (its number, the words in its
+    text, or all: every repeating one) goes in one go, repeating and one-off alike. Returns what was stopped."""
+    w = " " + " ".join(str(words).lower().split()) + " "
+    for drop in (" stop ", " the ", " my ", " reminders ", " reminder ", " all of ", " them "):
+        w = w.replace(drop, " ")
+    w = " ".join(w.split()) or ("all" if "all" in str(words).lower() else "")
+
+    def hit(r: dict) -> bool:
+        if r.get("sent") or r.get("why") not in (None, "remind"):
+            return False
+        if w == "all":
+            return bool(r.get("repeat"))
+        if w.isdigit():
+            return int(r.get("n") or 0) == int(w)
+        text = r.get("text", "").lower()
+        return bool(w) and all(re.search(rf"\b{re.escape(x)}", text) for x in w.split())
+    with _Lock():
+        s = read()
+        gone = [r for r in s["reminders"] if hit(r)]
+        if gone:
+            s["reminders"] = [r for r in s["reminders"] if r not in gone]
+            _write(s)
+    return gone
 
 
 def cancel(n: int) -> bool:
@@ -988,6 +1135,9 @@ def due(now: float | None = None, s: dict | None = None, evs: list[dict] | None 
                 out.append((why, str(r.get("n")), f"From last night's check: {r.get('text', '')}"))
                 continue
             facts = f"Reminder he asked for: {r.get('text', '')}\nAsked for: {r['at'][11:]}"
+            if r.get("repeat"):  # H285
+                facts += (f"\nIt comes back by itself, {repeat_says(r['repeat'])}, until he says stop; don't say "
+                          "when the next one comes, and vary how you say it so it doesn't read like a robot.")
             if late > 10 * 60:
                 facts += f" (it's {int(late // 60)} minutes late: HQ couldn't send it on time; say so)"
             out.append(("remind", str(r.get("n")), facts))
@@ -1026,7 +1176,19 @@ def watch(now: float | None = None, spawn=None, dry: bool = False) -> list[tuple
                 s["appointments"][key]["sent"] = time.strftime(FMT, time.localtime(t))
             else:
                 for r in s["reminders"]:
-                    if str(r.get("n")) == key:
+                    if str(r.get("n")) == key and r.get("repeat"):
+                        # H285: it moves on to its next time instead of being sent; one missed while HQ was off
+                        # (or that falls in his night after all) goes quietly
+                        late = t - time.mktime(time.strptime(r["at"], FMT))
+                        nxt = next_slot(r["repeat"], dt.datetime.fromtimestamp(t).replace(second=0, microsecond=0))
+                        r["last"] = time.strftime(FMT, time.localtime(t))
+                        if nxt:
+                            r["at"] = nxt.strftime(FMT)
+                        else:
+                            r["sent"] = r["last"]
+                        if late > LATE or _asleep(t):
+                            facts = ""
+                    elif str(r.get("n")) == key:
                         r["sent"] = time.strftime(FMT, time.localtime(t))
                         late = t - time.mktime(time.strptime(r["at"], FMT))
                         if late > REMIND_LATE:
@@ -1113,7 +1275,9 @@ def listing() -> str:
     out = ["Appointment pings (only the ones he picked):"]
     out += [_appt_line(k, p) for k, p in s["appointments"].items()] or ["- none"]
     out += ["", "Reminders:"]
-    out += [f"- {r['n']} · {r['at']} · {r['text']}" + (f" · sent {r['sent']}" if r.get("sent") else "")
+    out += [f"- {r['n']} · {r['at']} · {r['text']}"
+            + (f" · comes back {repeat_says(r['repeat'])}" if r.get("repeat") and not r.get("sent") else "")
+            + (f" · sent {r['sent']}" if r.get("sent") else "")
             for r in s["reminders"] if not r.get("dropped")] or ["- none"]
     out += ["", "Watches (\"let me know when …\"):"]
     out += [_watch_line(w) for w in s["watches"]] or ["- none"]
@@ -1161,7 +1325,7 @@ def main(argv: list[str]) -> int:
         return role.forward("pings", list(argv), {"HQ_PINGS_BY": by} if by else None)
     # F43: --item ties a reminder, watch, nudge or note to a to-do item, so it goes when that item is done or let go.
     item = ""
-    if "--item" in argv and cmd in ("remind", "watch", "nudge", "note"):
+    if "--item" in argv and cmd in ("remind", "remind-every", "watch", "nudge", "note"):
         i = argv.index("--item")
         want = argv[i + 1] if i + 1 < len(argv) else ""
         argv = argv[:i] + argv[i + 2:]
@@ -1212,6 +1376,29 @@ def main(argv: list[str]) -> int:
             print(e)
             return 2
         print(f"Reminder {r['n']}: {r['at']} · {r['text']}")
+    elif cmd == "remind-every" and len(argv) >= 3:  # H285
+        rest = argv[3:]
+
+        def ropt(name: str) -> str:
+            return rest[rest.index(name) + 1] if name in rest and rest.index(name) + 1 < len(rest) else ""
+        words = [a for i, a in enumerate(rest) if not a.startswith("--") and not (i and rest[i - 1].startswith("--"))]
+        try:
+            r = repeat_add(every_of(argv[1]), " ".join([argv[2]] + words), ropt("--between"), ropt("--at"),
+                           days_of(ropt("--days")), by)
+            tag("reminders", r["n"], item)
+        except ValueError as e:
+            print(e)
+            return 2
+        print(f"Reminder {r['n']}: {r['text']}, {repeat_says(r['repeat'])}, until he says stop; never at night. "
+              f"The first at {r['at']}.")
+    elif cmd == "remind-stop" and len(argv) >= 2:  # H285
+        gone = remind_stop(" ".join(argv[1:]))
+        if not gone:
+            print("No waiting reminder like that.")
+            return 1
+        print(f"Stopped {len(gone)}: " + "; ".join(
+            f"{r['n']} {r['text']}" + (f" ({repeat_says(r['repeat'])})" if r.get("repeat") else f" ({r['at']})")
+            for r in gone) + ".")
     elif cmd == "cancel" and len(argv) == 2 and argv[1].isdigit():
         if not cancel(int(argv[1])):
             print(f"No reminder {argv[1]} waiting.")

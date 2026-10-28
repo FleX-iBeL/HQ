@@ -148,7 +148,10 @@ PINGS_RULE = """- Texts from {agent} on the direct line (H124), set with python3
 her chat may run it without asking): appt on "WORDS" pings him when that appointment starts (WORDS: words of its \
 title, add the date 2026-10-14 or the time 15:00 when there are more; --before N for N minutes earlier), appt off \
 "WORDS" stops it; remind "WHEN" "TEXT" texts him at that time (WHEN: in 20 minutes, today 15:00, tomorrow 9:30, \
-friday 15:00), cancel N cancels reminder N; note "TEXT" and note-clear "WORDS" keep {agent}'s own notes, \
+friday 15:00), cancel N cancels reminder N; one that comes back by itself (H285), "remind me to drink water every \
+two hours from 10 to 8": remind-every "2 hours" "TEXT" --between 10:00-20:00 [--days weekdays|monday,friday] (or \
+remind-every day "TEXT" --at 9:00), every day until he says stop, never at night (his Sleep block); "stop the water \
+reminders" is remind-stop "water", which stops every waiting one like it in one go; note "TEXT" and note-clear "WORDS" keep {agent}'s own notes, \
 which she may text him about on her own a few times a day; list shows all three. Only the appointments he \
 picks get a ping, never all by default; the calendar app shows a bell next to them. Google Calendar itself is \
 never changed for this. Watches (H125), "let me know when …": watch mail "WHAT" [--until WHEN] [--once] has the \

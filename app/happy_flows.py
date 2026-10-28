@@ -14671,6 +14671,115 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
                 else:
                     os.environ[k] = v
 
+    async def flow180(self) -> str:
+        """H285, no Claude, no network: reminders that come back by themselves. routine/pings.py on its own copies:
+        "remind me to drink water every two hours from 10 to 8" goes at 10, 12, 2, 4, 6 and 8 on two days without being
+        set again, never inside his night (a slot there is skipped quietly), one missed while HQ was off goes quietly;
+        "stop the water reminders" stops all of them (repeating and one-off) in one go; tied to a to-do item it goes
+        when the item is done; once a day at a time, on set days; the command line, rules, policy and the backup."""
+        import pings
+        import loose_ends
+        from policy import Policy, ALLOW
+        d = self.tmp / "h285"
+        d.mkdir(parents=True, exist_ok=True)
+        keep = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_CALENDAR_FILE", "HQ_AGENT_NOTES", "HQ_DIRECT_DRY",
+                                               "HQ_INITIATIVE", "HQ_TODO")}
+        real = Path(os.path.join(pings.hqpaths.DATA, "direct-line", "pings.json"))
+        real_before = real.read_bytes() if real.exists() else None
+        os.environ.update({"HQ_DIRECT_DIR": str(d / "line"), "HQ_CALENDAR_FILE": str(d / "calendar.json"),
+                           "HQ_AGENT_NOTES": str(d / "notes-donna.md"), "HQ_DIRECT_DRY": "1", "HQ_INITIATIVE": "0"})
+        orig = pings._asleep
+        night = {"from": 1, "to": 9}  # his Sleep block, made up: 1 at night to 9 in the morning
+
+        def asleep(ts):
+            h = datetime.fromtimestamp(ts).hour
+            return h >= night["from"] and h < night["to"] if night["from"] < night["to"] else not night["to"] <= h < night["from"]
+        pings._asleep = asleep
+        texts = []
+        spawn = lambda why, facts: texts.append((why, facts))
+        t = lambda h, m=0, day=1: datetime(2099, 1, day, h, m).timestamp()  # 1 January 2099 is a Thursday
+        try:
+            need(pings.every_of("every two hours".replace("two", "2")) == 120 and pings.every_of("90 minutes") == 90
+                 and pings.every_of("day") == 1440 and pings.every_of("hour") == 60, "how often isn't read")
+            for bad in ("5 minutes", "now and then", "3 days"):
+                try:
+                    pings.every_of(bad)
+                    need(False, f"an unclear how-often was taken: {bad}")
+                except ValueError:
+                    pass
+            need(pings.days_of("weekdays") == [0, 1, 2, 3, 4] and pings.days_of("mon,fri") == [0, 4] and pings.days_of("") == [],
+                 "the days aren't read")
+            r = pings.repeat_add(120, "drink water", "10:00-20:00", now=datetime(2099, 1, 1, 7, 0))
+            need(r["at"] == "2099-01-01 10:00" and r["repeat"]["every"] == 120, f"the first water reminder isn't at 10: {r}")
+            sent = []
+            for day in (1, 2):
+                for h in range(24):
+                    for m in (0, 30):
+                        for why, facts in pings.watch(t(h, m, day), spawn=spawn):
+                            if why == "remind":
+                                sent.append((day, h, m))
+                                need("drink water" in facts and "comes back by itself" in facts, f"her facts: {facts}")
+            want = [(day, h, 0) for day in (1, 2) for h in (10, 12, 14, 16, 18, 20)]
+            need(sent == want, f"not at 10, 12, 2, 4, 6 and 8 on both days: {sent}")
+            left = [x for x in pings.read()["reminders"] if not x.get("sent")]
+            need(len(left) == 1 and left[0]["at"] == "2099-01-03 10:00", f"it doesn't wait for the next morning: {left}")
+            # never inside his night: a late night skips the slots in it, quietly
+            night.update({"from": 19, "to": 9})
+            with pings._Lock():
+                s = pings.read()
+                s["reminders"][0]["at"] = "2099-01-03 18:00"
+                pings._write(s)
+            got = [g for g in pings.watch(t(18, 0, 3), spawn=spawn) if g[0] == "remind"]
+            need(len(got) == 1, f"the 6 o'clock one didn't go: {got}")
+            need(pings.read()["reminders"][0]["at"] == "2099-01-04 10:00", f"a slot in his night wasn't skipped: {pings.read()['reminders']}")
+            night.update({"from": 1, "to": 9})
+            # HQ off for a while: the missed one goes quietly, the next one on time
+            got = [g for g in pings.watch(t(11, 0, 4), spawn=spawn) if g[0] == "remind"]
+            need(not got and pings.read()["reminders"][0]["at"] == "2099-01-04 12:00", f"a missed one was sent late: {got}")
+            # a set day only, once a day at a time
+            w = pings.repeat_add(1440, "take the vitamins", at="9:30", days=[0], now=datetime(2099, 1, 4, 12, 0))
+            need(w["at"] == "2099-01-05 09:30" and "every day at 09:30 on monday" == pings.repeat_says(w["repeat"]),
+                 f"once a day on monday: {w}")
+            # tied to a to-do item: it goes when the item is done
+            v = pings.repeat_add(60, "stretch for fifteen minutes", "10:00-18:00", now=datetime(2099, 1, 4, 12, 0))
+            pings.tag("reminders", v["n"], "Touch my toes")
+            cleared, recs, _ = loose_ends.sweep("Touch my toes", d / "todo.md")
+            need(len(cleared) == 1 and not [x for x in pings.read()["reminders"] if x["n"] == v["n"]],
+                 f"done on its to-do item doesn't stop it: {cleared}")
+            # stop: a one-off water reminder too, all of them in one go, nothing else
+            pings.remind(datetime(2099, 1, 4, 15, 0), "drink a glass of water")
+            gone = pings.remind_stop("stop the water reminders")
+            need(len(gone) == 2 and all("water" in g["text"] for g in gone), f"stop didn't take every water reminder: {gone}")
+            need([x["text"] for x in pings.read()["reminders"] if not x.get("sent")] == ["take the vitamins"], "stop took more than water")
+            need(not [g for g in pings.watch(t(12, 0, 4), spawn=spawn) if "water" in g[1]], "a water reminder came after stop")
+            need("comes back every day at 09:30 on monday" in pings.listing(), f"the listing: {pings.listing()}")
+            # the command line, as a call or her chat runs it
+            env = {**os.environ, "HQ_ROLE_HERE": "1"}
+            out = subprocess.run([sys.executable, str(ROOT / "routine/pings.py"), "remind-every", "2 hours", "drink water",
+                                  "--between", "10:00-20:00"], capture_output=True, text=True, env=env).stdout
+            need("every 2 hours from 10:00 to 20:00" in out and "until he says stop" in out, f"remind-every from the command line: {out}")
+            out = subprocess.run([sys.executable, str(ROOT / "routine/pings.py"), "remind-stop", "water"], capture_output=True,
+                                 text=True, env=env).stdout
+            need(out.startswith("Stopped 1") and not [x for x in pings.read()["reminders"] if "water" in x["text"] and not x.get("sent")],
+                 f"remind-stop from the command line: {out}")
+            need("remind-every" in config.PINGS_RULE and "remind-stop" in config.PINGS_RULE and "never at night" in config.PINGS_RULE,
+                 "the call's and her chat's rules don't know repeating reminders")
+            pol = Policy(config.FOLDER)
+            script = str(ROOT / "routine" / "pings.py")
+            for cmd in (f'python3 "{script}" remind-every "2 hours" "drink water" --between 10:00-20:00',
+                        f'python3 "{script}" remind-stop water'):
+                need(pol.decide("Bash", {"command": cmd}).verdict == ALLOW, f"a call may not run {cmd}")
+            import role
+            need({"remind-every", "remind-stop"} <= role.WRITES["pings"], "the backup doesn't hand repeating reminders to the main")
+        finally:
+            pings._asleep = orig
+            for k, v in keep.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        need((real.read_bytes() if real.exists() else None) == real_before, "the workspace's own pings were touched")
+        return ("every 2 hours from 10 to 8: at 10, 12, 2, 4, 6 and 8 on two days, set once; a slot in his night skipped, a missed "
+                "one quiet; stop takes every water reminder in one go and nothing else; done on its to-do item stops it; once a day "
+                "on a set day; command line, rules, policy, backup")
+
     async def flow179(self) -> str:
         """H279, no Claude: ask Donna or Pepper about an old text, and they find it. A throwaway line in its own git repo,
         filled over many commits past the 400 the thread keeps: a text past the last 15 (still in the file) and one
@@ -21413,6 +21522,7 @@ FLOWS = {
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     177: ("H286: the status page says in plain words what the team is doing (never the commands), a job that has to start fixing redoes its own estimate once with why, and a job that ran long through its own mistake is tagged, kept out of the estimates and listed", False, "flow177"),
+    180: ("H285: reminders that come back by themselves: every N hours between two times, every day or set days, never at night, stopped on one word in one go or with its to-do item", False, "flow180"),
     179: ("H279: ask Donna or Pepper about an old text and she finds it: a text past the last 15 and one past the 400 (only in git) found by words and by day on Donna's line and the coaching line, each once; the text rules say to look first; a call or a text runs the search without a yes, never on another folder", False, "flow179"),
     178: ("H266: Moneypenny's own line: the team's news (done, paused, the night's check, the Friday estimates, a failed QA, a held release, her own) comes from her, pushed to the same phone; she answers his texts there; Donna's line unchanged", False, "flow178"),
     164: ("H283: a note for the team while they work: jobs.py tell N to a running or waiting job, read with notes N after each step; push.py and release.py wait while a note is unread; the first prompt carries a waiting job's notes; the status page shows them; a call tells without a yes", False, "flow164"),

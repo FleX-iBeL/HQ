@@ -545,13 +545,13 @@ class Policy:
         # in the workspace (direct-line/pings.json, her notes file); Google Calendar is never touched by it.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "pings.py"):
             sub = args[1] if len(args) > 1 else "list"
-            if sub in ("list", "appt", "remind", "cancel", "note", "note-clear", "due", "watch", "unwatch",
+            if sub in ("list", "appt", "remind", "remind-every", "remind-stop", "cancel", "note", "note-clear", "due", "watch", "unwatch",
                        "out", "out-stop",  # H212: his own times out, for the weather
                        "nudge", "nudge-done", "nudge-later",  # H211: nudge until done
                        "call", "call-cancel"):  # H238: an agent calls him at a time they agreed
                 return Decision(ALLOW, "her pings, reminders, notes and watches")
             # H125: match is the mail check's own (it found a mail for a watch)
-            return Decision(DENY, "the pings script takes list, appt, remind, cancel, note, note-clear, watch, unwatch, out, out-stop, nudge, nudge-done, nudge-later, call or call-cancel")
+            return Decision(DENY, "the pings script takes list, appt, remind, remind-every, remind-stop, cancel, note, note-clear, watch, unwatch, out, out-stop, nudge, nudge-done, nudge-later, call or call-cancel")
         # H213: the mail sorting rules he agreed, in the workspace (HQ/mail-sort.json): read, add, stop, start, remove.
         # `sorted` is the mail check's own line per mail.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "mailsort.py"):
