@@ -47,6 +47,12 @@ usage (from the workspace):
   python3 "routine/jobs.py" held N                         the job's own chat, when the usage says STOP; the
                                                            next start carries on from there (H113); held N WHY
                                                            holds it for another reason (H187: an update ended it)
+  python3 "routine/jobs.py" steps N ["STEP" …]              the job's own chat, for big work (F72): its steps, written
+                                                           down before building (the done ones stay); without names,
+                                                           shows them
+  python3 "routine/jobs.py" step N K [--anyway]            the job's own chat (F72): step K is done and committed in HQ;
+                                                           a stop or crash then carries on at the next step. Refused
+                                                           while HQ has uncommitted changes
   python3 "routine/jobs.py" tell N "TEXT"                 a note for job N while it runs or waits (H283): kept in its
                                                            line, read by the job after each step and always before a
                                                            push or release; push.py and release.py refuse while the
@@ -677,6 +683,30 @@ def main(argv):
             print(f"Job {j['n']}: the team's guess is {m} min; the computed estimate is {e.get('est')} min."
                   + (f" Now: {w}" if w else ""))
             return
+        if cmd in ("steps", "step"):
+            # F72: big work in steps, saved as they go, so a stop or a crash picks up at the next step, not the top.
+            import carryon
+            if not args or not args[0].isdigit() or (cmd == "step" and (len(args) < 2 or not args[1].isdigit())):
+                sys.exit('Usage: steps N ["STEP 1" "STEP 2" …], or step N K [--anyway]')
+            j = find(jobs, int(args[0]))
+            if cmd == "steps" and len(args) == 1:
+                print(carryon.steps_words(j["n"]) or f"Job {j['n']} has no steps written down.")
+                return
+            if j["state"].startswith(FINISHED):
+                sys.exit(f"Job {j['n']} is {j['state']}; steps are for a job that hasn't finished.")
+            try:
+                if cmd == "steps":
+                    st = carryon.set_steps(j["n"], args[1:])
+                    print(f"Job {j['n']} has {len(st)} steps:\n{carryon.steps_words(j['n'])}\nAfter each one: commit "
+                          f"it in HQ, then jobs.py step {j['n']} K.")
+                else:
+                    x, st = carryon.step_done(j["n"], int(args[1]), anyway="--anyway" in args)
+                    nxt = carryon.next_step(j["n"])
+                    print(f"Job {j['n']}: step {x['k']} of {len(st)} done and saved ({x['commit'] or 'no commit found'}). "
+                          + (f"Next: step {nxt['k']}, {nxt['name']}." if nxt else "Every step is done."))
+            except ValueError as e:
+                sys.exit(f"Job {j['n']}: {e}.")
+            return
         if cmd == "tell":
             # H283: a note for a job that has started (or still waits): his words of 26 October 2026, "if they picked
             # up the item they don't see changes on the item. That is your first mistake. That should never happen again."
@@ -809,6 +839,11 @@ def main(argv):
                             + j["text"]), "notes": j.get("notes") or []}
             jobs.append(new)
             jobs = move(jobs, n, "top")
+            try:  # F72: its saved steps go with it, so the rerun carries on at the next one
+                import carryon
+                carryon.copy_steps(j["n"], n)
+            except Exception as e:
+                print(f"(couldn't hand its steps on: {e!r})", file=sys.stderr)
             write(text, jobs, on)
             try:  # H70: the rerun keeps the kind the first run had (a hand-set one too)
                 import estimate as est_

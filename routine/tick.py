@@ -319,6 +319,7 @@ def start(job):
             + importlib.import_module("jobs").notes_for_prompt(job)
             + importlib.import_module("qa").prompt_extra(job["text"])  # F56: a QA job runs as Moneypenny
         )
+        prompt += _steps_extra(job, plan)
     # F57: the done mark is always the very last step, after any restart; a job that said it was finished and
     # never ran it sat idle for over an hour (jobs 377 and 393, QA job 389).
     if plan["mode"] != "resume":  # the resume prompt already ends its rules with the done mark
@@ -373,6 +374,24 @@ JT=$(tty)
     status("BUILDING", f"Job {n} · " + (how or "started by the routine") + f" in {where}{watch_line(n)}",
            f"job {n} {how or 'started by the routine'}: {job['text'][:90]}")
     log(f"started job {n}" + (f" ({plan['mode']}, chat {plan['session']})" if how else ""))
+
+
+def _steps_extra(job, plan):
+    """F72: a rerun or a fresh chat carries on at its next saved step; big work gets the rule to save in steps."""
+    n = job["n"]
+    try:
+        if plan["mode"] == "fresh":
+            return ""  # the fresh note already names its steps
+        m = re.match(r"Rerun of job (\d+)", job["text"])
+        if carryon.load_steps(n):
+            return carryon.steps_note(n, first=int(m.group(1)) if m else None)
+        import estimate
+        e = estimate._load_state().get(str(n)) or {}
+        if carryon.needs_steps(job["text"], e.get("kind") or estimate.kind_of(job["text"]), e.get("est")):
+            return carryon.steps_rule(n)
+    except Exception as ex:
+        log(f"steps rule: {ex!r}")
+    return ""
 
 
 def _headless() -> bool:

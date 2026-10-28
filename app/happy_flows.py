@@ -13559,6 +13559,142 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("resume" in _P(B.__file__).read_text(), "a reopened session isn't resumed")
         return "F60: a big read is cut to a part; a dead session says so, reopens and answers the same turn"
 
+    async def flow174(self) -> str:
+        """F72, no Claude, no window: big work is cut into steps that are saved as they go, so a stop or a crash
+        picks up at the next step, not the top. On a copy of the roadmap, its own carry-on folder, a throwaway git
+        repo for HQ and a stand-in for Claude Code's chats: a big job gets the steps rule in its first prompt (a
+        small one and a QA don't); its three steps are written down; a step isn't marked while HQ has uncommitted
+        changes; steps 1 and 2 are committed and marked; it's held after step 2 (the hold names step 3), picked up
+        in its own chat told to carry on at step 3 with 1 and 2 saved, and their commits are untouched; a fresh
+        chat says the same; changing the steps keeps the done ones; a crash rerun takes the steps and carries on at
+        step 3; and the time counts once (the held minutes aren't counted)."""
+        import subprocess as sp, importlib
+        jv = ROOT
+        sys.path.insert(0, str(jv / "routine"))
+        rm = self.tmp / "roadmap-F72.md"
+        rm.write_text(ROADMAP.read_text())
+        co_dir, chats, repo = self.tmp / "carryon-F72", self.tmp / "claude-projects-F72", self.tmp / "hq-git-F72"
+        repo.mkdir(exist_ok=True)
+        def git(*a):
+            r = sp.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a],
+                       capture_output=True, text=True)
+            need(r.returncode == 0, f"git {' '.join(a)}: {r.stderr}")
+            return r.stdout.strip()
+        git("init", "-q")
+        (repo / "a.txt").write_text("start\n")
+        git("add", "a.txt")
+        git("commit", "-qm", "start")
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_CARRYON": str(co_dir), "HQ_STEPS_GIT": str(repo), "HQ_LOOK": "0"}
+        def jobs(*a, ok=True):
+            r = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
+            need((r.returncode == 0) == ok, f"jobs.py {' '.join(a)}: {r.stdout.strip()} {r.stderr.strip()}")
+            return r.stdout + r.stderr
+        for j in json.loads(jobs("next"))["waiting"]:
+            jobs("stop", str(j["n"]))
+        for j in json.loads(jobs("next"))["running"]:
+            jobs("mark", str(j["n"]), "stopped 00:00")
+        big = int(jobs("add", "flow 174 big job: big work cut into steps that are saved as they go").split()[1])
+        small = int(jobs("add", "flow 174 small job: fix one word").split()[1])
+        carryon = importlib.import_module("carryon")
+        tick = importlib.import_module("tick")
+        saved = (carryon.DIR, tick.RUN, tick.STATE, tick.PIDFILE, tick.hqpaths.ROADMAP, tick.open_window,
+                 tick.status, tick.jobs, tick.log, os.environ.get("HQ_CLAUDE_PROJECTS"), os.environ.get("HQ_STEPS_GIT"))
+        run = self.tmp / "run-F72"
+        run.mkdir(exist_ok=True)
+        opened = []
+        carryon.DIR, tick.RUN, tick.STATE, tick.PIDFILE = str(co_dir), str(run), str(run / "job.json"), str(run / "job.pid")
+        tick.hqpaths.ROADMAP = str(rm)
+        tick.open_window = lambda cmd, name="": opened.append(name)
+        tick.status = lambda *x: None
+        tick.jobs = lambda *x: ""
+        tick.log = lambda m: None
+        os.environ["HQ_CLAUDE_PROJECTS"] = str(chats)
+        os.environ["HQ_STEPS_GIT"] = str(repo)
+        def start(n):
+            job = next(j for j in json.loads(jobs("next"))["waiting"] if j["n"] == n)
+            opened.clear()
+            tick.start(job)
+            need(opened, f"job {n} wasn't started")
+            return (run / f"job-{n}.command").read_text(), (run / f"job-{n}.prompt").read_text()
+        try:
+            need(carryon.needs_steps("x", "bigbuild") and carryon.needs_steps("x", "build", 45)
+                 and not carryon.needs_steps("x", "build", 12) and not carryon.needs_steps("QA of F72 (F56): big work", "qa"),
+                 "the wrong jobs get the steps rule")
+            _, prompt = start(small)
+            need("F72" not in prompt, f"a small job got the steps rule: {prompt[-600:]}")
+            cmd, prompt = start(big)
+            sid = carryon.load(big).get("session")
+            need(f"steps {big} " in prompt and f"step {big} K" in prompt and "(F72)" in prompt,
+                 f"a big job's first prompt has no steps rule: {prompt[-800:]}")
+            jobs("mark", str(big), "running since 12:00")
+            jobs("step", str(big), "1", ok=False)  # no steps written down yet
+            out = jobs("steps", str(big), "the store", "the page", "the flow")
+            need("3 steps" in out and "step 3 of 3: the flow: not done yet" in out, f"the steps weren't written: {out}")
+            # Step 1: built but not committed yet: not saved, so it isn't marked.
+            (repo / "a.txt").write_text("step 1\n")
+            out = jobs("step", str(big), "1", ok=False)
+            need("aren't committed" in out, f"a step was marked with HQ uncommitted: {out}")
+            git("commit", "-qam", f"F72: the store (job {big}, step 1 of 3)")
+            c1 = git("rev-parse", "--short", "HEAD")
+            out = jobs("step", str(big), "1")
+            need(f"step 1 of 3 done and saved ({c1})" in out and "Next: step 2, the page" in out, f"step 1: {out}")
+            (repo / "b.txt").write_text("step 2\n")
+            git("add", "b.txt")
+            git("commit", "-qm", f"F72: the page (job {big}, step 2 of 3)")
+            c2 = git("rev-parse", "--short", "HEAD")
+            jobs("step", str(big), "2")
+            # The usage says STOP after step 2: the hold names step 3.
+            jobs("held", str(big))
+            rec = carryon.load(big)
+            need(rec.get("step", "").startswith("before step 3 of 3: the flow"), f"the hold doesn't name the next step: {rec}")
+            # Its own chat is still here: picked up, told to carry on at step 3 with 1 and 2 saved.
+            slug = re.sub(r"[^A-Za-z0-9]", "-", tick.FOLDER)
+            (chats / slug).mkdir(parents=True, exist_ok=True)
+            (chats / slug / f"{sid}.jsonl").write_text("{}\n")
+            cmd, prompt = start(big)
+            need(f"--resume {sid}" in cmd, f"the held job didn't pick its own chat up: {cmd}")
+            need("Carry on at step 3: the flow" in prompt and "Steps 1 to 2 are saved" in prompt and "don't redo them" in prompt
+                 and c1 in prompt and c2 in prompt,
+                 f"the carry-on prompt doesn't carry on at step 3: {prompt[-900:]}")
+            need((repo / "a.txt").read_text() == "step 1\n" and (repo / "b.txt").read_text() == "step 2\n"
+                 and git("log", "--format=%h", "-3").split()[:2] == [c2, c1], "steps 1 and 2 weren't left as they were")
+            # Held again, its chat gone: a fresh chat says the same.
+            jobs("mark", str(big), "running since 12:30")
+            jobs("held", str(big))
+            (chats / slug / f"{sid}.jsonl").unlink()
+            _, prompt = start(big)
+            need("stopped by the usage line" in prompt and "Carry on at step 3: the flow" in prompt
+                 and prompt.count("Carry on at step 3") == 1 and f"(job {big}, step" in prompt,
+                 f"the fresh chat doesn't carry on at step 3: {prompt[-900:]}")
+            # The steps changed halfway: the done ones stay.
+            out = jobs("steps", str(big), "the flow, in two halves", "the write-up")
+            need("step 1 of 4: the store: done" in out and "step 2 of 4: the page: done" in out and "step 4 of 4: the write-up" in out,
+                 f"changing the steps lost the done ones: {out}")
+            jobs("steps", str(big), "the store", "the page", "the flow")
+            # A crash: the rerun takes the steps and carries on at step 3.
+            jobs("mark", str(big), "running since 13:00")
+            out = jobs("crashed", str(big), "the server went down")
+            rerun = int(re.search(r"requeued as job (\d+)", out).group(1))
+            _, prompt = start(rerun)
+            need(f"The steps of job {big}'s first run" in prompt and "Carry on at step 3: the flow" in prompt
+                 and f"steps {rerun} \"STEP 1\"" not in prompt, f"the crash rerun doesn't carry on at step 3: {prompt[-900:]}")
+            need(carryon.next_step(rerun)["k"] == 3, "the rerun's own steps aren't the first run's")
+            # The time counts once: minutes held aren't counted.
+            est = importlib.import_module("estimate")
+            samples = [{"j": [{"n": big, "st": st}]} for st in ("BUILDING", "BUILDING", "STOPPED", "STOPPED", "STOPPED", "BUILDING")]
+            need(est._minutes_seen(big, samples) == 3, "a held job's waiting minutes count as work")
+        finally:
+            (carryon.DIR, tick.RUN, tick.STATE, tick.PIDFILE, tick.hqpaths.ROADMAP, tick.open_window,
+             tick.status, tick.jobs, tick.log, old, old_git) = saved
+            for k, v in (("HQ_CLAUDE_PROJECTS", old), ("HQ_STEPS_GIT", old_git)):
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        return ("a big job gets the steps rule, a small one and a QA don't; a step isn't marked uncommitted; held after "
+                "step 2 it carries on at step 3 in its own chat and in a fresh one, 1 and 2 untouched; changed steps keep "
+                "the done ones; a crash rerun carries on at step 3; the held minutes don't count")
+
     async def flow173(self) -> str:
         """F66, no Claude: the estimate counts the steps the work names, each with its own known time, and every
         estimate is a range. On 27 and 28 October the daily release that had to run the full test set first was
@@ -20764,6 +20900,7 @@ FLOWS = {
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
     169: ("Fable, 27 October 2026: the backend behind switches: the switches, the briefing made without Claude and the briefed start (the old one with the switch off), the open line's sessions and rollover, the log lift, the planning index against parsing, a headless job against a fake claude (done mark, stop signal), the lookups free on a call, the departments", False, "flow169"),
     172: ("F71: a QA pass names every done example of its row with what was run and what came out; without it the pass is refused, nothing written", False, "flow172"),
+    174: ("F72: big work in steps saved as they go: a stop or a crash carries on at the next step (its own chat, a fresh one, a crash rerun), the done steps untouched, the time counted once", False, "flow174"),
     173: ("F66: the estimate counts the steps the work names (the full test run, a history rewrite, flow 44) and every estimate is a range: the gate, the nights and the status page go by the latest end; the Friday report", False, "flow173"),
     171: ("F67: HQ's own commits carry the public identity: a computer with HQ's key sets FleX-iBeL and the noreply address in HQ's repo (at --pull and before a push), so the global name never goes up; a friend's HQ is left alone", False, "flow171"),
     170: ("F65: a job started through the routine's own start with the headless switch on: job-N.prompt and job-N.command written, the script runs runjob.py against a fake claude, the job runs and is marked done; the switch off gives the old chat script", False, "flow170"),
