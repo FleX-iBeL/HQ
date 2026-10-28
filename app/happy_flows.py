@@ -10949,8 +10949,9 @@ setTimeout(() => {
         sys.path.insert(0, str(ROOT / "routine"))
         d = self.tmp / "h80"
         d.mkdir()
-        saved = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_DIRECT_LOCAL", "HQ_DIRECT_DRY", "HQ_DIRECT")}
-        os.environ.update({"HQ_DIRECT_DIR": str(d / "line"), "HQ_DIRECT_LOCAL": str(d / "local.json"), "HQ_DIRECT_DRY": "1"})
+        saved = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR", "HQ_DIRECT_LOCAL", "HQ_DIRECT_DRY", "HQ_DIRECT", "HQ_TEAM_LINE")}
+        os.environ.update({"HQ_DIRECT_DIR": str(d / "line"), "HQ_DIRECT_LOCAL": str(d / "local.json"), "HQ_DIRECT_DRY": "1",
+                           "HQ_TEAM_LINE": "0"})  # H266: Donna's own line as before; Moneypenny's is flow 178
         os.environ.pop("HQ_DIRECT", None)
         try:
             import direct_line as dl
@@ -14513,6 +14514,162 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
         need("tell" in role.WRITES["jobs"], "the backup doesn't hand a tell on to the main")
         need("jobs.py\" tell" in config.TEAM_RULE, "the call rules don't say how to tell the team")
         return f"jobs {a} and {b}: notes told, read, the push and release held until read, shown on the status page"
+
+    async def flow178(self) -> str:
+        """H266, no Claude: Moneypenny's own line. The team's kinds of texts (done, paused, the night's check, the
+        Friday estimates, a failed QA, a held release, her own) land in her own thread from her, Donna's keep to
+        Donna's; her text pushes to the same phone, titled with her name and opening her chat; switched off (or
+        without her) it all stays Donna's; she answers his texts on her line; a failed QA and a held release go to her
+        from the routine, never to the real line from a test; on a call only she may text there; a throwaway status
+        server serves her line on /direct.json?line=team and takes his text there, Donna's chat unchanged."""
+        import urllib.request
+        import urllib.error
+        d = self.tmp / "h266"
+        d.mkdir()
+        keys = ("HQ_DIRECT_DIR", "HQ_DIRECT_LOCAL", "HQ_DIRECT_DRY", "HQ_DIRECT", "HQ_TEAM_LINE", "HQ_TEAM_LINE_DIR",
+                "HQ_DIRECT_PUSH_TO", "HQ_UNDER_TEST", "HQ_DIRECT_TEAM", "HQ_DIRECT_AGENT", "HQ_DIRECT_PUSH_DIR")
+        saved = {k: os.environ.get(k) for k in keys}
+        for k in keys:
+            os.environ.pop(k, None)
+        os.environ.update({"HQ_DIRECT_DIR": str(d / "line"), "HQ_DIRECT_LOCAL": str(d / "local.json"), "HQ_DIRECT_DRY": "1"})
+        team_dir = d / "team-line"
+        srv = None
+        try:
+            import direct_line as dl
+            from cryptography.hazmat.primitives.asymmetric import ec
+            from cryptography.hazmat.primitives import serialization
+            need(dl.team_on(), "H266: Moneypenny isn't one of the agents, so she has no line")
+            # 1. the team's kinds go to her thread, from her; Donna's stay Donna's
+            m = dl.text("jobs", "What ran: the thing")
+            need(m.get("line") == "team", f"H266: the team's done text didn't go on her line: {m}")
+            her = json.loads(open(team_dir / "thread.jsonl").read().splitlines()[-1])
+            need(her["why"] == "jobs" and her["from"] == "agent" and not dl.thread(), f"H266: her thread or Donna's is off: {her}, {dl.thread()}")
+            h = dl.text("hello", "")
+            need(h.get("line") is None and dl.thread()[-1]["why"] == "hello", "H266: Donna's own text went elsewhere")
+            for why in dl.TEAM_KINDS:
+                need(why in dl.KINDS and dl.plain(why, "the facts"), f"H266: the kind {why} has no words")
+                need(dl.line_for(why) == "team", f"H266: {why} isn't on her line")
+            for why in ("mail", "down", "remind", "appt", "weather" if False else "rain"):
+                need(dl.line_for(why) == "direct", f"H266: Donna's {why} moved to Moneypenny")
+            # 2. her text pushes to the same phone as Donna's, titled with her name, a tap opening her chat
+            phone = ec.generate_private_key(ec.SECP256R1())
+            p256dh = dl._b64(phone.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint))
+            auth = dl._b64(os.urandom(16))
+            dl.subscribe({"endpoint": "https://push.example.com/a", "keys": {"p256dh": p256dh, "auth": auth}}, "phone")
+            sent = []
+
+            class _R:
+                status = 201
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+            real_open = urllib.request.urlopen
+            urllib.request.urlopen = lambda req, timeout=0: (sent.append(req), _R())[1]
+            os.environ["HQ_DIRECT_PUSH_TO"] = "1"
+            try:
+                q = dl.text("qa-failed", "What: the bar\nWhat's off: the phone shows two bars")
+            finally:
+                urllib.request.urlopen = real_open
+                os.environ.pop("HQ_DIRECT_PUSH_TO", None)
+            need(q["pushed"] == ["201"] and len(sent) == 1, f"H266: her text wasn't pushed to the phone: {q}")
+            got = json.loads(dl.decrypt(sent[0].data, phone, auth))
+            need(got["title"] == "Moneypenny" and got["url"] == "/direct?line=team" and got["tag"] == "hq-team",
+                 f"H266: the phone would show {got}")
+            need(not (team_dir / "subscriptions.json").exists() and not (team_dir / "keys.json").exists(),
+                 "H266: her line keeps a phone list or key of its own")
+            # 3. switched off: the team's news stays with Donna
+            os.environ["HQ_TEAM_LINE"] = "0"
+            n = dl.text("jobs", "x")
+            need(n.get("line") is None and dl.thread()[-1]["why"] == "jobs", "H266: switched off, the team's text still went to her")
+            os.environ.pop("HQ_TEAM_LINE")
+            # 4. he texts her on her line; she answers there (her reply run, --team)
+            env = dict(os.environ)
+            with open(team_dir / "thread.jsonl", "a") as f:
+                f.write(json.dumps({"at": time.time(), "from": "me", "text": "Anything stuck?", "why": ""}) + "\n")
+            r = subprocess.run([sys.executable, str(ROOT / "app/direct_line.py"), "reply", "--team"], cwd=ROOT, env=env,
+                               capture_output=True, text=True, timeout=60)
+            last = json.loads(open(team_dir / "thread.jsonl").read().splitlines()[-1])
+            need(last["from"] == "agent" and last["why"] == "reply" and "Anything stuck?" in last["text"],
+                 f"H266: she didn't answer on her line: {last}, {r.stderr[-300:]}")
+            # 5. the routine's senders: a failed QA and a held release go to her; never to the real line from a test
+            sys.path.insert(0, str(ROOT / "routine"))
+            import qa
+            os.environ["HQ_UNDER_TEST"] = "1"
+            keep_dir = os.environ.pop("HQ_DIRECT_DIR")
+            need(qa.tell("qa-failed", "x") is None, "H266: a test would text the real line")
+            os.environ["HQ_DIRECT_DIR"] = keep_dir
+            need(qa.tell("qa-failed", "What: the bar\nWhat's off: two bars") is not None, "H266: a failed QA isn't texted")
+            for _ in range(100):
+                th = [json.loads(x) for x in open(team_dir / "thread.jsonl").read().splitlines()]
+                if sum(1 for x in th if x["why"] == "qa-failed") >= 2:
+                    break
+                await asyncio.sleep(0.1)
+            need(sum(1 for x in th if x["why"] == "qa-failed") >= 2, "H266: the failed QA's text didn't land on her line")
+            qsrc = (ROOT / "routine/qa.py").read_text()
+            need('tell("qa-failed"' in qsrc.split("def fail(")[1][:1200], "H266: qa.fail doesn't tell him")
+            rsrc = (ROOT / "routine/release.py").read_text()
+            need('qa.tell("release-held"' in rsrc.split("def cmd_main(")[1][:2000], "H266: a held release isn't told")
+            tsrc = (ROOT / "routine/tick.py").read_text()
+            need('direct_line.text("estimates"' in tsrc, "H266: the Friday estimates don't come from her")
+            # 6. on a call only she may text there; her craft says how
+            import policy as _policy
+            pol = _policy.Policy(config.FOLDER, dry_run=True)
+            cmd = f'python3 {ROOT}/app/direct_line.py team "I need your yes on the order"'
+            need(pol.decide("Bash", {"command": cmd}).verdict == "deny", "H266: Donna or Pepper could text on her line")
+            pol.team_texts = True
+            need(pol.decide("Bash", {"command": cmd}).verdict == "allow", "H266: Moneypenny can't text on her own line")
+            import agents as _agents
+            mp = [a for a in _agents.DEFAULTS if a["id"] == "moneypenny"][0]
+            need("direct_line.py team" in mp["craft"] and len(mp["craft"]) <= 8000, "H266: her craft doesn't say how to text him")
+            csrc = (ROOT / "app/call.py").read_text()
+            need(csrc.count("policy.team_texts") >= 2, "H266: a call with her doesn't let her text")
+            need("HQ/team-line/" in (ROOT / "routine/role.py").read_text(), "H266: the backup doesn't keep her line its own")
+            # 7. the status server: her line on ?line=team, his text there answered by her; Donna's chat unchanged
+            node = shutil.which("node") or "/opt/homebrew/bin/node"
+            port = _free_port()
+            log = open(self.tmp / "h266-server.log", "w")
+            srv = subprocess.Popen([node, str(ROOT / "status/server.mjs"), "--quiet"], cwd=ROOT,
+                                   env=dict(os.environ, HQ_STATUS_PORT=str(port), HQ_FIX_DRY="1"), stdout=log, stderr=subprocess.STDOUT)
+            base = f"http://127.0.0.1:{port}"
+
+            def call(path, data=None):
+                req = urllib.request.Request(base + path, data=None if data is None else json.dumps(data).encode(),
+                                             headers={"x-hq": "direct", "content-type": "application/json"})
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    return json.loads(r.read().decode())
+            for _ in range(50):
+                try:
+                    await asyncio.to_thread(call, "/direct.json")
+                    break
+                except Exception:
+                    await asyncio.sleep(0.2)
+            j = await asyncio.to_thread(call, "/direct.json?line=team")
+            need(j["agent"]["id"] == "moneypenny" and j["line"] == "team" and j["messages"][-1]["why"] in ("qa-failed", "reply"),
+                 f"H266: /direct.json?line=team says {str(j)[:300]}")
+            dj = await asyncio.to_thread(call, "/direct.json")
+            need(dj["agent"]["id"] != "moneypenny" and dj["line"] == "direct" and all(x["why"] != "qa-failed" for x in dj["messages"]),
+                 f"H266: Donna's chat changed: {str(dj)[:300]}")
+            need(await asyncio.to_thread(call, "/direct/send", {"text": "Is the release out?", "line": "team"}) == {"ok": True},
+                 "H266: his text to her wasn't taken")
+            for _ in range(150):
+                th = (await asyncio.to_thread(call, "/direct.json?line=team"))["messages"]
+                if th[-1]["from"] == "agent" and "Is the release out?" in th[-1]["text"]:
+                    break
+                await asyncio.sleep(0.2)
+            need(th[-2]["text"] == "Is the release out?" and th[-1]["from"] == "agent", f"H266: no answer on her line: {th[-2:]}")
+            need(all(x["text"] != "Is the release out?" for x in dl.thread()), "H266: his text to her landed in Donna's chat")
+            page = (ROOT / "status/direct.html").read_text()
+            need("get('line') === 'team'" in page and "'/direct.json?line=team'" in page and "line: 'team'" in page,
+                 "H266: the chat page doesn't open her line")
+            need("request.url.query" in (ROOT / "app/bot.py").read_text(), "H266: the call line drops ?line=team on the way")
+            return "the team's texts come from Moneypenny on her own line, pushed to the same phone; she answers there; Donna's line unchanged"
+        finally:
+            if srv:
+                srv.terminate()
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
     async def flow177(self) -> str:
         """H286, no Claude: the status page says in plain words what the team is doing, and a job that has to start
@@ -21165,6 +21322,7 @@ FLOWS = {
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     177: ("H286: the status page says in plain words what the team is doing (never the commands), a job that has to start fixing redoes its own estimate once with why, and a job that ran long through its own mistake is tagged, kept out of the estimates and listed", False, "flow177"),
+    178: ("H266: Moneypenny's own line: the team's news (done, paused, the night's check, the Friday estimates, a failed QA, a held release, her own) comes from her, pushed to the same phone; she answers his texts there; Donna's line unchanged", False, "flow178"),
     164: ("H283: a note for the team while they work: jobs.py tell N to a running or waiting job, read with notes N after each step; push.py and release.py wait while a note is unread; the first prompt carries a waiting job's notes; the status page shows them; a call tells without a yes", False, "flow164"),
     163: ("H282 (26 October 2026, changed): Moneypenny's craft has the ready and done lists and his definition of how she runs, none of the confirmed-twice and all-the-time wording; the default thinking time; the full call rules", False, "flow163"),
     162: ("H280 (26 October 2026, changed): Moneypenny starts a call like Pepper before the split: the folder and Claude's memory minus the vision, no build notes in full; a build call writes the memory without a yes", False, "flow162"),
