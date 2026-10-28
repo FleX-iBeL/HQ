@@ -12,6 +12,7 @@ anything goes up, `app/privacy.py --history` must say nothing personal; one hit 
     python3 routine/push.py --dry-run  the same, but git only shows what it would push
     python3 routine/push.py --check    only checks that GitHub accepts HQ's key; pushes nothing
     python3 routine/push.py --pull     brings HQ up to date with dev from GitHub (fast-forward only), at a job's start
+                                       (F67: a computer still on the 8 old commits is moved onto the rewritten ones, every ref)
     F67: on a computer with HQ's key, every pull and push first sets HQ's repo to commit as the public identity (own_identity).
     Every push (and release.py) waits while the running job has a note it hasn't read (H283, jobs.py notes N).
 
@@ -115,6 +116,64 @@ def across_rewrite() -> str:
     return msg
 
 
+def _carry(old: str, new: str, ref: str) -> str:
+    """F67: ref's own commits after old, re-made on new with the public identity, in a worktree of its own (the
+    working tree is never touched). Gives the new tip, or "" when it couldn't (then nothing is changed)."""
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="hq-f67-")
+    try:
+        if git("worktree", "add", "-q", "--detach", tmp, ref).returncode != 0:
+            return ""
+        fix = (f'test "$(git log -1 --format=%an%ae)" = "{PUBLIC_NAME}{PUBLIC_EMAIL}" || '
+               f'git -c user.name={PUBLIC_NAME} -c user.email={PUBLIC_EMAIL} commit -q --amend --no-edit --reset-author')
+        r = subprocess.run(["git", "-C", tmp, "-c", f"user.name={PUBLIC_NAME}", "-c", f"user.email={PUBLIC_EMAIL}",
+                            "rebase", "-q", "--exec", fix, "--onto", new, old], text=True, capture_output=True)
+        if r.returncode != 0:
+            subprocess.run(["git", "-C", tmp, "rebase", "--abort"], capture_output=True)
+            return ""
+        return subprocess.run(["git", "-C", tmp, "rev-parse", "HEAD"], text=True, capture_output=True).stdout.strip()
+    finally:
+        git("worktree", "remove", "--force", tmp)
+        git("worktree", "prune")
+
+
+def clear_old() -> list[str]:
+    """F67 (job 435): after the move, no other ref here may still hold the old 8 commits, or this computer's own
+    privacy check (it reads every ref) refuses every push. Remote-tracking branches and tags come fresh from GitHub
+    (forced, pruned: the re-made v0.4.18 too); another local branch is moved onto the rewritten commits, its own
+    commits after them carried over with the public identity. Only on a computer with HQ's key: a friend's backup
+    branches stay hers. What it did, line by line."""
+    if ssh_host() != KEY_HOST:
+        return []
+    have = [o for o in REWRITTEN if git("cat-file", "-e", f"{o}^{{commit}}").returncode == 0]
+    if not have or not any(git("for-each-ref", "--contains", o).stdout.strip() for o in have):
+        return []
+    said = []
+    if git("fetch", "-q", "--prune", "--force", "--tags", REMOTE,
+           f"+refs/heads/*:refs/remotes/{REMOTE}/*").returncode == 0:
+        said.append("GitHub's branches and tags fetched fresh (the old ones replaced).")
+    current = git("branch", "--show-current").stdout.strip()
+    for ref in git("for-each-ref", "--format=%(refname)", "refs/heads", "refs/tags").stdout.split():
+        old = next((o for o in reversed(have) if git("merge-base", "--is-ancestor", o, ref).returncode == 0), "")
+        if not old:
+            continue
+        short, new = ref.split("/", 2)[-1], REWRITTEN[old]
+        if ref == f"refs/heads/{current}" or ref.startswith("refs/tags/") \
+                or git("cat-file", "-e", f"{new}^{{commit}}").returncode != 0:
+            said.append(f"Still on the old commits, left as it is: {short}.")
+            continue
+        own = int(git("rev-list", "--count", f"{old}..{ref}").stdout.strip() or 0)
+        tip = new if own == 0 else _carry(old, new, ref)
+        if not tip:
+            said.append(f"Couldn't move {short} onto the rewritten commits; left as it is.")
+            continue
+        git("update-ref", ref, tip)
+        said.append(f"Moved {short} onto the rewritten commits" + (f", {own} commit(s) of its own carried over." if own else "."))
+    for s in said:
+        print(s)
+    return said
+
+
 def pull() -> int:
     """F31: a job's start: dev from GitHub, fast-forward only. Uncommitted changes are left alone (git refuses
     only when they'd be overwritten, and then says which)."""
@@ -131,6 +190,7 @@ def pull() -> int:
         print(f"Pulling {WORK_BRANCH} failed:\n{out}")
         refused(f"pulling {WORK_BRANCH}", out)
         return 2
+    clear_old()  # F67 (job 435): the other branches and tags too, so its own privacy check passes
     went_through(f"pulling {WORK_BRANCH}")
     print(f"Pulled {WORK_BRANCH}." + (f"\n{out}" if out else ""))
     if git("status", "--porcelain").stdout.strip():
