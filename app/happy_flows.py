@@ -4498,6 +4498,11 @@ window.addEventListener('load', () => setTimeout(() => {
                   "as many as possible in one go", "yes but x y z", "without asking again", "The ready check",
                   "nine points", "looking something up never needs his yes"):
             need(w in pm, f"her persona misses {w!r} of how she runs")
+        # H290 (28 October 2026): she delegates and checks; any change to HQ goes to the team as an item.
+        for w in ("You delegate and check, you never build", "never edit HQ's code", "never commit or push HQ",
+                  "never run a fix yourself, also not on his yes", "becomes a planning item for the team",
+                  "check it in QA", "\"The team has it\" and a new row, no edit to HQ"):
+            need(w in pm, f"H290: her persona misses {w!r}")
         need("one point at a time" not in pm, "her craft still asks one point at a time")
         need("fill in what you can yourself" not in pm.lower(), "her craft still says fill in what you can yourself")
         need("in the same reply" not in m["craft"], "her craft still checks a new item 'in the same reply'")
@@ -4505,6 +4510,7 @@ window.addEventListener('load', () => setTimeout(() => {
         need("Size, never nights" in pm and "a small build, a big build or research" in pm and "only decided at the sprint planning" in pm
              and "won't fit one night" not in pm, "H276: her craft still sizes work into nights while readying it")
         tourtext = (Path(__file__).parent / "web" / "tour.json").read_text(encoding="utf8")
+        need("never builds or fixes HQ herself" in tourtext, "H290: the tutorial's Moneypenny step doesn't say she never builds")
         need("works out the right answers herself" in tourtext
              and "yes but" in tourtext and "checked twice" not in tourtext, "the tutorial's Moneypenny step doesn't say how she runs")
         need("MoSCoW first, then bugs before features" in pm and "a Must feature stays above a Should bug" in pm,

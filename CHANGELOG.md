@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Moneypenny delegates and checks, she never builds. Her way of working now says it plainly: she never edits, commits or pushes HQ's code and never runs a fix herself, also not on your yes on a call. Any change becomes an item for the team, and she checks it in QA. Asked to fix something, she says the team has it and writes the item. The tutorial says it too.
+
 ## 0.4.18 · 27 October 2026
 
 - The backend rebuilt behind switches (HQ/backend.json in your folder; `app/backend.py` shows and flips them; every switch starts off on a fresh install, so nothing changes for you until you turn one on):
