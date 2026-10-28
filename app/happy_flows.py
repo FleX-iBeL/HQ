@@ -1289,7 +1289,16 @@ console.log(JSON.stringify({{
         from pipeline import make_brain
 
         folder = config.FOLDER
-        text = quick_context.build(folder)
+        # This flow checks the classic Quick start; the briefed one (backend switch `briefing`) has its own flow.
+        _was = os.environ.get("HQ_BACKEND_BRIEFING")
+        os.environ["HQ_BACKEND_BRIEFING"] = "0"
+        try:
+            text = quick_context.build(folder)
+        finally:
+            if _was is None:
+                os.environ.pop("HQ_BACKEND_BRIEFING", None)
+            else:
+                os.environ["HQ_BACKEND_BRIEFING"] = _was
         def has(rel: str, probe: int = 400) -> bool:  # a solid piece from the middle of the file
             body = (folder / rel).read_text()
             mid = len(body) // 2
@@ -1589,7 +1598,16 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         claude_md = (folder / "CLAUDE.md").read_text()
         need("@inbox.md" in claude_md and "very important items first" in claude_md,
              "the computer chat's start doesn't read the very important items first")
-        need(open_loops.VERY_IMPORTANT in quick_context.build(folder), "Quick doesn't have the Very important section")
+        _was = os.environ.get("HQ_BACKEND_BRIEFING")
+        os.environ["HQ_BACKEND_BRIEFING"] = "0"  # the classic Quick start; the briefed one has its own flow
+        try:
+            quick = quick_context.build(folder)
+        finally:
+            if _was is None:
+                os.environ.pop("HQ_BACKEND_BRIEFING", None)
+            else:
+                os.environ["HQ_BACKEND_BRIEFING"] = _was
+        need(open_loops.VERY_IMPORTANT in quick, "Quick doesn't have the Very important section")
         need("very important open items" in config.VOICE_RULES, "the call rules don't say to bring them up")
         need((Call.__init__.__kwdefaults__ or {}).get("loops", "x") is None
              and "open_loops.call_note" in (config.ROOT / "app" / "call.py").read_text(),
@@ -8760,7 +8778,8 @@ setTimeout(() => {
             cmd, prompt = start(a)
             need(f"--resume {sid}" in cmd and "--session-id" not in cmd, f"a held job didn't pick its own chat up: {cmd}")
             need(prompt.startswith(f"let's go again. This is job {a}") and "your own earlier chat" in prompt
-                 and "building the second half of flow 88" in prompt and prompt.rstrip().endswith("flow 88 job a"),
+                 and "building the second half of flow 88" in prompt
+                 and prompt.split("\n\nThis job runs headless")[0].rstrip().endswith("flow 88 job a"),
                  f"the carry-on prompt: {prompt}")
             need("carries on in its own chat" in caught["status"][-1][1], f"the status block doesn't say so: {caught['status'][-1]}")
             need(carryon.load(a).get("session") == sid and not carryon.load(a).get("held"), f"the hold wasn't used up: {carryon.load(a)}")
