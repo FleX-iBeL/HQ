@@ -44,10 +44,22 @@ with the same workspace and the same limits (policy.py), one text at a time.
 The coaching line (H225, coaching.py) is this same code on another folder, with the Life coaching agent and her rules
 (HQ_DIRECT_DIR, HQ_DIRECT_AGENT, HQ_DIRECT_COACHING=1); nothing subscribes there, so it never pushes.
 
+H266: Moneypenny's own line, the team line. Same code on the workspace's HQ/team-line/ with her (HQ_DIRECT_TEAM=1).
+The user's words (25 October 2026): "we need to make sure donna then stops texting updates right, and that becomes
+moneypenny", and (28 October 2026): "I want you to also proactively tell me things. Right now I have to call you up
+each time." A text of one of the team's kinds (TEAM_KINDS: the team done, a job paused, the night's check, the
+Friday estimates, a failed QA, a held release, her own) goes there, from her, whoever sends it (text() routes it);
+everything else stays Donna's. It pushes to the same phones as Donna's line (HQ_DIRECT_PUSH_DIR: her folder's
+subscriptions and keys, so nothing to allow again), titled with her name, and a tap opens /direct?line=team. His
+texts there are answered by her (reply() with this folder). Without Moneypenny in the agents, or HQ_TEAM_LINE=0,
+it all stays with Donna as before.
+
 Off: HQ_DIRECT=0 in switches.env. Tests: HQ_DIRECT_DRY=1 (her reply is canned, nothing is pushed out).
 
   python3 app/direct_line.py info                       her name and colour, the public key (JSON)
   .venv/bin/python app/direct_line.py text WHY "FACTS"  write and push one text (WHY: jobs, mail, down, back, hello)
+  .venv/bin/python app/direct_line.py team "FACTS"      Moneypenny texts him on her own line (H266)
+  ... --team                                            any of these on her line (info, reply): what the page uses
   .venv/bin/python app/direct_line.py reply             answer his newest texts
   .venv/bin/python app/direct_line.py initiative        her own look at her notes: a text, or quiet (H124)
   .venv/bin/python app/direct_line.py test              push a hello to every phone
@@ -74,7 +86,9 @@ import hqpaths  # noqa: E402
 import agents as _agents  # noqa: E402  stdlib only
 
 VENV_PY = ROOT / ".venv" / "bin" / "python"
-AGENT_ID = os.environ.get("HQ_DIRECT_AGENT", "donna")
+AGENT_ID = os.environ.get("HQ_DIRECT_AGENT", "donna")  # at import; agent() reads the variable each time (H266)
+TEAM_AGENT = "moneypenny"  # H266: the team line is hers
+TEAM_KINDS = ("jobs", "paused", "nightly", "estimates", "qa-failed", "release-held", "team")
 DOWN_AFTER = 180  # an incident open this long gets a text; a takeover or a refused pull or push (F31) gets one at once
 KEEP = 400  # messages kept in the thread
 SUBJECT = "https://github.com/FleX-iBeL/HQ"  # the VAPID contact the push services ask for
@@ -82,6 +96,67 @@ SUBJECT = "https://github.com/FleX-iBeL/HQ"  # the VAPID contact the push servic
 
 def folder() -> Path:
     return Path(os.environ.get("HQ_DIRECT_DIR") or os.path.join(hqpaths.DATA, "direct-line"))
+
+
+def push_folder() -> Path:
+    """Where the phones that allowed notifications and the push keys are: Donna's folder, also for the team line
+    (H266); the coaching line sets nothing, so it reads its own (empty) list and never pushes."""
+    return Path(os.environ.get("HQ_DIRECT_PUSH_DIR") or folder())
+
+
+def team_folder(donna: str | Path | None = None) -> Path:
+    """Her thread: next to Donna's (HQ/team-line in the workspace; a test's next to its own)."""
+    if os.environ.get("HQ_TEAM_LINE_DIR"):
+        return Path(os.environ["HQ_TEAM_LINE_DIR"])
+    return Path(donna or os.environ.get("HQ_DIRECT_DIR") or os.path.join(hqpaths.DATA, "direct-line")).parent / "team-line"
+
+
+def on_team_line() -> bool:
+    return os.environ.get("HQ_DIRECT_TEAM") == "1"
+
+
+def team_on() -> bool:
+    """H266: Moneypenny has her own line when she's one of the agents and it isn't switched off (HQ_TEAM_LINE=0)."""
+    if os.environ.get("HQ_TEAM_LINE", "1") == "0":
+        return False
+    try:
+        return any(a["id"] == TEAM_AGENT for a in _agents.load(Path(hqpaths.FOLDER)))
+    except Exception:
+        return False
+
+
+def team_env(base: dict | None = None) -> dict:
+    """The environment for the team line: her folder, her, and Donna's phones to push to."""
+    base = dict(os.environ if base is None else base)
+    donna = base.get("HQ_DIRECT_PUSH_DIR") or base.get("HQ_DIRECT_DIR") or os.path.join(hqpaths.DATA, "direct-line")
+    if base.get("HQ_DIRECT_TEAM") == "1":
+        return base
+    return {**base, "HQ_DIRECT_DIR": str(team_folder(donna)), "HQ_DIRECT_AGENT": TEAM_AGENT, "HQ_DIRECT_TEAM": "1",
+            "HQ_DIRECT_PUSH_DIR": str(donna)}
+
+
+class _Env:
+    """Run a piece with some environment variables set, then put them back."""
+
+    def __init__(self, env: dict):
+        self.new = {k: v for k, v in env.items() if os.environ.get(k) != v}
+
+    def __enter__(self):
+        self.old = {k: os.environ.get(k) for k in self.new}
+        os.environ.update(self.new)
+        return self
+
+    def __exit__(self, *a):
+        for k, v in self.old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def line_for(why: str) -> str:
+    """Which line a text of this kind goes on: team (Moneypenny's) or direct (Donna's)."""
+    return "team" if why in TEAM_KINDS and team_on() else "direct"
 
 
 def local_state_file() -> Path:
@@ -103,7 +178,7 @@ def _feature(fid: str) -> bool:
 
 
 def agent() -> dict:
-    return _agents.find(Path(hqpaths.FOLDER), AGENT_ID)
+    return _agents.find(Path(hqpaths.FOLDER), os.environ.get("HQ_DIRECT_AGENT", "donna"))
 
 
 def user() -> str:
@@ -131,9 +206,10 @@ def _write(path: Path, data) -> None:
 class _Lock:
     """One writer at a time for the thread (a reply and a routine text can meet)."""
 
-    def __init__(self, name: str = "thread"):
-        folder().mkdir(parents=True, exist_ok=True)
-        self.f = open(folder() / f".{name}.lock", "a")  # H152: "a", so taking the lock is no change for the sync
+    def __init__(self, name: str = "thread", where: Path | None = None):
+        where = where or folder()
+        where.mkdir(parents=True, exist_ok=True)
+        self.f = open(where / f".{name}.lock", "a")  # H152: "a", so taking the lock is no change for the sync
 
     def __enter__(self):
         fcntl.flock(self.f, fcntl.LOCK_EX)
@@ -195,7 +271,7 @@ def _unb64(s: str) -> bytes:
 
 def keys() -> dict:
     """The VAPID key pair, made once and kept in the workspace."""
-    path = folder() / "keys.json"
+    path = push_folder() / "keys.json"
     k = _read(path, None)
     if isinstance(k, dict) and k.get("private") and k.get("public"):
         return k
@@ -205,7 +281,7 @@ def keys() -> dict:
     raw = priv.private_numbers().private_value.to_bytes(32, "big")
     pub = priv.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
     k = {"private": _b64(raw), "public": _b64(pub), "made": time.strftime("%Y-%m-%d %H:%M")}
-    with _Lock("keys"):
+    with _Lock("keys", push_folder()):
         again = _read(path, None)
         if isinstance(again, dict) and again.get("public"):
             return again
@@ -214,7 +290,7 @@ def keys() -> dict:
 
 
 def public_key() -> str:
-    k = _read(folder() / "keys.json", None)
+    k = _read(push_folder() / "keys.json", None)
     return k["public"] if isinstance(k, dict) and k.get("public") else ""
 
 
@@ -280,7 +356,7 @@ def decrypt(body: bytes, ua_private, auth: str) -> bytes:
 
 
 def subscriptions() -> list[dict]:
-    subs = _read(folder() / "subscriptions.json", [])
+    subs = _read(push_folder() / "subscriptions.json", [])
     return [s for s in subs if isinstance(s, dict) and s.get("endpoint")] if isinstance(subs, list) else []
 
 
@@ -289,17 +365,17 @@ def subscribe(sub: dict, device: str = "") -> int:
     k = sub.get("keys") or {}
     if not (str(sub.get("endpoint", "")).startswith("https://") and k.get("p256dh") and k.get("auth")):
         raise ValueError("not a push subscription")
-    with _Lock("subs"):
+    with _Lock("subs", push_folder()):
         subs = [s for s in subscriptions() if s["endpoint"] != sub["endpoint"]]
         subs.append({"endpoint": sub["endpoint"], "keys": {"p256dh": k["p256dh"], "auth": k["auth"]},
                      "device": device[:120], "since": time.strftime("%Y-%m-%d %H:%M")})
-        _write(folder() / "subscriptions.json", subs)
+        _write(push_folder() / "subscriptions.json", subs)
     return len(subs)
 
 
 def unsubscribe(endpoint: str) -> None:
-    with _Lock("subs"):
-        _write(folder() / "subscriptions.json", [s for s in subscriptions() if s["endpoint"] != endpoint])
+    with _Lock("subs", push_folder()):
+        _write(push_folder() / "subscriptions.json", [s for s in subscriptions() if s["endpoint"] != endpoint])
 
 
 def push(text: str, title: str | None = None, extra: dict | None = None) -> list[str]:
@@ -311,8 +387,10 @@ def push(text: str, title: str | None = None, extra: dict | None = None) -> list
     if not subs or os.environ.get("HQ_DIRECT_DRY") == "1" and not os.environ.get("HQ_DIRECT_PUSH_TO"):
         return []
     k = keys()
-    payload = json.dumps({"title": title or agent()["name"], "body": text[:300], "url": "/direct",
-                          "tag": "hq-direct", **(extra or {})}).encode()
+    team = on_team_line()  # H266: her own line opens her own chat, and her texts don't replace Donna's on the lock screen
+    payload = json.dumps({"title": title or agent()["name"], "body": text[:300],
+                          "url": "/direct?line=team" if team else "/direct",
+                          "tag": "hq-team" if team else "hq-direct", **(extra or {})}).encode()
     said = []
     for s in subs:
         endpoint = s["endpoint"]
@@ -391,6 +469,15 @@ PLAIN = {
              "Quick one about your game: {facts}"],
     "game-away": ["Heads up, today's a bit different: {facts}"],
     "feedback-status": ["News on your feedback: {facts}"],  # H247 (c)
+    # H266: the team's own kinds, on Moneypenny's line
+    "paused": ["{facts}"],
+    "estimates": ["Before the sprint planning, how our estimates held this week: {facts}",
+                  "The week's estimates, for Friday: {facts}"],
+    "qa-failed": ["A check didn't pass, so it goes back to the team: {facts}",
+                  "Held one back, it didn't pass my check: {facts}"],
+    "release-held": ["Not everything went out with the release: {facts}",
+                     "I held part of the release back: {facts}"],
+    "team": ["{facts}"],
     "travel": ["Heads up for your trip: {facts}",
                "Change on your way there: {facts}"],
     "missed-call": ["Missed call. {facts}",
@@ -498,10 +585,25 @@ def _extensions_rule() -> str:
 # Her kinds of texts, what each is for. H235: an extension's own kind is looked up after these (extensions.text_kind),
 # so HQ's own always lead; the update's clash check reads these names.
 KINDS = {
+    "paused": "You stopped one of the team's jobs because it used far more of his usage than it should have (the facts "
+              "say which and how much). One or two short sentences: what got paused in everyday words, why, and that "
+              "it waits for him to say carry on or drop it. No job numbers.",
+    "estimates": "Every Friday before the sprint planning: how the team's time estimates held this week (the facts give "
+                 "the numbers). Two or three short sentences: how many landed inside their range, plainly when it's "
+                 "below eight in ten, and which kinds of work missed. Numbers are fine here, he plans with them.",
+    "qa-failed": "You checked the team's work on something and it didn't pass (the facts say what and what's off). A "
+                 "short text: what didn't pass in everyday words, what's off in one line, and that it went back to "
+                 "the team for a fix (or, when the facts say so, that it waits for him). No job numbers, no file names.",
+    "release-held": "A release went out without some of the work, because that work hasn't passed your check yet (the "
+                    "facts say what went out and what's held). One or two short sentences, plain: what's held back "
+                    "and why, and that it goes out once it passes.",
+    "team": "Something you, as head of the team, want him to know without waiting for a call: a decision you need "
+            "from him, a heads-up, what you found (the facts say it). A short text in your own words; when you need "
+            "a decision, end with the one question, plainly.",
     "feedback-status": "Feedback he sent to the person who makes HQ has a new status (the facts say what he sent and "
                        "what it is now: received, looked at, planned, being built, done or not doing it). One short, "
                        "warm line saying so, in his words for what he sent, no numbers or codes.",
-    "jobs": "The dev team at HQ (the specialists he hands his builds to) just finished up everything they had. "
+    "jobs": "The dev team at HQ (the specialists he hands his builds to; on your own line, your team) just finished up everything they had. "
             "Text him one short, cool line that the team's done, like a colleague passing it on. In his words: "
             "\"When they are done building, there should be a cool message, something about how they finished "
             "up. There don't need to be any details.\" So no details, no feature names, no numbers, nothing like "
@@ -637,7 +739,13 @@ def _clean(text: str) -> str:
 
 
 def text(why: str, facts: str) -> dict:
-    """Write one text from her into the thread and push it to his phone."""
+    """Write one text from her into the thread and push it to his phone. H266: one of the team's kinds goes on
+    Moneypenny's own line, from her, whoever sends it."""
+    if not on_team_line() and line_for(why) == "team":
+        with _Env(team_env()):
+            m = text(why, facts)
+        m["line"] = "team"
+        return m
     msg = add("agent", compose(why, facts), why)
     msg["pushed"] = push(msg["text"])
     return msg
@@ -665,6 +773,15 @@ def ring(n: int) -> dict:
 
 
 QUIET = "QUIET"
+
+# H266: what her chat on her own line adds to the rules.
+TEAM_LINE_RULE = """# This chat is your own line (H266)
+
+This is not Donna's direct line: it's your own line with him, as head of the team. The team's news comes here from you \
+(done, paused, the night's check, the Friday estimates, a check that didn't pass, a held release), and he texts you \
+here about the team, the planning and what's being built. Your craft and the build notes hold as on a call: check \
+before you answer, delegate, never build or push HQ yourself. The day to day (reminders, his calendar, mail, \
+groceries) is Donna's: when he asks you for one of those, say in one line that it's Donna's and that he can text her."""
 
 INITIATIVE_PROMPT = """You keep your own notes for {user} (below), next to his calendar. Nobody asked you anything \
 now: this is your own look, a few times a day. Text him only when one of your notes is worth bringing up right now \
@@ -761,6 +878,8 @@ def _answer(words: str) -> str:
             rules += "\n\n" + coaching.rule()
         except Exception as e:
             print(f"reply: the coaching rule: {e!r}", file=sys.stderr)
+    if on_team_line():  # H266: Moneypenny's own line
+        rules += "\n\n" + TEAM_LINE_RULE
     ctx = _agents.context_of(a)  # H246: what her role loads
     if ctx == "coach":  # nothing from the building in her rules either
         rules = _config.without_building(rules)
@@ -955,6 +1074,10 @@ def info() -> dict:
 
 if __name__ == "__main__":
     args = sys.argv[1:]
+    if "--team" in args:  # H266: the same commands on Moneypenny's own line (the status server's /direct?line=team)
+        args.remove("--team")
+        if team_on():
+            os.environ.update(team_env())
     cmd = args[0] if args else "info"
     if cmd == "info":
         if not public_key():
@@ -968,6 +1091,8 @@ if __name__ == "__main__":
         print(json.dumps(m, ensure_ascii=False))
     elif cmd == "ring" and len(args) >= 2 and args[1].isdigit():
         print(json.dumps(ring(int(args[1])), ensure_ascii=False))
+    elif cmd == "team" and len(args) >= 2:  # H266: Moneypenny texts him on her own line, without waiting for a call
+        print(json.dumps(text("team", " ".join(args[1:])), ensure_ascii=False))
     elif cmd == "initiative":
         m = initiative()
         print(json.dumps(m, ensure_ascii=False) if m else "quiet")

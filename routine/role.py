@@ -98,7 +98,7 @@ ONE_WRITER = ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "
               "HQ/calendar-todo.json")  # H243: which block a to-do is planned in
 
 
-LOCAL_ON_BACKUP = ("HQ/calls/", "HQ/direct-line/", "HQ/notes.md", "HQ/calendar.json")  # the backup's own, until handed over
+LOCAL_ON_BACKUP = ("HQ/calls/", "HQ/direct-line/", "HQ/team-line/", "HQ/notes.md", "HQ/calendar.json")  # H266: her line too; the backup's own, until handed over
 
 
 def one_way() -> bool:
