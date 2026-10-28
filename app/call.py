@@ -33,6 +33,7 @@ from pathlib import Path
 from loguru import logger
 
 import config
+from call_end import EndWatch
 import agents
 import open_loops
 from claude_llm import ClaudeSessionLLMService
@@ -164,6 +165,7 @@ class Call:
         self.wrap_up_reply: str | None = None
         self._finished = False
         self.ended_by_agent = False  # H75: she hung up after his goodbye
+        self.end = EndWatch(config.USER_LABEL)  # F59: a drop told apart from a hang-up
 
     def _continue_note(self) -> str:
         """H60: what the new call's Claude gets about the call it continues."""
@@ -440,7 +442,7 @@ class Call:
             self.transcript.note(f"{self.speaker['name']} put {self.switched_to['name']} on: the call goes on with her"
                                  if self.switched_to else
                                  f"{self.speaker['name']} hung up after the goodbye" if self.ended_by_agent
-                                 else f"{config.USER_LABEL} hung up")
+                                 else self.end.words(self.speaker['name']))
             self.transcript.end()
             if self.free:
                 logger.info("Free mode: nothing kept, no after-call work")
@@ -474,6 +476,9 @@ class Call:
                 if is_backup():
                     prompt = re.sub(r"^3\. Then commit and push.*?no here-documents\.$", lambda m: config.WRAP_UP_BACKUP_STEP,
                                     prompt, count=1, flags=re.S | re.M)
+            if self.end.is_drop() and not self.ended_by_agent:  # F59: never written down as a hang-up
+                prompt += (f"\n[Call system: F59: this call dropped, {config.USER} didn't hang up: "
+                           f"{self.end.reason()}. Where the notes say how it ended, say it dropped.]")
             if template is config.WRAP_UP_PROMPT:  # H232: HQ itself keeps what the agents said about themselves
                 try:
                     import about_self

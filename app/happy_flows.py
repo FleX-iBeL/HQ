@@ -13559,6 +13559,85 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("resume" in _P(B.__file__).read_text(), "a reopened session isn't resumed")
         return "F60: a big read is cut to a part; a dead session says so, reopens and answers the same turn"
 
+    async def flow176(self) -> str:
+        """F59, no Claude, no call: a call that drops on his side is written down as a drop, with which side went
+        quiet first, never as "hung up". On a made-up clock: his audio stops, the connection fails 33 s later
+        without the button: "the call dropped (his audio went quiet first, ...)" in the transcript and the log;
+        audio coming in until the server stops the call: the server's side; audio coming in until the network
+        fails: the network; his button (then the close): "<name> hung up" and "(button)"; her goodbye: hers.
+        The piece that notes his audio passes every frame on in a real pipecat pipeline, the call line wires it
+        right after the source, and the transcript's last line and the after-call work use it."""
+        import transcript
+        from call_end import EndWatch, AudioSeen, QUIET_GAP_SECS
+        from pipecat.frames.frames import InputAudioRawFrame
+        from pipecat.tests.utils import run_test
+        name = config.USER_LABEL
+        class Clock:
+            t = 1793210000.0
+            def __call__(self):
+                return self.t
+        def watch():
+            c = Clock()
+            return EndWatch(name, clock=c), c
+        def heard_until(w, c, secs):
+            for _ in range(int(secs * 10)):
+                c.t += 0.1
+                w.heard()
+        # 1. a drop from his side: his audio stops, the connection fails 33 s later
+        w, c = watch(); heard_until(w, c, 60); c.t += 33; w.connection("failed")
+        need(w.closed() and w.how == "drop" and w.quiet_first() == "audio", f"F59: a drop from his side: {w.how}, {w.quiet_first()}")
+        said = w.words("Moneypenny")
+        need(said.startswith("the call dropped (his audio went quiet first") and "33 s later" in said
+             and "network gave up" in said and "hung up" not in said, f"F59: a drop's line: {said}")
+        need(w.log_words().startswith("The call dropped: his audio went quiet first"), f"F59: a drop's log: {w.log_words()}")
+        need(not w.button(), "F59: a button after the close changed how it ended")
+        # 2. the server stopped mid-call while his audio came in
+        w, c = watch(); heard_until(w, c, 20); c.t += 0.1
+        need(w.server() and w.quiet_first() == "server" and w.is_drop(), "F59: the server stopping isn't the server's side")
+        need(w.words().startswith("the call dropped (the server stopped the call") and "hung up" not in w.words(),
+             f"F59: the server's line: {w.words()}")
+        need(not w.closed() and w.how == "server", "F59: the close after the server's stop changed how it ended")
+        # 2b. his audio came in until the network failed; 2c. until his page closed it without the button
+        w, c = watch(); heard_until(w, c, 20); c.t += QUIET_GAP_SECS / 3; w.connection("failed"); w.closed()
+        need(w.quiet_first() == "network" and w.words().startswith("the call dropped (the network"), f"F59: the network's line: {w.words()}")
+        w, c = watch(); heard_until(w, c, 20); c.t += 0.2; w.connection("closed"); w.closed()
+        need(w.quiet_first() == "page" and "without the hang-up button" in w.words(), f"F59: a page closed: {w.words()}")
+        # 3. a real hang-up: the button, then the connection closes
+        w, c = watch(); heard_until(w, c, 20); w.button(); c.t += 1; w.connection("closed")
+        need(not w.closed() and w.how == "button" and not w.is_drop(), "F59: the close after his button made it a drop")
+        need(w.words() == f"{name} hung up" and w.log_words() == "The caller hung up (button)", f"F59: the button: {w.words()}")
+        w, c = watch(); w.agent(); w.closed()
+        need(w.words("Pepper") == "Pepper hung up after the goodbye", f"F59: her goodbye: {w.words('Pepper')}")
+        # the transcript, read back, for the three endings
+        folder = self.tmp / "calls-F59"
+        folder.mkdir(exist_ok=True)
+        lines = {}
+        for how in ("drop", "server", "button"):
+            w, c = watch(); heard_until(w, c, 5)
+            if how == "drop":
+                c.t += 33; w.connection("failed"); w.closed()
+            elif how == "server":
+                w.server()
+            else:
+                w.button(); w.closed()
+            t = transcript.CallTranscript(folder, model="test", started=datetime(2099, 12, 31, 23, {"drop": 1, "server": 2, "button": 3}[how]))
+            t.note(w.words("Pepper")); t.end()
+            lines[how] = t.path.read_text()
+        need("*call: the call dropped (his audio went quiet first" in lines["drop"] and "hung up" not in lines["drop"], f"F59: the drop's transcript: {lines['drop'][-300:]}")
+        need("*call: the call dropped (the server stopped the call" in lines["server"], f"F59: the server's transcript: {lines['server'][-300:]}")
+        need(f"*call: {name} hung up*" in lines["button"], f"F59: the hang-up's transcript: {lines['button'][-300:]}")
+        # the piece in a real pipeline, and the wiring
+        w, c = watch()
+        await run_test(AudioSeen(w), frames_to_send=[InputAudioRawFrame(audio=b"\0" * 320, sample_rate=16000, num_channels=1)],
+                       expected_down_frames=[InputAudioRawFrame])
+        need(w.last_audio == c.t, "F59: AudioSeen didn't note his audio")
+        bot_src, call_src, pipe_src = ((ROOT / "app" / f).read_text() for f in ("bot.py", "call.py", "pipeline.py"))
+        need("end_watch=call.end" in bot_src and "call.end.closed()" in bot_src and "call.end.button()" in bot_src
+             and "call.end.server()" in bot_src and 'add_event_handler(_state' in bot_src, "F59: the call line doesn't tell the EndWatch")
+        need("source,\n            *([AudioSeen(end_watch)]" in pipe_src, "F59: AudioSeen isn't right after the source")
+        need("self.end.words(" in call_src and "this call dropped" in call_src, "F59: the transcript or the after-call work doesn't use it")
+        return "F59: a drop (his audio, the network, his page, the server) is written down as a drop with which side went quiet first; the button and her goodbye as before"
+
     async def flow175(self) -> str:
         """F58, no network, no Syncthing: the backup never writes the synced weather file. The test of one-way sync
         (28 October 2026) failed on the laptop at 14:26, both computers wrote the weather settings at once. On a
@@ -20952,6 +21031,7 @@ FLOWS = {
     150: ("F51: nothing running: the status block says DONE or WAITING, never BUILDING, on a job that's done, stopped, paused, ended or held; a running job and a normal chat's own status are left alone", False, "flow150"),
     169: ("Fable, 27 October 2026: the backend behind switches: the switches, the briefing made without Claude and the briefed start (the old one with the switch off), the open line's sessions and rollover, the log lift, the planning index against parsing, a headless job against a fake claude (done mark, stop signal), the lookups free on a call, the departments", False, "flow169"),
     172: ("F71: a QA pass names every done example of its row with what was run and what came out; without it the pass is refused, nothing written", False, "flow172"),
+    176: ("F59: a call that drops is written down as a drop, with which side went quiet first (his audio, the network, his page, the server), never as a hang-up; the button and her goodbye as before", False, "flow176"),
     175: ("F58: the backup never writes the synced weather file: what the app reads there is kept in a file of its own and read over the main one; the main writes weather.json", False, "flow175"),
     174: ("F72: big work in steps saved as they go: a stop or a crash carries on at the next step (its own chat, a fresh one, a crash rerun), the done steps untouched, the time counted once", False, "flow174"),
     173: ("F66: the estimate counts the steps the work names (the full test run, a history rewrite, flow 44) and every estimate is a range: the gate, the nights and the status page go by the latest end; the Friday report", False, "flow173"),

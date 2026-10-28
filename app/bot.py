@@ -197,7 +197,7 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
     ptt = PushToTalk()
     pipeline, _ = build_pipeline(
         source=transport.input(), sink=transport.output(), stt=call.stt, llm=call.llm,
-        tts=call.tts, fillers=call.fillers, call_state=call_state, ptt=ptt,
+        tts=call.tts, fillers=call.fillers, call_state=call_state, ptt=ptt, end_watch=call.end,
     )
     worker = PipelineWorker(
         pipeline,
@@ -213,8 +213,20 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info("The caller hung up")
+        # F59: a closed connection is a drop unless his button or her goodbye came first, and which side
+        # went quiet first is in the log and the transcript.
+        if call.end.closed():
+            logger.info(call.end.log_words())
+        else:
+            logger.info("The caller's connection closed")
         await worker.cancel()
+
+    # F59: WebRTC's own state as the connection goes (failed: the network let go; closed: his browser closed it).
+    if connection is not None:
+        for _state in ("failed", "closed", "disconnected"):
+            def _seen(conn, _s=_state):
+                call.end.connection(_s)
+            connection.add_event_handler(_state, _seen)
 
     # The phone page's Hang up button sends {"type": "hangup"} over the data channel before
     # it closes the connection, so the after-call work starts at once instead of after the
@@ -223,6 +235,7 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
         @connection.event_handler("app-message")
         async def on_app_message(conn, message):
             if isinstance(message, dict) and message.get("type") == "hangup":
+                call.end.button()
                 logger.info("The caller hung up (button)")
                 await worker.cancel()
             elif isinstance(message, dict) and message.get("type") == "ptt":
@@ -245,6 +258,7 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
         if call.ended_by_agent:
             return
         call.ended_by_agent = True
+        call.end.agent()
         logger.info(f"{call.agent['name']} hung up after the goodbye")
         if connection is not None:
             try:
@@ -261,6 +275,7 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
         if call.ended_by_agent:
             return
         call.ended_by_agent = True
+        call.end.agent()
         logger.info(f"H238: {call.speaker['name']} calls him right back")
         if connection is not None:
             try:
@@ -281,6 +296,7 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
         if other is None:
             return
         call.ended_by_agent = True
+        call.end.agent()
         call.switched_to = other
         logger.info(f"H79: {call.speaker['name']} puts {other['name']} on")
         if connection is not None:
@@ -306,7 +322,16 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
     await runner.add_workers(worker)
     try:
         await runner.run()
+    except asyncio.CancelledError:
+        # F59: the call line itself is stopping (a restart, an update) while the call is on: not a hang-up.
+        if call.end.server():
+            logger.info(call.end.log_words())
+        raise
     finally:
+        if call.end.how is None and not call.ended_by_agent:
+            # The pipeline ended with nothing having ended it (its idle time, an error): the server's side.
+            if call.end.server():
+                logger.info(call.end.log_words())
         ptt.stop()
         if not warming.done():
             warming.cancel()

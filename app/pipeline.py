@@ -659,9 +659,11 @@ def build_pipeline(
     taps: dict[str, FrameProcessor] | None = None,
     call_state=None,
     ptt: PushToTalk | None = None,
+    end_watch=None,
 ) -> tuple[Pipeline, LLMContextAggregatorPair]:
     """taps: optional pass-through processors for tests, at "after_stt", "after_llm",
-    "after_tts". ptt: the push-to-talk state (H9); one is made when none is given."""
+    "after_tts". ptt: the push-to-talk state (H9); one is made when none is given.
+    end_watch: F59's EndWatch, told each piece of his audio right after the source."""
     taps = taps or {}
     ptt = ptt or PushToTalk()
 
@@ -685,9 +687,12 @@ def build_pipeline(
     )
     ptt.user_aggregator = aggregators.user()
     ptt.call_state = call_state
+    if end_watch is not None:
+        from call_end import AudioSeen
     pipeline = Pipeline(
         [
             source,
+            *([AudioSeen(end_watch)] if end_watch is not None else []),
             stt,
             *tap("after_stt"),
             aggregators.user(),
