@@ -1209,7 +1209,9 @@ if __name__ == "__main__":
         head = {k: v for k, v in request.headers.items() if k.lower() in ("x-hq", "content-type")}
         try:
             async with _httpx.AsyncClient(timeout=90) as cl:
-                r = await cl.request(request.method, _STATUS + request.url.path, headers=head,
+                # H266: the query too (/direct.json?line=team is Moneypenny's line)
+                r = await cl.request(request.method, _STATUS + request.url.path
+                                     + (f"?{request.url.query}" if request.url.query else ""), headers=head,
                                      content=await request.body())
         except _httpx.HTTPError:
             return Response("The direct line can't be reached right now", status_code=502, media_type="text/plain")

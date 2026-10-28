@@ -409,7 +409,10 @@ async function temperatureHistory(hours, file = '.status/temperature-history.jso
 const DIRECT_DIR = process.env.HQ_DIRECT_DIR ?? join(dirname(ROADMAP), 'direct-line');
 const DIRECT_PY = existsSync(join(root, '.venv/bin/python')) ? join(root, '.venv/bin/python') : '/usr/bin/python3';
 const DIRECT_TOOL = join(root, 'app/direct_line.py');
+// H266: Moneypenny's own line, /direct?line=team: her thread next to Donna's, the same phones and key.
+const TEAM_DIR = process.env.HQ_TEAM_LINE_DIR ?? join(dirname(DIRECT_DIR), 'team-line');
 let directInfo = null;
+let teamInfo = null;
 function directTool(args, input = '') {
   return new Promise((resolve) => {
     const p = execFile(DIRECT_PY, [DIRECT_TOOL, ...args], { timeout: 30000, cwd: root }, (err, out) => {
@@ -420,9 +423,9 @@ function directTool(args, input = '') {
     if (input) p.stdin.end(input); else p.stdin.end();
   });
 }
-async function directThread() {
+async function directThread(dir = DIRECT_DIR) {
   try {
-    return (await readFile(join(DIRECT_DIR, 'thread.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => {
+    return (await readFile(join(dir, 'thread.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => {
       try { return JSON.parse(l); } catch { return null; }
     }).filter((m) => m && m.text).slice(-200);
   } catch {
@@ -431,10 +434,17 @@ async function directThread() {
 }
 async function directRoute(path0, req, res) {
   const json = (code, data) => res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(data));
+  const team = new URL(req.url ?? '/', 'http://x').searchParams.get('line') === 'team';
+  if (path0 === '/direct.json' && team) {
+    if (!teamInfo || !teamInfo.key) teamInfo = (await directTool(['info', '--team'])) || teamInfo;
+    // without Moneypenny the tool gives Donna: then her line is Donna's, as before
+    const own = teamInfo && teamInfo.id !== (directInfo?.id ?? 'donna');
+    return json(200, { agent: teamInfo, line: own ? 'team' : 'direct', messages: await directThread(own ? TEAM_DIR : DIRECT_DIR) });
+  }
   if (path0 === '/direct.json' || path0 === '/direct/key') {
     if (!directInfo || !directInfo.key) directInfo = (await directTool(['info'])) || directInfo;
     if (path0 === '/direct/key') return json(directInfo ? 200 : 500, { key: directInfo?.key ?? '' });
-    return json(200, { agent: directInfo, messages: await directThread() });
+    return json(200, { agent: directInfo, line: 'direct', messages: await directThread() });
   }
   if (req.method !== 'POST' || req.headers['x-hq'] !== 'direct') return res.writeHead(403).end('Only the HQ page can text her');
   let body = {};
@@ -451,10 +461,14 @@ async function directRoute(path0, req, res) {
     await new Promise((done) => execFile(DIRECT_PY, [join(root, 'app/travel.py'), 'here', String(body.lat), String(body.lon)],
       { timeout: 10000, cwd: root }, () => done()));
   }
-  await mkdir(DIRECT_DIR, { recursive: true });
-  await appendFile(join(DIRECT_DIR, 'thread.jsonl'), JSON.stringify({ at: Date.now() / 1000, from: 'me', text, why: '' }) + '\n');
+  if (body.line === 'team' && !teamInfo) teamInfo = await directTool(['info', '--team']);
+  // H266: a text to Moneypenny goes into her own thread, and she answers it (the tool's --team)
+  const toTeam = body.line === 'team' && teamInfo && teamInfo.id !== (directInfo?.id ?? 'donna');
+  const dir = toTeam ? TEAM_DIR : DIRECT_DIR;
+  await mkdir(dir, { recursive: true });
+  await appendFile(join(dir, 'thread.jsonl'), JSON.stringify({ at: Date.now() / 1000, from: 'me', text, why: '' }) + '\n');
   const log = openSync(join(root, 'scratch', 'direct-line.log'), 'a');
-  spawn(DIRECT_PY, [DIRECT_TOOL, 'reply'], { cwd: root, detached: true, stdio: ['ignore', log, log] }).unref();
+  spawn(DIRECT_PY, [DIRECT_TOOL, 'reply', ...(toTeam ? ['--team'] : [])], { cwd: root, detached: true, stdio: ['ignore', log, log] }).unref();
   return json(200, { ok: true });
 }
 
