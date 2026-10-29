@@ -14705,6 +14705,91 @@ tick.start(job); print(json.dumps(json.load(open(run + '/job-settings.json'))))
                 "and passes her ledger, her line, reads and the scripts; a cycle job's settings carry it, a normal job's don't; twenty handover "
                 "edits at once all land under the file's lock; off, all as before")
 
+    async def flow195(self) -> str:
+        """H298, piece 9, no Claude: the monthly review. On a throwaway workspace with Donna on: the runner's minute
+        plans her review once, as a one-off priority item of her kind on the coming first Friday at the review's
+        time, and a second minute plans nothing more; the first-Friday math from any day. Moved to now and started
+        through the routine's own start, the run has the review's box (20 minutes, 60 turns), her character, the
+        handbook, the whole month of her ledger and the review's questions, and its one way out is cycles.py
+        proposal; a fake claude writes the proposal: it lands in her ledger and on her line, marked as changing
+        nothing, and nothing else in the workspace changed (the handbook, the cycle settings, the to-do list, the
+        log, the planning's rows). Off, no review is planned."""
+        import subprocess as _sp
+        import hashlib as _hl
+        ws, env = self._h298_ws("p9")
+        env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
+        drv = self.tmp / "h298-driver9.py"
+        drv.write_text(self._h298_driver())
+        def drive(*a, extra=None):
+            r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws), *a], capture_output=True, text=True, env={**env, **(extra or {})}, cwd=str(ROOT), timeout=300)
+            m = re.search(r"RESULT (.*)", r.stdout)
+            need(m, f"the driver failed: {r.stdout[-600:]} {r.stderr[-1500:]}")
+            return json.loads(m.group(1))
+        def cy(*a):
+            r = _sp.run([sys.executable, str(ROOT / "routine/cycles.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            need(r.returncode == 0, f"cycles.py {' '.join(a)[:80]}: {r.stdout[-300:]} {r.stderr[-500:]}")
+            return r.stdout
+        def sched(*a):
+            return _sp.run([sys.executable, str(ROOT / "routine/schedule.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        import cycles as _cy
+        ff = {d: _cy.first_friday(datetime.strptime(d, "%Y-%m-%d")).strftime("%Y-%m-%d") for d in ("2026-10-29", "2026-11-06", "2026-11-07", "2026-12-01", "2027-01-02")}
+        need(ff == {"2026-10-29": "2026-11-06", "2026-11-06": "2026-12-04", "2026-11-07": "2026-12-04", "2026-12-01": "2026-12-04", "2027-01-02": "2027-02-05"}, f"the first-Friday math: {ff}")
+        for a in ("pepper", "moneypenny"):
+            cy("set", a, "on", "off")
+        rm = ws / "HQ/roadmap.md"
+        t = drive("tick", "2026-10-29 10:00")
+        need(any("donna's monthly review planned for Friday 6 November 09:00" in x for x in t["log"]), f"the review wasn't planned: {t['log']}")
+        items = re.findall(r"^- Item (\d+) · waiting(.*?) · Agent cycle: donna, monthly review$", rm.read_text(), re.M)
+        need(len(items) == 1 and ", priority" in items[0][1] and "every" not in items[0][1] and "2026-11-06 09:00" in items[0][1], f"the review item: {items}")
+        t = drive("tick", "2026-10-29 10:01")
+        need(not any("monthly review planned" in x for x in t["log"]), "a second minute planned the review again")
+        # start it: moved to now, promoted; the fake claude writes the proposal
+        before = {p.relative_to(ws).as_posix(): _hl.md5(p.read_bytes()).hexdigest() for p in ws.rglob("*") if p.is_file() and ".git" not in p.parts}
+        r = sched("move", items[0][0], "now")
+        need(r.returncode == 0 and "became job" in sched("promote").stdout, "the review didn't become a job")
+        words = "Drop: the second look at the mail list each cycle, it never changed anything. Automate: the parcel lines, a row for the planning. Change in my section: my ten percent should name the week's one deadline first."
+        fake = self.tmp / "h298-review-claude.py"
+        fake.write_text("#!/usr/bin/env python3\nimport json, sys, os, subprocess\np = sys.stdin.read(); open(os.environ['H298_GOT'], 'w').write(p)\n"
+                        "def out(d): print(json.dumps(d), flush=True)\n"
+                        "out({'type': 'system', 'subtype': 'init', 'session_id': 's-review'})\n"
+                        "r = subprocess.run([sys.executable, os.environ['H298_CYCLES'], 'proposal', 'donna', os.environ['H298_WORDS']], capture_output=True, text=True)\n"
+                        "out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'cycles.py proposal donna'}}]}})\n"
+                        "out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': r.stdout + r.stderr}]}})\n"
+                        "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Proposed.'})\n")
+        fake.chmod(0o755)
+        got = self.tmp / "h298-review-got.txt"
+        _sp.run([sys.executable, str(ROOT / "routine/ledger.py"), "donna", "note", "decision: the parcel line stays, source: his rule on parcels"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        s = drive("start", extra={"HQ_CLAUDE": str(fake), "H298_GOT": str(got), "H298_CYCLES": str(ROOT / "routine/cycles.py"), "H298_WORDS": words})
+        p = s["prompt"]
+        need(p.startswith(f"let's go. This is job {s['n']} from the queue: Donna's own cycle, monthly review (H298)"), f"the review's prompt head: {p[:200]}")
+        need("Your character:" in p and "The handbook: how you run yourself" in p and "### Donna" in p and "Your whole month" in p
+             and "This is your monthly review" in p and "which 20% of what you did moved your score" in p and "It changes nothing by itself" in p
+             and "proposal donna" in p and "the parcel line stays" in p, "the review's prompt lacks the month, the questions or the way out")
+        need("--max-minutes 20 --max-turns 60" in s["script"], f"the review's box: {s['script']}")
+        need(s["note"] and s["note"]["boxed"] is None, f"the review's run: {s['note']}")
+        led = (ws / "HQ/ledger/donna.md").read_text()
+        need("monthly review: proposal" in led and words in led, f"the proposal isn't in her ledger: {led[-500:]}")
+        thread = (ws / "HQ/direct-line/thread.jsonl").read_text() if (ws / "HQ/direct-line/thread.jsonl").exists() else ""
+        need("My monthly review, for your yes or no (nothing changed by itself): " + words in thread, f"the proposal isn't on her line: {thread[-400:]}")
+        after = {p_.relative_to(ws).as_posix(): _hl.md5(p_.read_bytes()).hexdigest() for p_ in ws.rglob("*") if p_.is_file() and ".git" not in p_.parts}
+        changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+        allowed = {"HQ/ledger/donna.md", "HQ/direct-line/thread.jsonl", "HQ/direct-line/.thread.lock", "HQ/roadmap.md"}
+        changed = [k for k in changed if not k.startswith("HQ/roadmap-estimates/")]  # the queue's own bookkeeping of the run
+        need(set(changed) <= allowed, f"the review changed more than her ledger, her line and the queue: {changed}")
+        for k in ("challenges.md", "coaching/log.md", "inbox.md", "HQ/agents/cycles.json", "HQ/agents/handbook.md", "HQ/sprint.json"):
+            need(before.get(k) == after.get(k), f"the review changed {k}")
+        rows_before = [l for l in (ROOT / "template/HQ/roadmap.md").read_text().splitlines() if l.startswith("- H") or l.startswith("- F")]
+        rows_after = [l for l in rm.read_text().splitlines() if l.startswith("- H") or l.startswith("- F")]
+        need(rows_before == rows_after, "a planning row changed")
+        need((ws / "HQ/agents/handbook.md").read_text() == (ROOT / "template/HQ/agents/handbook.md").read_text(), "the handbook changed")
+        # off: no review planned
+        ws2, env2 = self._h298_ws("p9off", maker=False)
+        r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws2), "tick", "2026-10-29 10:00"], capture_output=True, text=True, env={**env2, "HQ_LEDGER_FOLDER": str(ws2 / "HQ/ledger")}, cwd=str(ROOT), timeout=120)
+        need("monthly review" not in (ws2 / "HQ/roadmap.md").read_text(), "a review was planned with the feature off")
+        return ("Donna's review planned once for Friday 6 November 09:00 as a one-off priority item (the first-Friday math from any day); started, it ran "
+                "in its 20-minute 60-turn box with her character, the handbook, her whole month and the questions, and its proposal landed in her ledger "
+                "and on her line marked as changing nothing; nothing else in the workspace changed; off, none planned")
+
     async def flow184(self) -> str:
         """F78, no Claude, no window: a job held by the usage line is checked on what's left of it when it carries on
         in its own chat. On 28 October job 424 was held at 16:30 with about 5.8% of the 5-hour left, yet every minute
@@ -23067,6 +23152,7 @@ FLOWS = {
     192: ("H298, piece 6: the wall: the gate holds a start over the line, nothing starts outside her hours (dropped to the morning when still useful, waits before them), past useful-until is skipped, over her weekly or daily share is refused, boxed twice in a row is a tripwire and nothing restarts itself", False, "flow192"),
     193: ("H298, piece 7: the Friday screen on the status page: routines.json carries the agents (three lines per agent, her share against her line) and the page draws The agents, one card per agent, the share red over her line; off, nothing of it", False, "flow193"),
     194: ("H298, piece 8: serialized writes: a cycle's hook refuses Edit, Write and shell writes on a shared file before they land and passes her ledger, her line and the scripts; a cycle job's settings carry it, a normal job's don't; twenty one-writer edits at once all land under the file's lock; off, as before", False, "flow194"),
+    195: ("H298, piece 9: the monthly review: planned once per agent as a one-off priority item on the first Friday; run in its box with her character, the handbook, her whole month and the questions; its proposal lands in her ledger and on her line and changes nothing; off, none planned", False, "flow195"),
     191: ("H298, piece 6: a cycle runs: an order now becomes a step at once; the bigger session starts through the routine's own start with her character, the handbook, her ledger, the order and the plan command, inside her box; its plan becomes priority step items; a step with a changed input is stale; done and failed in the ledger; a check failing twice and the same goal twice are tripwires on her line, at most her texts a day", False, "flow191"),
     190: ("H298, piece 6: off means off: the runner plans nothing and the rules carry nothing while the feature is off; on, each agent's cycles are planned once as repeating priority items of their own kind, an agent off loses hers, off again cancels them all", False, "flow190"),
     189: ("H298, piece 5: the ledger per agent (orders on top, each cycle's plan as lines and JSON, notes, the score) and the weekly score computed without Claude: the pokes from his own lines (status questions, corrections, short calls) and each agent's own measures from the files", False, "flow189"),

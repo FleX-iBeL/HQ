@@ -638,6 +638,8 @@ def prompt(job: dict, parsed: dict, base: Path | None = None, now: dt.datetime |
         if parsed["kind"] == "session":
             parts.append(_plan_shape(aid, a, now))
         else:
+            parts.append("Your whole month (every dated section of your ledger of the last 31 days, oldest first; the scores HQ computed are the "
+                         "'score, week' ones):\n\n" + _month_words(aid, now))
             parts.append(_review_shape(aid))
     elif parsed["kind"] == "look":
         lk = next((x for x in a.get("looks") or [] if x.get("name") == parsed["name"]), {})
@@ -649,6 +651,17 @@ def prompt(job: dict, parsed: dict, base: Path | None = None, now: dt.datetime |
         spec = _step_spec(aid, parsed)
         parts.append(_step_words(aid, parsed, spec, base))
     return "\n\n".join(p for p in parts if p) + "\n"
+
+
+MONTH_MOST = 60_000  # characters of the month's ledger in a review's prompt
+
+
+def _month_words(aid: str, now: dt.datetime) -> str:
+    secs = ledger.recent(aid, 31, now)
+    if not secs:
+        return "(nothing in the last 31 days)"
+    t = "\n\n".join(f"## {s['title']}\n{s['body']}" for s in secs).strip()
+    return t if len(t) <= MONTH_MOST else "(the oldest part left out for room)\n\n" + t[-MONTH_MOST:]
 
 
 def _briefing(ctx: str, base: Path) -> str:
