@@ -4511,8 +4511,10 @@ window.addEventListener('load', () => setTimeout(() => {
             need(w in pm, f"her persona misses {w!r} of the definition of ready and done")
         # 26 October 2026, his definition of how she runs (replaces H274 and H282): she works out the answers herself,
         # executes towards the planning, and brings proposals for a yes or a "yes but x y z".
-        for w in ("you don't ask questions one at a time", "work out the right answers yourself",
-                  "execute towards the team planning yourself", "proposed solution",
+        # F81 (28 October 2026): she decides grounded, and what she can't ground is a sit-down with him; she no longer
+        # works out the answers or fills in the nine points herself (flow 198 checks the rest).
+        for w in ("you don't ask questions one at a time", "You decide, the way a head of development does",
+                  "execute towards the team planning", "proposed solution",
                   "as many as possible in one go", "yes but x y z", "without asking again", "The ready check",
                   "nine points", "looking something up never needs his yes"):
             need(w in pm, f"her persona misses {w!r} of how she runs")
@@ -4532,7 +4534,7 @@ window.addEventListener('load', () => setTimeout(() => {
              and "won't fit one night" not in pm, "H276: her craft still sizes work into nights while readying it")
         tourtext = (Path(__file__).parent / "web" / "tour.json").read_text(encoding="utf8")
         need("never builds or fixes HQ herself" in tourtext, "H290: the tutorial's Moneypenny step doesn't say she never builds")
-        need("works out the right answers herself" in tourtext
+        need("grounds each decision" in tourtext and "she sits down with you" in tourtext and "works out the right answers herself" not in tourtext
              and "yes but" in tourtext and "checked twice" not in tourtext, "the tutorial's Moneypenny step doesn't say how she runs")
         need("MoSCoW first, then bugs before features" in pm and "a Must feature stays above a Should bug" in pm,
              "F53: her persona doesn't put MoSCoW before bugs first")
@@ -10121,7 +10123,7 @@ setTimeout(() => {
         c = mp.get("craft", "")
         need("MoSCoW first, then bugs before features" in c and "a Must feature stays above a Should bug" in c
              and "always" not in c.split("MoSCoW first")[1][:200] and "tech debt" in c and "interest on a loan" in c and "Features and Bugs" in c
-             and "bug check" in c and "MoSCoW" in c and len(c) <= 6000, "H271: Moneypenny's craft doesn't put bugs first, explain tech debt, keep them apart and suggest a bug check")
+             and "bug check" in c and "MoSCoW" in c and len(c) <= 8000, "H271: Moneypenny's craft doesn't put bugs first, explain tech debt, keep them apart and suggest a bug check")
         need("bugs before features" in agents.persona(mp).lower() if hasattr(agents, "persona") else True, "H271: her persona doesn't carry it")
         fresh = (ROOT / "template/HQ/roadmap.md").read_text()
         need("## Phase F · Bugs" in fresh and "## Phase H · Features" in fresh and "tech debt" in fresh, "H271: a fresh roadmap doesn't keep Bugs and Features apart")
@@ -13696,6 +13698,66 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("source,\n            *([AudioSeen(end_watch)]" in pipe_src, "F59: AudioSeen isn't right after the source")
         need("self.end.words(" in call_src and "this call dropped" in call_src, "F59: the transcript or the after-call work doesn't use it")
         return "F59: a drop (his audio, the network, his page, the server) is written down as a drop with which side went quiet first; the button and her goodbye as before"
+
+    async def flow198(self) -> str:
+        """F81, no Claude: Moneypenny decides grounded, never by guessing. Her persona carries his why word for word at
+        the top of how she works; before she decides she looks it up (his rules and words, the rows and their holds,
+        how HQ really works, the code), grounded means his words with a date, a rule, a row or the code under
+        Sources, anything else is an assumption that goes on the sit-down list and never into an item, not even
+        marked as hers; the sit-down names the open points with a proposal each, nothing enters before his yes, a no
+        or no answer leaves the point open and the row not ready, over several calls too. No line of her prompt tells
+        her to work out or fill in the nine points without him: every hit of "yourself" and "fill in" is read here,
+        and each that may stay is named. Donna's and Pepper's crafts carry none of it. With the agents running
+        themselves (H298) the one line is still swapped for the handbook's."""
+        import agents
+        import handbook as hb
+        m = next(a for a in agents.DEFAULTS if a["id"] == "moneypenny")
+        c = m["craft"]
+        need(len(c) <= 8000 and agents._clean(dict(m))["craft"] == c.strip(), f"her craft is cut on load ({len(c)} characters)")
+        pm = agents.persona(m, "Alex")
+        why = ("Look, these checklist and prep work on the items are KEY to making whole of HQ work You have a very "
+               "important role as an agent, because you will eventually offload a lot of my life and work towards the "
+               "team, not just in development but also what these developments will produce through their applications "
+               "and reproduce consistently So the bottleneck is this planning If we prep it correctly, then development "
+               "goes well and the applications run well and the results will be great If we dont do the prep well, then "
+               "the development will be a shitshow running in circles and everything gets stalled infinitely and there "
+               "will be no results at all Do you understand this? You need to write this down and this needs to be in "
+               "your dna in order for this to work")
+        need(why in pm and c.index(why) < c.index("How you run") and c.index(why) < c.index("The definition of ready"),
+             "F81: his why isn't word for word at the top of how she works")
+        for w in ("You decide, the way a head of development does: grounded in what's already there, never by guessing",
+                  "Before you decide anything for an item, look it up", "his rules and his words on the planning",
+                  "the rows it touches and their holds", "usage is a percent of the subscription, not dollars",
+                  "the code where a number comes from", "Grounded means his words with a date, a rule, a planning row or the code",
+                  "named in the item under Sources", "Anything else is an assumption", "not even marked as your own",
+                  "it goes on the sit-down list", "The sit-down", "name the open points", "each with a proposed solution",
+                  "Nothing goes into the item before his yes", "word for word", "Each yes is written in the row with its date and stands",
+                  "No answer, or a no: the point stays open and the row stays not ready",
+                  "Over several calls the same", "a point he re-opens is open again until his new answer"):
+            need(w in pm, f"F81: her persona misses {w!r}")
+        # the prompt search: every line with "yourself" or "fill in", each sentence read
+        allowed = {
+            "fill in the nine points with him": "they fill the points in together",
+            "never run a fix yourself": "a thing she never does",
+            "hold every item against them yourself, and bring what's thin to the sit-down": "she checks, and brings the gaps to him",
+        }
+        hits = []
+        for sent in re.split(r"(?<=[.:;])\s+", c):
+            low = sent.lower()
+            if "yourself" in low or "fill in" in low or "fill it in" in low or "work out" in low:
+                why_ok = next((v for k, v in allowed.items() if k.lower() in low), None)
+                need(why_ok or "with him" in low, f"F81: a line still tells her to fill in or work out alone: {sent!r}")
+                hits.append(why_ok or "with him")
+        for bad in ("work out the right answers yourself", "execute towards the team planning yourself",
+                    "fill in the nine points, mark", "Fill it in from the complete picture"):
+            need(bad not in c, f"F81: her craft still says {bad!r}")
+        for a in agents.DEFAULTS:
+            if a["id"] != "moneypenny":
+                need("sit-down" not in a.get("craft", "") and "Why the prep matters" not in a.get("craft", ""),
+                     f"F81: {a['id']}'s rules carry Moneypenny's")
+        need(hb._CRAFT_OLD.search(c) and "fill in the nine points" not in hb._CRAFT_OLD.sub(hb._CRAFT_NEW, c),
+             "F81: the handbook's swap no longer finds her line")
+        return f"his why word for word on top, grounded or a sit-down, {len(hits)} hits of the search read and named: " + "; ".join(hits)
 
     async def flow197(self) -> str:
         """F59 (job 454, after QA job 443): the server stopped mid-call, for real. A throwaway test call line (its
@@ -23551,6 +23613,7 @@ FLOWS = {
     192: ("H298, piece 6: the wall: the gate holds a start over the line, nothing starts outside her hours (dropped to the morning when still useful, waits before them), past useful-until is skipped, over her weekly or daily share is refused, boxed twice in a row is a tripwire and nothing restarts itself", False, "flow192"),
     193: ("H298, piece 7: the Friday screen on the status page: routines.json carries the agents (three lines per agent, her share against her line) and the page draws The agents, one card per agent, the share red over her line; off, nothing of it", False, "flow193"),
     194: ("H298, piece 8: serialized writes: a cycle's hook refuses Edit, Write and shell writes on a shared file before they land and passes her ledger, her line and the scripts; a cycle job's settings carry it, a normal job's don't; twenty one-writer edits at once all land under the file's lock; off, as before", False, "flow194"),
+    198: ("F81: Moneypenny decides grounded and brings the rest to a sit-down with him: his why word for word on top of how she works, no line telling her to fill in the nine points alone", False, "flow198"),
     197: ("F59: the server stopped mid-call, for real: the call line's own stop script with a caller on ends the call itself and writes it down as the server's, in the log and the transcript", True, "flow197"),
     196: ("F58: the two computers never write the same file: two private Syncthings and two throwaway HQs, main and backup, both texting, reading the weather and marking the calendar at the same moment: one thread with every line on both, the backup's shown at once and kept while the main is away, no conflict copy, no merge job; two versions of a log of lines merged by the routine itself", False, "flow196"),
     195: ("H298, piece 9: the monthly review: planned once per agent as a one-off priority item on the first Friday; run in its box with her character, the handbook, her whole month and the questions; its proposal lands in her ledger and on her line and changes nothing; off, none planned", False, "flow195"),
