@@ -4512,10 +4512,13 @@ window.addEventListener('load', () => setTimeout(() => {
         # 26 October 2026, his definition of how she runs (replaces H274 and H282): she works out the answers herself,
         # executes towards the planning, and brings proposals for a yes or a "yes but x y z".
         for w in ("you don't ask questions one at a time", "work out the right answers yourself",
-                  "execute towards the team planning yourself", "mark them ready", "proposed solution",
+                  "execute towards the team planning yourself", "proposed solution",
                   "as many as possible in one go", "yes but x y z", "without asking again", "The ready check",
                   "nine points", "looking something up never needs his yes"):
             need(w in pm, f"her persona misses {w!r} of how she runs")
+        # With the agents running themselves on in this workspace (H298), that one line reads "mark ready only what you
+        # grounded" instead (handbook.trim_craft); either is how she runs.
+        need("mark them ready" in pm or "mark ready only what you grounded" in pm, "her persona misses 'mark them ready' of how she runs")
         # H290 (28 October 2026): she delegates and checks; any change to HQ goes to the team as an item.
         for w in ("You delegate and check, you never build", "never edit HQ's code", "never commit or push HQ",
                   "never run a fix yourself, also not on his yes", "becomes a planning item for the team",
@@ -6658,6 +6661,7 @@ import {{ readFileSync }} from 'node:fs';
 import {{ landing, landingWords, lineSettings }} from '{(jv / "status/usage.mjs").as_uri()}';
 const u = JSON.parse(readFileSync({json.dumps(str(u_file))}, 'utf8'));
 const lines = lineSettings(readFileSync({json.dumps(env2["HQ_ROADMAP"])}, 'utf8'));
+lines.weekly = {{ ...lines.weekly, moving: true }};  // the copy's weekly line may be fixed on the real roadmap; H177 reads it moving
 const E = JSON.parse(readFileSync(0, 'utf8'));
 const o = {{}};
 for (const l of u.limits) {{ const L = landing(l, lines, E); o[L.key] = {{ ...L, words: landingWords(L, (t) => String(t)) }}; }}
@@ -9922,10 +9926,22 @@ setTimeout(() => {
         env.pop("HQ_SPRINT_NOW")  # schedule.py checks real time; plan from tomorrow night on
         import datetime as _dt
         tomorrow = (_dt.date.today() + _dt.timedelta(days=1))
+        # The made-up reading by the real clock too, so tomorrow night's room is the same whatever the date and hour of
+        # the run: a 5-hour window starting at tomorrow 20:00 (its reset within the next five hours), the weekly reset
+        # five days on.
+        real = time.time()
+        r5 = _dt.datetime.combine(tomorrow, _dt.time(20, 0)).timestamp()
+        while r5 - 5 * 3600 > real:
+            r5 -= 5 * 3600
+        iso = lambda x: _dt.datetime.fromtimestamp(x, _dt.timezone.utc).isoformat().replace("+00:00", "Z")  # noqa: E731
+        Path(env["HQ_USAGE"]).write_text(json.dumps({"readable": True, "limits": [
+            {"label": "5-hour limit", "percent": 0, "resetsAt": iso(r5)},
+            {"label": "Weekly · all models", "percent": 10.0, "resetsAt": iso(real + 5 * 86400)}]}))
         ok = lambda r, what: need(r.returncode == 0, f"H269: {what}: {r.stdout[-300:]} {r.stderr[-600:]}")  # noqa: E731
         ok(self._sprint(env, "rank", "H9002", "1"), "rank")
         for l in ("H9001", "H9002", "H9004", "H9006", "H9007"):  # H272: only rows marked ready are planned
             ok(self._sprint(env, "ready", l), "ready")
+        laid = js.loads(self._sprint(env, "lay", "H9001", "H9002", "H9004", "H9006", "H9007", "--night", tomorrow.isoformat(), "--json").stdout)
         r = self._sprint(env, "plan", "H9001", "H9002", "H9004", "H9006", "H9007", "--night", tomorrow.isoformat())
         ok(r, "plan")
         import sys as _s0
@@ -9934,9 +9950,16 @@ setTimeout(() => {
         items = [i for i in sc.read(rm.read_text()) if i["state"] == "waiting"]
         got = [(re.match(r"(H\d+)", i["text"]).group(1), i["at"]) for i in items]
         d1, d2 = tomorrow.isoformat(), (tomorrow + _dt.timedelta(days=1)).isoformat()
-        # H9002 ranked first, then the roadmap's order (H9006 and H9007 stand above H9004 on it)
-        need(got == [("H9002", f"{d1} 22:00"), ("H9001", f"{d1} 22:01"), ("H9006", f"{d1} 22:02"), ("H9007", f"{d2} 22:00"), ("H9004", f"{d2} 22:01")],  # F66: by the latest end
-             f"H269: the sprint isn't planned in rank order at its nights: {got}")
+        # H9002 ranked first, then the roadmap's order (H9006 and H9007 stand above H9004 on it), each at the night the
+        # sprint view laid it on (F66: by the latest end; which night holds how many is flow 145's, on a fixed clock),
+        # its night's 22:00 a minute apart; the made-up reading leaves tomorrow night room for more than one
+        want, per = [], {}
+        for x in laid["rows"]:
+            k = per.get(x["night"], 0)
+            per[x["night"]] = k + 1
+            want.append((x["label"], f"{x['night']} 22:{k:02d}"))
+        need([x[0] for x in got] == ["H9002", "H9001", "H9006", "H9007", "H9004"] and got == want and want[0][1] == f"{d1} 22:00"
+             and per.get(d1, 0) >= 2, f"H269: the sprint isn't planned in rank order at its nights: {got}, laid {want}")
         need(all("on the HQ roadmap, planned for the team at the sprint planning" in i["text"] and "Read the" in i["text"] for i in items),
              f"H269: a planned row doesn't read its row: {items[0]['text']}")
         need("H9002 planned for" in r.stdout and "22:00" in r.stdout, f"H269: what got planned isn't said: {r.stdout}")
@@ -10291,8 +10314,9 @@ setTimeout(() => {
             return f(2, f(1, aid) + f(5, a))
         feeds = lambda *ents: (d / "feeds" / "alerts.pb").write_bytes(f(1, f(1, "2.0")) + b"".join(ents))
         now = int(time.time())
-        feeds(alert("KV15:1", "s1", "Lijn 9: halte vervalt, vervangende halte: Proefplein -- Line 9: stop closed", now - 3600, now + 86400),
-              alert("KV15:2", "s2", "Ver weg vervalt", now - 3600, now + 86400),
+        # active from a day before (the link below leaves at 14:45 today, also when the run is in the evening)
+        feeds(alert("KV15:1", "s1", "Lijn 9: halte vervalt, vervangende halte: Proefplein -- Line 9: stop closed", now - 86400, now + 86400),
+              alert("KV15:2", "s2", "Ver weg vervalt", now - 86400, now + 86400),
               alert("KV15:3", "s1", "Allang voorbij", now - 9 * 86400, now - 8 * 86400))
         (d / "feeds" / "trainUpdates.pb").write_bytes(f(1, f(1, "2.0")))
         script = str(APP / "travel.py")
@@ -14526,6 +14550,12 @@ print("RESULT " + json.dumps(out))
         need("cycles.gatekeep(job" in tsrc and tsrc.index("cycles.gatekeep(job") < tsrc.index('"--gate"]'), "tick.py doesn't ask the runner's check before the gate")
         # (4) the hours: 23:00 drops it (not useful tomorrow: Donna's until 12:00), 07:00 waits
         today = time.strftime("%Y-%m-%d")
+        # The session counts as queued this morning, as on a run at night: a session queued after 12:00 is still useful
+        # until tomorrow's 12:00, and would rightly be planned again for 08:00.
+        rq = ws / "HQ/roadmap.md"
+        morning = lambda m: re.sub(r"(, planned for \w+ \d{1,2} \w+, )\d{1,2}:\d\d:", r"\g<1>09:00:",  # noqa: E731
+                                   re.sub(r"(· agreed \d{4}-\d\d-\d\d )\d\d:\d\d", r"\g<1>09:00", m.group(0), count=1), count=1)
+        rq.write_text(re.sub(r"^- Job 1 · .*$", morning, rq.read_text(), count=1, flags=re.M))
         g = drive("gatekeep", f"{today} 23:00")
         need(g["verdict"] == "skipped" and any("hours end at 22:00" in x for x in g["log"]), f"at 23:00: {g}")
         led = (ws / "HQ/ledger/donna.md").read_text()
@@ -21939,8 +21969,18 @@ print("H88OUT " + json.dumps(out))
         import role
         for rel in ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "HQ/notes-donna.md"):
             need(role.one_writer(rel), f"{rel} isn't one of the files only the main writes")
-        for rel in ("current-situation.md", "HQ/notes.md", "HQ/calls/x.md", "HQ/agents/notes-x.md"):
-            need(not role.one_writer(rel), f"{rel} counts as only the main's")
+        # With one-way sync on (the live workspace's switch since 28 October 2026) every synced file is the main's;
+        # these are the files only the main writes with it off, as a fresh HQ has it.
+        keep_ow = os.environ.get("HQ_BACKEND_ONE_WAY_SYNC")
+        os.environ["HQ_BACKEND_ONE_WAY_SYNC"] = "0"
+        try:
+            for rel in ("current-situation.md", "HQ/notes.md", "HQ/calls/x.md", "HQ/agents/notes-x.md"):
+                need(not role.one_writer(rel), f"{rel} counts as only the main's")
+        finally:
+            if keep_ow is None:
+                os.environ.pop("HQ_BACKEND_ONE_WAY_SYNC", None)
+            else:
+                os.environ["HQ_BACKEND_ONE_WAY_SYNC"] = keep_ow
         base = self.tmp / "h203"
         shutil.rmtree(base, ignore_errors=True)
         ws = {}
