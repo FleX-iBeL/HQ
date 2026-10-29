@@ -34,7 +34,14 @@ from aiortc.mediastreams import AudioStreamTrack  # noqa: E402
 from kokoro_onnx import Kokoro  # noqa: E402
 
 # This Mac's own Tailscale name and address, as Tailscale reports them.
-_ts = json.loads(subprocess.run(["/usr/local/bin/tailscale", "status", "--json"], capture_output=True, text=True).stdout or "{}")
+# F59 (job 454): a computer without Tailscale at that path (a Linux server) can still import FakeMic for the flows.
+import shutil  # noqa: E402
+_TS_BIN = "/usr/local/bin/tailscale" if os.path.exists("/usr/local/bin/tailscale") else shutil.which("tailscale")
+try:
+    _ts = json.loads(subprocess.run([_TS_BIN, "status", "--json"], capture_output=True, text=True,
+                                    timeout=10).stdout or "{}") if _TS_BIN else {}
+except (OSError, subprocess.SubprocessError, ValueError):
+    _ts = {}
 HOST = (_ts.get("Self", {}).get("DNSName") or "").rstrip(".")
 TS_IP = (_ts.get("Self", {}).get("TailscaleIPs") or [""])[0]
 # H56.5: another HQ's call line on the tailnet (a server): HQ_TEST_HOST=<its ts.net name> HQ_TEST_IP=<its 100.x>

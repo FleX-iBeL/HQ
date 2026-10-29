@@ -13673,6 +13673,80 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         need("self.end.words(" in call_src and "this call dropped" in call_src, "F59: the transcript or the after-call work doesn't use it")
         return "F59: a drop (his audio, the network, his page, the server) is written down as a drop with which side went quiet first; the button and her goodbye as before"
 
+    async def flow197(self) -> str:
+        """F59 (job 454, after QA job 443): the server stopped mid-call, for real. A throwaway test call line (its
+        own port, dry after-call work), a real WebRTC caller who types one line and gets her answer, then the call
+        line's own stop script while the caller is still on: the stop ends the call itself (not after the caller
+        leaves), the call line's log says "The call dropped: the server stopped the call at ...", and the
+        transcript's last line "the call dropped (the server stopped the call ...), not a hang-up", never his page
+        closing it or a hang-up. One turn of the plan."""
+        import aiohttp
+        import numpy as np
+        from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
+        from test_a4 import FakeMic
+        srv = self.server
+        await self.ensure_server()
+        pid = srv.pid
+        offset = srv.log_size()
+        before = set(srv.calls.glob("*.md")) if srv.calls.exists() else set()
+        pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+        pc.addTrack(FakeMic(np.zeros(0, np.int16)))
+        dc = pc.createDataChannel("chat", ordered=True)
+        chats: list[tuple[str, str]] = []
+        told: list[str] = []
+
+        @dc.on("message")
+        def on_message(msg):
+            try:
+                m = json.loads(msg)
+            except (TypeError, ValueError):
+                return
+            if isinstance(m, dict):
+                told.append(str(m.get("type")))
+                if m.get("type") == "hq-chat":
+                    chats.append((m.get("who"), m.get("text")))
+        try:
+            await pc.setLocalDescription(await pc.createOffer())
+            async with aiohttp.ClientSession() as s:
+                async with s.post(TEST_URL + "/api/offer", json={
+                        "sdp": pc.localDescription.sdp, "type": "offer", "request_data": {"mode": "quick"}}) as r:
+                    need(r.status == 200, f"F59: the offer was refused ({r.status})")
+                    answer = await r.json()
+            await pc.setRemoteDescription(RTCSessionDescription(answer["sdp"], answer["type"]))
+            t0 = time.perf_counter()
+            while (pc.connectionState != "connected" or dc.readyState != "open") and time.perf_counter() - t0 < 20:
+                await asyncio.sleep(0.1)
+            need(pc.connectionState == "connected" and dc.readyState == "open", "F59: the test call did not connect")
+            await asyncio.sleep(3)  # her greeting first
+            dc.send(json.dumps({"type": "typed", "text": "This is a test call. Just say OK, nothing else."}))
+            self.turns += 1
+            t0 = time.perf_counter()
+            while not any(w == "hq" for w, _ in chats[1:]) and time.perf_counter() - t0 < 90:
+                await asyncio.sleep(0.3)
+            need(any(w == "hq" for w, _ in chats[1:]), f"F59: no answer on the test call: {chats}")
+            await asyncio.sleep(2)
+            need(pc.connectionState == "connected", "F59: the test call went before the stop")
+            # the call line's own stop, with the caller still on
+            say("stopping the test call line with the caller on")
+            t = time.perf_counter()
+            r = await asyncio.to_thread(srv.stop)
+            took = time.perf_counter() - t
+            need(not alive(pid), f"F59: the stop left the call line (pid {pid}) running: {r.stdout.strip()}")
+            need("forced" not in r.stdout, f"F59: the stop had to force it ({took:.0f} s): the call kept it up")
+        finally:
+            await pc.close()
+        log = srv.log_since(offset)
+        need("The call dropped: the server stopped the call at" in log,
+             f"F59: the call line's log doesn't say the server stopped the call: {log[-1500:]}")
+        need("without the hang-up button" not in log and "The caller hung up" not in log,
+             f"F59: a server stop read as his page or a hang-up: {log[-1500:]}")
+        made = sorted(set(srv.calls.glob("*.md")) - before)
+        need(made, "F59: no transcript from the test call")
+        text = made[-1].read_text()
+        need("*call: the call dropped (the server stopped the call" in text and f"*call: {config.USER_LABEL} hung up" not in text,
+             f"F59: the transcript's last line: {text[-400:]}")
+        return f"F59: the real stop script ended a live test call in {took:.0f} s, written down as the server's in the log and the transcript"
+
     async def flow175(self) -> str:
         """F58, no network, no Syncthing: the backup never writes the synced weather file. The test of one-way sync
         (28 October 2026) failed on the laptop at 14:26, both computers wrote the weather settings at once. On a
@@ -23365,6 +23439,7 @@ FLOWS = {
     192: ("H298, piece 6: the wall: the gate holds a start over the line, nothing starts outside her hours (dropped to the morning when still useful, waits before them), past useful-until is skipped, over her weekly or daily share is refused, boxed twice in a row is a tripwire and nothing restarts itself", False, "flow192"),
     193: ("H298, piece 7: the Friday screen on the status page: routines.json carries the agents (three lines per agent, her share against her line) and the page draws The agents, one card per agent, the share red over her line; off, nothing of it", False, "flow193"),
     194: ("H298, piece 8: serialized writes: a cycle's hook refuses Edit, Write and shell writes on a shared file before they land and passes her ledger, her line and the scripts; a cycle job's settings carry it, a normal job's don't; twenty one-writer edits at once all land under the file's lock; off, as before", False, "flow194"),
+    197: ("F59: the server stopped mid-call, for real: the call line's own stop script with a caller on ends the call itself and writes it down as the server's, in the log and the transcript", True, "flow197"),
     196: ("F58: the two computers never write the same file: two private Syncthings and two throwaway HQs, main and backup, both texting, reading the weather and marking the calendar at the same moment: one thread with every line on both, the backup's shown at once and kept while the main is away, no conflict copy, no merge job; two versions of a log of lines merged by the routine itself", False, "flow196"),
     195: ("H298, piece 9: the monthly review: planned once per agent as a one-off priority item on the first Friday; run in its box with her character, the handbook, her whole month and the questions; its proposal lands in her ledger and on her line and changes nothing; off, none planned", False, "flow195"),
     191: ("H298, piece 6: a cycle runs: an order now becomes a step at once; the bigger session starts through the routine's own start with her character, the handbook, her ledger, the order and the plan command, inside her box; its plan becomes priority step items; a step with a changed input is stale; done and failed in the ledger; a check failing twice and the same goal twice are tripwires on her line, at most her texts a day", False, "flow191"),
