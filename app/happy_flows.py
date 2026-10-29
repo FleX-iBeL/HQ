@@ -13799,6 +13799,61 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         return "the blank handbook and defaults ship clean; off loads nothing; on loads part one and her own section under every character"
 
 
+    async def flow186(self) -> str:
+        """H298, piece 2, no Claude: the identity fix. On a throwaway workspace, a made-up call transcript full of the
+        user's life (his workout, his bike, his appointment, his errands), where every line of the agents' is about
+        him; the look (HQ_ABOUT_FAKE) returns those as if they were hers: nothing is kept. A line she said about
+        herself in the first person (a plant on her desk) is kept; a text of hers the same way; a fact that names
+        him is never kept, whatever the look says. The look's rule says her life is her own, never his."""
+        import importlib
+        import subprocess as _sp
+        ws, env = self._h298_ws("p2")
+        (ws / "HQ/calls").mkdir(parents=True, exist_ok=True)
+        call = ws / "HQ/calls/2026-01-06-1201.md"
+        call.write_text(
+            "# Call 6 January 2026, 12:01\n\nStarted 12:01:00 · agent Pepper · brain opus\n\n"
+            "- 12:01 **Me:** I did my workout again, every day this week, and I biked to the bike shop in the rain.\n"
+            "- 12:01 **HQ:** Oh, that's good. So you did your workout again, every day. And your bike, did the shop fix the brakes?\n"
+            "- 12:02 **Me:** Not yet. I have the appointment at the clinic on Tuesday and I'm back at the office two afternoons a week.\n"
+            "- 12:02 **HQ:** Right, so the clinic on Tuesday, and the office two afternoons a week. How is that going for you?\n"
+            "- 12:03 **Me:** Fine. Also I took my fibre sachet this morning.\n"
+            "- 12:03 **HQ:** Good. Your fibre sachet every morning, that's the plan. By the way, I have a new plant on my desk. I keep forgetting to water it.\n"
+            "- 12:04 **Me:** Ha. Okay, bye.\n- 12:04 **HQ:** Bye.\n\n*call* hung up\n")
+        fake = json.dumps({"new": [
+            {"agent": "Pepper", "fact": "does her workout every day this week"},
+            {"agent": "Pepper", "fact": "biked to the bike shop in the rain"},
+            {"agent": "Pepper", "fact": "has an appointment at the clinic on Tuesday"},
+            {"agent": "Pepper", "fact": "is back at the office two afternoons a week"},
+            {"agent": "Pepper", "fact": "takes a fibre sachet every morning"},
+            {"agent": "Pepper", "fact": "thinks his bike brakes should get fixed"},
+            {"agent": "Pepper", "fact": "has a new plant on her desk and keeps forgetting to water it"},
+        ]})
+        r = _sp.run([sys.executable, str(APP / "about_self.py"), "harvest-call", str(call)], capture_output=True, text=True,
+                    env={**env, "HQ_ABOUT_FAKE": fake}, cwd=str(ROOT))
+        need(r.returncode == 0, f"harvest-call failed: {r.stderr[-400:]}")
+        kept = (ws / "HQ/agents/pepper-about-herself.md").read_text() if (ws / "HQ/agents/pepper-about-herself.md").exists() else ""
+        facts = [l[2:] for l in kept.splitlines() if l.startswith("- ")]
+        need(len(facts) == 1 and facts[0].startswith("has a new plant on her desk"), f"the harvest kept his life as hers: {facts}")
+        need(not re.search(r"workout|bike shop|clinic|afternoons|fibre|brakes", kept), f"something of his is in her list: {kept}")
+        # a text of hers: the same filter
+        fake2 = json.dumps({"new": [{"agent": "Donna", "fact": "has a perfect gaming week going"},
+                                    {"agent": "Donna", "fact": "has coffee from the machine on the second floor now"}]})
+        r = _sp.run([sys.executable, str(APP / "about_self.py"), "harvest-text", "donna",
+                     "Nice, day nine of your gaming week, perfect so far. I've switched to the coffee from the machine on the second floor, much better."],
+                    capture_output=True, text=True, env={**env, "HQ_ABOUT_FAKE": fake2}, cwd=str(ROOT))
+        need(r.returncode == 0, f"harvest-text failed: {r.stderr[-400:]}")
+        dk = (ws / "HQ/agents/donna-about-herself.md").read_text()
+        need("gaming week" not in dk and "second floor" in dk, f"Donna's text harvest: {dk}")
+        # the rule the look gets, and the mechanical check on its own
+        about_self = importlib.import_module("about_self")
+        need("Never anything about the boss" in about_self.HARVEST_SYSTEM and "first person" in about_self.HARVEST_SYSTEM,
+             "the look's rule doesn't keep his life out")
+        need(not about_self.own_life("thinks he should rest more", "Donna: I think he should rest more."), "a fact naming him was kept")
+        need(not about_self.own_life("has a cat", "Donna: Nothing yet."), "a fact from nowhere was kept")
+        need(about_self.own_life("has a cat called Mo", "Donna: My cat Mo knocked my coffee over again."), "her own cat wasn't kept")
+        need((ROOT / "app/about_self.py").read_text().count("own_life(f, said)") == 1, "harvest doesn't go through the check")
+        return "a transcript full of his life keeps nothing about him; her own plant and her own coffee are kept; a fact naming him never is"
+
     async def flow184(self) -> str:
         """F78, no Claude, no window: a job held by the usage line is checked on what's left of it when it carries on
         in its own chat. On 28 October job 424 was held at 16:30 with about 5.8% of the 5-hour left, yet every minute
@@ -22157,6 +22212,7 @@ FLOWS = {
     141: ("H240: a 9292 link at the leaving time (the calendar's start or the time he names, leaving then or there by then), with the notices for the stops and stations near both ends from the open live data, never made up", False, "flow141"),
     140: ("H238: call me back (the page reloads and calls the same agent, continuing the call), and an agent calls him at an agreed time or appointment (a push, one tap picks up, a missed one in her chat)", False, "flow140"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
+    186: ("H298, piece 2: the identity fix: the harvest after a call or text keeps only first-person lines about her own office life; a transcript full of his life yields nothing about him", False, "flow186"),
     185: ("H298, piece 1: the handbook under each agent's character behind the switch (in pieces, off by default): the template's blank handbook and cycle defaults, off loads nothing, on loads part one and her own section, Moneypenny's craft trimmed", False, "flow185"),
 }
 
