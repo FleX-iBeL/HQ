@@ -344,9 +344,12 @@ def start(job):
         chat += " " + " ".join(shlex.quote(x) for x in cycles.box_args(job, cycle, RUN))
     # The job's settings (its status line) with this HQ's path, written fresh each time.
     settings = os.path.join(RUN, "job-settings.json")
-    json.dump({"statusLine": {"type": "command",
-                              "command": f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'statusline.py'))}"}},
-              open(settings, "w"), indent=2)
+    sett = {"statusLine": {"type": "command",
+                           "command": f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'statusline.py'))}"}}
+    if cycle:  # H298, piece 8: a cycle's writes to a shared file go only through HQ's own scripts (the hook refuses the rest)
+        sett["hooks"] = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+                                         "hooks": [{"type": "command", "command": f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'cyclehook.py'))}"}]}]}
+    json.dump(sett, open(settings, "w"), indent=2)
     pfile = os.path.join(RUN, f"job-{n}.prompt")
     open(pfile, "w").write(prompt)
     cmd = os.path.join(RUN, f"job-{n}.command")

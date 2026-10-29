@@ -14615,6 +14615,96 @@ print("ok")
         return ("on: routines.json carries the agents and the page draws The agents with Donna's and Moneypenny's cards (picked, moved, "
                 "escalated, the share red over her line), Pepper off not drawn; off: no agents, no section, the rest as before")
 
+    async def flow194(self) -> str:
+        """H298, piece 8, no Claude: serialized writes. (1) The cycle's hook: an Edit or Write on a shared file
+        (the log, the to-do list, the planning), or a shell write on it, is refused before it lands, with the way in
+        named; her ledger, her line, a Read, and the scripts (handover.py edit, todo.py) pass. (2) A cycle job's
+        settings carry the hook; a normal job's don't. (3) The one-writer path takes the file's lock: twenty
+        handover edits on the log at once all land, none lost under another; the roadmap keeps the queue's lock.
+        (4) Off means off: handover.py and the job settings are as before for a normal job."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("p8")
+        env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
+        hook = ROOT / "routine/cyclehook.py"
+        def ask(tool, **inp):
+            r = _sp.run([sys.executable, str(hook)], input=json.dumps({"tool_name": tool, "tool_input": inp}), capture_output=True, text=True, env=env, cwd=str(ROOT))
+            return r.returncode, r.stderr.strip()
+        for tool, inp in (("Edit", {"file_path": str(ws / "coaching/log.md")}), ("Write", {"file_path": str(ws / "challenges.md")}),
+                          ("MultiEdit", {"file_path": str(ws / "HQ/roadmap.md")}), ("Edit", {"file_path": str(ws / "HQ/sprint.json")}),
+                          ("Bash", {"command": f"echo '- x' >> {ws / 'inbox.md'}"}), ("Bash", {"command": f"sed -i 's/a/b/' {ws / 'HQ/roadmap.md'}"}),
+                          ("Bash", {"command": f"python3 - <<'EOF'\nopen('{ws / 'challenges.md'}', 'a').write('x')\nEOF"})):
+            code, why = ask(tool, **inp)
+            need(code == 2 and "refused" in why and "HQ's own scripts" in why and "handover.py edit" in why, f"{tool} on {inp} wasn't refused: {code} {why[:200]}")
+        for tool, inp in (("Edit", {"file_path": str(ws / "HQ/ledger/donna.md")}), ("Write", {"file_path": str(ws / "HQ/direct-line/thread.jsonl")}),
+                          ("Read", {"file_path": str(ws / "challenges.md")}), ("Bash", {"command": f"python3 {ROOT / 'routine/handover.py'} edit coaching/log.md '{{}}'"}),
+                          ("Bash", {"command": f"python3 {ROOT / 'routine/todo.py'} add 'x'"}), ("Bash", {"command": f"cat {ws / 'coaching/log.md'} | head"}),
+                          ("Write", {"file_path": str(ws / "HQ/notes-donna.md")})):
+            code, why = ask(tool, **inp)
+            need(code == 0, f"{tool} on {inp} was refused: {why[:200]}")
+        # (2) a cycle job's settings carry the hook, a normal job's don't
+        drv = self.tmp / "h298-driver8.py"
+        drv.write_text(self._h298_driver())
+        def cy(*a):
+            r = _sp.run([sys.executable, str(ROOT / "routine/cycles.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            need(r.returncode == 0, f"cycles.py {' '.join(a)[:80]}: {r.stdout[-300:]} {r.stderr[-500:]}")
+            return r.stdout
+        def sched(*a):
+            return _sp.run([sys.executable, str(ROOT / "routine/schedule.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        for a in ("pepper", "moneypenny"):
+            cy("set", a, "on", "off")
+        cy("set", "donna", "hours", "00:00-23:59")
+        r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws), "tick"], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need("RESULT" in r.stdout, f"the driver's tick failed: {r.stdout[-300:]} {r.stderr[-800:]}")
+        rm = ws / "HQ/roadmap.md"
+        item = re.search(r"^- Item (\d+) · waiting, every day, priority · .* · Agent cycle: donna, bigger session$", rm.read_text(), re.M)
+        need(item and sched("move", item.group(1), "now").returncode == 0 and "became job" in sched("promote").stdout, "Donna's session didn't become a job")
+        fake = self.tmp / "h298-p8-claude"
+        fake.write_text("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\",\"session_id\":\"s\"}'\n")
+        fake.chmod(0o755)
+        r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws), "start"], capture_output=True, text=True, env={**env, "HQ_CLAUDE": str(fake)}, cwd=str(ROOT), timeout=300)
+        m = re.search(r"RESULT (.*)", r.stdout)
+        need(m, f"the cycle's start failed: {r.stdout[-400:]} {r.stderr[-1200:]}")
+        got = json.loads(m.group(1))
+        sett = json.loads((Path(env["HQ_JOB_RUN"]) / "job-settings.json").read_text())
+        hk = sett.get("hooks", {}).get("PreToolUse", [])
+        need(hk and "cyclehook.py" in hk[0]["hooks"][0]["command"] and "Edit" in hk[0]["matcher"] and "Bash" in hk[0]["matcher"], f"the cycle job's settings don't carry the hook: {sett}")
+        need("cyclehook" not in got["prompt"] and "the file's lock" in got["prompt"], "the prompt doesn't say the scripts serialize the shared files")
+        # a normal job: the old settings, no hook (the feature on or off)
+        _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), "add", "a plain test job: say done"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        r = _sp.run([sys.executable, "-c", """
+import sys, os, json; sys.path.insert(0, sys.argv[1] + '/routine'); import tick
+run = os.environ['HQ_JOB_RUN']; tick.LINUX_WINDOWS = True; tick.RUN, tick.STATE, tick.PIDFILE = run, run + '/job.json', run + '/job.pid'
+tick.open_window = lambda *a: None; tick.status = lambda *a: None; tick.log = lambda m: None
+q = json.loads(tick.jobs('next')); job = [j for j in q['waiting'] if 'plain test job' in j['text']][0]
+tick.start(job); print(json.dumps(json.load(open(run + '/job-settings.json'))))
+""", str(ROOT)], capture_output=True, text=True, env={**env, "HQ_CLAUDE": str(fake)}, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0 and "hooks" not in json.loads(r.stdout.strip().splitlines()[-1]), f"a normal job's settings changed: {r.stdout[-300:]} {r.stderr[-500:]}")
+        # (3) the lock on the one-writer path: twenty edits on the log at once, all land
+        log = ws / "coaching/log.md"
+        log.write_text("# Log\n\n## Open commitments\n\n- none\n\n## Lines\n")
+        procs = []
+        for i in range(20):
+            payload = json.dumps({"edits": [{"old": "## Lines\n", "new": f"## Lines\n- line {i}\n"}]})
+            procs.append(_sp.Popen([sys.executable, str(ROOT / "routine/handover.py"), "edit", "coaching/log.md", payload], env=env, cwd=str(ROOT), stdout=_sp.PIPE, stderr=_sp.PIPE, text=True))
+        outs = [p.communicate(timeout=120) for p in procs]
+        codes = [p.returncode for p in procs]
+        need(all(c == 0 for c in codes), f"a handover edit failed: {codes} {[o for o in outs if o[1]][:2]}")
+        t = log.read_text()
+        need(all(f"- line {i}\n" in t for i in range(20)) and t.count("- line ") == 20, f"an edit was lost under another: {t.count('- line ')} of 20 landed")
+        need(not (ws / "coaching/log.md.lock").exists() and not list(ws.glob("**/*.lock")), "a lock file landed in the user's folder")
+        import jobs as _jobs
+        need((Path(_jobs.LOCK).parent / "locks" / "coaching__log.md.lock").exists(), "the log's lock isn't in HQ's own locks folder")
+        hs = (ROOT / "routine/handover.py").read_text()
+        need('rel == "HQ/roadmap.md"' in hs and "jobs.locked()" in hs, "the roadmap no longer takes the queue's lock")
+        # (4) off: the same handover, the same settings for a normal job
+        (ws / "HQ/features.json").write_text('{"off": [], "on": [], "maker": true}\n')
+        payload = json.dumps({"edits": [{"old": "- line 0\n", "new": "- line 0 (off)\n"}]})
+        r = _sp.run([sys.executable, str(ROOT / "routine/handover.py"), "edit", "coaching/log.md", payload], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0 and "- line 0 (off)\n" in log.read_text(), f"handover edit with the feature off: {r.stdout} {r.stderr[-200:]}")
+        return ("the hook refuses Edit, Write and shell writes on the log, the to-do list, the planning and the mail list with the way in named, "
+                "and passes her ledger, her line, reads and the scripts; a cycle job's settings carry it, a normal job's don't; twenty handover "
+                "edits at once all land under the file's lock; off, all as before")
+
     async def flow184(self) -> str:
         """F78, no Claude, no window: a job held by the usage line is checked on what's left of it when it carries on
         in its own chat. On 28 October job 424 was held at 16:30 with about 5.8% of the 5-hour left, yet every minute
@@ -22976,6 +23066,7 @@ FLOWS = {
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
     192: ("H298, piece 6: the wall: the gate holds a start over the line, nothing starts outside her hours (dropped to the morning when still useful, waits before them), past useful-until is skipped, over her weekly or daily share is refused, boxed twice in a row is a tripwire and nothing restarts itself", False, "flow192"),
     193: ("H298, piece 7: the Friday screen on the status page: routines.json carries the agents (three lines per agent, her share against her line) and the page draws The agents, one card per agent, the share red over her line; off, nothing of it", False, "flow193"),
+    194: ("H298, piece 8: serialized writes: a cycle's hook refuses Edit, Write and shell writes on a shared file before they land and passes her ledger, her line and the scripts; a cycle job's settings carry it, a normal job's don't; twenty one-writer edits at once all land under the file's lock; off, as before", False, "flow194"),
     191: ("H298, piece 6: a cycle runs: an order now becomes a step at once; the bigger session starts through the routine's own start with her character, the handbook, her ledger, the order and the plan command, inside her box; its plan becomes priority step items; a step with a changed input is stale; done and failed in the ledger; a check failing twice and the same goal twice are tripwires on her line, at most her texts a day", False, "flow191"),
     190: ("H298, piece 6: off means off: the runner plans nothing and the rules carry nothing while the feature is off; on, each agent's cycles are planned once as repeating priority items of their own kind, an agent off loses hers, off again cancels them all", False, "flow190"),
     189: ("H298, piece 5: the ledger per agent (orders on top, each cycle's plan as lines and JSON, notes, the score) and the weekly score computed without Claude: the pokes from his own lines (status questions, corrections, short calls) and each agent's own measures from the files", False, "flow189"),

@@ -585,7 +585,7 @@ def _rules(aid: str, parsed: dict, a: dict, b: dict) -> str:
              "The same question is never asked twice in a day.",
              "- Writes to a shared file (the planning, the to-do list, the log, the mail list, the calendar) only through HQ's own scripts "
              f"(todo.py, sprint.py, jobs.py, pings.py, python3 \"{ROOT / 'routine' / 'handover.py'}\" edit REL JSON for the log and the mail list), never with an Edit or Write on the file itself: "
-             "that's the one place that serializes them, and a direct write is a tripwire. Your ledger and your line you write freely.",
+             "that's the one place that serializes them (each takes the file's lock); a direct write is refused by this run's hook before it lands, and is a tripwire. Your ledger and your line you write freely.",
              "- Never send mail, never a calendar change with another person in it, never anything he must say yes to first, never a change to the handbook, "
              "your section or the settings: those are his (an if-then question instead). Never start another run or plan more than this run's plan.",
              "- Nothing in what you write goes outside this workspace."]

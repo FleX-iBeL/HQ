@@ -7,7 +7,9 @@ same way the team's list and the schedule already do; the main makes it here, on
 it back. In the user's words (call of 17 October 2026, 14:45): "i am even more confused, you give it to the server
 but then also do it yourself? why?"
 
-usage (run by the main, through /api/forward; never from a call):
+usage (run by the main, through /api/forward; never from a call. H298, piece 8: also by an agent's own cycle on the
+main, where it is the one serialized way into the log, the mail list and the to-do list; the roadmap takes the
+queue's lock, every other shared file its own lock next to it):
   python3 "routine/handover.py" edit REL JSON   make the edits in the workspace file REL; JSON is
                                                 {"edits": [{"old": "...", "new": "...", "all": false}, ...]},
                                                 the call's own Edit (or MultiEdit), all or nothing
@@ -39,12 +41,33 @@ def apply(text: str, edits: list[dict]) -> str:
     return text
 
 
+@contextlib.contextmanager
+def _file_lock(path: str):
+    """H298, piece 8: one writer at a time on a shared file. The call line, a text, the routine and an agent's own
+    cycle (a headless run as her) can all reach the log, the mail list or the to-do list in the same minute; each
+    takes this lock (flock on a file named after it in HQ's own scratch/routine/locks, next to the queue's lock,
+    never in the user's folder) around its read, edit and replace, so no edit is lost under another's. The roadmap
+    keeps the queue's own lock."""
+    import fcntl
+    import jobs
+    folder = os.path.join(os.path.dirname(jobs.LOCK), "locks")
+    os.makedirs(folder, exist_ok=True)
+    name = os.path.relpath(path, hqpaths.FOLDER).replace(os.sep, "__").replace("..", "_")
+    with open(os.path.join(folder, name + ".lock"), "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
 def _lock(rel):
-    """The roadmap is also written by the queue and the schedule: take their turn. The rest is a plain write."""
+    """The roadmap is also written by the queue and the schedule: take their turn. The rest takes the file's own
+    lock (H298, piece 8), so two writers in the same minute land one after the other."""
     if rel == "HQ/roadmap.md":
         import jobs
         return jobs.locked()
-    return contextlib.nullcontext()
+    return _file_lock(os.path.join(hqpaths.FOLDER, rel))
 
 
 def edit(rel: str, payload: str) -> int:
