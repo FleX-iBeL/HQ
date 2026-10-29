@@ -13998,6 +13998,107 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         need(pol.decide("Bash", {"command": f"python3 {ROOT / 'routine/sprint.py'} fields H9101"}).verdict == ALLOW, "a call may not run fields")
         return "the fields hold on found quotes, named additions and real sources; a made-up quote, an empty field or a ghost source refuses the Ready mark with the feature on and is only reported with it off"
 
+    async def flow189(self) -> str:
+        """H298, piece 5, no Claude: the ledger per agent and the weekly score. On a throwaway workspace: the ledger is
+        made under HQ/ledger with its Orders on top; an order is added (start, stop, standing; "now" for a start), read
+        back as open and set planned; a cycle plan goes in as lines and a JSON block, read back as the newest plan; a
+        note lands under the newest section; a score section is read back. The pokes counted from made-up lines: three
+        status questions, one correction right after her text, one "no" that's his own first word (no correction), a
+        short call ending on a status question, a long one that doesn't; Donna's, Pepper's and Moneypenny's own
+        measures from a made-up list, mail list, calendar marks and ready marks; nothing uses Claude."""
+        import subprocess as _sp
+        import importlib
+        ws, env = self._h298_ws("p5")
+        env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
+        code = ("import sys, json, datetime as dt; sys.path.insert(0, %r); import ledger as L\n"
+                "L.ensure('donna'); o = L.add_order('donna', 'start', 'clear the To check pile'); L.add_order('donna', 'stop', 'the weather texts')\n"
+                "L.add_order('donna', 'start', 'draft the reply to the plumber', now_=True); L.add_order('donna', 'standing', 'no texts after nine')\n"
+                "L.write_plan('donna', {'picks': [{'what': 'the tax deadline', 'source': 'the to-do row'}], 'let_go': ['the newsletters'], "
+                "'steps': [{'goal': 'put the tax item in a block', 'at': '09:05', 'done_means': 'it has a block', 'inputs': [{'kind': 'todo', 'words': 'tax'}]}]}, job=7)\n"
+                "L.note('donna', 'decision: nothing to do about the weather')\n"
+                "L.set_order('donna', 1, 'planned', 'step 1 of the plan')\n"
+                "L.write_score('donna', '2026-W02', {'pokes': {'total': 2}}, ['pokes: 2'])\n"
+                "L.entry('donna', 'step 1 (job 8)', ['done · 2 min, 6 turns'])\n"
+                "print(json.dumps({'orders': L.orders('donna'), 'plan': L.plan('donna')[1], 'scores': [b for s, b in L.scores('donna')], "
+                "'text': L.text('donna'), 'words': L.words('donna'), 'secs': [s['what'] for s in L.sections('donna')]}))") % str(ROOT / "routine")
+        d = json.loads(self._h298_py(env, code))
+        need((ws / "HQ/ledger/donna.md").exists() and d["text"].startswith("# Donna's ledger"), "no ledger file")
+        os_ = d["orders"]
+        need(len(os_) == 4 and os_[0]["state"] == "planned" and os_[0]["note"] == "step 1 of the plan" and os_[1]["kind"] == "stop"
+             and os_[2]["state"] == "now" and os_[3]["kind"] == "standing", f"the orders: {os_}")
+        need(d["plan"]["steps"][0]["goal"] == "put the tax item in a block" and d["plan"]["picks"][0]["source"] == "the to-do row", f"the plan: {d['plan']}")
+        need(d["scores"] == [{"week": "2026-W02", "pokes": {"total": 2}}], f"the score: {d['scores']}")
+        need("- decision: nothing to do about the weather" in d["text"].split("## ")[2], "the note didn't land under the plan")
+        need(d["secs"] == ["Orders", "cycle plan (job 7)", "score, week 2026-W02", "step 1 (job 8)"], f"the sections: {d['secs']}")
+        need("\n\n\n" not in d["text"], "the ledger has double blank lines")
+        r = _sp.run([sys.executable, str(ROOT / "routine/ledger.py"), "donna", "orders"], capture_output=True, text=True, env=env)
+        need(r.returncode == 0 and "clear the To check pile" in r.stdout and "standing" in r.stdout, f"ledger.py orders: {r.stdout}")
+        # the pokes from made-up lines
+        now = time.time()
+        line = ws / "HQ/direct-line"; line.mkdir(parents=True, exist_ok=True)
+        msgs = [("agent", "Your tax item is in Friday's admin block.", now - 6 * 3600),
+                ("me", "is it done? did you put the plumber in the calendar", now - 5 * 3600),
+                ("agent", "Yes, Tuesday at ten.", now - 4.9 * 3600),
+                ("me", "no, that's wrong, rule: not before eleven", now - 4.8 * 3600),
+                ("me", "no plans tonight, I'm staying in", now - 4 * 3600),  # his own first word, not a correction of hers
+                ("agent", "Noted.", now - 3 * 3600),
+                ("me", "where is the dentist appointment, and what happened to the parcel", now - 2 * 3600),
+                ("me", "status?", now - 10 * 86400)]  # outside the week
+        (line / "thread.jsonl").write_text("".join(json.dumps({"at": t, "from": f, "text": x, "why": ""}) + "\n" for f, x, t in msgs))
+        calls = ws / "HQ/calls"; calls.mkdir(parents=True, exist_ok=True)
+        d1 = time.strftime("%Y-%m-%d", time.localtime(now - 86400))
+        (calls / f"{d1}-0900.md").write_text("# Call\n\nStarted 09:00:00 · agent Donna · brain opus\n\n- 09:00 **Me:** hey\n- 09:01 **HQ:** Hey you.\n- 09:03 **Me:** is the job done?\n- 09:03 **HQ:** Not yet.\n")
+        (calls / f"{d1}-1000.md").write_text("# Call\n\nStarted 10:00:00 · agent Donna · brain opus\n\n- 10:00 **Me:** hey\n- 10:20 **HQ:** Hey you.\n- 10:30 **Me:** is it done?\n- 10:31 **HQ:** Yes.\n")
+        (calls / f"{d1}-1100.md").write_text("# Call\n\nStarted 11:00:00 · agent Pepper · brain opus\n\n- 11:00 **Me:** status?\n- 11:01 **HQ:** Fine.\n")
+        pk = importlib.import_module("pokes")
+        importlib.reload(pk)
+        a = {"id": "donna", "name": "Donna", "context": "day"}
+        p = pk.pokes(a, now - 7 * 86400, now + 60, ws)
+        need(p["status_questions"] == 2 and p["corrections"] == 1 and p["short_calls"] == 1 and p["total"] == 4 and p["calls"] == 2,
+             f"the pokes: {p}")
+        need(p["texts_acted_on"] == [3, 3], f"texts acted on: {p['texts_acted_on']}")
+        # her own measures from a made-up list, mail list and marks
+        (ws / "challenges.md").write_text((ws / "challenges.md").read_text() + "\n")
+        import todo as _todo
+        importlib.reload(_todo)
+        env2 = {**env, "HQ_TODO": str(ws / "challenges.md"), "HQ_DIRECT_DIR": str(line)}
+        self._h298_py(env2, ("import sys; sys.path.insert(0, %r); import todo; from pathlib import Path\n"
+                             "p = Path(%r); todo.add('pay the plumber', 'Important and urgent', by='flow', p=p) if 'p=' in '' else None") % (str(ROOT / "app"), str(ws / "challenges.md")))
+        text = (ws / "challenges.md").read_text()
+        dl = time.strftime("%Y-%m-%d", time.localtime(now + 86400))
+        done_at = time.strftime("%Y-%m-%d %H:%M", time.localtime(now - 3600))
+        # a done row with a deadline in its notes (as a moved row keeps a column the done list lacks), and one without
+        text = re.sub(r"(## 7\. Done\n\n(?:[^\n]*\n)*?\|---\|[^\n]*\n)", lambda m: m.group(1) + f"| Pay the plumber | {done_at} | Deadline: {dl}. Paid. |\n| Buy stamps | {done_at} |  |\n", text, count=1)
+        (ws / "challenges.md").write_text(text)
+        need("Pay the plumber" in (ws / "challenges.md").read_text(), "the done rows didn't go in")
+        inbox = (ws / "inbox.md").read_text()
+        inbox = inbox.replace("## Closed\n", "## Closed\n\n- " + time.strftime("%d %b %Y", time.localtime(now - 3600)).lstrip("0") + " · a shop · the parcel · that's him\n", 1)
+        need(inbox.rstrip().endswith("## To check"), "the template's mail list doesn't end with To check")
+        (ws / "inbox.md").write_text(inbox.rstrip() + "\n\n- 1 Jan 2026 · a shop · a bill · worth a look\n- 2 Jan 2026 · a shop · a bill · worth a look\n")
+        m = pk.donna_measures(now - 7 * 86400, now + 60, ws)
+        need(m["dated_items_done_before_their_date"] == [1, 1] and m["very_important_mail_resolved"] == 1 and m["to_check_pile"] == 2, f"Donna's measures: {m}")
+        marks = ws / "HQ/calendar-marks.json"
+        marks.write_text(json.dumps({"marks": {"a": {"mark": "done", "marked": now - 3600, "title": "Admin"}, "b": {"mark": "x", "marked": now - 7200, "title": "Gym"},
+                                               "c": {"mark": "done", "marked": now - 20 * 86400, "title": "Old"}}}))
+        code = ("import sys, os, json, time; sys.path.insert(0, %r); sys.path.insert(0, %r); os.environ['HQ_CALENDAR_MARKS'] = %r\n"
+                "import planning, pokes; now = time.time()\n"
+                "print(json.dumps(pokes.pepper_measures(now - 7 * 86400, now + 60, __import__('pathlib').Path(%r), {'picks': [{'what': 'pay the plumber'}]})))") % (
+            str(ROOT / "app"), str(ROOT / "routine"), str(marks), str(ws))
+        pm = json.loads(self._h298_py({**env2, "HQ_CALENDAR_MARKS": str(marks)}, code))
+        need(pm["calendar_ticks_vs_x"] == [1, 1] and pm["items_done"] == 2 and pm["needle_mover_done"] is True, f"Pepper's measures: {pm}")
+        (ws / "HQ/sprint.json").write_text(json.dumps({"ready": {"H1": {"ask": "x", "at": now - 2 * 86400}, "H2": {"ask": "y", "at": now - 20 * 86400}}}))
+        mm = json.loads(self._h298_py(env2, ("import sys, json, time; sys.path.insert(0, %r); import pokes; now = time.time()\n"
+                                             "print(json.dumps(pokes.moneypenny_measures(now - 7 * 86400, now + 60, __import__('pathlib').Path(%r))))") % (str(ROOT / "routine"), str(ws))))
+        need(mm["rows_ready_before_friday_vs_at_the_sprint"] and mm["rows_ready_before_friday_vs_at_the_sprint"][0] + mm["rows_ready_before_friday_vs_at_the_sprint"][1] == 1
+             and mm["jobs_landed_in_range"] == [0, 0], f"Moneypenny's measures: {mm}")
+        sc = pk.score(a, folder=ws)
+        need(sc["pokes"]["total"] == 4 and sc["lines"][0].startswith("pokes: 4") and "dated items done before their date: 1 of 1" in sc["lines"],
+             f"the score: {sc['lines']}")
+        need(pk.delta(sc, {"pokes": {"total": 6}, "measures": {}}) == ["pokes 6 to 4 (down, good)"], "the delta")
+        need("Claude" not in (ROOT / "routine/pokes.py").read_text().split("Standard library only")[0].split('"""')[1].lower().replace("without claude", ""),
+             "the score's docstring says it uses Claude")
+        return "the ledger with orders, a plan, notes and a score read back; the pokes counted from made-up texts and calls (4); each agent's own measures from the files"
+
     async def flow184(self) -> str:
         """F78, no Claude, no window: a job held by the usage line is checked on what's left of it when it carries on
         in its own chat. On 28 October job 424 was held at 16:30 with about 5.8% of the 5-hour left, yet every minute
@@ -22356,6 +22457,7 @@ FLOWS = {
     141: ("H240: a 9292 link at the leaving time (the calendar's start or the time he names, leaving then or there by then), with the notices for the stops and stations near both ends from the open live data, never made up", False, "flow141"),
     140: ("H238: call me back (the page reloads and calls the same agent, continuing the call), and an agent calls him at an agreed time or appointment (a push, one tap picks up, a missed one in her chat)", False, "flow140"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
+    189: ("H298, piece 5: the ledger per agent (orders on top, each cycle's plan as lines and JSON, notes, the score) and the weekly score computed without Claude: the pokes from his own lines (status questions, corrections, short calls) and each agent's own measures from the files", False, "flow189"),
     188: ("H298, piece 4: the ready check's mechanical fields: His words a quote found in a call, the notes or the log; My own additions filled or none; Sources that exist (a row, a rule, a dated call, a file); with the feature on an empty or false field refuses the Ready mark", False, "flow188"),
     187: ("H298, piece 3: the deterministic box on a headless run (minutes from a wall clock, turns from the stream): past either the run is ended, done on the queue, its note written; the cycle kinds cycle-<agent> and step-<agent>", False, "flow187"),
     186: ("H298, piece 2: the identity fix: the harvest after a call or text keeps only first-person lines about her own office life; a transcript full of his life yields nothing about him", False, "flow186"),
