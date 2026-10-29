@@ -520,7 +520,7 @@ def push(text: str, title: str | None = None, extra: dict | None = None) -> list
                 said.append(f"{r.status}")
         except urllib.error.HTTPError as e:
             said.append(f"{e.code}")
-            if e.code in (404, 410):
+            if e.code in (404, 410) and not _backup():  # F58: the main drops it (the list is the main's to write)
                 unsubscribe(endpoint)
         except Exception as e:
             said.append(f"failed: {e!r}"[:120])
@@ -986,7 +986,7 @@ def _answer(words: str) -> str:
     import policy as _policy
     import quick_context
     a = agent()
-    st = _read(folder() / "state.json", {})
+    st = _read(_pending_file(), {})
     pol = _policy.Policy(_config.FOLDER)
     pol.pending = [tuple(p) for p in st.get("pending") or []]
     if pol.pending:
@@ -1042,9 +1042,22 @@ def _answer(words: str) -> str:
     except Exception as e:
         print(f"reply: {e!r}", file=sys.stderr)
         answer = "Sorry, I couldn't get to that just now. Try me again in a minute?"
-    st["pending"] = [list(p) for p in pol.pending]
-    _write(folder() / "state.json", st)
+    if _backup():  # F58: the shared state.json is the main's; the backup keeps its open question here
+        _write(_pending_file(), {"pending": [list(p) for p in pol.pending]})
+    else:
+        with _Lock("state"):
+            st = _read(folder() / "state.json", {})
+            st["pending"] = [list(p) for p in pol.pending]
+            _write(folder() / "state.json", st)
     return answer or "On it."
+
+
+def _pending_file() -> Path:
+    """Where her question waiting for his yes is read from: the line's shared state.json, written by the main; on the
+    backup (F58) a file of its own on this computer (in HQ's .status, never synced), so the two never both write it."""
+    if _backup():
+        return local_state_file().with_name(f"{folder().name}-pending.json")
+    return folder() / "state.json"
 
 
 # -- watching: when she texts (every minute, from tick.py; stdlib only) ---------------------------------

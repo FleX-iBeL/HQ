@@ -84,10 +84,12 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "coaching": {"done", "later"},
           "handover": {"edit", "put"},
           "review": {"clear"},  # F77: a flag taken off on his say-so goes to the main, which writes sprint.json  # put (Fable, 27 October 2026): a whole small file, with one-way sync
+          "agenda": {"changed"},  # F58: the mark that something wrote in the calendar (the main reads it again)
           "direct_line": {"put"}}  # F58: a line of a text thread (Donna's, the team line, the coaching line)
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
            "coaching": os.path.join(os.path.dirname(HERE), "app", "coaching.py"),
+           "agenda": os.path.join(os.path.dirname(HERE), "app", "agenda.py"),
            "direct_line": os.path.join(os.path.dirname(HERE), "app", "direct_line.py")}  # H225, F58; the rest are routine/<script>.py
 PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main (who asked, for her notes)
 

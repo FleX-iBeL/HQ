@@ -389,6 +389,14 @@ def changed(why: str = "", now: float | None = None) -> bool:
     if not on():
         return False
     t = now or time.time()
+    if _backup():  # F58: the mark is the main's file; the backup hands it over (kept and sent on when it can't)
+        try:
+            import role
+            code, _o, _e, how = role.hand("agenda", ["changed", str(why)[:80]], timeout=15)
+            if how == "kept" or (how == "main" and code == 0):
+                return False
+        except Exception:
+            pass
     try:
         p = changed_file()
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -403,6 +411,17 @@ def changed(why: str = "", now: float | None = None) -> bool:
         pass
     try:
         return start(t)
+    except Exception:
+        return False
+
+
+def _backup() -> bool:
+    """This HQ is the backup of a pair (role.py); a lone HQ, a test or a run handed over by the backup is the main."""
+    if os.environ.get("HQ_ROLE_HERE"):
+        return False
+    try:
+        import role
+        return role.is_backup()
     except Exception:
         return False
 
@@ -451,8 +470,9 @@ def start(now: float | None = None) -> bool:
 
 
 def refresh(now: float | None = None) -> bool:
-    """From the call page opening the calendar: read it again when the last look is older than FRESH."""
-    if not on():
+    """From the call page opening the calendar: read it again when the last look is older than FRESH. Only the main
+    reads it (F58: calendar.json has one writer)."""
+    if not on() or _backup():
         return False
     s = _read()
     t = now or time.time()
@@ -627,6 +647,8 @@ if __name__ == "__main__":
         s = look()
         print(time.strftime("%Y-%m-%d %H:%M:%S"), "calendar:",
               f"failed: {s['error']}" if s.get("error") else f"{len(s.get('events') or [])} appointments")
+    elif cmd == "changed":  # F58: the backup's mark that something wrote in the calendar, written by the main
+        print("read again" if changed(" ".join(args[1:])[:80] or "a write on the other computer") else "marked")
     elif cmd == "status":
         s = _read()
         print(json.dumps({"on": on(), "looked": s.get("looked"), "running": running(s), "due": due(s=s),

@@ -214,12 +214,29 @@ def set_here(lat, lon, now: float | None = None) -> dict:
     g = _spot(lat, lon)
     if not g:
         return {"ok": False}
-    f = _direct_dir() / "here.json"
+    f = _local_here() if _backup() else _direct_dir() / "here.json"
     f.parent.mkdir(parents=True, exist_ok=True)
     tmp = f.with_name(f".here.{os.getpid()}.tmp")
     tmp.write_text(json.dumps({"lat": g[0], "lon": g[1], "at": now or time.time()}))
     os.replace(tmp, f)
     return {"ok": True}
+
+
+def _backup() -> bool:
+    """This HQ is the backup of a pair (role.py); a lone HQ or a test is the main."""
+    if os.environ.get("HQ_ROLE_HERE"):
+        return False
+    try:
+        import role
+        return role.is_backup()
+    except Exception:
+        return False
+
+
+def _local_here() -> Path:
+    """F58: on the backup the phone's spot goes in a file of its own on this computer (never synced); here.json in the
+    synced folder is the main's. Read over it, the newer one winning."""
+    return Path(os.environ.get("HQ_TRAVEL_HERE_LOCAL") or os.path.join(hqpaths.SUPPORT, "here-here.json"))
 
 
 def _read_json(f: Path) -> dict:
@@ -235,6 +252,10 @@ def phone_spot(now: float | None = None) -> tuple[float, float] | None:
     about a kilometre there); None when neither is under HERE_FRESH old."""
     now = now or time.time()
     h = _read_json(_direct_dir() / "here.json")
+    if _backup():
+        mine = _read_json(_local_here())
+        if float(mine.get("at") or 0) > float(h.get("at") or 0):
+            h = mine
     if now - float(h.get("at") or 0) <= HERE_FRESH and _spot(h.get("lat"), h.get("lon")):
         return _spot(h["lat"], h["lon"])
     w = _read_json(_direct_dir() / "weather.json")
