@@ -15,8 +15,10 @@ Run the low usage Claude prompt check if your checklist passes."
   - When: on the main computer, every minute from tick.py, once a row's ask has been quiet for QUIET seconds (a row
     written in steps on a call is reviewed once), at most AT_ONCE at a time, each wording once.
   - The first start: every open row's ask is taken as already reviewed, without a review ("baseline"), so there's no
-    burst; only what's added or changed after that is reviewed.
-  - The reviewer: a small Claude run (MODEL, the lightest that does it well: Sonnet, low effort, no tools: it reads only the row it's
+    burst; only what's added or changed after that is reviewed. F80 (29 October 2026): the rows taken that way get one
+    real review each with `pass` (below), one after another.
+  - The reviewer: a small Claude run (MODEL and EFFORT: Sonnet at medium effort since F80, his words: "Use medium
+    effort sonnet"; no tools: it reads only the row it's
     given and can't change anything) holds the row against the nine ready points (a bug row with an F label: the three
     points of a small fix) and walks the same five probes every time (PROBES: twice, halfway, where each number comes
     from, the examples, each point), quoting the sentence that covers each; one that applies with none is a hole by
@@ -28,8 +30,10 @@ Run the low usage Claude prompt check if your checklist passes."
   - A row that's new or changed and not reviewed yet can't be marked ready until its review has passed.
   - A review that doesn't run (a time-out, no answer) leaves no flag and no pass: it's tried again RETRY_S later; from
     the second failure the row shows "the review didn't run" on the planning, so it's never skipped in silence.
-  - Usage: each review's cost is kept; when a day's reviews have cost DAY_USD (about 3% of the 5-hour, Claude's
-    estimate of what that is in the dollars the run reports), the rest waits for the night (22:00 to 8).
+  - Usage: each review's cost is kept, one line per attempt in COSTS (reviews.jsonl: the row, the verdict or failed,
+    the cost, the seconds, the model and the effort), failed attempts with what they cost too. No daily cap and no
+    waiting for the night (F80, 29 October 2026; the cap was F77's own addition, never his): a new or changed row is
+    reviewed within QUIET plus a few minutes, day or night, one at a time, each within BUDGET.
   - On Moneypenny's calls only (her briefing, quick_context._planning), the flagged rows come first, to raise before
     anything else, like the mail heads-up; Donna's and Pepper's never see them.
 
@@ -38,6 +42,9 @@ usage:
   python3 routine/review.py tick                 what the routine runs every minute (on the main)
   python3 routine/review.py clear LABEL "WORDS"  take a flag off on his say-so on a call, his words kept with it
   python3 routine/review.py run LABEL            a review now, in the foreground (a test, or by hand)
+  python3 routine/review.py pass                 F80's one-time pass: every open row never really reviewed gets one
+                                                 review, one after another (resumes; a failure is retried once, then named)
+  python3 routine/review.py pass-result          what the pass found: each row's verdict, the failures, the total cost
 Used by the background review itself: review-run LABEL.
 """
 import datetime as dt
@@ -60,7 +67,7 @@ import sprint as S  # noqa: E402
 # 5. With the probes (job 455, 29 October 2026): H297 as first written flagged 8 of 8 at low effort and 8 of 8 at
 # medium, H297 as it is passed 8 of 8 at both; low named the second stop every time and the cost's source 6 of 8, at about $0.008 a review.
 MODEL = os.environ.get("HQ_REVIEW_MODEL") or "sonnet"
-EFFORT = os.environ.get("HQ_REVIEW_EFFORT") or "low"
+EFFORT = os.environ.get("HQ_REVIEW_EFFORT") or "medium"  # F80, his words: "Use medium effort sonnet"
 QUIET = int(os.environ.get("HQ_REVIEW_QUIET") or 300)  # seconds a row's ask must stay the same before it's reviewed
 AT_ONCE = 1
 TIMEOUT = 180  # seconds for one review
@@ -68,10 +75,8 @@ PENDING = TIMEOUT + 60  # a started review counts as on its way this long
 RETRY_S = int(os.environ.get("HQ_REVIEW_RETRY") or 1800)  # a review that didn't run is tried again after this
 SHOW_FAILED = 2  # from this many failures for the same words, the row says the review didn't run
 BUDGET = 0.15  # dollars at most for one review (--max-budget-usd)
-DAY_USD = float(os.environ.get("HQ_REVIEW_DAY_USD") or 1.2)  # about 3% of the 5-hour (Claude's estimate), then the night
-NIGHT = (22, 8)
 LOG = os.path.join(E.DIR, "reviews.log")
-COSTS = os.path.join(E.DIR, "reviews.jsonl")  # one line per review: the row, the verdict, the cost, the seconds
+COSTS = os.path.join(E.DIR, "reviews.jsonl")  # one line per attempt: the row, the verdict or failed, the cost, the seconds, model, effort
 
 # F77's fix (job 455, 29 October 2026, after QA job 450): with "when in doubt, pass" and a free verdict the reviewer
 # flagged H297 as first written only 3 of 5 times (0 of 6 at medium effort), and a miss lets the hole through for good,
@@ -146,12 +151,6 @@ def _state():
     return d, (rv if isinstance(rv, dict) else {})
 
 
-def _is_night(now=None):
-    h = dt.datetime.fromtimestamp(now or time.time()).hour
-    a, b = NIGHT
-    return h >= a or h < b
-
-
 def _today(now=None):
     return dt.datetime.fromtimestamp(now or time.time()).strftime("%Y-%m-%d")
 
@@ -218,7 +217,7 @@ def why_not_ready(row, st=None):
 
 def tick(log=None, now=None, start=True):
     """Every minute on the main: the first start takes every open row as reviewed; then a row whose ask changed is
-    noted, and once quiet long enough a review starts (AT_ONCE at a time, each wording once, within the day's budget).
+    noted, and once quiet long enough a review starts (AT_ONCE at a time, each wording once; no daily cap, F80).
     Rows no longer open are let go. Returns the labels a review started for."""
     now = now or _clock()
     started = []
@@ -258,11 +257,6 @@ def tick(log=None, now=None, start=True):
                 tries = e.get("tries") or [None, 0]
                 if tries[0] == fp and now < (e.get("next_try") or 0):
                     continue
-                if not _is_night(now) and spent["usd"] >= DAY_USD:
-                    if not rv.get("waits_night"):
-                        rv["waits_night"] = int(now)
-                        (log or _log)(f"review: the day's reviews cost ${spent['usd']:.2f}, the rest waits for the night (F77)")
-                    break
                 e["pending"] = int(now)
                 try:
                     os.makedirs(E.DIR, exist_ok=True)
@@ -274,8 +268,7 @@ def tick(log=None, now=None, start=True):
                 except Exception as ex:
                     e.pop("pending", None)
                     print(f"(the review couldn't start: {ex!r})", file=sys.stderr)
-        if _is_night(now) or spent["usd"] < DAY_USD:
-            rv.pop("waits_night", None)
+        rv.pop("waits_night", None)  # F80: no more waiting for the night
         rv["rows"], rv["spent"] = rs, spent
         d["review"] = rv
         if marks:
@@ -297,16 +290,16 @@ def _input(row):
 
 def _fake(row):
     """HQ_REVIEW_FAKE (tests): "auto" flags a row whose ask holds "HOLE:" (the words after it the finding) and passes
-    the rest; "fail" never answers."""
+    the rest, and a row holding "FAILREVIEW" never answers; "fail" never answers for any row (a failed attempt, at HQ_REVIEW_FAKE_COST like the rest)."""
     how = os.environ.get("HQ_REVIEW_FAKE")
-    if how == "fail":
-        return None
-    ask = S.ask_of(row["line"])
     cost = float(os.environ.get("HQ_REVIEW_FAKE_COST") or 0)
+    if how == "fail" or "FAILREVIEW" in S.ask_of(row["line"]):  # "FAILREVIEW" in a row: only that one fails
+        return {"failed": True, "why": "the stand-in never answers", "cost": cost, "s": 0.0, "model": "fake", "effort": EFFORT}
+    ask = S.ask_of(row["line"])
     m = re.search(r"HOLE:\s*([^.|]+)", ask)
     if m:
-        return {"pass": False, "findings": [m.group(1).strip()], "cost": cost, "s": 0.0, "model": "fake"}
-    return {"pass": True, "findings": [], "cost": cost, "s": 0.0, "model": "fake"}
+        return {"pass": False, "findings": [m.group(1).strip()], "cost": cost, "s": 0.0, "model": "fake", "effort": EFFORT}
+    return {"pass": True, "findings": [], "cost": cost, "s": 0.0, "model": "fake", "effort": EFFORT}
 
 
 def _one(f):
@@ -335,7 +328,9 @@ def verdict(a):
 
 
 def ask_reviewer(row):
-    """The reviewer's answer: {"pass", "findings", "cost" (dollars), "s", "model"}, or None when it didn't run."""
+    """The reviewer's answer: {"pass", "findings", "cost" (dollars), "s", "model", "effort"}; when it didn't run (a
+    time-out, over its budget, no answer) {"failed": True, "why", "cost" (what it cost, when the run said), ...} (F80:
+    a failed attempt's cost is kept too)."""
     if os.environ.get("HQ_REVIEW_FAKE"):
         return _fake(row)
     try:
@@ -344,27 +339,35 @@ def ask_reviewer(row):
     except Exception:
         claude = "claude"
     t0 = time.time()
+    base = {"model": MODEL, "effort": EFFORT}
+    cost = None
     try:
         p = subprocess.run([claude, "-p", "--model", MODEL, "--output-format", "json", "--tools", "",
                             "--strict-mcp-config", "--setting-sources", "", "--effort", EFFORT,
                             "--max-budget-usd", str(BUDGET), "--no-session-persistence", "--system-prompt", SYSTEM],
                            input=_input(row), capture_output=True, text=True, timeout=TIMEOUT, cwd=E.ROOT)
         d = json.loads(p.stdout)
+        cost = d.get("total_cost_usd")
+        if d.get("is_error") or d.get("subtype") not in (None, "success"):
+            raise ValueError(f"the run ended {d.get('subtype') or 'with an error'}")
         found = re.findall(r"\{.*\}", d.get("result") or "", re.S)
         a = json.loads(found[-1])
         v = verdict(a)
         if v is None:
-            return None
+            raise ValueError("the answer wasn't a verdict")
         ok, fs = v
-        return {"pass": ok, "findings": fs, "cost": d.get("total_cost_usd"),
-                "s": round(time.time() - t0, 1), "model": MODEL + " " + EFFORT}
-    except Exception:
-        return None
+        return {"pass": ok, "findings": fs, "cost": cost, "s": round(time.time() - t0, 1), **base}
+    except subprocess.TimeoutExpired:
+        return {"failed": True, "why": f"timed out after {TIMEOUT} s", "cost": cost, "s": round(time.time() - t0, 1), **base}
+    except Exception as ex:
+        return {"failed": True, "why": str(ex)[:200] or repr(ex), "cost": cost, "s": round(time.time() - t0, 1), **base}
 
 
-def review_run(label, now_fn=_clock):
-    """In the background: the review itself, outside the lock; its verdict is written only when the row's ask is still
-    the one it read (changed in between: the next minute's tick starts the next one)."""
+def _attempt(label, now_fn=_clock, extra=None):
+    """One review of one row, outside the lock; its verdict is written only when the row's ask is still the one it
+    read (changed in between: the next minute's tick starts the next one). Every attempt, a failed one too, is a line
+    in COSTS with what it cost, the model and the effort (F80). Returns the reviewer's answer, or None when the row
+    isn't open (any more)."""
     def now_row():
         return next((r for r in S.open_rows() if r["label"] == label), None)
     with q.locked():
@@ -372,7 +375,8 @@ def review_run(label, now_fn=_clock):
     if not r:
         return None
     fp = S.ask_fp(r["line"])
-    a = ask_reviewer(r)
+    a = ask_reviewer(r) or {"failed": True, "why": "no answer", "cost": None}
+    failed = bool(a.get("failed"))
     lost = False
     with q.locked():
         d, rv = _state()
@@ -383,13 +387,13 @@ def review_run(label, now_fn=_clock):
         e.pop("pending", None)
         now = int(now_fn())
         r2 = now_row()
-        if a is None:
+        if failed:
             tries = e.get("tries") or [None, 0]
             e["tries"] = [fp, (tries[1] if tries[0] == fp else 0) + 1]
             e["next_try"] = now + RETRY_S
         elif r2 and S.ask_fp(r2["line"]) == fp:
             e.update({"ask": fp, "verdict": "pass" if a["pass"] else "flag", "findings": a["findings"], "at": now,
-                      "cost": a.get("cost"), "s": a.get("s"), "model": a.get("model")})
+                      "cost": a.get("cost"), "s": a.get("s"), "model": a.get("model"), "effort": a.get("effort")})
             e.pop("tries", None)
             e.pop("next_try", None)
             e.pop("cleared_words", None)
@@ -399,30 +403,198 @@ def review_run(label, now_fn=_clock):
                     marks.pop(label)
                     d["ready"] = marks
                     lost = True
-        if a is not None:
-            sp = rv.get("spent") or {}
-            if sp.get("day") != _today(now):
-                sp = {"day": _today(now), "usd": 0.0, "n": 0}
-            if not _is_night(now):
-                sp["usd"] = round(sp["usd"] + float(a.get("cost") or 0), 4)
-            sp["n"] = sp.get("n", 0) + 1
-            rv["spent"] = sp
+        sp = rv.get("spent") or {}
+        if sp.get("day") != _today(now):
+            sp = {"day": _today(now), "usd": 0.0, "n": 0}
+        sp["usd"] = round(sp["usd"] + float(a.get("cost") or 0), 4)  # every attempt counts, day or night (F80)
+        sp["n"] = sp.get("n", 0) + 1
+        rv["spent"] = sp
         rs[label] = e
         rv["rows"] = rs
         d["review"] = rv
         S._save(S.RANKS, d)
     rec = {"row": label, "at": int(now_fn()), "fp": fp}
-    rec.update({"verdict": "pass" if a["pass"] else "flag", "findings": len(a["findings"]), "cost": a.get("cost"),
-                "s": a.get("s"), "model": a.get("model")} if a else {"failed": True})
+    if failed:
+        rec.update({"failed": True, "why": a.get("why")})
+    else:
+        rec.update({"verdict": "pass" if a["pass"] else "flag", "findings": len(a["findings"])})
+    rec.update({"cost": a.get("cost"), "s": a.get("s"), "model": a.get("model"), "effort": a.get("effort")})
+    rec.update(extra or {})
     try:
         os.makedirs(E.DIR, exist_ok=True)
         with open(COSTS, "a") as f:
             f.write(json.dumps(rec) + "\n")
     except OSError:
         pass
-    _log(f"review {label}: " + ("didn't run" if a is None else ("passed" if a["pass"] else "flagged: " + "; ".join(a["findings"])))
-         + (" (its Ready mark taken off)" if lost else "") + (f", ${a['cost']:.4f}" if a and a.get("cost") else ""))
+    _log(f"review {label}: " + (f"didn't run ({a.get('why')})" if failed else ("passed" if a["pass"] else "flagged: " + "; ".join(a["findings"])))
+         + (" (its Ready mark taken off)" if lost else "") + (f", ${a['cost']:.4f}" if a.get("cost") else "")
+         + (" [the one-time pass]" if (extra or {}).get("pass") else ""))
     return a
+
+
+def review_run(label, now_fn=_clock):
+    """In the background, started by tick: one review of one row (a failure is tried again RETRY_S later by tick)."""
+    return _attempt(label, now_fn)
+
+
+# ---------- F80: one real review for every row taken as reviewed at the first start ----------
+
+PASS_WAIT = int(os.environ.get("HQ_REVIEW_PASS_WAIT") or 5)  # seconds between looks while another review runs
+PASS_MOST = int(os.environ.get("HQ_REVIEW_PASS_MOST") or 0)  # a test's stop halfway: at most this many rows a run
+
+
+def _due(rows, rs, now):
+    """The first open row tick would review now (new or changed, quiet long enough, not waiting for a retry), or None."""
+    for r in rows:
+        e = rs.get(r["label"]) or {}
+        fp = S.ask_fp(r["line"])
+        if e.get("ask") == fp or e.get("seen") != fp or now - (e.get("seen_at") or now) < QUIET:
+            continue
+        tries = e.get("tries") or [None, 0]
+        if tries[0] == fp and now < (e.get("next_try") or 0):
+            continue
+        return r["label"]
+    return None
+
+
+def _claim(now_fn, log):
+    """Under the lock: wait while another review runs (one at a time, as F77), then say which row is next: a row tick
+    has due first (a row edited or added during the pass is never held up by it: within QUIET plus a review, F80's 15
+    minutes), else the next row of the pass. Marks it pending (tick then waits) and returns (label, kind), or None."""
+    while True:
+        with q.locked():
+            d, rv = _state()
+            rs = rv.get("rows") or {}
+            now = int(now_fn())
+            if any(now - (e.get("pending") or 0) < PENDING for e in rs.values()):
+                label = kind = None
+            else:
+                rows = S.open_rows()
+                label, kind = _due(rows, rs, now), "changed"
+                if not label:
+                    label = next((r["label"] for r in rows if (rs.get(r["label"]) or {}).get("verdict") == "baseline"
+                                  and (rs.get(r["label"]) or {}).get("ask") == S.ask_fp(r["line"])), None)
+                    kind = "pass"
+                if not label:
+                    return None
+                rs[label]["pending"] = now
+                rv["rows"] = rs
+                d["review"] = rv
+                S._save(S.RANKS, d)
+                return label, kind
+        time.sleep(PASS_WAIT)
+
+
+def run_pass(log=print, now_fn=_clock):
+    """F80's one-time pass, in the foreground: every open row whose words are still the ones taken as reviewed at
+    F77's first start ("baseline") gets one real review, one after another, flags and lost Ready marks as any review.
+    Stopped halfway or run twice, it carries on with what's left (a row once reviewed is never baseline again). A
+    failed review is tried again once at once; failing again, it's named in the pass's result and not counted as
+    reviewed (the row then waits like a changed row: tick tries it again RETRY_S later and the planning shows the
+    review didn't run). Rows edited or added during the pass get their review as tick would, first. Every attempt is
+    a line in COSTS marked with the pass; the pass's result (each row, its verdict, its cost, its attempts, the total)
+    is kept in sprint.json under review.pass. Closed rows are never reviewed."""
+    if not on():
+        sys.exit("Reviews don't run here (HQ_REVIEW=0, or a test copy without HQ_REVIEW_FAKE).")
+    with q.locked():
+        d, rv = _state()
+        if not rv.get("since"):
+            sys.exit("The review hasn't had its first start yet (tick); nothing was taken as reviewed.")
+        ps = rv.get("pass") or {}
+        if not ps or ps.get("ended"):
+            ps = {"started": int(now_fn()), "rows": {}, "usd": 0.0, **({"before": ps} if ps else {})}
+        ps["runs"] = ps.get("runs", 0) + 1
+        ps.pop("ended", None)
+        rv["pass"] = ps
+        d["review"] = rv
+        S._save(S.RANKS, d)
+    pid = ps["started"]
+    done_now = 0
+    while True:
+        if PASS_MOST and done_now >= PASS_MOST:
+            log(f"review pass: stopped after {done_now} rows (HQ_REVIEW_PASS_MOST, a test's stop halfway)")
+            return ps
+        c = _claim(now_fn, log)
+        if not c:
+            break
+        label, kind = c
+        if kind == "changed":
+            log(f"review: {label} changed, reviewed before the pass goes on")
+            _attempt(label, now_fn)
+            continue
+        done_now += 1
+        out = {"attempts": 0, "usd": 0.0}
+        a = None
+        for n in (1, 2):
+            if n == 2:
+                with q.locked():  # the retry, at once: still pending, so tick waits
+                    d, rv = _state()
+                    e = (rv.get("rows") or {}).get(label)
+                    if e is None:
+                        break
+                    e["pending"] = int(now_fn())
+                    S._save(S.RANKS, d)
+            a = _attempt(label, now_fn, {"pass": pid, "attempt": n})
+            if a is None:
+                break
+            out["attempts"] = n
+            out["usd"] = round(out["usd"] + float(a.get("cost") or 0), 6)
+            if not a.get("failed"):
+                break
+        with q.locked():
+            d, rv = _state()
+            rs = rv.get("rows") or {}
+            e = rs.get(label) or {}
+            if a is None:
+                out["gone"] = True  # closed or changed while it ran: not the pass's any more
+            elif a.get("failed"):
+                out.update({"failed": True, "why": a.get("why")})
+                if e.get("verdict") == "baseline":
+                    e.pop("ask", None)  # never counted as reviewed: it waits like a changed row now
+                    e.pop("verdict", None)
+            else:
+                out["verdict"] = "pass" if a["pass"] else "flag"
+            if e:
+                rs[label] = e
+            ps = rv.get("pass") or {}
+            if ps.get("started") == pid:
+                ps.setdefault("rows", {})[label] = out
+                ps["usd"] = round(sum(float(x.get("usd") or 0) for x in ps["rows"].values()), 6)
+                rv["pass"] = ps
+            rv["rows"] = rs
+            d["review"] = rv
+            S._save(S.RANKS, d)
+        log(f"review pass: {label} " + ("failed twice: " + str(out.get("why")) if out.get("failed") else
+                                         out.get("verdict", "let go")) + f", ${out['usd']:.4f}")
+    with q.locked():
+        d, rv = _state()
+        ps = rv.get("pass") or {}
+        ps["ended"] = int(now_fn())
+        rv["pass"] = ps
+        d["review"] = rv
+        S._save(S.RANKS, d)
+    log(pass_words(ps))
+    return ps
+
+
+def pass_words(ps=None):
+    """The pass's result in a few lines."""
+    if ps is None:
+        ps = _state()[1].get("pass") or {}
+    if not ps:
+        return "The one-time pass (F80) hasn't run."
+    rows = ps.get("rows") or {}
+    by = lambda k: sorted(l for l, x in rows.items() if x.get("verdict") == k)  # noqa: E731
+    failed = sorted(l for l, x in rows.items() if x.get("failed"))
+    head = (f"The one-time pass (F80){' (still running or stopped)' if not ps.get('ended') else ''}: {len(rows)} rows, "
+            f"{len(by('pass'))} passed, {len(by('flag'))} flagged, {len(failed)} failed; "
+            f"{sum(x.get('attempts', 0) for x in rows.values())} attempts, ${ps.get('usd', 0):.4f} in all.")
+    out = [head]
+    if by("flag"):
+        out.append("Flagged: " + ", ".join(by("flag")))
+    if failed:
+        out.append("Failed twice, not counted as reviewed: " + "; ".join(f"{l} ({rows[l].get('why')})" for l in failed))
+    return "\n".join(out)
 
 
 def clear(label, words):
@@ -494,7 +666,7 @@ def list_words():
     sp = rv.get("spent") or {}
     head = (f"The review of the planning (F77): {sum(1 for s in st.values() if s['state'] == 'flagged')} flagged, "
             f"{sum(1 for s in st.values() if s['state'] in ('waiting', 'didnt_run'))} waiting; today's reviews "
-            f"{sp.get('n', 0)}, ${sp.get('usd', 0):.2f} of ${DAY_USD:.2f} by day.")
+            f"{sp.get('n', 0)}, ${sp.get('usd', 0):.2f} (no daily cap, F80).")
     lines = [head]
     for r in rows:
         s = st[r["label"]]
@@ -526,6 +698,10 @@ def main(argv):
     elif argv[0] == "clear" and len(argv) == 3:
         clear(argv[1], argv[2])
         print(f"{argv[1].upper()}: the flag is off, his words kept with it.")
+    elif argv[0] == "pass" and len(argv) == 1:
+        run_pass()
+    elif argv[0] == "pass-result":
+        print(pass_words())
     elif argv[0] == "flags":
         print(flag_words() or "No flagged rows on the planning.")
     else:

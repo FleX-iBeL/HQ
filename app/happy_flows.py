@@ -16167,8 +16167,10 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
         review, is flagged with the finding, refused the mark with why, and reviewed once per wording; a ready row that
         gets the flag loses its mark; fixed, the next review takes the flag off; his say-so clears it with his words
         kept outside the row; a review that doesn't run leaves no flag, is tried again, and from the second failure says
-        so; past the day's budget the rest waits for the night; the flag is first in Moneypenny's briefing and in no
-        other; the old planning flows' layouts hold."""
+        so; no daily cap (F80): past the old cap a changed row is still reviewed in the quiet time, each attempt's cost,
+        model and effort kept; the flag is first in Moneypenny's briefing and in no other; F80's one-time pass: every
+        baseline row reviewed once, stopped halfway and run again nothing twice, rows edited or added during it
+        reviewed, a failure retried once then named and not counted; the old planning flows' layouts hold."""
         import datetime as _dt
         import json as js
         import shutil
@@ -16287,19 +16289,22 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
         need(r.returncode != 0 and "didn't run" in r.stdout + r.stderr, "F77: a row whose review didn't run got the mark")
         tick(t3 + 301 + 3700)
         need(st()["H9011"]["verdict"] == "pass", f"F77: the review wasn't tried again after it failed: {st()['H9011']}")
-        # the day's budget: past it, the rest waits for the night
+        # F80: no daily cap: by day, past what the old cap allowed ($1.20), a changed row is still reviewed within the
+        # quiet time (QUIET left at its default), and every attempt is a line with its cost, model and effort
         edit("| ✅ | H9003 A made-up done row", "| ⬜ | H9012 A made-up twelfth row | What's asked: twelve. |\n| ⬜ | H9013 A made-up thirteenth row | What's asked: thirteen. |\n| ✅ | H9003 A made-up done row")
         t4 = _dt.datetime(2026, 10, 27, 12, 0).timestamp()
-        kw = {"HQ_REVIEW_DAY_USD": "0.01", "HQ_REVIEW_FAKE_COST": "0.02"}
+        kw = {"HQ_REVIEW_FAKE_COST": "0.9"}
         tick(t4, **kw)
         tick(t4 + 301, **kw)
         tick(t4 + 400, **kw)
         tick(t4 + 500, **kw)
-        done_day = [l for l in ("H9012", "H9013") if st()[l].get("verdict")]
-        need(len(done_day) == 1, f"F77: the day's budget didn't hold the second review: {done_day}")
+        sp_ = js.loads(sjson.read_text())["review"]["spent"]
+        need(all(st()[l].get("verdict") == "pass" for l in ("H9012", "H9013")) and sp_["usd"] >= 1.2,
+             f"F80: by day, past the old cap, a changed row waited: {[st()[l] for l in ('H9012', 'H9013')]} {sp_}")
+        recs = [js.loads(x) for x in costs.read_text().splitlines()]
+        need(all(x.get("model") and x.get("effort") == "medium" and "cost" in x for x in recs) and any(x.get("failed") for x in recs),
+             f"F80: a review's record lacks its model, effort or cost, or a failed attempt wasn't recorded: {recs[-3:]}")
         night = _dt.datetime(2026, 10, 27, 22, 30).timestamp()
-        tick(night, **kw)
-        need(all(st()[l].get("verdict") == "pass" for l in ("H9012", "H9013")), "F77: the waiting review didn't run at night")
         # Moneypenny's briefing has the flags first; the coach's and the day's none
         edit("What's asked: thirteen. |", "What's asked: thirteen. HOLE: no test named |")
         tick(night + 60)
@@ -16342,10 +16347,59 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
              == (False, ["A hole.", "Where the count is read."]), "F77: own findings first, then the uncovered probes")
         need(V({"pass": False, "findings": []}) == (False, ["the reviewer flagged it without saying why"])
              and V({"findings": []}) is None and V("no") is None, "F77: a flag without findings, or no verdict")
+        need(_rv.MODEL == "sonnet" and _rv.EFFORT == "medium" and not hasattr(_rv, "DAY_USD"), "F80: the reviewer isn't Sonnet at medium, or the cap is still there")
+        # F80: the one-time pass over the rows taken as reviewed at the first start. H9001 is still baseline; three
+        # more baseline rows added as if there at the first start, one of them failing every time.
+        d = js.loads(sjson.read_text())
+        edit("| ✅ | H9003 A made-up done row", "| ⬜ | H9020 A made-up old row | What's asked: twenty. |\n| ⬜ | H9021 A made-up old row | What's asked: twenty-one. HOLE: no example |\n"
+             "| ⬜ | H9022 A made-up old row | What's asked: twenty-two. FAILREVIEW |\n| ⬜ | H9023 A made-up old row | What's asked: twenty-three. |\n| ✅ | H9003 A made-up done row")
+        t5 = night + 4000
+        tick(t5)  # the new rows seen
+        d = js.loads(sjson.read_text())
+        for l in ("H9020", "H9021", "H9022", "H9023"):
+            e = d["review"]["rows"][l]
+            e.update({"ask": e["seen"], "verdict": "baseline"})
+        sjson.write_text(js.dumps(d))
+        base = sorted(l for l, e in st().items() if e.get("verdict") == "baseline")
+        need({"H9001", "H9020", "H9021", "H9022", "H9023"} <= set(base), f"F80 (the flow itself): the made-up rows aren't baseline: {base}")
+        pr = lambda **kw: rv("pass", HQ_REVIEW_NOW=str(int(t5 + 60)), HQ_REVIEW_FAKE_COST="0.01", HQ_REVIEW_PASS_WAIT="0", **kw)  # noqa: E731
+        r = pr(HQ_REVIEW_PASS_MOST="2")  # stopped halfway
+        ok(r, "the pass, stopped halfway")
+        half = sorted(l for l in base if st()[l].get("verdict") in ("pass", "flag"))
+        need(len(half) == 2 and "stopped after 2" in r.stdout, f"F80: the pass didn't stop halfway: {half} {r.stdout[-400:]}")
+        # edited during the pass: a baseline row not reviewed yet, and a new row; tick sees them, the quiet time passes
+        ed = next(l for l in ("H9020", "H9023") if l not in half)
+        t = rm.read_text()
+        old = next(x for x in t.split("\n") if f"| {ed} " in x)
+        edit(old, old.replace("What's asked:", "What's asked, edited:"))
+        edit("| ✅ | H9003 A made-up done row", "| ⬜ | H9024 A made-up row added during the pass | What's asked: twenty-four. |\n| ✅ | H9003 A made-up done row")
+        rv("tick", HQ_REVIEW_NOW=str(int(t5 + 60)), HQ_REVIEW_QUIET="100000")  # seen, not reviewed yet (tick waits)
+        before = {l: nrev(l) for l in base + ["H9024"]}
+        r = rv("pass", HQ_REVIEW_NOW=str(int(t5 + 60 + 301)), HQ_REVIEW_FAKE_COST="0.01", HQ_REVIEW_PASS_WAIT="0")  # run again: resumes
+        ok(r, "the pass, run again")
+        after = {l: nrev(l) for l in base + ["H9024"]}
+        need(all(after[l] == before[l] for l in half), f"F80: a row reviewed in the first half was reviewed again: {before} {after}")
+        need(after[ed] == before[ed] + 1 and after["H9024"] == 1 and st()[ed]["verdict"] == "pass" and st()["H9024"]["verdict"] == "pass",
+             f"F80: a row edited or added during the pass wasn't reviewed: {st().get(ed)} {st().get('H9024')}")
+        need(after["H9022"] == before["H9022"] + 2 and st()["H9022"].get("verdict") is None, f"F80: the failing row wasn't tried twice, or counted as reviewed: {st()['H9022']}")
+        res = js.loads(sjson.read_text())["review"]["pass"]
+        recs = [js.loads(x) for x in costs.read_text().splitlines() if js.loads(x).get("pass") == res["started"]]
+        need(res.get("ended") and res["rows"]["H9022"].get("failed") and res["rows"]["H9022"]["attempts"] == 2
+             and res["rows"]["H9021"].get("verdict") == "flag" and len(recs) == sum(x["attempts"] for x in res["rows"].values())
+             and abs(res["usd"] - 0.01 * len(recs)) < 1e-6 and sum(1 for x in recs if x.get("failed")) == 2,
+             f"F80: the pass's result or its cost lines are off: {res} {recs}")
+        pw = rv("pass-result").stdout
+        need("failed" in pw and "H9022" in pw and "H9021" in pw and "in all" in pw, f"F80: the pass's result doesn't say it: {pw}")
+        x = next(x for x in js.loads(self._sprint(env, "json").stdout)["rows"] if x["label"] == "H9022")
+        need(x.get("review") == "didnt_run", f"F80: a row that failed twice in the pass shows as reviewed: {x.get('review')}")
+        r = rv("pass", HQ_REVIEW_NOW=str(int(t5 + 400)), HQ_REVIEW_PASS_WAIT="0")
+        need(r.returncode == 0 and all(after[l] == nrev(l) for l in base if l != "H9022"), "F80: a third run reviewed a row again")
         return ("the first start reviews nothing; team notes start nothing and keep the mark (feature and bug rows); a new row "
                 "waits until quiet, is reviewed once, flagged, refused the mark with why, loses it, the fix takes the flag off, "
-                "his say-so clears it; a failed review is tried again and says so; the day's budget waits for the night; "
-                "the flags first in Moneypenny's briefing only; an uncovered probe flags by rule")
+                "his say-so clears it; a failed review is tried again and says so; no daily cap (F80), every attempt's cost, "
+                "model and effort kept; the flags first in Moneypenny's briefing only; an uncovered probe flags by rule; "
+                "the one-time pass reviews every baseline row once, resumes after a stop, reviews rows edited or added "
+                "during it, retries a failure once and names it")
 
     async def flow181(self) -> str:
         """H295, no Claude, no server: the game's weeks as he reads them. The game page (web/games.js) on a page of its
@@ -23465,7 +23519,7 @@ FLOWS = {
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),
     165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     177: ("H286: the status page says in plain words what the team is doing (never the commands), a job that has to start fixing redoes its own estimate once with why, and a job that ran long through its own mistake is tagged, kept out of the estimates and listed", False, "flow177"),
-    182: ("F77: the automatic review of new or changed planning rows: the flag, the refused and lost Ready mark, team notes start nothing, the quiet wait, once per wording, retries, the day's budget, first on Moneypenny's calls only", False, "flow182"),
+    182: ("F77, F80: the automatic review of new or changed planning rows: the flag, the refused and lost Ready mark, team notes start nothing, the quiet wait, once per wording, retries, no daily cap, the one-time pass, first on Moneypenny's calls only", False, "flow182"),
     184: ("F78: a job held by the usage line is checked on what's left of it when it carries on in its own chat (time and usage, at least what a picked-up turn costs, all its runs counted), its waiting line says so; a fresh job and one that starts over on the whole estimate", False, "flow184"),
     183: ("F67: the laptop's one-time start onto the rewritten history, from the old push.py it has: refused at first, then on the new dev with the public name everywhere", False, "flow183"),
     181: ("H295: the game's weeks Monday to Sunday along the top, the days before the start and after the end greyed, each box its date, today outlined and named, a tick lands on the day it says", False, "flow181"),
