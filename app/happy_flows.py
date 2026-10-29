@@ -16294,10 +16294,28 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
         need("FLAGGED ON THE PLANNING" in b and "H9013" in b and "no test named" in b and "Raise them first" in b
              and b.find("FLAGGED ON THE PLANNING") < b.find("status block"), f"F77: Moneypenny's briefing doesn't open with the flagged rows: {b[:900]}")
         need("FLAGGED" not in c and "FLAGGED" not in dd, "F77: a Pepper or Donna briefing carries the flags")
+        # The fix after QA job 450 (job 455): the reviewer walks the same probes every time, and a probe that applies
+        # with no covering sentence is a hole by rule, whatever its own pass says; its findings come first.
+        import review as _rv
+        need([k for k, _ in _rv.PROBES] == ["again", "halfway", "numbers", "examples", "points"]
+             and all(k in _rv.SYSTEM for k, _ in _rv.PROBES) and "When in doubt, pass" not in _rv.SYSTEM,
+             "F77: the reviewer's prompt doesn't walk the five probes")
+        V = _rv.verdict
+        cov = lambda k, c, h=None: {"probe": k, "applies": True, "covered": c, "hole": h}  # noqa: E731
+        need(V({"pass": True, "findings": [], "probes": [cov("again", "If it stops twice, each stop.")]}) == (True, []),
+             "F77: a covered probe should pass")
+        need(V({"pass": True, "findings": [], "probes": [cov("again", None, "No word on a second stop.")]})
+             == (False, ["No word on a second stop."]), "F77: an uncovered probe that applies should flag, whatever pass says")
+        need(V({"pass": True, "findings": [], "probes": [{"probe": "halfway", "applies": False, "covered": None}]}) == (True, []),
+             "F77: a probe that doesn't apply should pass")
+        need(V({"pass": False, "findings": ["A hole."], "probes": [cov("numbers", "", "Where the count is read.")]})
+             == (False, ["A hole.", "Where the count is read."]), "F77: own findings first, then the uncovered probes")
+        need(V({"pass": False, "findings": []}) == (False, ["the reviewer flagged it without saying why"])
+             and V({"findings": []}) is None and V("no") is None, "F77: a flag without findings, or no verdict")
         return ("the first start reviews nothing; team notes start nothing and keep the mark (feature and bug rows); a new row "
                 "waits until quiet, is reviewed once, flagged, refused the mark with why, loses it, the fix takes the flag off, "
                 "his say-so clears it; a failed review is tried again and says so; the day's budget waits for the night; "
-                "the flags first in Moneypenny's briefing only")
+                "the flags first in Moneypenny's briefing only; an uncovered probe flags by rule")
 
     async def flow181(self) -> str:
         """H295, no Claude, no server: the game's weeks as he reads them. The game page (web/games.js) on a page of its

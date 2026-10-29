@@ -18,7 +18,9 @@ Run the low usage Claude prompt check if your checklist passes."
     burst; only what's added or changed after that is reviewed.
   - The reviewer: a small Claude run (MODEL, the lightest that does it well: Sonnet, low effort, no tools: it reads only the row it's
     given and can't change anything) holds the row against the nine ready points (a bug row with an F label: the three
-    points of a small fix) and hunts holes per point. It answers pass, or flag with a few plain findings.
+    points of a small fix) and walks the same five probes every time (PROBES: twice, halfway, where each number comes
+    from, the examples, each point), quoting the sentence that covers each; one that applies with none is a hole by
+    rule (verdict). It answers pass, or flag with a few plain findings.
   - The flag and its findings are kept in sprint.json ("review"), next to the Ready mark, never in the row (or they'd
     start a review themselves). A flagged row can't be marked ready (sprint.py ready says why); a row that gets the
     flag loses its Ready mark. The flag goes when the row's ask changes and the next review passes, or on his say-so on
@@ -54,8 +56,11 @@ import sprint as S  # noqa: E402
 
 # The lightest model that does it (his "low usage Claude prompt"). Tried on real rows on 28 October 2026 (job 438):
 # Haiku flagged H297 as first written but missed its second stop, and flagged its whole version too; Sonnet at low
-# effort found both holes and passed the whole one, about a cent a review.
+# effort found both holes and passed the whole one, about a cent a review. QA (job 450) then found that was luck: 3 of
+# 5. With the probes (job 455, 29 October 2026): H297 as first written flagged 8 of 8 at low effort and 8 of 8 at
+# medium, H297 as it is passed 8 of 8 at both; low named both holes every time, at about $0.008 a review.
 MODEL = os.environ.get("HQ_REVIEW_MODEL") or "sonnet"
+EFFORT = os.environ.get("HQ_REVIEW_EFFORT") or "low"
 QUIET = int(os.environ.get("HQ_REVIEW_QUIET") or 300)  # seconds a row's ask must stay the same before it's reviewed
 AT_ONCE = 1
 TIMEOUT = 180  # seconds for one review
@@ -68,19 +73,45 @@ NIGHT = (22, 8)
 LOG = os.path.join(E.DIR, "reviews.log")
 COSTS = os.path.join(E.DIR, "reviews.jsonl")  # one line per review: the row, the verdict, the cost, the seconds
 
+# F77's fix (job 455, 29 October 2026, after QA job 450): with "when in doubt, pass" and a free verdict the reviewer
+# flagged H297 as first written only 3 of 5 times (0 of 6 at medium effort), and a miss lets the hole through for good,
+# since each wording is reviewed once. Now it walks the same five probes every time, says for each whether it applies
+# to this item and quotes the sentence that covers it, and an applying probe with no sentence is a hole by rule
+# (verdict() below), not by mood.
+PROBES = (
+    ("again", "The thing the item is about happens more than once: a second stop, a second run, a retry, twice in a "
+              "row. Does the item say what then?"),
+    ("halfway", "It stops or fails halfway, or meets an empty, missing or not-yet-there input. Does the item say what "
+                "then?"),
+    ("numbers", "Every number, cost, count or measurement the item asks the team to find or report, above all a part "
+                "to be split out of a larger whole (one step's share, one turn's cost, one day's count): does the item "
+                "say where it's read from, a source the team can actually read? A figure the project plainly keeps "
+                "already (a job's estimate, its total, its time) needs no source named, and turning tokens or dollars "
+                "into a percent, or into the unit the item's other figures already use, is settled the obvious way: "
+                "never a hole by itself."),
+    ("examples", "Each 'done means' example: could someone really try it and tell yes or no?"),
+    ("points", "Each point of the checklist: does it say something, not just name the point?"),
+)
+
 SYSTEM = (
     "You review one item of a software project's planning before it may be marked ready for the build team. You did "
     "not write it. You read only the item you're given; you have no tools and change nothing. Hold it against the "
     "points of the checklist and hunt for real holes, as a reviewer who wants the team to build or check the right "
-    "thing the first time. Look hardest at: what happens when the thing it's about happens more than once (a second "
-    "stop, a second run, a retry), stops halfway, or meets an empty or missing input; where each number it asks for or "
-    "gives actually comes from, and whether the team could get it; whether each 'done means' example could really be "
-    "tried; a point that is named but says nothing. A hole is something that would make a careful team build, measure "
-    "or check the wrong thing, or leave them unable to tell whether it's done. Not a hole: a detail a careful team would "
-    "settle the obvious way, style, length, wording, something the item rightly puts out of scope, or a requirement "
-    "you invent. When in doubt, pass. Answer with JSON only, nothing else: "
-    '{"pass": true, "findings": []} or {"pass": false, "findings": ["one plain sentence per hole, naming the point", '
-    '...]}, at most four findings, the most important first.')
+    "thing the first time. Do the same walk every time, probe by probe:\n"
+    + "".join(f"- {k}: {q}\n" for k, q in PROBES)
+    + "For each probe decide whether it applies to this item: it applies when what the item is about can really meet "
+    "that case (something that can fail can fail twice; a figure to report has to be read from somewhere). When it "
+    "applies, copy the item's own sentence that covers it into \"covered\", word for word; when no sentence covers it, "
+    "\"covered\" is null and \"hole\" says in one plain sentence what's missing, naming the point. Don't count a "
+    "sentence that only covers the case in general when the item's own question is left open (a figure given without "
+    "where to read it; one case handled when it can happen several times). A hole is something that would make a careful "
+    "team build, measure or check the wrong thing, or leave them unable to tell whether it's done. Not a hole: a detail "
+    "a careful team would settle the obvious way, style, length, wording, something the item rightly puts out of scope, "
+    "or a requirement you invent. Answer with JSON only, nothing else: "
+    '{"probes": [{"probe": "again", "applies": true, "covered": "the sentence" or null, "hole": null or "the sentence"}, '
+    '... one per probe, in order], "pass": true or false, "findings": ["one plain sentence per hole", ...]}. '
+    "pass is false exactly when a probe applies with no covering sentence, or you found another real hole; at most "
+    "four findings, the most important first.")
 
 NINE = ("1. what's asked; 2. what done means, with examples someone can try; 3. the test (which flow, what it covers); "
         "4. why; 5. out of scope; 6. what it touches; 7. its size; 8. what it waits on; "
@@ -278,6 +309,31 @@ def _fake(row):
     return {"pass": True, "findings": [], "cost": cost, "s": 0.0, "model": "fake"}
 
 
+def _one(f):
+    return re.sub(r"\s+", " ", str(f)).strip()[:400]
+
+
+def verdict(a):
+    """The reviewer's JSON to (pass, findings), or None when it's not an answer. A probe that applies with no covering
+    sentence is a hole whatever its own pass says (F77's fix); its own findings come first."""
+    if not isinstance(a, dict) or not isinstance(a.get("pass"), bool):
+        return None
+    fs = [_one(f) for f in (a.get("findings") or []) if str(f).strip()]
+    for p in a.get("probes") or []:
+        if not isinstance(p, dict) or p.get("applies") is not True:
+            continue
+        cov = p.get("covered")
+        if isinstance(cov, str) and cov.strip():
+            continue
+        h = _one(p.get("hole") or f"the {p.get('probe', 'a')} probe applies and nothing in the item covers it")
+        if h and h not in fs:
+            fs.append(h)
+    ok = a["pass"] and not fs
+    if not ok and not fs:
+        fs = ["the reviewer flagged it without saying why"]
+    return ok, ([] if ok else fs[:5])
+
+
 def ask_reviewer(row):
     """The reviewer's answer: {"pass", "findings", "cost" (dollars), "s", "model"}, or None when it didn't run."""
     if os.environ.get("HQ_REVIEW_FAKE"):
@@ -290,20 +346,18 @@ def ask_reviewer(row):
     t0 = time.time()
     try:
         p = subprocess.run([claude, "-p", "--model", MODEL, "--output-format", "json", "--tools", "",
-                            "--strict-mcp-config", "--setting-sources", "", "--effort", "low",
+                            "--strict-mcp-config", "--setting-sources", "", "--effort", EFFORT,
                             "--max-budget-usd", str(BUDGET), "--no-session-persistence", "--system-prompt", SYSTEM],
                            input=_input(row), capture_output=True, text=True, timeout=TIMEOUT, cwd=E.ROOT)
         d = json.loads(p.stdout)
         found = re.findall(r"\{.*\}", d.get("result") or "", re.S)
         a = json.loads(found[-1])
-        ok = a.get("pass")
-        if not isinstance(ok, bool):
+        v = verdict(a)
+        if v is None:
             return None
-        fs = [re.sub(r"\s+", " ", str(f)).strip()[:400] for f in (a.get("findings") or []) if str(f).strip()][:5]
-        if not ok and not fs:
-            fs = ["the reviewer flagged it without saying why"]
-        return {"pass": ok, "findings": [] if ok else fs, "cost": d.get("total_cost_usd"),
-                "s": round(time.time() - t0, 1), "model": MODEL}
+        ok, fs = v
+        return {"pass": ok, "findings": fs, "cost": d.get("total_cost_usd"),
+                "s": round(time.time() - t0, 1), "model": MODEL + " " + EFFORT}
     except Exception:
         return None
 
