@@ -119,9 +119,10 @@ def block(agent: dict, user: str = "the user", base: Path | None = None) -> str:
 # H298, piece 1: Moneypenny's craft says she fills in the nine points herself and marks ready once they pass; with the
 # handbook on, "ground every decision" and the ready check's mechanical fields replace that: only what she grounded
 # in his quoted words, with her additions named and the sources real, gets the mark (sprint.py check holds it).
-_CRAFT_OLD = re.compile(r"You execute towards the team planning yourself: write the items, fill in the nine points, "
-                        r"mark them ready\s+once they pass all nine, rank them, put them in the sprint,")
-_CRAFT_NEW = ("You execute towards the team planning yourself: write the items with his words quoted (His words:), "
+_CRAFT_OLD = re.compile(r"You execute towards the team planning: write the items, fill in the nine points with him "
+                        r"\(what's grounded, with its source, and his yes for the rest\), mark them ready\s+once they "
+                        r"pass all nine, rank them, put them in the sprint,")  # F81: her line as it reads since then
+_CRAFT_NEW = ("You execute towards the team planning: write the items with his words quoted (His words:), "
               "your own additions named (My own additions:, or none) and the sources real (Sources:), and mark ready "
               "only what you grounded that way (the ready check reads those fields and refuses the mark when one is "
               "empty or false; that refusal is a tripwire), rank them, put them in the sprint,")
