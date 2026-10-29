@@ -14490,6 +14490,131 @@ print("RESULT " + json.dumps(out))
              "a boxed run was planned again by the runner")
         return "the gate STOPs over the line; 23:00 drops the session (Pepper's planned again for 08:00), 07:00 waits, past useful-until skips; over her weekly or daily share refuses; boxed twice is one text and nothing restarts"
 
+    async def flow193(self) -> str:
+        """H298, piece 7, no Claude: the Friday screen on the status page. On a throwaway workspace with Donna's
+        ledger carrying a plan, two scores and a tripwire, and her share partly used: routines.json carries the agents
+        (on, three lines per agent, her share against her line), and the page draws The agents: one card per agent
+        with picked, moved, escalated and the share, red when over her line; Pepper off isn't drawn. With the switch
+        off, routines.json says off and the page has no such section (the senders section and the rest as before)."""
+        import shutil as _sh
+        import subprocess as _sp
+        ws, env = self._h298_ws("p7")
+        env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
+        def py(code):
+            return self._h298_py(env, "import sys; sys.path.insert(0, %r); sys.path.insert(0, %r)\n" % (str(ROOT / "routine"), str(ROOT / "app")) + code)
+        def cy(*a):
+            r = _sp.run([sys.executable, str(ROOT / "routine/cycles.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            need(r.returncode == 0, f"cycles.py {' '.join(a)[:80]}: {r.stdout[-300:]} {r.stderr[-500:]}")
+            return r.stdout
+        cy("set", "pepper", "on", "off")
+        py("""
+import datetime as dt, json, ledger
+from pathlib import Path
+now = dt.datetime.now()
+ledger.write_plan("donna", {"picks": [{"what": "the morning's items sorted by the hour", "source": "the to-do list"}, {"what": "the week's one deadline a slot before its date"}],
+                            "let_go": ["the newsletter digests"], "steps": [], "questions": []}, job=7, now=now - dt.timedelta(hours=5))
+ledger.write_score("donna", "2026-W43", {"pokes": {"total": 6, "status_questions": 4, "corrections": 2, "short_calls": 0, "his_texts": 20, "calls": 3}, "own": {"texts_acted_on": [2, 5]}},
+                   ["pokes: 6 (status questions 4, corrections 2)"], now=now - dt.timedelta(days=8))
+ledger.write_score("donna", "2026-W44", {"pokes": {"total": 2, "status_questions": 1, "corrections": 1, "short_calls": 0, "his_texts": 18, "calls": 2}, "own": {"texts_acted_on": [4, 5]}},
+                   ["pokes: 2 (status questions 1, corrections 1)"], now=now - dt.timedelta(days=1))
+ledger.entry("donna", "run: bigger session (job 7)", ["ran 4.0 minutes, 12 turns"], now=now - dt.timedelta(hours=4))
+ledger.note("donna", "tripwire (a check failing twice): the check of \\"the deadline's slot\\" failed twice; the step waits for his word")
+ledger.note("donna", "let go: the second reminder about the parcel")
+ledger.write_plan("moneypenny", {"picks": [{"what": "the two ready rows for Friday"}], "let_go": [], "steps": [], "questions": []}, job=8, now=now - dt.timedelta(hours=3))
+# her share partly used: finished runs of her kinds in the estimates history
+import estimate
+d = Path(estimate.DIR); d.mkdir(parents=True, exist_ok=True)
+hist = d / "job-estimates-history.jsonl"
+rows = []
+for i, (kind, w) in enumerate((("cycle-donna", 1.6), ("step-donna", 0.9), ("step-donna", 0.8), ("cycle-moneypenny", 1.2))):
+    rows.append({"n": 20 + i, "kind": kind, "est": 4, "actual": 3, "done": int(now.timestamp() - 3600 * (2 + i)), "machine": "here",
+                 "cost": {"weekly": w, "five": w * 3}, "text": "Agent cycle: x"})
+hist.write_text("".join(json.dumps(r) + "\\n" for r in rows))
+print("ok")
+""")
+        out = json.loads(cy("friday", "--json"))
+        need(out["on"] and [a["id"] for a in out["agents"]] == ["donna", "moneypenny"], f"the Friday screen's agents: {out}")
+        dn = out["agents"][0]
+        need("the morning's items sorted by the hour" in dn["picked"] and "the week's one deadline" in dn["picked"], f"picked: {dn['picked']}")
+        need("pokes" in dn["moved"] and "6" in dn["moved"] and "2" in dn["moved"], f"moved: {dn['moved']}")
+        need("a check failing twice" in dn["escalated"] and "the second reminder" in dn["let_go"], f"escalated/let go: {dn['escalated']} / {dn['let_go']}")
+        need(dn["share"]["weekly_share"] == 3 and abs(dn["share"]["weekly_used"] - 3.3) < 0.01, f"her share: {dn['share']}")
+        need(out["agents"][1]["moved"] == "no score yet", f"Moneypenny's moved: {out['agents'][1]}")
+        # the status page: its own copy, pointed at the throwaway workspace
+        site = self.tmp / "h298-p7-site"
+        _sh.copytree(ROOT / "status", site / "status")
+        _sh.copytree(ROOT / "routine", site / "routine")
+        _sh.copytree(ROOT / "app", site / "app", ignore=_sh.ignore_patterns("__pycache__", "node_modules", "web"))
+        (site / ".status").mkdir()
+        (site / "scratch").mkdir()
+        rm = ws / "HQ/roadmap.md"
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to look at the page in")
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  for (let i = 0; i < 40 && !document.querySelector('section.sprint, section.senders, section .log, section.now'); i++) await wait(250);
+  await wait(1500);
+  const ag = document.querySelector('section.agents');
+  out.push('agents:' + (ag ? 'yes' : 'no'));
+  if (ag) {
+    out.push('sum:' + ag.querySelector('summary').textContent.trim());
+    out.push('rows:' + ag.querySelectorAll('.row.agent').length);
+    out.push('names:' + [...ag.querySelectorAll('.row.agent .what')].map(w => w.firstChild.textContent).join(','));
+    const d = ag.querySelector('.row.agent .what');
+    out.push('lines:' + [...d.querySelectorAll('.soft')].map(x => x.textContent.split(':')[0]).join(','));
+    out.push('over:' + (d.querySelector('.share.over') ? 'yes' : 'no'));
+    out.push('share:' + d.querySelector('.share').textContent);
+  }
+  out.push('wide:' + document.documentElement.scrollWidth + '/' + window.innerWidth);
+  const pre = document.createElement('pre'); pre.textContent = 'H298RESULT ' + out.join(' | ') + ' END';
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        idx = site / "status/index.html"
+        idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
+        def look(port, name, on):
+            senv = {**env, "HQ_STATUS_PORT": str(port), "HQ_ROADMAP": str(rm)}
+            proc = _sp.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=senv, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+            try:
+                base = f"http://127.0.0.1:{port}"
+                for _ in range(50):
+                    if http_get("/routines.json", base)[0] == 200:
+                        break
+                    time.sleep(0.2)
+                _, body, _ = http_get("/routines.json", base)
+                r = json.loads(body)
+                need(bool(r.get("agents", {}).get("on")) == on, f"routines.json's agents with the switch {'on' if on else 'off'}: {str(r.get('agents'))[:200]}")
+                res = _sp.run([chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                              f"--user-data-dir={self.tmp / ('h298-p7-' + name)}", "--window-size=390,2400", "--virtual-time-budget=20000", "--dump-dom", base + "/"],
+                             capture_output=True, text=True, timeout=120)
+                m = re.search(r"<pre>H298RESULT (.*?) END</pre>", res.stdout, re.S)
+                need(m, f"the page didn't report ({name}): {res.stdout[-400:]} {res.stderr[-400:]}")
+                need(all(":" in x for x in m.group(1).split(" | ")), f"the page's report ({name}): {m.group(1)[:400]}")
+                return r, dict(x.split(":", 1) for x in m.group(1).split(" | "))
+            finally:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    proc.kill()
+        r, got = look(4797, "on", True)
+        need(got["agents"] == "yes" and got["rows"] == "2" and got["names"] == "Donna,Moneypenny", f"the page's agents section: {got}")
+        need(got["lines"] == "picked,moved,escalated,share" and got["over"] == "yes" and "3.3 of 3" in got["share"] and "over her line" in got["share"], f"Donna's card: {got}")
+        need("2 running themselves" in got["sum"] and "Friday screen" in got["sum"], f"the fold's summary: {got['sum']}")
+        need(int(got["wide"].split("/")[0]) <= int(got["wide"].split("/")[1]), f"the page is wider than a phone: {got['wide']}")
+        (ws / "HQ/features.json").write_text('{"off": [], "on": [], "maker": true}\n')
+        r, got = look(4798, "off", False)
+        need(got["agents"] == "no", f"the section is drawn with the switch off: {got}")
+        need("planning" in r and "estimate" in r, "the rest of routines.json isn't there with the switch off")
+        return ("on: routines.json carries the agents and the page draws The agents with Donna's and Moneypenny's cards (picked, moved, "
+                "escalated, the share red over her line), Pepper off not drawn; off: no agents, no section, the rest as before")
+
     async def flow184(self) -> str:
         """F78, no Claude, no window: a job held by the usage line is checked on what's left of it when it carries on
         in its own chat. On 28 October job 424 was held at 16:30 with about 5.8% of the 5-hour left, yet every minute
@@ -22850,6 +22975,7 @@ FLOWS = {
     140: ("H238: call me back (the page reloads and calls the same agent, continuing the call), and an agent calls him at an agreed time or appointment (a push, one tap picks up, a missed one in her chat)", False, "flow140"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
     192: ("H298, piece 6: the wall: the gate holds a start over the line, nothing starts outside her hours (dropped to the morning when still useful, waits before them), past useful-until is skipped, over her weekly or daily share is refused, boxed twice in a row is a tripwire and nothing restarts itself", False, "flow192"),
+    193: ("H298, piece 7: the Friday screen on the status page: routines.json carries the agents (three lines per agent, her share against her line) and the page draws The agents, one card per agent, the share red over her line; off, nothing of it", False, "flow193"),
     191: ("H298, piece 6: a cycle runs: an order now becomes a step at once; the bigger session starts through the routine's own start with her character, the handbook, her ledger, the order and the plan command, inside her box; its plan becomes priority step items; a step with a changed input is stale; done and failed in the ledger; a check failing twice and the same goal twice are tripwires on her line, at most her texts a day", False, "flow191"),
     190: ("H298, piece 6: off means off: the runner plans nothing and the rules carry nothing while the feature is off; on, each agent's cycles are planned once as repeating priority items of their own kind, an agent off loses hers, off again cancels them all", False, "flow190"),
     189: ("H298, piece 5: the ledger per agent (orders on top, each cycle's plan as lines and JSON, notes, the score) and the weekly score computed without Claude: the pokes from his own lines (status questions, corrections, short calls) and each agent's own measures from the files", False, "flow189"),

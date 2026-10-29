@@ -166,6 +166,22 @@ function sprint() {
   });
 }
 
+// H298, piece 7: the Friday screen of the agents running themselves (routine/cycles.py friday --json): three lines
+// per agent (what she picked, what moved on her score, what she escalated or let go) and her share used against her
+// line; asked at most every 20 seconds. Off (the switch) it answers {on: false} and the page shows nothing.
+let agentsFriday = { at: 0, data: null };
+function cyclesFriday() {
+  if (Date.now() - agentsFriday.at < 20000) return Promise.resolve(agentsFriday.data);
+  return new Promise((resolve) => {
+    execFile('/usr/bin/python3', [join(root, 'routine/cycles.py'), 'friday', '--json'], { timeout: 30000, cwd: root }, (err, out) => {
+      let data = null;
+      try { data = JSON.parse(String(out)); } catch {}
+      agentsFriday = { at: Date.now(), data };
+      resolve(data);
+    });
+  });
+}
+
 // H247 (b): who may send feedback to this HQ's mailbox (app/feedback_box.py list); asked at most every 20 seconds.
 let senders = { at: 0, data: null };
 function feedbackBox(args, cacheMs = 0) {
@@ -289,8 +305,8 @@ async function routines() {
   const stats = await read(join(root, '.status/stats.json'));
   // H45: whether the laptop keeps working with the lid closed (routine/lidsleep.py, every minute).
   const lidsleep = await read(join(root, '.status/lidsleep.json'));
-  const [estimate, planning, feedback] = await Promise.all([estimates(), sprint(), feedbackBox(['list'], 20000)]);
-  return { now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback };
+  const [estimate, planning, feedback, agents] = await Promise.all([estimates(), sprint(), feedbackBox(['list'], 20000), cyclesFriday()]);
+  return { now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback, agents };
 }
 
 // H23: every minute the state of each routine is written down, also when the helper is gone (its lines then

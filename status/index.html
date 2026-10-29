@@ -311,6 +311,10 @@
       .team-send .said { font-size: 13px; color: var(--soft); }
       /* H247 (b): who may send feedback, and the invite link to send them. */
       .senders .row { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--rule); }
+      /* H298, piece 7: the Friday screen, one card row per agent; her share line turns red over her line. */
+      .agents .row { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--rule); }
+      .agents .row .what { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+      .agents .share.over { color: var(--red); }
       .senders .row .what { flex: 1; min-width: 0; overflow-wrap: anywhere; }
       .senders form { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; }
       .senders input { flex: 1; min-width: 10em; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--rule); background: transparent; color: inherit; font: inherit; }
@@ -1269,6 +1273,33 @@
           }
           card.append(row);
         }
+        fold.append(card);
+        box.append(fold);
+        return box;
+      }
+      // H298, piece 7: the Friday screen. With the agents running themselves on, one card per agent: what she picked
+      // this week, what moved on her score, what she escalated or let go, and her share of the weekly room used
+      // against her line (routine/cycles.py friday --json). Off, the section isn't drawn at all.
+      function drawAgents(A) {
+        const box = el('section', 'agents');
+        const n = (A.agents || []).length;
+        const fold = foldPart('agents', true, 'The agents', n ? `${n} running ${n === 1 ? 'herself' : 'themselves'} · the Friday screen` : 'none on');
+        const card = el('div', 'card');
+        if (!n) card.append(el('div', 'soft', 'No agent is on. Turn one on under Settings, The agents run themselves.'));
+        for (const a of A.agents || []) {
+          const row = el('div', 'row agent');
+          const what = el('div', 'what', a.name);
+          const sh = a.share || {};
+          const over = Number(sh.weekly_used || 0) > Number(sh.weekly_share || 0);
+          what.append(el('div', 'soft', `picked: ${a.picked}`));
+          what.append(el('div', 'soft', `moved: ${a.moved}`));
+          what.append(el('div', 'soft', `escalated: ${a.escalated}; ${a.let_go}`));
+          const share = el('div', `soft share${over ? ' over' : ''}`, `share: ${Number(sh.weekly_used || 0).toFixed(1)} of ${sh.weekly_share} points of the week${over ? ' · over her line' : ''}; today ${Number(sh.daily_used || 0).toFixed(1)} of ${sh.daily_share}`);
+          what.append(share);
+          row.append(what);
+          card.append(row);
+        }
+        card.append(el('div', 'soft', `Read ${A.at || ''}. The whole of it is in each agent's ledger (HQ/ledger in the workspace).`));
         fold.append(card);
         box.append(fold);
         return box;
@@ -2348,6 +2379,8 @@
         if (routines?.planning?.rows) app.append(drawSprint(routines.planning));
         // H247 (b): with this HQ's feedback mailbox on, who may send feedback, and "Invite someone to send feedback".
         if (routines?.feedback?.on) app.append(drawSenders(routines.feedback));
+        // H298, piece 7: with the agents running themselves on, the Friday screen: three lines per agent and her share.
+        if (routines?.agents?.on) app.append(drawAgents(routines.agents));
 
         // H15: Recent activity folds open and closed, like the job list.
         if (s.log.length) {
@@ -2477,7 +2510,7 @@
           // Also once a minute, so "read 4 min ago" and "resets in" stay true.
           let routines = null;
           try { routines = JSON.parse(routinesText); } catch { routines = null; }
-          const lines = routines ? JSON.stringify([routines.routines, routines.incidents, routines.temperature, routines.battery, routines.stats, routines.lidsleep, routines.estimate, routines.planning, routines.feedback]) : '';
+          const lines = routines ? JSON.stringify([routines.routines, routines.incidents, routines.temperature, routines.battery, routines.stats, routines.lidsleep, routines.estimate, routines.planning, routines.feedback, routines.agents]) : '';
           const key = `${text}\n${usageText}\n${lines}\n${Math.floor(Date.now() / 60000)}`;
           // H23: the graph's history, once a minute (and when the time span or a routine is switched).
           if (key !== last) { await loadUptime(); await loadTemp(); }
