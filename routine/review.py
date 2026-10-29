@@ -58,7 +58,7 @@ import sprint as S  # noqa: E402
 # Haiku flagged H297 as first written but missed its second stop, and flagged its whole version too; Sonnet at low
 # effort found both holes and passed the whole one, about a cent a review. QA (job 450) then found that was luck: 3 of
 # 5. With the probes (job 455, 29 October 2026): H297 as first written flagged 8 of 8 at low effort and 8 of 8 at
-# medium, H297 as it is passed 8 of 8 at both; low named both holes every time, at about $0.008 a review.
+# medium, H297 as it is passed 8 of 8 at both; low named the second stop every time and the cost's source 6 of 8, at about $0.008 a review.
 MODEL = os.environ.get("HQ_REVIEW_MODEL") or "sonnet"
 EFFORT = os.environ.get("HQ_REVIEW_EFFORT") or "low"
 QUIET = int(os.environ.get("HQ_REVIEW_QUIET") or 300)  # seconds a row's ask must stay the same before it's reviewed
