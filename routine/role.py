@@ -83,10 +83,12 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "games": {"new", "spec", "tick", "count", "note", "diary", "week", "debrief", "undo"},
           "coaching": {"done", "later"},
           "handover": {"edit", "put"},
-          "review": {"clear"}}  # F77: a flag taken off on his say-so goes to the main, which writes sprint.json  # put (Fable, 27 October 2026): a whole small file, with one-way sync
+          "review": {"clear"},  # F77: a flag taken off on his say-so goes to the main, which writes sprint.json  # put (Fable, 27 October 2026): a whole small file, with one-way sync
+          "direct_line": {"put"}}  # F58: a line of a text thread (Donna's, the team line, the coaching line)
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
-           "coaching": os.path.join(os.path.dirname(HERE), "app", "coaching.py")}  # H225; the rest are routine/<script>.py
+           "coaching": os.path.join(os.path.dirname(HERE), "app", "coaching.py"),
+           "direct_line": os.path.join(os.path.dirname(HERE), "app", "direct_line.py")}  # H225, F58; the rest are routine/<script>.py
 PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main (who asked, for her notes)
 
 # H203, in the user's words (call of 17 October 2026, 14:45): "i am even more confused, you give it to the server but
@@ -708,7 +710,7 @@ def _run_here(script, args, env=None):
     return r.returncode, r.stdout, r.stderr
 
 
-def hand(script: str, args: list[str], env: dict | None = None) -> tuple[int, str, str, str]:
+def hand(script: str, args: list[str], env: dict | None = None, timeout: float = 90) -> tuple[int, str, str, str]:
     """H203: hand a write to the main. Returns (code, out, err, how): how is 'main' (the main ran it; code, out and
     err are its own), 'kept' (the main can't be reached: kept here, it goes on by itself, or runs here when this one
     takes over), 'refused' (the main said no) or 'alone' (no other HQ, or a test on the real pairing)."""
@@ -720,7 +722,7 @@ def hand(script: str, args: list[str], env: dict | None = None) -> tuple[int, st
     peer = c.get("peer_name") or "the main HQ"
     req = {"script": script, "args": args, **({"env": _env(env)} if _env(env) else {})}
     try:
-        code, d = _request(c["peer"].rstrip("/") + "/api/forward", req, "forward", timeout=90)
+        code, d = _request(c["peer"].rstrip("/") + "/api/forward", req, "forward", timeout=timeout)
         if code == 200 and isinstance(d, dict):
             return int(d.get("code") or 0), d.get("out") or "", d.get("err") or "", "main"
     except urllib.error.HTTPError as e:

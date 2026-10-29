@@ -222,30 +222,147 @@ class _Lock:
 
 # -- the thread -----------------------------------------------------------------------------------
 
-def thread(last: int | None = None) -> list[dict]:
+# F58 (job 453, 29 October 2026): both computers wrote this thread (an incident's down and back texts run on both, his
+# texts reach whichever one the phone opens), so the sync kept two versions about once a day. Now only the main
+# writes it: on the backup a new line goes to the main by hand-over (role.hand, the H203 way: `put`), and until it
+# comes back through the sync the backup keeps it in thread.here.jsonl next to the thread, which never syncs (the
+# workspace's .stignore and git exclude, routine/sync.py) and is read over the thread (read_lines), so the backup's
+# own page and her reply there see it at once. The main can't be reached: the hand-over is kept and goes on by
+# itself (or runs here when this one takes over). An older main that refuses `put`: written here as before.
+HERE_FILE = "thread.here.jsonl"
+LINE_NAMES = ("direct-line", "team-line", "coaching-line")
+
+
+def _lines(path: Path) -> list[dict]:
     try:
-        lines = (folder() / "thread.jsonl").read_text(encoding="utf8").splitlines()
+        raw = path.read_text(encoding="utf8").splitlines()
     except OSError:
         return []
     out = []
-    for line in lines:
+    for line in raw:
         try:
             m = json.loads(line)
         except ValueError:
             continue
         if isinstance(m, dict) and m.get("text"):
             out.append(m)
+    return out
+
+
+def _at(m: dict) -> float:
+    try:
+        return float(m.get("at") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _key(m: dict) -> tuple:
+    return (round(_at(m), 3), m.get("from"), m.get("text"))
+
+
+def read_lines(where: Path) -> list[dict]:
+    """The thread in the folder `where`, with (on the backup) its own lines the main hasn't sent back yet, in time
+    order (F58)."""
+    out = _lines(where / "thread.jsonl")
+    mine = _lines(where / HERE_FILE)
+    if mine:
+        have = {_key(m) for m in out}
+        extra = [m for m in mine if _key(m) not in have]
+        if extra:
+            out = sorted(out + extra, key=_at)
+    return out
+
+
+def thread(last: int | None = None) -> list[dict]:
+    out = read_lines(folder())
     return out[-last:] if last else out
+
+
+def _backup() -> bool:
+    """This HQ is the backup of a pair (role.py); a lone HQ, a test or a run handed over by the backup is the main."""
+    if os.environ.get("HQ_ROLE_HERE"):
+        return False
+    try:
+        import role
+        return role.is_backup()
+    except Exception:
+        return False
+
+
+def _write_lines(path: Path, msgs: list[dict]) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in msgs), encoding="utf8")
+    os.replace(tmp, path)
+
+
+def _prune_here(where: Path, have: set | None = None) -> None:
+    """Drop the backup's own lines that are in the thread by now (under the thread's lock)."""
+    here = where / HERE_FILE
+    if not here.exists():
+        return
+    have = have if have is not None else {_key(m) for m in _lines(where / "thread.jsonl")}
+    left = [m for m in _lines(here) if _key(m) not in have]
+    if left:
+        _write_lines(here, left)
+    else:
+        try:
+            here.unlink()
+        except OSError:
+            pass
+
+
+def put(where: Path, m: dict) -> bool:
+    """Write one line into the thread in `where`, in time order, once (a hand-over sent again changes nothing).
+    The main's way in for a line the backup handed over, and for every line written here. True when it was new."""
+    where.mkdir(parents=True, exist_ok=True)
+    with _Lock(where=where):
+        msgs = _lines(where / "thread.jsonl")
+        have = {_key(x) for x in msgs}
+        new = _key(m) not in have
+        if new:
+            i = len(msgs)
+            while i and _at(msgs[i - 1]) > _at(m):
+                i -= 1
+            msgs.insert(i, m)
+            _write_lines(where / "thread.jsonl", msgs[-KEEP:])
+            have.add(_key(m))
+        _prune_here(where, have)
+    return new
+
+
+def _keep_here(where: Path, m: dict) -> None:
+    """On the backup: the line in its own file next to the thread, until the main's thread brings it back."""
+    where.mkdir(parents=True, exist_ok=True)
+    with _Lock(where=where):
+        _prune_here(where)
+        with open(where / HERE_FILE, "a", encoding="utf8") as f:
+            f.write(json.dumps(m, ensure_ascii=False) + "\n")
+
+
+def line_dir(name: str) -> Path | None:
+    """A line's folder from its name, as this HQ has it (the main resolving a hand-over)."""
+    for d in (folder(), team_folder(), Path(os.environ.get("HQ_COACHING_LINE") or "")):
+        if str(d) not in ("", ".") and d.name == name:
+            return d
+    if name in LINE_NAMES:
+        return Path(hqpaths.DATA) / name
+    return None
 
 
 def add(sender: str, text: str, why: str = "") -> dict:
     m = {"at": round(time.time(), 3), "from": sender, "text": text.strip(), "why": why}
-    with _Lock():
-        msgs = thread() + [m]
-        path = folder() / "thread.jsonl"
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in msgs[-KEEP:]), encoding="utf8")
-        os.replace(tmp, path)
+    where = folder()
+    if _backup():
+        try:
+            import role
+            code, _out, _err, how = role.hand("direct_line", ["put", where.name, json.dumps(m, ensure_ascii=False)],
+                                              timeout=15)
+        except Exception:
+            code, how = 1, "failed"
+        if how == "kept" or (how == "main" and code == 0):
+            _keep_here(where, m)
+            return m
+    put(where, m)
     return m
 
 
@@ -1113,6 +1230,19 @@ if __name__ == "__main__":
         print(json.dumps({"ok": True, "phones": subscribe(body.get("subscription") or {}, body.get("device") or "")}))
     elif cmd == "test":
         print(json.dumps(text("hello", ""), ensure_ascii=False))
+    elif cmd == "me":  # the status server: his text from the phone, through add() so the backup hands it over (F58)
+        body = json.loads(sys.stdin.read() or "{}")
+        t = str(body.get("text") or "").strip()[:4000]
+        if not t:
+            sys.exit(2)
+        print(json.dumps(add("me", t), ensure_ascii=False))
+    elif cmd == "put" and len(args) >= 3:  # F58: the main writes a line the backup handed over (role.WRITES)
+        where = line_dir(args[1])
+        m = json.loads(args[2])
+        if where is None or not isinstance(m, dict) or not m.get("text") or m.get("from") not in ("me", "agent"):
+            print("Refused: not a line of one of HQ's own threads.", file=sys.stderr)
+            sys.exit(2)
+        print("written" if put(where, m) else "already there")
     elif cmd == "watch":
         q = json.loads(subprocess.run([sys.executable, str(ROOT / "routine" / "jobs.py"), "next"],
                                       capture_output=True, text=True).stdout or "{}")

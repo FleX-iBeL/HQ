@@ -448,18 +448,8 @@ def _env(f: Path | None = None) -> dict:
 
 
 def thread(last: int | None = None) -> list[dict]:
-    p = line_dir() / "thread.jsonl"
-    out = []
-    try:
-        for line in p.read_text(encoding="utf8").splitlines():
-            try:
-                m = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(m, dict) and m.get("text"):
-                out.append(m)
-    except OSError:
-        return []
+    import direct_line  # F58: with the backup's own lines not back from the main yet
+    out = direct_line.read_lines(line_dir())
     return out[-last:] if last else out
 
 

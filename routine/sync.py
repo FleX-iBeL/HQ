@@ -61,9 +61,10 @@ MEDIA = ("mp4", "mov", "m4v", "mkv", "webm", "avi", "m4a", "mp3", "wav", "aac", 
 # H152: a lock file belongs to the computer that holds it (a pid in it means nothing on the other one), and a
 # .tmp is a write half done; both went over and made conflict copies.
 IGNORE_WORKSPACE = [".git", ".claude/settings.local.json", *[f"(?i)*.{x}" for x in MEDIA], "(?d).DS_Store",
-                    "(?d)Thumbs.db", "(?d).*.lock", "(?d)*.tmp"]
+                    "(?d)Thumbs.db", "(?d).*.lock", "(?d)*.tmp",
+                    "(?d)*.here.jsonl"]  # F58: the backup's own text lines, waiting for the main's thread to bring them back
 IGNORE_MEMORY = ["(?d).DS_Store"]
-GIT_EXCLUDE = [".stfolder", ".stignore", "*.sync-conflict-*"]  # Syncthing's own files stay out of git
+GIT_EXCLUDE = [".stfolder", ".stignore", "*.sync-conflict-*", "*.here.jsonl"]  # Syncthing's own files stay out of git
 CONFLICT = re.compile(r"\.sync-conflict-\d{8}-\d{6}-[A-Z0-9]{7}")
 CALLS_AFTER = 1800  # H152: a call transcript nobody committed, this long after its last change, is committed by the main
 
@@ -186,6 +187,8 @@ def keep_ignores():
         if os.path.isdir(f["path"]):
             if write_ignores(f["path"], IGNORE_WORKSPACE if f["what"] == "workspace" else IGNORE_MEMORY):
                 out.append(f["what"])
+            if f["what"] == "workspace":  # F58: a pattern added later (the backup's own text lines) reaches git too
+                git_exclude(f["path"])
     return out
 
 

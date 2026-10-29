@@ -439,14 +439,26 @@ function directTool(args, input = '') {
     if (input) p.stdin.end(input); else p.stdin.end();
   });
 }
-async function directThread(dir = DIRECT_DIR) {
+async function threadLines(file) {
   try {
-    return (await readFile(join(dir, 'thread.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => {
+    return (await readFile(file, 'utf8')).split('\n').filter(Boolean).map((l) => {
       try { return JSON.parse(l); } catch { return null; }
-    }).filter((m) => m && m.text).slice(-200);
+    }).filter((m) => m && m.text);
   } catch {
     return [];
   }
+}
+// F58: on the backup its own lines wait in thread.here.jsonl (never synced) until the main's thread brings them back
+async function directThread(dir = DIRECT_DIR) {
+  const out = await threadLines(join(dir, 'thread.jsonl'));
+  const mine = await threadLines(join(dir, 'thread.here.jsonl'));
+  if (mine.length) {
+    const key = (m) => `${Math.round(Number(m.at || 0) * 1000)}|${m.from}|${m.text}`;
+    const have = new Set(out.map(key));
+    const extra = mine.filter((m) => !have.has(key(m)));
+    if (extra.length) return out.concat(extra).sort((a, b) => Number(a.at || 0) - Number(b.at || 0)).slice(-200);
+  }
+  return out.slice(-200);
 }
 async function directRoute(path0, req, res) {
   const json = (code, data) => res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(data));
@@ -482,7 +494,9 @@ async function directRoute(path0, req, res) {
   const toTeam = body.line === 'team' && teamInfo && teamInfo.id !== (directInfo?.id ?? 'donna');
   const dir = toTeam ? TEAM_DIR : DIRECT_DIR;
   await mkdir(dir, { recursive: true });
-  await appendFile(join(dir, 'thread.jsonl'), JSON.stringify({ at: Date.now() / 1000, from: 'me', text, why: '' }) + '\n');
+  // F58: through the tool's add(), so on the backup his text goes to the main (only the main writes the thread)
+  const put = await directTool(['me', ...(toTeam ? ['--team'] : [])], JSON.stringify({ text }));
+  if (!put) await appendFile(join(dir, 'thread.jsonl'), JSON.stringify({ at: Date.now() / 1000, from: 'me', text, why: '' }) + '\n');
   const log = openSync(join(root, 'scratch', 'direct-line.log'), 'a');
   spawn(DIRECT_PY, [DIRECT_TOOL, 'reply', ...(toTeam ? ['--team'] : [])], { cwd: root, detached: true, stdio: ['ignore', log, log] }).unref();
   return json(200, { ok: true });
