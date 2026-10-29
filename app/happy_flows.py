@@ -7878,6 +7878,40 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         return " · ".join(notes)
 
 
+    # 196
+    async def flow196(self) -> str:
+        """F58, no Claude: the two computers never write the same file. Two private, throwaway Syncthings and two
+        throwaway HQs as in flow 66 (the blank template, nothing of the user's), A paired as the main (behind a
+        stand-in for its status server's /api/role and /api/forward) and B as its backup. Three times over, at the
+        same moment on both: a down text, his text on the backup, the app's weather read and a mark that something
+        wrote in the calendar. Checked: the backup shows its own lines at once; the main writes them all, once,
+        and the sync brings the same thread back; no conflict copy on either, no merge job; weather.json is the
+        main's, the backup's weather kept on its own and read over it; the backup's calendar marks went to the
+        main. With the main away, the backup's line is kept, shown there, and goes over once at its next look. And
+        two versions of a log of lines (.jsonl) are merged by the routine itself: every line once, in time order,
+        no merge job. Then everything is removed again."""
+        import subprocess as sp, importlib
+        sys.path.insert(0, str(ROOT / "routine"))
+        hqpaths = importlib.import_module("hqpaths")
+        files = sp.run(["git", "-C", str(ROOT), "ls-files", "-co", "--exclude-standard"], capture_output=True, text=True).stdout
+        files = "\n".join(l for l in files.splitlines() if l and not l.startswith("workspace"))
+        tar = sp.run(["tar", "--no-xattrs", "-czf", "-", "-T", "-"] if hqpaths.IS_MAC else ["tar", "-czf", "-", "-T", "-"],
+                     input=files.encode(), capture_output=True, cwd=str(ROOT), env={**os.environ, "COPYFILE_DISABLE": "1"})
+        need(tar.returncode == 0, f"couldn't pack HQ: {tar.stderr.decode()[:200]}")
+        tag = f"hqflow196-{os.getpid()}"
+        base = "/tmp"
+        run = lambda cmd, **k: sp.run(["bash", "-c", cmd], **k)
+        r = run(f'T="{base}/{tag}"; mkdir -p "$T" && cat > "$T/hq.tgz"', input=tar.stdout, capture_output=True)
+        need(r.returncode == 0, f"couldn't copy HQ: {r.stderr.decode()[:200]}")
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("HQ_DIRECT", "HQ_WEATHER", "HQ_CALENDAR", "HQ_TRAVEL"))}
+        r = run("bash -s", input=FLOW196_SCRIPT.replace("@TAG@", tag).replace("@BASE@", base).encode(),
+                capture_output=True, timeout=400, env=env)
+        out = r.stdout.decode() + r.stderr.decode()
+        left = run(f'ls -d "{base}/{tag}" 2>/dev/null', capture_output=True).stdout.decode().strip()
+        need("ALL OK" in out, next((l[5:] for l in out.splitlines() if l.startswith("FAIL ")), out.strip()[-400:]))
+        need(not left, f"the test left something behind: {left}")
+        return "; ".join(l[3:] for l in out.splitlines() if l.startswith("OK ")) + "; everything removed again"
+
     async def flow67(self) -> str:
         """F17: under a test, jobs.py, schedule.py and set-status.py refuse the real workspace's roadmap, and the real
         pairing is never used. Proven on throwaway copies standing in for the real ones; the real job list is only
@@ -22974,6 +23008,175 @@ echo "ALL OK"
 """
 
 
+
+FLOW196_SCRIPT = r"""
+# F58, happy flow 196: two private Syncthings and two throwaway HQs, A the main (the laptop) and B the backup (the
+# server), paired as main and backup, writing the same files at the same moment; nothing of the user's.
+T="@BASE@/@TAG@"; export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+GA=8398; GB=8399; LA=22098; LB=22099; PA=4797; PIDS=""
+fail() { echo "FAIL $*"; exit 1; }
+cleanup() { for p in $PIDS; do kill "$p" 2>/dev/null; done; sleep 1; for p in $PIDS; do kill -9 "$p" 2>/dev/null; done; rm -rf "${T:?}"; }
+trap cleanup EXIT
+command -v syncthing >/dev/null || fail "Syncthing isn't installed here"
+command -v git >/dev/null || fail "git isn't installed here"
+git init -q --bare -b main "$T/origin.git" 2>/dev/null || fail "couldn't make the throwaway origin"
+for X in A B; do
+  mkdir -p "$T/$X/HQ" "$T/$X/state" "$T/$X/mem" && tar -xzf "$T/hq.tgz" -C "$T/$X/HQ" 2>/dev/null || fail "couldn't unpack HQ"
+done
+cp -R "$T/A/HQ/template" "$T/A/HQ/workspace"
+G="git -c user.name=hq-test -c user.email=hq-test@example.invalid"
+(cd "$T/A/HQ/workspace" && $G init -q -b main && $G add -A && $G commit -q -m start && $G remote add origin "$T/origin.git" && $G push -q -u origin main) || fail "couldn't make A's workspace a repo"
+$G clone -q "$T/origin.git" "$T/B/HQ/workspace" || fail "couldn't clone B's workspace"
+for X in A B; do (cd "$T/$X/HQ/workspace" && git config user.name hq-test && git config user.email hq-test@example.invalid); done
+WA="$T/A/HQ/workspace"; WB="$T/B/HQ/workspace"
+COMMON="HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_DIRECT_PLAIN=1 HQ_SYNC_GIT=0 HQ_ROLE_ONLINE=1 HQ_CLAUDE_CLI=/bin/false"
+ENVA="HQ_SUPPORT=$T/A/state HQ_SYNCTHING_HOME=$T/A/st HQ_STATUS_PORT=4796 HQ_PORT=7894 HQ_UNIT=@TAG@-a $COMMON"
+ENVB="HQ_SUPPORT=$T/B/state HQ_SYNCTHING_HOME=$T/B/st HQ_STATUS_PORT=4795 HQ_PORT=7893 HQ_UNIT=@TAG@-b $COMMON"
+ra() { (cd "$T/A/HQ" && env $ENVA python3 "$@"); }
+rb() { (cd "$T/B/HQ" && env $ENVB python3 "$@"); }
+st() { X=$1; shift; (cd "$T/$X/HQ" && env HQ_SYNCTHING_HOME="$T/$X/st" python3 -c "
+import sys, json; sys.path.insert(0, 'routine'); import sync
+a = sys.argv[1:]; r = sync.api(a[1], a[0], json.loads(a[2]) if len(a) > 2 else None); print(json.dumps(r))" "$@"); }
+wait_for() { for i in $(seq 1 ${2:-60}); do eval "$1" && return 0; sleep 1; done; return 1; }
+PYA="import sys; sys.path[:0] = ['app', 'routine']"
+for f in ra rb; do $f routine/jobs.py off >/dev/null && $f routine/jobs.py mail-off >/dev/null || fail "couldn't switch the test's routine off"; done
+
+# Two private Syncthings, only talking to each other on this computer.
+for X in A B; do syncthing generate --home="$T/$X/st" >/dev/null 2>&1 || fail "couldn't make a throwaway Syncthing"; done
+python3 - "$T/A/st/config.xml" $GA $LA "$T/B/st/config.xml" $GB $LB <<'PY'
+import sys, xml.etree.ElementTree as ET
+a = sys.argv[1:]
+for p, gui, listen in (a[0:3], a[3:6]):
+    t = ET.parse(p); r = t.getroot()
+    r.find("gui").find("address").text = f"127.0.0.1:{gui}"
+    o = r.find("options")
+    for x in o.findall("listenAddress"):
+        o.remove(x)
+    ET.SubElement(o, "listenAddress").text = f"tcp://127.0.0.1:{listen}"
+    for k, v in (("globalAnnounceEnabled", "false"), ("localAnnounceEnabled", "false"), ("relaysEnabled", "false"),
+                 ("natEnabled", "false"), ("urAccepted", "-1"), ("autoUpgradeIntervalH", "0"),
+                 ("startBrowser", "false"), ("crashReportingEnabled", "false")):
+        x = o.find(k)
+        if x is None:
+            x = ET.SubElement(o, k)
+        x.text = v
+    for f in r.findall("folder"):
+        r.remove(f)
+    t.write(p)
+PY
+for X in A B; do
+  STNODEFAULTFOLDER=1 STNOUPGRADE=1 syncthing serve --home="$T/$X/st" --no-browser > "$T/$X/st.log" 2>&1 &
+  PIDS="$PIDS $!"
+done
+wait_for "st A GET /rest/system/status >/dev/null 2>&1 && st B GET /rest/system/status >/dev/null 2>&1" 40 || fail "the throwaway Syncthings didn't start: $(tail -3 "$T/A/st.log")"
+IA=$(st A GET /rest/system/status | python3 -c "import json,sys; print(json.load(sys.stdin)['myID'])")
+IB=$(st B GET /rest/system/status | python3 -c "import json,sys; print(json.load(sys.stdin)['myID'])")
+st A PUT /rest/config/devices/$IB "{\"deviceID\": \"$IB\", \"name\": \"vps\", \"addresses\": [\"tcp://127.0.0.1:$LB\"]}" >/dev/null || fail "couldn't pair A"
+st B PUT /rest/config/devices/$IA "{\"deviceID\": \"$IA\", \"name\": \"laptop\", \"addresses\": [\"tcp://127.0.0.1:$LA\"]}" >/dev/null || fail "couldn't pair B"
+wait_for "st A GET /rest/system/connections | grep -q '\"connected\": true'" 60 || fail "the throwaway Syncthings didn't connect"
+ra routine/sync.py setup vps --memory "$T/A/mem" >/dev/null || fail "setup on A failed"
+rb routine/sync.py setup laptop --memory "$T/B/mem" >/dev/null || fail "setup on B failed"
+grep -q "here.jsonl" "$WA/.stignore" && grep -q "here.jsonl" "$WA/.git/info/exclude" || fail "the backup's own text lines aren't kept out of the sync and git"
+wait_for "ra routine/sync.py | grep -q 'In sync with vps'" 60 || fail "the two didn't get in sync: $(ra routine/sync.py)"
+echo "OK two private Syncthings, both ways, the backup's own text lines kept out of the sync and git"
+
+# A is the main (on its own role, behind a stand-in for its status server's /api/role and /api/forward); B its backup.
+cat > "$T/standin.py" <<'PY'
+import http.server, json, subprocess, sys, os
+port, hq, support = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+    def _send(self, code, data):
+        b = json.dumps(data).encode(); self.send_response(code); self.send_header("content-type", "application/json")
+        self.end_headers(); self.wfile.write(b)
+    def do_GET(self):
+        self._send(200, {"name": "laptop", "main": "laptop", "chosen_at": 1, "acting": "main", "busy": ""})
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("content-length") or 0))
+        r = subprocess.run([sys.executable, "routine/role.py", "serve", "forward"], input=body, capture_output=True,
+                           cwd=hq, env={**os.environ, "HQ_SUPPORT": support}, timeout=60)
+        open(os.path.join(support, "forwarded.log"), "a").write(body.decode() + "\n")
+        self._send(409 if r.returncode == 3 else 400 if r.returncode == 2 else 200, json.loads(r.stdout.decode().strip().splitlines()[-1]))
+http.server.ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
+PY
+standin() { (cd "$T/A/HQ" && exec env $ENVA python3 "$T/standin.py" $PA "$T/A/HQ" "$T/A/state" >/dev/null 2>&1) & SPID=$!; PIDS="$PIDS $SPID"; wait_for "curl -s http://127.0.0.1:$PA/ >/dev/null" 20 || fail "the stand-in main didn't start"; }
+standin
+echo "{\"name\": \"vps\", \"peer\": \"http://127.0.0.1:$PA/\", \"peer_name\": \"laptop\", \"main\": \"laptop\", \"chosen_at\": 1}" > "$T/B/state/role.json"
+echo '{"acting": "backup"}' > "$T/B/state/role-state.json"
+[ "$(rb -c "$PYA; import role; print(role.acting())")" = backup ] && [ "$(ra -c "$PYA; import role; print(role.acting())")" = main ] || fail "A isn't the main and B the backup"
+
+# Both computers text, read the weather and mark the calendar at the same moment, three times over.
+WB0=$(cat "$WB/HQ/direct-line/weather.json" 2>/dev/null)
+for i in 1 2 3; do
+  ra app/direct_line.py text down "flow 196: the server went quiet, round $i" >/dev/null 2>&1 &
+  P1=$!
+  rb app/direct_line.py text down "flow 196: the laptop went quiet, round $i" >>"$T/b.log" 2>&1 &
+  P2=$!
+  echo "{\"text\": \"flow 196: his text on the backup, round $i\"}" | rb app/direct_line.py me >>"$T/b.log" 2>&1 &
+  P3=$!
+  ra -c "$PYA; import weather, time; s = weather._read(); s['app'] = {'looked': time.time(), 'by': 'A $i'}; weather._write(s)" &
+  P4=$!
+  rb -c "$PYA; import weather, time; s = weather._read(); s['app'] = {'looked': time.time(), 'by': 'B $i'}; weather._write(s)" &
+  P5=$!
+  ra -c "$PYA; import agenda; agenda.changed('flow 196 A $i')" &
+  P6=$!
+  rb -c "$PYA; import agenda; agenda.changed('flow 196 B $i')" &
+  P7=$!
+  wait $P1 $P2 $P3 $P4 $P5 $P6 $P7
+  sleep 1
+done
+# the backup shows its own lines at once, before the sync brings them back
+N=$(rb -c "$PYA; import direct_line as d; print(sum('flow 196' in m['text'] or m['why'] == 'down' for m in d.thread()))")
+[ "$N" -ge 6 ] || fail "the backup's own chat doesn't show its own six lines at once: $N ($(tail -c 600 "$T/b.log"))"
+LINES="grep -c 'flow 196\\|\"why\": \"down\"'"
+wait_for "[ \$($LINES '$WB/HQ/direct-line/thread.jsonl' 2>/dev/null || echo 0) = 9 ]" 60 || fail "the main's thread with all nine lines didn't reach the backup: $(eval $LINES "$WB/HQ/direct-line/thread.jsonl" 2>/dev/null) there, $(eval $LINES "$WA/HQ/direct-line/thread.jsonl" 2>/dev/null) on the main; kept: $(wc -l < "$T/B/state/role-pending.jsonl" 2>/dev/null); the main's answers: $(tail -c 300 "$T/A/state/forwarded.log" 2>/dev/null)"
+[ "$(eval $LINES "$WA/HQ/direct-line/thread.jsonl")" = 9 ] || fail "the main's thread doesn't have every line once"
+wait_for "ra routine/sync.py | grep -q 'In sync with vps'" 60 || fail "the two didn't get in sync again: $(ra routine/sync.py)"
+sleep 3
+C=$(ra routine/sync.py conflicts; rb routine/sync.py conflicts)
+[ "$(echo "$C" | grep -vc 'No conflict copies')" = 0 ] || fail "a conflict copy came: $C"
+cmp -s "$WA/HQ/direct-line/thread.jsonl" "$WB/HQ/direct-line/thread.jsonl" || fail "the two threads differ"
+[ "$(cat "$WB/HQ/direct-line/weather.json" 2>/dev/null)" = "$(cat "$WA/HQ/direct-line/weather.json")" ] || fail "the backup's weather.json isn't the main's"
+grep -q '"A 3"' "$WA/HQ/direct-line/weather.json" && ! grep -q '"B ' "$WA/HQ/direct-line/weather.json" || fail "the backup wrote weather.json"
+grep -q '"B 3"' "$T/B/state/weather-here.json" || fail "the backup's own weather wasn't kept on its own"
+[ "$(rb -c "$PYA; import weather; print(weather._read()['app']['by'])")" = "B 3" ] || fail "the backup doesn't read its own weather over the main's"
+[ "$(grep -c '"agenda".*flow 196 B' "$T/A/state/forwarded.log")" = 3 ] && grep -q 'flow 196' "$WA/HQ/calendar-changed.json" || fail "the backup's calendar marks didn't go to the main"
+grep -q "Sync conflict" "$WA/HQ/roadmap.md" && fail "a merge job was queued"
+echo "OK both texted, read the weather and marked the calendar at the same moment, three times: one thread with all nine lines on both, the backup showing its own at once, the main the only writer, no conflict copy, no merge job"
+
+# The main can't be reached: the backup's line is kept, shown there, and goes over at its next look.
+kill $SPID 2>/dev/null; wait_for "! curl -s http://127.0.0.1:$PA/ >/dev/null" 10 || fail "the stand-in main didn't stop"
+echo '{"text": "flow 196: kept while the main was away"}' | rb app/direct_line.py me >/dev/null 2>&1
+grep -q "kept while the main" "$T/B/state/role-pending.jsonl" || fail "the backup's line wasn't kept for the main"
+[ "$(rb -c "$PYA; import direct_line as d; print(any('kept while' in m['text'] for m in d.thread()))")" = True ] || fail "the kept line isn't shown on the backup"
+grep -q "kept while the main" "$WA/HQ/direct-line/thread.jsonl" && fail "the line got to the main without it"
+standin
+rb routine/role.py tick >/dev/null 2>&1
+grep -q "kept while the main" "$WA/HQ/direct-line/thread.jsonl" || fail "the kept line didn't go over at the backup's next look"
+wait_for "grep -q 'kept while the main' '$WB/HQ/direct-line/thread.jsonl'" 60 || fail "the main's thread didn't come back to the backup"
+[ "$(rb -c "$PYA; import direct_line as d; print(sum('kept while' in m['text'] for m in d.thread()))")" = 1 ] || fail "the kept line shows twice on the backup"
+echo "OK with the main away the backup's line is kept and shown there, and goes over once at its next look"
+
+# Piece 2: two versions of a log of lines (as before one writer) are merged by the routine itself, no merge job.
+mkdir -p "$WA/HQ/ledger"; echo '{"at": 1, "x": "start"}' > "$WA/HQ/ledger/flow196.jsonl"
+wait_for "[ -f '$WB/HQ/ledger/flow196.jsonl' ]" 30 || fail "the log didn't reach B"
+sleep 2
+st A PATCH /rest/config/devices/$IB '{"paused": true}' >/dev/null || fail "couldn't pause"
+wait_for "! st A GET /rest/system/connections | grep -q '\"connected\": true'" 30 || fail "the pause didn't disconnect"
+echo '{"at": 3, "x": "the laptop"}' >> "$WA/HQ/ledger/flow196.jsonl"; sleep 1; echo '{"at": 2, "x": "the server"}' >> "$WB/HQ/ledger/flow196.jsonl"
+sleep 4
+st A PATCH /rest/config/devices/$IB '{"paused": false}' >/dev/null
+wait_for "ls '$WA/HQ/ledger' | grep -q 'sync-conflict'" 60 || fail "no conflict copy came for the test"
+OUT=$(ra routine/sync.py tick); echo "$OUT" | grep -q '"queued": \[\]' || fail "a merge job was queued for a log of lines: $OUT"
+ls "$WA/HQ/ledger" | grep -q 'sync-conflict' && fail "the conflict copy is still there"
+[ "$(python3 -c "import json,sys; print(','.join(json.loads(l)['x'] for l in open(sys.argv[1])))" "$WA/HQ/ledger/flow196.jsonl")" = "start,the server,the laptop" ] || fail "the merged log isn't every line once in time order: $(cat "$WA/HQ/ledger/flow196.jsonl")"
+wait_for "! ls '$WB/HQ/ledger' | grep -q 'sync-conflict' && cmp -s '$WA/HQ/ledger/flow196.jsonl' '$WB/HQ/ledger/flow196.jsonl'" 60 || fail "the merge didn't reach B"
+grep -q "Sync conflict" "$WA/HQ/roadmap.md" && fail "a merge job is on the queue"
+echo "OK two versions of a log of lines are merged by the routine itself: every line once, in time order, no merge job"
+echo "ALL OK"
+"""
+
 FLOWS = {
     1: ("The call server starts and the page loads", False, "flow1"),
     2: ("The greeting plays first, on Quick and Deep", True, "flow2"),
@@ -23162,6 +23365,7 @@ FLOWS = {
     192: ("H298, piece 6: the wall: the gate holds a start over the line, nothing starts outside her hours (dropped to the morning when still useful, waits before them), past useful-until is skipped, over her weekly or daily share is refused, boxed twice in a row is a tripwire and nothing restarts itself", False, "flow192"),
     193: ("H298, piece 7: the Friday screen on the status page: routines.json carries the agents (three lines per agent, her share against her line) and the page draws The agents, one card per agent, the share red over her line; off, nothing of it", False, "flow193"),
     194: ("H298, piece 8: serialized writes: a cycle's hook refuses Edit, Write and shell writes on a shared file before they land and passes her ledger, her line and the scripts; a cycle job's settings carry it, a normal job's don't; twenty one-writer edits at once all land under the file's lock; off, as before", False, "flow194"),
+    196: ("F58: the two computers never write the same file: two private Syncthings and two throwaway HQs, main and backup, both texting, reading the weather and marking the calendar at the same moment: one thread with every line on both, the backup's shown at once and kept while the main is away, no conflict copy, no merge job; two versions of a log of lines merged by the routine itself", False, "flow196"),
     195: ("H298, piece 9: the monthly review: planned once per agent as a one-off priority item on the first Friday; run in its box with her character, the handbook, her whole month and the questions; its proposal lands in her ledger and on her line and changes nothing; off, none planned", False, "flow195"),
     191: ("H298, piece 6: a cycle runs: an order now becomes a step at once; the bigger session starts through the routine's own start with her character, the handbook, her ledger, the order and the plan command, inside her box; its plan becomes priority step items; a step with a changed input is stale; done and failed in the ledger; a check failing twice and the same goal twice are tripwires on her line, at most her texts a day", False, "flow191"),
     190: ("H298, piece 6: off means off: the runner plans nothing and the rules carry nothing while the feature is off; on, each agent's cycles are planned once as repeating priority items of their own kind, an agent off loses hers, off again cancels them all", False, "flow190"),
