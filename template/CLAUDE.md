@@ -69,6 +69,10 @@ With Life coaching on, the HQ app has a Coaching place (the Coaching button): th
 
 What HQ helps them with (H205): every part of HQ is a switch in Settings, under What HQ helps you with, and everything starts on. `python3 ../HQ/app/features.py` lists them and which are on; `on <id>` and `off <id>` switch one, when they ask. What's off stays out of what you bring up or offer; if they ask for it, help, and say once where to turn it back on.
 
+## The agents run themselves (H298)
+
+A switch in Settings, off until they turn it on. On, every agent reads the handbook (`HQ/agents/handbook.md`: part one the shared core, part two her own section) under her character on calls, in texts and in her own cycles, and runs her cycle by herself: a bigger session at its time and small steps through the day, each a headless run inside a box of minutes and turns, under her share of the weekly usage, only in her hours (8 to 22 by default), one at a time and never beside the team's work; what she did goes in her ledger (`HQ/ledger/<id>.md`), and HQ computes her score every week from what it sees. The settings are `HQ/agents/cycles.json` (`python3 ../HQ/routine/cycles.py` shows them; `set AGENT KEY VALUE` changes one, as Settings does). An order they give an agent on a call or in a text ("start x", "stop y", "from now on …") goes into her ledger with `python3 ../HQ/routine/cycles.py order AGENT start|stop|standing "their words"`, and her runner picks it up. The Friday screen on the status page shows three lines per agent. Off means none of it: no cycles, no handbook loaded.
+
 ## Extensions
 
 What they build on top of HQ themselves (a connector, a routine, their own kind of text, extra rules for calls) goes in `HQ/extensions/`, one folder each with an `extension.json` and a line on what it does, never in HQ's own files: an update never touches this folder, and HQ checks it against every new version. `../HQ/EXTENSIONS.md` says how, and how to move something already built into HQ's files into an extension. `python3 ../HQ/app/extensions.py` lists them.

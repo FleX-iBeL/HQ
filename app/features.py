@@ -70,6 +70,12 @@ FEATURES = [
     {"id": "team", "name": "The team's work", "line": "What the computer builds for you, and how far it is: the Status button",
      "buttons": ["statbtn"]},
     {"id": "coaching", "name": "Life coaching", "line": "", "buttons": ["gamebtn", "coachbtn"], "workflow": "map"},
+    # H298 (29 October 2026): the agents run their own cycles inside a hard wall on usage. Off by default for everyone,
+    # since it spends usage on its own; while it's built in pieces it's also on the in-pieces list (hidden off the maker's).
+    {"id": "agents_run", "name": "The agents run themselves", "line": "Each agent runs her own cycle without being poked "
+     "(a bigger session and small steps, inside a wall on usage and hours), reads the handbook under her character, and "
+     "escalates to you on her own line; the Friday screen on the status page shows what they did", "buttons": [],
+     "default": "off", "cycles": True},
 ]
 IDS = [f["id"] for f in FEATURES]
 PIECES_FILE = ROOT / "app" / "features-in-pieces.json"
@@ -79,21 +85,32 @@ def _pieces_path() -> Path:
     return Path(os.environ.get("HQ_FEATURES_PIECES") or PIECES_FILE)
 
 
-def in_pieces() -> list[dict]:
-    """F56: the features still being built in pieces, each with its row; hidden from everyone but the maker."""
+def _pieces() -> list[dict]:
     try:
         d = json.loads(_pieces_path().read_text(encoding="utf8"))
     except (OSError, ValueError):
         return []
+    return [f for f in ((d.get("features") if isinstance(d, dict) else None) or [])
+            if isinstance(f, dict) and isinstance(f.get("id"), str)]
+
+
+def in_pieces() -> list[dict]:
+    """F56: the features still being built in pieces, each with its row; hidden from everyone but the maker. H298: one
+    that HQ already lists in FEATURES (a switch that will stay, off by default once shipped) is that entry, marked."""
     out = []
-    for f in (d.get("features") if isinstance(d, dict) else None) or []:
-        if isinstance(f, dict) and isinstance(f.get("id"), str) and f["id"] not in IDS:
+    byid = {f["id"]: f for f in FEATURES}
+    for f in _pieces():
+        if f["id"] in byid:
+            out.append({**byid[f["id"]], **{k: v for k, v in f.items() if k in ("row", "pieces")}, "in_pieces": True})
+        else:
             out.append({"buttons": [], "line": "", **f, "name": f.get("name") or f["id"], "in_pieces": True})
     return out
 
 
 def everything() -> list[dict]:
-    return FEATURES + in_pieces()
+    """Every switch: HQ's own, with the ones in pieces marked (or added, when HQ doesn't list them yet)."""
+    pieces = {f["id"]: f for f in in_pieces()}
+    return [pieces.get(f["id"], f) for f in FEATURES] + [f for i, f in pieces.items() if i not in IDS]
 
 
 def ids() -> list[str]:

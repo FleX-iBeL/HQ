@@ -1,0 +1,45 @@
+{
+  "_about": "The agents run themselves: each agent's own cycle (routine/cycles.py). Numbers only; nothing personal. Changed in Settings or on a call (cycles.py set AGENT KEY VALUE). weekly_share and daily_share are points of the weekly usage limit; hours is when her cycles may run; a box is minutes and turns.",
+  "agents": {
+    "donna": {
+      "on": true,
+      "weekly_share": 3,
+      "daily_share": 1,
+      "hours": ["08:00", "22:00"],
+      "batches": ["12:00", "17:00"],
+      "tripwire_texts": 2,
+      "session": {"at": "08:30", "every": "day", "minutes": 10, "turns": 30, "useful_until": "12:00"},
+      "step": {"minutes": 3, "turns": 10, "most_a_day": 6},
+      "looks": []
+    },
+    "pepper": {
+      "on": true,
+      "weekly_share": 2,
+      "daily_share": 1,
+      "hours": ["08:00", "22:00"],
+      "batches": [],
+      "tripwire_texts": 2,
+      "session": {"at": "20:00", "every": "thursday", "minutes": 20, "turns": 60, "useful_until": "friday 09:30"},
+      "step": {"minutes": 5, "turns": 15, "most_a_day": 2},
+      "looks": [
+        {"name": "midweek look", "at": "12:30", "every": "wednesday", "minutes": 5, "turns": 15,
+         "what": "Has the week's needle mover been touched yet? Look at the week's plan in your ledger, the to-do list and the calendar's ticks. If not, one short text on your line, once, in if-then shape. If yes, nothing: write one line in your ledger and end."}
+      ]
+    },
+    "moneypenny": {
+      "on": true,
+      "weekly_share": 5,
+      "daily_share": 2,
+      "hours": ["08:00", "22:00"],
+      "batches": ["12:00"],
+      "tripwire_texts": 2,
+      "session": {"at": "21:00", "every": "thursday", "minutes": 40, "turns": 120, "useful_until": "friday 12:30"},
+      "step": {"minutes": 5, "turns": 20, "most_a_day": 3},
+      "looks": [
+        {"name": "morning look", "at": "09:00", "every": "day", "minutes": 5, "turns": 20,
+         "what": "What did the night do: a job paused, held, failed QA, or past its range? Read the team's open jobs and the newest finished ones (jobs.py list), the QA marks and the night's log line. Act inside your limits (resume a held job, queue QA, stop a job that's looping); write what you did in your ledger. Text your line only when the user is needed, in the batch unless it's a tripwire."}
+      ]
+    }
+  },
+  "review": {"every": "first friday", "at": "09:00", "minutes": 20, "turns": 60}
+}

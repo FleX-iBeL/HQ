@@ -13691,6 +13691,114 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         need(not own.exists(), "F58: as the main, the read wrote a file of its own too")
         return "F58: the backup's weather read writes nothing synced, keeps its own; the main writes weather.json"
 
+    # -- H298: the agents run themselves (29 October 2026) ------------------------------------------------------
+
+    def _h298_ws(self, name: str, maker: bool = True) -> tuple:
+        """A throwaway workspace from the template, with its own feature switches and a made-up handbook, and the
+        environment that points every script at it (never the real workspace). Returns (workspace, env)."""
+        import shutil as _sh
+        ws = self.tmp / f"h298-{name}"
+        _sh.copytree(ROOT / "template", ws)
+        (ws / "HQ").mkdir(exist_ok=True)
+        if maker:
+            (ws / "HQ/features.json").write_text('{"off": [], "on": ["agents_run"], "maker": true}\n')
+        status = self.tmp / f"h298-{name}-status"
+        status.mkdir(exist_ok=True)
+        run = self.tmp / f"h298-{name}-run"
+        run.mkdir(exist_ok=True)
+        env = {**os.environ, "HQ_WORKSPACE": str(ws), "HQ_FOLDER": str(ws), "HQ_ROADMAP": str(ws / "HQ/roadmap.md"),
+               "HQ_STATUS_DIR": str(status), "HQ_CARRYON": str(self.tmp / f"h298-{name}-carryon"),
+               "HQ_CLAUDE_PROJECTS": str(self.tmp / f"h298-{name}-chats"), "HQ_JOB_RUN": str(run),
+               "HQ_ROLE_HERE": "1", "HQ_FEATURES_FOLDER": str(ws), "HQ_WORKFLOWS_FOLDER": str(ws),
+               "HQ_HANDBOOK_FOLDER": str(ws), "HQ_DIRECT_DIR": str(ws / "HQ/direct-line"),
+               "HQ_COACHING_LINE": str(ws / "HQ/coaching-line"), "HQ_TEAM_LINE_DIR": str(ws / "HQ/team-line"),
+               "HQ_DIRECT_LOCAL": str(status / "direct-line.json"), "HQ_CYCLES_STATE": str(status / "cycles-state.json"),
+               "HQ_ESTIMATES_DIR": str(status / "estimates"), "HQ_ACTIVITY": str(status / "job-activity.json"),
+               "HQ_LINES": str(status / "lines.json"), "HQ_BACKEND": str(ws / "HQ/backend.json")}
+        for k in ("HQ_MAKER", "HQ_FEATURES_PIECES", "HQ_BACKEND_HEADLESS_JOBS", "HQ_BACKEND_BRIEFING"):
+            env.pop(k, None)
+        return ws, env
+
+    def _h298_py(self, env: dict, code: str, timeout: int = 120):
+        import subprocess as _sp
+        r = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=timeout)
+        need(r.returncode == 0, lambda: f"a check failed: {r.stdout[-800:]} {r.stderr[-1200:]}")
+        return r.stdout
+
+    async def flow185(self) -> str:
+        """H298, piece 1, no Claude: the handbook under each agent's character, behind the switch. The template ships
+        a blank handbook (part one generic, three generic sections, no one's life) and cycle defaults with numbers and
+        no names; the feature is in pieces (hidden on a friend's HQ, listed as still being built on the maker's) and
+        off by default even there. On a throwaway workspace with a made-up handbook: with the switch off the persona
+        carries nothing of it and Moneypenny's craft is as it was; switched on, every agent gets part one and her own
+        section, and Moneypenny's "fill in the nine points yourself" is replaced by grounding; an agent without a
+        section gets part one only."""
+        import importlib
+        import features as ft
+        import handbook as hb
+        tpl = ROOT / "template/HQ/agents"
+        t = (tpl / "handbook.md").read_text()
+        need("## Part one" in t and "## Part two" in t and "### Donna" in t and "### Pepper" in t and "### Moneypenny" in t,
+             "the template's handbook lacks part one or the three sections")
+        need("put your own things here" in t.lower() and "me.md" in t and "vision.md" in t and "rules.md" in t,
+             "the template's handbook doesn't point at their own files")
+        import privacy as _pv
+        pat = _pv.pattern(_pv.words(ROOT / "workspace") if (ROOT / "workspace/me.md").exists() else [])
+        need(not re.search(r"\b(Ring Fit|sick leave|FODMAP)\b", t, re.I) and not _pv.scan_text(t, pat),
+             "the template's handbook carries something of the maker's life")
+        c = json.loads((tpl / "cycles.json").read_text())
+        for aid in ("donna", "pepper", "moneypenny"):
+            a = c["agents"][aid]
+            need(isinstance(a["weekly_share"], (int, float)) and a["session"]["minutes"] > 0 and a["session"]["turns"] > 0
+                 and a["hours"] == ["08:00", "22:00"], f"the template's cycle defaults for {aid} are off: {a}")
+        need(not _pv.scan_text(json.dumps(c), pat), "the template's cycle defaults carry something private")
+        pieces = json.loads((ROOT / "app/features-in-pieces.json").read_text())["features"]
+        need(any(f["id"] == "agents_run" and f.get("row") == "H298" for f in pieces), "the feature isn't on the in-pieces list")
+        ws, env = self._h298_ws("p1", maker=False)
+        fl = {i["id"]: i for i in ft.listing(ws)}
+        need(fl["agents_run"].get("hidden") and not ft.is_on("agents_run", ws), "a friend's HQ shows or has the feature")
+        need(ft.switch("agents_run", True, ws).startswith("No switch"), "a friend's HQ could switch it on")
+        (ws / "HQ/features.json").write_text('{"off": [], "maker": true}\n')
+        ml = {i["id"]: i for i in ft.listing(ws)}
+        need(not ml["agents_run"]["on"] and "Still being built (H298" in ml["agents_run"].get("pieces", ""),
+             f"on the maker's HQ it isn't off by default and listed as still being built: {ml['agents_run']}")
+        need("agents_run" not in ft.rule(ws) and "run themselves" not in ft.rule(ws), "the calls hear it as turned off")
+        # a made-up handbook, nothing of anyone real
+        (ws / "HQ/agents/handbook.md").write_text(
+            "# The handbook\n\n## Part one: the shared core\n\n### What HQ is for\n\nHQ is a demo company. The motto: "
+            "\"Boring first, then exciting.\"\n\n### The house rules\n\n- Decide and report.\n\n---\n\n## Part two: each agent's own section\n\n"
+            "### Donna, the secretary\n\n**Her job.** A ready day for the demo user.\n\n### Pepper, the coach\n\n**Her job.** The demo week.\n\n"
+            "### Moneypenny, head of development\n\n**Her job.** Ready rows for the demo team.\n\n## Part three: HQ's\n\nNot loaded.\n")
+        code = ("import sys, json; sys.path.insert(0, %r); import agents, config, handbook, features; from pathlib import Path\n"
+                "ws = Path(%r); out = {}\n"
+                "for a in agents.load(ws):\n"
+                "    p = agents.persona(a, 'Sam'); out[a['id']] = {'handbook': 'The handbook: how you run yourself' in p, "
+                "'core': 'demo company' in p, 'own': 'Your own section' in p, 'section': handbook.section(a, ws)[:40], "
+                "'nine': 'fill in the nine points' in p, 'ground': 'the ready check reads those fields' in p, 'three': 'Not loaded' in p}\n"
+                "out['core'] = handbook.core(ws)[:60]; out['none'] = handbook.section({'name': 'Nobody'}, ws)\n"
+                "print(json.dumps(out))") % (str(ROOT / "app"), str(ws))
+        off = json.loads(self._h298_py(env, code))
+        need(not any(v["handbook"] or v["core"] for k, v in off.items() if isinstance(v, dict)), f"with the switch off the handbook is loaded: {off}")
+        need(off["moneypenny"]["nine"] and not off["moneypenny"]["ground"], "with the switch off Moneypenny's craft changed")
+        ft.switch("agents_run", True, ws)
+        on = json.loads(self._h298_py(env, code))
+        for aid in ("donna", "pepper", "moneypenny"):
+            v = on[aid]
+            need(v["handbook"] and v["core"] and v["own"] and v["section"].startswith("### ") and not v["three"],
+                 f"{aid}'s persona with the switch on: {v}")
+        need(on["donna"]["section"].startswith("### Donna") and on["pepper"]["section"].startswith("### Pepper"),
+             f"an agent got another's section: {on}")
+        need(not on["moneypenny"]["nine"] and on["moneypenny"]["ground"], "Moneypenny's craft isn't trimmed with the switch on")
+        need(on["core"].startswith("## Part one") and on["none"] == "", f"part one or the empty section: {on['core']!r} {on['none']!r}")
+        # a texts reply loads the same persona (direct_line reads agents.persona), and the template's blank handbook parses
+        need("agents.persona(" in (APP / "direct_line.py").read_text(), "the texts don't load the persona")
+        need(hb.core(ROOT / "template").startswith("## Part one") and hb.section("Pepper", ROOT / "template").startswith("### Pepper"),
+             "the template's handbook doesn't parse")
+        ft.switch("agents_run", False, ws)
+        need(not ft.is_on("agents_run", ws), "the maker's switch doesn't go off again")
+        return "the blank handbook and defaults ship clean; off loads nothing; on loads part one and her own section under every character"
+
+
     async def flow184(self) -> str:
         """F78, no Claude, no window: a job held by the usage line is checked on what's left of it when it carries on
         in its own chat. On 28 October job 424 was held at 16:30 with about 5.8% of the 5-hour left, yet every minute
@@ -13717,6 +13825,7 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
 import json, os, subprocess, sys, time
 sys.path.insert(0, sys.argv[1] + "/routine")
 D, JV = sys.argv[2], sys.argv[1]
+
 def need(ok, why):
     if not ok:
         print("FAIL " + why); sys.exit(1)
@@ -22048,6 +22157,7 @@ FLOWS = {
     141: ("H240: a 9292 link at the leaving time (the calendar's start or the time he names, leaving then or there by then), with the notices for the stops and stations near both ends from the open live data, never made up", False, "flow141"),
     140: ("H238: call me back (the page reloads and calls the same agent, continuing the call), and an agent calls him at an agreed time or appointment (a push, one tap picks up, a missed one in her chat)", False, "flow140"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
+    185: ("H298, piece 1: the handbook under each agent's character behind the switch (in pieces, off by default): the template's blank handbook and cycle defaults, off loads nothing, on loads part one and her own section, Moneypenny's craft trimmed", False, "flow185"),
 }
 
 

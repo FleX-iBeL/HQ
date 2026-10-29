@@ -14,6 +14,7 @@ Settings on the call page shows each one's character under her voice, marked HQ'
 
 - **What she says about herself** (H132): when an agent tells you something about herself on a call or in her chat (her chair, her desk, what she was up to), it's kept in her own list here, `<id>-about-herself.md` (one line each, written after the call or by her chat), and loaded with her character every time, so she stays the same person. Change or remove a line whenever you like.
 - **Headshots:** a picture per agent in this folder, named after her: `donna.jpg`, `pepper.jpg` (.jpg, .jpeg, .png or .webp). Square works best.
+- **The handbook and the cycles** (H298): with "The agents run themselves" on in Settings, every agent reads `handbook.md` here under her character (part one is the shared core, part two her own section: her job, her ten percent, what she decides and what she asks); `cycles.json` holds each one's cycle (when her bigger session runs, her small steps, her box in minutes and turns, her share of the weekly usage, her hours; numbers only, changed in Settings or on a call). What her cycles did goes in `../ledger/<id>.md`. Off, none of it is read.
 - **Change or add agents:** `agents.json` in this folder, a list like this (only the parts you change):
 
 ```json
