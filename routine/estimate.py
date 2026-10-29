@@ -212,15 +212,22 @@ KINDS = {
     "release": "a release",            # F34: a few minutes, nothing built
     "qa": "QA of the team's work (Moneypenny tries every done example for real; nothing built)",  # F56
     "merge": "merging a sync conflict",  # F34: a minute or two; kept apart so they don't pull other kinds down
+    "cycle": "an agent's own cycle, run headless as her (H298): her bigger session or a look; one kind per agent, cycle-<id>",
+    "step": "an agent's small step from her cycle plan (H298); one kind per agent, step-<id>",
     "other": "other (none of these)",
 }
+# H298: the agents' own runs are kinds of their own per agent (cycle-donna, step-pepper …), so the estimates learn
+# each apart and the start check holds them under each stop line like any job. Told for sure by their wording.
+_CYCLE = re.compile(r"^agent cycle: ([a-z0-9][a-z0-9-]{0,30}),")
+_STEP = re.compile(r"^agent step: ([a-z0-9][a-z0-9-]{0,30}) #")
+_AGENT_KIND = re.compile(r"^(cycle|step)-[a-z0-9][a-z0-9-]{0,30}$")
 # H220: the kinds before H220, as a call may still say them. "call" (a change that restarts the call line) is a build
 # like any other, sorted small or big (restarting the call line counts in its size); "big" (the whole set of happy
 # flows) was the weekly sweep or a big build.
 OLD_KINDS = {"call": "build", "big": "bigbuild"}
 # F34: a kind set by hand (a call's --kind) wins over the guess, except over these: the routine's own wording says
 # them for sure, and a call has no word for them.
-SURE = ("merge", "release", "maintenance", "qa")
+SURE = ("merge", "release", "maintenance", "qa")  # H298: and cycle-<agent>, step-<agent> (_sure, by their wording)
 BUILDS = ("build", "bigbuild")  # H215: the two sizes of a build
 # H215: the words a call can give for a build's size. A plain "build" (the word the call rules used before H215) says
 # a build without its size: it's sorted into small or big like a guess (build_size). Only these say the size for sure.
@@ -281,6 +288,9 @@ def _sure(t):
     names them further on (building them, or a release that follows the nightly run) isn't one."""
     if re.search(r"^sync conflict|\bsync conflict \(h56\.4\), found by the routine\b", t):
         return "merge"
+    m = _CYCLE.match(t) or _STEP.match(t)  # H298: an agent's own run
+    if m:
+        return ("cycle-" if t.startswith("agent cycle") else "step-") + m.group(1)
     if re.search(r"^qa of [hf]\d+", t):  # F56: the QA job qa.py queues
         return "qa"
     if re.search(r"(^|: )(do |build )?release hq \d|^(h\d+ on the (hq )?roadmap: )?release (hq \d|hq now|now)\b"
@@ -338,6 +348,8 @@ def kind_given(kind):
     in words ("small", "big build") gives its kind. H220: the kinds from before H220 ("call", "big") are still taken."""
     k = " ".join((kind or "").strip().lower().split())
     k = SIZE_WORDS.get(k, OLD_KINDS.get(k, k))
+    if _AGENT_KIND.match(k):  # H298: cycle-<agent>, step-<agent>
+        return k
     return k if k in KINDS else None
 
 
@@ -368,7 +380,7 @@ def kind_for(text, kind=None):
     wording says a merge, a release or maintenance for sure, and except "other" by hand (it says nothing: a call's
     "other" was mostly research or a build, as job 292 was). The old "call" is a build sorted by its words."""
     guess = kind_of(text)
-    if guess in SURE:
+    if guess in SURE or _AGENT_KIND.match(guess):  # H298: an agent's run is hers whatever a hand said
         return guess
     k = " ".join((kind or "").strip().lower().split())
     if k == "call":
@@ -2760,7 +2772,7 @@ def new_kind(text, old, look_min=None, fixed=False):
     on a call); everything else is sorted again from its words, builds into small or big with their first look's
     minutes (look_min, H215). The old kinds (call, big, other) are gone that way."""
     k = kind_of(text)
-    if k in SURE:
+    if k in SURE or _AGENT_KIND.match(k):
         return k
     if fixed and old in BUILDS:
         return old

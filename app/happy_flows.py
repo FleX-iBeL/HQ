@@ -13854,6 +13854,91 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         need((ROOT / "app/about_self.py").read_text().count("own_life(f, said)") == 1, "harvest doesn't go through the check")
         return "a transcript full of his life keeps nothing about him; her own plant and her own coffee are kept; a fact naming him never is"
 
+    async def flow187(self) -> str:
+        """H298, piece 3, no Claude: the deterministic box on a headless run, and the cycle kinds. runjob.py against a
+        fake claude: (a) one that streams turn after turn is ended at its turns (--max-turns), (b) one that goes quiet
+        is ended at its minutes (--max-minutes), both run the done mark (a boxed run is a finished run), write the box
+        note (minutes, turns, boxed, the tools, the refusals) and the stream log says boxed; (c) a run inside its box
+        ends by itself with boxed null, and the note carries a refused Ready mark and the tools' paths. The kinds:
+        "Agent cycle: donna, …" is cycle-donna and "Agent step: pepper #2 …" step-pepper, for sure, also over a kind
+        given by hand; a call's --kind takes them."""
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        import importlib
+        est = importlib.import_module("estimate")
+        t = "Scheduled item 3, planned for Thursday 29 October, 08:30: Agent cycle: donna, bigger session"
+        need(est.kind_of(t) == "cycle-donna" and est.kind_for(t, "build") == "cycle-donna", f"the cycle kind: {est.kind_of(t)}")
+        need(est.kind_of("Agent step: pepper #2: see whether the week's focus moved") == "step-pepper", "the step kind")
+        need(est.kind_given("cycle-moneypenny") == "cycle-moneypenny" and est.kind_given("step-donna") == "step-donna"
+             and est.kind_given("cycle-") is None, "a call's --kind doesn't take the agent kinds")
+        need(est.kind_of("Build the box") == "build", "a build is read as an agent run")
+        ws, env = self._h298_ws("p3")
+        run_dir = Path(env["HQ_JOB_RUN"])
+        env["HQ_ROADMAP"] = str(ws / "HQ/roadmap.md")
+        def jobs(*a):
+            r = _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
+            need(r.returncode == 0, f"jobs.py {' '.join(a)}: {r.stdout[-300:]} {r.stderr[-300:]}")
+            return r.stdout + r.stderr
+        chatty = self.tmp / "h298-chatty.py"
+        chatty.write_text("#!/usr/bin/env python3\nimport json, sys, time\nsys.stdin.read()\n"
+                          "def out(d): print(json.dumps(d), flush=True)\n"
+                          "out({'type': 'system', 'subtype': 'init', 'session_id': 's-chatty'})\n"
+                          "for i in range(40):\n"
+                          "    out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'echo turn %d' % i}}]}})\n"
+                          "    out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': 'turn %d' % i}]}})\n"
+                          "    time.sleep(0.05)\n"
+                          "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Done all forty.'})\n")
+        quiet = self.tmp / "h298-quiet.py"
+        quiet.write_text("#!/usr/bin/env python3\nimport json, sys, time\nsys.stdin.read()\n"
+                         "def out(d): print(json.dumps(d), flush=True)\n"
+                         "out({'type': 'system', 'subtype': 'init', 'session_id': 's-quiet'})\n"
+                         "out({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Thinking.'}]}})\n"
+                         "time.sleep(60)\n"
+                         "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Too late.'})\n")
+        tidy = self.tmp / "h298-tidy.py"
+        tidy.write_text("#!/usr/bin/env python3\nimport json, sys\nsys.stdin.read()\n"
+                        "def out(d): print(json.dumps(d), flush=True)\n"
+                        "out({'type': 'system', 'subtype': 'init', 'session_id': 's-tidy'})\n"
+                        "out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'python3 routine/sprint.py ready H900'}}]}})\n"
+                        "out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': \"H900 isn't ready: no his words\"}]}})\n"
+                        "out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Edit', 'input': {'file_path': '/x/HQ/roadmap.md'}}]}})\n"
+                        "out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': 'ok'}]}})\n"
+                        "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Done.'})\n")
+        for f in (chatty, quiet, tidy):
+            f.chmod(0o755)
+        def run(fake, *box):
+            n = int(jobs("add", f"flow 187 box run {fake.stem}").split()[1])
+            jobs("mark", str(n), "running since 00:00")
+            (run_dir / f"job-{n}.prompt").write_text(f"let's go. This is job {n} from the queue: a box test")
+            note = run_dir / f"job-{n}.box.json"
+            r = _sp.run([sys.executable, str(ROOT / "routine/runjob.py"), str(n), "--session-id", "x", *box, "--box-note", str(note)],
+                        capture_output=True, text=True, env={**env, "HQ_CLAUDE": str(fake)}, timeout=120)
+            need(note.exists(), f"no box note for job {n}: {r.stdout[-400:]} {r.stderr[-400:]}")
+            log = (run_dir / f"job-{n}.stream.log").read_text()
+            return n, json.loads(note.read_text()), log, r
+        t0 = time.time()
+        n, note, log, r = run(chatty, "--max-turns", "5", "--max-minutes", "5")
+        need(note["boxed"] == "turns" and note["turns"] <= 7 and note["ended_by"] == "box", f"not boxed at its turns: {note}")
+        need("boxed (turns" in log and "the done mark is run for it" in log, f"the log doesn't say boxed and done: {log[-500:]}")
+        need(re.search(rf"^- Job {n} · done ", (ws / "HQ/roadmap.md").read_text(), re.M), "the boxed job isn't done on the queue")
+        need(time.time() - t0 < 30, "the turns box took too long to bite")
+        t0 = time.time()
+        n2, note2, log2, _ = run(quiet, "--max-minutes", "0.1", "--max-turns", "50")
+        need(note2["boxed"] == "minutes" and time.time() - t0 < 40, f"not boxed at its minutes: {note2}")
+        need(re.search(rf"^- Job {n2} · done ", (ws / "HQ/roadmap.md").read_text(), re.M), "the minutes-boxed job isn't done")
+        n3, note3, log3, _ = run(tidy, "--max-minutes", "5", "--max-turns", "50")
+        need(note3["boxed"] is None and note3["ended_by"] == "itself" and note3["turns"] == 2, f"a run inside its box: {note3}")
+        need(any("isn't ready" in x["said"] and "sprint.py ready" in x["tool"] for x in note3["refused"]),
+             f"the refused Ready mark isn't in the note: {note3['refused']}")
+        need(any(x.startswith("Edit /x/HQ/roadmap.md") for x in note3["tools"]), f"the tools' paths aren't in the note: {note3['tools']}")
+        # without a box nothing changes: the old run ends by itself, no note asked for
+        n4 = int(jobs("add", "flow 187 no box").split()[1]); jobs("mark", str(n4), "running since 00:00")
+        (run_dir / f"job-{n4}.prompt").write_text("let's go")
+        r = _sp.run([sys.executable, str(ROOT / "routine/runjob.py"), str(n4), "--session-id", "y"], capture_output=True, text=True,
+                    env={**env, "HQ_CLAUDE": str(tidy)}, timeout=60)
+        need(r.returncode == 0 and "boxed" not in (run_dir / f"job-{n4}.stream.log").read_text(), "a run without a box changed")
+        return "boxed at 5 turns and at 0.1 minutes, each done on the queue with its note; a run inside its box ends by itself; cycle-donna and step-pepper are kinds of their own"
+
     async def flow184(self) -> str:
         """F78, no Claude, no window: a job held by the usage line is checked on what's left of it when it carries on
         in its own chat. On 28 October job 424 was held at 16:30 with about 5.8% of the 5-hour left, yet every minute
@@ -22212,6 +22297,7 @@ FLOWS = {
     141: ("H240: a 9292 link at the leaving time (the calendar's start or the time he names, leaving then or there by then), with the notices for the stops and stations near both ends from the open live data, never made up", False, "flow141"),
     140: ("H238: call me back (the page reloads and calls the same agent, continuing the call), and an agent calls him at an agreed time or appointment (a push, one tap picks up, a missed one in her chat)", False, "flow140"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
+    187: ("H298, piece 3: the deterministic box on a headless run (minutes from a wall clock, turns from the stream): past either the run is ended, done on the queue, its note written; the cycle kinds cycle-<agent> and step-<agent>", False, "flow187"),
     186: ("H298, piece 2: the identity fix: the harvest after a call or text keeps only first-person lines about her own office life; a transcript full of his life yields nothing about him", False, "flow186"),
     185: ("H298, piece 1: the handbook under each agent's character behind the switch (in pieces, off by default): the template's blank handbook and cycle defaults, off loads nothing, on loads part one and her own section, Moneypenny's craft trimmed", False, "flow185"),
 }
