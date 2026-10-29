@@ -14471,6 +14471,16 @@ print("RESULT " + json.dumps(out))
         need(it and sched("move", it.group(1), "now").returncode == 0 and "became job" in sched("promote").stdout, "Donna's third session didn't become a job")
         g = drive("gatekeep", f"{today} 10:00")
         need(g["verdict"] == "skipped" and any("over her daily share" in x for x in g["log"]), f"over her daily share, but not refused: {g}")
+        # a share of 0 refuses every start (it used to mean no share at all, so the wall let everything through)
+        cy("set", "donna", "weekly", "0")
+        cy("set", "donna", "daily", "5")
+        drive("tick")
+        it = re.search(r"^- Item (\d+) · waiting, every day, priority · .* · Agent cycle: donna, bigger session$", rm.read_text(), re.M)
+        need(it and sched("move", it.group(1), "now").returncode == 0 and "became job" in sched("promote").stdout, "Donna's fourth session didn't become a job")
+        g = drive("gatekeep", f"{today} 10:00")
+        need(g["verdict"] == "skipped" and any("of 0 points used" in x for x in g["log"]), f"a weekly share of 0, but not refused: {g}")
+        drive("tick")
+        need("run: cancelled" not in (ws / "HQ/ledger/donna.md").read_text(), "a refused start is also written as a run")
         # boxed twice in a row: a tripwire on her line; a boxed run is never planned again by the runner
         code = ("import sys, json, datetime as dt; sys.path.insert(0, %r); import cycles, json\n"
                 "from pathlib import Path\nrun = Path(%r)\n"
@@ -14488,7 +14498,7 @@ print("RESULT " + json.dumps(out))
         drive("tick")
         need(len(re.findall(r"Agent cycle: donna, bigger session", rm.read_text(), re.M)) == len(re.findall(r"Agent cycle: donna, bigger session", before, re.M)),
              "a boxed run was planned again by the runner")
-        return "the gate STOPs over the line; 23:00 drops the session (Pepper's planned again for 08:00), 07:00 waits, past useful-until skips; over her weekly or daily share refuses; boxed twice is one text and nothing restarts"
+        return "the gate STOPs over the line; 23:00 drops the session (Pepper's planned again for 08:00), 07:00 waits, past useful-until skips; over her weekly or daily share refuses, a share of 0 too, and a refused start isn't written as a run; boxed twice is one text and nothing restarts"
 
     async def flow193(self) -> str:
         """H298, piece 7, no Claude: the Friday screen on the status page. On a throwaway workspace with Donna's

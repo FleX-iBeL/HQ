@@ -499,9 +499,11 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
         return skip(f"too late to be useful (until {u:%A %H:%M})")
     sh = shares(aid, now, base)
     est = _est_weekly(job)
-    if sh["weekly_share"] and sh["weekly_used"] + est > sh["weekly_share"]:
+    # A share of 0 is a wall with no room in it: nothing of hers starts (found on the server, 29 October 2026, where
+    # `set donna weekly 0` let every start through).
+    if sh["weekly_share"] <= 0 or sh["weekly_used"] + est > sh["weekly_share"]:
         return skip(f"over her weekly share ({sh['weekly_used']:g} of {sh['weekly_share']:g} points used, this run about {est:g})")
-    if sh["daily_share"] and sh["daily_used"] + est > sh["daily_share"]:
+    if sh["daily_share"] <= 0 or sh["daily_used"] + est > sh["daily_share"]:
         return skip(f"over her daily share ({sh['daily_used']:g} of {sh['daily_share']:g} points used today, this run about {est:g})")
     if p["kind"] == "step":
         today = now.strftime("%Y-%m-%d")
@@ -988,6 +990,9 @@ def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Pat
     if job["n"] in st_["processed"]:
         return {}
     st_["processed"] = (st_["processed"] + [job["n"]])[-200:]
+    if str(job["n"]) in st_["skipped"]:  # gatekeep stopped it before it ran and already wrote why
+        _save_state(d)
+        return {}
     run_dir = run_dir or os.environ.get("HQ_JOB_RUN") or os.path.join(hqpaths.HQ, "scratch", "routine")
     note = {}
     try:
