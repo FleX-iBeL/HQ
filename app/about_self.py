@@ -22,6 +22,12 @@ model, one optional line among many) remembered to run `add`, and a repeat only 
 one or two lines, one of them twice. Now HQ itself harvests: after every call and every text of hers a small look
 (Haiku, no tools) reads what she said and returns only the new things about herself, a near-repeat is skipped, and
 her persona nudges her to bring in a new one now and then and an old one back, never contradicting one.
+
+H298, piece 2 (29 October 2026, the identity fix): the harvest had kept lines about the user's life as the agent's own
+(she "does yoga every morning", "biked to the shop in the rain"), because his sentences and hers about him read alike to
+the look. Now the look is told her life is only her own, and `own_life` holds each fact against what she really said:
+kept only when its words come from a sentence of hers in the first person that isn't about him. The lists already
+written are the user's to wipe (they're in the workspace); `tidy` drops only near-repeats.
 """
 from __future__ import annotations
 
@@ -123,13 +129,51 @@ HARVEST_TIMEOUT = 90
 HARVEST_SYSTEM = (
     "You keep the small personal details colleagues at an office have said about themselves, so they stay the same "
     "people. You get each colleague's list of what she said before, then what she said now. Return only the NEW "
-    "things she said about herself as a person: her day, her life outside work, her desk or the office, what she "
-    "likes or can't stand, a habit, an opinion, a mood, something that happened to her. Also a changed opinion or "
-    "mood, with its reason if she gave one (\"used to X, now Y since Z\"). Not tasks, not what she did or will do for "
-    "the boss, not facts about him, not anything already on her list in other words, not things she only asked. "
-    "Each one a short line in the third person without her name, under 20 words. Most of the time there is nothing "
-    "new: then return an empty list. Answer with JSON only: {\"new\": [{\"agent\": \"<her name>\", \"fact\": \"...\"}]}"
+    "things she said about HERSELF, in the first person, as a person: her own day, her own life outside work, her "
+    "desk or the office, what she likes or can't stand, a habit of hers, an opinion, a mood, something that happened "
+    "to her. Her life is her own, at the office and around it. Never anything about the boss: not his day, his "
+    "health, his habits, his plans, his family, his things, his errands, his work, not even when she repeated it, "
+    "asked about it or cheered it on (\"you did your workout\", \"your bike\", \"how was the appointment\" are "
+    "about him, not her). Not tasks, not what she did or will do for him, not anything already on her list in other "
+    "words, not things she only asked. Each one a short line in the third person without her name, under 20 words. "
+    "Most of the time there is nothing new: then return an empty list. Answer with JSON only: "
+    "{\"new\": [{\"agent\": \"<her name>\", \"fact\": \"...\"}]}"
 )
+
+# H298, piece 2 (the identity fix): the harvest had been reading his sentences as hers (an agent "does yoga",
+# "biked to the bike shop in the rain"). The look above says it; this holds it in code: a fact is kept only when its
+# words come from a sentence she said in the first person about herself, not from one about him.
+_FIRST = re.compile(r"\b(i|i'm|i've|i'd|i'll|me|my|mine|myself)\b")
+_ABOUT_HIM = re.compile(r"\b(you|you're|you've|you'd|you'll|your|yours|yourself|he|him|his|himself|she's|the boss|the user)\b")
+_HIM_IN_FACT = re.compile(r"\b(he|him|his|himself|the boss|the user|you|your)\b")
+OWN_SHARE = 0.5  # at least this share of a fact's content words must come from her own first-person sentences
+
+
+def _sentences(said: str) -> list[str]:
+    out = []
+    for line in said.splitlines():
+        line = re.sub(r"^- [0-9:]+ \*\*[^*]+:\*\*\s*", "", line)  # a transcript line's time and speaker
+        line = re.sub(r"^[A-Za-z][\w ]{0,30}:\s+", "", line)  # "Name: text"
+        out += [x.strip() for x in re.split(r"(?<=[.!?])\s+", line) if x.strip()]
+    return out
+
+
+def own_life(fact: str, said: str) -> bool:
+    """H298, piece 2: whether a fact is about her own life, held mechanically against what she said: the fact names
+    nobody else, and at least half its content words appear in sentences of hers that are in the first person and not
+    about him (no you, your, he, his). A transcript full of his life, where every line of hers is about him, keeps
+    nothing."""
+    if _HIM_IN_FACT.search(fact.lower()):
+        return False
+    hers: set[str] = set()
+    for sent in _sentences(said):
+        low = sent.lower()
+        if _FIRST.search(low) and not _ABOUT_HIM.search(low):
+            hers |= _words(sent)
+    want = _words(fact)
+    if not want or not hers:
+        return False
+    return len(want & hers) / len(want) >= OWN_SHARE
 
 
 def _claude() -> str:
@@ -178,7 +222,8 @@ def harvest(folder: Path | None, who: list[dict], said: str) -> list[tuple[str, 
     by = {a["name"]: a for a in who}
     import time as _t
     day = _t.strftime("%d %b").lstrip("0")  # so a mood or a day is read as then, not forever
-    return [(n, f) for n, f in look(lists, said) if add(folder, by[n], f"{f.rstrip('.')} ({day})")]
+    # H298, piece 2: only a fact that comes from her own first-person sentences about herself is kept.
+    return [(n, f) for n, f in look(lists, said) if own_life(f, said) and add(folder, by[n], f"{f.rstrip('.')} ({day})")]
 
 
 def call_lines(text: str, everyone: list[dict]) -> tuple[list[dict], str]:

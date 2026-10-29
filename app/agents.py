@@ -45,6 +45,7 @@ from html import escape
 from pathlib import Path
 
 import about_self
+import handbook  # H298: the handbook under her character, when the agents run themselves
 
 LOADS = ("quick", "deep")
 # H246 (25 October 2026, call at 18:11, Moneypenny), in the user's words: "for now i want it trimmed, because when i
@@ -555,12 +556,14 @@ def persona(agent: dict, user: str = "the user") -> str:
         f"Your character: {agent['personality']}\n"
         f"What you're for: {agent['speciality']}.\n"
     )
-    if agent.get("craft"):  # H256: Moneypenny's definition of ready and done
-        out += f"How you work:\n{agent['craft']}\n"
+    if agent.get("craft"):  # H256: Moneypenny's definition of ready and done; H298: trimmed while the handbook is on
+        out += f"How you work:\n{handbook.trim_craft(agent['craft'])}\n"
     if agent.get("pushback"):
         out += (f"How you sound when you push back, as an example of your voice (don't repeat it word for word): "
                 f"\"{agent['pushback']}\"\n")
-    return out + about_self.block(agent, user) + HUMAN + "\nEverything else in the call rules above still holds.\n"
+    # H298: the handbook (part one and her own section) under her character, only while the feature is on.
+    return (out + about_self.block(agent, user) + handbook.block(agent, user) + HUMAN
+            + "\nEverything else in the call rules above still holds.\n")
 
 
 def public(agent: dict) -> dict:

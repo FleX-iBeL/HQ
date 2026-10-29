@@ -692,6 +692,32 @@ HANGUP_RULES = HANGUP_RULES.replace("{user}", USER)
 VOICE_RULES = VOICE_RULES.replace("{user}", USER)
 
 
+# H298 (29 October 2026): the agents run themselves. On a call or in a text, while the feature is on, an order to an
+# agent is written into her ledger and her runner picks it up; a setting changes from a call too.
+CYCLES_RULE = """- Your own cycles (H298): you run your own cycle by yourself (a bigger session and small steps, \
+headless, inside a box and your share of the usage; your ledger is HQ/ledger/<your id>.md in the workspace). When \
+{user} gives you an order on this call or in this chat, write it in your ledger so your runner picks it up, in his \
+words, without asking again: "start x", "do x from your next session" is python3 "{HQ}/routine/cycles.py" order <your id> \
+start "his words" (add --now when he says now: a small step runs at once); "stop y", "drop y", "leave y" is order \
+<your id> stop "his words" (your matching steps are cancelled at once, y goes on your let-go list); "from now on …" is \
+order <your id> standing "his words" (written into your own section of the handbook: his saying it is his yes). An \
+order for another agent goes to her id the same way ("tell Pepper to …"). The settings ("Donna gets four points a \
+week", "no steps after nine", "two texts a day"): python3 "{HQ}/routine/cycles.py" set <id> <weekly|daily|hours|batches|texts|session_at|session_minutes|session_turns|step_minutes|step_turns|steps_a_day|on> <value>; \
+python3 "{HQ}/routine/cycles.py" shows what runs and each one's share used this week; friday shows the Friday screen \
+(three lines per agent); ledger <id> her ledger. Say it as he would ("that's in my next session", "stopped"), never the command."""
+
+
+def cycles_rule() -> str:
+    """The rule above, only while the feature is on (app/features.py, agents_run)."""
+    try:
+        import features as _f
+        if _f.is_on("agents_run", Path(os.environ.get("HQ_FEATURES_FOLDER") or FOLDER)):
+            return CYCLES_RULE.replace("{user}", USER).replace("{HQ}", str(ROOT))
+    except Exception:
+        pass
+    return ""
+
+
 # H246: Pepper gets nothing from the building, in her rules either: the queue, the team, the scheduler and the
 # repeating items (from "Work for the computer" up to "Main and backup") become one line that hands it to Moneypenny.
 _BUILD_FROM, _BUILD_TO = "- Work for the computer (building", "- Main and backup (H56.3)"
@@ -753,8 +779,9 @@ def voice_rules(context: str = "all") -> str:
     elif context == "build":
         rules = rules.replace(MAIL_HEADSUP_RULE, " Answer what he says first. You talk about building HQ only, never his life: "
                               "no mail, no to-do list, no appointments of his unless he asks.")
+    cy = cycles_rule()  # H298: the agents' own cycles, only while the feature is on
     return (rules + ("\n" + off + "\n" if off else "") + ("\n" + nw + "\n" if nw else "")
-            + ("\n" + ext + "\n" if ext else ""))
+            + ("\n" + ext + "\n" if ext else "") + ("\n" + cy + "\n" if cy else ""))
 
 
 WRAP_UP_PROMPT = """[Call system: @USER@ has hung up. The call is over, and nothing you write now is spoken.

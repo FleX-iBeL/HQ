@@ -48,6 +48,7 @@ import estimate  # H81: the estimates learn from both computers
 import carryon  # H113: a job held by the usage line carries on in its own chat, or with a note
 import sync  # H56.4: the two-way sync of the workspace and Claude's memory with the other HQ
 import log_cycle  # H100: the coaching log keeps three hours; older entries move to its archive
+import cycles  # H298: the agents run themselves: their cycles as jobs of their own kind, in their own lane
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
@@ -296,7 +297,11 @@ def start(job):
     except OSError:
         roadmap = ""
     plan = carryon.plan(job, roadmap, FOLDER)
-    if plan["mode"] == "resume":
+    cycle = cycles.is_cycle_job(job)  # H298: an agent's own run: her prompt, a fresh session, the box, always headless
+    if cycle:
+        plan = {"mode": "new", "session": plan["session"]}
+        prompt = cycles.prompt(job, cycle)
+    elif plan["mode"] == "resume":
         prompt = carryon.resume_prompt(n, where, plan, job["text"], past_note)
     else:
         prompt = (
@@ -324,21 +329,27 @@ def start(job):
         prompt += _steps_extra(job, plan)
     # F57: the done mark is always the very last step, after any restart; a job that said it was finished and
     # never ran it sat idle for over an hour (jobs 377 and 393, QA job 389).
-    if plan["mode"] != "resume":  # the resume prompt already ends its rules with the done mark
+    if plan["mode"] != "resume" and not cycle:  # the resume prompt already ends its rules with the done mark
         prompt += (f"\n\nWhen the job is finished: the status block, then python3 {json.dumps(os.path.join(HERE, 'jobs.py'))} "
                    f"done {n} as the very last step, nothing after it (after any restart of the routine or the call line, "
                    "after any push, after your last report); the job isn't over until that has run.")
-    headless = _headless()
-    if headless:
+    headless = _headless() or bool(cycle)
+    if headless and not cycle:
         prompt += ("\n\nThis job runs headless (Fable, 27 October 2026): nobody types into its window, its end is "
                    "the end of this run, and when you end with the job finished the done mark is run for you; still "
                    "run it yourself as the last step, as above. Everything you need is in this prompt and the files.")
     chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")
+    if cycle:  # H298: the box, read by runjob.py from the run's own stream and a wall clock
+        import shlex
+        chat += " " + " ".join(shlex.quote(x) for x in cycles.box_args(job, cycle, RUN))
     # The job's settings (its status line) with this HQ's path, written fresh each time.
     settings = os.path.join(RUN, "job-settings.json")
-    json.dump({"statusLine": {"type": "command",
-                              "command": f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'statusline.py'))}"}},
-              open(settings, "w"), indent=2)
+    sett = {"statusLine": {"type": "command",
+                           "command": f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'statusline.py'))}"}}
+    if cycle:  # H298, piece 8: a cycle's writes to a shared file go only through HQ's own scripts (the hook refuses the rest)
+        sett["hooks"] = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+                                         "hooks": [{"type": "command", "command": f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'cyclehook.py'))}"}]}]}
+    json.dump(sett, open(settings, "w"), indent=2)
     pfile = os.path.join(RUN, f"job-{n}.prompt")
     open(pfile, "w").write(prompt)
     cmd = os.path.join(RUN, f"job-{n}.command")
@@ -373,6 +384,8 @@ JT=$(tty)
     carryon.started(n, plan)
     how = {"resume": "carries on in its own chat after the usage hold",
            "fresh": "started again after the usage hold, in a fresh chat with a note"}.get(plan["mode"])
+    if cycle:
+        how = f"{cycle['agent'].capitalize()}'s own run ({cycle['name']}), headless inside its box"
     status("BUILDING", f"Job {n} · " + (how or "started by the routine") + f" in {where}{watch_line(n)}",
            f"job {n} {how or 'started by the routine'}: {job['text'][:90]}")
     log(f"started job {n}" + (f" ({plan['mode']}, chat {plan['session']})" if how else ""))
@@ -1415,6 +1428,10 @@ def tick():
     handing_back = r.get("handing_back")
     q = json.loads(jobs("next"))
     jobs_line(q)
+    try:  # H298: the agents' cycles: their items follow the settings, finished runs go into the ledgers, the batches
+        cycles.tick(log=log)
+    except Exception as e:
+        log(f"cycles: {e!r}")
     try:
         schedule_line()
     except Exception as e:
@@ -1473,8 +1490,8 @@ def tick():
                 return
         except Exception as e:
             log(f"usage count: {e!r}")
-        if _headless():
-            return  # a headless run ends by itself; there's no chat to wake up
+        if _headless() or cycles.is_cycle_job(job):
+            return  # a headless run ends by itself; there's no chat to wake up (H298: a cycle always runs headless)
         try:
             # H36: gone quiet? Then continue is typed into its own window, and a stuck job shows as stuck.
             quiet.check(n, s, lambda x: json.dump(x, open(STATE, "w")), status,
@@ -1539,6 +1556,17 @@ def tick():
             log(f"job {job['n']} waits: the workspace isn't trusted by Claude here")
         return
     clear(TRUST_NOTE)
+    if cycles.is_cycle_job(job):  # H298: her hours, her share, still useful, the step's inputs; then the gate below
+        try:
+            verdict = cycles.gatekeep(job, log=log)
+        except Exception as e:
+            log(f"cycles: gatekeep: {e!r}")
+            verdict = "wait"
+        if verdict == "wait":
+            routines.beat("jobs", state="waiting", text=f"Job {job['n']} (an agent's own run) waits for her hours", every=60)
+            return
+        if verdict != "go":
+            return  # skipped and cancelled; the next minute takes the next job
     # F13: a job let past the line only skips the 5-hour line; the weekly line always counts, so a
     # past-the-line job held at the weekly line waits here quietly instead of being started every minute.
     # H172: it starts when its estimated usage (from the finished jobs like it) fits under each stop line; H141's

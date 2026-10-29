@@ -198,7 +198,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -13691,6 +13691,1105 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         need(not own.exists(), "F58: as the main, the read wrote a file of its own too")
         return "F58: the backup's weather read writes nothing synced, keeps its own; the main writes weather.json"
 
+    # -- H298: the agents run themselves (29 October 2026) ------------------------------------------------------
+
+    def _h298_ws(self, name: str, maker: bool = True) -> tuple:
+        """A throwaway workspace from the template, with its own feature switches and a made-up handbook, and the
+        environment that points every script at it (never the real workspace). Returns (workspace, env)."""
+        import shutil as _sh
+        ws = self.tmp / f"h298-{name}"
+        _sh.copytree(ROOT / "template", ws)
+        (ws / "HQ").mkdir(exist_ok=True)
+        if maker:
+            (ws / "HQ/features.json").write_text('{"off": [], "on": ["agents_run"], "maker": true}\n')
+        status = self.tmp / f"h298-{name}-status"
+        status.mkdir(exist_ok=True)
+        run = self.tmp / f"h298-{name}-run"
+        run.mkdir(exist_ok=True)
+        env = {**os.environ, "HQ_WORKSPACE": str(ws), "HQ_FOLDER": str(ws), "HQ_ROADMAP": str(ws / "HQ/roadmap.md"),
+               "HQ_STATUS_DIR": str(status), "HQ_CARRYON": str(self.tmp / f"h298-{name}-carryon"),
+               "HQ_CLAUDE_PROJECTS": str(self.tmp / f"h298-{name}-chats"), "HQ_JOB_RUN": str(run),
+               "HQ_ROLE_HERE": "1", "HQ_FEATURES_FOLDER": str(ws), "HQ_WORKFLOWS_FOLDER": str(ws),
+               "HQ_HANDBOOK_FOLDER": str(ws), "HQ_DIRECT_DIR": str(ws / "HQ/direct-line"),
+               "HQ_COACHING_LINE": str(ws / "HQ/coaching-line"), "HQ_TEAM_LINE_DIR": str(ws / "HQ/team-line"),
+               "HQ_DIRECT_LOCAL": str(status / "direct-line.json"), "HQ_CYCLES_STATE": str(status / "cycles-state.json"),
+               "HQ_ESTIMATES_DIR": str(status / "estimates"), "HQ_ACTIVITY": str(status / "job-activity.json"),
+               "HQ_LINES": str(status / "lines.json"), "HQ_BACKEND": str(ws / "HQ/backend.json")}
+        for k in ("HQ_MAKER", "HQ_FEATURES_PIECES", "HQ_BACKEND_HEADLESS_JOBS", "HQ_BACKEND_BRIEFING"):
+            env.pop(k, None)
+        return ws, env
+
+    def _h298_py(self, env: dict, code: str, timeout: int = 120):
+        import subprocess as _sp
+        r = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=timeout)
+        need(r.returncode == 0, lambda: f"a check failed: {r.stdout[-800:]} {r.stderr[-1200:]}")
+        return r.stdout
+
+    async def flow185(self) -> str:
+        """H298, piece 1, no Claude: the handbook under each agent's character, behind the switch. The template ships
+        a blank handbook (part one generic, three generic sections, no one's life) and cycle defaults with numbers and
+        no names; the feature is in pieces (hidden on a friend's HQ, listed as still being built on the maker's) and
+        off by default even there. On a throwaway workspace with a made-up handbook: with the switch off the persona
+        carries nothing of it and Moneypenny's craft is as it was; switched on, every agent gets part one and her own
+        section, and Moneypenny's "fill in the nine points yourself" is replaced by grounding; an agent without a
+        section gets part one only."""
+        import importlib
+        import features as ft
+        import handbook as hb
+        tpl = ROOT / "template/HQ/agents"
+        t = (tpl / "handbook.md").read_text()
+        need("## Part one" in t and "## Part two" in t and "### Donna" in t and "### Pepper" in t and "### Moneypenny" in t,
+             "the template's handbook lacks part one or the three sections")
+        need("put your own things here" in t.lower() and "me.md" in t and "vision.md" in t and "rules.md" in t,
+             "the template's handbook doesn't point at their own files")
+        import privacy as _pv
+        pat = _pv.pattern(_pv.words(ROOT / "workspace") if (ROOT / "workspace/me.md").exists() else [])
+        need(not re.search(r"\b(Ring Fit|sick leave|FODMAP)\b", t, re.I) and not _pv.scan_text(t, pat),
+             "the template's handbook carries something of the maker's life")
+        c = json.loads((tpl / "cycles.json").read_text())
+        for aid in ("donna", "pepper", "moneypenny"):
+            a = c["agents"][aid]
+            need(isinstance(a["weekly_share"], (int, float)) and a["session"]["minutes"] > 0 and a["session"]["turns"] > 0
+                 and a["hours"] == ["08:00", "22:00"], f"the template's cycle defaults for {aid} are off: {a}")
+        need(not _pv.scan_text(json.dumps(c), pat), "the template's cycle defaults carry something private")
+        pieces = json.loads((ROOT / "app/features-in-pieces.json").read_text())["features"]
+        need(any(f["id"] == "agents_run" and f.get("row") == "H298" for f in pieces), "the feature isn't on the in-pieces list")
+        ws, env = self._h298_ws("p1", maker=False)
+        fl = {i["id"]: i for i in ft.listing(ws)}
+        need(fl["agents_run"].get("hidden") and not ft.is_on("agents_run", ws), "a friend's HQ shows or has the feature")
+        need(ft.switch("agents_run", True, ws).startswith("No switch"), "a friend's HQ could switch it on")
+        (ws / "HQ/features.json").write_text('{"off": [], "maker": true}\n')
+        ml = {i["id"]: i for i in ft.listing(ws)}
+        need(not ml["agents_run"]["on"] and "Still being built (H298" in ml["agents_run"].get("pieces", ""),
+             f"on the maker's HQ it isn't off by default and listed as still being built: {ml['agents_run']}")
+        need("agents_run" not in ft.rule(ws) and "run themselves" not in ft.rule(ws), "the calls hear it as turned off")
+        # a made-up handbook, nothing of anyone real
+        (ws / "HQ/agents/handbook.md").write_text(
+            "# The handbook\n\n## Part one: the shared core\n\n### What HQ is for\n\nHQ is a demo company. The motto: "
+            "\"Boring first, then exciting.\"\n\n### The house rules\n\n- Decide and report.\n\n---\n\n## Part two: each agent's own section\n\n"
+            "### Donna, the secretary\n\n**Her job.** A ready day for the demo user.\n\n### Pepper, the coach\n\n**Her job.** The demo week.\n\n"
+            "### Moneypenny, head of development\n\n**Her job.** Ready rows for the demo team.\n\n## Part three: HQ's\n\nNot loaded.\n")
+        code = ("import sys, json; sys.path.insert(0, %r); import agents, config, handbook, features; from pathlib import Path\n"
+                "ws = Path(%r); out = {}\n"
+                "for a in agents.load(ws):\n"
+                "    p = agents.persona(a, 'Sam'); out[a['id']] = {'handbook': 'The handbook: how you run yourself' in p, "
+                "'core': 'demo company' in p, 'own': 'Your own section' in p, 'section': handbook.section(a, ws)[:40], "
+                "'nine': 'fill in the nine points' in p, 'ground': 'the ready check reads those fields' in p, 'three': 'Not loaded' in p}\n"
+                "out['core'] = handbook.core(ws)[:60]; out['none'] = handbook.section({'name': 'Nobody'}, ws)\n"
+                "print(json.dumps(out))") % (str(ROOT / "app"), str(ws))
+        off = json.loads(self._h298_py(env, code))
+        need(not any(v["handbook"] or v["core"] for k, v in off.items() if isinstance(v, dict)), f"with the switch off the handbook is loaded: {off}")
+        need(off["moneypenny"]["nine"] and not off["moneypenny"]["ground"], "with the switch off Moneypenny's craft changed")
+        ft.switch("agents_run", True, ws)
+        on = json.loads(self._h298_py(env, code))
+        for aid in ("donna", "pepper", "moneypenny"):
+            v = on[aid]
+            need(v["handbook"] and v["core"] and v["own"] and v["section"].startswith("### ") and not v["three"],
+                 f"{aid}'s persona with the switch on: {v}")
+        need(on["donna"]["section"].startswith("### Donna") and on["pepper"]["section"].startswith("### Pepper"),
+             f"an agent got another's section: {on}")
+        need(not on["moneypenny"]["nine"] and on["moneypenny"]["ground"], "Moneypenny's craft isn't trimmed with the switch on")
+        need(on["core"].startswith("## Part one") and on["none"] == "", f"part one or the empty section: {on['core']!r} {on['none']!r}")
+        # a texts reply loads the same persona (direct_line reads agents.persona), and the template's blank handbook parses
+        need("agents.persona(" in (APP / "direct_line.py").read_text(), "the texts don't load the persona")
+        need(hb.core(ROOT / "template").startswith("## Part one") and hb.section("Pepper", ROOT / "template").startswith("### Pepper"),
+             "the template's handbook doesn't parse")
+        ft.switch("agents_run", False, ws)
+        need(not ft.is_on("agents_run", ws), "the maker's switch doesn't go off again")
+        return "the blank handbook and defaults ship clean; off loads nothing; on loads part one and her own section under every character"
+
+
+    async def flow186(self) -> str:
+        """H298, piece 2, no Claude: the identity fix. On a throwaway workspace, a made-up call transcript full of the
+        user's life (his workout, his bike, his appointment, his errands), where every line of the agents' is about
+        him; the look (HQ_ABOUT_FAKE) returns those as if they were hers: nothing is kept. A line she said about
+        herself in the first person (a plant on her desk) is kept; a text of hers the same way; a fact that names
+        him is never kept, whatever the look says. The look's rule says her life is her own, never his."""
+        import importlib
+        import subprocess as _sp
+        ws, env = self._h298_ws("p2")
+        (ws / "HQ/calls").mkdir(parents=True, exist_ok=True)
+        call = ws / "HQ/calls/2026-01-06-1201.md"
+        call.write_text(
+            "# Call 6 January 2026, 12:01\n\nStarted 12:01:00 · agent Pepper · brain opus\n\n"
+            "- 12:01 **Me:** I did my workout again, every day this week, and I biked to the bike shop in the rain.\n"
+            "- 12:01 **HQ:** Oh, that's good. So you did your workout again, every day. And your bike, did the shop fix the brakes?\n"
+            "- 12:02 **Me:** Not yet. I have the appointment at the clinic on Tuesday and I'm back at the office two afternoons a week.\n"
+            "- 12:02 **HQ:** Right, so the clinic on Tuesday, and the office two afternoons a week. How is that going for you?\n"
+            "- 12:03 **Me:** Fine. Also I took my fibre sachet this morning.\n"
+            "- 12:03 **HQ:** Good. Your fibre sachet every morning, that's the plan. By the way, I have a new plant on my desk. I keep forgetting to water it.\n"
+            "- 12:04 **Me:** Ha. Okay, bye.\n- 12:04 **HQ:** Bye.\n\n*call* hung up\n")
+        fake = json.dumps({"new": [
+            {"agent": "Pepper", "fact": "does her workout every day this week"},
+            {"agent": "Pepper", "fact": "biked to the bike shop in the rain"},
+            {"agent": "Pepper", "fact": "has an appointment at the clinic on Tuesday"},
+            {"agent": "Pepper", "fact": "is back at the office two afternoons a week"},
+            {"agent": "Pepper", "fact": "takes a fibre sachet every morning"},
+            {"agent": "Pepper", "fact": "thinks his bike brakes should get fixed"},
+            {"agent": "Pepper", "fact": "has a new plant on her desk and keeps forgetting to water it"},
+        ]})
+        r = _sp.run([sys.executable, str(APP / "about_self.py"), "harvest-call", str(call)], capture_output=True, text=True,
+                    env={**env, "HQ_ABOUT_FAKE": fake}, cwd=str(ROOT))
+        need(r.returncode == 0, f"harvest-call failed: {r.stderr[-400:]}")
+        kept = (ws / "HQ/agents/pepper-about-herself.md").read_text() if (ws / "HQ/agents/pepper-about-herself.md").exists() else ""
+        facts = [l[2:] for l in kept.splitlines() if l.startswith("- ")]
+        need(len(facts) == 1 and facts[0].startswith("has a new plant on her desk"), f"the harvest kept his life as hers: {facts}")
+        need(not re.search(r"workout|bike shop|clinic|afternoons|fibre|brakes", kept), f"something of his is in her list: {kept}")
+        # a text of hers: the same filter
+        fake2 = json.dumps({"new": [{"agent": "Donna", "fact": "has a perfect gaming week going"},
+                                    {"agent": "Donna", "fact": "has coffee from the machine on the second floor now"}]})
+        r = _sp.run([sys.executable, str(APP / "about_self.py"), "harvest-text", "donna",
+                     "Nice, day nine of your gaming week, perfect so far. I've switched to the coffee from the machine on the second floor, much better."],
+                    capture_output=True, text=True, env={**env, "HQ_ABOUT_FAKE": fake2}, cwd=str(ROOT))
+        need(r.returncode == 0, f"harvest-text failed: {r.stderr[-400:]}")
+        dk = (ws / "HQ/agents/donna-about-herself.md").read_text()
+        need("gaming week" not in dk and "second floor" in dk, f"Donna's text harvest: {dk}")
+        # the rule the look gets, and the mechanical check on its own
+        about_self = importlib.import_module("about_self")
+        need("Never anything about the boss" in about_self.HARVEST_SYSTEM and "first person" in about_self.HARVEST_SYSTEM,
+             "the look's rule doesn't keep his life out")
+        need(not about_self.own_life("thinks he should rest more", "Donna: I think he should rest more."), "a fact naming him was kept")
+        need(not about_self.own_life("has a cat", "Donna: Nothing yet."), "a fact from nowhere was kept")
+        need(about_self.own_life("has a cat called Mo", "Donna: My cat Mo knocked my coffee over again."), "her own cat wasn't kept")
+        need((ROOT / "app/about_self.py").read_text().count("own_life(f, said)") == 1, "harvest doesn't go through the check")
+        return "a transcript full of his life keeps nothing about him; her own plant and her own coffee are kept; a fact naming him never is"
+
+    async def flow187(self) -> str:
+        """H298, piece 3, no Claude: the deterministic box on a headless run, and the cycle kinds. runjob.py against a
+        fake claude: (a) one that streams turn after turn is ended at its turns (--max-turns), (b) one that goes quiet
+        is ended at its minutes (--max-minutes), both run the done mark (a boxed run is a finished run), write the box
+        note (minutes, turns, boxed, the tools, the refusals) and the stream log says boxed; (c) a run inside its box
+        ends by itself with boxed null, and the note carries a refused Ready mark and the tools' paths. The kinds:
+        "Agent cycle: donna, …" is cycle-donna and "Agent step: pepper #2 …" step-pepper, for sure, also over a kind
+        given by hand; a call's --kind takes them."""
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        import importlib
+        est = importlib.import_module("estimate")
+        t = "Scheduled item 3, planned for Thursday 29 October, 08:30: Agent cycle: donna, bigger session"
+        need(est.kind_of(t) == "cycle-donna" and est.kind_for(t, "build") == "cycle-donna", f"the cycle kind: {est.kind_of(t)}")
+        need(est.kind_of("Agent step: pepper #2: see whether the week's focus moved") == "step-pepper", "the step kind")
+        need(est.kind_given("cycle-moneypenny") == "cycle-moneypenny" and est.kind_given("step-donna") == "step-donna"
+             and est.kind_given("cycle-") is None, "a call's --kind doesn't take the agent kinds")
+        need(est.kind_of("Build the box") == "build", "a build is read as an agent run")
+        ws, env = self._h298_ws("p3")
+        run_dir = Path(env["HQ_JOB_RUN"])
+        env["HQ_ROADMAP"] = str(ws / "HQ/roadmap.md")
+        def jobs(*a):
+            r = _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
+            need(r.returncode == 0, f"jobs.py {' '.join(a)}: {r.stdout[-300:]} {r.stderr[-300:]}")
+            return r.stdout + r.stderr
+        chatty = self.tmp / "h298-chatty.py"
+        chatty.write_text("#!/usr/bin/env python3\nimport json, sys, time\nsys.stdin.read()\n"
+                          "def out(d): print(json.dumps(d), flush=True)\n"
+                          "out({'type': 'system', 'subtype': 'init', 'session_id': 's-chatty'})\n"
+                          "for i in range(40):\n"
+                          "    out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'echo turn %d' % i}}]}})\n"
+                          "    out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': 'turn %d' % i}]}})\n"
+                          "    time.sleep(0.05)\n"
+                          "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Done all forty.'})\n")
+        quiet = self.tmp / "h298-quiet.py"
+        quiet.write_text("#!/usr/bin/env python3\nimport json, sys, time\nsys.stdin.read()\n"
+                         "def out(d): print(json.dumps(d), flush=True)\n"
+                         "out({'type': 'system', 'subtype': 'init', 'session_id': 's-quiet'})\n"
+                         "out({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Thinking.'}]}})\n"
+                         "time.sleep(60)\n"
+                         "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Too late.'})\n")
+        tidy = self.tmp / "h298-tidy.py"
+        tidy.write_text("#!/usr/bin/env python3\nimport json, sys\nsys.stdin.read()\n"
+                        "def out(d): print(json.dumps(d), flush=True)\n"
+                        "out({'type': 'system', 'subtype': 'init', 'session_id': 's-tidy'})\n"
+                        "out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'python3 routine/sprint.py ready H900'}}]}})\n"
+                        "out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': \"H900 isn't ready: no his words\"}]}})\n"
+                        "out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Edit', 'input': {'file_path': '/x/HQ/roadmap.md'}}]}})\n"
+                        "out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': 'ok'}]}})\n"
+                        "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Done.'})\n")
+        for f in (chatty, quiet, tidy):
+            f.chmod(0o755)
+        def run(fake, *box):
+            n = int(jobs("add", f"flow 187 box run {fake.stem}").split()[1])
+            jobs("mark", str(n), "running since 00:00")
+            (run_dir / f"job-{n}.prompt").write_text(f"let's go. This is job {n} from the queue: a box test")
+            note = run_dir / f"job-{n}.box.json"
+            r = _sp.run([sys.executable, str(ROOT / "routine/runjob.py"), str(n), "--session-id", "x", *box, "--box-note", str(note)],
+                        capture_output=True, text=True, env={**env, "HQ_CLAUDE": str(fake)}, timeout=120)
+            need(note.exists(), f"no box note for job {n}: {r.stdout[-400:]} {r.stderr[-400:]}")
+            log = (run_dir / f"job-{n}.stream.log").read_text()
+            return n, json.loads(note.read_text()), log, r
+        t0 = time.time()
+        n, note, log, r = run(chatty, "--max-turns", "5", "--max-minutes", "5")
+        need(note["boxed"] == "turns" and note["turns"] <= 7 and note["ended_by"] == "box", f"not boxed at its turns: {note}")
+        need("boxed (turns" in log and "the done mark is run for it" in log, f"the log doesn't say boxed and done: {log[-500:]}")
+        need(re.search(rf"^- Job {n} · done ", (ws / "HQ/roadmap.md").read_text(), re.M), "the boxed job isn't done on the queue")
+        need(time.time() - t0 < 30, "the turns box took too long to bite")
+        t0 = time.time()
+        n2, note2, log2, _ = run(quiet, "--max-minutes", "0.1", "--max-turns", "50")
+        need(note2["boxed"] == "minutes" and time.time() - t0 < 40, f"not boxed at its minutes: {note2}")
+        need(re.search(rf"^- Job {n2} · done ", (ws / "HQ/roadmap.md").read_text(), re.M), "the minutes-boxed job isn't done")
+        n3, note3, log3, _ = run(tidy, "--max-minutes", "5", "--max-turns", "50")
+        need(note3["boxed"] is None and note3["ended_by"] == "itself" and note3["turns"] == 2, f"a run inside its box: {note3}")
+        need(any("isn't ready" in x["said"] and "sprint.py ready" in x["tool"] for x in note3["refused"]),
+             f"the refused Ready mark isn't in the note: {note3['refused']}")
+        need(any(x.startswith("Edit /x/HQ/roadmap.md") for x in note3["tools"]), f"the tools' paths aren't in the note: {note3['tools']}")
+        # without a box nothing changes: the old run ends by itself, no note asked for
+        n4 = int(jobs("add", "flow 187 no box").split()[1]); jobs("mark", str(n4), "running since 00:00")
+        (run_dir / f"job-{n4}.prompt").write_text("let's go")
+        r = _sp.run([sys.executable, str(ROOT / "routine/runjob.py"), str(n4), "--session-id", "y"], capture_output=True, text=True,
+                    env={**env, "HQ_CLAUDE": str(tidy)}, timeout=60)
+        need(r.returncode == 0 and "boxed" not in (run_dir / f"job-{n4}.stream.log").read_text(), "a run without a box changed")
+        return "boxed at 5 turns and at 0.1 minutes, each done on the queue with its note; a run inside its box ends by itself; cycle-donna and step-pepper are kinds of their own"
+
+    async def flow188(self) -> str:
+        """H298, piece 4, no Claude: the ready check's mechanical fields. On a throwaway workspace with a made-up call
+        transcript, quick notes and planning rows: a row whose His words quote is found in the call, whose My own
+        additions says something and whose Sources name a row, a rule, a dated call and a file holds; a quote that's in
+        the notes holds; a quote around a "…" holds when both parts are found; a quote found nowhere, an empty
+        additions field, "none" (holds), a source that doesn't exist. With the feature on, the Ready mark is refused on
+        a row whose field doesn't hold and given to one whose fields hold; with it off, today's HQ: the mark goes on
+        either (the fields only reported). check and fields say it; a call may run fields."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("p4")
+        (ws / "HQ/calls").mkdir(parents=True, exist_ok=True)
+        (ws / "HQ/calls/2026-01-07-1030.md").write_text(
+            "# Call 7 January 2026, 10:30\n\nStarted 10:30:00 · agent Moneypenny · brain opus\n\n"
+            "- 10:31 **Me:** I want the feedback button to be bigger, and red, so I can find it with my thumb.\n"
+            "- 10:32 **HQ:** Noted.\n- 10:33 **Me:** And the status page should fold the finished jobs away by default.\n")
+        (ws / "HQ/notes.md").write_text("# Quick notes\n\n- 2026-01-08 09:00 · the calendar colours are too pale on the phone\n")
+        (ws / "rules.md").write_text("# Rules\n\n1. Talk like a person.\n2. Only say what benefits them.\n3. Short plain sentences.\n")
+        rm = ws / "HQ/roadmap.md"
+        rows = (
+            "| ⬜ | H9101 A bigger feedback button | What's asked: the button bigger and red. His words: \"the feedback button to be bigger, and red\". My own additions: the red is from the kinds' palette. Sources: rule 2, the call of 7 January 2026, app/features.py. Done means the button reads at a glance. Test: flow 160. Why: findability. Out of scope: the dock. Touches: the call page. Size: small. Waits on nothing. Privacy: nothing of his. | | |\n"
+            "| ⬜ | H9102 Fold the finished jobs | His words: \"the status page should fold … away by default\". My own additions: none. Sources: H9101. | | |\n"
+            "| ⬜ | H9103 Pale colours | His words: \"calendar colours are too pale on the phone\". My own additions: none. Sources: the quick notes of 8 January 2026, app/kinds.py. | | |\n"
+            "| ⬜ | H9104 Made up | His words: \"make the dock purple with stars\". My own additions: none. Sources: rule 1. | | |\n"
+            "| ⬜ | H9105 Empty additions | His words: \"the feedback button to be bigger, and red\". My own additions: . Sources: rule 1. | | |\n"
+            "| ⬜ | H9106 Ghost source | His words: \"the feedback button to be bigger, and red\". My own additions: none. Sources: H9999, rule 9. | | |\n"
+            "| ⬜ | H9107 No fields at all | Something to build, with every point: what's asked, done means, test, why, out of scope, touches, size, waits on nothing, privacy. | | |\n")
+        rm.write_text(rm.read_text().replace("## Phase H · Features\n\nWhat's new: things HQ should build or manage next.\n\n| | Step | What you get | Model |\n|---|---|---|---|\n",
+                                             "## Phase H · Features\n\nWhat's new: things HQ should build or manage next.\n\n| | Step | What you get | Model |\n|---|---|---|---|\n" + rows))
+        need("H9101" in rm.read_text(), "the made-up rows didn't go in")
+        env = {**env, "HQ_REVIEW": "0", "HQ_SPRINT": str(ws / "HQ/sprint.json")}
+        def sp(*a, on="1"):
+            return _sp.run([sys.executable, str(ROOT / "routine/sprint.py"), *a], capture_output=True, text=True,
+                           env={**env, "HQ_READY_FIELDS": on}, cwd=str(ROOT))
+        out = sp("fields", "H9101", "H9102", "H9103", "H9104", "H9105", "H9106", "H9107").stdout
+        need("H9101: the fields hold." in out and "H9102: the fields hold." in out and "H9103: the fields hold." in out, f"a row with good fields doesn't hold: {out}")
+        need("H9104: the fields don't hold." in out and "not found in the calls" in out, f"a made-up quote holds: {out}")
+        need("H9105: the fields don't hold." in out and "My own additions is empty" in out, f"an empty additions field holds: {out}")
+        need("H9106: the fields don't hold." in out and "a source that isn't there" in out, f"a ghost source holds: {out}")
+        need("H9107: the fields don't hold." in out and "no His words field" in out, f"a row without fields holds: {out}")
+        need("rule 2" in out and "call of 7 January 2026" in out and "app/features.py" in out, f"the sources aren't named as held: {out}")
+        # the feature on: refused on a false field, given on true ones; off: given on either (today's HQ)
+        r = sp("ready", "H9104")
+        need(r.returncode != 0 and "Refused" in r.stdout + r.stderr and "not found" in r.stdout + r.stderr, f"a false field didn't refuse the mark: {r.stdout} {r.stderr}")
+        r = sp("ready", "H9106")
+        need(r.returncode != 0 and "a source that isn't there" in r.stdout + r.stderr, "a ghost source didn't refuse the mark")
+        r = sp("ready", "H9101")
+        need(r.returncode == 0 and "marked ready" in r.stdout, f"good fields were refused: {r.stdout} {r.stderr}")
+        need("H9104 isn't ready" in sp("check", "H9104").stdout and "not found in the calls" in sp("check", "H9104").stdout, "check doesn't name the field")
+        r = sp("ready", "H9104", on="0")
+        need(r.returncode == 0 and "marked ready" in r.stdout, f"with the feature off the mark is held by the fields: {r.stdout} {r.stderr}")
+        off_check = sp("check", "H9105", on="0").stdout
+        need("fields don't hold" in off_check and "H9105 isn't ready: no " in off_check and "additions is empty" not in off_check.split("\n")[0],
+             f"with the feature off the fields aren't only reported alongside: {off_check}")
+        # a call may run fields
+        from policy import Policy, ALLOW
+        pol = Policy(ws)
+        need(pol.decide("Bash", {"command": f"python3 {ROOT / 'routine/sprint.py'} fields H9101"}).verdict == ALLOW, "a call may not run fields")
+        return "the fields hold on found quotes, named additions and real sources; a made-up quote, an empty field or a ghost source refuses the Ready mark with the feature on and is only reported with it off"
+
+    async def flow189(self) -> str:
+        """H298, piece 5, no Claude: the ledger per agent and the weekly score. On a throwaway workspace: the ledger is
+        made under HQ/ledger with its Orders on top; an order is added (start, stop, standing; "now" for a start), read
+        back as open and set planned; a cycle plan goes in as lines and a JSON block, read back as the newest plan; a
+        note lands under the newest section; a score section is read back. The pokes counted from made-up lines: three
+        status questions, one correction right after her text, one "no" that's his own first word (no correction), a
+        short call ending on a status question, a long one that doesn't; Donna's, Pepper's and Moneypenny's own
+        measures from a made-up list, mail list, calendar marks and ready marks; nothing uses Claude."""
+        import subprocess as _sp
+        import importlib
+        ws, env = self._h298_ws("p5")
+        env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
+        code = ("import sys, json, datetime as dt; sys.path.insert(0, %r); import ledger as L\n"
+                "L.ensure('donna'); o = L.add_order('donna', 'start', 'clear the To check pile'); L.add_order('donna', 'stop', 'the weather texts')\n"
+                "L.add_order('donna', 'start', 'draft the reply to the plumber', now_=True); L.add_order('donna', 'standing', 'no texts after nine')\n"
+                "L.write_plan('donna', {'picks': [{'what': 'the tax deadline', 'source': 'the to-do row'}], 'let_go': ['the newsletters'], "
+                "'steps': [{'goal': 'put the tax item in a block', 'at': '09:05', 'done_means': 'it has a block', 'inputs': [{'kind': 'todo', 'words': 'tax'}]}]}, job=7)\n"
+                "L.note('donna', 'decision: nothing to do about the weather')\n"
+                "L.set_order('donna', 1, 'planned', 'step 1 of the plan')\n"
+                "L.write_score('donna', '2026-W02', {'pokes': {'total': 2}}, ['pokes: 2'])\n"
+                "L.entry('donna', 'step 1 (job 8)', ['done · 2 min, 6 turns'])\n"
+                "print(json.dumps({'orders': L.orders('donna'), 'plan': L.plan('donna')[1], 'scores': [b for s, b in L.scores('donna')], "
+                "'text': L.text('donna'), 'words': L.words('donna'), 'secs': [s['what'] for s in L.sections('donna')]}))") % str(ROOT / "routine")
+        d = json.loads(self._h298_py(env, code))
+        need((ws / "HQ/ledger/donna.md").exists() and d["text"].startswith("# Donna's ledger"), "no ledger file")
+        os_ = d["orders"]
+        need(len(os_) == 4 and os_[0]["state"] == "planned" and os_[0]["note"] == "step 1 of the plan" and os_[1]["kind"] == "stop"
+             and os_[2]["state"] == "now" and os_[3]["kind"] == "standing", f"the orders: {os_}")
+        need(d["plan"]["steps"][0]["goal"] == "put the tax item in a block" and d["plan"]["picks"][0]["source"] == "the to-do row", f"the plan: {d['plan']}")
+        need(d["scores"] == [{"week": "2026-W02", "pokes": {"total": 2}}], f"the score: {d['scores']}")
+        need("- decision: nothing to do about the weather" in d["text"].split("## ")[2], "the note didn't land under the plan")
+        need(d["secs"] == ["Orders", "cycle plan (job 7)", "score, week 2026-W02", "step 1 (job 8)"], f"the sections: {d['secs']}")
+        need("\n\n\n" not in d["text"], "the ledger has double blank lines")
+        r = _sp.run([sys.executable, str(ROOT / "routine/ledger.py"), "donna", "orders"], capture_output=True, text=True, env=env)
+        need(r.returncode == 0 and "clear the To check pile" in r.stdout and "standing" in r.stdout, f"ledger.py orders: {r.stdout}")
+        # the pokes from made-up lines
+        now = time.time()
+        line = ws / "HQ/direct-line"; line.mkdir(parents=True, exist_ok=True)
+        msgs = [("agent", "Your tax item is in Friday's admin block.", now - 6 * 3600),
+                ("me", "is it done? did you put the plumber in the calendar", now - 5 * 3600),
+                ("agent", "Yes, Tuesday at ten.", now - 4.9 * 3600),
+                ("me", "no, that's wrong, rule: not before eleven", now - 4.8 * 3600),
+                ("me", "no plans tonight, I'm staying in", now - 4 * 3600),  # his own first word, not a correction of hers
+                ("agent", "Noted.", now - 3 * 3600),
+                ("me", "where is the dentist appointment, and what happened to the parcel", now - 2 * 3600),
+                ("me", "status?", now - 10 * 86400)]  # outside the week
+        (line / "thread.jsonl").write_text("".join(json.dumps({"at": t, "from": f, "text": x, "why": ""}) + "\n" for f, x, t in msgs))
+        calls = ws / "HQ/calls"; calls.mkdir(parents=True, exist_ok=True)
+        d1 = time.strftime("%Y-%m-%d", time.localtime(now - 86400))
+        (calls / f"{d1}-0900.md").write_text("# Call\n\nStarted 09:00:00 · agent Donna · brain opus\n\n- 09:00 **Me:** hey\n- 09:01 **HQ:** Hey you.\n- 09:03 **Me:** is the job done?\n- 09:03 **HQ:** Not yet.\n")
+        (calls / f"{d1}-1000.md").write_text("# Call\n\nStarted 10:00:00 · agent Donna · brain opus\n\n- 10:00 **Me:** hey\n- 10:20 **HQ:** Hey you.\n- 10:30 **Me:** is it done?\n- 10:31 **HQ:** Yes.\n")
+        (calls / f"{d1}-1100.md").write_text("# Call\n\nStarted 11:00:00 · agent Pepper · brain opus\n\n- 11:00 **Me:** status?\n- 11:01 **HQ:** Fine.\n")
+        pk = importlib.import_module("pokes")
+        importlib.reload(pk)
+        a = {"id": "donna", "name": "Donna", "context": "day"}
+        p = pk.pokes(a, now - 7 * 86400, now + 60, ws)
+        need(p["status_questions"] == 2 and p["corrections"] == 1 and p["short_calls"] == 1 and p["total"] == 4 and p["calls"] == 2,
+             f"the pokes: {p}")
+        need(p["texts_acted_on"] == [3, 3], f"texts acted on: {p['texts_acted_on']}")
+        # her own measures from a made-up list, mail list and marks
+        (ws / "challenges.md").write_text((ws / "challenges.md").read_text() + "\n")
+        import todo as _todo
+        importlib.reload(_todo)
+        env2 = {**env, "HQ_TODO": str(ws / "challenges.md"), "HQ_DIRECT_DIR": str(line)}
+        self._h298_py(env2, ("import sys; sys.path.insert(0, %r); import todo; from pathlib import Path\n"
+                             "p = Path(%r); todo.add('pay the plumber', 'Important and urgent', by='flow', p=p) if 'p=' in '' else None") % (str(ROOT / "app"), str(ws / "challenges.md")))
+        text = (ws / "challenges.md").read_text()
+        dl = time.strftime("%Y-%m-%d", time.localtime(now + 86400))
+        done_at = time.strftime("%Y-%m-%d %H:%M", time.localtime(now - 3600))
+        # a done row with a deadline in its notes (as a moved row keeps a column the done list lacks), and one without
+        text = re.sub(r"(## 7\. Done\n\n(?:[^\n]*\n)*?\|---\|[^\n]*\n)", lambda m: m.group(1) + f"| Pay the plumber | {done_at} | Deadline: {dl}. Paid. |\n| Buy stamps | {done_at} |  |\n", text, count=1)
+        (ws / "challenges.md").write_text(text)
+        need("Pay the plumber" in (ws / "challenges.md").read_text(), "the done rows didn't go in")
+        inbox = (ws / "inbox.md").read_text()
+        inbox = inbox.replace("## Closed\n", "## Closed\n\n- " + time.strftime("%d %b %Y", time.localtime(now - 3600)).lstrip("0") + " · a shop · the parcel · that's him\n", 1)
+        need(inbox.rstrip().endswith("## To check"), "the template's mail list doesn't end with To check")
+        (ws / "inbox.md").write_text(inbox.rstrip() + "\n\n- 1 Jan 2026 · a shop · a bill · worth a look\n- 2 Jan 2026 · a shop · a bill · worth a look\n")
+        m = pk.donna_measures(now - 7 * 86400, now + 60, ws)
+        need(m["dated_items_done_before_their_date"] == [1, 1] and m["very_important_mail_resolved"] == 1 and m["to_check_pile"] == 2, f"Donna's measures: {m}")
+        marks = ws / "HQ/calendar-marks.json"
+        marks.write_text(json.dumps({"marks": {"a": {"mark": "done", "marked": now - 3600, "title": "Admin"}, "b": {"mark": "x", "marked": now - 7200, "title": "Gym"},
+                                               "c": {"mark": "done", "marked": now - 20 * 86400, "title": "Old"}}}))
+        code = ("import sys, os, json, time; sys.path.insert(0, %r); sys.path.insert(0, %r); os.environ['HQ_CALENDAR_MARKS'] = %r\n"
+                "import planning, pokes; now = time.time()\n"
+                "print(json.dumps(pokes.pepper_measures(now - 7 * 86400, now + 60, __import__('pathlib').Path(%r), {'picks': [{'what': 'pay the plumber'}]})))") % (
+            str(ROOT / "app"), str(ROOT / "routine"), str(marks), str(ws))
+        pm = json.loads(self._h298_py({**env2, "HQ_CALENDAR_MARKS": str(marks)}, code))
+        need(pm["calendar_ticks_vs_x"] == [1, 1] and pm["items_done"] == 2 and pm["needle_mover_done"] is True, f"Pepper's measures: {pm}")
+        (ws / "HQ/sprint.json").write_text(json.dumps({"ready": {"H1": {"ask": "x", "at": now - 2 * 86400}, "H2": {"ask": "y", "at": now - 20 * 86400}}}))
+        mm = json.loads(self._h298_py(env2, ("import sys, json, time; sys.path.insert(0, %r); import pokes; now = time.time()\n"
+                                             "print(json.dumps(pokes.moneypenny_measures(now - 7 * 86400, now + 60, __import__('pathlib').Path(%r))))") % (str(ROOT / "routine"), str(ws))))
+        need(mm["rows_ready_before_friday_vs_at_the_sprint"] and mm["rows_ready_before_friday_vs_at_the_sprint"][0] + mm["rows_ready_before_friday_vs_at_the_sprint"][1] == 1
+             and mm["jobs_landed_in_range"] == [0, 0], f"Moneypenny's measures: {mm}")
+        sc = pk.score(a, folder=ws)
+        need(sc["pokes"]["total"] == 4 and sc["lines"][0].startswith("pokes: 4") and "dated items done before their date: 1 of 1" in sc["lines"],
+             f"the score: {sc['lines']}")
+        need(pk.delta(sc, {"pokes": {"total": 6}, "measures": {}}) == ["pokes 6 to 4 (down, good)"], "the delta")
+        need("Claude" not in (ROOT / "routine/pokes.py").read_text().split("Standard library only")[0].split('"""')[1].lower().replace("without claude", ""),
+             "the score's docstring says it uses Claude")
+        return "the ledger with orders, a plan, notes and a score read back; the pokes counted from made-up texts and calls (4); each agent's own measures from the files"
+
+    def _h298_driver(self) -> str:
+        """A child-python driver for the runner's flows: it points tick.py at a throwaway queue (as flow 88 does),
+        starts a cycle job through tick.start, runs its headless script against a fake claude, and reports JSON."""
+        return r"""
+import sys, os, json, re, time, datetime as dt, subprocess, importlib
+ROOT, WS = sys.argv[1], sys.argv[2]
+sys.path.insert(0, ROOT + "/routine"); sys.path.insert(0, ROOT + "/app")
+import tick, carryon, cycles, ledger, estimate
+run = os.environ["HQ_JOB_RUN"]
+tick.LINUX_WINDOWS = True
+tick.RUN, tick.STATE, tick.PIDFILE = run, run + "/job.json", run + "/job.pid"
+caught = {"opened": [], "status": []}
+tick.open_window = lambda cmd, name="": caught["opened"].append(cmd)
+tick.status = lambda *x: caught["status"].append(x)
+tick.log = lambda m: caught.setdefault("log", []).append(m)
+out = {}
+def jobs_next():
+    return json.loads(tick.jobs("next"))
+def waiting_cycle():
+    return [j for j in jobs_next()["waiting"] if cycles.is_cycle_job(j)]
+cmd = sys.argv[3]
+if cmd == "start":   # start the first waiting cycle job through tick.start and run its script
+    job = waiting_cycle()[0]
+    tick.start(job)
+    script = caught["opened"][0]
+    r = subprocess.run(["bash", script], capture_output=True, text=True, timeout=240)
+    out = {"n": job["n"], "prompt": open(run + f"/job-{job['n']}.prompt").read(), "script": open(script).read(),
+           "stream": open(run + f"/job-{job['n']}.stream.log").read() if os.path.exists(run + f"/job-{job['n']}.stream.log") else "",
+           "note": json.load(open(run + f"/job-{job['n']}.box.json")) if os.path.exists(run + f"/job-{job['n']}.box.json") else None,
+           "status": caught["status"], "stdout": r.stdout[-800:], "stderr": r.stderr[-800:]}
+elif cmd == "gatekeep":  # the verdict for the first waiting cycle job at a given time
+    now = dt.datetime.strptime(sys.argv[4], "%Y-%m-%d %H:%M")
+    job = waiting_cycle()[0]
+    out = {"n": job["n"], "verdict": cycles.gatekeep(job, now, log=lambda m: caught.setdefault("log", []).append(m)), "log": caught.get("log", [])}
+elif cmd == "tick":
+    now = dt.datetime.strptime(sys.argv[4], "%Y-%m-%d %H:%M") if len(sys.argv) > 4 else None
+    out = cycles.tick(now, log=lambda m: caught.setdefault("log", []).append(m))
+    out["log"] = caught.get("log", [])
+print("RESULT " + json.dumps(out))
+"""
+
+    async def flow190(self) -> str:
+        """H298, piece 6, no Claude: off means off. With the feature off (the default on every HQ, also the maker's):
+        the runner's minute plans nothing and cancels nothing it didn't plan, the schedule and the queue stay as they
+        were, the call and text rules carry no cycles rule, the policy still lets a call read the cycles script, a
+        normal job's start is the old one (flow 170 checks it against the fake claude), and the runner's words say off.
+        Then on: the minute plans each agent's cycles once (a repeating priority item per cycle, the kind
+        cycle-<agent>), a second minute plans nothing more, an agent switched off loses hers, off again cancels them
+        all. Nothing of this touches the real workspace."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("p6a", maker=False)
+        (ws / "HQ/features.json").write_text('{"off": [], "maker": true}\n')  # the maker's, but off by default
+        drv = self.tmp / "h298-driver.py"
+        drv.write_text(self._h298_driver())
+        def drive(*a):
+            r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws), *a], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
+            m = re.search(r"RESULT (.*)", r.stdout)
+            need(m, f"the driver failed: {r.stdout[-600:]} {r.stderr[-1200:]}")
+            return json.loads(m.group(1))
+        before = (ws / "HQ/roadmap.md").read_text()
+        t = drive("tick")
+        need(t["on"] is False and t.get("reconciled") == [] and "processed" not in t, f"off, but the minute did something: {t}")
+        need((ws / "HQ/roadmap.md").read_text() == before, "off, but the roadmap changed")
+        code = ("import sys, os; sys.path.insert(0, %r); import config, direct_line; print(json.dumps({'voice': 'order <your id>' in config.voice_rules('all'), "
+                "'text': 'order <your id>' in direct_line._text_rules()}))" % str(ROOT / "app")).replace("print(json", "import json; print(json")
+        r = json.loads(self._h298_py(env, code))
+        need(not r["voice"] and not r["text"], f"off, but the rules carry the cycles rule: {r}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/cycles.py")], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0 and r.stdout.startswith("The agents run themselves: off."), f"the runner's words: {r.stdout[:200]} {r.stderr[-300:]}")
+        from policy import Policy, ALLOW, DENY
+        pol = Policy(ws)
+        need(pol.decide("Bash", {"command": f"python3 {ROOT / 'routine/cycles.py'} friday"}).verdict == ALLOW
+             and pol.decide("Bash", {"command": f"python3 {ROOT / 'routine/cycles.py'} tick"}).verdict == DENY, "the policy on the cycles script")
+        # on: the items planned once
+        (ws / "HQ/features.json").write_text('{"off": [], "on": ["agents_run"], "maker": true}\n')
+        t = drive("tick")
+        need(t["on"] is True and len(t["reconciled"]) == 5 and all(x.startswith("planned") for x in t["reconciled"]), f"on, the first minute: {t['reconciled']}")
+        need(len(t.get("reviews", [])) == 3 and all("monthly review planned for Friday" in x for x in t["reviews"]), f"the monthly reviews (piece 9): {t.get('reviews')}")
+        rm = (ws / "HQ/roadmap.md").read_text()
+        items = re.findall(r"^- Item (\d+) · waiting, every (\w+), priority · at (\S+ \S+) · added \S+ \S+ · (Agent cycle: .*)$", rm, re.M)
+        need(len(items) == 5 and {i[3] for i in items} == {"Agent cycle: donna, bigger session", "Agent cycle: pepper, bigger session", "Agent cycle: pepper, midweek look",
+                                                               "Agent cycle: moneypenny, bigger session", "Agent cycle: moneypenny, morning look"}, f"the items: {items}")
+        need(all(i[1] == ("day" if "donna" in i[3] or "morning look" in i[3] else "thursday" if "bigger" in i[3] else "wednesday") for i in items), f"the items' days: {items}")
+        need(all(i[2].endswith(("08:30", "20:00", "12:30", "21:00", "09:00")) for i in items), f"the items' times: {items}")
+        kinds = json.loads((ws / "HQ/roadmap-estimates/schedule-kinds.json").read_text()) if (ws / "HQ/roadmap-estimates/schedule-kinds.json").exists() else {}
+        need(kinds and all(v.get("kind", "").startswith("cycle-") for v in kinds.values()), f"the items' kinds: {kinds}")
+        t2 = drive("tick")
+        need(t2["reconciled"] == [] and t2.get("reviews") == [], f"the second minute planned again: {t2}")
+        r = json.loads(self._h298_py(env, code))
+        need(r["voice"] and r["text"], f"on, but the rules don't carry the cycles rule: {r}")
+        # an agent off: hers go; the feature off: all go
+        need("pepper: on is now off." in _sp.run([sys.executable, str(ROOT / "routine/cycles.py"), "set", "pepper", "on", "off"], capture_output=True, text=True, env=env).stdout, "set on off")
+        t3 = drive("tick")
+        need(len(t3["reconciled"]) == 3 and all("pepper" in x and "cancelled" in x for x in t3["reconciled"]), f"pepper off: {t3['reconciled']}")
+        (ws / "HQ/features.json").write_text('{"off": [], "maker": true}\n')
+        t4 = drive("tick")
+        rm = (ws / "HQ/roadmap.md").read_text()
+        need(t4["on"] is False and len(t4["reconciled"]) == 5 and not re.search(r"^- Item \d+ · waiting", rm, re.M), f"off again: {t4['reconciled']}")
+        return "off: nothing planned, no rule, the roadmap untouched; on: five cycles planned once as repeating priority items of their own kinds; an agent off loses hers; off again cancels them all"
+
+    async def flow191(self) -> str:
+        """H298, piece 6, no Claude: a cycle runs. On the maker's throwaway workspace with the feature on: an order "start
+        … --now" plans a step at once; the first waiting cycle job (Donna's bigger session, planned by the minute and
+        made a job by the scheduler's promote) is started through the routine's own start: its prompt opens with her
+        name, carries her character, the handbook's part one and her section, her ledger and the open order, the plan
+        command and her batches; its script runs runjob.py with her box (10 minutes, 30 turns) and a box note; the fake
+        claude writes a plan through cycles.py plan (two steps, one with a to-do input), which the runner turns into
+        two one-off priority step items (kind step-donna) and the order into planned; a plan with four picks is refused.
+        The minute then writes the run into her ledger. A step whose input changed since the plan is stale: cancelled
+        on the queue, written in the ledger; an unchanged one gets go. A step's done and failed outcomes land in the
+        ledger; a goal that failed twice is a tripwire on her line (one text), a goal planned again after not getting
+        done is held with a tripwire; after her texts for the day are used up, the ledger only."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("p6b")
+        env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
+        drv = self.tmp / "h298-driver.py"
+        drv.write_text(self._h298_driver())
+        def drive(*a, extra=None):
+            r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws), *a], capture_output=True, text=True, env={**env, **(extra or {})}, cwd=str(ROOT), timeout=300)
+            m = re.search(r"RESULT (.*)", r.stdout)
+            need(m, f"the driver failed: {r.stdout[-600:]} {r.stderr[-1500:]}")
+            return json.loads(m.group(1))
+        def cy(*a, ok=True):
+            r = _sp.run([sys.executable, str(ROOT / "routine/cycles.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            if ok:
+                need(r.returncode == 0, f"cycles.py {' '.join(a)[:80]}: {r.stdout[-300:]} {r.stderr[-500:]}")
+            return r
+        def sched(*a):
+            return _sp.run([sys.executable, str(ROOT / "routine/schedule.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        (ws / "HQ/agents/handbook.md").write_text((ROOT / "template/HQ/agents/handbook.md").read_text().replace("HQ is your headquarters", "HQ is a demo headquarters"))
+        # only Donna on, so one cycle item; an order now
+        for a in ("pepper", "moneypenny"):
+            cy("set", a, "on", "off")
+        cy("set", "donna", "hours", "00:00-23:59")  # the flow may run at night: her hours cover it
+        r = cy("order", "donna", "start", "put the plumber's bill in Friday's block")
+        need("next bigger session" in r.stdout, f"the order: {r.stdout}")
+        r = cy("order", "donna", "start", "draft the reply to the dentist", "--now")
+        need(r.stdout.startswith("Now:") and "planned at once" in r.stdout, f"the now order: {r.stdout}")
+        t = drive("tick")
+        need(any("donna's bigger session" in x for x in t["reconciled"]), f"Donna's session wasn't planned: {t}")
+        rm = (ws / "HQ/roadmap.md").read_text()
+        need("Agent step: donna #0" in rm and "draft the reply to the dentist" in rm, "the now order isn't a step item")
+        # the scheduler's promote makes the step (due now) a job first in line
+        r = sched("promote")
+        need("became job" in r.stdout and "priority" in r.stdout, f"promote: {r.stdout} {r.stderr}")
+        # the step job: its prompt carries only the core, her section and the step; run it against a fake claude that says done
+        fake = self.tmp / "h298-step-claude.py"
+        fake.write_text("#!/usr/bin/env python3\nimport json, sys, os, subprocess\np = sys.stdin.read(); open(os.environ['H298_GOT'], 'w').write(p)\n"
+                        "def out(d): print(json.dumps(d), flush=True)\n"
+                        "out({'type': 'system', 'subtype': 'init', 'session_id': 's-step'})\n"
+                        "r = subprocess.run([sys.executable, os.environ['H298_CYCLES'], 'done', 'donna', '0', 'the draft is in his mailbox'], capture_output=True, text=True)\n"
+                        "out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'cycles.py done donna 0'}}]}})\n"
+                        "out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': r.stdout + r.stderr}]}})\n"
+                        "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Done.'})\n")
+        fake.chmod(0o755)
+        got = self.tmp / "h298-step-got.txt"
+        s = drive("start", extra={"HQ_CLAUDE": str(fake), "H298_GOT": str(got), "H298_CYCLES": str(ROOT / "routine/cycles.py")})
+        need(s["prompt"].startswith(f"let's go. This is job {s['n']} from the queue: Donna's own cycle, step 0 (H298)"), f"the step's prompt head: {s['prompt'][:200]}")
+        need("The handbook: how you run yourself" in s["prompt"] and "### Donna" in s["prompt"] and "This step, from your cycle plan" in s["prompt"]
+             and "draft the reply to the dentist" in s["prompt"] and "The briefing, written by HQ's routine" not in s["prompt"],
+             "the step's prompt lacks the core and the step, or carries the briefing")
+        need("--max-minutes 3 --max-turns 10" in s["script"] and "--box-note" in s["script"] and "runjob.py" in s["script"], f"the step's script: {s['script']}")
+        need(s["note"] and s["note"]["boxed"] is None and "the done mark is run for it" in s["stream"], f"the step's run: {s['note']} {s['stream'][-300:]}")
+        led = (ws / "HQ/ledger/donna.md").read_text()
+        need("- step 0 done: the draft is in his mailbox" in led, f"the step's outcome isn't in the ledger: {led[-400:]}")
+        t = drive("tick")
+        led = (ws / "HQ/ledger/donna.md").read_text()
+        need(f"step 0 ran (job {s['n']})" in led and "run: done" in led, f"the minute didn't write the run: {led[-500:]}")
+        # the bigger session: moved to now, promoted, started; the fake claude writes a plan through cycles.py plan
+        rm = (ws / "HQ/roadmap.md").read_text()
+        item = re.search(r"^- Item (\d+) · waiting, every day, priority · at \S+ \S+ · added \S+ \S+ · Agent cycle: donna, bigger session$", rm, re.M)
+        need(item, f"Donna's session item: {rm[-800:]}")
+        r = sched("move", item.group(1), "now")
+        need(r.returncode == 0, f"move: {r.stdout} {r.stderr}")
+        r = sched("promote")
+        need("became job" in r.stdout, f"promote: {r.stdout} {r.stderr}")
+        hh = ((time.localtime().tm_hour + 1) % 24, (time.localtime().tm_hour + 2) % 24)
+        plan = json.dumps({"picks": [{"what": "the plumber's bill", "source": "his order of today"}], "let_go": ["the newsletters"],
+                           "steps": [{"goal": "put the plumber's bill in Friday's block", "done_means": "the item is planned in a block", "at": f"{hh[0]:02d}:05",
+                                      "inputs": [{"kind": "todo", "words": "plumber"}], "may": "plan it", "escalate_when": "no free block"},
+                                     {"goal": "clear the To check pile by the rules", "done_means": "the pile is smaller", "at": f"{hh[1]:02d}:05", "inputs": [], "may": "clear lines"}],
+                           "questions": ["If the plumber's bill is really due Friday, I put it in Friday's block; if not, say when."], "orders_done": [1]})
+        bad = json.dumps({"picks": ["a", "b", "c", "d"], "steps": []})
+        (ws / "challenges.md").write_text((ws / "challenges.md").read_text().replace("## 2. Important and urgent\n\n| Challenge | Type | Deadline | Status | In calendar | Added | Notes |\n|---|---|---|---|---|---|---|\n",
+                                                                                     "## 2. Important and urgent\n\n| Challenge | Type | Deadline | Status | In calendar | Added | Notes |\n|---|---|---|---|---|---|---|\n| Pay the plumber | passive | 2026-12-01 | open |  | 2026-11-20 |  |\n"))
+        need("Pay the plumber" in (ws / "challenges.md").read_text(), "the to-do row didn't go in (the template's list changed?)")
+        fake2 = self.tmp / "h298-session-claude.py"
+        fake2.write_text("#!/usr/bin/env python3\nimport json, sys, os, subprocess\np = sys.stdin.read(); open(os.environ['H298_GOT'], 'w').write(p)\n"
+                         "def out(d): print(json.dumps(d), flush=True)\n"
+                         "out({'type': 'system', 'subtype': 'init', 'session_id': 's-session'})\n"
+                         "r0 = subprocess.run([sys.executable, os.environ['H298_CYCLES'], 'plan', 'donna', os.environ['H298_BAD']], capture_output=True, text=True)\n"
+                         "r = subprocess.run([sys.executable, os.environ['H298_CYCLES'], 'plan', 'donna', os.environ['H298_PLAN']], capture_output=True, text=True)\n"
+                         "out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'cycles.py plan donna'}}]}})\n"
+                         "out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': 'BAD: ' + r0.stdout + r0.stderr + ' GOOD: ' + r.stdout + r.stderr}]}})\n"
+                         "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Planned.'})\n")
+        fake2.chmod(0o755)
+        s2 = drive("start", extra={"HQ_CLAUDE": str(fake2), "H298_GOT": str(got), "H298_CYCLES": str(ROOT / "routine/cycles.py"), "H298_PLAN": plan, "H298_BAD": bad})
+        p = s2["prompt"]
+        need(p.startswith(f"let's go. This is job {s2['n']} from the queue: Donna's own cycle, bigger session (H298)"), f"the session's prompt head: {p[:200]}")
+        need("Your character:" in p and "The handbook: how you run yourself" in p and "## Your own section" in p and "### Donna" in p
+             and "Your ledger" in p and "His orders waiting for you" in p and "put the plumber's bill in Friday's block" in p
+             and "cycles.py\" plan donna" in p and "batches at 12:00 and 17:00" in p and "The briefing, written by HQ's routine" in p
+             and "At most 3 picks, at most 6 steps" in p, "the session's prompt lacks a part")
+        need("--max-minutes 10 --max-turns 30" in s2["script"], f"the session's box: {s2['script']}")
+        need("the done mark is run for it" in s2["stream"], f"the session's run: {s2['stream'][-400:]}")
+        rm = (ws / "HQ/roadmap.md").read_text()
+        steps = re.findall(r"^- Item (\d+) · waiting, priority · at (\S+ \S+) · added \S+ \S+ · (Agent step: donna #(\d) \([^)]+\): .*)$", rm, re.M)
+        need(len(steps) == 2 and {x[3] for x in steps} == {"1", "2"}, f"the plan's steps aren't planned as priority items: {steps}")
+        led = (ws / "HQ/ledger/donna.md").read_text()
+        need("· cycle plan (job " in led and "- pick: the plumber's bill · source: his order of today" in led and "- let go: the newsletters" in led
+             and '"orders_done"' in led and "- escalated: If the plumber's bill" in led, f"the plan isn't in the ledger: {led[-900:]}")
+        need(re.search(r'^- \S+ \S+ · start · "put the plumber\'s bill in Friday\'s block" · planned', led, re.M), f"the order isn't planned: {led[:700]}")
+        thread = (ws / "HQ/direct-line/thread.jsonl").read_text() if (ws / "HQ/direct-line/thread.jsonl").exists() else ""
+        need("If the plumber's bill is really due Friday" not in thread, "Donna's question went out at once instead of into her batch")
+        state = json.loads(Path(env["HQ_CYCLES_STATE"]).read_text())
+        need(any(x["text"].startswith("If the plumber's bill") for x in state["agents"]["donna"]["batch"]), f"the question isn't in her batch: {state['agents']['donna']}")
+        kinds = json.loads((ws / "HQ/roadmap-estimates/schedule-kinds.json").read_text())
+        need(all(kinds[x[0]]["kind"] == "step-donna" for x in steps), f"the steps' kinds: {[kinds[x[0]] for x in steps]}")
+        # staleness: the first step's input (the to-do row) changes; promoted, its gatekeep says stale and cancels it
+        r = sched("move", steps[0][0], "now"); need(r.returncode == 0, r.stdout + r.stderr)
+        r = sched("promote"); need("became job" in r.stdout, r.stdout + r.stderr)
+        (ws / "challenges.md").write_text((ws / "challenges.md").read_text().replace("| Pay the plumber | passive | 2026-12-01 | open |", "| Pay the plumber | passive | 2026-12-01 | scheduled |"))
+        g = drive("gatekeep", time.strftime("%Y-%m-%d %H:%M"))
+        need(g["verdict"] == "skipped" and any("stale" in x for x in g["log"]), f"a changed input isn't stale: {g}")
+        led = (ws / "HQ/ledger/donna.md").read_text()
+        need("step 1 stale" in led and "its input changed since the plan (todo plumber)" in led, f"stale isn't in the ledger: {led[-400:]}")
+        need(not [j for j in json.loads(_sp.run([sys.executable, str(ROOT / "routine/jobs.py"), "next"], capture_output=True, text=True, env=env).stdout)["waiting"]], "the stale step still waits")
+        # the second step, unchanged: go (inside the hours)
+        r = sched("move", steps[1][0], "now"); need(r.returncode == 0, r.stdout + r.stderr)
+        r = sched("promote"); need("became job" in r.stdout, r.stdout + r.stderr)
+        g = drive("gatekeep", time.strftime("%Y-%m-%d") + " 10:00")
+        need(g["verdict"] == "go", f"an unchanged step doesn't get go: {g}")
+        # failed twice: a tripwire text; a third tripwire that day: the ledger only
+        cy("failed", "donna", "2", "the pile didn't shrink")
+        cy("failed", "donna", "2", "still the same pile")
+        thread = (ws / "HQ/direct-line/thread.jsonl").read_text()
+        need(thread.count("A tripwire on my side: a check failing twice") == 1, f"the failing-twice tripwire: {thread}")
+        cy("failed", "donna", "2", "a third time")
+        cy("failed", "donna", "2", "a fourth time")
+        thread = (ws / "HQ/direct-line/thread.jsonl").read_text()
+        need(thread.count("A tripwire on my side") == 2, f"more than her two texts a day went out: {thread}")
+        led = (ws / "HQ/ledger/donna.md").read_text()
+        need(led.count("- tripwire (a check failing twice)") == 3, f"the tripwires aren't all in the ledger: {led.count('tripwire')}")
+        # the same goal planned again without done: held with a tripwire (the ledger; the texts are used up)
+        r = cy("plan", "donna", json.dumps({"picks": ["x"], "steps": [{"goal": "clear the To check pile by the rules", "done_means": "smaller", "at": f"{hh[1]:02d}:30"}]}))
+        need("1 step(s) held: the same goal was tried before" in r.stdout, f"the same goal twice isn't held: {r.stdout}")
+        led = (ws / "HQ/ledger/donna.md").read_text()
+        need("- tripwire (same goal twice)" in led, "the same-goal tripwire isn't in the ledger")
+        r = cy("plan", "donna", bad, ok=False)
+        need(r.returncode != 0 and "at most 3 picks" in r.stdout, f"four picks weren't refused: {r.stdout}")
+        cy("set", "donna", "hours", "08:00-22:00")
+        r = cy("plan", "donna", json.dumps({"picks": [], "steps": [{"goal": "x", "done_means": "y", "at": "23:30"}]}), ok=False)
+        need(r.returncode != 0 and "outside your hours" in r.stdout, f"a step at night wasn't refused: {r.stdout}")
+        # nothing restarts itself: no new step item for the stale or failed ones
+        rm = (ws / "HQ/roadmap.md").read_text()
+        need(len(re.findall(r"^- Item \d+ · waiting, priority · .* · Agent step: donna", rm, re.M)) == 0, f"a step was planned again by itself: {rm[-600:]}")
+        return (f"Donna's session (job {s2['n']}) ran in its box with the handbook, her ledger and the order; its plan became two priority step items and the order "
+                "planned; a step with a changed input is stale and cancelled, an unchanged one goes; failed twice is one text, the third tripwire the ledger only; "
+                "the same goal twice is held; nothing restarts by itself")
+
+    async def flow192(self) -> str:
+        """H298, piece 6, no Claude: the wall, layer by layer, on a throwaway workspace with Donna's session waiting
+        on the queue. (1) The gate: with the 5-hour line fixed and the saved usage over it, the routine's start check
+        says STOP for the cycle job's need, as for any job (the same gate; tick.py asks it after the runner's own
+        check). (2) The box is piece 3's (flow 187): ends a run at its minutes and at its turns. (3) The share: with
+        her finished runs this week costing most of her share, her next run is refused and written as skipped; over
+        her daily share the same. (4) The hours: at 23:00 nothing starts: the session is dropped (skipped, the ledger
+        says the hours) and, when still useful tomorrow (Pepper's), planned again for the morning; at 07:00 it waits;
+        past its useful-until it's skipped; boxed twice in a row is a tripwire on her line, and a boxed run is never
+        planned again by the runner."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("p6c")
+        env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
+        drv = self.tmp / "h298-driver.py"
+        drv.write_text(self._h298_driver())
+        def drive(*a, extra=None):
+            r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws), *a], capture_output=True, text=True, env={**env, **(extra or {})}, cwd=str(ROOT), timeout=300)
+            m = re.search(r"RESULT (.*)", r.stdout)
+            need(m, f"the driver failed: {r.stdout[-600:]} {r.stderr[-1500:]}")
+            return json.loads(m.group(1))
+        def cy(*a):
+            r = _sp.run([sys.executable, str(ROOT / "routine/cycles.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            need(r.returncode == 0, f"cycles.py {' '.join(a)[:80]}: {r.stdout[-300:]} {r.stderr[-500:]}")
+            return r.stdout
+        def sched(*a):
+            return _sp.run([sys.executable, str(ROOT / "routine/schedule.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        def jobs(*a):
+            return _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        for a in ("pepper", "moneypenny"):
+            cy("set", a, "on", "off")
+        drive("tick")
+        rm = ws / "HQ/roadmap.md"
+        item = re.search(r"^- Item (\d+) · waiting, every day, priority · .* · Agent cycle: donna, bigger session$", rm.read_text(), re.M)
+        need(item, "Donna's session isn't planned")
+        need(sched("move", item.group(1), "now").returncode == 0 and "became job" in sched("promote").stdout, "the session didn't become a job")
+        job = [j for j in json.loads(jobs("next").stdout)["waiting"]][0]
+        # (1) the gate, as tick.py asks it right after the runner's check: the 5-hour line fixed at 20%, the usage at 60%
+        rm.write_text(rm.read_text().replace("**Usage limit: 70%.**", "**Usage limit: 20%.**").replace("**5-hour line: moving.**", "**5-hour line: fixed.**"))
+        status = Path(env["HQ_STATUS_DIR"])
+        reset = (datetime.now(timezone.utc) + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        usage = {"readable": True, "checkedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                 "limits": [{"label": "5-hour", "percent": 60, "resetsAt": reset}, {"label": "Weekly (all models)", "percent": 10, "resetsAt": reset}]}
+        hq_status = ROOT / ".status"
+        hq_status.mkdir(exist_ok=True)
+        keep = (hq_status / "usage.json").read_text() if (hq_status / "usage.json").exists() else None
+        try:
+            (hq_status / "usage.json").write_text(json.dumps(usage))
+            g = _sp.run(["node", str(ROOT / "status/save-usage.mjs"), "--gate", "--minutes", "10", "--need", "five=1,weekly=1"], capture_output=True, text=True,
+                        env={**env, "HQ_ROADMAP": str(rm)}, cwd=str(ROOT))
+            need(g.returncode != 0 and g.stdout.startswith("STOP"), f"the gate doesn't hold a start over the line: {g.stdout} {g.stderr[-300:]}")
+        finally:
+            if keep is None:
+                (hq_status / "usage.json").unlink(missing_ok=True)
+            else:
+                (hq_status / "usage.json").write_text(keep)
+        tsrc = (ROOT / "routine/tick.py").read_text()
+        need("cycles.gatekeep(job" in tsrc and tsrc.index("cycles.gatekeep(job") < tsrc.index('"--gate"]'), "tick.py doesn't ask the runner's check before the gate")
+        # (4) the hours: 23:00 drops it (not useful tomorrow: Donna's until 12:00), 07:00 waits
+        today = time.strftime("%Y-%m-%d")
+        g = drive("gatekeep", f"{today} 23:00")
+        need(g["verdict"] == "skipped" and any("hours end at 22:00" in x for x in g["log"]), f"at 23:00: {g}")
+        led = (ws / "HQ/ledger/donna.md").read_text()
+        need("bigger session skipped" in led and "the day's hours end at 22:00" in led and "planned again" not in led, f"the ledger after 23:00: {led[-400:]}")
+        need(not json.loads(jobs("next").stdout)["waiting"], "the dropped job still waits")
+        # Pepper's, useful until Friday 9:30: dropped at 22:30 and planned again for 08:00
+        cy("set", "pepper", "on", "on")
+        drive("tick")
+        it = re.search(r"^- Item (\d+) · waiting, every thursday, priority · .* · Agent cycle: pepper, bigger session$", rm.read_text(), re.M)
+        need(it and sched("move", it.group(1), "now").returncode == 0 and "became job" in sched("promote").stdout, "Pepper's session didn't become a job")
+        thu = datetime.now()
+        thu = thu - timedelta(days=(thu.weekday() - 3) % 7)  # this week's Thursday, 22:30
+        g = drive("gatekeep", thu.strftime("%Y-%m-%d") + " 22:30")
+        need(g["verdict"] == "skipped", f"Pepper at 22:30: {g}")
+        led = (ws / "HQ/ledger/pepper.md").read_text()
+        need("planned again for Friday 08:00" in led, f"not planned again for the morning: {led[-300:]}")
+        need(re.search(r"^- Item \d+ · waiting, priority · at \S+ 08:00 · .* · Agent cycle: pepper, bigger session$", rm.read_text(), re.M), "the morning item isn't on the schedule")
+        # 07:00 waits
+        it = re.search(r"^- Item (\d+) · waiting, priority · at \S+ 08:00 · .* · Agent cycle: pepper, bigger session$", rm.read_text(), re.M)
+        need(sched("move", it.group(1), "now").returncode == 0 and "became job" in sched("promote").stdout, "the morning session didn't become a job")
+        g = drive("gatekeep", f"{today} 07:00")
+        need(g["verdict"] == "wait", f"at 07:00: {g}")
+        # past its useful-until (Pepper's: Friday 09:30): skipped
+        fri = thu + timedelta(days=1)
+        g = drive("gatekeep", fri.strftime("%Y-%m-%d") + " 11:00")
+        need(g["verdict"] == "skipped" and any("too late to be useful" in x for x in g["log"]), f"past useful-until: {g}")
+        # (3) the share: her finished runs this week cost 2.8 of her 3 points; a run of about 1 point is refused
+        drive("tick")
+        it = re.search(r"^- Item (\d+) · waiting, every day, priority · .* · Agent cycle: donna, bigger session$", rm.read_text(), re.M)
+        need(it and sched("move", it.group(1), "now").returncode == 0 and "became job" in sched("promote").stdout, "Donna's next session didn't become a job")
+        est_dir = ws / "HQ/roadmap-estimates"
+        est_dir.mkdir(exist_ok=True)
+        now = time.time()
+        with open(est_dir / "job-estimates-history.jsonl", "a") as f:
+            for k, c in enumerate((1.0, 0.9, 0.9)):
+                f.write(json.dumps({"n": 900 + k, "kind": "cycle-donna", "est": 8, "actual": 7, "done": int(now - 86400 * (k + 1)), "machine": "here",
+                                    "cost": {"five": 2.0, "weekly": c}, "cost_how": "tokens", "tokens": {"opus": [1000, 200, 0, 0]}, "retag": 4}) + "\n")
+        r = cy("set", "donna", "daily", "5")
+        g = drive("gatekeep", f"{today} 10:00")
+        need(g["verdict"] == "skipped" and any("over her weekly share" in x for x in g["log"]), f"over her share, but not refused: {g}")
+        led = (ws / "HQ/ledger/donna.md").read_text()
+        need("over her weekly share (2.8 of 3 points used" in led, f"the share isn't in the ledger: {led[-300:]}")
+        # the daily share: today's runs cost 0.9 of a daily share of 1
+        cy("set", "donna", "weekly", "20")
+        with open(est_dir / "job-estimates-history.jsonl", "a") as f:
+            f.write(json.dumps({"n": 910, "kind": "step-donna", "est": 3, "actual": 2, "done": int(now - 60), "machine": "here",
+                                "cost": {"five": 1.0, "weekly": 0.9}, "cost_how": "tokens", "tokens": {"opus": [1000, 200, 0, 0]}, "retag": 4}) + "\n")
+        cy("set", "donna", "daily", "1")
+        drive("tick")
+        it = re.search(r"^- Item (\d+) · waiting, every day, priority · .* · Agent cycle: donna, bigger session$", rm.read_text(), re.M)
+        need(it and sched("move", it.group(1), "now").returncode == 0 and "became job" in sched("promote").stdout, "Donna's third session didn't become a job")
+        g = drive("gatekeep", f"{today} 10:00")
+        need(g["verdict"] == "skipped" and any("over her daily share" in x for x in g["log"]), f"over her daily share, but not refused: {g}")
+        # boxed twice in a row: a tripwire on her line; a boxed run is never planned again by the runner
+        code = ("import sys, json, datetime as dt; sys.path.insert(0, %r); import cycles, json\n"
+                "from pathlib import Path\nrun = Path(%r)\n"
+                "for n in (41, 42):\n"
+                "    (run / f'job-{n}.box.json').write_text(json.dumps({'n': n, 'minutes': 10.1, 'turns': 31, 'steps': 12, 'boxed': 'turns', 'tools': [], 'refused': []}))\n"
+                "    cycles.after_run({'n': n, 'text': 'Scheduled item 9, planned for Monday 1 January, 08:30: Agent cycle: donna, bigger session', 'state': 'done 08:41'}, "
+                "{'agent': 'donna', 'kind': 'session', 'name': 'bigger session'}, run_dir=str(run))\n"
+                "print('ok')") % (str(ROOT / "routine"), env["HQ_JOB_RUN"])
+        self._h298_py(env, code)
+        thread = (ws / "HQ/direct-line/thread.jsonl").read_text() if (ws / "HQ/direct-line/thread.jsonl").exists() else ""
+        need(thread.count("boxed twice in a row") == 1, f"boxed twice isn't one text: {thread}")
+        led = (ws / "HQ/ledger/donna.md").read_text()
+        need(led.count("run: boxed at its turns") == 2 and "- tripwire (boxed twice in a row)" in led, f"the boxed runs aren't in the ledger: {led[-500:]}")
+        before = rm.read_text()
+        drive("tick")
+        need(len(re.findall(r"Agent cycle: donna, bigger session", rm.read_text(), re.M)) == len(re.findall(r"Agent cycle: donna, bigger session", before, re.M)),
+             "a boxed run was planned again by the runner")
+        return "the gate STOPs over the line; 23:00 drops the session (Pepper's planned again for 08:00), 07:00 waits, past useful-until skips; over her weekly or daily share refuses; boxed twice is one text and nothing restarts"
+
+    async def flow193(self) -> str:
+        """H298, piece 7, no Claude: the Friday screen on the status page. On a throwaway workspace with Donna's
+        ledger carrying a plan, two scores and a tripwire, and her share partly used: routines.json carries the agents
+        (on, three lines per agent, her share against her line), and the page draws The agents: one card per agent
+        with picked, moved, escalated and the share, red when over her line; Pepper off isn't drawn. With the switch
+        off, routines.json says off and the page has no such section (the senders section and the rest as before)."""
+        import shutil as _sh
+        import subprocess as _sp
+        ws, env = self._h298_ws("p7")
+        env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
+        def py(code):
+            return self._h298_py(env, "import sys; sys.path.insert(0, %r); sys.path.insert(0, %r)\n" % (str(ROOT / "routine"), str(ROOT / "app")) + code)
+        def cy(*a):
+            r = _sp.run([sys.executable, str(ROOT / "routine/cycles.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            need(r.returncode == 0, f"cycles.py {' '.join(a)[:80]}: {r.stdout[-300:]} {r.stderr[-500:]}")
+            return r.stdout
+        cy("set", "pepper", "on", "off")
+        py("""
+import datetime as dt, json, ledger
+from pathlib import Path
+now = dt.datetime.now()
+ledger.write_plan("donna", {"picks": [{"what": "the morning's items sorted by the hour", "source": "the to-do list"}, {"what": "the week's one deadline a slot before its date"}],
+                            "let_go": ["the newsletter digests"], "steps": [], "questions": []}, job=7, now=now - dt.timedelta(hours=5))
+ledger.write_score("donna", "2026-W43", {"pokes": {"total": 6, "status_questions": 4, "corrections": 2, "short_calls": 0, "his_texts": 20, "calls": 3}, "own": {"texts_acted_on": [2, 5]}},
+                   ["pokes: 6 (status questions 4, corrections 2)"], now=now - dt.timedelta(days=8))
+ledger.write_score("donna", "2026-W44", {"pokes": {"total": 2, "status_questions": 1, "corrections": 1, "short_calls": 0, "his_texts": 18, "calls": 2}, "own": {"texts_acted_on": [4, 5]}},
+                   ["pokes: 2 (status questions 1, corrections 1)"], now=now - dt.timedelta(days=1))
+ledger.entry("donna", "run: bigger session (job 7)", ["ran 4.0 minutes, 12 turns"], now=now - dt.timedelta(hours=4))
+ledger.note("donna", "tripwire (a check failing twice): the check of \\"the deadline's slot\\" failed twice; the step waits for his word")
+ledger.note("donna", "let go: the second reminder about the parcel")
+ledger.write_plan("moneypenny", {"picks": [{"what": "the two ready rows for Friday"}], "let_go": [], "steps": [], "questions": []}, job=8, now=now - dt.timedelta(hours=3))
+# her share partly used: finished runs of her kinds in the estimates history
+import estimate
+d = Path(estimate.DIR); d.mkdir(parents=True, exist_ok=True)
+hist = d / "job-estimates-history.jsonl"
+rows = []
+for i, (kind, w) in enumerate((("cycle-donna", 1.6), ("step-donna", 0.9), ("step-donna", 0.8), ("cycle-moneypenny", 1.2))):
+    rows.append({"n": 20 + i, "kind": kind, "est": 4, "actual": 3, "done": int(now.timestamp() - 3600 * (2 + i)), "machine": "here",
+                 "cost": {"weekly": w, "five": w * 3}, "text": "Agent cycle: x"})
+hist.write_text("".join(json.dumps(r) + "\\n" for r in rows))
+print("ok")
+""")
+        out = json.loads(cy("friday", "--json"))
+        need(out["on"] and [a["id"] for a in out["agents"]] == ["donna", "moneypenny"], f"the Friday screen's agents: {out}")
+        dn = out["agents"][0]
+        need("the morning's items sorted by the hour" in dn["picked"] and "the week's one deadline" in dn["picked"], f"picked: {dn['picked']}")
+        need("pokes" in dn["moved"] and "6" in dn["moved"] and "2" in dn["moved"], f"moved: {dn['moved']}")
+        need("a check failing twice" in dn["escalated"] and "the second reminder" in dn["let_go"], f"escalated/let go: {dn['escalated']} / {dn['let_go']}")
+        need(dn["share"]["weekly_share"] == 3 and abs(dn["share"]["weekly_used"] - 3.3) < 0.01, f"her share: {dn['share']}")
+        need(out["agents"][1]["moved"] == "no score yet", f"Moneypenny's moved: {out['agents'][1]}")
+        # the status page: its own copy, pointed at the throwaway workspace
+        site = self.tmp / "h298-p7-site"
+        _sh.copytree(ROOT / "status", site / "status")
+        _sh.copytree(ROOT / "routine", site / "routine")
+        _sh.copytree(ROOT / "app", site / "app", ignore=_sh.ignore_patterns("__pycache__", "node_modules", "web"))
+        (site / ".status").mkdir()
+        (site / "scratch").mkdir()
+        rm = ws / "HQ/roadmap.md"
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to look at the page in")
+        harness = r"""
+<script>
+(async () => {
+  const out = [], wait = ms => new Promise(r => setTimeout(r, ms));
+  for (let i = 0; i < 40 && !document.querySelector('section.sprint, section.senders, section .log, section.now'); i++) await wait(250);
+  await wait(1500);
+  const ag = document.querySelector('section.agents');
+  out.push('agents:' + (ag ? 'yes' : 'no'));
+  if (ag) {
+    out.push('sum:' + ag.querySelector('summary').textContent.trim());
+    out.push('rows:' + ag.querySelectorAll('.row.agent').length);
+    out.push('names:' + [...ag.querySelectorAll('.row.agent .what')].map(w => w.firstChild.textContent).join(','));
+    const d = ag.querySelector('.row.agent .what');
+    out.push('lines:' + [...d.querySelectorAll('.soft')].map(x => x.textContent.split(':')[0]).join(','));
+    out.push('over:' + (d.querySelector('.share.over') ? 'yes' : 'no'));
+    out.push('share:' + d.querySelector('.share').textContent);
+  }
+  out.push('wide:' + document.documentElement.scrollWidth + '/' + window.innerWidth);
+  const pre = document.createElement('pre'); pre.textContent = 'H298RESULT ' + out.join(' | ') + ' END';
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        idx = site / "status/index.html"
+        idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
+        def look(port, name, on):
+            senv = {**env, "HQ_STATUS_PORT": str(port), "HQ_ROADMAP": str(rm)}
+            proc = _sp.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=senv, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+            try:
+                base = f"http://127.0.0.1:{port}"
+                for _ in range(50):
+                    if http_get("/routines.json", base)[0] == 200:
+                        break
+                    time.sleep(0.2)
+                _, body, _ = http_get("/routines.json", base)
+                r = json.loads(body)
+                need(bool(r.get("agents", {}).get("on")) == on, f"routines.json's agents with the switch {'on' if on else 'off'}: {str(r.get('agents'))[:200]}")
+                res = _sp.run([chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                              f"--user-data-dir={self.tmp / ('h298-p7-' + name)}", "--window-size=390,2400", "--virtual-time-budget=20000", "--dump-dom", base + "/"],
+                             capture_output=True, text=True, timeout=120)
+                m = re.search(r"<pre>H298RESULT (.*?) END</pre>", res.stdout, re.S)
+                need(m, f"the page didn't report ({name}): {res.stdout[-400:]} {res.stderr[-400:]}")
+                need(all(":" in x for x in m.group(1).split(" | ")), f"the page's report ({name}): {m.group(1)[:400]}")
+                return r, dict(x.split(":", 1) for x in m.group(1).split(" | "))
+            finally:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    proc.kill()
+        r, got = look(4811, "on", True)
+        need(got["agents"] == "yes" and got["rows"] == "2" and got["names"] == "Donna,Moneypenny", f"the page's agents section: {got}")
+        need(got["lines"] == "picked,moved,escalated,share" and got["over"] == "yes" and "3.3 of 3" in got["share"] and "over her line" in got["share"], f"Donna's card: {got}")
+        need("2 running themselves" in got["sum"] and "Friday screen" in got["sum"], f"the fold's summary: {got['sum']}")
+        need(int(got["wide"].split("/")[0]) <= int(got["wide"].split("/")[1]), f"the page is wider than a phone: {got['wide']}")
+        (ws / "HQ/features.json").write_text('{"off": [], "on": [], "maker": true}\n')
+        r, got = look(4812, "off", False)
+        need(got["agents"] == "no", f"the section is drawn with the switch off: {got}")
+        need("planning" in r and "estimate" in r, "the rest of routines.json isn't there with the switch off")
+        return ("on: routines.json carries the agents and the page draws The agents with Donna's and Moneypenny's cards (picked, moved, "
+                "escalated, the share red over her line), Pepper off not drawn; off: no agents, no section, the rest as before")
+
+    async def flow194(self) -> str:
+        """H298, piece 8, no Claude: serialized writes. (1) The cycle's hook: an Edit or Write on a shared file
+        (the log, the to-do list, the planning), or a shell write on it, is refused before it lands, with the way in
+        named; her ledger, her line, a Read, and the scripts (handover.py edit, todo.py) pass. (2) A cycle job's
+        settings carry the hook; a normal job's don't. (3) The one-writer path takes the file's lock: twenty
+        handover edits on the log at once all land, none lost under another; the roadmap keeps the queue's lock.
+        (4) Off means off: handover.py and the job settings are as before for a normal job."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("p8")
+        env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
+        hook = ROOT / "routine/cyclehook.py"
+        def ask(tool, **inp):
+            r = _sp.run([sys.executable, str(hook)], input=json.dumps({"tool_name": tool, "tool_input": inp}), capture_output=True, text=True, env=env, cwd=str(ROOT))
+            return r.returncode, r.stderr.strip()
+        for tool, inp in (("Edit", {"file_path": str(ws / "coaching/log.md")}), ("Write", {"file_path": str(ws / "challenges.md")}),
+                          ("MultiEdit", {"file_path": str(ws / "HQ/roadmap.md")}), ("Edit", {"file_path": str(ws / "HQ/sprint.json")}),
+                          ("Bash", {"command": f"echo '- x' >> {ws / 'inbox.md'}"}), ("Bash", {"command": f"sed -i 's/a/b/' {ws / 'HQ/roadmap.md'}"}),
+                          ("Bash", {"command": f"python3 - <<'EOF'\nopen('{ws / 'challenges.md'}', 'a').write('x')\nEOF"})):
+            code, why = ask(tool, **inp)
+            need(code == 2 and "refused" in why and "HQ's own scripts" in why and "handover.py edit" in why, f"{tool} on {inp} wasn't refused: {code} {why[:200]}")
+        for tool, inp in (("Edit", {"file_path": str(ws / "HQ/ledger/donna.md")}), ("Write", {"file_path": str(ws / "HQ/direct-line/thread.jsonl")}),
+                          ("Read", {"file_path": str(ws / "challenges.md")}), ("Bash", {"command": f"python3 {ROOT / 'routine/handover.py'} edit coaching/log.md '{{}}'"}),
+                          ("Bash", {"command": f"python3 {ROOT / 'routine/todo.py'} add 'x'"}), ("Bash", {"command": f"cat {ws / 'coaching/log.md'} | head"}),
+                          ("Write", {"file_path": str(ws / "HQ/notes-donna.md")})):
+            code, why = ask(tool, **inp)
+            need(code == 0, f"{tool} on {inp} was refused: {why[:200]}")
+        # (2) a cycle job's settings carry the hook, a normal job's don't
+        drv = self.tmp / "h298-driver8.py"
+        drv.write_text(self._h298_driver())
+        def cy(*a):
+            r = _sp.run([sys.executable, str(ROOT / "routine/cycles.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            need(r.returncode == 0, f"cycles.py {' '.join(a)[:80]}: {r.stdout[-300:]} {r.stderr[-500:]}")
+            return r.stdout
+        def sched(*a):
+            return _sp.run([sys.executable, str(ROOT / "routine/schedule.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        for a in ("pepper", "moneypenny"):
+            cy("set", a, "on", "off")
+        cy("set", "donna", "hours", "00:00-23:59")
+        r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws), "tick"], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need("RESULT" in r.stdout, f"the driver's tick failed: {r.stdout[-300:]} {r.stderr[-800:]}")
+        rm = ws / "HQ/roadmap.md"
+        item = re.search(r"^- Item (\d+) · waiting, every day, priority · .* · Agent cycle: donna, bigger session$", rm.read_text(), re.M)
+        need(item and sched("move", item.group(1), "now").returncode == 0 and "became job" in sched("promote").stdout, "Donna's session didn't become a job")
+        fake = self.tmp / "h298-p8-claude"
+        fake.write_text("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\",\"session_id\":\"s\"}'\n")
+        fake.chmod(0o755)
+        r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws), "start"], capture_output=True, text=True, env={**env, "HQ_CLAUDE": str(fake)}, cwd=str(ROOT), timeout=300)
+        m = re.search(r"RESULT (.*)", r.stdout)
+        need(m, f"the cycle's start failed: {r.stdout[-400:]} {r.stderr[-1200:]}")
+        got = json.loads(m.group(1))
+        sett = json.loads((Path(env["HQ_JOB_RUN"]) / "job-settings.json").read_text())
+        hk = sett.get("hooks", {}).get("PreToolUse", [])
+        need(hk and "cyclehook.py" in hk[0]["hooks"][0]["command"] and "Edit" in hk[0]["matcher"] and "Bash" in hk[0]["matcher"], f"the cycle job's settings don't carry the hook: {sett}")
+        need("cyclehook" not in got["prompt"] and "the file's lock" in got["prompt"], "the prompt doesn't say the scripts serialize the shared files")
+        # a normal job: the old settings, no hook (the feature on or off)
+        _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), "add", "a plain test job: say done"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        r = _sp.run([sys.executable, "-c", """
+import sys, os, json; sys.path.insert(0, sys.argv[1] + '/routine'); import tick
+run = os.environ['HQ_JOB_RUN']; tick.LINUX_WINDOWS = True; tick.RUN, tick.STATE, tick.PIDFILE = run, run + '/job.json', run + '/job.pid'
+tick.open_window = lambda *a: None; tick.status = lambda *a: None; tick.log = lambda m: None
+q = json.loads(tick.jobs('next')); job = [j for j in q['waiting'] if 'plain test job' in j['text']][0]
+tick.start(job); print(json.dumps(json.load(open(run + '/job-settings.json'))))
+""", str(ROOT)], capture_output=True, text=True, env={**env, "HQ_CLAUDE": str(fake)}, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0 and "hooks" not in json.loads(r.stdout.strip().splitlines()[-1]), f"a normal job's settings changed: {r.stdout[-300:]} {r.stderr[-500:]}")
+        # (3) the lock on the one-writer path: twenty edits on the log at once, all land
+        log = ws / "coaching/log.md"
+        log.write_text("# Log\n\n## Open commitments\n\n- none\n\n## Lines\n")
+        procs = []
+        for i in range(20):
+            payload = json.dumps({"edits": [{"old": "## Lines\n", "new": f"## Lines\n- line {i}\n"}]})
+            procs.append(_sp.Popen([sys.executable, str(ROOT / "routine/handover.py"), "edit", "coaching/log.md", payload], env=env, cwd=str(ROOT), stdout=_sp.PIPE, stderr=_sp.PIPE, text=True))
+        outs = [p.communicate(timeout=120) for p in procs]
+        codes = [p.returncode for p in procs]
+        need(all(c == 0 for c in codes), f"a handover edit failed: {codes} {[o for o in outs if o[1]][:2]}")
+        t = log.read_text()
+        need(all(f"- line {i}\n" in t for i in range(20)) and t.count("- line ") == 20, f"an edit was lost under another: {t.count('- line ')} of 20 landed")
+        need(not (ws / "coaching/log.md.lock").exists() and not list(ws.glob("**/*.lock")), "a lock file landed in the user's folder")
+        import jobs as _jobs
+        need((Path(_jobs.LOCK).parent / "locks" / "coaching__log.md.lock").exists(), "the log's lock isn't in HQ's own locks folder")
+        hs = (ROOT / "routine/handover.py").read_text()
+        need('rel == "HQ/roadmap.md"' in hs and "jobs.locked()" in hs, "the roadmap no longer takes the queue's lock")
+        # (4) off: the same handover, the same settings for a normal job
+        (ws / "HQ/features.json").write_text('{"off": [], "on": [], "maker": true}\n')
+        payload = json.dumps({"edits": [{"old": "- line 0\n", "new": "- line 0 (off)\n"}]})
+        r = _sp.run([sys.executable, str(ROOT / "routine/handover.py"), "edit", "coaching/log.md", payload], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0 and "- line 0 (off)\n" in log.read_text(), f"handover edit with the feature off: {r.stdout} {r.stderr[-200:]}")
+        return ("the hook refuses Edit, Write and shell writes on the log, the to-do list, the planning and the mail list with the way in named, "
+                "and passes her ledger, her line, reads and the scripts; a cycle job's settings carry it, a normal job's don't; twenty handover "
+                "edits at once all land under the file's lock; off, all as before")
+
+    async def flow195(self) -> str:
+        """H298, piece 9, no Claude: the monthly review. On a throwaway workspace with Donna on: the runner's minute
+        plans her review once, as a one-off priority item of her kind on the coming first Friday at the review's
+        time, and a second minute plans nothing more; the first-Friday math from any day. Moved to now and started
+        through the routine's own start, the run has the review's box (20 minutes, 60 turns), her character, the
+        handbook, the whole month of her ledger and the review's questions, and its one way out is cycles.py
+        proposal; a fake claude writes the proposal: it lands in her ledger and on her line, marked as changing
+        nothing, and nothing else in the workspace changed (the handbook, the cycle settings, the to-do list, the
+        log, the planning's rows). Off, no review is planned."""
+        import subprocess as _sp
+        import hashlib as _hl
+        ws, env = self._h298_ws("p9")
+        env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
+        drv = self.tmp / "h298-driver9.py"
+        drv.write_text(self._h298_driver())
+        def drive(*a, extra=None):
+            r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws), *a], capture_output=True, text=True, env={**env, **(extra or {})}, cwd=str(ROOT), timeout=300)
+            m = re.search(r"RESULT (.*)", r.stdout)
+            need(m, f"the driver failed: {r.stdout[-600:]} {r.stderr[-1500:]}")
+            return json.loads(m.group(1))
+        def cy(*a):
+            r = _sp.run([sys.executable, str(ROOT / "routine/cycles.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            need(r.returncode == 0, f"cycles.py {' '.join(a)[:80]}: {r.stdout[-300:]} {r.stderr[-500:]}")
+            return r.stdout
+        def sched(*a):
+            return _sp.run([sys.executable, str(ROOT / "routine/schedule.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        import cycles as _cy
+        ff = {d: _cy.first_friday(datetime.strptime(d, "%Y-%m-%d")).strftime("%Y-%m-%d") for d in ("2026-10-29", "2026-11-06", "2026-11-07", "2026-12-01", "2027-01-02")}
+        need(ff == {"2026-10-29": "2026-11-06", "2026-11-06": "2026-12-04", "2026-11-07": "2026-12-04", "2026-12-01": "2026-12-04", "2027-01-02": "2027-02-05"}, f"the first-Friday math: {ff}")
+        for a in ("pepper", "moneypenny"):
+            cy("set", a, "on", "off")
+        rm = ws / "HQ/roadmap.md"
+        t = drive("tick", "2026-10-29 10:00")
+        need(any("donna's monthly review planned for Friday 6 November 09:00" in x for x in t["log"]), f"the review wasn't planned: {t['log']}")
+        items = re.findall(r"^- Item (\d+) · waiting(.*?) · Agent cycle: donna, monthly review$", rm.read_text(), re.M)
+        need(len(items) == 1 and ", priority" in items[0][1] and "every" not in items[0][1] and "2026-11-06 09:00" in items[0][1], f"the review item: {items}")
+        t = drive("tick", "2026-10-29 10:01")
+        need(not any("monthly review planned" in x for x in t["log"]), "a second minute planned the review again")
+        # start it: moved to now, promoted; the fake claude writes the proposal
+        before = {p.relative_to(ws).as_posix(): _hl.md5(p.read_bytes()).hexdigest() for p in ws.rglob("*") if p.is_file() and ".git" not in p.parts}
+        r = sched("move", items[0][0], "now")
+        need(r.returncode == 0 and "became job" in sched("promote").stdout, "the review didn't become a job")
+        words = "Drop: the second look at the mail list each cycle, it never changed anything. Automate: the parcel lines, a row for the planning. Change in my section: my ten percent should name the week's one deadline first."
+        fake = self.tmp / "h298-review-claude.py"
+        fake.write_text("#!/usr/bin/env python3\nimport json, sys, os, subprocess\np = sys.stdin.read(); open(os.environ['H298_GOT'], 'w').write(p)\n"
+                        "def out(d): print(json.dumps(d), flush=True)\n"
+                        "out({'type': 'system', 'subtype': 'init', 'session_id': 's-review'})\n"
+                        "r = subprocess.run([sys.executable, os.environ['H298_CYCLES'], 'proposal', 'donna', os.environ['H298_WORDS']], capture_output=True, text=True)\n"
+                        "out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'cycles.py proposal donna'}}]}})\n"
+                        "out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': r.stdout + r.stderr}]}})\n"
+                        "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Proposed.'})\n")
+        fake.chmod(0o755)
+        got = self.tmp / "h298-review-got.txt"
+        _sp.run([sys.executable, str(ROOT / "routine/ledger.py"), "donna", "note", "decision: the parcel line stays, source: his rule on parcels"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        s = drive("start", extra={"HQ_CLAUDE": str(fake), "H298_GOT": str(got), "H298_CYCLES": str(ROOT / "routine/cycles.py"), "H298_WORDS": words})
+        p = s["prompt"]
+        need(p.startswith(f"let's go. This is job {s['n']} from the queue: Donna's own cycle, monthly review (H298)"), f"the review's prompt head: {p[:200]}")
+        need("Your character:" in p and "The handbook: how you run yourself" in p and "### Donna" in p and "Your whole month" in p
+             and "This is your monthly review" in p and "which 20% of what you did moved your score" in p and "It changes nothing by itself" in p
+             and "proposal donna" in p and "the parcel line stays" in p, "the review's prompt lacks the month, the questions or the way out")
+        need("--max-minutes 20 --max-turns 60" in s["script"], f"the review's box: {s['script']}")
+        need(s["note"] and s["note"]["boxed"] is None, f"the review's run: {s['note']}")
+        led = (ws / "HQ/ledger/donna.md").read_text()
+        need("monthly review: proposal" in led and words in led, f"the proposal isn't in her ledger: {led[-500:]}")
+        thread = (ws / "HQ/direct-line/thread.jsonl").read_text() if (ws / "HQ/direct-line/thread.jsonl").exists() else ""
+        need("My monthly review, for your yes or no (nothing changed by itself): " + words in thread, f"the proposal isn't on her line: {thread[-400:]}")
+        after = {p_.relative_to(ws).as_posix(): _hl.md5(p_.read_bytes()).hexdigest() for p_ in ws.rglob("*") if p_.is_file() and ".git" not in p_.parts}
+        changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+        allowed = {"HQ/ledger/donna.md", "HQ/direct-line/thread.jsonl", "HQ/direct-line/.thread.lock", "HQ/roadmap.md"}
+        changed = [k for k in changed if not k.startswith("HQ/roadmap-estimates/")]  # the queue's own bookkeeping of the run
+        need(set(changed) <= allowed, f"the review changed more than her ledger, her line and the queue: {changed}")
+        for k in ("challenges.md", "coaching/log.md", "inbox.md", "HQ/agents/cycles.json", "HQ/agents/handbook.md", "HQ/sprint.json"):
+            need(before.get(k) == after.get(k), f"the review changed {k}")
+        rows_before = [l for l in (ROOT / "template/HQ/roadmap.md").read_text().splitlines() if l.startswith("- H") or l.startswith("- F")]
+        rows_after = [l for l in rm.read_text().splitlines() if l.startswith("- H") or l.startswith("- F")]
+        need(rows_before == rows_after, "a planning row changed")
+        need((ws / "HQ/agents/handbook.md").read_text() == (ROOT / "template/HQ/agents/handbook.md").read_text(), "the handbook changed")
+        # off: no review planned
+        ws2, env2 = self._h298_ws("p9off", maker=False)
+        r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws2), "tick", "2026-10-29 10:00"], capture_output=True, text=True, env={**env2, "HQ_LEDGER_FOLDER": str(ws2 / "HQ/ledger")}, cwd=str(ROOT), timeout=120)
+        need("monthly review" not in (ws2 / "HQ/roadmap.md").read_text(), "a review was planned with the feature off")
+        return ("Donna's review planned once for Friday 6 November 09:00 as a one-off priority item (the first-Friday math from any day); started, it ran "
+                "in its 20-minute 60-turn box with her character, the handbook, her whole month and the questions, and its proposal landed in her ledger "
+                "and on her line marked as changing nothing; nothing else in the workspace changed; off, none planned")
+
     async def flow184(self) -> str:
         """F78, no Claude, no window: a job held by the usage line is checked on what's left of it when it carries on
         in its own chat. On 28 October job 424 was held at 16:30 with about 5.8% of the 5-hour left, yet every minute
@@ -13717,6 +14816,7 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
 import json, os, subprocess, sys, time
 sys.path.insert(0, sys.argv[1] + "/routine")
 D, JV = sys.argv[2], sys.argv[1]
+
 def need(ok, why):
     if not ok:
         print("FAIL " + why); sys.exit(1)
@@ -20972,8 +22072,9 @@ print("H88OUT " + json.dumps(out))
             os.environ.pop("HQ_CALENDAR", None)
             items = ft.listing()
             ids = [i["id"] for i in items]
-            need(ids == ["calendar", "todo", "texts", "weather", "travel", "driving", "mail", "news", "notes", "team", "coaching"], f"the switches: {ids}")
-            need(all(i["on"] for i in items if i["id"] not in ("coaching", "driving")) and not (tmp / ft.STATE).exists(), "not everything starts on")
+            need(ids == ["calendar", "todo", "texts", "weather", "travel", "driving", "mail", "news", "notes", "team", "coaching", "agents_run"], f"the switches: {ids}")
+            need(all(i["on"] for i in items if i["id"] not in ("coaching", "driving", "agents_run")) and not (tmp / ft.STATE).exists(), "not everything starts on")
+            need(not next(i for i in items if i["id"] == "agents_run")["on"], "the agents run themselves (H298) doesn't start off")
             need(not next(i for i in items if i["id"] == "driving")["on"], "driving (H230, their own key) doesn't start off")
             need(all(i["line"] for i in items) and next(i for i in items if i["id"] == "weather").get("needs_name", "").startswith("Texts with"),
                  "a switch without its line, or the weather doesn't say it needs the texts")
@@ -22048,6 +23149,17 @@ FLOWS = {
     141: ("H240: a 9292 link at the leaving time (the calendar's start or the time he names, leaving then or there by then), with the notices for the stops and stations near both ends from the open live data, never made up", False, "flow141"),
     140: ("H238: call me back (the page reloads and calls the same agent, continuing the call), and an agent calls him at an agreed time or appointment (a push, one tap picks up, a missed one in her chat)", False, "flow140"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
+    192: ("H298, piece 6: the wall: the gate holds a start over the line, nothing starts outside her hours (dropped to the morning when still useful, waits before them), past useful-until is skipped, over her weekly or daily share is refused, boxed twice in a row is a tripwire and nothing restarts itself", False, "flow192"),
+    193: ("H298, piece 7: the Friday screen on the status page: routines.json carries the agents (three lines per agent, her share against her line) and the page draws The agents, one card per agent, the share red over her line; off, nothing of it", False, "flow193"),
+    194: ("H298, piece 8: serialized writes: a cycle's hook refuses Edit, Write and shell writes on a shared file before they land and passes her ledger, her line and the scripts; a cycle job's settings carry it, a normal job's don't; twenty one-writer edits at once all land under the file's lock; off, as before", False, "flow194"),
+    195: ("H298, piece 9: the monthly review: planned once per agent as a one-off priority item on the first Friday; run in its box with her character, the handbook, her whole month and the questions; its proposal lands in her ledger and on her line and changes nothing; off, none planned", False, "flow195"),
+    191: ("H298, piece 6: a cycle runs: an order now becomes a step at once; the bigger session starts through the routine's own start with her character, the handbook, her ledger, the order and the plan command, inside her box; its plan becomes priority step items; a step with a changed input is stale; done and failed in the ledger; a check failing twice and the same goal twice are tripwires on her line, at most her texts a day", False, "flow191"),
+    190: ("H298, piece 6: off means off: the runner plans nothing and the rules carry nothing while the feature is off; on, each agent's cycles are planned once as repeating priority items of their own kind, an agent off loses hers, off again cancels them all", False, "flow190"),
+    189: ("H298, piece 5: the ledger per agent (orders on top, each cycle's plan as lines and JSON, notes, the score) and the weekly score computed without Claude: the pokes from his own lines (status questions, corrections, short calls) and each agent's own measures from the files", False, "flow189"),
+    188: ("H298, piece 4: the ready check's mechanical fields: His words a quote found in a call, the notes or the log; My own additions filled or none; Sources that exist (a row, a rule, a dated call, a file); with the feature on an empty or false field refuses the Ready mark", False, "flow188"),
+    187: ("H298, piece 3: the deterministic box on a headless run (minutes from a wall clock, turns from the stream): past either the run is ended, done on the queue, its note written; the cycle kinds cycle-<agent> and step-<agent>", False, "flow187"),
+    186: ("H298, piece 2: the identity fix: the harvest after a call or text keeps only first-person lines about her own office life; a transcript full of his life yields nothing about him", False, "flow186"),
+    185: ("H298, piece 1: the handbook under each agent's character behind the switch (in pieces, off by default): the template's blank handbook and cycle defaults, off loads nothing, on loads part one and her own section, Moneypenny's craft trimmed", False, "flow185"),
 }
 
 
