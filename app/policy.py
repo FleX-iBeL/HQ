@@ -586,6 +586,19 @@ class Policy:
             if len(args) == 1 or args[1] in ("day", "coach", "build", "layer", "fresh"):
                 return Decision(ALLOW, "the briefing, or a layer of the map")
             return Decision(DENY, "the briefing script takes day, coach, build, fresh or layer N on a call")
+        # H298: the agents run themselves: what runs and each one's share (list), the settings and a change to one
+        # ("Donna gets four points a week"), an order from this call ("start x", "stop y", "from now on"), her ledger,
+        # the Friday screen and the score. A plan, a step's outcome, a text or the routine's minute are her own runs'.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "cycles.py"):
+            sub = args[1] if len(args) > 1 else "list"
+            if sub in ("list", "show", "status", "settings", "set", "order", "ledger", "friday", "score"):
+                return Decision(ALLOW, "the agents' own cycles: the settings, an order, her ledger, the Friday screen")
+            return Decision(DENY, "from a call, the cycles script takes list, settings, set, order, ledger, friday or score; "
+                                  "a plan, a step's outcome and the minute are her own runs'")
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "ledger.py"):
+            if len(args) <= 2 or args[2] in ("show", "list", "orders", "plan", "scores", "note"):
+                return Decision(ALLOW, "an agent's ledger")
+            return Decision(DENY, "from a call, the ledger script reads, or adds a note")
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "backend.py"):
             if len(args) == 1 or args[1] in ("list", "show"):
                 return Decision(ALLOW, "the backend switches")

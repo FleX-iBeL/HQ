@@ -290,6 +290,8 @@ def listing(base: Path | None = None) -> list[dict]:
             item["needs_name"] = need["name"].replace("{agent}", agent)
         if _computer_off(f):
             item["on"], item["fixed"] = False, "Off on this computer"
+        if f.get("cycles"):  # H298: the agents' cycle settings, a line per agent under this row when it's on
+            item["cycles"] = True
         if f.get("key"):  # H230: their own maps key, kept on this computer (drive.py); never the key itself
             try:
                 sys.path.insert(0, str(ROOT / "app"))

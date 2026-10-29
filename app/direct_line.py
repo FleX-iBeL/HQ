@@ -575,7 +575,8 @@ def _text_rules() -> str:
             .replace("{pings}", _config.PINGS_RULE).replace("{mailfast}", _config.MAIL_FAST_RULE + "\n" + _config.MAIL_TIDY_RULE)
             .replace("{apptnotes}", _config.APPT_NOTES_RULE).replace("{todo}", _config.TODO_RULE).replace("{games}", _config.GAMES_RULE).replace("{travel}", _config.TRAVEL_RULE)
             .replace("{onewriter}", _config.ONE_WRITER_RULE)
-            .replace("{team}", _config.TEAM_RULE).replace("{extensions}", _extensions_rule()))
+            .replace("{team}", _config.TEAM_RULE).replace("{extensions}", _extensions_rule())
+            + (("\n" + _config.cycles_rule() + "\n") if _config.cycles_rule() else ""))  # H298: only while it's on
 
 
 def _extensions_rule() -> str:

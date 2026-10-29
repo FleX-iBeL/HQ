@@ -1139,6 +1139,43 @@ if __name__ == "__main__":
             return JSONResponse({"error": "Couldn't write it"}, status_code=500)
         return JSONResponse({"items": await asyncio.to_thread(_feat.listing, _feat_folder()), "said": said}, headers=_NO_CACHE)
 
+    # H298: the agents' cycle settings (routine/cycles.py), a line per agent under the feature's row in Settings: on or
+    # off, her shares, her boxes, her hours, her batches, her texts a day; and each one's share used this week. Changed
+    # only from the page (x-hq: features), never on Free-only; a call changes the same with cycles.py set.
+    @app.get("/api/agents-cycles", include_in_schema=False)
+    async def cycles_read():
+        if config.FREE_ONLY:
+            return JSONResponse({"off": "Free"}, headers=_NO_CACHE)
+        sys.path.insert(0, str(config.ROOT / "routine"))
+        import cycles as _cy
+
+        def _read():
+            base = _feat_folder()
+            s = _cy.settings(base)["agents"]
+            return {"on": _cy.on(base), "agents": [{"id": aid, "name": next((a["name"] for a in _cy._agents(base) if a["id"] == aid), aid.capitalize()),
+                                                   "settings": v, "share": _cy.shares(aid, base=base)} for aid, v in s.items()
+                                                  if any(a["id"] == aid for a in _cy._agents(base))]}
+        return JSONResponse(await asyncio.to_thread(_read), headers=_NO_CACHE)
+
+    @app.post("/api/agents-cycles", include_in_schema=False)
+    async def cycles_change(request: Request):
+        if request.headers.get("x-hq") != "features":
+            return JSONResponse({"error": "Only the HQ page can change these"}, status_code=403)
+        if config.FREE_ONLY:
+            return JSONResponse({"error": "Not on Free"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict) or not all(isinstance(ask.get(k), str) for k in ("agent", "key", "value")):
+            return JSONResponse({"error": "no change asked"}, status_code=400)
+        sys.path.insert(0, str(config.ROOT / "routine"))
+        import cycles as _cy
+        if not _cy.on(_feat_folder()):
+            return JSONResponse({"error": "The agents run themselves is off"}, status_code=409)
+        said = await asyncio.to_thread(_cy.set_setting, ask["agent"], ask["key"], ask["value"], _feat_folder())
+        return JSONResponse({"said": said, "ok": said.endswith(f" is now {ask['value'].strip()}.")}, headers=_NO_CACHE)
+
     # H230: their own maps key for Driving to appointments, pasted in Settings: kept on this computer only
     # (drive.py, ~/.config/hq/maps-key), never in the workspace, never sent back. {key} keeps it, {key: ""} forgets it.
     @app.post("/api/drive/key", include_in_schema=False)

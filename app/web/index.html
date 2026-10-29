@@ -397,7 +397,15 @@
   #caltrip .trip a { color:var(--accent); font-weight:600; margin-top:2px; }
   #calping.on, #caltravel.on { border-color:var(--accent); color:var(--accent); }
   #caltrip .calmode { margin-top:6px; border:0; background:transparent; color:var(--accent); font:500 14px/1.3 -apple-system,sans-serif; padding:4px 0; }
-  #wfrows .row:has(.keybox) { flex-wrap:wrap; }
+  #wfrows .row:has(.keybox), #wfrows .row:has(.cycbox) { flex-wrap:wrap; }
+  /* H298: the agents' cycle settings under the feature's row: a line per agent, numbers in small fields */
+  #wfrows .cycbox { flex-basis:100%; margin-top:6px; display:flex; flex-direction:column; gap:8px; }
+  #wfrows .cycbox .cyc { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; font-size:14px; }
+  #wfrows .cycbox .cyc b { flex-basis:100%; font-weight:600; }
+  #wfrows .cycbox .cyc small { color:var(--muted); flex-basis:100%; }
+  #wfrows .cycbox label { display:inline-flex; align-items:center; gap:4px; font-size:13px; color:var(--muted); }
+  #wfrows .cycbox input { width:5.2em; font:14px -apple-system,sans-serif; padding:5px 6px; border-radius:8px; border:1px solid var(--muted); background:transparent; color:var(--fg); }
+  #wfrows .cycbox input.wide { width:8.5em; }
   #wfrows .keybox { flex-basis:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:6px; }
   #wfrows .keybox small { flex-basis:100%; }
   #wfrows .keybox input { flex:1; min-width:0; font:15px -apple-system,sans-serif; padding:8px 10px; border-radius:10px; border:1px solid var(--muted); background:transparent; color:var(--fg); }
@@ -1488,8 +1496,51 @@ function showWorkflows(items) {
     });
     row.append(span, b);
     if (w.key && w.on) row.append(keyBox(w.key));  // H230: their own maps key
+    if (w.cycles && w.on) row.append(cyclesBox());  // H298: the agents' cycle settings, a line per agent
     return row;
   }));
+}
+// H298: the agents run themselves: under the feature's row, one line per agent (on or off, her weekly and daily share
+// in points, her bigger session's time and box, a small step's box and count, her hours, Donna's batches, her texts a
+// day) and her share used this week; each field saves on change through /api/agents-cycles. A call changes the same.
+function cyclesBox() {
+  const box = document.createElement("div"); box.className = "cycbox";
+  const note = document.createElement("small"); note.textContent = "Loading the agents' cycles…"; box.append(note);
+  const fields = [["weekly", "share a week", a => a.settings.weekly_share], ["daily", "a day", a => a.settings.daily_share],
+                  ["session_at", "session at", a => a.settings.session.at, "wide"], ["session_minutes", "min", a => a.settings.session.minutes],
+                  ["session_turns", "turns", a => a.settings.session.turns], ["step_minutes", "step min", a => a.settings.step.minutes],
+                  ["step_turns", "turns", a => a.settings.step.turns], ["steps_a_day", "steps a day", a => a.settings.step.most_a_day],
+                  ["hours", "hours", a => a.settings.hours.join("-"), "wide"], ["batches", "batches", a => (a.settings.batches || []).join(",") || "none", "wide"],
+                  ["texts", "texts a day", a => a.settings.tripwire_texts]];
+  const save = async (agent, key, value, small) => {
+    try {
+      const r = await fetch("api/agents-cycles", { method: "POST", cache: "no-store", headers: { "x-hq": "features", "content-type": "application/json" },
+        body: JSON.stringify({ agent, key, value: String(value) }) });
+      const d = await r.json(); small.textContent = d.said || d.error || "";
+    } catch (e) { small.textContent = "Couldn't save it."; }
+  };
+  fetch("api/agents-cycles", { cache: "no-store" }).then(r => r.json()).then(d => {
+    box.replaceChildren();
+    if (!d || !d.agents) { note.textContent = "The agents' cycles couldn't be read."; box.append(note); return; }
+    for (const a of d.agents) {
+      const line = document.createElement("div"); line.className = "cyc"; line.dataset.agent = a.id;
+      const b = document.createElement("b"); b.textContent = `${a.name}: ${a.share.weekly_used} of ${a.share.weekly_share} points used this week (today ${a.share.daily_used} of ${a.share.daily_share})`;
+      const sw = document.createElement("button"); sw.type = "button"; sw.className = "sw" + (a.settings.on ? " on" : ""); sw.textContent = a.settings.on ? "On" : "Off";
+      sw.setAttribute("aria-label", `${a.name} runs her own cycle`); sw.setAttribute("aria-pressed", String(!!a.settings.on));
+      const small = document.createElement("small");
+      sw.addEventListener("click", async () => { const want = !a.settings.on; a.settings.on = want; sw.className = "sw" + (want ? " on" : ""); sw.textContent = want ? "On" : "Off"; await save(a.id, "on", want ? "on" : "off", small); });
+      line.append(b, sw);
+      for (const [key, label, get, cls] of fields) {
+        if (key === "batches" && !(a.settings.batches || []).length && a.id !== "donna") continue;
+        const lab = document.createElement("label"); const inp = document.createElement("input");
+        inp.type = "text"; inp.value = String(get(a)); inp.setAttribute("aria-label", `${a.name}: ${label}`); if (cls) inp.className = cls;
+        inp.addEventListener("change", () => save(a.id, key, inp.value, small));
+        lab.append(document.createTextNode(label + " "), inp); line.append(lab);
+      }
+      line.append(small); box.append(line);
+    }
+  }).catch(() => { note.textContent = "The agents' cycles couldn't be read."; });
+  return box;
 }
 // H230: Driving's maps key, pasted here, kept on this computer only (drive.py); the page never gets it back, only
 // which kind is set. Empty and Forget takes it off.
