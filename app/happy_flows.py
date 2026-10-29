@@ -6803,7 +6803,7 @@ print(json.dumps(o))
              and "--land-planned" in page72 and "--land-repeat" in page72, "H176: the status page doesn't draw where the usage will land")
         srv = (jv / "status/server.mjs").read_text()
         page = (jv / "status/index.html").read_text()
-        need("routine/estimate.py" in srv and ("estimate };" in srv or "estimate, planning };" in srv or "estimate, planning, feedback };" in srv), "the status server doesn't serve the estimates")
+        need("routine/estimate.py" in srv and ("estimate };" in srv or "estimate, planning };" in srv or "estimate, planning, feedback };" in srv or "estimate, planning, feedback, agents };" in srv), "the status server doesn't serve the estimates")
         need("function etaWords" in page and "etaTotal(E)" in page and "etaAccuracy(E.accuracy)" in page and "(estimate)" in page,
              "the status page doesn't show the estimates")
         # H174: under each heading what its total counts; the total says it's the computed estimate; the team's guess on its own quiet line.
