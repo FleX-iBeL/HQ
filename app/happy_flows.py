@@ -14154,7 +14154,8 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
     async def flow188(self) -> str:
         """H298, piece 4, no Claude: the ready check's mechanical fields. On a throwaway workspace with a made-up call
         transcript, quick notes and planning rows: a row whose His words quote is found in the call, whose My own
-        additions says something and whose Sources name a row, a rule, a dated call and a file holds; a quote that's in
+        additions names what he said yes to with the date and whose Sources name a row, a rule, a dated call and a file
+        holds; an addition without his yes and its date doesn't (F81), a row without the field does; a quote that's in
         the notes holds; a quote around a "…" holds when both parts are found; a quote found nowhere, an empty
         additions field, "none" (holds), a source that doesn't exist. With the feature on, the Ready mark is refused on
         a row whose field doesn't hold and given to one whose fields hold; with it off, today's HQ: the mark goes on
@@ -14170,12 +14171,14 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         (ws / "rules.md").write_text("# Rules\n\n1. Talk like a person.\n2. Only say what benefits them.\n3. Short plain sentences.\n")
         rm = ws / "HQ/roadmap.md"
         rows = (
-            "| ⬜ | H9101 A bigger feedback button | What's asked: the button bigger and red. His words: \"the feedback button to be bigger, and red\". My own additions: the red is from the kinds' palette. Sources: rule 2, the call of 7 January 2026, app/features.py. Done means the button reads at a glance. Test: flow 160. Why: findability. Out of scope: the dock. Touches: the call page. Size: small. Waits on nothing. Privacy: nothing of his. | | |\n"
+            "| ⬜ | H9101 A bigger feedback button | What's asked: the button bigger and red. His words: \"the feedback button to be bigger, and red\". My own additions: the red is from the kinds' palette, his yes on the call of 7 January 2026. Sources: rule 2, the call of 7 January 2026, app/features.py. Done means the button reads at a glance. Test: flow 160. Why: findability. Out of scope: the dock. Touches: the call page. Size: small. Waits on nothing. Privacy: nothing of his. | | |\n"
             "| ⬜ | H9102 Fold the finished jobs | His words: \"the status page should fold … away by default\". My own additions: none. Sources: H9101. | | |\n"
             "| ⬜ | H9103 Pale colours | His words: \"calendar colours are too pale on the phone\". My own additions: none. Sources: the quick notes of 8 January 2026, app/kinds.py. | | |\n"
             "| ⬜ | H9104 Made up | His words: \"make the dock purple with stars\". My own additions: none. Sources: rule 1. | | |\n"
             "| ⬜ | H9105 Empty additions | His words: \"the feedback button to be bigger, and red\". My own additions: . Sources: rule 1. | | |\n"
             "| ⬜ | H9106 Ghost source | His words: \"the feedback button to be bigger, and red\". My own additions: none. Sources: H9999, rule 9. | | |\n"
+            "| ⬜ | H9108 Her own cap | His words: \"the feedback button to be bigger, and red\". My own additions: at most three reviews a day. Sources: rule 1. | | |\n"
+            "| ⬜ | H9109 No additions field | His words: \"the feedback button to be bigger, and red\". Sources: rule 1. | | |\n"
             "| ⬜ | H9107 No fields at all | Something to build, with every point: what's asked, done means, test, why, out of scope, touches, size, waits on nothing, privacy. | | |\n")
         rm.write_text(rm.read_text().replace("## Phase H · Features\n\nWhat's new: things HQ should build or manage next.\n\n| | Step | What you get | Model |\n|---|---|---|---|\n",
                                              "## Phase H · Features\n\nWhat's new: things HQ should build or manage next.\n\n| | Step | What you get | Model |\n|---|---|---|---|\n" + rows))
@@ -14184,7 +14187,12 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         def sp(*a, on="1"):
             return _sp.run([sys.executable, str(ROOT / "routine/sprint.py"), *a], capture_output=True, text=True,
                            env={**env, "HQ_READY_FIELDS": on}, cwd=str(ROOT))
-        out = sp("fields", "H9101", "H9102", "H9103", "H9104", "H9105", "H9106", "H9107").stdout
+        out = sp("fields", "H9101", "H9102", "H9103", "H9104", "H9105", "H9106", "H9107", "H9108", "H9109").stdout
+        # F81 (job 481): an addition only with his yes and its date; none or no field at all holds
+        need("H9108: the fields don't hold." in out and "an addition without his yes and its date" in out, f"her own cap without his yes holds: {out}")
+        need("H9109: the fields hold." in out, f"a row without a My own additions field doesn't hold: {out}")
+        r = sp("ready", "H9108")
+        need(r.returncode != 0 and "sit-down list" in r.stdout + r.stderr, f"an addition without his yes didn't refuse the mark: {r.stdout} {r.stderr}")
         need("H9101: the fields hold." in out and "H9102: the fields hold." in out and "H9103: the fields hold." in out, f"a row with good fields doesn't hold: {out}")
         need("H9104: the fields don't hold." in out and "not found in the calls" in out, f"a made-up quote holds: {out}")
         need("H9105: the fields don't hold." in out and "My own additions is empty" in out, f"an empty additions field holds: {out}")
@@ -23638,7 +23646,7 @@ FLOWS = {
     191: ("H298, piece 6: a cycle runs: an order now becomes a step at once; the bigger session starts through the routine's own start with her character, the handbook, her ledger, the order and the plan command, inside her box; its plan becomes priority step items; a step with a changed input is stale; done and failed in the ledger; a check failing twice and the same goal twice are tripwires on her line, at most her texts a day", False, "flow191"),
     190: ("H298, piece 6: off means off: the runner plans nothing and the rules carry nothing while the feature is off; on, each agent's cycles are planned once as repeating priority items of their own kind, an agent off loses hers, off again cancels them all", False, "flow190"),
     189: ("H298, piece 5: the ledger per agent (orders on top, each cycle's plan as lines and JSON, notes, the score) and the weekly score computed without Claude: the pokes from his own lines (status questions, corrections, short calls) and each agent's own measures from the files", False, "flow189"),
-    188: ("H298, piece 4: the ready check's mechanical fields: His words a quote found in a call, the notes or the log; My own additions filled or none; Sources that exist (a row, a rule, a dated call, a file); with the feature on an empty or false field refuses the Ready mark", False, "flow188"),
+    188: ("H298, piece 4: the ready check's mechanical fields: His words a quote found in a call, the notes or the log; My own additions left out, none, or with his yes and its date (F81); Sources that exist (a row, a rule, a dated call, a file); with the feature on an empty or false field refuses the Ready mark", False, "flow188"),
     187: ("H298, piece 3: the deterministic box on a headless run (minutes from a wall clock, turns from the stream): past either the run is ended, done on the queue, its note written; the cycle kinds cycle-<agent> and step-<agent>", False, "flow187"),
     186: ("H298, piece 2: the identity fix: the harvest after a call or text keeps only first-person lines about her own office life; a transcript full of his life yields nothing about him", False, "flow186"),
     185: ("H298, piece 1: the handbook under each agent's character behind the switch (in pieces, off by default): the template's blank handbook and cycle defaults, off loads nothing, on loads part one and her own section, Moneypenny's craft trimmed", False, "flow185"),

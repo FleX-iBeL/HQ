@@ -412,7 +412,7 @@ def set_ready(label, on=True):
             fw = fields_why(row)
             if fw:
                 sys.exit("Refused: " + fw + ". (His words must be a quote found in a call, the notes or the log; "
-                         "My own additions says what's hers or none; Sources names a row, a rule, a dated call or a file.)")
+                         "My own additions is left out, none, or what he said yes to with the date; Sources names a row, a rule, a dated call or a file.)")
     d = _load(RANKS)
     have = {r["label"] for r in rows}
     m = {l: v for l, v in (d.get("ready") or {}).items() if l in have}
@@ -469,8 +469,8 @@ def gate(text, job_text_, say_so=False):
 
 # The lesson of 28 October (F77, F81) built in code, not in a prompt: three of the nine points are fields the check
 # reads from the row's ask. "His words:" must hold a quote found by grep in a call transcript (HQ/calls/), the quick
-# notes (HQ/notes.md, with the cleared ones) or the log (coaching/log.md and its archive); "My own additions:" must say
-# something or say "none"; "Sources:" must name a planning row, a rule, a dated call or a file that exists. While "The
+# notes (HQ/notes.md, with the cleared ones) or the log (coaching/log.md and its archive); "My own additions:" may be
+# left out or say "none", and what it names needs his yes with its date (F81); "Sources:" must name a planning row, a rule, a dated call or a file that exists. While "The
 # agents run themselves" is on, a Ready mark with an empty or false field is refused (set_ready, and so Plan the sprint,
 # Send to the team and a call's add), and that refusal is one of Moneypenny's tripwires (routine/cycles.py). Off, the
 # fields are only reported (sprint.py check, fields), nothing is refused: today's HQ exactly.
@@ -624,10 +624,23 @@ def ready_fields(row, ws=None):
     out["his_words"] = {"ok": bool(quotes) and not missing, "quotes": quotes, "found": found,
                         "why": ("no His words field" if not ft["his_words"] else "no quote in His words (put his words between quotes)"
                                 if not quotes else f"not found in the calls, the notes or the log: {missing[0][:60]!r}" if missing else "")}
+    # F81 (job 481): an addition of hers never goes into a row on her own say; it goes on the sit-down list, and only
+    # with his yes is it written in, with the date. So the field may be left out or say "none"; when it says
+    # something, it needs his yes with a date ("his yes, 29 October 2026"); an empty one still says nothing.
     add = ft["additions"].strip(" .,;:*")
-    out["additions"] = {"ok": bool(add), "text": add,
-                        "why": "" if add else ("no My own additions field" if not ft["additions"] and "additions" not in row["line"].lower()
-                                                       else "My own additions is empty: say what's hers, or none")}
+    has_label = bool(re.search(r"(?:^|[\s(;.,*])(?:" + dict(FIELD_LABELS)["additions"] + r")\s*:", ask_of(row["line"]), re.I))
+    none = bool(re.fullmatch(r"none|nothing|no(?:ne)? additions?", add, re.I))
+    yes = bool(re.search(r"\byes\b", add, re.I) and _DATE.search(add))
+    if not has_label:
+        a_ok, a_why = True, ""
+    elif not add:
+        a_ok, a_why = False, "My own additions is empty: leave it out, say none, or name what he said yes to with the date"
+    elif none or yes:
+        a_ok, a_why = True, ""
+    else:
+        a_ok, a_why = False, ("an addition without his yes and its date: it goes on the sit-down list first (F81), "
+                              "or write his yes with the date")
+    out["additions"] = {"ok": a_ok, "text": add or ("none" if not has_label else ""), "why": a_why}
     named = [x for x in re.split(r"[;,]| and ", ft["sources"]) if x.strip()]
     labels = {r["label"] for r in open_rows()}
     held = {x.strip(): _source_ok(x, ws, labels) for x in named}
