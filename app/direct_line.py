@@ -91,6 +91,7 @@ TEAM_AGENT = "moneypenny"  # H266: the team line is hers
 TEAM_KINDS = ("jobs", "paused", "nightly", "estimates", "qa-failed", "release-held", "team")
 DOWN_AFTER = 180  # an incident open this long gets a text; a takeover or a refused pull or push (F31) gets one at once
 KEEP = 400  # messages kept in the thread
+SYNC_CONFLICT = "Both sides changed"  # F58: routine/sync.py's CONFLICT_WHY, an incident she never texts about
 SUBJECT = "https://github.com/FleX-iBeL/HQ"  # the VAPID contact the push services ask for
 
 
@@ -1157,6 +1158,8 @@ def watch(q: dict | None = None, *, main: bool = True, incidents_data: list | No
     downs, backs, ts_down, ts_back = [], [], [], []
     for e in incidents_data or []:
         iid = str(e.get("id"))
+        if e.get("key") == "sync" and str(e.get("why") or "").startswith(SYNC_CONFLICT):
+            continue  # F58: a sync conflict is the routine's to merge; she stays quiet about it, down and back
         if str(e.get("key") or "").endswith("-tailscale"):  # H234: Tailscale off here, its own text, not "down"
             if not e.get("back"):
                 if iid not in told and now - float(e.get("down") or now) >= DOWN_AFTER:

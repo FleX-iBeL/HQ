@@ -66,6 +66,7 @@ IGNORE_WORKSPACE = [".git", ".claude/settings.local.json", *[f"(?i)*.{x}" for x 
 IGNORE_MEMORY = ["(?d).DS_Store"]
 GIT_EXCLUDE = [".stfolder", ".stignore", "*.sync-conflict-*", "*.here.jsonl"]  # Syncthing's own files stay out of git
 CONFLICT = re.compile(r"\.sync-conflict-\d{8}-\d{6}-[A-Z0-9]{7}")
+CONFLICT_WHY = "Both sides changed"  # F58: an incident that starts so is a conflict copy; Donna doesn't text about it
 CALLS_AFTER = 1800  # H152: a call transcript nobody committed, this long after its last change, is committed by the main
 
 
@@ -390,12 +391,51 @@ def merge_text(c):
             f"the file through the lock, and say in the log what was merged. Nothing else.")
 
 
+def merge_lines(file, copy):
+    """F58 (job 453): a log of lines (.jsonl: Donna's texts, the team line, a ledger) is the routine's own writing, so
+    two versions of it are merged here, without Claude: every line of both, each once, in time order when every line
+    has its time ("at"), else the file's order with the copy's own lines after. Written over the file; True when done.
+    Anything else (a line that isn't JSON, a file that isn't a log) is left for a merge job."""
+    if not file.endswith(".jsonl"):
+        return False
+    try:
+        a = open(file, encoding="utf8").read().splitlines()
+        b = open(copy, encoding="utf8").read().splitlines()
+        rows = [(l, json.loads(l)) for l in a + b if l.strip()]
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    seen, out = set(), []
+    for l, d in rows:
+        if l not in seen:
+            seen.add(l)
+            out.append((l, d))
+    def at(d):
+        try:
+            return float(d.get("at"))
+        except (AttributeError, TypeError, ValueError):
+            return None
+    if out and all(at(d) is not None for _, d in out):
+        out.sort(key=lambda x: at(x[1]))  # stable: lines of the same time keep their order
+    tmp = file + ".merge.tmp"
+    with open(tmp, "w", encoding="utf8") as f:
+        f.write("".join(l + "\n" for l, _ in out))
+    os.replace(tmp, file)
+    return True
+
+
 def settle(found, log):
     """H152: conflict copies that need no merge are cleared here, without a job: one that is the same as the file
-    (byte for byte), and one of a lock or a half-written .tmp (this computer's own, never worth keeping). Returns
-    the ones still to merge."""
+    (byte for byte), and one of a lock or a half-written .tmp (this computer's own, never worth keeping). F58: and a
+    log of lines, merged here (merge_lines), so a merge job is the rare exception. Returns the ones still to merge."""
     left = []
     for c in found:
+        try:
+            if os.path.exists(c["file"]) and merge_lines(c["file"], c["copy"]):
+                os.remove(c["copy"])
+                log(f"sync: conflict copy {c['copy']} merged by the routine (every line of both, in time order)")
+                continue
+        except OSError as e:
+            log(f"sync: couldn't merge {c['copy']}: {e}")
         name = os.path.basename(c["file"])
         same = False
         try:
@@ -561,7 +601,7 @@ def judge(seen, found, state, main, peer, now=None):
         what = (f"merge job{'s' * (len(jobs) > 1)} {', '.join(map(str, jobs))} queued" if jobs and main
                 else "the main one merges it" if not main else "merge job not queued yet")
         names = ", ".join(os.path.basename(c["file"]) for c in found[:3])
-        return "waiting", f"{n} conflict cop{'ies' if n > 1 else 'y'} ({names}): {what}", f"Both sides changed {names} at once; both versions kept"
+        return "waiting", f"{n} conflict cop{'ies' if n > 1 else 'y'} ({names}): {what}", f"{CONFLICT_WHY} {names} at once; both versions kept"
     if not seen["peer_up"]:
         gone = now - (state.get("seen_peer") or now)
         if gone >= GONE_AFTER:
