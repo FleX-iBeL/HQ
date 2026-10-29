@@ -116,6 +116,41 @@ class EndWatch:
         return f"The call dropped: {self.reason()}"
 
 
+# F59 (job 454): the calls that are on, each with how to end it. A stop of the call line (the stop script's polite
+# stop, an update's restart) used to leave a call on: uvicorn waits for the call's request to finish before it shuts
+# down, and the forced stop after 60 s is a SIGTERM, which it doesn't treat as forcing. So the stop itself now marks
+# every live call as the server's and ends it, and the after-call work runs as after a hang-up.
+_live: dict = {}
+
+
+def live(watch: EndWatch, stop) -> None:
+    """A call is on: `stop` is an async function that ends it (the call's worker.cancel)."""
+    _live[watch] = stop
+
+
+def gone(watch: EndWatch) -> None:
+    _live.pop(watch, None)
+
+
+def live_calls() -> int:
+    return len(_live)
+
+
+async def server_stopping(log=None) -> int:
+    """The call line is stopping: every call that's on is marked as stopped by the server (unless something ended it
+    first) and ended. Returns how many were ended; `log` gets each call's log line."""
+    n = 0
+    for watch, stop in list(_live.items()):
+        if watch.server() and log is not None:
+            log(watch.log_words())
+        try:
+            await stop()
+        except Exception:
+            pass
+        n += 1
+    return n
+
+
 class AudioSeen(FrameProcessor):
     """Right after the transport's input: notes each piece of his audio for the EndWatch, passes everything on."""
 

@@ -27,6 +27,7 @@ from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.workers.runner import WorkerRunner
 
+import call_end
 from call import Call
 from call_state import CallState
 from pipeline import PushToTalk, build_pipeline, cancel_turn, late_cancel, type_to_agent
@@ -320,6 +321,7 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
 
     runner = WorkerRunner(handle_sigint=handle_sigint)
     await runner.add_workers(worker)
+    call_end.live(call.end, worker.cancel)  # F59: a stop of the call line ends this call as the server's
     try:
         await runner.run()
     except asyncio.CancelledError:
@@ -328,6 +330,7 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
             logger.info(call.end.log_words())
         raise
     finally:
+        call_end.gone(call.end)
         if call.end.how is None and not call.ended_by_agent:
             # The pipeline ended with nothing having ended it (its idle time, an error): the server's side.
             if call.end.server():
@@ -338,6 +341,41 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
         # The after-call work runs on its own task, shielded: if this coroutine is
         # cancelled (the server is shutting down), it still gets as far as it can.
         await asyncio.shield(asyncio.create_task(call.finish(), name="after-call"))
+
+
+def stop_ends_calls() -> None:
+    """F59 (job 454): when the call line is told to stop (SIGINT from the stop script or an update, SIGTERM), every
+    call that's on is ended at once and written down as "the server stopped the call", instead of staying on until
+    the caller leaves (uvicorn waits for the call's request, and a SIGTERM after the SIGINT doesn't force it)."""
+    import signal
+    import uvicorn.server as _us
+
+    if getattr(_us.Server, "_hq_stop_ends_calls", False):
+        return
+    _orig = _us.Server.handle_exit
+
+    tasks: set = set()
+
+    def handle_exit(self, sig, frame):
+        was = self.should_exit
+        _orig(self, sig, frame)
+        if was and sig == signal.SIGTERM:
+            self.force_exit = True  # the stop script's forced stop, after the polite one, really forces
+        if call_end.live_calls():
+            logger.info(f"The call line is stopping: ending {call_end.live_calls()} call(s) on as the server's")
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+
+            def _go():
+                t = loop.create_task(call_end.server_stopping(logger.info))
+                tasks.add(t)
+                t.add_done_callback(tasks.discard)
+            loop.call_soon_threadsafe(_go)
+
+    _us.Server.handle_exit = handle_exit
+    _us.Server._hq_stop_ends_calls = True
 
 
 async def bot(runner_args: RunnerArguments):
@@ -412,6 +450,7 @@ if __name__ == "__main__":
 
     keep_audio_in_the_tailnet()
     app.add_middleware(CallerHere)  # H46
+    stop_ends_calls()  # F59 (job 454)
 
     WEB = Path(__file__).resolve().parent / "web"
     _NO_CACHE = {"Cache-Control": "no-cache"}
