@@ -40,6 +40,9 @@ usage:
   python3 routine/sprint.py moscow LABEL must|should|could|wont|off  its MoSCoW tag for the sprint (H271), or none
   python3 routine/sprint.py ready LABEL [on|off]          its Ready mark (H272): only rows marked ready go to the team
   python3 routine/sprint.py check LABEL...             why a row isn't ready (the points it seems to miss), or that it is
+  python3 routine/sprint.py fields LABEL...            H298: the three mechanical fields (His words found, My own additions,
+                                                        Sources that exist), held one by one; with the agents running
+                                                        themselves on, a Ready mark is refused while one doesn't hold
   python3 routine/sprint.py lay LABEL... [--night D]     the sprint: the rows, in rank order, laid over the nights from
                                                         night D (tonight, tomorrow, a weekday or 2026-10-26; tonight
                                                         when left out); --json for the status page
@@ -371,6 +374,10 @@ def not_ready_why(row, state=None):
         return why
     if state == "changed":
         return f"{row['label']} isn't ready: its words changed since it was marked ready, so it needs the mark again"
+    if fields_on():  # H298, piece 4
+        fw = fields_why(row)
+        if fw:
+            return f"{row['label']} isn't ready: {fw.split(': ', 1)[1]}"
     miss = missing_points(row)
     if len(miss) == len(BUG_POINTS if row["label"].startswith("F") and is_bug(row) else READY_POINTS):
         return f"{row['label']} isn't ready: none of its ready points are written in it yet"
@@ -401,6 +408,11 @@ def set_ready(label, on=True):
         why = _review_why(row)
         if why:
             sys.exit(why + ". (On his explicit say-so a call can still give it to the team with --not-ready.)")
+        if fields_on():  # H298, piece 4: an empty or false field refuses the mark (a tripwire for Moneypenny's runner)
+            fw = fields_why(row)
+            if fw:
+                sys.exit("Refused: " + fw + ". (His words must be a quote found in a call, the notes or the log; "
+                         "My own additions says what's hers or none; Sources names a row, a rule, a dated call or a file.)")
     d = _load(RANKS)
     have = {r["label"] for r in rows}
     m = {l: v for l, v in (d.get("ready") or {}).items() if l in have}
@@ -451,6 +463,199 @@ def gate(text, job_text_, say_so=False):
     labels = ", ".join(r["label"] for r in rows if states.get(r["label"]) != "ready")
     return (job_text_.rstrip() + f" It went to the team without the Ready mark ({labels}), on the explicit say-so "
             "on the call; check the row's points before building.")
+
+
+# ---------- H298, piece 4: the ready check's mechanical fields ----------
+
+# The lesson of 28 October (F77, F81) built in code, not in a prompt: three of the nine points are fields the check
+# reads from the row's ask. "His words:" must hold a quote found by grep in a call transcript (HQ/calls/), the quick
+# notes (HQ/notes.md, with the cleared ones) or the log (coaching/log.md and its archive); "My own additions:" must say
+# something or say "none"; "Sources:" must name a planning row, a rule, a dated call or a file that exists. While "The
+# agents run themselves" is on, a Ready mark with an empty or false field is refused (set_ready, and so Plan the sprint,
+# Send to the team and a call's add), and that refusal is one of Moneypenny's tripwires (routine/cycles.py). Off, the
+# fields are only reported (sprint.py check, fields), nothing is refused: today's HQ exactly.
+
+FIELD_LABELS = (("his_words", r"his words|their words|the user'?s words|your words"),
+                ("additions", r"my own additions|own additions|my additions"),
+                ("sources", r"sources?"))
+QUOTE_MIN = 8   # a quote shorter than this says nothing
+_QUOTES = re.compile(r"[\"“”]([^\"“”]{%d,}?)[\"“”]" % QUOTE_MIN)
+_DATE = re.compile(r"\b(\d{1,2}) (January|February|March|April|May|June|July|August|September|October|November|December) (\d{4})\b", re.I)
+GREP_FILES = ("HQ/notes.md", "HQ/notes-cleared.md", "coaching/log.md", "coaching/log-archive.md")
+_NEXT_POINT = re.compile(r"\.\s+(?=[A-Z][a-z]+(?: [a-z]+){0,3}(?: means\b|:))")
+
+
+def _ws():
+    """The workspace the planning belongs to (the roadmap sits in its HQ folder)."""
+    return os.environ.get("HQ_SPRINT_FOLDER") or os.path.dirname(os.path.dirname(os.path.realpath(q.ROADMAP)))
+
+
+def fields_on():
+    """Whether the fields hold a Ready mark: only with the feature on (app/features.py, agents_run)."""
+    if os.environ.get("HQ_READY_FIELDS") in ("0", "1"):
+        return os.environ["HQ_READY_FIELDS"] == "1"
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "app"))
+        import features
+        from pathlib import Path as _P
+        return features.is_on("agents_run", _P(_ws()))
+    except Exception:
+        return False
+
+
+def _norm(t):
+    t = t.replace("“", '"').replace("”", '"').replace("’", "'").replace("‘", "'")
+    return " ".join(t.lower().split())
+
+
+def field_texts(line):
+    """{field: text} from the row's ask: each labelled part ("His words: …", "My own additions: …", "Sources: …") up to
+    the next label or the end; "" when a label isn't there."""
+    ask = ask_of(line)
+    pos = []
+    for key, pat in FIELD_LABELS:
+        for m in re.finditer(r"(?:^|[\s(;.,*])(?:" + pat + r")\s*:\s*", ask, re.I):
+            pos.append((m.end(), key, m.start()))
+    pos.sort()
+    out = {k: "" for k, _ in FIELD_LABELS}
+    for i, (start, key, head) in enumerate(pos):
+        end = pos[i + 1][2] if i + 1 < len(pos) else len(ask)
+        part = ask[start:end]
+        nxt = _NEXT_POINT.search(part)  # the next of the nine points ("Done means", "Test:", "Why:") ends the field
+        if nxt:
+            part = part[:nxt.start() + 1]
+        if not out[key]:
+            out[key] = part.strip().strip("*").strip()
+    return out
+
+
+def _grep_texts(ws):
+    """The texts a quote may be found in: the call transcripts, the quick notes, the log and its archive."""
+    out = []
+    calls = os.path.join(ws, "HQ", "calls")
+    try:
+        names = sorted(os.listdir(calls))
+    except OSError:
+        names = []
+    for nm in names:
+        if nm.endswith(".md"):
+            try:
+                out.append((f"HQ/calls/{nm}", _norm(open(os.path.join(calls, nm), encoding="utf8", errors="replace").read())))
+            except OSError:
+                pass
+    for rel in GREP_FILES:
+        try:
+            out.append((rel, _norm(open(os.path.join(ws, rel), encoding="utf8", errors="replace").read())))
+        except OSError:
+            pass
+    return out
+
+
+def quote_found(quote, texts):
+    """Where a quote (its parts around a "…" or "..." each) is found, or None."""
+    parts = [p.strip(" .,;:") for p in re.split(r"\s*(?:…|\.\.\.)\s*", _norm(quote)) if p.strip(" .,;:")]
+    parts = [p for p in parts if len(p) >= QUOTE_MIN] or ([_norm(quote)] if len(_norm(quote)) >= QUOTE_MIN else [])
+    if not parts:
+        return None
+    for name, text in texts:
+        if all(p in text for p in parts):
+            return name
+    return None
+
+
+def _source_ok(item, ws, labels):
+    """One named source: a planning row (exists), a rule (rules.md has it), a dated call (a transcript that day), or a
+    file that exists in the workspace or in HQ."""
+    it = item.strip().strip(".;,")
+    if not it:
+        return None
+    m = re.search(r"\b([A-Z]\d+(?:\.\d+)*)\b", it)
+    if m and (m.group(1) in labels or row_of(m.group(1)) is not None):
+        return f"row {m.group(1)}"
+    m = re.search(r"\brule (\d{1,2})\b", it, re.I)
+    if m:
+        try:
+            if re.search(rf"^{m.group(1)}\. ", open(os.path.join(ws, "rules.md"), encoding="utf8").read(), re.M):
+                return f"rule {m.group(1)}"
+        except OSError:
+            pass
+        return None
+    m = _DATE.search(it)
+    if m:
+        import datetime as _dt
+        try:
+            day = _dt.datetime.strptime(f"{m.group(1)} {m.group(2).title()} {m.group(3)}", "%d %B %Y").date()
+        except ValueError:
+            return None
+        calls = os.path.join(ws, "HQ", "calls")
+        try:
+            if any(nm.startswith(day.isoformat()) for nm in os.listdir(calls)):
+                return f"call of {day:%-d %B %Y}"
+        except OSError:
+            pass
+        # a dated line in the log or the quick notes counts too
+        for rel in ("coaching/log.md", "coaching/log-archive.md", "HQ/notes.md", "HQ/notes-cleared.md"):
+            try:
+                if day.isoformat() in open(os.path.join(ws, rel), encoding="utf8").read():
+                    return f"{'the notes' if 'notes' in rel else 'the log'} of {day:%-d %B %Y}"
+            except OSError:
+                pass
+        return None
+    for tok in re.findall(r"[\w./-]+\.(?:md|json|py|mjs|html|js|txt)", it):
+        for base in (ws, os.path.dirname(HERE)):
+            if os.path.exists(os.path.join(base, tok)):
+                return tok
+    return None
+
+
+def ready_fields(row, ws=None):
+    """The three mechanical fields of a row, each held: {"his_words": {"ok", "quotes", "found", "why"}, "additions":
+    {"ok", "text", "why"}, "sources": {"ok", "named", "held", "why"}, "ok"}."""
+    ws = ws or _ws()
+    ft = field_texts(row["line"])
+    out = {}
+    quotes = [m.group(1).strip() for m in _QUOTES.finditer(ft["his_words"])]
+    found = {}
+    if quotes:
+        texts = _grep_texts(ws)
+        for qt in quotes:
+            found[qt] = quote_found(qt, texts)
+    missing = [qt for qt, where in found.items() if not where]
+    out["his_words"] = {"ok": bool(quotes) and not missing, "quotes": quotes, "found": found,
+                        "why": ("no His words field" if not ft["his_words"] else "no quote in His words (put his words between quotes)"
+                                if not quotes else f"not found in the calls, the notes or the log: {missing[0][:60]!r}" if missing else "")}
+    add = ft["additions"].strip(" .,;:*")
+    out["additions"] = {"ok": bool(add), "text": add,
+                        "why": "" if add else ("no My own additions field" if not ft["additions"] and "additions" not in row["line"].lower()
+                                                       else "My own additions is empty: say what's hers, or none")}
+    named = [x for x in re.split(r"[;,]| and ", ft["sources"]) if x.strip()]
+    labels = {r["label"] for r in open_rows()}
+    held = {x.strip(): _source_ok(x, ws, labels) for x in named}
+    bad = [x for x, ok in held.items() if not ok]
+    out["sources"] = {"ok": bool(named) and not bad, "named": [x.strip() for x in named], "held": held,
+                      "why": ("no Sources field" if not ft["sources"] else "Sources names nothing" if not named
+                              else f"a source that isn't there: {bad[0][:60]!r} (a row, a rule, a dated call or a file)" if bad else "")}
+    out["ok"] = all(out[k]["ok"] for k in ("his_words", "additions", "sources"))
+    return out
+
+
+def fields_why(row, ws=None):
+    """Why the fields don't hold, in a few plain words, or None when they do."""
+    f = ready_fields(row, ws)
+    if f["ok"]:
+        return None
+    whys = [f[k]["why"] for k in ("his_words", "additions", "sources") if not f[k]["ok"]]
+    return f"{row['label']}'s fields don't hold: " + "; ".join(whys)
+
+
+def fields_words(row, ws=None):
+    f = ready_fields(row, ws)
+    hw = f["his_words"]
+    lines = [f"{row['label']}: the fields " + ("hold." if f["ok"] else "don't hold.")]
+    lines.append("- His words: " + ("found (" + ", ".join(f"{v}" for v in hw["found"].values() if v) + ")" if hw["ok"] else hw["why"]))
+    lines.append("- My own additions: " + (f"{f['additions']['text'][:80]}" if f["additions"]["ok"] else f["additions"]["why"]))
+    lines.append("- Sources: " + (", ".join(f"{k} ({v})" for k, v in f["sources"]["held"].items()) if f["sources"]["ok"] else f["sources"]["why"]))
+    return "\n".join(lines)
 
 
 def group_key(x, roadmap_place):
@@ -1047,10 +1252,16 @@ def main(argv):
             set_ready(argv[1], on)
         label = argv[1].strip().upper()
         print(f"{label} is marked ready for the sprint." if on else f"{label} has no Ready mark now.")
-    elif cmd == "check":  # H272: why a row isn't ready, for a call or the page
+    elif cmd == "check":  # H272: why a row isn't ready, for a call or the page; H298: and the fields
         rows = {r["label"]: r for r in open_rows()}
         for l in [a.strip().upper() for a in argv[1:]]:
             print((not_ready_why(rows[l]) or f"{l} is ready.") if l in rows else f"{l} isn't an open row on the planning.")
+            if l in rows:
+                print(fields_words(rows[l]))
+    elif cmd == "fields":  # H298, piece 4: the three mechanical fields of a row, held one by one
+        rows = {r["label"]: r for r in open_rows()}
+        for l in [a.strip().upper() for a in argv[1:]]:
+            print(fields_words(rows[l]) if l in rows else f"{l} isn't an open row on the planning.")
     elif cmd == "show":  # Fable clean-up: one row, open or closed, never the whole planning
         if len(argv) < 2:
             sys.exit("show LABEL [LABEL …]")

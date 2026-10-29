@@ -13939,6 +13939,65 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         need(r.returncode == 0 and "boxed" not in (run_dir / f"job-{n4}.stream.log").read_text(), "a run without a box changed")
         return "boxed at 5 turns and at 0.1 minutes, each done on the queue with its note; a run inside its box ends by itself; cycle-donna and step-pepper are kinds of their own"
 
+    async def flow188(self) -> str:
+        """H298, piece 4, no Claude: the ready check's mechanical fields. On a throwaway workspace with a made-up call
+        transcript, quick notes and planning rows: a row whose His words quote is found in the call, whose My own
+        additions says something and whose Sources name a row, a rule, a dated call and a file holds; a quote that's in
+        the notes holds; a quote around a "…" holds when both parts are found; a quote found nowhere, an empty
+        additions field, "none" (holds), a source that doesn't exist. With the feature on, the Ready mark is refused on
+        a row whose field doesn't hold and given to one whose fields hold; with it off, today's HQ: the mark goes on
+        either (the fields only reported). check and fields say it; a call may run fields."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("p4")
+        (ws / "HQ/calls").mkdir(parents=True, exist_ok=True)
+        (ws / "HQ/calls/2026-01-07-1030.md").write_text(
+            "# Call 7 January 2026, 10:30\n\nStarted 10:30:00 · agent Moneypenny · brain opus\n\n"
+            "- 10:31 **Me:** I want the feedback button to be bigger, and red, so I can find it with my thumb.\n"
+            "- 10:32 **HQ:** Noted.\n- 10:33 **Me:** And the status page should fold the finished jobs away by default.\n")
+        (ws / "HQ/notes.md").write_text("# Quick notes\n\n- 2026-01-08 09:00 · the calendar colours are too pale on the phone\n")
+        (ws / "rules.md").write_text("# Rules\n\n1. Talk like a person.\n2. Only say what benefits them.\n3. Short plain sentences.\n")
+        rm = ws / "HQ/roadmap.md"
+        rows = (
+            "| ⬜ | H9101 A bigger feedback button | What's asked: the button bigger and red. His words: \"the feedback button to be bigger, and red\". My own additions: the red is from the kinds' palette. Sources: rule 2, the call of 7 January 2026, app/features.py. Done means the button reads at a glance. Test: flow 160. Why: findability. Out of scope: the dock. Touches: the call page. Size: small. Waits on nothing. Privacy: nothing of his. | | |\n"
+            "| ⬜ | H9102 Fold the finished jobs | His words: \"the status page should fold … away by default\". My own additions: none. Sources: H9101. | | |\n"
+            "| ⬜ | H9103 Pale colours | His words: \"calendar colours are too pale on the phone\". My own additions: none. Sources: the quick notes of 8 January 2026, app/kinds.py. | | |\n"
+            "| ⬜ | H9104 Made up | His words: \"make the dock purple with stars\". My own additions: none. Sources: rule 1. | | |\n"
+            "| ⬜ | H9105 Empty additions | His words: \"the feedback button to be bigger, and red\". My own additions: . Sources: rule 1. | | |\n"
+            "| ⬜ | H9106 Ghost source | His words: \"the feedback button to be bigger, and red\". My own additions: none. Sources: H9999, rule 9. | | |\n"
+            "| ⬜ | H9107 No fields at all | Something to build, with every point: what's asked, done means, test, why, out of scope, touches, size, waits on nothing, privacy. | | |\n")
+        rm.write_text(rm.read_text().replace("## Phase H · Features\n\nWhat's new: things HQ should build or manage next.\n\n| | Step | What you get | Model |\n|---|---|---|---|\n",
+                                             "## Phase H · Features\n\nWhat's new: things HQ should build or manage next.\n\n| | Step | What you get | Model |\n|---|---|---|---|\n" + rows))
+        need("H9101" in rm.read_text(), "the made-up rows didn't go in")
+        env = {**env, "HQ_REVIEW": "0", "HQ_SPRINT": str(ws / "HQ/sprint.json")}
+        def sp(*a, on="1"):
+            return _sp.run([sys.executable, str(ROOT / "routine/sprint.py"), *a], capture_output=True, text=True,
+                           env={**env, "HQ_READY_FIELDS": on}, cwd=str(ROOT))
+        out = sp("fields", "H9101", "H9102", "H9103", "H9104", "H9105", "H9106", "H9107").stdout
+        need("H9101: the fields hold." in out and "H9102: the fields hold." in out and "H9103: the fields hold." in out, f"a row with good fields doesn't hold: {out}")
+        need("H9104: the fields don't hold." in out and "not found in the calls" in out, f"a made-up quote holds: {out}")
+        need("H9105: the fields don't hold." in out and "My own additions is empty" in out, f"an empty additions field holds: {out}")
+        need("H9106: the fields don't hold." in out and "a source that isn't there" in out, f"a ghost source holds: {out}")
+        need("H9107: the fields don't hold." in out and "no His words field" in out, f"a row without fields holds: {out}")
+        need("rule 2" in out and "call of 7 January 2026" in out and "app/features.py" in out, f"the sources aren't named as held: {out}")
+        # the feature on: refused on a false field, given on true ones; off: given on either (today's HQ)
+        r = sp("ready", "H9104")
+        need(r.returncode != 0 and "Refused" in r.stdout + r.stderr and "not found" in r.stdout + r.stderr, f"a false field didn't refuse the mark: {r.stdout} {r.stderr}")
+        r = sp("ready", "H9106")
+        need(r.returncode != 0 and "a source that isn't there" in r.stdout + r.stderr, "a ghost source didn't refuse the mark")
+        r = sp("ready", "H9101")
+        need(r.returncode == 0 and "marked ready" in r.stdout, f"good fields were refused: {r.stdout} {r.stderr}")
+        need("H9104 isn't ready" in sp("check", "H9104").stdout and "not found in the calls" in sp("check", "H9104").stdout, "check doesn't name the field")
+        r = sp("ready", "H9104", on="0")
+        need(r.returncode == 0 and "marked ready" in r.stdout, f"with the feature off the mark is held by the fields: {r.stdout} {r.stderr}")
+        off_check = sp("check", "H9105", on="0").stdout
+        need("fields don't hold" in off_check and "H9105 isn't ready: no " in off_check and "additions is empty" not in off_check.split("\n")[0],
+             f"with the feature off the fields aren't only reported alongside: {off_check}")
+        # a call may run fields
+        from policy import Policy, ALLOW
+        pol = Policy(ws)
+        need(pol.decide("Bash", {"command": f"python3 {ROOT / 'routine/sprint.py'} fields H9101"}).verdict == ALLOW, "a call may not run fields")
+        return "the fields hold on found quotes, named additions and real sources; a made-up quote, an empty field or a ghost source refuses the Ready mark with the feature on and is only reported with it off"
+
     async def flow184(self) -> str:
         """F78, no Claude, no window: a job held by the usage line is checked on what's left of it when it carries on
         in its own chat. On 28 October job 424 was held at 16:30 with about 5.8% of the 5-hour left, yet every minute
@@ -22297,6 +22356,7 @@ FLOWS = {
     141: ("H240: a 9292 link at the leaving time (the calendar's start or the time he names, leaving then or there by then), with the notices for the stops and stations near both ends from the open live data, never made up", False, "flow141"),
     140: ("H238: call me back (the page reloads and calls the same agent, continuing the call), and an agent calls him at an agreed time or appointment (a push, one tap picks up, a missed one in her chat)", False, "flow140"),
     122: ("H204: the estimate counts the material a job names to read: folders and files, counted, told to the first look, weighed in, recounted when the words change", False, "flow122"),
+    188: ("H298, piece 4: the ready check's mechanical fields: His words a quote found in a call, the notes or the log; My own additions filled or none; Sources that exist (a row, a rule, a dated call, a file); with the feature on an empty or false field refuses the Ready mark", False, "flow188"),
     187: ("H298, piece 3: the deterministic box on a headless run (minutes from a wall clock, turns from the stream): past either the run is ended, done on the queue, its note written; the cycle kinds cycle-<agent> and step-<agent>", False, "flow187"),
     186: ("H298, piece 2: the identity fix: the harvest after a call or text keeps only first-person lines about her own office life; a transcript full of his life yields nothing about him", False, "flow186"),
     185: ("H298, piece 1: the handbook under each agent's character behind the switch (in pieces, off by default): the template's blank handbook and cycle defaults, off loads nothing, on loads part one and her own section, Moneypenny's craft trimmed", False, "flow185"),
