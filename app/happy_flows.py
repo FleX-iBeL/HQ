@@ -13757,7 +13757,25 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                      f"F81: {a['id']}'s rules carry Moneypenny's")
         need(hb._CRAFT_OLD.search(c) and "fill in the nine points" not in hb._CRAFT_OLD.sub(hb._CRAFT_NEW, c),
              "F81: the handbook's swap no longer finds her line")
-        return f"his why word for word on top, grounded or a sit-down, {len(hits)} hits of the search read and named: " + "; ".join(hits)
+        # job 481 (QA job 480): with the handbook on, the swapped persona keeps F81's rule: his words and Sources asked
+        # for, an addition of hers never into an item (the sit-down list, then only with his yes and its date)
+        sw = agents.persona({**m, "craft": hb._CRAFT_OLD.sub(hb._CRAFT_NEW, c)}, "Alex")
+        for w in ("his words quoted (His words:)", "the sources real (Sources:)", "an addition of yours never goes in",
+                  "it goes on the sit-down list", "only with his yes is it written in, with the date of that yes",
+                  "not even marked as your own"):
+            need(w in sw, f"F81: with the handbook on her persona misses {w!r}")
+        for bad in ("your own additions named", "My own additions:, or none", "her own additions named", "her parts marked as hers"):
+            need(bad not in sw, f"F81: with the handbook on her persona still says {bad!r}")
+        sec = (ROOT / "template/HQ/agents/handbook.md").read_text()
+        sec = sec[sec.index("### Moneypenny"):]
+        sec = sec[:sec.index("\n### ", 5)] if "\n### " in sec[5:] else sec
+        for bad in ("her own additions named", "her parts marked as hers"):
+            need(bad not in sec, f"F81: her handbook section still says {bad!r}")
+        need("never into a row before your yes" in sec and "the sources named" in sec,
+             "F81: her handbook section doesn't send her additions to the sit-down")
+        return (f"his why word for word on top, grounded or a sit-down, {len(hits)} hits of the search read and named: "
+                + "; ".join(hits) + "; with the handbook on the swapped line and her handbook section ask for his words "
+                "and sources, an addition only after his yes")
 
     async def flow197(self) -> str:
         """F59 (job 454, after QA job 443): the server stopped mid-call, for real. A throwaway test call line (its

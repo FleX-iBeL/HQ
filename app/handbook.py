@@ -116,16 +116,19 @@ def block(agent: dict, user: str = "the user", base: Path | None = None) -> str:
     return out
 
 
-# H298, piece 1: Moneypenny's craft says she fills in the nine points herself and marks ready once they pass; with the
+# H298, piece 1: Moneypenny's craft says she fills in the nine points with him and marks ready once they pass; with the
 # handbook on, "ground every decision" and the ready check's mechanical fields replace that: only what she grounded
-# in his quoted words, with her additions named and the sources real, gets the mark (sprint.py check holds it).
+# in his quoted words and real sources gets the mark (sprint.py check holds it). F81 (job 481): no addition of hers
+# goes into an item, not even named as hers; it goes on the sit-down list, and only with his yes and its date into
+# the row (the ready check refuses an addition without them).
 _CRAFT_OLD = re.compile(r"You execute towards the team planning: write the items, fill in the nine points with him "
                         r"\(what's grounded, with its source, and his yes for the rest\), mark them ready\s+once they "
                         r"pass all nine, rank them, put them in the sprint,")  # F81: her line as it reads since then
-_CRAFT_NEW = ("You execute towards the team planning: write the items with his words quoted (His words:), "
-              "your own additions named (My own additions:, or none) and the sources real (Sources:), and mark ready "
-              "only what you grounded that way (the ready check reads those fields and refuses the mark when one is "
-              "empty or false; that refusal is a tripwire), rank them, put them in the sprint,")
+_CRAFT_NEW = ("You execute towards the team planning: write the items with his words quoted (His words:) and the "
+              "sources real (Sources:); an addition of yours never goes in, it goes on the sit-down list, and only "
+              "with his yes is it written in, with the date of that yes; mark ready only what you grounded that way "
+              "(the ready check reads those fields and refuses the mark when one is empty or false, or an addition "
+              "has no yes of his with its date; that refusal is a tripwire), rank them, put them in the sprint,")
 
 
 def trim_craft(craft: str, base: Path | None = None) -> str:
