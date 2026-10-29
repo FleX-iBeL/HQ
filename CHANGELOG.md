@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 0.4.19 · 29 October 2026
+
 - Fix: Moneypenny's checks of the team's work could pass with a line on the whole, without saying what was really tried for each thing the item has to do. A pass now names every one of them with what was run and what came out, and a pass without that is refused and nothing is written. A new check (happy flow 172).
 - Fix: the privacy check over every file and HQ's whole git history (happy flow 44) ran out of the six minutes every flow shares, because the history grows every day, so nightly runs and releases failed on it. It now has its own limit of twenty minutes and still checks everything; the other flows still stop at six. The run's summary shows its time next to its limit, so a slow climb shows before it bites.
 - HQ's own commits always carry its public name. A computer that pushes with HQ's key now sets HQ's public GitHub name and its noreply address in HQ's own repo by itself (at every pull and before every push), so a computer's own git name can never end up in HQ's history again. Eight commits from 27 October that carried a personal name were rewritten to the public name: the code is exactly the same, and updating from 0.4.18 goes through as normal (anything you changed or committed yourself is kept on a backup branch, as always). A new check (happy flow 171).
