@@ -1,7 +1,7 @@
 """The handbook: how the agents run themselves (H298, piece 1, 29 October 2026).
 
-The user's words (29 October 2026): "the whole point is i dont want to shadow, or tell them. its okay if they make
-mistakes, but if they iterate on it, we will get there." The handbook is the workspace's `HQ/agents/handbook.md`:
+The point of it: the user doesn't shadow the agents or tell them each step; they may make mistakes, as long as they
+iterate on them. The handbook is the workspace's `HQ/agents/handbook.md`:
 part one is the shared core every agent reads (what HQ is for, the north star, Pareto and Parkinson the agent way,
 the house rules, how she knows what worked); part two is each agent's own section (her job in one sentence, her ten
 percent, what she lets go, her cycle, what she decides and what she asks, her score). HQ ships a blank, generic one in

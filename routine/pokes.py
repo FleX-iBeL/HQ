@@ -3,8 +3,8 @@
 
 The handbook: "HQ computes your score every week from what it already sees, writes it in your ledger, and your bigger
 session reads it first. One measure is shared by all three, and it's the one that matters: how often he had to poke,
-chase or correct you. Down is good." His words (28 October 2026): "how would they know if it helped me? now i need to
-keep telling that? ... it should liberate me, not put me to work."
+chase or correct you. Down is good." The point of computing it: the score must not put the user to work telling
+each agent whether she helped; it has to come from what HQ already sees.
 
 The pokes, counted from his own lines (the handbook's part four): his texts to an agent on her line that ask after
 something she owns (a status question: is it done, did you, where is, what happened to), his corrections (the word

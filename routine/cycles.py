@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The agents run themselves: the cycle runner (H298, piece 6, 29 October 2026).
 
-The user's words (28 October 2026): "you guys should be running the show, and escalate to me if you need me", and
-(29 October): "the one thing we need to make sure doesnt happen is that i wake up and all the usage is burned."
+What it's for: the agents run the show and escalate to the user when they need him; and no morning may start with the
+usage burned by their running. The handbook in the user's folder says it in his own words; nothing of it is in HQ.
 
 A cycle is a repeating planned item on the schedule (routine/schedule.py), tagged priority, that becomes a job of its
 own kind (cycle-<agent>, step-<agent>; routine/estimate.py) and runs headless as the agent (her character, the

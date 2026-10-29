@@ -24,7 +24,7 @@ one or two lines, one of them twice. Now HQ itself harvests: after every call an
 her persona nudges her to bring in a new one now and then and an old one back, never contradicting one.
 
 H298, piece 2 (29 October 2026, the identity fix): the harvest had kept lines about the user's life as the agent's own
-(she "does Ring Fit", "biked to the bike shop in the rain"), because his sentences and hers about him read alike to
+(she "does yoga every morning", "biked to the shop in the rain"), because his sentences and hers about him read alike to
 the look. Now the look is told her life is only her own, and `own_life` holds each fact against what she really said:
 kept only when its words come from a sentence of hers in the first person that isn't about him. The lists already
 written are the user's to wipe (they're in the workspace); `tidy` drops only near-repeats.
@@ -140,7 +140,7 @@ HARVEST_SYSTEM = (
     "{\"new\": [{\"agent\": \"<her name>\", \"fact\": \"...\"}]}"
 )
 
-# H298, piece 2 (the identity fix): the harvest had been reading his sentences as hers (an agent "does Ring Fit",
+# H298, piece 2 (the identity fix): the harvest had been reading his sentences as hers (an agent "does yoga",
 # "biked to the bike shop in the rain"). The look above says it; this holds it in code: a fact is kept only when its
 # words come from a sentence she said in the first person about herself, not from one about him.
 _FIRST = re.compile(r"\b(i|i'm|i've|i'd|i'll|me|my|mine|myself)\b")
