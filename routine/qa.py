@@ -335,6 +335,11 @@ def subject_labels(subject: str) -> list[str]:
 FREE_FILES = ("app/happy_flows.py", "routine/flowsets.py", "VERSION", "CHANGELOG.md", "README.md", "updates/")
 
 
+def proof_on() -> bool:
+    import proof
+    return proof.gate_on()
+
+
 def only_free_files(root: str, sha: str) -> bool:
     r = subprocess.run(["git", "-C", str(root), "show", "--first-parent", "--format=", "--name-only", sha],
                        text=True, capture_output=True)
@@ -362,7 +367,7 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
         named = [l for l in subject_labels(subject) if l in all_rows]
         need = [l for l in named if all_rows[l][1] in GATED]
         bad = [l for l in need if state(l, text) != "passed"]
-        if not named and not only_free_files(root, sha):  # F101: nothing goes out that no item asked for
+        if not named and proof_on() and not only_free_files(root, sha):  # F101: nothing goes out that no item asked for
             if not stop:
                 stop = True
             held.append({"label": sha[:7], "why": f"this commit names no item: {subject[:70]}"})

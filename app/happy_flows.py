@@ -16367,7 +16367,7 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
         ssh = base / "fake-ssh"
         ssh.write_text(f'#!/bin/sh\nfor a; do last="$a"; done\ncd "{srv}" && exec sh -c "$last"\n')
         ssh.chmod(0o755)
-        env = {**os.environ, "GIT_CONFIG_GLOBAL": str(glob), "GIT_CONFIG_NOSYSTEM": "1", "GIT_SSH_COMMAND": str(ssh)}
+        env = {**os.environ, "GIT_CONFIG_GLOBAL": str(glob), "GIT_CONFIG_NOSYSTEM": "1", "GIT_SSH_COMMAND": str(ssh), "HQ_MAKER": "1"}
         env.pop("GIT_DIR", None)
         def g(repo, *a):
             return _sp.run(["git", "-C", str(repo), *a], capture_output=True, text=True, env=env)
@@ -17276,8 +17276,10 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
         need([k for k, _ in _rv.PROBES] == ["again", "halfway", "numbers", "examples", "points"]
              and all(k in _rv.SYSTEM for k, _ in _rv.PROBES) and "When in doubt, pass" not in _rv.SYSTEM,
              "F77: the reviewer's prompt doesn't walk the five probes")
-        V = _rv.verdict
         cov = lambda k, c, h=None: {"probe": k, "applies": True, "covered": c, "hole": h}  # noqa: E731
+        def V(a):  # F101: an answer has all five probes; the ones a case doesn't name don't apply
+            named = {p["probe"] for p in a["probes"]}
+            return _rv.verdict({**a, "probes": a["probes"] + [{"probe": k, "applies": False, "covered": None} for k, _ in _rv.PROBES if k not in named]})
         need(V({"pass": True, "findings": [], "probes": [cov("again", "If it stops twice, each stop.")]}) == (True, []),
              "F77: a covered probe should pass")
         need(V({"pass": True, "findings": [], "probes": [cov("again", None, "No word on a second stop.")]})
