@@ -109,7 +109,7 @@ def status(state, step, logline):
     subprocess.run([PY, os.path.join(JV, "status", "set-status.py"), state, step,
                     just.group(1) if just else "", nxt.group(1) if nxt else "",
                     re.sub(r"\s*\|\s*", "|", row.group(1)) if row else "Phase L|L2 ✅",
-                    logline], capture_output=True)
+                    logline], capture_output=True, env={**os.environ, "HQ_ROLE_HERE": "1"})  # the routine's own, never handed on
 
 
 BUSY = ("BUILDING", "TESTING", "RELEASING")

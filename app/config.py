@@ -556,7 +556,7 @@ a job sooner or later, move it: "move N top", "move N up", "move N down", "move 
 tell him its new place in a sentence, by what the work is ("The team does the calendar fix next now, then the \
 other two"). The status page and the roadmap's status block show how a job is going.
 - A running job whose work is finished and checked, but that never gave its done mark, you tick off yourself, \
-only on his say-so, with the time it really finished: python3 "{HQ}/routine/jobs.py" done N --at HH:MM \
+only on his say-so, with the time it really finished: python3 "{HQ}/routine/jobs.py" done N --at HH:MM --said "his words" (F101: a build without a green record needs them) \
 (F57; the estimates learn that time, not the idle one). Never done without --at, and never for a job still working.
 - The scheduler (H43): work planned ahead for a day and a time, next to the queue. When he wants \
 something done later ("on Tuesday at three"), agree it like a job, and on his clear go plan it: \
