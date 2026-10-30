@@ -15,7 +15,8 @@ The waiting jobs (ready or held) run in the order they stand on the list, top fi
 a new job goes at the bottom, and "move" changes its place. The job numbers never change.
 
 usage (from the workspace):
-  python3 "routine/jobs.py" add "TEXT" [--past-the-line] [--kind K] [--guess MINUTES] [--not-ready]   a call's let's go: the
+  python3 "routine/jobs.py" write-row "THE ROW" [--bug]     F99: a new row on the planning, no job (a call's way in)
+  python3 "routine/jobs.py" add "TEXT" [--past-the-line] [--kind K] [--guess MINUTES] [--not-ready --said "HIS WORDS"]   a call's let's go: the
                                                            job is ready; K (small, bigbuild, research, transcribe, release, other; H220) sets
                                                            the kind for its estimate instead of the guess (H70);
                                                            MINUTES is the call's own guess (H190), kept apart from the
@@ -551,6 +552,17 @@ def main(argv):
             write(text, jobs, on)
             print(f"{label} is on the planning, under Feedback.")
             return
+        if cmd == "write-row":
+            # F99: a call's way to put a new row on the planning, nothing more: the file itself is refused, and no job
+            # is made (a row goes to the team only when it's ready, rules 13).
+            bug = "--bug" in args
+            said = one_line(" ".join(a for a in args if a != "--bug")).replace("|", "/")
+            if not said:
+                sys.exit("What goes on the planning? Write it in a line or two.")
+            text, label = roadmap_row(text, said, bug)
+            write(text, jobs, on)
+            print(f"{label} is on the planning.")
+            return
         if cmd == "add-row":
             # H160: work added on the status page, without a call. Roadmap first stays the rule (rules 13): it gets its own
             # numbered row (F for a bug, else H) before it goes to the team, and the job says to read that row.
@@ -567,6 +579,8 @@ def main(argv):
                     extra.append(a)
                 elif a == "--not-ready":  # H272: a new row has no Ready mark; only on his say-so
                     extra.append(a)
+                elif a == "--said":  # F99: his own words for the say-so
+                    extra += [a, next(it, "")]
                 else:
                     words.append(a)
             said = one_line(" ".join(words)).replace("|", "/")
@@ -603,6 +617,12 @@ def main(argv):
             past = "--past-the-line" in args
             say_so = "--not-ready" in args  # H272: his explicit say-so for a row without the Ready mark
             words = [a for a in args if a not in ("--past-the-line", "--not-ready")]
+            his = None  # F99: --said "his words", the quote behind a --not-ready
+            for i, a in enumerate(words):
+                if a == "--said" or a.startswith("--said="):
+                    his = a.split("=", 1)[1] if "=" in a else (words[i + 1] if i + 1 < len(words) else "")
+                    words = words[:i] + words[i + (1 if "=" in a else 2):]
+                    break
             guess = None  # H190: the call's own guess in minutes, kept apart from the look's and the team's
             for i, a in enumerate(words):
                 if a == "--guess" or a.startswith("--guess="):
@@ -627,7 +647,7 @@ def main(argv):
             if not words or not one_line(" ".join(words)):
                 sys.exit("What should the job do? Give it as one self-contained line.")
             import sprint as sp_  # H272: the open planning rows it names must be marked ready, or his say-so
-            said = sp_.gate(text, one_line(" ".join(words)), say_so)
+            said = sp_.gate(text, one_line(" ".join(words)), say_so, his)
             n = max([j["n"] for j in jobs] + [0]) + 1
             j = {"n": n, "state": "ready", "past": past, "agreed": time.strftime("%Y-%m-%d %H:%M"),
                  "text": one_line(said).replace("·", "-")}

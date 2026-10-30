@@ -407,7 +407,7 @@ def set_ready(label, on=True):
     if on:
         why = _review_why(row)
         if why:
-            sys.exit(why + ". (On his explicit say-so a call can still give it to the team with --not-ready.)")
+            sys.exit(why + ". (On his explicit say-so a call can still give it to the team with --not-ready --said \"his words\".)")
         if fields_on():  # H298, piece 4: an empty or false field refuses the mark (a tripwire for Moneypenny's runner)
             fw = fields_why(row)
             if fw:
@@ -446,10 +446,86 @@ def named_open_rows(text, job_text_):
     return out
 
 
-def gate(text, job_text_, say_so=False):
+def _bare(t):
+    """A line or a quote without punctuation or case, so a dictated comma doesn't decide what he said."""
+    return " ".join(re.sub(r"[^\w\s]", " ", _norm(t), flags=re.UNICODE).split())
+
+
+HIS_CALLS = 120  # the newest transcripts looked through for his own words; Claude's choice, about a month of calls
+HIS_THREADS = ("direct-line", "coaching-line", "team-line")
+HIS_QUOTE_WORDS = 3  # a quote under three words proves nothing ("yes", "ok go")
+
+
+def his_lines(ws=None):
+    """F99: only what he himself said or typed, as (where, the line without punctuation): his lines in the call
+    transcripts, his side of the text threads, his quick notes. Never an agent's line, a summary or the log."""
+    ws = ws or _ws()
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "app"))
+    import me as _me
+    from pathlib import Path as _P
+    name = _me.load(_P(ws))["name"] or "Me"
+    mark = re.compile(rf"^- [0-9:]+ \*\*{re.escape(name)}:\*\*\s*(.*)$")
+    out = []
+    calls = os.path.join(ws, "HQ", "calls")
+    try:
+        names = sorted(n for n in os.listdir(calls) if n.endswith(".md"))[-HIS_CALLS:]
+    except OSError:
+        names = []
+    for nm in names:
+        try:
+            for line in open(os.path.join(calls, nm), encoding="utf8", errors="replace"):
+                m = mark.match(line)
+                if m:
+                    out.append((f"HQ/calls/{nm}", _bare(m.group(1))))
+        except OSError:
+            pass
+    for line_name in HIS_THREADS:
+        try:
+            for line in open(os.path.join(ws, "HQ", line_name, "thread.jsonl"), encoding="utf8", errors="replace"):
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(d, dict) and d.get("from") == "me" and d.get("text"):
+                    out.append((f"HQ/{line_name}", _bare(str(d["text"]))))
+        except OSError:
+            pass
+    for rel in ("HQ/notes.md", "HQ/notes-cleared.md"):
+        try:
+            for line in open(os.path.join(ws, rel), encoding="utf8", errors="replace"):
+                if line.startswith("- "):
+                    out.append((rel, _bare(line)))
+        except OSError:
+            pass
+    return out
+
+
+def his_quote(quote, ws=None):
+    """F99: where a quote stands in his own lines, or None. Its parts around a "…" must all be in one line of his."""
+    parts = [_bare(p) for p in re.split(r"\s*(?:…|\.\.\.)\s*", quote or "")]
+    parts = [p for p in parts if p]
+    if sum(len(p.split()) for p in parts) < HIS_QUOTE_WORDS:
+        return None
+    for where, line in his_lines(ws):
+        if all(p in line for p in parts):
+            return where
+    return None
+
+
+def keep_say_so(labels, quote, where):
+    """F99: his say-so kept with the quote and the time, in sprint.json outside the rows."""
+    d = _load(RANKS)
+    d.setdefault("say_so", []).append({"labels": list(labels), "quote": quote, "where": where,
+                                       "at": time.strftime("%Y-%m-%d %H:%M")})
+    d["say_so"] = d["say_so"][-200:]
+    _save(RANKS, d)
+
+
+def gate(text, job_text_, say_so=False, said=None):
     """H272, for a call adding work for the team (jobs.py add, schedule.py add): the open rows it names must be ready.
     Returns the job's words to use (with a line that it went without the mark, on the say-so); exits with why when a
-    row isn't ready and there's no say-so."""
+    row isn't ready and there's no say-so. F99: the say-so is a quote found in his own lines (--said), kept with the
+    time; a flag alone is an agent's word."""
     rows = named_open_rows(text, job_text_)
     if not rows:
         return job_text_
@@ -459,10 +535,15 @@ def gate(text, job_text_, say_so=False):
         return job_text_
     if not say_so:
         sys.exit("; ".join(whys) + ". Only rows marked ready go to the team; mark it ready first "
-                 "(sprint.py ready LABEL), or, on his explicit say-so, add it with --not-ready.")
-    labels = ", ".join(r["label"] for r in rows if states.get(r["label"]) != "ready")
-    return (job_text_.rstrip() + f" It went to the team without the Ready mark ({labels}), on the explicit say-so "
-            "on the call; check the row's points before building.")
+                 "(sprint.py ready LABEL), or, on his explicit say-so, add it with --not-ready --said \"his words\".")
+    where = his_quote(said)
+    if not where:
+        sys.exit("Refused: --not-ready needs --said with his own words, at least three of them, as they stand in a call, "
+                 "a text or a quick note of his. " + ("Those words aren't in his lines." if said else "None were given."))
+    names = [r["label"] for r in rows if states.get(r["label"]) != "ready"]
+    keep_say_so(names, q.one_line(said), where)
+    return (job_text_.rstrip() + f" It went to the team without the Ready mark ({', '.join(names)}), on his say-so: "
+            f"\"{q.one_line(said)}\" ({where}, {time.strftime('%Y-%m-%d %H:%M')}); check the row's points before building.")
 
 
 # ---------- H298, piece 4: the ready check's mechanical fields ----------

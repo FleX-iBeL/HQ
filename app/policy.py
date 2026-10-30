@@ -122,6 +122,68 @@ CURL_SAFE_FLAGS = {"-s", "-S", "-sS", "-Ss", "-f", "-fs", "-sf", "-fsS", "-sSf",
 
 ALLOW, ASK, DENY = "allow", "ask", "deny"
 
+# F99, piece 1 of the foundation (30 October 2026, his words: "so we need to do everything together here"): the guards
+# around his own life in code, not in instructions. The vision, the map and the rules ask, on a call, in a text and after
+# a call (nobody to ask there, so no). The files with a script of their own are refused whatever the tool, with the way
+# in named: that script takes the lock and keeps the log, so a change there can be followed.
+VISION_FILES = {"my-answers.md", "day-in-the-life.md", "day-in-the-life-stories.md", "lifestyle-design.md", "vision.md",
+                "map.md", "rules.md"}  # and every CLAUDE.md
+_RK = f"python3 \"{HQ_ROUTINE / 'review.py'}\""
+_JB = f"python3 \"{HQ_ROUTINE / 'jobs.py'}\""
+_APP = HQ_ROUTINE.parent / "app"
+WAYS_IN = {
+    "hq/roadmap.md": (f"a new row: {_JB} write-row \"THE ROW\" [--bug]; a change to an open row: {_RK} reword LABEL "
+                      f"'{{\"edits\": [{{\"old\": \"...\", \"new\": \"...\"}}]}}'; the status block: python3 "
+                      f"\"{HQ_ROUTINE.parent / 'status' / 'set-status.py'}\""),
+    "hq/sprint.json": f"python3 \"{HQ_ROUTINE / 'sprint.py'}\" (rank, moscow, ready), {_RK} clear",
+    "challenges.md": f"python3 \"{_APP / 'todo.py'}\"",
+    "inbox.md": (f"python3 \"{HQ_ROUTINE / 'handover.py'}\" edit inbox.md "
+                 f"'{{\"edits\": [{{\"old\": \"...\", \"new\": \"...\"}}]}}'"),
+    "hq/notes.md": f"python3 \"{_APP / 'notes.py'}\" (add, clear, restore)",
+    "hq/games.json": f"python3 \"{_APP / 'games.py'}\"",
+    "hq/coaching.json": f"python3 \"{_APP / 'coaching.py'}\"",
+    "hq/calendar.json": f"python3 \"{HQ_ROUTINE / 'pings.py'}\", and the calendar connector for the calendar itself",
+    "hq/calendar-todo.json": f"python3 \"{_APP / 'todo.py'}\" (plan, unplan)",
+    "hq/calendar-marks.json": "the page's own marks",
+}
+ABOUT_WAY = f"python3 \"{_APP / 'about_self.py'}\" add AGENT \"FACT\""
+# What proves his words is written only by HQ: a call or a text never changes a transcript or a thread.
+_PROOF = re.compile(r"^hq/(calls/[^/]+\.md|(direct-line|coaching-line|team-line)/thread\.jsonl)$")
+_ABOUT_LIST = re.compile(r"^hq/agents/[^/]+-about-herself\.md$")
+# The same files through the shell: a redirect, sed -i, tee, a copy or move over them, a Python one-liner, a git restore.
+_GUARDED_NAME = (r"(?:roadmap\.md|sprint\.json|challenges\.md|inbox\.md|notes\.md|games\.json|coaching\.json|calendar\.json|"
+                 r"calendar-todo\.json|calendar-marks\.json|thread\.jsonl|[\w-]*-about-herself\.md)")
+_SHELL_WRITE = re.compile(
+    rf">>?\s*[\"']?[^\s\"'|;&]*{_GUARDED_NAME}"
+    rf"|\bsed\s+(?:-[a-zA-Z]*\s+)*-i[^|;&]*{_GUARDED_NAME}"
+    rf"|\btee\b[^|;&]*{_GUARDED_NAME}"
+    rf"|\b(?:cp|mv|rm|ln|truncate|dd|rsync|install|touch|chmod)\b[^|;&]*{_GUARDED_NAME}"
+    rf"|\bpython3?\s+-c\b[^|;&]*{_GUARDED_NAME}"
+    rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{_GUARDED_NAME}", re.I)
+# F99: the after-call run is alone with nobody to ask: it writes the log and the lists, and adds the transcript.
+AFTER_CALL_EDIT = "coaching/log.md"
+AFTER_CALL_ADD = re.compile(r"^(coaching/log\.md|challenges\.md|hq/agents/[^/]+-about-herself\.md|hq/calls/[^/]+\.md)$")
+AFTER_CALL_SCRIPTS = {"todo.py", "about_self.py"}  # sprint.py, review.py and jobs.py only to read (AFTER_CALL_READS)
+AFTER_CALL_READS = {"sprint.py": {"list", "json", "show", "open", "fields", "check"}, "review.py": {"list", "flags"},
+                    "jobs.py": {"list"}, "schedule.py": {"list"}}
+
+
+def plain_address(url: str) -> bool:
+    """F99: a web address that carries nothing of ours out: http(s), a real host, no login, no query string. Anything
+    else asks (a query string or a login in an address is how text leaves through a fetch)."""
+    from urllib.parse import urlsplit
+    try:
+        u = urlsplit(str(url).strip())
+        host = (u.hostname or "").lower()
+        port = u.port
+    except ValueError:
+        return False
+    if u.scheme not in ("http", "https") or not host or "." not in host or u.query or u.username or u.password:
+        return False
+    if port not in (None, 80, 443) or re.fullmatch(r"[\d.]+|\[?[0-9a-f:]+\]?", host) or host.endswith((".local", ".internal", ".ts.net")):
+        return False
+    return True
+
 
 @dataclass
 class Decision:
@@ -212,6 +274,7 @@ class Policy:
     # a yes, so a lesson she learns is there at the next call's start.
     memory_writes: bool = False
     team_texts: bool = False  # H266: Moneypenny (context build) texts him on her own line without a yes
+    after_call: bool = False  # F99: the after-call run: only the log, the lists and the transcript
     pending_turns: int = 0  # how many of his turns the pending questions have waited (answer, PENDING_TURNS)
 
     def __post_init__(self):
@@ -297,9 +360,14 @@ class Policy:
             return self._bash(inp.get("command") or "")
         if tool in CALL_UNFRIENDLY:
             return Decision(DENY, "not available on a call")
-        if tool in ("WebSearch", "WebFetch"):
+        if tool == "WebSearch":
             # H103 (13 October 2026), in his words: "donna needs access to internet always (no need to ask for yes)".
             return Decision(ALLOW, "looking it up on the web (no need to ask)")
+        if tool == "WebFetch":
+            url = str(inp.get("url") or "")
+            if plain_address(url):
+                return Decision(ALLOW, "reading a plain web address (no need to ask)")  # H103
+            return _ask("open that web address, which carries more than a plain page", "a web address with data in it (F99)")
         if tool in ("Task", "Agent"):
             return _ask("hand this to a helper to work on", "a helper")
         return _ask(f"use {tool}", "anything else")
@@ -362,6 +430,23 @@ class Policy:
             return Decision(DENY, "git's own files are not edited")
         if top == ".claude":
             return _ask(f"change the project setup file {rel.name}", "the project setup")
+        low = rel.as_posix().casefold()  # casefold: a Mac's disk doesn't tell Roadmap.md from roadmap.md
+        if self.after_call and low != AFTER_CALL_EDIT:  # F99: alone after a call, it writes only the log
+            return Decision(DENY, f"after a call only the log, the lists and the transcript are written, not {rel.name}: "
+                                  "leave it as a follow-up in the log, for when he can be asked")
+        way = WAYS_IN.get(low)
+        if way:
+            return Decision(DENY, f"{rel.name} is never edited directly, whoever asks: use {way}", retry=True)
+        if _PROOF.match(low):
+            return Decision(DENY, f"{rel.name} is what proves his words, and only HQ writes it")
+        if _ABOUT_LIST.match(low):
+            return Decision(DENY, f"her list only takes what passes the filter: use {ABOUT_WAY}", retry=True)
+        if rel.name.casefold() == "claude.md" or low in VISION_FILES:
+            key = (tool, _key(inp or {}))
+            if key in self.approved:  # his yes for exactly this change; on the backup it still goes to the main below
+                self.approved.discard(key)
+            else:
+                return _ask(f"change {rel.name}, which is yours", "his vision, map, rules or CLAUDE.md (F99)")
         if is_backup() and one_writer(rel.as_posix()):
             return self._hand_over(tool, rel.as_posix(), inp or {})
         return Decision(ALLOW, "writing in the folder")
@@ -425,6 +510,8 @@ class Policy:
             return Decision(DENY, "empty command")
         # Only plain commands, joined by && or |. No redirection into files, no
         # subshells, variables or here-documents (quoted text may contain anything).
+        if _SHELL_WRITE.search(cmd):  # F99: the same files through the shell, also with a yes
+            return Decision(DENY, "those files are never written through the shell, whoever asks: use their own script")
         cmd = _hide_quoted_dollars(cmd)  # H281: awk's $1 and sed's $p in single quotes are text, not variables
         # 27 October 2026: ${n} of a plain for loop (for n in 1 2; do sed -n "${n}p" …) is filled in by _loops below.
         loop_vars = re.findall(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b", cmd)
@@ -485,6 +572,13 @@ class Policy:
         if not words:
             return Decision(DENY, "empty command")
         prog, args = words[0], words[1:]
+        if self.after_call and prog in ("python3", "python") and args:  # F99: alone after a call
+            name = Path(args[0]).name
+            sub = args[1] if len(args) > 1 else ""
+            mine = self.hq_script(args[0], name) or self.hq_app_script(args[0], name)
+            if not mine or not (name in AFTER_CALL_SCRIPTS or sub in AFTER_CALL_READS.get(name, ())):
+                return Decision(DENY, f"after a call only the log, the lists and the transcript are written, so {name} "
+                                      f"{sub} waits: leave it as a follow-up in the log")
         if prog == "cd":
             target = args[0] if args else str(Path.home())
             if self.inside(target):
@@ -511,6 +605,7 @@ class Policy:
         if prog in ("python3", "python") and args and self.hq_script(args[0], "jobs.py"):
             sub = args[1] if len(args) > 1 else ""
             if sub in ("add", "add-row", "send-row",  # H277: a row on the roadmap first, or an open row to the team
+                       "write-row",  # F99: a new row, nothing more; the planning file itself is refused
                        "tell",  # H283: a note for a job while it runs or waits
                        "list", "stop", "overrule", "move", "on", "off", "resume",  # H172: resume a paused job
                        "mail-fast", "mail-hourly"):  # H149: the mail check every 15 minutes for a while he names
@@ -538,9 +633,9 @@ class Policy:
         # F77: the automatic review of the planning's rows: read it, and take a flag off on his say-so (sprint.json only).
         if prog in ("python3", "python") and args and self.hq_script(args[0], "review.py"):
             sub = args[1] if len(args) > 1 else "list"
-            if sub in ("list", "flags", "clear"):
+            if sub in ("list", "flags", "clear", "reword"):  # F99: reword is a call's way to change an open row
                 return Decision(ALLOW, "the planning's review and its flags")
-            return Decision(DENY, "from a call, the review script takes list, flags or clear")
+            return Decision(DENY, "from a call, the review script takes list, flags, clear or reword")
         # H173: the usage counts, read only: what a job or a call cost on its own tokens, the rate, the room now.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usagecost.py"):
             sub = args[1] if len(args) > 1 else ""
@@ -564,11 +659,21 @@ class Policy:
             if len(args) == 1 or args[1] in ("list", "add", "stop", "start", "remove"):
                 return Decision(ALLOW, "his mail sorting rules")
             return Decision(DENY, "the mail sorting script takes list, add, stop, start or remove")
-        # H132: what an agent has said about herself, kept in her own list in the workspace (HQ/agents/).
+        # H132: what an agent has said about herself, kept in her own list in the workspace (HQ/agents/). F98: add holds
+        # the filter itself, so a yes-free add can't keep his life.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "about_self.py"):
-            if len(args) == 1 or args[1] in ("list", "add"):
+            if len(args) == 1 or args[1] in ("list", "add", "check"):
                 return Decision(ALLOW, "her own list of what she has said about herself")
-            return Decision(DENY, "the about-herself script takes list or add")
+            return Decision(DENY, "the about-herself script takes list, add or check")
+        # F99: the mail list's way in, since the file itself is refused: an edit on that one file, all or nothing, with
+        # its lock; on the backup it goes to the main.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "handover.py"):
+            if len(args) == 4 and args[1] == "edit" and args[2] == "inbox.md":
+                return Decision(ALLOW, "an edit of the mail list, with its lock")
+            return Decision(DENY, "from a call, the handover script only edits the mail list (edit inbox.md JSON)")
+        # F99: the status block's way in, since the planning file itself is refused.
+        if prog in ("python3", "python") and args and self.status_script(args[0], "set-status.py"):
+            return Decision(ALLOW, "the status block")
         # H143: the week's ticks and X in his calendar, read only, to look back with him.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "planning.py"):
             if len(args) == 1 or (args[1] == "week" and len(args) <= 3):
@@ -616,9 +721,9 @@ class Policy:
                 return Decision(ALLOW, "looking up an old text on this chat")
             return Decision(DENY, "the text search looks only on the chat line she answers on")
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "notes.py"):
-            if len(args) == 1 or args[1] in ("clear", "cleared", "restore"):
+            if len(args) == 1 or args[1] in ("add", "clear", "cleared", "restore"):  # F99: add, the file is refused
                 return Decision(ALLOW, "his quick notes")
-            return Decision(DENY, "the notes script takes clear, cleared or restore")
+            return Decision(DENY, "the notes script takes add, clear, cleared or restore")
         # H200: the to-do list, the user's own file in the workspace: read, add, done, let go, move, undo. Each change is
         # one table row and its log line, the same as editing the file by hand, which a call may do anyway.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "todo.py"):
@@ -815,6 +920,8 @@ class Policy:
                 return _ask("add files from outside the folder to git", "git add outside")
             if any(self.rel(a).parts[:1] and self.rel(a).parts[0] in self.protected for a in files):
                 return Decision(DENY, "that folder never goes to GitHub")
+            if self.after_call and not all(AFTER_CALL_ADD.match(self.rel(a).as_posix().casefold()) for a in files):
+                return Decision(DENY, "after a call only the log, the lists and the transcript are committed")
             return Decision(ALLOW, "git add, files by name")
         if sub in ("commit", "push") and is_backup():
             # H56.3: only the main one commits; on the backup the notes go over with the sync.
@@ -891,6 +998,13 @@ class Policy:
         if not p.is_absolute():
             p = self._base() / p
         return Path(os.path.realpath(p)) == HQ_ROUTINE.parent / "app" / name
+
+    def status_script(self, path: str, name: str) -> bool:
+        """F99: one of HQ's own status scripts, like hq_script for the routine's."""
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = self._base() / p
+        return Path(os.path.realpath(p)) == HQ_ROUTINE.parent / "status" / name
 
     def rel(self, path: str) -> Path:
         p = Path(path).expanduser()

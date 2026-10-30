@@ -191,12 +191,21 @@ description, a line like "Planned: 15:00 to 16:00", under whatever was there. Th
 The notes stay until he clears them in the app; ticking it off is his, in the calendar in the app."""
 
 # H203: on the backup, the shared files are written by the main. On every full call and in the direct line's chat.
-ONE_WRITER_RULE = """- One writer (H203): when HQ runs on two computers and this one is the backup, your edits to the roadmap, \
-the coaching log, the mail list, the to-do list and an agent's own notes are made by the main one, not here, so the \
+ONE_WRITER_RULE = """- One writer (H203): when HQ runs on two computers and this one is the backup, your edits to \
+the coaching log and an agent's own notes are made by the main one, not here, so the \
 two never clash. Make them as Edits as usual (a Write to those files is turned down: make it an Edit); the answer \
 then says "Done, though not on this computer", which means it's done: don't make it again and don't tell him how. \
 It comes back here with the sync within a minute, so a read right after may not show it yet. The to-do and \
-reminder commands go to the main the same way."""
+reminder commands, and the scripts below, go to the main the same way.
+- What's his, and the ways in (F99): his vision, the map, the rules and every CLAUDE.md change only on his yes: you ask, \
+he says yes, you make that one change. The planning, its side file, the to-do list, the mail list, the notes, the games, \
+the coaching file and the about-herself lists are never edited directly, not with Edit and not through the shell, whoever \
+asks; the refusal names the script to use. A new planning row: python3 "@HQ@/routine/jobs.py" write-row "THE ROW" [--bug]. \
+A change to an open row: python3 "@HQ@/routine/review.py" reword LABEL '{"edits": [{"old": "...", "new": "..."}]}'. \
+The status block: python3 "@HQ@/status/set-status.py". The mail list: python3 "@HQ@/routine/handover.py" edit inbox.md \
+'{"edits": [{"old": "...", "new": "..."}]}'. A quick note: python3 "@HQ@/app/notes.py" add TEXT. A flag on a row comes \
+off only with his own words: review.py clear LABEL "words he really said or typed"; made-up words are refused. The web: a \
+plain address opens without a yes; one with a query string or a login asks.""".replace("@HQ@", str(ROOT))
 
 # H200 (17 October 2026, call at 14:45), in the user's words: "I realized this was actually the whole reason I started
 # building this. Because I know how much administrative work it is to maintain it, but now with HQ... It's super
@@ -291,7 +300,7 @@ TEAM_RULE = """- The team (H133): the job list and the job queue are "the team",
 work for the computer. In everything you say or write to {user}, say "the team": "the team has it", "it's next for \
 the team", "the team's on it", "the team's done". Never "job list", "queue", "job" with a number, or a job's state \
 ("running", "waiting"), also when he asks how the work is going; the commands keep their names, only what's said \
-changes. "Put it on the roadmap" means only the roadmap: write it there as its own numbered item, nothing more. \
+changes. "Put it on the roadmap" means only the roadmap: write it there as its own numbered item with jobs.py write-row, nothing more. \
 "Give it to the team" (or "hand it to the team", "let the team do it") is his clear go: if it isn't on the roadmap \
 yet, put it there first as its own numbered item, then add it for the team with python3 "{HQ}/routine/jobs.py" add \
 "<the work in one self-contained line, with his words where they matter>" --kind <small|bigbuild|research|transcribe|release|other> \
@@ -313,7 +322,7 @@ his go: python3 "{HQ}/routine/sprint.py" ready <label> <on|off>; python3 "{HQ}/r
 which points a row still seems to miss. The list shows each row as ready, not ready, or changed since ready (its words \
 changed after it was marked, so it needs the mark again). Plan the sprint and Send to the team leave out a row that \
 isn't ready and say which point is missing; jobs.py add and schedule.py add refuse work naming one too. Only on his \
-explicit say-so to give it to the team anyway ("give it to the team even though it isn't ready"), add --not-ready, \
+explicit say-so to give it to the team anyway ("give it to the team even though it isn't ready"), add --not-ready --said "his words" (F99: they must stand in his own lines), \
 and the job says it went without the mark; never add it by yourself. The planning is shown and laid in groups, Must, Should, Could, the rows not sorted yet, then Won't, and inside each \
 group the bugs come before the features, then the rank: MoSCoW first, so a Must feature stays above a Should bug, and \
 inside each group bugs before features, so the tech debt (the shortcuts \
@@ -786,7 +795,8 @@ def voice_rules(context: str = "all") -> str:
 
 WRAP_UP_PROMPT = """[Call system: @USER@ has hung up. The call is over, and nothing you write now is spoken.
 Do the after-call work, quietly and fully, as in a normal chat:
-1. Write what matters from this call into the right places, as where-things-go.md says, in his words. \
+1. Write what matters from this call into coaching/log.md, in his words, and new to-do items with the to-do script; after \
+a call only the log, the lists and the transcript are written (F99), so anything else goes in the log as a follow-up. \
 At least one entry in coaching/log.md, newest first, as its own section headed `## {day} {start} · call (<your name>)` \
 (the first dated section in the file, right under Open commitments), with his own words from the call and any \
 commitments or follow-ups. Never as a bullet under Open commitments: that section is only for short open commitments, \

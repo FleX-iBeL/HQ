@@ -13,6 +13,8 @@ queue's lock, every other shared file its own lock next to it):
   python3 "routine/handover.py" edit REL JSON   make the edits in the workspace file REL; JSON is
                                                 {"edits": [{"old": "...", "new": "...", "all": false}, ...]},
                                                 the call's own Edit (or MultiEdit), all or nothing
+F99 (30 October 2026): a direct Edit of the mail list is refused on a call or a text, so `edit inbox.md JSON` is their
+way in too (app/policy.py lets only that one through); run on the backup, it goes to the main.
 Exit 0 when written, 1 when the main's copy doesn't have the text (nothing written), 2 when it's refused.
 """
 from __future__ import annotations
@@ -136,6 +138,8 @@ def put(rel: str, payload: str) -> int:
 
 def main(argv):
     if len(argv) == 3 and argv[0] == "edit":
+        if role.is_backup() and not os.environ.get("HQ_ROLE_HERE"):  # F99: from a call on the backup: the main makes it
+            return role.forward("handover", argv)
         return edit(argv[1], argv[2])
     if len(argv) == 3 and argv[0] == "put":
         return put(argv[1], argv[2])

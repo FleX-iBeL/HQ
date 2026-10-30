@@ -150,10 +150,10 @@ def main(argv: list[str]) -> int:
     stream_log = os.path.join(RUN, f"job-{n}.stream.log")
     os.makedirs(RUN, exist_ok=True)
     cmd = [CLAUDE, "-p", "--no-chrome", "--permission-mode", "auto", "--output-format", "stream-json", "--verbose",
-           *chat]
+           *hqpaths.job_flags(), *chat]  # F99: no project settings, the never-send list; tick gives --settings in `chat`
     if box["turns"]:
         cmd += ["--max-turns", str(box["turns"])]
-    env = dict(os.environ)
+    env = {**os.environ, **hqpaths.JOB_ENV}  # F99: none of his folder's files at the start
     env.setdefault("HQ_JOB", str(n))
     with open(stream_log, "a") as lg, open(pfile, encoding="utf8") as prompt:
         _log(lg, f"job {n}: headless run started ({' '.join(chat) or 'a new session'})")

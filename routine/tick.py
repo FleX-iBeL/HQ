@@ -308,7 +308,12 @@ def start(job):
             f"let's go. This is job {n} from the queue on the HQ roadmap, started by the routine "
             f"(phase L) in {where}. The job, as agreed on the call: {job['text']}"
             + (carryon.fresh_note(n, plan) if plan["mode"] == "fresh" else "") + "\n\n"
-            "Follow the HQ build notes, the section \"Jobs started by the routine\". "
+            f"Follow the HQ build notes, the section \"Jobs started by the routine\": they're in "
+            f"{json.dumps(os.path.join(FOLDER, 'HQ', 'CLAUDE.md'))}, a big file, so read that section, not all of it. "
+            # F99: a job starts without his private folder; what it needs, it reads by path.
+            f"A row on the planning: python3 {json.dumps(os.path.join(HERE, 'sprint.py'))} show LABEL. "
+            "None of his private files are loaded at your start, on purpose: open only what this job needs, by path, and "
+            "nothing of his life goes into HQ's code. "
             # H90: one HQ code on every computer: the working branch on GitHub is where every job starts and ends.
             "Before the first step, bring HQ up to date with its working branch (dev) from GitHub with "
             "routine/push.py --pull; when done, push HQ's commits to dev with routine/push.py, after its privacy check. "
@@ -346,10 +351,16 @@ def start(job):
     settings = os.path.join(RUN, "job-settings.json")
     sett = {"statusLine": {"type": "command",
                            "command": f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'statusline.py'))}"}}
+    hook = f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'cyclehook.py'))}"
     if cycle:  # H298, piece 8: a cycle's writes to a shared file go only through HQ's own scripts (the hook refuses the rest)
-        sett["hooks"] = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
-                                         "hooks": [{"type": "command", "command": f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'cyclehook.py'))}"}]}]}
+        sett["hooks"] = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|mcp__.*",
+                                         "hooks": [{"type": "command", "command": hook}]}]}
+    else:  # F99: every job: no send, reply or forward through any connector
+        sett["hooks"] = {"PreToolUse": [{"matcher": "mcp__.*", "hooks": [{"type": "command", "command": hook + " --mail-only"}]}]}
     json.dump(sett, open(settings, "w"), indent=2)
+    if headless:  # F99 (review, c-found 3): the headless run never got this file, so the cycle's hook never loaded
+        import shlex
+        chat += " --settings " + shlex.quote(settings)
     pfile = os.path.join(RUN, f"job-{n}.prompt")
     open(pfile, "w").write(prompt)
     cmd = os.path.join(RUN, f"job-{n}.command")
@@ -370,7 +381,7 @@ echo $$ > {json.dumps(PIDFILE)}
 # H36: wakes the chat up when it has gone quiet (types continue into this window only).
 JT=$(tty)
 /usr/bin/python3 {json.dumps(os.path.join(HERE, 'nudge.py'))} {n} "$JT" $$ </dev/null >/dev/null 2>&1 &!
-{CLAUDE} --no-chrome --permission-mode auto --settings {json.dumps(settings)} {chat} \\
+{job_env()} {CLAUDE} --no-chrome --permission-mode auto --settings {json.dumps(settings)} {job_flags()} {chat} \\
   -n "HQ job {n}" "$(cat {json.dumps(pfile)})"
 """ + CLOSE_WINDOW)
     os.chmod(cmd, 0o755)
@@ -389,6 +400,16 @@ JT=$(tty)
     status("BUILDING", f"Job {n} · " + (how or "started by the routine") + f" in {where}{watch_line(n)}",
            f"job {n} {how or 'started by the routine'}: {job['text'][:90]}")
     log(f"started job {n}" + (f" ({plan['mode']}, chat {plan['session']})" if how else ""))
+
+
+def job_env() -> str:
+    """F99: a job's start without his private folder, for a window's own command line (runjob.py sets the same)."""
+    return " ".join(f"{k}={v}" for k, v in hqpaths.JOB_ENV.items())
+
+
+def job_flags() -> str:
+    import shlex
+    return " ".join(shlex.quote(x) for x in hqpaths.job_flags())
 
 
 def _steps_extra(job, plan):
@@ -461,7 +482,7 @@ echo
 echo $$ > {json.dumps(PIDFILE)}
 # H36: wakes the chat up when it has gone quiet (types continue into this pane only).
 {json.dumps(PY)} {json.dumps(os.path.join(HERE, 'nudge.py'))} {n} "tmux:$TMUX_PANE" $$ </dev/null >/dev/null 2>&1 & disown
-{CLAUDE} --no-chrome --permission-mode auto --settings {json.dumps(settings)} {chat} \\
+{job_env()} {CLAUDE} --no-chrome --permission-mode auto --settings {json.dumps(settings)} {job_flags()} {chat} \\
   -n "HQ job {n}" "$(cat {json.dumps(pfile)})"
 """ + CLOSE_WINDOW_TMUX
 

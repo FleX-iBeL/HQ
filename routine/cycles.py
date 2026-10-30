@@ -585,7 +585,7 @@ def box_args(job: dict, parsed: dict, run_dir: str, base: Path | None = None) ->
 
 def _library(aid: str, ctx: str) -> str:
     sp = ROOT / "routine" / "sprint.py"
-    out = ["Read just in time: your briefing and your ledger are below; open only what a step needs:",
+    out = ["Read just in time: your ledger is below, your briefing one command away; open only what a step needs:",
            f"- one to-do item with its details: python3 \"{ROOT / 'app' / 'todo.py'}\" show \"a few words of it\" (the list one line each is in the briefing)",
            f"- one planning row, open or closed: python3 \"{sp}\" show LABEL; the open items: python3 \"{sp}\" open; the three mechanical fields of a row: python3 \"{sp}\" fields LABEL",
            f"- one layer of the map: python3 \"{ROOT / 'routine' / 'briefing.py'}\" layer N",
@@ -689,12 +689,10 @@ def _month_words(aid: str, now: dt.datetime) -> str:
 
 
 def _briefing(ctx: str, base: Path) -> str:
-    try:
-        r = subprocess.run([PY, str(HERE / "briefing.py"), "fresh", ctx if ctx in ("day", "coach", "build") else "day"],
-                           capture_output=True, text=True, timeout=60, env={**os.environ, "HQ_WORKSPACE": str(base)})
-        return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "The briefing couldn't be made just now."
-    except Exception:
-        return "The briefing couldn't be made just now."
+    """F99: a run starts without his life in its first prompt: the briefing is one command away, by path."""
+    which = ctx if ctx in ("day", "coach", "build") else "day"
+    return (f"Your briefing isn't in this prompt on purpose (F99). Read it first, once: HQ_WORKSPACE={json.dumps(str(base))} "
+            f"python3 \"{HERE / 'briefing.py'}\" fresh {which}")
 
 
 def _review_shape(aid: str) -> str:

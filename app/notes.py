@@ -11,6 +11,7 @@ notes-cleared.md next to the notes ("- cleared YYYY-MM-DD HH:MM:SS · " and the 
 bottom. The page shows Undo for a moment after a Clear; a call can bring any cleared note back.
 
     python3 app/notes.py                 the notes, as the page gets them (JSON)
+    python3 app/notes.py add TEXT        add one note (F99: the way in for a call or a text; the file itself is refused)
     python3 app/notes.py clear WORDS     clear the one note with these words in it (kept, so it can come back)
     python3 app/notes.py cleared         the cleared notes, newest first, in plain lines
     python3 app/notes.py restore WORDS   bring back the newest cleared note with these words in it
@@ -199,6 +200,10 @@ def _cli(args: list[str]) -> int:
         print(json.dumps(read(), ensure_ascii=False, indent=1))
         return 0
     what, words = args[0], " ".join(args[1:])
+    if what == "add":
+        got = add(words)
+        print(f"In the notes: {got['text']}" if got else "Nothing to add.")
+        return 0 if got else 1
     if what == "cleared":
         got = cleared()
         print("\n".join(f"- cleared {i['cleared'][:16]}: {i['text']}" for i in got) if got else "No cleared notes.")

@@ -11,7 +11,8 @@ agents.persona puts it in front of her on every call, three-way call and text. S
 
     python3 app/about_self.py                     every agent's list
     python3 app/about_self.py list AGENT          one agent's list (AGENT: her id or name)
-    python3 app/about_self.py add AGENT "FACT"    keep one fact (skipped when it's already there); prints the file
+    python3 app/about_self.py add AGENT "FACT"    keep one fact (skipped when it's already there, refused when it's his life); prints the file
+    python3 app/about_self.py check [AGENT]       the lines already on a list that the filter would refuse; changes nothing
     python3 app/about_self.py harvest-call FILE   H232: keep the new things the agents said about themselves on a call
     python3 app/about_self.py harvest-text AGENT "TEXT"   the same for one of her texts
     python3 app/about_self.py tidy                drop the near-repeats from every list
@@ -28,6 +29,15 @@ H298, piece 2 (29 October 2026, the identity fix): the harvest had kept lines ab
 the look. Now the look is told her life is only her own, and `own_life` holds each fact against what she really said:
 kept only when its words come from a sentence of hers in the first person that isn't about him. The lists already
 written are the user's to wipe (they're in the workspace); `tidy` drops only near-repeats.
+
+F98 (30 October 2026, his words: "bigger question is why is it happening AGAIN"): his life came back within a day,
+because an agent narrating his plans in the first person reads like her own life ("I've cleared my Tuesday and I'm
+biking to the clinic at 10:40"), and `add` had no filter at all while a call or text may run it without a yes. Now
+`refused` is the one filter on every way in: `add` itself holds it, so the harvest, the wrap-up and a command all go
+through it. A fact is refused when it's about him, when it's the shape of planning his days, or when it names his world:
+his name, the names and private words in me.md, a name in his calendar or to-do titles, or a day or a time together with
+something on his calendar. `own_life` also no longer counts a sentence that plans a day as hers. `check` shows what's
+already on a list; the lines themselves are his to take off.
 """
 from __future__ import annotations
 
@@ -98,9 +108,9 @@ def _write(folder: Path | None, agent: dict, have: list[str]) -> None:
 
 
 def add(folder: Path | None, agent: dict, fact: str) -> bool:
-    """Keep FACT in her list. False when it was empty or already there."""
+    """Keep FACT in her list. False when it was empty, already there, or his life (F98: `refused`, on every way in)."""
     fact = " ".join(str(fact).split())[:LONGEST].strip()
-    if not fact:
+    if not fact or refused(folder, fact):
         return False
     have = facts(folder, agent["id"])
     if any(same(fact, f) for f in have):
@@ -148,6 +158,15 @@ _ABOUT_HIM = re.compile(r"\b(you|you're|you've|you'd|you'll|your|yours|yourself|
 _HIM_IN_FACT = re.compile(r"\b(he|him|his|himself|the boss|the user|you|your)\b")
 OWN_SHARE = 0.5  # at least this share of a fact's content words must come from her own first-person sentences
 
+# F98: the shape of planning a day, which is the work she does for him, never her own life: a verb of the calendar with a
+# day, a time or the calendar itself in the same sentence.
+_DAY = r"(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|today|tonight|tomorrow|weekend)"
+_CLOCK = r"(?:\d{1,2}[:.]\d{2}|\d{1,2}\s?(?:am|pm))"
+_WHEN = re.compile(rf"\b{_DAY}\b|\b{_CLOCK}\b|\b(?:calendar|agenda|appointments?|time ?blocks?|blocks?|schedule)\b")
+_PLAN_VERB = re.compile(r"\b(?:clear(?:s|ed|ing)?|block(?:s|ed|ing)?|book(?:s|ed|ing)?|mov(?:e|es|ed|ing)|"
+                        r"re-?schedul(?:e|es|ed|ing)|schedul(?:e|es|ed|ing)|plann?(?:s|ed|ing)?|put|puts|cancel(?:s|led|ling)?|"
+                        r"remind(?:s|ed|ing)?|free(?:s|d)?|sort(?:s|ed|ing)?)\b")
+
 
 def _sentences(said: str) -> list[str]:
     out = []
@@ -158,17 +177,80 @@ def _sentences(said: str) -> list[str]:
     return out
 
 
+def plans_a_day(text: str) -> bool:
+    """F98: the shape of planning a day: a calendar verb next to a day, a time or the calendar."""
+    low = text.lower()
+    return bool(_PLAN_VERB.search(low) and _WHEN.search(low))
+
+
+def _life_names(folder: Path) -> tuple[set[str], set[str]]:
+    """F98: what names his world in this workspace: (names, calendar words). Names are his own name, the names and
+    private words in me.md, and every name inside his calendar and to-do titles (a capital that isn't the title's first
+    word). Calendar words are the content words of his calendar's titles. Read fresh; nothing of it is kept or in HQ's code."""
+    import json
+    names: set[str] = set()
+    try:
+        import me as _me
+        m = _me.load(folder)
+        names |= {w for w in re.findall(r"[^\W\d_][\w'-]+", " ".join([m.get("name") or "", m.get("hear") or ""]))}
+        names |= {str(w) for w in m.get("private") or []}
+    except Exception:
+        pass
+    titles: list[str] = []
+    calendar: list[str] = []
+    try:
+        d = json.loads((folder / "HQ" / "calendar.json").read_text(encoding="utf8"))
+        calendar = [str(e.get("title") or "") for e in d.get("events") or [] if isinstance(e, dict)]
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        for line in (folder / "challenges.md").read_text(encoding="utf8").splitlines():
+            m2 = re.match(r"^\|\s*([^|]+?)\s*\|", line)
+            if m2 and not re.fullmatch(r"[-: ]+", m2.group(1)):
+                titles.append(m2.group(1))
+    except OSError:
+        pass
+    for t in titles + calendar:
+        for w in re.findall(r"[^\W\d_][\w'-]+", t)[1:]:
+            if w[0].isupper() and len(w) > 2 and not w.isupper():
+                names.add(w)
+    days = {d.capitalize() for d in "monday tuesday wednesday thursday friday saturday sunday".split()}
+    months = {m3.capitalize() for m3 in "january february march april may june july august september october november december".split()}
+    names = {n for n in names if n and n not in days and n not in months}
+    words: set[str] = set()
+    for t in calendar:
+        words |= _words(t)
+    return names, words
+
+
+def refused(folder: Path | None, fact: str) -> str:
+    """F98: why FACT can't be kept as hers, or "". The one filter on every way in."""
+    folder = folder or _folder()
+    low = fact.lower()
+    if _HIM_IN_FACT.search(low):
+        return "it's about him, not her"
+    if plans_a_day(fact):
+        return "it's the shape of planning a day, which is her work for him, not her own life"
+    names, calendar = _life_names(folder)
+    for n in sorted(names, key=len, reverse=True):
+        if re.search(rf"(?<![\w-]){re.escape(n.lower())}(?![\w-])", low):
+            return "it names someone or something from his own life"
+    if (re.search(rf"\b{_DAY}\b|\b{_CLOCK}\b", low)) and (_words(fact) & calendar):
+        return "it names a day or a time together with something on his calendar"
+    return ""
+
+
 def own_life(fact: str, said: str) -> bool:
     """H298, piece 2: whether a fact is about her own life, held mechanically against what she said: the fact names
     nobody else, and at least half its content words appear in sentences of hers that are in the first person and not
     about him (no you, your, he, his). A transcript full of his life, where every line of hers is about him, keeps
-    nothing."""
+    nothing. F98: a sentence that plans a day doesn't count as hers either, whoever's day she says it is."""
     if _HIM_IN_FACT.search(fact.lower()):
         return False
     hers: set[str] = set()
     for sent in _sentences(said):
         low = sent.lower()
-        if _FIRST.search(low) and not _ABOUT_HIM.search(low):
+        if _FIRST.search(low) and not _ABOUT_HIM.search(low) and not plans_a_day(low):
             hers |= _words(sent)
     want = _words(fact)
     if not want or not hers:
@@ -306,6 +388,20 @@ def main(argv: list[str]) -> int:
         for n, f in harvest(folder, who, said):
             print(f"kept for {n}: {f}")
         return 0
+    if cmd == "check":
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import agents
+        found = 0
+        for a in agents.load(folder):
+            if rest and rest[0].strip().lower() not in (a["id"], a["name"].lower()):
+                continue
+            for f in facts(folder, a["id"]):
+                why = refused(folder, f)
+                if why:
+                    found += 1
+                    print(f"{a['name']}: {f}\n    {why}")
+        print(f"{found} line(s) the filter would refuse." if found else "Nothing on the lists that the filter would refuse.")
+        return 0
     if cmd not in ("list", "add") or not rest or (cmd == "add" and len(rest) != 2) or (cmd == "list" and len(rest) != 1):
         print(__doc__.split("\n\n")[-2], file=sys.stderr)
         return 2
@@ -316,6 +412,10 @@ def main(argv: list[str]) -> int:
     if cmd == "list":
         print(*(f"- {f}" for f in facts(folder, a["id"])) or [f"{a['name']}: nothing yet"], sep="\n")
         return 0
+    why = refused(folder, " ".join(rest[1].split()))
+    if why:
+        print(f"refused: {why}. Nothing of his life is kept as hers (F98).", file=sys.stderr)
+        return 1
     kept = add(folder, a, rest[1])
     print(("kept" if kept else "already there") + f": {path(folder, a['id'])}")
     return 0

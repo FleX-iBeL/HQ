@@ -9,6 +9,10 @@ writes freely. The run's stream shows the refusal, so after the run it's also a 
 
 The hook reads the PreToolUse JSON on stdin: exit 0 lets the call through, exit 2 refuses it with the reason on
 stderr. Nothing else is decided here; the box and the shares are the runner's.
+
+F99 (30 October 2026): the same hook guards every team job against sending: any connector's send, reply or forward is
+refused, whatever the connector is called. A team job needs the planning (it writes its results in the row), so only
+a cycle gets the shared-file part: `--mail-only` is how a team job's settings call it.
 """
 from __future__ import annotations
 
@@ -41,8 +45,18 @@ def shared_name(path: str) -> str | None:
     return None
 
 
-def decide(ask: dict) -> tuple[int, str]:
+def never_mail(name: str) -> bool:
+    """F99: a connector's send, reply or forward, whatever the connector is called."""
+    import hqpaths
+    return name.startswith("mcp__") and name.rsplit("__", 1)[-1] in hqpaths.NEVER_MAIL
+
+
+def decide(ask: dict, mail_only: bool = False) -> tuple[int, str]:
     name, inp = str(ask.get("tool_name", "")), ask.get("tool_input") or {}
+    if never_mail(name):
+        return 2, f"HQ: refused {name}: nothing is ever sent, replied to or forwarded from a job. A draft at the most."
+    if mail_only:
+        return 0, ""
     if name in EDITORS:
         s = shared_name(str(inp.get("file_path") or inp.get("notebook_path") or ""))
         if s:
@@ -63,7 +77,7 @@ def main() -> int:
         ask = json.loads(sys.stdin.read() or "{}")
     except ValueError:
         return 0
-    code, why = decide(ask)
+    code, why = decide(ask, "--mail-only" in sys.argv[1:])
     if code:
         print(why, file=sys.stderr)
     return code

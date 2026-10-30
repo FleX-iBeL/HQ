@@ -397,7 +397,7 @@ def main(argv):
             return
         if cmd == "add":
             past = "--past-the-line" in args
-            rest, kind, every, skip, guess = [], None, None, False, None
+            rest, kind, every, skip, guess, his = [], None, None, False, None, None
             for k, a in enumerate(args):  # H95: --kind for its estimate, as for a job (H70)
                 if skip:
                     skip = False
@@ -406,6 +406,9 @@ def main(argv):
                     skip = "=" not in a
                 elif a == "--guess" or a.startswith("--guess="):  # H190: the call's own guess
                     guess = a.split("=", 1)[1] if "=" in a else (args[k + 1] if k + 1 < len(args) else "")
+                    skip = "=" not in a
+                elif a == "--said" or a.startswith("--said="):  # F99: his own words behind a --not-ready
+                    his = a.split("=", 1)[1] if "=" in a else (args[k + 1] if k + 1 < len(args) else "")
                     skip = "=" not in a
                 elif a == "--every" or a.startswith("--every="):  # H171
                     every = a.split("=", 1)[1] if "=" in a else (args[k + 1] if k + 1 < len(args) else "")
@@ -432,7 +435,7 @@ def main(argv):
             if at < dt.datetime.now().replace(second=0, microsecond=0) - dt.timedelta(minutes=1):
                 sys.exit(f"{say_when(at.strftime(FMT))} has already passed. Give a time ahead, or now.")
             import sprint as sp_  # H272: the open planning rows it names must be marked ready, or his say-so
-            said = sp_.gate(text, jobs.one_line(" ".join(rest[1:])), "--not-ready" in args)
+            said = sp_.gate(text, jobs.one_line(" ".join(rest[1:])), "--not-ready" in args, his)
             n = max([i["n"] for i in items] + [0]) + 1
             prio = "--priority" in args
             item = {"n": n, "state": "waiting", "past": past, "priority": prio, "every": every, "at": at.strftime(FMT),

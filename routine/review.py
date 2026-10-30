@@ -613,11 +613,16 @@ def pass_words(ps=None):
 
 
 def clear(label, words):
-    """His say-so on a call: the flag off, his words kept with the row (in sprint.json, outside the ask)."""
+    """His say-so on a call: the flag off, his words kept with the row (in sprint.json, outside the ask). F99: the words
+    must stand in his own lines (a call, a text, a quick note), so a flag never comes off on an agent's word."""
     label = label.strip().upper()
     words = q.one_line(words or "").strip()
     if not words:
         sys.exit("Clearing a flag needs his words, as he said them on the call.")
+    where = S.his_quote(words)
+    if not where:
+        sys.exit(f"Refused: those words aren't in his own lines, so the flag on {label} stays. Quote at least three words "
+                 "he really said or typed in a call, a text or a quick note.")
     with q.locked():
         row = next((r for r in S.open_rows() if r["label"] == label), None)
         if not row:
@@ -628,7 +633,7 @@ def clear(label, words):
         if e.get("verdict") != "flag":
             sys.exit(f"{label} has no flag to take off.")
         e.update({"ask": S.ask_fp(row["line"]), "verdict": "cleared", "at": int(_clock()),
-                  "cleared_words": words, "cleared_findings": e.get("findings") or []})
+                  "cleared_words": words, "cleared_where": where, "cleared_findings": e.get("findings") or []})
         e["findings"] = []
         rs[label] = e
         rv["rows"] = rs

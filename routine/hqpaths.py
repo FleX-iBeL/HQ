@@ -285,3 +285,20 @@ def part_cmd(name: str, *args: str) -> list[str] | None:
     if p.endswith(".sh"):
         return ["/bin/sh", p, *args]
     return [p, *args]
+
+
+# F99, piece 1 of the foundation (30 October 2026): a team job or an agent's own run starts without his private folder:
+# no CLAUDE.md with its imports, no memory, no project settings (their hook pours his rules into every prompt, their
+# skills name him). It reads what it needs by path. The folder's deny list is gone with those settings, so the never-send
+# list comes with the job itself: the flags here, and cyclehook.py on any connector.
+JOB_ENV = {"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+NEVER_MAIL = ("send_message", "send", "reply", "forward", "send_draft")  # the same as policy.GMAIL_NEVER
+
+
+def never_mail_tools() -> list[str]:
+    return [f"mcp__claude_ai_Gmail__{t}" for t in NEVER_MAIL]
+
+
+def job_flags() -> list[str]:
+    """The flags every team job and cycle starts with, next to JOB_ENV."""
+    return ["--setting-sources", "user", "--disallowedTools", ",".join(never_mail_tools())]

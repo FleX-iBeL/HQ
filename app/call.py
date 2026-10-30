@@ -461,6 +461,7 @@ class Call:
             self.policy.listener = None
             self.policy.pending.clear()
             self.policy.unattended = True
+            self.policy.after_call = True  # F99: only the log, the lists and the transcript from here on
             if self.wrap_up_mode == "dry":
                 self.policy.dry_run = True
                 template = config.WRAP_UP_DRY_PROMPT
