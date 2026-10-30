@@ -56,7 +56,7 @@ def build(text: str | None = None) -> dict:
             continue
         if not phase or not line.startswith("|"):
             continue
-        cells = [c.strip() for c in line.split("|")[1:-1]]
+        cells = hqpaths.cells(line)
         if len(cells) < 2:
             continue
         head = cells[1].split(" ", 1)
@@ -125,7 +125,7 @@ def row(label: str) -> dict | None:
     for r in idx["rows"]:
         if r["label"] == label:
             line = line_at(r["start"], r["end"])
-            cells = [c.strip() for c in line.split("|")[1:-1]]
+            cells = hqpaths.cells(line)
             return {"label": label, "title": r["title"], "state": r["state"], "phase": r["phase"],
                     "cells": cells[2:], "line": line, "n": r["n"]}
     return {"missing": True}

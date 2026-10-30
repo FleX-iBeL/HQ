@@ -3,19 +3,37 @@
 usage: set-status.py STATE "STEP" "JUST" "NEXT" "TABLE_ROW" "LOGLINE" ["UPDATED_NOTE"]
 STATE: BUILDING|TESTING|RELEASING|WAITING|DONE|STOPPED. TABLE_ROW like "Phase A|A1 ✅|A2 🔨|A3 ⬜".
 Keeps the newest eight log lines. An empty TABLE_ROW keeps the phase row that was there; a row that
-doesn't start with "Phase " is refused, and so is an empty one when there's no row to keep (F35)."""
+doesn't start with "Phase " is refused, and so is an empty one when there's no row to keep (F35).
+
+F101: written under the queue's lock through a temporary file, so two writers can't lose each other's work and a crash can't
+leave half a planning; a file without the block's separator is refused, nothing written. Run from a call on the backup, it goes
+to the main, like every other write to the planning."""
 import os, re, sys, time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "routine"))
 import hqpaths  # M1: the roadmap is in the workspace
+import jobs as q
+import role
 path = hqpaths.ROADMAP
+if len(sys.argv) < 7:
+    sys.exit(__doc__)
+if role.is_backup() and not os.environ.get("HQ_ROLE_HERE"):
+    sys.exit(role.forward("set_status", ["set", *sys.argv[1:]]))
 states = {"BUILDING": "🔨 BUILDING", "TESTING": "🧪 TESTING", "RELEASING": "🚀 RELEASING",
           "WAITING": "⏸ WAITING FOR YOU", "DONE": "✅ DONE", "STOPPED": "⚠️ STOPPED"}
-state, step, just, nxt, row, logline = sys.argv[1:7]
-note = sys.argv[7] if len(sys.argv) > 7 else None
-
+args = sys.argv[1:]
+if args and args[0] == "set":  # the hand-over from the backup
+    args = args[1:]
+state, step, just, nxt, row, logline = args[:6]
+note = args[6] if len(args) > 6 else None
+if state not in states:
+    sys.exit(f"set-status.py: no state {state!r}; nothing written")
+lock = q.locked()
+lock.__enter__()
 text = open(path, encoding="utf8").read()
 head, sep, rest = text.partition("\n---\n")
+if not sep:
+    sys.exit("set-status.py: the roadmap has no --- under its status block; nothing written")
 old_log = [l for l in head.splitlines() if re.match(r"^- \d\d:\d\d ", l)]
 if note is None:
     m = re.search(r"^\*Updated [^·]*· (.+)\*$", head, re.M)
@@ -46,5 +64,13 @@ block = f"""# {states[state]}
 *Updated {time.strftime('%Y-%m-%d')}{' · ' + note if note else ''}*
 """
 hqpaths.guard_roadmap(path)  # F17
-open(path, "w", encoding="utf8").write(block + sep + rest)
+tmp = f"{path}.status.{os.getpid()}"
+with open(tmp, "w", encoding="utf8") as f:
+    f.write(block + sep + rest)
+try:
+    os.chmod(tmp, os.stat(path).st_mode & 0o777)
+except OSError:
+    pass
+os.replace(tmp, path)
+lock.__exit__(None, None, None)
 print(block)

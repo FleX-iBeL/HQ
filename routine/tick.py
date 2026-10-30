@@ -315,10 +315,16 @@ def start(job):
             "None of his private files are loaded at your start, on purpose: open only what this job needs, by path, and "
             "nothing of his life goes into HQ's code. "
             # H90: one HQ code on every computer: the working branch on GitHub is where every job starts and ends.
-            "Before the first step, bring HQ up to date with its working branch (dev) from GitHub with "
-            "routine/push.py --pull; when done, push HQ's commits to dev with routine/push.py, after its privacy check. "
-            "A refused pull or push is never passed over: say so in the status block's log and the coaching log (F31). "
-            "Never main, never the version tags. "
+            + ("Before the first step, bring HQ up to date with its working branch (dev) from GitHub with "
+               "routine/push.py --pull; when done, push HQ's commits to dev with routine/push.py, after its privacy check. "
+               "A refused pull or push is never passed over: say so in the status block's log and the coaching log (F31). "
+               "Never main, never the version tags. " if hqpaths.is_maker() else
+               "This HQ stays on its released version: never pull the work line (dev), and push nothing. ")  # F101 (C45)
+            # F101: a program passes a build, not the job.
+            + f"Before the done mark of a build, commit, then run python3 {json.dumps(os.path.join(HERE, 'proof.py'))} run {n}: it "
+              "runs the flows your row names and the quick set on a copy and keeps the record; done is refused without a "
+              "green one for the commit HQ is on. "
+            +
             # H168: the team estimates itself: its own guess at the start, kept next to the computed one and the real time.
             f"After reading the job's row, before building, write down your own guess of how many minutes this job will "
             f"take: python3 {json.dumps(os.path.join(HERE, 'jobs.py'))} guess {n} MINUTES (H168). "
@@ -356,7 +362,7 @@ def start(job):
         sett["hooks"] = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|mcp__.*",
                                          "hooks": [{"type": "command", "command": hook}]}]}
     else:  # F99: every job: no send, reply or forward through any connector
-        sett["hooks"] = {"PreToolUse": [{"matcher": "mcp__.*", "hooks": [{"type": "command", "command": hook + " --mail-only"}]}]}
+        sett["hooks"] = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|Bash|mcp__.*", "hooks": [{"type": "command", "command": hook + " --mail-only"}]}]}
     json.dump(sett, open(settings, "w"), indent=2)
     if headless:  # F99 (review, c-found 3): the headless run never got this file, so the cycle's hook never loaded
         import shlex
@@ -400,6 +406,31 @@ JT=$(tty)
     status("BUILDING", f"Job {n} · " + (how or "started by the routine") + f" in {where}{watch_line(n)}",
            f"job {n} {how or 'started by the routine'}: {job['text'][:90]}")
     log(f"started job {n}" + (f" ({plan['mode']}, chat {plan['session']})" if how else ""))
+
+
+# F101 (C73): the night's test run is the routine's own, not a Claude job's: no usage, no line to wait behind, and a release
+# reads what it left. A failure is a job for the team.
+NIGHT_AT = (2, 0)  # the same time as the H169 item that ran it
+
+
+def nightly_minute(now=None):
+    now = now or time.localtime()
+    if (now.tm_hour, now.tm_min) < NIGHT_AT or now.tm_hour > 5:
+        return None
+    nf = os.path.join(RUN, "nightly-started")
+    day = time.strftime("%Y-%m-%d", now)
+    try:
+        if open(nf).read().strip() == day:
+            return None
+    except OSError:
+        pass
+    os.makedirs(RUN, exist_ok=True)
+    open(nf, "w").write(day)
+    out = open(os.path.join(RUN, "nightly.log"), "a")
+    p = subprocess.Popen([sys.executable, os.path.join(HERE, "nightly.py"), "run", "--routine"], cwd=JV, stdin=subprocess.DEVNULL,
+                         stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+    log(f"the night's test run started (pid {p.pid})")
+    return p.pid
 
 
 def job_env() -> str:
@@ -1550,6 +1581,10 @@ def tick():
         return
     if not q["on"]:
         return
+    try:
+        nightly_minute()  # F101: the night's test run is the routine's own
+    except Exception as e:
+        log(f"nightly: {e!r}")
     # H39: the waiting job highest on the list goes first (ready, or held for the usage and now
     # given another go), not the oldest; a call can move them with jobs.py move.
     line = q.get("waiting")

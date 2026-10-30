@@ -116,12 +116,14 @@ def mark(label: str, passed: bool, what: str, job: int | None = None, now: dt.da
         if not r:
             sys.exit(f"No {label} row on the roadmap.")
         line = r[0]
-        cells = [c.strip() for c in line.rstrip().split("|")[1:-1]]
+        cells = hqpaths.cells(line)  # F101: an escaped pipe in a row is not a cell
         at = len(cells) - 2 if len(cells) >= 6 else len(cells) - 1
         word = "passed" if passed else "failed"
         new = f"QA {word} ({f'job {job}' if job else 'by hand'}, {_when(now)}): {what}."
         cells[at] = (cells[at].strip() + " " + new).strip()
-        row2 = ("| " + " | ".join(cells) + " |").replace("|  |", "| |").replace("|  |", "| |")
+        row2 = hqpaths.join_cells(cells)
+        if len(hqpaths.cells(row2)) != len(hqpaths.cells(line)):
+            sys.exit(f"Nothing written: the mark would change the cells of the {label} row.")
         text = text.replace(line, row2, 1)
         q.write(text, jobs, on)
         return row2
@@ -274,8 +276,8 @@ def title_of(label: str, text: str | None = None) -> str:
         line = rows(q.read()[0] if text is None else text).get(label, ("",))[0]
     except Exception:
         return ""
-    cells = [c.strip() for c in line.split("|")]
-    name = cells[2] if len(cells) > 2 else ""
+    cells = hqpaths.cells(line) if line else []
+    name = cells[1] if len(cells) > 1 else ""
     return re.sub(rf"^{re.escape(label)}\s*", "", name)[:160]
 
 
@@ -325,7 +327,18 @@ def subject_labels(subject: str) -> list[str]:
     head, sep, _ = subject.partition(":")
     if not sep or len(head) > 60:
         return []
-    return [m.group(0) for m in re.finditer(r"(?<![\w.])[HF]\d+(?:\.\d+)*\b", head)]
+    return [m.group(0) for m in re.finditer(r"(?<![\w.])[A-Z]\d+(?:\.\d+)*\b", head)]
+
+
+# F101 (C73): a commit that names no item holds the release, unless it only touches the tests, the version or the changelog.
+FREE_FILES = ("app/happy_flows.py", "routine/flowsets.py", "VERSION", "CHANGELOG.md", "README.md", "updates/")
+
+
+def only_free_files(root: str, sha: str) -> bool:
+    r = subprocess.run(["git", "-C", str(root), "show", "--first-parent", "--format=", "--name-only", sha],
+                       text=True, capture_output=True)
+    files = [f for f in r.stdout.splitlines() if f.strip()]
+    return bool(files) and all(f.startswith(FREE_FILES) for f in files)
 
 
 def commits(root: str, base: str, tip: str) -> list[tuple[str, str]]:
@@ -345,8 +358,14 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
     cs = commits(root, base, tip)
     to, taken, held, behind, stop = None, [], [], [], False
     for sha, subject in cs:
-        need = [l for l in subject_labels(subject) if l in all_rows and all_rows[l][1] in GATED]
+        named = [l for l in subject_labels(subject) if l in all_rows]
+        need = [l for l in named if all_rows[l][1] in GATED]
         bad = [l for l in need if state(l, text) != "passed"]
+        if not named and not only_free_files(root, sha):  # F101: nothing goes out that no item asked for
+            if not stop:
+                stop = True
+            held.append({"label": sha[:7], "why": f"this commit names no item: {subject[:70]}"})
+            continue
         if bad and not stop:
             stop = True
         if stop:
@@ -438,6 +457,35 @@ def prompt_extra(text: str) -> str:
             "row's last piece passes, qa.py pass takes it off that list: commit that file too.\n")
 
 
+_PIECE = re.compile(r"\bpiece \d+ of (\d+)\b", re.I)
+_COMPARED = re.compile(r"\d+\s*(?:of|/|out of)\s*\d+", re.I)
+
+
+def proof_refuses(label: str, compared: str) -> str | None:
+    """F101: QA's pass stands on what a program saw, never on what's typed: the build's green record, a comparison on
+    real data that says what, how many and how many right, and for a piece, its switch on the hidden list."""
+    import proof
+    rec = proof.latest(label)
+    if not rec:
+        return f"{label} has no record of a green run (routine/proof.py run), so there's nothing to pass."
+    if not rec.get("green"):
+        return f"the last run for {label} wasn't green: {'; '.join(rec.get('failed') or [])[:300]}."
+    if not (compared and re.search(r"[A-Za-z]{3}", compared) and _COMPARED.search(compared)):
+        return ("a pass names a comparison on real data: --compared \"what, how many, how many right\", like "
+                "\"open planning rows read whole, 61 of 61\".")
+    text = q.read()[0]
+    r = rows(text).get(label)
+    m = _PIECE.search(r[0]) if r else None
+    if m and int(m.group(1)) >= 2:
+        try:
+            listed = bool(_features().for_row(label))
+        except Exception:
+            listed = False
+        if not listed:
+            return f"{label} is built in pieces and its switch isn't on the hidden list (app/features-in-pieces.json)."
+    return None
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
@@ -452,6 +500,11 @@ def main(argv: list[str]) -> int:
     if cmd in ("pass", "fail", "state", "queue") and not LABEL.fullmatch(label):
         print("Which row? Give its label, like H247.")
         return 2
+    compared = ""
+    if "--compared" in args:  # F101: what was compared on real data, how many, how many right
+        i = args.index("--compared")
+        compared = " ".join((args[i + 1] if i + 1 < len(args) else "").split())
+        args = args[:i] + args[i + 2:]
     if cmd in ("pass", "fail"):
         args, ev, err = evidence(args)
         if err or (cmd == "pass" and not ev):
@@ -462,6 +515,11 @@ def main(argv: list[str]) -> int:
             summary = " ".join(" ".join(args[1:]).split()).rstrip(".")
             args = args[:1] + [(summary + ". " if summary else "") + tried_words(ev)]
     if cmd == "pass":
+        no = proof_refuses(label, compared)
+        if no:
+            print(f"Refused: {no} Nothing written.")
+            return 2
+        args = args[:1] + [" ".join(args[1:]).rstrip(". ") + f". Compared: {compared}"]
         row = mark(label, True, " ".join(args[1:]), job)
         print(f"QA passed for {label}, in its row; the release may take it.")
         for said in ship_whole(label, row):

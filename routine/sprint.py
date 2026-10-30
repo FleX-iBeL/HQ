@@ -64,6 +64,7 @@ import hashlib, json, os, re, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import estimate as E  # noqa: E402
+import hqpaths  # noqa: E402
 import jobs as q  # noqa: E402
 
 RANKS = os.environ.get("HQ_SPRINT") or os.path.join(os.path.dirname(q.ROADMAP), "sprint.json")
@@ -91,7 +92,7 @@ def open_rows(text=None):
             continue
         if not phase.startswith("## Phase ") or phase.startswith("## Phase P ") or not line.startswith("|"):
             continue
-        cells = [c.strip() for c in line.split("|")[1:-1]]
+        cells = hqpaths.cells(line)
         if len(cells) < 2 or cells[0] != "⬜":
             continue
         head = cells[1].split(" ", 1)
@@ -127,7 +128,7 @@ def row_of(label, text=None):
             continue
         if not line.startswith("|"):
             continue
-        cells = [c.strip() for c in line.split("|")[1:-1]]
+        cells = hqpaths.cells(line)
         if len(cells) < 2:
             continue
         head = cells[1].split(" ", 1)
@@ -312,13 +313,31 @@ TEAM_NOTE = re.compile(r"(?:\b(?:Built|Done|Fixed|Shipped|Released|Merged|Finish
                        r"|\bQA (?:passed|failed) \((?:by hand|job \d+))")
 
 
+_ASK_GOES_ON = re.compile(r"\b(?:what'?s asked|what'?s wrong|what right looks like|done means|how to check|his words|"
+                         r"out of scope|sources?)\s*:", re.I)
+
+
+def team_note_at(desc):
+    """F101: where the team's notes start in a description, or None. Only at the start of a sentence with no more of the
+    ask after it: "its QA passed (job 459) and then" in the middle of a sentence is the row's own words, and the rows that
+    reached the reviewer cut there are why this is here."""
+    for m in TEAM_NOTE.finditer(desc):
+        before = desc[:m.start()].rstrip()
+        if before and before[-1] not in ".!?:;)\"”'":
+            continue
+        if _ASK_GOES_ON.search(desc[m.end():]):
+            continue
+        return m.start()
+    return None
+
+
 def ask_of(line):
     """A row's ask in words: its Step cell (label and title) and its description, without the team's notes."""
-    cells = [c.strip() for c in line.split("|")[1:-1]]
+    cells = hqpaths.cells(line)
     desc = cells[2] if len(cells) > 2 else ""
-    m = TEAM_NOTE.search(desc)
-    if m:
-        desc = desc[:m.start()]
+    at = team_note_at(desc)
+    if at is not None:
+        desc = desc[:at]
     return (cells[1] if len(cells) > 1 else "") + " | " + desc.strip()
 
 
@@ -330,7 +349,7 @@ def ask_fp(line):
 def row_words_fp(line):
     """Before F77: the row's cells 1 to 3, which on a feature row took the team's notes in too. Kept only to read a
     Ready mark given before F77 (its "fp"); a mark given since holds the ask ("ask")."""
-    cells = [c.strip() for c in line.split("|")[1:-1]]
+    cells = hqpaths.cells(line)
     return _fp(" | ".join(cells[1:4]))
 
 

@@ -30,6 +30,8 @@ Run the low usage Claude prompt check if your checklist passes."
   - A row that's new or changed and not reviewed yet can't be marked ready until its review has passed.
   - A review that doesn't run (a time-out, no answer) leaves no flag and no pass: it's tried again RETRY_S later; from
     the second failure the row shows "the review didn't run" on the planning, so it's never skipped in silence.
+  - F101: an answer needs all five probes and its "covered" quotes must stand in the item; `golden` runs real past rows the
+    reviewer must still flag (review.py golden), on every change to the reviewer.
   - Usage: each review's cost is kept, one line per attempt in COSTS (reviews.jsonl: the row, the verdict or failed,
     the cost, the seconds, the model and the effort), failed attempts with what they cost too. No daily cap and no
     waiting for the night (F80, 29 October 2026; the cap was F77's own addition, never his): a new or changed row is
@@ -43,7 +45,7 @@ Run the low usage Claude prompt check if your checklist passes."
     loop's state (in sprint.json, each row's "fix"); routine/cycles.py opens her short sessions: a round rewords the row
     (reword, that one row and nothing else) and the review looks again; once it passes, one short session for her
     mark, the review's pass first, hers second. A finding only he can answer is never filled in: sitdown puts it on
-    her sit-down list with one text on her line and the loop stops for that row. At most ROUNDS rounds a row a day,
+    her sit-down list with one text on her line and the loop stops for that row. At most ROUNDS rounds an item,
     then the sit-down list. A stop holds until the row's words change. Rows flagged before the loop was switched on
     wait for her calls, unless they have a rank.
 
@@ -321,10 +323,22 @@ def _one(f):
     return re.sub(r"\s+", " ", str(f)).strip()[:400]
 
 
-def verdict(a):
+def in_item(quote, ask):
+    """F101: whether the reviewer's "covered" sentence really stands in the item, punctuation aside. Its parts around a
+    "…" each."""
+    parts = [S._bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", quote)]
+    have = S._bare(ask)
+    return any(parts) and all(x in have for x in parts if x)
+
+
+def verdict(a, ask=None):
     """The reviewer's JSON to (pass, findings), or None when it's not an answer. A probe that applies with no covering
-    sentence is a hole whatever its own pass says (F77's fix); its own findings come first."""
+    sentence is a hole whatever its own pass says (F77's fix); its own findings come first. F101: an answer without all
+    five probes is no answer, and a "covered" sentence that isn't in the item (ask) covers nothing."""
     if not isinstance(a, dict) or not isinstance(a.get("pass"), bool):
+        return None
+    answered = {p.get("probe") for p in a.get("probes") or [] if isinstance(p, dict)}
+    if any(k not in answered for k, _ in PROBES):
         return None
     fs = [_one(f) for f in (a.get("findings") or []) if str(f).strip()]
     for p in a.get("probes") or []:
@@ -332,6 +346,11 @@ def verdict(a):
             continue
         cov = p.get("covered")
         if isinstance(cov, str) and cov.strip():
+            if ask is None or in_item(cov, ask):
+                continue
+            h = _one(f"the {p.get('probe', 'a')} probe quotes something that isn't in the item")
+            if h not in fs:
+                fs.append(h)
             continue
         h = _one(p.get("hole") or f"the {p.get('probe', 'a')} probe applies and nothing in the item covers it")
         if h and h not in fs:
@@ -367,9 +386,9 @@ def ask_reviewer(row):
             raise ValueError(f"the run ended {d.get('subtype') or 'with an error'}")
         found = re.findall(r"\{.*\}", d.get("result") or "", re.S)
         a = json.loads(found[-1])
-        v = verdict(a)
+        v = verdict(a, S.ask_of(row["line"]))
         if v is None:
-            raise ValueError("the answer wasn't a verdict")
+            raise ValueError("the answer wasn't a verdict with all five probes")
         ok, fs = v
         return {"pass": ok, "findings": fs, "cost": cost, "s": round(time.time() - t0, 1), **base}
     except subprocess.TimeoutExpired:
@@ -642,9 +661,72 @@ def clear(label, words):
     return e
 
 
+# ---------- F101: the golden set ----------
+
+# F101 (C76): real past rows the reviewer once flagged for a real hole, each of which it must still flag. They're his own
+# planning rows, so the file is the workspace's (HQ/review-golden.json), never HQ's: {"rows": [{"label", "line", "must"}],
+# "passed_for": fingerprint}. A change to the reviewer (its prompt, probes, model, effort or what it reads) gives a new
+# fingerprint, and a flow fails until the real reviewer has flagged them all again; the weekly sweep runs it too.
+def golden_file():
+    return os.environ.get("HQ_GOLDEN") or os.path.join(S._ws(), "HQ", "review-golden.json")
+
+
+def fingerprint():
+    import hashlib
+    import inspect
+    parts = [SYSTEM, repr(PROBES), MODEL, str(EFFORT), inspect.getsource(verdict), inspect.getsource(_input),
+             inspect.getsource(S.ask_of), inspect.getsource(S.team_note_at), S.TEAM_NOTE.pattern]
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+
+
+def golden():
+    """Every golden row through the real reviewer; passes only when each is flagged. Its usage is logged like any review."""
+    try:
+        data = json.load(open(golden_file(), encoding="utf8"))
+    except (OSError, ValueError) as ex:
+        print(f"No golden set here: {ex}")
+        return 3
+    rows = data.get("rows") or []
+    missed, failed, cost = [], [], 0.0
+    for r in rows:
+        row = {"label": r["label"], "line": r["line"], "phase": r["label"][0], "title": ""}
+        got = ask_reviewer(row)
+        cost += float(got.get("cost") or 0)
+        try:
+            with open(COSTS, "a") as f:
+                f.write(json.dumps({"row": r["label"], "at": int(_clock()), "golden": True, "verdict": "failed" if got.get("failed") else ("pass" if got.get("pass") else "flag"),
+                                    "cost": got.get("cost"), "s": got.get("s"), "model": got.get("model"), "effort": got.get("effort")}) + "\n")
+        except OSError:
+            pass
+        if got.get("failed"):
+            failed.append(f"{r['label']} ({got.get('why')})")
+        elif got.get("pass"):
+            missed.append(r["label"])
+        print(f"{r['label']}: {'failed to run' if got.get('failed') else 'passed it, it should have flagged it' if got.get('pass') else 'flagged'}", flush=True)
+    good = len(rows) - len(missed) - len(failed)
+    print(f"Golden set: {good} of {len(rows)} flagged, ${cost:.3f}.")
+    if rows and not missed and not failed:
+        data["passed_for"] = fingerprint()
+        tmp = golden_file() + ".tmp"
+        with open(tmp, "w", encoding="utf8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, golden_file())
+        return 0
+    return 1
+
+
+def golden_current():
+    """Whether the real reviewer has flagged the golden set since it last changed: True, False, or None with no set here."""
+    try:
+        data = json.load(open(golden_file(), encoding="utf8"))
+    except (OSError, ValueError):
+        return None
+    return data.get("passed_for") == fingerprint()
+
+
 # ---------- F86: the fix-and-review loop ----------
 
-ROUNDS = 3  # rounds a row a day, then the sit-down list (F86, his yes 30 October 2026)
+ROUNDS = 3  # rounds an item, then the sit-down list and one text to him (F86, his yes 30 October 2026; F101: per item, not per day)
 STOP_WORDS = {"his": "needs him", "cap": f"{ROUNDS} rounds and the review still flags it"}
 
 
@@ -654,9 +736,9 @@ def _stopped(e, fp):
     return st if st and st.get("ask") == fp else None
 
 
-def _rounds_today(e, now):
-    f = e.get("fix") or {}
-    return int(f.get("n") or 0) if f.get("day") == _today(now) else 0
+def _rounds(e):
+    """F101 (C36): the rounds this item has had, whatever the day; two before midnight and three after is five."""
+    return int((e.get("fix") or {}).get("n") or 0)
 
 
 def next_round(now=None):
@@ -691,9 +773,13 @@ def next_round(now=None):
                 continue
             if label not in place and int(e.get("at") or 0) < since:
                 continue
-            n = _rounds_today(e, now)
+            f = e.setdefault("fix", {})
+            if f.get("stop") and f["stop"].get("ask") != fp:  # his answer written in lifted the stop: rounds from nothing
+                f.pop("stop")
+                f["n"] = 0
+            n = _rounds(e)
             if n >= ROUNDS:
-                e.setdefault("fix", {})["stop"] = {"ask": fp, "kind": "cap", "why": "; ".join(e.get("findings") or []), "at": int(now)}
+                f["stop"] = {"ask": fp, "kind": "cap", "why": "; ".join(e.get("findings") or []), "at": int(now)}
                 capped.append(label)
                 continue
             pick = {"label": label, "mode": "fix", "round": n + 1}
@@ -716,7 +802,7 @@ def round_started(pick, now=None):
         if pick["mode"] == "mark":
             f["marked"] = e.get("ask")
         else:
-            f.update({"day": _today(now), "n": _rounds_today(e, now) + 1, "at": int(now)})
+            f.update({"day": _today(now), "n": _rounds(e) + 1, "at": int(now)})
         S._save(S.RANKS, d)
 
 
@@ -731,7 +817,7 @@ def round_refund(label, mode, now=None):
             return
         if mode == "mark":
             f.pop("marked", None)
-        elif f.get("day") == _today(now) and f.get("n"):
+        elif f.get("n"):
             f["n"] -= 1
         S._save(S.RANKS, d)
 
@@ -772,7 +858,8 @@ def reword(label, payload):
             new = handover.apply(line, edits)
         except (LookupError, ValueError) as ex:
             sys.exit(f"Not written: {ex}.")
-        if "\n" in new or len(new.split("|")) != len(line.split("|")) or label not in new.split("|")[2]:
+        import hqpaths as _hp
+        if "\n" in new or len(_hp.cells(new)) != len(_hp.cells(line)) or label not in _hp.cells(new)[1]:
             sys.exit("Refused: the row must stay one row with the same cells and its label.")
         texts = S._grep_texts(S._ws())
         bad = [x for x in _new_quotes(line, new) if not S.quote_found(x, texts)]
@@ -917,6 +1004,10 @@ def main(argv):
         run_pass()
     elif argv[0] == "pass-result":
         print(pass_words())
+    elif argv[0] == "golden":  # F101: every golden row through the real reviewer
+        sys.exit(golden())
+    elif argv[0] == "fingerprint":
+        print(fingerprint(), golden_current())
     elif argv[0] == "flags":
         print(flag_words() or "No flagged rows on the planning.")
     elif argv[0] == "reword" and len(argv) == 3:

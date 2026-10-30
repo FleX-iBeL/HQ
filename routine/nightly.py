@@ -68,7 +68,8 @@ NIGHT_HOURS = 12  # a round belongs to tonight when tonight's round 1 started le
 
 
 def flow_args() -> list[str]:
-    return ["--quick"] if sys.platform == "darwin" else ["--quick", "--only", flowsets.LINUX_NIGHTLY]
+    """F101 (C73): every quick flow, a new one by itself; on Linux all but those marked Mac-only."""
+    return ["--quick"] if sys.platform == "darwin" else ["--quick", "--skip", flowsets.MAC_ONLY]
 
 
 def is_main() -> bool:
@@ -160,12 +161,26 @@ def tonight(prev: dict | None, now: dt.datetime | None = None) -> dict | None:
     return {"night": night, "round": int(prev.get("round") or 1), "rounds": rounds, "green": green}
 
 
-def run(again: bool = False) -> int:
+def team_job(failed: list[str]) -> None:
+    """F101: a red night started by the routine is the team's to fix, as the H169 job did."""
+    what = "; ".join(failed)[:900] or "the run ended with an error"
+    subprocess.run([sys.executable, os.path.join(HQ, "routine", "jobs.py"), "add",
+                    f"H169, the nightly run, was red: {what}. Read scratch/nightly/last.json and its log, fix everything it "
+                    "found, then nightly.py again, up to three rounds a night; python3 routine/nightly.py morning \"TEXT\" for the "
+                    "morning's text.", "--kind", "small"], capture_output=True, text=True)
+
+
+def run(again: bool = False, routine: bool = False) -> int:
     stamp = dt.datetime.now()
     if not is_main():
         print("This computer isn't the main right now, so the nightly run is the main's. Nothing done.")
         return 0
     os.makedirs(OUT, exist_ok=True)
+    if not again and not routine:  # F101: the routine already ran it: the H169 item has nothing left to run
+        t = tonight(last(), stamp)
+        if t and t["green"]:
+            print(f"Tonight's run already passed every flow (round {t['round']}): nothing to run.")
+            return 0
     night, n, rounds = stamp.strftime("%Y-%m-%d %H:%M"), 1, []
     if again:
         t = tonight(last(), stamp)
@@ -204,6 +219,8 @@ def run(again: bool = False) -> int:
                   f"Write one line for the night with nightly.py log (what each round found and what was fixed). "
                   f"Then the tutorial read: nightly.py tutorial.")
         return 0
+    if routine:
+        team_job(failed)
     print(f"Round {n}: {passed} of {ran} passed ({mins} min). Failed:")
     for ln in failed or [f"(no flow failed, but the run ended with exit {r.returncode}: see the log's end)"]:
         print("  " + ln)
@@ -251,6 +268,8 @@ def tutorial(done: bool = False) -> int:
 
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv else ""
+    if cmd == "run" and "--routine" in argv:  # F101: started by the routine's own minute
+        return run(routine=True)
     if cmd == "run":
         return run()
     if cmd == "again":

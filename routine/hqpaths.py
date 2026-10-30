@@ -302,3 +302,28 @@ def never_mail_tools() -> list[str]:
 def job_flags() -> list[str]:
     """The flags every team job and cycle starts with, next to JOB_ENV."""
     return ["--setting-sources", "user", "--disallowedTools", ",".join(never_mail_tools())]
+
+
+def cells(line: str) -> list[str]:
+    """F101: a table row's cells, split only on unescaped pipes (a row may carry \\| in its words), stripped. Every
+    reader of the planning uses this one, so a row reads the same to the reviewer, the QA mark and the release."""
+    import re
+    return [c.strip() for c in re.split(r"(?<!\\)\|", line.rstrip())[1:-1]]
+
+
+def join_cells(cs: list[str]) -> str:
+    """F101: the row back from cells(), its escaped pipes untouched."""
+    return ("| " + " | ".join(cs) + " |").replace("|  |", "| |").replace("|  |", "| |")
+
+
+def is_maker() -> bool:
+    """F101: whether this HQ is the maker's (the workspace's features.json says so, or HQ_MAKER on that computer). Only
+    the maker's HQ follows the work line; a friend's stays on its released version."""
+    import json
+    env = os.environ.get("HQ_MAKER")
+    if env in ("0", "1"):
+        return env == "1"
+    try:
+        return json.load(open(os.path.join(FOLDER, "HQ", "features.json"), encoding="utf8")).get("maker") is True
+    except (OSError, ValueError, AttributeError):
+        return False

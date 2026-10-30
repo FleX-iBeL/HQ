@@ -268,7 +268,15 @@ def main(argv: list[str]) -> int:
                 _log(lg, _jobs("done", str(n)))
             elif code == 0 and not is_error:
                 _log(lg, f"job {n}: still marked running on the roadmap; the done mark is run for it (headless)")
-                _log(lg, _jobs("done", str(n)))
+                said = _jobs("done", str(n))
+                _log(lg, said)
+                if said.startswith("Refused"):  # F101: a clean exit isn't done: a program runs its tests, then done again
+                    _log(lg, f"job {n}: no green record yet; the program runs its tests on a copy")
+                    subprocess.run([PY, os.path.join(HERE, "proof.py"), "run", str(n)], stdout=lg, stderr=subprocess.STDOUT)
+                    said = _jobs("done", str(n))
+                    _log(lg, said)
+                    if said.startswith("Refused"):
+                        _log(lg, _jobs("mark", str(n), "paused: ended, no record"))
             else:
                 _log(lg, f"job {n}: ended without finishing (exit {code}{', error' if is_error else ''}); left as it is "
                          "for the routine (it notes a chat that closed without a done mark)")

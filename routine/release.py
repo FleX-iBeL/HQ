@@ -15,7 +15,10 @@ The daily release (H178, a repeating planned item at 2:05) runs after the nightl
   python3 "routine/release.py" status          tonight's run, what changed since it started (tests or HQ itself),
                                                dev against nightly and main, and the suggestion: sure, again or hesitate
   python3 "routine/release.py" nightly "WHY"   hesitating: the privacy check, then dev to nightly only; main stays
-  python3 "routine/release.py" main            sure: the privacy check, dev to nightly, then the next small version
+  python3 "routine/release.py" main [--without-qa] [--past-the-night] [--said "HIS WORDS"]
+                                               sure: the privacy check, dev to nightly, then the next small version.
+                                               F101: refused after a red or missing night and for a commit naming no item;
+                                               Moneypenny decides when, inside those gates; past them only on his own words
                                                the H90 way (Coming next becomes it, VERSION, tag, main, back to dev);
                                                only the work whose row says QA passed (F56, qa.py): from the first
                                                commit for a row without it, the rest stays on dev and nightly;
@@ -42,6 +45,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import hqpaths  # noqa: E402
 import push  # noqa: E402
 import qa  # noqa: E402  F56: the release only takes work that passed QA
 
@@ -194,11 +198,43 @@ def cmd_nightly(why: str) -> int:
     return 0
 
 
-def cmd_main(today: dt.date | None = None, without_qa: bool = False) -> int:
+def night_refuses() -> str | None:
+    """F101 (C43, C73): what the night says against a release, or None. A program reads it; suggest() is only advice."""
+    run = last_run()
+    if not run or run.get("at", "")[:10] != dt.date.today().isoformat():
+        at = (run or {}).get("at")
+        return "there was no test run tonight" + (f" (the last one was {at})" if at else "")
+    if run.get("failed") or not run.get("ran") or run.get("passed") != run.get("ran"):
+        return (f"the night of {run.get('at')} was red: {run.get('passed')} of {run.get('ran')} passed"
+                + (f"; failed: {'; '.join(run.get('failed') or [])[:300]}" if run.get("failed") else ""))
+    return None
+
+
+def say_so(said: str | None, what: str) -> bool:
+    """F101: going past a gate takes his own words, found in his lines and kept; a flag alone is nothing."""
+    import sprint as S
+    where = S.his_quote(said)
+    if not where:
+        print(f"No release: {what} needs --said with his own words, as they stand in a call, a text or a quick note.")
+        return False
+    S.keep_say_so([f"release: {what}"], " ".join(said.split()), where)
+    return True
+
+
+def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: bool = False, said: str | None = None) -> int:
     no = _ready()
     if no:
         print(f"No release: {no}.")
         return 0 if "isn't the main" in no else 2
+    night = night_refuses()
+    if night:
+        if not red_night:
+            print(f"No release: {night}. It stays on {push.NIGHTLY_BRANCH}; main stays at {version()}.")
+            return 2
+        if not say_so(said, "a release past the night"):
+            return 2
+    if without_qa and not say_so(said, "a release without QA"):
+        return 2
     r = to_nightly()  # always first to nightly
     if r:
         return r
@@ -377,7 +413,7 @@ def add_line(line: str, roadmap: str | None = None) -> bool:
         if not m:
             return False
         row = m.group(0).rstrip()
-        cells = row[1:-1].split(" | ")
+        cells = hqpaths.cells(row)  # F101: the one reader; an escaped pipe isn't a cell
         before, _, rel = cells[-1].strip().partition(MARK)
         old = [n.strip() for n in re.split(r"(?<=\.) (?=\d{1,2} \w+ 20\d\d)", rel.strip()) if n.strip()]
         new = " ".join([line if line.endswith(".") else line + "."] + old[:KEEP - 1])
@@ -420,8 +456,10 @@ def main(argv: list[str]) -> int:
     if cmd == "nightly" and len(argv) >= 2:
         return cmd_nightly(" ".join(argv[1:]))
     if cmd == "main":
-        # F56: --without-qa only on his explicit say-so on a call; it releases everything on dev.
-        return cmd_main(without_qa="--without-qa" in argv)
+        # F56: --without-qa only on his explicit say-so on a call; it releases everything on dev. F101: that say-so, and
+        # going past a red night, is a quote found in his own lines (--said), kept with the time.
+        said = argv[argv.index("--said") + 1] if "--said" in argv and argv.index("--said") + 1 < len(argv) else None
+        return cmd_main(without_qa="--without-qa" in argv, red_night="--past-the-night" in argv, said=said)
     if cmd == "log" and len(argv) >= 2:
         if not add_line(" ".join(argv[1:])):
             print(f"No {ROW} row on the roadmap.")

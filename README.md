@@ -68,6 +68,7 @@ You don't have to do the setup yourself: Claude does it with you. HQ comes with 
    ```sh
    git clone https://github.com/FleX-iBeL/HQ.git
    cd HQ
+   git checkout "$(git tag --sort=-v:refname | head -1)"
    claude
    ```
 

@@ -24128,6 +24128,7 @@ def limit_of(n: int) -> int:
 
 async def main(args) -> bool:
     chosen = sorted(int(x) for x in args.only.split(",")) if args.only else sorted(FLOWS)
+    chosen = [n for n in chosen if str(n) not in args.skip.split(",")]  # F101: the night's Mac-only ones
     bad = [n for n in chosen if n not in FLOWS]
     if bad:
         print(f"No such flow: {bad}. The flows are 1 to {len(FLOWS)}.")
@@ -24198,6 +24199,7 @@ async def main(args) -> bool:
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="HQ happy flows (phase G)")
     p.add_argument("--only", default="", help="comma-separated flow numbers, e.g. 3,5")
+    p.add_argument("--skip", default="", help="comma-separated flow numbers to leave out")
     p.add_argument("--quick", action="store_true", help="skip the flows that use Claude turns (2-7)")
     p.add_argument("--keep", action="store_true", help="keep the scratch folder")
     p.add_argument("-v", "--verbose", action="store_true")

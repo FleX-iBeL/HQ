@@ -55,6 +55,10 @@ def decide(ask: dict, mail_only: bool = False) -> tuple[int, str]:
     name, inp = str(ask.get("tool_name", "")), ask.get("tool_input") or {}
     if never_mail(name):
         return 2, f"HQ: refused {name}: nothing is ever sent, replied to or forwarded from a job. A draft at the most."
+    if name in EDITORS and ".status/proofs" in str(inp.get("file_path") or "").replace(os.sep, "/"):
+        return 2, "HQ: refused: a build's record is written only by routine/proof.py."
+    if name == "Bash" and re.search(r"\.status/proofs|\bHQ_(?:UNDER_TEST|PROOF_\w+)\s*=", str(inp.get("command") or "")) and "proof.py" not in str(inp.get("command")):
+        return 2, "HQ: refused: a build's record and its gate are the program's: routine/proof.py run N."
     if mail_only:
         return 0, ""
     if name in EDITORS:

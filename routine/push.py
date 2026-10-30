@@ -283,6 +283,11 @@ def main() -> int:
     if "--check" in sys.argv:
         return check_key()
     if "--pull" in sys.argv:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import hqpaths
+        if not hqpaths.is_maker():  # F101 (C45): a friend's HQ stays on its released version
+            print("This HQ stays on its released version: it doesn't pull the work line.")
+            return 0
         return pull()
     if notes_waiting():
         return 3

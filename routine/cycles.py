@@ -1289,7 +1289,8 @@ def fix_rounds(now: dt.datetime | None = None, base: Path | None = None, log=Non
     got = review.next_round(now.timestamp())
     did = []
     for label in got["capped"]:
-        ledger.note(aid, f"{label} on the sit-down list: {review.ROUNDS} rounds today and the review still flags it")
+        ledger.note(aid, f"{label} on the sit-down list: {review.ROUNDS} rounds and the review still flags it")
+        ask(aid, f"If you tell me what {label} should say, I'll write it in and the review looks again; if not, it stays on my list for Friday.")  # F101 (C36)
         did.append(f"{label} went on the sit-down list")
     pick = got["pick"]
     if not pick:

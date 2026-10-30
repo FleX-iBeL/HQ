@@ -15,6 +15,8 @@ The waiting jobs (ready or held) run in the order they stand on the list, top fi
 a new job goes at the bottom, and "move" changes its place. The job numbers never change.
 
 usage (from the workspace):
+  python3 "routine/jobs.py" done N [--at HH:MM] [--said "HIS WORDS"]   F101: refused while a note is unread, and for a build
+                                                           without a green record (routine/proof.py run N), unless his own words say so
   python3 "routine/jobs.py" write-row "THE ROW" [--bug]     F99: a new row on the planning, no job (a call's way in)
   python3 "routine/jobs.py" add "TEXT" [--past-the-line] [--kind K] [--guess MINUTES] [--not-ready --said "HIS WORDS"]   a call's let's go: the
                                                            job is ready; K (small, bigbuild, research, transcribe, release, other; H220) sets
@@ -339,7 +341,7 @@ def open_row(text, label):
         if line.startswith("## "):
             phase = line
             continue
-        cells = [c.strip() for c in line.split("|")[1:-1]] if line.startswith("|") else []
+        cells = hqpaths.cells(line) if line.startswith("|") else []
         if not phase.startswith("## Phase ") or len(cells) < 2 or cells[1].split(" ", 1)[0] != label:
             continue
         if phase.startswith("## Phase P "):
@@ -924,6 +926,23 @@ def main(argv):
                     at_epoch -= 86400
                 now = f"{int(m_at.group(1)):02d}:{m_at.group(2)}"
                 args = args[:i] + args[i + 2:]
+            his = None  # F101: done without a record only on his own words
+            if cmd == "done" and "--said" in args:
+                i = args.index("--said")
+                his = args[i + 1] if i + 1 < len(args) else ""
+                args = args[:i] + args[i + 2:]
+            if cmd == "done" and not was.startswith("done"):
+                waiting = [x for x in j.get("notes") or [] if not x.get("read")]
+                if waiting:  # F101 (C23): a note he sent while it ran is read before it's over
+                    sys.exit(f"Refused: job {j['n']} has {len(waiting)} note(s) it hasn't read: python3 routine/jobs.py notes "
+                             f"{j['n']} first. The job stays open.")
+                import proof
+                no = proof.refuses(j, text)
+                if no:
+                    import sprint as sp_
+                    if not (his and sp_.his_quote(his)):
+                        sys.exit(f"Refused: {no} The job stays open.")
+                    proof.keep_say_so(j, his)
             # H187: an update that ended the job's chat holds it with its own reason (held N an update ...).
             why = one_line(" ".join(args[1:])).replace("·", "-") if cmd == "held" else ""
             j["state"] = f"done {now}" if cmd == "done" else f"held: {why or 'usage over the line'}"
