@@ -17278,6 +17278,8 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
              "F77: the reviewer's prompt doesn't walk the five probes")
         cov = lambda k, c, h=None: {"probe": k, "applies": True, "covered": c, "hole": h}  # noqa: E731
         def V(a):  # F101: an answer has all five probes; the ones a case doesn't name don't apply
+            if not isinstance(a, dict):
+                return _rv.verdict(a)
             have = a.get("probes") or []
             named = {p["probe"] for p in have}
             return _rv.verdict({**a, "probes": have + [{"probe": k, "applies": False, "covered": None} for k, _ in _rv.PROBES if k not in named]})
