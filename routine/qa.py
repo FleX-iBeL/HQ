@@ -209,7 +209,8 @@ def qa_text(label: str, after: str) -> str:
             "of the row with its evidence, three flags each: --example \"the row's example\" --ran \"the command, "
             "page or step you really ran for it\" --got \"what came out\" (F71: a pass without them is refused; "
             "reading the team's notes or the code is not running it, and the flows alone don't stand in for the "
-            f"examples), or python3 routine/qa.py fail {label} "
+            "examples), plus --compared \"what you compared on real data, how many of how many\" (F101: a pass also needs "
+            f"the green run routine/proof.py keeps for this row), or python3 routine/qa.py fail {label} "
             "\"what's off, plainly\" --job N (a fail queues a fix job by itself). No helpers fanned out (F55). Nothing to push "
             "unless a test was fixed; the call line isn't restarted. " + DONE_LAST)
 
@@ -465,6 +466,8 @@ def proof_refuses(label: str, compared: str) -> str | None:
     """F101: QA's pass stands on what a program saw, never on what's typed: the build's green record, a comparison on
     real data that says what, how many and how many right, and for a piece, its switch on the hidden list."""
     import proof
+    if not proof.gate_on():
+        return None
     rec = proof.latest(label)
     if not rec:
         return f"{label} has no record of a green run (routine/proof.py run), so there's nothing to pass."

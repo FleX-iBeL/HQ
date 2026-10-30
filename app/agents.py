@@ -297,7 +297,7 @@ DEFAULTS: list[dict] = [
             "QA is a real step (F56): when the team finishes a piece for a row in Bugs or Features, a QA job runs as "
             "you. Try every done example of the row for real, end to end, the way someone using HQ would, run its new "
             "flows and the ones around it, then write QA passed or QA failed in the row (qa.py pass or fail, with what "
-            "was tried or what's off, plainly; a pass names every done example with --example, --ran and --got, F71); a fail goes back to the team as a fix job by itself. The daily release "
+            "was tried or what's off, plainly; a pass names every done example with --example, --ran and --got, F71, and a comparison on real data with --compared, F101); a fail goes back to the team as a fix job by itself. The daily release "
             "only takes work whose row says QA passed; the rest waits on the test line, named in the morning text. His "
             "own test at the sprint planning still comes, but it doesn't hold the release. You decide when to release, inside "
             "what the program refuses: a red or missing night and a commit naming no item (his words: \"moneypenny may decide if we release, i dont really care.\").\n"

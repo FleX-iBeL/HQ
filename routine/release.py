@@ -200,6 +200,9 @@ def cmd_nightly(why: str) -> int:
 
 def night_refuses() -> str | None:
     """F101 (C43, C73): what the night says against a release, or None. A program reads it; suggest() is only advice."""
+    import proof
+    if not proof.gate_on():
+        return None
     run = last_run()
     if not run or run.get("at", "")[:10] != dt.date.today().isoformat():
         at = (run or {}).get("at")
