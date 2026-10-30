@@ -70,6 +70,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT_FILE = os.path.abspath(__file__)
 sys.path.insert(0, HERE)
 import estimate as E  # noqa: E402
 import jobs as q  # noqa: E402

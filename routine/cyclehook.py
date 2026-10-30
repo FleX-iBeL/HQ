@@ -26,7 +26,7 @@ FREE = ("HQ/ledger/", "HQ/direct-line/", "HQ/coaching-line/", "HQ/team-line/", "
 EDITORS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 # a shell write on the file itself: a redirect into it, sed -i, tee, or a python open(..., "w") on it
 _SHELL_WRITE = r"(>>?\s*\S*{name})|(sed\s+-i\S*\s.*{name})|(tee\s+(-a\s+)?\S*{name})|(open\(\s*[\"'][^\"']*{name}[\"']\s*,\s*[\"'][wa])"
-WAY = ("the planning through sprint.py or jobs.py, the to-do list through todo.py, the calendar through pings.py, "
+WAY = ("the planning through sprint.py, jobs.py or review.py reword, the to-do list through todo.py, the calendar through pings.py, "
        "the games through games.py, the log and the mail list through handover.py edit REL JSON; your ledger and "
        "your line you write freely")
 
@@ -52,7 +52,7 @@ def decide(ask: dict) -> tuple[int, str]:
         cmd = str(inp.get("command") or "")
         for s in SHARED:
             if re.search(_SHELL_WRITE.format(name=re.escape(s.split("/")[-1])), cmd):
-                if "handover.py" in cmd or any(x in cmd for x in ("todo.py", "sprint.py", "jobs.py", "pings.py", "games.py", "coaching.py")):
+                if "handover.py" in cmd or any(x in cmd for x in ("todo.py", "sprint.py", "jobs.py", "pings.py", "games.py", "coaching.py", "review.py")):
                     continue
                 return 2, f"HQ: refused a shell write on {s}: a shared file is written only through HQ's own scripts ({WAY})."
     return 0, ""

@@ -19,7 +19,8 @@ before the next waiting job (H99's priority tag). The wall, four layers, each en
 
 The bigger session writes a cycle plan into her ledger (`cycles.py plan AGENT JSON`): the few things, the let-go,
 and the small steps, each with its goal, what done means, its named inputs, what it may do, when it runs, and what
-makes it escalate. The runner schedules those steps as one-off priority items; a small step starts with only the core,
+makes it escalate. F86: a flagged planning row gets a short run of hers by itself (fix_rounds; the loop's state is in
+routine/review.py): her step's box, her share, her hours, with its own kind "fix" so her planned steps keep their count. The runner schedules those steps as one-off priority items; a small step starts with only the core,
 her section, the step and its inputs, and first the runner checks its inputs still hold (a to-do item, a planning
 row, a mail line, a calendar block, a file) against what the plan saw: changed, the step is stale and never runs. The
 tripwires are counted here, never judged by the agent (the same goal twice without done, a step boxed twice in a row,
@@ -31,7 +32,7 @@ into her ledger. The settings are the workspace's HQ/agents/cycles.json (numbers
 
     python3 routine/cycles.py                         what runs, each agent's share used this week, what's planned
     python3 routine/cycles.py settings                the settings, per agent
-    python3 routine/cycles.py set AGENT KEY VALUE     on|off, weekly, daily, hours (08:00-22:00), batches (12:00,17:00),
+    python3 routine/cycles.py set AGENT KEY VALUE     on|off, fix (F86's loop, on|off), weekly, daily, hours (08:00-22:00), batches (12:00,17:00),
                                                       texts (tripwire texts a day), session_at, session_every,
                                                       session_minutes, session_turns, step_minutes, step_turns, steps_a_day
     python3 routine/cycles.py order AGENT start|stop|standing "HIS WORDS" [--now]   an order from a call or a text
@@ -71,6 +72,8 @@ PY = sys.executable
 FMT = "%Y-%m-%d %H:%M"
 MARK_CYCLE = "Agent cycle: "
 MARK_STEP = "Agent step: "
+MARK_FIX = "Agent fix: "
+FIX_AGENT = "moneypenny"  # F86: the loop is hers; the rows are hers to write
 PICKS_MOST = 3
 QUESTIONS_MOST = 3
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -98,7 +101,7 @@ def on(base: Path | None = None) -> bool:
         return False
 
 
-DEFAULT_AGENT = {"on": True, "weekly_share": 2, "daily_share": 1, "hours": ["08:00", "22:00"], "batches": [], "tripwire_texts": 2,
+DEFAULT_AGENT = {"on": True, "fix": False, "weekly_share": 2, "daily_share": 1, "hours": ["08:00", "22:00"], "batches": [], "tripwire_texts": 2,
                  "session": {"at": "09:00", "every": "day", "minutes": 10, "turns": 30, "useful_until": "12:00"},
                  "step": {"minutes": 3, "turns": 10, "most_a_day": 3}, "looks": []}
 
@@ -141,7 +144,7 @@ def _save_settings(d: dict, base: Path | None = None) -> None:
     os.replace(tmp, p)
 
 
-SET_KEYS = ("on", "weekly", "daily", "hours", "batches", "texts", "session_at", "session_every", "session_minutes",
+SET_KEYS = ("on", "fix", "weekly", "daily", "hours", "batches", "texts", "session_at", "session_every", "session_minutes",
             "session_turns", "session_until", "step_minutes", "step_turns", "steps_a_day")
 
 
@@ -154,8 +157,8 @@ def set_setting(aid: str, key: str, value: str, base: Path | None = None) -> str
     a = d["agents"][aid]
     v = str(value).strip()
     key = key.strip().lower().replace("-", "_")
-    if key == "on":
-        a["on"] = v.lower() in ("on", "true", "yes", "1")
+    if key in ("on", "fix"):
+        a[key] = v.lower() in ("on", "true", "yes", "1")
     elif key in ("weekly", "weekly_share", "daily", "daily_share", "texts", "tripwire_texts", "steps_a_day",
                  "session_minutes", "session_turns", "step_minutes", "step_turns"):
         try:
@@ -281,12 +284,17 @@ def cycle_text(aid: str, name: str) -> str:
     return f"{MARK_CYCLE}{aid}, {name}"
 
 
+def fix_text(aid: str, label: str, mode: str, n: int) -> str:
+    return f"{MARK_FIX}{aid}, {label} " + (f"round {n}" if mode == "fix" else "mark")
+
+
 def step_text(aid: str, stamp: str, k: int, goal: str) -> str:
     return f"{MARK_STEP}{aid} #{k} ({stamp}): {' '.join(goal.split())[:90]}"
 
 
 _JOB_HEAD = re.compile(r"^scheduled item (\d+), planned for [^:]*?(?:\d{1,2}:\d\d)?: ", re.I)
 _CYCLE_RE = re.compile(r"^Agent cycle: ([a-z0-9][a-z0-9-]{0,30}), (.+?)\s*$")
+_FIX_RE = re.compile(r"^Agent fix: ([a-z0-9][a-z0-9-]{0,30}), (\S+) (?:round (\d+)|mark)\s*$")
 _STEP_RE = re.compile(r"^Agent step: ([a-z0-9][a-z0-9-]{0,30}) #(\d+) \(([^)]+)\): (.*)$")
 
 
@@ -303,6 +311,11 @@ def parse(text: str) -> dict | None:
         name = c.group(2).strip()
         kind = "session" if name == "bigger session" else "review" if name == "monthly review" else "look"
         return {"agent": c.group(1), "kind": kind, "name": name, "item": item}
+    f = _FIX_RE.match(t)
+    if f:
+        n = int(f.group(3) or 0)
+        return {"agent": f.group(1), "kind": "fix", "label": f.group(2), "mode": "fix" if n else "mark", "round": n, "item": item,
+                "name": f"{f.group(2)} round {n}" if n else f"{f.group(2)} mark"}
     s = _STEP_RE.match(t)
     if s:
         return {"agent": s.group(1), "kind": "step", "k": int(s.group(2)), "stamp": s.group(3), "goal": s.group(4), "item": item,
@@ -473,6 +486,9 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
 
     def skip(why: str, morning: bool = False) -> str:
         _jobs("stop", str(job["n"]))
+        if p["kind"] == "fix":  # F86: a round that never ran doesn't count
+            import review
+            review.round_refund(p["label"], p["mode"])
         ledger.entry(aid, f"{p['name']} skipped (job {job['n']})", [f"skipped: {why}"], now)
         st["skipped"][str(job["n"])] = why
         if morning and p["kind"] == "session":
@@ -505,6 +521,10 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
         return skip(f"over her weekly share ({sh['weekly_used']:g} of {sh['weekly_share']:g} points used, this run about {est:g})")
     if sh["daily_share"] <= 0 or sh["daily_used"] + est > sh["daily_share"]:
         return skip(f"over her daily share ({sh['daily_used']:g} of {sh['daily_share']:g} points used today, this run about {est:g})")
+    if p["kind"] == "fix":
+        import review
+        if not review.round_wanted(p["label"], p["mode"]):
+            return skip("the row no longer needs it (changed or settled since)")
     if p["kind"] == "step":
         today = now.strftime("%Y-%m-%d")
         n = sum(1 for k, v in st["steps"].items() if v.get("day") == today and v.get("started"))
@@ -649,6 +669,8 @@ def prompt(job: dict, parsed: dict, base: Path | None = None, now: dt.datetime |
                      + (json.dumps(ledger.plan(aid)[1], ensure_ascii=False)[:4000] if ledger.plan(aid)[1] else "(no plan yet)"))
         parts.append(_briefing(ctx, base))
         parts.append(f"End with one line in your ledger: python3 \"{ROOT / 'routine' / 'ledger.py'}\" {aid} note \"{parsed['name']}: what you saw and did\".")
+    elif parsed["kind"] == "fix":
+        parts.append(_fix_words(aid, parsed))
     else:
         spec = _step_spec(aid, parsed)
         parts.append(_step_words(aid, parsed, spec, base))
@@ -765,6 +787,33 @@ def _step_words(aid: str, parsed: dict, spec: dict, base: Path) -> str:
     out.append(f"\nA small step makes no new steps and plans nothing. End with python3 \"{cy}\" done {aid} {parsed['k']} \"what came of it\" "
                f"(or python3 \"{cy}\" failed {aid} {parsed['k']} \"why\" when the check failed, or an ask when it's outside your limits).")
     return "\n".join(out)
+
+
+def _fix_words(aid: str, parsed: dict) -> str:
+    """F86: the one row and its findings, and the ways out of this round."""
+    import review
+    import sprint
+    rv = review.ROOT_FILE
+    label = parsed["label"]
+    row = sprint.row_of(label) or {"line": ""}
+    ask = sprint.ask_of(row["line"])
+    st = review.states([row]).get(label, {}) if row.get("label") else {}
+    sit = (f"python3 \"{rv}\" sitdown {label} \"the open point with your proposed solution\" \"If ..., I'll ...; if not, ...\"")
+    end = f"End with one line in your ledger: python3 \"{ROOT / 'routine' / 'ledger.py'}\" {aid} note \"{parsed['name']}: what you did\"."
+    if parsed["mode"] == "mark":
+        return (f"This run: one row, {label}. The review passed it, so your mark comes second. Nothing else is loaded.\n\nThe row:\n{ask}\n\n"
+                f"Hold it against your ready check yourself. It holds: python3 \"{ROOT / 'routine' / 'sprint.py'}\" ready {label}. "
+                f"It doesn't, or the mark is refused: nothing is forced, it goes to him: {sit}\n{end}")
+    finds = "\n".join(f"- {f}" for f in st.get("findings") or []) or "- (no findings written)"
+    return (f"This run: round {parsed['round']} of at most {review.ROUNDS} today on one row of the planning, {label}. The review flagged it. "
+            f"Nothing else is loaded; look up only what a finding needs.\n\nThe row:\n{ask}\n\nThe review's findings:\n{finds}\n\n"
+            "For each finding, one of two:\n"
+            f"- You can ground it (his words with a date, a rule, a planning row, the code): improve the row, naming the source: "
+            f"python3 \"{rv}\" reword {label} '{{\"edits\": [{{\"old\": \"the exact words\", \"new\": \"the new words\"}}]}}' (this one row only; a shared file is "
+            "written no other way). The review looks again by itself.\n"
+            f"- Only he can answer it (his words are missing, a choice that's his, a number you'd pick): you never fill it in, not even marked as yours. {sit} "
+            "That's his one text, and the loop stops for this row. All the open points of the row in that one command.\n"
+            f"Never mark it ready in this round: the review's pass comes first, and your mark gets its own run after it.\n{end}")
 
 
 def _norm_goal(g: str) -> str:
@@ -1024,6 +1073,12 @@ def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Pat
             st_["boxed_streak"] = 0
     else:
         st_["boxed_streak"] = 0
+    if parsed["kind"] == "fix":  # F86: what the row's own words say (a "refused", a push.py) is no refusal or action of hers
+        ledger.note(aid, f"{parsed['name']}: " + (f"cut off at its {note['boxed']}; the row stays as the review last saw it, the round counts"
+                                                  if note.get("boxed") else "ended; the review looks again if the words changed"))
+        said = ("reword", "sitdown", "sprint.py show", "sprint.py fields")
+        note = {**note, "refused": [r for r in note.get("refused") or [] if not any(w in r.get("tool", "") for w in said)],
+                "tools": [t for t in note.get("tools") or [] if not any(w in t for w in said)]}
     # refused, outside her limits, a shared file written directly, a Ready mark refused
     for r in note.get("refused") or []:
         if "sprint.py ready" in r.get("tool", "") and aid == "moneypenny":
@@ -1208,6 +1263,59 @@ def drop_waiting(now: dt.datetime | None = None, base: Path | None = None, log=N
     return did
 
 
+def _round_points(base: Path | None = None) -> float:
+    """What a round may cost in points of the weekly limit: her step's box at the rate of her own steps."""
+    try:
+        import usagecost
+        c = usagecost.cost_for(agent_settings(FIX_AGENT, base)["step"]["minutes"], "", f"step-{FIX_AGENT}")
+        return float(c.get("weekly") or 0)
+    except Exception:
+        return 0.0
+
+
+def fix_rounds(now: dt.datetime | None = None, base: Path | None = None, log=None) -> list[str]:
+    """F86: the next round of the fix-and-review loop: one at a time, in her hours, and only when it fits under her
+    share of the day and the week; else it waits for the next day's share, named once a day in her ledger. Skipped
+    while the loop's switch (`set moneypenny fix on`) is off."""
+    now = now or dt.datetime.now()
+    aid = FIX_AGENT
+    a = agent_settings(aid, base)
+    if not a.get("on") or not a.get("fix") or not in_hours(a, now) or not _agent(aid, base):
+        return []
+    import jobs as q
+    import review
+    items, jobs_ = _items()
+    is_fix = lambda x: (parse(x["text"]) or {}).get("kind") == "fix"  # noqa: E731
+    if any(is_fix(i) and i["state"] == "waiting" for i in items) or any(is_fix(j) and not j["state"].startswith(q.FINISHED) for j in jobs_):
+        return []
+    got = review.next_round(now.timestamp())
+    did = []
+    for label in got["capped"]:
+        ledger.note(aid, f"{label} on the sit-down list: {review.ROUNDS} rounds today and the review still flags it")
+        did.append(f"{label} went on the sit-down list")
+    pick = got["pick"]
+    if not pick:
+        return did
+    sh, est = shares(aid, now, base), _round_points(base)
+    if sh["daily_used"] + est > sh["daily_share"] or sh["weekly_used"] + est > sh["weekly_share"]:
+        d = _state()
+        st_ = _agent_state(d, aid)
+        if st_.get("fix_waits") != _today(now):
+            st_["fix_waits"] = _today(now)
+            ledger.note(aid, f"{pick['label']} waits for the next day's share ({sh['daily_used']:g} of {sh['daily_share']:g} points today, "
+                             f"{sh['weekly_used']:g} of {sh['weekly_share']:g} this week, a round about {est:g})")
+        _save_state(d)
+        return did + [f"{pick['label']} waits for the next day's share"]
+    code, out = _schedule("add", "now", fix_text(aid, pick["label"], pick["mode"], pick["round"]), "--priority", "--kind", f"step-{aid}")
+    if code:
+        return did + [f"{pick['label']}: not planned ({out[:80]})"]
+    review.round_started(pick, now.timestamp())
+    did.append(f"{pick['label']} {'mark' if pick['mode'] == 'mark' else 'round ' + str(pick['round'])} planned")
+    if log:
+        log(f"cycles: {did[-1]} (F86)")
+    return did
+
+
 def tick(now: dt.datetime | None = None, base: Path | None = None, log=None) -> dict:
     """The routine's minute on the main: the items follow the settings, finished runs go into the ledgers, the
     batches go out, waiting runs are dropped at the hours' end, the reviews are planned, the weekly score written."""
@@ -1227,7 +1335,7 @@ def tick(now: dt.datetime | None = None, base: Path | None = None, log=None) -> 
         out["processed"] = done
     except Exception as e:
         out["processed"] = [f"error: {e!r}"]
-    for name, fn in (("batches", send_batches), ("dropped", drop_waiting), ("reviews", plan_reviews), ("scores", write_scores)):
+    for name, fn in (("batches", send_batches), ("dropped", drop_waiting), ("reviews", plan_reviews), ("scores", write_scores), ("fixes", fix_rounds)):
         try:
             out[name] = fn(now, base, log=log)
         except Exception as e:
@@ -1251,6 +1359,7 @@ def words(base: Path | None = None, now: dt.datetime | None = None) -> str:
                    f"({a['session']['minutes']} min, {a['session']['turns']} turns, useful until {a['session'].get('useful_until', '?')}); "
                    f"steps {a['step']['minutes']} min, {a['step']['turns']} turns, at most {a['step'].get('most_a_day', 3)} a day; hours {a['hours'][0]} to {a['hours'][1]}"
                    + (f"; batches {', '.join(a['batches'])}" if a.get("batches") else "") + f"; {a.get('tripwire_texts', 2)} tripwire texts a day"
+                   + ("; the fix loop on" if a.get("fix") else "")
                    + "".join(f"; {lk['name']} {lk.get('every', 'day')} at {lk['at']}" for lk in a.get("looks") or []))
     try:
         items, jobs_ = _items()
