@@ -14214,6 +14214,260 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         return "the blank handbook and defaults ship clean; off loads nothing; on loads part one and her own section under every character"
 
 
+    async def flow200(self) -> str:
+        """F98, no Claude: his life never becomes an agent's. On a throwaway workspace with a made-up calendar, to-do
+        list and private words, a transcript full of his sentences in the shapes the agents really narrated them, and a
+        look that hands them all back as hers: nothing is kept. add refuses the same lines, her own life still passes,
+        and `check` names what's already on a list without changing it."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f98")
+        (ws / "HQ").mkdir(exist_ok=True)
+        (ws / "HQ/calendar.json").write_text(json.dumps({"events": [
+            {"title": "Lunch at the office"}, {"title": "Physio with Marlies"}, {"title": "Tuesday biking to Gouda"}]}))
+        (ws / "challenges.md").write_text("# Challenges\n\n## 1. Important\n\n| Challenge | Type |\n|---|---|\n| Call the Vandenberg notary | passive |\n")
+        (ws / "me.md").write_text((ws / "me.md").read_text().replace("**Private words:**", "**Private words:** Zeewolde,", 1))
+        (ws / "HQ/calls").mkdir(exist_ok=True)
+        call = ws / "HQ/calls/2026-01-09-1000.md"
+        call.write_text(
+            "# Call 9 January 2026, 10:00\n\nStarted 10:00:00 · agent Donna · brain opus\n\n"
+            "- 10:00 **Me:** Can you move things around for Tuesday?\n"
+            "- 10:01 **HQ:** I've cleared your Tuesday and you bike to Marlies at 10:40.\n"
+            "- 10:01 **HQ:** I've cleared my Tuesday office blocks and I'm planning a bike ride to Marlies at 10:40.\n"
+            "- 10:02 **HQ:** I have lunch at home on Tuesdays now.\n"
+            "- 10:02 **HQ:** I blocked my Friday morning for the notary.\n"
+            "- 10:03 **HQ:** I moved my appointment to 14:00 tomorrow.\n"
+            "- 10:03 **HQ:** I keep a small cactus on my desk, it hasn't died yet.\n")
+        lines = ["has cleared her Tuesday and bikes to Marlies at 10:40", "Has cleared her Tuesday office blocks and plans a bike ride to Marlies",
+                 "has lunch at home on Tuesdays", "blocked her Friday morning for the notary", "moved her appointment to 14:00 tomorrow",
+                 "calls the Vandenberg notary", "grew up near Zeewolde"]
+        fake = json.dumps({"new": [{"agent": "Donna", "fact": f} for f in lines + ["keeps a small cactus on her desk"]]})
+        r = _sp.run([sys.executable, str(APP / "about_self.py"), "harvest-call", str(call)], capture_output=True, text=True,
+                    env={**env, "HQ_ABOUT_FAKE": fake}, cwd=str(ROOT))
+        need(r.returncode == 0, f"harvest-call failed: {r.stderr[-400:]}")
+        lst = ws / "HQ/agents/donna-about-herself.md"
+        kept = [l[2:] for l in lst.read_text().splitlines() if l.startswith("- ")] if lst.exists() else []
+        need(len(kept) == 1 and "cactus" in kept[0], f"the harvest kept his life: {kept}")
+        def add(fact):
+            return _sp.run([sys.executable, str(APP / "about_self.py"), "add", "donna", fact], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        for line in ["I've cleared your Tuesday and you bike to Marlies at 10:40"] + lines:
+            r = add(line)
+            need(r.returncode == 1 and "refused" in r.stderr, f"add took {line!r}: {r.stdout} {r.stderr}")
+        need("Marlies" not in lst.read_text() and "Marlies" not in lst.read_text(), "add wrote a refused line")
+        r = add("thinks the coffee on the second floor is too strong")
+        need(r.returncode == 0 and "kept" in r.stdout, f"her own life is refused: {r.stdout} {r.stderr}")
+        r = add("goes running on Sundays")
+        need(r.returncode == 0, f"a day of her own is refused: {r.stderr}")
+        lst.write_text(lst.read_text() + "- has lunch at home on Tuesdays (29 Oct)\n")
+        before = lst.read_text()
+        r = _sp.run([sys.executable, str(APP / "about_self.py"), "check"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0 and "lunch at home" in r.stdout and "cactus" not in r.stdout and lst.read_text() == before,
+             f"check: {r.stdout} {r.stderr}")
+        return "his sentences and their real shapes keep nothing, by the harvest and by add; her own life still passes; check names old lines"
+
+    async def flow201(self) -> str:
+        """F99, no Claude: the doors, one sample per guarded path through the real policy: the vision, the map, the rules
+        and CLAUDE.md ask (and with nobody to ask are refused), a direct write of the planning, its side file, the to-do
+        list, the mail list, the notes, the games, the coaching file, a transcript, a thread or a list is refused whatever
+        the tool, a yes doesn't open them, the shell doesn't either, a capitalised path neither; each script way in passes;
+        the web asks on anything but a plain address; the after-call run writes only the log, the lists and the transcript."""
+        ws, env = self._h298_ws("f99")
+        import policy as P
+        pol = P.Policy(ws)
+        def v(tool, **inp):
+            return pol._decide(tool, inp)
+        for rel in ("rules.md", "map.md", "my-answers.md", "day-in-the-life.md", "lifestyle-design.md", "vision.md", "CLAUDE.md", "HQ/CLAUDE.md"):
+            for tool in ("Edit", "Write"):
+                need(v(tool, file_path=str(ws / rel)).verdict == P.ASK, f"{tool} {rel} doesn't ask")
+        for rel in ("HQ/roadmap.md", "HQ/sprint.json", "challenges.md", "inbox.md", "HQ/notes.md", "HQ/games.json", "HQ/coaching.json",
+                    "HQ/calendar.json", "HQ/calendar-todo.json", "HQ/calls/2026-01-01-1000.md", "HQ/direct-line/thread.jsonl",
+                    "HQ/coaching-line/thread.jsonl", "HQ/team-line/thread.jsonl", "HQ/agents/donna-about-herself.md", "HQ/ROADMAP.md", "Challenges.md"):
+            for tool in ("Edit", "Write", "MultiEdit"):
+                d = v(tool, file_path=str(ws / rel))
+                need(d.verdict == P.DENY, f"{tool} {rel}: {d.verdict}")
+            pol.approved.add(("Edit", P._key({"file_path": str(ws / rel)})))
+            need(pol.decide("Edit", {"file_path": str(ws / rel)}).verdict == P.DENY, f"a yes opened {rel}")
+            pol.approved.clear()
+        need("todo.py" in v("Edit", file_path=str(ws / "challenges.md")).why, "the refusal doesn't name the way in")
+        need("write-row" in v("Edit", file_path=str(ws / "HQ/roadmap.md")).why, "the planning's refusal doesn't name the way in")
+        for cmd in (f"echo x >> {ws}/HQ/roadmap.md", f"sed -i 's/a/b/' {ws}/inbox.md", f"cp /tmp/x {ws}/challenges.md", f"tee {ws}/HQ/sprint.json",
+                    f"python3 -c \"open('{ws}/HQ/notes.md','w')\"", f"git checkout -- {ws}/HQ/roadmap.md", f"mv /tmp/x {ws}/HQ/games.json",
+                    f"rm {ws}/HQ/direct-line/thread.jsonl", f"echo x > {ws}/HQ/agents/donna-about-herself.md"):
+            need(v("Bash", command=cmd).verdict == P.DENY, f"the shell got through: {cmd}")
+        hq = ROOT
+        for cmd in (f"python3 {hq}/routine/jobs.py write-row 'a new row'", f"python3 {hq}/routine/review.py reword F1 '{{}}'",
+                    f"python3 {hq}/status/set-status.py WAITING a b c '' d", f"python3 {hq}/app/notes.py add a note",
+                    f"python3 {hq}/routine/handover.py edit inbox.md '{{\"edits\": []}}'", f"python3 {hq}/app/todo.py add x",
+                    f"python3 {hq}/routine/review.py clear F1 'his words here'", f"python3 {hq}/app/about_self.py add donna 'x'"):
+            d = v("Bash", command=cmd)
+            need(d.verdict == P.ALLOW, f"the way in is shut: {cmd}: {d.verdict} {d.why}")
+        need(v("Bash", command=f"python3 {hq}/routine/handover.py edit HQ/roadmap.md '{{}}'").verdict == P.DENY, "handover opens the planning")
+        need(v("Edit", file_path=str(ws / "coaching/log.md")).verdict == P.ALLOW, "the log is shut for a call")
+        need(v("Edit", file_path=str(ws / "current-situation.md")).verdict == P.ALLOW, "an ordinary file is shut for a call")
+        for url in ("https://example.com/page", "http://news.example.org/a/b.html", "https://example.com/a#part"):
+            need(v("WebFetch", url=url).verdict == P.ALLOW, f"a plain address asks: {url}")
+        for url in ("https://example.com/a?q=his+words", "https://user:pw@example.com/", "http://192.168.1.5/x", "http://localhost:4748/",
+                    "https://evil.example.com:8443/x", "file:///etc/passwd", "ftp://example.com/x", "https://box.tail.ts.net/x"):
+            need(v("WebFetch", url=url).verdict == P.ASK, f"this address doesn't ask: {url}")
+        need(v("WebSearch", query="the weather").verdict == P.ALLOW, "a search asks")
+        # after a call: nobody to ask, and only the log, the lists and the transcript
+        after = P.Policy(ws)
+        after.unattended, after.after_call = True, True
+        def a(tool, **inp):
+            return after.decide(tool, inp)
+        need(a("Edit", file_path=str(ws / "coaching/log.md")).verdict == P.ALLOW, "the wrap-up can't write the log")
+        for rel in ("rules.md", "map.md", "CLAUDE.md", "current-situation.md", "where-things-go.md", "HQ/roadmap.md", "challenges.md"):
+            need(a("Edit", file_path=str(ws / rel)).verdict == P.DENY, f"the wrap-up may edit {rel}")
+        for cmd in (f"python3 {hq}/routine/jobs.py add 'a job'", f"python3 {hq}/routine/sprint.py rank F1 1", f"python3 {hq}/routine/review.py clear F1 'x y z'",
+                    f"python3 {hq}/routine/pings.py remind 'x' 'y'", f"python3 {hq}/app/notes.py add x"):
+            need(a("Bash", command=cmd).verdict == P.DENY, f"the wrap-up ran: {cmd}")
+        for cmd in (f"python3 {hq}/app/todo.py add x", f"python3 {hq}/app/about_self.py add donna 'x'", f"python3 {hq}/routine/sprint.py list",
+                    "git add coaching/log.md", "git add HQ/calls/2026-01-01-1000.md", "git add HQ/agents/donna-about-herself.md", "git commit -q -m x"):
+            d = a("Bash", command=cmd)
+            need(d.verdict == P.ALLOW, f"the wrap-up can't: {cmd}: {d.why}")
+        need(a("Bash", command="git add rules.md").verdict == P.DENY, "the wrap-up may commit the rules")
+        return "every guarded path asks or refuses, the shell and a yes don't open them, each way in passes, the web and the wrap-up are cut"
+
+    async def flow202(self) -> str:
+        """F99, no Claude: a job starts without his folder, and the guards really load. On a throwaway workspace whose
+        life files hold a marker, a team job and a cycle go through the real tick.start and their own start script, with a
+        stand-in claude that writes down what it was given: flags, environment, prompt. None of the life text is in the
+        prompt; his CLAUDE.md, the memory and the project settings are off; the build notes come by path; the settings
+        file is really passed, and its hook, run as written there, refuses a direct write of the side file for a cycle and
+        any connector's send for both."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f99job")
+        mark = "XLIFEMARKX"
+        for rel in ("rules.md", "my-answers.md", "day-in-the-life.md", "map.md", "current-situation.md", "challenges.md", "inbox.md",
+                    "coaching/log.md", "CLAUDE.md", "where-things-go.md"):
+            (ws / rel).parent.mkdir(parents=True, exist_ok=True)
+            (ws / rel).write_text(f"# {rel}\n\n{mark} a private line of {rel}\n")
+        (ws / "HQ").mkdir(exist_ok=True)
+        (ws / "HQ/CLAUDE.md").write_text("# build notes\n")
+        run = Path(env["HQ_JOB_RUN"])
+        rec = self.tmp / "f99-claude-rec.json"
+        fake = self.tmp / "f99-claude"
+        fake.write_text("#!/usr/bin/env python3\nimport json, os, sys\n"
+                        "p = sys.stdin.read()\n"
+                        f"json.dump({{'argv': sys.argv[1:], 'env': dict(os.environ), 'prompt': p}}, open({str(rec)!r}, 'w'))\n"
+                        "print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'done', 'session_id': 's'}))\n")
+        fake.chmod(0o755)
+        _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), "add", "a plain test job: say done"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        drv = self.tmp / "f99-start.py"
+        drv.write_text("""
+import sys, os, json; sys.path.insert(0, sys.argv[1] + '/routine'); import tick
+run = os.environ['HQ_JOB_RUN']; tick.LINUX_WINDOWS = True; tick.RUN, tick.STATE, tick.PIDFILE = run, run + '/job.json', run + '/job.pid'
+tick.open_window = lambda *a: None; tick.status = lambda *a: None; tick.log = lambda m: None
+tick._headless = lambda: True
+q = json.loads(tick.jobs('next')); job = [j for j in q['waiting'] if sys.argv[2] in j['text']][0]
+tick.start(job); print('N', job['n'])
+""")
+        def start(words):
+            r = _sp.run([sys.executable, str(drv), str(ROOT), words], capture_output=True, text=True, env={**env, "HQ_CLAUDE": str(fake)}, cwd=str(ROOT), timeout=120)
+            m = re.search(r"^N (\d+)$", r.stdout, re.M)
+            need(m, f"the start failed: {r.stdout[-300:]} {r.stderr[-800:]}")
+            n = m.group(1)
+            script = run / f"job-{n}.command"
+            r = _sp.run(["bash", str(script)], capture_output=True, text=True, env={**env, "HQ_CLAUDE": str(fake)}, timeout=120)
+            need(rec.exists(), f"the job's own script didn't run claude: {r.stdout[-300:]} {r.stderr[-500:]}")
+            got = json.loads(rec.read_text())
+            rec.unlink()
+            return n, got
+        def holds(got, what):
+            a, e, p = got["argv"], got["env"], got["prompt"]
+            need(mark not in p and mark not in " ".join(a), f"{what}: his life is in the first prompt")
+            need(e.get("CLAUDE_CODE_DISABLE_CLAUDE_MDS") == "1" and e.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY") == "1", f"{what}: his CLAUDE.md or memory loads")
+            need(a[a.index("--setting-sources") + 1] == "user", f"{what}: the project's settings load (their hook pours in his rules)")
+            need("mcp__claude_ai_Gmail__send_message" in a[a.index("--disallowedTools") + 1], f"{what}: the never-send list isn't on the job")
+            s = a[a.index("--settings") + 1]
+            need(Path(s).exists(), f"{what}: the settings file isn't passed: {a}")
+            return json.loads(Path(s).read_text())
+        n, got = start("a plain test job")
+        sett = holds(got, "a team job")
+        need(str(ws / "HQ/CLAUDE.md") in got["prompt"] and "sprint.py" in got["prompt"] and "show LABEL" in got["prompt"], "the build notes and the row aren't given by path")
+        hooks = sett["hooks"]["PreToolUse"]
+        def hook(cfg, tool, **inp):
+            cmd = cfg["hooks"][0]["command"].replace("/usr/bin/python3", sys.executable)
+            r = _sp.run(cmd, shell=True, input=json.dumps({"tool_name": tool, "tool_input": inp}), capture_output=True, text=True, env=env)
+            return r.returncode, r.stderr
+        need(re.fullmatch(hooks[0]["matcher"], "mcp__c1a5a515__send_message"), "the job's hook doesn't see a connector")
+        for t in ("mcp__claude_ai_Gmail__send_message", "mcp__c1a5a515__reply", "mcp__anything__forward"):
+            need(hook(hooks[0], t)[0] == 2, f"a job may run {t}")
+        need(hook(hooks[0], "mcp__claude_ai_Gmail__create_draft")[0] == 0, "a job can't make a draft")
+        need(hook(hooks[0], "Edit", file_path=str(ws / "HQ/roadmap.md"))[0] == 0, "a team job can't write its row")
+        # a cycle
+        env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
+        sch = _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), "add", "Agent cycle: donna, bigger session"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(sch.returncode == 0, f"no cycle job: {sch.stderr[-300:]}")
+        n, got = start("Agent cycle: donna")
+        sett = holds(got, "a cycle")
+        hooks = sett["hooks"]["PreToolUse"]
+        code, why = hook(hooks[0], "Write", file_path=str(ws / "HQ/sprint.json"))
+        need(code == 2 and "refused" in why, f"a cycle's direct write of the side file passed: {code} {why}")
+        need(hook(hooks[0], "mcp__x__send_message")[0] == 2, "a cycle may send")
+        need(re.fullmatch(hooks[0]["matcher"], "Edit") and re.fullmatch(hooks[0]["matcher"], "mcp__x__reply"), "the cycle's hook doesn't see these tools")
+        need("briefing.py" in got["prompt"] and "fresh" in got["prompt"], "the briefing isn't given by path")
+        return "a job's and a cycle's first prompt hold none of his life files, CLAUDE.md, memory and project settings stay off, the settings file is passed and its hook refuses"
+
+    async def flow203(self) -> str:
+        """F99, no Claude: a flag and a say-so stand on his own words. On a throwaway workspace with his lines in a call, a
+        text and a quick note and an agent's line next to them: review.py clear with made-up words, with an agent's words,
+        with a two-word quote, and without words is refused and the flag stays; with words of his it comes off and the words
+        and where they stand are kept. --not-ready without --said or with made-up words is refused; with his words the job
+        goes and the say-so is kept with the quote and the time, for jobs.py and schedule.py alike."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f99say")
+        env["HQ_REVIEW"] = "1"
+        (ws / "HQ/calls").mkdir(parents=True, exist_ok=True)
+        (ws / "HQ/calls/2026-01-10-0900.md").write_text(
+            "# Call 10 January 2026, 09:00\n\nStarted 09:00:00 · agent Moneypenny · brain opus\n\n"
+            "- 09:01:10 **Me:** Yes, I've read the flag, take it off, that hole doesn't matter.\n"
+            "- 09:01:20 **HQ:** Of course, a made up sentence the agent said here.\n")
+        (ws / "HQ/direct-line").mkdir(exist_ok=True)
+        (ws / "HQ/direct-line/thread.jsonl").write_text(
+            json.dumps({"at": 1, "from": "me", "text": "Give it to the team even though it isn't ready"}) + "\n" +
+            json.dumps({"at": 2, "from": "agent", "text": "an agent's own text that looks like his"}) + "\n")
+        (ws / "HQ/notes.md").write_text("# Notes\n\n## Notes\n\n- 2026-01-10 08:00:00 · the quick note he typed himself\n")
+        rm = ws / "HQ/roadmap.md"
+        rm.write_text(rm.read_text().replace("| | Step | What you get | Model |\n|---|---|---|---|\n",
+            "| | Step | What you get | Model |\n|---|---|---|---|\n| ⬜ | H9301 A flagged row | Something to build. | | |\n", 1))
+        spr = Path(env.get("HQ_SPRINT") or ws / "HQ/sprint.json")
+        def state(verdict="flag"):
+            spr.write_text(json.dumps({"review": {"since": 1, "rows": {"H9301": {"verdict": verdict, "findings": ["a hole"], "ask": "x"}}}}))
+        def rev(*a):
+            return _sp.run([sys.executable, str(ROOT / "routine/review.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        state()
+        for words in ("make this go away please", "a made up sentence the agent said here", "an agent's own text that looks like his", "take it", ""):
+            r = rev("clear", "H9301", words)
+            need(r.returncode != 0, f"a flag came off on {words!r}: {r.stdout}")
+            need(json.loads(spr.read_text())["review"]["rows"]["H9301"]["verdict"] == "flag", f"the flag moved on {words!r}")
+        r = rev("clear", "H9301", "take it off, that hole doesn't matter")
+        need(r.returncode == 0, f"his own words were refused: {r.stdout} {r.stderr}")
+        e = json.loads(spr.read_text())["review"]["rows"]["H9301"]
+        need(e["verdict"] == "cleared" and "that hole" in e["cleared_words"] and "calls" in e["cleared_where"], f"what's kept: {e}")
+        state()
+        r = rev("clear", "H9301", "the quick note he typed himself")
+        need(r.returncode == 0, f"his note wasn't taken: {r.stderr}")
+        state()
+        def job(*a):
+            return _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        text = "H9301 on the HQ roadmap: build it. Read the H9301 row."
+        need(job("add", text).returncode != 0, "a row not ready went to the team")
+        r = job("add", text, "--not-ready")
+        need(r.returncode != 0 and "--said" in (r.stdout + r.stderr), f"a bare --not-ready went through: {r.stdout}")
+        r = job("add", text, "--not-ready", "--said", "he told me to go ahead")
+        need(r.returncode != 0, f"a made-up say-so went through: {r.stdout}")
+        r = job("add", text, "--not-ready", "--said", "give it to the team even though")
+        need(r.returncode == 0, f"his say-so was refused: {r.stdout} {r.stderr}")
+        d = json.loads(spr.read_text())
+        ss = d.get("say_so") or []
+        need(ss and ss[-1]["labels"] == ["H9301"] and "give it to the team" in ss[-1]["quote"] and ss[-1]["at"] and "direct-line" in ss[-1]["where"], f"the say-so isn't kept: {ss}")
+        need("give it to the team even though" in rm.read_text(), "the job doesn't carry his words")
+        r = _sp.run([sys.executable, str(ROOT / "routine/schedule.py"), "add", "tomorrow 02:00", text, "--not-ready"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode != 0, f"schedule took a bare --not-ready: {r.stdout}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/schedule.py"), "add", "tomorrow 02:00", text, "--not-ready", "--said", "give it to the team even though"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"schedule refused his say-so: {r.stdout} {r.stderr}")
+        return "made-up or an agent's words keep the flag and the row back; his own words take it off, kept with where and when"
+
     async def flow186(self) -> str:
         """H298, piece 2, no Claude: the identity fix. On a throwaway workspace, a made-up call transcript full of the
         user's life (his workout, his bike, his appointment, his errands), where every line of the agents' is about
@@ -23842,6 +24096,10 @@ FLOWS = {
     192: ("H298, piece 6: the wall: the gate holds a start over the line, nothing starts outside her hours (dropped to the morning when still useful, waits before them), past useful-until is skipped, over her weekly or daily share is refused, boxed twice in a row is a tripwire and nothing restarts itself", False, "flow192"),
     193: ("H298, piece 7: the Friday screen on the status page: routines.json carries the agents (three lines per agent, her share against her line) and the page draws The agents, one card per agent, the share red over her line; off, nothing of it", False, "flow193"),
     194: ("H298, piece 8: serialized writes: a cycle's hook refuses Edit, Write and shell writes on a shared file before they land and passes her ledger, her line and the scripts; a cycle job's settings carry it, a normal job's don't; twenty one-writer edits at once all land under the file's lock; off, as before", False, "flow194"),
+    200: ("F98: his life never becomes an agent's: the harvest and add refuse his sentences and their real shapes, whatever the look returns; her own life still passes", False, "flow200"),
+    201: ("F99: the doors: his vision, map, rules and CLAUDE.md ask, the shared files are refused whatever the tool, each script way in passes, the web asks on anything but a plain address, the wrap-up writes only the log, the lists and the transcript", False, "flow201"),
+    202: ("F99: a job and a cycle start without his folder, with the never-send list, and the guard file really loads", False, "flow202"),
+    203: ("F99: a flag and a say-so stand on his own words: made-up words and an agent's words are refused, his are kept with where and when", False, "flow203"),
     199: ("F86: the fix-and-review loop runs by itself: a flagged row opens her short session (one at a time, her box, her share, her hours), it improves that row only, the review looks again, a pass gets her mark; a finding only he can answer goes on the sit-down list with one text and stops the loop until the words change; a cut-off round stays flagged and counts; three rounds a day, then the sit-down list", False, "flow199"),
     198: ("F81: Moneypenny decides grounded and brings the rest to a sit-down with him: his why word for word on top of how she works, no line telling her to fill in the nine points alone", False, "flow198"),
     197: ("F59: the server stopped mid-call, for real: the call line's own stop script with a caller on ends the call itself and writes it down as the server's, in the log and the transcript", True, "flow197"),
