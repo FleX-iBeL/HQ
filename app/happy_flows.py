@@ -13180,7 +13180,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         ok(r, "add with his say-so")
         q_ = js.loads(jobs("next").stdout)
         j = next(j for j in q_["waiting"] if j["text"].startswith("H9001 on the HQ roadmap"))
-        need("without the Ready mark (H9001), on the explicit say-so" in j["text"], f"H272: the job doesn't say it went without the mark: {j['text']}")
+        need("without the Ready mark (H9001), on his say-so" in j["text"], f"H272: the job doesn't say it went without the mark: {j['text']}")
         r = sched("add", f"{d1} 23:00", "H9007 on the HQ roadmap: the seventh row.", "--not-ready")
         ok(r, "plan with his say-so")
         need(any("H9007 on the HQ roadmap" in i["text"] and "without the Ready mark" in i["text"] for i in sc.read(rm.read_text())),
@@ -15372,7 +15372,7 @@ print("RESULT " + json.dumps(out))
         need(p.startswith(f"let's go. This is job {s2['n']} from the queue: Donna's own cycle, bigger session (H298)"), f"the session's prompt head: {p[:200]}")
         need("Your character:" in p and "The handbook: how you run yourself" in p and "## Your own section" in p and "### Donna" in p
              and "Your ledger" in p and "His orders waiting for you" in p and "put the plumber's bill in Friday's block" in p
-             and "cycles.py\" plan donna" in p and "batches at 12:00 and 17:00" in p and "The briefing, written by HQ's routine" in p
+             and "cycles.py\" plan donna" in p and "batches at 12:00 and 17:00" in p and "briefing.py" in p
              and "At most 3 picks, at most 6 steps" in p, "the session's prompt lacks a part")
         need("--max-minutes 10 --max-turns 30" in s2["script"], f"the session's box: {s2['script']}")
         need("the done mark is run for it" in s2["stream"], f"the session's run: {s2['stream'][-400:]}")

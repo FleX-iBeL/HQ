@@ -774,9 +774,9 @@ def next_round(now=None):
             if label not in place and int(e.get("at") or 0) < since:
                 continue
             f = e.setdefault("fix", {})
-            if f.get("stop") and f["stop"].get("ask") != fp:  # his answer written in lifted the stop: rounds from nothing
-                f.pop("stop")
-                f["n"] = 0
+            if f.get("stop") and f["stop"].get("ask") != fp:  # new words lifted the stop; after the cap, rounds from nothing
+                if f.pop("stop").get("kind") == "cap":
+                    f["n"] = 0
             n = _rounds(e)
             if n >= ROUNDS:
                 f["stop"] = {"ask": fp, "kind": "cap", "why": "; ".join(e.get("findings") or []), "at": int(now)}

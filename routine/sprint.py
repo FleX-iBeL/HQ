@@ -318,12 +318,12 @@ _ASK_GOES_ON = re.compile(r"\b(?:what'?s asked|what'?s wrong|what right looks li
 
 
 def team_note_at(desc):
-    """F101: where the team's notes start in a description, or None. Only at the start of a sentence with no more of the
-    ask after it: "its QA passed (job 459) and then" in the middle of a sentence is the row's own words, and the rows that
-    reached the reviewer cut there are why this is here."""
+    """F101: where the team's notes start in a description, or None. A note has its shape, "Fixed (job 12, 3 May 2026): it was
+    the lock", and no more of the ask comes after it. "its QA passed (job 459), but it's only on the nightly line" is the
+    row's own sentence, and the rows that reached the reviewer cut there are why this is here."""
     for m in TEAM_NOTE.finditer(desc):
-        before = desc[:m.start()].rstrip()
-        if before and before[-1] not in ".!?:;)]\"”'":
+        close = desc.find(")", m.end())
+        if close < 0 or desc[close + 1:close + 2] != ":":
             continue
         if _ASK_GOES_ON.search(desc[m.end():]):
             continue
