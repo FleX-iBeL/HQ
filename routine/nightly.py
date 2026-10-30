@@ -178,7 +178,7 @@ def run(again: bool = False, routine: bool = False) -> int:
     os.makedirs(OUT, exist_ok=True)
     if not again and not routine:  # F101: the routine already ran it: the H169 item has nothing left to run
         t = tonight(last(), stamp)
-        if t and t["green"]:
+        if t and t["green"] and (last() or {}).get("routine"):
             print(f"Tonight's run already passed every flow (round {t['round']}): nothing to run.")
             return 0
     night, n, rounds = stamp.strftime("%Y-%m-%d %H:%M"), 1, []
@@ -206,7 +206,7 @@ def run(again: bool = False, routine: bool = False) -> int:
     failed = failures(out)
     entry = {"at": stamp.strftime("%Y-%m-%d %H:%M"), "ran": ran, "passed": passed, "failed": failed,
              "exit": r.returncode, "minutes": mins, "log": log}
-    json.dump({**entry, "round": n, "rounds_max": ROUNDS, "night": night, "rounds": rounds + [entry]},
+    json.dump({**entry, "round": n, "rounds_max": ROUNDS, "night": night, "rounds": rounds + [entry], "routine": routine},
               open(os.path.join(OUT, "last.json"), "w"), indent=1)
     _prune()
     when = stamp.strftime("%-d %b %H:%M")

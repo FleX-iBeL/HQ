@@ -14416,7 +14416,7 @@ tick.start(job); print('N', job['n'])
         goes and the say-so is kept with the quote and the time, for jobs.py and schedule.py alike."""
         import subprocess as _sp
         ws, env = self._h298_ws("f99say")
-        env["HQ_REVIEW"] = "1"
+        env.update({"HQ_REVIEW": "1", "HQ_PROOF_ON": "1"})
         (ws / "HQ/calls").mkdir(parents=True, exist_ok=True)
         (ws / "HQ/calls/2026-01-10-0900.md").write_text(
             "# Call 10 January 2026, 09:00\n\nStarted 09:00:00 · agent Moneypenny · brain opus\n\n"
@@ -23035,7 +23035,7 @@ print("H88OUT " + json.dumps(out))
             return (ws[side] / rel).read_text()
         try:
             # an Edit on each of the main's files: made by the main, not here
-            for rel in ("coaching/log.md", "HQ/roadmap.md", "inbox.md", "challenges.md", "HQ/notes-donna.md"):
+            for rel in ("coaching/log.md", "HQ/notes-donna.md"):  # F99: the planning, the mail list and the to-do list have their scripts
                 before = text("backup", rel)
                 old = before.splitlines()[0]
                 d = decide("backup", "Edit", {"file_path": str(ws["backup"] / rel), "old_string": old,
@@ -23049,16 +23049,16 @@ print("H88OUT " + json.dumps(out))
                 {"old_string": "(H203 flow)", "new_string": "(H203 flow, again)"}]})
             need(d["handed"] and "(H203 flow, again)" in text("main", "coaching/log.md"), f"a MultiEdit wasn't handed over: {d}")
             # a text the main's copy doesn't have: not yet, nothing written
-            was = text("main", "inbox.md")
-            d = decide("backup", "Edit", {"file_path": str(ws["backup"] / "inbox.md"), "old_string": "nowhere in it 203",
+            was = text("main", "HQ/notes-donna.md")
+            d = decide("backup", "Edit", {"file_path": str(ws["backup"] / "HQ/notes-donna.md"), "old_string": "nowhere in it 203",
                                           "new_string": "x"})
             need(d["verdict"] == "deny" and d["retry"] and not d["handed"] and "differs" in d["why"],
                  f"an Edit the main's copy can't take wasn't a not yet: {d}")
-            need(text("main", "inbox.md") == was, "the main wrote a change it couldn't make")
+            need(text("main", "HQ/notes-donna.md") == was, "the main wrote a change it couldn't make")
             # a Write: an Edit only
-            d = decide("backup", "Write", {"file_path": str(ws["backup"] / "HQ/roadmap.md"), "content": "gone"})
-            need(d["retry"] and "Edit" in d["why"] and text("backup", "HQ/roadmap.md") != "gone"
-                 and text("main", "HQ/roadmap.md") != "gone", f"a Write on the backup wasn't turned into an Edit: {d}")
+            d = decide("backup", "Write", {"file_path": str(ws["backup"] / "coaching/log.md"), "content": "gone"})
+            need(d["retry"] and "Edit" in d["why"] and text("backup", "coaching/log.md") != "gone"
+                 and text("main", "coaching/log.md") != "gone", f"a Write on the backup wasn't turned into an Edit: {d}")
             # any other file: written here, as before
             d = decide("backup", "Edit", {"file_path": str(ws["backup"] / "plain.md"), "old_string": "one", "new_string": "two"})
             need(d["verdict"] == "allow", f"an Edit to another file on the backup wasn't allowed: {d}")
