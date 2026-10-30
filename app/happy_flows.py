@@ -2725,9 +2725,9 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
                  f"a web lookup after hang-up is refused: {tool}")
         # The workspace still works as before, through HQ's workspace link too.
         need(v("Read", {"file_path": str(config.FOLDER / "rules.md")}) == ALLOW, "reading the workspace now asks")
-        need(v("Edit", {"file_path": str(config.FOLDER / "inbox.md")}) == ALLOW, "writing in the workspace now asks")
+        need(v("Edit", {"file_path": str(config.FOLDER / "coaching/log.md")}) == ALLOW, "writing in the workspace now asks")
         if (ROOT / "workspace").exists():
-            need(v("Edit", {"file_path": str(ROOT / "workspace" / "inbox.md")}) == ALLOW,
+            need(v("Edit", {"file_path": str(ROOT / "workspace" / "coaching/log.md")}) == ALLOW,
                  "writing through HQ's workspace link is counted as HQ")
         need("H65" in config.VOICE_RULES and "localhost:4748/routines.json" in config.VOICE_RULES
              and "mail.log" in config.VOICE_RULES, "the call rules don't say HQ may be read freely")
@@ -14252,7 +14252,7 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         for line in ["I've cleared your Tuesday and you bike to Marlies at 10:40"] + lines:
             r = add(line)
             need(r.returncode == 1 and "refused" in r.stderr, f"add took {line!r}: {r.stdout} {r.stderr}")
-        need("Marlies" not in lst.read_text() and "Marlies" not in lst.read_text(), "add wrote a refused line")
+        need("Marlies" not in lst.read_text(), "add wrote a refused line")
         r = add("thinks the coffee on the second floor is too strong")
         need(r.returncode == 0 and "kept" in r.stdout, f"her own life is refused: {r.stdout} {r.stderr}")
         r = add("goes running on Sundays")
@@ -14467,6 +14467,401 @@ tick.start(job); print('N', job['n'])
         r = _sp.run([sys.executable, str(ROOT / "routine/schedule.py"), "add", "tomorrow 02:00", text, "--not-ready", "--said", "give it to the team even though"], capture_output=True, text=True, env=env, cwd=str(ROOT))
         need(r.returncode == 0, f"schedule refused his say-so: {r.stdout} {r.stderr}")
         return "made-up or an agent's words keep the flag and the row back; his own words take it off, kept with where and when"
+
+    async def flow204(self) -> str:
+        """F101, no Claude: one reader. A row with an escaped pipe and a status phrase in the middle of a sentence reaches the
+        reviewer whole; a real team note at the end of the cell is still cut; a QA mark and a release line leave the row's
+        cells as they were."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f101a")
+        rm = ws / "HQ/roadmap.md"
+        rows = ("| ⬜ | F9401 Pipes in a row | What's wrong: it splits on a \\| in the words and loses what comes after. Then its QA passed (job 459) and "
+                "this part of the sentence must stay. Done means: the tail survives. | | | |\n"
+                "| ⬜ | F9402 A finished note | What's wrong: something small. Done means: it works. Fixed (job 12, 3 May 2026): it was the lock. | | | |\n")
+        rm.write_text(rm.read_text().replace("| | Step | What you get | Model |\n|---|---|---|---|\n", "| | Step | What you get | Model |\n|---|---|---|---|\n" + rows, 1))
+        code = """
+import sys, json
+sys.path.insert(0, sys.argv[1] + '/routine')
+import sprint as S, review as R, hqpaths as H, qa, release
+out = {}
+rs = {r['label']: r for r in S.open_rows(open(sys.argv[2], encoding='utf8').read())}
+out['a'] = S.ask_of(rs['F9401']['line']); out['input'] = R._input(rs['F9401']); out['b'] = S.ask_of(rs['F9402']['line'])
+out['cells'] = len(H.cells(rs['F9401']['line']))
+row = qa.mark('F9401', True, 'a line of what was tried', 3)
+out['after'] = len(H.cells(row)); out['esc'] = chr(92) + '|' in row
+out['bad'] = chr(92) + ' |' in row
+print(json.dumps(out))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(rm)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"the reader: {r.stderr[-600:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        for what in ("what comes after", "this part of the sentence must stay", "the tail survives"):
+            need(what in o["a"] and what in o["input"], f"the reviewer didn't get: {what}")
+        need("Fixed (job 12" not in o["b"] and "it works" in o["b"], f"a real team note isn't cut: {o['b']}")
+        need(o["after"] == o["cells"] and o["esc"] and not o["bad"], f"the QA mark changed the cells: {o}")
+        rm.write_text(rm.read_text().replace("| ⬜ | F9402 A finished note |", "| 🔁 | H178 and the \\| daily release |", 1))
+        code = """
+import sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import release, hqpaths as H
+line = [l for l in open(sys.argv[2], encoding='utf8') if 'H178' in l][0]
+n = len(H.cells(line))
+print(release.add_line('30 October 2026: 1.2.3 went out', sys.argv[2]))
+line = [l for l in open(sys.argv[2], encoding='utf8') if 'H178' in l][0]
+print(n, len(H.cells(line)))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(rm)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"the release line: {r.stderr[-500:]}")
+        a, b = r.stdout.strip().splitlines()[-1].split()
+        need(a == b, f"the release line changed the cells: {r.stdout}")
+        return "an escaped pipe and a status phrase mid-sentence reach the reviewer whole, a real note is cut, a QA mark and a release line keep the cells"
+
+    def _proof_env(self, tag):
+        """A throwaway workspace and a throwaway HQ repository for the proof, with a stand-in for the flows: a flow named in
+        the file FAILS fails, everything else passes."""
+        import subprocess as _sp
+        ws, env = self._h298_ws(tag)
+        repo = self.tmp / f"{tag}-repo"
+        repo.mkdir()
+        g = lambda *a: _sp.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True)
+        g("init", "-q", "-b", "main")
+        g("config", "user.email", "t@example.com")
+        g("config", "user.name", "T")
+        (repo / "a.py").write_text("x = 1\n")
+        g("add", "a.py")
+        g("commit", "-q", "-m", "first")
+        fails = self.tmp / f"{tag}-fails"
+        fails.write_text("")
+        runner = self.tmp / f"{tag}-runner"
+        runner.write_text("#!/usr/bin/env python3\nimport sys\n"
+                          f"bad = open({str(fails)!r}).read().split()\n"
+                          "args = sys.argv[1:]\nonly = args[args.index('--only') + 1].split(',') if '--only' in args else ['1', '2']\n"
+                          "hit = [n for n in only if n in bad]\n"
+                          "print('== Result')\n"
+                          "for n in hit:\n    print(f'      {n}: FAILED - a stand-in failure')\n"
+                          "print(f'{len(only) - len(hit)} of {len(only)} passed')\nsys.exit(1 if hit else 0)\n")
+        runner.chmod(0o755)
+        env.update({"HQ_PROOF_ON": "1", "HQ_PROOF_ROOT": str(repo), "HQ_PROOF_DIR": str(self.tmp / f"{tag}-proofs"), "HQ_PROOF_RUNNER": str(runner)})
+        return ws, env, repo, fails
+
+    async def flow205(self) -> str:
+        """F101, no Claude: done is a program's. A build with no record, with a failing named flow, or with a record of an
+        older commit is refused and stays open, and so is any job with a note it hasn't read; a green record for the commit
+        HQ is on passes. Made-up words don't get past it, his own do. A headless run that ends clean with no green record is
+        parked as ended, no record, not done. A QA job needs no record."""
+        import subprocess as _sp
+        ws, env, repo, fails = self._proof_env("f101b")
+        (ws / "HQ/direct-line").mkdir(exist_ok=True)
+        (ws / "HQ/direct-line/thread.jsonl").write_text(json.dumps({"at": 1, "from": "me", "text": "Mark that job done, I checked it myself"}) + "\n")
+        def jobs(*a):
+            return _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        def proof(*a):
+            return _sp.run([sys.executable, str(ROOT / "routine/proof.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        def state(n):
+            return re.search(rf"^- Job {n} · ([^·\n]*)", (ws / "HQ/roadmap.md").read_text(), re.M).group(1).strip()
+        def new(text):
+            r = jobs("add", text, "--kind", "small")
+            need(r.returncode == 0, f"no job: {r.stdout} {r.stderr}")
+            n = re.search(r"Job (\d+) is ready", r.stdout).group(1)
+            need(jobs("mark", n, "running since 10:00").returncode == 0, "no mark")
+            return n
+        n = new("Fix for F9501 (F56): the thing is wrong. Happy flow 903 must hold.")
+        r = jobs("done", n)
+        need(r.returncode != 0 and "no record" in r.stderr and state(n).startswith("running"), f"a build went done with no record: {r.stdout} {r.stderr}")
+        fails.write_text("903")
+        r = proof("run", n)
+        need(r.returncode == 1, f"a failing named flow: {r.stdout} {r.stderr}")
+        rec = json.loads(proof("show", n).stdout)
+        need(rec["named"] == [903] and not rec["green"] and rec["failed"], f"the record: {rec}")
+        r = jobs("done", n)
+        need(r.returncode != 0 and "failed" in r.stderr and state(n).startswith("running"), f"done with a failing flow: {r.stdout} {r.stderr}")
+        fails.write_text("")
+        need(proof("run", n).returncode == 0, "a green run isn't green")
+        (repo / "a.py").write_text("x = 2\n")
+        _sp.run(["git", "-C", str(repo), "commit", "-qam", "more"], check=True)
+        r = jobs("done", n)
+        need(r.returncode != 0 and "stands for" in r.stderr, f"a record of an older commit passed: {r.stderr}")
+        need(proof("run", n).returncode == 0, "the second run")
+        need(jobs("tell", n, "one more thing to look at").returncode == 0, "no note")
+        r = jobs("done", n)
+        need(r.returncode != 0 and "note" in r.stderr and state(n).startswith("running"), f"done with an unread note: {r.stderr}")
+        jobs("notes", n)
+        r = jobs("done", n)
+        need(r.returncode == 0 and state(n).startswith("done"), f"a green build wasn't done: {r.stdout} {r.stderr}")
+        # the say-so
+        n2 = new("Fix for F9502 (F56): another thing.")
+        r = jobs("done", n2, "--said", "he told me it was fine")
+        need(r.returncode != 0 and state(n2).startswith("running"), f"made-up words got past it: {r.stdout}")
+        r = jobs("done", n2, "--said", "I checked it myself")
+        need(r.returncode == 0 and state(n2).startswith("done"), f"his words were refused: {r.stderr}")
+        need("I checked it myself" in json.loads(proof("show", n2).stdout).get("say_so", ""), "the say-so isn't kept")
+        # a clean exit is not done
+        n3 = new("Fix for F9503 (F56): a third thing. Flow 904.")
+        fails.write_text("904")
+        run = Path(env["HQ_JOB_RUN"])
+        (run / f"job-{n3}.prompt").write_text("go")
+        fake = self.tmp / "f101b-claude"
+        fake.write_text("#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"all done\",\"session_id\":\"s\"}'\n")
+        fake.chmod(0o755)
+        r = _sp.run([sys.executable, str(ROOT / "routine/runjob.py"), n3], capture_output=True, text=True, env={**env, "HQ_CLAUDE": str(fake)}, cwd=str(ROOT), timeout=120)
+        need(state(n3).startswith("paused: ended, no record"), f"a clean exit with a failing flow: {state(n3)} {r.stdout[-400:]}")
+        # not a build
+        n4 = new("Fix for F9504 (F56): a fourth.")
+        est = Path(env["HQ_ESTIMATES_DIR"])
+        r = _sp.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {str(ROOT / 'routine')!r}); import estimate as E; d = E._load_state(); d['{n4}']['kind'] = 'qa'; E._save_state(d)"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"the kind: {r.stderr[-300:]}")
+        r = jobs("done", n4)
+        need(r.returncode == 0, f"a QA job needs a record: {r.stderr}")
+        return "no record, a failing flow, an older commit or an unread note keep a job open; a green record passes; only his own words go past it; a clean exit isn't done"
+
+    async def flow206(self) -> str:
+        """F101, no Claude: QA's pass stands on a program's run. Refused with no record, with a red record, with no comparison
+        or one without numbers; passes with a green record and a comparison that says what, how many, how many right. A
+        piece of a bigger row is refused unless its switch is on the hidden list."""
+        import subprocess as _sp
+        ws, env, repo, fails = self._proof_env("f101c")
+        rm = ws / "HQ/roadmap.md"
+        rows = ("| ⬜ | F9601 A row | What's wrong: x. | | | |\n| ⬜ | F9602 The feature, piece 1 of 2 | What's wrong: y. | | | |\n")
+        t = rm.read_text()
+        need("## Phase F" in t, "no bugs phase")
+        rm.write_text(t.replace("| | Step | What you get | Model |\n|---|---|---|---|\n", "| | Step | What you get | Model |\n|---|---|---|---|\n" + rows, 1))
+        def qa(label, *a):
+            return _sp.run([sys.executable, str(ROOT / "routine/qa.py"), "pass", label, "looked fine", "--example", "the example", "--ran", "nothing", "--got", "fine", *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        pdir = Path(env["HQ_PROOF_DIR"])
+        pdir.mkdir(parents=True, exist_ok=True)
+        def rec(label, green, n):
+            (pdir / f"job-{n}.json").write_text(json.dumps({"n": n, "label": label, "green": green, "failed": [] if green else ["7: FAILED - x"], "t": time.time()}))
+        r = qa("F9601", "--compared", "open rows read whole, 61 of 61")
+        need(r.returncode == 2 and "no record" in r.stdout, f"a pass with no record: {r.stdout}")
+        rec("F9601", False, 1)
+        r = qa("F9601", "--compared", "open rows read whole, 61 of 61")
+        need(r.returncode == 2 and "wasn't green" in r.stdout, f"a pass on a red run: {r.stdout}")
+        rec("F9601", True, 2)
+        for words in ((), ("--compared", "all good"), ("--compared", "61 of 61"), ("--compared", "")):
+            r = qa("F9601", *words)
+            need(r.returncode == 2 and "comparison" in r.stdout, f"a pass without a real comparison {words}: {r.stdout}")
+        need("QA passed" not in rm.read_text().split("F9601")[1].split("\n")[0], "a refused pass wrote its mark")
+        r = qa("F9601", "--compared", "open rows read whole, 61 of 61")
+        need(r.returncode == 0 and "QA passed" in r.stdout, f"a good pass was refused: {r.stdout}")
+        need("61 of 61" in rm.read_text(), "the comparison isn't in the row")
+        rec("F9602", True, 3)
+        r = qa("F9602", "--compared", "rows checked, 3 of 3")
+        need(r.returncode == 2 and "hidden list" in r.stdout, f"a piece with no switch on the list: {r.stdout}")
+        return "no record, a red run or no real comparison refuse the pass; a green run and a comparison pass it; a piece needs its switch on the hidden list"
+
+    async def flow207(self) -> str:
+        """F101, no Claude: the release reads the night. Refused after a red night with the night named, and with no night;
+        past it only on his own words; a green night goes on. A commit naming no item holds the release, except one that only
+        touches the tests, the version or the changelog; a commit naming a row that passed QA goes."""
+        import subprocess as _sp
+        ws, env, repo, fails = self._proof_env("f101d")
+        (ws / "HQ/direct-line").mkdir(exist_ok=True)
+        (ws / "HQ/direct-line/thread.jsonl").write_text(json.dumps({"at": 1, "from": "me", "text": "Release it anyway, the red test is only the phone page"}) + "\n")
+        hq = self.tmp / "f101d-hq"
+        (hq / "scratch/nightly").mkdir(parents=True)
+        drv = self.tmp / "f101d-rel.py"
+        drv.write_text("""
+import sys, json
+sys.path.insert(0, sys.argv[1] + '/routine')
+import release as R
+from pathlib import Path
+R.ROOT = Path(sys.argv[2]); R._ready = lambda need_clean=None: None
+R.to_nightly = lambda: 77
+R.version = lambda: '1.2.3'
+print('EXIT', R.cmd_main(red_night='--past-the-night' in sys.argv, said=sys.argv[sys.argv.index('--said') + 1] if '--said' in sys.argv else None))
+""")
+        def rel(*a):
+            r = _sp.run([sys.executable, str(drv), str(ROOT), str(hq), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            need("EXIT" in r.stdout, f"the release: {r.stdout} {r.stderr[-500:]}")
+            return r.stdout, int(r.stdout.rsplit("EXIT", 1)[1])
+        today = datetime.now().strftime("%Y-%m-%d")
+        out, code = rel()
+        need(code == 2 and "no test run tonight" in out, f"no night: {out}")
+        last = hq / "scratch/nightly/last.json"
+        last.write_text(json.dumps({"at": f"{today} 02:00", "ran": 10, "passed": 9, "failed": ["45: FAILED - a test"]}))
+        out, code = rel()
+        need(code == 2 and f"{today} 02:00" in out and "45: FAILED" in out, f"a red night isn't named: {out}")
+        out, code = rel("--past-the-night", "--said", "it was fine, he said")
+        need(code == 2 and "his own words" in out, f"made-up words got past the night: {out}")
+        out, code = rel("--past-the-night", "--said", "the red test is only the phone page")
+        need(code == 77, f"his words didn't get past it: {out}")
+        last.write_text(json.dumps({"at": f"{today} 02:00", "ran": 10, "passed": 10, "failed": []}))
+        out, code = rel()
+        need(code == 77, f"a green night is refused: {out}")
+        last.write_text(json.dumps({"at": "2020-01-01 02:00", "ran": 10, "passed": 10, "failed": []}))
+        out, code = rel()
+        need(code == 2 and "no test run tonight" in out, f"an old night counts: {out}")
+        # the commits
+        g = lambda *a: _sp.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True)
+        g("checkout", "-q", "-b", "dev")
+        def commit(name, subject):
+            (repo / name).parent.mkdir(exist_ok=True)
+            (repo / name).write_text(subject)
+            g("add", name)
+            g("commit", "-q", "-m", subject)
+        commit("b.py", "F9701: the fix")
+        commit("app/happy_flows.py", "Nightly: a test made stable")
+        text = "## Phase F · Bugs\n\n| ✅ | F9701 The fix | What's wrong. | QA passed (job 5, 30 October 2026 10:00): tried it. | |\n"
+        code = """
+import sys, json
+sys.path.insert(0, sys.argv[1] + '/routine')
+import qa
+print(json.dumps(qa.hold(sys.argv[2], 'main', 'dev', open(sys.argv[3], encoding='utf8').read())))
+"""
+        tf = self.tmp / "f101d-rows.md"
+        tf.write_text(text)
+        def hold():
+            r = _sp.run([sys.executable, "-c", code, str(ROOT), str(repo), str(tf)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            need(r.returncode == 0, f"the hold: {r.stderr[-500:]}")
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        h = hold()
+        need(h["all"] and not h["held"], f"a row that passed and a tests commit are held: {h}")
+        commit("c.py", "A quick change nobody asked for")
+        commit("d.py", "F9701: more of the fix")
+        h = hold()
+        need(not h["all"] and len(h["held"]) == 1 and "names no item" in h["held"][0]["why"], f"a commit with no item isn't held: {h}")
+        need(h["to"], f"what came before it should still go: {h}")
+        return "a red or missing night refuses the release with the night named, only his own words go past it; a commit naming no item holds it, tests and the version don't"
+
+    async def flow208(self) -> str:
+        """F101, no Claude: the rest of the hand-offs. The status block is written under the lock, whole, through a temp file,
+        and refused without its separator; twenty writers next to the queue lose nothing. The reviewer's answer needs all
+        five probes and its quotes must stand in the item; three rounds an item, across days, then the stop. The night is the
+        routine's own, once a night, over every quick flow; a friend's HQ doesn't pull the work line."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f101e")
+        rm = ws / "HQ/roadmap.md"
+        ss = ROOT / "status/set-status.py"
+        keep = rm.read_text()
+        rm.write_text("no separator here\n")
+        r = _sp.run([sys.executable, str(ss), "BUILDING", "a", "b", "c", "Phase A|A1 ✅", "d"], capture_output=True, text=True, env=env)
+        need(r.returncode != 0 and rm.read_text() == "no separator here\n", f"a planning without its separator was written: {r.stdout} {r.stderr}")
+        rm.write_text(keep)
+        ps = [_sp.Popen([sys.executable, str(ss), "BUILDING", f"step {i}", "b", "c", "Phase A|A1 ✅", f"line {i}"], env=env, stdout=_sp.DEVNULL, stderr=_sp.PIPE, text=True) for i in range(10)]
+        ps += [_sp.Popen([sys.executable, str(ROOT / "routine/jobs.py"), "add", f"a job number {i} to keep"], env=env, stdout=_sp.DEVNULL, stderr=_sp.PIPE, text=True) for i in range(10)]
+        for p in ps:
+            need(p.wait(timeout=120) == 0, f"a writer failed: {p.stderr.read()[-300:]}")
+        t = rm.read_text()
+        need(all(f"a job number {i} to keep" in t for i in range(10)), "a job was lost under the status block")
+        need(t.count("\n---\n") == keep.count("\n---\n") and not list(rm.parent.glob("roadmap.md.status.*")), "the block broke the file or left a temp file")
+        code = """
+import sys, json
+sys.path.insert(0, sys.argv[1] + '/routine')
+import review as R
+item = 'What is asked: stop the thing twice a day. Done means: it stops.'
+good = [{'probe': k, 'applies': True, 'covered': 'stop the thing twice a day', 'hole': None} for k, _ in R.PROBES]
+print(json.dumps({
+  'none': R.verdict({'pass': True}, item),
+  'four': R.verdict({'pass': True, 'probes': good[:4]}, item),
+  'good': R.verdict({'pass': True, 'probes': good}, item),
+  'made': R.verdict({'pass': True, 'probes': [dict(p, covered='a sentence that is nowhere in it') for p in good]}, item)}))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"the verdict: {r.stderr[-500:]}")
+        v = json.loads(r.stdout.strip().splitlines()[-1])
+        need(v["none"] is None and v["four"] is None, f"an answer without all probes counts: {v}")
+        need(v["good"][0] is True, f"a full answer doesn't pass: {v}")
+        need(v["made"][0] is False and "isn't in the item" in v["made"][1][0], f"a made-up quote covers: {v}")
+        rm.write_text(rm.read_text().replace("| | Step | What you get | Model |\n|---|---|---|---|\n", "| | Step | What you get | Model |\n|---|---|---|---|\n| ⬜ | F9801 Flagged | Something. | | | |\n", 1))
+        code = """
+import sys, json, time
+sys.path.insert(0, sys.argv[1] + '/routine')
+import review as R, sprint as S
+now = time.time()
+row = [r for r in S.open_rows() if r['label'] == 'F9801'][0]
+fp = S.ask_fp(row['line'])
+d = {'review': {'fix_since': 1, 'rows': {'F9801': {'verdict': 'flag', 'ask': fp, 'at': int(now), 'findings': ['a hole']}}}, 'order': ['F9801']}
+S._save(S.RANKS, d)
+seen = []
+for day in range(4):
+    got = R.next_round(now + day * 86400)
+    seen.append((got['pick'] or {}).get('round'))
+    if got['pick']:
+        R.round_started(got['pick'], now + day * 86400)
+print(json.dumps({'seen': seen, 'capped': got['capped']}))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env={**env, "HQ_SPRINT": str(ws / "HQ/sprint.json")}, cwd=str(ROOT))
+        need(r.returncode == 0, f"the rounds: {r.stderr[-500:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["seen"] == [1, 2, 3, None] and o["capped"] == ["F9801"], f"rounds aren't per item: {o}")
+        code = """
+import sys, os, json, time
+sys.path.insert(0, sys.argv[1] + '/routine')
+import tick, nightly, flowsets
+started = []
+class P:
+    pid = 1
+tick.subprocess = type('S', (), {'Popen': staticmethod(lambda *a, **k: started.append(a[0]) or P()), 'DEVNULL': -3, 'STDOUT': -2})
+tick.log = lambda m: None
+tick.RUN = os.environ['HQ_JOB_RUN']
+at = lambda h, m: time.struct_time((2026, 10, 31, h, m, 0, 5, 304, 0))
+tick.nightly_minute(at(1, 59)); a = len(started)
+tick.nightly_minute(at(2, 0)); b = len(started)
+tick.nightly_minute(at(2, 1)); c = len(started)
+print(json.dumps({'a': a, 'b': b, 'c': c, 'cmd': started[-1][-2:], 'skip': flowsets.MAC_ONLY.split(',')}))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"the night's minute: {r.stderr[-500:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need((o["a"], o["b"], o["c"]) == (0, 1, 1) and o["cmd"] == ["run", "--routine"], f"the night's minute: {o}")
+        sys.path.insert(0, str(ROOT / "routine"))
+        import flowsets as _fs
+        night = set(_fs.MAC_ONLY.split(","))
+        for n in ("175", "179", "180", "198", "200", "204"):
+            need(n not in night, f"flow {n} is left out of the night")
+        r = _sp.run([sys.executable, str(ROOT / "routine/push.py"), "--pull"], capture_output=True, text=True, env={**env, "HQ_MAKER": "0"}, cwd=str(ROOT))
+        need(r.returncode == 0 and "released version" in r.stdout, f"a friend's HQ pulled the work line: {r.stdout} {r.stderr}")
+        return "the status block can't break the planning, the reviewer's answer is held to all five probes and real quotes, three rounds an item, the night is the routine's, a friend stays on the release"
+
+    async def flow209(self) -> str:
+        """F101: the golden set, no Claude. A change to the reviewer shows: the fingerprint moves when its prompt moves, and
+        while it hasn't been through the real rows again, this flow fails (a friend's HQ has no set, and says so). A stand-in
+        that lets one row through fails the set and doesn't mark it."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f101f")
+        real = config.FOLDER / "HQ/review-golden.json"
+        gold = ws / "HQ/review-golden.json"
+        row = lambda l, w: {"label": l, "line": f"| ⬜ | {l} A row | {w} | | | |", "must": "a test"}
+        gold.write_text(json.dumps({"rows": [row("F9901", "HOLE: no word on a second stop"), row("F9902", "HOLE: no test named")]}))
+        e = {**env, "HQ_GOLDEN": str(gold), "HQ_REVIEW_FAKE": "auto"}
+        r = _sp.run([sys.executable, str(ROOT / "routine/review.py"), "golden"], capture_output=True, text=True, env=e, cwd=str(ROOT))
+        need(r.returncode == 0 and "2 of 2 flagged" in r.stdout and json.loads(gold.read_text()).get("passed_for"), f"the set: {r.stdout} {r.stderr[-400:]}")
+        gold.write_text(json.dumps({"rows": [row("F9901", "HOLE: a hole"), row("F9903", "nothing wrong in this one")]}))
+        r = _sp.run([sys.executable, str(ROOT / "routine/review.py"), "golden"], capture_output=True, text=True, env=e, cwd=str(ROOT))
+        need(r.returncode == 1 and "1 of 2 flagged" in r.stdout and not json.loads(gold.read_text()).get("passed_for"), f"a row let through: {r.stdout}")
+        code = """
+import sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import review as R
+a = R.fingerprint(); R.SYSTEM += ' changed'; print(a != R.fingerprint())
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.stdout.strip().endswith("True"), f"a change to the reviewer doesn't show: {r.stdout} {r.stderr[-300:]}")
+        if not real.exists():
+            return "the set's checks hold; no real set in this workspace"
+        code = """
+import sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import review as R
+print(R.golden_current())
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env={**os.environ, "HQ_GOLDEN": str(real)}, cwd=str(ROOT))
+        need(r.stdout.strip().endswith("True"), f"the reviewer changed and the real set hasn't been run on it: review.py golden. {r.stdout} {r.stderr[-300:]}")
+        return "a change to the reviewer shows, a row let through fails the set, and the real set has been run on this reviewer"
+
+    async def flow210(self) -> str:
+        """F101, real Claude: every real past row in the golden set goes through the real reviewer, which must flag them
+        all. Weekly, with its cost logged, and on every change to the reviewer (flow 209 fails until it has run)."""
+        import subprocess as _sp
+        real = config.FOLDER / "HQ/review-golden.json"
+        if not real.exists():
+            return "no golden set in this workspace"
+        copy = self.tmp / "review-golden.json"
+        shutil.copy(real, copy)
+        r = await asyncio.to_thread(_sp.run, [sys.executable, str(ROOT / "routine/review.py"), "golden"], capture_output=True, text=True,
+                                    env={**os.environ, "HQ_GOLDEN": str(copy), "HQ_ESTIMATES_DIR": str(self.tmp / "golden-est")}, cwd=str(ROOT))
+        need(r.returncode == 0, f"the reviewer let a real past row through: {r.stdout[-600:]} {r.stderr[-300:]}")
+        return r.stdout.strip().splitlines()[-1]
 
     async def flow186(self) -> str:
         """H298, piece 2, no Claude: the identity fix. On a throwaway workspace, a made-up call transcript full of the
@@ -15371,7 +15766,8 @@ tick.open_window = lambda *a: None; tick.status = lambda *a: None; tick.log = la
 q = json.loads(tick.jobs('next')); job = [j for j in q['waiting'] if 'plain test job' in j['text']][0]
 tick.start(job); print(json.dumps(json.load(open(run + '/job-settings.json'))))
 """, str(ROOT)], capture_output=True, text=True, env={**env, "HQ_CLAUDE": str(fake)}, cwd=str(ROOT), timeout=120)
-        need(r.returncode == 0 and "hooks" not in json.loads(r.stdout.strip().splitlines()[-1]), f"a normal job's settings changed: {r.stdout[-300:]} {r.stderr[-500:]}")
+        hk = json.loads(r.stdout.strip().splitlines()[-1]).get("hooks", {}).get("PreToolUse", [{}])
+        need(r.returncode == 0 and "--mail-only" in hk[0]["hooks"][0]["command"], f"a normal job's settings: {r.stdout[-300:]} {r.stderr[-500:]}")
         # (3) the lock on the one-writer path: twenty edits on the log at once, all land
         log = ws / "coaching/log.md"
         log.write_text("# Log\n\n## Open commitments\n\n- none\n\n## Lines\n")
@@ -24096,6 +24492,13 @@ FLOWS = {
     192: ("H298, piece 6: the wall: the gate holds a start over the line, nothing starts outside her hours (dropped to the morning when still useful, waits before them), past useful-until is skipped, over her weekly or daily share is refused, boxed twice in a row is a tripwire and nothing restarts itself", False, "flow192"),
     193: ("H298, piece 7: the Friday screen on the status page: routines.json carries the agents (three lines per agent, her share against her line) and the page draws The agents, one card per agent, the share red over her line; off, nothing of it", False, "flow193"),
     194: ("H298, piece 8: serialized writes: a cycle's hook refuses Edit, Write and shell writes on a shared file before they land and passes her ledger, her line and the scripts; a cycle job's settings carry it, a normal job's don't; twenty one-writer edits at once all land under the file's lock; off, as before", False, "flow194"),
+    210: ("F101: the golden set: every real past row goes through the real reviewer, which must flag them all", True, "flow210"),
+    209: ("F101: a change to the reviewer shows, a row let through fails the golden set, and the real set has been run on this reviewer", False, "flow209"),
+    208: ("F101: the status block can't break the planning, the reviewer's answer needs all five probes and real quotes, three rounds an item, the night is the routine's, a friend stays on the release", False, "flow208"),
+    207: ("F101: the release reads the night and refuses a red or missing one with the night named; a commit naming no item holds it", False, "flow207"),
+    206: ("F101: QA's pass stands on a green run and a named comparison; a piece needs its switch on the hidden list", False, "flow206"),
+    205: ("F101: done is a program's: no record, a failing flow, an older commit or an unread note keep a job open; a clean exit isn't done", False, "flow205"),
+    204: ("F101: one reader: an escaped pipe and a status phrase mid-sentence reach the reviewer whole; a QA mark and a release line keep the cells", False, "flow204"),
     200: ("F98: his life never becomes an agent's: the harvest and add refuse his sentences and their real shapes, whatever the look returns; her own life still passes", False, "flow200"),
     201: ("F99: the doors: his vision, map, rules and CLAUDE.md ask, the shared files are refused whatever the tool, each script way in passes, the web asks on anything but a plain address, the wrap-up writes only the log, the lists and the transcript", False, "flow201"),
     202: ("F99: a job and a cycle start without his folder, with the never-send list, and the guard file really loads", False, "flow202"),

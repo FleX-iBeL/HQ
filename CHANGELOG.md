@@ -4,6 +4,20 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Your vision, your map, your rules and every CLAUDE.md now change only after you say yes, on a call, in a text and after a call, where nobody can answer so nothing changes. The planning, the to-do list, the mail list, the notes, the games and the coaching file can't be edited directly any more, not even with a yes: each has its own command, so every change takes its turn and can be followed. Going through your map on a call means a short yes for each thing written down.
+
+- The team and the agents' own runs start without your private files. What they need they open one by one. Nothing is sent, replied to or forwarded from a job, whatever the connector. A web address opens by itself only when it's a plain page; one that carries extra data asks you first.
+
+- What an agent says about her own life no longer picks up yours. Your calendar, your to-do items and the names around you are never kept as hers, whichever way they come in.
+
+- A flag on a planning item comes off only with words you really said or typed, and the same goes for giving the team an item that isn't ready. Words an agent makes up are refused.
+
+- A build is finished when a program says so, not when the agent does. It runs the tests the item names and the whole quick set on a copy, and keeps a record. Without a green record the job stays open, and QA can't pass it. A release is refused after a red or missing night, and for work no item asked for. Moneypenny decides when to release, inside those limits.
+
+- The night's test run is the routine's own now, over every quick test, so a new test joins by itself and the night no longer depends on a team job getting its turn.
+
+- Friends install the latest released version, and only the maker's HQ follows the work in progress.
+
 - An item the review flags no longer waits for Moneypenny to be on a call. A short session of hers opens by itself for that one item, improves what she can ground, and the review looks again, until it passes; only then does she mark it ready. What only you can answer she never guesses: it goes on her sit-down list with one text, and she stops there. At most three tries an item a day, inside her own share of the usage.
 
 - Moneypenny no longer fills gaps in an item with her own guesses. Before she decides anything for an item she looks it up: your words and rules, the other items it touches, how HQ really works, the code a number comes from; the item says where each decision comes from. What she can't ground that way (a limit, a default, an exception she'd pick) never goes in, not even marked as hers: she sits down with you, names the open points with a proposal for each, and only your yes goes into the item, with its date. A no or no answer leaves the point open and the item not ready. Why the preparation matters, in your own words, now stands at the top of how she works. This holds with the agents' handbook on too: her handbook section and her line from it ask for your words and the sources, never her own additions. A new check (happy flow 198).

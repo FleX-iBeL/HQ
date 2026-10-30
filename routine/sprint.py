@@ -323,7 +323,7 @@ def team_note_at(desc):
     reached the reviewer cut there are why this is here."""
     for m in TEAM_NOTE.finditer(desc):
         before = desc[:m.start()].rstrip()
-        if before and before[-1] not in ".!?:;)\"”'":
+        if before and before[-1] not in ".!?:;)]\"”'":
             continue
         if _ASK_GOES_ON.search(desc[m.end():]):
             continue
