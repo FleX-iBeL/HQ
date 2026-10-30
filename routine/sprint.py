@@ -563,9 +563,10 @@ def gate(text, job_text_, say_so=False, said=None):
         sys.exit("Refused: --not-ready needs --said with his own words, at least three of them, as they stand in a call, "
                  "a text or a quick note of his. " + ("Those words aren't in his lines." if said else "None were given."))
     names = [r["label"] for r in rows if states.get(r["label"]) != "ready"]
-    keep_say_so(names, q.one_line(said), where)
+    said = q.one_line(said or "")
+    keep_say_so(names, said, where)
     return (job_text_.rstrip() + f" It went to the team without the Ready mark ({', '.join(names)}), on his say-so: "
-            f"\"{q.one_line(said)}\" ({where}, {time.strftime('%Y-%m-%d %H:%M')}); check the row's points before building.")
+            f"\"{said}\" ({where}, {time.strftime('%Y-%m-%d %H:%M')}); check the row's points before building.")
 
 
 # ---------- H298, piece 4: the ready check's mechanical fields ----------

@@ -26,8 +26,12 @@ else
   # A clean environment: the call runs on the Max login of the claude CLI, never on an API
   # key, and never through the Claude desktop host this may have been started from.
   # The bot listens on this MacBook only (127.0.0.1); Tailscale serve is the only way in.
+  # F99: a test server (HQ_NO_PHONE) keeps every HQ_ setting of the test: without them it read and wrote the real files, and
+  # through the pairing the main's. The live server starts clean as before.
+  TEST_ENV=()
+  [[ -n "$HQ_NO_PHONE" ]] && TEST_ENV=("${(f)$(/usr/bin/env | /usr/bin/grep '^HQ_')}")
   env -i HOME="$HOME" USER="$USER" PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" LANG=en_US.UTF-8 \
-    HQ_HOST=127.0.0.1 HQ_PORT="$PORT" \
+    "${TEST_ENV[@]}" HQ_HOST=127.0.0.1 HQ_PORT="$PORT" \
     ${HQ_MODEL:+HQ_MODEL="$HQ_MODEL"} ${HQ_PLAIN:+HQ_PLAIN="$HQ_PLAIN"} \
     ${HQ_WRAP_UP:+HQ_WRAP_UP="$HQ_WRAP_UP"} ${HQ_CALLS:+HQ_CALLS="$HQ_CALLS"} \
     nohup "$ROOT/.venv/bin/python" "$ROOT/app/bot.py" "$@" >> "$LOG" 2>&1 &

@@ -220,7 +220,7 @@ def say_so(said: str | None, what: str) -> bool:
     if not where:
         print(f"No release: {what} needs --said with his own words, as they stand in a call, a text or a quick note.")
         return False
-    S.keep_say_so([f"release: {what}"], " ".join(said.split()), where)
+    S.keep_say_so([f"release: {what}"], " ".join((said or "").split()), where)
     return True
 
 
