@@ -36,6 +36,16 @@ Run the low usage Claude prompt check if your checklist passes."
     reviewed within QUIET plus a few minutes, day or night, one at a time, each within BUDGET.
   - On Moneypenny's calls only (her briefing, quick_context._planning), the flagged rows come first, to raise before
     anything else, like the mail heads-up; Donna's and Pepper's never see them.
+  - F86 (30 October 2026): the fix-and-review loop runs by itself. In the user's words (call of 29 October 2026): "i want
+    you create the item to the best of your ability Then the stystem tools check it and flag it Then you improve it
+    again And the tool check again And this repeats until the tool says it looks good And then and only then can you
+    mark it ready", "And the loop part? It should open a prompt with you and it should go automatic". Here is the
+    loop's state (in sprint.json, each row's "fix"); routine/cycles.py opens her short sessions: a round rewords the row
+    (reword, that one row and nothing else) and the review looks again; once it passes, one short session for her
+    mark, the review's pass first, hers second. A finding only he can answer is never filled in: sitdown puts it on
+    her sit-down list with one text on her line and the loop stops for that row. At most ROUNDS rounds a row a day,
+    then the sit-down list. A stop holds until the row's words change. Rows flagged before the loop was switched on
+    wait for her calls, unless they have a rank.
 
 usage:
   python3 routine/review.py list                 the review state of every open row
@@ -45,6 +55,10 @@ usage:
   python3 routine/review.py pass                 F80's one-time pass: every open row never really reviewed gets one
                                                  review, one after another (resumes; a failure is retried once, then named)
   python3 routine/review.py pass-result          what the pass found: each row's verdict, the failures, the total cost
+  python3 routine/review.py reword LABEL 'JSON'  F86: {"edits": [{"old": "...", "new": "..."}]} inside that one row
+  python3 routine/review.py sitdown LABEL "THE OPEN POINT WITH YOUR FIX" "If ..., I'll ...; if not, ..."
+                                                 F86: on her sit-down list, one text on her line, the loop stops for it
+  python3 routine/review.py sitdown-list         F86: what waits for him
 Used by the background review itself: review-run LABEL.
 """
 import datetime as dt
@@ -622,6 +636,199 @@ def clear(label, words):
     return e
 
 
+# ---------- F86: the fix-and-review loop ----------
+
+ROUNDS = 3  # rounds a row a day, then the sit-down list (F86, his yes 30 October 2026)
+STOP_WORDS = {"his": "needs him", "cap": f"{ROUNDS} rounds and the review still flags it"}
+
+
+def _stopped(e, fp):
+    """The stop that holds on these words, or None: new words (his answer written in) lift it."""
+    st = (e.get("fix") or {}).get("stop")
+    return st if st and st.get("ask") == fp else None
+
+
+def _rounds_today(e, now):
+    f = e.get("fix") or {}
+    return int(f.get("n") or 0) if f.get("day") == _today(now) else 0
+
+
+def next_round(now=None):
+    """The routine's look, for routine/cycles.py: {"pick": {"label", "mode": "mark"|"fix", "round"} or None, "capped":
+    [labels that just went on the sit-down list]}. A mark for a row the loop got past the review comes first, then the
+    flagged rows, ranked first (F87's rank 1 goes first). Only a verdict on the row's current words counts: changed
+    words wait for their review. Rows flagged before the loop was on (fix_since) are left to her calls, unless ranked."""
+    now = now or _clock()
+    capped = []
+    with q.locked():
+        rows = S.open_rows()
+        d, rv = _state()
+        rs = rv.get("rows") or {}
+        since = rv.get("fix_since")
+        if not since:
+            since = rv["fix_since"] = int(now)
+        marks = S.ready_of(rows)
+        ranked = S.order(rows)
+        place = {l: i for i, l in enumerate(ranked)}
+        order = sorted(rows, key=lambda r: place.get(r["label"], len(ranked)))
+        pick = None
+        for r in order:
+            e, label, fp = rs.get(r["label"]) or {}, r["label"], S.ask_fp(r["line"])
+            f = e.get("fix") or {}
+            if e.get("ask") == fp and e.get("verdict") == "pass" and f and marks.get(label) != "ready" \
+                    and f.get("marked") != fp and not _stopped(e, fp):
+                pick = {"label": label, "mode": "mark", "round": 0}
+                break
+        for r in ([] if pick else order):
+            e, label, fp = rs.get(r["label"]) or {}, r["label"], S.ask_fp(r["line"])
+            if e.get("ask") != fp or e.get("verdict") != "flag" or _stopped(e, fp):
+                continue
+            if label not in place and int(e.get("at") or 0) < since:
+                continue
+            n = _rounds_today(e, now)
+            if n >= ROUNDS:
+                e.setdefault("fix", {})["stop"] = {"ask": fp, "kind": "cap", "why": "; ".join(e.get("findings") or []), "at": int(now)}
+                capped.append(label)
+                continue
+            pick = {"label": label, "mode": "fix", "round": n + 1}
+            break
+        rv["rows"] = rs
+        d["review"] = rv
+        S._save(S.RANKS, d)
+    return {"pick": pick, "capped": capped}
+
+
+def round_started(pick, now=None):
+    """A round is on its way: it counts from here, a cut-off one too."""
+    now = now or _clock()
+    with q.locked():
+        d, rv = _state()
+        e = (rv.get("rows") or {}).get(pick["label"])
+        if e is None:
+            return
+        f = e.setdefault("fix", {})
+        if pick["mode"] == "mark":
+            f["marked"] = e.get("ask")
+        else:
+            f.update({"day": _today(now), "n": _rounds_today(e, now) + 1, "at": int(now)})
+        S._save(S.RANKS, d)
+
+
+def round_refund(label, mode, now=None):
+    """A round that never ran (skipped at the start) doesn't count."""
+    now = now or _clock()
+    with q.locked():
+        d, rv = _state()
+        e = (rv.get("rows") or {}).get(label)
+        f = (e or {}).get("fix")
+        if not f:
+            return
+        if mode == "mark":
+            f.pop("marked", None)
+        elif f.get("day") == _today(now) and f.get("n"):
+            f["n"] -= 1
+        S._save(S.RANKS, d)
+
+
+def round_wanted(label, mode):
+    """Whether the round still has work when it starts (a call may have fixed the row meanwhile)."""
+    with q.locked():
+        r = next((x for x in S.open_rows() if x["label"] == label), None)
+        e = (_state()[1].get("rows") or {}).get(label) or {}
+    if not r:
+        return False
+    return e.get("ask") == S.ask_fp(r["line"]) and e.get("verdict") == ("pass" if mode == "mark" else "flag")
+
+
+def _new_quotes(old, new):
+    pick = lambda line: {m.group(1).strip() for m in S._QUOTES.finditer(S.field_texts(line)["his_words"])}  # noqa: E731
+    return pick(new) - pick(old)
+
+
+def reword(label, payload):
+    """Her edits inside this one row, all or nothing, under the queue's lock: the row stays one row with the same cells
+    and its label, and a quote new in His words must be found in a call, the notes or the log: no guess written."""
+    import handover
+    import hqpaths
+    label = label.strip().upper()
+    try:
+        edits = json.loads(payload).get("edits") or []
+        assert isinstance(edits, list) and edits and all(isinstance(x, dict) for x in edits)
+    except Exception:
+        sys.exit('Refused: no edits given ({"edits": [{"old": "...", "new": "..."}]}).')
+    with q.locked():
+        text = open(q.ROADMAP, encoding="utf8").read()
+        row = next((r for r in S.open_rows(text) if r["label"] == label), None)
+        if not row:
+            sys.exit(f"Refused: {label} isn't an open row on the planning.")
+        line = row["line"]
+        try:
+            new = handover.apply(line, edits)
+        except (LookupError, ValueError) as ex:
+            sys.exit(f"Not written: {ex}.")
+        if "\n" in new or len(new.split("|")) != len(line.split("|")) or label not in new.split("|")[2]:
+            sys.exit("Refused: the row must stay one row with the same cells and its label.")
+        texts = S._grep_texts(S._ws())
+        bad = [x for x in _new_quotes(line, new) if not S.quote_found(x, texts)]
+        if bad:
+            sys.exit(f"Refused: a new quote in His words isn't in a call, the notes or the log: {bad[0][:80]!r}. "
+                     "His words are never written for him; it goes on the sit-down list.")
+        hqpaths.guard_roadmap(q.ROADMAP)
+        tmp = f"{q.ROADMAP}.reword.{os.getpid()}"
+        with open(tmp, "w", encoding="utf8") as f:
+            f.write(text.replace(line, new, 1))
+        os.replace(tmp, q.ROADMAP)
+    return f"{label} changed; the review looks again once it's been quiet {QUIET // 60} minutes."
+
+
+def sitdown(label, what, ifthen, now=None):
+    """A finding only he can answer: on her sit-down list, the loop stops for this row, one text in if-then shape."""
+    import cycles
+    import ledger
+    label, what, ifthen = label.strip().upper(), q.one_line(what or "").strip(), q.one_line(ifthen or "").strip()
+    if not what or not re.match(r"if\b", ifthen, re.I) or "if not" not in ifthen.lower():
+        sys.exit('Refused: it needs the open point and a text in if-then shape: "If ..., I\'ll ...; if not, ...".')
+    now = now or _clock()
+    with q.locked():
+        row = next((r for r in S.open_rows() if r["label"] == label), None)
+        if not row:
+            sys.exit(f"{label} isn't an open row on the planning.")
+        d, rv = _state()
+        rs = rv.get("rows") or {}
+        e = rs.setdefault(label, {})
+        fp = S.ask_fp(row["line"])
+        had = _stopped(e, fp)
+        e.setdefault("fix", {})["stop"] = {"ask": fp, "kind": "his", "why": what, "at": int(now)}
+        rv["rows"] = rs
+        d["review"] = rv
+        S._save(S.RANKS, d)
+    if had and had.get("kind") == "his":
+        return f"{label} was on the sit-down list already; no second text."
+    ledger.note(cycles.FIX_AGENT, f"{label} on the sit-down list: {what}")
+    return f"{label} is on the sit-down list. " + cycles.ask(cycles.FIX_AGENT, ifthen)
+
+
+def sitdown_rows(rows=None):
+    """[(row, stop)] for the rows on her sit-down list, in the planning's order."""
+    rows = S.open_rows() if rows is None else rows
+    rs = _state()[1].get("rows") or {}
+    out = []
+    for r in rows:
+        st = _stopped(rs.get(r["label"]) or {}, S.ask_fp(r["line"]))
+        if st:
+            out.append((r, st))
+    return out
+
+
+def sitdown_words(rows=None):
+    sd = sitdown_rows(rows)
+    if not sd:
+        return ""
+    return "\n".join(["ON YOUR SIT-DOWN LIST (F86): the loop stopped for these rows; each waits for his answer."]
+                     + [f"- {r['label']} {q.one_line(r['title'])[:120]} ({STOP_WORDS.get(s.get('kind'), 'stopped')}): {s.get('why', '')}"
+                        for r, s in sd])
+
+
 def role_writes():
     try:
         import role
@@ -647,8 +854,9 @@ def flagged(rows=None):
 def flag_words(rows=None):
     """For Moneypenny's briefing (F77): the flagged rows, with the findings, to raise first; "" when none."""
     fl = flagged(rows)
+    sd = sitdown_words(rows)
     if not fl:
-        return ""
+        return sd
     out = ["FLAGGED ON THE PLANNING (F77): the automatic review found holes in these rows. Raise them first on this "
            "call, before anything else, like the mail heads-up: a sentence each, with your proposed fix; fix the row "
            "with him (its next review takes the flag off), or, on his say-so, python3 \"" + os.path.abspath(__file__)
@@ -656,7 +864,7 @@ def flag_words(rows=None):
     for r, s in fl:
         more = " (changed since; the next review looks again)" if s.get("changed") else ""
         out.append(f"- {r['label']} {q.one_line(r['title'])[:120]}{more}: " + "; ".join(s["findings"]))
-    return "\n".join(out)
+    return "\n".join(out + ([sd] if sd else []))
 
 
 def list_words():
@@ -676,7 +884,8 @@ def list_words():
         if s.get("cleared_words"):
             line += f' (his words: "{s["cleared_words"]}")'
         lines.append(line)
-    return "\n".join(lines)
+    sd = sitdown_words(rows)
+    return "\n".join(lines + ([sd] if sd else []))
 
 
 def main(argv):
@@ -704,6 +913,12 @@ def main(argv):
         print(pass_words())
     elif argv[0] == "flags":
         print(flag_words() or "No flagged rows on the planning.")
+    elif argv[0] == "reword" and len(argv) == 3:
+        print(reword(argv[1], argv[2]))
+    elif argv[0] == "sitdown" and len(argv) == 4:
+        print(sitdown(argv[1], argv[2], argv[3]))
+    elif argv[0] == "sitdown-list":
+        print(sitdown_words() or "Nothing on the sit-down list.")
     else:
         sys.exit(__doc__)
 
