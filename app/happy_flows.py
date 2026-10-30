@@ -1416,7 +1416,7 @@ console.log(JSON.stringify({{
         from policy import Policy, ALLOW, DENY
         jv = ROOT
         rm = self.tmp / "roadmap-L.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         env = {**os.environ, "HQ_ROADMAP": str(rm)}
         def jobs(*a):
             r = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
@@ -2614,7 +2614,7 @@ end tell"""], timeout=20)
         from policy import Policy, ALLOW, DENY
         jv = ROOT
         rm = self.tmp / "roadmap-H39.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         env = {**os.environ, "HQ_ROADMAP": str(rm)}
         def jobs(*a, ok=True):
             r = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
@@ -3032,7 +3032,7 @@ echo "ALL OK"
         sys.path.insert(0, str(jv / "routine"))
         crash = importlib.import_module("crash")
         rm = self.tmp / "roadmap-H62.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         env = {**os.environ, "HQ_ROADMAP": str(rm)}
         def jobs(*a, ok=True):
             r = sp.run(["python3", str(jv / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
@@ -3932,7 +3932,7 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         from policy import Policy, ALLOW, DENY
         jv = ROOT
         rm = self.tmp / "roadmap-H43.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         env = {**os.environ, "HQ_ROADMAP": str(rm)}
         def run(script, *a, ok=True):
             r = sp.run(["python3", str(jv / "routine" / script), *a], capture_output=True, text=True, env=env)
@@ -6100,7 +6100,7 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         from policy import Policy, ALLOW
         jv = ROOT
         rm = self.tmp / "roadmap-H61.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         est_dir = self.tmp / "roadmap-H61-estimates"
         env = {**os.environ, "HQ_ROADMAP": str(rm)}
         env.pop("HQ_ESTIMATES", None)
@@ -7937,9 +7937,9 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
              f"the happy flows don't name the real roadmap: {os.environ.get('HQ_REAL_ROADMAP')}")
         fake_real = self.tmp / "f17-real" / "roadmap.md"   # stands in for the real one
         fake_real.parent.mkdir(parents=True, exist_ok=True)
-        fake_real.write_text(ROADMAP.read_text())
+        fake_real.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         own = self.tmp / "f17-own.md"                      # a test's own copy
-        own.write_text(ROADMAP.read_text())
+        own.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         support = self.tmp / "f17-support"                 # stands in for this computer's real HQ memory
         support.mkdir(exist_ok=True)
         (support / "role.json").write_text(json.dumps({"name": "here", "peer": "https://127.0.0.1:9/", "peer_name": "there",
@@ -7965,7 +7965,7 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         # The real pairing: a test on this computer's real HQ memory (here a stand-in, paired as the backup) isn't
         # paired, so a call's write stays on the test's own copy and nothing is handed on or kept for the main.
         own2 = self.tmp / "f17-own2.md"
-        own2.write_text(ROADMAP.read_text())
+        own2.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         r = run("jobs.py", "add", "flow 67 not forwarded", "--kind", "other", roadmap=own2)
         need(r.returncode == 0 and "flow 67 not forwarded" in own2.read_text() and "handed" not in r.stdout,
              f"a test on the real pairing didn't stay on its own copy: {r.returncode} {r.stdout[-200:]} {r.stderr[-200:]}")
@@ -8762,7 +8762,7 @@ setTimeout(() => {
         jv = ROOT
         sys.path.insert(0, str(jv / "routine"))
         rm = self.tmp / "roadmap-H113.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         co_dir, chats = self.tmp / "carryon-H113", self.tmp / "claude-projects-H113"
         env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_CARRYON": str(co_dir)}
         def jobs(*a, ok=True):
@@ -13022,7 +13022,7 @@ window.fetch = async (url, opt) => {
              "the end isn't said back in plain words")
         # the switch, on a copy of the roadmap
         rm = self.tmp / "roadmap-H149.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         env = {**os.environ, "HQ_ROADMAP": str(rm)}
         def jobs(*a, ok=True):
             r = sp.run(["python3", str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
@@ -13392,7 +13392,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         import subprocess as sp
         sys.path.insert(0, str(ROOT / "routine"))
         rm = self.tmp / "roadmap-F56.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1"}
         def run(*a, ok=True):
             r = sp.run(["python3", *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
@@ -16033,7 +16033,7 @@ print("OK")
         jv = ROOT
         sys.path.insert(0, str(jv / "routine"))
         rm = self.tmp / "roadmap-F72.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         co_dir, chats, repo = self.tmp / "carryon-F72", self.tmp / "claude-projects-F72", self.tmp / "hq-git-F72"
         repo.mkdir(exist_ok=True)
         def git(*a):
@@ -16452,7 +16452,7 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
         import subprocess as _sp
         jv = ROOT
         rm = self.tmp / "roadmap-F65.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         run_dir, co_dir, chats = self.tmp / "run-F65", self.tmp / "carryon-F65", self.tmp / "claude-projects-F65"
         run_dir.mkdir(exist_ok=True)
         got = self.tmp / "F65-prompt-seen.txt"
@@ -16709,7 +16709,7 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
         need("done {n} as the very last step" in tick, "the routine's first prompt doesn't end with the done mark")
         # 4. done N --at HH:MM.
         rm = self.tmp / "roadmap-F57.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         env = {**os.environ, "HQ_ROADMAP": str(rm)}
         def jobs(*a, ok=True):
             r = sp.run(["python3", str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
@@ -16865,7 +16865,7 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
         import subprocess as sp
         from policy import Policy, ALLOW
         rm = self.tmp / "roadmap-H283.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1"}
         def run(*a, ok=True):
             r = sp.run(["python3", *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
@@ -17640,7 +17640,7 @@ window.fetch = async (u, o) => { sent.push(JSON.parse(o.body)); return { ok: tru
         job's first prompt carries the rule, the page draws the line, the redone estimate and the list."""
         import subprocess as sp
         rm = self.tmp / "roadmap-H286.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1", "HQ_LOOK": "0"}
         def run(*a, ok=True):
             r = sp.run(["python3", *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
@@ -18364,7 +18364,7 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
         import role
         need("add-row" in role.WRITES["jobs"] and "send-row" in role.WRITES["jobs"], "the backup doesn't hand add-row and send-row to the main")
         rm = self.tmp / "roadmap-H160.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_SPRINT": str(self.tmp / "sprint-H160.json")}
 
         def jobs(*a, ok=True, e=None):
@@ -18573,7 +18573,7 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
             shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
             (site / ".status").mkdir()
             (site / "state").mkdir()
-            site_roadmap(site).write_text(ROADMAP.read_text())
+            site_roadmap(site).write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
             sites[name] = site
         (sites["laptop"] / "state/role.json").write_text(json.dumps({"peer": "http://127.0.0.1:4784", "peer_name": "VPS"}))
 
@@ -21805,7 +21805,7 @@ console.log(JSON.stringify({{ W, F, long: long.length, five: daysAhead({{ ...l, 
         /api/estimates and the page and the job list show what was learned."""
         import subprocess as sp
         rm = self.tmp / "roadmap-H81.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         d = self.tmp / "roadmap-H81-estimates"
         d.mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ESTIMATES": str(d)}
@@ -23692,7 +23692,7 @@ const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "
         (ws / "HQ").mkdir(parents=True, exist_ok=True)
         (ws / "HQ" / "secret.md").write_text("never counted")
         rm = self.tmp / "roadmap-H204.md"
-        rm.write_text(ROADMAP.read_text())
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         est_dir = self.tmp / "roadmap-H204-estimates"
         env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_WORKSPACE": str(ws)}
         for k in ("HQ_ESTIMATES", "HQ_ROUTINES_HISTORY", "HQ_LOOK_FAKE"):
