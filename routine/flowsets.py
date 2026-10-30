@@ -18,5 +18,6 @@ LINUX_FLOWS = "8,15,16,20,23,26,34,41,42,44,45,51,54,56,60,61,63,65,66,67,70,71,
 LINUX_NIGHTLY = "1,8,9,10,15,16,20,21,23,26,27,28,29,34,35,36,40,41,42,44,45,46,48,50,51,52,53,54,55,56,57,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,111,112,113,114,115,116,117,118,119,120,122,123,124,125,126,127,128,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,176,177,178,182,183,184,185,186,187,188,189,190,191,192,193,194,195,199"
 
 # F101 (30 October 2026): the night runs every quick flow; a new one joins by itself. Only a flow marked here stays out on
-# Linux, because it can't hold there. The list by hand above forgot 18 flows, four of which pass on Linux.
-MAC_ONLY = "18,19,25,30,31,33,37,38,39,43,47,129,181,196"
+# Linux, because it doesn't hold there: each of these was run on the server that day and failed. 18, 25, 43 and 196 aren't
+# Mac things by nature, so they're the first to bring back. The list by hand above forgot 18 flows; six of them hold on Linux.
+MAC_ONLY = "18,19,25,30,31,33,37,38,39,43,47,196"
