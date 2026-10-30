@@ -284,8 +284,12 @@ def main() -> int:
         return check_key()
     if "--pull" in sys.argv:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        import hqpaths
-        if not hqpaths.is_maker():  # F101 (C45): a friend's HQ stays on its released version
+        try:
+            import hqpaths
+            maker = hqpaths.is_maker()
+        except ImportError:  # F67's one-time start runs this file on its own, from GitHub, next to the old one
+            maker = True
+        if not maker:  # F101 (C45): a friend's HQ stays on its released version
             print("This HQ stays on its released version: it doesn't pull the work line.")
             return 0
         return pull()
