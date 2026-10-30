@@ -1074,8 +1074,8 @@ def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Pat
     else:
         st_["boxed_streak"] = 0
     if parsed["kind"] == "fix":  # F86: what the row's own words say (a "refused", a push.py) is no refusal or action of hers
-        ledger.note(aid, f"{parsed['name']}: " + (f"cut off at its {note['boxed']}; the row stays as the review last saw it, the round counts"
-                                                  if note.get("boxed") else "ended; the review looks again if the words changed"))
+        ledger.note(aid, f"{parsed['name']}: " + (f"cut off ({note.get('boxed') or state}); the row stays flagged and not ready, the round counts"
+                                                  if note.get("boxed") or state.startswith("ended") else "ended; the review looks again if the words changed"))
         said = ("reword", "sitdown", "sprint.py show", "sprint.py fields")
         note = {**note, "refused": [r for r in note.get("refused") or [] if not any(w in r.get("tool", "") for w in said)],
                 "tools": [t for t in note.get("tools") or [] if not any(w in t for w in said)]}
