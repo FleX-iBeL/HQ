@@ -7,10 +7,10 @@ chase or correct you. Down is good." The point of computing it: the score must n
 each agent whether she helped; it has to come from what HQ already sees.
 
 The pokes, counted from his own lines (the handbook's part four): his texts to an agent on her line that ask after
-something she owns (a status question: is it done, did you, where is, what happened to), his corrections (the word
-"rule", a "no" or "wrong" right after her message) and calls with her shorter than five minutes that end on such a
-question. Rough but free; it only has to move in the right direction. The keyword lists are below (KEYWORDS), tuned
-in the monthly review. Then each agent's own measures from what HQ already has: the to-do list, the mail list, the
+something she owns (a status question: is it done, did you, where is, what happened to), and calls with her shorter than
+five minutes that end on such a question. Rough but free; it only has to move in the right direction. The keyword list is
+below (KEYWORDS), tuned in the monthly review. F103: his corrections are no longer guessed here: they're the lines of the one
+ledger (routine/mistakes.py), across every call and text, read per agent and per hand-off. Then each agent's own measures from what HQ already has: the to-do list, the mail list, the
 calendar's ticks and X's, the game, the coaching check-ins, the planning's Ready marks, the finished jobs' estimates,
 the QA marks. A measure that can't be read on this HQ says so ("not measured yet") instead of a made-up number.
 
@@ -43,11 +43,9 @@ KEYWORDS = {
                r"\bany (news|update)\b", r"\bstill (waiting|running|open|not done)\b", r"\bdid the team\b", r"\bhow far (is|are|did)\b",
                r"\bstatus\b", r"\bdid (it|that) (run|work|go|happen)\b", r"\bhas (it|that) (run|been done|happened)\b",
                r"\bwhen (is|will) (it|that) (be )?(done|ready)\b", r"\bis (it|that) (on|in) (the|my) (list|calendar|planning)\b"],
-    "correction": [r"^\W*(no|nope|wrong|not that|that'?s wrong|that'?s not (right|it|what i))\b", r"\brule\b", r"\bwhat is this\b",
-                   r"\bnot what i (said|asked|meant)\b", r"\bthis is (wrong|not acceptable)\b", r"\byou (got|read|did) (it|that|this) wrong\b"],
 }
 _STATUS = re.compile("|".join(KEYWORDS["status"]), re.I)
-_CORRECTION = re.compile("|".join(KEYWORDS["correction"]), re.I)
+HIS_MISTAKE_KINDS = ("correction", "stop-asking", "say-yes")  # F103: the ledger's kinds that are him correcting her
 
 
 # -- where each agent's line is ------------------------------------------------------------------------------------
@@ -80,37 +78,32 @@ def _thread(agent_id: str, folder: Path | None = None) -> list[dict]:
 # -- the pokes ------------------------------------------------------------------------------------------------------
 
 def text_pokes(agent_id: str, since: float, until: float, folder: Path | None = None) -> dict:
-    """{"status": n, "corrections": n, "texts": his texts counted, "acted": [hers he answered, hers in all]}."""
+    """{"status": n, "texts": his texts counted, "acted": [hers he answered, hers in all]}."""
     msgs = _thread(agent_id, folder)
-    status = corrections = his = 0
+    status = his = 0
     hers_all = hers_acted = 0
-    prev = None
     for i, m in enumerate(msgs):
         at = float(m.get("at") or 0)
         if since <= at < until:
             if m.get("from") == "me":
                 his += 1
-                t = m["text"]
-                if _STATUS.search(t):
+                if _STATUS.search(m["text"]):
                     status += 1
-                if _CORRECTION.search(t) and prev is not None and prev.get("from") == "agent":
-                    corrections += 1
             elif m.get("from") == "agent":
                 hers_all += 1
                 nxt = next((x for x in msgs[i + 1:] if x.get("from") == "me"), None)
                 if nxt and float(nxt.get("at") or 0) - at <= ACTED_HOURS * 3600:
                     hers_acted += 1
-        prev = m
-    return {"status": status, "corrections": corrections, "texts": his, "acted": [hers_acted, hers_all]}
+    return {"status": status, "texts": his, "acted": [hers_acted, hers_all]}
 
 
 _HEAD = re.compile(r"^Started (\d\d:\d\d:\d\d) · (?:agent ([^·]+?) · )?", re.M)
-_LINE = re.compile(r"^- (\d\d:\d\d) \*\*([^*:]+?)(?: \([^)]*\))?:\*\* (.*)$", re.M)
+_LINE = re.compile(r"^- (\d\d:\d\d)(?::\d\d)? \*\*([^*:]+?)(?: \([^)]*\))?:\*\* (.*)$", re.M)
 
 
 def call_pokes(agent_id: str, agent_name: str, since: float, until: float, folder: Path | None = None) -> dict:
     """Calls with her (her name in the head, or hers on a three-way) shorter than five minutes that end on a status
-    question or a correction of his: {"short": n, "calls": n}."""
+    question of his: {"short": n, "calls": n}."""
     calls = (folder or FOLDER) / "HQ" / "calls"
     short = total = 0
     try:
@@ -145,17 +138,19 @@ def call_pokes(agent_id: str, agent_name: str, since: float, until: float, folde
         minutes = ((t1 - t0).seconds // 60) if t1 >= t0 else 0
         his = [l for l in lines if l[1].strip().lower() not in ("hq",) and not l[1].strip().startswith("HQ")]
         last = his[-1][2] if his else ""
-        if minutes < SHORT_CALL_MIN and (_STATUS.search(last) or _CORRECTION.search(last)):
+        if minutes < SHORT_CALL_MIN and _STATUS.search(last):
             short += 1
     return {"short": short, "calls": total}
 
 
 def pokes(agent: dict, since: float, until: float, folder: Path | None = None) -> dict:
+    import mistakes
     t = text_pokes(agent["id"], since, until, folder)
     c = call_pokes(agent["id"], agent["name"], since, until, folder)
-    return {"status_questions": t["status"], "corrections": t["corrections"], "short_calls": c["short"],
-            "total": t["status"] + t["corrections"] + c["short"], "his_texts": t["texts"], "calls": c["calls"],
-            "texts_acted_on": t["acted"]}
+    kinds = mistakes.counts((agent["id"].lower(), agent["name"].lower()), since, until, folder or FOLDER)
+    fixed = sum(kinds.get(k, 0) for k in HIS_MISTAKE_KINDS)
+    return {"status_questions": t["status"], "corrections": fixed, "short_calls": c["short"], "refused": kinds.get("refused", 0),
+            "total": t["status"] + fixed + c["short"], "his_texts": t["texts"], "calls": c["calls"], "texts_acted_on": t["acted"]}
 
 
 # -- each agent's own measures -----------------------------------------------------------------------------------------
@@ -387,8 +382,10 @@ NAMES = {"dated_items_done_before_their_date": "dated items done before their da
 
 
 def lines_of(agent: dict, p: dict, own: dict) -> list[str]:
-    out = [f"pokes: {p['total']} (status questions {p['status_questions']}, corrections {p['corrections']}, short calls "
+    out = [f"pokes: {p['total']} (status questions {p['status_questions']}, corrections on the ledger {p['corrections']}, short calls "
            f"{p['short_calls']}; his texts {p['his_texts']}, calls with her {p['calls']})"]
+    if p.get("refused"):
+        out.append(f"refused outward tries on the ledger: {p['refused']}")
     if agent.get("context") == "day":
         out.append(f"texts he acted on: {_say(p['texts_acted_on'])}")
     for k, v in own.items():

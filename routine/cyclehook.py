@@ -86,6 +86,13 @@ def main() -> int:
     code, why = decide(ask, "--mail-only" in sys.argv[1:])
     if code:
         print(why, file=sys.stderr)
+        if never_mail(str(ask.get("tool_name", ""))):  # F103: a refused outward action is a mistake on the ledger
+            try:
+                import mistakes
+                mistakes.add("refused", os.environ.get("HQ_JOB_AGENT") or "team", why, where=f"job {os.environ.get('HQ_IN_JOB', '')}".strip(),
+                             key=f"refused|{ask.get('tool_name')}|{json.dumps(ask.get('tool_input') or {}, sort_keys=True)[:200]}")
+            except Exception:
+                pass
     return code
 
 

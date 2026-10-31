@@ -355,8 +355,9 @@ def line_dir(name: str) -> Path | None:
     return None
 
 
-def add(sender: str, text: str, why: str = "") -> dict:
-    m = {"at": round(time.time(), 3), "from": sender, "text": text.strip(), "why": why, "id": secrets.token_hex(8)}
+def add(sender: str, text: str, why: str = "", item: str = "") -> dict:
+    m = {"at": round(time.time(), 3), "from": sender, "text": text.strip(), "why": why, "id": secrets.token_hex(8),
+         **({"item": item} if item else {})}  # F103: the id of the work it's about, carried as an argument
     where = folder()
     if _backup():
         try:
@@ -724,7 +725,9 @@ def _text_rules() -> str:
             .replace("{onewriter}", _config.ONE_WRITER_RULE)
             .replace("{team}", _config.TEAM_RULE).replace("{extensions}", _extensions_rule())
             + (("\n" + _config.cycles_rule() + "\n") if _config.cycles_rule() else "")  # H298: only while it's on
-            + (("\n" + _config.plan_rule() + "\n") if _config.plan_rule() else ""))  # F107: no 5-hour limit on this plan
+            + (("\n" + _config.plan_rule() + "\n") if _config.plan_rule() else "")  # F107: no 5-hour limit on this plan
+            + f"\nWhen {user()} corrects you here (you got it wrong, did what wasn't asked, kept asking, just agreed), put it on the ledger "
+              f"with his exact words: python3 \"{ROOT}/routine/mistakes.py\" add correction --line {folder().name} --said \"HIS WORDS\"\n")  # F103
 
 
 def _extensions_rule() -> str:
@@ -951,24 +954,35 @@ def morning_summary() -> tuple[str, str] | None:
     return "night-summary", "\n".join(lines)[:SUMMARY_MOST]
 
 
-def text(why: str, facts: str) -> dict:
+def _on_record(item: str, why: str, state: str, line: str = "") -> None:
+    """F103: a text about an item is a step of its record."""
+    if item:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+        import trail
+        trail.step(item, "text", why=why, state=state, line=line)
+
+
+def text(why: str, facts: str, item: str = "") -> dict:
     """Write one text from her into the thread and push it to his phone. H266: one of the team's kinds goes on
-    Moneypenny's own line, from her, whoever sends it. F102: while he sleeps, only what can't wait."""
+    Moneypenny's own line, from her, whoever sends it. F102: while he sleeps, only what can't wait. F103: item, the id of the
+    work it's about."""
     if asleep():
         later = can_wait(why, facts)
         if later:
             hold(why, later)
             left = "\n".join(l for l in (facts or "").splitlines() if l not in later.splitlines()) if why == "down" else ""
             if not left:
+                _on_record(item, why, "held for the morning")
                 return {"held": True, "why": why}
             facts = left
     if not on_team_line() and line_for(why) == "team":
         with _Env(team_env()):
-            m = text(why, facts)
+            m = text(why, facts, item)
         m["line"] = "team"
         return m
-    msg = add("agent", compose(why, facts), why)
+    msg = add("agent", compose(why, facts), why, item)
     msg["pushed"] = push(msg["text"])
+    _on_record(item, why, "sent", msg.get("id", ""))
     return msg
 
 
@@ -1085,6 +1099,7 @@ def _answer(words: str) -> str:
     a = agent()
     st = _read(_pending_file(), {})
     pol = _policy.Policy(_config.FOLDER)
+    pol.agent = a["id"]  # F103
     pol.pending = [tuple(p) for p in st.get("pending") or []]
     if pol.pending:
         pol.answer(words)  # his yes (or no) to what she asked last time
@@ -1330,7 +1345,12 @@ if __name__ == "__main__":
                 pass
         print(json.dumps(info()))
     elif cmd == "text" and len(args) >= 2:
-        m = text(args[1], args[2] if len(args) > 2 else "")
+        item = ""  # F103
+        if "--item" in args:
+            i = args.index("--item")
+            item = args[i + 1] if i + 1 < len(args) else ""
+            del args[i:i + 2]
+        m = text(args[1], args[2] if len(args) > 2 else "", item)
         print(json.dumps(m, ensure_ascii=False))
     elif cmd == "ring" and len(args) >= 2 and args[1].isdigit():
         print(json.dumps(ring(int(args[1])), ensure_ascii=False))

@@ -64,6 +64,8 @@ def row_of(text: str, label: str | None) -> str:
 
 
 def label_of(j: dict) -> str | None:
+    if (j.get("item") or {}).get("label"):  # F103: the carried id's row
+        return j["item"]["label"]
     import qa
     return qa.job_label(j["text"])
 
@@ -180,7 +182,7 @@ def run(n: int) -> int:
     rowtext = (j["text"] + " " + row_of(text, label))
     named = named_flows(rowtext)
     head = _git("rev-parse", "HEAD")
-    rec = {"n": n, "label": label, "head": head, "commits": commits_of(label), "named": named, "ran": 0, "passed": 0,
+    rec = {"n": n, "label": label, "item": (j.get("item") or {}).get("id"), "head": head, "commits": commits_of(label), "named": named, "ran": 0, "passed": 0,
            "failed": [], "green": False, "at": time.strftime("%Y-%m-%d %H:%M"), "t": time.time()}
     wt = _copy()
     logpath = path(n)[:-5] + ".log"

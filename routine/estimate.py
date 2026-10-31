@@ -1382,7 +1382,8 @@ REPORT_HOURS = (8, 12)  # F66: Friday morning, before the sprint planning after 
 
 
 def friday_due(now=None):
-    """F66: True once each Friday morning (REPORT_HOURS, local time) while it hasn't gone out that day; marks it sent."""
+    """F66: True each Friday morning (REPORT_HOURS, local time) while it hasn't gone out that day. F103: marked sent by friday_sent,
+    after the text went."""
     now = time.time() if now is None else now
     t = time.localtime(now)
     if t.tm_wday != 4 or not (REPORT_HOURS[0] <= t.tm_hour < REPORT_HOURS[1]):
@@ -1393,9 +1394,15 @@ def friday_due(now=None):
             return False
     except Exception:
         pass
-    os.makedirs(os.path.dirname(REPORT_STATE), exist_ok=True)
-    json.dump({"sent": day}, open(REPORT_STATE, "w"))
     return True
+
+
+def friday_sent(now=None):
+    """F103: the Friday report went out; only now it counts as sent, so a text that failed goes again the next minute."""
+    day = time.strftime("%Y-%m-%d", time.localtime(time.time() if now is None else now))
+    os.makedirs(os.path.dirname(REPORT_STATE), exist_ok=True)
+    with open(REPORT_STATE, "w") as f:
+        json.dump({"sent": day}, f)
 
 
 def friday_report(hist=None, now=None):
@@ -1947,6 +1954,15 @@ def on_done(n, text="", started_hhmm=None, at=None):
         print(f"(the plan couldn't be read: {ex!r})", file=sys.stderr)
     if e.get("fixed"):
         rec["fixed"] = True  # H215: its size was said by hand, so a retag keeps it
+    if e.get("based") is not None:  # F103: how many jobs its estimate was based on
+        rec["based"] = e["based"]
+    try:  # F103: turns and minutes for every job, from what the run itself counted
+        import wall as wall_
+        got = wall_.used(n)
+        if got:
+            rec["run_minutes"], rec["turns"] = got.get("minutes"), got.get("turns")
+    except Exception as ex:
+        print(f"(the job's turns couldn't be read: {ex!r})", file=sys.stderr)
     if isinstance(e.get("guess"), (int, float)):  # H168: the team's own guess, next to the computed estimate
         rec["guess"] = e["guess"]
     rec.update({k: v for k, v in guess_detail(e).items() if k != "guess"})  # H190: the call's and the look's, apart
@@ -2147,6 +2163,7 @@ def plan(now=None):
                        "looks": gfits["guess_look"], "calls": gfits["guess_call"]}}
     for h in hist[-30:]:
         out["jobs"][str(h["n"])] = {"finished": True, "est": h.get("est"), "actual": h["actual"], "kind": h.get("kind"),
+                                    **({"turns": h["turns"]} if h.get("turns") else {}),  # F103
                                     **({"cost": h["cost"]} if isinstance(h.get("cost"), dict) else {}),  # H172
                                     **guess_detail(h)}  # H168, H190: the team's, the call's and the look's
     samples = None
@@ -2311,6 +2328,9 @@ def plan(now=None):
     import jobs as q
     out["paused"] = q.is_paused()  # F100
     out["five_on"] = _five_on()  # F107
+    for k, e in out["jobs"].items():  # F103: each estimate says how many jobs it's based on
+        if not e.get("finished") and (st.get(k) or {}).get("based") is not None:
+            e["based"] = st[k]["based"]
     return out
 
 
@@ -2514,7 +2534,9 @@ def words(n, p):
     g = f", {gw}" if gw else ""
     if e.get("finished"):
         return (f"estimated {dur(e['est'])}{g}, took {dur(e['actual'])}" if e.get("est") else f"took {dur(e['actual'])}{g}") \
-            + _cost_words(e)
+            + (f", {e['turns']} turns" if e.get("turns") else "") + _cost_words(e)
+    if e.get("based") is not None:  # F103: each estimate says what it stands on
+        g += f", from {based_words(e['based'])}"
     if gw and e.get("computed") and e.get("computed") != e["est"]:
         g = f" (computed {dur(e['computed'])}, {gw})"
     elif e.get("looking"):
@@ -2545,6 +2567,11 @@ def words(n, p):
     elif e.get("waits") == "off":
         s += f", {off_words()}"
     return s + " (estimate)"
+
+
+def based_words(n) -> str:
+    """F103: how many finished jobs an estimate stands on."""
+    return "no finished jobs yet" if not n else f"{n} finished job{'' if n == 1 else 's'}"
 
 
 def item_words(n, p):

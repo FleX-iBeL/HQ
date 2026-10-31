@@ -1,0 +1,426 @@
+#!/usr/bin/env python3
+"""F103, the ledger: one append-only list of mistakes, read for the score with no model.
+
+His words, 30 October 2026: "All calls, all chats, everything needs to be checked and needs to be logged when people make
+mistakes. The scoring system needs to be across the whole build otherwise it doesn't make any fucking sense." One JSON line per
+mistake in the workspace's `HQ/mistakes.jsonl`, never in HQ; nothing here changes or removes a line. A call or a text can only add
+through this script (app/policy.py refuses the file itself).
+
+What goes in, and who writes it:
+- correction: his correction on a call or in a text. The after-call wrap-up tags them in the same run (a model reads the call, the
+  program checks the quote is his, and takes the agent from the transcript, never from the one tagging), and a text's agent the same.
+  The clearest ones the program finds by itself (CLEAR below), so a call whose wrap-up never ran still counts.
+- stop-asking, say-yes: his "stop asking" and "you just say yes" lines (C12), found by the program.
+- refused: a refused outward action (mail sent, replied, forwarded), from app/policy.py, routine/cyclehook.py and the cycles.
+- qa-fail: every QA fail, against the team's build (qa.py fail).
+- bug-after-qa: a bug found after a QA pass, against that QA: `jobs.py write-row "…" --bug --after-qa LABEL`, here by hand, or a
+  later QA fail on a row that had passed.
+
+    python3 routine/mistakes.py add correction --call HQ/calls/NAME.md --said "HIS WORDS" [--handoff "X to Y"] [--item ID|LABEL]
+    python3 routine/mistakes.py add correction --line direct-line|coaching-line|team-line --said "HIS WORDS"
+    python3 routine/mistakes.py add bug-after-qa LABEL "WHAT WAS FOUND"
+    python3 routine/mistakes.py scan [--call PATH | --all]    the program's own pass; without a target, what's new since the last pass
+    python3 routine/mistakes.py list [--days N] [--agent A]
+    python3 routine/mistakes.py score [--days N] [--json]     per agent and per hand-off, from the ledger alone
+    python3 routine/mistakes.py put JSON                      the main writes a line the backup handed over (role.WRITES)
+Standard library only.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import hqlock  # noqa: E402
+import hqpaths  # noqa: E402
+
+REL = os.path.join("HQ", "mistakes.jsonl")
+# The hand-off each kind belongs to, unless a line names its own ("Pepper to Moneypenny").
+HANDOFF = {"correction": "him to the agent", "stop-asking": "him to the agent", "say-yes": "him to the agent",
+           "refused": "the agent to the outside", "qa-fail": "the build to QA", "bug-after-qa": "QA to the release"}
+KINDS = tuple(HANDOFF)
+QUOTE_LEAST = 3  # F103: the shortest quote taken as his words, the same three words as sprint.his_quote
+WORDS_KEPT = 600  # F103: how much of a line of his the ledger keeps; the transcript holds the rest
+THREADS = {"direct-line": "donna", "coaching-line": "pepper", "team-line": "moneypenny"}
+ONE_HANDOFF = re.compile(r"^[\w .'-]{1,40} to [\w .'-]{1,40}$")
+
+# What the program reads as a mistake from his own line, no model. Not "no", "wrong" or "what is this" on their own: those counted
+# "No problem, thanks!" and "what is this amazing thing". What needs reading between the lines is the wrap-up's.
+CLEAR = {
+    "say-yes": re.compile(r"\byou (?:just |only |always |keep |keep on |literally )+(?:say|saying|said) yes\b|\byou'?re (?:just |only |always )?saying yes\b"
+                          r"|\byou say yes to (?:everything|whatever|anything)\b|\bstop (?:saying yes|agreeing)\b"
+                          r"|\byou (?:just |only |always |keep )*agree(?:ing)? with (?:me|everything|whatever)\b", re.I),
+    "stop-asking": re.compile(r"\bstop asking\b|\b(?:quit|enough) asking\b|\bdon'?t (?:keep |ever )?ask(?:ing)? me (?:that|this|again|every)\b", re.I),
+    "correction": re.compile(r"^\W*rule\b(?!s)|\b(?:new|another|add a|make (?:it|that|this) a|that'?s a|this is a) rule\b"
+                             r"|\b(?:that'?s|thats|that is|this is) (?:wrong|not (?:right|correct|acceptable|what i (?:said|asked|meant|wanted)))\b"
+                             r"|\bnot what i (?:said|asked|meant|wanted|requested)\b"
+                             r"|\byou (?:got|read|did) (?:it|that|this) wrong\b"
+                             r"|\b(?:didn'?t|did not|doesn'?t|does not) (?:deliver|do) what i\b", re.I),
+}
+_HEAD = re.compile(r"^Started \d\d:\d\d:\d\d · (?:agent ([^·\n]+?) · )?", re.M)
+_LINE = re.compile(r"^- (\d\d:\d\d)(?::\d\d)? \*\*([^*:(]+?)(?: \(([^)]*)\))?:\*\* (.*)$")
+_TAIL = re.compile(r"(?:\s*\*\([^)]*\)\*)+\s*$")  # *(typed)*, *(cancelled)*
+
+
+def path(base=None) -> str | None:
+    """The ledger's file, or None for a test that gave no folder of its own (it never writes in a real one)."""
+    if base:
+        return os.path.join(str(base), REL)
+    if os.environ.get("HQ_MISTAKES"):
+        return os.environ["HQ_MISTAKES"]
+    if os.environ.get("HQ_ROADMAP"):
+        return os.path.join(os.path.dirname(hqpaths.ROADMAP), "mistakes.jsonl")
+    if hqpaths.under_test() and not os.environ.get("HQ_WORKSPACE"):
+        return None
+    return os.path.join(hqpaths.FOLDER, REL)
+
+
+def read(base=None, since: float | None = None, until: float | None = None) -> list[dict]:
+    p = path(base)
+    out = []
+    if not p:
+        return out
+    try:
+        with open(p, encoding="utf8") as f:
+            for l in f:
+                try:
+                    d = json.loads(l)
+                except ValueError:
+                    continue
+                if isinstance(d, dict) and d.get("kind") and (since is None or d.get("at", 0) >= since) and (until is None or d.get("at", 0) < until):
+                    out.append(d)
+    except OSError:
+        pass
+    return out
+
+
+def _backup() -> bool:
+    if os.environ.get("HQ_ROLE_HERE"):
+        return False
+    try:
+        import role
+        return role.is_backup()
+    except Exception:
+        return False
+
+
+def _append(line: dict, base=None) -> bool:
+    """False when a line with its key is already there: one event, one line."""
+    p = path(base)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with hqlock.locked(p):
+        if any(d.get("key") == line["key"] for d in read(base)):
+            return False
+        with open(p, "a", encoding="utf8") as f:
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    return True
+
+
+def add(kind: str, agent: str, words: str, *, where: str = "", handoff: str = "", item: str = "", label: str = "", key: str = "",
+        by: str = "the program", at: float | None = None, base=None) -> dict | None:
+    """One line, or None when it's already there or nothing can be written. Never raises: a ledger that can't be written is a red
+    line on the page, not a stopped call."""
+    words = " ".join(str(words).split())[:WORDS_KEPT]
+    who = " ".join(str(agent or "").split()).lower() or "unknown"
+    line = {"at": round(at or time.time(), 3), "kind": kind, "agent": who, "handoff": handoff or HANDOFF.get(kind, ""), "words": words,
+            "where": where, "by": by, "key": key or hashlib.sha256(f"{kind}|{where}|{words}".encode()).hexdigest()[:16],
+            **({"item": item} if item else {}), **({"label": label} if label else {})}
+    try:
+        if not path(base):
+            return None
+        if base is None and _backup():
+            import role
+            code, _o, _e, how = role.hand("mistakes", ["put", json.dumps(line, ensure_ascii=False)], timeout=15)
+            if how == "kept" or (how == "main" and code == 0):
+                return line
+        return line if _append(line, base) else None
+    except Exception as e:
+        print(f"(the ledger: {e!r})", file=sys.stderr)
+        try:
+            import routines
+            routines.bad("mistakes", f"the ledger couldn't be written: {e!r}", every=30 * 86400)
+        except Exception:
+            pass
+        return None
+
+
+# -- his own lines --------------------------------------------------------------------------------------------------
+
+def _bare(t: str) -> str:
+    return " ".join(re.sub(r"[^\w\s]", " ", " ".join(str(t).lower().split()), flags=re.UNICODE).split())
+
+
+def _folder(base=None) -> str:
+    return str(base or hqpaths.FOLDER)
+
+
+def _his_name(base=None) -> str:
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "app"))
+    import me as _me
+    from pathlib import Path
+    return _me.load(Path(_folder(base)))["name"] or "Me"
+
+
+def call_lines(p: str, base=None) -> list[dict]:
+    """His lines of a transcript: {"n" (its line number), "words", "agent" (who spoke just before him, else the call's agent)}."""
+    try:
+        text = open(p, encoding="utf8", errors="replace").read()
+    except OSError:
+        return []
+    me = _his_name(base).lower()
+    h = _HEAD.search(text)
+    agent = (h.group(1) or "").strip() if h else ""
+    out = []
+    for i, l in enumerate(text.splitlines(), 1):
+        m = _LINE.match(l)
+        if not m:
+            continue
+        who = m.group(2).strip()
+        if who.lower() == me:
+            if "*(cancelled)*" not in m.group(4):
+                out.append({"n": i, "words": _TAIL.sub("", m.group(4)).strip(), "agent": agent, "at": None})
+        elif m.group(3):  # HQ (Pepper): who took that turn on a three-way
+            agent = m.group(3).strip()
+    return out
+
+
+def thread_lines(line: str, base=None) -> list[dict]:
+    """His lines of a text thread: {"n" (the line's id), "words", "agent", "at"}."""
+    p = os.path.join(_folder(base), "HQ", line, "thread.jsonl")
+    out = []
+    try:
+        with open(p, encoding="utf8", errors="replace") as f:
+            for l in f:
+                try:
+                    d = json.loads(l)
+                except ValueError:
+                    continue
+                if isinstance(d, dict) and d.get("from") == "me" and d.get("text"):
+                    out.append({"n": d.get("id") or f"{d.get('at')}", "words": str(d["text"]).strip(), "agent": THREADS[line],
+                                "at": d.get("at")})
+    except OSError:
+        pass
+    return out
+
+
+def clear_kind(words: str) -> str | None:
+    """The kind of mistake a line of his plainly is, or None."""
+    for kind in ("say-yes", "stop-asking", "correction"):
+        if CLEAR[kind].search(words):
+            return kind
+    return None
+
+
+def _where_call(p: str, base=None) -> str:
+    return os.path.relpath(os.path.realpath(p), os.path.realpath(_folder(base)))
+
+
+def _key(where: str, n) -> str:
+    """One line of his, one ledger line, whoever tags it and however often."""
+    return hashlib.sha256(f"{where}#{n}".encode()).hexdigest()[:16]
+
+
+def scan_call(p: str, base=None) -> list[dict]:
+    where = _where_call(p, base)
+    got = []
+    for l in call_lines(p, base):
+        kind = clear_kind(l["words"])
+        if kind:
+            d = add(kind, l["agent"], l["words"], where=where, key=_key(where, l["n"]), base=base)
+            if d:
+                got.append(d)
+    return got
+
+
+def scan_thread(line: str, since: float = 0, base=None) -> list[dict]:
+    where = f"HQ/{line}"
+    got = []
+    for l in thread_lines(line, base):
+        if float(l["at"] or 0) <= since:
+            continue
+        kind = clear_kind(l["words"])
+        if kind:
+            d = add(kind, l["agent"], l["words"], where=where, key=_key(where, l["n"]), at=l["at"], base=base)
+            if d:
+                got.append(d)
+    return got
+
+
+def _state_file() -> str:
+    return os.path.join(hqpaths.HQ, ".status", "mistakes-scan.json")
+
+
+def sweep(all_of_it: bool = False, base=None) -> list[dict]:
+    """What's new in the transcripts and the threads since the last pass (on the main, from the routine's minute): the program's
+    part for what reached the main without a wrap-up here, a call's from the backup and every text."""
+    try:
+        st = json.load(open(_state_file()))
+    except (OSError, ValueError):
+        st = {}
+    calls = os.path.join(_folder(base), "HQ", "calls")
+    try:
+        names = sorted(n for n in os.listdir(calls) if n.endswith(".md"))
+    except OSError:
+        names = []
+    if not st and not all_of_it:  # the first pass starts now; what came before is `scan --all`, once
+        st = {"calls": names[-1] if names else "", "threads": time.time()}
+        names = []
+    got = []
+    last = "" if all_of_it else st.get("calls", "")
+    newest = st.get("calls", "")
+    for n in names:
+        if n > last:
+            got += scan_call(os.path.join(calls, n), base)
+            newest = max(newest, n)
+    since = 0 if all_of_it else float(st.get("threads") or 0)
+    now = time.time()
+    for line in THREADS:
+        got += scan_thread(line, since, base)
+    if base is None:
+        try:
+            os.makedirs(os.path.dirname(_state_file()), exist_ok=True)
+            tmp = hqlock.tmp(_state_file())
+            with open(tmp, "w") as f:
+                json.dump({"calls": newest, "threads": now}, f)
+            os.replace(tmp, _state_file())
+        except OSError:
+            pass
+    return got
+
+
+def tag(said: str, *, call: str = "", line: str = "", handoff: str = "", item: str = "", label: str = "", base=None) -> tuple[dict | None, str]:
+    """A correction tagged by a model: (the line, what went wrong). The quote must stand in one of his own lines of that call or
+    thread; the agent comes from there. None and "" means it was already on the ledger."""
+    quote = _bare(said)
+    if len(quote.split()) < QUOTE_LEAST:
+        return None, f"Refused: a quote of at least {QUOTE_LEAST} of his own words."
+    if handoff and not ONE_HANDOFF.match(handoff):
+        return None, "Refused: a hand-off is written like \"Pepper to Moneypenny\"."
+    if bool(call) == bool(line):
+        return None, "Refused: name the call (--call HQ/calls/NAME.md) or the text line (--line direct-line)."
+    if call:
+        folder = _folder(base)
+        p = call if os.path.isabs(call) else os.path.join(folder, call)
+        where = _where_call(p, base)
+        if not re.fullmatch(r"HQ/calls/[^/]+\.md", where.replace(os.sep, "/")):
+            return None, "Refused: not a call's transcript."
+        his = call_lines(p, base)
+    else:
+        if line not in THREADS:
+            return None, "Refused: not one of the text lines."
+        where = f"HQ/{line}"
+        his = thread_lines(line, base)
+    hit = next((l for l in reversed(his) if quote in _bare(l["words"])), None)
+    if not hit:
+        return None, "Refused: those words aren't his in that call or line. Nothing written."
+    kind = clear_kind(hit["words"]) or "correction"
+    d = add(kind, hit["agent"], hit["words"], where=where, key=_key(where, hit["n"]), handoff=handoff, item=item, label=label,
+            by="the wrap-up" if call else "the agent", at=hit["at"], base=base)
+    return d, ""
+
+
+# -- the score ------------------------------------------------------------------------------------------------------
+
+def tally(rows: list[dict]) -> dict:
+    agents: dict = {}
+    hands: dict = {}
+    for d in rows:
+        for box, name in ((agents, d.get("agent") or "unknown"), (hands, d.get("handoff") or "not said")):
+            e = box.setdefault(name, {"total": 0, "kinds": {}})
+            e["total"] += 1
+            e["kinds"][d["kind"]] = e["kinds"].get(d["kind"], 0) + 1
+    return {"lines": len(rows), "agents": agents, "handoffs": hands}
+
+
+def counts(names, since: float, until: float, base=None) -> dict:
+    """One agent's lines in a period, per kind (routine/pokes.py); names: her id and her name, lower case. QA's and the build's
+    lines stand under their own names."""
+    out: dict = {}
+    for d in read(base, since, until):
+        if d.get("agent") in names:
+            out[d["kind"]] = out.get(d["kind"], 0) + 1
+    return out
+
+
+def _kinds(e: dict) -> str:
+    return ", ".join(f"{k} {n}" for k, n in sorted(e["kinds"].items()))
+
+
+def score_words(t: dict, days: float) -> str:
+    out = [f"The score over the last {days:g} days, from the ledger: {t['lines']} line{'' if t['lines'] == 1 else 's'}."]
+    for title, box in (("Per agent:", t["agents"]), ("Per hand-off:", t["handoffs"])):
+        out.append(title)
+        out += [f"- {name}: {e['total']} ({_kinds(e)})" for name, e in sorted(box.items(), key=lambda x: (-x[1]["total"], x[0]))] or ["- nothing"]
+    return "\n".join(out)
+
+
+def _opt(args: list[str], name: str) -> str:
+    if name in args:
+        i = args.index(name)
+        v = args[i + 1] if i + 1 < len(args) else ""
+        del args[i:i + 2]
+        return v
+    return ""
+
+
+def main(argv: list[str]) -> int:
+    args = list(argv)
+    cmd = args.pop(0) if args else ""
+    if cmd == "add" and args:
+        kind = args.pop(0)
+        if kind == "correction":
+            call, line, said, hand_, it = (_opt(args, x) for x in ("--call", "--line", "--said", "--handoff", "--item"))
+            item, label = "", ""
+            if it:
+                import trail
+                item, label = trail.resolve(it) or "", (it.upper() if not trail.ID.match(it) else trail.label_of(it) or "")
+            d, no = tag(said, call=call, line=line, handoff=hand_, item=item, label=label)
+            if no:
+                print(no)
+                return 2
+            print("Already on the ledger." if not d else f"On the ledger: {d['kind']}, {d['agent']}.")
+            return 0
+        if kind == "bug-after-qa" and len(args) >= 2:
+            import qa
+            label, what = args[0].upper(), " ".join(args[1:])
+            no = qa.bug_after_qa(label, what)
+            print(no or f"On the ledger against {label}'s QA.")
+            return 2 if no else 0
+        print("Only a correction or a bug found after QA goes in by hand; the rest is the program's.")
+        return 2
+    if cmd == "scan":
+        call = _opt(args, "--call")
+        got = scan_call(call) if call else sweep("--all" in args)
+        print(f"{len(got)} new on the ledger.")
+        return 0
+    if cmd == "list":
+        days, who = _opt(args, "--days"), _opt(args, "--agent").lower()
+        since = time.time() - float(days) * 86400 if days else None
+        for d in read(None, since):
+            if not who or d.get("agent") == who:
+                print(f"- {time.strftime('%Y-%m-%d %H:%M', time.localtime(d['at']))} · {d['agent']} · {d['kind']} · {d['handoff']} · {d['words'][:200]}"
+                      + (f" · {d['where']}" if d.get("where") else ""))
+        return 0
+    if cmd == "score":
+        days = float(_opt(args, "--days") or 7)
+        t = tally(read(None, time.time() - days * 86400))
+        print(json.dumps(t, indent=1, ensure_ascii=False) if "--json" in args else score_words(t, days))
+        return 0
+    if cmd == "put" and args:
+        d = json.loads(args[0])
+        if not isinstance(d, dict) or d.get("kind") not in KINDS or not d.get("key"):
+            print("Refused: not a line of the ledger.", file=sys.stderr)
+            return 2
+        print("written" if _append(d) else "already there")
+        return 0
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

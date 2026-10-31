@@ -130,6 +130,7 @@ class Call:
             # H246: she loads what fits her role; a Deep call with the day's agent keeps the whole folder, as before
             context = agents.context_of(self.agent)
             self.context = "all" if context == "day" and self.load == "deep" else context
+            self.policy.agent = self.agent["id"]  # F103
             self.policy.memory_writes = self.context == "build"  # H280: her lessons stay
             self.policy.team_texts = self.context == "build"  # H266: she texts him on her own line
             # H282: her own thinking time (Moneypenny high), the rest as before; a three-way keeps the first one's
@@ -214,6 +215,8 @@ class Call:
 
     def _speak_as(self, agent: dict) -> None:
         """Her voice from now on (the fillers too)."""
+        if self.policy:
+            self.policy.agent = agent["id"]  # F103
         v = self.voice_for(agent)
         from pipecat.transcriptions.language import Language
         self.tts._settings.voice = v
@@ -454,6 +457,13 @@ class Call:
                 logger.info("Nobody said anything on this call: no after-call work, transcript removed")
                 self.transcript.path.unlink(missing_ok=True)
                 return
+            if not self.policy.dry_run:  # F103: the program's own pass first, so nothing rests on the wrap-up
+                try:
+                    import mistakes
+                    got = await asyncio.to_thread(mistakes.scan_call, str(self.transcript.path), config.FOLDER)
+                    logger.info(f"The ledger: {len(got)} from this call")
+                except Exception as e:
+                    logger.warning(f"The ledger's pass failed: {e!r}")
             if self.wrap_up_mode == "off":
                 logger.info("After-call work is off (HQ_WRAP_UP=off)")
                 return

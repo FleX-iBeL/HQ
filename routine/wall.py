@@ -236,6 +236,11 @@ def what_next(n) -> str:
     return "It won't start again by itself; tell me on a call if it should carry on or be dropped."
 
 
+def used(n) -> dict:
+    """F103: what the runs of a job really took: {"minutes", "turns"}."""
+    return _boxes().get(str(n)) or {}
+
+
 def add_used(n, minutes, turns=0) -> None:
     """What a run of the job used of its box: its own minutes, the test runs left out."""
     d = _boxes()

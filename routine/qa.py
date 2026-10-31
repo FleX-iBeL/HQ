@@ -231,10 +231,11 @@ def _waiting_for(jobs: list, label: str, qa: bool) -> dict | None:
     return None
 
 
-def _append(jobs: list, text: str) -> dict:
+def _append(jobs: list, text: str, label: str | None = None) -> dict:
     n = max([j["n"] for j in jobs] + [0]) + 1
     j = {"n": n, "state": "ready", "past": False, "agreed": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
          "text": q.one_line(text).replace("·", "-")}
+    q.carry(j, label)  # F103: the same id through the QA and the fix
     jobs.append(j)
     return j
 
@@ -251,10 +252,10 @@ def on_done(jobs: list, j: dict, text: str, kind: str | None) -> dict | None:
     of the line. Returns the new job (not written yet), or None."""
     if kind not in ("build", "bigbuild") or is_qa(j["text"]):
         return None
-    label = job_label(j["text"])
+    label = (j.get("item") or {}).get("label") or job_label(j["text"])  # F103: the carried id's row, never a sentence again
     if not label or not gated(label, text) or _waiting_for(jobs, label, qa=True):
         return None
-    return _append(jobs, qa_text(label, f"the team finished job {j['n']} for it."))
+    return _append(jobs, qa_text(label, f"the team finished job {j['n']} for it."), label)
 
 
 def queue(label: str, after: str = "") -> str:
@@ -265,7 +266,7 @@ def queue(label: str, after: str = "") -> str:
         w = _waiting_for(jobs, label, qa=True)
         if w:
             return f"{label} already has a QA job: job {w['n']} ({w['state']})."
-        j = _append(jobs, qa_text(label, after or "asked for on a call."))
+        j = _append(jobs, qa_text(label, after or "asked for on a call."), label)
         q.write(text, jobs, on)
     _estimate(j, "qa")
     return f"Job {j['n']} is ready: QA of {label}."
@@ -282,13 +283,13 @@ def title_of(label: str, text: str | None = None) -> str:
     return re.sub(rf"^{re.escape(label)}\s*", "", name)[:160]
 
 
-def tell(why: str, facts: str) -> list[str] | None:
+def tell(why: str, facts: str, item: str | None = None) -> list[str] | None:
     """H266: Moneypenny texts him on her own line (direct_line.py text WHY, detached; the team's kinds go to her).
     Never from a test on the real line: only when the test gave its own (HQ_DIRECT_DIR)."""
     if hqpaths.under_test() and not os.environ.get("HQ_DIRECT_DIR"):
         return None
     py = os.path.join(ROOT, ".venv", "bin", "python")
-    cmd = [py if os.path.exists(py) else sys.executable, os.path.join(ROOT, "app", "direct_line.py"), "text", why, facts]
+    cmd = [py if os.path.exists(py) else sys.executable, os.path.join(ROOT, "app", "direct_line.py"), "text", why, facts] + (["--item", item] if item else [])
     try:
         os.makedirs(os.path.join(ROOT, "scratch"), exist_ok=True)
         log = open(os.path.join(ROOT, "scratch", "direct-line.log"), "a")
@@ -300,21 +301,59 @@ def tell(why: str, facts: str) -> list[str] | None:
     return cmd
 
 
+def item_id(label: str) -> str | None:
+    """F103: the id of a row."""
+    import trail
+    return trail.resolve(label)
+
+
+def last_pass(label: str, text: str | None = None) -> tuple[str | None, str]:
+    """F103: (the job of the row's newest mark, when, if that mark is a pass), else (None, ""). By hand it has no job: "by hand"."""
+    r = rows(q.read()[0] if text is None else text).get(label)
+    ms = list(MARK.finditer(r[0])) if r else []
+    if not ms or ms[-1].group(1) != "passed":
+        return None, ""
+    m = re.search(r"\(job (\d+),", ms[-1].group(0))
+    return (m.group(1) if m else "by hand"), ms[-1].group(2)
+
+
+def why_no_bug_after(label: str, text: str | None = None) -> str | None:
+    if not last_pass(label, text)[0]:
+        return f"{label} has no QA pass to hold this against."
+    return None
+
+
+def bug_after_qa(label: str, what: str, found_in: str = "", text: str | None = None) -> str | None:
+    """F103 (C42): a bug found after a QA pass, on the ledger against that QA. What's wrong, or None."""
+    job, _when_ = last_pass(label, text)
+    if not job:
+        return f"{label} has no QA pass to hold this against."
+    import mistakes
+    mistakes.add("bug-after-qa", "qa", what, where=f"QA job {job}", label=label, item=item_id(label) or "",
+                 key=f"bug-after-qa|{label}|{job}|{found_in or ' '.join(what.split())}", by="the program")
+    return None
+
+
 def fail(label: str, what: str, job: int | None = None) -> str:
+    item = item_id(label)
+    bug_after_qa(label, what)  # a pass that didn't hold: against that QA; nothing when the row had no pass
     row = mark(label, False, what, job)
+    import mistakes, trail
+    mistakes.add("qa-fail", "team", what, where=f"QA job {job}" if job else "QA by hand", label=label, item=item or "")
+    trail.step(item, "qa", state="failed", job=job, words=what[:300])
     name = title_of(label)
     if fails_in_a_row(row) >= MAX_FAILS:
         tell("qa-failed", f"What: {name}\nWhat's off: {what}\nIt didn't pass {MAX_FAILS} times in a row, so no fix "
-                          "goes to the team by itself: it waits for him, on a call or here.")
+                          "goes to the team by itself: it waits for him, on a call or here.", item)
         return (f"QA failed for {label}, {MAX_FAILS} times in a row now: no fix job by itself; it waits for a call, "
                 "and the release holds it.")
-    tell("qa-failed", f"What: {name}\nWhat's off: {what}\nIt went back to the team for a fix; your check follows by itself.")
+    tell("qa-failed", f"What: {name}\nWhat's off: {what}\nIt went back to the team for a fix; your check follows by itself.", item)
     with q.locked():
         text, jobs, on = q.read()
         w = _waiting_for(jobs, label, qa=False)
         if w and w["text"].startswith("Fix for "):
             return f"QA failed for {label}; a fix job is already waiting: job {w['n']}."
-        j = _append(jobs, fix_text(label, " ".join(what.split()).rstrip("."), job))
+        j = _append(jobs, fix_text(label, " ".join(what.split()).rstrip("."), job), label)
         q.write(text, jobs, on)
     _estimate(j, "build")
     return f"QA failed for {label}; job {j['n']} is the fix, and QA follows by itself."
@@ -529,6 +568,8 @@ def main(argv: list[str]) -> int:
             return 2
         args = args[:1] + [" ".join(args[1:]).rstrip(". ") + f". Compared: {compared}"]
         row = mark(label, True, " ".join(args[1:]), job)
+        import trail
+        trail.step(item_id(label), "qa", state="passed", job=job)
         print(f"QA passed for {label}, in its row; the release may take it.")
         for said in ship_whole(label, row):
             print(said)

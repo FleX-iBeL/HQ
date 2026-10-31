@@ -144,13 +144,13 @@ export function parseRoadmap(markdown) {
       if (m) {
         // H283: notes for a job while it runs or waits sit at the end of its line: " ⟪note DATE TIME[ · read HH:MM]⟫ TEXT".
         // H286: and what it says it's doing now, " ⟪now HH:MM⟫ TEXT", and its redone estimate, " ⟪redone HH:MM · N min · was M min⟫ WHY".
-        const first = m[4].search(/ ⟪(?:note|now|redone|sayso) /);
+        const first = m[4].search(/ ⟪(?:note|now|redone|sayso|item) /);
         const notes = [];
         let now = null;
         let redone = null;
         let sayso = null;
         if (first >= 0) {
-          for (const x of m[4].slice(first).matchAll(/ ⟪(note|now|redone|sayso) ([^⟫]*)⟫ (.*?)(?= ⟪(?:note|now|redone|sayso) |$)/g)) {
+          for (const x of m[4].slice(first).matchAll(/ ⟪(note|now|redone|sayso|item) ([^⟫]*)⟫ (.*?)(?= ⟪(?:note|now|redone|sayso|item) |$)/g)) {
             if (x[1] === 'note') {
               const h = /^(\S+ \S+?)(?: · read (\S+))?$/.exec(x[2]);
               if (h) notes.push({ at: h[1], read: h[2] ?? null, text: plain(x[3]) });

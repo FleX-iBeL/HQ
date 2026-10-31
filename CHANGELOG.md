@@ -4,6 +4,12 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- One id per request. An item gets its id when it's written, and the job, its QA, the release, a text and an incident carry it, so `trail.py follow` shows everything that happened to it, from the words to live.
+
+- One ledger of mistakes, across every call and text. Your corrections are tagged at the end of the call, in the same run, with your own words checked against the transcript; "stop asking" and "you just say yes" count, every refused outward action, every QA fail and every bug found after a QA pass too. Praise no longer counts as a correction. The score reads the ledger alone, per agent and per hand-off, with no model, whatever the agents' switch says.
+
+- Every job keeps its turns and minutes, every estimate says how many finished jobs it stands on, and the Friday report counts as sent only after the text went.
+
 - The status page no longer hangs for up to half a minute when the planning takes long to read: it shows the last answer at once and refreshes behind it.
 
 - Nothing you write gets lost, and nothing breaks silently. What's left unsaved in your folder for ten minutes goes to GitHub by itself, also when GitHub already has something newer from a chat elsewhere; a file with a key in it stays out and says so. Two things writing the to-do list, the notes, the games, the coaching file or the mail list at once can't wipe each other any more. Quick notes and what the agents say about themselves on a backup computer now reach the main, and something the main refuses stays kept and shows up. Each mail check is held to its rules by a program, and the mail list turns red when it hasn't been checked for two hours between 8:00 and midnight. A failing reviewer, QA, release, agent cycle or briefing turns red. While you sleep only what can't wait gets through, the rest comes in one text when you're up. Keys are masked in call transcripts, the phone push key moved out of the synced folder, each computer's version is on the role line, the sync line counts what's not handed over, and a call line that hangs starts again.

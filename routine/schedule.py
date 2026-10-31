@@ -300,6 +300,7 @@ def promote():
             n = max([j["n"] for j in queue] + [0]) + 1
             job = {"n": n, "state": "ready", "past": item["past"], "agreed": time.strftime("%Y-%m-%d %H:%M"),
                    "text": f"Scheduled item {item['n']}, planned for {say_when(item['at'])}: {item['text']}"}
+            jobs.carry(job)  # F103
             if item.get("priority"):
                 # H99: first in line, after the waiting jobs that came from tagged items before it.
                 tagged = {int(m.group(1)) for i in items if i.get("priority")

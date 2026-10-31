@@ -89,7 +89,8 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "direct_line": {"put"},  # F58: a line of a text thread (Donna's, the team line, the coaching line)
           "notes": {"put", "clear-id", "restore-id"},  # F102: his quick notes, like the text lines
           "about_self": {"add"},  # F102: what an agent says about herself, written by the main
-          "usagecost": {"plan"}}  # F107: the plan in use, written only by the main
+          "usagecost": {"plan"},  # F107: the plan in use, written only by the main
+          "trail": {"put"}, "mistakes": {"put"}}  # F103: the record and the ledger, written only by the main
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
            "coaching": os.path.join(os.path.dirname(HERE), "app", "coaching.py"),

@@ -6156,7 +6156,7 @@ try { Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: 
         need(p["total"]["jobs"] == 2 and p["total"]["minutes"] == 14 + 1 + 6 and p["total"]["eta"] == p["jobs"][str(b)]["eta"],
              f"the total for the whole list is wrong: {p['total']}")
         lst = jobs("list")
-        need("Estimate: about 14 min; about 7% of the 5-hour and 1.4% of the week, done around" in lst and "All 2 jobs: about 21 min, all done around" in lst and "(estimate)" in lst,
+        need("Estimate: about 14 min, from " in lst and "about 7% of the 5-hour and 1.4% of the week, done around" in lst and "All 2 jobs: about 21 min, all done around" in lst and "(estimate)" in lst,
              f"list doesn't say the estimates: {lst}")
         need("No estimate has been checked" in lst, f"list doesn't say how close the estimates have been: {lst}")
         # H174: the total says what it counts, part by part, and the parts add up with the per-job lines.
@@ -16120,6 +16120,287 @@ print(json.dumps({"plan": U.current_plan(), "five": U.five_on(), "words": U.cost
         need("5-hour" in jobs("list").stdout, "the job list doesn't say the 5-hour again")
         return "the past stays Max 5x, the week carries everything, five jobs teach Ultra from the week, the page has no 5-hour of any kind, and it all comes back"
 
+    async def flow231(self) -> str:
+        """F103, no Claude: the record. An item gets an id when it's written; the job, its QA, the release, a text and an incident
+        carry it as an argument. The job's text names no row, so nothing could have been found by reading a sentence."""
+        import subprocess as _sp
+        ws, env, repo, fails = self._proof_env("f103a")
+        env.update({"HQ_DIRECT_PLAIN": "1", "HQ_UNDER_TEST": "1", "HQ_NO_PHONE": "1", "HQ_LOOK": "0", "HQ_INCIDENTS_FILE": str(self.tmp / "f103a-inc.json"),
+                    "HQ_REVIEW": "0", "HQ_NO_WALL": "1"})
+        run = lambda *a, ok=True, tool="routine/jobs.py": (lambda r: (need(r.returncode == 0 or not ok, f"{tool} {a}: {r.stdout[-400:]} {r.stderr[-400:]}"), r)[1])(
+            _sp.run([sys.executable, str(ROOT / tool), *a], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120))
+        said = run("write-row", "--bug", "A made-up bug. Done means: it works.").stdout
+        label = re.search(r"([FH]\d+) is on the planning", said).group(1)
+        trail = ws / "HQ/trail.jsonl"
+        first = json.loads(trail.read_text().splitlines()[0])
+        need(first["step"] == "written" and first["label"] == label and re.fullmatch(r"r-[0-9a-f]{8}", first["id"]), f"no id at the writing: {first}")
+        item = first["id"]
+        r = run("add", "Build the thing as agreed, nothing else.", "--item", item, "--kind", "build")
+        n = int(re.search(r"Job (\d+)", r.stdout).group(1))
+        line = [l for l in (ws / "HQ/roadmap.md").read_text().splitlines() if l.startswith(f"- Job {n} ")][0]
+        need(f"⟪item {item}⟫ {label}" in line, f"the job doesn't hold the id: {line}")
+        run("mark", str(n), "running since 10:00")
+        (repo / "a.py").write_text("x = 2\n")
+        _sp.run(["git", "-C", str(repo), "commit", "-q", "-am", f"{label}: the thing"], check=True)
+        r = _sp.run([sys.executable, str(ROOT / "routine/proof.py"), "run", str(n)], capture_output=True, text=True, env=env)
+        need(r.returncode == 0, f"the proof: {r.stdout} {r.stderr[-300:]}")
+        r = run("done", str(n))
+        qa_job = re.search(r"Job (\d+) is ready: QA", r.stdout)
+        need(qa_job, f"the job's id didn't bring its QA: {r.stdout}")
+        q = int(qa_job.group(1))
+        line = [l for l in (ws / "HQ/roadmap.md").read_text().splitlines() if l.startswith(f"- Job {q} ")][0]
+        need(f"⟪item {item}⟫" in line, f"the QA job doesn't carry the id: {line}")
+        run("pass", label, "tried it", "--job", str(q), "--example", "the example", "--ran", "ran it", "--got", "it came out right",
+            "--compared", "two made-up lines, 2 of 2 right", tool="routine/qa.py")
+        # the release, on the copy's own commits
+        code = """
+import json, os, subprocess, sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import release, trail
+from pathlib import Path
+repo = sys.argv[2]
+release.ROOT = Path(repo)
+g = lambda *a: subprocess.run(['git', '-C', repo, *a], capture_output=True, text=True, check=True).stdout.strip()
+old = g('rev-list', '--max-parents=0', 'HEAD')
+g('tag', '-a', 'v9.9.9', '-m', 'HQ 9.9.9')
+print(json.dumps(release.on_the_record(old, 'v9.9.9', '9.9.9')))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(repo)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0 and item in r.stdout, f"the release: {r.stdout} {r.stderr[-400:]}")
+        # a text and an incident about it, given the id
+        r = _sp.run([sys.executable, str(ROOT / "app/direct_line.py"), "text", "down", "the made-up part went quiet", "--item", item], capture_output=True, text=True, env=env)
+        need(r.returncode == 0, f"the text: {r.stderr[-300:]}")
+        last = json.loads((ws / "HQ/direct-line/thread.jsonl").read_text().splitlines()[-1])
+        need(last.get("item") == item, f"the text doesn't carry the id: {last}")
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import incidents; incidents.down('jobs', 'a made-up stop', item=sys.argv[2])"
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), item], capture_output=True, text=True, env=env)
+        need(r.returncode == 0, f"the incident: {r.stderr[-300:]}")
+        r = run("follow", label, tool="routine/trail.py")
+        steps = [json.loads(l) for l in trail.read_text().splitlines()]
+        need({"written", "job", "qa", "release", "text", "incident"} == {d["step"] for d in steps if d["id"] == item}, f"a step is missing: {r.stdout}")
+        need([d for d in steps if d["step"] == "job" and d.get("state") == "done" and d.get("commit")], f"no commit on the job's step: {r.stdout}")
+        need("Not yet" not in r.stdout and f"job {q}" in r.stdout and "version 9.9.9" in r.stdout, f"the follow: {r.stdout}")
+        # a row older than the record gets its id once
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import trail; print(trail.resolve('H9400'), trail.resolve('H9400'))"
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env)
+        a, b = r.stdout.split()
+        need(a == b, f"an older row got two ids: {r.stdout}")
+        return f"{label} followed by {item} from the writing through job {n}, QA job {q}, the release, a text and an incident; the job's text names no row"
+
+    def _ledger_env(self, tag):
+        ws, env = self._h298_ws(tag)
+        env.update({"HQ_UNDER_TEST": "1"})
+        return ws, env
+
+    async def flow232(self) -> str:
+        """F103, no Claude: a call with a correction adds one ledger line with the agent and his words, however it's tagged: the program
+        at the call's end, the wrap-up with a quote checked against the transcript, both on the same line of his. Words that aren't
+        his are refused. Praise doesn't count; "you keep saying yes" and "stop asking" do. Only the ledger's own script gets in."""
+        import subprocess as _sp
+        ws, env = self._ledger_env("f103b")
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/app'); import me; from pathlib import Path; print(me.load(Path(sys.argv[2]))['name'] or 'Me')"
+        me = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=env).stdout.strip()
+        calls = ws / "HQ/calls"; calls.mkdir(parents=True, exist_ok=True)
+        t = calls / "2026-10-30-1704.md"
+        t.write_text(f"# Call\n\nStarted 17:04:00 · agent Moneypenny · brain opus\n\n"
+                     f"- 17:04:01 **{me}:** Hey, what's on the list?\n"
+                     f"- 17:04:10 **HQ:** Three things, all looking lovely.\n"
+                     f"- 17:05:00 **{me}:** No problem, thanks! *(typed)*\n"
+                     f"- 17:06:00 **{me}:** That also didnt deliver what I specifically requested as mandatory\n"
+                     f"- 17:07:00 **{me}:** the whole thing felt a bit off today honestly\n"
+                     f"- 17:07:30 **HQ (Pepper):** I'm here too.\n"
+                     f"- 17:08:00 **{me}:** You keep saying yes to whatever I say\n"
+                     f"- 17:09:00 **{me}:** Stop asking me that every time\n")
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import mistakes as M
+print(json.dumps([M.scan_call(sys.argv[2]), M.scan_call(sys.argv[2])]))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(t)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"the scan: {r.stderr[-400:]}")
+        one, two = json.loads(r.stdout.strip().splitlines()[-1])
+        need(two == [] and [(d["kind"], d["agent"]) for d in one] == [("correction", "moneypenny"), ("say-yes", "pepper"), ("stop-asking", "pepper")], f"the program's pass: {one} {two}")
+        need(one[0]["words"].startswith("That also didnt deliver"), f"not his words: {one[0]}")
+        add = lambda *a: _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "add", "correction", *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        rel = "HQ/calls/2026-10-30-1704.md"
+        r = add("--call", rel, "--said", "the whole thing felt a bit off today")
+        need(r.returncode == 0 and "moneypenny" in r.stdout, f"the wrap-up's tag: {r.stdout} {r.stderr[-300:]}")
+        rows = [json.loads(l) for l in (ws / "HQ/mistakes.jsonl").read_text().splitlines()]
+        need(len(rows) == 4 and rows[-1]["by"] == "the wrap-up" and rows[-1]["where"] == rel and "felt a bit off" in rows[-1]["words"], f"one line with the agent and his words: {rows[-1]}")
+        r = add("--call", rel, "--said", "That also didnt deliver what I specifically requested")
+        need(r.returncode == 0 and "Already" in r.stdout and len((ws / "HQ/mistakes.jsonl").read_text().splitlines()) == 4, f"tagged twice: {r.stdout}")
+        r = add("--call", rel, "--said", "Three things, all looking lovely")
+        need(r.returncode == 2 and "aren't his" in r.stdout, f"her words passed as his: {r.stdout}")
+        r = add("--call", rel, "--said", "I never said this at all")
+        need(r.returncode == 2, f"made-up words passed: {r.stdout}")
+        # the real end of a call: the program's pass, then the wrap-up (a stand-in brain) tags what only reading can find
+        t2 = calls / "2026-10-30-1800.md"
+        t2.write_text(f"# Call\n\nStarted 18:00:00 · agent Donna · brain opus\n\n- 18:00:01 **{me}:** rule: never before eleven\n- 18:00:09 **HQ:** Got it.\n"
+                      f"- 18:01:00 **{me}:** it landed on the wrong day again\n")
+        code = """
+import asyncio, json, re, shlex, subprocess, sys, types
+from datetime import datetime
+from pathlib import Path
+sys.path.insert(0, sys.argv[1] + '/app')
+sys.path.insert(0, sys.argv[1] + '/routine')
+import about_self, call, config, policy
+about_self.harvest = lambda *a, **k: []
+about_self.call_lines = lambda *a, **k: ([], '')
+said = []
+class Brain:
+    _client = None
+    async def ask(self, prompt):
+        said.append(prompt)
+        rel = re.search(r'add correction --call (\\S+)', prompt).group(1)
+        cmd = f'python3 {shlex.quote(sys.argv[1] + "/routine/mistakes.py")} add correction --call {rel} --said "it landed on the wrong day"'
+        d = c.policy.decide('Bash', {'command': cmd})
+        said.append(d.verdict)
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        said.append(r.stdout)
+        yield 'wrote it down'
+    async def stop(self): pass
+class C(call.Call):
+    def _note_lines(self): pass
+    def _hand_transcript(self): pass
+c = C.__new__(C)
+p = Path(sys.argv[2])
+c._finished = False
+c.switched_to = None; c.ended_by_agent = False; c.free = False; c.wrap_up_mode = 'on'; c.model = 'x'
+c.speaker = {'name': 'Donna'}
+c.end = types.SimpleNamespace(words=lambda who: 'he hung up', is_drop=lambda: False, reason=lambda: '')
+c.transcript = types.SimpleNamespace(note=lambda w: None, end=lambda: None, path=p, start_hhmm='18:00', started=datetime(2026, 10, 30, 18, 0))
+c.llm = types.SimpleNamespace(turns=[{'words': 'x'}])
+c.policy = policy.Policy(config.FOLDER, agent='donna')
+c.brain = Brain(); c.brains = {'donna': c.brain}; c.self_free = False
+asyncio.run(c.finish())
+print(json.dumps({'prompt_names': 'mistakes.py' in said[0] and str(p.name) in said[0], 'verdict': said[1], 'out': said[2]}))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(t2)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0, f"the call's end: {r.stdout[-300:]} {r.stderr[-700:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["prompt_names"] and o["verdict"] == "allow" and "donna" in o["out"], f"the wrap-up's step: {o}")
+        rows = [json.loads(l) for l in (ws / "HQ/mistakes.jsonl").read_text().splitlines()]
+        need(len(rows) == 6 and [d["agent"] for d in rows[-2:]] == ["donna", "donna"] and [d["by"] for d in rows[-2:]] == ["the program", "the wrap-up"]
+             and rows[-1]["words"] == "it landed on the wrong day again", f"the call's lines: {rows[-2:]}")
+        for d in rows[-2:]:
+            need(d["where"] == "HQ/calls/2026-10-30-1800.md", f"where: {d}")
+        t2.unlink()
+        (ws / "HQ/mistakes.jsonl").write_text("".join(json.dumps(d) + "\n" for d in rows[:-2]))
+        # a text: the same words, the same way
+        (ws / "HQ/coaching-line").mkdir(parents=True, exist_ok=True)
+        (ws / "HQ/coaching-line/thread.jsonl").write_text(json.dumps({"at": time.time(), "from": "me", "text": "you just say yes to everything", "id": "abc"}) + "\n"
+                                                          + json.dumps({"at": time.time(), "from": "agent", "text": "stop asking me", "id": "abd"}) + "\n")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "scan", "--all"], capture_output=True, text=True, env={**env, "HQ_STATUS_FILE": ""}, cwd=str(ROOT))
+        rows = [json.loads(l) for l in (ws / "HQ/mistakes.jsonl").read_text().splitlines()]
+        need(len(rows) == 5 and rows[-1]["kind"] == "say-yes" and rows[-1]["agent"] == "pepper" and rows[-1]["where"] == "HQ/coaching-line", f"the text: {r.stdout} {rows[-1]}")
+        # the doors: a call can't write the ledger or the record, a wrap-up can only tag, a refused mail is one line
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/app')
+sys.path.insert(0, sys.argv[1] + '/routine')
+from pathlib import Path
+import policy as P
+pol = P.Policy(Path(sys.argv[2]))
+pol.agent = 'donna'
+out = {}
+out['edit'] = pol.decide('Edit', {'file_path': sys.argv[2] + '/HQ/mistakes.jsonl', 'old_string': 'a', 'new_string': 'b'}).verdict
+out['trail'] = pol.decide('Write', {'file_path': sys.argv[2] + '/HQ/trail.jsonl', 'content': 'a'}).verdict
+out['shell'] = pol.decide('Bash', {'command': 'echo x > HQ/mistakes.jsonl'}).verdict
+hq = str(P.HQ_ROUTINE)
+out['tag'] = pol.decide('Bash', {'command': 'python3 "' + hq + '/mistakes.py" add correction --call x --said "a b c"'}).verdict
+out['put'] = pol.decide('Bash', {'command': 'python3 "' + hq + '/mistakes.py" put "{}"'}).verdict
+out['score'] = pol.decide('Bash', {'command': 'python3 "' + hq + '/mistakes.py" score'}).verdict
+for i in (1, 2):
+    out['mail'] = pol.decide('mcp__claude_ai_Gmail__send_message', {'to': 'someone', 'body': 'made up'}).verdict
+out['look'] = pol.decide('mcp__claude_ai_Gmail__create_filter', {}).verdict
+pol.after_call = True
+pol.unattended = True
+out['after'] = pol.decide('Bash', {'command': 'python3 "' + hq + '/mistakes.py" add correction --call x --said "a b c"'}).verdict
+print(json.dumps(out))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"the doors: {r.stderr[-500:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["edit"] == o["trail"] == o["shell"] == o["put"] == "deny" and o["tag"] == o["score"] == o["after"] == "allow" and o["mail"] == "deny", f"the doors: {o}")
+        rows = [json.loads(l) for l in (ws / "HQ/mistakes.jsonl").read_text().splitlines()]
+        need(len(rows) == 6 and rows[-1]["kind"] == "refused" and rows[-1]["agent"] == "donna" and rows[-1]["handoff"] == "the agent to the outside", f"the refused mail: {rows[-1]}")
+        return "one line per mistake with the agent and his words, from the program, the wrap-up and a text; praise and an agent's words stay out; the doors hold"
+
+    async def flow233(self) -> str:
+        """F103, no Claude: the score, per agent and per hand-off, from the ledger alone: a folder with nothing but the ledger. A QA fail,
+        a bug after a QA pass against that QA, the weekly score reading the ledger with the agents' switch off, and turns, minutes and
+        how many jobs an estimate stands on, for every job."""
+        import subprocess as _sp
+        ws, env, repo, fails = self._proof_env("f103c")
+        env.update({"HQ_DIRECT_PLAIN": "1", "HQ_UNDER_TEST": "1", "HQ_LOOK": "0", "HQ_REVIEW": "0", "HQ_NO_WALL": "1"})
+        run = lambda tool, *a: _sp.run([sys.executable, str(ROOT / tool), *a], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        r = run("routine/jobs.py", "write-row", "--bug", "Another made-up bug. Done means: it works.")
+        label = re.search(r"([FH]\d+) is on the planning", r.stdout).group(1)
+        r = run("routine/mistakes.py", "add", "bug-after-qa", label, "nothing passed yet")
+        need(r.returncode == 2 and "no QA pass" in r.stdout, f"a bug against a QA that never passed: {r.stdout}")
+        r = run("routine/qa.py", "fail", label, "the second example didn't hold", "--job", "41", "--example", "e", "--ran", "r", "--got", "g")
+        need(r.returncode == 0, f"qa fail: {r.stdout} {r.stderr[-300:]}")
+        rm = ws / "HQ/roadmap.md"
+        row = [l for l in rm.read_text().splitlines() if f" {label} " in l and l.startswith("| ")][0]
+        rm.write_text(rm.read_text().replace(row, row.rstrip().rstrip("|").rstrip() + " QA passed (job 44, 30 October 2026 17:40): it held. |"))
+        r = run("routine/jobs.py", "write-row", "--bug", "--after-qa", label, "It came back on the phone. Done means: it works on the phone.")
+        need(r.returncode == 0 and "against" in r.stdout, f"a bug found after the pass: {r.stdout} {r.stderr[-300:]}")
+        r = run("routine/jobs.py", "write-row", "--bug", "--after-qa", "F99999", "A row without any QA.")
+        need(r.returncode != 0, f"a bug against a row with no pass went in: {r.stdout}")
+        rows = [json.loads(l) for l in (ws / "HQ/mistakes.jsonl").read_text().splitlines()]
+        need([(d["kind"], d["agent"], d["where"]) for d in rows] == [("qa-fail", "team", "QA job 41"), ("bug-after-qa", "qa", "QA job 44")], f"the ledger: {rows}")
+        # the score from nothing but the ledger
+        lone = self.tmp / "f103c-lone"; lone.mkdir()
+        led = lone / "the-ledger.jsonl"
+        now = time.time()
+        made = [("correction", "moneypenny", "him to the agent"), ("correction", "moneypenny", "pepper to moneypenny"), ("say-yes", "donna", "him to the agent"),
+                ("qa-fail", "team", "the build to QA"), ("bug-after-qa", "qa", "QA to the release"), ("refused", "pepper", "the agent to the outside")]
+        led.write_text("".join(json.dumps({"at": now - 60 * i, "kind": k, "agent": a, "handoff": h, "words": "made up", "where": "", "key": str(i)}) + "\n" for i, (k, a, h) in enumerate(made))
+                       + json.dumps({"at": now - 30 * 86400, "kind": "correction", "agent": "donna", "handoff": "him to the agent", "words": "old", "where": "", "key": "old"}) + "\n")
+        bare = {k: v for k, v in env.items() if k not in ("HQ_ROADMAP",)}
+        bare.update({"HQ_MISTAKES": str(led), "HQ_WORKSPACE": str(lone), "HQ_FOLDER": str(lone)})
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score", "--json"], capture_output=True, text=True, env=bare, cwd=str(lone))
+        need(r.returncode == 0, f"the score: {r.stderr[-300:]}")
+        t = json.loads(r.stdout)
+        need(t["lines"] == 6 and t["agents"]["moneypenny"]["total"] == 2 and t["agents"]["team"]["kinds"] == {"qa-fail": 1}, f"per agent: {t['agents']}")
+        need(t["handoffs"]["him to the agent"]["total"] == 2 and t["handoffs"]["pepper to moneypenny"]["total"] == 1 and t["handoffs"]["QA to the release"]["total"] == 1, f"per hand-off: {t['handoffs']}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score"], capture_output=True, text=True, env=bare, cwd=str(lone))
+        need("Per agent:" in r.stdout and "Per hand-off:" in r.stdout and "- moneypenny: 2" in r.stdout, f"the score's words: {r.stdout}")
+        # the weekly score reads it, the agents' switch off
+        off = ws / "HQ/features.json"
+        off.write_text('{"off": ["agents_run"], "on": [], "maker": true}\n')
+        (ws / "HQ/mistakes.jsonl").write_text("".join(json.dumps({"at": now - 60, "kind": k, "agent": "donna", "handoff": "him to the agent", "words": "x", "where": "", "key": k}) + "\n" for k in ("correction", "say-yes", "stop-asking")))
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+sys.path.insert(0, sys.argv[1] + '/app')
+import cycles, datetime as dt, ledger
+from pathlib import Path
+fri = dt.datetime.now()
+fri += dt.timedelta(days=(4 - fri.weekday()) % 7)
+fri = fri.replace(hour=8, minute=0)
+print(json.dumps(cycles.write_scores(now=fri)))
+print(ledger.text('donna')[-900:])
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0 and "donna's score" in r.stdout, f"the week's score with the switch off: {r.stdout} {r.stderr[-400:]}")
+        # turns and minutes for every job, and what an estimate stands on
+        r = run("routine/jobs.py", "add", "Look at something made up.", "--kind", "other")
+        n = int(re.search(r"Job (\d+)", r.stdout).group(1))
+        need(re.search(r"from (no finished jobs yet|\d+ finished jobs?)", r.stdout), f"the estimate doesn't say what it stands on: {r.stdout}")
+        run("routine/jobs.py", "mark", str(n), "running since 00:00")
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import wall; wall.add_used(int(sys.argv[2]), 3.5, 21)"
+        _sp.run([sys.executable, "-c", code, str(ROOT), str(n)], check=True, env=env, cwd=str(ROOT))
+        r = run("routine/jobs.py", "done", str(n))
+        need(r.returncode == 0, f"done: {r.stdout} {r.stderr[-300:]}")
+        code = "import json, sys; sys.path.insert(0, sys.argv[1] + '/routine'); import estimate as E; h = E.history()[-1]; print(json.dumps({k: h.get(k) for k in ('n', 'turns', 'run_minutes', 'based', 'actual')})); print(E.job_words(int(sys.argv[2]), E.plan()) if hasattr(E, 'job_words') else '')"
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(n)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"the history: {r.stderr[-400:]}")
+        h = json.loads(r.stdout.splitlines()[0])
+        need(h["n"] == n and h["turns"] == 21 and h["run_minutes"] == 3.5 and h["based"] is not None, f"turns and minutes: {h}")
+        return "the score per agent and per hand-off from a folder holding only the ledger; QA's fail and a bug after a pass on it; the week's score with the switch off; turns, minutes and the estimate's base kept"
+
     async def flow230(self) -> str:
         """F108, no Claude: three writers at the same instant, the way flow 196 does it (two "down" texts in plain words and his own
         text, each its own process, three rounds), 20 runs on Donna's line and 20 on the team line: all 9 lines land every
@@ -16898,6 +17179,7 @@ print(R.golden_current())
         (calls / f"{d1}-1100.md").write_text("# Call\n\nStarted 11:00:00 · agent Pepper · brain opus\n\n- 11:00 **Me:** status?\n- 11:01 **HQ:** Fine.\n")
         pk = importlib.import_module("pokes")
         importlib.reload(pk)
+        importlib.import_module("mistakes").scan_thread("direct-line", 0, ws)  # F103: his correction reaches the score through the ledger
         a = {"id": "donna", "name": "Donna", "context": "day"}
         p = pk.pokes(a, now - 7 * 86400, now + 60, ws)
         need(p["status_questions"] == 2 and p["corrections"] == 1 and p["short_calls"] == 1 and p["total"] == 4 and p["calls"] == 2,
@@ -26286,6 +26568,9 @@ FLOWS = {
     221: ("F102: a mail run that moves the marker back or drops a very important line is put back with an incident; red after 2 hours between 8:00 and midnight", False, "flow221"),
     220: ("F102: two processes adding 150 notes lose none; one lock across processes for the to-do list, the notes, the games, the coaching file and the mail list", False, "flow220"),
     229: ("F107: the gate on a real reading with only the weekly windows: readable, on the week, the reserve and the age hold, the 5-hour back with a reading that has it", False, "flow229"),
+    231: ("F103: the record: an id given when the item is written, carried by the job, its QA, the release, a text and an incident; follow prints them all; the job's text names no row", False, "flow231"),
+    232: ("F103: the ledger: a call with a correction adds one line with the agent and his words, from the program or the wrap-up, a quote that isn't his is refused, praise isn't counted, the file can't be written from a call, a refused mail is a line", False, "flow232"),
+    233: ("F103: the score per agent and per hand-off from the ledger alone; a QA fail and a bug after a pass; the week's score with the switch off; turns, minutes and what each estimate stands on", False, "flow233"),
     230: ("F108: three writers at the same instant, 20 runs on Donna's line and the team line: all 9 lines land; a real repeat stays out", False, "flow230"),
     228: ("F107: Ultra with no 5-hour window: the past stays Max 5x, estimates, planning, nights and page on the week with no 5-hour left, then back on Max 5x with all of it", False, "flow228"),
     227: ("F102: the status page never hangs on a slow script: the last answer at once, one run at a time", False, "flow227"),

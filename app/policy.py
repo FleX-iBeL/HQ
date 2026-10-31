@@ -24,6 +24,7 @@ import json
 import os
 import re
 import shlex
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -145,13 +146,15 @@ WAYS_IN = {
     "hq/calendar.json": f"python3 \"{HQ_ROUTINE / 'pings.py'}\", and the calendar connector for the calendar itself",
     "hq/calendar-todo.json": f"python3 \"{_APP / 'todo.py'}\" (plan, unplan)",
     "hq/calendar-marks.json": "the page's own marks",
+    "hq/mistakes.jsonl": f"python3 \"{HQ_ROUTINE / 'mistakes.py'}\" add correction (the ledger only ever grows, through its script)",
+    "hq/trail.jsonl": "the record is written by HQ's own scripts, never by hand",
 }
 ABOUT_WAY = f"python3 \"{_APP / 'about_self.py'}\" add AGENT \"FACT\""
 # What proves his words is written only by HQ: a call or a text never changes a transcript or a thread.
 _PROOF = re.compile(r"^hq/(calls/[^/]+\.md|(direct-line|coaching-line|team-line)/thread\.jsonl)$")
 _ABOUT_LIST = re.compile(r"^hq/agents/[^/]+-about-herself\.md$")
 # The same files through the shell: a redirect, sed -i, tee, a copy or move over them, a Python one-liner, a git restore.
-_GUARDED_NAME = (r"(?:roadmap\.md|sprint\.json|challenges\.md|inbox\.md|notes\.md|games\.json|coaching\.json|calendar\.json|"
+_GUARDED_NAME = (r"(?:roadmap\.md|sprint\.json|challenges\.md|inbox\.md|notes\.md|games\.json|coaching\.json|calendar\.json|mistakes\.jsonl|trail\.jsonl|"
                  r"calendar-todo\.json|calendar-marks\.json|thread\.jsonl|[\w-]*-about-herself\.md)")
 _SHELL_WRITE = re.compile(
     rf">>?\s*[\"']?[^\s\"'|;&]*{_GUARDED_NAME}"
@@ -163,9 +166,26 @@ _SHELL_WRITE = re.compile(
 # F99: the after-call run is alone with nobody to ask: it writes the log and the lists, and adds the transcript.
 AFTER_CALL_EDIT = "coaching/log.md"
 AFTER_CALL_ADD = re.compile(r"^(coaching/log\.md|challenges\.md|hq/agents/[^/]+-about-herself\.md|hq/calls/[^/]+\.md)$")
-AFTER_CALL_SCRIPTS = {"todo.py", "about_self.py"}  # sprint.py, review.py and jobs.py only to read (AFTER_CALL_READS)
+AFTER_CALL_SCRIPTS = {"todo.py", "about_self.py", "mistakes.py"}  # sprint.py, review.py and jobs.py only to read (AFTER_CALL_READS)
 AFTER_CALL_READS = {"sprint.py": {"list", "json", "show", "open", "fields", "check"}, "review.py": {"list", "flags"},
                     "jobs.py": {"list"}, "schedule.py": {"list"}}
+
+
+_SHELL_OUT = re.compile(r"\bgit\s+push\b|\bcurl\b[^|;&]*(?:\s-X\s*(?:POST|PUT|DELETE|PATCH)|\s--data\b|\s-d\s|\s-F\s)|\b(?:scp|sendmail|mailx|ftp|nc)\b|\bssh\s", re.I)
+
+
+def outward(tool: str, inp: dict) -> bool:
+    """F103: an action that reaches outside this HQ: mail sent, an invitation, a web address carrying data, the shell sending
+    something out. Only these count on the ledger when refused; a refused look at a file isn't a mistake."""
+    server, name = _mcp_parts(tool)
+    if server:
+        s = server.lower()
+        if "gmail" in s:
+            return name in GMAIL_NEVER or "send" in name
+        return "calendar" in s and name in CALENDAR_ADD | CALENDAR_CHANGE and bool(inp.get("attendees"))
+    if tool == "WebFetch":
+        return not plain_address(str(inp.get("url") or ""))
+    return tool == "Bash" and bool(_SHELL_OUT.search(str(inp.get("command") or "")))
 
 
 def plain_address(url: str) -> bool:
@@ -276,6 +296,7 @@ class Policy:
     team_texts: bool = False  # H266: Moneypenny (context build) texts him on her own line without a yes
     after_call: bool = False  # F99: the after-call run: only the log, the lists and the transcript
     pending_turns: int = 0  # how many of his turns the pending questions have waited (answer, PENDING_TURNS)
+    agent: str = ""  # F103: who's taking this turn, for the ledger's line on a refused outward action
 
     def __post_init__(self):
         self.folder = Path(os.path.realpath(self.folder))
@@ -305,12 +326,24 @@ class Policy:
                     self.pending_turns = 0
         summary = summarize(tool, inp or {})
         self.log.append((tool, summary, d))
+        if d.verdict == DENY and not self.dry_run and outward(tool, inp or {}):
+            self._on_the_ledger(tool, summary, d)
         if callable(self.listener):
             try:
                 self.listener(tool, summary, d)
             except Exception:
                 pass
         return d
+
+    def _on_the_ledger(self, tool: str, summary: str, d: Decision) -> None:
+        """F103: a refused outward action is a mistake on the ledger, once per thing tried."""
+        try:
+            sys.path.insert(0, str(HQ_ROUTINE))
+            import mistakes
+            mistakes.add("refused", self.agent or "unknown", f"{summary}: {d.why}", where="a call or a text", base=self.folder,
+                         key=f"refused|{self.agent}|{tool}|{summary}"[:200])
+        except Exception:
+            pass
 
     def _decide(self, tool: str, inp: dict) -> Decision:
         server, name = _mcp_parts(tool)
@@ -705,6 +738,15 @@ class Policy:
                 return Decision(ALLOW, "the agents' own cycles: the settings, an order, her ledger, the Friday screen")
             return Decision(DENY, "from a call, the cycles script takes list, settings, set, order, ledger, friday or score; "
                                   "a plan, a step's outcome and the minute are her own runs'")
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "mistakes.py"):
+            sub = args[1] if len(args) > 1 else ""
+            if sub in ("list", "score") or (sub == "add" and len(args) > 2 and args[2] in ("correction", "bug-after-qa")):
+                return Decision(ALLOW, "the ledger: a correction or a bug after QA goes in, the score reads it")
+            return Decision(DENY, "from a call, the ledger takes add correction, add bug-after-qa, list or score; the rest is the program's")
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "trail.py"):
+            if len(args) > 1 and args[1] == "follow":
+                return Decision(ALLOW, "reading an item's record")
+            return Decision(DENY, "from a call, the record is only read: trail.py follow ID")
         if prog in ("python3", "python") and args and self.hq_script(args[0], "ledger.py"):
             if len(args) <= 2 or args[2] in ("show", "list", "orders", "plan", "scores", "note"):
                 return Decision(ALLOW, "an agent's ledger")

@@ -65,6 +65,7 @@ def down(key, why, at=None, **extra):
                "fixes": [], "back": None, **{k: v for k, v in extra.items() if v}}
         data["incidents"].append(inc)
         _write(data)
+        _on_record(inc)
         return inc
     except Exception:
         return None
@@ -95,16 +96,25 @@ def up(key, at=None):
         pass
 
 
-def past(key, since, until, why, fixes):
-    """An outage that is already over when it's noticed (the helper itself was down)."""
+def past(key, since, until, why, fixes, item=None):
+    """An outage that is already over when it's noticed (the helper itself was down). F103: item, the id of the work it hit."""
     try:
         data = read()
-        data["incidents"].append({"id": f"{key}-{int(since)}", "key": key, "down": since, "why": why,
-                                  "fixes": [{"at": a, "what": w} for a, w in fixes], "back": until})
+        inc = {"id": f"{key}-{int(since)}", "key": key, "down": since, "why": why,
+               "fixes": [{"at": a, "what": w} for a, w in fixes], "back": until, **({"item": item} if item else {})}
+        data["incidents"].append(inc)
         data["incidents"].sort(key=lambda i: i["down"])
         _write(data)
+        _on_record(inc)
     except Exception:
         pass
+
+
+def _on_record(inc):
+    """F103: an incident about an item is a step of its record."""
+    if inc.get("item"):
+        import trail
+        trail.step(inc["item"], "incident", key=inc["key"], why=str(inc.get("why") or "")[:200], line=inc["id"])
 
 
 def watchdog_events():

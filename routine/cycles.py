@@ -1010,6 +1010,9 @@ def tripwire(aid: str, kind: str, detail: str, now: dt.datetime | None = None, b
     d = _state() if own else d
     st_ = _agent_state(d, aid)
     ledger.note(aid, f"tripwire ({kind}): {detail}")
+    if "refus" in kind:  # F103: a refused try is also on the one ledger the score reads
+        import mistakes
+        mistakes.add("refused", aid, f"{kind}: {detail}", where="her own cycle", base=base)
     today = _today(now)
     sent = st_["texts"].get(today, 0)
     most = int(agent_settings(aid, base).get("tripwire_texts", 2))
@@ -1216,9 +1219,7 @@ def write_scores(now: dt.datetime | None = None, base: Path | None = None, force
         return did
     for ag in _agents(base):
         aid = ag["id"]
-        if not agent_settings(aid, base).get("on") and not force:
-            continue
-        st_ = _agent_state(d, aid)
+        st_ = _agent_state(d, aid)  # F103: whatever the agents' switch says, the score is written (C69)
         if st_.get("scored") == week and not force:
             continue
         sc = pokes.score(ag, now, folder=base or folder(), plan=ledger.plan(aid)[1])

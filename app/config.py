@@ -200,7 +200,8 @@ reminder commands, and the scripts below, go to the main the same way.
 - What's his, and the ways in (F99): his vision, the map, the rules and every CLAUDE.md change only on his yes: you ask, \
 he says yes, you make that one change. The planning, its side file, the to-do list, the mail list, the notes, the games, \
 the coaching file and the about-herself lists are never edited directly, not with Edit and not through the shell, whoever \
-asks; the refusal names the script to use. A new planning row: python3 "@HQ@/routine/jobs.py" write-row "THE ROW" [--bug]. \
+asks; the refusal names the script to use. A new planning row: python3 "@HQ@/routine/jobs.py" write-row "THE ROW" [--bug]; a bug found after an item passed QA gets --after-qa LABEL, so it \
+counts against that QA. \
 A change to an open row: python3 "@HQ@/routine/review.py" reword LABEL '{"edits": [{"old": "...", "new": "..."}]}'. \
 The status block: python3 "@HQ@/status/set-status.py". The mail list: python3 "@HQ@/routine/handover.py" edit inbox.md \
 '{"edits": [{"old": "...", "new": "..."}]}'. A quick note: python3 "@HQ@/app/notes.py" add TEXT. A flag on a row comes \
@@ -828,7 +829,11 @@ one line each, and the cycle that keeps the log small never moves it. \
 HQ has already kept the new things you and any other agent on this call said about yourselves (H232), so add \
 every HQ/agents/*-about-herself.md that git shows as changed to the commit. Only if one is clearly missing, keep it \
 with python3 "@HQ@/app/about_self.py" add <her name> "<the fact, one short line>" (H132; it skips a repeat).
-2. The full transcript of the call is in {transcript}. Read it if you need to; don't change it.
+2. The full transcript of the call is in {transcript}. Read it if you need to; don't change it. Every time @USER@ corrected you or \
+another agent on this call (you got it wrong, did what he didn't ask, kept asking, just agreed), put it on the ledger, one command \
+per correction, with his exact words: python3 "@HQ@/routine/mistakes.py" add correction --call {transcript} --said "HIS WORDS" \
+(add --handoff "X to Y" when it was a hand-off between two of you, --item LABEL when it's about one item). The program checks the \
+quote and takes the agent from the transcript; a line it already has stays one line. Praise or a plain "no" to a question isn't a correction.
 3. Then commit and push, as CLAUDE.md says: git add every file you changed plus the transcript, \
 each by name (never -A or a dot), then one plain command: git commit -q -m "Call {start_short}: <a short description>", then git push. \
 One line per command, no here-documents.

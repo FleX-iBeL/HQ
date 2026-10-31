@@ -1253,12 +1253,12 @@ def initiative_facts(now: float | None = None) -> str:
     return "\n".join(lines)
 
 
-def _spawn(why: str, facts: str) -> None:
+def _spawn(why: str, facts: str, item: str | None = None) -> None:
     py = ROOT / ".venv" / "bin" / "python"
     log = ROOT / "scratch" / "direct-line.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     cmd = [str(py) if py.exists() else sys.executable, str(ROOT / "app" / "direct_line.py")]
-    cmd += ["initiative"] if why == "initiative" else ["ring", facts] if why == "ring" else ["text", why, facts]
+    cmd += ["initiative"] if why == "initiative" else ["ring", facts] if why == "ring" else ["text", why, facts] + (["--item", item] if item else [])
     subprocess.Popen(cmd, cwd=str(ROOT), stdout=open(log, "a"), stderr=subprocess.STDOUT, start_new_session=True)
 
 

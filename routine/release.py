@@ -294,6 +294,7 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
         return _undo(old_main, tag, committed=True) or r
     r = push.push_branch(push.WORK_BRANCH) or push.push_nightly(push.WORK_BRANCH, [])
     print(f"Released {v} ({tag}) on {push.RELEASE_BRANCH}; {push.NIGHTLY_BRANCH} and {push.WORK_BRANCH} have it too.")
+    on_the_record(old_main, tag, v)
     return r
 
 
@@ -390,7 +391,30 @@ def cmd_part(h: dict, today: dt.date | None = None) -> int:
     r = push.push_branch(push.WORK_BRANCH) or push.push_nightly(push.WORK_BRANCH, [])
     print(f"Released {v} ({tag}) on {push.RELEASE_BRANCH}, with the work that passed QA; what's held stays on "
           f"{push.WORK_BRANCH} and {push.NIGHTLY_BRANCH}.")
+    on_the_record(old_main, tag, v)
     return r
+
+
+def on_the_record(old_main: str, tag: str, v: str) -> list[str]:
+    """F103: which items this version took: the builds whose proof record stands on a commit in it (the id they carried), and the
+    rows named at the start of a commit's subject for work done by hand. Never a search through sentences."""
+    import proof
+    import trail
+    shas = out("log", "--format=%H", f"{old_main}..{tag}").split()
+    ids = {}
+    for sha in shas:
+        for label in qa.subject_labels(out("log", "-1", "--format=%s", sha)):
+            ids.setdefault(trail.resolve(label), sha)
+    try:
+        for name in os.listdir(proof.folder()):
+            rec = json.load(open(os.path.join(proof.folder(), name))) if name.endswith(".json") else {}
+            if rec.get("item") and rec.get("head") in shas:
+                ids.setdefault(rec["item"], rec["head"])
+    except (OSError, ValueError):
+        pass
+    for item, sha in ids.items():
+        trail.step(item, "release", version=v, tag=tag, commit=sha[:12])
+    return [i for i in ids if i]
 
 
 def _undo(old_main: str, tag: str, committed: bool) -> int:

@@ -1221,11 +1221,11 @@ def usage_overrun(job, s):
            f"and a call takes it off the list (jobs.py stop {n})")
     status("STOPPED", f"Job {n} paused: it used about four times the top of its estimated usage", f"job {n} {why}")
     incidents.past("jobs", time.time(), time.time(), f"Job {n} {why}",
-                   [(time.time(), "Ended its chat; it stops for good, and Moneypenny told him")])
+                   [(time.time(), "Ended its chat; it stops for good, and Moneypenny told him")], item=(job.get("item") or {}).get("id"))
     log(f"job {n} paused: {why}")
     try:
         import pings
-        pings._spawn("paused", usagecost.paused_words(n, job.get("text", ""), o))
+        pings._spawn("paused", usagecost.paused_words(n, job.get("text", ""), o), (job.get("item") or {}).get("id"))
     except Exception as e:
         log(f"the text about the paused job: {e!r}")
     return True
@@ -1349,6 +1349,25 @@ def guarded(key, fn, every=60):
     return r
 
 
+MISTAKES_EVERY = 5  # F103: minutes between the ledger's own passes; a call's lines are in at its end, a text's within this
+
+
+def mistakes_minute():
+    """F103: the ledger's own pass on the main (what's new in the transcripts and the threads), and each agent's weekly score,
+    whatever the agents' switch says. Both no model."""
+    try:
+        import cycles
+        import mistakes
+        got = mistakes.sweep()
+        if got:
+            log(f"the ledger: {len(got)} new")
+        cycles.write_scores(log=log)
+        routines.good("mistakes", "The ledger is up to date", every=300)
+    except Exception as e:
+        log(f"the ledger: {e!r}")
+        routines.bad("mistakes", f"The ledger's pass failed: {e!r}", every=300)
+
+
 def save_minute():
     """F102: every workspace file left unsaved for ten minutes committed by the main itself."""
     import saver
@@ -1450,6 +1469,7 @@ def direct_watch():
             import estimate
             if estimate.friday_due():
                 direct_line.text("estimates", estimate.friday_report())
+                estimate.friday_sent()  # F103: only after the text went
                 log("direct line: the Friday report on the estimates")
         except Exception as e:
             log(f"the Friday estimates report: {e!r}")
@@ -1567,6 +1587,8 @@ def tick():
         return
     if not hqpaths.under_test() or os.environ.get("HQ_SAVE_QUIET"):
         save_minute()
+    if (not hqpaths.under_test() and int(time.time() / 60) % MISTAKES_EVERY == 0) or os.environ.get("HQ_MISTAKES_MINUTE"):
+        mistakes_minute()
     try:
         log_move()
     except Exception as e:
@@ -1649,7 +1671,7 @@ def tick():
             jobs("mark", str(n), "ended " + time.strftime("%H:%M") + " without a done mark")
             clear()
             incidents.past("jobs", time.time(), time.time(), f"Job {n}'s chat closed before it said it was done",
-                           [(time.time(), "Marked it as ended, so the next job can start")])
+                           [(time.time(), "Marked it as ended, so the next job can start")], item=(job.get("item") or {}).get("id"))
             status("STOPPED", f"Job {n} ended without saying it was done",
                    f"job {n}: its chat closed before it said done; check the Terminal window or the log")
             log(f"job {n} ended without a done mark")

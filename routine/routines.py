@@ -66,12 +66,12 @@ def good(key, text="Ran fine", every=60):
         incidents.up(key)
 
 
-def bad(key, what, every=60):
-    """F102: a part that failed: its line red and an incident, whatever else keeps running."""
+def bad(key, what, every=60, item=None):
+    """F102: a part that failed: its line red and an incident, whatever else keeps running. F103: item, the id of the work it hit."""
     if _real():
         import incidents
         beat(key, state="down", text=str(what)[:200], last=time.time(), every=every, why=str(what)[:200])
-        incidents.down(key, str(what)[:300])
+        incidents.down(key, str(what)[:300], **({"item": item} if item else {}))
 
 
 def drop(prefix, keep=()):

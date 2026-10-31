@@ -18,8 +18,9 @@ a new job goes at the bottom, and "move" changes its place. The job numbers neve
 usage (from the workspace):
   python3 "routine/jobs.py" done N [--at HH:MM] [--said "HIS WORDS"]   F101: refused while a note is unread, and for a build
                                                            without a green record (routine/proof.py run N), unless his own words say so
-  python3 "routine/jobs.py" write-row "THE ROW" [--bug]     F99: a new row on the planning, no job (a call's way in)
-  python3 "routine/jobs.py" add "TEXT" [--past-the-line] [--kind K] [--guess MINUTES] [--not-ready --said "HIS WORDS"]   a call's let's go: the
+  python3 "routine/jobs.py" write-row "THE ROW" [--bug] [--after-qa LABEL]   F99: a new row on the planning, no job (a call's way in);
+                                                           F103: --after-qa names the row whose QA passed before this bug was found
+  python3 "routine/jobs.py" add "TEXT" [--item ID|LABEL] [--past-the-line] [--kind K] [--guess MINUTES] [--not-ready --said "HIS WORDS"]   a call's let's go: the
                                                            job is ready; K (small, bigbuild, research, transcribe, release, other; H220) sets
                                                            the kind for its estimate instead of the guess (H70);
                                                            MINUTES is the call's own guess (H190), kept apart from the
@@ -124,8 +125,8 @@ FAST_RE = re.compile(r"every 15 minutes from (\d{4}-\d\d-\d\d \d\d:\d\d(?:[+-]\d
 # F100: and his say-so for a build in his day hours, with who and when: " ⟪sayso 2026-10-31 14:02 · who⟫ HIS WORDS".
 NOTE = re.compile(r" ⟪note (\d{4}-\d\d-\d\d \d\d:\d\d)(?: · read (\d\d:\d\d))?⟫ (.*?)(?= ⟪(?:note|now|redone|sayso) |$)")
 NOTE_START = " ⟪note "
-MARK = re.compile(r" ⟪(note|now|redone|sayso) ([^⟫]*)⟫ (.*?)(?= ⟪(?:note|now|redone|sayso) |$)")
-MARK_START = re.compile(r" ⟪(?:note|now|redone|sayso) ")
+MARK = re.compile(r" ⟪(note|now|redone|sayso|item) ([^⟫]*)⟫ (.*?)(?= ⟪(?:note|now|redone|sayso|item) |$)")
+MARK_START = re.compile(r" ⟪(?:note|now|redone|sayso|item) ")
 REDONE = re.compile(r"(\d\d:\d\d) · (\d+) min · was (\d+) min$")
 
 
@@ -161,6 +162,31 @@ def sayso_of(rest):
     return None
 
 
+def item_of(rest):
+    """F103: the id a job's line holds: {"id", "label"} or None."""
+    m0 = MARK_START.search(rest)
+    for m in MARK.finditer(rest[m0.start():]) if m0 else ():
+        if m.group(1) == "item":
+            return {"id": m.group(2), "label": m.group(3)}
+    return None
+
+
+def carry(j, item=None):
+    """F103: a job gets its item's id once, when it's made: from the argument, else the row its text starts from, the one place a
+    sentence is still read, by the old wording. After this the id is what's carried."""
+    if j.get("item"):
+        return j["item"]
+    import trail
+    if not item:
+        import qa
+        item = qa.job_label(j["text"])
+    got = trail.resolve(item)
+    if got:
+        j["item"] = {"id": got, "label": trail.label_of(got) or ""}
+        trail.step(got, "job", job=j["n"], state="added")
+    return j.get("item")
+
+
 def split_notes(rest):
     """(text, notes) from what follows "agreed …· " on a job's line."""
     body, notes, _, _ = split_marks(rest)
@@ -182,6 +208,8 @@ def notes_text(j):
     if j.get("sayso"):  # F100
         s = j["sayso"]
         out += f" ⟪sayso {s['at']} · {s['who']}⟫ {s['words']}"
+    if j.get("item"):  # F103: the item's id, carried, never read from a sentence
+        out += f" ⟪item {j['item']['id']}⟫ {j['item']['label']}"
     return out + "".join(f"{NOTE_START}{x['at']}{' · read ' + x['read'] if x.get('read') else ''}⟫ {x['text']}"
                          for x in j.get("notes") or [])
 
@@ -234,7 +262,7 @@ def read():
                 body, notes, doing, redone = split_marks(m.group(4))
                 jobs.append({"n": int(m.group(1)), "state": state[: -len(PAST)] if past else state,
                              "past": past, "agreed": m.group(3), "text": body, "notes": notes,
-                             "now": doing, "redone": redone, "sayso": sayso_of(m.group(4))})
+                             "now": doing, "redone": redone, "sayso": sayso_of(m.group(4)), "item": item_of(m.group(4))})
             elif l.startswith("**Routine:**"):
                 on = "off" not in l.lower() and "paused" not in l.lower()
                 p = re.match(r"\*\*Routine:\*\* paused since (.*)$", l)
@@ -321,6 +349,8 @@ def roadmap_row(text, said, bug=False):
     label = f"{letter}{n}"
     lines.insert(at + 1, f"| ⬜ | {label} {title} | {when}, typed: \"{said}\" [Added on the status page, no call; "
                          f"the title is the first sentence.] | {said} | |")
+    import trail
+    trail.written(label, said)  # F103: the id is given here, when the item is written
     return text[:head] + "\n".join(lines) + text[end:], label
 
 
@@ -646,12 +676,24 @@ def main(argv):
             # F99: a call's way to put a new row on the planning, nothing more: the file itself is refused, and no job
             # is made (a row goes to the team only when it's ready, rules 13).
             bug = "--bug" in args
+            after = None  # F103: a bug found after a QA pass is written against that QA: the row it escaped, as an argument
+            if "--after-qa" in args:
+                i = args.index("--after-qa")
+                after = (args[i + 1] if i + 1 < len(args) else "").upper()
+                args = args[:i] + args[i + 2:]
             said = one_line(" ".join(a for a in args if a != "--bug")).replace("|", "/")
             if not said:
                 sys.exit("What goes on the planning? Write it in a line or two.")
+            if after:
+                import qa
+                no = qa.why_no_bug_after(after, text)
+                if no:
+                    sys.exit(f"Refused: {no} Nothing written.")
             text, label = roadmap_row(text, said, bug)
             write(text, jobs, on)
             print(f"{label} is on the planning.")
+            if after:
+                print(qa.bug_after_qa(after, said, found_in=label) or f"On the ledger against {after}'s QA.")
             return
         if cmd == "add-row":
             # H160: work added on the status page, without a call. Roadmap first stays the rule (rules 13): it gets its own
@@ -680,7 +722,7 @@ def main(argv):
             cmd = "add"
             args = [f"{label} on the HQ roadmap, added on the status page: {said.replace('·', '-').rstrip('.')}. "
                     f"Read the {label} row. Pull dev first, privacy check, push to dev with push.py, "
-                    f"write the result in the {label} row."] + extra
+                    f"write the result in the {label} row.", "--item", label] + extra
             print(f"{label} is on the roadmap.")
         if cmd == "send-row":
             # H182: an item on the roadmap, sparred on a call before, goes to the team from the status page. Only an open
@@ -703,12 +745,18 @@ def main(argv):
             cmd = "add"
             args = [f"{label} on the HQ roadmap, sent to the team from the status page: {title}. Read the {label} row "
                     f"and do what it says. Pull dev first, privacy check, push to dev with push.py, "
-                    f"write the result in the {label} row.", "--kind", est_.kind_of(line), *keep]
+                    f"write the result in the {label} row.", "--item", label, "--kind", est_.kind_of(line), *keep]
         if cmd == "add":
             past = "--past-the-line" in args
             say_so = "--not-ready" in args  # H272: his explicit say-so for a row without the Ready mark
             at_once = "--now" in args  # F100: a build in his day hours, only on his own say-so
             words = [a for a in args if a not in ("--past-the-line", "--not-ready", "--now")]
+            item = None  # F103: the item this job is for, as an argument: its id or its label
+            for i, a in enumerate(words):
+                if a == "--item" or a.startswith("--item="):
+                    item = a.split("=", 1)[1] if "=" in a else (words[i + 1] if i + 1 < len(words) else "")
+                    words = words[:i] + words[i + (1 if "=" in a else 2):]
+                    break
             his = None  # F99: --said "his words", the quote behind a --not-ready
             for i, a in enumerate(words):
                 if a == "--said" or a.startswith("--said="):
@@ -743,6 +791,7 @@ def main(argv):
             n = max([j["n"] for j in jobs] + [0]) + 1
             j = {"n": n, "state": "ready", "past": past, "agreed": time.strftime("%Y-%m-%d %H:%M"),
                  "text": one_line(said).replace("·", "-")}
+            carry(j, item)
             if at_once:
                 j["sayso"] = sayso(n, his)
                 if not j["sayso"]:
@@ -770,7 +819,9 @@ def main(argv):
             if no:
                 after = f" It waits: {no}."
             if e:
-                after += f" Estimate: about {e['est']} min" + (f", the call guessed {guess} min" if guess else "") + "."
+                import estimate as est_
+                after += (f" Estimate: about {e['est']} min, from {est_.based_words(e.get('based'))}"
+                          + (f", the call guessed {guess} min" if guess else "") + ".")  # F103
             if looks:
                 after += " A first look at it is on its way."
             print(f"Job {n} is ready.{after}")
@@ -1104,6 +1155,7 @@ def main(argv):
                     if not (his and sp_.his_quote(his)):
                         sys.exit(f"Refused: {no} The job stays open.")
                     proof.keep_say_so(j, his)
+                carry(j)
             # H187: an update that ended the job's chat holds it with its own reason (held N an update ...).
             why = one_line(" ".join(args[1:])).replace("·", "-") if cmd == "held" else ""
             j["state"] = f"done {now}" if cmd == "done" else f"held: {why or 'usage over the line'}"
@@ -1142,6 +1194,11 @@ def main(argv):
                 r = estimate("on_done", j["n"], j["text"], m.group(1) if m else None, at_epoch)
                 if r:
                     print(f"Took {r['actual']} min" + (f"; the estimate was {r['est']} min." if r.get("est") else "."))
+                if j.get("item"):  # F103: what it built, the id's next step
+                    import proof, trail
+                    rec = proof.load(j["n"]) or {}
+                    trail.step(j["item"]["id"], "job", job=j["n"], state="done", commit=(rec.get("head") or "")[:12],
+                               minutes=(r or {}).get("actual"), turns=(r or {}).get("turns"))
             return
         if cmd == "crashed":
             # H62: the Mac went down while job N ran. It ends by a crash and runs again from the top of the
