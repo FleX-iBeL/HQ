@@ -21,7 +21,7 @@ import hqpaths  # noqa: E402
 
 QUIET = 600        # his ten minutes: "workspace files left unsaved for ten minutes"
 MOST = 300         # files in one commit; the rest next minute
-SKIP_END = (".tmp", ".lock", ".here.jsonl", ".swp", "~")
+SKIP_END = (".tmp", ".lock", ".here.jsonl", ".here.md", ".swp", "~")
 SKIP_NAME = (".DS_Store", ".stfolder", ".stignore", "Thumbs.db")
 GITLOCK = os.path.join(HERE, "gitlock.py")
 

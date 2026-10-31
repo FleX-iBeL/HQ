@@ -330,7 +330,9 @@ def tag_once(log=None):
     """By itself, once on each computer (tick.py): the computer that pulls this code tags its own past jobs."""
     if os.path.exists(PLAN_TAGGED):
         return None
-    n = tag_past()
+    import jobs as q
+    with q.locked():  # a job's done mark writes the same file
+        n = tag_past()
     os.makedirs(DIR, exist_ok=True)
     open(PLAN_TAGGED, "w").write(f"{int(_now())} {n}\n")
     if log and n:
