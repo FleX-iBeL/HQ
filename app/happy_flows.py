@@ -6799,7 +6799,7 @@ print(json.dumps(o))
         need("job_need(job)" in (jv / "routine/tick.py").read_text() and "usage_overrun(job, s)" in (jv / "routine/tick.py").read_text()
              and "backfill_once" in (jv / "routine/tick.py").read_text(), "H172: the routine doesn't use the usage estimate, the pause or the backfill")
         page72 = (jv / "status/index.html").read_text()
-        need("etaCost(e.cost)" in page72 and "USAGE_START" in page72 and "/^paused/.test(j.state) ? 'parked'" in page72,
+        need("etaCost(e.cost)" in page72 and "USAGE_START" in page72 and "/^(paused|boxed)/.test(j.state) ? 'parked'" in page72,
              "H172: the status page doesn't show the usage next to the time, when it starts, or a paused job")
         need("H172" in config.VOICE_RULES and "resume N" in config.VOICE_RULES, "H172: the call rules don't say the usage estimate or resume")
         pol72 = Policy(config.FOLDER)
