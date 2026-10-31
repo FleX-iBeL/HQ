@@ -95,6 +95,8 @@ def after_run(ok: bool, incidents, routines, log=print) -> list[str]:
     incident. Returns what was wrong."""
     b = _before()
     if not os.path.exists(b):
+        if ok:
+            open(_ok_file(), "w").write(str(int(time.time())))
         return []
     with hqlock.locked(path()):
         try:

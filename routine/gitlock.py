@@ -74,6 +74,8 @@ def _tell(down, why=""):
 
 
 def push():
+    if not _quiet("remote").stdout.strip():  # a workspace with no GitHub: nothing to push to, nothing wrong
+        return 0
     r = _quiet("push", "-q")
     if r.returncode == 0:
         _tell(False)

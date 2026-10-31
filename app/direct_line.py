@@ -908,9 +908,12 @@ def asleep(t: float | None = None) -> bool:
     """He's asleep now (pings._asleep: his calendar's Sleep block, else the night hours). A test says so itself."""
     if hqpaths.under_test():
         return os.environ.get("HQ_ASLEEP") == "1"
-    sys.path.insert(0, str(ROOT / "routine"))
-    import pings as _pings
-    return _pings._asleep(t or time.time())
+    try:
+        sys.path.insert(0, str(ROOT / "routine"))
+        import pings as _pings
+        return _pings._asleep(t or time.time())
+    except Exception:
+        return False
 
 
 def can_wait(why: str, facts: str) -> str:

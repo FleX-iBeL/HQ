@@ -407,10 +407,18 @@ def parked(j):
     return j["state"].startswith(("paused", "boxed"))
 
 
+_PAUSE_SEEN = {}
+
+
 def is_paused():
-    """F100: is everything paused? For what starts Claude outside the queue (the reviewer, the first looks)."""
+    """F100: is everything paused? For what starts Claude outside the queue (the reviewer, the first looks). Read again
+    only when the roadmap changed: the reviewer asks for every row."""
     try:
-        return bool(re.search(r"^\*\*Routine:\*\* paused\b", open(ROADMAP, encoding="utf8").read(), re.M))
+        st = os.stat(ROADMAP)
+        key = (st.st_mtime_ns, st.st_size)
+        if _PAUSE_SEEN.get("key") != key:
+            _PAUSE_SEEN.update(key=key, on=bool(re.search(r"^\*\*Routine:\*\* paused\b", open(ROADMAP, encoding="utf8").read(), re.M)))
+        return _PAUSE_SEEN["on"]
     except OSError:
         return False
 
