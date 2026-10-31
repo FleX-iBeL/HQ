@@ -40,13 +40,15 @@ something on his calendar. `own_life` also no longer counts a sentence that plan
 already on a list; the lines themselves are his to take off. Fix round of F98 (31 October 2026, QA found 21 of his 48
 real lines of 29 October kept through `add`, which has no transcript to hold them against): `refused` also takes his
 own words (`his_words`, his lines as sprint.his_lines reads them, a turned "I" or "she" included) and whatever doesn't
-read as a line about her (`not_about_her`: a question, a reply, an order).
+read as a line about her (`not_about_her`: a question, a reply, an order). And an ordinary word with a capital in one
+of his titles ("Small", "Session", "I'm") no longer counts as a name, so her own life isn't refused for it.
 """
 from __future__ import annotations
 
 import os
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 MOST = 40  # facts kept per agent, the newest; Claude's choice
@@ -179,6 +181,7 @@ _ORDER = re.compile(r"^(?:let'?s|lets|can you|could you|would you|will you|shoul
                     r"run|push|send|remove|update|change|make|give|tell|show|put|move)\b")
 _MARKS = re.compile(r"(?:\s*\*\([^)]*\)\*)+\s*$")  # a transcript's *(typed)* and *(cut in)*
 _KEPT_DAY = re.compile(r"\s*\(\d{1,2} [A-Z][a-z]{2}\)$")  # the day the harvest keeps a fact with
+NAME_SHARE = 3  # a word from a title is a name when it's written with a capital at least this many times for each small one
 HIS_RUN = 3  # this many words in a row, in his order, are his words; fewer only when they're the whole of a line of his
 _CLIPPED = {"m", "s", "ve", "ll", "d", "re"}  # what's left of i'm, she's, i've once the punctuation is gone
 
@@ -201,7 +204,7 @@ def plans_a_day(text: str) -> bool:
 def _life_names(folder: Path) -> tuple[set[str], set[str]]:
     """F98: what names his world in this workspace: (names, calendar words). Names are his own name, the names and
     private words in me.md, and every name inside his calendar and to-do titles (a capital that isn't the title's first
-    word). Calendar words are the content words of his calendar's titles. Read fresh; nothing of it is kept or in HQ's code."""
+    word, on a word hardly ever written small in his to-do list, his calendar and his own writing). Calendar words are the content words of his calendar's titles. Read fresh; nothing of it is kept or in HQ's code."""
     import json
     names: set[str] = set()
     try:
@@ -213,21 +216,34 @@ def _life_names(folder: Path) -> tuple[set[str], set[str]]:
         pass
     titles: list[str] = []
     calendar: list[str] = []
+    todo = ""
     try:
         d = json.loads((folder / "HQ" / "calendar.json").read_text(encoding="utf8"))
         calendar = [str(e.get("title") or "") for e in d.get("events") or [] if isinstance(e, dict)]
     except (OSError, ValueError, AttributeError):
         pass
     try:
-        for line in (folder / "challenges.md").read_text(encoding="utf8").splitlines():
+        todo = (folder / "challenges.md").read_text(encoding="utf8")
+        for line in todo.splitlines():
             m2 = re.match(r"^\|\s*([^|]+?)\s*\|", line)
             if m2 and not re.fullmatch(r"[-: ]+", m2.group(1)):
                 titles.append(m2.group(1))
     except OSError:
         pass
+    said = todo + "\n" + "\n".join(set(calendar))  # a weekly appointment counts once
+    for rel in ("current-situation.md", "map.md", "my-answers.md"):  # enough of his own writing to tell the two apart
+        try:
+            said += "\n" + (folder / rel).read_text(encoding="utf8")
+        except OSError:
+            pass
+    small = Counter(re.findall(r"(?<![\w'-])[a-z][\w-]+", said))
+    capital = Counter(re.findall(r"(?<=[\w,)] )[A-Z][\w-]+", said))
     for t in titles + calendar:
         for w in re.findall(r"[^\W\d_][\w'-]+", t)[1:]:
-            if w[0].isupper() and len(w) > 2 and not w.isupper():
+            w = w.split("'")[0]  # Sam's is Sam, I'm is no name
+            # Fix round of F98: a capital in a title only makes a name when the word is hardly ever written small: "Small"
+            # or "Session" in a title is an ordinary word, a name typed small now and then stays a name.
+            if w[0].isupper() and len(w) > 2 and not w.isupper() and small[w.lower()] * NAME_SHARE <= capital[w]:
                 names.add(w)
     days = {d.capitalize() for d in "monday tuesday wednesday thursday friday saturday sunday".split()}
     months = {m3.capitalize() for m3 in "january february march april may june july august september october november december".split()}

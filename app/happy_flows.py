@@ -14220,13 +14220,18 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         look that hands them all back as hers: nothing is kept. add refuses the same lines, her own life still passes,
         and `check` names what's already on a list without changing it. Fix round: his own typed lines (a question, a
         reply, an order, a plain statement, on a call, in a text or a quick note, a turned "I" too) go through neither way,
-        and a question, a reply or an order is refused even when he never said it."""
+        and a question, a reply or an order is refused even when he never said it. An ordinary word with a capital in a
+        title isn't a name, a name typed small once stays one."""
         import subprocess as _sp
         ws, env = self._h298_ws("f98")
         (ws / "HQ").mkdir(exist_ok=True)
         (ws / "HQ/calendar.json").write_text(json.dumps({"events": [
-            {"title": "Lunch at the office"}, {"title": "Physio with Marlies"}, {"title": "Tuesday biking to Gouda"}]}))
-        (ws / "challenges.md").write_text("# Challenges\n\n## 1. Important\n\n| Challenge | Type |\n|---|---|\n| Call the Vandenberg notary | passive |\n")
+            {"title": "Lunch at the office"}, {"title": "Physio with Marlies"}, {"title": "Tuesday biking to Gouda"}]
+            + [{"title": "Reading about the Single Market"}] * 4}))
+        (ws / "challenges.md").write_text("# Challenges\n\n## 1. Important\n\n| Challenge | Type |\n|---|---|\n| Call the Vandenberg notary | passive |\n"
+                                          "| Plan the Daily Session with the Small Team | passive |\n| Ask what I'm owed | passive |\n| Visit Joost's brother | passive |\n\n"
+                                          "A small note: the daily session was small, a small room for a session. A single market stall. "
+                                          "See Marlies, ask Marlies, tell Marlies, marlies typed small once.\n")
         (ws / "me.md").write_text((ws / "me.md").read_text().replace("**Private words:**", "**Private words:** Zeewolde,", 1))
         (ws / "HQ/calls").mkdir(exist_ok=True)
         call = ws / "HQ/calls/2026-01-09-1000.md"
@@ -14282,9 +14287,13 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         r = add("goes running on Sundays")
         need(r.returncode == 0, f"a day of her own is refused: {r.stderr}")
         for line in ["I have a chair by the window that squeaks", "No longer takes sugar in her tea", "Good at crosswords, bad at small talk",
-                     "What she misses most is the sea", "Prefers thick paper for her letters", "takes the bus to the station and reads"]:
+                     "What she misses most is the sea", "Prefers thick paper for her letters", "takes the bus to the station and reads",
+                     "keeps a small fern on the windowsill", "Has a daily session of sudoku", "I'm a morning person", "has a single goldfish"]:
             r = add(line)
             need(r.returncode == 0 and "kept" in r.stdout, f"her own life is refused: {line!r}: {r.stdout} {r.stderr}")
+        for line in ["visits Marlies after work", "sends Marlies's letters on", "plays cards with Joost"]:
+            r = add(line)
+            need(r.returncode == 1 and "from his own life" in r.stderr, f"a name stopped counting: {line!r}: {r.stdout} {r.stderr}")
         lst.write_text(lst.read_text() + "- has lunch at home on Tuesdays (29 Oct)\n")
         before = lst.read_text()
         r = _sp.run([sys.executable, str(APP / "about_self.py"), "check"], capture_output=True, text=True, env=env, cwd=str(ROOT))
