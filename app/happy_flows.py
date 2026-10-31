@@ -9828,16 +9828,18 @@ setTimeout(() => {
     def _sprint_lay_env(self, tag, weekly=10.0, fixed=None):
         """H269, piece 2: the made-up planning with two more rows, no queue and no planned items of its own, a made-up
         reading (the 5-hour empty, the weekly at `weekly`, its reset five days on), a clock at Monday 26 October 12:00
-        and a room of one hour a night (22:00 to 23:00), so four rows of about 15 minutes fill a night."""
+        and a room of two hours a night (22:00 to midnight), so four rows of about 15 minutes, 30 at their latest, fit by
+        the clock and the 5-hour line decides."""
         import datetime as _dt
         rm, env = self._sprint_env(tag)
         t = rm.read_text()
         t = "\n".join(l for l in t.split("\n") if not l.startswith(("- Job ", "- Item ")))
         t = t.replace("| ⬜ | H9004 A made-up export", "| ⬜ | H9006 A made-up sixth row | Something | | |\n"
                       "| ⬜ | H9007 A made-up seventh row | Something else | | |\n| ⬜ | H9004 A made-up export")
-        t = t.replace("**5-hour line: fixed.**", "**5-hour line: moving.**")  # not this computer's live setting
-        if fixed is not None:
-            t = re.sub(r"\*\*Weekly line: [^*]*\*\*", f"**Weekly line: fixed at {fixed}%.**", t)
+        # Not this computer's live settings: a routine that's off plans no usage at all, so the room would never show.
+        t = t.replace("**Routine:** off", "**Routine:** on")
+        t = re.sub(r"\*\*5-hour line: [^*]*\*\*", "**5-hour line: moving.**", t)
+        t = re.sub(r"\*\*Weekly line: [^*]*\*\*", "**Weekly line: moving.**" if fixed is None else f"**Weekly line: fixed at {fixed}%.**", t)
         rm.write_text(t)
         now = _dt.datetime(2026, 10, 26, 12, 0).timestamp()
         iso = lambda x: _dt.datetime.fromtimestamp(x, _dt.timezone.utc).isoformat().replace("+00:00", "Z")  # noqa: E731
@@ -9845,14 +9847,14 @@ setTimeout(() => {
         u.write_text(json.dumps({"readable": True, "limits": [
             {"label": "5-hour limit", "percent": 0, "resetsAt": iso(now + 3600)},
             {"label": "Weekly · all models", "percent": weekly, "resetsAt": iso(now + 5 * 86400)}]}))
-        env.update({"HQ_LOOK": "0", "HQ_USAGE": str(u), "HQ_SPRINT_NOW": str(int(now)), "HQ_SPRINT_ROOM": "22-0"})  # F66: two hours, so four rows fit at their latest end (30 each with no history)
+        env.update({"HQ_LOOK": "0", "HQ_USAGE": str(u), "HQ_SPRINT_NOW": str(int(now)), "HQ_SPRINT_ROOM": "22-0"})  # F66: two hours, so four rows fit by the clock at their latest end (30 each with no history)
         return rm, env, now
 
     async def flow145(self) -> str:
         """H269, piece 2: the sprint view's layout (sprint.py lay, what the status page and a call show). No Claude turns.
         Ticked rows fall into the nights in rank order (ranked first, then the roadmap's order), each starting when the
         one before is done, with when it should be done and its share of the 5-hour and weekly; a night that's full sends
-        the next row to the next night (four in Monday's, the fifth on Tuesday); a later night picked starts there; no line
+        the next row to the next night (two in Monday's, the third meeting the 5-hour reset at 23:00, the rest on Tuesday); a later night picked starts there; no line
         while everything fits; with the weekly room nearly gone, a line where it runs out, the rows after it waiting for
         the weekly reset. A row that isn't open, or is with the team, is left out and said."""
         import json as js
@@ -9915,7 +9917,7 @@ setTimeout(() => {
         page = (ROOT / "status" / "index.html").read_text()
         need("function drawSprint(P)" in page and "/api/sprint?rows=" in page and "sprint-line" in page and "'Plan the sprint'" in page,
              "H269: the status page has no sprint view")
-        return "ticked rows in rank order over the nights (four Monday, the fifth Tuesday), times and shares, a later night, the line where the weekly room runs out, rows with the team left out"
+        return "ticked rows in rank order over the nights (two Monday, the 5-hour reset sending the rest to Tuesday), times and shares, a later night, the line where the weekly room runs out, rows with the team left out"
 
     async def flow146(self) -> str:
         """H269, piece 2: Plan the sprint. No Claude turns. sprint.py plan puts the ticked rows on the schedule for the
@@ -12797,8 +12799,12 @@ window.fetch = async (url, opt) => {
                 need(all(n in FLOWS and not FLOWS[n][1] for n in nums), f"{name} names a flow that isn't a quick flow")
             need(set(fs.LINUX_FLOWS.split(",")) <= set(fs.LINUX_NIGHTLY.split(",")),
                  "the nightly leaves out a flow the installer runs on Linux")
-            want = ["--quick"] if sys.platform == "darwin" else ["--quick", "--only", fs.LINUX_NIGHTLY]
+            # F101: the night is every quick flow, on Linux all but those marked Mac-only, so a new flow joins by itself
+            want = ["--quick"] if sys.platform == "darwin" else ["--quick", "--skip", fs.MAC_ONLY]
             need(ni.flow_args() == want, f"the nightly runs {ni.flow_args()} here, not {want}")
+            need(all(int(x) in FLOWS for x in fs.MAC_ONLY.split(",")), "MAC_ONLY names a flow that doesn't exist")
+            need(not set(fs.LINUX_FLOWS.split(",")) & set(fs.MAC_ONLY.split(",")),
+                 "the nightly leaves out a flow the installer runs on Linux")
             # reading a run's result
             out = ("\n== Result\n  8  waiting lines   PASS  1 s\n 45  scheduler  FAIL  3 s\n       8: ok\n"
                    "      45: FAILED - the repeat wasn't planned\n\n1 of 2 passed · 0 Claude turns · 4 s\n")
@@ -15543,8 +15549,13 @@ print("RESULT " + json.dumps(out))
         drive("tick")
         it = re.search(r"^- Item (\d+) · waiting, every thursday, priority · .* · Agent cycle: pepper, bigger session$", rm.read_text(), re.M)
         need(it and sched("move", it.group(1), "now").returncode == 0 and "became job" in sched("promote").stdout, "Pepper's session didn't become a job")
+        # A Thursday still to come, 22:30, whatever day and hour the run is: the Friday morning after it must lie ahead
+        # (schedule.py refuses a time gone by), with the job as planned for that Thursday, as on a real Thursday night.
         thu = datetime.now()
-        thu = thu - timedelta(days=(thu.weekday() - 3) % 7)  # this week's Thursday, 22:30
+        thu = thu + timedelta(days=(3 - thu.weekday()) % 7 or 7)
+        rq.write_text(re.sub(r"^- Job \d+ · .*Agent cycle: pepper, bigger session$",
+                             lambda m: re.sub(r", planned for \w+ \d{1,2} \w+, \d{1,2}:\d\d:", thu.strftime(", planned for %A %d %B, 22:00:"), m.group(0), count=1),
+                             rq.read_text(), flags=re.M))
         g = drive("gatekeep", thu.strftime("%Y-%m-%d") + " 22:30")
         need(g["verdict"] == "skipped", f"Pepper at 22:30: {g}")
         led = (ws / "HQ/ledger/pepper.md").read_text()
@@ -15934,6 +15945,8 @@ tick.start(job); print(json.dumps(json.load(open(run + '/job-settings.json'))))
         text = ROADMAP.read_text()
         text = re.sub(r"\*\*Usage limit:\s*\d+%", "**Usage limit: 100%", text, count=1)
         text = re.sub(r"\*\*5-hour line:\s*moving", "**5-hour line: fixed", text, count=1)
+        text = re.sub(r"\*\*Weekly line: [^*]*\*\*", "**Weekly line: moving.**", text, count=1)
+        text = text.replace("**Routine:** off", "**Routine:** on")  # not this computer's live switch: off, no job counts as waiting on room
         rm.write_text(text)
         env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ESTIMATES": str(d / "est"), "HQ_USAGE": str(d / "usage.json"),
                "HQ_CARRYON": str(d / "carryon"), "HQ_CLAUDE_PROJECTS": str(d / "chats"),
