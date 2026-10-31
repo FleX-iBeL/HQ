@@ -1137,6 +1137,8 @@
       const etaUsed = (c) => (c ? `used ${etaPct(c.five ?? 0)} of the 5-hour and ${etaPct(c.weekly ?? 0)} of the week` : '');
       const etaAt = (t) => `${new Date(t * 1000).toDateString() === new Date().toDateString() ? '' : `${new Date(t * 1000).toLocaleDateString('en-GB', { weekday: 'short' })} `}${etaTime(t)}`;
       const USAGE_START = 'when the usage leaves room for it';
+      /** F100: why nothing starts: paused, or the routine is off. */
+      const offWords = (E) => (E?.paused ? 'everything is paused' : 'the routine is off');
       function etaWords(E, n) {
         const e = E?.jobs?.[n];
         if (!e) return '';
@@ -1154,7 +1156,7 @@
         if (e.never) s += ' · it doesn\'t fit under the usage lines as they\'re set (a fixed line), so no time';
         else if (e.eta) s += ` · done around ${etaAt(e.eta)}${e.eta_latest && e.eta_latest > e.eta + 30 ? `, at the latest ${etaAt(e.eta_latest)}` : ''}`;
         else if (e.waits === 'usage') s += ' · when it\'s done waits on the usage';
-        else if (e.waits === 'off') s += ' · the routine is off';
+        else if (e.waits === 'off') s += ` · ${offWords(E)}`;
         return `${s} (estimate)`;
       }
       /** H174 (H168): the team's own guess for a job, said quietly under the estimate; when it's taken in, says so.
@@ -1509,7 +1511,7 @@
         if (e.never) s += ' · it doesn\'t fit under the usage lines as they\'re set (a fixed line), so no time';
         else if (e.eta) s += `${e.usage_wait ? ` · starts around ${at(e.start)} ${USAGE_START}` : e.later ? ` · starts around ${at(e.start)}, after the work before it` : ''} · done around ${at(e.eta)}`;
         else if (e.waits === 'usage') s += ' · when it\'s done waits on the usage';
-        else if (e.waits === 'off') s += ' · the routine is off';
+        else if (e.waits === 'off') s += ` · ${offWords(E)}`;
         return `${s} (estimate)`;
       }
       function etaTotal(E) {
@@ -1518,7 +1520,7 @@
         // H174: the time and the 5-hour usage everything still takes, then when it's all done; what it counts is under the heading.
         const use = 'five' in t ? ` and ${etaPct(t.five)} of the 5-hour` : '';
         if (t.eta) return `about ${etaDur(t.minutes)}${use}, all done around ${etaTime(t.eta)}${t.eta_latest && t.eta_latest > t.eta + 30 ? `, at the latest ${etaAt(t.eta_latest)}` : ''} (computed estimate)`;
-        return `about ${etaDur(t.minutes)}${use} (computed estimate; ${t.waits === 'usage' ? 'waits on the usage' : 'the routine is off'})`;
+        return `about ${etaDur(t.minutes)}${use} (computed estimate; ${t.waits === 'usage' ? 'waits on the usage' : offWords(E)})`;
       }
       /** H107: all planned items together, the same way etaTotal does it for the job list. */
       function etaItemsTotal(E) {
@@ -1529,7 +1531,7 @@
           const d = x.toDateString() === new Date().toDateString() ? '' : `${x.toLocaleDateString('en-GB', { weekday: 'short' })} `;
           return `about ${etaDur(t.minutes)} of work${t.has_cost ? ` and ${etaPct(t.weekly)} of the week` : ''}, the last done around ${d}${etaTime(t.eta)} (computed estimate)`;
         }
-        return `about ${etaDur(t.minutes)} of work (computed estimate; ${t.waits === 'usage' ? 'waits on the usage' : 'the routine is off'})`;
+        return `about ${etaDur(t.minutes)} of work (computed estimate; ${t.waits === 'usage' ? 'waits on the usage' : offWords(E)})`;
       }
       function etaAccuracy(a) {
         if (!a?.count) return 'Estimates: none checked against a finished job yet. Each job that finishes teaches the next estimates.';
@@ -2252,7 +2254,7 @@
           // H61: the estimates, learned from how long earlier jobs really took (routine/estimate.py).
           const E = routines?.estimate ?? null;
           const total = etaTotal(E);
-          const counts = q.on ? `${of('running').length} running · ${of('waiting').length} waiting${of('parked').length ? ` · ${of('parked').length} parked` : ''}${total ? ` · ${total}` : ' · the routine looks every minute'}` : 'The routine is off';
+          const counts = q.on ? `${of('running').length} running · ${of('waiting').length} waiting${of('parked').length ? ` · ${of('parked').length} parked` : ''}${total ? ` · ${total}` : ' · the routine looks every minute'}` : q.paused ? 'Everything is paused' : 'The routine is off';
           const fold = foldPart('jobs', true, 'Jobs from calls', counts, false, q.on && total ? lateNote(E?.total) : '');
           const parts = el('div', 'parts');
           if (q.on && E?.total?.counts) parts.append(el('p', 'soft eta-counts', E.total.counts));  // H174: what the total counts

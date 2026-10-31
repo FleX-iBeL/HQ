@@ -98,7 +98,7 @@ SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "direct_line": os.path.join(os.path.dirname(HERE), "app", "direct_line.py"),  # H225, F58; the rest are routine/<script>.py
            "notes": os.path.join(os.path.dirname(HERE), "app", "notes.py"),  # F102
            "about_self": os.path.join(os.path.dirname(HERE), "app", "about_self.py")}  # F102
-PASS_ENV = ("HQ_PINGS_BY", "HQ_SAYSO")  # what a handed request may carry over to the main (who asked, for her notes)
+PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main (who asked, for her notes)
 
 # H203, in the user's words (call of 17 October 2026, 14:45): "i am even more confused, you give it to the server but
 # then also do it yourself? why?", then "ok, is there also other things you'd be better to hand over while that one

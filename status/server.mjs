@@ -8,6 +8,7 @@
 // It only listens on this MacBook (127.0.0.1), never on the network. The phone reaches it through
 // Tailscale serve (tailnet only), set up by status/phone.sh (H13).
 import { execFile, spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync, openSync } from 'node:fs';
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest } from 'node:http';
@@ -137,63 +138,77 @@ function hqControl(args) {
   });
 }
 
+// F102: /routines.json never waits on a slow script. These scripts take 2 to 25 seconds on a real planning, and each read after the
+// 20 seconds started its own run and waited for it, so every read in that stretch hung (a poller saw 8 and 25 seconds; flows 25
+// and 54 gave up after 5). Now one run at a time goes on in the background and a read gets the last answer at once. Only with
+// no answer yet does a read wait, FIRST_WAIT at most.
+const FIRST_WAIT = 4000;
+function kept(slot, ms, run) {
+  if (Date.now() - slot.at >= ms && !slot.busy) {
+    slot.busy = run().then((data) => {
+      if (data !== null) slot.data = data;  // a run that failed keeps the last good answer
+      slot.at = Date.now();
+      slot.busy = null;
+    });
+  }
+  if (slot.data !== null || !slot.busy) return Promise.resolve(slot.data);
+  return Promise.race([slot.busy.then(() => slot.data), new Promise((r) => { setTimeout(() => r(slot.data), FIRST_WAIT); })]);
+}
+
 // H61: how long the jobs should take, from routine/estimate.py (learned from how long earlier jobs took).
 // Asked at most every 20 seconds; the page polls every 3.
-let est = { at: 0, data: null };
+const est = { at: 0, data: null, busy: null };
 function estimates() {
-  if (Date.now() - est.at < 20000) return Promise.resolve(est.data);
-  return new Promise((resolve) => {
+  return kept(est, 20000, () => new Promise((resolve) => {
     execFile('/usr/bin/python3', [join(root, 'routine/estimate.py'), 'plan'], { timeout: 20000 }, (err, out) => {
       let data = null;
       try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
-      est = { at: Date.now(), data };
       resolve(data);
     });
-  });
+  }));
 }
 
 // H269: the planning's ranks and estimates, from routine/sprint.py; asked at most every 20 seconds, like the estimates.
-let sprintPlan = { at: 0, data: null };
+const sprintPlan = { at: 0, data: null, busy: null };
 function sprint() {
-  if (Date.now() - sprintPlan.at < 20000) return Promise.resolve(sprintPlan.data);
-  return new Promise((resolve) => {
+  return kept(sprintPlan, 20000, () => new Promise((resolve) => {
     execFile('/usr/bin/python3', [join(root, 'routine/sprint.py'), 'json'], { timeout: 30000 }, (err, out) => {
       let data = null;
       try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
-      sprintPlan = { at: Date.now(), data };
       resolve(data);
     });
-  });
+  }));
 }
 
 // H298, piece 7: the Friday screen of the agents running themselves (routine/cycles.py friday --json): three lines
 // per agent (what she picked, what moved on her score, what she escalated or let go) and her share used against her
 // line; asked at most every 20 seconds. Off (the switch) it answers {on: false} and the page shows nothing.
-let agentsFriday = { at: 0, data: null };
+const agentsFriday = { at: 0, data: null, busy: null };
 function cyclesFriday() {
-  if (Date.now() - agentsFriday.at < 20000) return Promise.resolve(agentsFriday.data);
-  return new Promise((resolve) => {
+  return kept(agentsFriday, 20000, () => new Promise((resolve) => {
     execFile('/usr/bin/python3', [join(root, 'routine/cycles.py'), 'friday', '--json'], { timeout: 30000, cwd: root }, (err, out) => {
       let data = null;
       try { data = JSON.parse(String(out)); } catch {}
-      agentsFriday = { at: Date.now(), data };
       resolve(data);
     });
-  });
+  }));
 }
 
 // H247 (b): who may send feedback to this HQ's mailbox (app/feedback_box.py list); asked at most every 20 seconds.
-let senders = { at: 0, data: null };
+const tickets = new Map();  // F100: a tap's one-use tickets, in memory only
+const senders = { at: 0, data: null, busy: null };
 function feedbackBox(args, cacheMs = 0) {
-  if (cacheMs && Date.now() - senders.at < cacheMs) return Promise.resolve(senders.data);
-  return new Promise((resolve) => {
+  const run = () => new Promise((resolve) => {
     execFile('/usr/bin/python3', [join(root, 'app/feedback_box.py'), ...args], { timeout: 30000, cwd: root }, (err, out) => {
       let data = null;
       try { data = JSON.parse(String(out)); } catch {}
-      if (args[0] === 'list') senders = { at: Date.now(), data };
-      else senders.at = 0;
       resolve(data);
     });
+  });
+  if (cacheMs) return kept(senders, cacheMs, run);
+  return run().then((data) => {  // an invite or a take-back: the list is read again
+    senders.at = 0;
+    return data;
   });
 }
 
@@ -696,6 +711,19 @@ const server = createServer(async (req, res) => {
   // its row; new work only after a call has sparred on it, so no free text here), cancel a waiting job, or move it in
   // the line. All through routine/jobs.py (which hands it to the main HQ when this is the backup). Needs the x-hq
   // header, so a page from elsewhere can't press it.
+  // F100: jobs.py asks here whether a tap on this page really was one: a one-use ticket, kept only in this server's memory, for
+  // that job, for half a minute. Nothing outside this process can make one; a setting or a variable can't stand in for it.
+  if (path0 === '/api/sayso') {
+    let body = {};
+    if (req.method === 'POST' && req.headers['x-hq'] === 'sayso') {
+      try { body = JSON.parse(await readBody(req)); } catch {}
+    }
+    const t = tickets.get(body.ticket);
+    tickets.delete(body.ticket);
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      .end(JSON.stringify({ ok: !!t && t.n === String(body.n) && Date.now() - t.at < 30000 }));
+    return;
+  }
   if (path0 === '/api/team') {
     if (req.method !== 'POST' || req.headers['x-hq'] !== 'team') {
       res.writeHead(403).end('Only the HQ page can change the team\'s work');
@@ -710,7 +738,9 @@ const server = createServer(async (req, res) => {
     } else if (body.do === 'cancel' && n) {
       args = ['stop', n];
     } else if (body.do === 'now' && n) {  // F100: his tap: a build may start in his day hours, kept with who and when
-      args = ['now', n];
+      const ticket = randomBytes(24).toString('hex');
+      tickets.set(ticket, { n, at: Date.now() });
+      args = ['now', n, '--ticket', ticket];
     } else if (body.do === 'move' && n && ['top', 'up', 'down', 'bottom'].includes(body.to)) {
       args = ['move', n, body.to];
     }
@@ -718,7 +748,7 @@ const server = createServer(async (req, res) => {
       res.writeHead(400).end('do is send (with row, like H182), cancel (with n), now (with n) or move (with n and to: top, up, down or bottom)');
       return;
     }
-    execFile('/usr/bin/python3', [join(root, 'routine/jobs.py'), ...args], { timeout: 30000, env: { ...process.env, ...(args[0] === 'now' ? { HQ_SAYSO: 'page' } : {}) } }, (err, out, errOut) => {
+    execFile('/usr/bin/python3', [join(root, 'routine/jobs.py'), ...args], { timeout: 30000 }, (err, out, errOut) => {
       const said = String(err ? errOut || out : out).trim();
       res.writeHead(err ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ ok: !err, said }));
     });

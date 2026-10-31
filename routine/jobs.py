@@ -68,8 +68,9 @@ usage (from the workspace):
                                                            went wrong, kept out of the estimates; mistakes lists them
   python3 "routine/jobs.py" notes N                        the job's own chat (H283): its notes, the new ones marked
                                                            read (with the time); "No notes." when there are none
-  python3 "routine/jobs.py" resume N                       a job paused for using about four times the top of its estimated usage
-                                                           carries on, in its own chat (H172); stop N drops it
+  python3 "routine/jobs.py" resume N                       a job paused for using about four times the top of its estimated usage,
+                                                           or boxed, carries on in its own chat at raised limits (H172, F100); at most
+                                                           twice, then it stops for good and the item gets split; stop N drops it
   python3 "routine/jobs.py" off | on                       jobs from calls off or on
   python3 "routine/jobs.py" pause [WHY]                    F100: everything holds: the running job is held within a minute,
                                                            nothing new starts, no reviewer or first look starts; on ends it
@@ -423,10 +424,28 @@ def is_paused():
         return False
 
 
-def sayso(words, by=""):
-    """F100: his say-so for a build in his day hours, kept with who and when: his own words (sprint.his_quote), or his
-    tap on the status page (the server says so). None when it doesn't stand."""
-    if os.environ.get("HQ_SAYSO") == "page":
+def page_tap(n, ticket):
+    """F100: the status page's own request gave this one-use ticket for job n; the server that made it, and only that server,
+    says so, once. It's kept in that server's memory, so no setting, file or variable can stand in for it."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{hqpaths.status_port()}/api/sayso", method="POST",
+                                     data=json.dumps({"ticket": ticket, "n": str(n)}).encode(),
+                                     headers={"x-hq": "sayso", "content-type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return bool(json.load(r).get("ok"))
+    except Exception:
+        return False
+
+
+def sayso(n, words, by="", ticket=None):
+    """F100: his say-so for a build in his day hours, kept with who and when: his own words (sprint.his_quote), or his tap
+    on the status page (a ticket only its server can make good). Never from a job's own process. None when it doesn't stand."""
+    if os.environ.get("HQ_IN_JOB"):
+        return None
+    if ticket:
+        if not page_tap(n, ticket):
+            return None
         who, words = "the status page", "tapped now on the status page"
     else:
         import sprint as sp_
@@ -579,6 +598,8 @@ def main(argv):
     # H56.3: on the backup HQ, a call's change to the queue goes to the main one as a request, so only
     # one HQ ever writes it. HQ_ROLE_HERE is set when the main runs such a request itself.
     import role
+    if cmd == "now" and "--ticket" in argv and not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
+        sys.exit("A tap counts on the main HQ's own page. Tap it there, or say it on a call.")  # F100: its server made the ticket
     if (cmd in role.WRITES["jobs"] or (cmd == "done" and "--at" in argv)) and not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
         sys.exit(role.forward("jobs", list(argv)))
     now = time.strftime("%H:%M")
@@ -722,9 +743,9 @@ def main(argv):
             j = {"n": n, "state": "ready", "past": past, "agreed": time.strftime("%Y-%m-%d %H:%M"),
                  "text": one_line(said).replace("·", "-")}
             if at_once:
-                j["sayso"] = sayso(his)
+                j["sayso"] = sayso(n, his)
                 if not j["sayso"]:
-                    sys.exit("Now takes his own words: --now --said \"HIS WORDS\", a line he said or typed.")
+                    sys.exit("Refused: now takes his own words, --now --said \"HIS WORDS\", a line he said or typed, and a job can't give it to itself.")
             jobs.append(j)
             import wall
             if bug_job(j) and not wall.off():  # F100: a bug's job goes ahead of the features in the line
@@ -736,7 +757,9 @@ def main(argv):
             looks = estimate("look_later", "job", n, j["text"])  # H190: the first look, in the background
             waiting = [x for x in line_up(jobs) if x["n"] != n]
             busy = any(x["state"].startswith(("running", "stop asked")) for x in jobs)
-            if not on:
+            if PAUSED:  # F100
+                after = " Everything is paused, so it waits until he says on."
+            elif not on:
                 after = " The routine is off, so it waits until it's on."
             elif busy or waiting:
                 after = f" It waits its turn: {int(busy)} running, {len(waiting)} waiting before it."
@@ -791,14 +814,16 @@ def main(argv):
             # F100: his words of 30 October 2026: "daytime building is only allowed if i manually say it is."
             his = args[args.index("--said") + 1] if "--said" in args and args.index("--said") + 1 < len(args) else ""
             by = args[args.index("--by") + 1] if "--by" in args and args.index("--by") + 1 < len(args) else ""
+            ticket = args[args.index("--ticket") + 1] if "--ticket" in args and args.index("--ticket") + 1 < len(args) else None
             if not args or not args[0].isdigit():
                 sys.exit('Usage: now N --said "HIS WORDS"')
             j = find(jobs, int(args[0]))
             if not (j["state"] == "ready" or j["state"].startswith("held")):
                 sys.exit(f"Job {j['n']} is {j['state']}; only a waiting job can go now.")
-            s = sayso(his, by)
+            s = sayso(j["n"], his, by, ticket)
             if not s:
-                sys.exit("Refused: a build in his day hours goes only on his own words: --said with a line he said or typed.")
+                sys.exit("Refused: a build in his day hours goes only on his own say-so: --said with a line he said or typed, or his tap "
+                         "on the status page. A job can't give it to itself.")
             j["sayso"] = s
             write(text, jobs, on)
             print(f"Job {j['n']} may start in the day: {s['who']}, {s['at']}: {s['words']}")
@@ -1007,6 +1032,10 @@ def main(argv):
             j = find(jobs, int(args[0]))
             if not parked(j):
                 sys.exit(f"Job {j['n']} is {j['state']}; only a paused or boxed job can be resumed.")
+            import wall
+            no = None if wall.off() else wall.no_resume(j["n"])  # his words: "stop after 2 resumes"
+            if no:
+                sys.exit(no)
             j["state"] = "held: resumed by him"
             if not j.get("sayso"):  # it starts on his word, in the day too
                 j["sayso"] = {"at": time.strftime("%Y-%m-%d %H:%M"), "who": "a call", "words": "resumed"}
@@ -1019,7 +1048,10 @@ def main(argv):
             except Exception as e:
                 print(f"(couldn't raise its limits: {e!r})", file=sys.stderr)
             place = [x["n"] for x in line_up(jobs)].index(j["n"]) + 1
-            print(f"Job {j['n']} carries on at raised limits: number {place} in line, in its own chat, when the usage leaves room.")
+            left = wall.MOST_RESUMES - ((wall._boxes().get(str(j["n"])) or {}).get("resumes") or 0)
+            print(f"Job {j['n']} carries on at raised limits: number {place} in line, in its own chat, when the usage leaves room. "
+                  + (f"It can be resumed {left} more time." if left == 1 else "That was its last resume: past this it stops for good and the item gets split."
+                     if left <= 0 else f"It can be resumed {left} more times."))
             return
         if cmd == "boxed":
             # F100: the job ran past its box. Not done: parked for a call, what it wrote stays, a resume carries on.
@@ -1132,7 +1164,9 @@ def main(argv):
             jobs = move(jobs, n, "top")
             try:  # F72: its saved steps go with it, so the rerun carries on at the next one
                 import carryon
+                import wall
                 carryon.copy_steps(j["n"], n)
+                wall.carry_over(j["n"], n)  # F100: and its box: a crash gives no extra room
             except Exception as e:
                 print(f"(couldn't hand its steps on: {e!r})", file=sys.stderr)
             write(text, jobs, on)

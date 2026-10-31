@@ -2094,6 +2094,12 @@ def _from_hhmm(hhmm, now):
 
 # ---------- the plan ----------
 
+def off_words():
+    """F100: why nothing starts: paused, or the routine is off."""
+    import jobs as q
+    return "everything is paused" if q.is_paused() else "the routine is off"
+
+
 def _queue():
     import jobs as q
     _, js, on = q.read()
@@ -2292,6 +2298,8 @@ def plan(now=None):
     out["items_total"] = _items_total(out["items"], waits, on)
     if U:  # F107: which plan these percents are on, and what they're based on
         out["usage_plan"] = U.plan_status()
+    import jobs as q
+    out["paused"] = q.is_paused()  # F100
     return out
 
 
@@ -2523,7 +2531,7 @@ def words(n, p):
     elif e.get("waits") == "usage":
         s += ", when it's done waits on the usage"
     elif e.get("waits") == "off":
-        s += ", the routine is off"
+        s += f", {off_words()}"
     return s + " (estimate)"
 
 
@@ -2549,7 +2557,7 @@ def item_words(n, p):
     elif e.get("waits") == "usage":
         s += ", when it's done waits on the usage"
     elif e.get("waits") == "off":
-        s += ", the routine is off"
+        s += f", {off_words()}"
     if e.get("every"):  # H171
         s += f", each time again, {'every day' if e['every'] == 'day' else 'every ' + e['every'].capitalize()}"
     return s + " (estimate)"
@@ -2567,7 +2575,7 @@ def total_words(p):
     elif t.get("waits") == "usage":
         s += "; when it's done waits on the usage"
     elif t.get("waits") == "off":
-        s += "; the routine is off"
+        s += f"; {off_words()}"
     return s + " (estimate)." + (f" {t['counts']}" if t.get("counts") else "")
 
 
@@ -2586,7 +2594,7 @@ def items_total_words(p):
     elif t.get("waits") == "usage":
         s += "; when it's done waits on the usage"
     elif t.get("waits") == "off":
-        s += "; the routine is off"
+        s += f"; {off_words()}"
     return s + " (estimate)." + (f" {t['counts']}" if t.get("counts") else "")
 
 

@@ -150,8 +150,7 @@ def _tell_boxed(n: int, why: str, box: dict) -> None:
         import pings
         import usagecost
         pings._spawn("paused", f"Heads up: one of the team's jobs, {usagecost.short_what(_text(n))}, ran past the time it was given "
-                               f"({box['minutes']:g} minutes), so it was stopped before it burns more. It isn't finished and it won't start "
-                               "again by itself; tell me on a call if it should carry on or be dropped.")
+                               f"({box['minutes']:g} minutes), so it was stopped before it burns more. It isn't finished. {wall.what_next(n)}")
     except Exception:
         pass
 

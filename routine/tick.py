@@ -357,7 +357,9 @@ def start(job):
     box = None if cycle else wall.box_for(job)  # F100: every job a limit, from its estimate's latest end
     if box:
         prompt += (f"\n\nThis job has a box of {box['minutes']:g} minutes of its own work and {box['turns']} turns; your test run "
-                   "(proof.py) doesn't count. Past it the run is ended and the job is boxed, not done, and waits for a call.")
+                   "(proof.py) doesn't count. Past it the run is ended and the job is boxed, not done, and waits for a call. "
+                   f"A call can let it go on at most {wall.MOST_RESUMES} times, and in all it never goes past {box['cap']:g} minutes; "
+                   "then it stops for good and the item gets split, so save your work as you go.")
     chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")
     if box and headless:
         chat += f" --max-minutes {box['minutes']:g} --max-turns {box['turns']} --box-state"
@@ -1103,6 +1105,8 @@ def jobs_line(q):
         text = (f"Job {running[0]['n']} running" + (f", {waiting} waiting" if waiting else "")
                 + watch_line(running[0]["n"]))
         state = "running"
+    elif q.get("paused"):  # F100
+        text, state = f"Paused since {q['paused']}: nothing starts until he says on", "off"
     elif not q.get("on", True):
         text, state = "Switched off from a call", "off"
     elif waiting and os.path.exists(GATE_NOTE):

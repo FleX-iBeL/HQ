@@ -348,7 +348,7 @@ def status():
                 "next": None}
     rp = f", repeats {say_every(first['every'])}" if first.get("every") else ""  # H171
     if due(first, now):
-        why = "the routine is off" if not on else "the job list goes first"
+        why = ("everything is paused" if jobs.is_paused() else "the routine is off") if not on else "the job list goes first"
         more = len(passed(items, now)) - 1  # H111: the others whose time passed wait their turn, none skipped
         more = f", {more} more after it, earliest first" if more > 0 else ""
         # Waiting for the job list is how it's meant to work, so it's not shown as a warning.
@@ -451,7 +451,7 @@ def main(argv):
                 after = (" It has priority: its time has come, so it goes first in line once no job runs."
                          if due(item) else " It has priority: at its time it goes ahead of the waiting jobs.")
             if not on:
-                after += " The routine is off right now."
+                after += " Everything is paused right now." if jobs.is_paused() else " The routine is off right now."
             elif due(item) and not busy:
                 after = " Its time has come; it starts within about a minute."
             try:  # H95: its estimate, as a job gets when it's added

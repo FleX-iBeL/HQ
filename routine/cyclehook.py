@@ -59,6 +59,8 @@ def decide(ask: dict, mail_only: bool = False) -> tuple[int, str]:
         return 2, "HQ: refused: a build's record is written only by routine/proof.py."
     if name == "Bash" and re.search(r"\.status/proofs|\bHQ_(?:UNDER_TEST|PROOF_\w+)\s*=", str(inp.get("command") or "")) and "proof.py" not in str(inp.get("command")):
         return 2, "HQ: refused: a build's record and its gate are the program's: routine/proof.py run N."
+    if name == "Bash" and re.search(r"jobs\.py[\"']?\s+(?:now\b|(?:add|add-row|send-row)\b[^\n]*\s--now\b)|/api/team\b|/api/sayso\b|/api/forward\b|\bHQ_IN_JOB\b", str(inp.get("command") or "")):
+        return 2, "HQ: refused: a build in his day hours goes only on his own say-so; a job can't give it to itself."
     if mail_only:
         return 0, ""
     if name in EDITORS:

@@ -324,7 +324,8 @@ def part_cmd(name: str, *args: str) -> list[str] | None:
 # no CLAUDE.md with its imports, no memory, no project settings (their hook pours his rules into every prompt, their
 # skills name him). It reads what it needs by path. The folder's deny list is gone with those settings, so the never-send
 # list comes with the job itself: the flags here, and cyclehook.py on any connector.
-JOB_ENV = {"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+JOB_ENV = {"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+           "HQ_IN_JOB": "1"}  # F100: a job's own process: it can't give itself his say-so
 NEVER_MAIL = ("send_message", "send", "reply", "forward", "send_draft")  # the same as policy.GMAIL_NEVER
 
 

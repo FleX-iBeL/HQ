@@ -885,7 +885,8 @@ def pause_backtest(hist=None):
 
 
 def allow(n):
-    """jobs.py resume N: he let the paused job carry on. F100: at a raised limit, RAISE times the one it had, never none."""
+    """jobs.py resume N: he let the paused job carry on. F100: at a raised limit, RAISE times the one it had, never none. With at
+    most two resumes it comes to sixteen times the top of the estimate, and there it stops rising."""
     import wall
     d = _load()
     rec = d.get(str(n)) or {"n": n, "spent": {k: 0 for k in KEYS}, "seg": {}, "last": {}, "running": False}
@@ -911,12 +912,16 @@ def short_what(text):
     return s.strip()[:120]
 
 
+def _what_next(n):
+    import wall
+    return wall.what_next(n)
+
+
 def paused_words(n, text, o):
     """Moneypenny's facts (H266) for a paused job: plain, everyday words (the text is sent as it is when she can't compose)."""
     line = "the five-hour usage" if o["line"] == "five" else "the weekly usage"
     return (f"Heads up: I paused one of the team's jobs, {short_what(text)}. It had used about {o['used']:g}% of "
-            f"{line}, roughly four times the most it was expected to take, so I stopped it before it burns more. It won't start "
-            f"again by itself; tell me on a call if it should carry on or be dropped.")
+            f"{line}, far more than the most it was expected to take, so I stopped it before it burns more. {_what_next(n)}")
 
 
 # ---------- past jobs: from the saved readings ----------

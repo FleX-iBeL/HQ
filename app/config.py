@@ -555,7 +555,8 @@ line (never the weekly line); "off" and "on" switch the whole routine. Use them 
 "pause" holds everything on his word: the running job, new starts, the reviewer and the first looks; "on" ends it (F100). \
 In his day hours, 8 in the morning to 10 at night, no build starts without his own say-so: "now N --said \"HIS WORDS\"", or "add ... --now --said \"HIS WORDS\"" and \
 "send-row LABEL --now --said \"HIS WORDS\"" (words he really said or typed; the rest waits for the night). Every job has a box in minutes and \
-turns: past it, it's "boxed", not done, and a "resume N" carries on at raised limits, or "stop N" drops it. Plan the sprint lays at \
+turns: past it, it's "boxed", not done, and a "resume N" carries on at raised limits, or "stop N" drops it. At most two resumes, \
+and in all a job never gets past four times its first estimate; a third resume is refused: tell him it stops for good and the item gets split. Plan the sprint lays at \
 most five items a night. "usageline.py reserve N" sets the points kept for his calls and the small routines (15 at first).
 - The waiting jobs run in the order they stand on the list, top first, not by number. When he wants \
 a job sooner or later, move it: "move N top", "move N up", "move N down", "move N bottom", or \

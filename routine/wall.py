@@ -7,7 +7,11 @@ What's here, read by the routine's minute (tick.py), the runner (runjob.py) and 
   - the box: every job a limit in minutes and turns from its estimate's latest end; a job with no estimate 60 minutes (his
     words, 31 October 2026: "up to you, if you think 60 is good"). It counts the job's own work, not the test run that proves
     it (proof.py marks that time), so a build is never stopped by its own tests. Past it: `boxed`, parked for a call.
-  - a resume raises the box, and the usage pause, RAISE times; it never takes them away.
+  - a resume raises the box, and the usage pause, RAISE times; it never takes them away. At most two resumes, then the job stops for
+    good and the item gets split, and in all its time never goes past four times its first estimate. His words, 31 October 2026:
+    "yes stop after 2 resumes sound good, if that means in total it could get 4x it's initial estimate." The first box stands when four
+    times the estimate is smaller than it; a job with no estimate gets 240 minutes in all. Turns follow the same limit. The usage
+    pause rises with the two resumes and stops there: four times the top of the estimate at first, sixteen times after two.
   - his day: between 8:00 and 22:00 no build starts without his stored say-so, with who and when (jobs.py now N).
   - a held job doesn't restart at night unless it was planned for the night, or he resumed it himself.
   - at most WIP items in progress: the next build waits until one is through QA.
@@ -20,8 +24,8 @@ Off only for a test: HQ_NO_WALL under HQ_UNDER_TEST (the happy flows set it, so 
 wall flow takes it out again). HQ_WALL_HOUR pins the hour for a test.
 
 [The numbers that aren't his: BOX_OVER 1.5 (the review's example: 2 jobs in 10 run past their latest end), BOX_MIN 20, RAISE 2,
-TURNS_A_MINUTE 15 (on the server's headless runs the middle is 6 a minute, the most 16), BOX_LEFT 5. His: 60, 8:00 to 22:00,
-30 minutes. WIP 3 is the design's. The reserve's 15 is Fable's, his to turn.]
+TURNS_A_MINUTE 15 (on the server's headless runs the middle is 6 a minute, the most 16), BOX_LEFT 5. His: 60, two resumes, four times,
+240, 8:00 to 22:00, 30 minutes. WIP 3 is the design's. The reserve's 15 is Fable's, his to turn.]
 """
 from __future__ import annotations
 
@@ -43,6 +47,9 @@ BOX_MIN = 20          # never a smaller box than this
 BOX_LEFT = 5          # minutes a job carrying on always gets
 TURNS_A_MINUTE = 15
 RAISE = 2             # a resume multiplies the limits by this
+MOST_RESUMES = 2      # his words: "stop after 2 resumes"
+MOST_TIMES = 4        # his words: "in total it could get 4x it's initial estimate"
+NO_ESTIMATE_ALL = 240  # minutes in all for a job with no estimate: four times its 60
 WIP = 3
 PROOF_MAX = 3600      # a test run that says it's still on after this long has died
 BUILDS = ("build", "bigbuild")
@@ -152,32 +159,73 @@ def _save_boxes(d) -> None:
     os.replace(tmp, _boxes_path())
 
 
-def latest_minutes(job):
-    """The estimate's latest end in minutes, with the guesses taken in; None when the job has no estimate."""
+def estimate_of(job):
+    """(the likely minutes, the latest end), with the guesses taken in; (None, None) when the job has no estimate."""
     import estimate as E
     n, text = job["n"], job.get("text", "")
     e = E.known(n)
     if not e.get("est"):
-        return None
+        return None, None
     hist = E.all_history()
     d = E.job_estimate(n, text, hist)
     guess, _, fit = E.pick_guess(e, E.guess_fits(hist))
-    return max(d["latest"], E.latest_of(E.with_guess(d["est"], guess, fit), d["kind"], hist))
+    est = E.with_guess(d["est"], guess, fit)
+    return est, max(d["latest"], E.latest_of(est, d["kind"], hist))
+
+
+def latest_minutes(job):
+    return estimate_of(job)[1]
 
 
 def box_for(job) -> dict | None:
-    """{"minutes", "turns", "total", "raised"}: what's left of job's box. None under a test without the wall."""
+    """{"minutes", "turns", "total", "raised", "cap", "resumes"}: what's left of job's box. The first estimate and the first box are
+    kept the first time they're asked, so a later estimate never moves the limit. None under a test without the wall."""
     if off():
         return None
-    try:
-        lat = latest_minutes(job)
-    except Exception:
-        lat = None
-    rec = _boxes().get(str(job["n"])) or {}
-    raised = rec.get("raised") or 1
-    total = (BOX_NONE if lat is None else max(BOX_MIN, math.ceil(lat * BOX_OVER))) * raised
-    left = max(BOX_LEFT, total - (rec.get("minutes") or 0))
-    return {"minutes": round(left, 1), "turns": max(TURNS_A_MINUTE, math.ceil(left * TURNS_A_MINUTE)), "total": total, "raised": raised}
+    d = _boxes()
+    rec = d.get(str(job["n"])) or {}
+    if "first_box" not in rec:
+        try:
+            est, lat = estimate_of(job)
+        except Exception:
+            est, lat = None, None
+        rec.update(first_est=est, first_box=BOX_NONE if lat is None else max(BOX_MIN, math.ceil(lat * BOX_OVER)))
+        d[str(job["n"])] = rec
+        _save_boxes(d)
+    first, raised, used = rec["first_box"], rec.get("raised") or 1, rec.get("minutes") or 0
+    cap = _cap(rec)
+    total = min(cap, first * raised)
+    left = total - used
+    if left < BOX_LEFT:  # a job carrying on always gets a little, but never past the most it can have
+        left = min(BOX_LEFT, cap - used)
+    left = max(0.1, left)
+    turns = min(math.ceil(left * TURNS_A_MINUTE), math.ceil(total * TURNS_A_MINUTE) - (rec.get("turns") or 0))
+    return {"minutes": round(left, 1), "turns": max(1, turns), "total": total, "raised": raised, "cap": cap, "resumes": rec.get("resumes") or 0}
+
+
+def _cap(rec) -> float:
+    """The most a job gets in all: four times its first estimate, the first box when that's smaller."""
+    est = rec.get("first_est")
+    return NO_ESTIMATE_ALL if est is None else max(rec.get("first_box") or 0, MOST_TIMES * est)
+
+
+def no_resume(n) -> str | None:
+    """Why job n can't be resumed, in words a job, an agent and he can read; None when it can."""
+    rec = _boxes().get(str(n)) or {}
+    if (rec.get("resumes") or 0) >= MOST_RESUMES:
+        return (f"Job {n} has had its {MOST_RESUMES} resumes, the most a job gets, so it stops here for good. What it wrote stays. "
+                "The item gets split into smaller pieces on the planning.")
+    if "first_box" in rec and (rec.get("minutes") or 0) >= _cap(rec):
+        return (f"Job {n} has used all its time, {MOST_TIMES} times its first estimate at the most, so it stops here for good. What it "
+                "wrote stays. The item gets split into smaller pieces on the planning.")
+    return None
+
+
+def what_next(n) -> str:
+    """The sentence for his text about a paused or boxed job."""
+    if no_resume(n):
+        return "It has had all the room it gets, so it stops here for good; what it wrote stays and the item needs splitting."
+    return "It won't start again by itself; tell me on a call if it should carry on or be dropped."
 
 
 def add_used(n, minutes, turns=0) -> None:
@@ -190,12 +238,21 @@ def add_used(n, minutes, turns=0) -> None:
 
 
 def raise_box(n) -> int:
-    """jobs.py resume N: its box grows RAISE times, on top of what it had."""
+    """jobs.py resume N: its box grows RAISE times, on top of what it had, up to the most it can have (box_for)."""
     d = _boxes()
     rec = d.setdefault(str(n), {})
     rec["raised"] = (rec.get("raised") or 1) * RAISE
+    rec["resumes"] = (rec.get("resumes") or 0) + 1
     _save_boxes(d)
     return rec["raised"]
+
+
+def carry_over(n, to) -> None:
+    """A crash's rerun goes on with the job's box: what it used, its resumes and its first estimate."""
+    d = _boxes()
+    if str(n) in d:
+        d[str(to)] = dict(d[str(n)])
+        _save_boxes(d)
 
 
 def forget(n) -> None:

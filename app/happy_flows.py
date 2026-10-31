@@ -1832,7 +1832,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         page = (jv / "status/index.html").read_text()
         need("function drawIncidents" in page and ".routine.waiting i" in page and "'waiting'" in page,
              "the status page has no incident log or no waiting colour")
-        with urllib.request.urlopen("http://127.0.0.1:4748/routines.json", timeout=5) as resp:
+        with urllib.request.urlopen(f"http://127.0.0.1:{os.environ.get('HQ_STATUS_PORT') or 4748}/routines.json", timeout=5) as resp:  # this HQ's own server
             need("incidents" in json.loads(resp.read()), "the status server doesn't serve the incident log")
         wd = (jv / "routine/watchdog.py").read_text()
         installed = Path.home() / "Library/Application Support/HQ/watchdog.py"
@@ -6816,7 +6816,7 @@ print(json.dumps(o))
         need("E.total.counts" in page and "items_total.counts" in page and "(computed estimate)" in page
              and "function etaGuess" in page and ".eta-guess {" in page and "the team guessed" not in page.split("function etaWords")[1].split("function etaItem")[0],
              "H174: the status page doesn't say what the totals count, or the team's guess isn't apart")
-        code, body, _ = await asyncio.to_thread(http_get, "/routines.json", "http://127.0.0.1:4748")
+        code, body, _ = await asyncio.to_thread(http_get, "/routines.json", f"http://127.0.0.1:{os.environ.get('HQ_STATUS_PORT') or 4748}")
         live = json.loads(body) if code == 200 else {}
         need("estimate" in live and "accuracy" in (live["estimate"] or {}), f"the live status server has no estimates: {code}")
         q = json.loads(sp.run(["python3", str(jv / "routine/jobs.py"), "next"], capture_output=True, text=True).stdout)
@@ -6825,7 +6825,7 @@ print(json.dumps(o))
         if (q["running"] or q["waiting"]) and browsers:
             chrome = browsers[-1]
             r = await asyncio.to_thread(run, [str(chrome), "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []), "--window-size=900,3000",
-                                              f"--user-data-dir={self.tmp / 'h61'}", "--virtual-time-budget=8000", "--dump-dom", "http://127.0.0.1:4748/"], timeout=120)
+                                              f"--user-data-dir={self.tmp / 'h61'}", "--virtual-time-budget=8000", "--dump-dom", f"http://127.0.0.1:{os.environ.get('HQ_STATUS_PORT') or 4748}/"], timeout=120)
             need("(estimate)" in r.stdout and "Estimates" in r.stdout, "the live status page doesn't show the estimates on the job list")
         # A call may read the list, and the call rules say the estimates are estimates.
         pol = Policy(config.FOLDER)
@@ -14992,13 +14992,58 @@ need(wall.box_for(j)["minutes"] == wall.BOX_LEFT, "a used box leaves nothing but
 out = subprocess.run([sys.executable, sys.argv[1] + "/routine/jobs.py", "resume", sys.argv[2]], capture_output=True, text=True)
 need(out.returncode == 0, out.stderr)
 b = wall.box_for(j)
-need(b["total"] == a["total"] * 2 and b["minutes"] == a["total"], f"twice the box, what it used counted: {a} {b}")
-need(wall.raise_box(j["n"]) == 4, "a second resume")
+need(b["total"] == min(a["total"] * 2, b["cap"]) and b["minutes"] == max(b["total"] - a["total"], min(wall.BOX_LEFT, b["cap"] - a["total"])), f"twice the box, what it used counted: {a} {b}")
+need(b["resumes"] == 1 and b["raised"] == 2, f"the resume isn't counted: {b}")
 print("OK")
 '''
         r = _sp.run([sys.executable, "-c", child, str(ROOT), n2], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
         need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-800:])
-        return "a resumed job pauses at twice the limit, a boxed one has twice the box, what it used counted"
+        # his words: "yes stop after 2 resumes sound good, if that means in total it could get 4x it's initial estimate."
+        need(jobs("mark", n2, "boxed: again").returncode == 0, "no mark")
+        r = jobs("resume", n2)
+        need(r.returncode == 0 and "last resume" in r.stdout, f"the second resume: {r.stdout} {r.stderr}")
+        need(jobs("mark", n2, "boxed: and again").returncode == 0, "no mark")
+        r = jobs("resume", n2)
+        need(r.returncode != 0 and "stops here for good" in r.stderr and "split" in r.stderr, f"a third resume: {r.stdout} {r.stderr}")
+        need(state(n2).startswith("boxed"), f"a refused resume moved the job: {state(n2)}")
+        child = r'''
+import json, os, sys
+sys.path.insert(0, sys.argv[1] + "/routine")
+import wall, usagecost as U
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+def box(n, est, first, raised=1, used=0):
+    d = wall._boxes()
+    d[str(n)] = {"first_est": est, "first_box": first, "raised": raised, "minutes": used, "resumes": {1: 0, 2: 1, 4: 2}[raised]}
+    wall._save_boxes(d)
+    return wall.box_for({"n": n, "text": "made up"})
+# four times the first estimate: 30 minutes likely, a first box of 68
+need(box(9001, 30, 68)["total"] == 68, "the first box")
+need(box(9001, 30, 68, 2)["total"] == 120, "the first resume stops at four times the estimate")
+b = box(9001, 30, 68, 4)
+need(b["total"] == 120 and b["minutes"] == 120 and b["turns"] == 1800, f"the second resume stays there, turns too: {b}")
+b = box(9001, 30, 68, 4, used=119.5)
+need(b["minutes"] == 0.5 and b["total"] == 120, f"never past it, not even by the last minutes: {b}")
+# the first box as the floor: 4 minutes likely, 16 in all, a first box of 20
+b = box(9002, 4, 20, 2)
+need(b["total"] == 20 and b["cap"] == 20, f"the first box isn't the floor: {b}")
+b = box(9002, 4, 20, 2, used=20)
+need(wall.no_resume(9002) and "all its time" in wall.no_resume(9002) and "split" in wall.no_resume(9002), "a box used up can't be resumed")
+# no estimate: 60, then 120, then 240 in all
+need(box(9003, None, 60)["total"] == 60 and box(9003, None, 60, 2)["total"] == 120 and box(9003, None, 60, 4)["total"] == 240, "no estimate: 240 in all")
+need(box(9003, None, 60, 4, used=240)["minutes"] == 0.1, "no estimate, used up")
+# the first estimate is kept, whatever the estimate says later
+wall.box_for({"n": 9004, "text": "a job nobody estimated"})
+need(wall._boxes()["9004"]["first_box"] == 60 and wall._boxes()["9004"]["first_est"] is None, "the first box isn't kept")
+# the usage pause: twice, then it stops rising
+r = {"est": {"five": 2.0, "weekly": 1.0, "top": 1}, "own": {"five": 31.9, "weekly": 1.0}, "raised": 4}
+need(not U.overrun(r) and U.overrun({**r, "own": {"five": 32.0, "weekly": 1.0}}), "the pause after two resumes isn't sixteen times the top")
+print("OK")
+'''
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-800:])
+        return "at most two resumes, a third refused in plain words, never past four times the first estimate, the first box the floor, 240 with no estimate, the pause at sixteen times the top"
 
     async def flow215(self) -> str:
         """F100, no Claude: one real pause. Through the routine's real minute: pause holds the running job (it carries on at on, in
@@ -15054,6 +15099,13 @@ print("OK")
         need(state(n2) == "ready" and not r["opened"] and state(n).startswith("held"), f"something started during the pause: {state(n)} {state(n2)}")
         q = json.loads(jobs("next").stdout)
         need(q["paused"] and not q["on"], f"next: {q['paused']}")
+        beat = [b for b in r["beats"] if b["key"] == "jobs"][-1]
+        need(beat["text"].startswith("Paused since"), f"the jobs line while paused: {beat}")
+        r3 = jobs("add", "Build a thing while paused")
+        need("Everything is paused" in r3.stdout and "routine is off" not in r3.stdout, f"add while paused: {r3.stdout}")
+        lst = jobs("list").stdout
+        need("Routine: paused since" in lst and "everything is paused" in lst and "the routine is off" not in lst, f"the list while paused: {lst[:500]}")
+        need(jobs("stop", re.search(r"Job (\d+) is ready", r3.stdout).group(1)).returncode == 0, "no stop")
         need(jobs("on").returncode == 0 and "**Routine:** on" in rm.read_text(), "on doesn't end the pause")
         need(jobs("next").stdout and json.loads(jobs("next").stdout)["paused"] is None, "the pause stays after on")
         env2 = {**env, "HQ_WALL_HOUR": "23"}
@@ -15076,8 +15128,8 @@ print("ON" if review.on() else "OFF")
     async def flow216(self) -> str:
         """F100, no Claude: daytime building only on his say-so, and a held job at night. Through the routine's real minute, with
         the hour pinned: a build sent to the team in the day waits and says why; a job behind it that isn't a build goes ahead;
-        made-up words don't get past it, his own do, kept with who and when, also from the status page's tap and through add
-        and send-row; at night it starts by itself. A held job doesn't restart at night unless it was planned for the night or he
+        made-up words don't get past it, his own do, kept with who and when, also through add
+        and send-row (the status page's tap is flow 226); at night it starts by itself. A held job doesn't restart at night unless it was planned for the night or he
         resumed it; in the morning a held build still needs his word."""
         import subprocess as _sp
         ws, env, d = self._wall_env("day", hour=14)
@@ -15118,10 +15170,6 @@ print("ON" if review.on() else "OFF")
         n3 = new("Build a second thing", "--now", "--said", "Build that one now please")
         need("sayso" in json.dumps(json.loads(jobs("next").stdout)["waiting"][0]) and json.loads(jobs("next").stdout)["waiting"][0]["sayso"]["who"] == "a call", "add --now isn't kept")
         need(jobs("mark", n3, "stopped 12:02").returncode == 0, "no mark")
-        n4 = new("Build a third thing")
-        need(jobs("now", n4, HQ_SAYSO="page").returncode == 0, "the page's tap")
-        need("· the status page⟫" in rm.read_text(), "the page's tap isn't kept")
-        need(jobs("stop", n4).returncode == 0, "no stop")
         # at night a build goes by itself
         n5 = new("Build a night thing")
         minute(HQ_WALL_HOUR="23")
@@ -15756,6 +15804,127 @@ print("OK")
         r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
         need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-900:])
         return "a note from the backup on the main, cleared there too, a refused hand-over kept with an incident, versions, sync count, a hung line restarted"
+
+    def _status_server(self, root, env, name):
+        """A status server of its own on a free port, by its exact pid; never the live one."""
+        import socket
+        import subprocess as _sp
+        with socket.socket() as sk:
+            sk.bind(("127.0.0.1", 0))
+            port = sk.getsockname()[1]
+        log = open(self.tmp / f"{name}-server.log", "w")
+        p = _sp.Popen(["node", "status/server.mjs", "--quiet"], cwd=str(root), env={**env, "HQ_STATUS_PORT": str(port)}, stdout=log, stderr=log)
+        for _ in range(100):
+            code, _b, _c = http_get("/roadmap.md", f"http://127.0.0.1:{port}", timeout=1)
+            if code:
+                break
+            time.sleep(0.1)
+        else:
+            p.terminate()
+            need(False, f"the test's status server didn't start: {(self.tmp / f'{name}-server.log').read_text()[-400:]}")
+        return p, port
+
+    async def flow226(self) -> str:
+        """F100, no Claude: his say-so for a daytime build can't be set by anyone but him. A job's own process is refused, with his
+        real words too; the old variable does nothing and doesn't go over the hand-over; a made-up ticket is refused; a tap
+        through the status page's own request is kept with who and when; a ticket works once, for its own job. A job's hook refuses
+        the command and the request itself."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env("sayso", hour=14)
+        env["HQ_PROOF_ON"] = "1"
+        (ws / "HQ/direct-line").mkdir(exist_ok=True)
+        (ws / "HQ/direct-line/thread.jsonl").write_text(json.dumps({"at": 1, "from": "me", "text": "Build that one now please, I want it today"}) + "\n")
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        self._wall_usage(env)
+        n = new("Build the thing on the made-up page")
+        rm = ws / "HQ/roadmap.md"
+        said = "Build that one now please"
+        r = jobs("now", n, "--said", said, HQ_IN_JOB="1")
+        need(r.returncode != 0 and "can't give it to itself" in r.stderr, f"a job gave itself his words: {r.stdout} {r.stderr}")
+        r = jobs("add", "Build a second thing", "--now", "--said", said, HQ_IN_JOB="1")
+        need(r.returncode != 0, f"a job added itself a say-so: {r.stdout}")
+        r = jobs("now", n, HQ_SAYSO="page")
+        need(r.returncode != 0 and "sayso" not in rm.read_text(), f"the old variable still works: {r.stdout}")
+        sys.path.insert(0, str(ROOT / "routine"))
+        import role
+        need("HQ_SAYSO" not in role.PASS_ENV and "HQ_SAYSO" not in (ROOT / "status/server.mjs").read_text(), "the old variable still goes over")
+        p, port = self._status_server(ROOT, env, "sayso")
+        try:
+            env["HQ_STATUS_PORT"] = str(port)
+            r = jobs("now", n, "--ticket", "a-made-up-ticket")
+            need(r.returncode != 0 and "sayso" not in rm.read_text(), f"a made-up ticket: {r.stdout}")
+            def post(path, body, hq):
+                req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=json.dumps(body).encode(), method="POST", headers={"x-hq": hq, "content-type": "application/json"})
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    return json.loads(resp.read())
+            got = post("/api/team", {"do": "now", "n": int(n)}, "team")
+            need(got.get("ok"), f"the page's tap: {got}")
+            need(re.search(rf"^- Job {n} .*⟪sayso \d{{4}}-\d\d-\d\d \d\d:\d\d · the status page⟫", rm.read_text(), re.M), "the tap isn't kept with who and when")
+            r_min = minute()
+            need(state(n).startswith("running"), f"his tap didn't start it: {state(n)} {r_min['log'][-2:]}")
+            need(not post("/api/sayso", {"ticket": "x", "n": n}, "sayso")["ok"], "a ticket nobody made passed")
+        finally:
+            env.pop("HQ_STATUS_PORT", None)
+            p.terminate()
+            p.wait(timeout=10)
+        hook = ROOT / "routine/cyclehook.py"
+        for cmd in (f'python3 {ROOT}/routine/jobs.py now {n} --said "x"', 'python3 "routine/jobs.py" add "Build it" --now --said "x"',
+                    'curl -X POST -H x-hq:team -d \'{"do":"now","n":1}\' http://127.0.0.1:4748/api/team',
+                    'curl -X POST http://127.0.0.1:4748/api/forward'):
+            r = _sp.run([sys.executable, str(hook), "--mail-only"], input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}), capture_output=True, text=True)
+            need(r.returncode == 2 and "say-so" in r.stderr, f"a job's hook let this through: {cmd}: {r.returncode}")
+        r = _sp.run([sys.executable, str(hook), "--mail-only"], input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "git log --oneline -3"}}), capture_output=True, text=True)
+        need(r.returncode == 0, "the hook refused a plain command")
+        return "a job's process, the old variable and a made-up ticket refused; the page's own tap kept and it starts the build; the hook refuses the command and the request"
+
+    async def flow227(self) -> str:
+        """F102, no Claude: the status page never hangs on a slow script. A status server with stand-ins that take six seconds (the real
+        planning takes 2 to 25): the first read answers inside FIRST_WAIT, under the five seconds a reader gives it; once there's an
+        answer every read gets it at once, also while it's being read again; and one run goes at a time, however many reads come in."""
+        import shutil as _sh
+        import subprocess as _sp
+        root = self.tmp / "slow-hq"
+        (root / "routine").mkdir(parents=True)
+        (root / "app").mkdir()
+        _sh.copytree(ROOT / "status", root / "status")
+        runs = root / "runs"
+        stand = ("import json, os, sys, time\nopen(%r, 'a').write(sys.argv[0].split('/')[-1] + ' start\\n')\ntime.sleep(6)\n"
+                 "open(%r, 'a').write(sys.argv[0].split('/')[-1] + ' end\\n')\nprint(json.dumps({'accuracy': {}, 'rows': [], 'from': 'the stand-in'}))\n") % (str(runs), str(runs))
+        for f in ("routine/estimate.py", "routine/sprint.py", "routine/cycles.py", "app/feedback_box.py"):
+            (root / f).write_text(stand)
+        rm = root / "roadmap.md"
+        rm.write_text((ROOT / "template/HQ/roadmap.md").read_text())
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_SUPPORT": str(root / "support")}
+        p, port = self._status_server(root, env, "slow")
+        base = f"http://127.0.0.1:{port}"
+        lat = []
+        def read():
+            t = time.perf_counter()
+            code, body, _ = http_get("/routines.json", base, timeout=8)
+            lat.append(time.perf_counter() - t)
+            need(code == 200, f"the status server didn't answer: {code}")
+            return json.loads(body)
+        try:
+            first = read()
+            need(lat[0] < 4.8, f"the first read took {lat[0]:.1f} s")
+            need(first.get("estimate") is None, "the stand-in can't have answered yet")
+            t0 = time.time()
+            while read().get("estimate") is None:
+                need(time.time() - t0 < 15, "no answer after the first run")
+                time.sleep(0.3)
+            lat.clear()
+            t0 = time.time()
+            while time.time() - t0 < 24:  # through the 20 seconds, into the second run
+                got = read()
+                need(got.get("estimate"), "a read lost the last answer during the second run")
+                time.sleep(0.25)
+            need(max(lat) < 1.0, f"a read waited on the run: {max(lat):.1f} s")
+            lines = [l for l in runs.read_text().splitlines() if l.startswith("estimate.py")]
+            need(lines.count("estimate.py start") == 2, f"more than one run at a time: {lines}")
+        finally:
+            p.terminate()
+            p.wait(timeout=10)
+        return f"the first read inside its wait, then every read under {max(lat):.2f} s through a six-second run, one run at a time"
 
     def _proof_env(self, tag):
         """A throwaway workspace and a throwaway HQ repository for the proof, with a stand-in for the flows: a flow named in
@@ -25752,6 +25921,8 @@ FLOWS = {
     222: ("F102: a failing reviewer, cycle, briefing, QA or release turns red with an incident within the minute; a broken lines file shows red", False, "flow222"),
     221: ("F102: a mail run that moves the marker back or drops a very important line is put back with an incident; red after 2 hours between 8:00 and midnight", False, "flow221"),
     220: ("F102: two processes adding 150 notes lose none; one lock across processes for the to-do list, the notes, the games, the coaching file and the mail list", False, "flow220"),
+    227: ("F102: the status page never hangs on a slow script: the last answer at once, one run at a time", False, "flow227"),
+    226: ("F100: his say-so for a daytime build: a job's process, the old variable and a made-up ticket refused, only the status page's own tap counts", False, "flow226"),
     219: ("F102: a note written in the app is on GitHub after its ten minutes with no one naming it; a key stays out; a refused push merges; a clash is an incident", False, "flow219"),
     218: ("F100: a headless job saves the stream's limits as they come and reads no status line; the routine holds it at the line", False, "flow218"),
     217: ("F100: near the reserve a team job is refused, his to turn; cycles before the team, a bug ahead of the features, three items in progress at most, five a night with each test run counted", False, "flow217"),
