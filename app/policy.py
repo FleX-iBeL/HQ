@@ -166,7 +166,7 @@ _SHELL_WRITE = re.compile(
 # F99: the after-call run is alone with nobody to ask: it writes the log and the lists, and adds the transcript.
 AFTER_CALL_EDIT = "coaching/log.md"
 AFTER_CALL_ADD = re.compile(r"^(coaching/log\.md|challenges\.md|hq/agents/[^/]+-about-herself\.md|hq/calls/[^/]+\.md)$")
-AFTER_CALL_SCRIPTS = {"todo.py", "about_self.py", "mistakes.py"}  # sprint.py, review.py and jobs.py only to read (AFTER_CALL_READS)
+AFTER_CALL_SCRIPTS = {"todo.py", "about_self.py", "mistakes.py", "rules.py"}  # sprint.py, review.py and jobs.py only to read (AFTER_CALL_READS)
 AFTER_CALL_READS = {"sprint.py": {"list", "json", "show", "open", "fields", "check"}, "review.py": {"list", "flags"},
                     "jobs.py": {"list"}, "schedule.py": {"list"}}
 
@@ -743,6 +743,12 @@ class Policy:
             if sub in ("list", "score") or (sub == "add" and len(args) > 2 and args[2] in ("correction", "bug-after-qa")):
                 return Decision(ALLOW, "the ledger: a correction or a bug after QA goes in, the score reads it")
             return Decision(DENY, "from a call, the ledger takes add correction, add bug-after-qa, list or score; the rest is the program's")
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "helper.py"):
+            if len(args) > 1 and args[1] in ("start", "list") and not self.after_call:  # F106: boxed, only reads, nothing to say yes to
+                return Decision(ALLOW, "a helper beside the call: it only reads, boxed in minutes and turns")
+            return Decision(DENY, "from a call, the helper takes start \"THE QUESTION\" or list")
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "rules.py"):
+            return Decision(ALLOW, "reading how something works here")
         if prog in ("python3", "python") and args and self.hq_script(args[0], "trail.py"):
             if len(args) > 1 and args[1] == "follow":
                 return Decision(ALLOW, "reading an item's record")

@@ -35,6 +35,7 @@ CONTEXTS = ("day", "coach", "build")
 RECENT_HOURS = 3
 LINE_MOST = 300  # a note's first line, cut
 ITEMS_MOST = 120
+SHORT_MOST = 8  # F106: the coach's start: the first of what's promised and urgent
 EVENTS_MOST = 40
 
 
@@ -135,7 +136,8 @@ def commitments_part(now: dt.datetime, folder: Path | None = None) -> str:
     return "\n\n".join(out)
 
 
-def todo_part(folder: Path | None = None) -> str:
+def todo_part(folder: Path | None = None, short: bool = False) -> str:
+    """short (F106, the coach's start): what's promised and urgent, the rest as a count."""
     try:
         import todo
         d = todo.read((folder or FOLDER) / "challenges.md")
@@ -164,7 +166,10 @@ def todo_part(folder: Path | None = None) -> str:
                 bits.append("for " + it["for"])
             lines.append(f"- {it['title']}" + (f" ({'; '.join(bits)})" if bits else ""))
             n += 1
-        out.append(f"{names[lst['kind']]} ({len(items)}):\n" + "\n".join(lines[:ITEMS_MOST]))
+        if short and lst["kind"] not in ("commit", "q1"):
+            out.append(f"{names[lst['kind']]}: {len(items)}")
+            continue
+        out.append(f"{names[lst['kind']]} ({len(items)}):\n" + "\n".join(lines[:SHORT_MOST if short else ITEMS_MOST]))
     head = (f"The to-do list, {n} open items, one line each (an item's own words and details: python3 "
             f"\"{HERE.parent / 'app' / 'todo.py'}\" show \"a few words of its name\"; the done and let-go items are in "
             f"challenges.md and challenges-archive.md):")
@@ -229,8 +234,9 @@ def planning_part(folder: Path | None = None) -> str:
 
 
 def situation_part(folder: Path | None = None) -> str:
+    """F106: a lookup now: a life file isn't loaded whole at a start."""
     text = _read("current-situation.md", folder)
-    return ("Where he stands now (current-situation.md, whole):\n\n" + text.strip()) if text else ""
+    return "Where he stands now: current-situation.md, read it when a turn needs it." if text else ""
 
 
 # -- the briefing ---------------------------------------------------------------------------------------------------
@@ -243,7 +249,7 @@ def build(context: str = "day", now: dt.datetime | None = None, folder: Path | N
     if context == "build":
         parts.append(planning_part(folder))
     else:
-        parts += [calendar_part(now, folder), mail_part(folder), commitments_part(now, folder), todo_part(folder),
+        parts += [calendar_part(now, folder), mail_part(folder), commitments_part(now, folder), todo_part(folder, short=context == "coach"),
                   nudges_part(), games_part()]
         if context == "coach":
             parts.append(map_part(folder))

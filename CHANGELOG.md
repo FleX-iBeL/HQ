@@ -4,6 +4,12 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- On a call, "let me figure that out": for anything bigger than a quick look the agent takes it away to a helper beside the call, which only reads and has a limit in minutes and turns. The call goes on, and the answer comes back into the same call, or as a text on her line if you hung up. One line on the status page shows what's being worked on for you right now.
+
+- A check she couldn't run is never answered around: if a command was refused or waits for your yes and her answer doesn't say so, the program says "I couldn't check that".
+
+- Lighter starts: a call starts with about a third of what it did, under 40 KB for every agent. How the team, the to-do list, the reminders and the rest work is looked up when it's needed, and where you stand is no longer loaded whole.
+
 - A way back. `update.py back` puts HQ one version back in one step, on both computers, with what that version changed in your data undone; `update.py forward` brings it forward again. A release that changes data is refused unless its undo works on a copy, and it lists the change in the changelog.
 
 - Friends stay on released versions: a job on a friend's HQ never takes the work line, by any way. On the maker's HQ a feature still in pieces stays off until its QA passed, unless he says so, and that's kept. New workspaces run the team's jobs headless. The privacy check also runs as a pre-push hook, and HQ's old project name is gone from the code.

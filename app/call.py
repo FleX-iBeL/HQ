@@ -36,7 +36,7 @@ import config
 from call_end import EndWatch
 import agents
 import open_loops
-from claude_llm import ClaudeSessionLLMService
+from claude_llm import ClaudeSessionLLMService, HelperFrame
 from fillers import FillerPlayer
 from pipeline import make_brain, make_stt, make_tts, warm_up_tts
 from policy import SESSION_TOOLS, Policy
@@ -88,7 +88,7 @@ class Call:
         # H29: the agent on this call (Pepper for Quick, Donna for Deep by default); her personality
         # goes after the call rules. Without one asked for, the agent with this call's load.
         self.agent = agents.find(config.FOLDER, agent, self.load)
-        persona = agents.persona(self.agent, config.USER)
+        persona = agents.persona(self.agent, config.USER, light=not free)  # F106: the handbook and her craft are lookups on a call
         # H79: the other agents she can hand over to or bring in (never on Free: one plain Claude);
         # H121: one still coming soon too, to bring in only (agents.switch_marks)
         self.others = [] if free else [a for a in agents.visible(config.FOLDER) + agents.soon(config.FOLDER)
@@ -136,7 +136,7 @@ class Call:
             # H282: her own thinking time (Moneypenny high), the rest as before; a three-way keeps the first one's
             self.brain = make_brain(self.model, self.policy, load=self.load, persona=persona, context=self.context,
                                     effort=agents.effort_of(self.agent, self.model),
-                                    resume=self._line_for(self.agent))
+                                    resume=self._line_for(self.agent), agent_name=self.agent["name"])
         self.brains[self.agent["id"]] = self.brain
         self.stt = make_stt(quiet=free)
         self.voice = voice if voice in config.VOICES else config.VOICE
@@ -324,11 +324,11 @@ class Call:
         on_call = {a["id"] for a in self.panel}
         others = [a for a in agents.visible(config.FOLDER) + agents.soon(config.FOLDER)
                   if a["id"] != who["id"] and a["id"] not in on_call]
-        persona = agents.persona(who, config.USER) + agents.switch_rules(who, others, config.USER)
+        persona = agents.persona(who, config.USER, light=True) + agents.switch_rules(who, others, config.USER)
         context = agents.context_of(who)
         context = "all" if context == "day" and who["load"] == "deep" else context
         model = config.MODEL_ALIASES.get(agents.runs_on(who["model"]), who["model"])
-        b = make_brain(model, self.policy, load=who["load"], persona=persona, context=context,
+        b = make_brain(model, self.policy, load=who["load"], persona=persona, context=context, agent_name=who["name"],
                        effort=agents.effort_of(who, model), resume=self._line_for(who))
         self.brains[who["id"]] = b
         t = time.perf_counter()
@@ -396,6 +396,31 @@ class Call:
             logger.warning(f"H129: what he's doing now couldn't be read: {e!r}")
             return []
 
+    def helper_name(self) -> str:
+        """F106: the name a helper of this call goes by: its transcript's."""
+        return self.transcript.path.stem if self.transcript.path else ""
+
+    async def watch_helpers(self) -> None:
+        """F106: for as long as the call is on: it says so, and an answer from a helper of this call is said at the next quiet moment."""
+        import helper
+        name = self.helper_name()
+        while name:
+            try:
+                await asyncio.to_thread(helper.live, name, self.speaker["id"])
+                if not (self.llm._replying or self.llm._bot_speaking):
+                    for rec in await asyncio.to_thread(helper.take, name):
+                        self.transcript.note(f"a helper came back: {rec['question'][:120]}")
+                        await self.llm.queue_frame(HelperFrame(self.helper_note(rec)))
+            except Exception as e:
+                logger.warning(f"F106: looking for a helper's answer failed: {e!r}")
+            await asyncio.sleep(helper.WATCH_S)
+
+    def helper_note(self, rec: dict) -> str:
+        import helper
+        return (f"[Call system: the helper you started came back. It was asked: {rec['question']}\nWhat it says: {helper.words(rec)}\n"
+                f"Tell {config.USER} now, in a sentence or two, in your own words, and say first what it's about: he may have moved on. "
+                "If it couldn't find it, say so.]")
+
     def _on_decision(self, tool, summary, decision):
         if tool in SESSION_TOOLS and tool != "Skill":
             return  # loading tools and the session's own to-do list: noise in a transcript
@@ -443,6 +468,12 @@ class Call:
         if self._finished:
             return
         self._finished = True
+        if not self.free:  # F106: what a helper still has for this call now goes by text
+            try:
+                import helper
+                await asyncio.to_thread(helper.call_over, self.helper_name())
+            except Exception as e:
+                logger.warning(f"F106: a helper's answer after the call: {e!r}")
         try:
             self.transcript.note(f"{self.speaker['name']} put {self.switched_to['name']} on: the call goes on with her"
                                  if self.switched_to else

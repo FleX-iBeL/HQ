@@ -144,6 +144,15 @@ def very_important(text: str) -> str:
             "he asks.]\n") if out else "(No very important mail.)\n"
 
 
+# F106: what Moneypenny's start holds of the planning, in characters; the rest is one command away. Together with the rules these keep
+# her start under config.START_CAP.
+PLANNING_MOST = 3000  # the open items, the first by rank
+STATUS_MOST = 3000    # the status block
+FLAGS_MOST = 2000     # the flagged rows
+JOB_LINE_MOST = 180   # a line of the team's open jobs
+JOBS_MOST = 12        # how many of those lines
+
+
 def _planning(folder: Path) -> str:
     """The roadmap's status block, the team's open jobs and the open items of the planning, for a build call
     (Fable clean-up, 27 October 2026). Before Sunday 25 October Pepper had these at hand on every call; the split took
@@ -156,15 +165,15 @@ def _planning(folder: Path) -> str:
         r = subprocess.run([sys.executable, str(config.ROOT / "routine" / "review.py"), "flags"],
                            capture_output=True, text=True, timeout=30, env={**os.environ, "HQ_WORKSPACE": str(folder)})
         if r.returncode == 0 and r.stdout.startswith("FLAGGED"):
-            out.append(r.stdout.strip()[:8000])
+            out.append(r.stdout.strip()[:FLAGS_MOST])
     except Exception:
         pass
     try:
         road = (folder / "HQ" / "roadmap.md").read_text()
         qpos = road.find("\n## The queue")
-        block = road[:qpos if qpos > 0 else 8000].rstrip()
+        block = road[:qpos if qpos > 0 else 8000].rstrip()[:STATUS_MOST]
         rest = road[qpos:road.find("\n# ", qpos + 1)] if qpos > 0 else ""
-        jobs = [l[:300] for l in rest.splitlines() if l.startswith("- Job ") and "· done" not in l]
+        jobs = [l[:JOB_LINE_MOST] for l in rest.splitlines() if l.startswith("- Job ") and "· done" not in l and "· cancelled" not in l][-JOBS_MOST:]
         out.append("The HQ roadmap's status block (never read HQ/roadmap.md whole: it's over 1 MB; one row is "
                    f"python3 \"{config.ROOT / 'routine' / 'sprint.py'}\" show LABEL):\n\n" + block)
         out.append("The team's open jobs (python3 \"" + str(config.ROOT / "routine" / "jobs.py") + "\" list for the "
@@ -178,14 +187,15 @@ def _planning(folder: Path) -> str:
                            capture_output=True, text=True, timeout=30, env={**os.environ, "HQ_WORKSPACE": str(folder)})
         if r.stdout.strip():
             out.append("The open items of the planning now (python3 \"" + str(config.ROOT / "routine" / "sprint.py")
-                       + "\" open; the whole of one: show LABEL):\n\n" + r.stdout.strip()[:16000])
+                       + "\" open; the whole of one: show LABEL):\n\n" + r.stdout.strip()[:PLANNING_MOST])
     except Exception:
         pass
     return "\n\n".join(out)
 
 
-IDENTITY_FILES = {"day": ["rules.md", "where-things-go.md"],
-                  "coach": ["rules.md", "where-things-go.md", "day-in-the-life.md"],
+# F106: where things go and where he stands are lookups now, named in the heads below; the coach keeps the vision's day whole.
+IDENTITY_FILES = {"day": ["rules.md"],
+                  "coach": ["rules.md", "day-in-the-life.md"],
                   "build": ["rules.md"]}
 
 
@@ -202,7 +212,8 @@ def briefed(folder: Path, context: str = "day", today: datetime.date | None = No
         head = ["# This is a coaching call",
                 f"You start with a briefing, not the whole folder: what's current today, the open things, and the map's "
                 f"status lines; {config.USER}'s vision of the day he's building towards (day-in-the-life.md) is loaded whole. The rest is the "
-                "library, opened when a turn needs it: a layer of the map is python3 \""
+                "library, opened when a turn needs it: what goes where is where-things-go.md, where he stands is current-situation.md, "
+                "a layer of the map is python3 \""
                 f"{config.ROOT / 'routine' / 'briefing.py'}\" layer N (1 the vision, 2 the year, 3 the six-week game, "
                 "4 the ideal week, 5 the real week, 6 looking back); his answers to the vision questions are my-answers.md (grep -n '^## ' "
                 "for the questions, sed -n for one); a to-do item with its details is python3 \""
@@ -223,7 +234,8 @@ def briefed(folder: Path, context: str = "day", today: datetime.date | None = No
         head = ["# This is a Quick call",
                 f"{config.USER} picked Quick: calendar, mail and small orders. You start with a briefing, not the "
                 "folder: today and tomorrow, the very important mail, the open commitments, the to-do list one line "
-                "each, the open nudges, the game. The rest is the library, opened when a question needs it: a to-do "
+                "each, the open nudges, the game. The rest is the library, opened when a question needs it: what goes where is "
+                "where-things-go.md, where he stands is current-situation.md, a to-do "
                 f"item with its details is python3 \"{config.ROOT / 'app' / 'todo.py'}\" show \"a few words of it\"; "
                 "the whole mail list is inbox.md; earlier notes are coaching/log-archive.md. For sparring, planning or "
                 "coaching, Pepper has the vision."]
@@ -244,7 +256,8 @@ def briefed(folder: Path, context: str = "day", today: datetime.date | None = No
     mem = memory_dir(folder)
     if (mem / "MEMORY.md").exists():
         parts.append("Claude's memory for this folder (the index; a note is read when it's needed):\n\n"
-                     + (mem / "MEMORY.md").read_text().strip())
+                     + (mem / "MEMORY.md").read_text().strip() if context == "build" else  # H280: hers stays; F106: the others look it up
+                     f"Claude's memory for this folder is {mem / 'MEMORY.md'}: read it when a turn needs how his tools work.")
     return "\n\n".join(parts) + "\n"
 
 

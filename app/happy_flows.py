@@ -14204,7 +14204,7 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         off = json.loads(self._h298_py(env, code))
         need(not any(v["handbook"] or v["core"] for k, v in off.items() if isinstance(v, dict)), f"with the switch off the handbook is loaded: {off}")
         need(off["moneypenny"]["nine"] and not off["moneypenny"]["ground"], "with the switch off Moneypenny's craft changed")
-        ft.switch("agents_run", True, ws)
+        ft.switch("agents_run", True, ws, tapped=True)
         on = json.loads(self._h298_py(env, code))
         for aid in ("donna", "pepper", "moneypenny"):
             v = on[aid]
@@ -16723,6 +16723,344 @@ print(json.dumps(out))
         rm.write_text(rm.read_text().replace(row, "| ⬜ | H9500 A half-built thing | His words. | QA passed (job 44, 30 October 2026 17:40): it held. | |\n"))
         need(on() == "True", "a feature whose QA passed stays off")
         return "a friend's copy pulls nothing, by push.py or by hand, the maker's does; headless on in the template; a feature in pieces stays off until QA passed, or his own words, kept; made-up words don't turn it on"
+
+    def _helper_env(self, tag):
+        """F106: a throwaway workspace and a stand-in for the model: it answers at once, or sleeps first (a question with SLOW in it), or
+        keeps taking turns (LOOP)."""
+        ws, env = self._h298_ws(tag)
+        fake = self.tmp / f"{tag}-claude"
+        fake.write_text("#!/usr/bin/env python3\n"
+                        "import json, sys, time\n"
+                        "q = sys.argv[2]\n"
+                        "say = lambda t: print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': t}]}}), flush=True)\n"
+                        "if 'LOOP' in q:\n"
+                        "    for i in range(1000):\n"
+                        "        say(f'still reading, step {i}'); time.sleep(0.02)\n"
+                        "if 'SLOW' in q:\n"
+                        "    say('Half way: the first file says it was moved.'); time.sleep(float(open(sys.argv[0] + '.wait').read()))\n"
+                        "print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'The made-up answer: it stands in the second file.'}), flush=True)\n")
+        fake.chmod(0o755)
+        (self.tmp / f"{tag}-claude.wait").write_text("1.5")
+        env.update({"HQ_HELPERS": str(self.tmp / f"{tag}-helpers"), "HQ_HELPER_CLAUDE": str(fake), "HQ_UNDER_TEST": "1", "HQ_DIRECT_PLAIN": "1", "HQ_NO_PHONE": "1",
+                    "HQ_USAGE": str(self.tmp / f"{tag}-usage.json")})
+        return ws, env
+
+    async def flow238(self) -> str:
+        """F106, with a stand-in for the model: a helper beside a call. The agent starts it without a yes, the call goes on at once, the answer
+        comes into the same call through the call's own watcher, once; hung up, it arrives as a text on her own line, once. It only reads, past
+        its box in minutes or turns it's ended and says so. A third at once and a used-up limit are told no."""
+        import subprocess as _sp
+        ws, env = self._helper_env("f106a")
+        h = lambda *a: _sp.run([sys.executable, str(ROOT / "routine/helper.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        py = lambda code, *a, e=None: _sp.run([sys.executable, "-c", code, str(ROOT), *a], capture_output=True, text=True, env=e or env, cwd=str(ROOT), timeout=120)
+        records = lambda: [json.loads(p.read_text()) for p in sorted(Path(env["HQ_HELPERS"]).glob("*.json")) if not p.name.startswith("live-")]
+        def wait(hid, secs=20):
+            end = time.time() + secs
+            while time.time() < end:
+                d = json.loads((Path(env["HQ_HELPERS"]) / f"{hid}.json").read_text())
+                if d["state"] != "running":
+                    return d
+                time.sleep(0.05)
+            need(False, f"the helper never ended: {d}")
+        # the doors
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/app')
+from pathlib import Path
+import policy as P
+pol = P.Policy(Path(sys.argv[2]))
+hq = str(P.HQ_ROUTINE)
+out = {'start': pol.decide('Bash', {'command': 'python3 "' + hq + '/helper.py" start "How did the move go?"'}).verdict,
+       'run': pol.decide('Bash', {'command': 'python3 "' + hq + '/helper.py" run abc'}).verdict,
+       'task': pol.decide('Task', {'prompt': 'x'}).verdict}
+pol.after_call = True
+out['after'] = pol.decide('Bash', {'command': 'python3 "' + hq + '/helper.py" start "How did the move go?"'}).verdict
+sys.path.insert(0, sys.argv[1] + '/routine')
+import helper
+c = helper._command('a question')
+out['tools'] = c[c.index('--tools') + 1]
+out['mail'] = '--disallowedTools' in c
+print(json.dumps(out))
+"""
+        r = py(code, str(ws))
+        need(r.returncode == 0, f"the doors: {r.stderr[-400:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["start"] == "allow" and o["run"] == "deny" and o["after"] == "deny" and o["task"] == "ask" and o["tools"] == "Read,Glob,Grep,WebSearch" and o["mail"], f"the doors: {o}")
+        # on the call: the call's own watcher, with a stand-in for the voice
+        call = """
+import asyncio, json, sys, types
+sys.path.insert(0, sys.argv[1] + '/app')
+sys.path.insert(0, sys.argv[1] + '/routine')
+import call as C, helper, subprocess
+got, notes = [], []
+class L:
+    _replying = False; _bot_speaking = False
+    async def queue_frame(self, f): got.append(f.note)
+c = C.Call.__new__(C.Call)
+c.llm = L()
+c.speaker = {'id': 'donna'}
+c.transcript = types.SimpleNamespace(path=types.SimpleNamespace(stem='2026-11-01-1000'), note=lambda w: notes.append(w))
+helper.WATCH_S = 0.1
+async def main():
+    t = asyncio.create_task(c.watch_helpers())
+    await asyncio.sleep(0.3)
+    t0 = __import__('time').time()
+    r = subprocess.run([sys.executable, sys.argv[1] + '/routine/helper.py', 'start', 'Where did the SLOW report go after the move?'], capture_output=True, text=True)
+    started = __import__('time').time() - t0
+    assert r.returncode == 0, r.stdout + r.stderr
+    busy = len(helper.running())
+    L._replying = True          # she's talking: it waits
+    await asyncio.sleep(2.4)
+    early = list(got)
+    L._replying = False
+    for i in range(50):
+        await asyncio.sleep(0.1)
+        if got:
+            break
+    await asyncio.sleep(0.5)
+    t.cancel()
+    print(json.dumps({'started': started, 'busy': busy, 'early': early, 'got': got, 'notes': notes}))
+asyncio.run(main())
+"""
+        r = await asyncio.to_thread(py, call)
+        need(r.returncode == 0, f"the call's watcher: {r.stdout[-300:]} {r.stderr[-700:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["started"] < 2 and o["busy"] == 1, f"the call had to wait for the helper: {o}")
+        need(o["early"] == [] and len(o["got"]) == 1 and "The made-up answer" in o["got"][0] and "Where did the SLOW report go" in o["got"][0], f"the answer in the call: {o}")
+        rec = records()[-1]
+        need(rec["state"] == "done" and rec["told"] == "call" and rec["call"] == "2026-11-01-1000" and rec["agent"] == "donna", f"the record: {rec}")
+        need(rec["minutes"] <= rec["box"]["minutes"], f"past its box: {rec}")
+        thread = ws / "HQ/direct-line/thread.jsonl"
+        need(not thread.exists() or "made-up answer" not in thread.read_text(), "the answer went by text too")
+        # hung up while it runs: a text on her line, once
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import helper; helper.live('c2', sys.argv[2])"
+        py(code, "donna")
+        r = h("start", "Where is the SLOW thing, for a call that hangs up?")
+        need(r.returncode == 0, f"start: {r.stdout}")
+        code = "import sys, json; sys.path.insert(0, sys.argv[1] + '/routine'); import helper; print(json.dumps(helper.running()[-1]['id'])); helper.call_over('c2')"
+        r = py(code)
+        hid = json.loads(r.stdout.strip().splitlines()[-1])
+        d = wait(hid)
+        end = time.time() + 10
+        while time.time() < end and not (thread.exists() and "made-up answer" in thread.read_text()):
+            time.sleep(0.05)
+        need(thread.exists() and thread.read_text().count("made-up answer") == 1, f"no text after the hang-up: {thread.read_text() if thread.exists() else 'nothing'}")
+        need(json.loads((Path(env["HQ_HELPERS"]) / f"{hid}.json").read_text())["told"] == "text", f"the record: {d}")
+        last = json.loads(thread.read_text().splitlines()[-1])
+        need(last["why"] == "helper" and last["from"] == "agent", f"the text: {last}")
+        # finished while the call was on, never said, then hung up: a text; on Pepper's line for Pepper
+        (self.tmp / "f106a-claude.wait").write_text("0")
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import helper; helper.live('c3', 'pepper')"
+        py(code)
+        h("start", "Which of the two reports is the newest one?")
+        hid = sorted(records(), key=lambda x: x["started"])[-1]["id"]
+        d = wait(hid)
+        need(d["agent"] == "pepper" and not d.get("told"), f"said too early: {d}")
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import helper; print(helper.call_over('c3'))"
+        py(code)
+        line = ws / "HQ/coaching-line/thread.jsonl"
+        need(line.exists() and "made-up answer" in line.read_text(), f"not on Pepper's own line: {line.exists()}")
+        # the box: minutes, then turns; what it had comes back, and it's said to be cut short
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import helper; helper.live('c4', 'donna')"
+        py(code)
+        (self.tmp / "f106a-claude.wait").write_text("30")
+        r = _sp.run([sys.executable, str(ROOT / "routine/helper.py"), "start", "This one is SLOW and never ends in time"], capture_output=True, text=True, env={**env, "HQ_HELPER_BOX_S": "0.6"})
+        hid = sorted(records(), key=lambda x: x["started"])[-1]["id"]
+        t0 = time.time()
+        d = wait(hid)
+        need(d["state"] == "boxed" and d["why"] == "minutes" and time.time() - t0 < 6 and "Half way" in d["answer"], f"the box in minutes: {d}")
+        code = "import sys, json; sys.path.insert(0, sys.argv[1] + '/routine'); import helper; print(helper.words(helper.load(sys.argv[2])))"
+        need("ran out of its time" in py(code, hid).stdout, "a boxed answer isn't said to be cut short")
+        r = _sp.run([sys.executable, str(ROOT / "routine/helper.py"), "start", "LOOP over everything there is"], capture_output=True, text=True, env={**env, "HQ_HELPER_TURNS": "5"})
+        hid = sorted(records(), key=lambda x: x["started"])[-1]["id"]
+        d = wait(hid)
+        need(d["state"] == "boxed" and d["why"] == "turns" and d["turns"] <= 12, f"the box in turns: {d}")
+        # at most two at once; a limit used up
+        (self.tmp / "f106a-claude.wait").write_text("3")
+        for q in ("One more SLOW question for the box", "Another SLOW question for the box"):
+            r = h("start", q)
+            need(r.returncode == 0, f"start: {r.stdout}")
+        r = h("start", "A third SLOW question at the same time")
+        need(r.returncode == 2 and "already running" in r.stdout, f"a third at once: {r.stdout}")
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import helper, os, signal\nfor d in helper.running():\n    os.kill(d['pid'], signal.SIGKILL)\n    d['state'] = 'failed'; helper.save(d)"
+        py(code)
+        Path(env["HQ_USAGE"]).write_text(json.dumps({"limits": [{"label": "Weekly", "percent": 99, "resetsAt": "2099-01-01T00:00:00.000Z"}]}))
+        r = h("start", "Is there room for one more question")
+        need(r.returncode == 2 and "used up" in r.stdout, f"a used-up limit: {r.stdout}")
+        Path(env["HQ_USAGE"]).write_text(json.dumps({"limits": [{"label": "Weekly", "percent": 90, "resetsAt": "2099-01-01T00:00:00.000Z"}]}))
+        r = h("start", "Is there room for one more question")
+        need(r.returncode == 0, f"under the limit, past the team's lines: {r.stdout}")
+        return "started without a yes in under two seconds, the answer in the call once at a quiet moment; hung up it's a text on her own line, once; boxed in minutes and turns and said so; two at once; a used-up limit stops it"
+
+    async def flow239(self) -> str:
+        """F106, no Claude: a check she couldn't run is never answered around: a refused command in a turn whose reply doesn't say so gets the
+        spoken line from the program; a reply that says so, or asks his yes, doesn't; a command that ran, or a step handed to the main, doesn't."""
+        sys.path.insert(0, str(ROOT / "app"))
+        from claude_llm import BLOCKED_LINE, ClaudeSessionLLMService
+        from pipecat.processors.aggregators.llm_context import LLMContext
+        import policy as P
+        ws, env = self._h298_ws("f106b")
+        pol = P.Policy(ws)
+        class Stand:
+            model = "stand-in"
+            def __init__(self): self.script = lambda: None; self.reply = ""
+            async def start(self): pass
+            async def stop(self): pass
+            def cancel_turn(self): pass
+            async def ask(self, text):
+                self.script()
+                yield self.reply
+        class Script:
+            def __init__(self): self.notes = []
+            def user(self, *a, **k): pass
+            def note(self, w): self.notes.append(w)
+            def reply(self, *a, **k): pass
+        brain, script = Stand(), Script()
+        llm = ClaudeSessionLLMService(brain, transcript=script, policy=pol)
+        said = []
+        async def nothing(*a, **k): pass
+        async def speak(t): said.append(t)
+        llm.push_frame = nothing
+        llm._push_llm_text = speak
+        llm.push_error = nothing
+        llm.start_processing_metrics = llm.stop_processing_metrics = nothing
+        llm.start_ttfb_metrics = llm.stop_ttfb_metrics = nothing
+        msgs = []
+        async def turn(words, reply, tool):
+            said.clear()
+            brain.reply = reply
+            brain.script = tool
+            msgs.append({"role": "user", "content": words})
+            await llm._process_context(LLMContext(messages=list(msgs)))
+            msgs.append({"role": "assistant", "content": reply})
+            return " ".join(said)
+        refused = lambda: pol.decide("Bash", {"command": "rm -rf /tmp/x && git push origin main"})
+        asked = lambda: pol.decide("mcp__claude_ai_Gmail__trash_message", {"id": "1"})
+        ran = lambda: pol.decide("Read", {"file_path": str(ws / "challenges.md")})
+        out = await turn("Is the label check clean?", "Yes, all of the labels are clean.", refused)
+        need(BLOCKED_LINE in out and BLOCKED_LINE == "I couldn't check that.", f"an answer around a refused check: {out!r}")
+        need(any("around a check" in n for n in script.notes), f"not written in the transcript: {script.notes}")
+        need(llm.turns[-1]["reply"].endswith(BLOCKED_LINE), f"the turn's reply: {llm.turns[-1]['reply']!r}")
+        out = await turn("And the second one?", "That one I couldn't check, the command was refused.", refused)
+        need(BLOCKED_LINE not in out, f"she said it herself, and heard it twice: {out!r}")
+        pol.pending.clear()
+        out = await turn("Throw that mail away.", "Shall I move that mail to the trash?", asked)
+        need(BLOCKED_LINE not in out, f"asking his yes isn't an answer around it: {out!r}")
+        pol.pending.clear()
+        out = await turn("What's on the list?", "Three things, all small.", ran)
+        need(BLOCKED_LINE not in out, f"a check that ran: {out!r}")
+        out = await turn("Move that mail to the trash.", "It's gone.", asked)
+        need(BLOCKED_LINE in out, f"waiting for a yes and answered around it: {out!r}")
+        return "refused or waiting and answered around it: the program says I couldn't check that, written in the transcript; said by her, asked of him, or a look that ran: nothing added"
+
+    async def flow240(self) -> str:
+        """F106, no Claude: one line on the status page shows what's being worked on for him right now: a running helper is on /routines.json and
+        on the page, in words; a finished one and one past its box aren't."""
+        import shutil as _sh
+        ws, env = self._helper_env("f106c")
+        root = self.tmp / "f106c-hq"
+        (root / "routine").mkdir(parents=True)
+        (root / "app").mkdir()
+        (root / ".status").mkdir()
+        _sh.copytree(ROOT / "status", root / "status")
+        for f in ROOT.joinpath("routine").glob("*.py"):
+            _sh.copy(f, root / "routine" / f.name)
+        hdir = Path(env["HQ_HELPERS"])
+        hdir.mkdir(parents=True)
+        now = time.time()
+        rec = lambda i, state, age: json.dumps({"id": i, "question": f"The {i} made-up question", "agent": "moneypenny", "state": state, "started": now - age, "box": {"minutes": 5, "turns": 40}})
+        (hdir / "on.json").write_text(rec("running", "running", 90))
+        (hdir / "over.json").write_text(rec("stuck", "running", 900))
+        (hdir / "ended.json").write_text(rec("finished", "done", 60))
+        (hdir / "live-a.json").write_text('{"call": "a", "agent": "donna", "at": 1}')
+        p, port = self._status_server(root, env, "f106c")
+        try:
+            code, body, _c = http_get("/routines.json", f"http://127.0.0.1:{port}", timeout=30)
+            need(code == 200, f"/routines.json: {code}")
+            d = json.loads(body)
+            need([x["question"] for x in d["forYou"]] == ["The running made-up question"] and d["forYou"][0]["who"] == "moneypenny", f"the line's data: {d['forYou']}")
+            chrome = self._chrome_for_page()
+            r = subprocess.run([chrome, "--headless", "--no-sandbox", "--disable-gpu", "--virtual-time-budget=6000", "--dump-dom", f"http://127.0.0.1:{port}/"], capture_output=True, text=True, timeout=60)
+            need("For you now: Moneypenny's helper: The running made-up question (1 of 5 minutes)" in r.stdout, f"the page: {r.stdout[:300]} {r.stderr[-300:]}")
+            (hdir / "on.json").unlink()
+            code, body, _c = http_get("/routines.json", f"http://127.0.0.1:{port}", timeout=30)
+            need(json.loads(body)["forYou"] == [], "a helper that's gone stays on the line")
+        finally:
+            p.terminate()
+        return "a running helper stands on the page in one line, in words; finished, past its box or gone it doesn't"
+
+    async def flow241(self) -> str:
+        """F106, no Claude: a call's start is under the size the design sets, for every agent, on a workspace filled with made-up work: a long
+        to-do list, a long status block, many planning rows, a big handbook. No life file is loaded whole; nothing of the rules is lost: every
+        part is in the start or a topic, each topic is read with rules.py without a yes; a call's own session gets this start."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f106d")
+        env.update({"HQ_UNDER_TEST": "1"})
+        (ws / "current-situation.md").write_text("# Where things stand\n\nMADEUPSITUATION " + "a line about how things stand. " * 900)
+        (ws / "where-things-go.md").write_text("# Where things go\n\nMADEUPWHERE " + "a line about where things go. " * 500)
+        (ws / "day-in-the-life.md").write_text("# A day\n\nMADEUPDAY " + "a line of the day. " * 300)
+        ch = ws / "challenges.md"
+        t = ch.read_text()
+        rows = "".join(f"| A made-up item number {i} with a longer title than most | passive | | open | | 2026-10-05 | |\n" for i in range(80))
+        for head in ("## 1. Important, not urgent", "## 2. Important and urgent"):
+            if head in t:
+                t = re.sub(rf"({re.escape(head)}.*?\n\|---[^\n]*\n)", lambda m: m.group(1) + rows, t, count=1, flags=re.S)
+        ch.write_text(t)
+        rm = ws / "HQ/roadmap.md"
+        road = rm.read_text()
+        pos = road.find("\n## The queue")
+        rm.write_text(road[:pos] + "\n" + ("A long made-up line of the status block. " * 400) + road[pos:])
+        rows = "".join(f"| ⬜ | H{9000 + i} A made-up row on the planning | His words: made up. Done means: it works. | | | |\n" for i in range(120))
+        rm.write_text(rm.read_text().replace("| | Step | What you get | Model |\n|---|---|---|---|\n", "| | Step | What you get | Model |\n|---|---|---|---|\n" + rows, 1))
+        r = _sp.run([sys.executable, str(ROOT / "app/startsize.py"), "--check"], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0 and r.stdout.count("bytes of") >= 3, f"a start over the cap: {r.stdout} {r.stderr[-400:]}")
+        code = """
+import json, re, sys
+sys.path.insert(0, sys.argv[1] + '/app')
+sys.path.insert(0, sys.argv[1] + '/routine')
+import agents, config, quick_context, startsize
+from pathlib import Path
+ws = Path(sys.argv[2])
+out = {'cap': config.START_CAP, 'totals': {}, 'lost': [], 'topics': list(config.topics())}
+for a in agents.visible(ws):
+    d = startsize.start_of(a, ws)
+    out['totals'][a['id']] = d['total']
+    text = quick_context.build(ws, context=d['context'])
+    out[a['id']] = {'situation': 'MADEUPSITUATION' in text, 'where': 'MADEUPWHERE' in text, 'day': 'MADEUPDAY' in text}
+core = config.start_rules('day', 'Donna')
+book = config.voice_rules('day')
+for b in config._blocks(book):
+    if b.strip() and b not in core and not config._topic_of(b):
+        out['lost'].append(b[:60])
+out['named'] = all(k in core for k in out['topics'])
+out['safety'] = all(w in core for w in ("never answered around", "helper.py", "Some actions need his okay"))
+print(json.dumps(out))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0, f"the start: {r.stderr[-600:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["cap"] == 40000 and max(o["totals"].values()) <= o["cap"], f"the sizes: {o['totals']}")
+        need(not o["lost"] and o["named"] and o["safety"], f"lost from the rules: {o['lost']} named {o['named']} safety {o['safety']}")
+        need(o["donna"] == {"situation": False, "where": False, "day": False} and o["pepper"] == {"situation": False, "where": False, "day": True}
+             and not o["moneypenny"]["situation"], f"what's loaded whole: {o}")
+        for topic in o["topics"]:
+            r = _sp.run([sys.executable, str(ROOT / "app/rules.py"), topic], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+            need(r.returncode == 0 and len(r.stdout) > 100, f"the topic {topic}: {r.stdout[:200]} {r.stderr[-300:]}")
+        r = _sp.run([sys.executable, str(ROOT / "app/rules.py"), "nothing-like-this"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 2, "an unknown topic")
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/app')
+from pathlib import Path
+import policy as P
+pol = P.Policy(Path(sys.argv[2]))
+print(pol.decide('Bash', {'command': 'python3 "' + str(P._APP) + '/rules.py" todo'}).verdict)
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.stdout.strip().splitlines()[-1] == "allow", f"a lookup asks for a yes: {r.stdout}")
+        pipeline = (ROOT / "app/pipeline.py").read_text()
+        need("config.start_rules(context, agent_name)" in pipeline and "light=" in (ROOT / "app/call.py").read_text(), "a call's session doesn't get the light start")
+        return f"every agent under {o['cap']} bytes on a full workspace ({o['totals']}); nothing lost from the rules, every topic a lookup without a yes; no life file whole but Pepper's day"
 
     async def flow230(self) -> str:
         """F108, no Claude: three writers at the same instant, the way flow 196 does it (two "down" texts in plain words and his own
@@ -26903,6 +27241,10 @@ FLOWS = {
     235: ("F104: a release that changes data is refused when its undo fails on a copy, past any say-so; a good one goes out listed in the changelog", False, "flow235"),
     236: ("F104: the old project name nowhere in HQ's files; the privacy check as a pre-push hook refuses it and a computer named after someone; a clean push goes", False, "flow236"),
     237: ("F104: friends only on released versions: a job on a friend's copy never pulls dev; headless on in the template; a feature in pieces stays off until its QA passed or his own words, logged", False, "flow237"),
+    238: ("F106: a helper beside a call, with a stand-in for the model: started without a yes, the call goes on, the answer in the same call once; hung up it's a text on her line; boxed in minutes and turns; two at once; a used-up limit stops it", False, "flow238"),
+    239: ("F106: a check she couldn't run is never answered around: the program says I couldn't check that when her reply doesn't", False, "flow239"),
+    240: ("F106: one line on the status page shows the helper working for him right now", False, "flow240"),
+    241: ("F106: a call's start is under the design's size for every agent, on a full workspace; nothing lost from the rules, each topic a lookup without a yes", False, "flow241"),
     230: ("F108: three writers at the same instant, 20 runs on Donna's line and the team line: all 9 lines land; a real repeat stays out", False, "flow230"),
     228: ("F107: Ultra with no 5-hour window: the past stays Max 5x, estimates, planning, nights and page on the week with no 5-hour left, then back on Max 5x with all of it", False, "flow228"),
     227: ("F102: the status page never hangs on a slow script: the last answer at once, one run at a time", False, "flow227"),

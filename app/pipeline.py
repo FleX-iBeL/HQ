@@ -338,7 +338,7 @@ def warm_up_tts(tts: KokoroTTSService) -> float:
 
 def make_brain(model: str | None = None, policy: Policy | None = None, cwd=None,
                free: bool = False, load: str = "deep", persona: str = "", demo: bool = False,
-               context: str | None = None, effort: str | None = None, resume: str | None = None) -> ClaudeBrain:
+               context: str | None = None, effort: str | None = None, resume: str | None = None, agent_name: str = "") -> ClaudeBrain:
     """With a policy: the full Claude of the user's workspace (A3). Without one, or
     with HQ_PLAIN=1: the plain Claude of A2, working in cwd (default: scratch).
     free=True (H7, H8): the plain Claude plus web search and fetching pages, nothing else.
@@ -356,7 +356,7 @@ def make_brain(model: str | None = None, policy: Policy | None = None, cwd=None,
         options = call_session_options(
             model=model,
             folder=config.FOLDER,
-            voice_rules=config.voice_rules(context) + config.HANGUP_RULES + persona,
+            voice_rules=config.start_rules(context, agent_name) + config.HANGUP_RULES + persona,  # F106
             policy=policy,
             cli_path=config.CLAUDE_CLI,
             effort=effort,

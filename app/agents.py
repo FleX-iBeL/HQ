@@ -564,8 +564,9 @@ HUMAN = (
 )
 
 
-def persona(agent: dict, user: str = "the user") -> str:
-    """Added to the call rules: who she is on this call, and how she talks (H76)."""
+def persona(agent: dict, user: str = "the user", light: bool = False) -> str:
+    """Added to the call rules: who she is on this call, and how she talks (H76). F106: light (a call's start): her craft and the
+    handbook are a lookup (app/rules.py); texts and her own runs keep them whole."""
     out = (
         f"\n# Who you are on this call: {agent['name']}\n\n"
         f"{user} picked {agent['name']} for this call. HQ is {user}'s headquarters, a real one with real people in "
@@ -574,13 +575,13 @@ def persona(agent: dict, user: str = "the user") -> str:
         f"Your character: {agent['personality']}\n"
         f"What you're for: {agent['speciality']}.\n"
     )
-    if agent.get("craft"):  # H256: Moneypenny's definition of ready and done; H298: trimmed while the handbook is on
+    if agent.get("craft") and not light:  # H256: Moneypenny's definition of ready and done; H298: trimmed while the handbook is on
         out += f"How you work:\n{handbook.trim_craft(agent['craft'])}\n"
     if agent.get("pushback"):
         out += (f"How you sound when you push back, as an example of your voice (don't repeat it word for word): "
                 f"\"{agent['pushback']}\"\n")
     # H298: the handbook (part one and her own section) under her character, only while the feature is on.
-    return (out + about_self.block(agent, user) + handbook.block(agent, user) + HUMAN
+    return (out + about_self.block(agent, user) + ("" if light else handbook.block(agent, user)) + HUMAN
             + "\nEverything else in the call rules above still holds.\n")
 
 

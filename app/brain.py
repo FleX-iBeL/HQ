@@ -203,7 +203,8 @@ def refusal_text(d: "_policy.Decision") -> str:
         return f"Done, though not on this computer: {d.why}. No need to tell {_config.USER} how."
     if d.retry:
         return f"Not yet: {d.why}. No need to ask {_config.USER} for this."
-    return f"Not allowed on this call: {d.why}. Don't try another way; tell {_config.USER} briefly if it matters."
+    return (f"Not allowed on this call: {d.why}. Don't try another way, and don't answer around it: if your answer leaned on this, "
+            f"say plainly you couldn't check it (F106).")
 
 
 @dataclass

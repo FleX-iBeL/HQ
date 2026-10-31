@@ -818,9 +818,75 @@ def voice_rules(context: str = "all") -> str:
             + ("\n" + ext + "\n" if ext else "") + ("\n" + cy + "\n" if cy else "") + ("\n" + plan + "\n" if plan else ""))
 
 
+# F106: lighter starts. His words: "lighter starts"; the design's cap per agent: "say 40 KB; the number is his". A call starts with the
+# core of the rules; the topics below are a lookup (app/rules.py), read before she acts on one. voice_rules() stays the whole book.
+START_CAP = int(os.environ.get("HQ_START_CAP") or 40_000)  # bytes HQ adds to Claude's own prompt at a call's start, per agent
+RULE_TOPICS = {  # topic: (when to read it, the first words of its parts in the rules)
+    "team": ("before anything with the team, the job list, the scheduler, planned or repeating work, the planning",
+             ("- Work for the computer", "- The team (H133)", "- The team's work on a call", "- The waiting jobs run", "- A running job whose",
+              "- The scheduler (H43)", "- The priority tag", "- Repeating items", "- Since 24 October 2026")),
+    "todo": ("before the to-do list, the groceries, planning an item into a block, or passing on feedback",
+             ("- The to-do list (H200)", "- Feedback for HQ")),
+    "reminders": ("before a reminder, a nudge, a text he asks for later, or a call back", ("- Texts from",)),
+    "mail": ("before tidying his mail or changing how often it's checked", ("- Mail more often", "- Tidying his mail")),
+    "calendar": ("before notes on appointments, or looking back at the ticks and X's", ("- Ticks and X", "- Notes on appointments")),
+    "game": ("before the six-week game", ("- The six-week game",)),
+    "travel": ("before travel advice, trips on appointments or driving", ("- Public transport door to door", "- Travel on appointments", "- Driving to appointments")),
+    "notes": ("before his quick notes", ("- His quick notes",)),
+    "computers": ("before main and backup, who writes what, or the lid", ("- Main and backup", "- One writer", "- Keep working with the lid")),
+    "usage": ("before saying what the usage is, or changing a stop line", ("- When he asks what the usage is", "- The usage stop lines")),
+    "cycles": ("before anything about your own cycles", ("- Your own cycles",)),
+    "coaching": ("before a guided session (Life coaching and the map)", ("- Workflows they turned on",)),
+    "looking": ("before reading HQ's own logs or the status page's data", ("- HQ itself",)),
+    "files": ("before you change a file that's his or shared", ("- What's his, and the ways in",)),
+}
+HELPER_RULE = """- Looking never waits for his yes: reading the workspace, HQ and its logs, and looking at this computer run without asking, so check \
+what you need before you answer. Changing anything in HQ asks him first; building HQ is the team's. His vision, the map, the rules and every \
+CLAUDE.md only change after his yes; the shared files only through their script, and a refusal names it.
+- Taking it away (F106): you're here to decide with him; the work happens beside the call. For anything bigger than a quick look \
+(a long read, a question across many files, a proposal, an investigation), say in a few words that you'll take it away and start a helper: \
+python3 "{HQ}/routine/helper.py" start "<the question in one self-contained line>". It only reads and is boxed in minutes and turns; you \
+go on with him at once, and the answer comes back to you here, or as a text on your line if he's hung up. Never make him wait for a long read.
+- A check you couldn't run (a command refused, or waiting for his yes) is never answered around: say you couldn't check it.
+- Before you do any of these, read how it works here first, a quick look that needs no yes, and never guess a command from memory: \
+python3 "{HQ}/app/rules.py" TOPIC. The topics: {topics}. Your own handbook and how you work: python3 "{HQ}/app/rules.py" handbook {agent} \
+and craft {agent}, before a decision the handbook names or a judgment on an item.
+"""
+
+
+def _blocks(text: str) -> list[str]:
+    return re.split(r"(?m)^(?=- |# |\n)", text)
+
+
+def _topic_of(block: str, keep: tuple = ()) -> str | None:
+    for name, (_when, starts) in RULE_TOPICS.items():
+        if name not in keep and block.startswith(starts):
+            return name
+    return None
+
+
+def topics(context: str = "all") -> dict:
+    """The topics this role has in its rules: name: when to read it."""
+    have = {_topic_of(b) for b in _blocks(voice_rules(context))}
+    return {k: v[0] for k, v in RULE_TOPICS.items() if k in have}
+
+
+def rule_topic(name: str, context: str = "all") -> str:
+    return "".join(b for b in _blocks(voice_rules(context)) if _topic_of(b) == name).strip()
+
+
+def start_rules(context: str = "all", agent: str = "") -> str:
+    """A call's start: the rules without the topics, and how to look them up."""
+    keep = ()
+    core = "".join(b for b in _blocks(voice_rules(context)) if not _topic_of(b, keep))
+    names = "; ".join(f"{k} ({v})" for k, v in topics(context).items() if k not in keep)
+    return core.rstrip() + "\n" + HELPER_RULE.replace("{HQ}", str(ROOT)).replace("{topics}", names).replace("{agent}", agent or "<your name>")
+
+
 WRAP_UP_PROMPT = """[Call system: @USER@ has hung up. The call is over, and nothing you write now is spoken.
 Do the after-call work, quietly and fully, as in a normal chat:
-1. Write what matters from this call into coaching/log.md, in his words, and new to-do items with the to-do script; after \
+1. Write what matters from this call into coaching/log.md, in his words, and new to-do items with the to-do script (how: \
+python3 "@HQ@/app/rules.py" todo); after \
 a call only the log, the lists and the transcript are written (F99), so anything else goes in the log as a follow-up. \
 At least one entry in coaching/log.md, newest first, as its own section headed `## {day} {start} · call (<your name>)` \
 (the first dated section in the file, right under Open commitments), with his own words from the call and any \

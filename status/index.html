@@ -542,6 +542,7 @@
       <div id="hqu-line" style="display: flex; justify-content: flex-end; min-height: 22px;"></div>
       <div id="hqu-banner"></div>
     </div>
+    <p id="for-you" hidden></p>
     <main id="app"><p>Reading the roadmap…</p></main>
     <script src="./update-ui.js"></script>
     <script>HQUpdate.mount({ line: document.getElementById('hqu-line'), banner: document.getElementById('hqu-banner') });</script>
@@ -1609,6 +1610,16 @@
         const i = ROUTINES.findIndex(([k]) => k === 'helper');
         return [...ROUTINES.slice(0, i), ...beats, ...ROUTINES.slice(i)];
       }
+      // F106: one line: what's being worked on for him right now, beside a call.
+      function drawForYou(list) {
+        const el = document.getElementById('for-you');
+        if (!el) return;
+        const now = Date.now() / 1000;
+        const say = (list ?? []).map((h) => `${h.who ? h.who[0].toUpperCase() + h.who.slice(1) : 'An agent'}'s helper: ${h.question} (${Math.floor((now - h.since) / 60)} of ${h.box} minutes)`);
+        el.hidden = !say.length;
+        el.textContent = say.length ? `For you now: ${say.join(' · ')}` : '';
+      }
+
       function drawRoutines(r) {
         const box = el('section');
         const now = r?.now ?? Date.now() / 1000;
@@ -2542,6 +2553,7 @@
           // Also once a minute, so "read 4 min ago" and "resets in" stay true.
           let routines = null;
           try { routines = JSON.parse(routinesText); } catch { routines = null; }
+          drawForYou(routines?.forYou);  // F106
           const lines = routines ? JSON.stringify([routines.routines, routines.incidents, routines.temperature, routines.battery, routines.stats, routines.lidsleep, routines.estimate, routines.planning, routines.feedback, routines.agents]) : '';
           const key = `${text}\n${usageText}\n${lines}\n${Math.floor(Date.now() / 60000)}`;
           // H23: the graph's history, once a minute (and when the time span or a routine is switched).

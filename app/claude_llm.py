@@ -60,6 +60,20 @@ class JoinedHiFrame(DataFrame):
         self.agent = agent
 
 
+class HelperFrame(DataFrame):
+    """F106: a helper's answer for this call: queued to the service, so she says it as a turn of its own, without words of his."""
+
+    def __init__(self, note: str):
+        super().__init__()
+        self.note = note
+
+
+# F106: what in her reply shows she said it couldn't be checked, or is asking for his yes; without it the program says the line.
+SAID_BLOCKED = re.compile(r"\b(couldn'?t|could not|can'?t|cannot|wasn'?t able|not able|unable|didn'?t (work|go through|run)|no access|refused|not allowed|"
+                          r"needs? your|shall i|should i|want me to|do you want|okay to|is it ok)\b", re.I)
+BLOCKED_LINE = "I couldn't check that."
+
+
 class ClaudeSessionLLMService(LLMService):
     def __init__(
         self,
@@ -246,6 +260,9 @@ class ClaudeSessionLLMService(LLMService):
         if isinstance(frame, JoinedHiFrame):
             await self._say_hi(frame.agent)
             return
+        if isinstance(frame, HelperFrame):
+            await self._answer(frame.note, "", hi=True)
+            return
 
         if isinstance(frame, InterruptionFrame):
             # In case a reply is still being drained or was mid-flight outside our task.
@@ -345,6 +362,7 @@ class ClaudeSessionLLMService(LLMService):
         }
         self.turns.append(turn)
         t0 = turn["t0"]
+        decided = len(self.policy.log) if self.policy else 0  # F106: what's refused from here on is this turn's
         self._replying = True
         self._cancel_asked = False
         if not button and not hi:
@@ -376,6 +394,7 @@ class ClaudeSessionLLMService(LLMService):
                     if pending else ""))
                 mark, speech = Marks([config.HANGUP_MARK, config.CALLBACK_MARK, *self.switch_marks]), SpeechFilter()
                 await self._stream(reply, turn, t0, mark, speech)
+            await self._say_blocked(turn, decided)
             asked = [self.switch_marks[m] for m in self.switch_marks if mark.found(m)]
             if mark.found(config.CALLBACK_MARK) and not mark.found(config.HANGUP_MARK):
                 # H238: he asked her to hang up and call him right back
@@ -471,6 +490,25 @@ class ClaudeSessionLLMService(LLMService):
         said = speech.feed(tail) + speech.flush()
         if said:
             await self._push_llm_text(said)
+
+    def blocked_checks(self, turn: dict, decided: int) -> list[str]:
+        """F106: what this turn couldn't run (refused, or waiting for his yes) while her reply doesn't say so: an answer given around
+        a check. On the call of 30 October a refused look became a confident wrong answer. Empty when she said it."""
+        if not self.policy or SAID_BLOCKED.search(turn["reply"]):
+            return []
+        return [s for t, s, d in self.policy.log[decided:] if d.verdict != "allow" and not getattr(d, "handed", False)
+                and not getattr(d, "retry", False)]
+
+    async def _say_blocked(self, turn: dict, decided: int) -> None:
+        missed = self.blocked_checks(turn, decided)
+        if not missed:
+            return
+        logger.warning(f"F106: an answer around a check that didn't run: {missed[:3]}")
+        if self.transcript:
+            self.transcript.note("she answered around a check that didn't run; the call system said so: " + "; ".join(missed[:3]))
+        turn["reply"] = turn["reply"].rstrip() + (" " if turn["reply"].strip() else "") + BLOCKED_LINE
+        turn["blocked"] = missed
+        await self._push_llm_text(" " + BLOCKED_LINE)
 
     def _ended_silent(self, turn: dict) -> bool:
         """The reply came to its end (a result, not a cut-in, not a dead line) and she said nothing at all."""

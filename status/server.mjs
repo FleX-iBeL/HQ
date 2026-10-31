@@ -10,7 +10,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, openSync } from 'node:fs';
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { homedir } from 'node:os';
@@ -302,6 +302,25 @@ const SUPPORT = process.env.HQ_SUPPORT
   || (process.platform === 'darwin' ? join(homedir(), 'Library/Application Support/HQ')
     : join(process.env.XDG_STATE_HOME || join(homedir(), '.local/state'), 'hq'));
 
+// F106: one line on the page: the helpers beside a call, from their own records. A record past its box and a minute is left out.
+async function forYouNow() {
+  const dir = process.env.HQ_HELPERS || join(root, '.status/helpers');
+  const out = [];
+  let names = [];
+  try { names = await readdir(dir); } catch { return out; }
+  for (const n of names) {
+    if (!n.endsWith('.json') || n.startsWith('live-')) continue;
+    try {
+      const d = JSON.parse(await readFile(join(dir, n), 'utf8'));
+      const box = (d.box?.minutes ?? 5) * 60;
+      if (d.state === 'running' && Date.now() / 1000 - d.started < box + 60) {
+        out.push({ who: d.agent, question: String(d.question).slice(0, 120), since: d.started, box: d.box?.minutes ?? 5 });
+      }
+    } catch {}
+  }
+  return out;
+}
+
 // H19/H20: every routine's own line, plus the watchdog's, which lives outside the Documents folder.
 async function routines() {
   const read = async (path) => {
@@ -320,8 +339,9 @@ async function routines() {
   const stats = await read(join(root, '.status/stats.json'));
   // H45: whether the laptop keeps working with the lid closed (routine/lidsleep.py, every minute).
   const lidsleep = await read(join(root, '.status/lidsleep.json'));
+  const forYou = await forYouNow();  // F106: what's being worked on for him right now
   const [estimate, planning, feedback, agents] = await Promise.all([estimates(), sprint(), feedbackBox(['list'], 20000), cyclesFriday()]);
-  return { now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback, agents };
+  return { forYou, now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback, agents };
 }
 
 // H23: every minute the state of each routine is written down, also when the helper is gone (its lines then

@@ -619,6 +619,7 @@ PLAIN = {
     "feedback-status": ["News on your feedback: {facts}"],  # H247 (c)
     # H266: the team's own kinds, on Moneypenny's line
     "paused": ["{facts}"],
+    "helper": ["About what you asked on the call. {facts}", "What you asked on the call came back. {facts}", "From the call. {facts}"],
     "estimates": ["Before the sprint planning, how our estimates held this week: {facts}",
                   "The week's estimates, for Friday: {facts}"],
     "qa-failed": ["A check didn't pass, so it goes back to the team: {facts}",
@@ -746,6 +747,7 @@ KINDS = {
     "paused": "You stopped one of the team's jobs because it used far more of his usage than it should have (the facts "
               "say which and how much). One or two short sentences: what got stopped in everyday words, why, and what "
               "happens next as the facts say it: it waits for his word, or it stops for good and the item gets split. No job numbers.",
+    "helper": "He hung up while a helper was still looking something up for him on the call. The facts give what he asked and what came back: tell him, plainly and shortly.",
     "estimates": "Every Friday before the sprint planning: how the team's time estimates held this week (the facts give "
                  "the numbers). Two or three short sentences: how many landed inside their range, plainly when it's "
                  "below eight in ten, and which kinds of work missed. Numbers are fine here, he plans with them.",

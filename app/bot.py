@@ -205,6 +205,7 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_secs=config.CALL_IDLE_SECS,  # F9: a quiet call stays on
     )
+    helpers = asyncio.create_task(call.watch_helpers(), name="helpers") if not free else None  # F106
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -338,6 +339,8 @@ async def _run_call(transport: SmallWebRTCTransport, handle_sigint: bool, connec
         ptt.stop()
         if not warming.done():
             warming.cancel()
+        if helpers:
+            helpers.cancel()
         # The after-call work runs on its own task, shielded: if this coroutine is
         # cancelled (the server is shutting down), it still gets as far as it can.
         await asyncio.shield(asyncio.create_task(call.finish(), name="after-call"))
