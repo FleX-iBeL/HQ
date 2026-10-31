@@ -1438,6 +1438,7 @@ def tick():
     try:
         import usagecost
         usagecost.backfill_once(log=log)
+        usagecost.tag_once(log=log)  # F107: first, so what's learned next is learned per plan
         usagecost.tokens_once(log=log)  # H173: the past jobs' own tokens, and the rate
     except Exception as e:
         log(f"usage: backfill: {e!r}")
@@ -1477,6 +1478,11 @@ def tick():
         review.tick(log=log)
     except Exception as e:
         log(f"review: {e!r}")
+    try:  # F107: the plan in use: set once, and following what Claude Code reports
+        import usagecost
+        usagecost.plan_minute(log=log)
+    except Exception as e:
+        log(f"usage: plan: {e!r}")
     handing_back = r.get("handing_back")
     q = json.loads(jobs("next"))
     jobs_line(q)

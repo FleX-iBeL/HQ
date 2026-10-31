@@ -548,6 +548,8 @@ team learns from the finished jobs (how many tokens make a point, the nightly ru
 call, the mail check or someone else using Claude at the same time doesn't count against the job or pause it; \
 the start still waits on the real total under the lines. What a call cost on its own, when he asks: \
 python3 "{HQ}/routine/usagecost.py" calls (the rate: "rate"; a job: "tokens N"). \
+Percents are per plan (F107): when he changes plan, python3 "{HQ}/routine/usagecost.py" plan set "Max 20x" (bare "plan" says \
+which one and what the estimates are based on; "plan ratio \"Max 20x\" five=4 weekly=3.5" when he corrects what a plan is worth). \
 "stop" ends the running job, "stop N" cancels waiting job N; "overrule N" lets job N past the 5-hour usage \
 line (never the weekly line); "off" and "on" switch the whole routine. Use them when he asks.
 - The waiting jobs run in the order they stand on the list, top first, not by number. When he wants \

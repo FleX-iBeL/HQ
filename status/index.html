@@ -952,6 +952,7 @@
         );
         box.append(head);
         if (u && !u.readable) box.append(el('p', 'alarm', 'The last attempt to read the usage failed. Work stops until it can be read. The numbers below are the last known ones.'));
+        if (E?.usage_plan?.words) box.append(el('p', 'soft usage-plan', `Estimates ${E.usage_plan.words}.`));  // F107
         const card = el('div', 'card');
         // The context window first: it belongs to one session and never stops the work.
         if (u?.context) {
@@ -1206,8 +1207,9 @@
         if (!t?.count) return 'nothing';
         return `${t.count} ${t.count === 1 ? 'item' : 'items'}, about ${etaDur(t.minutes)}, ${etaPct(t.five)} of the 5-hour, ${etaPct(t.weekly)} of the week`;
       }
-      function sprintTotals(T) {
-        const fold = foldPart('sprint-totals', false, 'Totals', `${sprintTotalWords(T.total)} (computed estimate)`, true);
+      function sprintTotals(T, plan) {
+        // F107: which plan the percents are on, so an estimate is never read against the wrong one.
+        const fold = foldPart('sprint-totals', false, 'Totals', `${sprintTotalWords(T.total)} (computed estimate)${plan?.plan ? ` on ${plan.plan}` : ''}`, true);
         const card = el('div', 'card sprint-totals');
         for (const [k, name] of SPRINT_TOTALS) {
           const row = el('div', `sprint-total${k === 'total' ? ' sum' : ''}`);
@@ -1216,6 +1218,7 @@
           card.append(row);
         }
         card.append(el('p', 'soft', 'Ready leaves out what\'s already planned, so the three add up to the total. Planned is with the team or planned for a night.'));
+        if (plan?.words) card.append(el('p', 'soft', `The percents are ${plan.words}.`));
         fold.append(card);
         return fold;
       }
@@ -1312,7 +1315,7 @@
         const fold = foldPart('sprint', false, 'Sprint planning', `${P.rows.length} on the planning · ${P.ranked} ranked · ${P.tagged ?? 0} with a MoSCoW tag · ${P.ready ?? 0} ready · ${ticked.length} ticked for this sprint`);
         const parts = el('div', 'parts');
         // H275: the totals, like the job list's: not ready, ready and not planned yet, planned, and all of it; a tap unfolds them.
-        if (P.totals) parts.append(sprintTotals(P.totals));
+        if (P.totals) parts.append(sprintTotals(P.totals, P.usage_plan));
         // The night it starts from: tonight or one of the six after it.
         const pick = el('div', 'sprint-pick');
         const sel = el('select');

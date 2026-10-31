@@ -86,7 +86,8 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "review": {"clear", "reword", "sitdown"},  # F77: a flag taken off on his say-so goes to the main, which writes sprint.json  # put (Fable, 27 October 2026): a whole small file, with one-way sync
           "set_status": {"set"},  # F101: the status block from a call on the backup
           "agenda": {"changed"},  # F58: the mark that something wrote in the calendar (the main reads it again)
-          "direct_line": {"put"}}  # F58: a line of a text thread (Donna's, the team line, the coaching line)
+          "direct_line": {"put"},  # F58: a line of a text thread (Donna's, the team line, the coaching line)
+          "usagecost": {"plan"}}  # F107: the plan in use, written only by the main
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
            "coaching": os.path.join(os.path.dirname(HERE), "app", "coaching.py"),
@@ -102,7 +103,8 @@ PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main 
 # main, which writes it; the sync brings it back. Paths are relative to the workspace.
 ONE_WRITER = ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "HQ/games.json", "HQ/coaching.json",
               "HQ/sprint.json",  # H269: the planning's ranks
-              "HQ/calendar-todo.json")  # H243: which block a to-do is planned in
+              "HQ/calendar-todo.json",  # H243: which block a to-do is planned in
+              "HQ/usage-plan.json")  # F107: the plan in use
 
 
 LOCAL_ON_BACKUP = ("HQ/calls/", "HQ/direct-line/", "HQ/team-line/", "HQ/notes.md", "HQ/calendar.json")  # H266: her line too; the backup's own, until handed over

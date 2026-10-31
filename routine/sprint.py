@@ -966,7 +966,8 @@ def plan():
     out.sort(key=lambda x: group_key(x, roadmap_place))  # H271: Must first, bugs first in each group, then the rank
     counts = {MOSCOW_NAMES[g]: sum(1 for x in out if x.get("moscow") == g) for g in GROUPS}
     return {"rows": out, "ranked": len(ranked), "tagged": len(tags), "groups": counts,
-            "ready": sum(1 for v in readies.values() if v == "ready"), "totals": totals(out)}
+            "ready": sum(1 for v in readies.values() if v == "ready"), "totals": totals(out),
+            "usage_plan": U.plan_status()}  # F107: which plan the percents are on
 
 
 TOTAL_PARTS = (("not_ready", "Not ready"), ("ready", "Ready, not planned yet"), ("planned", "Planned"), ("total", "Total"))
@@ -1036,6 +1037,8 @@ def words(p):
     t = p.get("totals")
     if t:  # H275
         head += "\nTotals: " + "; ".join(f"{name}: {total_words(t[k])}" for k, name in TOTAL_PARTS) + "."
+        if p.get("usage_plan"):  # F107
+            head += f" The percents are {p['usage_plan']['words']}."
     return "\n".join([head] + lines)
 
 

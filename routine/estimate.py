@@ -1937,6 +1937,11 @@ def on_done(n, text="", started_hhmm=None, at=None):
            "actual": max(1, actual), "done": int(now), "how": "seen" if seen else "clock", "machine": m["name"],
            "label": m["label"], "type": m["type"], "tags": tags_of(text), "retag": RETAG,
            "size": e.get("size") if isinstance(e.get("size"), dict) else look(_about(text))}  # H167
+    try:  # F107: the plan it ran on, so the rate learned from it stays that plan's
+        import usagecost
+        rec["plan"] = usagecost.current_plan()
+    except Exception as ex:
+        print(f"(the plan couldn't be read: {ex!r})", file=sys.stderr)
     if e.get("fixed"):
         rec["fixed"] = True  # H215: its size was said by hand, so a retag keeps it
     if isinstance(e.get("guess"), (int, float)):  # H168: the team's own guess, next to the computed estimate
@@ -2282,6 +2287,8 @@ def plan(now=None):
         out["mistakes"] = []
     out["items"] = _plan_items(cursor, waits, on, hist, run, run_end, proj, U, gfits)
     out["items_total"] = _items_total(out["items"], waits, on)
+    if U:  # F107: which plan these percents are on, and what they're based on
+        out["usage_plan"] = U.plan_status()
     return out
 
 

@@ -14559,6 +14559,160 @@ print(n, len(H.cells(line)))
         need(a == b, f"the release line changed the cells: {r.stdout}")
         return "an escaped pipe and a status phrase mid-sentence reach the reviewer whole, a real note is cut, a QA mark and a release line keep the cells"
 
+    def _usage_env(self, tag):
+        """A throwaway folder for the usage flows: the template's roadmap (never the live one: its routine switch and lines
+        aren't this flow's), the estimates, a usage reading and a plan setting of its own, no chats, no looks."""
+        d = self.tmp / tag
+        d.mkdir(exist_ok=True)
+        rm = d / "roadmap.md"
+        rm.write_text((ROOT / "template/HQ/roadmap.md").read_text())
+        return d, {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ESTIMATES": str(d / "est"), "HQ_USAGE": str(d / "usage.json"),
+                   "HQ_USAGE_LOG": str(d / "usage.log"), "HQ_USAGE_PLAN": str(d / "usage-plan.json"), "HQ_CARRYON": str(d / "carryon"),
+                   "HQ_CLAUDE_PROJECTS": "", "HQ_CLAUDE_JSON": str(d / "claude.json"), "HQ_ROUTINES_HISTORY": str(d / "samples.jsonl"),
+                   "HQ_LOOK": "0", "HQ_JOB_RUN": str(d / "run"), "HQ_SUPPORT": str(d / "support"), "HQ_ROLE_HERE": "1",
+                   "HQ_ROUTINES_FILE": str(d / "routines.json"), "HQ_INCIDENTS_FILE": str(d / "incidents.json")}
+
+    async def flow211(self) -> str:
+        """F107, no Claude: the estimates know which plan they were learned on. On a copy with a made-up job history: (a) every
+        past job's record says Max 5x and none is lost, a broken line stays; (b) with the plan set to Max 20x the estimate in
+        percent is a quarter of the one before and its minutes stay, also without a rate (the jobs' own cost, H141's fallback);
+        (c) until five jobs ran on it the rate stays the old one scaled, the fifth makes the rate come from those five alone;
+        (d) back on Max 5x the old numbers come back; (e) each line has its own ratio, his to correct; (f) the plan follows what
+        Claude Code reports, once per change, so a plan he set isn't overruled; (g) a finished job's record carries its plan;
+        (h) the planning's totals, the job list's plan and the status page name the plan; (i) a call may set it, the tagging
+        isn't a call's, and on a backup it goes to the main."""
+        import subprocess as sp
+        d, env = self._usage_env("F107")
+        child = r'''
+import json, os, subprocess, sys, time
+sys.path.insert(0, sys.argv[1] + "/routine")
+JV, D = sys.argv[1], sys.argv[2]
+import usagecost as U, estimate as E
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+os.makedirs(U.DIR, exist_ok=True)
+now = time.time()
+TEXT = "flow 211 job: fix the small thing on the made-up page"
+TOK = {"opus": [1000, 20000, 3000000, 100000]}
+def line(n, five=5.0, plan=None):
+    h = {"n": n, "kind": "build", "est": 20, "actual": 20, "done": int(now - 90000 + n * 600), "how": "seen", "machine": "test",
+         "about": f"flow 211 job {n}: fix the small thing on the made-up page", "tokens": TOK, "cost": {"five": five, "weekly": five / 5},
+         "cost_how": "tokens", "cost_read": {"five": five, "weekly": five / 5}}
+    if plan:
+        h["plan"] = plan
+    return h
+with open(E.HISTORY, "w") as f:
+    for n in range(1, 13):
+        f.write(json.dumps(line(n)) + "\n")
+    f.write("a line nobody can read\n")
+need(U.current_plan() == "Max 5x", "the plan with nothing set and nothing reported: " + U.current_plan())
+need(U.tag_past() == 12, "not every past job got a tag")
+raw = open(E.HISTORY).read().splitlines()
+need(len(raw) == 13 and raw[-1] == "a line nobody can read", "a line was lost in the tagging")
+need(all(json.loads(l)["plan"] == "Max 5x" for l in raw[:12]), "a past job doesn't say Max 5x")
+need(U.tag_past() == 0, "tagged twice")
+old = U.learn()
+need(old and old["based"] == 12 and old["rate"]["five"], f"no rate learned: {old}")
+keep = json.load(open(U.RATE_FILE))
+need(keep["plans"]["Max 5x"]["rate"] == old["rate"] and keep["rate"] == old["rate"], "the rate isn't kept per plan")
+before = U.cost_for(20, TEXT, "build")
+mins = E.estimate_detail(TEXT, kind="build")["est"]
+need(before["five"] > 0 and before["how"] != "fallback", f"the estimate before: {before}")
+U.set_plan("max 20x", by="the flow")
+need(U.current_plan() == "Max 20x" and U.plan_settings()["since"], "the plan wasn't set")
+after = U.cost_for(20, TEXT, "build")
+need(abs(after["five"] - before["five"] / 4) <= 0.06 and abs(after["weekly"] - before["weekly"] / 4) <= 0.06, f"not a quarter: {before} {after}")
+need(E.estimate_detail(TEXT, kind="build")["est"] == mins, "the minutes moved with the plan")
+st = U.plan_status()
+need(st["how"] == "scaled" and st["from"] == "Max 5x" and "Max 20x" in st["words"], f"the plan's words: {st}")
+# with no rate at all: the jobs' own cost, then H141's fallback, each a quarter too
+rate = U.RATE_FILE + ".away"
+os.replace(U.RATE_FILE, rate)
+c = U.cost_for(20, TEXT, "build")
+need(abs(c["five"] - 5 / 4) <= 0.06, f"the jobs' own cost isn't read on the new plan: {c}")
+os.replace(E.HISTORY, E.HISTORY + ".away")
+c = U.cost_for(20, TEXT, "build")
+need(c["how"] == "fallback" and abs(c["five"] - 2.5) <= 0.06, f"the fallback isn't read on the new plan: {c}")
+need(U.resume_floor([], None)["five"] == 0.5, "the floor isn't read on the new plan")
+os.replace(E.HISTORY + ".away", E.HISTORY)
+os.replace(rate, U.RATE_FILE)
+# five jobs on Max 20x: a tenth of a line each, so the rate is plainly not the old one times four
+four = U.load_rate()["rate"]["five"]
+need(four == round(old["rate"]["five"] * 4), "the old rate isn't scaled")
+for n in range(1, 6):
+    with open(E.HISTORY, "a") as f:
+        f.write(json.dumps(line(100 + n, five=0.5, plan="Max 20x")) + "\n")
+    m = U.learn()
+    if n < 5:
+        need(m["scaled_from"] == "Max 5x" and m["rate"]["five"] == four, f"job {n} of 5 already moved the rate: {m}")
+need(not m.get("scaled_from") and m["based"] == 5 and m["plan"] == "Max 20x", f"not from those five: {m}")
+W = U.weighted(TOK, m)
+need(abs(m["rate"]["five"] - W / 0.5) <= 2, f"the rate isn't from those five alone: {m['rate']} {W}")
+need(U.plan_status()["how"] == "learned", "the status doesn't say learned")
+U.set_plan("Max 5x", by="the flow")
+back = U.cost_for(20, TEXT, "build")
+need(U.load_rate()["rate"] == old["rate"], "the old rate didn't come back")
+need(back["five"] == before["five"] and back["weekly"] == before["weekly"], f"not the old numbers: {before} {back}")
+# a ratio per line, his to correct (with no jobs of its own on a new plan)
+del_ = json.load(open(U.RATE_FILE))
+del_["plans"].pop("Max 20x")
+json.dump(del_, open(U.RATE_FILE, "w"))
+r = subprocess.run([sys.executable, JV + "/routine/usagecost.py", "plan", "ratio", "Max 20x", "five=5", "weekly=2"], capture_output=True, text=True)
+need(r.returncode == 0, r.stdout + r.stderr)
+need(subprocess.run([sys.executable, JV + "/routine/usagecost.py", "plan", "ratio", "Max 20x", "five=0"], capture_output=True, text=True).returncode == 2, "a ratio of nothing passed")
+r = subprocess.run([sys.executable, JV + "/routine/usagecost.py", "plan", "set", "20x"], capture_output=True, text=True)
+need(r.returncode == 0 and "Max 20x" in r.stdout, r.stdout + r.stderr)
+c = U.cost_for(20, TEXT, "build")
+need(abs(c["five"] - before["five"] / 5) <= 0.06 and abs(c["weekly"] - before["weekly"] / 2) <= 0.06, f"each line's own ratio: {c}")
+need(subprocess.run([sys.executable, JV + "/routine/usagecost.py", "plan", "set", "a big one"], capture_output=True, text=True).returncode == 2, "a made-up plan passed")
+U.set_plan("Max 5x", by="the flow")
+# what Claude Code reports
+claude = os.environ["HQ_CLAUDE_JSON"]
+def reports(tier):
+    json.dump({"oauthAccount": {"organizationRateLimitTier": tier}}, open(claude, "w"))
+reports("default_claude_max_5x")
+U.plan_minute()
+need(U.plan_settings()["reported"] == "Max 5x" and U.current_plan() == "Max 5x", "the report isn't kept")
+reports("default_claude_max_20x")
+U.plan_minute()
+need(U.current_plan() == "Max 20x" and U.plan_settings()["by"] == "Claude Code reports it", "the plan doesn't follow the report")
+U.set_plan("Max 5x", by="by hand")
+U.plan_minute()
+need(U.current_plan() == "Max 5x", "the same report overruled what he set")
+# a finished job's record
+n = 500
+E.on_add(n, TEXT, kind="build")
+E.on_start(n, TEXT)
+rec = E.on_done(n, TEXT, at=now + 60)
+need(rec and rec.get("plan") == "Max 5x", f"a finished job has no plan: {rec}")
+print("OK")
+'''
+        r = sp.run([sys.executable, "-c", child, str(ROOT), str(d)], capture_output=True, text=True, env=env, timeout=120)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-1500:])
+        # the planning, the job list's plan and the page name it
+        rm = d / "roadmap.md"
+        rm.write_text(rm.read_text().replace("| ⬜ | A1 Your first step |", "| ⬜ | A1 Your first step, made up |"))
+        r = sp.run([sys.executable, str(ROOT / "routine/sprint.py"), "list"], capture_output=True, text=True, env=env, timeout=60)
+        need("The percents are on Max 5x" in r.stdout and "Totals:" in r.stdout, f"the planning's totals don't name the plan: {r.stdout[:400]} {r.stderr[-300:]}")
+        r = sp.run([sys.executable, str(ROOT / "routine/sprint.py"), "json"], capture_output=True, text=True, env=env, timeout=60)
+        need(json.loads(r.stdout)["usage_plan"]["plan"] == "Max 5x", "the planning's json doesn't name the plan")
+        r = sp.run(["/usr/bin/python3", str(ROOT / "routine/estimate.py"), "plan"], capture_output=True, text=True, env=env, timeout=60)
+        need(json.loads(r.stdout.strip().splitlines()[-1])["usage_plan"]["plan"] == "Max 5x", f"the plan json: {r.stdout[-300:]} {r.stderr[-300:]}")
+        page = (ROOT / "status/index.html").read_text()
+        need("E.usage_plan.words" in page and "sprintTotals(P.totals, P.usage_plan)" in page, "the status page doesn't name the plan")
+        # a call
+        from policy import Policy
+        pol = Policy(config.FOLDER)
+        for cmd, want in ((f'python3 {ROOT}/routine/usagecost.py plan', "allow"), (f'python3 {ROOT}/routine/usagecost.py plan set "Max 20x"', "allow"),
+                          (f'python3 {ROOT}/routine/usagecost.py plan tag', "deny")):
+            got = pol.decide("Bash", {"command": cmd}).verdict
+            need(got == want, f"{cmd}: {got}")
+        sys.path.insert(0, str(ROOT / "routine"))
+        import role
+        need("plan" in role.WRITES["usagecost"] and "HQ/usage-plan.json" in role.ONE_WRITER, "the backup doesn't hand the plan to the main")
+        return "the tag, the switch, the estimate, the learning and the way back on a made-up history"
+
     def _proof_env(self, tag):
         """A throwaway workspace and a throwaway HQ repository for the proof, with a stand-in for the flows: a flow named in
         the file FAILS fails, everything else passes."""
@@ -24548,6 +24702,7 @@ FLOWS = {
     193: ("H298, piece 7: the Friday screen on the status page: routines.json carries the agents (three lines per agent, her share against her line) and the page draws The agents, one card per agent, the share red over her line; off, nothing of it", False, "flow193"),
     194: ("H298, piece 8: serialized writes: a cycle's hook refuses Edit, Write and shell writes on a shared file before they land and passes her ledger, her line and the scripts; a cycle job's settings carry it, a normal job's don't; twenty one-writer edits at once all land under the file's lock; off, as before", False, "flow194"),
     210: ("F101: the golden set: every real past row goes through the real reviewer, which must flag them all", True, "flow210"),
+    211: ("F107: the estimates know their plan: every past job says Max 5x, on Max 20x the percents are a quarter and the minutes stay, five jobs on it make its own rate, the old numbers come back, each line its own ratio, the report followed once, the planning names it", False, "flow211"),
     209: ("F101: a change to the reviewer shows, a row let through fails the golden set, and the real set has been run on this reviewer", False, "flow209"),
     208: ("F101: the status block can't break the planning, the reviewer's answer needs all five probes and real quotes, three rounds an item, the night is the routine's, a friend stays on the release", False, "flow208"),
     207: ("F101: the release reads the night and refuses a red or missing one with the night named; a commit naming no item holds it", False, "flow207"),

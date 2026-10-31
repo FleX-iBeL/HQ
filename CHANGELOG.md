@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- HQ's usage estimates now know which plan they were learned on. Every finished job says its plan, and when you change plan (you say so, or Claude Code reports it) the percents follow at once, while the minutes stay the same. A new plan starts from the old numbers scaled, and after five jobs on it, it has its own. Go back and the old numbers are there again. The status page and the sprint planning say which plan the percents are on.
+
 - Your vision, your map, your rules and every CLAUDE.md now change only after you say yes, on a call, in a text and after a call, where nobody can answer so nothing changes. The planning, the to-do list, the mail list, the notes, the games and the coaching file can't be edited directly any more, not even with a yes: each has its own command, so every change takes its turn and can be followed. Going through your map on a call means a short yes for each thing written down.
 
 - The team and the agents' own runs start without your private files. What they need they open one by one. Nothing is sent, replied to or forwarded from a job, whatever the connector. A web address opens by itself only when it's a plain page; one that carries extra data asks you first.

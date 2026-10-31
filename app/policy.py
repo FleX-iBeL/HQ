@@ -641,7 +641,9 @@ class Policy:
             sub = args[1] if len(args) > 1 else ""
             if sub in ("now", "cost", "when", "costs", "rate", "tokens", "calls"):
                 return Decision(ALLOW, "the usage counts")
-            return Decision(DENY, "from a call, the usage script only reads (now, cost, when, costs, rate, tokens, calls)")
+            if sub == "plan" and (len(args) == 2 or args[2] in ("set", "ratio")):  # F107: he changed plan, on his word
+                return Decision(ALLOW, "the plan in use")
+            return Decision(DENY, "from a call, the usage script only reads (now, cost, when, costs, rate, tokens, calls) or sets the plan")
         # H124: Donna texts first. Picking appointments to ping, reminders and her own notes only writes HQ's own list
         # in the workspace (direct-line/pings.json, her notes file); Google Calendar is never touched by it.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "pings.py"):

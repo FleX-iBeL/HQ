@@ -59,12 +59,17 @@ usage:
   python3 routine/usagecost.py fill                H173: the finished jobs' own tokens from their chats (by itself once)
   python3 routine/usagecost.py pauses              H220: every finished job against the pause: twice, four times, and
                                                    four times the top of its estimate (which ones would have paused)
+  python3 routine/usagecost.py plan                F107: the plan in use, since when, and what the estimates are based on
+  python3 routine/usagecost.py plan set "Max 20x" [--since "YYYY-MM-DD HH:MM"]    he changed plan
+  python3 routine/usagecost.py plan ratio "Max 20x" five=4 weekly=3.5             what that plan is worth against Max 5x
+  python3 routine/usagecost.py plan tag            every past job's record gets its plan (by itself, once on each computer)
 """
 import json, math, os, re, sys, time
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import hqpaths  # noqa: E402
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 _TEST = os.environ.get("HQ_ROADMAP")
 if os.environ.get("HQ_ESTIMATES"):
@@ -113,6 +118,224 @@ def line_key(label):
     if re.match(r"weekly", label, re.I):
         return "fable" if re.search(r"fable", label, re.I) else "weekly"
     return None
+
+
+# ---------- F107: which plan the numbers were learned on ----------
+# His words, 30 October 2026: "ok so we asap need to build this first, that all items get the tag that they were on the
+# max x5 plan, since everything i've built has happened on the x5 plan. i seriously hesitate to upgrade so i dont want
+# when i do its broken." Tokens don't change with a plan, percents do: a point of a bigger plan is more tokens. So every
+# finished job's record says its plan, the rate (tokens a point) is kept per plan, and a plan with no five jobs of its
+# own takes another plan's rate times the plans' ratio, each line its own. Minutes never change with a plan.
+# The setting is the workspace's HQ/usage-plan.json, next to the roadmap with its usage lines, so both HQs read the same
+# one; only the main writes it. [SIZES: Pro and the 20x are Claude's starting numbers, his to turn with "plan ratio".]
+
+BASE_PLAN = "Max 5x"  # what every job so far ran on (his words), and what a plan's size is counted against
+SIZES = {"Pro": {"five": 0.2, "weekly": 0.2}, "Max 5x": {"five": 1.0, "weekly": 1.0}, "Max 20x": {"five": 4.0, "weekly": 4.0}}
+PLAN_FILE = (os.environ.get("HQ_USAGE_PLAN") or (os.path.splitext(_TEST)[0] + "-plan.json" if _TEST
+                                                 else os.path.join(hqpaths.DATA, "usage-plan.json")))
+PLAN_TAGGED = os.path.join(DIR, "job-usage-plan-tagged")
+_PLAN_CACHE = {}
+
+
+def plan_name(text):
+    """A plan's own name from how it's said ("max 20x", "20x", "pro"), or None."""
+    t = re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    m = re.search(r"\b(\d+)\s*x\b", t)
+    if m:
+        return f"Max {m.group(1)}x"
+    return "Pro" if re.fullmatch(r"(claude )?pro", t) else None
+
+
+def plan_settings():
+    """{"plan", "since", "by", "changes": [{"plan", "since", "by"}], "ratios": {plan: {line: size}}, "reported"}; {} when
+    there's no setting yet. Read again only when the file changed: an estimate asks many times."""
+    try:
+        st = os.stat(PLAN_FILE)
+    except OSError:
+        return {}
+    key = (st.st_mtime_ns, st.st_size)
+    if _PLAN_CACHE.get("key") != key:
+        try:
+            _PLAN_CACHE.update(key=key, data=json.load(open(PLAN_FILE)))
+        except (OSError, ValueError):
+            return _PLAN_CACHE.get("data") or {}
+    return _PLAN_CACHE.get("data") or {}
+
+
+def _save_plan(d):
+    os.makedirs(os.path.dirname(PLAN_FILE), exist_ok=True)
+    tmp = f"{PLAN_FILE}.{os.getpid()}"
+    with open(tmp, "w") as f:
+        json.dump(d, f, indent=1)
+    os.replace(tmp, PLAN_FILE)
+    _PLAN_CACHE.clear()
+
+
+def reported_plan():
+    """The plan Claude Code reports (its account's rate limit tier in ~/.claude.json, only that field), or None. A test's
+    copy reads none unless HQ_CLAUDE_JSON names one."""
+    path = os.environ.get("HQ_CLAUDE_JSON")
+    if path is None:
+        path = "" if _TEST else os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~"), ".claude.json")
+    try:
+        a = json.load(open(path)).get("oauthAccount") or {}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    tier = str(a.get("organizationRateLimitTier") or a.get("userRateLimitTier") or "").lower()
+    m = re.search(r"max_(\d+)x", tier)
+    if m:
+        return f"Max {m.group(1)}x"
+    return "Pro" if "pro" in tier else None
+
+
+def first_plan():
+    """The plan the past jobs ran on: the first one set, else what Claude Code reports, else BASE_PLAN."""
+    ch = plan_settings().get("changes") or []
+    return (ch[0].get("plan") if ch else None) or reported_plan() or BASE_PLAN
+
+
+def current_plan():
+    return plan_settings().get("plan") or reported_plan() or BASE_PLAN
+
+
+def plan_at(t):
+    """The plan in use at time t, from the setting's changes."""
+    ch = plan_settings().get("changes") or []
+    if not ch or not t:
+        return first_plan()
+    now = ch[0].get("plan")
+    for c in ch:
+        if (c.get("since") or 0) <= t:
+            now = c.get("plan")
+    return now or first_plan()
+
+
+def plan_of(h):
+    """The plan a finished job ran on: its own tag, else the plan in use when it was done."""
+    return h.get("plan") or plan_at(h.get("done"))
+
+
+def plan_size(plan, key):
+    """What a plan's line is worth against Max 5x: his own number when he set one, else SIZES, else 1."""
+    mine = (plan_settings().get("ratios") or {}).get(plan) or {}
+    v = mine.get(key) or (SIZES.get(plan) or {}).get(key)
+    return float(v) if v else 1.0
+
+
+def plan_ratio(frm, to, key):
+    """How many of `frm`'s tokens-a-point make one point of `to`: 4 from Max 5x to Max 20x."""
+    return plan_size(to, key) / plan_size(frm, key)
+
+
+def points_on(value, key, frm, to=None):
+    """Points of a line counted on plan `frm`, as points of plan `to` (default the plan in use)."""
+    return float(value or 0) / plan_ratio(frm, to or current_plan(), key)
+
+
+def set_plan(name, by="by hand", since=None):
+    """The plan in use from `since` (default now). The same plan again changes nothing. Returns the setting."""
+    plan = plan_name(name) or (name if name in SIZES else None)
+    if not plan:
+        raise ValueError(f"not a plan: {name}")
+    d = dict(plan_settings())
+    if d.get("plan") == plan:
+        return d
+    t = int(_now() if since is None else since)
+    ch = list(d.get("changes") or [])
+    if not ch and plan != first_plan():  # the first change: what ran before it stays named
+        ch.append({"plan": first_plan(), "since": 0, "by": "what ran before"})
+    ch.append({"plan": plan, "since": t, "by": by})
+    d.update(plan=plan, since=t, by=by, changes=ch)
+    _save_plan(d)
+    return d
+
+
+def set_ratio(plan, sizes):
+    """His own number for a plan against Max 5x, per line: {"five": 4, "weekly": 3.5}."""
+    plan = plan_name(plan) or plan
+    d = dict(plan_settings())
+    if not d.get("plan"):
+        d.update(plan=current_plan(), since=int(_now()), by="first start", changes=[])
+    d["ratios"] = {**(d.get("ratios") or {}), plan: {**((d.get("ratios") or {}).get(plan) or {}), **sizes}}
+    _save_plan(d)
+    return d
+
+
+def plan_status():
+    """What the status page and the planning say: {"plan", "since", "by", "how", "based", "from", "ratio", "words"}."""
+    plan, s = current_plan(), plan_settings()
+    m = load_rate(plan)
+    out = {"plan": plan, "since": s.get("since"), "by": s.get("by"), "how": "fallback", "based": 0}
+    if m and m.get("scaled_from"):
+        out.update(how="scaled", based=m.get("based", 0), **{"from": m["scaled_from"]}, ratio=m.get("ratio"))
+        r = m["ratio"]
+        n = (f"{r['five']:g}" if r["five"] == r["weekly"] else f"{r['five']:g} on the 5-hour, {r['weekly']:g} on the week")
+        out["words"] = f"on {plan}: {m['scaled_from']}'s jobs scaled by {n}, until {RATE_MIN} jobs ran on {plan}"
+    elif m:
+        out.update(how="learned", based=m.get("based", 0))
+        out["words"] = f"on {plan}: learned from {m.get('based', 0)} jobs on it"
+    else:
+        out["words"] = f"on {plan}: too few finished jobs for a rate yet"
+    return out
+
+
+def plan_minute(log=None):
+    """Every minute on the main (tick.py): the setting exists, and when Claude Code starts reporting another plan, that's
+    the plan in use from now on. Only a change in what it reports counts, so a plan he set by hand isn't overruled."""
+    s, rep = plan_settings(), reported_plan()
+    if not s:
+        _save_plan({"plan": rep or BASE_PLAN, "since": int(_now()), "by": "first start", "reported": rep,
+                    "changes": [{"plan": rep or BASE_PLAN, "since": 0, "by": "first start"}]})
+        return
+    if not rep or rep == s.get("reported"):
+        return
+    d = dict(s)
+    d["reported"] = rep
+    _save_plan(d)
+    if rep != d.get("plan"):
+        set_plan(rep, by="Claude Code reports it")
+        if log:
+            log(f"usage: Claude Code reports {rep}; the estimates follow it from now on")
+
+
+def tag_past(lines=None):
+    """Every past job's record gets the plan it ran on (his words: everything so far ran on Max 5x); none is lost: a line
+    that can't be read stays as it is. Returns how many got a tag."""
+    E = _est()
+    try:
+        raw = open(E.HISTORY, encoding="utf8").read().splitlines()
+    except OSError:
+        return 0
+    out, n = [], 0
+    for l in raw:
+        try:
+            h = json.loads(l)
+        except ValueError:
+            out.append(l)
+            continue
+        if isinstance(h, dict) and not h.get("plan"):
+            h["plan"] = plan_of(h)
+            n += 1
+            l = json.dumps(h)
+        out.append(l)
+    if n:
+        tmp = f"{E.HISTORY}.{os.getpid()}"
+        with open(tmp, "w", encoding="utf8") as f:
+            f.writelines(x + "\n" for x in out)
+        os.replace(tmp, E.HISTORY)
+    return n
+
+
+def tag_once(log=None):
+    """By itself, once on each computer (tick.py): the computer that pulls this code tags its own past jobs."""
+    if os.path.exists(PLAN_TAGGED):
+        return None
+    n = tag_past()
+    os.makedirs(DIR, exist_ok=True)
+    open(PLAN_TAGGED, "w").write(f"{int(_now())} {n}\n")
+    if log and n:
+        log(f"usage: {n} finished jobs tagged with the plan they ran on")
+    return n
 
 
 # ---------- the stop lines, as status/usage.mjs has them (lineSettings, movingLine, stopLine) ----------
@@ -326,6 +549,11 @@ def _quantile(pairs, q):
     return pairs[-1][0] if pairs else 0
 
 
+def _fallback(key, plan):
+    """H141's rates, counted on Max 5x, as percent a minute of plan (F107)."""
+    return points_on(FALLBACK[key], key, BASE_PLAN, plan)
+
+
 def rates(text="", kind=None, hist=None, about=None):
     """Percent per minute on each line for work like this: {"five", "weekly", "how", "based"}. H173: from the finished
     jobs' own tokens once there's a rate ("tokens": weighted tokens per minute, "lo" and "hi" the range: the middle
@@ -335,7 +563,8 @@ def rates(text="", kind=None, hist=None, about=None):
     kind = E.kind_for(text, kind) if text or kind else kind
     about = E._about(text) if about is None else about
     real = [h for h in E._real(hist) if not E.mistake(h)]  # H286: a job's own mistake doesn't teach the rate
-    model = load_rate()
+    plan = current_plan()  # F107: tokens carry over to any plan; points are read as points of this one
+    model = load_rate(plan)
     if model:
         tok = [h for h in real if isinstance(h.get("tokens"), dict) and h["tokens"] and h.get("actual")]
         pairs, how, based = _pick(tok, about, kind)
@@ -343,15 +572,15 @@ def rates(text="", kind=None, hist=None, about=None):
             per = [(weighted(h["tokens"], model) / h["actual"], w) for w, h in pairs]
             mins = sum(w * h["actual"] for w, h in pairs)
             wpm = sum(w * weighted(h["tokens"], model) for w, h in pairs) / mins
-            r = {k: wpm / model["rate"][k] if model["rate"].get(k) else FALLBACK[k] for k in KEYS}
+            r = {k: wpm / model["rate"][k] if model["rate"].get(k) else _fallback(k, plan) for k in KEYS}
             return {**r, "how": how, "based": based, "tokens": wpm, "lo": _quantile(per, 0.25), "hi": _quantile(per, 0.75)}
     withc = [h for h in real if isinstance(h.get("cost"), dict) and h.get("actual")]
     pairs, how, based = _pick(withc, about, kind)
     if not pairs:
-        return {**FALLBACK, "how": "fallback", "based": 0}
+        return {**{k: _fallback(k, plan) for k in KEYS}, "how": "fallback", "based": 0}
     mins = sum(w * h["actual"] for w, h in pairs)
-    return {**{k: (sum(w * float(h["cost"].get(k) or 0) for w, h in pairs) / mins) if mins else FALLBACK[k] for k in KEYS},
-            "how": how, "based": based}
+    return {**{k: (sum(w * points_on(h["cost"].get(k), k, plan_of(h), plan) for w, h in pairs) / mins) if mins
+               else _fallback(k, plan) for k in KEYS}, "how": how, "based": based}
 
 
 def cost_for(minutes, text="", kind=None, hist=None, about=None):
@@ -360,7 +589,7 @@ def cost_for(minutes, text="", kind=None, hist=None, about=None):
     ("five_range", "weekly_range")."""
     r = rates(text, kind, hist, about)
     m = max(1, minutes or 1)
-    out = {**{k: round(r[k] * m, 1) for k in KEYS}, "how": r["how"], "based": r["based"]}
+    out = {**{k: round(r[k] * m, 1) for k in KEYS}, "how": r["how"], "based": r["based"], "plan": current_plan()}  # F107
     if r.get("tokens"):
         model = load_rate() or {}
         lo, hi = min(r["lo"], r["tokens"]) * m, max(r["hi"], r["tokens"]) * m
@@ -451,7 +680,7 @@ def start(n, text="", now=None):
             minutes, cost = None, None
         rec = {"n": n, "started": int(now), "running": True, "spent": {k: 0 for k in KEYS},
                "seg": {k: list(v) for k, v in snap.items()}, "last": {k: list(v) for k, v in snap.items()},
-               "est": ({**{k: cost[k] for k in KEYS}, "minutes": minutes, "how": cost["how"],
+               "est": ({**{k: cost[k] for k in KEYS}, "minutes": minutes, "how": cost["how"], "plan": cost.get("plan"),
                         **{k: cost[k] for k in ("tokens", "range") if k in cost}} if cost else None)}
     d[str(n)] = rec
     _save(d)
@@ -473,6 +702,9 @@ def track(n, text="", now=None):
         _own(rec, n)
     if isinstance(rec.get("est"), dict):  # H220: the top of its estimate, with the guesses known by now
         rec["est"]["top"] = top_factor(rec["est"], job_guesses(n))
+        was, plan = rec["est"].get("plan"), current_plan()
+        if was and was != plan:  # F107: the plan changed while it ran: its own count is on the new plan now
+            rec["est"].update({k: round(points_on(rec["est"].get(k), k, was, plan), 1) for k in KEYS}, plan=plan)
     d[str(n)] = rec
     _save(d)
     return {**rec, "so_far": _so_far(rec)}
@@ -589,7 +821,7 @@ def usage_backtest(hist=None, last=None):
         d = E.estimate_detail("", prior, h.get("kind"), h.get("machine"), h.get("tags") or [], h.get("about") or "")
         e = cost_for(d["est"], "", h.get("kind"), prior, h.get("about") or "")
         e["minutes"] = d["est"]
-        rows.append((h.get("n"), float(c["five"]), float(e["five"] or 0.1),
+        rows.append((h.get("n"), points_on(c["five"], "five", plan_of(h)), float(e["five"] or 0.1),
                      top_factor(e, {k: h[k] for k in GUESS_KEYS if h.get(k)})))
     if last:
         rows = rows[-last:]
@@ -960,12 +1192,38 @@ def own_cost(tokens, model=None):
     return {k: round(w / model["rate"][k], 2) for k in KEYS if model["rate"].get(k)}
 
 
-def load_rate():
+def _rates_kept():
+    """The learned rates per plan. A file from before F107 holds one rate: the plan it was learned on."""
     try:
         r = json.load(open(RATE_FILE))
-        return r if r.get("rate") else None
     except (OSError, ValueError):
+        return {}
+    kept = r.get("plans")
+    if isinstance(kept, dict):
+        return kept
+    return {plan_at(r.get("at")): r} if r.get("rate") else {}
+
+
+def model_for(plan, kept=None):
+    """The rate on a plan: its own once it's learned, else the newest other plan's times the plans' ratio; None when
+    no plan has one yet."""
+    kept = _rates_kept() if kept is None else kept
+    own = kept.get(plan)
+    if own and own.get("rate"):
+        return {**own, "plan": plan}
+    others = sorted(((m.get("at") or 0, p) for p, m in kept.items() if m.get("rate")), reverse=True)
+    if not others:
         return None
+    frm = others[0][1]
+    m = kept[frm]
+    ratio = {k: round(plan_ratio(frm, plan, k), 4) for k in KEYS}
+    return {**m, "plan": plan, "scaled_from": frm, "ratio": ratio,
+            "rate": {k: (round(m["rate"][k] * ratio[k]) if m["rate"].get(k) else None) for k in KEYS}}
+
+
+def load_rate(plan=None):
+    """The rate in use (F107: on the plan in use, or on `plan`)."""
+    return model_for(plan or current_plan())
 
 
 def _solve(A, b):
@@ -1010,13 +1268,9 @@ def is_nightly(h):
     return "h169, the nightly run" in (h.get("about") or "").lower()
 
 
-def learn(hist=None, write=True):
-    """The rate from the finished jobs with their own tokens and a reading: the weights per kind of token and per
-    model, how many weighted tokens make one point of each line, and which jobs were left out as outliers."""
-    E = _est()
-    hist = E.all_history() if hist is None else hist
-    samples = [h for h in hist if isinstance(h.get("tokens"), dict) and h["tokens"] and read_cost(h)
-               and all(k in read_cost(h) for k in KEYS)]
+def _fit(samples):
+    """The rate from one plan's finished jobs: the weights per kind of token and per model, how many weighted tokens
+    make one point of each line, and which jobs were left out as outliers."""
     if len(samples) < RATE_MIN:
         return None
     wt = [NIGHTLY if is_nightly(h) else 1 for h in samples]
@@ -1056,13 +1310,30 @@ def learn(hist=None, write=True):
     for k in KEYS:
         pts = sum(float(read_cost(samples[i])[k]) * wt[i] for i in idx)
         rate[k] = round(sum(W[i] * wt[i] for i in idx) / pts) if pts > 0 else None
-    model = {"weights": {k: round(v, 4) for k, v in kw.items()}, "models": {k: round(v, 4) for k, v in mw.items()},
-             "rate": rate, "based": len(idx), "nightly": sum(1 for i in idx if is_nightly(samples[i])),
-             "left_out": [samples[i].get("n") for i in range(len(samples)) if not keep[i]], "at": int(_now())}
-    if write:
+    return {"weights": {k: round(v, 4) for k, v in kw.items()}, "models": {k: round(v, 4) for k, v in mw.items()},
+            "rate": rate, "based": len(idx), "nightly": sum(1 for i in idx if is_nightly(samples[i])),
+            "left_out": [samples[i].get("n") for i in range(len(samples)) if not keep[i]], "at": int(_now())}
+
+
+def learn(hist=None, write=True):
+    """The rate per plan, each from its own finished jobs alone (F107), kept in usage-rate.json; returns the rate in use."""
+    E = _est()
+    hist = E.all_history() if hist is None else hist
+    samples = [h for h in hist if isinstance(h.get("tokens"), dict) and h["tokens"] and read_cost(h)
+               and all(k in read_cost(h) for k in KEYS)]
+    groups, kept = {}, _rates_kept()
+    for h in samples:
+        groups.setdefault(plan_of(h), []).append(h)
+    fitted = False
+    for plan, jobs_ in groups.items():
+        m = _fit(jobs_)
+        if m:
+            kept[plan], fitted = {**m, "plan": plan}, True
+    model = model_for(current_plan(), kept) if fitted else None
+    if write and model:
         os.makedirs(DIR, exist_ok=True)
-        tmp = RATE_FILE + ".tmp"
-        json.dump(model, open(tmp, "w"), indent=1)
+        tmp = f"{RATE_FILE}.{os.getpid()}"
+        json.dump({**model, "plans": kept}, open(tmp, "w"), indent=1)
         os.replace(tmp, RATE_FILE)
     return model
 
@@ -1089,7 +1360,7 @@ def backfill_tokens(write=True):
     for h in lines:
         if isinstance(h.get("tokens"), dict) and read_cost(h) and "cost_read" not in h:
             h["cost_read"] = read_cost(h)
-        c = own_cost(h.get("tokens"), model)
+        c = own_cost(h.get("tokens"), (load_rate(plan_of(h)) if write else None) or model)  # F107: on the plan it ran on
         if c:
             h["cost"], h["cost_how"] = c, "tokens"
     if write:
@@ -1237,9 +1508,10 @@ def resume_floor(turns=None, model=None):
         return {**{k: round(statistics_median([c.get(k, 0) for c in costs]), 2) for k in KEYS},
                 "how": "learned", "count": len(costs)}
     r = (model or {}).get("rate") or {}
-    week = RESUME_FLOOR * (r["five"] / r["weekly"] if r.get("five") and r.get("weekly")
-                           else FALLBACK["weekly"] / FALLBACK["five"])
-    return {"five": RESUME_FLOOR, "weekly": round(week, 2), "how": "default", "count": 0}
+    five = round(points_on(RESUME_FLOOR, "five", BASE_PLAN), 2)  # F107: the floor was counted on Max 5x
+    week = five * (r["five"] / r["weekly"] if r.get("five") and r.get("weekly")
+                   else FALLBACK["weekly"] / FALLBACK["five"])
+    return {"five": five, "weekly": round(week, 2), "how": "default", "count": 0}
 
 
 def statistics_median(xs):
@@ -1277,6 +1549,43 @@ def used_words(c):
     if not c:
         return ""
     return f"used {pct(c.get('five', 0))} of the 5-hour and {pct(c.get('weekly', 0))} of the week"
+
+
+def plan_cmd(argv):
+    """F107: the plan in use, and changing it. On the backup a change goes to the main, which writes the file."""
+    sub = argv[0] if argv else "show"
+    if sub in ("set", "ratio") and not os.environ.get("HQ_ROLE_HERE"):
+        import role
+        if role.is_backup():
+            sys.exit(role.forward("usagecost", ["plan", *argv]))
+    if sub == "set" and len(argv) > 1:
+        since = None
+        if "--since" in argv:
+            since = _iso(argv[argv.index("--since") + 1])
+        try:
+            set_plan(argv[1], since=since)
+        except ValueError as e:
+            print(f"{e}; say Pro, Max 5x or Max 20x.", file=sys.stderr)
+            return 2
+    elif sub == "ratio" and len(argv) > 2:
+        sizes = {}
+        for a in argv[2:]:
+            m = re.fullmatch(r"(five|weekly)=(\d+(?:\.\d+)?)", a)
+            if not m or float(m.group(2)) <= 0:
+                print("Say it per line: five=4 weekly=3.5.", file=sys.stderr)
+                return 2
+            sizes[m.group(1)] = float(m.group(2))
+        set_ratio(argv[1], sizes)
+    elif sub == "tag":
+        print(f"{tag_past()} finished jobs got the plan they ran on.")
+        return 0
+    elif sub != "show":
+        print(__doc__)
+        return 2
+    st = plan_status()
+    when = time.strftime("%d %b %Y %H:%M", time.localtime(st["since"])) if st.get("since") else "the start"
+    print(f"The plan: {st['plan']}, since {when} ({st.get('by') or 'not set yet'}). Estimates {st['words']}.")
+    return 0
 
 
 def main(argv):
@@ -1340,6 +1649,8 @@ def main(argv):
         filled, left = backfill()
         print(f"Filled the cost of {filled} finished jobs from the saved readings; {left} couldn't be matched.")
         return 0
+    if cmd == "plan":  # F107
+        return plan_cmd(argv[1:])
     if cmd == "pauses":  # H220
         b = pause_backtest()
         for name, words in (("twice", "twice the estimate (until H221)"), ("four", "four times the estimate (H221)"),
