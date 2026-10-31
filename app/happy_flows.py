@@ -25163,7 +25163,7 @@ const pre = document.createElement("pre"); pre.id = "h205s"; pre.textContent = "
                     "Update button", "a bell", "let me know when", "let me know if it rains", "her own", "check my mail more often",
                     "official weather warning", "rain radar", "let me know between 2 and 6", "Ticked off", "sorting rule",
                     "Gmail filter", "a day and a time", "repeat", "priority tag", "fix a line", "Show the next 20 hours",
-                    "Show the whole week", "Totals", "Ready", "carry on or stop", "Incidents", "lid", "Other sound to Normal"]
+                    "Show the whole week", "Totals", "Ready", "stopped by its time limit", "carry on, at most twice", "stops for good", "gets split", "Incidents", "lid", "Other sound to Normal"]
         missing = [f for f in features if f not in whole]
         need(not missing, f"H208: the tutorial misses {missing}")
         slop = [w for w in ("seamless", "effortless", "empower", "leverage", "elevate", "unlock", "delve", "robust", "safe playground") if w in whole.lower()]

@@ -607,7 +607,7 @@ class Policy:
             if sub in ("add", "add-row", "send-row",  # H277: a row on the roadmap first, or an open row to the team
                        "write-row",  # F99: a new row, nothing more; the planning file itself is refused
                        "tell",  # H283: a note for a job while it runs or waits
-                       "list", "stop", "overrule", "move", "on", "off", "resume",  # H172: resume a paused job
+                       "list", "stop", "overrule", "move", "on", "off", "resume",  # H172, F100: resume a boxed job
                        "pause",  # F100: everything holds, on his word
                        "mail-fast", "mail-hourly"):  # H149: the mail check every 15 minutes for a while he names
 
