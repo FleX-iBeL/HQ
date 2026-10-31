@@ -60,8 +60,8 @@ usage:
   python3 routine/usagecost.py pauses              H220: every finished job against the pause: twice, four times, and
                                                    four times the top of its estimate (which ones would have paused)
   python3 routine/usagecost.py plan                F107: the plan in use, since when, and what the estimates are based on
-  python3 routine/usagecost.py plan set "Max 20x" [--since "YYYY-MM-DD HH:MM"]    he changed plan
-  python3 routine/usagecost.py plan ratio "Max 20x" five=4 weekly=3.5             what that plan is worth against Max 5x
+  python3 routine/usagecost.py plan set "Ultra" [--since "YYYY-MM-DD HH:MM"]      he changed plan (Max 20x is called Ultra now)
+  python3 routine/usagecost.py plan ratio "Ultra" weekly=2.5                      what that plan is worth against Max 5x
   python3 routine/usagecost.py plan tag            every past job's record gets its plan (by itself, once on each computer)
 """
 import json, math, os, re, sys, time
@@ -127,14 +127,22 @@ def line_key(label):
 # finished job's record says its plan, the rate (tokens a point) is kept per plan, and a plan with no five jobs of its
 # own takes another plan's rate times the plans' ratio, each line its own. Minutes never change with a plan.
 # The setting is the workspace's HQ/usage-plan.json, next to the roadmap with its usage lines, so both HQs read the same
-# one; only the main writes it. [SIZES: Pro and the 20x are Claude's starting numbers, his to turn with "plan ratio".]
+# one; only the main writes it. [SIZES are starting numbers, his to turn with "plan ratio": Anthropic's help page gives Ultra (Max 20x's
+# name now) 10 times Pro's weekly usage, so about two of Max 5x; a verified Ultra has no 5-hour limit, so its 5-hour size only
+# counts for an account with the temporary one, Claude's pick: the same two.]
+#
+# His words, 31 October 2026, after the upgrade: "it seems we dont have 5 hour usage anymore, which is very nice, but also yes
+# something we need to take into account then for our status page. if we downgrade back to x5 then yes ofcourse we have it back, and
+# other users might use pro as well, so we should still have it available". What's shown and what stops work follows what the
+# reading carries (five_on), never a list of plans.
 
 BASE_PLAN = "Max 5x"  # what every job so far ran on (his words), and what a plan's size is counted against
-SIZES = {"Pro": {"five": 0.2, "weekly": 0.2}, "Max 5x": {"five": 1.0, "weekly": 1.0}, "Max 20x": {"five": 4.0, "weekly": 4.0}}
+SIZES = {"Pro": {"five": 0.2, "weekly": 0.2}, "Max 5x": {"five": 1.0, "weekly": 1.0}, "Ultra": {"five": 2.0, "weekly": 2.0}}
 PLAN_FILE = (os.environ.get("HQ_USAGE_PLAN") or (os.path.splitext(_TEST)[0] + "-plan.json" if _TEST
                                                  else os.path.join(hqpaths.DATA, "usage-plan.json")))
 PLAN_TAGGED = os.path.join(DIR, "job-usage-plan-tagged")
 _PLAN_CACHE = {}
+_FIVE_SEEN = {}
 
 
 def plan_name(text):
@@ -142,7 +150,9 @@ def plan_name(text):
     t = re.sub(r"\s+", " ", str(text or "")).strip().lower()
     m = re.search(r"\b(\d+)\s*x\b", t)
     if m:
-        return f"Max {m.group(1)}x"
+        return "Ultra" if m.group(1) == "20" else f"Max {m.group(1)}x"  # Max 20x is called Ultra now
+    if "ultra" in t:
+        return "Ultra"
     return "Pro" if re.fullmatch(r"(claude )?pro", t) else None
 
 
@@ -184,14 +194,15 @@ def reported_plan():
     tier = str(a.get("organizationRateLimitTier") or a.get("userRateLimitTier") or "").lower()
     m = re.search(r"max_(\d+)x", tier)
     if m:
-        return f"Max {m.group(1)}x"
-    return "Pro" if "pro" in tier else None
+        return plan_name(f"{m.group(1)}x")
+    return "Ultra" if "ultra" in tier else "Pro" if "pro" in tier else None
 
 
 def first_plan():
-    """The plan the past jobs ran on: the first one set, else what Claude Code reports, else BASE_PLAN."""
+    """The plan the past jobs ran on: the first one set, else BASE_PLAN (his words: everything so far ran on it), also
+    when Claude Code reports another one by now: that's the plan from now on."""
     ch = plan_settings().get("changes") or []
-    return (ch[0].get("plan") if ch else None) or reported_plan() or BASE_PLAN
+    return (ch[0].get("plan") if ch else None) or BASE_PLAN
 
 
 def current_plan():
@@ -212,7 +223,8 @@ def plan_at(t):
 
 def plan_of(h):
     """The plan a finished job ran on: its own tag, else the plan in use when it was done."""
-    return h.get("plan") or plan_at(h.get("done"))
+    p = h.get("plan")
+    return (plan_name(p) or p) if p else plan_at(h.get("done"))
 
 
 def plan_size(plan, key):
@@ -261,6 +273,27 @@ def set_ratio(plan, sizes):
     return d
 
 
+def five_on():
+    """F107: does the reading carry a 5-hour window? A plan without one (a verified Ultra) has no 5-hour limit: nothing is shown,
+    said or gated on it, and it all comes back with a reading that has one. No reading, or one that failed, counts as on:
+    that's not a plan without a limit. A kept number is an old one, so it doesn't count."""
+    if not USAGE:
+        return True
+    try:
+        st = os.stat(USAGE)
+    except OSError:
+        return True
+    key = (USAGE, st.st_mtime_ns, st.st_size)
+    if _FIVE_SEEN.get("key") != key:
+        try:
+            r = json.load(open(USAGE))
+            on = not r.get("readable") or any(line_key(l.get("label")) == "five" and not l.get("kept") for l in r.get("limits") or [])
+        except (OSError, ValueError, TypeError):
+            on = True
+        _FIVE_SEEN.update(key=key, on=on)
+    return _FIVE_SEEN["on"]
+
+
 def plan_status():
     """What the status page and the planning say: {"plan", "since", "by", "how", "based", "from", "ratio", "words"}."""
     plan, s = current_plan(), plan_settings()
@@ -269,7 +302,7 @@ def plan_status():
     if m and m.get("scaled_from"):
         out.update(how="scaled", based=m.get("based", 0), **{"from": m["scaled_from"]}, ratio=m.get("ratio"))
         r = m["ratio"]
-        n = (f"{r['five']:g}" if r["five"] == r["weekly"] else f"{r['five']:g} on the 5-hour, {r['weekly']:g} on the week")
+        n = (f"{r['weekly']:g}" if r["five"] == r["weekly"] or not five_on() else f"{r['five']:g} on the 5-hour, {r['weekly']:g} on the week")
         out["words"] = f"on {plan}: {m['scaled_from']}'s jobs scaled by {n}, until {RATE_MIN} jobs ran on {plan}"
     elif m:
         out.update(how="learned", based=m.get("based", 0))
@@ -284,8 +317,10 @@ def plan_minute(log=None):
     the plan in use from now on. Only a change in what it reports counts, so a plan he set by hand isn't overruled."""
     s, rep = plan_settings(), reported_plan()
     if not s:
-        _save_plan({"plan": rep or BASE_PLAN, "since": int(_now()), "by": "first start", "reported": rep,
-                    "changes": [{"plan": rep or BASE_PLAN, "since": 0, "by": "first start"}]})
+        _save_plan({"plan": BASE_PLAN, "since": 0, "by": "first start", "reported": rep,
+                    "changes": [{"plan": BASE_PLAN, "since": 0, "by": "first start"}]})
+        if rep and rep != BASE_PLAN:  # everything so far ran on Max 5x; what Claude Code reports counts from now on
+            set_plan(rep, by="Claude Code reports it")
         return
     if not rep or rep == s.get("reported"):
         return
@@ -817,7 +852,7 @@ def overrun(rec):
     f = float(rec["est"].get("top") or 1) * float(rec.get("raised") or (2 if rec.get("allowed") else 1))
     for k in KEYS:
         est, used = float(rec["est"].get(k) or 0), so_far.get(k)
-        if used is None:
+        if used is None or (k == "five" and not five_on()):  # F107: no 5-hour limit, no pause on it
             continue
         top = round(est * f, 1)
         if used >= OVER * top and used - est >= OVER_MIN[k]:
@@ -921,7 +956,7 @@ def paused_words(n, text, o):
     """Moneypenny's facts (H266) for a paused job: plain, everyday words (the text is sent as it is when she can't compose)."""
     line = "the five-hour usage" if o["line"] == "five" else "the weekly usage"
     return (f"Heads up: I paused one of the team's jobs, {short_what(text)}. It had used about {o['used']:g}% of "
-            f"{line}, far more than the most it was expected to take, so I stopped it before it burns more. {_what_next(n)}")
+            f"{line}, roughly four times the most it was expected to take, so I stopped it before it burns more. {_what_next(n)}")
 
 
 # ---------- past jobs: from the saved readings ----------
@@ -1298,11 +1333,16 @@ def is_nightly(h):
 
 def _fit(samples):
     """The rate from one plan's finished jobs: the weights per kind of token and per model, how many weighted tokens
-    make one point of each line, and which jobs were left out as outliers."""
+    make one point of each line, and which jobs were left out as outliers. F107: on the 5-hour line while enough jobs have
+    it, as always; on a plan without one, on the week."""
+    with_five = [h for h in samples if "five" in read_cost(h)]
+    lead = "five" if len(with_five) >= RATE_MIN else "weekly"
+    samples = with_five if lead == "five" else samples
     if len(samples) < RATE_MIN:
         return None
     wt = [NIGHTLY if is_nightly(h) else 1 for h in samples]
-    ys = [float(read_cost(h)["five"]) for h in samples]
+    ys = [float(read_cost(h)[lead]) for h in samples]
+    gap = OUT_MIN if lead == "five" else OUT_MIN / 5  # the week's points are that much bigger
     kw, mw = dict(PRIOR), dict(MODEL_PRIOR)
     fams = sorted({f for h in samples for f in h["tokens"]})
     keep = [True] * len(samples)
@@ -1328,7 +1368,7 @@ def _fit(samples):
         # The outliers: the reading rose far more than the tokens explain.
         W = [weighted(h["tokens"], {"weights": kw, "models": mw}) for h in samples]
         rate5 = sum(W[i] * wt[i] for i in idx) / (sum(ys[i] * wt[i] for i in idx) or 1)
-        new = [not (ys[i] > OUT_RATIO * W[i] / rate5 and ys[i] - W[i] / rate5 >= OUT_MIN) for i in range(len(samples))]
+        new = [not (ys[i] > OUT_RATIO * W[i] / rate5 and ys[i] - W[i] / rate5 >= gap) for i in range(len(samples))]
         if new == keep:
             break
         keep = new
@@ -1336,7 +1376,7 @@ def _fit(samples):
     W = [weighted(h["tokens"], {"weights": kw, "models": mw}) for h in samples]
     rate = {}
     for k in KEYS:
-        pts = sum(float(read_cost(samples[i])[k]) * wt[i] for i in idx)
+        pts = sum(float(read_cost(samples[i]).get(k) or 0) * wt[i] for i in idx)
         rate[k] = round(sum(W[i] * wt[i] for i in idx) / pts) if pts > 0 else None
     return {"weights": {k: round(v, 4) for k, v in kw.items()}, "models": {k: round(v, 4) for k, v in mw.items()},
             "rate": rate, "based": len(idx), "nightly": sum(1 for i in idx if is_nightly(samples[i])),
@@ -1348,7 +1388,7 @@ def learn(hist=None, write=True):
     E = _est()
     hist = E.all_history() if hist is None else hist
     samples = [h for h in hist if isinstance(h.get("tokens"), dict) and h["tokens"] and read_cost(h)
-               and all(k in read_cost(h) for k in KEYS)]
+               and "weekly" in read_cost(h)]
     groups, kept = {}, _rates_kept()
     for h in samples:
         groups.setdefault(plan_of(h), []).append(h)
@@ -1439,8 +1479,9 @@ def rate_words(model):
     if not model:
         return "no rate yet (too few finished jobs with their own tokens and a reading)"
     r = model["rate"]
-    return (f"{mtok(r.get('five'))} weighted tokens a point of the 5-hour, {mtok(r.get('weekly'))} a point of the week, "
-            f"from {model['based']} jobs ({model.get('nightly', 0)} nightly), {len(model.get('left_out') or [])} left out")
+    five = f"{mtok(r.get('five'))} weighted tokens a point of the 5-hour, " if five_on() and r.get("five") else ""
+    week = f"{mtok(r.get('weekly'))} a point of the week" if five else f"{mtok(r.get('weekly'))} weighted tokens a point of the week"
+    return f"{five}{week}, from {model['based']} jobs ({model.get('nightly', 0)} nightly), {len(model.get('left_out') or [])} left out"
 
 
 # ---------- F78: a held job is checked on what's left of it ----------
@@ -1570,12 +1611,16 @@ def cost_words(c):
     """"about 4% of the 5-hour and 0.8% of the week"."""
     if not c:
         return ""
+    if not five_on():  # F107
+        return f"about {pct(c.get('weekly', 0))} of the week"
     return f"about {pct(c.get('five', 0))} of the 5-hour and {pct(c.get('weekly', 0))} of the week"
 
 
 def used_words(c):
     if not c:
         return ""
+    if not five_on():  # F107
+        return f"used {pct(c.get('weekly', 0))} of the week"
     return f"used {pct(c.get('five', 0))} of the 5-hour and {pct(c.get('weekly', 0))} of the week"
 
 
@@ -1593,7 +1638,7 @@ def plan_cmd(argv):
         try:
             set_plan(argv[1], since=since)
         except ValueError as e:
-            print(f"{e}; say Pro, Max 5x or Max 20x.", file=sys.stderr)
+            print(f"{e}; say Pro, Max 5x or Ultra.", file=sys.stderr)
             return 2
     elif sub == "ratio" and len(argv) > 2:
         sizes = {}
@@ -1636,8 +1681,9 @@ def main(argv):
         c = cost_for(minutes, text)
         print(f"About {minutes} min, {cost_words(c)} (from {c['how']}, {c['based']} jobs).")
         if c.get("tokens"):
+            line_, name = ("five_range", "of the 5-hour") if five_on() and "five_range" in c else ("weekly_range", "of the week")
             print(f"In tokens: about {mtok(c['tokens'])} weighted ({mtok(c['range'][0])} to {mtok(c['range'][1])}), "
-                  f"{pct(c['five_range'][0])} to {pct(c['five_range'][1])} of the 5-hour.")
+                  f"{pct(c[line_][0])} to {pct(c[line_][1])} {name}.")
         if cmd == "when":
             p = Projection.here()
             t = p.fits_at(c, _now()) if p else None

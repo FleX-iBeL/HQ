@@ -14574,8 +14574,8 @@ print(n, len(H.cells(line)))
 
     async def flow211(self) -> str:
         """F107, no Claude: the estimates know which plan they were learned on. On a copy with a made-up job history: (a) every
-        past job's record says Max 5x and none is lost, a broken line stays; (b) with the plan set to Max 20x the estimate in
-        percent is a quarter of the one before and its minutes stay, also without a rate (the jobs' own cost, H141's fallback);
+        past job's record says Max 5x and none is lost, a broken line stays; (b) with the plan set to Ultra (Max 20x's name now) the estimate in
+        percent is about half of the one before and its minutes stay, also without a rate (the jobs' own cost, H141's fallback);
         (c) until five jobs ran on it the rate stays the old one scaled, the fifth makes the rate come from those five alone;
         (d) back on Max 5x the old numbers come back; (e) each line has its own ratio, his to correct; (f) the plan follows what
         Claude Code reports, once per change, so a plan he set isn't overruled; (g) a finished job's record carries its plan;
@@ -14619,34 +14619,34 @@ need(keep["plans"]["Max 5x"]["rate"] == old["rate"] and keep["rate"] == old["rat
 before = U.cost_for(20, TEXT, "build")
 mins = E.estimate_detail(TEXT, kind="build")["est"]
 need(before["five"] > 0 and before["how"] != "fallback", f"the estimate before: {before}")
-U.set_plan("max 20x", by="the flow")
-need(U.current_plan() == "Max 20x" and U.plan_settings()["since"], "the plan wasn't set")
+U.set_plan("max 20x", by="the flow")  # the old name is read as Ultra
+need(U.current_plan() == "Ultra" and U.plan_settings()["since"], "the plan wasn't set")
 after = U.cost_for(20, TEXT, "build")
-need(abs(after["five"] - before["five"] / 4) <= 0.06 and abs(after["weekly"] - before["weekly"] / 4) <= 0.06, f"not a quarter: {before} {after}")
+need(abs(after["five"] - before["five"] / 2) <= 0.06 and abs(after["weekly"] - before["weekly"] / 2) <= 0.06, f"not half: {before} {after}")
 need(E.estimate_detail(TEXT, kind="build")["est"] == mins, "the minutes moved with the plan")
 st = U.plan_status()
-need(st["how"] == "scaled" and st["from"] == "Max 5x" and "Max 20x" in st["words"], f"the plan's words: {st}")
+need(st["how"] == "scaled" and st["from"] == "Max 5x" and "Ultra" in st["words"], f"the plan's words: {st}")
 # with no rate at all: the jobs' own cost, then H141's fallback, each a quarter too
 rate = U.RATE_FILE + ".away"
 os.replace(U.RATE_FILE, rate)
 c = U.cost_for(20, TEXT, "build")
-need(abs(c["five"] - 5 / 4) <= 0.06, f"the jobs' own cost isn't read on the new plan: {c}")
+need(abs(c["five"] - 5 / 2) <= 0.06, f"the jobs' own cost isn't read on the new plan: {c}")
 os.replace(E.HISTORY, E.HISTORY + ".away")
 c = U.cost_for(20, TEXT, "build")
-need(c["how"] == "fallback" and abs(c["five"] - 2.5) <= 0.06, f"the fallback isn't read on the new plan: {c}")
-need(U.resume_floor([], None)["five"] == 0.5, "the floor isn't read on the new plan")
+need(c["how"] == "fallback" and abs(c["five"] - 5) <= 0.06, f"the fallback isn't read on the new plan: {c}")
+need(U.resume_floor([], None)["five"] == 1.0, "the floor isn't read on the new plan")
 os.replace(E.HISTORY + ".away", E.HISTORY)
 os.replace(rate, U.RATE_FILE)
-# five jobs on Max 20x: a tenth of a line each, so the rate is plainly not the old one times four
+# five jobs on Ultra: a tenth of a line each, so the rate is plainly not the old one times two
 four = U.load_rate()["rate"]["five"]
-need(four == round(old["rate"]["five"] * 4), "the old rate isn't scaled")
+need(four == round(old["rate"]["five"] * 2), "the old rate isn't scaled")
 for n in range(1, 6):
     with open(E.HISTORY, "a") as f:
-        f.write(json.dumps(line(100 + n, five=0.5, plan="Max 20x")) + "\n")
+        f.write(json.dumps(line(100 + n, five=0.5, plan="Ultra")) + "\n")
     m = U.learn()
     if n < 5:
         need(m["scaled_from"] == "Max 5x" and m["rate"]["five"] == four, f"job {n} of 5 already moved the rate: {m}")
-need(not m.get("scaled_from") and m["based"] == 5 and m["plan"] == "Max 20x", f"not from those five: {m}")
+need(not m.get("scaled_from") and m["based"] == 5 and m["plan"] == "Ultra", f"not from those five: {m}")
 W = U.weighted(TOK, m)
 need(abs(m["rate"]["five"] - W / 0.5) <= 2, f"the rate isn't from those five alone: {m['rate']} {W}")
 need(U.plan_status()["how"] == "learned", "the status doesn't say learned")
@@ -14656,13 +14656,13 @@ need(U.load_rate()["rate"] == old["rate"], "the old rate didn't come back")
 need(back["five"] == before["five"] and back["weekly"] == before["weekly"], f"not the old numbers: {before} {back}")
 # a ratio per line, his to correct (with no jobs of its own on a new plan)
 del_ = json.load(open(U.RATE_FILE))
-del_["plans"].pop("Max 20x")
+del_["plans"].pop("Ultra")
 json.dump(del_, open(U.RATE_FILE, "w"))
 r = subprocess.run([sys.executable, JV + "/routine/usagecost.py", "plan", "ratio", "Max 20x", "five=5", "weekly=2"], capture_output=True, text=True)
 need(r.returncode == 0, r.stdout + r.stderr)
 need(subprocess.run([sys.executable, JV + "/routine/usagecost.py", "plan", "ratio", "Max 20x", "five=0"], capture_output=True, text=True).returncode == 2, "a ratio of nothing passed")
 r = subprocess.run([sys.executable, JV + "/routine/usagecost.py", "plan", "set", "20x"], capture_output=True, text=True)
-need(r.returncode == 0 and "Max 20x" in r.stdout, r.stdout + r.stderr)
+need(r.returncode == 0 and "Ultra" in r.stdout, r.stdout + r.stderr)
 c = U.cost_for(20, TEXT, "build")
 need(abs(c["five"] - before["five"] / 5) <= 0.06 and abs(c["weekly"] - before["weekly"] / 2) <= 0.06, f"each line's own ratio: {c}")
 need(subprocess.run([sys.executable, JV + "/routine/usagecost.py", "plan", "set", "a big one"], capture_output=True, text=True).returncode == 2, "a made-up plan passed")
@@ -14676,7 +14676,7 @@ U.plan_minute()
 need(U.plan_settings()["reported"] == "Max 5x" and U.current_plan() == "Max 5x", "the report isn't kept")
 reports("default_claude_max_20x")
 U.plan_minute()
-need(U.current_plan() == "Max 20x" and U.plan_settings()["by"] == "Claude Code reports it", "the plan doesn't follow the report")
+need(U.current_plan() == "Ultra" and U.plan_settings()["by"] == "Claude Code reports it", "the plan doesn't follow the report")
 U.set_plan("Max 5x", by="by hand")
 U.plan_minute()
 need(U.current_plan() == "Max 5x", "the same report overruled what he set")
@@ -14704,7 +14704,7 @@ print("OK")
         # a call
         from policy import Policy
         pol = Policy(config.FOLDER)
-        for cmd, want in ((f'python3 {ROOT}/routine/usagecost.py plan', "allow"), (f'python3 {ROOT}/routine/usagecost.py plan set "Max 20x"', "allow"),
+        for cmd, want in ((f'python3 {ROOT}/routine/usagecost.py plan', "allow"), (f'python3 {ROOT}/routine/usagecost.py plan set "Ultra"', "allow"),
                           (f'python3 {ROOT}/routine/usagecost.py plan tag', "deny")):
             got = pol.decide("Bash", {"command": cmd}).verdict
             need(got == want, f"{cmd}: {got}")
@@ -15805,6 +15805,14 @@ print("OK")
         need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-900:])
         return "a note from the backup on the main, cleared there too, a refused hand-over kept with an incident, versions, sync count, a hung line restarted"
 
+    def _chrome_for_page(self) -> str:
+        """The headless browser the page flows use, on this computer."""
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser found to run the page in")
+        return chrome
+
     def _status_server(self, root, env, name):
         """A status server of its own on a free port, by its exact pid; never the live one."""
         import socket
@@ -15925,6 +15933,251 @@ print("OK")
             p.terminate()
             p.wait(timeout=10)
         return f"the first read inside its wait, then every read under {max(lat):.2f} s through a six-second run, one run at a time"
+
+    async def flow228(self) -> str:
+        """F107, no Claude: what's shown and what stops work follows what the reading carries. Max 20x is called Ultra now, a verified
+        account has no 5-hour limit. On a copy, with his plan reported as Ultra: the past jobs stay Max 5x; a reading with only
+        the weekly windows isn't a missing reading: the estimates, the job list, the planning, the lines, the wall's room and the
+        pause go on the week, and no word or number of a 5-hour line is left, on the status page either; five jobs teach Ultra's rate
+        from the week alone. A reading with the window again, the plan back on Max 5x or an account with the temporary limit,
+        and all of it is back with the old numbers."""
+        import shutil as _sh
+        import subprocess as _sp
+        ws, env, d = self._wall_env("ultra")
+        (d / "claude.json").write_text(json.dumps({"oauthAccount": {"organizationRateLimitTier": "default_claude_max_20x"}}))
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        iso = lambda t: t.strftime("%Y-%m-%dT%H:%M:%SZ")
+        def reading(five=None, weekly=5):
+            now = datetime.now(timezone.utc)
+            limits = ([{"label": "5-hour limit", "percent": five, "resetsAt": iso(now + timedelta(minutes=120))}] if five is not None else [])
+            limits += [{"label": "Weekly · all models", "percent": weekly, "resetsAt": iso(now + timedelta(hours=60))},
+                       {"label": "Weekly · Fable", "percent": 1, "resetsAt": iso(now + timedelta(hours=60))}]
+            Path(env["HQ_USAGE"]).write_text(json.dumps({"readable": True, "checkedAt": iso(now), "by": "a test", "plan": "Ultra", "limits": limits}))
+        reading()
+        child = r"""
+import json, os, subprocess, sys, time
+sys.path.insert(0, sys.argv[1] + "/routine"); sys.path.insert(0, sys.argv[1] + "/app")
+import usagecost as U, estimate as E
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+JV = sys.argv[1]
+os.makedirs(U.DIR, exist_ok=True)
+now = time.time()
+TEXT = "flow 228 job: fix the small thing on the made-up page"
+TOK = {"opus": [1000, 20000, 3000000, 100000]}
+def line(n, plan=None, five=5.0, week=1.0):
+    h = {"n": n, "kind": "build", "est": 20, "actual": 20, "done": int(now - 90000 + n * 60), "how": "seen", "machine": "test",
+         "about": f"flow 228 job {n}: fix the small thing on the made-up page", "tokens": TOK, "cost": {"weekly": week},
+         "cost_how": "tokens", "cost_read": {"weekly": week}}
+    if five is not None:
+        h["cost"]["five"] = h["cost_read"]["five"] = five
+    if plan:
+        h["plan"] = plan
+    return h
+with open(E.HISTORY, "w") as f:
+    for n in range(1, 13):
+        f.write(json.dumps(line(n)) + "\n")
+U.plan_minute()
+need(U.current_plan() == "Ultra" and U.first_plan() == "Max 5x", f"reported 20x: {U.plan_settings()}")
+U.tag_past()
+need(all(json.loads(l)["plan"] == "Max 5x" for l in open(E.HISTORY)), "the past jobs must stay Max 5x")
+old = U.learn()
+need(old["scaled_from"] == "Max 5x" and old["plan"] == "Ultra", f"{old}")
+need(not U.five_on(), "a reading with no 5-hour window")
+c = U.cost_for(20, TEXT, "build")
+words = U.cost_words(c) + " " + U.used_words(c) + " " + U.plan_status()["words"] + " " + U.rate_words(U.load_rate())
+need("5-hour" not in words and "of the week" in words, words)
+# the room: the week alone
+p = U.Projection.here(now)
+need(list(p.read) == ["weekly"] or set(p.read) == {"weekly", "fable"}, f"{p.read}")
+need(p.counted() and "five" not in p.counted() and p.fits({"five": 999, "weekly": 1}, now), "the room isn't the week's")
+need(p.fits_at({"five": 999, "weekly": 1}, now) is not None, "fits has no time without a 5-hour window")
+# the pause: not on a line that isn't there, still on the week
+rec = {"est": {"five": 2.0, "weekly": 1.0, "top": 1}, "own": {"five": 50.0, "weekly": 1.0}}
+need(U.overrun(rec) is None, "paused on a 5-hour line that isn't there")
+rec["own"]["weekly"] = 5.0
+need(U.overrun(rec)["line"] == "weekly", "the week's pause")
+# five jobs on Ultra, the week alone
+for n in range(1, 6):
+    with open(E.HISTORY, "a") as f:
+        f.write(json.dumps(line(100 + n, plan="Ultra", five=None, week=0.5)) + "\n")
+    m = U.learn()
+need(not m.get("scaled_from") and m["based"] == 5 and m["rate"].get("five") is None and m["rate"]["weekly"], f"not from those five: {m}")
+need(abs(m["rate"]["weekly"] - U.weighted(TOK, m) / 0.5) <= 2, f"the rate isn't from the week: {m}")
+need("5-hour" not in U.rate_words(m), U.rate_words(m))
+need(U.own_cost(TOK).get("weekly") and "five" not in U.own_cost(TOK), f"{U.own_cost(TOK)}")
+# a job's count with no 5-hour window
+r = U.start(900, TEXT)
+need("five" not in r["seg"] and "weekly" in r["seg"], f"{r}")
+U.forget(900)
+print("OK")
+"""
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-1000:])
+        rm = ws / "HQ/roadmap.md"
+        rm.write_text(rm.read_text().replace("| ⬜ | A1 Your first step |", "| ⬜ | A1 Your first step, made up |"))
+        n = new("Build the thing on the made-up page")
+        said = {"jobs": jobs("list").stdout,
+                "sprint": _sp.run([sys.executable, str(ROOT / "routine/sprint.py"), "list"], capture_output=True, text=True, env=env, cwd=str(ROOT)).stdout,
+                "lines": _sp.run([sys.executable, str(ROOT / "routine/usageline.py")], capture_output=True, text=True, env=env, cwd=str(ROOT)).stdout}
+        need("of the week" in said["jobs"] and "weekly" in said["sprint"] and "weekly" in said["lines"].lower(), f"the week isn't said: {said}")
+        need("5-hour" not in said["jobs"] and "5-hour" not in said["sprint"] and "5-hour line moves" not in said["lines"], f"a 5-hour word is left: {said}")
+        need("no 5-hour limit" in said["lines"], said["lines"])
+        rules = r"""
+import sys
+sys.path.insert(0, sys.argv[1] + "/app")
+import config
+print(repr(config.plan_rule()))
+"""
+        r = _sp.run([sys.executable, "-c", rules, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        need("no 5-hour limit" in r.stdout, f"calls and texts aren't told: {r.stdout} {r.stderr[-300:]}")
+        # the sprint's nights lie on the week
+        night = r"""
+import json, sys, time
+sys.path.insert(0, sys.argv[1] + "/routine")
+import sprint as S
+fake = [{"label": "H9400", "title": "Row", "rank": 1, "est": 10, "latest": 12, "kind": "build", "cost": {"five": 999, "weekly": 0.1}, "moscow": "must", "bug": False, "ready": "ready", "phase": "H"}]
+S.plan = lambda: {"rows": fake, "ranked": 1}
+L = S.lay(["H9400"], night="tonight")
+print(json.dumps({"nights": len(L["nights"]), "words": S.lay_words(L)}))
+"""
+        r = _sp.run([sys.executable, "-c", night, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["nights"] == 1 and "5-hour" not in o["words"] and "weekly" in o["words"], f"the sprint on the week: {o}")
+        # the status page: no bar, no line, no fold, no points; back with a reading that has one
+        chrome = self._chrome_for_page()
+        root = self.tmp / "ultra-hq"
+        (root / "routine").mkdir(parents=True)
+        (root / "app").mkdir()
+        (root / ".status").mkdir()
+        _sh.copytree(ROOT / "status", root / "status")
+        plan = json.dumps({"on": True, "jobs": {"1": {"est": 20, "kind": "build", "cost": {"five": 7, "weekly": 3}, "eta": 2000000000, "latest": 30}}, "items": {}, "accuracy": {"n": 0},
+                           "kinds": {}, "total": {"jobs": 1, "minutes": 20, "eta": 2000000000, "five": 7, "weekly": 3, "running": 0, "waiting": 1, "counts": ""}, "items_total": None, "usage_plan": {"words": "on Ultra: made up", "plan": "Ultra"}})
+        (root / "routine/estimate.py").write_text(f"print({plan!r})\n")
+        (root / "routine/sprint.py").write_text("print('{}')\n")
+        (root / "routine/cycles.py").write_text("print('{}')\n")
+        (root / "app/feedback_box.py").write_text("print('{}')\n")
+        rm2 = root / "roadmap.md"
+        rm2.write_text((ROOT / "template/HQ/roadmap.md").read_text() + "\n")
+        page_env = {**os.environ, "HQ_ROADMAP": str(rm2), "HQ_SUPPORT": str(root / "support")}
+        p, port = self._status_server(root, page_env, "ultra")
+        try:
+            http_get("/routines.json", f"http://127.0.0.1:{port}", timeout=5)
+            time.sleep(1)
+            def dom(usage):
+                (root / ".status/usage.json").write_text(json.dumps(usage))
+                r = _sp.run([chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                             f"--user-data-dir={self.tmp / 'ultra-profile'}", "--virtual-time-budget=12000", "--dump-dom", f"http://127.0.0.1:{port}/"],
+                            capture_output=True, text=True, timeout=120)
+                return re.sub(r"<script.*?</script>|<style.*?</style>", "", r.stdout, flags=re.S)  # what's on the page, not its code
+            on_ = lambda: json.loads(Path(env["HQ_USAGE"]).read_text())
+            reading()
+            page = dom(on_())
+            need("Weekly, all models" in page and "of the week" in page, f"the page has no week: {page[:300]!r}")
+            for word in ("5-hour limit", "of the 5-hour", "5-hour line", "next 20 hours", 'data-line="five"'):
+                need(word not in page, f"the page still says {word!r} on a plan with no 5-hour limit")
+            reading(five=30)
+            page = dom(on_())
+            for word in ("5-hour limit", "of the 5-hour", "5-hour line", 'data-line="five"'):
+                need(word in page, f"the page lost {word!r} on a plan with a 5-hour limit")
+        finally:
+            p.terminate()
+            p.wait(timeout=10)
+        # back: the temporary limit of an account not verified yet, and Max 5x: the words and the old numbers
+        reading(five=30)
+        (d / "claude.json").write_text(json.dumps({"oauthAccount": {"organizationRateLimitTier": "default_claude_max_5x"}}))
+        back = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1] + "/routine")
+import usagecost as U
+U.plan_minute()
+print(json.dumps({"plan": U.current_plan(), "five": U.five_on(), "words": U.cost_words({"five": 2, "weekly": 1}), "rate": U.load_rate()["rate"]}))
+"""
+        r = _sp.run([sys.executable, "-c", back, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["plan"] == "Max 5x" and o["five"] and "of the 5-hour" in o["words"] and o["rate"]["five"], f"back on Max 5x: {o}")
+        need("5-hour" in jobs("list").stdout, "the job list doesn't say the 5-hour again")
+        return "the past stays Max 5x, the week carries everything, five jobs teach Ultra from the week, the page has no 5-hour of any kind, and it all comes back"
+
+    async def flow229(self) -> str:
+        """F107, no Claude: the gate on a real reading of this shape: only the weekly windows, as the usage tool and a run's own stream
+        give it. It's readable and nothing is kept of the old 5-hour; through the routine's real minute a job starts under the week's
+        line, waits at it, a reading too old still stops it, a headless job is held at the week; a stream with the 5-hour window
+        brings the limit back at once, and a reading that fails keeps the last numbers as before."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env("ultragate")
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        rm = ws / "HQ/roadmap.md"
+        rm.write_text(rm.read_text().replace("**Weekly line: moving; fixed at 90% when switched.**", "**Weekly line: fixed at 60%.**"))
+        now = datetime.now(timezone.utc)
+        reset = (now + timedelta(hours=60)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        tool = {"plan": {"status": "ok", "plan": "Ultra", "windows": [{"label": "Weekly · all models", "percentUsed": 3, "resetsAt": reset, "resetsIn": "2d 12h"},
+                                                                      {"label": "Weekly · Fable", "percentUsed": 1, "resetsAt": reset, "resetsIn": "2d 12h"}]}}
+        save = lambda *a, inp=None: _sp.run(["node", str(ROOT / "status/save-usage.mjs"), *a], input=inp, capture_output=True, text=True, env=env, cwd=str(ROOT))
+        Path(env["HQ_USAGE"]).write_text(json.dumps({"readable": True, "checkedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "plan": "Max", "limits": [
+            {"label": "5-hour limit", "percent": 63, "resetsAt": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")}]}))
+        r = save("--by", "a test", inp=json.dumps(tool))
+        need(r.returncode == 0 and "could not be read" not in r.stdout and "OK to go on" in r.stdout, f"a reading with no 5-hour: {r.stdout}")
+        u = json.loads(Path(env["HQ_USAGE"]).read_text())
+        need(u["readable"] and u["plan"] == "Ultra" and not any("5-hour" in l["label"] for l in u["limits"]), f"{u}")
+        # the stream's shape: only seven_day, over a reading that had the 5-hour
+        live = ROOT / "scratch/routine/usage-live.json"
+        keep = live.read_text() if live.exists() else None
+        Path(env["HQ_USAGE"]).write_text(json.dumps({**u, "limits": [{"label": "5-hour limit", "percent": 63, "resetsAt": reset}, *u["limits"]]}))
+        code = ("import sys\nsys.path.insert(0, %r)\nimport usagelive\nprint(usagelive.save({'seven_day': {'utilization': 0.04, 'resetsAt': 2000000000}}, 'mail check'))\n" % str(ROOT / "routine"))
+        try:
+            r = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+            need("seven_day" in r.stdout, r.stdout + r.stderr)
+            r = save("--statusline", "--any", "--by", "usage check")
+            need(r.returncode == 0, f"the stream's reading: {r.stdout}")
+            u = json.loads(Path(env["HQ_USAGE"]).read_text())
+            need(not any("5-hour" in l["label"] for l in u["limits"]), f"the old 5-hour was kept: {u['limits']}")
+            need(any(l["label"].startswith("Weekly · Fable") and l.get("kept") for l in u["limits"]), f"Fable isn't kept as before: {u['limits']}")
+            # back: the stream has the 5-hour window again
+            code2 = code.replace("{'seven_day':", "{'five_hour': {'utilization': 0.2, 'resetsAt': 2000000000}, 'seven_day':")
+            _sp.run([sys.executable, "-c", code2], capture_output=True, text=True, env=env)
+            save("--statusline", "--any", "--by", "usage check")
+            u = json.loads(Path(env["HQ_USAGE"]).read_text())
+            need(any("5-hour" in l["label"] and not l.get("kept") for l in u["limits"]), f"the 5-hour didn't come back: {u['limits']}")
+            # a reading that fails keeps the last numbers
+            r = save("--by", "a test", inp="not json")
+            u = json.loads(Path(env["HQ_USAGE"]).read_text())
+            need(r.returncode == 2 and any("5-hour" in l["label"] and l.get("kept") for l in u["limits"]), f"a failed reading: {r.stdout} {u['limits']}")
+        finally:
+            if keep is None:
+                live.unlink(missing_ok=True)
+            else:
+                live.write_text(keep)
+        def weekly(pct, age=0):
+            t = datetime.now(timezone.utc) - timedelta(seconds=age)
+            Path(env["HQ_USAGE"]).write_text(json.dumps({"readable": True, "checkedAt": t.strftime("%Y-%m-%dT%H:%M:%SZ"), "plan": "Ultra", "limits": [
+                {"label": "Weekly · all models", "percent": pct, "resetsAt": reset}, {"label": "Weekly · Fable", "percent": 1, "resetsAt": reset}]}))
+        gate = lambda *a: _sp.run(["node", str(ROOT / "status/save-usage.mjs"), "--gate", *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        n = new("Build the thing on the made-up page")
+        weekly(50)
+        g = gate("--reserve", "--need", "five=999,weekly=1")
+        need(g.returncode == 2 and "reserve" in g.stdout, f"the week near the reserve: {g.stdout}")
+        r = minute()
+        need(state(n) == "ready" and not r["opened"], f"it started into the reserve: {state(n)}")
+        weekly(3, age=45 * 60)
+        g = gate("--reserve", "--need", "five=999,weekly=1")
+        need(g.returncode == 2 and "45 minutes old" in g.stdout, f"a reading too old: {g.stdout}")
+        weekly(3)
+        need(gate("--reserve", "--need", "five=999,weekly=1").returncode == 0, "a 5-hour need held it up with no 5-hour limit")
+        r = minute()
+        need(state(n).startswith("running") and r["opened"], f"under the week's line it didn't start: {state(n)} {r['log'][-2:]}")
+        (Path(env["HQ_JOB_RUN"]) / "job.json").write_text(json.dumps({"n": int(n), "pid": 999999, "started": time.time() - 10}))
+        (Path(env["HQ_JOB_RUN"]) / "job.pid").write_text("999999")
+        rec = json.loads((Path(env["HQ_ESTIMATES"]) / "job-usage.json").read_text())
+        rec[n]["late"] = True
+        (Path(env["HQ_ESTIMATES"]) / "job-usage.json").write_text(json.dumps(rec))
+        r = minute()
+        need(state(n).startswith("running") and not r["ended"], "held with room on the week")
+        weekly(70)
+        r = minute()
+        need(state(n).startswith("held") and r["ended"], f"not held at the week's line: {state(n)} {r['log'][-2:]}")
+        return "a reading with only the weekly windows gates on the week: readable, the old 5-hour gone, the reserve and the age hold, a job starts and is held at the week"
 
     def _proof_env(self, tag):
         """A throwaway workspace and a throwaway HQ repository for the proof, with a stand-in for the flows: a flow named in
@@ -25921,6 +26174,8 @@ FLOWS = {
     222: ("F102: a failing reviewer, cycle, briefing, QA or release turns red with an incident within the minute; a broken lines file shows red", False, "flow222"),
     221: ("F102: a mail run that moves the marker back or drops a very important line is put back with an incident; red after 2 hours between 8:00 and midnight", False, "flow221"),
     220: ("F102: two processes adding 150 notes lose none; one lock across processes for the to-do list, the notes, the games, the coaching file and the mail list", False, "flow220"),
+    229: ("F107: the gate on a real reading with only the weekly windows: readable, on the week, the reserve and the age hold, the 5-hour back with a reading that has it", False, "flow229"),
+    228: ("F107: Ultra with no 5-hour window: the past stays Max 5x, estimates, planning, nights and page on the week with no 5-hour left, then back on Max 5x with all of it", False, "flow228"),
     227: ("F102: the status page never hangs on a slow script: the last answer at once, one run at a time", False, "flow227"),
     226: ("F100: his say-so for a daytime build: a job's process, the old variable and a made-up ticket refused, only the status page's own tap counts", False, "flow226"),
     219: ("F102: a note written in the app is on GitHub after its ten minutes with no one naming it; a key stays out; a refused push merges; a clash is an incident", False, "flow219"),

@@ -548,8 +548,8 @@ team learns from the finished jobs (how many tokens make a point, the nightly ru
 call, the mail check or someone else using Claude at the same time doesn't count against the job or pause it; \
 the start still waits on the real total under the lines. What a call cost on its own, when he asks: \
 python3 "{HQ}/routine/usagecost.py" calls (the rate: "rate"; a job: "tokens N"). \
-Percents are per plan (F107): when he changes plan, python3 "{HQ}/routine/usagecost.py" plan set "Max 20x" (bare "plan" says \
-which one and what the estimates are based on; "plan ratio \"Max 20x\" five=4 weekly=3.5" when he corrects what a plan is worth). \
+Percents are per plan (F107): when he changes plan, python3 "{HQ}/routine/usagecost.py" plan set "Ultra" (bare "plan" says \
+which one and what the estimates are based on; "plan ratio \"Ultra\" weekly=2.5" when he corrects what a plan is worth). \
 "stop" ends the running job, "stop N" cancels waiting job N; "overrule N" lets job N past the 5-hour usage \
 line (never the weekly line); "off" and "on" switch the whole routine. Use them when he asks. \
 "pause" holds everything on his word: the running job, new starts, the reviewer and the first looks; "on" ends it (F100). \
@@ -763,6 +763,21 @@ he calls. Name them in your first reply, after answering him, every call, until 
 resolved or not that important.""")
 
 
+def plan_rule() -> str:
+    """F107: on a plan whose reading has no 5-hour window, what's said about usage goes on the week alone; on any other plan
+    nothing is added. Read at every call start and every text."""
+    try:
+        import sys as _s
+        _s.path.insert(0, str(ROOT / "routine"))
+        import usagecost
+        if usagecost.five_on():
+            return ""
+    except Exception:
+        return ""
+    return ("- This plan has no 5-hour limit: only the week and the weekly Fable limit count. Whatever the rules here say about the "
+            "5-hour usage or the 5-hour line doesn't apply now: never name a 5-hour number, line or window.")
+
+
 def voice_rules(context: str = "all") -> str:
     """The call rules with the workflows as they are now (job 257): Life coaching switched in Settings counts from the
     next call, no restart of the call line. H205: and what they turned off in What HQ helps you with. H235: and their
@@ -797,8 +812,9 @@ def voice_rules(context: str = "all") -> str:
         rules = rules.replace(MAIL_HEADSUP_RULE, " Answer what he says first. You talk about building HQ only, never his life: "
                               "no mail, no to-do list, no appointments of his unless he asks.")
     cy = cycles_rule()  # H298: the agents' own cycles, only while the feature is on
+    plan = plan_rule()  # F107
     return (rules + ("\n" + off + "\n" if off else "") + ("\n" + nw + "\n" if nw else "")
-            + ("\n" + ext + "\n" if ext else "") + ("\n" + cy + "\n" if cy else ""))
+            + ("\n" + ext + "\n" if ext else "") + ("\n" + cy + "\n" if cy else "") + ("\n" + plan + "\n" if plan else ""))
 
 
 WRAP_UP_PROMPT = """[Call system: @USER@ has hung up. The call is over, and nothing you write now is spoken.

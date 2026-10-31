@@ -65,6 +65,16 @@ export function lineKey(label) {
 }
 
 /**
+ * F107: does the reading carry a 5-hour window? A plan without one (a verified Ultra) has no 5-hour limit, so nothing is shown or
+ * gated on it; it all comes back with a reading that has one. No reading, or one that failed, isn't a plan without a limit.
+ * A kept number is an old one. usagecost.five_on says the same.
+ */
+export function hasFive(reading) {
+  if (!reading?.readable) return true;
+  return (reading.limits ?? []).some((l) => lineKey(l.label) === 'five' && !l.kept);
+}
+
+/**
  * The three lines' settings from the roadmap, or null when it names no usage limit (then nothing stops).
  *   - **Usage limit: 70%.**                 the 5-hour line's fixed number (also: there are stop lines at all)
  *   - **5-hour line: moving.** / fixed.     H87; moving when it isn't named

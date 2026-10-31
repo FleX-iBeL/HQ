@@ -547,7 +547,7 @@
     <script>HQUpdate.mount({ line: document.getElementById('hqu-line'), banner: document.getElementById('hqu-banner') });</script>
     <script type="module">
       import { parseRoadmap } from './parse.mjs';
-      import { stopLine, usageVerdict, landing, landingWords, LAND_KINDS, windowsAhead, windowWords, daysAhead, dayWords } from './usage.mjs';
+      import { hasFive, stopLine, usageVerdict, landing, landingWords, LAND_KINDS, windowsAhead, windowWords, daysAhead, dayWords } from './usage.mjs';
 
       const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped' };
       const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision', repeat: 'Repeats' };
@@ -932,6 +932,8 @@
         return p;
       }
 
+      /** F107: whether the last reading carries a 5-hour window; drawUsage sets it. */
+      let fiveOn = true;
       /** F7: the three plan limits that always show, in this order, even without a number. */
       const ALWAYS = [
         { label: '5-hour limit', test: /5-hour/i },
@@ -941,6 +943,7 @@
 
       /** The last usage reading a session saved. The page cannot take one itself. */
       function drawUsage(u, lines, E = null) {
+        fiveOn = hasFive(u);  // F107: what's shown follows what the reading carries
         const age = u ? Date.now() - new Date(u.checkedAt).getTime() : 0;
         const verdict = usageVerdict(u, lines, new Date());
         // An old reading is shown dimmed: usage may have moved on since.
@@ -959,10 +962,10 @@
           const k = (n) => `${Math.round(n / 1000).toLocaleString('en')}k`;
           card.append(meter('Context window', 'This session only', u.context.percent, `${k(u.context.tokens)} of ${k(u.context.window)}`, null, 'context'));
         }
-        const limits = Array.isArray(u?.limits) ? u.limits : [];
+        const limits = (Array.isArray(u?.limits) ? u.limits : []).filter((l) => fiveOn || !/5-hour/i.test(l.label));
         let landed = false;
         // F7: all three always show; the known ones in the order above, anything else after them.
-        const rows = ALWAYS.map((a) => ({ a, l: limits.find((l) => a.test.test(l.label)) ?? null }));
+        const rows = ALWAYS.filter((a) => fiveOn || !a.test.test('5-hour limit')).map((a) => ({ a, l: limits.find((l) => a.test.test(l.label)) ?? null }));
         for (const l of limits) if (!rows.some((r) => r.l === l)) rows.push({ a: null, l });
         for (const { a, l } of rows) {
           // Never read at all: an empty bar, greyed out.
@@ -1059,14 +1062,14 @@
         box.append(card);
         if (landed) box.append(landLegend());
         if (u?.readable && verdict.stop) box.append(el('p', 'alarm', `Stop line reached. ${verdict.reason}`));
-        if (lines) for (const key of ['five', 'weekly', 'fable']) box.append(lineSwitch(key, lines[key]));
+        if (lines) for (const key of fiveOn ? ['five', 'weekly', 'fable'] : ['weekly', 'fable']) box.append(lineSwitch(key, lines[key]));
         box.append(
           el(
             'p',
             'soft',
             !lines
               ? 'Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are. They are not live: older than 20 minutes, the whole box is greyed out. A greyed-out bar is an old number.'
-              : 'The dark mark is the stop line: work stops when a plan limit reaches it. Each of the three lines either moves, recalculated every minute from its own reset (it climbs a little every minute, smoothly: the 5-hour line from 10% after a reset up to 100% at the next, a weekly line from 20% up to 100% at its reset), or stays at a fixed number; switch each one above, or from a call. A job let past the line only skips the 5-hour line. Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.',
+              : `The dark mark is the stop line: work stops when a plan limit reaches it. Each of the ${fiveOn ? 'three lines' : 'lines'} either moves, recalculated every minute from its own reset (it climbs a little every minute, smoothly: ${fiveOn ? 'the 5-hour line from 10% after a reset up to 100% at the next, ' : ''}a weekly line from 20% up to 100% at its reset), or stays at a fixed number; switch each one above, or from a call.${fiveOn ? ' A job let past the line only skips the 5-hour line.' : ''} Every minute the routine puts the latest saved numbers here, from a running job or the hourly mail check, with how old they are; they are not live, and older than 20 minutes the whole box is greyed out. A greyed-out bar is an old number.`,
           ),
         );
         return box;
@@ -1133,8 +1136,10 @@
       }
       /** H172: the usage a job should take (and has used) next to its time, the same words as routine/usagecost.py. */
       const etaPct = (x) => `${Math.round(Number(x) * 10) / 10}%`;
-      const etaCost = (c) => (c ? `about ${etaPct(c.five ?? 0)} of the 5-hour and ${etaPct(c.weekly ?? 0)} of the week` : '');
-      const etaUsed = (c) => (c ? `used ${etaPct(c.five ?? 0)} of the 5-hour and ${etaPct(c.weekly ?? 0)} of the week` : '');
+      // F107: on a plan with no 5-hour limit, only the week.
+      const fivePart = (c, then = ' and ') => (fiveOn ? `${etaPct(c.five ?? 0)} of the 5-hour${then}` : '');
+      const etaCost = (c) => (c ? `about ${fivePart(c)}${etaPct(c.weekly ?? 0)} of the week` : '');
+      const etaUsed = (c) => (c ? `used ${fivePart(c)}${etaPct(c.weekly ?? 0)} of the week` : '');
       const etaAt = (t) => `${new Date(t * 1000).toDateString() === new Date().toDateString() ? '' : `${new Date(t * 1000).toLocaleDateString('en-GB', { weekday: 'short' })} `}${etaTime(t)}`;
       const USAGE_START = 'when the usage leaves room for it';
       /** F100: why nothing starts: paused, or the routine is off. */
@@ -1151,7 +1156,7 @@
             ? `About ${etaDur(e.est)} left (held after ${etaDur(e.held.so_far)} of ${etaDur(e.held.of)}, counted on what's left of it${e.held.floor?.length ? ', at least what a picked-up turn costs' : ''})`
             : `About ${etaDur(e.est)}`;
         if (e.latest && !e.over) s += ` to ${etaDur(e.latest)} at the latest`;  // F66: a range, likely and at the latest
-        if (e.cost) s += ` · ${etaCost(e.cost)}${e.cost_latest ? ` (${etaPct(e.cost_latest.five ?? 0)} and ${etaPct(e.cost_latest.weekly ?? 0)} at the latest)` : ''}${e.used ? ` (${etaUsed(e.used)} so far)` : ''}`;
+        if (e.cost) s += ` · ${etaCost(e.cost)}${e.cost_latest ? ` (${fiveOn ? `${etaPct(e.cost_latest.five ?? 0)} and ` : ''}${etaPct(e.cost_latest.weekly ?? 0)} at the latest)` : ''}${e.used ? ` (${etaUsed(e.used)} so far)` : ''}`;
         if (e.start) s += ` · starts around ${etaAt(e.start)} ${USAGE_START}`;
         if (e.never) s += ' · it doesn\'t fit under the usage lines as they\'re set (a fixed line), so no time';
         else if (e.eta) s += ` · done around ${etaAt(e.eta)}${e.eta_latest && e.eta_latest > e.eta + 30 ? `, at the latest ${etaAt(e.eta_latest)}` : ''}`;
@@ -1207,7 +1212,7 @@
       const SPRINT_TOTALS = [['not_ready', 'Not ready'], ['ready', 'Ready, not planned yet'], ['planned', 'Planned'], ['total', 'Total']];
       function sprintTotalWords(t) {
         if (!t?.count) return 'nothing';
-        return `${t.count} ${t.count === 1 ? 'item' : 'items'}, about ${etaDur(t.minutes)}, ${etaPct(t.five)} of the 5-hour, ${etaPct(t.weekly)} of the week`;
+        return `${t.count} ${t.count === 1 ? 'item' : 'items'}, about ${etaDur(t.minutes)}, ${fivePart(t, ', ')}${etaPct(t.weekly)} of the week`;
       }
       function sprintTotals(T, plan) {
         // F107: which plan the percents are on, so an estimate is never read against the wrong one.
@@ -1437,13 +1442,13 @@
               if (r.night && !seen.has(r.night)) {
                 seen.add(r.night);
                 const n = nights[r.night];
-                laid.append(el('p', 'sprint-night', `${sprintNightName(r.night)}: ${n.rows.length} ${n.rows.length === 1 ? 'row' : 'rows'}, about ${etaDur(n.minutes)}, done around ${sprintClock(n.eta)} · ${etaPct(n.five)} of the 5-hour, ${etaPct(n.weekly)} of the week`));
+                laid.append(el('p', 'sprint-night', `${sprintNightName(r.night)}: ${n.rows.length} ${n.rows.length === 1 ? 'row' : 'rows'}, about ${etaDur(n.minutes)}, done around ${sprintClock(n.eta)} · ${fivePart(n, ', ')}${etaPct(n.weekly)} of the week`));
               }
               const c = r.cost || {};
               const when = r.start ? `starts around ${sprintClock(r.start)}${r.usage ? ' (it waits for the usage)' : ''}, done around ${sprintClock(r.eta)}` : (r.why || 'no time');
               const lg = moscowOf(r.moscow);
               const notReady = r.ready !== 'ready' ? ` · ${r.not_ready || `${r.label} isn't ready`}, so Plan the sprint leaves it out` : '';
-              const ld = el('div', `sprint-laid mo${r.past ? ' past' : ''}`, `${lg.key !== 'none' ? `${lg.name} · ` : ''}${r.bug ? 'bug · ' : ''}${r.rank ? `${r.rank}. ` : ''}${r.label} ${r.title} · about ${etaDur(r.est)} · ${etaPct(c.five ?? 0)} of the 5-hour, ${etaPct(c.weekly ?? 0)} of the week · ${when}${notReady}`);
+              const ld = el('div', `sprint-laid mo${r.past ? ' past' : ''}`, `${lg.key !== 'none' ? `${lg.name} · ` : ''}${r.bug ? 'bug · ' : ''}${r.rank ? `${r.rank}. ` : ''}${r.label} ${r.title} · about ${etaDur(r.est)} · ${fivePart(c, ', ')}${etaPct(c.weekly ?? 0)} of the week · ${when}${notReady}`);
               ld.style.setProperty('--mo', `var(--mo-${lg.key})`);
               laid.append(ld);
             }
@@ -1518,7 +1523,7 @@
         const t = E?.total;
         if (!t) return '';
         // H174: the time and the 5-hour usage everything still takes, then when it's all done; what it counts is under the heading.
-        const use = 'five' in t ? ` and ${etaPct(t.five)} of the 5-hour` : '';
+        const use = 'five' in t && fiveOn ? ` and ${etaPct(t.five)} of the 5-hour` : 'weekly' in t && !fiveOn ? ` and ${etaPct(t.weekly)} of the week` : '';
         if (t.eta) return `about ${etaDur(t.minutes)}${use}, all done around ${etaTime(t.eta)}${t.eta_latest && t.eta_latest > t.eta + 30 ? `, at the latest ${etaAt(t.eta_latest)}` : ''} (computed estimate)`;
         return `about ${etaDur(t.minutes)}${use} (computed estimate; ${t.waits === 'usage' ? 'waits on the usage' : offWords(E)})`;
       }
@@ -2165,6 +2170,7 @@
       function redraw() { if (lastDraw) { last = ''; tick(); } }
 
       function draw(s, readAt, usage, routines) {
+        fiveOn = hasFive(usage);  // F107: before anything is drawn
         lastDraw = true;
         roadmapNow = s;
         app.replaceChildren();

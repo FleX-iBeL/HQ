@@ -870,7 +870,9 @@ def main(argv):
             if j["state"].startswith("held"):
                 j["state"] = "ready"
             write(text, jobs, on)
-            print(f"Job {j['n']} may go past the 5-hour usage line; the weekly line still counts.")
+            import usagecost
+            print(f"Job {j['n']} may go past the 5-hour usage line; the weekly line still counts." if usagecost.five_on()
+                  else f"This plan has no 5-hour line, so that changes nothing for job {j['n']}; the weekly line counts.")
             return
         if cmd == "guess":
             # H168: the team estimates itself. The job writes down its own guess at its start; at done it's kept next to

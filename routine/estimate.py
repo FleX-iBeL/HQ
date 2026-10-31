@@ -2094,6 +2094,16 @@ def _from_hhmm(hhmm, now):
 
 # ---------- the plan ----------
 
+def _five_on():
+    import usagecost
+    return usagecost.five_on()
+
+
+def U_cost_words(c):
+    import usagecost
+    return usagecost.cost_words(c)
+
+
 def off_words():
     """F100: why nothing starts: paused, or the routine is off."""
     import jobs as q
@@ -2300,6 +2310,7 @@ def plan(now=None):
         out["usage_plan"] = U.plan_status()
     import jobs as q
     out["paused"] = q.is_paused()  # F100
+    out["five_on"] = _five_on()  # F107
     return out
 
 
@@ -2341,7 +2352,7 @@ def total_counts(t, with_cost=True):
         bits.append(f"{dur(t['gaps'])} between jobs")
     s = "The total counts " + (", ".join(bits[:-1]) + " and " + bits[-1] if len(bits) > 1 else bits[0]) + f": {dur(t['minutes'])} in all"
     if with_cost:
-        s += f", using about {_pct(t.get('five', 0))} of the 5-hour and {_pct(t.get('weekly', 0))} of the week"
+        s += ", using " + U_cost_words(t)
         if t.get("running"):
             s += " (of the running job, only what's still to come)"
     s += "."
@@ -2519,7 +2530,8 @@ def words(n, p):
         s = f"about {dur(e['est'])}{g}"  # H190: a waiting job's guesses too
     s += _cost_words(e)
     if e.get("held") and e.get("cost_latest"):  # F78: the figure the start check needs room for
-        s += f", it needs room for {e['cost_latest'].get('five', 0):g}% of the 5-hour (what's left at the latest)"
+        s += (f", it needs room for {e['cost_latest'].get('five', 0):g}% of the 5-hour (what's left at the latest)" if _five_on()
+              else f", it needs room for {e['cost_latest'].get('weekly', 0):g}% of the week (what's left at the latest)")
     if e.get("start"):  # H172: when the usage should leave room for it
         s += f", starts around {_day(e['start'], p['now'])}{hhmm(e['start'])} {USAGE_START}"
     if e.get("never"):

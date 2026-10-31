@@ -36,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hqpaths  # noqa: E402
 
 ROADMAP = hqpaths.ROADMAP
-USAGE = os.path.join(hqpaths.HQ, ".status", "usage.json")
+USAGE = os.environ.get("HQ_USAGE") or os.path.join(hqpaths.HQ, ".status", "usage.json")
 LIMIT = re.compile(r"\*\*Usage limit:\s*(\d{1,3})\s*%")
 FLAT = re.compile(r"\*\*Weekly limit:\s*(\d{1,3})\s*%")
 WEEKLY_FIXED = 90  # a weekly line fixed with no number of its own (Claude's choice), as in usage.mjs
@@ -131,7 +131,10 @@ def describe() -> str:
     _, s = read()
     if s is None:
         return "The roadmap names no usage limit, so there are no stop lines."
-    return " ".join(describe_one(k, s[k]) for k in LINES)
+    import usagecost
+    if usagecost.five_on():
+        return " ".join(describe_one(k, s[k]) for k in LINES)
+    return "This plan has no 5-hour limit, so only the week counts. " + " ".join(describe_one(k, s[k]) for k in LINES if k != "five")
 
 
 def line_text(key: str, moving: bool, number: int) -> str:

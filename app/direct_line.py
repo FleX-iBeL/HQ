@@ -718,7 +718,8 @@ def _text_rules() -> str:
             .replace("{apptnotes}", _config.APPT_NOTES_RULE).replace("{todo}", _config.TODO_RULE).replace("{games}", _config.GAMES_RULE).replace("{travel}", _config.TRAVEL_RULE)
             .replace("{onewriter}", _config.ONE_WRITER_RULE)
             .replace("{team}", _config.TEAM_RULE).replace("{extensions}", _extensions_rule())
-            + (("\n" + _config.cycles_rule() + "\n") if _config.cycles_rule() else ""))  # H298: only while it's on
+            + (("\n" + _config.cycles_rule() + "\n") if _config.cycles_rule() else "")  # H298: only while it's on
+            + (("\n" + _config.plan_rule() + "\n") if _config.plan_rule() else ""))  # F107: no 5-hour limit on this plan
 
 
 def _extensions_rule() -> str:

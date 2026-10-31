@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseRoadmap } from './parse.mjs';
 import { ROADMAP } from './paths.mjs';
-import { reserveOf, staleWords, stopLine, usageReading, usageVerdict } from './usage.mjs';
+import { lineKey, reserveOf, staleWords, stopLine, usageReading, usageVerdict } from './usage.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const flag = process.argv.indexOf('--by');
@@ -54,7 +54,9 @@ function fromStatusline() {
         ? { label, percentUsed: Math.round(w.used_percentage), resetsAt: w.resets_at ? new Date(w.resets_at * 1000).toISOString() : null }
         : null;
     const windows = [win('5-hour limit', r.five_hour), win('Weekly · all models', r.seven_day)].filter(Boolean);
-    return windows.length ? { plan: { status: 'ok', plan: 'Max', windows } } : null;
+    let name = 'Max';  // a status line doesn't say the plan: the last reading's name stays
+    try { name = JSON.parse(readFileSync(USAGE_FILE, 'utf8')).plan || name; } catch {}
+    return windows.length ? { plan: { status: 'ok', plan: name, windows } } : null;
   } catch {
     return null;
   }
@@ -125,16 +127,19 @@ const reading = usageReading(tool, {
 if (process.argv.includes('--statusline') || !reading.readable) {
   let prev = null;
   try {
-    prev = JSON.parse(readFileSync(join(root, '.status/usage.json'), 'utf8'));
+    prev = JSON.parse(readFileSync(USAGE_FILE, 'utf8'));
   } catch {}
   const have = new Set(reading.limits.map((l) => l.label));
   for (const l of Array.isArray(prev?.limits) ? prev.limits : []) {
     if (have.has(l.label)) continue;
+    // F107: a reading that works and has no 5-hour window is a plan without that limit, not a number it couldn't read. On Max 5x
+    // that happened once in 3,938 readings; a next reading with one puts it right back.
+    if (reading.readable && lineKey(l.label) === 'five') continue;
     reading.limits.push({ ...l, kept: true, keptAt: l.keptAt ?? prev.checkedAt, keptBy: l.keptBy ?? prev.by });
   }
 }
 mkdirSync(join(root, '.status'), { recursive: true });
-writeFileSync(join(root, '.status/usage.json'), `${JSON.stringify(reading, null, 2)}\n`);
+writeFileSync(USAGE_FILE, `${JSON.stringify(reading, null, 2)}\n`);
 
 const { usageLines: lines } = parseRoadmap(readFileSync(ROADMAP, 'utf8'));
 const verdict = usageVerdict(reading, lines, new Date(), { weeklyOnly });

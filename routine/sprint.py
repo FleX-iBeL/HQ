@@ -969,7 +969,7 @@ def plan():
     counts = {MOSCOW_NAMES[g]: sum(1 for x in out if x.get("moscow") == g) for g in GROUPS}
     return {"rows": out, "ranked": len(ranked), "tagged": len(tags), "groups": counts,
             "ready": sum(1 for v in readies.values() if v == "ready"), "totals": totals(out),
-            "usage_plan": U.plan_status()}  # F107: which plan the percents are on
+            "usage_plan": U.plan_status(), "five_on": U.five_on()}  # F107: which plan the percents are on, and whether a 5-hour limit is there
 
 
 TOTAL_PARTS = (("not_ready", "Not ready"), ("ready", "Ready, not planned yet"), ("planned", "Planned"), ("total", "Total"))
@@ -998,11 +998,18 @@ def totals(rows):
     return t
 
 
+def use_words(c):
+    """F107: "5-hour 40%, weekly 9%", or only the week on a plan with no 5-hour limit."""
+    import usagecost as U
+    week = f"weekly {E._pct(c.get('weekly') or 0)}"
+    return f"5-hour {E._pct(c.get('five') or 0)}, {week}" if U.five_on() else week
+
+
 def total_words(t):
     """H275: one total in words: "6 rows, about 2 h, 5-hour 40%, weekly 9%"."""
     s = f"{t['count']} {'row' if t['count'] == 1 else 'rows'}"
     if t["count"]:
-        s += f", about {E.dur(t['minutes'])}, 5-hour {E._pct(t['five'])}, weekly {E._pct(t['weekly'])}"
+        s += f", about {E.dur(t['minutes'])}, {use_words(t)}"
     return s
 
 
@@ -1015,7 +1022,7 @@ def row_words(x):
         s += " (a first look is on its way)"
     c = x.get("cost")
     if c:
-        s += f", 5-hour {E._pct(c.get('five') or 0)}, weekly {E._pct(c.get('weekly') or 0)}"
+        s += f", {use_words(c)}"
     return s
 
 
@@ -1252,7 +1259,9 @@ def _line_why(r, proj):
         wk = None
     if r.get("start") and wk and r["start"] >= wk:
         return f"the weekly room runs out: from here the work waits for the weekly reset ({_when(wk)})"
-    return "the usage room runs out: from here the work waits for the 5-hour or weekly stop line, so it moves on"
+    import usagecost as U
+    which = "5-hour or weekly" if U.five_on() else "weekly"
+    return f"the usage room runs out: from here the work waits for the {which} stop line, so it moves on"
 
 
 def _when(t):
@@ -1282,13 +1291,13 @@ def lay_words(L):
             seen.add(r["night"])
             n = nights[r["night"]]
             out.append(f"{_night_name(r['night'], L['now']).capitalize()} ({r['night']}): {len(n['rows'])} {'row' if len(n['rows']) == 1 else 'rows'}, about "
-                       f"{E.dur(n['minutes'])}, done around {E.hhmm(n['eta'])}; 5-hour {E._pct(n['five'])}, weekly {E._pct(n['weekly'])}"
+                       f"{E.dur(n['minutes'])}, done around {E.hhmm(n['eta'])}; {use_words(n)}"
                        + (f"; that's the most a night, {L.get('most')} items, so the rest goes on the next" if n.get("full") else ""))
         c = r.get("cost") or {}
         where = (f"starts around {E.hhmm(r['start'])}{' (it waits for the usage)' if r.get('usage') else ''}, done around {E.hhmm(r['eta'])}"
                  if r.get("start") else r.get("why", "no time"))
         out.append(f"  {r['rank'] or '-'}. {r['label']} {q.one_line(r['title'])[:80]}: about {E.dur(r['est'])}, "
-                   f"5-hour {E._pct(c.get('five') or 0)}, weekly {E._pct(c.get('weekly') or 0)}; {where}"
+                   f"{use_words(c)}; {where}"
                    + (f" ({r['not_ready']}, so Plan the sprint leaves it out)" if r.get("ready") != "ready" else ""))
     if not L["line"]:
         out.append("Everything ticked fits in the room (estimate).")
