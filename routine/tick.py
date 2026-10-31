@@ -538,6 +538,8 @@ MAIL_ALLOW = ",".join([
     "Read", "Grep", "Glob", "Edit(/inbox.md)", "Bash(sh .claude/mail-commit.sh)",
     # H125: a mail that fits one of Donna's open mail watches is kept for her to text (only that command).
     f"Bash(python3 {os.path.join(JV, 'routine', 'pings.py')} match:*)",
+    # F109: which of the mails the date searches found can be new (only reads; only that command).
+    f"Bash(python3 {os.path.join(JV, 'routine', 'mailguard.py')} newer:*)",
     "mcp__claude_ai_Gmail__search_threads", "mcp__claude_ai_Gmail__get_thread", "mcp__claude_ai_Gmail__get_message",
 ])
 MAIL_DENY = ",".join("mcp__claude_ai_Gmail__" + t for t in (
@@ -857,7 +859,8 @@ def start_mail():
     open(instructions, "w").write(open(os.path.join(HERE, "mail-check.md")).read().replace("{WORKSPACE}", FOLDER)
                                   .replace("{WATCHES}", mail_watches()).replace("{PINGS}", os.path.join(JV, "routine", "pings.py"))
                                   .replace("{SORTING}", mail_sort_text()).replace("{MAILSORT}", os.path.join(JV, "routine", "mailsort.py"))
-                                  .replace("{EXTENSIONS}", mail_ext_text()))
+                                  .replace("{EXTENSIONS}", mail_ext_text()).replace("{SEARCHES}", mailguard.search_text())
+                                  .replace("{MAILGUARD}", os.path.join(JV, "routine", "mailguard.py")))
     open(cmd, "w").write(mail_script_tmux(instructions, run_file) if LINUX_WINDOWS else f"""#!/bin/zsh
 # The hourly mail check, started by the HQ routine (phase L, L8). Hidden: opened in the
 # background, minimized to the Dock, and the window closes itself when it's done (L7).
@@ -1268,9 +1271,10 @@ def on_backup():
     text = f"Runs on the main one, {peer}; this HQ is the backup"
     for key in ("mail", "jobs", "schedule"):
         routines.beat(key, state="ok", text=text, last=None, next=None, every=60, why="", detail=[], run="")
-    for key in ("maillist", "saving", "cycles"):  # F102: these run on the main only; never overdue here
+    for key in ("maillist", "mailmarker", "saving", "cycles"):  # F102: these run on the main only; never overdue here
         if key in routines.read():
             routines.beat(key, state="ok", text=text, last=None, next=None, every=60, why="")
+    incidents.up("mailmarker")  # F109: the main keeps that watch
     clear(GATE_NOTE, TRUST_NOTE)
 
 
