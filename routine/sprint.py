@@ -473,6 +473,7 @@ def _bare(t):
 HIS_CALLS = 120  # the newest transcripts looked through for his own words; Claude's choice, about a month of calls
 HIS_THREADS = ("direct-line", "coaching-line", "team-line")
 HIS_QUOTE_WORDS = 3  # a quote under three words proves nothing ("yes", "ok go")
+MARKS = re.compile(r"(?:\s*\*\([^)]*\)\*)+\s*$")  # a transcript's *(typed)* and *(cut in)*: HQ's, not his words
 
 
 def his_lines(ws=None):
@@ -495,7 +496,7 @@ def his_lines(ws=None):
             for line in open(os.path.join(calls, nm), encoding="utf8", errors="replace"):
                 m = mark.match(line)
                 if m:
-                    out.append((f"HQ/calls/{nm}", _bare(m.group(1))))
+                    out.append((f"HQ/calls/{nm}", _bare(MARKS.sub("", m.group(1)))))
         except OSError:
             pass
     for line_name in HIS_THREADS:

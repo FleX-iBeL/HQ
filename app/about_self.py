@@ -37,7 +37,10 @@ biking to the clinic at 10:40"), and `add` had no filter at all while a call or 
 through it. A fact is refused when it's about him, when it's the shape of planning his days, or when it names his world:
 his name, the names and private words in me.md, a name in his calendar or to-do titles, or a day or a time together with
 something on his calendar. `own_life` also no longer counts a sentence that plans a day as hers. `check` shows what's
-already on a list; the lines themselves are his to take off.
+already on a list; the lines themselves are his to take off. Fix round of F98 (31 October 2026, QA found 21 of his 48
+real lines of 29 October kept through `add`, which has no transcript to hold them against): `refused` also takes his
+own words (`his_words`, his lines as sprint.his_lines reads them, a turned "I" or "she" included) and whatever doesn't
+read as a line about her (`not_about_her`: a question, a reply, an order).
 """
 from __future__ import annotations
 
@@ -109,9 +112,10 @@ def _write(folder: Path | None, agent: dict, have: list[str]) -> None:
 
 def add(folder: Path | None, agent: dict, fact: str) -> bool:
     """Keep FACT in her list. False when it was empty, already there, or his life (F98: `refused`, on every way in)."""
-    fact = " ".join(str(fact).split())[:LONGEST].strip()
+    fact = " ".join(str(fact).split())
     if not fact or refused(folder, fact):
         return False
+    fact = fact[:LONGEST].strip()
     have = facts(folder, agent["id"])
     if any(same(fact, f) for f in have):
         return False
@@ -166,6 +170,17 @@ _WHEN = re.compile(rf"\b{_DAY}\b|\b{_CLOCK}\b|\b(?:calendar|agenda|appointments?
 _PLAN_VERB = re.compile(r"\b(?:clear(?:s|ed|ing)?|block(?:s|ed|ing)?|book(?:s|ed|ing)?|mov(?:e|es|ed|ing)|"
                         r"re-?schedul(?:e|es|ed|ing)|schedul(?:e|es|ed|ing)|plann?(?:s|ed|ing)?|put|puts|cancel(?:s|led|ling)?|"
                         r"remind(?:s|ed|ing)?|free(?:s|d)?|sort(?:s|ed|ing)?)\b")
+
+
+# Fix round of F98: what doesn't read as a line about her, her own "I" included: a question, a reply to someone, an order.
+_REPLY = re.compile(r"^(?:(?:yes|yeah|yep|nope|ok|okay|oke|thanks|thank you|wtf|oh|hey|hi|hello|or maybe)\b|"
+                    r"(?:no|perfect|exactly|great|good|sure|right|alright|cool|nice|wow|what)(?:[,.!?:]|$))")
+_ORDER = re.compile(r"^(?:let'?s|lets|can you|could you|would you|will you|should we|do we|merge|add|build|fix|check|"
+                    r"run|push|send|remove|update|change|make|give|tell|show|put|move)\b")
+_MARKS = re.compile(r"(?:\s*\*\([^)]*\)\*)+\s*$")  # a transcript's *(typed)* and *(cut in)*
+_KEPT_DAY = re.compile(r"\s*\(\d{1,2} [A-Z][a-z]{2}\)$")  # the day the harvest keeps a fact with
+HIS_RUN = 3  # this many words in a row, in his order, are his words; fewer only when they're the whole of a line of his
+_CLIPPED = {"m", "s", "ve", "ll", "d", "re"}  # what's left of i'm, she's, i've once the punctuation is gone
 
 
 def _sentences(said: str) -> list[str]:
@@ -223,10 +238,38 @@ def _life_names(folder: Path) -> tuple[set[str], set[str]]:
     return names, words
 
 
+def _run(text: str) -> str:
+    """TEXT as his words are compared: the content words in their order, so a turned "I", "my" or "she" stays the same."""
+    words = re.findall(r"\w+", text.lower().replace("’", "'"))
+    return " ".join(w.rstrip("s") for w in words if w not in _SMALL and w not in _CLIPPED)
+
+
+def his_words(folder: Path, fact: str) -> bool:
+    """Fix round of F98: FACT is a line of his, or HIS_RUN words or more of one in his order. The lines are the ones a
+    say-so is held against (sprint.his_lines), read fresh, nothing of them kept."""
+    run = _run(_KEPT_DAY.sub("", _MARKS.sub("", fact)))
+    if not run:
+        return False
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+    import sprint
+    lines = (_run(line) for _, line in sprint.his_lines(str(folder)))
+    if len(run.split()) < HIS_RUN:
+        return run in lines
+    return any(f" {run} " in f" {line} " for line in lines)
+
+
+def not_about_her(fact: str) -> bool:
+    """Fix round of F98: a question, a reply or an order isn't a line about her, whoever typed it."""
+    low = _KEPT_DAY.sub("", _MARKS.sub("", fact)).lower().strip()
+    return low.endswith("?") or bool(_REPLY.search(low) or _ORDER.search(low))
+
+
 def refused(folder: Path | None, fact: str) -> str:
     """F98: why FACT can't be kept as hers, or "". The one filter on every way in."""
     folder = folder or _folder()
     low = fact.lower()
+    if not_about_her(fact):
+        return "it's a question, a reply or an order, not something about her"
     if _HIM_IN_FACT.search(low):
         return "it's about him, not her"
     if plans_a_day(fact):
@@ -237,6 +280,8 @@ def refused(folder: Path | None, fact: str) -> str:
             return "it names someone or something from his own life"
     if (re.search(rf"\b{_DAY}\b|\b{_CLOCK}\b", low)) and (_words(fact) & calendar):
         return "it names a day or a time together with something on his calendar"
+    if his_words(folder, fact):
+        return "it's his own words, not hers"
     return ""
 
 

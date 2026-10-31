@@ -8,7 +8,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 - The team and the agents' own runs start without your private files. What they need they open one by one. Nothing is sent, replied to or forwarded from a job, whatever the connector. A web address opens by itself only when it's a plain page; one that carries extra data asks you first.
 
-- What an agent says about her own life no longer picks up yours. Your calendar, your to-do items and the names around you are never kept as hers, whichever way they come in.
+- What an agent says about her own life no longer picks up yours. Your calendar, your to-do items, your own sentences and the names around you are never kept as hers, whichever way they come in.
 
 - A flag on a planning item comes off only with words you really said or typed, and the same goes for giving the team an item that isn't ready. Words an agent makes up are refused.
 

@@ -14218,7 +14218,9 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         """F98, no Claude: his life never becomes an agent's. On a throwaway workspace with a made-up calendar, to-do
         list and private words, a transcript full of his sentences in the shapes the agents really narrated them, and a
         look that hands them all back as hers: nothing is kept. add refuses the same lines, her own life still passes,
-        and `check` names what's already on a list without changing it."""
+        and `check` names what's already on a list without changing it. Fix round: his own typed lines (a question, a
+        reply, an order, a plain statement, on a call, in a text or a quick note, a turned "I" too) go through neither way,
+        and a question, a reply or an order is refused even when he never said it."""
         import subprocess as _sp
         ws, env = self._h298_ws("f98")
         (ws / "HQ").mkdir(exist_ok=True)
@@ -14236,10 +14238,25 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
             "- 10:02 **HQ:** I have lunch at home on Tuesdays now.\n"
             "- 10:02 **HQ:** I blocked my Friday morning for the notary.\n"
             "- 10:03 **HQ:** I moved my appointment to 14:00 tomorrow.\n"
-            "- 10:03 **HQ:** I keep a small cactus on my desk, it hasn't died yet.\n")
+            "- 10:03 **HQ:** I keep a small cactus on my desk, it hasn't died yet.\n"
+            "- 10:04 **Me:** Yes, lets meet at 9 and get the boxes ready *(typed)*\n"
+            "- 10:04 **Me:** 8:15 in the evening? *(typed)*\n"
+            "- 10:05 **Me:** Why would she look at 8:15? *(typed)*\n"
+            "- 10:05 **Me:** Perfect, thanks *(typed)*\n"
+            "- 10:06 **Me:** Copy it and file it under the winter folder *(typed)*\n"
+            "- 10:06 **Me:** Is that what the crew painted last week? *(typed)*\n"
+            "- 10:07 **Me:** yes exactly, i want this one painted tonight *(typed)* *(cut in)*\n"
+            "- 10:07 **Me:** The printer upstairs keeps jamming on thick paper. I always forget my umbrella at the station\n")
+        (ws / "HQ/direct-line").mkdir(exist_ok=True)
+        (ws / "HQ/direct-line/thread.jsonl").write_text(json.dumps({"from": "me", "text": "the kettle in the hallway leaks again"}) + "\n")
+        (ws / "HQ/notes.md").write_text("# Notes\n\n- the garage door squeaks when it rains\n")
+        typed = ["Yes, lets meet at 9 and get the boxes ready", "8:15 in the evening?", "Why would she look at 8:15?", "Perfect, thanks",
+                 "Copy it and file it under the winter folder", "Is that what the crew painted last week?", "yes exactly, i want this one painted tonight",
+                 "Perfect, thanks *(typed)*", "The printer upstairs keeps jamming on thick paper", "she always forgets her umbrella at the station",
+                 "the kettle in the hallway leaks again", "the garage door squeaks when it rains"]
         lines = ["has cleared her Tuesday and bikes to Marlies at 10:40", "Has cleared her Tuesday office blocks and plans a bike ride to Marlies",
                  "has lunch at home on Tuesdays", "blocked her Friday morning for the notary", "moved her appointment to 14:00 tomorrow",
-                 "calls the Vandenberg notary", "grew up near Zeewolde"]
+                 "calls the Vandenberg notary", "grew up near Zeewolde"] + typed
         fake = json.dumps({"new": [{"agent": "Donna", "fact": f} for f in lines + ["keeps a small cactus on her desk"]]})
         r = _sp.run([sys.executable, str(APP / "about_self.py"), "harvest-call", str(call)], capture_output=True, text=True,
                     env={**env, "HQ_ABOUT_FAKE": fake}, cwd=str(ROOT))
@@ -14253,16 +14270,27 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
             r = add(line)
             need(r.returncode == 1 and "refused" in r.stderr, f"add took {line!r}: {r.stdout} {r.stderr}")
         need("Marlies" not in lst.read_text(), "add wrote a refused line")
+        r = add("she always forgets her umbrella at the station")
+        need("his own words" in r.stderr, f"a turned line of his isn't refused as his: {r.stderr}")
+        for line in ["Can you send that over?", "Should we wait until the morning?", "Ok it should be painted soon",
+                     "okay, lets chat, what do we need to talk about", "Merge it into the big one", "Exactly, that one"]:
+            r = add(line)
+            need(r.returncode == 1 and "not something about her" in r.stderr, f"add took {line!r}, which he never said: {r.stdout} {r.stderr}")
+        need(not any(w in lst.read_text() for w in ("printer", "umbrella", "kettle", "garage", "Perfect", "painted")), "add wrote a line of his")
         r = add("thinks the coffee on the second floor is too strong")
         need(r.returncode == 0 and "kept" in r.stdout, f"her own life is refused: {r.stdout} {r.stderr}")
         r = add("goes running on Sundays")
         need(r.returncode == 0, f"a day of her own is refused: {r.stderr}")
+        for line in ["I have a chair by the window that squeaks", "No longer takes sugar in her tea", "Good at crosswords, bad at small talk",
+                     "What she misses most is the sea", "Prefers thick paper for her letters", "takes the bus to the station and reads"]:
+            r = add(line)
+            need(r.returncode == 0 and "kept" in r.stdout, f"her own life is refused: {line!r}: {r.stdout} {r.stderr}")
         lst.write_text(lst.read_text() + "- has lunch at home on Tuesdays (29 Oct)\n")
         before = lst.read_text()
         r = _sp.run([sys.executable, str(APP / "about_self.py"), "check"], capture_output=True, text=True, env=env, cwd=str(ROOT))
         need(r.returncode == 0 and "lunch at home" in r.stdout and "cactus" not in r.stdout and lst.read_text() == before,
              f"check: {r.stdout} {r.stderr}")
-        return "his sentences and their real shapes keep nothing, by the harvest and by add; her own life still passes; check names old lines"
+        return "his sentences, his typed lines and their real shapes keep nothing, by the harvest and by add; her own life still passes; check names old lines"
 
     async def flow201(self) -> str:
         """F99, no Claude: the doors, one sample per guarded path through the real policy: the vision, the map, the rules
@@ -24504,7 +24532,7 @@ FLOWS = {
     206: ("F101: QA's pass stands on a green run and a named comparison; a piece needs its switch on the hidden list", False, "flow206"),
     205: ("F101: done is a program's: no record, a failing flow, an older commit or an unread note keep a job open; a clean exit isn't done", False, "flow205"),
     204: ("F101: one reader: an escaped pipe and a status phrase mid-sentence reach the reviewer whole; a QA mark and a release line keep the cells", False, "flow204"),
-    200: ("F98: his life never becomes an agent's: the harvest and add refuse his sentences and their real shapes, whatever the look returns; her own life still passes", False, "flow200"),
+    200: ("F98: his life never becomes an agent's: the harvest and add refuse his sentences, his typed lines and their real shapes, whatever the look returns; her own life still passes", False, "flow200"),
     201: ("F99: the doors: his vision, map, rules and CLAUDE.md ask, the shared files are refused whatever the tool, each script way in passes, the web asks on anything but a plain address, the wrap-up writes only the log, the lists and the transcript", False, "flow201"),
     202: ("F99: a job and a cycle start without his folder, with the never-send list, and the guard file really loads", False, "flow202"),
     203: ("F99: a flag and a say-so stand on his own words: made-up words and an agent's words are refused, his are kept with where and when", False, "flow203"),
