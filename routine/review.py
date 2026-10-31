@@ -141,6 +141,9 @@ NINE = ("1. what's asked; 2. what done means, with examples someone can try; 3. 
 THREE = "1. what's wrong; 2. what right looks like; 3. how to check it's fixed"
 
 
+LINE_EVERY = 30 * 86400  # F102: its line isn't overdue in a quiet month: it runs when a row changes
+
+
 def on():
     """Whether reviews may run here: not with HQ_REVIEW=0, and a test copy (HQ_ROADMAP) only with HQ_REVIEW_FAKE."""
     if os.environ.get("HQ_REVIEW", "1") == "0":
@@ -414,6 +417,12 @@ def _attempt(label, now_fn=_clock, extra=None):
     a = ask_reviewer(r) or {"failed": True, "why": "no answer", "cost": None}
     failed = bool(a.get("failed"))
     lost = False
+    try:  # F102: a reviewer that doesn't run turns its line red and opens an incident; the next good run closes it
+        import routines
+        (routines.bad("review", f"The review of {label} didn't run: {a.get('why') or 'no answer'}", every=LINE_EVERY) if failed
+         else routines.good("review", f"Reviewed {label}", every=LINE_EVERY))
+    except Exception:
+        pass
     with q.locked():
         d, rv = _state()
         rs = rv.get("rows") or {}

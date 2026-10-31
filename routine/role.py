@@ -87,13 +87,17 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "set_status": {"set"},  # F101: the status block from a call on the backup
           "agenda": {"changed"},  # F58: the mark that something wrote in the calendar (the main reads it again)
           "direct_line": {"put"},  # F58: a line of a text thread (Donna's, the team line, the coaching line)
+          "notes": {"put", "clear-id", "restore-id"},  # F102: his quick notes, like the text lines
+          "about_self": {"add"},  # F102: what an agent says about herself, written by the main
           "usagecost": {"plan"}}  # F107: the plan in use, written only by the main
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
            "coaching": os.path.join(os.path.dirname(HERE), "app", "coaching.py"),
            "agenda": os.path.join(os.path.dirname(HERE), "app", "agenda.py"),
            "set_status": os.path.join(os.path.dirname(HERE), "status", "set-status.py"),  # F101
-           "direct_line": os.path.join(os.path.dirname(HERE), "app", "direct_line.py")}  # H225, F58; the rest are routine/<script>.py
+           "direct_line": os.path.join(os.path.dirname(HERE), "app", "direct_line.py"),  # H225, F58; the rest are routine/<script>.py
+           "notes": os.path.join(os.path.dirname(HERE), "app", "notes.py"),  # F102
+           "about_self": os.path.join(os.path.dirname(HERE), "app", "about_self.py")}  # F102
 PASS_ENV = ("HQ_PINGS_BY", "HQ_SAYSO")  # what a handed request may carry over to the main (who asked, for her notes)
 
 # H203, in the user's words (call of 17 October 2026, 14:45): "i am even more confused, you give it to the server but
@@ -225,6 +229,16 @@ def is_backup() -> bool:
     return acting() == "backup"
 
 
+def version() -> str:
+    """F102: the version and the commit this computer runs."""
+    try:
+        v = open(os.path.join(hqpaths.HQ, "VERSION")).read().strip()
+    except OSError:
+        v = "?"
+    r = subprocess.run(["git", "-C", hqpaths.HQ, "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
+    return f"{v} {r.stdout.strip()}".strip()
+
+
 def mine() -> dict:
     """What this HQ tells the other one (GET /api/role)."""
     c = config()
@@ -234,6 +248,7 @@ def mine() -> dict:
             "took_over": bool(s.get("took_over")),  # F19: took over (main gone) or just handing over a choice
             "took_over_at": s.get("took_over") or None,  # H139: when, so a main that never left can tell
             "label": hqpaths.short_name(),  # H88: the name of its heartbeat line on the other's status page
+            "version": version(),  # F102: what it runs, for the role line
             # H234: when Tailscale was last off here, so the other one's "answered again" can say why it was gone
             "tailscale_off": _load(os.path.join(hqpaths.SUPPORT, "heartbeat-state.json"), {}).get("ts_last_off")}
 
@@ -663,8 +678,13 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
                 log(f"role: on_main: {e!r}")
     _deliver(s["acting"], p, c, jobs_cmd, log)
     if routines:
-        routines.beat("role", state=_line_state(s, p, lost, chosen), text=line(s, p, me, peer, lost, takeover, chosen),
-                      last=now, next=now + 60, every=60, badge=badge(c, s))
+        words, st_ = line(s, p, me, peer, lost, takeover, chosen), _line_state(s, p, lost, chosen)
+        other = (p or {}).get("version")
+        if other:  # F102: each computer's version on the role line, yellow when they differ
+            words += f" · here {version()}, {peer} {other}"
+            if other != version():
+                st_ = "waiting"
+        routines.beat("role", state=st_, text=words, last=now, next=now + 60, every=60, badge=badge(c, s))
     return {"acting": s["acting"], "handing_back": bool(s.get("handing_back")), "peer": peer, "why": s.get("why")}
 
 
@@ -757,6 +777,22 @@ def forward(script: str, args: list[str], env: dict | None = None) -> int:
     return code
 
 
+REFUSALS = 3  # F102: a kept request the main refuses this many times stops being sent, stays kept, and opens an incident
+HANDOVER_KEY = "handover"
+
+
+def _refused(r, why, left, log):
+    """F102: a hand-over the main refused stays kept; after a few tries an incident says so, and it waits for a person."""
+    r["refused"] = r.get("refused", 0) + 1
+    r["why"] = why
+    left.append(r)
+    if log:
+        log(f"role: the main refused a kept request ({r['refused']} of {REFUSALS}): {r['script']} {' '.join(r['args'])[:80]}: {why}")
+    if r["refused"] >= REFUSALS:
+        import incidents
+        incidents.down(HANDOVER_KEY, f"The main keeps refusing something written here: {r['script']} {' '.join(r['args'])[:60]}: {why}")
+
+
 def _deliver(acting_now, p, c, jobs_cmd, log):
     """Requests kept on the backup: run here once this one is main, or sent to the main once it answers."""
     try:
@@ -767,17 +803,31 @@ def _deliver(acting_now, p, c, jobs_cmd, log):
     for r in lines:
         try:
             if acting_now == "main":
+                if r.get("refused", 0) >= REFUSALS:
+                    left.append(r)  # kept for a person: tried enough, an incident says so
+                    continue
                 code, out, err = _run_here(r["script"], r["args"], r.get("env"))
                 if log:
                     log(f"role: ran a kept request here: {r['script']} {' '.join(r['args'])[:80]} -> {code}")
+                if code:
+                    _refused(r, f"{(out + err).strip()[:160]}", left, log)
                 continue
             if p and p.get("acting") == "main":
+                if r.get("refused", 0) >= REFUSALS:
+                    left.append(r)
+                    continue
                 code, d = _request(c["peer"].rstrip("/") + "/api/forward", r, "forward", timeout=90)
                 if code == 200:
                     if log:
                         said = "" if not isinstance(d, dict) or not d.get("code") else \
                             f" -> {d['code']}: {' '.join(((d.get('out') or '') + (d.get('err') or '')).split())[:120]}"
                         log(f"role: sent a kept request to the main: {r['script']} {' '.join(r['args'])[:80]}{said}")
+                    if isinstance(d, dict) and d.get("code"):  # F102: the main said no: it's kept, never dropped
+                        _refused(r, " ".join(((d.get("out") or "") + (d.get("err") or "")).split())[:160], left, log)
+                    elif isinstance(d, dict):
+                        import incidents
+                        if incidents.is_down(HANDOVER_KEY) and not any(x.get("refused") for x in lines):
+                            incidents.up(HANDOVER_KEY)
                     continue
         except Exception:
             pass

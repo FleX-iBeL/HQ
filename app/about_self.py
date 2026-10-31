@@ -118,6 +118,16 @@ def add(folder: Path | None, agent: dict, fact: str) -> bool:
     if not fact or refused(folder, fact):
         return False
     fact = fact[:LONGEST].strip()
+    if not os.environ.get("HQ_ROLE_HERE"):  # F102: only the main writes it; from the backup it's handed over, like a text line
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+            import role
+            if role.is_backup():
+                _code, _o, _e, how = role.hand("about_self", ["add", agent["id"], fact], timeout=15)
+                if how in ("main", "kept"):
+                    return how == "kept" or _code == 0
+        except Exception:
+            pass
     have = facts(folder, agent["id"])
     if any(same(fact, f) for f in have):
         return False

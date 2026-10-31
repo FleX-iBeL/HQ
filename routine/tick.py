@@ -998,8 +998,8 @@ def call_line():
     routines.beat("call", state=state, text=text, last=now, next=now + 60, every=60)
     # H30: respond, not only report. Nothing listening for 3 minutes in a row (a job's own restart takes
     # seconds): start it the way login does (app/start.sh, which does nothing if it already runs). The page
-    # answering without the phone address: turn the address on again. A server that runs but doesn't
-    # answer is only reported: stopping it could drop a call.
+    # answering without the phone address: turn the address on again. F102: a line that listens but doesn't answer
+    # for 3 minutes is hung, with or without a call on it: that exact process ends, and it starts again.
     if state == "ok":
         incidents.up("call")
         return
@@ -1013,12 +1013,20 @@ def call_line():
                        capture_output=True, timeout=30)
         incidents.fix("call", "Turned the phone address on again")
         log("call line: phone address turned on again")
-    elif not listening(port) and now - inc["down"] >= 180 and quiet:
+    elif not answers and now - inc["down"] >= 180 and quiet:
+        hung = hqpaths.listener(port) if listening(port) else None
+        if hung:
+            try:
+                os.kill(hung, signal.SIGTERM)
+            except OSError as e:
+                log(f"call line: couldn't end {hung}: {e!r}")
+            time.sleep(3)
+            log(f"call line: it listened but didn't answer for 3 minutes; ended pid {hung}")
         out = open(os.path.join(JV, "scratch", "launchagent.log"), "a")
         start_sh = hqpaths.start_script()
         subprocess.Popen(["/bin/zsh" if hqpaths.IS_MAC else "/bin/bash", start_sh], stdout=out, stderr=out,
                          stdin=subprocess.DEVNULL, start_new_session=True)
-        incidents.fix("call", f"Nothing was listening for 3 minutes: started it again (app/{os.path.basename(start_sh)})")
+        incidents.fix("call", f"{'It listened but didn’t answer' if hung else 'Nothing was listening'} for 3 minutes: started it again (app/{os.path.basename(start_sh)})")
         log("call line: started it again")
 
 
@@ -1311,6 +1319,36 @@ def briefing_minute():
         return
     import briefing
     briefing.write()
+    routines.good("briefing", "Written")
+
+
+LOOK_FAILED = "The routine's look failed"
+
+
+def guarded(key, fn, every=60):
+    """F102: a part of the minute: a failure turns its line red and opens an incident, and doesn't stop the next one. A later
+    good look closes what a look opened; a reviewer's own runs keep their own line."""
+    try:
+        r = fn()
+    except Exception as e:
+        log(f"{key}: {e!r}")
+        routines.bad(key, f"{LOOK_FAILED}: {e!r}", every=every)
+        return None
+    open_ = incidents.is_down(key)
+    if open_ and str(open_.get("why", "")).startswith(LOOK_FAILED):
+        routines.good(key, "Looks again", every=every)
+    return r
+
+
+def save_minute():
+    """F102: every workspace file left unsaved for ten minutes committed by the main itself."""
+    import saver
+    try:
+        files = saver.minute(log=log)
+    except Exception as e:
+        routines.bad("saving", f"Saving the workspace failed: {e}", every=300)
+        return
+    routines.good("saving", f"Saved {len(files)} file(s) just now" if files else "Everything older than ten minutes is saved", every=300)
 
 
 def log_move():
@@ -1508,10 +1546,7 @@ def tick():
         log(f"usage: backfill: {e!r}")
     # Fable, 27 October 2026: the briefing an agent starts with (backend switch `briefing`), made every minute from the
     # files, on both computers (each one's calls read its own), no Claude.
-    try:
-        briefing_minute()
-    except Exception as e:
-        log(f"briefing: {e!r}")
+    guarded("briefing", briefing_minute)
     try:  # Fable, 27 October 2026: the planning index (only rewritten when the planning file changed)
         import planning_index
         planning_index.write()
@@ -1521,6 +1556,8 @@ def tick():
         stale_job_here()
         on_backup()
         return
+    if not hqpaths.under_test() or os.environ.get("HQ_SAVE_QUIET"):
+        save_minute()
     try:
         log_move()
     except Exception as e:
@@ -1537,11 +1574,8 @@ def tick():
     except Exception as e:
         log(f"sprint: refresh: {e!r}")
     # F77: a fresh reviewer for every row whose ask is new or changed, once it's been quiet a few minutes (main only).
-    try:
-        import review
-        review.tick(log=log)
-    except Exception as e:
-        log(f"review: {e!r}")
+    import review
+    guarded("review", lambda: review.tick(log=log), every=review.LINE_EVERY)
     try:  # F107: the plan in use: set once, and following what Claude Code reports
         import usagecost
         usagecost.plan_minute(log=log)
@@ -1550,10 +1584,8 @@ def tick():
     handing_back = r.get("handing_back")
     q = json.loads(jobs("next"))
     jobs_line(q)
-    try:  # H298: the agents' cycles: their items follow the settings, finished runs go into the ledgers, the batches
-        cycles.tick(log=log)
-    except Exception as e:
-        log(f"cycles: {e!r}")
+    # H298: the agents' cycles: their items follow the settings, finished runs go into the ledgers, the batches
+    guarded("cycles", lambda: (cycles.tick(log=log), routines.good("cycles", "Looked at the agents' cycles")))
     try:
         schedule_line()
     except Exception as e:

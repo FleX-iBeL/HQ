@@ -25,6 +25,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import config
+import privacy  # F102: a key said or pasted on a call is never written down whole
 
 TZ = ZoneInfo(config.TIMEZONE)
 
@@ -72,7 +73,7 @@ class CallTranscript:
         if self.path is None:
             return
         with open(self.path, "a", encoding="utf8") as f:
-            f.write(text)
+            f.write(privacy.mask_keys(text))
             f.flush()
 
     def _line(self, text: str) -> None:

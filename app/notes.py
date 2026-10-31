@@ -15,6 +15,10 @@ bottom. The page shows Undo for a moment after a Clear; a call can bring any cle
     python3 app/notes.py clear WORDS     clear the one note with these words in it (kept, so it can come back)
     python3 app/notes.py cleared         the cleared notes, newest first, in plain lines
     python3 app/notes.py restore WORDS   bring back the newest cleared note with these words in it
+
+F102 (31 October 2026): only the main writes the notes, like the text lines (F58). His quick note of 30 October never reached
+the server: on the backup a note goes to the main as a hand-over (`put`), kept in notes.here.md next to the notes (which never
+syncs) until the main's list brings it back, so his page shows it at once; the main can't be reached: it goes on by itself.
 """
 import hashlib
 import json
@@ -66,6 +70,50 @@ def _read(notes: Path) -> tuple[list[str], list[str]]:
         return HEAD.rstrip("\n").splitlines(), []
 
 
+def _here(notes: Path) -> Path:
+    return notes.with_name(notes.stem + ".here" + notes.suffix)
+
+
+def _backup() -> bool:
+    if os.environ.get("HQ_ROLE_HERE"):
+        return False
+    try:
+        import role
+        return role.is_backup()
+    except Exception:
+        return False
+
+
+def _hand(*args) -> str:
+    """The backup hands a change to the main; how it went: main, kept, or '' (not done, write it here as before)."""
+    import role
+    try:
+        code, _o, _e, how = role.hand("notes", list(args), timeout=15)
+    except Exception:
+        return ""
+    return how if how == "kept" or (how == "main" and code == 0) else ""
+
+
+def _here_lines(notes: Path) -> list[str]:
+    try:
+        return [l for l in _here(notes).read_text().splitlines() if l.startswith("- ")]
+    except OSError:
+        return []
+
+
+def _keep_here(notes: Path, lines: list[str]) -> None:
+    """On the backup: its own notes the main's list hasn't brought back yet (those it has are dropped)."""
+    have = set(_read(notes)[1])
+    left = [l for l in dict.fromkeys(lines) if l not in have]
+    f = _here(notes)
+    if left:
+        tmp = hqlock.tmp(f)
+        tmp.write_text("\n".join(left) + "\n")
+        os.replace(tmp, f)
+    else:
+        f.unlink(missing_ok=True)
+
+
 def _write(notes: Path, head: list[str], body: list[str]) -> None:
     notes.parent.mkdir(parents=True, exist_ok=True)
     tmp = hqlock.tmp(notes)
@@ -74,8 +122,10 @@ def _write(notes: Path, head: list[str], body: list[str]) -> None:
 
 
 def items(notes: Path | None = None) -> list[dict]:
+    notes = notes or NOTES
     out = []
-    for line in _read(notes or NOTES)[1]:
+    body = _read(notes)[1]
+    for line in body + [l for l in _here_lines(notes) if l not in body]:
         if not line.startswith("- "):
             continue
         out.append(_item(line))
@@ -92,6 +142,10 @@ def add(text: str, notes: Path | None = None) -> dict | None:
         return None
     notes = notes or NOTES
     line = f"- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} · " + text.replace("\n", "<br>")
+    if notes == NOTES and _backup() and _hand("put", line):
+        with _lock:
+            _keep_here(notes, _here_lines(notes) + [line])
+        return _item(line)
     with _lock:
         head, body = _read(notes)
         notes_end = next((i for i, l in enumerate(body) if not l.startswith("- ")), len(body))
@@ -144,8 +198,32 @@ def cleared(notes: Path | None = None) -> list[dict]:
     return out
 
 
+def put(line: str, notes: Path | None = None) -> bool:
+    """F102: the main's way in for a note the backup handed over: the line as it is, in its place by its time, once."""
+    notes = notes or NOTES
+    if not line.startswith("- "):
+        return False
+    with _lock:
+        head, body = _read(notes)
+        if line in body:
+            return False
+        end = next((i for i, l in enumerate(body) if not l.startswith("- ")), len(body))
+        when = _item(line)["when"]
+        later = [i for i in range(end) if when and (_item(body[i])["when"] or "") > when]
+        body.insert(later[0] if later else end, line)
+        _write(notes, head, body)
+    return True
+
+
 def clear(note_id: str, notes: Path | None = None) -> bool:
     notes = notes or NOTES
+    if notes == NOTES and _backup():
+        mine = [l for l in _here_lines(notes) if _id(l) == note_id]
+        if mine:  # not on the main's list yet: it's cleared there the moment it lands
+            with _lock:
+                _keep_here(notes, [l for l in _here_lines(notes) if l not in mine])
+        if _hand("clear-id", note_id):
+            return True
     with _lock:
         head, body = _read(notes)
         for i, line in enumerate(body):
@@ -161,6 +239,8 @@ def clear(note_id: str, notes: Path | None = None) -> bool:
 def restore(note_id: str, notes: Path | None = None) -> dict | None:
     """Brings a cleared note back to the notes, in its place by its time (a note without a time at the end)."""
     notes = notes or NOTES
+    if notes == NOTES and _backup() and _hand("restore-id", note_id):
+        return {"id": note_id}
     with _lock:
         lines = _cleared_lines(notes)
         for k in range(len(lines) - 1, -1, -1):
@@ -201,6 +281,13 @@ def _cli(args: list[str]) -> int:
         print(json.dumps(read(), ensure_ascii=False, indent=1))
         return 0
     what, words = args[0], " ".join(args[1:])
+    if what == "put" and words:  # F102: the main writes a note the backup handed over (role.WRITES)
+        print("In the notes." if put(words) else "Already there.")
+        return 0
+    if what in ("clear-id", "restore-id") and words:
+        done = clear(words) if what == "clear-id" else restore(words)
+        print("Done." if done else "It isn't here.")
+        return 0 if done else 1
     if what == "add":
         got = add(words)
         print(f"In the notes: {got['text']}" if got else "Nothing to add.")

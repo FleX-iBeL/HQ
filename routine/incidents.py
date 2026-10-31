@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
-FILE = os.path.join(JV, ".status", "incidents.json")
+FILE = os.environ.get("HQ_INCIDENTS_FILE") or os.path.join(JV, ".status", "incidents.json")
 import hqpaths  # noqa: E402  H56.1: HQ's own memory, a folder that fits each computer
 EVENTS = os.path.join(hqpaths.SUPPORT, "events.jsonl")
 KEEP = 100

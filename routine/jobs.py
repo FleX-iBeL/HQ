@@ -1075,6 +1075,8 @@ def main(argv):
                     qa_job = qa.on_done(jobs, j, text, kind)
                 except Exception as e:
                     print(f"(couldn't queue its QA: {e!r})", file=sys.stderr)
+                    import routines
+                    routines.bad("qa", f"QA couldn't be queued for job {j['n']}: {e!r}", every=30 * 86400)  # F102
             write(text, jobs, on)
             print(show(j))
             if qa_job:

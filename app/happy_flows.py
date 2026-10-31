@@ -14723,7 +14723,7 @@ print("OK")
         env.update({"HQ_USAGE": str(d / "usage.json"), "HQ_USAGE_LOG": str(d / "usage.log"), "HQ_USAGE_PLAN": str(d / "plan.json"),
                     "HQ_ESTIMATES": str(d / "est"), "HQ_WALL_HOUR": str(hour), "HQ_LOOK": "0", "HQ_ACTIVITY": str(d / "activity.json"),
                     "HQ_CLAUDE_JSON": str(d / "claude.json"), "HQ_GATE_NOTE": str(d / "gate-note"), "HQ_SUPPORT": str(d / "support"),
-                    "HQ_PROOF_DIR": str(d / "proofs")})
+                    "HQ_PROOF_DIR": str(d / "proofs"), "HQ_ROUTINES_FILE": str(d / "routines.json"), "HQ_INCIDENTS_FILE": str(d / "incidents.json")})
         drv = d / "driver.py"
         drv.write_text(self._wall_driver())
         return ws, env, d
@@ -14748,10 +14748,11 @@ caught = {"opened": [], "status": [], "log": [], "beats": [], "gate": []}
 tick.open_window = lambda c, name="": caught["opened"].append(c)
 tick.status = lambda *x: caught["status"].append(list(x))
 tick.log = lambda m: caught["log"].append(m)
-routines.beat = lambda key, **f: caught["beats"].append({"key": key, **{k: v for k, v in f.items() if k in ("state", "text")}})
-routines.drop = lambda *a: None
-incidents.past = lambda *a, **k: None
-incidents.is_down = lambda *a: False
+if not os.environ.get("WALL_REAL"):
+    routines.beat = lambda key, **f: caught["beats"].append({"key": key, **{k: v for k, v in f.items() if k in ("state", "text")}})
+    routines.drop = lambda *a: None
+    incidents.past = lambda *a, **k: None
+    incidents.is_down = lambda *a: False
 tick.hqpaths.window_kind = lambda: "tmux"
 tick.workspace_trusted = lambda: True
 tick.mail = lambda *a, **k: None
@@ -14768,6 +14769,16 @@ tick.end_chat = lambda pid: ended.append(pid)
 tick.alive = lambda pid: bool(pid)
 if os.environ.get("WALL_STAND_IN"):  # the gate's stand-in: what the minute asks it, and its answer
     tick.NODE = os.environ["WALL_STAND_IN"]
+def boom(*a, **k):
+    raise RuntimeError("a made-up failure")
+throw = os.environ.get("WALL_THROW")
+if throw == "review":
+    import review
+    review.tick = boom
+elif throw == "cycles":
+    cycles.tick = boom
+elif throw == "briefing":
+    tick.briefing_minute = boom
 for j in (sys.argv[4:] or ["1"]):
     tick.tick()
 print("RESULT " + json.dumps({**caught, "ended": ended}))
@@ -15289,6 +15300,462 @@ print("OK")
         r = minute()
         need(state(n2).startswith("held") and r["ended"], f"not held at the line: {state(n2)} {r['log'][-2:]}")
         return "the limits saved as they come, no status line read, the first prompt says so, held at the line by the routine"
+
+    def _save_env(self, name: str):
+        """A workspace copy with its own git and a throwaway GitHub (a bare repository), for the flows that save."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env(name)
+        bare = d / "github.git"
+        g = lambda *a, cwd=ws: _sp.run(["git", *a], cwd=str(cwd), capture_output=True, text=True, check=True)
+        _sp.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+        g("init", "-q", "-b", "main")
+        g("config", "user.email", "t@example.com")
+        g("config", "user.name", "T")
+        g("add", "-A")
+        g("commit", "-q", "-m", "first")
+        g("remote", "add", "origin", str(bare))
+        g("push", "-q", "-u", "origin", "main")
+        env.update({"HQ_SAVE_QUIET": "600"})
+        return ws, env, d, bare, g
+
+    async def flow219(self) -> str:
+        """F102, no Claude: what's written on the main reaches GitHub by itself. On a copy with a throwaway GitHub: a note written
+        the way the app does is committed and pushed by the routine's real minute once it's ten minutes old, and not before; a
+        new file too, a temp file never; a file with a key stays out and an incident says which; a push GitHub refuses because a
+        chat outside HQ saved there fetches, merges and goes through; a clash that won't merge is taken back and opens an
+        incident, the next good push closes it; commits left unpushed are pushed by the next look."""
+        import subprocess as _sp
+        ws, env, d, bare, g = self._save_env("save")
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        self._wall_usage(env)
+        env_notes = {**env, "HQ_NOTES": str(ws / "HQ/notes.md")}
+        r = _sp.run([sys.executable, str(ROOT / "app/notes.py"), "add", "buy made up soap"], capture_output=True, text=True, env=env_notes, cwd=str(ROOT))
+        need(r.returncode == 0, r.stdout + r.stderr)
+        on_github = lambda f: _sp.run(["git", "--git-dir", str(bare), "show", f"main:{f}"], capture_output=True, text=True)
+        need(on_github("HQ/notes.md").returncode != 0, "the note is on GitHub already")
+        minute()
+        need(on_github("HQ/notes.md").returncode != 0, "a note under ten minutes old was saved")
+        old = time.time() - 660
+        os.utime(ws / "HQ/notes.md", (old, old))
+        (ws / "HQ/brand-new.md").write_text("a new file of his\n")
+        os.utime(ws / "HQ/brand-new.md", (old, old))
+        (ws / "HQ/half-written.tmp").write_text("x")
+        os.utime(ws / "HQ/half-written.tmp", (old, old))
+        r = minute()
+        need("buy made up soap" in on_github("HQ/notes.md").stdout, f"the note didn't reach GitHub: {r['log'][-3:]}")
+        need(on_github("HQ/brand-new.md").returncode == 0, "a new file didn't reach GitHub")
+        need(on_github("HQ/half-written.tmp").returncode != 0, "a temp file reached GitHub")
+        inc = lambda: json.loads((d / "incidents.json").read_text())["incidents"] if (d / "incidents.json").exists() else []
+        # a key stays out
+        (ws / "HQ/with-key.md").write_text("the token is " + "github_pat_" + "A" * 30 + "\n")
+        (ws / "HQ/fine.md").write_text("nothing here\n")
+        for f in ("with-key.md", "fine.md"):
+            os.utime(ws / "HQ" / f, (old, old))
+        minute()
+        need(on_github("HQ/with-key.md").returncode != 0 and on_github("HQ/fine.md").returncode == 0, "a key went to GitHub, or the rest stayed behind")
+        need(any(i["key"] == "secrets" and "with-key.md" in i["why"] for i in inc()), f"no incident for the key: {inc()}")
+        (ws / "HQ/with-key.md").unlink()
+        # a chat outside HQ saved on GitHub in between
+        other = d / "other"
+        _sp.run(["git", "clone", "-q", str(bare), str(other)], check=True)
+        g("config", "user.email", "o@example.com", cwd=other)
+        g("config", "user.name", "O", cwd=other)
+        (other / "from-a-chat.md").write_text("saved from a chat\n")
+        g("add", "from-a-chat.md", cwd=other)
+        g("commit", "-q", "-m", "a chat", cwd=other)
+        g("push", "-q", cwd=other)
+        (ws / "HQ/second.md").write_text("second\n")
+        os.utime(ws / "HQ/second.md", (old, old))
+        minute()
+        need(on_github("HQ/second.md").returncode == 0 and on_github("from-a-chat.md").returncode == 0, "a refused push didn't merge and go through")
+        need((ws / "from-a-chat.md").exists(), "the chat's save didn't come here")
+        # a clash that doesn't merge
+        g("pull", "-q", cwd=other)
+        (other / "HQ/fine.md").write_text("the chat's words\n")
+        g("commit", "-qam", "a chat again", cwd=other)
+        g("push", "-q", cwd=other)
+        (ws / "HQ/fine.md").write_text("the main's words\n")
+        os.utime(ws / "HQ/fine.md", (old, old))
+        minute()
+        need(any(i["key"] == "workspace-push" and not i.get("back") for i in inc()), f"no incident for a clash: {inc()}")
+        need("the main's words" in (ws / "HQ/fine.md").read_text() and not (ws / ".git/MERGE_HEAD").exists(), "the merge wasn't taken back")
+        # settled by hand: the next look pushes what was left, and the incident closes
+        g("fetch", "-q", "origin")
+        g("merge", "-q", "-X", "ours", "--no-edit", "origin/main")
+        minute()
+        need("the main's words" in on_github("HQ/fine.md").stdout, "what was left unpushed wasn't pushed")
+        need(not any(i["key"] == "workspace-push" and not i.get("back") for i in inc()), "the incident stays open")
+        return "a note on GitHub after its ten minutes, a key kept out, a refused push merged, a clash an incident, a late push"
+
+    async def flow220(self) -> str:
+        """F102, no Claude: two writers can't wipe each other. Two processes adding 150 notes at once lose none, with no errors
+        and no temp files left; the same for the to-do list, the games and the coaching file: each its own lock across processes."""
+        import subprocess as _sp
+        d = self.tmp / "F102-lock"
+        d.mkdir(exist_ok=True)
+        notes = d / "notes.md"
+        (d / "challenges.md").write_text((ROOT / "template/challenges.md").read_text())
+        env = {**os.environ, "HQ_NOTES": str(notes), "HQ_TODO": str(d / "challenges.md"), "HQ_TODO_UNDO": str(d / "undo.json"),
+               "HQ_COACHING": str(d / "coaching.json"), "HQ_GAMES": str(d / "games.json")}
+        child = "import sys\nsys.path.insert(0, sys.argv[1] + '/app')\nimport notes\nfor i in range(150):\n    notes.add(f'{sys.argv[2]} note {i}')\n"
+        ps = [_sp.Popen([sys.executable, "-c", child, str(ROOT), w], env=env, stdout=_sp.PIPE, stderr=_sp.PIPE, text=True) for w in ("A", "B")]
+        errs = [p.communicate(timeout=120)[1] for p in ps]
+        need(all(p.returncode == 0 for p in ps), f"a writer failed: {errs}")
+        got = [l for l in notes.read_text().splitlines() if l.startswith("- ")]
+        need(len(got) == 300 and len({l.split(" · ", 1)[1] for l in got}) == 300, f"{len(got)} notes of 300")
+        need(not list(d.glob("*.tmp")), "temp files were left")
+        child = ("import sys\nsys.path.insert(0, sys.argv[1] + '/app')\nimport todo\nfor i in range(12):\n"
+                 "    r = todo.add('4', f'{sys.argv[2]} item {i}')\n    assert r\n")
+        ps = [_sp.Popen([sys.executable, "-c", child, str(ROOT), w], env=env, stdout=_sp.PIPE, stderr=_sp.PIPE, text=True) for w in ("A", "B")]
+        errs = [p.communicate(timeout=120)[1] for p in ps]
+        need(all(p.returncode == 0 for p in ps), f"a to-do writer failed: {errs[0][-600:]} {errs[1][-600:]}")
+        text = (d / "challenges.md").read_text()
+        need(sum(f"{w} item {i}" in text for w in "AB" for i in range(12)) == 24, "a to-do item was lost")
+        for f in ("todo.py", "notes.py", "games.py", "coaching.py"):
+            src = (ROOT / "app" / f).read_text()
+            need("threading.Lock" not in src and "hqlock.For(" in src, f"{f} still locks inside one process")
+        need("hqlock" in (ROOT / "app/loose_ends.py").read_text() and "hqlock.locked(path)" in (ROOT / "routine/handover.py").read_text(), "the mail list's writers")
+        return "300 of 300 notes, 24 of 24 items, one lock for all five files"
+
+    async def flow221(self) -> str:
+        """F102, no Claude: a program holds the mail check to its rules. On a copy, through the check after a run: the marker gone
+        backwards, a very important line dropped or changed in its first three parts, two lines with one key: the old file back,
+        an incident, the line red, the run not counted as good; a good run passes and a line resolved by hand during it isn't
+        held against it. The list turns red when it hasn't been checked for 2 hours between 8:00 and midnight, not at night."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env("mailguard")
+        (ws / "inbox.md").write_text("# Mail to check\n\nMarker: 1000 (a date)\n\n## Very important\n\n"
+                                     "- 1 Nov · a@example.com · The one · what it is · Why: a test · Status: new · [Gmail](x)\n"
+                                     "- 2 Nov · b@example.com · The two · what it is · Why: a test · Status: new · [Gmail](x)\n\n## To check\n\n")
+        child = r'''
+import json, os, sys, time
+sys.path.insert(0, sys.argv[1] + "/routine")
+import mailguard as M, routines, incidents, hqpaths
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+p = M.path()
+good = open(p).read()
+def run(changed, ok=True):
+    M.before()
+    open(p, "w").write(changed)
+    return M.after_run(ok, incidents, routines, log=lambda m: None)
+inc = lambda: [i for i in incidents.read()["incidents"] if i["key"] == "maillist" and not i.get("back")]
+need(run(good.replace("Marker: 1000", "Marker: 2000")) == [], "a good run was refused")
+need(M.last_good(), "a good run isn't counted")
+good = open(p).read()
+os.remove(M._ok_file())
+bad = run(good.replace("Marker: 2000", "Marker: 900"))
+need(bad and "backwards" in bad[0] and open(p).read() == good, f"a marker gone backwards: {bad}")
+need(inc() and M.last_good() is None, f"no incident: {inc()}")
+need(routines.read().get("maillist", {}).get("state") == "down", "the line isn't red")
+incidents.up("maillist")
+drop = "\n".join(l for l in good.splitlines() if "The two" not in l)
+bad = run(drop)
+need(bad and "gone or changed" in bad[0] and open(p).read() == good, f"a line dropped: {bad}")
+bad = run(good.replace("· The one ·", "· The other one ·"))
+need(bad and open(p).read() == good, f"a changed subject: {bad}")
+bad = run(good.replace("- 2 Nov · b@example.com · The two", "- 1 Nov · a@example.com · The one"))
+need(bad and any("share one key" in x or "gone" in x for x in bad) and open(p).read() == good, f"two lines one key: {bad}")
+# a line resolved by hand during the run
+incidents.up("maillist")
+M.before()
+done = "\n".join(l for l in good.splitlines() if "The two" not in l)
+open(p, "w").write(done)
+M.touched(p)
+need(M.after_run(True, incidents, routines) == [] and open(p).read() == done, "a line taken out by hand counted against the run")
+# stale
+now = time.time()
+open(M._ok_file(), "w").write(str(int(now - 3 * 3600)))
+os.environ["HQ_WALL_HOUR"] = "14"
+need(M.minute(True, incidents, routines, now) == "stale" and inc(), "not red after 3 hours in the day")
+need(routines.read()["maillist"]["state"] == "down", "the line isn't red")
+open(M._ok_file(), "w").write(str(int(now - 3 * 3600)))
+os.environ["HQ_WALL_HOUR"] = "3"
+need(M.minute(True, incidents, routines, now) != "stale", "red at 3 at night")
+os.environ["HQ_WALL_HOUR"] = "14"
+open(M._ok_file(), "w").write(str(int(now - 100)))
+need(M.minute(True, incidents, routines, now) == "ok" and not inc(), "a good run doesn't close it")
+need(M.minute(False, incidents, routines, now) == "off", "off from a call")
+print("OK")
+'''
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-900:])
+        tsrc = (ROOT / "routine/tick.py").read_text()
+        need("mailguard.before()" in tsrc and "mailguard.after_run(" in tsrc and "mailguard.minute(" in tsrc, "the routine doesn't use the check")
+        return "a marker gone backwards put back with an incident, lines kept, red after 2 hours in the day only"
+
+    async def flow222(self) -> str:
+        """F102, no Claude: failures turn red. Through the routine's real minute: a reviewer that throws, or a review that doesn't run,
+        turns its line red with an incident at that minute, and a good one closes it; the briefing and the cycles the same; a
+        failure of QA and of the release; the night and the release have a line with a day's interval; an unreadable lines file
+        shows red, not grey."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env("red")
+        env["WALL_REAL"] = "1"
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        self._wall_usage(env)
+        inc = lambda k: [i for i in json.loads((d / "incidents.json").read_text())["incidents"] if i["key"] == k and not i.get("back")] if (d / "incidents.json").exists() else []
+        lines = lambda: json.loads((d / "routines.json").read_text())
+        minute(WALL_THROW="review")
+        need(lines()["review"]["state"] == "down" and inc("review"), f"a reviewer that throws isn't red: {lines().get('review')}")
+        minute()
+        need(not inc("review"), "the next good look doesn't close it")
+        minute(WALL_THROW="cycles")
+        need(lines()["cycles"]["state"] == "down" and inc("cycles"), f"the cycles: {lines().get('cycles')}")
+        minute()
+        need(lines()["cycles"]["state"] == "ok" and not inc("cycles"), "the cycles stay red")
+        minute(WALL_THROW="briefing")
+        need(lines()["briefing"]["state"] == "down" and inc("briefing"), f"the briefing: {lines().get('briefing')}")
+        # a review that doesn't run: the reviewer's own run
+        child = r'''
+import json, os, sys, time
+sys.path.insert(0, sys.argv[1] + "/routine")
+import review, routines, incidents, sprint as S, jobs as q
+review.tick()
+rows = S.open_rows()
+label = rows[0]["label"]
+d, rv = review._state()
+review.ask_reviewer = lambda r: {"failed": True, "why": "the reviewer is out of credit", "cost": None}
+review._attempt(label)
+print(json.dumps(routines.read().get("review")))
+review.ask_reviewer = lambda r: {"pass": True, "findings": [], "cost": 0, "s": 0, "model": "m", "effort": "e"}
+review._attempt(label)
+print(json.dumps(routines.read().get("review")))
+'''
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        a, b = [json.loads(x) for x in r.stdout.strip().splitlines()[-2:]]
+        need(a["state"] == "down" and "out of credit" in a["text"], f"a review that doesn't run: {a}")
+        need(b["state"] == "ok" and not inc("review"), f"a good one doesn't close it: {b}")
+        # QA and the release
+        for script, key, a0 in (("qa.py", "qa", "state"), ("release.py", "release", "main")):
+            src = (ROOT / "routine" / script).read_text()
+            need(f'routines.bad("{key}"' in src, f"{script} has no red line")
+        boom = d / "boom.py"
+        boom.write_text("import sys, runpy\nsys.argv = ['qa.py', 'state']\nsys.path.insert(0, %r)\nimport qa\nqa.main = None\n" % str(ROOT / "routine"))
+        need('routines.good("nightly"' in (ROOT / "routine/nightly.py").read_text() and 'every=86400' in (ROOT / "routine/release.py").read_text(), "no day's interval")
+        # an unreadable lines file
+        (d / "routines.json").write_text("{ this isn't json")
+        child = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1] + "/routine")
+import routines
+routines.beat("helper", state="ok", text="x", every=60)
+print(json.dumps(routines.read()))
+'''
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        got = json.loads(r.stdout)
+        need(got["routines-file"]["state"] == "down" and "unreadable" in got["routines-file"]["text"] and got["helper"]["state"] == "ok", f"an unreadable file: {got}")
+        need((d / "routines.json.bad").exists(), "the bad file isn't kept aside")
+        return "a reviewer that throws is red at that minute with an incident, a good run closes it; cycles, briefing, QA, release, the night, a broken file"
+
+    async def flow223(self) -> str:
+        """F102, no Claude: one night rule for texts. While he sleeps a text that can wait isn't sent and nothing is pushed; what
+        can't wait goes (a time he named, a server down, a refused push, a security warning), and a text mixing both is split;
+        when he's up one summary goes, once, whatever piled up."""
+        import subprocess as _sp
+        d = self.tmp / "F102-night"
+        d.mkdir(exist_ok=True)
+        env = {**os.environ, "HQ_DIRECT_DIR": str(d / "line"), "HQ_DIRECT_LOCAL": str(d / "local.json"), "HQ_DIRECT_DRY": "1", "HQ_DIRECT_PLAIN": "1",
+               "HQ_ROLE_HERE": "1", "HQ_TEAM_LINE": "0"}
+        child = r'''
+import json, os, sys
+sys.path.insert(0, sys.argv[1] + "/app"); sys.path.insert(0, sys.argv[1] + "/routine")
+import direct_line as D
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+os.environ["HQ_ASLEEP"] = "1"
+n = lambda: len(D.thread())
+for why, facts in (("down", "call: the call line went quiet"), ("jobs", "the team finished"), ("paused", "a job was paused"), ("back", "call: back"), ("mail", "a bill came in")):
+    need(D.text(why, facts).get("held"), f"{why} wasn't held")
+need(n() == 0, "something was sent at night")
+need(D.morning_summary() is None, "a summary while he sleeps")
+# what can't wait
+for why, facts in (("down", "role: the main can't be reached"), ("down", "beat-VPS: the server is gone"), ("down", "workspace-push: GitHub refused"),
+                   ("remind", "the time he asked for"), ("appt", "his appointment"), ("mail", "a security warning: a new sign-in")):
+    need(not D.text(why, facts).get("held"), f"{why} {facts} was held")
+need(n() == 6, f"what can't wait didn't go: {n()}")
+# a text with both: the one that can't wait goes, the other waits
+m = D.text("down", "github: a push was refused\ntemp: the laptop is warm")
+need(not m.get("held") and "temp" not in m["text"], f"not split: {m}")
+os.environ["HQ_ASLEEP"] = "0"
+s = D.morning_summary()
+need(s and s[0] == "night-summary" and all(w in s[1] for w in ("call line went quiet", "team finished", "job was paused", "a bill came in", "the laptop is warm")), f"the summary: {s}")
+need(D.morning_summary() is None, "the summary twice")
+m = D.text(*s)
+need(m["text"].startswith("While you slept") and D._kind("night-summary"), f"the summary's text: {m}")
+print("OK")
+'''
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-900:])
+        src = (ROOT / "app/direct_line.py").read_text()
+        need("summary = morning_summary()" in src, "the look doesn't send the summary")
+        return "a night incident that can wait sends nothing and one summary at waking; what can't wait goes"
+
+    async def flow224(self) -> str:
+        """F102, no Claude: keys stay out of what's written. A key said on a call is masked in the transcript, in every kind of
+        line; the words around it stay. The push key moves out of the workspace into HQ's own folder, mode 600, the same key,
+        and the file in the workspace is gone; a commit of the workspace leaves a file with a key out (flow 219)."""
+        import subprocess as _sp
+        d = self.tmp / "F102-keys"
+        d.mkdir(exist_ok=True)
+        key = "ghp_" + "a1B2c3D4e5" * 4
+        child = r'''
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1] + "/app"); sys.path.insert(0, sys.argv[1] + "/routine")
+import transcript
+t = transcript.CallTranscript(Path(sys.argv[2]) / "calls")
+t.user("my key is " + sys.argv[3] + " please keep it")
+t.reply("I got " + sys.argv[3])
+t.note("noted " + sys.argv[3])
+t.end()
+print(t.path)
+'''
+        r = _sp.run([sys.executable, "-c", child, str(ROOT), str(d), key], capture_output=True, text=True, env=os.environ, cwd=str(ROOT), timeout=60)
+        need(r.returncode == 0, r.stderr[-600:])
+        text = Path(r.stdout.strip().splitlines()[-1]).read_text()
+        need(key not in text and text.count("ghp_[masked]") == 3 and "please keep it" in text, f"not masked: {text[-400:]}")
+        support = d / "support"
+        folder = d / "line"
+        folder.mkdir()
+        (folder / "keys.json").write_text(json.dumps({"private": "the-private-one", "public": "the-public-one", "made": "x"}))
+        env = {k: v for k, v in os.environ.items() if k not in ("HQ_DIRECT_DIR", "HQ_DIRECT_PUSH_DIR")}
+        env.update({"HQ_SUPPORT": str(support), "HQ_FOLDER": str(d), "HQ_WORKSPACE": str(d)})
+        (d / "HQ").mkdir(exist_ok=True)
+        (d / "HQ" / "direct-line").mkdir(exist_ok=True)
+        (d / "HQ" / "direct-line" / "keys.json").write_text((folder / "keys.json").read_text())
+        child = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1] + "/app"); sys.path.insert(0, sys.argv[1] + "/routine")
+import direct_line as D
+print(json.dumps({"k": D.keys(), "f": str(D._keys_path()), "again": D.keys()}))
+'''
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        need(r.returncode == 0, r.stderr[-600:])
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["k"]["public"] == "the-public-one" and o["again"]["private"] == "the-private-one", f"the key changed: {o}")
+        need(o["f"].startswith(str(support)) and oct(os.stat(o["f"]).st_mode)[-3:] == "600", f"not in HQ's own folder, 600: {o['f']}")
+        need(not (d / "HQ" / "direct-line" / "keys.json").exists(), "the key stayed in the workspace")
+        return "keys masked in every transcript line, the push key in HQ's own folder at 600"
+
+    async def flow225(self) -> str:
+        """F102, no Claude: the laptop's words reach the main, and each side says what it runs. On a stand-in pair: a note written on
+        the backup goes to the main like a text line and shows here at once, once on the main; clearing it there too; what an agent
+        says about herself written by the main; a hand-over the main refuses stays kept, and after a few tries stays kept and
+        opens an incident instead of vanishing; the role line names both versions and turns yellow when they differ; the sync
+        line counts the changes that aren't handed over; a call line that listens but doesn't answer ends and starts again."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env("pair")
+        env["HQ_NOTES"] = str(ws / "HQ/notes.md")
+        env.pop("HQ_ROLE_HERE", None)
+        drv = d / "backup.py"
+        drv.write_text(r'''
+import json, os, subprocess, sys
+ROOT = sys.argv[1]
+sys.path.insert(0, ROOT + "/app"); sys.path.insert(0, ROOT + "/routine")
+import role, notes
+role.is_backup = lambda: True
+kept = []
+MAIN = os.environ.get("WALL_MAIN", "up")
+def hand(script, args, env=None, timeout=90):
+    if MAIN == "down":
+        kept.append({"script": script, "args": args})
+        return 0, "", "", "kept"
+    r = subprocess.run([sys.executable, role._script_path(script), *args], capture_output=True, text=True, env={**os.environ, "HQ_ROLE_HERE": "1", "HQ_NOTES": os.environ["WALL_MAIN_NOTES"]})
+    return r.returncode, r.stdout, r.stderr, "main"
+role.hand = hand
+n = notes.add(sys.argv[2])
+print(json.dumps({"added": n, "here": [i["text"] for i in notes.items()]}))
+if len(sys.argv) > 3:
+    print(json.dumps({"cleared": notes.clear(n["id"]), "here": [i["text"] for i in notes.items()]}))
+''')
+        main_notes = d / "main-notes.md"
+        r = _sp.run([sys.executable, str(drv), str(ROOT), "written on the laptop"], capture_output=True, text=True, env={**env, "WALL_MAIN_NOTES": str(main_notes)}, cwd=str(ROOT), timeout=60)
+        need(r.returncode == 0, r.stderr[-700:])
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need("written on the laptop" in main_notes.read_text(), "the note didn't reach the main")
+        need(o["here"] == ["written on the laptop"] and (ws / "HQ/notes.here.md").exists(), f"the note isn't shown here: {o}")
+        need("written on the laptop" not in (ws / "HQ/notes.md").read_text() if (ws / "HQ/notes.md").exists() else True, "the backup wrote the file itself")
+        # once it's back from the main it shows once
+        (ws / "HQ/notes.md").write_text(main_notes.read_text())
+        r = _sp.run([sys.executable, str(drv), str(ROOT), "a second one", "clear"], capture_output=True, text=True, env={**env, "WALL_MAIN_NOTES": str(main_notes)}, cwd=str(ROOT), timeout=60)
+        need(r.returncode == 0, r.stderr[-700:])
+        lines_ = [json.loads(x) for x in r.stdout.strip().splitlines()]
+        need(lines_[0]["here"].count("written on the laptop") == 1, f"twice: {lines_[0]}")
+        need(lines_[1]["cleared"] and "a second one" not in main_notes.read_text().split("## Notes")[1] and "a second one" not in lines_[1]["here"], f"a clear from the backup: {lines_[1]}")
+        # a kept hand-over the main refuses
+        child = r'''
+import json, os, sys, time
+sys.path.insert(0, sys.argv[1] + "/routine")
+import role, incidents
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+role.PENDING = sys.argv[2] + "/pending.jsonl"
+open(role.PENDING, "w").write(json.dumps({"script": "handover", "args": ["edit", "x", "{}"]}) + "\n")
+said = []
+role._request = lambda url, r, kind, timeout=90: (200, {"code": 1, "out": "Not written: the main's copy doesn't have the text", "err": ""})
+c, p = {"peer": "http://x"}, {"acting": "main"}
+for i in range(role.REFUSALS):
+    role._deliver("backup", p, c, None, said.append)
+    d = [json.loads(l) for l in open(role.PENDING)]
+    need(len(d) == 1 and d[0]["refused"] == i + 1, f"try {i}: {d}")
+need(incidents.is_down("handover"), "no incident after a few tries")
+role._request = lambda *a, **k: (_ for _ in ()).throw(AssertionError("sent again"))
+role._deliver("backup", p, c, None, said.append)
+need(len(open(role.PENDING).readlines()) == 1, "a refused request was dropped")
+# the version on the role line, yellow when they differ
+need(role.mine()["version"] == role.version() and role.version(), "no version")
+print("OK")
+'''
+        r = _sp.run([sys.executable, "-c", child, str(ROOT), str(d)], capture_output=True, text=True, env={**env, "HQ_ROLE_HERE": "1"}, cwd=str(ROOT), timeout=60)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-900:])
+        src = (ROOT / "routine/role.py").read_text()
+        need('st_ = "waiting"' in src and "here {version()}, {peer} {other}" in src, "the role line doesn't compare versions")
+        # the sync line
+        child = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1] + "/routine")
+import sync
+seen = {"peer_up": True, "folders": [{"id": "w", "what": "workspace", "state": "idle", "error": "", "need": 0, "errors": [], "local": 3}]}
+print(json.dumps(sync.judge(seen, [], {}, False, "the server")))
+seen["folders"][0]["local"] = 0
+print(json.dumps(sync.judge(seen, [], {}, False, "the server")))
+'''
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        a, b = [json.loads(x) for x in r.stdout.strip().splitlines()[-2:]]
+        need(a[0] == "waiting" and "3 changes" in a[1] and b[0] == "ok", f"the sync line: {a} {b}")
+        # a hung call line
+        child = r'''
+import json, os, signal, subprocess, sys, time
+sys.path.insert(0, sys.argv[1] + "/routine")
+import tick, routines, incidents, hqpaths
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+ended, started = [], []
+os_kill = os.kill
+tick.os.kill = lambda pid, sig: ended.append(pid)
+tick.listening = lambda port: True
+tick.hqpaths.listener = lambda port: 4242
+tick.hqpaths.call_port = lambda: 1  # nothing answers there: never the live call line
+tick.NO_PHONE = True
+tick.CALL_FIX = True
+tick.time.sleep = lambda s: None
+tick.subprocess.Popen = lambda *a, **k: started.append(a[0]) or None
+tick.incidents.down = lambda *a, **k: {"down": time.time() - 200, "fixes": []}
+fixes = []
+tick.incidents.fix = lambda k, w: fixes.append(w)
+tick.call_line()
+need(ended == [4242] and started, f"a hung line wasn't ended and started: {ended} {started}")
+need("listened" in fixes[0], fixes)
+print("OK")
+'''
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-900:])
+        return "a note from the backup on the main, cleared there too, a refused hand-over kept with an incident, versions, sync count, a hung line restarted"
 
     def _proof_env(self, tag):
         """A throwaway workspace and a throwaway HQ repository for the proof, with a stand-in for the flows: a flow named in
@@ -25279,6 +25746,13 @@ FLOWS = {
     193: ("H298, piece 7: the Friday screen on the status page: routines.json carries the agents (three lines per agent, her share against her line) and the page draws The agents, one card per agent, the share red over her line; off, nothing of it", False, "flow193"),
     194: ("H298, piece 8: serialized writes: a cycle's hook refuses Edit, Write and shell writes on a shared file before they land and passes her ledger, her line and the scripts; a cycle job's settings carry it, a normal job's don't; twenty one-writer edits at once all land under the file's lock; off, as before", False, "flow194"),
     210: ("F101: the golden set: every real past row goes through the real reviewer, which must flag them all", True, "flow210"),
+    225: ("F102: a note from the backup reaches the main, a refused hand-over stays kept with an incident, the role line names both versions, the sync line counts what's not handed over, a hung call line restarts", False, "flow225"),
+    224: ("F102: a key is masked in every transcript line, the push key lives in HQ's own folder at 600", False, "flow224"),
+    223: ("F102: one night rule: a text that can wait sends nothing and one summary at waking; what can't wait goes", False, "flow223"),
+    222: ("F102: a failing reviewer, cycle, briefing, QA or release turns red with an incident within the minute; a broken lines file shows red", False, "flow222"),
+    221: ("F102: a mail run that moves the marker back or drops a very important line is put back with an incident; red after 2 hours between 8:00 and midnight", False, "flow221"),
+    220: ("F102: two processes adding 150 notes lose none; one lock across processes for the to-do list, the notes, the games, the coaching file and the mail list", False, "flow220"),
+    219: ("F102: a note written in the app is on GitHub after its ten minutes with no one naming it; a key stays out; a refused push merges; a clash is an incident", False, "flow219"),
     218: ("F100: a headless job saves the stream's limits as they come and reads no status line; the routine holds it at the line", False, "flow218"),
     217: ("F100: near the reserve a team job is refused, his to turn; cycles before the team, a bug ahead of the features, three items in progress at most, five a night with each test run counted", False, "flow217"),
     216: ("F100: no build in the day without his say-so, kept with who and when; a held job doesn't restart at night unless planned", False, "flow216"),

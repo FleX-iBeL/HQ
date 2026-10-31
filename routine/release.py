@@ -474,4 +474,17 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    import routines
+    try:
+        code = main(sys.argv[1:])
+    except Exception as e:  # F102: a release that fails is red, with an incident; its line has a day's interval
+        routines.bad("release", f"release.py failed: {e!r}", every=86400)
+        raise
+    if sys.argv[1:2] in (["main"], ["nightly"]):
+        if code == 0:
+            routines.good("release", "Ran fine", every=86400)
+        elif code == 2:
+            routines.beat("release", state="waiting", text="Held back: see the night and QA", last=__import__("time").time(), every=86400)
+        else:
+            routines.bad("release", f"release.py {sys.argv[1]} ended with {code}", every=86400)
+    sys.exit(code)

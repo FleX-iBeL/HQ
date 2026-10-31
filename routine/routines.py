@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
-FILE = os.path.join(JV, ".status", "routines.json")
+FILE = os.environ.get("HQ_ROUTINES_FILE") or os.path.join(JV, ".status", "routines.json")
 import hqpaths  # noqa: E402  H56.1: HQ's own memory, a folder that fits each computer
 SUPPORT = hqpaths.SUPPORT
 HEARTBEAT = os.path.join(SUPPORT, "heartbeat")
@@ -24,8 +24,15 @@ HEARTBEAT = os.path.join(SUPPORT, "heartbeat")
 def read():
     try:
         return json.load(open(FILE))
-    except (OSError, ValueError):
+    except OSError:
         return {}
+    except ValueError:  # F102: an unreadable file shows red, not grey: kept aside, and a line that says so
+        try:
+            os.replace(FILE, FILE + ".bad")
+        except OSError:
+            pass
+        return {"routines-file": {"state": "down", "at": time.time(), "every": 3600,
+                                  "text": f"The routine lines were unreadable; kept as {os.path.basename(FILE)}.bad, they fill again as each one runs"}}
 
 
 def beat(key, **fields):
@@ -43,6 +50,28 @@ def beat(key, **fields):
         os.replace(tmp, FILE)
     except Exception:
         pass
+
+
+def _real() -> bool:
+    """F102: a test writes no lines or incidents of the real HQ unless it named its own files."""
+    return not hqpaths.under_test() or bool(os.environ.get("HQ_ROUTINES_FILE"))
+
+
+def good(key, text="Ran fine", every=60):
+    """F102: a part that ran: its line, and its incident closed. `every` is how often it's expected."""
+    if _real():
+        import incidents
+        now = time.time()
+        beat(key, state="ok", text=text[:200], last=now, next=now + every, every=every, why="")
+        incidents.up(key)
+
+
+def bad(key, what, every=60):
+    """F102: a part that failed: its line red and an incident, whatever else keeps running."""
+    if _real():
+        import incidents
+        beat(key, state="down", text=str(what)[:200], last=time.time(), every=every, why=str(what)[:200])
+        incidents.down(key, str(what)[:300])
 
 
 def drop(prefix, keep=()):

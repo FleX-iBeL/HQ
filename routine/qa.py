@@ -554,4 +554,12 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    import routines
+    try:
+        code = main(sys.argv[1:])
+    except Exception as e:  # F102: a failure of QA itself: red, with an incident
+        routines.bad("qa", f"qa.py {' '.join(sys.argv[1:2])} failed: {e!r}", every=30 * 86400)
+        raise
+    if sys.argv[1:2] in (["pass"], ["fail"]) and not code:
+        routines.good("qa", f"QA {sys.argv[1]} written", every=30 * 86400)
+    sys.exit(code)

@@ -62,9 +62,9 @@ MEDIA = ("mp4", "mov", "m4v", "mkv", "webm", "avi", "m4a", "mp3", "wav", "aac", 
 # .tmp is a write half done; both went over and made conflict copies.
 IGNORE_WORKSPACE = [".git", ".claude/settings.local.json", *[f"(?i)*.{x}" for x in MEDIA], "(?d).DS_Store",
                     "(?d)Thumbs.db", "(?d).*.lock", "(?d)*.tmp",
-                    "(?d)*.here.jsonl"]  # F58: the backup's own text lines, waiting for the main's thread to bring them back
+                    "(?d)*.here.jsonl", "(?d)*.here.md"]  # F58: the backup's own text lines, waiting for the main's thread to bring them back
 IGNORE_MEMORY = ["(?d).DS_Store"]
-GIT_EXCLUDE = [".stfolder", ".stignore", "*.sync-conflict-*", "*.here.jsonl"]  # Syncthing's own files stay out of git
+GIT_EXCLUDE = [".stfolder", ".stignore", "*.sync-conflict-*", "*.here.jsonl", "*.here.md"]  # Syncthing's own files stay out of git
 CONFLICT = re.compile(r"\.sync-conflict-\d{8}-\d{6}-[A-Z0-9]{7}")
 CONFLICT_WHY = "Both sides changed"  # F58: an incident that starts so is a conflict copy; Donna doesn't text about it
 CALLS_AFTER = 1800  # H152: a call transcript nobody committed, this long after its last change, is committed by the main
@@ -575,6 +575,7 @@ def look():
             errs = (api(f"/rest/folder/errors?folder={f['id']}") or {}).get("errors") or []
             out["folders"].append({"id": f["id"], "what": f["what"], "state": st.get("state", ""),
                                    "error": st.get("error") or "", "need": st.get("needFiles", 0) + st.get("needDeletes", 0),
+                                   "local": st.get("receiveOnlyTotalItems", 0),  # F102: changes here that aren't handed over
                                    "errors": [e.get("path", "") + ": " + e.get("error", "") for e in errs][:5]})
         except urllib.error.HTTPError as e:
             out["folders"].append({"id": f["id"], "what": f["what"], "state": "missing", "need": 0, "errors": [],
@@ -611,6 +612,9 @@ def judge(seen, found, state, main, peer, now=None):
     busy = [f for f in seen["folders"] if f["state"] in ("syncing", "sync-preparing", "scanning", "sync-waiting")]
     if need or busy:
         return "running", f"Syncing with {peer}" + (f": {need} file{'s' * (need != 1)} to go" if need else ""), ""
+    here = sum(f.get("local") or 0 for f in seen["folders"])
+    if here:  # F102: the line doesn't say In sync while this computer holds changes that aren't handed over
+        return "waiting", f"{here} change{'s' * (here != 1)} on this computer not handed over to {peer}", ""
     return "ok", f"In sync with {peer}: the workspace" + (" and Claude's memory" if len(seen["folders"]) > 1 else ""), ""
 
 

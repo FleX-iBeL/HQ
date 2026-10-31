@@ -164,6 +164,17 @@ def listening(port: int) -> bool:
         return False
 
 
+def listener(port: int) -> int | None:
+    """F102: the pid listening on this computer's port, or None. By that exact pid, never by a name."""
+    tool_ = ["/usr/sbin/lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"] if IS_MAC else ["fuser", f"{port}/tcp"]
+    try:
+        r = subprocess.run(tool_, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    pids = [int(x) for x in r.stdout.split() if x.isdigit()]
+    return pids[0] if pids else None
+
+
 def boottime() -> int:
     """When this computer last started (epoch seconds): kern.boottime on a Mac, btime in /proc/stat on Linux."""
     if IS_LINUX:

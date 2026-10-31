@@ -210,6 +210,11 @@ def run(again: bool = False, routine: bool = False) -> int:
               open(os.path.join(OUT, "last.json"), "w"), indent=1)
     _prune()
     when = stamp.strftime("%-d %b %H:%M")
+    import routines  # F102: the night's own line, with a day's interval, so a night that didn't run shows
+    if r.returncode == 0 and ran and not failed:
+        routines.good("nightly", f"{when}: all {ran} flows pass", every=86400)
+    else:
+        routines.bad("nightly", f"{when}: {passed} of {ran} passed", every=86400)
     if r.returncode == 0 and ran and not failed:
         if n == 1:
             add_night(f"{when} all {ran} flows pass ({mins} min)")

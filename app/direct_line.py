@@ -387,11 +387,34 @@ def _unb64(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
+def _keys_path() -> Path:
+    """F102: the push key lives in HQ's own folder, mode 600, never in the synced workspace. A test's line keeps its own."""
+    if os.environ.get("HQ_DIRECT_DIR") or os.environ.get("HQ_DIRECT_PUSH_DIR"):
+        return push_folder() / "keys.json"
+    return Path(hqpaths.SUPPORT) / "push-keys.json"
+
+
+def _keep_key(path: Path, k: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(k, f)
+    os.replace(tmp, path)
+
+
 def keys() -> dict:
-    """The VAPID key pair, made once and kept in the workspace."""
-    path = push_folder() / "keys.json"
+    """The VAPID key pair, made once. F102: moved here from the workspace the first time it's asked for; the file that was
+    there goes, so the sync carries the key no further."""
+    path = _keys_path()
     k = _read(path, None)
     if isinstance(k, dict) and k.get("private") and k.get("public"):
+        return k
+    old = push_folder() / "keys.json"
+    k = _read(old, None) if old != path else None
+    if isinstance(k, dict) and k.get("private") and k.get("public"):
+        _keep_key(path, k)
+        old.unlink(missing_ok=True)
         return k
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives import serialization
@@ -403,7 +426,7 @@ def keys() -> dict:
         again = _read(path, None)
         if isinstance(again, dict) and again.get("public"):
             return again
-        _write(path, k)
+        _keep_key(path, k)
     return k
 
 
@@ -533,6 +556,7 @@ def push(text: str, title: str | None = None, extra: dict | None = None) -> list
 # H127 (14 October 2026, call at 12:35): every text short, quick and "super, super, super humanised, as in someone
 # is just texting in between". The plain lines (no Claude) come in a few versions, never the same one twice in a row.
 PLAIN = {
+    "night-summary": "While you slept: {facts}",
     "jobs": ["The team just wrapped up. All built 🙌",
              "Dev team's done for now, everything's in.",
              "That's a wrap from the team.",
@@ -747,6 +771,9 @@ KINDS = {
                  "be the reason there is no connection\". Short, calm.",
     "tailscale-back": "Tailscale is on again on this computer, so the two HQs reach each other again. A quick "
                       "all-clear in a few words; don't say the other computer came back, it never went away.",
+    "night-summary": "He just got up. Some things waited through the night so they wouldn't wake him (the facts list them). One "
+                     "short text with what he needs to know: what happened in plain words and what, if anything, still needs "
+                     "him. Nothing that resolved itself gets more than a few words. No details, no apology.",
     "hello": "Say hi: this is your own direct line with him now. Quick and warm.",
     "sun": "It's dry and sunny where he is for the next hours. A light nudge to enjoy it: the sun, or a short "
            "walk. One idea at most, not pushy.",
@@ -863,9 +890,69 @@ def _clean(text: str) -> str:
     return text.replace("**", "").strip().strip('"').strip()
 
 
+# F102, the night rule, his words of 30 October 2026: "anything that can't wait until the next working day needs to allow to wake
+# me at night." While he sleeps only what can't wait goes out: a time he named himself (a reminder, an appointment he picked, a
+# call he missed), a server down, a refused push, a security warning. The rest waits, and goes in one summary when he's up.
+# [Which kinds count is Claude's first reading of his rule, his to correct.]
+CANT_WAIT = ("remind", "appt", "missed-call", "night-summary")
+CANT_WAIT_DOWN = ("role", "github", "workspace-push", "beat-")  # a line of a "down" text starts with its incident's key
+SECURITY = re.compile(r"\b(security|sign-?in|password|new device|logged in|login)\b", re.I)
+SUMMARY_MOST = 1500
+
+
+def held_file() -> Path:
+    return local_state_file().with_name("direct-line-night.json")
+
+
+def asleep(t: float | None = None) -> bool:
+    """He's asleep now (pings._asleep: his calendar's Sleep block, else the night hours). A test says so itself."""
+    if hqpaths.under_test():
+        return os.environ.get("HQ_ASLEEP") == "1"
+    sys.path.insert(0, str(ROOT / "routine"))
+    import pings as _pings
+    return _pings._asleep(t or time.time())
+
+
+def can_wait(why: str, facts: str) -> str:
+    """What of this text can wait for the morning: all of it, part of a "down" text, or nothing ('')."""
+    if why in CANT_WAIT or (why == "mail" and SECURITY.search(facts or "")):
+        return ""
+    if why == "down":
+        return "\n".join(l for l in (facts or "").splitlines() if not l.startswith(CANT_WAIT_DOWN))
+    return facts or why
+
+
+def hold(why: str, facts: str) -> None:
+    with _Lock("night", held_file().parent):
+        d = _read(held_file(), [])
+        d.append({"at": time.time(), "why": why, "facts": facts})
+        _write(held_file(), d)
+
+
+def morning_summary() -> tuple[str, str] | None:
+    """He's up and something waited: one text with all of it, and the list emptied. (why, facts) or None."""
+    if not held_file().exists() or asleep():
+        return None
+    with _Lock("night", held_file().parent):
+        d = _read(held_file(), [])
+        held_file().unlink(missing_ok=True)
+    if not d:
+        return None
+    lines = [f"{x['why']}: {' '.join(str(x['facts']).split())}" for x in d]
+    return "night-summary", "\n".join(lines)[:SUMMARY_MOST]
+
+
 def text(why: str, facts: str) -> dict:
     """Write one text from her into the thread and push it to his phone. H266: one of the team's kinds goes on
-    Moneypenny's own line, from her, whoever sends it."""
+    Moneypenny's own line, from her, whoever sends it. F102: while he sleeps, only what can't wait."""
+    if asleep():
+        later = can_wait(why, facts)
+        if later:
+            hold(why, later)
+            left = "\n".join(l for l in (facts or "").splitlines() if l not in later.splitlines()) if why == "down" else ""
+            if not left:
+                return {"held": True, "why": why}
+            facts = left
     if not on_team_line() and line_for(why) == "team":
         with _Env(team_env()):
             m = text(why, facts)
@@ -1171,7 +1258,7 @@ def watch(q: dict | None = None, *, main: bool = True, incidents_data: list | No
                 told.pop(iid)
             continue
         if not e.get("back"):
-            if iid not in told and (e.get("key") in ("role", "github") or now - float(e.get("down") or now) >= DOWN_AFTER):
+            if iid not in told and (e.get("key") in ("role", "github", "workspace-push") or now - float(e.get("down") or now) >= DOWN_AFTER):
                 if not first:
                     fixes = "; ".join(f.get("what", "") for f in (e.get("fixes") or [])[-2:])
                     downs.append(f"{e.get('key')}: {e.get('why') or 'down'}" + (f" (done so far: {fixes})" if fixes else ""))
@@ -1192,6 +1279,10 @@ def watch(q: dict | None = None, *, main: bool = True, incidents_data: list | No
         out.append(("tailscale-back", "\n".join(ts_back)))
     s["told"] = told
     s["looked"] = now
+    if not dry:  # F102: he's up: what waited in the night, in one text
+        summary = morning_summary()
+        if summary:
+            out.append(summary)
     if not dry:
         _write(path, s)
         for why, facts in out:
