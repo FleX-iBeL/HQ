@@ -14,7 +14,7 @@ later). The push goes through Apple's or the browser's own push service, so it a
 the chat to answer needs Tailscale.
 
 Kept in the workspace's HQ/direct-line/, so both computers have it through the sync:
-  thread.jsonl          the chat, one message per line: {"at", "from": "agent"|"me", "text", "why"}
+  thread.jsonl          the chat, one message per line: {"at", "from": "agent"|"me", "text", "why", "id"}
   subscriptions.json    the phones (and browsers) that allowed her notifications
   keys.json             the VAPID key pair the subscriptions were made with (the same on both computers, so the
                         backup can text the same phone)
@@ -73,6 +73,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -258,7 +259,11 @@ def _at(m: dict) -> float:
 
 
 def _key(m: dict) -> tuple:
-    return (round(_at(m), 3), m.get("from"), m.get("text"))
+    """What makes a line one line. F108: its own id, given when it's written, so a hand-over sent again stays once while two
+    texts with the same words in the same millisecond are two: two "down" texts without Claude can be word for word the same,
+    and the time, the sender and the words alone took them for a hand-over sent again and dropped one. A line from before
+    has no id."""
+    return (m["id"],) if m.get("id") else (round(_at(m), 3), m.get("from"), m.get("text"))
 
 
 def read_lines(where: Path) -> list[dict]:
@@ -351,7 +356,7 @@ def line_dir(name: str) -> Path | None:
 
 
 def add(sender: str, text: str, why: str = "") -> dict:
-    m = {"at": round(time.time(), 3), "from": sender, "text": text.strip(), "why": why}
+    m = {"at": round(time.time(), 3), "from": sender, "text": text.strip(), "why": why, "id": secrets.token_hex(8)}
     where = folder()
     if _backup():
         try:

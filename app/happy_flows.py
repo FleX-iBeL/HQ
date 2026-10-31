@@ -16120,6 +16120,97 @@ print(json.dumps({"plan": U.current_plan(), "five": U.five_on(), "words": U.cost
         need("5-hour" in jobs("list").stdout, "the job list doesn't say the 5-hour again")
         return "the past stays Max 5x, the week carries everything, five jobs teach Ultra from the week, the page has no 5-hour of any kind, and it all comes back"
 
+    async def flow230(self) -> str:
+        """F108, no Claude: three writers at the same instant, the way flow 196 does it (two "down" texts in plain words and his own
+        text, each its own process, three rounds), 20 runs on Donna's line and 20 on the team line: all 9 lines land every
+        time. Two "down" texts can be word for word the same in the same millisecond; the line's own id keeps them two. A
+        hand-over sent again stays once, a line from before keeps the old key, the backup's own lines and the page's merge
+        tell two such lines apart too."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env("lines")
+        env.update({"HQ_DIRECT_PLAIN": "1", "HQ_UNDER_TEST": "1", "HQ_ROLE_HERE": "1", "HQ_NO_PHONE": "1"})
+        tool = str(ROOT / "app/direct_line.py")
+        def hammer(name: str, runs: int = 20) -> tuple:
+            twins = 0
+            for run in range(runs):
+                t = d / name / str(run)
+                line = t / ("team-line" if name == "team" else "direct-line")
+                line.mkdir(parents=True)
+                e = dict(env, HQ_DIRECT_DIR=str(line))
+                if name == "team":  # direct_line.team_env, with no list of agents to read
+                    e.update({"HQ_DIRECT_AGENT": "moneypenny", "HQ_DIRECT_TEAM": "1", "HQ_DIRECT_PUSH_DIR": str(t / "direct-line")})
+                said = []
+                for i in (1, 2, 3):
+                    ps = [_sp.Popen([sys.executable, tool, "text", "down", f"the server went quiet, round {i}"], env=e, stdout=_sp.PIPE, stderr=_sp.PIPE, text=True),
+                          _sp.Popen([sys.executable, tool, "text", "down", f"the laptop went quiet, round {i}"], env=e, stdout=_sp.PIPE, stderr=_sp.PIPE, text=True),
+                          _sp.Popen([sys.executable, tool, "me"], env=e, stdin=_sp.PIPE, stdout=_sp.PIPE, stderr=_sp.PIPE, text=True)]
+                    ps[2].stdin.write(json.dumps({"text": f"his text, round {i}"}))
+                    ps[2].stdin.close()
+                    for p in ps:
+                        out = p.stdout.read()
+                        err = p.stderr.read()
+                        need(p.wait(timeout=60) == 0, f"{name}: a writer failed: {err[-300:]}")
+                        said.append(json.loads(out))
+                have = [json.loads(x) for x in (line / "thread.jsonl").read_text().splitlines()]
+                need(len(have) == 9 and sorted(m["id"] for m in have) == sorted(m["id"] for m in said),
+                     f"{name}, run {run + 1}: {len(have)} of 9 lines landed: {[(m['at'], m['text'][:30]) for m in have]}")
+                need(sum(m["from"] == "me" for m in have) == 3 and sum(m.get("why") == "down" for m in have) == 6, f"{name}, run {run + 1}: the wrong lines landed")
+                need([m["at"] for m in have] == sorted(m["at"] for m in have), f"{name}, run {run + 1}: not in time order")
+                twins += len(have) - len({(m["at"], m["from"], m["text"]) for m in have})
+            return runs, twins
+        donna = await asyncio.to_thread(hammer, "donna")
+        team = await asyncio.to_thread(hammer, "team")
+        child = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1] + "/app")
+import direct_line as D
+from pathlib import Path
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+w = D.folder()
+m = D.add("agent", "a text")
+need(m.get("id") and not D.put(w, dict(m)) and len(D.thread()) == 1, "a hand-over sent again counts twice")
+twin = {**m, "id": "another"}
+need(D.put(w, twin) and len(D.thread()) == 2, "the same words in the same millisecond with an id of its own didn't land")
+old = {"at": 1000.5, "from": "me", "text": "from before", "why": ""}
+need(D.put(w, dict(old)) and not D.put(w, dict(old)) and len(D.thread()) == 3, "a line from before lost the old key")
+# the backup: two lines word for word the same, kept until the main's thread brings each back
+a = {"at": 2000.25, "from": "me", "text": "twice the same", "why": "", "id": "one"}
+b = {**a, "id": "two"}
+D._keep_here(w, a)
+D._keep_here(w, b)
+need(sum(x["text"] == "twice the same" for x in D.read_lines(w)) == 2, "the backup shows one of two lines")
+print("OK")
+"""
+        wd = d / "keys"
+        e = dict(env, HQ_DIRECT_DIR=str(wd / "direct-line"))
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=60)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-800:])
+        p, port = self._status_server(ROOT, e, "lines")
+        try:
+            code, body, _c = await asyncio.to_thread(http_get, "/direct.json", f"http://127.0.0.1:{port}", 15)
+            shown = [m for m in json.loads(body)["messages"] if m["text"] == "twice the same"] if code == 200 else []
+            need(len(shown) == 2, f"the page shows {len(shown)} of the two lines: {code}")
+        finally:
+            p.terminate()
+            p.wait(timeout=10)
+        child2 = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1] + "/app")
+import direct_line as D
+w = D.folder()
+a = [m for m in D._lines(w / D.HERE_FILE) if m["id"] == "one"][0]
+D.put(w, a)
+left = [m["id"] for m in D._lines(w / D.HERE_FILE)]
+print("OK" if left == ["two"] and sum(x["text"] == "twice the same" for x in D.read_lines(w)) == 2 else f"FAIL {left}")
+"""
+        r = _sp.run([sys.executable, "-c", child2, str(ROOT)], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=60)
+        need(r.stdout.strip().endswith("OK"), "the main's copy of one line took the other out of the backup's: " + (r.stdout + r.stderr)[-500:])
+        return (f"20 runs on Donna's line and 20 on the team line, three writers at the same instant, three rounds: all 9 lines every time, "
+                f"{donna[1] + team[1]} times two lines word for word the same in the same millisecond; a hand-over sent again stays once, "
+                "a line from before keeps the old key, the backup and the page tell two such lines apart")
+
     async def flow229(self) -> str:
         """F107, no Claude: the gate on a real reading of this shape: only the weekly windows, as the usage tool and a run's own stream
         give it. It's readable and nothing is kept of the old 5-hour; through the routine's real minute a job starts under the week's
@@ -26195,6 +26286,7 @@ FLOWS = {
     221: ("F102: a mail run that moves the marker back or drops a very important line is put back with an incident; red after 2 hours between 8:00 and midnight", False, "flow221"),
     220: ("F102: two processes adding 150 notes lose none; one lock across processes for the to-do list, the notes, the games, the coaching file and the mail list", False, "flow220"),
     229: ("F107: the gate on a real reading with only the weekly windows: readable, on the week, the reserve and the age hold, the 5-hour back with a reading that has it", False, "flow229"),
+    230: ("F108: three writers at the same instant, 20 runs on Donna's line and the team line: all 9 lines land; a real repeat stays out", False, "flow230"),
     228: ("F107: Ultra with no 5-hour window: the past stays Max 5x, estimates, planning, nights and page on the week with no 5-hour left, then back on Max 5x with all of it", False, "flow228"),
     227: ("F102: the status page never hangs on a slow script: the last answer at once, one run at a time", False, "flow227"),
     226: ("F100: his say-so for a daytime build: a job's process, the old variable and a made-up ticket refused, only the status page's own tap counts", False, "flow226"),

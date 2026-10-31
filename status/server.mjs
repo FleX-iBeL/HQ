@@ -468,7 +468,7 @@ async function directThread(dir = DIRECT_DIR) {
   const out = await threadLines(join(dir, 'thread.jsonl'));
   const mine = await threadLines(join(dir, 'thread.here.jsonl'));
   if (mine.length) {
-    const key = (m) => `${Math.round(Number(m.at || 0) * 1000)}|${m.from}|${m.text}`;
+    const key = (m) => m.id || `${Math.round(Number(m.at || 0) * 1000)}|${m.from}|${m.text}`; // F108: a line's own id, the old key for a line from before
     const have = new Set(out.map(key));
     const extra = mine.filter((m) => !have.has(key(m)));
     if (extra.length) return out.concat(extra).sort((a, b) => Number(a.at || 0) - Number(b.at || 0)).slice(-200);
