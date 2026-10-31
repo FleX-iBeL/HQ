@@ -1196,7 +1196,8 @@ def pause_running(job, s):
 def usage_overrun(job, s):
     """H172: every minute while a job runs, its usage so far from the newest reading. At about four times the top of its estimate
     (H220: the estimate times how unsure it is, at most twice; H221 four times the estimate; twice before) it's
-    paused for good: its chat ends, it isn't started again by itself (a call resumes or drops it), and Moneypenny texts him (H266).
+    paused for good: its chat ends, it isn't started again by itself and can't be resumed (F100: the item gets split), and Moneypenny
+    texts him (H266).
     True when it paused it. The stop at the line itself stays the job's own (H113)."""
     import usagecost
     n = job["n"]
@@ -1216,11 +1217,11 @@ def usage_overrun(job, s):
     quiet.clear_request()
     line = "5-hour" if o["line"] == "five" else "weekly"
     why = (f"used {o['used']:g}% of the {line} usage, about four times the top of its estimate of {o['est']:g}% "
-           f"(top {o.get('top', o['est']):g}%); paused for good: "
-           f"a call resumes it (jobs.py resume {n}) or drops it (jobs.py stop {n})")
+           f"(top {o.get('top', o['est']):g}%); paused for good: it can't be resumed, the item gets split, "
+           f"and a call takes it off the list (jobs.py stop {n})")
     status("STOPPED", f"Job {n} paused: it used about four times the top of its estimated usage", f"job {n} {why}")
     incidents.past("jobs", time.time(), time.time(), f"Job {n} {why}",
-                   [(time.time(), "Ended its chat; it waits for a call, and Moneypenny told him")])
+                   [(time.time(), "Ended its chat; it stops for good, and Moneypenny told him")])
     log(f"job {n} paused: {why}")
     try:
         import pings

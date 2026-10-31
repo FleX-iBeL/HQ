@@ -6575,7 +6575,7 @@ U.start(n); at(31, 25, t0 + 8 * 3600); o["back"] = U.track(n)["so_far"]
 o["over"] = [U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 8, "weekly": 0.2}}),
              U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 7, "weekly": 0.2}}),  # H221: twice no longer pauses
              U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 2, "weekly": 1.2}}),
-             U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 9, "weekly": 0}, "raised": 2}),  # F100: a resume raises the limit
+             U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 9, "weekly": 0}, "raised": 2}),  # F100: the usage pause doesn't rise
              U.overrun({"est": {"five": 2, "weekly": 0.2}, "so_far": {"five": 9, "weekly": 0}, "late": True})]
 o["words"] = U.paused_words(7, "H7 on the HQ roadmap: the usage count. Read the H7 row", {"line": "five", "used": 5, "est": 2})
 # H220: the top of the estimate: how unsure it is (the jobs' range, the longest guess), at most twice; the pause is at four times it.
@@ -6613,7 +6613,7 @@ print(json.dumps(o, default=str))
         need(o2["a"] == {"five": 3, "weekly": 1} and o2["reset"]["five"] == 5, f"H172: the usage so far is wrong, or a reset isn't counted: {o2}")
         need(o2["held"]["five"] == 5 and o2["back"]["five"] == 6, f"H172: the usage while held counts, or it doesn't count on after: {o2}")
         need(o2["over"][0]["line"] == "five" and o2["over"][1] is None and o2["over"][2]["line"] == "weekly"
-             and o2["over"][3] is None and o2["over"][4] is None, f"H172: the pause at about four times the estimate is off (H221): {o2['over']}")
+             and o2["over"][3]["line"] == "five" and o2["over"][4] is None, f"H172: the pause at about four times the estimate is off (H221): {o2['over']}")
         need(o2["top"][:3] == [1.5, 1.8, 2.0] and o2["top"][3] is None and o2["top"][4]["line"] == "five" and o2["top"][4]["top"] == 4.0,
              f"H220: the top of the estimate, or the pause at four times it, is off: {o2['top']}")
         need("four times" in o2["words"] and "the usage count" in o2["words"] and "H7" not in o2["words"] and "won't start again by itself" in o2["words"],
@@ -6698,9 +6698,12 @@ console.log(JSON.stringify(o));
         need(not t37 or (t37.get("paused", 0) >= 1 and "parked for a call" in (t37.get("counts") or "")),
              f"F37: the plan's total doesn't say the paused job is parked: {t37}")
         jobs2("resume", "999", ok=False)
+        r9 = jobs2("resume", str(w1), ok=False)
+        need(w1 in [j["n"] for j in json.loads(jobs2("next")).get("parked") or []], f"F100: a job paused for its usage was resumed: {r9}")
+        jobs2("mark", str(w1), "boxed: it ran past its box")
         r9 = jobs2("resume", str(w1))
-        need("carries on" in r9 and any(j["n"] == w1 and j["state"].startswith("held") for j in json.loads(jobs2("next"))["waiting"])
-             and json.loads((est_dir / "job-usage.json").read_text())[str(w1)].get("raised") == 2, f"H172: resume doesn't put it back in line: {r9}")
+        need("carries on" in r9 and any(j["n"] == w1 and j["state"].startswith("held") for j in json.loads(jobs2("next"))["waiting"]),
+             f"H172: resume doesn't put a boxed job back in line: {r9}")
         jobs2("mark", str(w1), "paused: used about four times its estimated usage")
         need("cancelled" in jobs2("stop", str(w1)), "H172: a paused job can't be dropped")
         # Past jobs: their usage from the saved readings, where a reading is close enough to both ends.
@@ -14916,16 +14919,16 @@ print("OK")
         return "a 3-day-old reading stops the gate and says so, the minute starts nothing, a fresh one starts it"
 
     async def flow214(self) -> str:
-        """F100, no Claude: a resume raises the limit and never removes it. A job paused at four times the top of its estimate
-        carries on after resume N, and pauses again at twice that, through the routine's real minute with its own tokens
-        counted; a boxed job resumes with twice its box, what it used counted; resumed twice, four times. A resume also
-        starts at night and in the day, on his word."""
+        """F100, no Claude: a resume gives a boxed job more time and turns, at most twice, never past four times its first estimate,
+        and never touches the usage pause. A job paused at four times the top of its estimate can't be resumed: the refusal says it
+        used too much and the item gets split, and it stays parked. A boxed job resumed starts, also at night, and is still
+        paused at the same four times the top. A job held at a usage line carries on as before."""
         import subprocess as _sp
         ws, env, d = self._wall_env("resume")
         jobs, minute, state, new = self._wall_tools(env, d, ws)
         self._wall_usage(env)
         n = new("Build the thing on the made-up page")
-        child = r'''
+        child = r"""
 import json, os, sys, time, subprocess
 sys.path.insert(0, sys.argv[1] + "/routine")
 import usagecost as U, wall
@@ -14933,48 +14936,46 @@ def need(ok, why):
     if not ok:
         print("FAIL " + why); sys.exit(1)
 n = int(sys.argv[2])
-def rec(used, raised=None):
-    r = {"n": n, "started": 1, "running": True, "spent": {}, "seg": {}, "last": {}, "own": {"five": used, "weekly": 1.0},
-         "est": {"five": 2.0, "weekly": 1.0, "minutes": 10, "top": 1}}
-    return {**r, **({"raised": raised} if raised else {})}
+def rec(used, **more):
+    return {"n": n, "started": 1, "running": True, "spent": {}, "seg": {}, "last": {}, "own": {"five": used, "weekly": 1.0},
+            "est": {"five": 2.0, "weekly": 1.0, "minutes": 10, "top": 1}, **more}
 need(U.overrun(rec(8.0)), "no pause at four times")
 need(not U.overrun(rec(7.9)), "paused below four times")
-U._save({str(n): rec(8.0)})
+need(U.overrun(rec(8.0, raised=4)) and U.overrun(rec(8.0, allowed=True)), "a mark on the count raised the usage pause")
+need(not hasattr(U, "allow"), "something can still raise the usage pause")
 print("OK")
-'''
+"""
         r = _sp.run([sys.executable, "-c", child, str(ROOT), n], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
         need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-800:])
         need(jobs("mark", n, "paused: used about four times the top of its estimated usage").returncode == 0, "no mark")
         r = jobs("resume", n)
-        need(r.returncode == 0 and "raised" in r.stdout, r.stdout + r.stderr)
-        child = r'''
-import json, os, sys, time, subprocess
-sys.path.insert(0, sys.argv[1] + "/routine")
-import usagecost as U, wall
-def need(ok, why):
-    if not ok:
-        print("FAIL " + why); sys.exit(1)
-n = sys.argv[2]
-d = U._load()
-need(d[n].get("raised") == 2 and not d[n].get("allowed"), f"not raised: {d[n]}")
-for used, want in ((8.0, False), (15.9, False), (16.0, True)):
-    r = {**d[n], "own": {"five": used, "weekly": 1.0}, "running": True}
-    need(bool(U.overrun(r)) == want, f"{used}: {U.overrun(r)}")
-print("OK")
-'''
-        r = _sp.run([sys.executable, "-c", child, str(ROOT), n], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
-        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-800:])
-        # through the minute: resumed, it starts, and at its raised limit it's paused again
+        need(r.returncode != 0 and "used too much" in r.stderr and "split" in r.stderr, f"a job paused for its usage: {r.stdout} {r.stderr}")
+        need(state(n).startswith("paused"), f"the refusal moved the job: {state(n)}")
+        need(jobs("stop", n).returncode == 0 and state(n).startswith("cancelled"), "a call can't take it off the list")
+        # a boxed job goes on, also at night, and the usage pause is the same one
+        n1 = new("Build a boxed thing on the made-up page")
+        need(jobs("mark", n1, "running since 00:00").returncode == 0 and jobs("boxed", n1, "it ran past its box").returncode == 0, "no box")
+        r = jobs("resume", n1)
+        need(r.returncode == 0 and "more time" in r.stdout, r.stdout + r.stderr)
         r = minute()
-        need(state(n).startswith("running"), f"a resumed job doesn't start at night: {state(n)} {r['log'][-2:]}")
+        need(state(n1).startswith("running"), f"a resumed job doesn't start at night: {state(n1)} {r['log'][-2:]}")
         rec = json.loads((Path(env["HQ_ESTIMATES"]) / "job-usage.json").read_text())
-        rec[n].update({"own": {"five": 16.0, "weekly": 1.0}, "running": True})
+        rec[n1].update({"own": {"five": 4 * float(rec[n1]["est"]["five"]) + 5, "weekly": 1.0}, "running": True, "est": {**rec[n1]["est"], "top": 1}})
         (Path(env["HQ_ESTIMATES"]) / "job-usage.json").write_text(json.dumps(rec))
-        env_track = {"HQ_FAKE_NOTHING": "1"}
-        (Path(env["HQ_JOB_RUN"]) / "job.json").write_text(json.dumps({"n": int(n), "pid": 999999, "started": time.time() - 10}))
+        (Path(env["HQ_JOB_RUN"]) / "job.json").write_text(json.dumps({"n": int(n1), "pid": 999999, "started": time.time() - 10}))
         (Path(env["HQ_JOB_RUN"]) / "job.pid").write_text("999999")
-        r = minute(**env_track)
-        need(state(n).startswith("paused"), f"it never paused at its raised limit: {state(n)} {r['log'][-3:]}")
+        r = minute()
+        need(state(n1).startswith("paused"), f"a resume moved the usage pause: {state(n1)} {r['log'][-3:]}")
+        r = jobs("resume", n1)
+        need(r.returncode != 0 and "used too much" in r.stderr, f"resumed after a usage pause: {r.stdout}")
+        # held at a usage line stays its own stop
+        need(jobs("stop", n1).returncode == 0, "no stop")
+        n3 = new("Build a held thing on the made-up page")
+        need(jobs("mark", n3, "held: usage over the line").returncode == 0, "no mark")
+        minute()  # at night it waits for the morning, in line, never paused
+        need(state(n3) == "held: usage over the line" and n3 in [str(j["n"]) for j in json.loads(jobs("next").stdout)["waiting"]],
+             f"a job held at a usage line isn't waiting to carry on: {state(n3)}")
+        need(jobs("stop", n3).returncode == 0, "no stop")
         # a boxed job
         n2 = new("Build another thing on the made-up page")
         need(jobs("mark", n2, "running since 00:00").returncode == 0 and jobs("boxed", n2, "it ran past its box").returncode == 0, "no box")
@@ -15036,14 +15037,11 @@ need(box(9003, None, 60, 4, used=240)["minutes"] == 0.1, "no estimate, used up")
 # the first estimate is kept, whatever the estimate says later
 wall.box_for({"n": 9004, "text": "a job nobody estimated"})
 need(wall._boxes()["9004"]["first_box"] == 60 and wall._boxes()["9004"]["first_est"] is None, "the first box isn't kept")
-# the usage pause: twice, then it stops rising
-r = {"est": {"five": 2.0, "weekly": 1.0, "top": 1}, "own": {"five": 31.9, "weekly": 1.0}, "raised": 4}
-need(not U.overrun(r) and U.overrun({**r, "own": {"five": 32.0, "weekly": 1.0}}), "the pause after two resumes isn't sixteen times the top")
 print("OK")
 '''
         r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
         need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-800:])
-        return "at most two resumes, a third refused in plain words, never past four times the first estimate, the first box the floor, 240 with no estimate, the pause at sixteen times the top"
+        return "a job paused for its usage can't be resumed, a boxed one twice, a third refused in plain words, never past four times the first estimate, the first box the floor, 240 with no estimate, the usage pause stays where it was"
 
     async def flow215(self) -> str:
         """F100, no Claude: one real pause. Through the routine's real minute: pause holds the running job (it carries on at on, in
@@ -26205,7 +26203,7 @@ FLOWS = {
     217: ("F100: near the reserve a team job is refused, his to turn; cycles before the team, a bug ahead of the features, three items in progress at most, five a night with each test run counted", False, "flow217"),
     216: ("F100: no build in the day without his say-so, kept with who and when; a held job doesn't restart at night unless planned", False, "flow216"),
     215: ("F100: one real pause: the running job held, nothing new, no reviewer and no first look; on brings it back", False, "flow215"),
-    214: ("F100: a resume raises the limit and never removes it: paused again at twice, the box twice", False, "flow214"),
+    214: ("F100: a resume gives a boxed job more time, twice at most, never past four times its first estimate; a job paused for its usage can't be resumed and that pause never rises", False, "flow214"),
     213: ("F100: through the routine's minute with a stand-in gate and the real one: a reading over 30 minutes old stops the start and says its age", False, "flow213"),
     212: ("F100: every job has a box in minutes and turns, past it boxed not done and not started again, 60 with no estimate, the test run not counted", False, "flow212"),
     211: ("F107: the estimates know their plan: every past job says Max 5x, on Max 20x the percents are a quarter and the minutes stay, five jobs on it make its own rate, the old numbers come back, each line its own ratio, the report followed once, the planning names it", False, "flow211"),

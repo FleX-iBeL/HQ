@@ -32,7 +32,8 @@ What it does:
     the top of its estimate (OVER times; twice the estimate itself until H221, four times until H220; and at least
     OVER_MIN points more than the estimate, so a rounding of the readings doesn't do it) is paused for good: its chat
     ends, it isn't started again by itself, and Moneypenny texts him (H266) in plain words. A call lets it carry on (jobs.py resume
-    N, in its own chat, H113) or cancels it (jobs.py stop N).
+    N, in its own chat, H113) or cancels it (jobs.py stop N). F100: a resume is for a job stopped by its box: one paused for
+    its usage can't be resumed, it stops for good and the item gets split; a call drops it (jobs.py stop N).
   - H220 (21 October 2026): how sure the estimate is counts. Every pause so far (jobs 211, 248, 266, 281, 292) was a
     job whose usage was estimated from its computed minutes alone, while the first look, the call and the team itself
     had guessed it two to ten times longer, and they were right. The top of an estimate (top_factor) is the estimate
@@ -316,10 +317,8 @@ def plan_minute(log=None):
     the plan in use from now on. Only a change in what it reports counts, so a plan he set by hand isn't overruled."""
     s, rep = plan_settings(), reported_plan()
     if not s:
-        _save_plan({"plan": BASE_PLAN, "since": 0, "by": "first start", "reported": rep,
-                    "changes": [{"plan": BASE_PLAN, "since": 0, "by": "first start"}]})
-        if rep and rep != BASE_PLAN:  # everything so far ran on Max 5x; what Claude Code reports counts from now on
-            set_plan(rep, by="Claude Code reports it")
+        _save_plan({"plan": rep or BASE_PLAN, "since": 0, "by": "first start", "reported": rep,
+                    "changes": [{"plan": rep or BASE_PLAN, "since": 0, "by": "first start"}]})
         return
     if not rep or rep == s.get("reported"):
         return
@@ -847,8 +846,7 @@ def overrun(rec):
     if not rec or (rec.get("late") and not rec.get("own")) or not rec.get("est"):
         return None
     so_far = rec.get("so_far") or _so_far(rec)
-    # F100: a resume raises the limit, never removes it ("allowed" is the mark of a resume from before)
-    f = float(rec["est"].get("top") or 1) * float(rec.get("raised") or (2 if rec.get("allowed") else 1))
+    f = float(rec["est"].get("top") or 1)  # F100: this limit never rises: a resume only gives a boxed job more time and turns
     for k in KEYS:
         est, used = float(rec["est"].get(k) or 0), so_far.get(k)
         if used is None or (k == "five" and not five_on()):  # F107: no 5-hour limit, no pause on it
@@ -918,19 +916,6 @@ def pause_backtest(hist=None):
     return out
 
 
-def allow(n):
-    """jobs.py resume N: he let the paused job carry on. F100: at a raised limit, RAISE times the one it had, never none. With at
-    most two resumes it comes to sixteen times the top of the estimate, and there it stops rising."""
-    import wall
-    d = _load()
-    rec = d.get(str(n)) or {"n": n, "spent": {k: 0 for k in KEYS}, "seg": {}, "last": {}, "running": False}
-    rec["raised"] = float(rec.get("raised") or 1) * wall.RAISE
-    rec["running"] = False
-    d[str(n)] = rec
-    _save(d)
-    return rec
-
-
 def forget(n):
     d = _load()
     if d.pop(str(n), None) is not None:
@@ -946,16 +931,12 @@ def short_what(text):
     return s.strip()[:120]
 
 
-def _what_next(n):
-    import wall
-    return wall.what_next(n)
-
-
 def paused_words(n, text, o):
     """Moneypenny's facts (H266) for a paused job: plain, everyday words (the text is sent as it is when she can't compose)."""
     line = "the five-hour usage" if o["line"] == "five" else "the weekly usage"
     return (f"Heads up: I paused one of the team's jobs, {short_what(text)}. It had used about {o['used']:g}% of "
-            f"{line}, roughly four times the most it was expected to take, so I stopped it before it burns more. {_what_next(n)}")
+            f"{line}, roughly four times the most it was expected to take, so I stopped it before it burns more. It won't start again by itself: "
+            f"that's too much to carry on, so it stops here for good. What it wrote stays, and the item needs splitting.")
 
 
 # ---------- past jobs: from the saved readings ----------

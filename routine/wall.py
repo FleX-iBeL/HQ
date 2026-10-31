@@ -7,11 +7,13 @@ What's here, read by the routine's minute (tick.py), the runner (runjob.py) and 
   - the box: every job a limit in minutes and turns from its estimate's latest end; a job with no estimate 60 minutes (his
     words, 31 October 2026: "up to you, if you think 60 is good"). It counts the job's own work, not the test run that proves
     it (proof.py marks that time), so a build is never stopped by its own tests. Past it: `boxed`, parked for a call.
-  - a resume raises the box, and the usage pause, RAISE times; it never takes them away. At most two resumes, then the job stops for
-    good and the item gets split, and in all its time never goes past four times its first estimate. His words, 31 October 2026:
-    "yes stop after 2 resumes sound good, if that means in total it could get 4x it's initial estimate." The first box stands when four
-    times the estimate is smaller than it; a job with no estimate gets 240 minutes in all. Turns follow the same limit. The usage
-    pause rises with the two resumes and stops there: four times the top of the estimate at first, sixteen times after two.
+  - a resume gives a job stopped by its box more time and turns, RAISE times; it never takes the limit away. At most two resumes,
+    then the job stops for good and the item gets split, and in all its time never goes past four times its first estimate. His
+    words, 31 October 2026: "yes stop after 2 resumes sound good, if that means in total it could get 4x it's initial estimate." The
+    first box stands when four times the estimate is smaller than it; a job with no estimate gets 240 minutes in all. Turns follow
+    the same limit. The usage pause is another stop and doesn't rise: four times the top of the estimate (H220, H221), and a job
+    paused for its usage can't be resumed: it stops for good and the item gets split. Held at a usage stop line (H113) is
+    a third thing: that job carries on by itself when there's room.
   - his day: between 8:00 and 22:00 no build starts without his stored say-so, with who and when (jobs.py now N).
   - a held job doesn't restart at night unless it was planned for the night, or he resumed it himself.
   - at most WIP items in progress: the next build waits until one is through QA.
@@ -219,6 +221,12 @@ def no_resume(n) -> str | None:
         return (f"Job {n} has used all its time, {MOST_TIMES} times its first estimate at the most, so it stops here for good. What it "
                 "wrote stays. The item gets split into smaller pieces on the planning.")
     return None
+
+
+def used_too_much(n) -> str:
+    """What jobs.py resume N says for a job paused for its usage."""
+    return (f"Job {n} used too much of the usage, about four times the most it was expected to take, so it can't be resumed. It stops "
+            f"here for good. What it wrote stays. The item gets split into smaller pieces on the planning; stop {n} takes it off the list.")
 
 
 def what_next(n) -> str:

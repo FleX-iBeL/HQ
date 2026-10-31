@@ -736,8 +736,8 @@ def _extensions_rule() -> str:
 # so HQ's own always lead; the update's clash check reads these names.
 KINDS = {
     "paused": "You stopped one of the team's jobs because it used far more of his usage than it should have (the facts "
-              "say which and how much). One or two short sentences: what got paused in everyday words, why, and that "
-              "it waits for him to say carry on or drop it. No job numbers.",
+              "say which and how much). One or two short sentences: what got stopped in everyday words, why, and what "
+              "happens next as the facts say it: it waits for his word, or it stops for good and the item gets split. No job numbers.",
     "estimates": "Every Friday before the sprint planning: how the team's time estimates held this week (the facts give "
                  "the numbers). Two or three short sentences: how many landed inside their range, plainly when it's "
                  "below eight in ten, and which kinds of work missed. Numbers are fine here, he plans with them.",

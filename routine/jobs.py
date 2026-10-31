@@ -8,7 +8,8 @@ all read the same place. One line per job:
 States: ready · running since 21:31 · stop asked · stopped 21:40 · done 21:45 ·
 held: usage over the line · ended 21:45 without a done mark · cancelled 21:33 ·
 paused: used about four times the top of its estimated usage (H172, H221 (was twice), H220 (the top: the estimate, up to twice it when
-unsure): not started again by itself; resume N or stop N from a call).
+unsure): not started again by itself, can't be resumed (F100): the item gets split; stop N from a call takes it off the list).
+boxed: ran past its box in minutes or turns (F100): resume N, at most twice, or stop N.
 ", past the line" after the state: the user's say-so on a call to go past the 5-hour usage line, for that job only.
 The weekly line always counts, also for such a job (F13, 10 October 2026).
 The waiting jobs (ready or held) run in the order they stand on the list, top first (H39, 10 October 2026):
@@ -68,9 +69,9 @@ usage (from the workspace):
                                                            went wrong, kept out of the estimates; mistakes lists them
   python3 "routine/jobs.py" notes N                        the job's own chat (H283): its notes, the new ones marked
                                                            read (with the time); "No notes." when there are none
-  python3 "routine/jobs.py" resume N                       a job paused for using about four times the top of its estimated usage,
-                                                           or boxed, carries on in its own chat at raised limits (H172, F100); at most
-                                                           twice, then it stops for good and the item gets split; stop N drops it
+  python3 "routine/jobs.py" resume N                       a boxed job carries on in its own chat with more time and turns (H172, F100);
+                                                           at most twice, then it stops for good and the item gets split; a job
+                                                           paused for its usage can't be resumed; stop N drops it
   python3 "routine/jobs.py" off | on                       jobs from calls off or on
   python3 "routine/jobs.py" pause [WHY]                    F100: everything holds: the running job is held within a minute,
                                                            nothing new starts, no reviewer or first look starts; on ends it
@@ -404,7 +405,7 @@ def waiting(j):
 
 def parked(j):
     """F37: a job paused for its usage (H172) or boxed (F100) is parked: neither running nor waiting, never started by
-    itself, on the list until a call resumes it (resume N) or drops it (stop N). Nothing waits on it."""
+    itself, on the list until a call drops it (stop N) or, when it was boxed, resumes it (resume N). Nothing waits on it."""
     return j["state"].startswith(("paused", "boxed"))
 
 
@@ -1027,14 +1028,16 @@ def main(argv):
                 print("Nothing new since you last read them.")
             return
         if cmd == "resume":
-            # H172: he lets a job paused for its usage or boxed carry on: it waits in line again like a held job (its own
-            # chat, H113). F100: its limits are raised, never removed.
+            # H172: he lets a stopped job carry on: it waits in line again like a held job (its own chat, H113). F100: a boxed
+            # job gets more time and turns, never no limit; one paused for its usage can't be resumed.
             if not args or not args[0].isdigit():
                 sys.exit("Usage: resume N")
             j = find(jobs, int(args[0]))
             if not parked(j):
                 sys.exit(f"Job {j['n']} is {j['state']}; only a paused or boxed job can be resumed.")
             import wall
+            if j["state"].startswith("paused: used"):
+                sys.exit(wall.used_too_much(j["n"]))
             no = None if wall.off() else wall.no_resume(j["n"])  # his words: "stop after 2 resumes"
             if no:
                 sys.exit(no)
@@ -1043,15 +1046,12 @@ def main(argv):
                 j["sayso"] = {"at": time.strftime("%Y-%m-%d %H:%M"), "who": "a call", "words": "resumed"}
             write(text, jobs, on)
             try:
-                import usagecost
-                import wall
-                usagecost.allow(j["n"])
                 wall.raise_box(j["n"])
             except Exception as e:
-                print(f"(couldn't raise its limits: {e!r})", file=sys.stderr)
+                print(f"(couldn't raise its limit: {e!r})", file=sys.stderr)
             place = [x["n"] for x in line_up(jobs)].index(j["n"]) + 1
             left = wall.MOST_RESUMES - ((wall._boxes().get(str(j["n"])) or {}).get("resumes") or 0)
-            print(f"Job {j['n']} carries on at raised limits: number {place} in line, in its own chat, when the usage leaves room. "
+            print(f"Job {j['n']} carries on with more time and turns: number {place} in line, in its own chat, when the usage leaves room. "
                   + (f"It can be resumed {left} more time." if left == 1 else "That was its last resume: past this it stops for good and the item gets split."
                      if left <= 0 else f"It can be resumed {left} more times."))
             return

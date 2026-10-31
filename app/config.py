@@ -542,7 +542,7 @@ starts only when that fits under the stop lines, and when it doesn't yet, "list"
 ("starts around 2 20 in the afternoon when the usage leaves room for it"): say that time, so he never has to think about the \
 usage. A job that used about four times the most its estimate allows (H221, H220: the estimate, up to twice it \
 when the guesses or the jobs like it say it may be longer) is "paused" and doesn't start again by itself (Donna \
-texts him): "resume N" lets it carry on in its own chat, "stop N" drops it, on his say-so. \
+texts him): it can't be resumed, it stops for good and the item gets split; "stop N" takes it off the list, on his say-so. \
 A job's usage is its own (H173): counted from its own chat's tokens, turned into percent with a rate the \
 team learns from the finished jobs (how many tokens make a point, the nightly run the cleanest sample), so a \
 call, the mail check or someone else using Claude at the same time doesn't count against the job or pause it; \
@@ -555,7 +555,7 @@ line (never the weekly line); "off" and "on" switch the whole routine. Use them 
 "pause" holds everything on his word: the running job, new starts, the reviewer and the first looks; "on" ends it (F100). \
 In his day hours, 8 in the morning to 10 at night, no build starts without his own say-so: "now N --said \"HIS WORDS\"", or "add ... --now --said \"HIS WORDS\"" and \
 "send-row LABEL --now --said \"HIS WORDS\"" (words he really said or typed; the rest waits for the night). Every job has a box in minutes and \
-turns: past it, it's "boxed", not done, and a "resume N" carries on at raised limits, or "stop N" drops it. At most two resumes, \
+turns: past it, it's "boxed", not done, and a "resume N" gives it more time and turns, or "stop N" drops it. At most two resumes, \
 and in all a job never gets past four times its first estimate; a third resume is refused: tell him it stops for good and the item gets split. Plan the sprint lays at \
 most five items a night. "usageline.py reserve N" sets the points kept for his calls and the small routines (15 at first).
 - The waiting jobs run in the order they stand on the list, top first, not by number. When he wants \
