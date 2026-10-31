@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import sys
 import time
 from pathlib import Path
 
@@ -48,6 +49,9 @@ import todo
 import tour
 import transcript
 from transcript import CallTranscript, now
+
+
+sys.path.insert(0, str(config.ROOT / "routine"))  # F103, F106: the ledger and the helper
 
 
 def _about(e: dict, what: str):

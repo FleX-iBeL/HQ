@@ -1210,6 +1210,9 @@ def _jobs_done_facts(seen: dict, roadmap: str) -> str:
         text = ""
     lines = []
     for n, what in sorted(seen.items(), key=lambda x: int(x[0])):
+        item = re.search(rf"^- Job {int(n)} · .* ⟪item (r-[0-9a-f]{{8}})⟫", text, flags=re.M)
+        if item:  # F103: the id the job's line holds
+            _on_record(item.group(1), "jobs", "sent")
         m = re.search(rf"^- Job {int(n)} · ([^·]+)·", text, flags=re.M)
         state = m.group(1).strip() if m else "finished"
         lines.append(f"- {what[:160]} ({state})")

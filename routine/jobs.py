@@ -669,6 +669,8 @@ def main(argv):
             if not said:
                 sys.exit("What's the feedback? Write it in a line or two.")
             text, label = feedback_row(text, said[:2000], by, bug, when, via)
+            import trail
+            trail.written(label, said, by=by or "")  # F103
             write(text, jobs, on)
             print(f"{label} is on the planning, under Feedback.")
             return
