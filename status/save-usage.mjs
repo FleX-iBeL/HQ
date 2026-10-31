@@ -76,7 +76,8 @@ if (process.argv.includes('--gate')) {
   const stale = noWall ? null : staleWords(saved, now);
   if (process.argv.includes('--line')) {
     if (stale || !saved?.readable) process.exit(0);
-    const v = usageVerdict(saved, lines, now, { weeklyOnly });
+    const held = process.argv.includes('--reserve') && !noWall ? reserveOf(roadmapText) : 0;
+    const v = usageVerdict(saved, lines, now, { weeklyOnly, reserve: held });
     console.log(v.stop ? `STOP. ${v.reason}` : 'OK to go on.');
     process.exit(v.stop ? 2 : 0);
   }

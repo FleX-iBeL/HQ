@@ -1165,7 +1165,7 @@ def at_the_line(job, s):
     """F100: a headless job no longer reads the usage itself, so the routine holds it at the line (H113 stays: it carries on in
     its own chat). The reading comes from its own stream, every minute. True when it held it."""
     n = job["n"]
-    g = subprocess.run([NODE, os.path.join(JV, "status", "save-usage.mjs"), "--gate", "--line"]
+    g = subprocess.run([NODE, os.path.join(JV, "status", "save-usage.mjs"), "--gate", "--line", "--reserve"]
                        + (["--weekly-only"] if job.get("past") else []), capture_output=True, text=True)
     if g.returncode == 0:
         return False
@@ -1263,6 +1263,9 @@ def on_backup():
     text = f"Runs on the main one, {peer}; this HQ is the backup"
     for key in ("mail", "jobs", "schedule"):
         routines.beat(key, state="ok", text=text, last=None, next=None, every=60, why="", detail=[], run="")
+    for key in ("maillist", "saving", "cycles"):  # F102: these run on the main only; never overdue here
+        if key in routines.read():
+            routines.beat(key, state="ok", text=text, last=None, next=None, every=60, why="")
     clear(GATE_NOTE, TRUST_NOTE)
 
 
@@ -1316,6 +1319,7 @@ def briefing_minute():
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
     import backend
     if not backend.on("briefing"):
+        routines.drop("briefing")
         return
     import briefing
     briefing.write()

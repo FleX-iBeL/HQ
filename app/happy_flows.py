@@ -2653,7 +2653,7 @@ end tell"""], timeout=20)
         need("move N top" in jobs("--help"), "--help doesn't say how to move a job")
         # The routine takes the first of the line, not the oldest ready one.
         tick = (jv / "routine/tick.py").read_text()
-        need('line = q.get("waiting")' in tick and "job = line[0]" in tick and 'ready = q["ready"]' not in tick,
+        need('line = q.get("waiting")' in tick and "for cand in wall.order(line):" in tick and 'ready = q["ready"]' not in tick,
              "the routine doesn't take the top of the line")
         # The status page numbers the waiting jobs in their order.
         js = f"""import {{ parseRoadmap }} from {json.dumps(str(jv / 'status/parse.mjs'))};
@@ -4145,7 +4145,7 @@ console.log(JSON.stringify({{ problems: r.problems, state: r.state, phases: r.ph
         tick = (jv / "routine/tick.py").read_text()
         # H99: every minute with nothing running it asks (promote itself keeps the job list first, untagged).
         i_prom = tick.index("did = schedule_promote()")
-        need(tick.index("    if not q[\"on\"]:\n        return") < i_prom < tick.index("job = line[0]") and "H99" in tick,
+        need(tick.index("    if not q[\"on\"]:\n        return") < i_prom < tick.index("for cand in wall.order(line):") and "H99" in tick,
              "the routine doesn't ask the scheduler before it picks a job")
         need("schedule_line()" in tick, "the scheduler has no routine line")
         # The status page reads it and shows it, with its own routine line.
@@ -25081,7 +25081,7 @@ rb routine/tick.py; ra routine/tick.py
 [ "$(acting "$T/B")" = main ] && [ "$(acting "$T/A")" = backup ] || fail "after the choice: B $(acting "$T/B"), A $(acting "$T/A")"
 lines A | grep -q 'Backup (laptop); vps is the main one' || fail "the backup's line doesn't say so"
 lines A | grep -q '"text": "Runs on the main one, vps; this HQ is the backup"' || fail "the backup's mail, jobs and scheduler lines don't say they run on the main"
-lines B | grep -q '"text": "Main (vps)"' || fail "the main's line doesn't say so"
+lines B | grep -q '"text": "Main (vps)' || fail "the main's line doesn't say so"
 echo "OK the choice of main reaches the other one; the backup's mail check, jobs and scheduler say they run on the main"
 
 # On the backup: a call's job and planned item go to the main; nothing is committed.

@@ -39,6 +39,28 @@ def real_roadmap() -> str:
                             or os.path.join(os.path.realpath(os.path.join(HQ, "workspace")), "HQ", "roadmap.md"))
 
 
+# F102: what a key looks like, for HQ's privacy check, a commit of the workspace and a transcript's lines.
+KEY_PATTERNS = [
+    r"sk-ant-[A-Za-z0-9_-]{10,}",
+    r"\bgh[pousr]_[A-Za-z0-9]{20,}",
+    r"github_pat_[A-Za-z0-9_]{20,}",
+    r"\bxox[abpr]-[A-Za-z0-9-]{10,}",
+    r"\bAKIA[0-9A-Z]{16}\b",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+]
+_KEYS = re.compile("|".join(f"(?:{p})" for p in KEY_PATTERNS))
+
+
+def key_hits(text: str) -> list:
+    """The keys in a text, each cut to what says what it is."""
+    return [m.group(0)[:8] + "…" for m in _KEYS.finditer(text or "")]
+
+
+def mask_keys(text: str) -> str:
+    """Every key in a text masked, kept readable: a transcript line never holds one."""
+    return _KEYS.sub(lambda m: m.group(0)[:4] + "[masked]", text or "")
+
+
 def under_test() -> bool:
     return bool(os.environ.get("HQ_UNDER_TEST"))
 

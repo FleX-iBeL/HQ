@@ -1576,9 +1576,20 @@
         ['phone', 'Status page', 'Also on the phone'],
         ['call', 'Call line', 'For calls from the phone'],
         ['extensions', 'Your own routines', 'From your extensions, each at its own time (H235)'],
+        // F102: what used to fail without a sound; each shows once it has written a line.
+        ['maillist', 'Mail list', 'Checked by a program after every mail check; red when it has not been checked for 2 hours between 8:00 and midnight'],
+        ['saving', 'Saving to GitHub', 'What stays unsaved for ten minutes is committed by itself'],
+        ['review', 'Reviewer', 'A second pair of eyes on every item'],
+        ['qa', 'QA', 'Checks the team\'s work before it goes out'],
+        ['nightly', 'The night\'s tests', 'Every night'],
+        ['release', 'Release', 'Every night, when the night is green'],
+        ['cycles', 'The agents\' cycles', 'Their own runs, in their hours'],
+        ['briefing', 'Briefing', 'What the agents start with, every minute'],
+        ['routines-file', 'The routine lines', 'Their own file'],
         ['temp', 'Laptop temperature', 'Every minute, free, no password'],
         ['battery', 'Laptop battery', 'Every minute, free'],
       ].filter(([key]) => LAPTOP || (key !== 'temp' && key !== 'battery'));  // H92
+      const OPTIONAL_LINES = new Set(['maillist', 'saving', 'review', 'qa', 'nightly', 'release', 'cycles', 'briefing', 'routines-file']);
       /** H88: with a second HQ, a heartbeat line for each computer (Laptop, VPS), right after Main or backup and
           the sync, in the order of their names; its graph bar too. Taken from the lines themselves. */
       let beats = [];
@@ -1605,7 +1616,7 @@
         const card = el('div', 'card');
         for (const [key, name, about] of routineList(all)) {
           const x = all[key];
-          if ((key === 'role' || key === 'sync' || key === 'extensions') && !x) continue;  // H235: only with routines of their own  // H56.3/H56.4: an HQ on its own says nothing about them
+          if ((key === 'role' || key === 'sync' || key === 'extensions' || OPTIONAL_LINES.has(key)) && !x) continue;  // H235: only with routines of their own  // H56.3/H56.4: an HQ on its own says nothing about them
           let state = x?.state ?? 'off';
           let text = x?.text ?? 'No line yet';
           const late = x && now - x.at > (x.every ?? 60) * 2 + 60;

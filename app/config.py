@@ -553,7 +553,7 @@ which one and what the estimates are based on; "plan ratio \"Max 20x\" five=4 we
 "stop" ends the running job, "stop N" cancels waiting job N; "overrule N" lets job N past the 5-hour usage \
 line (never the weekly line); "off" and "on" switch the whole routine. Use them when he asks. \
 "pause" holds everything on his word: the running job, new starts, the reviewer and the first looks; "on" ends it (F100). \
-Between 8:00 and 22:00 no build starts without his own say-so: "now N --said \"HIS WORDS\"", or "add ... --now --said \"HIS WORDS\"" and \
+In his day hours, 8 in the morning to 10 at night, no build starts without his own say-so: "now N --said \"HIS WORDS\"", or "add ... --now --said \"HIS WORDS\"" and \
 "send-row LABEL --now --said \"HIS WORDS\"" (words he really said or typed; the rest waits for the night). Every job has a box in minutes and \
 turns: past it, it's "boxed", not done, and a "resume N" carries on at raised limits, or "stop N" drops it. Plan the sprint lays at \
 most five items a night. "usageline.py reserve N" sets the points kept for his calls and the small routines (15 at first).

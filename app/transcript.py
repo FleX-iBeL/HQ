@@ -24,8 +24,11 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import config
-import privacy  # F102: a key said or pasted on a call is never written down whole
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+import hqpaths  # noqa: E402  F102: a key said or pasted on a call is never written down whole
+import config  # noqa: E402
 
 TZ = ZoneInfo(config.TIMEZONE)
 
@@ -73,7 +76,7 @@ class CallTranscript:
         if self.path is None:
             return
         with open(self.path, "a", encoding="utf8") as f:
-            f.write(privacy.mask_keys(text))
+            f.write(hqpaths.mask_keys(text))
             f.flush()
 
     def _line(self, text: str) -> None:

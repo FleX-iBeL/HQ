@@ -98,15 +98,13 @@ def push():
 
 
 def _with_keys(files):
-    """F102: the files with a key in them (privacy.key_hits), which stay out of a commit."""
-    sys.path.insert(0, os.path.join(JV, "app"))
-    import privacy
+    """F102: the files with a key in them, which stay out of a commit."""
     out = {}
     for rel in files:
         p = os.path.join(FOLDER, rel)
         try:
-            if os.path.isfile(p) and not privacy.BINARY.search(rel) and os.path.getsize(p) < 20_000_000:
-                hit = privacy.key_hits(open(p, encoding="utf8", errors="ignore").read())
+            if os.path.isfile(p) and os.path.getsize(p) < 20_000_000:
+                hit = hqpaths.key_hits(open(p, encoding="utf8", errors="ignore").read())
                 if hit:
                     out[rel] = hit[0]
         except OSError:

@@ -110,7 +110,7 @@ def why_not(job, jobs, now=None) -> str | None:
     if off() or _is_cycle(job):
         return None
     day = daytime(now)
-    if job["state"].startswith("held") and not day and not job["state"].startswith("held: resumed") and not planned_night(job):
+    if job["state"].startswith("held") and not day and not job["state"].startswith(("held: resumed", "held: paused")) and not planned_night(job):
         return "held, and a held job doesn't restart at night unless it was planned for the night; it can go on in the morning"
     if not is_build(job):
         return None

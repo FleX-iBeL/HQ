@@ -23,35 +23,19 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+import hqpaths  # noqa: E402  F102: what a key looks like, one list
+
 ROOT = Path(__file__).resolve().parent.parent
 BINARY = re.compile(r"\.(png|jpe?g|gif|ico|m4a|wav|mp3|onnx|bin|npz|zip|gz)$", re.I)
 
-KEYS = [  # F102: what a key looks like, also for a commit of the workspace and a transcript's lines
-    r"sk-ant-[A-Za-z0-9_-]{10,}",
-    r"\bgh[pousr]_[A-Za-z0-9]{20,}",
-    r"github_pat_[A-Za-z0-9_]{20,}",
-    r"\bxox[abpr]-[A-Za-z0-9-]{10,}",
-    r"\bAKIA[0-9A-Z]{16}\b",
-    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
-]
 GENERIC = [
     r"/Users/(?!you/|you\b|<)[A-Za-z0-9._-]+",
     r"\b[A-Za-z0-9-]+\.tail[0-9a-f]{4,}\.ts\.net\b",
     r"\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b(?!/)",
     r"\b[A-Za-z0-9._%+-]+@(?!example\.|users\.noreply\.github\.com|anthropic\.com)[A-Za-z0-9-]+\.[A-Za-z.]{2,}\b",
-    *KEYS,
+    *hqpaths.KEY_PATTERNS,
 ]
-_KEYS = re.compile("|".join(f"(?:{p})" for p in KEYS))
-
-
-def key_hits(text: str) -> list[str]:
-    """F102: the keys in a text, each cut to what says what it is."""
-    return [m.group(0)[:8] + "…" for m in _KEYS.finditer(text or "")]
-
-
-def mask_keys(text: str) -> str:
-    """F102: every key in a text masked, kept readable: a transcript line never holds one."""
-    return _KEYS.sub(lambda m: m.group(0)[:4] + "[masked]", text or "")
 
 
 def words(folder: Path | None = None) -> list[str]:
