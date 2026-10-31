@@ -1549,9 +1549,7 @@ def updating():
         u = json.load(open(os.path.join(JV, ".status", "update-run.json")))
     except (OSError, ValueError):
         return False
-    if u.get("state") == "updating" and alive(u.get("pid")) and time.time() - u.get("at", 0) < 1800:
-        return True
-    return gone_back()
+    return u.get("state") == "updating" and alive(u.get("pid")) and time.time() - u.get("at", 0) < 1800
 
 
 def gone_back():
@@ -1673,6 +1671,9 @@ def tick():
         mail(q, start_new=not handing_back)  # H30: on its own, also while a job runs
     except Exception as e:
         log(f"mail: {e!r}")
+    if gone_back():  # F104: the mail check goes on, the team waits
+        routines.beat("jobs", state="waiting", text="HQ went back a version: the team waits until it goes forward", every=60)
+        return
     try:
         mailguard.minute(q.get("mail", True), incidents, routines)  # F102: red when it hasn't been checked for 2 hours
     except Exception as e:

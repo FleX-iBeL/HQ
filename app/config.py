@@ -304,7 +304,7 @@ the team", "the team's on it", "the team's done". Never "job list", "queue", "jo
 changes. "Put it on the roadmap" means only the roadmap: write it there as its own numbered item with jobs.py write-row, nothing more. \
 "Give it to the team" (or "hand it to the team", "let the team do it") is his clear go: if it isn't on the roadmap \
 yet, put it there first as its own numbered item, then add it for the team with python3 "{HQ}/routine/jobs.py" add \
-"<the work in one self-contained line, with his words where they matter>" --kind <small|bigbuild|research|transcribe|release|other> \
+"<the work in one self-contained line, with his words where they matter>" --item <the row's label> --kind <small|bigbuild|research|transcribe|release|other> \
 --guess <your own guess in whole minutes> (H190), without asking him again. The planning's rank and estimates \
 (H269): python3 "{HQ}/routine/sprint.py" list gives every open row on the planning, the ranked ones first (1 the \
 top), each with about how long it takes and its share of the 5-hour and the weekly usage (an estimate, made like the \

@@ -176,6 +176,7 @@ def call_lines(p: str, base=None) -> list[dict]:
     h = _HEAD.search(text)
     agent = (h.group(1) or "").strip() if h else ""
     out = []
+    day = re.match(r"(\d{4}-\d\d-\d\d)-\d{4}", os.path.basename(p))
     for i, l in enumerate(text.splitlines(), 1):
         m = _LINE.match(l)
         if not m:
@@ -183,10 +184,18 @@ def call_lines(p: str, base=None) -> list[dict]:
         who = m.group(2).strip()
         if who.lower() == me:
             if "*(cancelled)*" not in m.group(4):
-                out.append({"n": i, "words": _TAIL.sub("", m.group(4)).strip(), "agent": agent, "at": None})
+                out.append({"n": i, "words": _TAIL.sub("", m.group(4)).strip(), "agent": agent, "at": _when(day, l)})
         elif m.group(3):  # HQ (Pepper): who took that turn on a three-way
             agent = m.group(3).strip()
     return out
+
+
+def _when(day, line: str) -> float | None:
+    """When a transcript's line was said: the call's day from its name, the time from the line."""
+    try:
+        return time.mktime(time.strptime(f"{day.group(1)} {line[2:7]}", "%Y-%m-%d %H:%M"))
+    except (AttributeError, ValueError):
+        return None
 
 
 def thread_lines(line: str, base=None) -> list[dict]:
@@ -231,7 +240,7 @@ def scan_call(p: str, base=None) -> list[dict]:
     for l in call_lines(p, base):
         kind = clear_kind(l["words"])
         if kind:
-            d = add(kind, l["agent"], l["words"], where=where, key=_key(where, l["n"]), base=base)
+            d = add(kind, l["agent"], l["words"], where=where, key=_key(where, l["n"]), at=l["at"], base=base)
             if d:
                 got.append(d)
     return got

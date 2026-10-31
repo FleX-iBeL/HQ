@@ -226,7 +226,7 @@ def _waiting_for(jobs: list, label: str, qa: bool) -> dict | None:
     for j in jobs:
         if j["state"].startswith(q.FINISHED):
             continue
-        if is_qa(j["text"]) == qa and job_label(j["text"]) == label:
+        if is_qa(j["text"]) == qa and ((j.get("item") or {}).get("label") or job_label(j["text"])) == label:  # F103
             return j
     return None
 
