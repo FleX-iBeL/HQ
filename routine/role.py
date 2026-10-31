@@ -76,7 +76,7 @@ PY = sys.executable or "/usr/bin/python3"
 # H203 (17 October 2026): also the to-do list (todo.py), the agent's reminders and notes (pings.py), and a call's or
 # chat's own edits to the files only the main writes (handover.py edit, see ONE_WRITER).
 WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place on the planning; piece 2: Plan the sprint; H271: its MoSCoW tag
-          "jobs": {"add", "add-row", "write-row", "feedback", "send-row", "tell", "stop", "overrule", "move", "on", "off", "mail-on", "mail-off", "mail-fast", "mail-hourly", "resume", "done"},  # F57: done only with --at is ever forwarded
+          "jobs": {"add", "add-row", "write-row", "feedback", "send-row", "tell", "stop", "overrule", "move", "on", "off", "pause", "now", "mail-on", "mail-off", "mail-fast", "mail-hourly", "resume", "done"},  # F57: done only with --at is ever forwarded
           "schedule": {"add", "cancel", "move", "priority", "every"},
           "todo": {"add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo", "plan", "unplan", "repeat"},
           "pings": {"appt", "remind", "remind-every", "remind-stop", "cancel", "note", "note-clear", "watch", "unwatch", "out", "out-stop", "nudge", "nudge-done", "nudge-later", "call", "call-cancel", "answered"},
@@ -94,7 +94,7 @@ SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "agenda": os.path.join(os.path.dirname(HERE), "app", "agenda.py"),
            "set_status": os.path.join(os.path.dirname(HERE), "status", "set-status.py"),  # F101
            "direct_line": os.path.join(os.path.dirname(HERE), "app", "direct_line.py")}  # H225, F58; the rest are routine/<script>.py
-PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main (who asked, for her notes)
+PASS_ENV = ("HQ_PINGS_BY", "HQ_SAYSO")  # what a handed request may carry over to the main (who asked, for her notes)
 
 # H203, in the user's words (call of 17 October 2026, 14:45): "i am even more confused, you give it to the server but
 # then also do it yourself? why?", then "ok, is there also other things you'd be better to hand over while that one

@@ -95,6 +95,26 @@ export function lineSettings(markdown) {
   };
 }
 
+/** F100: the points kept for his calls and the small routines, taken off each line for the cycles and the team. */
+export const RESERVE = 15;
+export function reserveOf(markdown) {
+  return Number(/\*\*Usage reserve:\s*(\d{1,2})\b/.exec(markdown ?? '')?.[1] ?? RESERVE);
+}
+
+/**
+ * F100, his words of 30 October 2026: "A usage reading counts as too old after 30 minutes. Then nothing new starts until a
+ * fresh one comes in." Why a saved reading is too old for the gate, in words, or null.
+ */
+export const STALE_MIN = 30;
+export function staleWords(reading, now = new Date()) {
+  if (!reading?.readable) return null;  // no reading at all has its own words in the verdict
+  const at = Date.parse(reading.checkedAt ?? '');
+  const min = Number.isFinite(at) ? Math.floor((now.getTime() - at) / 60000) : null;
+  if (min !== null && min <= STALE_MIN) return null;
+  const age = min === null ? 'of no known age' : min >= 2880 ? `${Math.floor(min / 1440)} days old` : min >= 120 ? `${Math.floor(min / 60)} hours old` : `${min} minutes old`;
+  return `The usage reading is ${age}, older than ${STALE_MIN} minutes: nothing new starts until a fresh one comes in.`;
+}
+
 /**
  * Where a moving line stands at a given moment, from its limit's reset time.
  * @returns {{ line: number, next: string | null, perHour: number } | null} next: when it leaves its floor
@@ -173,7 +193,7 @@ export function roomNeeded(key, minutes = START_MINUTES) {
  *   needs room under each line for the job's estimated usage `need` in points (H172; Weekly Fable takes the weekly
  *   one), else for its estimate of `minutes` at START_ROOM's rates (H141, roomNeeded)
  */
-export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = false, start = false, minutes, need } = {}) {
+export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = false, start = false, minutes, need, reserve = 0 } = {}) {
   if (!reading?.readable) return { stop: true, reason: 'The usage could not be read.' };
   if (!lines) return { stop: false, reason: '' };
   // A kept reading (F6) is old and from another session: shown, but never a stop.
@@ -182,7 +202,7 @@ export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = fa
     .filter((l) => !l.kept)
     .filter((l) => !weeklyOnly || /^weekly/i.test(l.label))
     .map((l) => {
-      const line = stopLine(l, lines, now).line;
+      const line = Math.round(10 * (stopLine(l, lines, now).line - reserve)) / 10;  // F100: the reserve stays out of it
       const key = lineKey(l.label) ?? 'five';
       const est = need ? Number(need[key] ?? need.weekly ?? 0) : null;
       const room = Math.round(10 * (line - l.percent)) / 10;
@@ -195,7 +215,7 @@ export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = fa
     reason: `${over
       .map((l) =>
         l.percent >= l.line
-          ? `${l.label} is at ${l.percent}%, its stop line is ${l.line}%`
+          ? `${l.label} is at ${l.percent}%, its stop line is ${l.line}%${reserve ? ` with the reserve of ${reserve} points kept` : ''}`
           : l.est !== null && Number.isFinite(l.est)
             ? `${l.label}: about ${Number.isFinite(minutes) && minutes > 0 ? `${Math.round(minutes)} min of work, estimated to use ` : ''}${l.need}% of it, doesn't fit under its stop line of ${l.line}%: there's ${l.room}% of room (at ${l.percent}%)`
             : `${l.label}: about ${Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes) : START_MINUTES} min of work needs ${l.need}% of room under its stop line of ${l.line}%, there's ${l.room}% (at ${l.percent}%)`,

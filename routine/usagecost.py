@@ -340,6 +340,9 @@ def tag_once(log=None):
 
 # ---------- the stop lines, as status/usage.mjs has them (lineSettings, movingLine, stopLine) ----------
 
+RESERVE = 15  # F100: points taken off each stop line for the agents' cycles and the team (Fable's default, his to turn)
+
+
 def line_settings(markdown):
     """The three lines' settings from the roadmap, or None when it names no usage limit (lineSettings in usage.mjs)."""
     limit = re.search(r"\*\*Usage limit:\s*(\d{1,3})\s*%", markdown or "")
@@ -359,6 +362,21 @@ def line_settings(markdown):
     pick = lambda r: {"moving": r["moving"], "fixed": r["fixed"] if r["fixed"] is not None else old["fixed"]} if r else dict(old)  # noqa: E731
     return {"five": {"moving": five["moving"] if five else True, "fixed": int(limit.group(1))},
             "weekly": pick(week), "fable": pick(fable)}
+
+
+def reserve_points(markdown=None):
+    """F100: the points taken off each stop line for the agents' cycles and the team, from the roadmap (RESERVE when it
+    doesn't name one); 0 under a test without the wall."""
+    import wall
+    if wall.off():
+        return 0
+    if markdown is None:
+        try:
+            markdown = open(hqpaths.ROADMAP, encoding="utf8").read()
+        except OSError:
+            return RESERVE
+    res = re.search(r"\*\*Usage reserve:\s*(\d{1,2})\b", markdown)
+    return int(res.group(1)) if res else RESERVE
 
 
 def roadmap_lines():
@@ -426,14 +444,15 @@ class Projection:
     """The use on each line from now on: the reading now, plus the cost of the work planned before (added at its
     start), with each reset bringing the use back to 0 and the moving line back to its floor."""
 
-    def __init__(self, read, lines, now=None):
+    def __init__(self, read, lines, now=None, reserve=0):
         self.read, self.lines, self.now = read, lines, (_now() if now is None else now)
         self.adds = []  # (t, {key: points})
+        self.reserve = reserve  # F100: stays out of the room the team and the cycles count on
 
     @classmethod
     def here(cls, now=None):
         r, lines = reading(now=now), roadmap_lines()
-        return cls(r, lines, now) if r and lines else None
+        return cls(r, lines, now, reserve_points()) if r and lines else None
 
     def _window(self, key, t):
         reset = self.read[key]["reset"]
@@ -462,7 +481,7 @@ class Projection:
         return [k for k in self.read if not (weekly_only and k == "five")]
 
     def room(self, key, t):
-        return round(self.line(key, t) - self.pct(key, t), 1)
+        return round(self.line(key, t) - self.reserve - self.pct(key, t), 1)
 
     def fits(self, need, t, weekly_only=False):
         return all(self.room(k, t) > _need(need, k) for k in self.counted(weekly_only))
@@ -485,7 +504,7 @@ class Projection:
                 c = None
                 if s and s["moving"] and reset is not None:
                     # The minute the moving line passes the use plus the need, in this window.
-                    target = self.pct(k, t) + need_k + 0.05
+                    target = self.pct(k, t) + self.reserve + need_k + 0.05
                     win = LINES[k]["window"]
                     start = round(reset / 60) * 60 - win
                     begun = math.ceil((target - 0.05) * (win // 60) / 100)
@@ -789,10 +808,11 @@ def job_guesses(n):
 def overrun(rec):
     """None, or {"line", "used", "est", "top"} when the running job has used about four times the top of its estimated
     cost on a line (H220: the top is the estimate times top_factor, kept in its est as "top" by track)."""
-    if not rec or (rec.get("late") and not rec.get("own")) or rec.get("allowed") or not rec.get("est"):
+    if not rec or (rec.get("late") and not rec.get("own")) or not rec.get("est"):
         return None
     so_far = rec.get("so_far") or _so_far(rec)
-    f = float(rec["est"].get("top") or 1)
+    # F100: a resume raises the limit, never removes it ("allowed" is the mark of a resume from before)
+    f = float(rec["est"].get("top") or 1) * float(rec.get("raised") or (2 if rec.get("allowed") else 1))
     for k in KEYS:
         est, used = float(rec["est"].get(k) or 0), so_far.get(k)
         if used is None:
@@ -863,10 +883,11 @@ def pause_backtest(hist=None):
 
 
 def allow(n):
-    """jobs.py resume N: he let the paused job carry on; it isn't paused for an overrun again."""
+    """jobs.py resume N: he let the paused job carry on. F100: at a raised limit, RAISE times the one it had, never none."""
+    import wall
     d = _load()
     rec = d.get(str(n)) or {"n": n, "spent": {k: 0 for k in KEYS}, "seg": {}, "last": {}, "running": False}
-    rec["allowed"] = True
+    rec["raised"] = float(rec.get("raised") or 1) * wall.RAISE
     rec["running"] = False
     d[str(n)] = rec
     _save(d)

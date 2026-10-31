@@ -70,6 +70,8 @@ import jobs as q  # noqa: E402
 RANKS = os.environ.get("HQ_SPRINT") or os.path.join(os.path.dirname(q.ROADMAP), "sprint.json")
 ESTS = os.path.join(E.DIR, "sprint-estimates.json")
 LOOKS_AT_ONCE = 1  # Claude's choice: one look at a time, so the first pass over the planning stays light
+MOST_A_NIGHT = 5   # F100, his words: "yea perfect ok so i know to try to keep it at 4-5 features/bugs per night"
+PROOF_MINUTES = 24  # F100: a build's test run on the server, counted in the night's time, not in the job's own box
 
 
 # ---------- the planning's open rows ----------
@@ -1170,19 +1172,24 @@ def lay(labels, night=None, now=None):
     a0, _ = _night(d0)
     horizon_end = _night(d0 + dt.timedelta(days=NIGHTS - 1))[1]
     proj, busy, reserved = _busy(now, horizon_end)
+    import wall
+    wall_on = not wall.off()
     nights = []
     for k in range(NIGHTS):
         a, b = _night(d0 + dt.timedelta(days=k))
         res = sum(m for t, m in reserved if a <= t < b)
         taken = [e for s_, e in busy if s_ < b and e > a]  # the work already there that reaches into this night
         nights.append({"day": (d0 + dt.timedelta(days=k)).isoformat(), "from": int(a), "to": int(b), "reserved": res,
-                       "cursor": max([a, now] + taken), "end": b - res * 60, "rows": []})
+                       "cursor": max([a, now] + taken), "end": b - res * 60, "rows": [],
+                       "planned": sum(1 for s_, _ in busy if a <= s_ < b)})  # F100: what's already on that night counts
     out, line = [], None
     k = 0
     for x in picked:
         cost = x.get("cost_latest") or x.get("cost") or {}  # F66: by the latest end
         need = {kk: cost.get(kk, 0) for kk in ("five", "weekly")}
         span = x.get("latest") or x["est"]
+        if wall_on and x.get("kind") in wall.BUILDS:
+            span += PROOF_MINUTES  # F100: the build's test run is in the night's time
         r = {"label": x["label"], "title": x["title"], "rank": x["rank"], "est": x["est"], "cost": x.get("cost") or {}, "kind": x.get("kind"), "latest": span,
              "moscow": x.get("moscow"), "bug": x.get("bug"), "ready": x.get("ready"), "not_ready": x.get("not_ready")}
         placed = False
@@ -1190,6 +1197,10 @@ def lay(labels, night=None, now=None):
         while k < len(nights):
             n = nights[k]
             if n["cursor"] >= n["end"]:
+                k += 1
+                continue
+            if wall_on and len(n["rows"]) + n["planned"] >= MOST_A_NIGHT:  # F100: at most five a night
+                n["full"] = True
                 k += 1
                 continue
             t = proj.fits_at(need, n["cursor"]) if proj else n["cursor"]
@@ -1228,9 +1239,9 @@ def lay(labels, night=None, now=None):
                      "minutes": sum(r["est"] for r in mine), "eta": max(r["eta"] for r in mine),
                      "five": round(sum((r["cost"] or {}).get("five", 0) for r in mine), 1),
                      "weekly": round(sum((r["cost"] or {}).get("weekly", 0) for r in mine), 1),
-                     "reserved": n["reserved"]})
+                     "reserved": n["reserved"], "full": bool(n.get("full"))})
     return {"rows": out, "nights": used, "line": line, "night": d0.isoformat(), "room": list(_room()),
-            "left_out": left_out, "now": int(now)}
+            "left_out": left_out, "now": int(now), "most": MOST_A_NIGHT, "proof_minutes": PROOF_MINUTES if wall_on else 0}
 
 
 def _line_why(r, proj):
@@ -1271,7 +1282,8 @@ def lay_words(L):
             seen.add(r["night"])
             n = nights[r["night"]]
             out.append(f"{_night_name(r['night'], L['now']).capitalize()} ({r['night']}): {len(n['rows'])} {'row' if len(n['rows']) == 1 else 'rows'}, about "
-                       f"{E.dur(n['minutes'])}, done around {E.hhmm(n['eta'])}; 5-hour {E._pct(n['five'])}, weekly {E._pct(n['weekly'])}")
+                       f"{E.dur(n['minutes'])}, done around {E.hhmm(n['eta'])}; 5-hour {E._pct(n['five'])}, weekly {E._pct(n['weekly'])}"
+                       + (f"; that's the most a night, {L.get('most')} items, so the rest goes on the next" if n.get("full") else ""))
         c = r.get("cost") or {}
         where = (f"starts around {E.hhmm(r['start'])}{' (it waits for the usage)' if r.get('usage') else ''}, done around {E.hhmm(r['eta'])}"
                  if r.get("start") else r.get("why", "no time"))

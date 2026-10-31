@@ -13,6 +13,7 @@ the stream are saved for the usage check, as the mail check's are (L10). A SIGTE
 a call) ends the claude process too, and nothing is marked done.
 
     python3 routine/runjob.py N [--session-id UUID | --resume UUID] [--max-minutes M] [--max-turns T] [--box-note FILE]
+                                [--box-state]
 
 H298, piece 3 (29 October 2026): a deterministic box on the run, read from the run's own stream and a wall clock, no
 estimate involved: `--max-minutes M` and `--max-turns T` (a turn is one assistant message; claude's own --max-turns is
@@ -20,6 +21,11 @@ set too). Past either, the run is ended (SIGTERM to claude), what it wrote stays
 that ended well (a boxed run is a finished run), and `--box-note FILE` gets a JSON note of what happened: minutes,
 turns, steps, boxed (minutes, turns or null), the tools used with their paths, and the tool results that read as a
 refusal, so the agents' runner (routine/cycles.py) can mark the run boxed in her ledger and count its tripwires.
+
+F100, the usage wall (31 October 2026): every team job gets the same box (tick.py, from wall.py) with `--box-state`: past it
+the job is `boxed`, not done, parked for a call. The minutes count its own work: the time its own test run took
+(proof.py) is left out, so a build is never stopped by its tests. The stream's limits are saved as they arrive, so a headless
+job never reads the status line (HQ_HEADLESS tells save-usage.mjs so); the routine holds it at the line.
 """
 from __future__ import annotations
 
@@ -34,6 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import hqpaths  # noqa: E402
 import usagelive  # noqa: E402
+import wall  # noqa: E402
 
 FOLDER = hqpaths.FOLDER
 # F65: HQ_JOB_RUN gives a test its own run folder (the prompt, the stream log, the activity), as tick.py does.
@@ -98,9 +105,13 @@ def _jobs(*args: str) -> str:
 
 def _box_args(argv: list[str]) -> tuple[list[str], dict]:
     """H298: the box's options taken out of the chat arguments: {"minutes", "turns", "note"}."""
-    box, rest, i = {"minutes": None, "turns": None, "note": None}, [], 0
+    box, rest, i = {"minutes": None, "turns": None, "note": None, "state": False}, [], 0
     while i < len(argv):
         a = argv[i]
+        if a == "--box-state":
+            box["state"] = True
+            i += 1
+            continue
         if a in ("--max-minutes", "--max-turns", "--box-note") and i + 1 < len(argv):
             v = argv[i + 1]
             if a == "--box-note":
@@ -131,6 +142,25 @@ def _write_note(path: str | None, note: dict) -> None:
         pass
 
 
+def _tell_boxed(n: int, why: str, box: dict) -> None:
+    """Moneypenny's facts (H266) for a boxed job, in everyday words. Never from a test without its own line."""
+    if hqpaths.under_test() and not os.environ.get("HQ_DIRECT_DIR"):
+        return
+    try:
+        import pings
+        import usagecost
+        pings._spawn("paused", f"Heads up: one of the team's jobs, {usagecost.short_what(_text(n))}, ran past the time it was given "
+                               f"({box['minutes']:g} minutes), so it was stopped before it burns more. It isn't finished and it won't start "
+                               "again by itself; tell me on a call if it should carry on or be dropped.")
+    except Exception:
+        pass
+
+
+def _text(n: int) -> str:
+    import jobs as q
+    return next((j["text"] for j in q.read()[1] if j["n"] == n), "")
+
+
 def _result_text(block: dict) -> str:
     c = block.get("content")
     if isinstance(c, str):
@@ -153,7 +183,7 @@ def main(argv: list[str]) -> int:
            *hqpaths.job_flags(), *chat]  # F99: no project settings, the never-send list; tick gives --settings in `chat`
     if box["turns"]:
         cmd += ["--max-turns", str(box["turns"])]
-    env = {**os.environ, **hqpaths.JOB_ENV}  # F99: none of his folder's files at the start
+    env = {**os.environ, **hqpaths.JOB_ENV, "HQ_HEADLESS": "1"}  # F99: none of his folder's files at the start
     env.setdefault("HQ_JOB", str(n))
     with open(stream_log, "a") as lg, open(pfile, encoding="utf8") as prompt:
         _log(lg, f"job {n}: headless run started ({' '.join(chat) or 'a new session'})")
@@ -186,12 +216,17 @@ def main(argv: list[str]) -> int:
                 except OSError:
                     pass
 
+        proof_before = wall.proof_seconds(n)
+
+        def _own_seconds():  # F100: the job's own work, without the test run that proves it
+            return time.time() - started_at - max(0.0, wall.proof_seconds(n) - proof_before)
+
         if box["minutes"]:
             import threading
 
             def _clock():
                 while proc.poll() is None:
-                    if time.time() - started_at >= box["minutes"] * 60:
+                    if _own_seconds() >= box["minutes"] * 60:
                         _box("minutes")
                         return
                     time.sleep(1)
@@ -211,6 +246,10 @@ def main(argv: list[str]) -> int:
                 _activity(session, "session open")
             elif t == "rate_limit_event":
                 windows = (d.get("rate_limit_info") or {}).get("unifiedWindows") or windows
+                try:  # F100: as they arrive, so the routine reads them every minute and no job reads the status line
+                    usagelive.save(windows, f"job {n}")
+                except Exception as e:
+                    _log(lg, f"usage not saved: {e!r}")
             elif t == "assistant":
                 turns += 1
                 if box["turns"] and turns > box["turns"]:
@@ -241,6 +280,8 @@ def main(argv: list[str]) -> int:
                 result = d.get("result") or ""
                 is_error = bool(d.get("is_error"))
                 subtype = d.get("subtype")
+                if subtype == "error_max_turns" and box["turns"]:  # claude's own count of the same box
+                    boxed["why"] = boxed["why"] or "turns"
         code = proc.wait()
         if windows:
             try:
@@ -248,6 +289,11 @@ def main(argv: list[str]) -> int:
             except Exception as e:
                 _log(lg, f"usage not saved: {e!r}")
         minutes = round((time.time() - started_at) / 60, 2)
+        if box["state"]:  # F100: what this run used of its box, for a resume
+            try:
+                wall.add_used(n, _own_seconds() / 60, turns)
+            except Exception as e:
+                _log(lg, f"box not kept: {e!r}")
         _write_note(box["note"], {"n": n, "minutes": minutes, "turns": turns, "steps": steps, "boxed": boxed["why"],
                                   "box": {"minutes": box["minutes"], "turns": box["turns"]}, "exit": code,
                                   "error": bool(is_error), "subtype": subtype, "result": (result or "")[:2000],
@@ -263,7 +309,11 @@ def main(argv: list[str]) -> int:
             _log(lg, "last words: " + " ".join(result.split())[:LINE_MOST * 3])
         state = _state(n)
         if state.startswith("running") or state.startswith("stop asked"):
-            if boxed["why"]:  # H298: a boxed run is a finished run: done on the queue, boxed in her ledger
+            if boxed["why"] and box["state"]:  # F100: not done: parked for a call, what it wrote stays
+                _log(lg, f"job {n}: boxed: ended at its box, not done; it waits for a call")
+                _log(lg, _jobs("boxed", str(n), f"it ran past its box ({boxed['why']}: {box['minutes']:g} min, {box['turns']} turns); a call resumes it or drops it"))
+                _tell_boxed(n, boxed["why"], box)
+            elif boxed["why"]:  # H298: a boxed run is a finished run: done on the queue, boxed in her ledger
                 _log(lg, f"job {n}: boxed, so the done mark is run for it (what it wrote stays)")
                 _log(lg, _jobs("done", str(n)))
             elif code == 0 and not is_error:

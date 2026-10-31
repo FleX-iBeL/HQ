@@ -21,6 +21,7 @@ A job let past the line still only skips the 5-hour line; the weekly lines alway
     python3 routine/usageline.py weekly moving         the weekly all-models line moves
     python3 routine/usageline.py weekly fixed 95       the weekly all-models line fixed at 95%
     python3 routine/usageline.py fable moving|fixed [N]   the same for the weekly Fable line
+    python3 routine/usageline.py reserve [N]           F100: the points kept for his calls and the small routines (0 to 50)
 """
 from __future__ import annotations
 
@@ -167,9 +168,45 @@ def write(key: str, moving: bool, number: int | None) -> None:
     os.replace(tmp, ROADMAP)
 
 
+RESERVE = re.compile(r"\*\*Usage reserve:\s*(\d{1,2})\b[^*]*\*\*")
+
+
+def reserve_of(text: str) -> int:
+    m = RESERVE.search(text)
+    return int(m.group(1)) if m else 15
+
+
+def write_reserve(n: int) -> None:
+    """F100: taken off each stop line for the agents' cycles and the team; on the roadmap, so both HQs read the same one."""
+    text, s = read()
+    if s is None:
+        sys.exit("The roadmap names no usage limit (**Usage limit: N%**), so there are no stop lines to keep a reserve under.")
+    new = f"**Usage reserve: {n} points.**"
+    if RESERVE.search(text):
+        text = RESERVE.sub(lambda _: new, text, count=1)
+    else:
+        lines = text.split("\n")
+        i = max(j for j, l in enumerate(lines) if LIMIT.search(l) or any(mode_re(k).search(l) for k in LINES))
+        lines.insert(i + 1, f"- {new} Taken off each stop line for the agents' cycles and the team, so his calls and the "
+                            "small routines always have room (F100). Switched from a call.")
+        text = "\n".join(lines)
+    hqpaths.guard_roadmap(ROADMAP)
+    tmp = ROADMAP + ".tmp"
+    open(tmp, "w", encoding="utf8").write(text)
+    os.replace(tmp, ROADMAP)
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(describe())
+        return 0
+    if argv[0] == "reserve":
+        if len(argv) == 2:
+            if not argv[1].isdigit() or int(argv[1]) > 50:
+                print("The reserve is a whole number of points from 0 to 50.", file=sys.stderr)
+                return 2
+            write_reserve(int(argv[1]))
+        print(f"The reserve is {reserve_of(read()[0])} points: taken off each stop line for the agents' cycles and the team.")
         return 0
     key = "five"
     if argv[0].lower() in ALIASES:

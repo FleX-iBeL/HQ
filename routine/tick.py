@@ -49,6 +49,7 @@ import carryon  # H113: a job held by the usage line carries on in its own chat,
 import sync  # H56.4: the two-way sync of the workspace and Claude's memory with the other HQ
 import log_cycle  # H100: the coaching log keeps three hours; older entries move to its archive
 import cycles  # H298: the agents run themselves: their cycles as jobs of their own kind, in their own lane
+import wall  # F100: the usage wall: the box, his day hours, the night, the items in progress, the order
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
@@ -348,8 +349,17 @@ def start(job):
     if headless and not cycle:
         prompt += ("\n\nThis job runs headless (Fable, 27 October 2026): nobody types into its window, its end is "
                    "the end of this run, and when you end with the job finished the done mark is run for you; still "
-                   "run it yourself as the last step, as above. Everything you need is in this prompt and the files.")
+                   "run it yourself as the last step, as above. Everything you need is in this prompt and the files. "
+                   # F100: its limits come back with its own run; the routine holds it at the line
+                   "Don't read the usage yourself: skip every save-usage command in the notes; the runner saves it as it comes "
+                   "in, and the routine holds you at the line.")
+    box = None if cycle else wall.box_for(job)  # F100: every job a limit, from its estimate's latest end
+    if box:
+        prompt += (f"\n\nThis job has a box of {box['minutes']:g} minutes of its own work and {box['turns']} turns; your test run "
+                   "(proof.py) doesn't count. Past it the run is ended and the job is boxed, not done, and waits for a call.")
     chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")
+    if box and headless:
+        chat += f" --max-minutes {box['minutes']:g} --max-turns {box['turns']} --box-state"
     if cycle:  # H298: the box, read by runjob.py from the run's own stream and a wall clock
         import shlex
         chat += " " + " ".join(shlex.quote(x) for x in cycles.box_args(job, cycle, RUN))
@@ -396,7 +406,8 @@ JT=$(tty)
     except OSError:
         pass
     jobs("mark", str(n), "running since " + time.strftime("%H:%M"))
-    json.dump({"n": n, "pid": None, "started": time.time()}, open(STATE, "w"))
+    json.dump({"n": n, "pid": None, "started": time.time(), **({"box": box["minutes"]} if box and not headless else {}),
+               "proof": wall.proof_seconds(n)}, open(STATE, "w"))
     open_window(cmd, f"job-{n}")
     carryon.started(n, plan)
     how = {"resume": "carries on in its own chat after the usage hold",
@@ -1117,6 +1128,54 @@ def job_need(job):
         return []
 
 
+def box_watch(job, s):
+    """F100: a job in a window has no runner to end it at its box: the minute does. Its test run isn't counted. True when
+    it boxed it."""
+    if not s.get("box") or not s.get("started"):
+        return False
+    n = job["n"]
+    used = (time.time() - s["started"] - max(0.0, wall.proof_seconds(n) - (s.get("proof") or 0))) / 60
+    if used < s["box"]:
+        return False
+    end_chat(s.get("pid"))
+    wall.add_used(n, used)
+    why = f"it ran past its box ({s['box']:g} min); a call resumes it or drops it"
+    jobs("boxed", str(n), why)
+    clear()
+    quiet.clear_request()
+    status("STOPPED", f"Job {n} boxed: {why}", f"job {n} boxed: {why}")
+    log(f"job {n} boxed: {why}")
+    return True
+
+
+def at_the_line(job, s):
+    """F100: a headless job no longer reads the usage itself, so the routine holds it at the line (H113 stays: it carries on in
+    its own chat). The reading comes from its own stream, every minute. True when it held it."""
+    n = job["n"]
+    g = subprocess.run([NODE, os.path.join(JV, "status", "save-usage.mjs"), "--gate", "--line"]
+                       + (["--weekly-only"] if job.get("past") else []), capture_output=True, text=True)
+    if g.returncode == 0:
+        return False
+    end_chat(s.get("pid"))
+    jobs("held", str(n))
+    clear()
+    quiet.clear_request()
+    status("STOPPED", f"Job {n} held at the usage line", f"job {n} held: {g.stdout.strip()[6:].strip()[:120]}")
+    log(f"job {n} held at the usage line: {g.stdout.strip()}")
+    return True
+
+
+def pause_running(job, s):
+    """F100: everything is paused: the running job is held; it carries on in its own chat when he ends the pause."""
+    n = job["n"]
+    end_chat(s.get("pid"))
+    jobs("held", str(n), "paused by him")
+    clear()
+    quiet.clear_request()
+    status("STOPPED", f"Job {n} held: everything is paused", f"job {n} held: everything is paused")
+    log(f"job {n} held: everything is paused")
+
+
 def usage_overrun(job, s):
     """H172: every minute while a job runs, its usage so far from the newest reading. At about four times the top of its estimate
     (H220: the estimate times how unsure it is, at most twice; H221 four times the estimate; twice before) it's
@@ -1518,6 +1577,9 @@ def tick():
             # Marked running, but this routine didn't start it (or lost track): treat as ended.
             s = {"n": n, "pid": None, "started": 0}
         pid = s.get("pid")
+        if q.get("paused") and job["state"] != "stop asked":  # F100
+            pause_running(job, s)
+            return
         if job["state"] == "stop asked":
             end_chat(pid)
             jobs("mark", str(n), "stopped " + time.strftime("%H:%M"))
@@ -1548,7 +1610,17 @@ def tick():
                 return
         except Exception as e:
             log(f"usage count: {e!r}")
+        try:
+            if box_watch(job, s):  # F100
+                return
+        except Exception as e:
+            log(f"box: {e!r}")
         if _headless() or cycles.is_cycle_job(job):
+            try:
+                if not wall.off() and at_the_line(job, s):  # F100
+                    return
+            except Exception as e:
+                log(f"usage line: {e!r}")
             return  # a headless run ends by itself; there's no chat to wake up (H298: a cycle always runs headless)
         try:
             # H36: gone quiet? Then continue is typed into its own window, and a stuck job shows as stuck.
@@ -1605,7 +1677,30 @@ def tick():
         line = q.get("waiting") or []
     if not line:
         return
-    job = line[0]
+    # F100: the wall: the cycles before the team; his day hours, a held job at night and the items in progress; the gate then
+    # looks at the first that may go, and a job that can't go now never blocks one behind it.
+    job, first_why = None, None
+    for cand in wall.order(line):
+        why = wall.why_not(cand, q.get("all") or line)
+        if why:
+            first_why = first_why or (cand, why)
+            continue
+        if cycles.is_cycle_job(cand):  # H298: her hours, her share, still useful, the step's inputs; then the gate below
+            try:
+                verdict = cycles.gatekeep(cand, log=log)
+            except Exception as e:
+                log(f"cycles: gatekeep: {e!r}")
+                verdict = "wait"
+            if verdict == "wait":
+                first_why = first_why or (cand, "an agent's own run: it waits for her hours")
+                continue
+            if verdict != "go":
+                return  # skipped and cancelled; the next minute takes the next job
+        job = cand
+        break
+    if job is None:
+        routines.beat("jobs", state="waiting", text=f"Job {first_why[0]['n']} waits: {first_why[1]}", every=60)
+        return
     if LINUX_WINDOWS and not workspace_trusted():
         # H56.2: wait, and say what to do, instead of starting a chat into a question nobody answers.
         why = (f"Claude on this server hasn't been told to trust the workspace yet: run claude once in "
@@ -1618,22 +1713,11 @@ def tick():
             log(f"job {job['n']} waits: the workspace isn't trusted by Claude here")
         return
     clear(TRUST_NOTE)
-    if cycles.is_cycle_job(job):  # H298: her hours, her share, still useful, the step's inputs; then the gate below
-        try:
-            verdict = cycles.gatekeep(job, log=log)
-        except Exception as e:
-            log(f"cycles: gatekeep: {e!r}")
-            verdict = "wait"
-        if verdict == "wait":
-            routines.beat("jobs", state="waiting", text=f"Job {job['n']} (an agent's own run) waits for her hours", every=60)
-            return
-        if verdict != "go":
-            return  # skipped and cancelled; the next minute takes the next job
     # F13: a job let past the line only skips the 5-hour line; the weekly line always counts, so a
     # past-the-line job held at the weekly line waits here quietly instead of being started every minute.
     # H172: it starts when its estimated usage (from the finished jobs like it) fits under each stop line; H141's
     # rates only for work with too little history (routine/usagecost.py).
-    g = subprocess.run([NODE, os.path.join(JV, "status", "save-usage.mjs"), "--gate"]
+    g = subprocess.run([NODE, os.path.join(JV, "status", "save-usage.mjs"), "--gate", "--reserve"]  # F100: room kept for him
                        + (["--weekly-only"] if job["past"] else []) + job_need(job),
                        capture_output=True, text=True)
     if g.returncode:

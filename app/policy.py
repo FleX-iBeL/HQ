@@ -608,9 +608,12 @@ class Policy:
                        "write-row",  # F99: a new row, nothing more; the planning file itself is refused
                        "tell",  # H283: a note for a job while it runs or waits
                        "list", "stop", "overrule", "move", "on", "off", "resume",  # H172: resume a paused job
+                       "pause",  # F100: everything holds, on his word
                        "mail-fast", "mail-hourly"):  # H149: the mail check every 15 minutes for a while he names
 
                 return Decision(ALLOW, "the queue for the computer")
+            if sub == "now" and "--said" in args:  # F100: a build in his day hours, only with his own words
+                return Decision(ALLOW, "his say-so for a build in the day")
             if sub == "done" and "--at" in args:  # F57: tick off a running job whose work is checked done, on his say-so
                 return Decision(ALLOW, "ticking off a running job at the time it really finished")
             return Decision(DENY, "that part of the queue is only for the computer itself")

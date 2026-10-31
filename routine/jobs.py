@@ -71,13 +71,17 @@ usage (from the workspace):
   python3 "routine/jobs.py" resume N                       a job paused for using about four times the top of its estimated usage
                                                            carries on, in its own chat (H172); stop N drops it
   python3 "routine/jobs.py" off | on                       jobs from calls off or on
+  python3 "routine/jobs.py" pause [WHY]                    F100: everything holds: the running job is held within a minute,
+                                                           nothing new starts, no reviewer or first look starts; on ends it
+  python3 "routine/jobs.py" now N --said "HIS WORDS"       F100: job N may start in his day hours (8:00 to 22:00), stored with
+                                                           who and when; add and send-row take --now --said too
   python3 "routine/jobs.py" mail-off | mail-on             the hourly mail check off or on (L8)
   python3 "routine/jobs.py" mail-fast "UNTIL"              the mail check every 15 minutes until UNTIL, his words
                                                            as routine/mailfast.py reads them (6 hours, 20:00,
                                                            tonight, Friday, end of the week), then hourly by itself (H149)
   python3 "routine/jobs.py" mail-hourly                    back to every hour now (H149)
 Used by the routine itself: next, mark N STATE, crashed N "HOW" (H62: job N ended by a crash; its rerun
-goes to the top of the line, once only).
+goes to the top of the line, once only); boxed N "WHY" (F100: job N ran past its box: parked for a call, not done).
 """
 import fcntl, json, os, re, sys, time
 from contextlib import contextmanager
@@ -107,6 +111,7 @@ MAIL = True  # the hourly mail check through the routine (L8); its own switch, s
 # H149: (from, until) epoch seconds while the mail check runs every 15 minutes for a while he named, else None.
 # Kept on the Mail check line; once `until` has passed it counts as hourly and the next write drops it.
 MAIL_FAST = None
+PAUSED = None  # F100: "2026-10-31 14:02, why" while everything is paused; the routine line says so
 FAST_RE = re.compile(r"every 15 minutes from (\d{4}-\d\d-\d\d \d\d:\d\d(?:[+-]\d\d:\d\d)?) until (\d{4}-\d\d-\d\d \d\d:\d\d(?:[+-]\d\d:\d\d)?)")
 
 
@@ -114,10 +119,11 @@ FAST_RE = re.compile(r"every 15 minutes from (\d{4}-\d\d-\d\d \d\d:\d\d(?:[+-]\d
 # its kind, its first look) never changes by a note: " ⟪note 2026-10-26 16:50⟫ TEXT", read: "⟪note … · read 16:52⟫".
 # H286: the same place keeps what the job says it's doing now, in plain words, " ⟪now 19:58⟫ TEXT" (one, the newest),
 # and the estimate it redid when it had to start fixing, " ⟪redone 20:04 · 45 min · was 30 min⟫ WHY" (one).
-NOTE = re.compile(r" ⟪note (\d{4}-\d\d-\d\d \d\d:\d\d)(?: · read (\d\d:\d\d))?⟫ (.*?)(?= ⟪(?:note|now|redone) |$)")
+# F100: and his say-so for a build in his day hours, with who and when: " ⟪sayso 2026-10-31 14:02 · who⟫ HIS WORDS".
+NOTE = re.compile(r" ⟪note (\d{4}-\d\d-\d\d \d\d:\d\d)(?: · read (\d\d:\d\d))?⟫ (.*?)(?= ⟪(?:note|now|redone|sayso) |$)")
 NOTE_START = " ⟪note "
-MARK = re.compile(r" ⟪(note|now|redone) ([^⟫]*)⟫ (.*?)(?= ⟪(?:note|now|redone) |$)")
-MARK_START = re.compile(r" ⟪(?:note|now|redone) ")
+MARK = re.compile(r" ⟪(note|now|redone|sayso) ([^⟫]*)⟫ (.*?)(?= ⟪(?:note|now|redone|sayso) |$)")
+MARK_START = re.compile(r" ⟪(?:note|now|redone|sayso) ")
 REDONE = re.compile(r"(\d\d:\d\d) · (\d+) min · was (\d+) min$")
 
 
@@ -136,11 +142,21 @@ def split_marks(rest):
                 notes.append({"at": h.group(1), "read": h.group(2), "text": body})
         elif kind == "now":
             now = {"at": head, "text": body}
-        else:
+        elif kind == "redone":
             r = REDONE.fullmatch(head)
             if r:
                 redone = {"at": r.group(1), "est": int(r.group(2)), "was": int(r.group(3)), "why": body}
     return rest[:m0.start()], notes, now, redone
+
+
+def sayso_of(rest):
+    """F100: his say-so on a job's line: {"at", "who", "words"} or None."""
+    m0 = MARK_START.search(rest)
+    for m in MARK.finditer(rest[m0.start():]) if m0 else ():
+        if m.group(1) == "sayso":
+            at, _, who = m.group(2).partition(" · ")
+            return {"at": at, "who": who, "words": m.group(3)}
+    return None
 
 
 def split_notes(rest):
@@ -161,6 +177,9 @@ def notes_text(j):
     if j.get("redone"):
         r = j["redone"]
         out += f" ⟪redone {r['at']} · {r['est']} min · was {r['was']} min⟫ {r['why']}"
+    if j.get("sayso"):  # F100
+        s = j["sayso"]
+        out += f" ⟪sayso {s['at']} · {s['who']}⟫ {s['words']}"
     return out + "".join(f"{NOTE_START}{x['at']}{' · read ' + x['read'] if x.get('read') else ''}⟫ {x['text']}"
                          for x in j.get("notes") or [])
 
@@ -198,8 +217,9 @@ def locked():
 
 def read():
     """(text, jobs, routine_on). jobs: list of dicts n, state, past, agreed, text."""
-    global MAIL, MAIL_FAST
+    global MAIL, MAIL_FAST, PAUSED
     MAIL_FAST = None
+    PAUSED = None
     text = open(ROADMAP, encoding="utf8").read()
     jobs, on = [], True
     sec = section(text)
@@ -212,9 +232,11 @@ def read():
                 body, notes, doing, redone = split_marks(m.group(4))
                 jobs.append({"n": int(m.group(1)), "state": state[: -len(PAST)] if past else state,
                              "past": past, "agreed": m.group(3), "text": body, "notes": notes,
-                             "now": doing, "redone": redone})
+                             "now": doing, "redone": redone, "sayso": sayso_of(m.group(4))})
             elif l.startswith("**Routine:**"):
-                on = "off" not in l.lower()
+                on = "off" not in l.lower() and "paused" not in l.lower()
+                p = re.match(r"\*\*Routine:\*\* paused since (.*)$", l)
+                PAUSED = p.group(1).strip() if p else None
             elif l.startswith("**Mail check:**"):
                 MAIL = "off" not in l.split("(")[0].lower()
                 m = FAST_RE.search(l)
@@ -245,7 +267,8 @@ def write(text, jobs, on):
     order = sorted(finished, key=lambda j: j["n"]) + [j for j in rest if not waiting(j)] + [j for j in rest if waiting(j)]
     lines = [f"- Job {j['n']} · {j['state']}{PAST if j['past'] else ''} · agreed {j['agreed']} · {j['text']}{notes_text(j)}"
              for j in order if j["n"] not in drop]
-    body = (f"{HEADING}\n\n{INTRO}\n\n**Routine:** {'on' if on else 'off'}\n\n"
+    routine = f"paused since {PAUSED}" if PAUSED else ("on" if on else "off")
+    body = (f"{HEADING}\n\n{INTRO}\n\n**Routine:** {routine}\n\n"
             f"**Mail check:** {'on' if MAIL else 'off'} ({mail_words()}, hidden, also while a job runs; commits take turns)\n\n"
             + ("\n".join(lines) if lines else "No jobs yet.") + "\n\n")
     sec = section(text)
@@ -379,9 +402,41 @@ def waiting(j):
 
 
 def parked(j):
-    """F37: a job paused for its usage (H172) is parked: neither running nor waiting, never started by itself,
-    on the list until a call resumes it (resume N) or drops it (stop N). Nothing waits on it."""
-    return j["state"].startswith("paused")
+    """F37: a job paused for its usage (H172) or boxed (F100) is parked: neither running nor waiting, never started by
+    itself, on the list until a call resumes it (resume N) or drops it (stop N). Nothing waits on it."""
+    return j["state"].startswith(("paused", "boxed"))
+
+
+def is_paused():
+    """F100: is everything paused? For what starts Claude outside the queue (the reviewer, the first looks)."""
+    try:
+        return bool(re.search(r"^\*\*Routine:\*\* paused\b", open(ROADMAP, encoding="utf8").read(), re.M))
+    except OSError:
+        return False
+
+
+def sayso(words, by=""):
+    """F100: his say-so for a build in his day hours, kept with who and when: his own words (sprint.his_quote), or his
+    tap on the status page (the server says so). None when it doesn't stand."""
+    if os.environ.get("HQ_SAYSO") == "page":
+        who, words = "the status page", "tapped now on the status page"
+    else:
+        import sprint as sp_
+        if not (words and sp_.his_quote(words)):
+            return None
+        who = by or "a call"
+    return {"at": time.strftime("%Y-%m-%d %H:%M"), "who": clean_mark(who).replace("·", "-"), "words": clean_mark(words)}
+
+
+def bug_job(j):
+    """F100: a job for a bug row (a row in Bugs, or any F row): it goes ahead of the features in the line."""
+    try:
+        import qa
+        import sprint as sp_
+        label = qa.job_label(j["text"])
+        return bool(label) and label.startswith("F") or any(r["label"] == label and sp_.is_bug(r) for r in sp_.open_rows())
+    except Exception:
+        return False
 
 
 def open_job(j):
@@ -461,9 +516,12 @@ def with_estimates(jobs):
         return show_all(jobs)
     lines = []
     gn, why = gate_words()
+    import wall
     for j in jobs:
         w = est.words(j["n"], p)
+        no = wall.why_not(j, jobs) if waiting(j) else None  # F100: the day, the night, the items in progress
         lines.append(show(j, places.get(j["n"])) + (f"\n    Estimate: {w}" if w else "")
+                     + (f"\n    Waits: {no}" if no else "")
                      + (f"\n    Waits for the usage line: {why}" if j["n"] == gn and waiting(j) and p.get("on") else ""))
     lines.append(est.total_words(p))
     lines.append(est.accuracy_words(p["accuracy"]))
@@ -505,7 +563,7 @@ def move(jobs, n, where, other=None):
 
 
 def main(argv):
-    global MAIL, MAIL_FAST
+    global MAIL, MAIL_FAST, PAUSED
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
         return
@@ -519,7 +577,7 @@ def main(argv):
     with locked():
         text, jobs, on = read()
         if cmd == "list":
-            print(f"Routine: {'on' if on else 'off'}")
+            print(f"Routine: {'paused since ' + PAUSED if PAUSED else 'on' if on else 'off'}")
             print(f"Mail check: {'on' if MAIL else 'off'} ({mail_words()})")  # H149
             print(with_estimates(jobs))
             return
@@ -527,7 +585,7 @@ def main(argv):
             ready = [j for j in jobs if j["state"] == "ready"]
             running = [j for j in jobs if j["state"].startswith(("running", "stop asked"))]
             # H39: "waiting" is the line itself, ready and held together, top first; the routine takes its first.
-            print(json.dumps({"on": on, "mail": MAIL, "mail_fast": list(MAIL_FAST) if MAIL_FAST else None, "running": running, "ready": ready,
+            print(json.dumps({"on": on, "paused": PAUSED, "all": [j for j in jobs if not j["state"].startswith(FINISHED)], "mail": MAIL, "mail_fast": list(MAIL_FAST) if MAIL_FAST else None, "running": running, "ready": ready,
                               "held": [j for j in jobs if j["state"].startswith("held")], "waiting": line_up(jobs),
                               "parked": [j for j in jobs if parked(j)]}))  # F37
             return
@@ -600,6 +658,7 @@ def main(argv):
             label = (args[0] if args else "").strip().upper()
             if not re.fullmatch(r"[A-Z]\d+(\.\d+)*", label):
                 sys.exit("Which roadmap item? Give its number, like H182.")
+            keep = [a for i, a in enumerate(args) if a in ("--now", "--said") or (i and args[i - 1] == "--said")]  # F100
             title, line = open_row(text, label)
             j = with_team(jobs, label)
             if j:
@@ -614,11 +673,12 @@ def main(argv):
             cmd = "add"
             args = [f"{label} on the HQ roadmap, sent to the team from the status page: {title}. Read the {label} row "
                     f"and do what it says. Pull dev first, privacy check, push to dev with push.py, "
-                    f"write the result in the {label} row.", "--kind", est_.kind_of(line)]
+                    f"write the result in the {label} row.", "--kind", est_.kind_of(line), *keep]
         if cmd == "add":
             past = "--past-the-line" in args
             say_so = "--not-ready" in args  # H272: his explicit say-so for a row without the Ready mark
-            words = [a for a in args if a not in ("--past-the-line", "--not-ready")]
+            at_once = "--now" in args  # F100: a build in his day hours, only on his own say-so
+            words = [a for a in args if a not in ("--past-the-line", "--not-ready", "--now")]
             his = None  # F99: --said "his words", the quote behind a --not-ready
             for i, a in enumerate(words):
                 if a == "--said" or a.startswith("--said="):
@@ -653,7 +713,16 @@ def main(argv):
             n = max([j["n"] for j in jobs] + [0]) + 1
             j = {"n": n, "state": "ready", "past": past, "agreed": time.strftime("%Y-%m-%d %H:%M"),
                  "text": one_line(said).replace("·", "-")}
+            if at_once:
+                j["sayso"] = sayso(his)
+                if not j["sayso"]:
+                    sys.exit("Now takes his own words: --now --said \"HIS WORDS\", a line he said or typed.")
             jobs.append(j)
+            import wall
+            if bug_job(j) and not wall.off():  # F100: a bug's job goes ahead of the features in the line
+                first = next((x for x in line_up(jobs) if x["n"] != n and not bug_job(x)), None)
+                if first:
+                    jobs = move(jobs, n, "before", first["n"])
             write(text, jobs, on)
             e = estimate("on_add", n, j["text"], kind, None, guess)
             looks = estimate("look_later", "job", n, j["text"])  # H190: the first look, in the background
@@ -665,6 +734,9 @@ def main(argv):
                 after = f" It waits its turn: {int(busy)} running, {len(waiting)} waiting before it."
             else:
                 after = " The routine starts it within about a minute."
+            no = wall.why_not(j, jobs)  # F100
+            if no:
+                after = f" It waits: {no}."
             if e:
                 after += f" Estimate: about {e['est']} min" + (f", the call guessed {guess} min" if guess else "") + "."
             if looks:
@@ -694,8 +766,34 @@ def main(argv):
             print("The mail check runs every hour again." if was else "The mail check already runs every hour.")
             return
         if cmd in ("on", "off"):
+            PAUSED = None
             write(text, jobs, cmd == "on")
             print(f"The routine is {cmd}.")
+            return
+        if cmd == "pause":
+            # F100: one real pause: the routine holds the running job within a minute (it carries on in its own chat at
+            # "on"), nothing new starts, and the reviewer and the first looks hold too.
+            why = one_line(" ".join(args)).replace("·", "-")
+            PAUSED = time.strftime("%Y-%m-%d %H:%M") + (f", {why}" if why else "")
+            write(text, jobs, False)
+            print("Everything is paused: the running job is held within a minute, nothing new starts, no reviewer or first "
+                  "look starts. The mail check and his calls go on. jobs.py on ends it, in the same order.")
+            return
+        if cmd == "now":
+            # F100: his words of 30 October 2026: "daytime building is only allowed if i manually say it is."
+            his = args[args.index("--said") + 1] if "--said" in args and args.index("--said") + 1 < len(args) else ""
+            by = args[args.index("--by") + 1] if "--by" in args and args.index("--by") + 1 < len(args) else ""
+            if not args or not args[0].isdigit():
+                sys.exit('Usage: now N --said "HIS WORDS"')
+            j = find(jobs, int(args[0]))
+            if not (j["state"] == "ready" or j["state"].startswith("held")):
+                sys.exit(f"Job {j['n']} is {j['state']}; only a waiting job can go now.")
+            s = sayso(his, by)
+            if not s:
+                sys.exit("Refused: a build in his day hours goes only on his own words: --said with a line he said or typed.")
+            j["sayso"] = s
+            write(text, jobs, on)
+            print(f"Job {j['n']} may start in the day: {s['who']}, {s['at']}: {s['words']}")
             return
         if cmd == "stop":
             if args:
@@ -708,12 +806,14 @@ def main(argv):
             if j["state"].startswith("running"):
                 j["state"] = "stop asked"
                 msg = f"Job {j['n']}: stop asked; the routine ends it within about a minute."
-            elif j["state"] in ("ready",) or j["state"].startswith(("held", "paused")):
+            elif j["state"] in ("ready",) or j["state"].startswith(("held", "paused", "boxed")):
                 j["state"] = f"cancelled {now}"
                 msg = f"Job {j['n']} cancelled; it won't start."
                 try:  # H172: a held or paused job's usage count goes with it
                     import usagecost
+                    import wall
                     usagecost.forget(j["n"])
+                    wall.forget(j["n"])
                 except Exception:
                     pass
             else:
@@ -892,22 +992,41 @@ def main(argv):
                 print("Nothing new since you last read them.")
             return
         if cmd == "resume":
-            # H172: he lets a job paused for its usage carry on: it waits in line again like a held job (its own
-            # chat, H113) and isn't paused for its usage again.
+            # H172: he lets a job paused for its usage or boxed carry on: it waits in line again like a held job (its own
+            # chat, H113). F100: its limits are raised, never removed.
             if not args or not args[0].isdigit():
                 sys.exit("Usage: resume N")
             j = find(jobs, int(args[0]))
-            if not j["state"].startswith("paused"):
-                sys.exit(f"Job {j['n']} is {j['state']}; only a paused job can be resumed.")
-            j["state"] = "held: usage over the line"
+            if not parked(j):
+                sys.exit(f"Job {j['n']} is {j['state']}; only a paused or boxed job can be resumed.")
+            j["state"] = "held: resumed by him"
+            if not j.get("sayso"):  # it starts on his word, in the day too
+                j["sayso"] = {"at": time.strftime("%Y-%m-%d %H:%M"), "who": "a call", "words": "resumed"}
             write(text, jobs, on)
             try:
                 import usagecost
+                import wall
                 usagecost.allow(j["n"])
+                wall.raise_box(j["n"])
             except Exception as e:
-                print(f"(couldn't note it may go on: {e!r})", file=sys.stderr)
+                print(f"(couldn't raise its limits: {e!r})", file=sys.stderr)
             place = [x["n"] for x in line_up(jobs)].index(j["n"]) + 1
-            print(f"Job {j['n']} carries on: number {place} in line, in its own chat, when the usage leaves room.")
+            print(f"Job {j['n']} carries on at raised limits: number {place} in line, in its own chat, when the usage leaves room.")
+            return
+        if cmd == "boxed":
+            # F100: the job ran past its box. Not done: parked for a call, what it wrote stays, a resume carries on.
+            j = find(jobs, int(args[0]))
+            why = one_line(" ".join(args[1:])).replace("·", "-") or "it ran past its box"
+            j["state"] = f"boxed: {why}"
+            write(text, jobs, on)
+            print(show(j))
+            try:
+                import carryon
+                import usagecost
+                carryon.on_held(j["n"], text)
+                usagecost.hold(j["n"])
+            except Exception as e:
+                print(f"(couldn't note where it stopped: {e!r})", file=sys.stderr)
             return
         if cmd in ("done", "held"):
             j = find(jobs, int(args[0]))

@@ -185,6 +185,8 @@ def run(n: int) -> int:
     wt = _copy()
     logpath = path(n)[:-5] + ".log"
     os.makedirs(folder(), exist_ok=True)
+    import wall
+    wall.proof_start(n)  # F100: the box counts the job's own work, not the test run that proves it
     try:
         with open(logpath, "w", encoding="utf8") as log:
             if named:
@@ -200,6 +202,7 @@ def run(n: int) -> int:
                 rec["failed"] = nightly.failures(out) or ([] if code == 0 and r_ else [f"the quick set ended with exit {code}, {p} of {r_}"])
         rec["green"] = not rec["failed"] and rec["ran"] > 0 and rec["passed"] == rec["ran"]
     finally:
+        wall.proof_end(n)
         subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", wt], capture_output=True)
         shutil.rmtree(os.path.dirname(wt), ignore_errors=True)
     _save(rec)

@@ -145,6 +145,8 @@ def on():
     """Whether reviews may run here: not with HQ_REVIEW=0, and a test copy (HQ_ROADMAP) only with HQ_REVIEW_FAKE."""
     if os.environ.get("HQ_REVIEW", "1") == "0":
         return False
+    if q.is_paused():  # F100: a pause holds the reviewer too
+        return False
     return bool(os.environ.get("HQ_REVIEW_FAKE")) or not os.environ.get("HQ_ROADMAP")
 
 

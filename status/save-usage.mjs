@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseRoadmap } from './parse.mjs';
 import { ROADMAP } from './paths.mjs';
-import { stopLine, usageReading, usageVerdict } from './usage.mjs';
+import { reserveOf, staleWords, stopLine, usageReading, usageVerdict } from './usage.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const flag = process.argv.indexOf('--by');
@@ -28,6 +28,13 @@ const by = flag >= 0 ? (process.argv[flag + 1] ?? '') : 'HQ session';
 // the 5-hour line; the weekly lines still count, so it waits at the weekly line like any other job.
 // L10: --any takes the saved numbers whatever their age (the routine's usage check, every minute);
 // the reading keeps the time they were really read, so the page shows how old they are.
+// F100: --reserve (the routine's start check for the team and the cycles): the reserve on the roadmap comes off each stop
+// line. A reading older than 30 minutes stops the gate and says its age. --line: is a running job at its line? (the reading's
+// own numbers, no room needed; a stale reading holds nobody.) HQ_NO_WALL under a test leaves the old gate.
+// HQ_USAGE reads a test's own reading. A headless job (HQ_HEADLESS, runjob.py) never reads the status line: the runner saves
+// the stream's limits as they arrive, and a read here would write an empty reading over them.
+const noWall = process.env.HQ_UNDER_TEST && process.env.HQ_NO_WALL;
+const USAGE_FILE = process.env.HQ_USAGE || join(root, '.status/usage.json');
 const weeklyOnly = process.argv.includes('--weekly-only');
 const LIVE = join(root, 'scratch/routine/usage-live.json');
 const FRESH_MS = 10 * 60 * 1000;
@@ -53,13 +60,30 @@ function fromStatusline() {
   }
 }
 
+if (process.env.HQ_HEADLESS && process.argv.includes('--statusline') && !process.argv.includes('--any')) {
+  console.log('OK to go on: this job runs headless, so the runner keeps the usage and the routine holds it at the line.');
+  process.exit(0);
+}
+
 if (process.argv.includes('--gate')) {
-  const { usageLines: lines } = parseRoadmap(readFileSync(ROADMAP, 'utf8'));
+  const roadmapText = readFileSync(ROADMAP, 'utf8');
+  const { usageLines: lines } = parseRoadmap(roadmapText);
   let saved = null;
   try {
-    saved = JSON.parse(readFileSync(join(root, '.status/usage.json'), 'utf8'));
+    saved = JSON.parse(readFileSync(USAGE_FILE, 'utf8'));
   } catch {}
   const now = new Date();
+  const stale = noWall ? null : staleWords(saved, now);
+  if (process.argv.includes('--line')) {
+    if (stale || !saved?.readable) process.exit(0);
+    const v = usageVerdict(saved, lines, now, { weeklyOnly });
+    console.log(v.stop ? `STOP. ${v.reason}` : 'OK to go on.');
+    process.exit(v.stop ? 2 : 0);
+  }
+  if (stale) {
+    console.log(`STOP. ${stale}`);
+    process.exit(2);
+  }
   if (saved?.readable) saved.limits = saved.limits.filter((l) => !l.resetsAt || Date.parse(l.resetsAt) > now.getTime());
   // H141: a new job needs room under each line for its own estimate.
   const mf = process.argv.indexOf('--minutes');
@@ -69,7 +93,8 @@ if (process.argv.includes('--gate')) {
   const need = nf >= 0
     ? Object.fromEntries(String(process.argv[nf + 1] ?? '').split(',').map((p) => p.split('=')).filter(([k, v]) => k && Number.isFinite(Number(v))).map(([k, v]) => [k, Number(v)]))
     : undefined;
-  const v = usageVerdict(saved, lines, now, { weeklyOnly, start: true, minutes, need: need && Object.keys(need).length ? need : undefined });
+  const reserve = process.argv.includes('--reserve') && !noWall ? reserveOf(roadmapText) : 0;
+  const v = usageVerdict(saved, lines, now, { weeklyOnly, start: true, minutes, need: need && Object.keys(need).length ? need : undefined, reserve });
   console.log(v.stop ? `STOP. ${v.reason}` : weeklyOnly ? 'OK to go on (past the 5-hour line; the weekly lines are under).' : 'OK to go on.');
   process.exit(v.stop ? 2 : 0);
 }

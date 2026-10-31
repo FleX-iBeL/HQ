@@ -1695,6 +1695,9 @@ def look_on():
     """H190: whether a look may run here: not with HQ_LOOK=0, and a test copy only with a made-up one (HQ_LOOK_FAKE)."""
     if os.environ.get("HQ_LOOK", "1") == "0":
         return False
+    import jobs as q
+    if q.is_paused():  # F100: a pause holds the looks too
+        return False
     return bool(os.environ.get("HQ_LOOK_FAKE")) or not _TEST
 
 
@@ -2279,7 +2282,7 @@ def plan(now=None):
                         "minutes_latest": round(late_total),
                         "eta_latest": int(now + late_total * 60) if on and not (proj and waits) else None,
                         "usage_wait": held_wait,
-                        "paused": sum(1 for j in js if j["state"].startswith("paused"))}
+                        "paused": sum(1 for j in js if j["state"].startswith(("paused", "boxed")))}  # F100: both are parked
         out["total"]["counts"] = total_counts(out["total"], bool(U))
     try:  # H286: the jobs that ran long through their own mistake, for the list on the status page
         out["mistakes"] = mistakes(hist, 10)

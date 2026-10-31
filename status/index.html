@@ -587,7 +587,7 @@
       function withTeam(jobs, label) {
         const l = label.replace(/\./g, '\\.');
         const re = new RegExp(`(^|[^\\w.])${l} on the (HQ )?roadmap\\b|\\bthe ${l} row\\b`, 'i');
-        return jobs.find((j) => /^(ready|held|running|stop asked|paused)/.test(j.state) && re.test(j.text));
+        return jobs.find((j) => /^(ready|held|running|stop asked|paused|boxed)/.test(j.state) && re.test(j.text));
       }
       function teamSend(label, jobs, li) {
         const box = el('div', 'team-send');
@@ -2236,7 +2236,7 @@
         {
           const box = el('section');
           // F37: a job paused for its usage (H172) is parked: neither running nor waiting, it holds nothing up and waits for a call.
-          const group = (j) => (/^(running|stop asked)/.test(j.state) ? 'running' : /^(ready|held)/.test(j.state) ? 'waiting' : /^paused/.test(j.state) ? 'parked' : 'finished');
+          const group = (j) => (/^(running|stop asked)/.test(j.state) ? 'running' : /^(ready|held)/.test(j.state) ? 'waiting' : /^(paused|boxed)/.test(j.state) ? 'parked' : 'finished');
           const of = (g) => q.jobs.filter((j) => group(j) === g);
           // H61: the estimates, learned from how long earlier jobs really took (routine/estimate.py).
           const E = routines?.estimate ?? null;
@@ -2277,6 +2277,15 @@
               const gate = routines?.routines?.jobs;
               const gateText = gate?.state === 'waiting' && g === 'waiting' ? (gate.text ?? '') : '';
               if (gateText.startsWith(`Job ${j.n} waits for the usage line: `)) left.append(el('span', 'eta over', gateText.slice(`Job ${j.n} waits for the usage line: `.length).replace(/^./, (c) => c.toUpperCase())));
+              // F100: why it waits: his day hours, the night, the items in progress; a build in the day goes on his tap.
+              if (gateText.startsWith(`Job ${j.n} waits: `)) {
+                left.append(el('span', 'eta over', gateText.slice(`Job ${j.n} waits: `.length).replace(/^./, (c) => c.toUpperCase())));
+                if (/say-so/.test(gateText)) {
+                  const go = el('button', 'teamact', 'Build it now');
+                  go.addEventListener('click', (e) => { e.stopPropagation(); teamPost({ do: 'now', n: j.n }); });
+                  left.append(go);
+                }
+              }
               // H160: a waiting or parked job can be moved or cancelled from here (a swipe left arms the cancel).
               if (g === 'waiting' || g === 'parked') {
                 const i = jobs.indexOf(j);

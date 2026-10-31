@@ -709,14 +709,16 @@ const server = createServer(async (req, res) => {
       args = ['send-row', body.row];
     } else if (body.do === 'cancel' && n) {
       args = ['stop', n];
+    } else if (body.do === 'now' && n) {  // F100: his tap: a build may start in his day hours, kept with who and when
+      args = ['now', n];
     } else if (body.do === 'move' && n && ['top', 'up', 'down', 'bottom'].includes(body.to)) {
       args = ['move', n, body.to];
     }
     if (!args) {
-      res.writeHead(400).end('do is send (with row, like H182), cancel (with n) or move (with n and to: top, up, down or bottom)');
+      res.writeHead(400).end('do is send (with row, like H182), cancel (with n), now (with n) or move (with n and to: top, up, down or bottom)');
       return;
     }
-    execFile('/usr/bin/python3', [join(root, 'routine/jobs.py'), ...args], { timeout: 30000 }, (err, out, errOut) => {
+    execFile('/usr/bin/python3', [join(root, 'routine/jobs.py'), ...args], { timeout: 30000, env: { ...process.env, ...(args[0] === 'now' ? { HQ_SAYSO: 'page' } : {}) } }, (err, out, errOut) => {
       const said = String(err ? errOut || out : out).trim();
       res.writeHead(err ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ ok: !err, said }));
     });
