@@ -15945,6 +15945,8 @@ print("OK")
         import subprocess as _sp
         ws, env, d = self._wall_env("ultra")
         (d / "claude.json").write_text(json.dumps({"oauthAccount": {"organizationRateLimitTier": "default_claude_max_20x"}}))
+        Path(env["HQ_USAGE_PLAN"]).write_text(json.dumps({"plan": "Max 5x", "since": 0, "by": "set by hand", "reported": "Max 5x",
+                                                          "changes": [{"plan": "Max 5x", "since": 0, "by": "what ran before"}]}))  # his setting
         jobs, minute, state, new = self._wall_tools(env, d, ws)
         iso = lambda t: t.strftime("%Y-%m-%dT%H:%M:%SZ")
         def reading(five=None, weekly=5):
@@ -15979,7 +15981,7 @@ with open(E.HISTORY, "w") as f:
     for n in range(1, 13):
         f.write(json.dumps(line(n)) + "\n")
 U.plan_minute()
-need(U.current_plan() == "Ultra" and U.first_plan() == "Max 5x", f"reported 20x: {U.plan_settings()}")
+need(U.current_plan() == "Ultra" and U.first_plan() == "Max 5x", f"his setting with Ultra reported: {U.plan_settings()}")
 U.tag_past()
 need(all(json.loads(l)["plan"] == "Max 5x" for l in open(E.HISTORY)), "the past jobs must stay Max 5x")
 old = U.learn()
@@ -16015,6 +16017,26 @@ print("OK")
 """
         r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
         need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-1000:])
+        # a friend on Pro: no setting yet: the past is what Claude Code reports, not Max 5x
+        pro_dir = d / "pro"
+        pro_dir.mkdir()
+        (pro_dir / "claude.json").write_text(json.dumps({"oauthAccount": {"organizationRateLimitTier": "default_claude_pro"}}))
+        pro = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1] + "/routine")
+import usagecost as U, estimate as E, os
+os.makedirs(U.DIR, exist_ok=True)
+before = U.first_plan()
+with open(E.HISTORY, "w") as f:
+    f.write(json.dumps({"n": 1, "kind": "build", "est": 5, "actual": 5, "done": 1700000000, "how": "seen", "machine": "test"}) + "\n")
+U.plan_minute()
+U.tag_past()
+print(json.dumps({"before": before, "first": U.first_plan(), "now": U.current_plan(), "tag": json.loads(open(E.HISTORY).read())["plan"]}))
+"""
+        r = _sp.run([sys.executable, "-c", pro, str(ROOT)], capture_output=True, text=True, cwd=str(ROOT), timeout=60,
+                    env={**env, "HQ_USAGE_PLAN": str(pro_dir / "plan.json"), "HQ_ESTIMATES": str(pro_dir / "est"), "HQ_CLAUDE_JSON": str(pro_dir / "claude.json")})
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o == {"before": "Pro", "first": "Pro", "now": "Pro", "tag": "Pro"}, f"a friend on Pro: {o} {r.stderr[-300:]}")
         rm = ws / "HQ/roadmap.md"
         rm.write_text(rm.read_text().replace("| ⬜ | A1 Your first step |", "| ⬜ | A1 Your first step, made up |"))
         n = new("Build the thing on the made-up page")

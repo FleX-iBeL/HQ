@@ -199,10 +199,9 @@ def reported_plan():
 
 
 def first_plan():
-    """The plan the past jobs ran on: the first one set, else BASE_PLAN (his words: everything so far ran on it), also
-    when Claude Code reports another one by now: that's the plan from now on."""
+    """The plan the past jobs ran on: the first one in the setting, else what Claude Code reports, else BASE_PLAN."""
     ch = plan_settings().get("changes") or []
-    return (ch[0].get("plan") if ch else None) or BASE_PLAN
+    return (ch[0].get("plan") if ch else None) or reported_plan() or BASE_PLAN
 
 
 def current_plan():
