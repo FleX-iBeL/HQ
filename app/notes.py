@@ -21,12 +21,13 @@ import json
 import os
 import re
 import sys
-import threading
 from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+import hqlock  # noqa: E402  F102: one lock across processes, unique temp files
 
 NOTES = Path(os.environ.get("HQ_NOTES", str(config.DATA / "notes.md")))
 MAX_TEXT = 2000
@@ -37,7 +38,7 @@ HEAD = ("# Quick notes\n\n"
         "## Notes\n\n")
 _CLEARED = re.compile(r"^- cleared (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) · (.*?)(?: <!-- before (\w+) -->)?$")
 _STAMP = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) · (.*)$")
-_lock = threading.Lock()
+_lock = hqlock.For(lambda: NOTES)
 
 
 def _id(line: str) -> str:
@@ -67,7 +68,7 @@ def _read(notes: Path) -> tuple[list[str], list[str]]:
 
 def _write(notes: Path, head: list[str], body: list[str]) -> None:
     notes.parent.mkdir(parents=True, exist_ok=True)
-    tmp = notes.with_name(notes.name + ".tmp")
+    tmp = hqlock.tmp(notes)
     tmp.write_text("\n".join(head).rstrip("\n") + "\n\n" + ("\n".join(body) + "\n" if body else ""))
     os.replace(tmp, notes)
 
@@ -96,7 +97,7 @@ def add(text: str, notes: Path | None = None) -> dict | None:
         notes_end = next((i for i, l in enumerate(body) if not l.startswith("- ")), len(body))
         body.insert(notes_end, line)
         _write(notes, head, body)
-    return items(notes)[notes_end]
+    return _item(line)
 
 
 def cleared_file(notes: Path | None = None) -> Path:
@@ -128,7 +129,7 @@ def _keep(line: str, notes: Path, before: str = "") -> None:
         text = ("# Cleared quick notes\n\n> **Private.** Every note cleared from the quick notes (H263), newest at the "
                 "bottom, so it can always be brought back.\n\n")
     f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_name(f.name + ".tmp")
+    tmp = hqlock.tmp(f)
     tmp.write_text(text.rstrip("\n") + "\n" + f"- cleared {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} · {line[2:]}"
                    + (f" <!-- before {before} -->" if before else "") + "\n")
     os.replace(tmp, f)
@@ -183,7 +184,7 @@ def restore(note_id: str, notes: Path | None = None) -> dict | None:
             text = f.read_text().splitlines()
             gone = len(text) - 1 - text[::-1].index(lines[k])
             del text[gone]
-            tmp = f.with_name(f.name + ".tmp")
+            tmp = hqlock.tmp(f)
             tmp.write_text("\n".join(text) + "\n")
             os.replace(tmp, f)
             return _item(line)

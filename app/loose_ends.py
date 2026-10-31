@@ -199,20 +199,31 @@ def _clear_one(f: dict, todo_file: Path) -> dict | None:
         return {"where": where} | got if got else None
     if where == "mail":
         p = inbox_path(todo_file)
-        text = p.read_text(encoding="utf8")
-        lines = text.splitlines()
-        if f["line"] not in lines:
-            return None
-        lines.remove(f["line"])
-        _write_text(p, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
+        with _inbox_lock(p):  # F102: the mail list's writers take turns
+            text = p.read_text(encoding="utf8")
+            lines = text.splitlines()
+            if f["line"] not in lines:
+                return None
+            lines.remove(f["line"])
+            _write_text(p, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
         return {"where": "mail", "line": f["line"], "heading": f.get("heading", "")}
     return None
 
 
+def _inbox_lock(p: Path):
+    sys.path.insert(0, str(ROOT / "routine"))
+    import hqlock
+    return hqlock.locked(p)
+
+
 def _write_text(p: Path, text: str) -> None:
-    tmp = p.with_name(p.name + ".tmp")
+    sys.path.insert(0, str(ROOT / "routine"))
+    import hqlock
+    import mailguard
+    tmp = hqlock.tmp(p)
     tmp.write_text(text, encoding="utf8")
     os.replace(tmp, p)
+    mailguard.touched(p)  # F102: a line taken out by hand during a mail check isn't that check's doing
 
 
 def sweep(title: str, todo_file: Path) -> tuple[list[str], list[dict], list[str]]:
@@ -268,22 +279,23 @@ def put_back(records: list[dict], todo_file: Path) -> int:
                 n += 1
             elif where == "mail":
                 p = inbox_path(todo_file)
-                text = p.read_text(encoding="utf8")
-                lines = text.splitlines()
-                if rec["line"] in lines:
-                    continue
-                head = rec.get("heading") or ""
-                at = next((i for i, l in enumerate(lines) if head and l == head), None)
-                if at is not None:
-                    at += 2 if at + 1 < len(lines) and not lines[at + 1].strip() else 1
-                    lines.insert(at, rec["line"])
-                else:
-                    sec = next((i for i, l in enumerate(lines) if l.strip().lower() == "## to check"), None)
-                    if sec is None:
-                        lines += ["", "## To check"]
-                        sec = len(lines) - 1
-                    lines[sec + 1:sec + 1] = [""] + ([head, ""] if head else []) + [rec["line"]]
-                _write_text(p, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
+                with _inbox_lock(p):
+                    text = p.read_text(encoding="utf8")
+                    lines = text.splitlines()
+                    if rec["line"] in lines:
+                        continue
+                    head = rec.get("heading") or ""
+                    at = next((i for i, l in enumerate(lines) if head and l == head), None)
+                    if at is not None:
+                        at += 2 if at + 1 < len(lines) and not lines[at + 1].strip() else 1
+                        lines.insert(at, rec["line"])
+                    else:
+                        sec = next((i for i, l in enumerate(lines) if l.strip().lower() == "## to check"), None)
+                        if sec is None:
+                            lines += ["", "## To check"]
+                            sec = len(lines) - 1
+                        lines[sec + 1:sec + 1] = [""] + ([head, ""] if head else []) + [rec["line"]]
+                    _write_text(p, "\n".join(lines) + ("\n" if text.endswith("\n") else ""))
                 n += 1
         except Exception:
             continue

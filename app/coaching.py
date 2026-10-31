@@ -43,7 +43,6 @@ import os
 import re
 import subprocess
 import sys
-import threading
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -52,6 +51,8 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent  # HQ
 sys.path.insert(0, str(HERE))
 import workflows  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+import hqlock  # noqa: E402  F102: one lock across processes, unique temp files
 
 FILE = "HQ/coaching.json"  # in the workspace
 LINE_DIR = "HQ/coaching-line"  # the coaching line's thread, in the workspace
@@ -59,7 +60,7 @@ WID = "map"
 EVERY_WEEKS = 8  # the bigger check-in (H251): the games' rhythm, a setup week, six weeks and a look-back week
 PARTS = {"morning": 9, "afternoon": 14, "evening": 19, "night": 21}  # a part of the day starts at
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-_lock = threading.Lock()
+_lock = hqlock.For(lambda: path())
 
 
 def folder() -> Path:
@@ -98,7 +99,7 @@ def _load() -> dict:
 def _save(d: dict) -> None:
     p = path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
+    tmp = hqlock.tmp(p)
     tmp.write_text(json.dumps(d, indent=1, ensure_ascii=False) + "\n", encoding="utf8")
     os.replace(tmp, p)
 

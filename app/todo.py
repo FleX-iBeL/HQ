@@ -70,14 +70,15 @@ import os
 import re
 import sys
 import calendar
-import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent  # HQ
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # loose_ends (F43)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+import hqlock  # noqa: E402  F102: one lock across processes, unique temp files
 FILE = "challenges.md"
-_lock = threading.Lock()
+_lock = hqlock.For(lambda: path())
 _HEAD = re.compile(r"^##\s+(?:(\d+)\.\s*)?(.+?)\s*$")
 _DETAIL = re.compile(r"^\*\*(.+?)\*\*\s*(.*)$")
 
@@ -382,7 +383,7 @@ def _insert_log(lines: list[str], line: str) -> list[str]:
 def _write(p: Path, before: str, lines: list[str], what: str, swept: list | None = None,
            links_before: dict | None = None) -> None:
     text = "\n".join(lines) + ("\n" if before.endswith("\n") else "")
-    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp = hqlock.tmp(p)
     tmp.write_text(text, encoding="utf8")
     os.replace(tmp, p)
     try:
@@ -607,7 +608,7 @@ def _ensure_ticked_list(p: Path) -> dict:
                  _row_line(gro["columns"]), "|" + "|".join("---" for _ in gro["columns"]) + "|"]
         lines = lines[:at] + block + lines[at:]
         text = "\n".join(lines) + ("\n" if before.endswith("\n") else "")
-        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp = hqlock.tmp(p)
         tmp.write_text(text, encoding="utf8")
         os.replace(tmp, p)
         return next(x for x in parse(text)["lists"] if x["kind"] == "grocoff")
@@ -952,7 +953,7 @@ def undo() -> dict:
             return {"ok": False, "said": "The list isn't there."}
         if hashlib.sha1(now_text.encode()).hexdigest() != u.get("after_sha"):
             return {"ok": False, "said": "The list changed since, so it can't be undone from here."}
-        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp = hqlock.tmp(p)
         tmp.write_text(u["before"], encoding="utf8")
         os.replace(tmp, p)
         if isinstance(u.get("links_before"), dict):  # H243
@@ -994,7 +995,7 @@ def _links() -> dict:
 def _save_links(s: dict) -> None:
     f = links_file()
     f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_suffix(".tmp")
+    tmp = hqlock.tmp(f)
     tmp.write_text(json.dumps(s, indent=1, ensure_ascii=False) + "\n", encoding="utf8")
     os.replace(tmp, f)
 

@@ -50,17 +50,9 @@ def _file_lock(path: str):
     takes this lock (flock on a file named after it in HQ's own scratch/routine/locks, next to the queue's lock,
     never in the user's folder) around its read, edit and replace, so no edit is lost under another's. The roadmap
     keeps the queue's own lock."""
-    import fcntl
-    import jobs
-    folder = os.path.join(os.path.dirname(jobs.LOCK), "locks")
-    os.makedirs(folder, exist_ok=True)
-    name = os.path.relpath(path, hqpaths.FOLDER).replace(os.sep, "__").replace("..", "_")
-    with open(os.path.join(folder, name + ".lock"), "w") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+    import hqlock  # F102: one lock, also for the to-do list, the notes, the games, the coaching file and the mail list
+    with hqlock.locked(path):
+        yield
 
 
 def _lock(rel):
@@ -102,6 +94,9 @@ def edit(rel: str, payload: str) -> int:
         with contextlib.suppress(OSError):
             os.chmod(tmp, os.stat(path).st_mode & 0o777)
         os.replace(tmp, path)
+        if rel == "inbox.md":  # F102: taken out by a call during a mail check isn't that check's doing
+            import mailguard
+            mailguard.touched(path)
     print(f"Written by the main: {rel}.")
     return 0
 

@@ -63,14 +63,15 @@ import json
 import os
 import re
 import sys
-import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent  # HQ
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+import hqlock  # noqa: E402  F102: one lock across processes, unique temp files
 FILE = "HQ/games.json"  # in the workspace
 WRITES = ("new", "spec", "tick", "count", "note", "diary", "week", "debrief", "undo")
-_lock = threading.Lock()
+_lock = hqlock.For(lambda: path())
 KEEP_LOG = 300  # the last changes a game keeps, newest first
 
 
@@ -184,7 +185,7 @@ def _save(d: dict, before: str) -> None:
     p = path()
     p.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(d, ensure_ascii=False, indent=1) + "\n"
-    tmp = p.with_suffix(".tmp")
+    tmp = hqlock.tmp(p)
     tmp.write_text(text, encoding="utf8")
     os.replace(tmp, p)
     try:

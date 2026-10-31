@@ -50,6 +50,7 @@ import sync  # H56.4: the two-way sync of the workspace and Claude's memory with
 import log_cycle  # H100: the coaching log keeps three hours; older entries move to its archive
 import cycles  # H298: the agents run themselves: their cycles as jobs of their own kind, in their own lane
 import wall  # F100: the usage wall: the box, his day hours, the night, the items in progress, the order
+import mailguard  # F102: a program holds the mail check to its rules, and says when it stopped
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
@@ -657,6 +658,9 @@ def mail_running():
     log("mail check finished")
     res = mail_result()
     ok, text = res["ok"], res["text"]
+    if mailguard.after_run(ok, incidents, routines, log=log):  # F102: the list put back, the incident open
+        res, ok = {**res, "ok": False}, False
+        text = "The list it left broke the rules, so it was put back"
     routines.beat("mail", state="ok" if ok else "down", text=text, last=started, next=mail_next(started), every=60,
                   why=res.get("why", ""), detail=res.get("detail", []), run=res.get("run", ""))
     if ok:
@@ -877,6 +881,7 @@ echo $$ > {json.dumps(MAIL_PID)}
         json.dump({**r, "started": time.time()}, open(MAIL_RETRY, "w"))
     open(MAIL_LAST, "w").write(str(int(time.time())))
     json.dump({"pid": None, "started": time.time()}, open(MAIL_STATE, "w"))
+    mailguard.before()  # F102
     open_window(cmd, "mail")
     log("started the mail check")
     routines.beat("mail", state="running", text="Started", last=time.time(), next=mail_next(time.time()), every=60)
@@ -1568,6 +1573,10 @@ def tick():
         mail(q, start_new=not handing_back)  # H30: on its own, also while a job runs
     except Exception as e:
         log(f"mail: {e!r}")
+    try:
+        mailguard.minute(q.get("mail", True), incidents, routines)  # F102: red when it hasn't been checked for 2 hours
+    except Exception as e:
+        log(f"mail list: {e!r}")
     running = q["running"]
     s = load_state()
     if running:
