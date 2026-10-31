@@ -14,7 +14,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-c</string>
-    <string>sleep 20; A="$HOME/Applications/HQ Routine.app"; [ -d "$A" ] || A="$HOME/Applications/Jarvis Routine.app"; exec /usr/bin/open -a "$A"</string>
+    <string>sleep 20; exec /usr/bin/open -a "$HOME/Applications/HQ Routine.app"</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

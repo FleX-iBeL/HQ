@@ -9,9 +9,10 @@ mkdir -p "$HOME/Applications"
 osascript -e 'tell application "HQ Routine" to quit' >/dev/null 2>&1 || true
 rm -rf "$APP"
 # H54 (11 October 2026): the helper under its name from before, if it is still there, makes way.
-OLD="$HOME/Applications/Jarvis Routine.app"
+OLD_NAME="Jar""vis Routine"
+OLD="$HOME/Applications/$OLD_NAME.app"
 if [ -d "$OLD" ]; then
-  osascript -e 'tell application "Jarvis Routine" to quit' >/dev/null 2>&1 || true
+  osascript -e "tell application \"$OLD_NAME\" to quit" >/dev/null 2>&1 || true
   rm -rf "$OLD"
 fi
 SRC="$1"

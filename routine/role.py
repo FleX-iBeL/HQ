@@ -91,6 +91,7 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "about_self": {"add"},  # F102: what an agent says about herself, written by the main
           "usagecost": {"plan"},  # F107: the plan in use, written only by the main
           "trail": {"put"}, "mistakes": {"put"}}  # F103: the record and the ledger, written only by the main
+TO_BOTH = {"update": {"back-here", "forward-here"}}  # F104: what the other computer takes whichever it is: the code, not the data
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
            "coaching": os.path.join(os.path.dirname(HERE), "app", "coaching.py"),
@@ -778,6 +779,20 @@ def forward(script: str, args: list[str], env: dict | None = None) -> int:
     return code
 
 
+def tell_other(script: str, args: list[str], timeout: float = 30) -> str:
+    """F104: a word to the other computer, whichever is main: 'told', 'not reached' or 'alone'."""
+    if _test_on_real_pairing():
+        return "alone"
+    c = config()
+    if not c:
+        return "alone"
+    try:
+        code, d = _request(c["peer"].rstrip("/") + "/api/forward", {"script": script, "args": args}, "forward", timeout=timeout)
+        return "told" if code == 200 and isinstance(d, dict) and not d.get("code") else "not reached"
+    except Exception:
+        return "not reached"
+
+
 REFUSALS = 3  # F102: a kept request the main refuses this many times stops being sent, stays kept, and opens an incident
 HANDOVER_KEY = "handover"
 
@@ -862,11 +877,12 @@ def serve(kind: str) -> int:
         return 0
     if kind == "forward":
         script, args = d.get("script"), [str(a) for a in d.get("args") or []]
-        if script not in WRITES or not args or args[0] not in WRITES[script]:
+        both = bool(args) and args[0] in TO_BOTH.get(script, ())
+        if not both and (script not in WRITES or not args or args[0] not in WRITES[script]):
             print(json.dumps({"code": 2, "out": "", "err": "Only a call's own queue, schedule, to-do, game, "
                                                              "reminder and hand-over commands are taken.\n"}))
             return 2
-        if acting() != "main":
+        if not both and acting() != "main":
             print(json.dumps({"code": 3, "out": "", "err": "This HQ isn't the main one right now.\n"}))
             return 3
         code, out, err = _run_here(script, args, d.get("env"))

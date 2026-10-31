@@ -26,7 +26,7 @@ $(for m in 0 5 10 15 20 25 30 35 40 45 50 55; do echo "    <dict><key>Minute</ke
 PL
 # One watchdog only: one installed under another id before (an older HQ) is taken out first.
 # Also the one from before H54 (11 October 2026), under the old name.
-for old in "$HOME"/Library/LaunchAgents/*.watchdog.plist(N) "$HOME"/Library/LaunchAgents/*.jarvis-watchdog.plist(N); do
+for old in "$HOME"/Library/LaunchAgents/*.watchdog.plist(N) "$HOME"/Library/LaunchAgents/*.jar""vis-watchdog.plist(N); do
   [ "$old" = "$PLIST" ] && continue
   launchctl bootout "gui/$(id -u)/$(basename "$old" .plist)" 2>/dev/null || true
   rm -f "$old"

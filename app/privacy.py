@@ -7,7 +7,9 @@ HQ's files (and, with --history, every version in its git history) for:
 - things that are personal for anyone: a home folder path (/Users/<someone>, except the
   placeholder /Users/you), a Tailscale machine name (<mac>.tail<id>.ts.net), a Tailscale address
   (100.64.x.x to 100.127.x.x), a mail address (except example and noreply ones), and keys or
-  tokens (Anthropic, GitHub, Slack, AWS, private key blocks).
+  tokens (Anthropic, GitHub, Slack, AWS, private key blocks);
+- F104: a computer named after someone (<name>s-MacBook-Air) and HQ's old project name, in the files as they are now. Old commits
+  still hold them: taking them out of the history means rewriting the public repo, so `--history` doesn't count those two.
 
     python3 app/privacy.py            HQ's files as they are now (tracked, and new ones not ignored)
     python3 app/privacy.py --history  also every version in git's history
@@ -38,6 +40,10 @@ GENERIC = [
 ]
 
 
+# F104: only in the files as they are now. Old commits hold both; taking them out means rewriting the public repo.
+TODAY = [hqpaths.OLD_NAME, r"\b[A-Z][a-z]+s-(?:MacBook|iMac|Mac-mini)(?:-[A-Za-z0-9]+)*\b"]
+
+
 def words(folder: Path | None = None) -> list[str]:
     """The user's private words, from me.md in their workspace."""
     sys.path.insert(0, str(ROOT / "app"))
@@ -48,8 +54,8 @@ def words(folder: Path | None = None) -> list[str]:
     return [w for w in [m["name"], *m["private"]] if w]
 
 
-def pattern(private: list[str]) -> re.Pattern:
-    parts = list(GENERIC)
+def pattern(private: list[str], today: bool = False) -> re.Pattern:
+    parts = list(GENERIC) + (TODAY if today else [])
     for w in private:
         e = re.escape(w)
         parts.append((r"\b" if w[:1].isalnum() else "") + e + (r"\b" if w[-1:].isalnum() else ""))
@@ -109,12 +115,38 @@ def scan_history(pat: re.Pattern, root: Path = ROOT) -> list[str]:
     return hits
 
 
+HOOK = """#!/bin/sh
+# HQ (F104): nothing goes up without the privacy check, whatever pushes it. push.py runs the check itself first.
+[ -n "$HQ_PRIVACY_PASSED" ] && exit 0
+root="$(git rev-parse --show-toplevel)"
+exec python3 "$root/app/privacy.py" --history
+"""
+
+
+def install_hook(root: Path = ROOT) -> str:
+    """The check as a pre-push hook in HQ's clone (F104), in the repository's own hooks folder, also from a worktree."""
+    r = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-common-dir"], capture_output=True, text=True)
+    if r.returncode:
+        return "This HQ isn't a git copy: no hook."
+    common = Path(r.stdout.strip())
+    p = (common if common.is_absolute() else root / common) / "hooks" / "pre-push"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if p.exists() and p.read_text() != HOOK and "HQ (F104)" not in p.read_text():
+        return f"There's another pre-push hook here, left as it is: {p}"
+    p.write_text(HOOK)
+    p.chmod(0o755)
+    return f"The privacy check runs before every push here: {p.name}."
+
+
 def main() -> int:
     private = words()
     if not private:
         print("No private words in workspace/me.md (Name, Private words): only the general checks run.")
+    if "--hook" in sys.argv:
+        print(install_hook())
+        return 0
     pat = pattern(private)
-    hits = scan_tree(pat)
+    hits = scan_tree(pattern(private, today=True))
     if "--history" in sys.argv:
         hits += scan_history(pat)
     for h in hits:

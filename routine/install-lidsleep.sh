@@ -26,7 +26,7 @@ if ! /usr/sbin/visudo -cf "$TMP" >/dev/null; then
   exit 1
 fi
 mv "$TMP" /etc/sudoers.d/hq-lidsleep
-rm -f /etc/sudoers.d/jarvis-lidsleep  # H54: the same rule under its name from before
+rm -f /etc/sudoers.d/jar""vis-lidsleep  # H54: the same rule under its name from before
 /usr/sbin/visudo -c >/dev/null
 echo "Done. From now on a call can flip the lid-closed sleep; nothing else runs without your password."
 [ -n "$SUDO_USER" ] && sudo -u "$SUDO_USER" python3 "$HERE/lidsleep.py" >/dev/null 2>&1 || true

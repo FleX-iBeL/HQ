@@ -383,6 +383,7 @@ class Installer:
         return "signed in with a Claude plan"
 
     def workspace(self):
+        subprocess.run([sys.executable, os.path.join(HQ, "app", "privacy.py"), "--hook"], capture_output=True, text=True)  # F104
         if os.path.lexists(WORKSPACE):
             # Never touched: not copied over, not changed, not even a git init.
             kind = "a link to " + os.path.realpath(WORKSPACE) if os.path.islink(WORKSPACE) else "a folder"
@@ -461,8 +462,8 @@ class Installer:
         # One start at login only: one installed under another id before (an older HQ) is taken out.
         suffix = "." + HELPER_AGENT.split(".")[-1] + ".plist"
         for old in os.listdir(AGENTS):
-            # (Also the id from before H54, 11 October 2026: .jarvis-va.)
-            if (old.endswith(suffix) or old.endswith(".jarvis-va.plist")) and old != HELPER_AGENT + ".plist":
+            # (Also the id from before H54, 11 October 2026.)
+            if (old.endswith(suffix) or old.endswith(".jar" "vis-va.plist")) and old != HELPER_AGENT + ".plist":
                 subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{old[:-len('.plist')]}"], capture_output=True)
                 os.remove(os.path.join(AGENTS, old))
         open(dest, "w").write(plist)

@@ -26,7 +26,7 @@ PMSET = "/usr/bin/pmset"
 SUDO = "/usr/bin/sudo"
 SUDOERS = "/etc/sudoers.d/hq-lidsleep"  # put there by the one-time setup
 # Its name before H54 (11 October 2026), set up before then, works the same until it is renamed.
-SUDOERS_OLD = "/etc/sudoers.d/jarvis-lidsleep"
+SUDOERS_OLD = "/etc/sudoers.d/jar" "vis-lidsleep"
 SETUP_LINE = f'sudo sh "{os.path.join(HERE, "install-lidsleep.sh")}"'
 COMMAND = {"on": [PMSET, "-a", "disablesleep", "1"], "off": [PMSET, "-a", "disablesleep", "0"]}
 

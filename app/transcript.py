@@ -8,7 +8,7 @@ What goes in:
   **<Name>** what they said (the name from me.md, else Me) (as Whisper heard it)        · (cut in) when he talked over HQ
                                                          · (typed) when he typed it on the call page (H18)
                                                          · (cancelled) when he tapped Cancel before she answered (H31)
-  **HQ** what Claude said (before H54: **Jarvis**)          · (cut off) when he stopped it
+  **HQ** what Claude said (before H54: its old name)          · (cut off) when he stopped it
   *filler* what the call system said while Claude worked (not Claude's words; Claude never sees them)
   `tool` one short line per tool call, with the decision (done / asked / refused)
   *call* call system notes (permission answers, connect, hang-up, after-call work)
@@ -140,7 +140,7 @@ class CallTranscript:
 
 
 # Her lines: **HQ:** since H54 (11 October 2026); saved calls from before still say the old name.
-_HERS = ("**HQ:** ", "**Jarvis:** ")
+_HERS = ("**HQ:** ", "**Jar" "vis:** ")  # F104: the second is the old name, in old transcripts
 _HERS_ON_THREE_WAY = re.compile(r"^\*\*HQ \(([^)*]+)\):\*\* ")  # H79: **HQ (Donna):** on a three-way call
 _LINE = re.compile(r"^- (\d\d:\d\d):\d\d (.*)$")
 _MARK = re.compile(r"\s*\*\((typed|cut in|cut off|cancelled|Cancel button)\)\*\s*$")

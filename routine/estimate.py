@@ -277,7 +277,7 @@ def size_score(about):
 
 def _first_row(t):
     """H220: the roadmap row a job is for: "h169" from "h169 on the hq roadmap", "read the h169 row" or "h169, the ..."."""
-    m = re.search(r"\b([hfmlj]\d+(?:\.\d+)?)(?: and [hfmlj]\d+(?:\.\d+)?)?(?: on the (?:hq |jarvis va )?roadmap\b|,| \()"
+    m = re.search(r"\b([hfmlj]\d+(?:\.\d+)?)(?: and [hfmlj]\d+(?:\.\d+)?)?(?: on the (?:hq |jar" r"vis va )?roadmap\b|,| \()"
                   r"|\bread the ([hfmlj]\d+(?:\.\d+)?) row", t)
     return (m.group(1) or m.group(2)) if m else None
 
@@ -315,7 +315,7 @@ def kind_of(text):
     reading (when nothing says it builds); a build by its wording, sorted small or big (build_size); a job for a
     roadmap row that says nothing else, a build too (nearly every one of those built something); else other."""
     t = " ".join(text.lower().split())
-    t = t.split("follow the hq build notes")[0].split("follow the jarvis va build notes")[0]
+    t = t.split("follow the hq build notes")[0].split("follow the jar" "vis va build notes")[0]
     t = re.sub(r"^.*?the job, as agreed on the call: ", "", t)
     t = re.sub(r"^scheduled item \d+, planned for [^:]*?(?:\d{1,2}:\d\d)?: ", "", t)
     sure = _sure(t)

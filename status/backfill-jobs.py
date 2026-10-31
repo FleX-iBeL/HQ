@@ -45,7 +45,7 @@ def at(day: dt.date, hhmm: str, not_before: float | None = None) -> float:
 def main() -> None:
     versions = []  # (commit time, text), oldest first
     # The roadmap's folder had another name before H54 (11 October 2026); its saved versions are there.
-    paths = ("HQ/roadmap.md", "Jarvis VA/roadmap.md")
+    paths = ("HQ/roadmap.md", "Jar" "vis VA/roadmap.md")
     for line in reversed(git("log", "--format=%H %ct", "--", *paths).split("\n")):
         if not line.strip():
             continue

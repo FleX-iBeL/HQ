@@ -1173,7 +1173,8 @@ if __name__ == "__main__":
         if ask["id"] not in _feat.ids():
             return JSONResponse({"error": "no such switch"}, status_code=404)
         try:
-            said = await asyncio.to_thread(_feat.switch, ask["id"], ask["on"], _feat_folder())
+            # F104: this door is the page's own: his tap counts as his say-so for a feature still in pieces
+            said = await asyncio.to_thread(_feat.switch, ask["id"], ask["on"], _feat_folder(), tapped=True)
         except Exception:  # a file that can't be written, the mail check's jobs.py timing out
             return JSONResponse({"error": "Couldn't write it"}, status_code=500)
         return JSONResponse({"items": await asyncio.to_thread(_feat.listing, _feat_folder()), "said": said}, headers=_NO_CACHE)

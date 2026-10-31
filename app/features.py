@@ -19,7 +19,7 @@ Which are off is the workspace's: `HQ/features.json` there, {"off": ["calendar"]
 what starts off ("default": "off": Driving, H230, which needs their own key); turned on, it's in the file's "on" list.
 
     python3 app/features.py                 every switch, on or off
-    python3 app/features.py on calendar     turn one on
+    python3 app/features.py on calendar     turn one on (a feature in pieces only after its QA passed, or --said "HIS WORDS": F104)
     python3 app/features.py off calendar    turn one off
     python3 app/features.py pieces          the features still being built in pieces (F56, piece 2)
     python3 app/features.py ship ID         a feature in pieces goes on for everyone (by hand; qa.py does it itself)
@@ -40,6 +40,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent  # HQ
@@ -174,7 +175,7 @@ def turned_off(base: Path | None = None) -> list[str]:
     off, on = d.get("off") or [], d.get("on") or []
     mk = maker(base)
     return [x["id"] for x in everything() if x["id"] in off or (x.get("default") == "off" and x["id"] not in on)
-            or (x.get("in_pieces") and not mk)]
+            or (x.get("in_pieces") and (not mk or untested(x, base)))]  # F104
 
 
 def _save(base: Path, off: list[str]) -> None:
@@ -185,10 +186,13 @@ def _save(base: Path, off: list[str]) -> None:
     d = {"off": [x["id"] for x in everything() if x["id"] in off and x.get("default") != "off"
                  and not (x.get("in_pieces") and not maker(base))]}
     on = [x["id"] for x in FEATURES if x.get("default") == "off" and x["id"] not in off]
+    on += [x for x in old.get("on") or [] if x not in on and x not in off and x not in IDS]  # F104: a piece HQ doesn't list yet
     if on:
         d["on"] = on
     if old.get("maker") is True:  # F56: kept, never set here
         d["maker"] = True
+    if old.get("say_so"):  # F104
+        d["say_so"] = old["say_so"]
     tmp.write_text(json.dumps(d, indent=2) + "\n", encoding="utf8")
     os.replace(tmp, p)
 
@@ -235,12 +239,34 @@ def _wf_folder() -> Path:
     return Path(os.environ.get("HQ_WORKFLOWS_FOLDER") or folder())
 
 
+def qa_passed(f: dict) -> bool:
+    """F104: whether the row of a feature in pieces has QA passed. Read from the row's own marks."""
+    row = str(f.get("row") or "").upper()
+    if not row:
+        return False
+    sys.path.insert(0, str(ROOT / "routine"))
+    try:
+        import qa
+        return qa.state(row) == "passed"
+    except Exception:
+        return False
+
+
+def untested(f: dict, base: Path | None = None) -> bool:
+    """F104: a feature in pieces on the maker's HQ stays off until its QA passed or he turned it on himself: the work line never
+    switches on untested work by itself, as the agents' cycles did on 30 October. What's in the file's "on" list got there through
+    `switch`, which asks for that."""
+    return bool(f.get("in_pieces")) and f["id"] not in (_state(base).get("on") or []) and not qa_passed(f)
+
+
 def is_on(fid: str, base: Path | None = None) -> bool:
     """Whether a switch is on, with what it needs. The cheap ones (no roadmap, no workflow) are read on every look."""
     f = next((x for x in everything() if x["id"] == fid), None)
     if not f:
         return True
     if f.get("in_pieces") and not maker(base):  # F56: not whole yet, hidden here
+        return False
+    if untested(f, base):
         return False
     if _computer_off(f):
         return False
@@ -265,7 +291,7 @@ def listing(base: Path | None = None) -> list[dict]:
             if mk:
                 item["pieces"] = f"Still being built ({f.get('row') or 'no row'}"
                 item["pieces"] += f", {f['pieces']})" if f.get("pieces") else ")"
-                item["pieces"] += ": only on your HQ until its last piece passes QA"
+                item["pieces"] += ": only on your HQ until its last piece passes QA; before that only when you turn it on yourself"
             else:
                 item["hidden"] = True
             out.append(item)
@@ -308,11 +334,36 @@ def listing(base: Path | None = None) -> list[dict]:
     return out
 
 
-def switch(fid: str, on: bool, base: Path | None = None) -> str:
+def _keep_say_so(base: Path, fid: str, how: str) -> None:
+    """F104: who turned an untested feature on, kept in the file with the time."""
+    d = _state(base)
+    d.setdefault("say_so", {})[fid] = {"at": time.strftime("%Y-%m-%d %H:%M"), "how": how}
+    if fid not in (d.get("on") or []):
+        d["on"] = (d.get("on") or []) + [fid]
+    p = base / STATE
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(d, indent=2) + "\n", encoding="utf8")
+    os.replace(tmp, p)
+
+
+def switch(fid: str, on: bool, base: Path | None = None, said: str = "", tapped: bool = False) -> str:
+    """F104: a feature in pieces goes on only after its QA passed, or on his own words (`said`, a line he said or typed) or his own
+    tap in Settings (`tapped`), kept with the time."""
     base = base or folder()
     f = next((x for x in everything() if x["id"] == fid and not (x.get("in_pieces") and not maker(base))), None)
     if not f:
         return f"No switch {fid}. There are: {', '.join(i for i in ids() if is_on(i, base) or i in IDS)}."
+    if on and untested(f, base):
+        quote = None
+        if said:
+            sys.path.insert(0, str(ROOT / "routine"))
+            import sprint
+            quote = sprint.his_quote(said)
+        if not quote and not tapped:
+            return (f"Refused: {f['name'].replace('{agent}', _agent())} hasn't passed QA yet ({f.get('row') or 'no row'}), so it stays off "
+                    "unless he says so: --said \"HIS WORDS\", a line he said or typed.")
+        _keep_say_so(base, fid, f"his words: {said}" if quote else "his tap in Settings")
     if f.get("workflow"):
         wf = _workflows()
         return wf.turn_on(_wf_folder(), f["workflow"]) if on else wf.turn_off(_wf_folder(), f["workflow"])
@@ -361,9 +412,14 @@ def main(argv: list[str]) -> int:
     if argv[0] == "ship" and len(argv) == 2:
         print(ship(argv[1]))
         return 0
+    if argv[0] == "on" and len(argv) == 4 and argv[2] == "--said":
+        said = switch(argv[1], True, said=argv[3])
+        print(said)
+        return 2 if said.startswith("Refused") else 0
     if argv[0] in ("on", "off") and len(argv) == 2:
-        print(switch(argv[1], argv[0] == "on"))
-        return 0
+        said = switch(argv[1], argv[0] == "on")
+        print(said)
+        return 2 if said.startswith("Refused") else 0
     print(__doc__)
     return 2
 

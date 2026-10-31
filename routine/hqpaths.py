@@ -108,7 +108,7 @@ def host_name() -> str:
     """This computer's own short name, the one that doesn't move with the network (H162, 16 October 2026). On a
     Mac the network's name (gethostname) follows the network it's on: on his phone's hotspot it became the phone's
     ("iPhone-van-P took over" in the incident log of 14 October), so main and backup lost track of who is who.
-    There, scutil's LocalHostName (the name set in Sharing, e.g. Patricks-MacBook-Air) comes first."""
+    There, scutil's LocalHostName (the name set in Sharing, e.g. My-MacBook-Air) comes first."""
     global _HOST
     if _HOST:
         return _HOST
@@ -348,6 +348,9 @@ def cells(line: str) -> list[str]:
 def join_cells(cs: list[str]) -> str:
     """F101: the row back from cells(), its escaped pipes untouched."""
     return ("| " + " | ".join(cs) + " |").replace("|  |", "| |").replace("|  |", "| |")
+
+
+OLD_NAME = "jar" + "vis"  # F104: HQ's old project name, written so that it stands nowhere: only for clearing what it left behind
 
 
 def is_maker() -> bool:

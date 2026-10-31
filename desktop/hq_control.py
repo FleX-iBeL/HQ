@@ -32,7 +32,7 @@ except Exception:  # the app must still show something
 STATUS = "http://127.0.0.1:4748"
 CALL_PORT = 7860
 # The helper app; until it is rebuilt under its new name (H54, 11 October 2026), the old one still runs.
-HELPER_APPS = [os.path.expanduser("~/Applications/HQ Routine.app"), os.path.expanduser("~/Applications/Jarvis Routine.app")]
+HELPER_APPS = [os.path.expanduser("~/Applications/HQ Routine.app")]
 HELPER_APP = next((a for a in HELPER_APPS if os.path.isdir(a)), HELPER_APPS[0])
 SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
 PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"

@@ -36,7 +36,7 @@ else:
     SUPPORT = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hq")
 UNIT = os.environ.get("HQ_UNIT") or "hq"  # Linux: the units are <UNIT>-routine.timer, <UNIT>-routine.service
 # The helper app; until it is rebuilt under its new name (H54, 11 October 2026), the old one still runs.
-APPS = [os.path.expanduser("~/Applications/HQ Routine.app"), os.path.expanduser("~/Applications/Jarvis Routine.app")]
+APPS = [os.path.expanduser("~/Applications/HQ Routine.app")]
 APP = next((a for a in APPS if os.path.isdir(a)), APPS[0])
 EVERY = 300
 STUCK = 360

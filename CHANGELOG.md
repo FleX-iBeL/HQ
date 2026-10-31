@@ -4,6 +4,10 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- A way back. `update.py back` puts HQ one version back in one step, on both computers, with what that version changed in your data undone; `update.py forward` brings it forward again. A release that changes data is refused unless its undo works on a copy, and it lists the change in the changelog.
+
+- Friends stay on released versions: a job on a friend's HQ never takes the work line, by any way. On the maker's HQ a feature still in pieces stays off until its QA passed, unless he says so, and that's kept. New workspaces run the team's jobs headless. The privacy check also runs as a pre-push hook, and HQ's old project name is gone from the code.
+
 - One id per request. An item gets its id when it's written, and the job, its QA, the release, a text and an incident carry it, so `trail.py follow` shows everything that happened to it, from the words to live.
 
 - One ledger of mistakes, across every call and text. Your corrections are tagged at the end of the call, in the same run, with your own words checked against the transcript; "stop asking" and "you just say yes" count, every refused outward action, every QA fail and every bug found after a QA pass too. Praise no longer counts as a correction. The score reads the ledger alone, per agent and per hand-off, with no model, whatever the agents' switch says.

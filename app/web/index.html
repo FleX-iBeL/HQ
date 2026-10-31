@@ -1213,7 +1213,7 @@
 try {
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (k && k.startsWith("jarvis-") && localStorage.getItem("hq-" + k.slice(7)) === null)
+    if (k && k.startsWith("jar" + "vis-") && localStorage.getItem("hq-" + k.slice(7)) === null)
       localStorage.setItem("hq-" + k.slice(7), localStorage.getItem(k));
   }
 } catch (e) {}

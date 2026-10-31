@@ -45,6 +45,9 @@ A newer version is a tag vX.Y or vX.Y.Z on the public repo with a higher number.
      and rebuild in local/.
 State: .status/update.json (the last check) and .status/update-run.json (the update), for the pages.
 Tests: HQ_UPDATE_URL (another repo, e.g. a folder), HQ_PLATFORM (pretend another computer), HQ_CALL_URL,
+F104: `back [--tag vX.Y.Z]` one version back (on the work line past a version: that version), in the background, here and on the other
+computer through the forward; the main runs the undos of the data changes it leaves behind (routine/datachange.py), the backup gets
+them by the sync; while back on the maker's HQ the team waits. `forward` the other way. Tests: HQ_UPDATE_WAIT in the foreground.
 HQ_UPDATE_RESTART=0 (restart nothing, end nothing), HQ_UPDATE_ROUTINE=0 (leave the routine and the watchdog alone).
 """
 from __future__ import annotations
@@ -79,6 +82,8 @@ PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 # F32: who the update's backup (a stash is a commit) is by, so it works on a computer whose git has no name yet.
 IDENTITY = ("-c", "user.name=HQ update", "-c", "user.email=hq-update@localhost")
 TAG = re.compile(r"^v(\d+)\.(\d+)(?:\.(\d+))?$")
+BACK_FILE = os.path.join(STATUS_DIR, "back.json")      # F104: this HQ went back: from where, to which version
+OTHER_FILE = os.path.join(STATUS_DIR, "back-other.json")  # F104: the other computer still has to hear it
 
 
 def platform() -> str:
@@ -409,6 +414,8 @@ def backup(target: str) -> dict:
     own = git("rev-list", "--count", f"{target}..HEAD", timeout=10).stdout.strip()
     if head and own and int(own) > 0:
         name = f"hq-backup/{stamp}-before-{target}-commits"
+        if not git("rev-parse", "-q", "--verify", f"refs/heads/{name}", timeout=10).returncode:  # F104: back twice within a minute
+            name += f"-{int(time.time())}"
         git("branch", name, head, timeout=10, check=True)
         saved["commits"] = {"branch": name, "count": int(own)}
     return saved
@@ -436,7 +443,7 @@ def listening(port: int) -> bool:
 
 CALL_MARK, STATUS_MARK = "app/bot.py", "status/server.mjs"
 RUN_DIR = os.path.join(HQ, "scratch", "routine")
-HELPERS = [os.path.expanduser("~/Applications/HQ Routine.app"), os.path.expanduser("~/Applications/Jarvis Routine.app")]
+HELPERS = [os.path.expanduser("~/Applications/HQ Routine.app")]
 
 
 def cmdline(pid: int) -> str:
@@ -984,8 +991,137 @@ def run() -> int:
         return 1
 
 
+def previous() -> str | None:
+    """F104: one version back: the newest version tag under where HQ stands; on the work line past a version, that version."""
+    at = set(git("tag", "--points-at", "HEAD", timeout=10).stdout.split())
+    older = [t for t in git("tag", "--merged", "HEAD", timeout=10).stdout.split() if vtuple(t) and t not in at]
+    return max(older, key=vtuple) if older else None
+
+
+def gone_back() -> dict:
+    """F104: {"to", "from", "branch", "at"} while this HQ stands on an older version it went back to."""
+    return read_json(BACK_FILE)
+
+
+def _peer(cmd: list[str]) -> bool:
+    """F104: the other computer is told through the forward. True when it took it, or there's no other computer."""
+    import role
+    return role.tell_other("update", cmd) in ("told", "alone")
+
+
+def tell_later(cmd: list[str]) -> None:
+    write_json(OTHER_FILE, {"cmd": cmd, "at": time.time()})
+
+
+def other_minute() -> str | None:
+    """F104: from the routine's minute: the other computer was off when this one went back; try again."""
+    d = read_json(OTHER_FILE)
+    if not d.get("cmd"):
+        return None
+    if _peer(d["cmd"]):
+        os.remove(OTHER_FILE)
+        return f"told the other computer: {' '.join(d['cmd'])}"
+    return None
+
+
+def _spawn(*args: str) -> None:
+    subprocess.Popen(scoped([sys.executable, os.path.abspath(__file__), *args], "update"), cwd=HQ, stdin=subprocess.DEVNULL,
+                     stdout=open(LOG, "a"), stderr=subprocess.STDOUT, start_new_session=True)
+
+
+def back(tag: str | None = None, tell: bool = True) -> dict:
+    """F104: one version back, here and on the other computer, in one step. The work happens in the background (it ends what runs,
+    so also the shell a call started this from). Returns what was started."""
+    tag = tag or previous()
+    if not tag or not vtuple(tag):
+        return {"ok": False, "said": "There's no version before this one."}
+    write_json(RUN_FILE, {"state": "waiting", "step": "Going back", "message": "", "at": time.time(), "from": local_version().get("version"), "to": vname(tag)})
+    if os.environ.get("HQ_UPDATE_WAIT"):  # a test: in the foreground
+        code = back_run(tag, tell)
+        return {"ok": code == 0, "said": read_json(RUN_FILE).get("message") or "", "to": vname(tag)}
+    _spawn("back-run", tag, "tell" if tell else "quiet")
+    return {"ok": True, "said": f"Going back to {vname(tag)}, on this computer and the other one.", "to": vname(tag)}
+
+
+def back_run(tag: str, tell: bool) -> int:
+    say("updating", "Going back", **{"to": vname(tag)})
+    told = None
+    try:
+        import datachange
+        import role
+        old = local_version().get("version")
+        was = {"call": listening(hqpaths.call_port()), "status": listening(hqpaths.status_port()),
+               "call_pid": pid_on(hqpaths.call_port(), CALL_MARK)}
+        if tell:  # first, so the laptop is on its way even when this computer goes down halfway
+            told = _peer(["back-here", tag])
+            if not told:
+                tell_later(["back-here", tag])
+        say("updating", "Ending what runs: the call, the job, the mail check")
+        ended = force_out(stop_call=True)
+        if git("rev-parse", "-q", "--verify", f"refs/tags/{tag}", timeout=10).returncode:
+            git("fetch", "--no-tags", "--quiet", UPSTREAM, f"+refs/tags/{tag}:refs/tags/{tag}", timeout=120, check=True)
+        say("updating", "Saving anything you changed")
+        saved = backup(tag)
+        before = git("rev-parse", "HEAD", timeout=10).stdout.strip()
+        branch = git("symbolic-ref", "-q", "--short", "HEAD", timeout=10).stdout.strip()
+        undone = []
+        if not role.is_backup():  # the workspace is the main's: the backup gets it back by the sync
+            say("updating", "Undoing what the newer version changed in your data")
+            undone = datachange.undo(datachange.between(tag, "HEAD"))
+        say("updating", f"Moving HQ to {vname(tag)}")
+        git("checkout", "--quiet", "--detach", tag, timeout=60, check=True)
+        changed = [f for f in git("diff", "--name-only", before, "HEAD", timeout=30).stdout.splitlines() if f]
+        prior = gone_back()
+        write_json(BACK_FILE, {"to": vname(tag), "from": prior.get("from") or old, "branch": prior.get("branch") or branch,
+                               "head": prior.get("head") or before, "at": time.time()})
+        say("updating", "Restarting what changed")
+        done, todo = restart_new(changed, was)
+        msg = f"Back on {vname(tag)}." + (f" Undone in your data: {', '.join(undone)}." if undone else "") + (
+            " The other computer hears it as soon as it answers." if told is False else "")
+        say("done", "", msg, done=ended + done, todo=todo, saved=saved, undone=undone, finished=time.time())
+        check(force=True)
+        return 0
+    except Exception as e:
+        say("failed", "", f"Going back didn't go through: {str(e)[:200]}. HQ stays where it was.")
+        return 1
+
+
+def forward(tell: bool = True) -> dict:
+    """F104: the way forward again: this HQ back where it went back from, and the other computer too. The routine runs the data
+    changes again by itself."""
+    d = gone_back()
+    if not d:
+        return {"ok": False, "said": "This HQ hasn't gone back."}
+    if tell and not _peer(["forward-here"]):
+        tell_later(["forward-here"])
+    if d.get("branch"):
+        git("checkout", "--quiet", d["branch"], timeout=60, check=True)
+    else:
+        git("checkout", "--quiet", "--detach", d.get("head") or "HEAD", timeout=60, check=True)
+    os.remove(BACK_FILE)
+    if not os.environ.get("HQ_UPDATE_WAIT"):
+        _spawn("restart-all")
+    return {"ok": True, "said": f"Forward again, on {git('describe', '--tags', '--always', timeout=10).stdout.strip()}."}
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv else "status"
+    if cmd == "back":  # F104: python3 routine/update.py back [--tag vX.Y.Z]
+        tag = argv[argv.index("--tag") + 1] if "--tag" in argv else None
+        print(json.dumps(back(tag)))
+        return 0
+    if cmd == "back-here" and len(argv) == 2:  # F104: the other computer said so, through the forward
+        print(json.dumps(back(argv[1], tell=False)))
+        return 0
+    if cmd == "back-run" and len(argv) >= 2:
+        return back_run(argv[1], argv[2:] != ["quiet"])
+    if cmd in ("forward", "forward-here"):
+        print(json.dumps(forward(tell=cmd == "forward")))
+        return 0
+    if cmd == "restart-all":
+        was = {"call": listening(hqpaths.call_port()), "status": listening(hqpaths.status_port()), "call_pid": pid_on(hqpaths.call_port(), CALL_MARK)}
+        restart_new(["app/bot.py", "status/server.mjs"], was)
+        return 0
     if cmd == "status":
         print(json.dumps(status()))
     elif cmd == "check":

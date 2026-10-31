@@ -23,6 +23,7 @@ page's Incidents, and Donna texts at once); the next pull or push that goes thro
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -238,6 +239,7 @@ def privacy_ok(dry: bool = False) -> bool:
         if not dry:
             refused("pushing (the privacy check found something personal)", p.stdout)
         return False
+    os.environ["HQ_PRIVACY_PASSED"] = "1"  # F104: the pre-push hook doesn't run the same check twice
     return True
 
 
@@ -296,6 +298,7 @@ def main() -> int:
     if notes_waiting():
         return 3
     own_identity()
+    subprocess.run([sys.executable, str(ROOT / "app" / "privacy.py"), "--hook"], capture_output=True, text=True)  # F104
     dry = ["--dry-run"] if "--dry-run" in sys.argv else []
 
     if not privacy_ok(bool(dry)):

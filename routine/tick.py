@@ -1352,6 +1352,24 @@ def guarded(key, fn, every=60):
 MISTAKES_EVERY = 5  # F103: minutes between the ledger's own passes; a call's lines are in at its end, a text's within this
 
 
+def data_minute():
+    """F104: on the main, a version's new data changes run (a tag's or the work line's), and the other computer hears what it
+    missed. Not while HQ stands on an older version: going back undid them on purpose."""
+    try:
+        import datachange
+        import update
+        if not update.gone_back():
+            did = datachange.apply(log=log)
+            if did:
+                log(f"data changes run: {', '.join(did)}")
+        said = update.other_minute()
+        if said:
+            log(said)
+    except Exception as e:
+        log(f"data changes: {e!r}")
+        routines.bad("data", f"A data change failed: {e!r}", every=3600)
+
+
 def mistakes_minute():
     """F103: the ledger's own pass on the main (what's new in the transcripts and the threads), and each agent's weekly score,
     whatever the agents' switch says. Both no model."""
@@ -1531,7 +1549,18 @@ def updating():
         u = json.load(open(os.path.join(JV, ".status", "update-run.json")))
     except (OSError, ValueError):
         return False
-    return u.get("state") == "updating" and alive(u.get("pid")) and time.time() - u.get("at", 0) < 1800
+    if u.get("state") == "updating" and alive(u.get("pid")) and time.time() - u.get("at", 0) < 1800:
+        return True
+    return gone_back()
+
+
+def gone_back():
+    """F104: on the maker's HQ the team waits while it stands on an older version: a build there would land on no branch. A friend
+    who went back carries on, on that version."""
+    try:
+        return bool(json.load(open(os.path.join(JV, ".status", "back.json")))) and hqpaths.is_maker()
+    except (OSError, ValueError):
+        return False
 
 
 def tick():
@@ -1584,9 +1613,17 @@ def tick():
     if r["acting"] == "backup":
         stale_job_here()
         on_backup()
+        if not hqpaths.under_test():  # F104: the main was off when this one went back
+            try:
+                import update
+                update.other_minute()
+            except Exception as e:
+                log(f"telling the main: {e!r}")
         return
     if not hqpaths.under_test() or os.environ.get("HQ_SAVE_QUIET"):
         save_minute()
+    if not hqpaths.under_test() or os.environ.get("HQ_DATA_MINUTE"):
+        data_minute()
     if (not hqpaths.under_test() and int(time.time() / 60) % MISTAKES_EVERY == 0) or os.environ.get("HQ_MISTAKES_MINUTE"):
         mistakes_minute()
     try:

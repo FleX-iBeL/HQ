@@ -246,6 +246,16 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
         return 0
     if not without_qa:  # F56: only work whose row says QA passed goes out
         h = qa.hold(str(ROOT), push.RELEASE_BRANCH, push.WORK_BRANCH)
+        if not h["all"] and h.get("to"):
+            no = data_refuses(push.RELEASE_BRANCH, h["to"])  # F104: on the part that would go out
+            if no:
+                print(no)
+                return 2
+        elif h["all"]:
+            no = data_refuses(push.RELEASE_BRANCH, push.WORK_BRANCH)
+            if no:
+                print(no)
+                return 2
         if not h["all"]:
             print(qa.hold_words(h))
             if h["held"]:  # H266: Moneypenny tells him on her own line what's held and why
@@ -260,6 +270,11 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
     if not coming_next():
         print("No release: the changelog's Coming next is empty; write what's new for friends first, commit, then again.")
         return 2
+    if without_qa:
+        no = data_refuses(push.RELEASE_BRANCH, push.WORK_BRANCH)  # F104: no say-so goes past a broken undo
+        if no:
+            print(no)
+            return 2
     today = today or dt.date.today()
     old_main = out("rev-parse", push.RELEASE_BRANCH)
     old = version()
@@ -270,7 +285,7 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
         return 2
     log = ROOT / "CHANGELOG.md"
     text = log.read_text(encoding="utf8")
-    log.write_text(text.replace("## Coming next\n", f"## Coming next\n\n## {v} · {today.day} {today:%B %Y}\n", 1), encoding="utf8")
+    log.write_text(text.replace("## Coming next\n", f"## Coming next\n\n## {v} · {today.day} {today:%B %Y}\n" + data_lines(old_main, push.WORK_BRANCH), 1), encoding="utf8")
     (ROOT / "VERSION").write_text(v + "\n")
     files = ["CHANGELOG.md", "VERSION"]
     readme = ROOT / "README.md"  # its "HQ is at version **X**" line moves along (H209)
@@ -324,6 +339,9 @@ def cmd_part(h: dict, today: dt.date | None = None) -> int:
         print("No release: the work that passed QA has nothing in the changelog's Coming next; it stays on "
               f"{push.NIGHTLY_BRANCH}, main stays at {version()}.")
         return 0
+    import datachange  # F104: its data changes are listed with it
+    moved = data_lines(push.RELEASE_BRANCH, to)
+    lines = lines + [x for x in moved.splitlines() if x.strip()]
     old_main, old_dev = out("rev-parse", push.RELEASE_BRANCH), out("rev-parse", push.WORK_BRANCH)
     old = version()
     v = next_version(old)
@@ -393,6 +411,23 @@ def cmd_part(h: dict, today: dt.date | None = None) -> int:
           f"{push.WORK_BRANCH} and {push.NIGHTLY_BRANCH}.")
     on_the_record(old_main, tag, v)
     return r
+
+
+def data_refuses(base: str, tip: str) -> str | None:
+    """F104: a release that changes data needs an undo that works: tried on a copy of the workspace, from the code at the tip."""
+    import datachange
+    new = datachange.between(base, tip, ROOT)
+    if not new:
+        return None
+    no = datachange.try_on_copy(new, root=ROOT)
+    return f"No release: {no}. It stays on {push.NIGHTLY_BRANCH}; main stays at {version()}." if no else None
+
+
+def data_lines(base: str, tip: str) -> str:
+    """F104: the changelog's lines for a release's data changes, under its heading."""
+    import datachange
+    new = datachange.between(base, tip, ROOT)
+    return ("\n" + "\n\n".join(datachange.lines_for(new, ROOT)) + "\n") if new else ""
 
 
 def on_the_record(old_main: str, tag: str, v: str) -> list[str]:
