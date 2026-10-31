@@ -6700,7 +6700,7 @@ console.log(JSON.stringify(o));
         jobs2("resume", "999", ok=False)
         r9 = jobs2("resume", str(w1))
         need("carries on" in r9 and any(j["n"] == w1 and j["state"].startswith("held") for j in json.loads(jobs2("next"))["waiting"])
-             and json.loads((est_dir / "job-usage.json").read_text())[str(w1)].get("allowed"), f"H172: resume doesn't put it back in line: {r9}")
+             and json.loads((est_dir / "job-usage.json").read_text())[str(w1)].get("raised") == 2, f"H172: resume doesn't put it back in line: {r9}")
         jobs2("mark", str(w1), "paused: used about four times its estimated usage")
         need("cancelled" in jobs2("stop", str(w1)), "H172: a paused job can't be dropped")
         # Past jobs: their usage from the saved readings, where a reading is close enough to both ends.
