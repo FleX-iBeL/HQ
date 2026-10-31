@@ -14,6 +14,7 @@
         {"target": "mute", "title": "Mute, or hold to talk", "text": "Tap this button to mute yourself. Hold it down to talk for as long as you want, pauses and all. Let go and she answers."},
         {"target": "status", "title": "What she's doing", "text": "This line tells you: listening, thinking or talking. While she thinks you hear a soft tick, so it's never just silence.",
          "demo": {"kind": "chat", "items": [["you", "What's on my plate today?"], ["agent", "Three things. The dentist at ten, a call with Alex at two, and the report you wanted done before Friday."]]}},
+        {"target": "status", "title": "She takes it away", "text": "Ask something that takes a long read and she says she'll look into it. A helper works on it beside the call, only reading, for a few minutes at most, and you go on talking. The answer comes back into the call, or as a text if you've hung up. The Status page shows what's being worked on for you right now."},
         {"target": "btn", "title": "Hang up by saying bye", "text": "You don't have to press anything to end a call. Say bye, \"that's it, see you later\" or \"cheers\", and she says goodbye and hangs up. Her goodbye goes with what you're doing next, like the appointment that's coming up. Say something right after and the call goes on."}
       ]
     },
@@ -236,7 +237,8 @@
       "id": "updates", "title": "Updates", "line": "What's new, and getting it",
       "steps": [
         {"target": "", "title": "The version number", "text": "A small grey number on the call page, the Status page and in the Mac app tells you which version you're on. Tap it to see what's new in every version."},
-        {"target": "", "title": "The Update button", "text": "HQ looks a few times a day for a new version. When there is one, a small bar shows what's new with an Update button. One tap and it updates and restarts what it needs to, without restarting your computer. A call in progress ends, so tap it when you're off a call. Your own files and what you built yourself are never touched."}
+        {"target": "", "title": "The Update button", "text": "HQ looks a few times a day for a new version. When there is one, a small bar shows what's new with an Update button. One tap and it updates and restarts what it needs to, without restarting your computer. A call in progress ends, so tap it when you're off a call. Your own files and what you built yourself are never touched."},
+        {"target": "", "title": "Going back a version", "text": "If a new version turns out bad, one command takes HQ back one version, on both your computers, and undoes what that version changed in your data. Ask your agent, or run python3 routine/update.py back. It goes forward again with python3 routine/update.py forward."}
       ]
     },
     {
