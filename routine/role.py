@@ -83,7 +83,7 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "games": {"new", "spec", "tick", "count", "note", "diary", "week", "debrief", "undo"},
           "coaching": {"done", "later"},
           "handover": {"edit", "put"},
-          "review": {"clear", "reword", "add", "sitdown", "no"},  # F77: a flag taken off on his say-so goes to the main, which writes sprint.json  # put (Fable, 27 October 2026): a whole small file, with one-way sync
+          "review": {"clear", "reword", "add", "sitdown", "no", "keep"},  # F77: a flag taken off on his say-so goes to the main, which writes sprint.json  # put (Fable, 27 October 2026): a whole small file, with one-way sync
           "set_status": {"set"},  # F101: the status block from a call on the backup
           "agenda": {"changed"},  # F58: the mark that something wrote in the calendar (the main reads it again)
           "direct_line": {"put"},  # F58: a line of a text thread (Donna's, the team line, the coaching line)

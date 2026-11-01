@@ -68,8 +68,10 @@ usage:
   python3 routine/review.py sitdown LABEL "THE OPEN POINT WITH YOUR FIX" "If ..., I'll ...; if not, ..."
                                                  F86: on her sit-down list, one text on her line, the loop stops for it
   python3 routine/review.py sitdown-list         F86: what waits for him
+  python3 routine/review.py keep [N]             F86: his keep it: what the look after round N, or the last one, put back, as it was written
 Used by the background review itself: review-run LABEL.
 """
+import contextlib
 import datetime as dt
 import json
 import os
@@ -84,6 +86,7 @@ sys.path.insert(0, HERE)
 import estimate as E  # noqa: E402
 import hqpaths  # noqa: E402
 import jobs as q  # noqa: E402
+import roundlog  # noqa: E402
 import sprint as S  # noqa: E402
 
 # The lightest model that does it (his "low usage Claude prompt"). Tried on real rows on 28 October 2026 (job 438):
@@ -759,12 +762,12 @@ def golden_current():
 
 ADD_MOST = 4000  # F86: characters in one addition, about two pages; three rounds are 12,000. The review reads 24,000 of a row (_input)
 REVIEW_READS = 24000
-ROUNDS_DIR = os.path.join(E.DIR, "rounds")
+ROUNDS_DIR = roundlog.folder()
 ROUND_QUIET = 300  # F86: seconds no row may have changed before a round starts, his five minutes
 ROUNDS = 3  # rounds an item, then the sit-down list and one text to him (F86, his yes 30 October 2026; F101: per item, not per day)
 STOP_WORDS = {"his": "needs him", "cap": f"{ROUNDS} rounds and the review still flags it", "mark": "her mark didn't land",
               "no": "she says no, it's his to decide, and only his words lift it, through review.py clear",
-              "broke": "the planning changed during a round, outside its one addition"}
+              "broke": "its own row changed during a round, outside its one addition, with no door behind it"}
 
 
 def _stopped(e, fp):
@@ -920,11 +923,7 @@ def _new_quotes(old, new):
     return pick(new) - pick(old)
 
 
-# Quote marks: double, curly, guillemets, and single ones around words (an apostrophe isn't one).
-_OPEN, _CLOSE = '"“„«‹「『＂″‟', '"”“»›」』＂″'
-_DOUBLE = re.compile(f"[{_OPEN}]([^{_OPEN}{_CLOSE}]*)[{_CLOSE}]")
-_SINGLE = re.compile(r"(?<![\w'’])['‘‚]([^'‘’]+)['’](?![\w])")
-_ANY_MARK = re.compile(f"[{_OPEN}{_CLOSE}]")
+_ANY_MARK = re.compile(f"[{S.QUOTE_OPEN}{S.QUOTE_CLOSE}]")
 
 
 def _addition_why(words, about=""):
@@ -934,7 +933,7 @@ def _addition_why(words, about=""):
         return ("Refused: that has the shape of the team's mark (Built, Done, Fixed, QA passed or failed). A mark is put only by its own "
                 "command at its own place. Say it without that shape.")
     rest = words
-    for marks in (_DOUBLE, _SINGLE):  # in backticks too: a quote is a quote
+    for marks in S.QUOTE_MARKS:  # a quote is a quote, in any marks, backticks too
         for m in marks.finditer(rest):
             bit = m.group(1).strip()
             if re.search(r"…|\.\.\.", bit):
@@ -994,6 +993,7 @@ def reword(label, payload):
             sys.exit(f"Refused: a new quote isn't in a call, the notes or the log: {bad[0][:80]!r}. His words are never written for "
                      "him; it goes on the sit-down list. (Not his words at all, a name or a label: write it without the quote marks.)")
         hqpaths.guard_roadmap(q.ROADMAP)
+        roundlog.planning(q.ROADMAP, text.replace(line, new, 1))
         tmp = f"{q.ROADMAP}.reword.{os.getpid()}"
         with open(tmp, "w", encoding="utf8") as f:
             f.write(text.replace(line, new, 1))
@@ -1067,30 +1067,6 @@ def _sha(line):
     return hashlib.sha256(line.encode()).hexdigest()
 
 
-_ROW_LABEL = re.compile(r"^\| [^|]* \| ([A-Z]\d+(?:\.\d+)*)\b")
-
-
-def _keyed_rows(text):
-    """The labelled rows of the planning's phases, in order: {(label, which): line}. A label can stand in two tables."""
-    out, seen, phase = {}, {}, False
-    for line in text.split("\n"):
-        if line.startswith("## "):
-            phase = line.startswith("## Phase")
-        elif phase:
-            m = _ROW_LABEL.match(line)
-            if m:
-                k = seen.get(m.group(1), 0)
-                seen[m.group(1)] = k + 1
-                out[(m.group(1), k)] = line
-    return out
-
-
-def _queue(text):
-    """{"jobs": {n: line}, "items": {n: line}} as a planning's text has them."""
-    return {"jobs": {int(m.group(1)): m.group(0) for m in re.finditer(r"^- Job (\d+) · .*$", text, re.M)},
-            "items": {int(m.group(1)): m.group(0) for m in re.finditer(r"^- Item (\d+) · .*$", text, re.M)}}
-
-
 def round_waits():
     """Why no round may start now, or "": a call is on, or a row changed in the last five minutes. seen_at comes from the file itself, so that also
     covers the status page, a laptop chat and a call on the other computer."""
@@ -1126,22 +1102,10 @@ def round_before(n, label, mode):
         json.dump({"n": n, "label": label, "mode": mode, "at": time.time(), "planning": text, "ready": d.get("ready") or {}, "rows": rv.get("rows") or {}}, f)
 
 
-def _reviewed(label, since):
-    """Whether a real review of this row passed since `since`: its line in the costs."""
-    try:
-        for line in open(COSTS, encoding="utf8"):
-            r = json.loads(line)
-            if r.get("row") == label and r.get("verdict") == "pass" and r.get("at", 0) >= int(since) - 1:
-                return True
-    except (OSError, ValueError):
-        pass
-    return False
-
-
 def _rows_back(text, before, back, gone):
-    """The planning with these rows as they were: row by row, never the whole file, unless no row is left in it at all, and then nothing is thrown away."""
-    was, now = _keyed_rows(before), _keyed_rows(text)
-    if not now:
+    """The planning with these rows as they were, row by row. A file cut in half, a heading gone with it, comes back whole from what stood before."""
+    was, now = roundlog.keyed_rows(before), roundlog.keyed_rows(text)
+    if not now or _cut(text, before):
         return before
     lines = text.split("\n")
     for key in back:
@@ -1154,11 +1118,29 @@ def _rows_back(text, before, back, gone):
     return "\n".join(lines)
 
 
+def _cut(text, before):
+    return not text.strip() or any(x.startswith("## ") and x not in text for x in before.split("\n"))
+
+
+def _the_change(old, new):
+    """What differs between two versions of a row, in a few words each."""
+    a, b = S.ask_of(old), S.ask_of(new)
+    i = 0
+    while i < min(len(a), len(b)) and a[i] == b[i]:
+        i += 1
+    j = 0
+    while j < min(len(a), len(b)) - i and a[-1 - j] == b[-1 - j]:
+        j += 1
+    bit = lambda t: q.one_line(t[max(0, i - 30):len(t) - j + 10])[:160].strip() or "(nothing there)"  # noqa: E731
+    return (bit(a), bit(b)) if a != b else (q.one_line(old)[:60], q.one_line(new)[:60])
+
+
 def round_after(n):
     """The runner, after her session, or the routine's minute when the runner never got there: what stood before the round against what stands now, row by row
-    by label, the queue, and the sprint file. Only her one addition on her one row is hers. A row she had no right to change goes back, and a row gone comes
-    back; what's new is kept and named, a job or item past a call's reach stopped but still there. What can't be told apart, a call being on in those minutes,
-    is kept and named: losing something he said is the worst outcome. What went back is kept beside (job-N.put-back.json), and one plain text says what happened."""
+    by label, the queue, the sprint file. What's in the journal (roundlog) was written through a door by someone else: it stays, and nobody is told. Only her one
+    addition on her row is hers. What's left, a change no door wrote, goes back as a last net: with a call on it can't be told apart and it's kept and named,
+    with none it goes back, a job or item is cancelled, and he's told right away, what it said, what it says now, and that "keep it" brings it back (keep).
+    A new row stays and is named. The planning is copied first, and what went back is kept in job-N.put-back.json."""
     p = os.path.join(ROUNDS_DIR, f"job-{n}.json")
     try:
         s = json.load(open(p, encoding="utf8"))
@@ -1166,6 +1148,7 @@ def round_after(n):
         return ""
     label, mode, before = s["label"], s["mode"], s["planning"]
     call = _call_since(s.get("at") or 0)
+    wrote = roundlog.read(f"job-{n}")
     with q.locked():
         try:
             text = open(q.ROADMAP, encoding="utf8").read()
@@ -1174,74 +1157,80 @@ def round_after(n):
         d, rv = _state()
         rs = rv.setdefault("rows", {})
         f = (rs.get(label) or {}).get("fix") or {}
-        was, now_ = _keyed_rows(before), _keyed_rows(text)
-        back, kept = [], []
-        gone = [k for k in was if k not in now_]
-        for k, a in was.items():
-            b = now_.get(k)
-            if b is None or a == b:
-                continue
-            if k[0] == label and mode == "fix" and S.ask_of(b).startswith(S.ask_of(a)) and (f.get("added") or {}).get("sha") == _sha(b):
-                continue  # the line her door wrote
-            ca, cb = hqpaths.cells(a), hqpaths.cells(b)
-            only_more = ca[:2] == cb[:2] and ca[3:] == cb[3:] and S.ask_of(b).startswith(S.ask_of(a))  # nothing in it went: it can't have cost him a word
-            (kept if call or only_more and k[0] != label else back).append(k)
-        fresh = [k for k in now_ if k not in was]
-        q0, q1 = _queue(before), _queue(text)
-        jobs_new = {j: x for j, x in q1["jobs"].items() if j not in q0["jobs"] and not any(f"Scheduled item {i}," in x for i in q0["items"])}
-        items_new = {i: x for i, x in q1["items"].items() if i not in q0["items"] and not re.search(r"· Agent (?:fix|step|cycle)", x)}
+        was, now_ = roundlog.keyed_rows(before), roundlog.keyed_rows(text)
+        cut = _cut(text, before)
+        anywhere = {m.group(1) for m in re.finditer(r"^\| [^|]* \| ([A-Z]\d+(?:\.\d+)*)\b", text, re.M)}  # a row moved out of the phases isn't gone
+        changed = [k for k in was if k in now_ and was[k] != now_[k] and f"row {k[0]}" not in wrote
+                   and not (k[0] == label and mode == "fix" and S.ask_of(now_[k]).startswith(S.ask_of(was[k])) and (f.get("added") or {}).get("sha") == _sha(now_[k]))]
+        lost_rows = [k for k in was if k not in now_ and f"row {k[0]}" not in wrote and (cut or k[0] not in anywhere)]
+        fresh = [k for k in now_ if k not in was and f"row {k[0]}" not in wrote]
+        q0, q1 = roundlog.queue(before), roundlog.queue(text)
+        jobs_new = {j: x for j, x in q1["jobs"].items() if j not in q0["jobs"] and f"job {j}" not in wrote}
+        items_new = {i: x for i, x in q1["items"].items() if i not in q0["items"] and f"item {i}" not in wrote}
         ready, was_ready = d.get("ready") or {}, s.get("ready") or {}
-        open_now = {r["label"]: r for r in S.open_rows(text)} if text else {}
-        gained = [k for k, v in ready.items() if v != was_ready.get(k) and not (k == label and mode == "mark")]
-        lost = [k for k in was_ready if k not in ready and k in open_now and (rs.get(k) or {}).get("verdict") != "flag" and not _said_no(open_now[k])]
-        passed = [k for k, e in rs.items() if e.get("verdict") in ("pass", "cleared") and e.get("verdict") != ((s.get("rows") or {}).get(k) or {}).get("verdict")
-                  and not _reviewed(k, s.get("at") or 0)]
-        changed = bool(gone or back or kept or fresh or jobs_new or items_new or gained or lost or passed)
-        said, told = [], False
-        if changed:
+        gained = [k for k, v in ready.items() if v != was_ready.get(k) and f"ready {k}" not in wrote and not (k == label and mode == "mark")]
+        lost = [k for k in was_ready if k not in ready and f"ready {k}" not in wrote]
+        passed = [k for k, e in rs.items() if e.get("verdict") != ((s.get("rows") or {}).get(k) or {}).get("verdict") and f"verdict {k}" not in wrote and e.get("verdict") in ("pass", "cleared")]
+        anything = bool(changed or lost_rows or fresh or jobs_new or items_new or gained or lost or passed)
+        said, told, back, gone, kept = [], False, [], [], []
+        if anything:
+            net = not call  # no door wrote it and no call was on: the last net
+            back, gone, kept = (changed if net or cut else []), (lost_rows if net or cut else []), ([] if net or cut else changed + lost_rows)
+            copy = os.path.join(ROUNDS_DIR, f"job-{n}.planning.md")
             if back or gone:
+                with open(copy, "w", encoding="utf8") as fh:
+                    fh.write(text)
                 os.makedirs(os.path.dirname(q.ROADMAP), exist_ok=True)
                 tmp = f"{q.ROADMAP}.back.{os.getpid()}"
                 with open(tmp, "w", encoding="utf8") as fh:
                     fh.write(_rows_back(text, before, back, gone))
                 os.replace(tmp, q.ROADMAP)
             with open(os.path.join(ROUNDS_DIR, f"job-{n}.put-back.json"), "w", encoding="utf8") as fh:
-                json.dump({"call": call, "back": [[was[k], now_[k]] for k in back], "gone": [was[k] for k in gone], "kept": [[was[k], now_[k]] for k in kept], "new_rows": [now_[k] for k in fresh],
-                           "jobs": jobs_new, "items": items_new, "gained": {k: ready[k] for k in gained}, "lost": {k: was_ready[k] for k in lost}, "passed": {k: rs[k] for k in passed},
-                           "text": "" if _keyed_rows(text) else text}, fh)
-            if back or gone:
-                said.append("put back as it was: " + ", ".join(sorted({k[0] for k in back + gone})))
+                json.dump({"n": n, "label": label, "call": call, "back": [[was[k], now_[k]] for k in back], "gone": [was[k] for k in gone], "kept": [[was[k], now_.get(k, "")] for k in kept],
+                           "new_rows": [now_[k] for k in fresh], "jobs": jobs_new, "items": items_new, "gained": {k: ready[k] for k in gained}, "lost": {k: was_ready[k] for k in lost},
+                           "passed": {k: rs[k] for k in passed}, "copy": copy if back or gone else ""}, fh)
+            for k in back[:3]:
+                old, new_ = _the_change(was[k], now_[k])
+                said.append(f"{k[0]} said \"{new_}\" and I put it back to \"{old}\"")
+            if gone:
+                said.append("these rows were gone and came back: " + ", ".join(sorted({k[0] for k in gone})))
             if kept:
                 said.append("changed and kept: " + ", ".join(sorted({k[0] for k in kept})))
             if fresh:
                 said.append("new, kept: " + ", ".join(sorted({k[0] for k in fresh})))
-            if jobs_new or items_new:
-                said.append(("new in the queue, kept: " if call else "new in the queue, kept but stopped: ") + ", ".join([f"job {j}" for j in jobs_new] + [f"item {i}" for i in items_new]))
-            for k in gained if not call else []:
-                ready.pop(k)
-            for k in lost if not call else []:
-                ready[k] = was_ready[k]
-            for k in passed if not call else []:
-                if k in (s.get("rows") or {}):
-                    rs[k] = s["rows"][k]
-                else:
-                    rs.pop(k)
+            for x, what in ((jobs_new, "job"), (items_new, "item")):
+                for i, line in x.items():
+                    said.append(f"{what} {i} appeared, \"{q.one_line(line.split(' · ')[-1])[:80]}\"" + (", kept" if call else ", and I cancelled it"))
             if gained or lost or passed:
-                said.append(("sprint file changed and kept: " if call else "sprint file put back: ") + ", ".join(sorted(set(gained + lost + passed))))
-            d["ready"] = ready
-            if not call and (back or gone or gained or lost or passed or jobs_new or items_new):
+                said.append(("Ready marks or passes changed and kept: " if call else "Ready marks or passes I put back: ") + ", ".join(sorted(set(gained + lost + passed))))
+            if net:
+                for k in gained:
+                    ready.pop(k)
+                for k in lost:
+                    ready[k] = was_ready[k]
+                for k in passed:
+                    if k in (s.get("rows") or {}):
+                        rs[k] = s["rows"][k]
+                    else:
+                        rs.pop(k)
+                d["ready"] = ready
+            own = net and (any(k[0] == label for k in back + gone) or label in gained + lost + passed)  # only the one place the round itself writes stops its row
+            if own:
                 row = next((r for r in S.open_rows() if r["label"] == label), None)
                 e = rs.setdefault(label, {})
                 g = e.setdefault("fix", {})
                 st = _stopped(e, S.ask_fp(row["line"])) if row else None
                 told = bool(st and st.get("kind") in ("his", "no") and st.get("round") == g.get("n"))
                 if row and not told:
-                    g["stop"] = {"ask": S.ask_fp(row["line"]), "kind": "broke", "at": int(_clock()), "round": g.get("n"), "why": "; ".join(said)}
-            rv["round_said"] = (rv.get("round_said") or [])[-19:] + [{"at": int(_clock()), "label": label, "call": call, "words": "; ".join(said)}]
+                    g["stop"] = {"ask": S.ask_fp(row["line"]), "kind": "broke", "at": int(_clock()), "round": g.get("n"), "why": "; ".join(said)[:400]}
+            rv["round_said"] = (rv.get("round_said") or [])[-19:] + [{"at": int(_clock()), "label": label, "call": call, "n": n, "words": "; ".join(said)[:600]}]
             d["review"] = rv
             S._save(S.RANKS, d)
     os.remove(p)
-    if not changed:
+    for x in (f"job-{n}.journal.jsonl",):
+        with contextlib.suppress(OSError):
+            os.remove(os.path.join(ROUNDS_DIR, x))
+    if not anything:
         return ""
     import cycles
     import ledger
@@ -1252,11 +1241,56 @@ def round_after(n):
             subprocess.run([sys.executable, os.path.join(here, "jobs.py"), "stop", str(j)], capture_output=True, timeout=60)
         for i in items_new:
             subprocess.run([sys.executable, os.path.join(here, "schedule.py"), "cancel", str(i)], capture_output=True, timeout=60)
-    ledger.note(cycles.FIX_AGENT, f"after job {n}, the round on {label}" + (", a call on in those minutes" if call else "") + f": {words}")
+    ledger.note(cycles.FIX_AGENT, f"after job {n}, the round on {label}" + (", a call on in those minutes" if call else "") + f": {words[:300]}. Kept in .status/rounds/job-{n}.put-back.json")
+    if call:
+        text_ = f"While my round on {label} ran the planning changed, with a call on, so I can't say who did what: {words}. If any of that isn't what you want, tell me which and I'll set it right; if not, it stays."
+    else:
+        text_ = f"While my round on {label} ran something changed that I can't place: {words}. If that was you, say keep it and it comes back as you wrote it; if not, there's nothing to do."
     if not told:
-        cycles.ask(cycles.FIX_AGENT, f"The planning changed while my round on {label} ran" + (", with a call on, so I can't say who did what" if call else "") + f": {words}. "
-                   f"If any of that isn't what you want, tell me which and I'll set it right, the old words are kept; if not, it stays as it is.")
-    return f"after the round on {label}: {words}"
+        cycles.send(cycles.FIX_AGENT, text_[:1500], "round-put-back")
+    return f"after the round on {label}: {words[:300]}"
+
+
+def keep(n=None):
+    """His "keep it": what the last net put back (or job N's) as it was written. The kept words are in .status/rounds/job-N.put-back.json."""
+    if in_round():
+        sys.exit("Refused: this run is a round; his keep it is for a call or a chat.")
+    names = sorted((x for x in os.listdir(ROUNDS_DIR) if re.fullmatch(r"job-\d+\.put-back\.json", x)), key=lambda x: int(x[4:-14])) if os.path.isdir(ROUNDS_DIR) else []
+    name = f"job-{n}.put-back.json" if n else (names[-1] if names else "")
+    p = os.path.join(ROUNDS_DIR, name)
+    if not name or not os.path.exists(p):
+        sys.exit("Nothing kept to bring back.")
+    s = json.load(open(p, encoding="utf8"))
+    done, missed = [], []
+    with q.locked():
+        text = open(q.ROADMAP, encoding="utf8").read()
+        for old, new in s.get("back") or []:
+            if old in text:
+                text = text.replace(old, new, 1)
+                done.append(new.split(" | ")[1].split(" ")[0])
+            else:
+                missed.append(old.split(" | ")[1].split(" ")[0])
+        for line in s.get("gone") or []:
+            text = text.replace(line + "\n", "", 1)
+        for what, x in (("Job", s.get("jobs") or {}), ("Item", s.get("items") or {})):
+            for i, line in x.items():
+                text = re.sub(rf"^- {what} {i} · .*$", lambda _m, ln=line: ln, text, count=1, flags=re.M)
+                done.append(f"{what.lower()} {i}")
+        tmp = f"{q.ROADMAP}.keep.{os.getpid()}"
+        with open(tmp, "w", encoding="utf8") as fh:
+            fh.write(text)
+        os.replace(tmp, q.ROADMAP)
+        d, rv = _state()
+        ready = d.setdefault("ready", {})
+        ready.update(s.get("gained") or {})
+        for k in s.get("lost") or {}:
+            ready.pop(k, None)
+        rv.setdefault("rows", {}).update(s.get("passed") or {})
+        done += sorted(set(s.get("gained") or {}) | set(s.get("lost") or {}) | set(s.get("passed") or {}))
+        d["review"] = rv
+        S._save(S.RANKS, d)
+    os.replace(p, p.replace(".put-back.json", ".kept.json"))
+    return "Back as written: " + (", ".join(done) or "nothing") + "." + (f" Changed since, so not touched: {', '.join(missed)}; the words are in {name}." if missed else "")
 
 
 def _rounds_left(log=None):
@@ -1338,8 +1372,8 @@ def sitdown_words(rows=None):
     return "\n".join((["ON YOUR SIT-DOWN LIST (F86): the loop stopped for these rows; each waits for his answer."] if sd else [])
                      + [f"- {r['label']} {q.one_line(r['title'])[:120]} ({STOP_WORDS.get(s.get('kind'), 'stopped')}): {s.get('why', '')}"
                         + (f" What could work instead: {s['instead']}" if s.get("instead") else "") for r, s in sd]
-                     + (["WHILE A ROUND RAN, this week (F86): raise these with him."] if after else [])
-                     + [f"- around {x['label']}: {x['words']}" for x in after])
+                     + (["WHILE A ROUND RAN, this week (F86): raise these with him. On his keep it: python3 routine/review.py keep N brings back what round N put back; the words are in .status/rounds/job-N.put-back.json."] if after else [])
+                     + [f"- job {x.get('n', '?')}, around {x['label']}: {x['words']}" for x in after])
 
 
 def role_writes():
@@ -1438,6 +1472,8 @@ def main(argv):
         print(addition(argv[1], argv[2]))
     elif argv[0] == "sitdown" and len(argv) == 4:
         print(sitdown(argv[1], argv[2], argv[3]))
+    elif argv[0] == "keep" and len(argv) in (1, 2):
+        print(keep(int(argv[1]) if len(argv) == 2 else None))
     elif argv[0] == "round-before" and len(argv) == 4:
         round_before(int(argv[1]), argv[2], argv[3])
     elif argv[0] == "round-after" and len(argv) == 2:

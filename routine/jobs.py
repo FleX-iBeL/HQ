@@ -92,6 +92,7 @@ from contextlib import contextmanager
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import hqpaths  # M1: the roadmap is in the workspace
+import roundlog  # noqa: E402  F86: who wrote while a round ran
 ROADMAP = hqpaths.ROADMAP
 LOCK = os.path.join(HERE, "..", "scratch", "routine", "queue.lock")
 # H141: why the job first in line waits, as the routine's start check last said it (tick.py writes it).
@@ -309,6 +310,7 @@ def write(text, jobs, on):
         head, sep, rest = text.partition("\n---\n")
         text = head + sep + "\n" + body + rest.lstrip("\n")
     hqpaths.guard_roadmap(ROADMAP)  # F17
+    roundlog.planning(ROADMAP, text)  # F86: who wrote while a round ran
     tmp = ROADMAP + ".tmp"
     open(tmp, "w", encoding="utf8").write(text)
     os.replace(tmp, ROADMAP)

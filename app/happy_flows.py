@@ -14172,6 +14172,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             b.seq[0] += 1
             f = self.tmp / f"{name}-fake-{b.seq[0]}.py"
             f.write_text("#!/usr/bin/env python3\nimport json, sys, os, subprocess\nrv, sp = os.environ['F86_REVIEW'], os.environ['F86_SPRINT']\nsys.stdin.read()\n"
+                         "def other(*a):\n    e = dict(os.environ)\n    e.pop('HQ_ROUND', None)\n    r = subprocess.run([sys.executable, *a], capture_output=True, text=True, env=e)\n    assert r.returncode == 0, r.stdout + r.stderr\n"
                          "def out(d): print(json.dumps(d), flush=True)\ndef run(*a):\n    r = subprocess.run([sys.executable, *a], capture_output=True, text=True)\n"
                          "    out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': ' '.join(a)[:150]}}]}})\n"
                          "    out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': r.stdout + r.stderr}]}})\n"
@@ -14250,6 +14251,11 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
 
         def _rows(b):
             return [x for x in b.rm.read_text().split("\n") if x.startswith("| ")]
+
+        def with_field_row(b, label, words):
+            t = re.sub(rf"\| {label} A row of {label} \| [^|]*\|", lambda _m: f"| {label} A row of {label} | His words: {words}. What right looks like: it works. Sources: call of 20 October 2026. |", b.rm.read_text(), count=1)
+            b.rm.write_text(t)
+            return b.fields(label)
 
         def step(name, fn):
             try:
@@ -14334,18 +14340,28 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             b.minute()
             s = b.go("")
             need("none, found by job N" in s["prompt"] and "a real quote of his" not in s["prompt"] and "another thing, leave it out" in s["prompt"], f"her prompt still asks for a quote: {s['prompt'][-1500:]}")
+            need("between backticks" not in s["prompt"], "her prompt still sends code to backticks")
 
             def with_field(words):
                 t = re.sub(r"\| F9302 A row of F9302 \| [^|]*\|", lambda _m: f"| F9302 A row of F9302 | His words: {words}. What right looks like: it works. Sources: call of 20 October 2026. |", b.rm.read_text(), count=1)
                 b.rm.write_text(t)
                 return b.fields("F9302")
-            for w in ("none, found by job 1", "none, found by the review", "none, found by a check", "None found by QA job 1", "none, found by QA"):
+            for w in ("none, found by the review", "none, found by a check", "none, found by QA"):
                 need("fields hold" in with_field(w), f"his field says he said nothing, and that doesn't hold: {w}: {b.fields('F9302')}")
-            for w in ("none", "none, he never said", "nothing", "none, found by job 999999", "none, found by QA. He asked for five tries though"):
+            for w in ("none", "none, he never said", "nothing", "none, found by job 999999", "none, found by job 0", "none, found by job 1", "none, found by QA. He asked for five tries though"):
                 need("don't hold" in with_field(w), f"an empty excuse held: {w}")
-            t = re.sub(r"\| F9302 A row of F9302 \| [^|]*\|", lambda _m: '| F9302 A row of F9302 | His words: none, found by the review. What he wanted: "the export has to work for the whole list". Sources: call of 20 October 2026. |', b.rm.read_text(), count=1)
+            with_field("none, found by job 1")
+            t = b.rm.read_text()
+            b.rm.write_text(t.replace("| F9302 A row of F9302 | His words: ", "| F9302 A row of F9302 | Found in job 1. His words: ", 1))
+            need("fields hold" in b.fields("F9302"), f"a job the row names: {b.fields('F9302')}")
+            need("fields hold" in with_field_row(b, "F9303", "none, found by job 1"), f"a job whose text names the row: {b.fields('F9303')}")
+            t = re.sub(r"\| F9302 A row of F9302 \| [^|]*\|", lambda _m: '| F9302 A row of F9302 | The flow says "notes.md counts as only the main". His words: none, found by the review. Sources: call of 20 October 2026. |', b.rm.read_text(), count=1)
             b.rm.write_text(t)
-            need("holds a quote of his" in b.fields("F9302"), f"none, on a row that holds a quote of his: {b.fields('F9302')}")
+            need("fields hold" in b.fields("F9302"), f"a program's own text quoted in a row: {b.fields('F9302')}")
+            for quoted in ('"the export has to work for the whole list"', '"a line typed on the page"', "‘typed on the page once’"):  # in no call, text or note: still a quotation
+                t = re.sub(r"\| F9302 A row of F9302 \| [^|]*\|", lambda _m: f'| F9302 A row of F9302 | His words: none, found by the review. What he wanted: {quoted}. Sources: call of 20 October 2026. |', b.rm.read_text(), count=1)
+                b.rm.write_text(t)
+                need("holds a quotation" in b.fields("F9302"), f"none, on a row that holds a quotation: {quoted}: {b.fields('F9302')}")
             for ans, why in (("no", "about something else"), ("???", "about something else")):
                 before = b.rm.read_text()
                 r = b.tool("review.py", "add", "F9301", 'Also: "great thanks do the first one".', extra={**rnd, "HQ_SAYSO_FAKE": ans})
@@ -14369,7 +14385,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             need("F9301" in lst and "outside its one addition" in lst, f"not on the list: {lst} {s['stream'][-500:]}")
             b.minute()
             got = b.texts()[len(texts):]
-            need(got.count("changed while my round on F9301 ran") == 1 and not b.items(), f"not one text, or another round: {got[-300:]} {b.items()}")
+            need(got.count("While my round on F9301 ran") == 1 and "keep it" in got and not b.items(), f"not one text, or another round: {got[-300:]} {b.items()}")
             need(list(b.rm.parent.rglob("job-*.put-back.json")), "what went back isn't kept")
 
         def own_row_door(b):  # her own row: a direct write that looks like her addition isn't the door's
@@ -14385,7 +14401,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             t = b.rm.read_text()
             b.rm.write_text(t.replace("| F9302 A row of F9302 | ", "| F9302 A row of F9302 | Changed behind the door. ", 1))
             need(b.tool("review.py", "tick").returncode == 0, "the minute")
-            need(_rows(b) == before and "outside its one addition" in b.tool("review.py", "sitdown-list").stdout, "a killed run's round isn't looked at")
+            need(_rows(b) == before and "F9302" in b.tool("review.py", "sitdown-list").stdout, "a killed run's round isn't looked at")
 
         def row_by_row(b):  # never the whole file: what's new stays, what she'd no right to touch goes back, nothing lost
             b.flag("F9301", "no size named")
@@ -14478,7 +14494,65 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             need("F9303" in now_["ready"] and "F9302" not in now_["ready"], f"a Ready mark forged or taken off stayed: {now_['ready']}")
             need(re.search(r"^- Job \d+ · cancelled.*A forged job", b.rm.read_text(), re.M), "a forged job stands to run")
             lst = b.tool("review.py", "sitdown-list").stdout
-            need("sprint file put back" in lst and "kept but stopped" in lst, f"not named: {lst}")
+            need("Ready marks or passes I put back" in lst and "I cancelled it" in lst, f"not named: {lst}")
+
+        def journaled(b):  # what a person or an agent wrote through a door in those minutes stays, and nobody is blamed
+            b.flag("F9301", "no size named")
+            b.minute()
+            texts = b.texts()
+            ho = str(ROOT / "routine/handover.py")
+            code = ("run(rv, 'add', 'F9301', 'FILLED: no size named.')\n"
+                    "other(sp, 'ready', 'F9303')\n"
+                    f"other({str(ROOT / 'routine/jobs.py')!r}, 'add', 'Given in a chat during the round')\n"
+                    f"other({str(ROOT / 'routine/schedule.py')!r}, 'add', 'tomorrow 10:00', 'Planned in a chat during the round')\n"
+                    f"other({ho!r}, 'edit', 'HQ/roadmap.md', json.dumps({{'edits': [{{'old': '| F9302 A row of F9302 | His words: ', 'new': '| F9302 A row of F9302 | Words: '}}]}}))\n"
+                    f"other({ho!r}, 'edit', 'HQ/roadmap.md', json.dumps({{'edits': [{{'old': '| F9301 A row of F9301 | ', 'new': '| F9301 A row of F9301 | His answer in a chat. '}}]}}))\n")
+            s = b.go(code)
+            now_ = b.rm.read_text()
+            need("kept to its one addition" in s["stream"], f"the look did something: {s['stream'][-400:]}")
+            need("| F9302 A row of F9302 | Words: " in now_ and "His answer in a chat. " in now_ and "FILLED: no size named" in now_, "a chat's words went, or her addition")
+            need("F9303" in json.loads((b.ws / "HQ/sprint.json").read_text()).get("ready", {}), "a Ready click went")
+            need(re.search(r"^- Job \d+ · ready.*Given in a chat during the round", now_, re.M) and re.search(r"^- Item \d+ · waiting.*Planned in a chat during the round", now_, re.M), "a job or item given in those minutes went")
+            b.minute()
+            need(b.texts() == texts and b.st()["F9301"]["fix"].get("stop") is None and not list(b.rm.parent.rglob("job-*.put-back.json")), f"blamed: {b.texts()[len(texts):][-300:]} {b.st()['F9301']['fix']}")
+
+        def last_net(b):  # no door behind it and no call on: back, said at once with both words, and keep it brings it back
+            b.tool("cycles.py", "set", "moneypenny", "batches", "12:00")
+            b.flag("F9301", "no size named")
+            b.minute()
+            texts = b.texts()
+            b.go("p = os.environ['HQ_ROADMAP']; t = open(p).read(); open(p, 'w').write(t.replace('| F9302 A row of F9302 | His words: ', '| F9302 A row of F9302 | Changed behind every door. His words: '))\n"
+                 "run(os.path.join(os.path.dirname(rv), 'jobs.py'), 'add', 'A job with no door behind it')\n")
+            now_ = b.rm.read_text()
+            need("Changed behind every door" not in now_, "the last net didn't hold")
+            got = b.texts()[len(texts):]
+            need("F9302" in got and "Changed behind every door" in got and "keep it" in got and "A job with no door behind it" in got, f"not told at once, both words: {got[-500:]}")
+            need(b.st()["F9301"]["fix"].get("stop") is None, f"its row stopped for what's not its place: {b.st()['F9301']['fix']}")
+            k = b.tool("review.py", "keep")
+            need(k.returncode == 0 and "F9302" in k.stdout, f"keep it: {k.stdout} {k.stderr}")
+            now_ = b.rm.read_text()
+            need("Changed behind every door" in now_ and re.search(r"^- Job \d+ · ready.*A job with no door behind it", now_, re.M), "keep it didn't bring it back")
+            need(b.tool("review.py", "keep").returncode != 0, "keep it twice")
+            import agents
+            need("review.py keep" in next(a for a in agents.DEFAULTS if a["id"] == "moneypenny")["craft"], "her rule doesn't name it")
+
+        def moved_row(b):
+            b.flag("F9301", "no size named")
+            b.minute()
+            code = ("p = os.environ['HQ_ROADMAP']; t = open(p).read(); L = t.split(chr(10)); i = next(k for k, x in enumerate(L) if '| F9302 A row' in x); r = L.pop(i)\n"
+                    "j = next(k for k, x in enumerate(L) if x.startswith('## Phase')); L.insert(j, '| | Step | What | Done | Result |'); L.insert(j + 1, r); L.insert(j + 2, ''); open(p, 'w').write(chr(10).join(L))\n")
+            b.go(code)
+            t = b.rm.read_text()
+            need(t.count("| F9302 A row of F9302") == 1, f"a moved row came back as a second copy: {t.count('| F9302 A row of F9302')}")
+
+        def cut_file(b):
+            b.flag("F9301", "no size named")
+            b.minute()
+            heads = [x for x in b.rm.read_text().split("\n") if x.startswith("## ")]
+            before = _rows(b)
+            b.go("p = os.environ['HQ_ROADMAP']; t = open(p).read(); open(p, 'w').write(t[:t.index('| ⬜ | F9302')])")
+            need([x for x in b.rm.read_text().split("\n") if x.startswith("## ")] == heads and _rows(b) == before, "a file cut in half isn't back whole")
+            need(list(b.rm.parent.rglob("job-*.planning.md")), "the planning wasn't copied before the put-back")
 
         def clean(b):  # a round that kept to its door: nothing put back, nothing said
             b.flag("F9301", "no size named")
@@ -14529,16 +14603,17 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 r = b.tool("review.py", "add", "F9301", words, extra=rnd)
                 need(r.returncode != 0 and why in (r.stdout + r.stderr), f"written or the wrong refusal for {words}: {r.stdout} {r.stderr}")
                 need(b.rm.read_text() == before, f"the row changed on a refused addition: {words}")
-            for words in ('His words: `"nine euros is what I always wanted"`.', "His words: 「nine euros is what I always wanted」.", "His words: ‹nine euros is what I always wanted›.",
+            for words in ("His words: ❝nine euros is what I always wanted❞.", "His words: 〝nine euros is what I always wanted〞.", "His words: `nine euros is what I always wanted`.",
+                          'His words: `"nine euros is what I always wanted"`.', "His words: 「nine euros is what I always wanted」.", "His words: ‹nine euros is what I always wanted›.",
                           "His words: ＂nine euros is what I always wanted＂.", "His words: ″nine euros is what I always wanted″.", "His words: ‚nine euros is what I always wanted’."):
                 before = b.rm.read_text()
                 r = b.tool("review.py", "add", "F9301", words, extra=rnd)
                 need(r.returncode != 0 and b.rm.read_text() == before, f"a quote in other marks went in: {words}: {r.stdout} {r.stderr}")
-            r = b.tool("review.py", "add", "F9301", 'His words: "great thanks do the first one". The team\'s rule isn\'t touched, nor rows\' labels. Run `grep x a | wc -l` to see.', extra=rnd)
+            r = b.tool("review.py", "add", "F9301", 'His words: "great thanks do the first one". The team\'s rule isn\'t touched, nor rows\' labels. Run grep x a | wc -l to see.', extra=rnd)
             need(r.returncode == 0, f"a true quote of his, apostrophes or code refused: {r.stdout} {r.stderr}")
             row = next(x for x in b.rm.read_text().split("\n") if "| F9301 A row" in x)
             other = next(x for x in b.rm.read_text().split("\n") if "| F9303 A row" in x)
-            need('`grep x a \\| wc -l`' in row and len(re.split(r"(?<!\\)\|", row)) == len(re.split(r"(?<!\\)\|", other)), f"a pipe in her words broke the row, or was changed: {row[-200:]}")
+            need('grep x a \\| wc -l' in row and len(re.split(r"(?<!\\)\|", row)) == len(re.split(r"(?<!\\)\|", other)), f"a pipe in her words broke the row, or was changed: {row[-200:]}")
             # her own field that won't hold can't be taken back later, so it doesn't go in: a row with no Sources and no His words
             t = b.rm.read_text()
             b.rm.write_text(t.replace("| F9302 A row of F9302 | " + b.good, "| F9302 A row of F9302 | What right looks like: it works.", 1))
@@ -14899,7 +14974,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 need(not b.items() and not [x for x in t["fixes"] if "round" in x], f"a fourth round on day {d}: {b.items()} {t}")
             need(b.texts().count("If you tell me what F9301 should say") == 1, "the cap's text came twice")
 
-        for name, fn in (("found by, not his", found_by), ("compared after a round", compared), ("her row past the door", own_row_door), ("a killed run's look", compared_killed), ("a clean round", clean), ("row by row", row_by_row), ("the file emptied", emptied), ("a call starts after", call_starts), ("rounds wait", waits), ("forged outside the rows", forged),
+        for name, fn in (("found by, not his", found_by), ("compared after a round", compared), ("her row past the door", own_row_door), ("a killed run's look", compared_killed), ("a clean round", clean), ("row by row", row_by_row), ("the file emptied", emptied), ("a call starts after", call_starts), ("rounds wait", waits), ("forged outside the rows", forged), ("a door's write stays", journaled), ("the last net", last_net), ("a moved row", moved_row), ("a file cut in half", cut_file),
                          ("an addition's cap", capped), ("a no stays", no_stays), ("one price", one_price), ("a round only adds", only_adds), ("quotes in an addition", quotes), ("the review reads it", reads_it), ("no is a way out", says_no), ("no at the mark", says_no_at_mark),
                          ("the box", the_box), ("no false alarms", no_alarms), ("a held mark dropped", held_mark), ("no forged mark", no_forgery), ("the ready fields", fields),
                          ("the row", the_row), ("what a round touches", touch), ("a held round", held), ("held, then again", held_again),

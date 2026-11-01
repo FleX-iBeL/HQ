@@ -296,7 +296,7 @@ def job_guard(cmd: str) -> str | None:
 
 # F86: what writes, besides role.WRITES (what a call may hand to the main); a round's own ways out are named in fix_guard.
 _FIX_ALSO = {"cycles": {"ask", "batch", "text", "plan", "order", "set", "done", "failed", "proposal"}, "direct_line": None, "handover": None,
-             "review": {"clear", "pass", "run", "golden", "tick", "round-before", "round-after"}, "set-status": None, "set_status": None, "notes": None, "gitlock": None, "push": None,
+             "review": {"clear", "pass", "run", "golden", "tick", "round-before", "round-after", "keep"}, "set-status": None, "set_status": None, "notes": None, "gitlock": None, "push": None,
              "qa": {"pass", "fail", "queue"}, "jobs": {"mark", "held"}}
 _SCRIPT = re.compile(r"(?<![\w-])([a-z_-]+)\.py\b\s*(\S+)?\s*(\S+)?")
 _GIT_WRITES = {"checkout", "restore", "reset", "stash", "commit", "push", "pull", "fetch", "merge", "rebase", "apply", "am", "rm", "mv", "clean", "cherry-pick", "revert", "switch", "add",

@@ -66,6 +66,7 @@ sys.path.insert(0, HERE)
 import estimate as E  # noqa: E402
 import hqpaths  # noqa: E402
 import jobs as q  # noqa: E402
+import roundlog  # noqa: E402
 
 RANKS = os.environ.get("HQ_SPRINT") or os.path.join(os.path.dirname(q.ROADMAP), "sprint.json")
 ESTS = os.path.join(E.DIR, "sprint-estimates.json")
@@ -218,6 +219,8 @@ def _load(path):
 
 def _save(path, d):
     hqpaths.guard_beside_roadmap(path)
+    if path == RANKS:  # F86: who wrote while a round ran
+        roundlog.sprint(path, d)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
@@ -775,6 +778,9 @@ def gate(text, job_text_, say_so=False, said=None):
 # Send to the team and a call's add), and that refusal is one of Moneypenny's tripwires (routine/cycles.py). Off, the
 # fields are only reported (sprint.py check, fields), nothing is refused: today's HQ exactly.
 
+_PROGRAM_TEXT = re.compile(r"\b[\w.-]+\.(?:md|py|json|jsonl|sh|mjs)\b|\([FH]\d+\)")
+QUOTE_OPEN, QUOTE_CLOSE = '"“„«‹「『＂″‟❝〝`', '"”“»›」』＂″❞〞〟`'
+QUOTE_MARKS = (re.compile(f"[{QUOTE_OPEN}]([^{QUOTE_OPEN}{QUOTE_CLOSE}]*)[{QUOTE_CLOSE}]"), re.compile(r"(?<![\w'’])['‘‚]([^'‘’]+)['’](?![\w])"))  # an apostrophe is no quote
 NO_WORDS = re.compile(r"none,? found by (?:(?:QA )?job (\d+)|QA|the review|a check)\.?", re.I)  # F86: a row found by a job, QA, the review or a check, where he said nothing
 FIELD_LABELS = (("his_words", r"his words|their words|the user'?s words|your words"),
                 ("additions", r"my own additions|own additions|my additions"),
@@ -911,16 +917,31 @@ def _source_ok(item, ws, labels):
     return None
 
 
-def _no_words_why(found_by, row, ws):
-    """F86: "none, found by" holds only where it's true: not on a row that holds a quote of his, not for a job that never was."""
-    if found_by.group(1) and int(found_by.group(1)) > max([j["n"] for j in q.read()[1]] + [0]):
-        return f"none, found by job {found_by.group(1)}: there is no such job"
-    texts, his = _grep_texts(ws), [line for _, line in his_lines(ws)]
-    for m in _QUOTES.finditer(ask_of(row["line"])):
-        words = _bare(m.group(1))
-        if len(words.split()) >= HIS_QUOTE_WORDS and (any(words in line for line in his) or quote_found(m.group(1), texts)):
-            return "none, found by: but this row holds a quote of his; his words go in the field, or it goes on the list"
-    return ""
+def _no_words_why(found_by, row):
+    """F86: "none, found by" holds only where it's true. Any quotation of three words or more in the ask refuses it, wherever it came from, and job N must
+    be a real job of this row: the row names it as where it came from, or the job's text names this row. What her own addition says doesn't count. The one
+    exception is a program's own text quoted in a row (a flow's message, a job's line): it carries a file name or a row label in brackets."""
+    line, ask = row["line"], ask_of(row["line"])
+    for marks in QUOTE_MARKS:
+        for m in marks.finditer(ask):
+            if len(_bare(m.group(1)).split()) >= HIS_QUOTE_WORDS and not _PROGRAM_TEXT.search(m.group(1)):
+                return f"none, found by: but this row holds a quotation, {m.group(1)[:50]!r}; his words go in the field, or it goes on the list"
+    if not found_by.group(1):
+        return ""
+    n = int(found_by.group(1))
+    jobs_ = q.read()[1]
+    if n <= 0 or n > max([j["n"] for j in jobs_] + [0]):
+        return f"none, found by job {n}: there is no such job"
+    mark = ADDITION.search(ask)
+    own = ask[:mark.start()] if mark else ask
+    cs = hqpaths.cells(line)
+    at = team_note_at(cs[2]) if len(cs) > 2 else None
+    notes = " ".join(cs[3:]) + (" " + cs[2][at:] if at is not None else "")
+    named = re.search(rf"\b[Jj]obs? (?:\d+(?:, | and ))*{n}\b", (own + " " + notes).replace(found_by.group(0), ""))
+    text = next((j["text"] for j in jobs_ if j["n"] == n), "")
+    if named or re.search(rf"(?<![\w.]){re.escape(row['label'])}(?![\w.])", text):
+        return ""
+    return f"none, found by job {n}: that job isn't this row's: the row doesn't name it and its text doesn't name {row['label']}"
 
 
 def ready_fields(row, ws=None):
@@ -937,7 +958,7 @@ def ready_fields(row, ws=None):
             found[qt] = quote_found(qt, texts)
     missing = [qt for qt, where in found.items() if not where]
     found_by = NO_WORDS.fullmatch(ft["his_words"].strip()) if not quotes else None
-    no_way = _no_words_why(found_by, row, ws) if found_by else ""
+    no_way = _no_words_why(found_by, row) if found_by else ""
     if found_by and no_way:
         found_by = None
     out["his_words"] = {"ok": bool(found_by) or (bool(quotes) and not missing), "quotes": quotes, "found": found, "none": found_by.group(0) if found_by else "",
