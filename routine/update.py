@@ -1252,9 +1252,20 @@ def _trees(revs: list[str]) -> dict[str, str]:
     return dict(ln.split() for ln in _log(revs, "--format=%T %H").decode().splitlines() if len(ln.split()) == 2)
 
 
+def _not_own(revs: list[str]) -> list[str]:
+    """The commits that weren't written by this copy's own git identity (its name or its address): `git am` and a cherry-pick keep the author
+    of dev's commit. Her own work is hers, also when the team took her patch as it is and dev now holds the same change."""
+    r = git("var", "GIT_AUTHOR_IDENT", timeout=10)
+    m = re.match(r"(.*) <(.*)> \d+ [-+]\d+$", r.stdout.strip())
+    who = {x for x in (m[1], m[2]) if x} if m and not r.returncode else set()
+    rows = [ln.split("\0") for ln in _log(revs, "--format=%H%x00%an%x00%ae").decode(errors="replace").split("\n") if ln]
+    return [c for c, *author in rows if not who & set(author)]
+
+
 def unreleased(mine: list[str], tags: list[str], tips: list[str]) -> list[str]:
     """Of the commits past a release, the ones that are GitHub's unreleased work: the very commit, the same change made again (`git am`, a
-    cherry-pick), or the same files as one of them (a squash). Not a commit that repeats something that was released: that's hers."""
+    cherry-pick), or the same files as one of them (a squash). Not a commit that repeats something that was released: that's hers. And a
+    commit of this copy's own identity counts only as the very commit: the same change or the same files in her own commit are hers."""
     if not mine or not tips:
         return []
     theirs = git("rev-list", *tips, *[f"^{t}" for t in tags], timeout=30).stdout.split()
@@ -1264,11 +1275,14 @@ def unreleased(mine: list[str], tags: list[str], tips: list[str]) -> list[str]:
     hit = [c for c in mine if c in same]
     if hit:
         return hit
+    rest = _not_own(mine)
+    if not rest:
+        return []
     ids = _patches(theirs)
-    hit = [c for i, c in _patches(mine).items() if i in ids]
+    hit = [c for i, c in _patches(rest).items() if i in ids]
     of_theirs = _trees(theirs)
     of_tags = set(git("rev-parse", *[f"{t}^{{tree}}" for t in tags], timeout=20).stdout.split())
-    return hit + [c for t, c in _trees(mine).items() if t in of_theirs and t not in of_tags and c not in hit]
+    return hit + [c for t, c in _trees(rest).items() if t in of_theirs and t not in of_tags and c not in hit]
 
 
 def off_release(head: str = "HEAD") -> list[str]:
