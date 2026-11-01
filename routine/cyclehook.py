@@ -507,7 +507,7 @@ def fix_guard(cmd: str, label: str, mode: str) -> str | None:
 def decide(ask: dict, mail_only: bool = False, fix: tuple | None = None, who: tuple | None = None) -> tuple[int, str]:
     import hqpaths
     name, inp = str(ask.get("tool_name", "")), ask.get("tool_input") or {}
-    aid, kind = who or ("", "")
+    aid, kind = who or (("moneypenny", "fix") if fix else ("", ""))  # F86: a round is hers
     if never_mail(name) and not (aid and hqpaths.may_send(aid)):
         return 2, f"HQ: refused {name}: nothing is ever sent, replied to or forwarded from a job. A draft at the most."
     if name in EDITORS and ".status/proofs" in str(inp.get("file_path") or "").replace(os.sep, "/"):

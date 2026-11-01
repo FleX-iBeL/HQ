@@ -14174,7 +14174,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             f.write_text("#!/usr/bin/env python3\nimport json, sys, os, subprocess\nrv, sp = os.environ['F86_REVIEW'], os.environ['F86_SPRINT']\nsys.stdin.read()\n"
                          "def out(d): print(json.dumps(d), flush=True)\ndef run(*a):\n    r = subprocess.run([sys.executable, *a], capture_output=True, text=True)\n"
                          "    out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': ' '.join(a)[:150]}}]}})\n"
-                         "    out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': r.stdout + r.stderr}]}})\n"
+                         "    out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'is_error': r.returncode != 0, 'content': r.stdout + r.stderr}]}})\n"
                          "    return r\nout({'type': 'system', 'subtype': 'init', 'session_id': 's-f86'})\n" + code
                          + "\nout({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Done.'})\n")
             f.chmod(0o755)
