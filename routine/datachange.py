@@ -49,6 +49,22 @@ def names(root=None) -> list[str]:
         return []
 
 
+def number(name: str) -> str:
+    """F104: what makes a change that change: the number at the start of its name; a rename doesn't make it a new one. A name with no number is itself."""
+    m = re.match(r"\d+", name)
+    return str(int(m.group(0))) if m else name
+
+
+def renamed_from(name: str, root=None) -> str:
+    """F104: the change this file was renamed from with another number, by git's own history, or "". Its identity is still that one's."""
+    rel = f"{REL}/{name}.py"
+    for ln in _git(root, "log", "-M", "--diff-filter=R", "--name-status", "--format=", "HEAD", "--", REL).splitlines():
+        cols = ln.split("\t")
+        if len(cols) == 3 and cols[2] == rel and number(Path(cols[1]).stem) != number(name):
+            return Path(cols[1]).stem
+    return ""
+
+
 def load(name: str, root=None):
     """The change's module. Raises when it can't be loaded or lacks do, undo or WHAT."""
     p = os.path.join(str(root or hqpaths.HQ), REL, name + ".py")
@@ -134,8 +150,18 @@ def apply(base=None, root=None, log=None) -> list[str]:
     """Runs what hasn't run and may (why_left). On a first look nothing is taken as having run for code that has no change yet."""
     did, left = [], {}
     have = applied(base)
-    for n in names(root):
+    here = names(root)
+    for n in here:
         if n in have:
+            continue
+        ran_as = [x for x in have if number(x) == number(n)]
+        if ran_as:  # renamed after it ran: the same change. Another file with a number that's taken never runs, and that's said
+            if ran_as[0] in here:
+                left[n] = f"its number is {ran_as[0]}'s"
+            continue
+        was = renamed_from(n, root)
+        if was and any(number(x) == number(was) for x in have):
+            left[n] = f"it's {was} under a new number, and that has run: a change keeps its number"
             continue
         why = why_left(n, root)
         if why:
@@ -154,8 +180,9 @@ def apply(base=None, root=None, log=None) -> list[str]:
 def undo(todo: list[str], base=None, root=None) -> list[str]:
     """The undos of these, newest first; only what has run. A failure puts back what this run undid, and raises."""
     have = applied(base)
+    ids = {number(x) for x in have}
     done: list[str] = []
-    for n in sorted((x for x in todo if x in have), reverse=True):
+    for n in sorted((x for x in todo if number(x) in ids), reverse=True):
         try:
             load(n, root).undo(_base(base))
         except Exception:
@@ -164,15 +191,36 @@ def undo(todo: list[str], base=None, root=None) -> list[str]:
             raise
         done.append(n)
     if done:
-        _save([x for x in have if x not in done], base)
+        gone = {number(x) for x in done}
+        _save([x for x in have if number(x) not in gone], base)
     return done
 
 
 def between(a: str, b: str, root=None) -> list[str]:
-    """The changes added from a to b, in order."""
+    """The changes added from a to b, in order; one with a number that was already there is that change, renamed."""
     r = subprocess.run(["git", "-C", str(root or hqpaths.HQ), "diff", "--name-only", "--diff-filter=A", a, b, "--", REL],
                        capture_output=True, text=True)
-    return sorted(Path(f).stem for f in r.stdout.splitlines() if f.endswith(".py") and not Path(f).name.startswith("_"))
+    new = sorted(Path(f).stem for f in r.stdout.splitlines() if f.endswith(".py") and not Path(f).name.startswith("_"))
+    old = {number(n) for n in _names_at(a, root)}
+    return [n for n in new if number(n) not in old]
+
+
+def _names_at(rev: str, root=None) -> list[str]:
+    return [Path(f).stem for f in _git(root, "ls-tree", "-r", "--name-only", rev, "--", REL + "/").splitlines() if f.endswith(".py") and not Path(f).name.startswith("_")]
+
+
+def number_refuses(a: str, b: str, root=None) -> str | None:
+    """F104: the release check: at `b` every change has its own number, and from a to b none got a new one. What's wrong, or None."""
+    at_b = _names_at(b, root)
+    for n in at_b:
+        same = [x for x in at_b if x != n and number(x) == number(n)]
+        if same:
+            return f"{n} and {same[0]} have the same number, and a change's number is what it is"
+    for ln in _git(root, "diff", "-M", "--diff-filter=R", "--name-status", a, b, "--", REL).splitlines():
+        cols = ln.split("\t")
+        if len(cols) == 3 and number(Path(cols[1]).stem) != number(Path(cols[2]).stem):
+            return f"{Path(cols[1]).stem} got a new number ({Path(cols[2]).stem}), and it would run a second time"
+    return None
 
 
 def _skip(base: Path):
@@ -204,8 +252,8 @@ def try_on_copy(todo: list[str], base=None, root=None) -> str | None:
     copy = Path(tmp) / "ws"
     try:
         shutil.copytree(src, copy, ignore=_skip(src), symlinks=True)
-        have = applied(copy)
-        for n in sorted((x for x in todo if x in have), reverse=True):  # what the work line has already run here: back first
+        ids = {number(x) for x in applied(copy)}
+        for n in sorted((x for x in todo if number(x) in ids), reverse=True):  # what the work line has already run here: back first
             try:
                 load(n, root).undo(copy)
             except Exception as e:
@@ -240,7 +288,7 @@ def main(argv: list[str]) -> int:
     cmd = argv[0] if argv else "list"
     if cmd == "list":
         have = applied()
-        print("\n".join(f"{n}: {'run here' if n in have else 'not run'}" for n in names()) or "No data changes.")
+        print("\n".join(f"{n}: {'run here' if number(n) in {number(x) for x in have} else 'not run'}" for n in names()) or "No data changes.")
         return 0
     if cmd == "apply":
         print("\n".join(apply(log=print)) or "Nothing to run.")

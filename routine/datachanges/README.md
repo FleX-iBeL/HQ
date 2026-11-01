@@ -1,7 +1,8 @@
 # Data changes
 
 A version that changes how something is stored in the user's folder ships that change here, one Python file each, with its undo.
-The files run in the order of their names, so start each with a number: `002-move-the-notes.py`.
+The files run in the order of their names, so start each with a number: `002-move-the-notes.py`. That number is what the change is: rename it if you
+like, it won't run again, but it keeps its number. A release is refused when two changes share one or a change got a new one.
 
 ```python
 WHAT = "The notes move to their own folder."   # plain words, for the changelog
