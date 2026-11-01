@@ -2016,6 +2016,34 @@ def on_done(n, text="", started_hhmm=None, at=None):
     return rec
 
 
+def run_used(n, minutes, turns):
+    """F103: what a job's runs took, in its history line, inside the queue's lock. A job closes itself inside its run, and only once claude has
+    exited does the runner know what it took, so this comes after on_done or before it, and it lands either way: on the line that's there, and
+    with no line yet on_done takes it from the box. False when there's no line."""
+    lines, found = [], None
+    try:
+        raw = open(HISTORY, encoding="utf8").read().splitlines()
+    except FileNotFoundError:
+        return False
+    for i, l in enumerate(raw):
+        lines.append(l)
+        try:
+            if json.loads(l).get("n") == n:
+                found = i
+        except Exception:
+            pass
+    if found is None:
+        return False
+    h = json.loads(lines[found])
+    h["run_minutes"], h["turns"] = minutes, turns
+    lines[found] = json.dumps(h)
+    tmp = f"{HISTORY}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp, HISTORY)
+    return True
+
+
 # ---------- planned items (H95), called by schedule.py (inside the queue's lock) ----------
 
 def _load_items():

@@ -169,6 +169,19 @@ def _result_text(block: dict) -> str:
     return ""
 
 
+def _keep_run(n: int, box: dict, minutes: float, turns: int, lg) -> None:
+    """F103: what the runs took, into the job's history line: from the box when it keeps them, else this run's own. The job's own `jobs.py done`
+    ran inside the run, before anyone knew, so this is what puts it there."""
+    try:
+        import estimate
+        import jobs as q
+        got = wall.used(n) if box["state"] else {}
+        with q.locked():
+            estimate.run_used(n, got.get("minutes", round(minutes, 2)), got.get("turns", turns))
+    except Exception as e:
+        _log(lg, f"turns and minutes not kept: {e!r}")
+
+
 def main(argv: list[str]) -> int:
     if not argv or not argv[0].isdigit():
         print(__doc__)
@@ -293,6 +306,7 @@ def main(argv: list[str]) -> int:
                 wall.add_used(n, _own_seconds() / 60, turns)
             except Exception as e:
                 _log(lg, f"box not kept: {e!r}")
+        _keep_run(n, box, _own_seconds() / 60, turns, lg)
         _write_note(box["note"], {"n": n, "minutes": minutes, "turns": turns, "steps": steps, "boxed": boxed["why"],
                                   "box": {"minutes": box["minutes"], "turns": box["turns"]}, "exit": code,
                                   "error": bool(is_error), "subtype": subtype, "result": (result or "")[:2000],
@@ -331,6 +345,7 @@ def main(argv: list[str]) -> int:
                          "for the routine (it notes a chat that closed without a done mark)")
         else:
             _log(lg, f"job {n}: the roadmap says '{state or 'unknown'}', nothing to mark")
+        _keep_run(n, box, _own_seconds() / 60, turns, lg)  # marked done just now, with no box to read it from
         return 0 if code == 0 else 1
 
 

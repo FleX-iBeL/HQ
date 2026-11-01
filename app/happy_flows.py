@@ -16659,20 +16659,38 @@ print(ledger.text('donna')[-900:])
 """
         r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT))
         need(r.returncode == 0 and "donna's score" in r.stdout, f"the week's score with the switch off: {r.stdout} {r.stderr[-400:]}")
-        # turns and minutes for every job, and what an estimate stands on
-        r = run("routine/jobs.py", "add", "Look at something made up.", "--kind", "other")
-        n = int(re.search(r"Job (\d+)", r.stdout).group(1))
-        need(re.search(r"from (no finished jobs yet|\d+ finished jobs?)", r.stdout), f"the estimate doesn't say what it stands on: {r.stdout}")
-        run("routine/jobs.py", "mark", str(n), "running since 00:00")
-        code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import wall; wall.add_used(int(sys.argv[2]), 3.5, 21)"
-        _sp.run([sys.executable, "-c", code, str(ROOT), str(n)], check=True, env=env, cwd=str(ROOT))
-        r = run("routine/jobs.py", "done", str(n))
-        need(r.returncode == 0, f"done: {r.stdout} {r.stderr[-300:]}")
-        code = "import json, sys; sys.path.insert(0, sys.argv[1] + '/routine'); import estimate as E; h = E.history()[-1]; print(json.dumps({k: h.get(k) for k in ('n', 'turns', 'run_minutes', 'based', 'actual')})); print(E.job_words(int(sys.argv[2]), E.plan()) if hasattr(E, 'job_words') else '')"
-        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(n)], capture_output=True, text=True, env=env, cwd=str(ROOT))
-        need(r.returncode == 0, f"the history: {r.stderr[-400:]}")
-        h = json.loads(r.stdout.splitlines()[0])
-        need(h["n"] == n and h["turns"] == 21 and h["run_minutes"] == 3.5 and h["based"] is not None, f"turns and minutes: {h}")
+        # turns and minutes for every job, and what an estimate stands on, through the real order: the runner, a stand-in for claude, and the
+        # job closing itself inside its run, before anything knows what the run took. Then the other order, and a run with no box of its own.
+        fake = self.tmp / "f103c-claude"
+        fake.write_text("#!/usr/bin/env python3\nimport json, os, subprocess, sys\nsys.stdin.read()\n"
+                        "def out(d): print(json.dumps(d), flush=True)\n"
+                        "out({'type': 'system', 'subtype': 'init', 'session_id': 's-f103c'})\n"
+                        "for i in range(3):\n"
+                        "    out({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'a turn'}]}})\n"
+                        "if os.environ.get('F103_CLOSES'):\n"
+                        "    r = subprocess.run([sys.executable, os.environ['F103_JOBS'], 'done', os.environ['HQ_JOB']], capture_output=True, text=True)\n"
+                        "    assert r.returncode == 0, r.stdout + r.stderr\n"
+                        "out({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Done.'})\n")
+        fake.chmod(0o755)
+        hist = "import json, sys; sys.path.insert(0, sys.argv[1] + '/routine'); import estimate as E; h = [x for x in E.history() if x.get('n') == int(sys.argv[2])]; print(len(h)); print(json.dumps({k: h[-1].get(k) for k in ('n', 'turns', 'run_minutes', 'based', 'actual')}))"
+        run_dir = Path(env.get("HQ_JOB_RUN") or self.tmp / "f103c-run")
+        run_dir.mkdir(exist_ok=True)
+        env["HQ_JOB_RUN"] = str(run_dir)
+        for closes, box in ((True, ["--max-minutes", "5", "--max-turns", "50", "--box-state"]), (False, ["--max-minutes", "5", "--max-turns", "50", "--box-state"]),
+                            (True, ["--max-minutes", "5", "--max-turns", "50"]), (False, [])):
+            r = run("routine/jobs.py", "add", "Look at something made up.", "--kind", "other")
+            n = int(re.search(r"Job (\d+)", r.stdout).group(1))
+            need(re.search(r"from (no finished jobs yet|\d+ finished jobs?)", r.stdout), f"the estimate doesn't say what it stands on: {r.stdout}")
+            run("routine/jobs.py", "mark", str(n), "running since 00:00")
+            (run_dir / f"job-{n}.prompt").write_text(f"let's go. This is job {n} from the queue")
+            e = {**env, "HQ_CLAUDE": str(fake), "F103_JOBS": str(ROOT / "routine/jobs.py"), **({"F103_CLOSES": "1"} if closes else {})}
+            r = await asyncio.to_thread(lambda: _sp.run([sys.executable, str(ROOT / "routine/runjob.py"), str(n), "--session-id", "x", *box], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=120))
+            need(r.returncode == 0, f"the run: {r.stdout[-300:]} {r.stderr[-300:]} {(run_dir / f'job-{n}.stream.log').read_text()[-400:]}")
+            r = _sp.run([sys.executable, "-c", hist, str(ROOT), str(n)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            need(r.returncode == 0, f"the history: {r.stderr[-400:]}")
+            count, h = r.stdout.splitlines()[:2]
+            h = json.loads(h)
+            need(count == "1" and h["n"] == n and h["turns"] == 3 and isinstance(h["run_minutes"], (int, float)) and h["based"] is not None, f"turns and minutes (the job closed itself: {closes}, box {box}): {count} {h}")
         return "the score per agent and per hand-off from a folder holding only the ledger; QA's fail and a bug after a pass on it; the week's score with the switch off; turns, minutes and the estimate's base kept"
 
     async def flow244(self) -> str:
