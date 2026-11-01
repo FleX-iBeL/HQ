@@ -16732,6 +16732,58 @@ print(ledger.text('donna')[-900:])
         need(applied(ws) == ["001-first"] and (ws / "HQ/b.txt").exists(), f"what's in her release didn't run: {applied(ws)}")
         return "uncommitted, changed, only local or not in her release: left alone and said once; committed, unchanged and on dev runs, and what's in her release"
 
+    async def flow245(self) -> str:
+        """F104, no Claude: the way back on a friend's copy and to an old version. With a commit of her own past a tag she stands on that tag: one version
+        back is the one below it, forward brings her commit back, and with nothing below there's no way back. A version whose own update.py has no
+        `forward` is refused in plain words, nothing moved, also as the plain first `back`; the guard still goes where she stood."""
+        import subprocess as _sp
+        make = self._friend("f104j")["make"]
+        up = lambda c, *x: _sp.run([sys.executable, str(c["hq"] / "routine/update.py"), *x], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"]), timeout=120)
+        said = lambda r: json.loads(r.stdout.strip().splitlines()[-1])
+        head = lambda c: c["g"]("rev-parse", "HEAD")
+        tag = lambda c, t: c["g"]("rev-parse", t + "^{commit}")
+        def own(c, name="mine.txt"):
+            (c["hq"] / name).write_text("her own\n")
+            c["g"]("add", name); c["g"]("commit", "-q", "-m", "a commit of her own")
+            return head(c)
+        prev = lambda c: _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import update; print(update.previous())", str(c["hq"])], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"])).stdout.strip().splitlines()[-1]
+        c = make()
+        need(prev(c) == "v1.0.0", f"on a tag: {prev(c)}")
+        mine = own(c)
+        need(prev(c) == "v1.0.0", f"with a commit of her own past v1.1.0: {prev(c)}")
+        r = await asyncio.to_thread(up, c, "back")
+        need(said(r).get("ok") and head(c) == tag(c, "v1.0.0") and "Back on 1.0.0" in (c["hq"] / ".status/update-run.json").read_text(), f"back: {r.stdout[-300:]} {r.stderr[-300:]} {(c['hq'] / '.status/update-run.json').read_text()[-300:]}")
+        need(json.loads((c["ws"] / "HQ/data-changes.json").read_text())["applied"] == [] and (c["ws"] / "HQ/a.txt").exists(), "the data wasn't undone")
+        need(c["g"]("for-each-ref", "--contains", mine, "--format=%(refname:short)", "refs/heads/hq-backup/"), "her commit isn't kept")
+        r = await asyncio.to_thread(up, c, "forward")
+        need(said(r).get("ok") and head(c) == mine, f"forward: {r.stdout[-300:]} {r.stderr[-300:]} {head(c)}")
+        c = make("git checkout -q --detach v1.0.0")
+        own(c)
+        need(prev(c) == "None", f"past the first version: {prev(c)}")
+        r = await asyncio.to_thread(up, c, "back")
+        need(not said(r).get("ok") and "no version before" in r.stdout, f"past the first version: {r.stdout[-300:]}")
+        # a version with no forward, as the plain back and by name; v1.3.0 on top of it so it's the one before
+        c = make()
+        p = c["hq"] / "routine/update.py"
+        good = p.read_text()
+        p.write_text(re.sub(r"^def forward\(", "def onward(", good, flags=re.M))
+        c["g"]("add", "routine/update.py"); c["g"]("commit", "-q", "-m", "as it was before forward"); c["g"]("tag", "v1.2.0")
+        p.write_text(good)
+        c["g"]("add", "routine/update.py"); c["g"]("commit", "-q", "-m", "back again"); c["g"]("tag", "v1.3.0")
+        at, run_file = head(c), c["hq"] / ".status/update-run.json"
+        for how in (("back",), ("back", "--tag", "v1.2.0")):
+            r = await asyncio.to_thread(up, c, *how)
+            need(not said(r).get("ok") and "no way forward" in said(r).get("said", "") and "Nothing moved" in said(r).get("said", ""), f"{how}: {r.stdout[-300:]}")
+            need(head(c) == at and not (c["hq"] / ".status/back.json").exists() and not run_file.exists(), f"{how}: it moved: {c['g']('describe', '--tags', '--always')}")
+        r = await asyncio.to_thread(up, c, "back-run", "v1.2.0", "quiet")
+        need(r.returncode == 1 and head(c) == at and "no way forward" in run_file.read_text(), f"back-run: {r.stdout[-200:]} {r.stderr[-300:]}")
+        r = await asyncio.to_thread(up, c, "back", "--tag", "v1.1.0")
+        need(said(r).get("ok") and head(c) == tag(c, "v1.1.0"), f"a version with a forward: {r.stdout[-300:]} {r.stderr[-300:]}")
+        # the guard isn't a going back she can undo: it goes where she stood
+        r = await asyncio.to_thread(lambda: _sp.run([sys.executable, str(c["hq"] / "routine/update.py"), "back-run", "v1.2.0", "guard"], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"]), timeout=120))
+        need(r.returncode == 0 and head(c) == tag(c, "v1.2.0"), f"the guard: {r.stdout[-200:]} {r.stderr[-300:]}")
+        return "her own commits count as standing on the tag: one version back is the one below, forward brings them back; a version with no forward is refused, nothing moved"
+
     async def flow250(self) -> str:
         """F106, no Claude: a stock Mac's python3 is 3.9, and agents run rules lookups with it. HQ's Python is read for what 3.9 can't: syntax past it, a `X | Y`
         annotation without the future import, or an f-string only 3.12 can read. No 3.9 here, so it reads the source; the checker is tried on made-up bad lines first."""
@@ -28278,6 +28330,7 @@ FLOWS = {
     238: ("F106: a helper beside a call, with a stand-in for the model: started without a yes, the call goes on, the answer in the same call once; hung up it's a text on her line; boxed in minutes and turns; two at once; a used-up limit stops it", False, "flow238"),
     239: ("F106: a check she couldn't run is never answered around: the program says I couldn't check that when her reply doesn't", False, "flow239"),
     250: ("F106: nothing in HQ's Python that a stock Mac's 3.9 can't read: no newer syntax, no X | Y annotation without the future import, what a rules lookup pulls in included", False, "flow250"),
+    245: ("F104: a friend's own commits past a tag count as standing on that tag: one version back is the one below; a version with no forward of its own is refused, nothing moved", False, "flow245"),
     244: ("F104: a data change runs only when committed, unchanged and on dev, or in the release she stands on; anything else is left alone and said once", False, "flow244"),
     243: ("F104: the guard on the state: every way onto dev puts a friend's copy back on the newest release within the routine's minute, no data change of dev's runs, the job stopped by its exact pid, said and written down; her own commits stay, also with dev's patch; offline never on a guess, never older than it stood on, no newer release she didn't stand on; the maker's copy never touched, whatever the environment or a lost key says; no way forward again; one backup branch", False, "flow243"),
     242: ("F106: one line on the status page shows the helper working for him right now", False, "flow242"),

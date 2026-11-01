@@ -45,7 +45,8 @@ A newer version is a tag vX.Y or vX.Y.Z on the public repo with a higher number.
      and rebuild in local/.
 State: .status/update.json (the last check) and .status/update-run.json (the update), for the pages.
 Tests: HQ_UPDATE_URL (another repo, e.g. a folder), HQ_PLATFORM (pretend another computer), HQ_CALL_URL,
-F104: `back [--tag vX.Y.Z]` one version back (on the work line past a version: that version), in the background, here and on the other
+F104: `back [--tag vX.Y.Z]` one version back (on the work line past a version: that version; on a friend's copy with commits of her own past a
+tag: the one below it; never to a version with no `forward` of its own), in the background, here and on the other
 computer through the forward; the main runs the undos of the data changes it leaves behind (routine/datachange.py) first and tells the
 other computer only once that held, so a failing undo leaves both where they were (started on the backup, the main goes first); the
 backup gets them by the sync; while back on the maker's HQ the team waits. `forward` the other way. Tests: HQ_UPDATE_WAIT in the foreground.
@@ -1018,10 +1019,34 @@ def run() -> int:
 
 
 def previous() -> str | None:
-    """F104: one version back: the newest version tag under where HQ stands; on the work line past a version, that version."""
+    """F104: one version back: the newest version tag under where HQ stands; on the work line past a version, that version. On a friend's
+    copy her own commits past a tag count as standing on that tag: one version back is the one below it, or she'd stay on the same version."""
     at = set(git("tag", "--points-at", "HEAD", timeout=10).stdout.split())
     older = [t for t in git("tag", "--merged", "HEAD", timeout=10).stdout.split() if vtuple(t) and t not in at]
-    return max(older, key=vtuple) if older else None
+    if not older:
+        return None
+    newest = max(older, key=vtuple)
+    if at or not hqpaths.is_friend():
+        return newest
+    below = [t for t in older if vtuple(t) < vtuple(newest)]
+    return max(below, key=vtuple) if below else None
+
+
+def has_forward(tag: str) -> bool:
+    """F104: whether that version's own update.py knows `forward`. One that doesn't is a way back with no way out again, and no team wait."""
+    want = f"refs/tags/{tag}:routine/update.py"
+    try:
+        r = git("show", want, timeout=20)
+        if r.returncode:
+            git("fetch", "--no-tags", "--quiet", UPSTREAM, f"+refs/tags/{tag}:refs/tags/{tag}", timeout=120)
+            r = git("show", want, timeout=20)
+    except subprocess.SubprocessError:
+        return False
+    return not r.returncode and bool(re.search(r"^def forward\(", r.stdout, re.M))
+
+
+def no_forward_words(tag: str) -> str:
+    return f"HQ can't go back to {vname(tag)}: that version has no way forward again, so it would be stuck there. Nothing moved."
 
 
 def gone_back() -> dict:
@@ -1078,6 +1103,8 @@ def back(tag: str | None = None, tell: bool = True, first: bool = False) -> dict
     tag = tag or previous()
     if not tag or not vtuple(tag):
         return {"ok": False, "said": "There's no version before this one."}
+    if not has_forward(tag):
+        return {"ok": False, "said": no_forward_words(tag)}
     import role
     if tell and not first and role.is_backup():
         if role.tell_other("update", ["back-first", tag]) == "told":
@@ -1099,6 +1126,9 @@ def back_run(tag: str, tell: bool, guard: bool = False) -> int:
     if why:
         log(f"release guard: left alone: {why}")
         print(f"The guard leaves this HQ alone: {why}.")
+        return 1
+    if not guard and not has_forward(tag):  # the guard goes where she stood, it isn't a going back she can undo
+        say("failed", "", no_forward_words(tag))
         return 1
     say("updating", "Going back", **{"to": vname(tag)})
     told, undone, saved, moved = None, [], {}, False
