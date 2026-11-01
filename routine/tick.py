@@ -372,6 +372,8 @@ def start(job):
                            "command": f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'statusline.py'))}"}}
     hook = f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'cyclehook.py'))}"
     if cycle:  # H298, piece 8: a cycle's writes to a shared file go only through HQ's own scripts (the hook refuses the rest)
+        if cycle["kind"] == "fix":  # F86: a round touches its one row
+            hook += f" --fix {shlex.quote(cycle['label'])} {cycle['mode']}"
         sett["hooks"] = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|mcp__.*",
                                          "hooks": [{"type": "command", "command": hook}]}]}
     else:  # F99: every job: no send, reply or forward through any connector

@@ -14,6 +14,11 @@ F99 (30 October 2026): the same hook guards every team job against sending: any 
 refused, whatever the connector is called. A team job needs the planning (it writes its results in the row), so only
 a cycle gets the shared-file part: `--mail-only` is how a team job's settings call it.
 
+F86: a round of the fix-and-review loop (`--fix LABEL fix|mark`) touches its one row: a fix run rewords it, a mark run marks it (a
+mark run doesn't reword: rounds are counted, marks aren't, and that would be a loop with no cap), either puts it on the sit-down list;
+and her ledger. Nothing else of HQ's is written, no file is edited by hand, and no other text goes out: sitdown is the round's one
+text. Reading stays free.
+
 F104, F103, F106 (fix round of batch 3): every job, whatever its kind, is kept off the work line on a friend's copy (any way of
 moving the head onto commits she hasn't got released), off HQ's guard variables, off the switches and the two records, and it
 can't write the ledger or start a helper, skip the pre-push hook, go back or forward a version, or run the data changes by hand. The hook reads
@@ -288,7 +293,34 @@ def job_guard(cmd: str) -> str | None:
     return None
 
 
-def decide(ask: dict, mail_only: bool = False) -> tuple[int, str]:
+# F86: what writes, besides role.WRITES (what a call may hand to the main); a round's own ways out are named in fix_guard.
+_FIX_ALSO = {"cycles": {"ask", "batch", "text", "plan", "order", "set", "done", "failed", "proposal"}, "direct_line": None, "handover": None,
+             "review": {"clear", "pass", "run", "golden", "tick"}}
+_SCRIPT = re.compile(r"(?<![\w-])([a-z_]+)\.py\s+(\S+)?\s*(\S+)?")
+
+
+def fix_guard(cmd: str, label: str, mode: str) -> str | None:
+    """F86: what a round of the loop may not do with a shell command, in a refusal's words; None when it's fine."""
+    import role
+    no = (f"HQ: refused: this run is one round on {label}: only " + (f"sprint.py ready {label}" if mode == "mark" else f"review.py reword {label}") +
+          f", review.py sitdown {label}, your ledger, and reading. What's left goes on the sit-down list.")
+    named = re.sub(r"[\"']([^\"'\n]*\.py)[\"']", lambda m: m.group(1).replace(" ", "_"), cmd)  # a path with a space in it stays one word
+    for piece in re.split(r"[;&|\n]+", ran(named)):
+        if _says_only(piece):
+            continue
+        for script, sub, arg in _SCRIPT.findall(piece):
+            if script == "review" and sub in ("reword", "sitdown"):
+                if arg.upper() != label or sub == "reword" and mode == "mark":
+                    return no
+            elif script == "sprint" and sub == "ready":
+                if mode != "mark" or arg.upper() != label:
+                    return no
+            elif sub in role.WRITES.get(script, ()) or script in _FIX_ALSO and (_FIX_ALSO[script] is None or sub in _FIX_ALSO[script]):
+                return no
+    return None
+
+
+def decide(ask: dict, mail_only: bool = False, fix: tuple | None = None) -> tuple[int, str]:
     name, inp = str(ask.get("tool_name", "")), ask.get("tool_input") or {}
     if never_mail(name):
         return 2, f"HQ: refused {name}: nothing is ever sent, replied to or forwarded from a job. A draft at the most."
@@ -308,6 +340,12 @@ def decide(ask: dict, mail_only: bool = False) -> tuple[int, str]:
         return 2, "HQ: refused: a build in his day hours goes only on his own say-so; a job can't give it to itself."
     if mail_only:
         return 0, ""
+    if fix and name in EDITORS and not any(x in str(inp.get("file_path") or inp.get("notebook_path") or "").replace(os.sep, "/") for x in FREE):
+        return 2, f"HQ: refused {name}: this run is one round on {fix[0]}; it writes through review.py reword and your ledger, nothing by hand."
+    if fix and name == "Bash":
+        why = fix_guard(str(inp.get("command") or ""), *fix)
+        if why:
+            return 2, why
     if name in EDITORS:
         s = shared_name(str(inp.get("file_path") or inp.get("notebook_path") or ""))
         if s:
@@ -328,7 +366,8 @@ def main() -> int:
         ask = json.loads(sys.stdin.read() or "{}")
     except ValueError:
         return 0
-    code, why = decide(ask, "--mail-only" in sys.argv[1:])
+    a = sys.argv[1:]
+    code, why = decide(ask, "--mail-only" in a, (a[a.index("--fix") + 1].upper(), a[a.index("--fix") + 2]) if "--fix" in a else None)
     if code:
         print(why, file=sys.stderr)
         if never_mail(str(ask.get("tool_name", ""))):  # F103: a refused outward action is a mistake on the ledger

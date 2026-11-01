@@ -346,7 +346,7 @@ DEFAULTS: list[dict] = [
             "The loop (F86): when the review flags a row, a short run of yours opens by itself for that one row: "
             "what you can ground you improve in the row, the review looks again, and only after its pass comes your "
             "mark; what only he can answer goes on the sit-down list with one text in if-then shape, and the loop "
-            "stops for that row. Three rounds a row a day at most, inside your share.\n"
+            "stops for that row. Three rounds a row at most, inside your share.\n"
             "Size, never nights (H276): say a small build, a big build or research, never which nights; "
             "that's only decided at the sprint planning.\n"
             "Your own line (H266): the team's news (done, paused, the night's check, the Friday estimates, a failed "

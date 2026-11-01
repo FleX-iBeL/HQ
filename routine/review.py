@@ -46,8 +46,8 @@ Run the low usage Claude prompt check if your checklist passes."
     (reword, that one row and nothing else) and the review looks again; once it passes, one short session for her
     mark, the review's pass first, hers second. A finding only he can answer is never filled in: sitdown puts it on
     her sit-down list with one text on her line and the loop stops for that row. At most ROUNDS rounds an item,
-    then the sit-down list. A stop holds until the row's words change. Rows flagged before the loop was switched on
-    wait for her calls, unless they have a rank.
+    then the sit-down list, for good: no day starts them again. A stop holds until the row's words change. Rows flagged
+    before the loop was switched on wait for her calls, unless they have a rank.
 
 usage:
   python3 routine/review.py list                 the review state of every open row
@@ -75,6 +75,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT_FILE = os.path.abspath(__file__)
 sys.path.insert(0, HERE)
 import estimate as E  # noqa: E402
+import hqpaths  # noqa: E402
 import jobs as q  # noqa: E402
 import sprint as S  # noqa: E402
 
@@ -739,7 +740,7 @@ def golden_current():
 # ---------- F86: the fix-and-review loop ----------
 
 ROUNDS = 3  # rounds an item, then the sit-down list and one text to him (F86, his yes 30 October 2026; F101: per item, not per day)
-STOP_WORDS = {"his": "needs him", "cap": f"{ROUNDS} rounds and the review still flags it"}
+STOP_WORDS = {"his": "needs him", "cap": f"{ROUNDS} rounds and the review still flags it", "mark": "her mark didn't land"}
 
 
 def _stopped(e, fp):
@@ -834,6 +835,25 @@ def round_refund(label, mode, now=None):
         S._save(S.RANKS, d)
 
 
+def mark_ended(label, why, now=None):
+    """Her mark's run is over. Marked, or on the sit-down list by her own hand: nothing to do. Else (cut off, or it ended
+    with neither) the row would wait unseen, since a mark gets one run: it goes on the list, named, for her next call."""
+    now = now or _clock()
+    with q.locked():
+        rows = S.open_rows()
+        row = next((r for r in rows if r["label"] == label), None)
+        d, rv = _state()
+        e = (rv.get("rows") or {}).get(label)
+        if not row or not e:
+            return False
+        fp = S.ask_fp(row["line"])
+        if e.get("ask") != fp or e.get("verdict") != "pass" or _stopped(e, fp) or S.ready_of([row]).get(label) == "ready":
+            return False
+        e.setdefault("fix", {})["stop"] = {"ask": fp, "kind": "mark", "why": why, "at": int(now)}
+        S._save(S.RANKS, d)
+    return True
+
+
 def round_wanted(label, mode):
     """Whether the round still has work when it starts (a call may have fixed the row meanwhile)."""
     with q.locked():
@@ -844,16 +864,40 @@ def round_wanted(label, mode):
     return e.get("ask") == S.ask_fp(r["line"]) and e.get("verdict") == ("pass" if mode == "mark" else "flag")
 
 
+# Words that say what he said or chose. What's new with these in it needs his words between quotes, found (reword).
+_ATTRIBUTED = re.compile(r"\b(?:(?:he|the user)\s+(?:said|says|typed|wrote|told|answered|agreed|confirmed|chose|picked|decided|wants?)\b"
+                         r"|(?:his|their|the user'?s|your)\s+(?:words?|yes|say-so|answer|choice|pick|decision)\b)", re.I)
+
+
 def _new_quotes(old, new):
-    pick = lambda line: {m.group(1).strip() for m in S._QUOTES.finditer(S.field_texts(line)["his_words"])}  # noqa: E731
+    """Every quote in the new ask that wasn't in the old one, wherever it stands: a second His words, "He said:", a yes."""
+    pick = lambda line: {m.group(1).strip() for m in S._QUOTES.finditer(S.ask_of(line))}  # noqa: E731
     return pick(new) - pick(old)
 
 
+def _new_claims(old, new):
+    """The new sentences that say what he said or chose, with no quote in them: nothing for the quote check to hold."""
+    said = lambda t: [m.group(0).lower() for m in _ATTRIBUTED.finditer(t)]  # noqa: E731
+    before, after = S.ask_of(old), S.ask_of(new)
+    grown = {w for w in set(said(after)) if said(after).count(w) > said(before).count(w)}
+    was = set(re.split(r"(?<=[.!?;])\s+", before))
+    return [x for x in re.split(r"(?<=[.!?;])\s+", after)
+            if x not in was and grown & set(said(x)) and not S._QUOTES.search(x)]
+
+
+def _note_of(line):
+    """The team's part of a row's description (Built, QA, ...), never hers to change."""
+    cs = hqpaths.cells(line)
+    desc = cs[2] if len(cs) > 2 else ""
+    at = S.team_note_at(desc)
+    return "" if at is None else desc[at:]
+
+
 def reword(label, payload):
-    """Her edits inside this one row, all or nothing, under the queue's lock: the row stays one row with the same cells
-    and its label, and a quote new in His words must be found in a call, the notes or the log: no guess written."""
+    """Her edits inside this one row's ask, all or nothing, under the queue's lock: its status, its label, its other cells
+    and the team's notes stay as they are, and a new quote anywhere in it, or a new line saying what he said or chose,
+    must be his words found in a call, the notes or the log: no guess written."""
     import handover
-    import hqpaths
     label = label.strip().upper()
     try:
         edits = json.loads(payload).get("edits") or []
@@ -870,13 +914,19 @@ def reword(label, payload):
             new = handover.apply(line, edits)
         except (LookupError, ValueError) as ex:
             sys.exit(f"Not written: {ex}.")
-        import hqpaths as _hp
-        if "\n" in new or len(_hp.cells(new)) != len(_hp.cells(line)) or label not in _hp.cells(new)[1]:
-            sys.exit("Refused: the row must stay one row with the same cells and its label.")
+        was, now_ = hqpaths.cells(line), hqpaths.cells(new)
+        if "\n" in new or len(now_) != len(was) or now_[1].split()[:1] != was[1].split()[:1] or now_[0] != was[0] or now_[3:] != was[3:]:
+            sys.exit("Refused: the row must stay one row with the same status, label and cells; only its title and words change.")
+        if _note_of(new) != _note_of(line):
+            sys.exit("Refused: the team's notes on a row aren't reworded, and nothing goes after them: the review reads what comes before.")
         texts = S._grep_texts(S._ws())
         bad = [x for x in _new_quotes(line, new) if not S.quote_found(x, texts)]
         if bad:
-            sys.exit(f"Refused: a new quote in His words isn't in a call, the notes or the log: {bad[0][:80]!r}. "
+            sys.exit(f"Refused: a new quote isn't in a call, the notes or the log: {bad[0][:80]!r}. "
+                     "His words are never written for him; it goes on the sit-down list.")
+        said = _new_claims(line, new)
+        if said:
+            sys.exit(f"Refused: this says what he said or chose without his words between quotes: {said[0][:80]!r}. "
                      "His words are never written for him; it goes on the sit-down list.")
         hqpaths.guard_roadmap(q.ROADMAP)
         tmp = f"{q.ROADMAP}.reword.{os.getpid()}"
@@ -917,10 +967,11 @@ def sitdown_rows(rows=None):
     """[(row, stop)] for the rows on her sit-down list, in the planning's order."""
     rows = S.open_rows() if rows is None else rows
     rs = _state()[1].get("rows") or {}
+    ready = S.ready_of(rows)
     out = []
     for r in rows:
         st = _stopped(rs.get(r["label"]) or {}, S.ask_fp(r["line"]))
-        if st:
+        if st and not (st.get("kind") == "mark" and ready.get(r["label"]) == "ready"):  # she marked it since
             out.append((r, st))
     return out
 

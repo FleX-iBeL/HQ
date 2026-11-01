@@ -469,6 +469,17 @@ def _est_weekly(job: dict) -> float:
         return 0.0
 
 
+def over_share(sh: dict, est: float) -> str | None:
+    """Why a run of about est points doesn't fit her shares, in words, or None. One wall for the start and for a fix round's
+    plan. A share of 0 is a wall with no room in it: nothing of hers starts (found on the server, 29 October 2026, where
+    `set donna weekly 0` let every start through)."""
+    if sh["weekly_share"] <= 0 or sh["weekly_used"] + est > sh["weekly_share"]:
+        return f"over her weekly share ({sh['weekly_used']:g} of {sh['weekly_share']:g} points used, this run about {est:g})"
+    if sh["daily_share"] <= 0 or sh["daily_used"] + est > sh["daily_share"]:
+        return f"over her daily share ({sh['daily_used']:g} of {sh['daily_share']:g} points used today, this run about {est:g})"
+    return None
+
+
 def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None, log=None) -> str:
     """Before the routine starts a cycle job (tick.py, with the jobs' gate after it): "go", "wait" (before her hours;
     nothing else starts meanwhile, the queue is the lane) or "skipped" (cancelled on the queue, written in her ledger:
@@ -486,7 +497,7 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
 
     def skip(why: str, morning: bool = False) -> str:
         _jobs("stop", str(job["n"]))
-        if p["kind"] == "fix":  # F86: a round that never ran doesn't count
+        if p["kind"] == "fix" and not job.get("state", "").startswith("held"):  # F86: a round that never ran doesn't count; a held one ran
             import review
             review.round_refund(p["label"], p["mode"])
         ledger.entry(aid, f"{p['name']} skipped (job {job['n']})", [f"skipped: {why}"], now)
@@ -513,14 +524,9 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
     u = useful_until(p, a, job_at, now)
     if u and now > u:
         return skip(f"too late to be useful (until {u:%A %H:%M})")
-    sh = shares(aid, now, base)
-    est = _est_weekly(job)
-    # A share of 0 is a wall with no room in it: nothing of hers starts (found on the server, 29 October 2026, where
-    # `set donna weekly 0` let every start through).
-    if sh["weekly_share"] <= 0 or sh["weekly_used"] + est > sh["weekly_share"]:
-        return skip(f"over her weekly share ({sh['weekly_used']:g} of {sh['weekly_share']:g} points used, this run about {est:g})")
-    if sh["daily_share"] <= 0 or sh["daily_used"] + est > sh["daily_share"]:
-        return skip(f"over her daily share ({sh['daily_used']:g} of {sh['daily_share']:g} points used today, this run about {est:g})")
+    why = over_share(shares(aid, now, base), _round_points(base) if p["kind"] == "fix" else _est_weekly(job))  # F86: a round's one price
+    if why:
+        return skip(why)
     if p["kind"] == "fix":
         import review
         if not review.round_wanted(p["label"], p["mode"]):
@@ -803,7 +809,7 @@ def _fix_words(aid: str, parsed: dict) -> str:
                 f"Hold it against your ready check yourself. It holds: python3 \"{ROOT / 'routine' / 'sprint.py'}\" ready {label}. "
                 f"It doesn't, or the mark is refused: nothing is forced, it goes to him: {sit}\n{end}")
     finds = "\n".join(f"- {f}" for f in st.get("findings") or []) or "- (no findings written)"
-    return (f"This run: round {parsed['round']} of at most {review.ROUNDS} today on one row of the planning, {label}. The review flagged it. "
+    return (f"This run: round {parsed['round']} of at most {review.ROUNDS} on one row of the planning, {label}. The review flagged it. "
             f"Nothing else is loaded; look up only what a finding needs.\n\nThe row:\n{ask}\n\nThe review's findings:\n{finds}\n\n"
             "For each finding, one of two:\n"
             f"- You can ground it (his words with a date, a rule, a planning row, the code): improve the row, naming the source: "
@@ -1002,9 +1008,11 @@ TRIPWIRE_WORDS = {
 }
 
 
-def tripwire(aid: str, kind: str, detail: str, now: dt.datetime | None = None, base: Path | None = None, d: dict | None = None) -> str:
+def tripwire(aid: str, kind: str, detail: str, now: dt.datetime | None = None, base: Path | None = None, d: dict | None = None,
+             text: bool = True) -> str:
     """Counted by the runner: a line in her ledger, and one message on her line in if-then shape, at most her texts
-    a day; past that, the ledger only. A caller holding the state passes it (d) and saves it itself."""
+    a day; past that, the ledger only. A caller holding the state passes it (d) and saves it itself. text=False: the
+    ledger only, for a run that already put the same thing to him (F86: one text)."""
     now = now or dt.datetime.now()
     own = d is None
     d = _state() if own else d
@@ -1016,10 +1024,10 @@ def tripwire(aid: str, kind: str, detail: str, now: dt.datetime | None = None, b
     today = _today(now)
     sent = st_["texts"].get(today, 0)
     most = int(agent_settings(aid, base).get("tripwire_texts", 2))
-    if sent >= most:
+    if sent >= most or not text:
         if own:
             _save_state(d)
-        return "ledger only (the day's texts are used up)"
+        return "ledger only (the day's texts are used up)" if text else "ledger only (she put it to him herself)"
     st_["texts"][today] = sent + 1
     if own:
         _save_state(d)
@@ -1074,16 +1082,24 @@ def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Pat
             st_["boxed_streak"] = 0
     else:
         st_["boxed_streak"] = 0
+    told = False  # F86: she already put the row to him: one text
     if parsed["kind"] == "fix":  # F86: what the row's own words say (a "refused", a push.py) is no refusal or action of hers
-        ledger.note(aid, f"{parsed['name']}: " + (f"cut off ({note.get('boxed') or state}); the row stays flagged and not ready, the round counts"
-                                                  if note.get("boxed") or state.startswith("ended") else "ended; the review looks again if the words changed"))
-        said = ("reword", "sitdown", "sprint.py show", "sprint.py fields")
+        import review
+        cut = bool(note.get("boxed") or state.startswith("ended"))
+        ledger.note(aid, f"{parsed['name']}: " + (f"cut off ({note.get('boxed') or state}); " + ("not marked, it stays on her list" if parsed["mode"] == "mark" else
+                                                  "the row stays flagged and not ready, the round counts")
+                                                  if cut else "ended; the review looks again if the words changed"))
+        if parsed["mode"] == "mark":
+            if review.mark_ended(parsed["label"], "her mark's run was cut off" if cut else "her mark's run ended with no mark and nothing for the sit-down list"):
+                ledger.note(aid, f"{parsed['label']} on the sit-down list: passed by the review, not marked")
+            told = any(r["label"] == parsed["label"] and s.get("kind") == "his" for r, s in review.sitdown_rows())
+        said = tuple(f"{w} {parsed['label']}" for w in ("reword", "sitdown")) + ("sprint.py show", "sprint.py fields")
         note = {**note, "refused": [r for r in note.get("refused") or [] if not any(w in r.get("tool", "") for w in said)],
                 "tools": [t for t in note.get("tools") or [] if not any(w in t for w in said)]}
     # refused, outside her limits, a shared file written directly, a Ready mark refused
     for r in note.get("refused") or []:
         if "sprint.py ready" in r.get("tool", "") and aid == "moneypenny":
-            tripwire(aid, "a Ready mark refused on its fields", r.get("said", "")[:160], now, base, d)
+            tripwire(aid, "a Ready mark refused on its fields", r.get("said", "")[:160], now, base, d, text=not told)
         else:
             tripwire(aid, "a refused command or push", f"{r.get('tool', '')[:80]}: {r.get('said', '')[:120]}", now, base, d)
         break
@@ -1283,6 +1299,8 @@ def fix_rounds(now: dt.datetime | None = None, base: Path | None = None, log=Non
         return []
     import jobs as q
     import review
+    if not review.on():  # the review isn't looking (switched off, or everything is paused): a round's words would wait for nobody
+        return []
     items, jobs_ = _items()
     is_fix = lambda x: (parse(x["text"]) or {}).get("kind") == "fix"  # noqa: E731
     if any(is_fix(i) and i["state"] == "waiting" for i in items) or any(is_fix(j) and not j["state"].startswith(q.FINISHED) for j in jobs_):
@@ -1297,14 +1315,20 @@ def fix_rounds(now: dt.datetime | None = None, base: Path | None = None, log=Non
     if not pick:
         return did
     sh, est = shares(aid, now, base), _round_points(base)
-    if sh["daily_used"] + est > sh["daily_share"] or sh["weekly_used"] + est > sh["weekly_share"]:
+    if over_share(sh, est):
         d = _state()
         st_ = _agent_state(d, aid)
         if st_.get("fix_waits") != _today(now):
             st_["fix_waits"] = _today(now)
             ledger.note(aid, f"{pick['label']} waits for the next day's share ({sh['daily_used']:g} of {sh['daily_share']:g} points today, "
                              f"{sh['weekly_used']:g} of {sh['weekly_share']:g} this week, a round about {est:g})")
-        _save_state(d)
+        never = 0 < min(sh["daily_share"], sh["weekly_share"]) < est  # no day's share ever holds a round (a smaller plan)
+        if never and not st_.get("fix_never"):
+            st_["fix_never"] = est
+            _save_state(d)
+            ask(aid, f"If you raise my daily share to at least {est:g} points, I'll fix flagged rows by myself; if not, they wait for our calls.")
+        else:
+            _save_state(d)
         return did + [f"{pick['label']} waits for the next day's share"]
     code, out = _schedule("add", "now", fix_text(aid, pick["label"], pick["mode"], pick["round"]), "--priority", "--kind", f"step-{aid}")
     if code:
