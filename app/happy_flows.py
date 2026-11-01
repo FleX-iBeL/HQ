@@ -20456,7 +20456,9 @@ print("RESULT " + json.dumps(out))
         def py(code, extra=None, ok=True):
             head = ("import sys, json, os, datetime as dt, re, time\nsys.path.insert(0, %r); sys.path.insert(0, %r)\nimport cycles, ledger, jobs as q, estimate\n"
                     "T = lambda s: dt.datetime.strptime(s, '%%Y-%%m-%%d %%H:%%M')\nJ = lambda n: next(j for j in q.read()[1] if j['n'] == n)\n"
-                    "def out(x): print('RESULT ' + json.dumps(x))\n") % (str(ROOT / "routine"), str(ROOT / "app"))
+                    "def out(x): print('RESULT ' + json.dumps(x))\n"
+                    "if not hasattr(cycles, 'settle'):\n    cycles.settle = lambda now=None, base=None, log=None: [cycles.after_run(j, p, now, base) for j, p in cycles.finished_cycle_jobs()]\n"  # so a flow run on an older commit fails on what it tests
+                    "if not hasattr(cycles, 'started'):\n    cycles.started = lambda *a: None\n") % (str(ROOT / "routine"), str(ROOT / "app"))
             r = _sp.run([sys.executable, "-c", head + code], capture_output=True, text=True, env={**env, **(extra or {})}, cwd=str(ROOT), timeout=180)
             need(r.returncode == 0 or not ok, lambda: f"a check failed: {r.stdout[-600:]} {r.stderr[-1500:]}")
             m = re.findall(r"^RESULT (.*)$", r.stdout, re.M)
@@ -20481,7 +20483,7 @@ print("RESULT " + json.dumps(out))
             stamp = f"{day} 08:30"
             b.seq[0] += 1
             spec = {"goal": goal, "done_means": "done", "inputs": rec.pop("inputs", []), "at": at}
-            py(f"with cycles.held() as d:\n    cycles._agent_state(d, {aid!r})['steps'][{aid + '|' + stamp + '|' + str(k)!r}] = {{**{{'spec': {spec!r}, 'fps': {rec.pop('fps', [])!r}, 'day': {day!r}, 'state': 'planned', 'stamp': {stamp!r}}}, **{rec!r}}}\n")
+            py(f"d = cycles._state()\ncycles._agent_state(d, {aid!r})['steps'][{aid + '|' + stamp + '|' + str(k)!r}] = {{**{{'spec': {spec!r}, 'fps': {rec.pop('fps', [])!r}, 'day': {day!r}, 'state': 'planned', 'stamp': {stamp!r}}}, **{rec!r}}}\ncycles._save_state(d)\n")
             return job(aid, f"Agent step: {aid} #{k} ({stamp}): {goal}"[:140], day, at, state)
         b.step = step
         b.gate = lambda n, now: py(f"out(cycles.gatekeep(J({n}), T({now!r})))")
@@ -21307,7 +21309,10 @@ if os.environ.get("HQ_NIGHT_LOG"):
     open(os.environ["HQ_NIGHT_LOG"], "w").write("\n".join(caught))
 print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-12:]}))
 """)
-        r = _sp.run([sys.executable, str(drv), str(ROOT), str(d)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=320)
+        try:
+            r = _sp.run([sys.executable, str(drv), str(ROOT), str(d)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=320)
+        finally:
+            clock.unlink(missing_ok=True)  # the stand-in ends with its clock, whatever happened to the run
         m = re.search(r"RESULT (.*)", r.stdout)
         need(m, f"the night didn't run: {r.stdout[-500:]} {r.stderr[-1500:]}")
         got = json.loads(m.group(1))

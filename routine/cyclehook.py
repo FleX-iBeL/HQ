@@ -534,7 +534,7 @@ def decide(ask: dict, mail_only: bool = False, fix: tuple | None = None, who: tu
         why = fix_guard(str(inp.get("command") or ""), *fix)
         if why:
             return 2, why
-    why = None if never_mail(name) else cycle_tool(name, inp, aid, kind, ask.get("cwd"))
+    why = cycle_tool(name, inp, aid, kind, ask.get("cwd")) if aid and not never_mail(name) else None
     if why:
         return 2, why
     if name in EDITORS:
