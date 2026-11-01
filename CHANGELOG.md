@@ -4,6 +4,10 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Phone notifications again: since the push key moved to HQ's own folder the page got an empty key, so a phone couldn't sign up or stay on the list. The page now gets the key that signs the pushes, on Moneypenny's line too, which no longer makes a key of its own.
+
+- A trip stays how you set it: switching an appointment between car and public transport, turning travel off or keeping a place while HQ was looking at your trips in the background could be undone by that look. Now your change stands, and the look only fills in the trips nobody touched.
+
 - On a call, "let me figure that out": for anything bigger than a quick look the agent takes it away to a helper beside the call, which only reads and has a limit in minutes and turns. The call goes on, and the answer comes back into the same call, or as a text on her line if you hung up. One line on the status page shows what's being worked on for you right now.
 
 - A check she couldn't run is never answered around: if a command was refused or waits for your yes and her answer doesn't say so, the program says "I couldn't check that".

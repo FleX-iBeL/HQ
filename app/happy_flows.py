@@ -4386,7 +4386,7 @@ console.log(JSON.stringify({{ problems: r.problems, current: r.current }}));"""
              "the app doesn't show her texts as Mac notifications that open her chat (H145)")
         need("push(" not in swift and "/direct/send" not in swift, "the app sends or pushes her texts itself (H145)")
         dh = (ROOT / "status/direct.html").read_text()
-        need("has('app')" in dh and "if (APP) document.querySelector('header a').remove();" in dh and "if (!SHEET && !APP) bellState();" in dh,
+        need("has('app')" in dh and "if (APP) document.querySelector('header a').remove();" in dh and "if (!APP) pushCheck();" in dh,
              "her chat in the app still shows the phone's back arrow or notification button (H145)")
         if sys.platform != "darwin":
             return ("seven made-up states judged like the status page; turning on starts only what's off, stops nothing; the strip's five "
@@ -10605,7 +10605,8 @@ setTimeout(() => {
         the drive takes with the traffic and when to leave; from two hours before the traffic is looked at again, and
         Donna texts once when it's time to leave and when the drive got ten minutes longer; public transport and car
         switch per appointment; at most DAILY_MAX looks a day; Google's and TomTom's answers read right; a call may ask
-        whether there's a key, never set it; the page, the server, the rules and the tutorial carry it."""
+        whether there's a key, never set it; the page, the server, the rules and the tutorial carry it. A change made
+        while a look waits on the network stands: the look doesn't write its older copy over it."""
         import http.server
         import threading as _th
         from policy import Policy, ALLOW, DENY
@@ -10637,6 +10638,12 @@ setTimeout(() => {
         drv.write_text("import sys, json\nsys.path.insert(0, sys.argv[1])\ncmd = sys.argv[2]\n"
                        "if cmd == 'check':\n    import trips\n    print(json.dumps(trips.check(float(sys.argv[3]))))\n"
                        "elif cmd == 'attach':\n    import trips, agenda\n    print(json.dumps(trips.attach(agenda._read()['events'])))\n"
+                       "elif cmd == 'race':\n    import trips, drive, subprocess\n    look = drive.look\n"
+                       "    def meanwhile(*a, **k):\n"
+                       "        for hand in (['on', 'Dentist', '--car'], ['place', 'Sam', 'Proefweg 3 Ergenshoven']):\n"
+                       "            subprocess.run([sys.executable, sys.argv[0], sys.argv[1], *hand], check=True, capture_output=True)\n"
+                       "        return look(*a, **k)\n"
+                       "    drive.look = meanwhile\n    print(json.dumps(trips.check(float(sys.argv[3]))))\n"
                        "elif cmd == 'switch':\n    import trips\n    trips.page_switch(sys.argv[3], sys.argv[4] == 'on', sys.argv[5])\n"
                        "elif cmd == 'listing':\n    import features\n    print(json.dumps(features.listing()))\n"
                        "elif cmd == 'drive':\n    import drive\n    sys.exit(drive.main(sys.argv[3:]))\n"
@@ -10711,6 +10718,16 @@ setTimeout(() => {
         e2 = data()["trips"]["e2"]
         need(r.returncode == 0 and e2["mode"] == "transit" and e2["link"].startswith("https://9292.nl/") and "drive" not in e2,
              f"back to public transport doesn't work: {r.stdout} {e2}")
+        # a change while the look in the background waits on the maps service: the change stands, the rest of the look too
+        asked = data()["trips"]["e1"]["drive"]["asked"]
+        r = run("race", str(now + 700))
+        got, e2 = data(), data()["trips"]["e2"]
+        need(r.returncode == 0 and e2["mode"] == "car" and e2["link"].startswith("https://www.google.com/maps/dir/?") and "drive" in e2,
+             f"a look undoes a change made while it looked: {r.stdout}{r.stderr} {e2}")
+        need("sam" in got["places"], f"a look undoes a place kept while it looked: {got['places']}")
+        need(got["trips"]["e1"]["drive"]["asked"] > asked, "the look's own finding on the other trip is lost")
+        r = run("on", "Dentist", "--transit")
+        need(r.returncode == 0 and data()["trips"]["e2"]["mode"] == "transit", f"it doesn't go back: {r.stdout}")
         # only driving on: every trip by car
         _f.switch("travel", False, d / "ws")
         att = {e["id"]: e.get("travel") for e in last(run("attach"))}
@@ -11049,7 +11066,11 @@ setTimeout(() => {
         when something stays down and when it's back. A throwaway status server serves the chat and its service
         worker, refuses a send without the HQ header, signs a phone up, and his text gets her (canned) reply. Off a
         Mac her reply finds Claude on PATH (F27). H170: a web address in a text is a link to tap, only http and https.
-        F42: in a thread over 200 (the server sends the last 200) a new text still shows in the chat."""
+        F42: in a thread over 200 (the server sends the last 200) a new text still shows in the chat. F102: her chat in
+        the sheet (how the phone opens it) and the call page look after the phone on every open: the page's check, run
+        on stand-in browsers, re-posts a subscription, makes a missing one, says what stopped it, never hangs on
+        serviceWorker.ready and never waits on its report; the report is kept in .status and shown by info, not on the
+        page; a notification refused as asked still shows plainly and the worker says what it saw."""
         import base64
         import urllib.request
         sys.path.insert(0, str(ROOT / "routine"))
@@ -11219,7 +11240,10 @@ setTimeout(() => {
                     except Exception:
                         await asyncio.sleep(0.2)
                 code, page = await asyncio.to_thread(call, "/direct")
-                need(code == 200 and "/direct/send" in page and "pushManager" in page, "the chat page isn't served")
+                need(code == 200 and "/direct/send" in page, "the chat page isn't served")
+                need("/direct-check.js" in page, "her chat doesn't look after the phone (F102)")
+                code, check_js = await asyncio.to_thread(call, "/direct-check.js")
+                need(code == 200 and "pushManager" in check_js and "/direct/report" in check_js, "the page's check of her texts isn't served")
                 code, sw = await asyncio.to_thread(call, "/direct-sw.js")
                 need(code == 200 and "showNotification" in sw, "the service worker isn't served")
                 code, body = await asyncio.to_thread(call, "/direct.json")
@@ -11230,6 +11254,37 @@ setTimeout(() => {
                 need(code == 403, f"a send without the HQ header got {code}")
                 code, body = await asyncio.to_thread(call, "/direct/subscribe", {"subscription": {"endpoint": "https://push.example.com/c", "keys": {"p256dh": p256dh, "auth": auth}}, "device": "test"})
                 need(code == 200 and json.loads(body)["phones"] == 2, f"signing a phone up gave {code} {body}")
+                # F102: what the page and the worker saw: only from the page, kept on this computer, shown by info, never
+                # on the page's own /direct.json, the newest few only.
+                seen = {"kind": "page", "origin": "https://phone.example:8443", "page": "/direct?sheet", "frame": True, "standalone": True,
+                        "permission": "granted", "registered": True, "scope": "https://phone.example:8443/", "active": "activated",
+                        "subscription": "abcdefghijklmn", "posted": True, "problem": "", "errors": {"ready": "no answer in 6 seconds"},
+                        "ua": "stand-in", "secret": "not a field"}
+                code, _ = await asyncio.to_thread(call, "/direct/report", seen, False)
+                need(code == 403, f"a report without the HQ header got {code}")
+                t0 = time.time()
+                code, body = await asyncio.to_thread(call, "/direct/report", seen)
+                need(code == 200 and time.time() - t0 < 5, f"a report gave {code} {body} after {time.time() - t0:.1f}s")
+                for _ in range(100):
+                    if dl.page_reports()["reports"]:
+                        break
+                    await asyncio.sleep(0.1)
+                got = dl.page_reports()
+                need(got["reports"] and got["reports"][0]["subscription"] == "abcdefghijklmn" and got["reports"][0]["errors"] == {"ready": "no answer in 6 seconds"}
+                     and "secret" not in got["reports"][0], f"the page's report isn't kept as sent: {got}")
+                need("https://push.example.com/c"[-14:] in got["listed"], f"info doesn't list the phones by the page's tail: {got['listed']}")
+                need(dl.page_file().parent == dl.local_state_file().parent and dl.folder() not in dl.page_file().parents,
+                     f"the page's report is kept in the synced folder: {dl.page_file()}")
+                code, body = await asyncio.to_thread(call, "/direct.json")
+                need('"page"' not in body.split('"messages"')[0] and "abcdefghijklmn" not in body, "the page's report leaks into /direct.json")
+                shown = subprocess.run([sys.executable, str(APP / "direct_line.py"), "info"], capture_output=True, text=True, env=os.environ)
+                need(json.loads(shown.stdout)["page"]["reports"][0]["origin"] == "https://phone.example:8443", f"direct_line.py info doesn't show it: {shown.stdout[-300:]}")
+                for i in range(9):
+                    dl.report({"kind": "page", "page": f"/{i}"})
+                    dl.report({"kind": "push", "shown": "yes", "tag": str(i)})
+                rows = dl.page_reports()["reports"]
+                need(len(rows) == 2 * dl.PAGE_KEEP and rows[0]["kind"] in ("page", "push") and {"/8"} <= {r.get("page") for r in rows}
+                     and {"8"} <= {r.get("tag") for r in rows}, f"the report file doesn't keep the newest few of each: {rows}")
                 code, _ = await asyncio.to_thread(call, "/direct/send", {"text": "Is the job list done?"})
                 need(code == 200, f"his text got {code}")
                 for _ in range(100):
@@ -11292,7 +11347,102 @@ console.log(JSON.stringify({ one: [one.length, one[one.length - 1]], two: [two.l
                  "the call line doesn't pass her chat on to the status page")
             dh = (ROOT / "status/direct.html").read_text()
             need("location.port === '8443'" in dh and "'/manifest.webmanifest'" in dh, "the chat doesn't know it's opened through the call line")
-            need("has('sheet')" in dh and "if (!SHEET && !APP) bellState();" in dh, "her chat in the sheet still shows its back arrow or signs the phone up")
+            need("has('sheet')" in dh and "if (!APP) pushCheck();" in dh and "bellState" not in dh, "her chat in the sheet doesn't look after the phone")
+            # F102: the phone's own page does the same on every open, and what's wrong is said in one plain line.
+            need('"/direct/report"' in bot.split("_DIRECT = (")[1][:300] and '"/direct-check.js"' in bot.split("_DIRECT = (")[1][:300],
+                 "the call line doesn't pass the page's report on")
+            need(re.search(r'location\.port !== "8443".*?direct-check\.js.*?\}\)\(\);\n// M2: Free', web, re.S), "the call page doesn't look after the phone on every open")
+            need(all(w in dh for w in ('id="pushline"', "Settings, Notifications, HQ", "Close HQ and open it again", "Turn on her texts")),
+                 "her chat doesn't say in a plain line what's wrong")
+            # The check itself, on stand-in browsers: what it does with each phone, and that it can't hang.
+            js = (ROOT / "status/direct-check.js").read_text().replace("const LIMIT = 6000;", "const LIMIT = 300;")
+            need("LIMIT = 300" in js, "the check has no time limit")
+            stand_in = """
+const never = new Promise(() => {});
+const run = async (o = {}) => {
+  const posts = [];
+  const sub = { endpoint: 'https://web.push.apple.com/abc' + 'x'.repeat(14), options: o.noKey ? { applicationServerKey: null } : { applicationServerKey: Uint8Array.from(o.oldKey ? [9, 9, 9] : [4, 1, 2]).buffer },
+    toJSON() { return { endpoint: this.endpoint, keys: {} }; } };
+  const reg = { scope: 'https://phone.example:8443/', active: { state: 'activated' },
+    pushManager: { getSubscription: async () => o.none ? null : sub,
+      subscribe: async () => { if (o.refuse) throw Object.assign(new Error('needs a tap'), { name: 'NotAllowedError' }); posts.push('made'); return sub; } } };
+  const self = {}, top = o.frame ? {} : self;
+  const window = { self, top };
+  if (!o.nopush) { window.PushManager = 1; window.Notification = 1; }
+  const location = { origin: 'https://phone.example:8443', pathname: '/direct', search: o.frame ? '?sheet' : '' };
+  const navigator = { userAgent: 'stand-in', standalone: true };
+  if (!o.nopush) navigator.serviceWorker = { controller: {}, getRegistration: async () => reg, register: async () => reg,
+    ready: o.hang ? never : Promise.resolve(reg) };
+  const fetch = async (path, opt) => {
+    if (path === '/direct/key') return { json: async () => ({ key: 'BAEC' }) };
+    posts.push(path + (opt && path === '/direct/report' ? ':' + JSON.parse(opt.body).problem : ''));
+    if (path === '/direct/report' && o.reportHangs) return never;
+    if (path === '/direct/report' && o.reportFails) throw new Error('offline');
+    return { ok: true, status: 200 };
+  };
+  const Notification = { permission: o.permission || 'granted' };
+  const f = new Function('window', 'location', 'navigator', 'fetch', 'Notification', 'atob', 'URLSearchParams', code + '; return window.hqPush;');
+  const t0 = Date.now();
+  const r = await f(window, location, navigator, fetch, Notification, atob, URLSearchParams).check();
+  return { r, posts, ms: Date.now() - t0 };
+};
+const code = process.argv[1];
+(async () => {
+  const out = {};
+  for (const [name, o] of Object.entries({ there: {}, frame: { frame: true }, none: { none: true }, refused: { none: true, refuse: true }, denied: { permission: 'denied' },
+    asks: { permission: 'default' }, hang: { hang: true }, nopush: { nopush: true }, reportHangs: { reportHangs: true }, reportFails: { reportFails: true }, noKey: { noKey: true }, oldKey: { oldKey: true } })) out[name] = await run(o);
+  await new Promise((d) => setTimeout(d, 20));
+  console.log(JSON.stringify(out));
+  process.exit(0);
+})();
+"""
+            r = subprocess.run([shutil.which("node") or "/opt/homebrew/bin/node", "-e", stand_in, js], capture_output=True, text=True, timeout=60)
+            out = json.loads(r.stdout or "null") if r.returncode == 0 else None
+            need(isinstance(out, dict), f"the check doesn't run on a stand-in browser: {r.stderr[-400:]}")
+            there = out["there"]
+            need(there["r"]["posted"] and not there["r"]["made"] and there["r"]["problem"] == "" and "made" not in there["posts"] and "/direct/subscribe" in there["posts"]
+                 and there["posts"][-1] == "/direct/report:" and there["r"]["subscription"] == "x" * 14 and there["r"]["keyMatch"] is True,
+                 f"a subscription that's there isn't sent again: {there}")
+            need(there["r"]["registered"] and there["r"]["active"] == "activated" and there["r"]["scope"] == "https://phone.example:8443/" and there["r"]["controlled"]
+                 and there["r"]["standalone"] and not there["r"]["frame"] and there["r"]["origin"] == "https://phone.example:8443" and there["r"]["permission"] == "granted",
+                 f"the report doesn't say what the page sees: {there['r']}")
+            need(out["noKey"]["r"]["keyMatch"] is None and out["noKey"]["r"]["problem"] == "" and out["oldKey"]["r"]["keyMatch"] is False and out["oldKey"]["r"]["problem"] == "oldkey",
+                 f"which key a subscription was made with isn't told right: {out['noKey']} {out['oldKey']}")
+            need(out["frame"]["r"]["frame"] and out["frame"]["r"]["page"] == "/direct?sheet" and out["frame"]["r"]["posted"], f"in the sheet the check doesn't do the same: {out['frame']}")
+            need(out["none"]["r"]["made"] and out["none"]["r"]["posted"] and "made" in out["none"]["posts"], f"a missing subscription isn't made: {out['none']}")
+            ref = out["refused"]["r"]
+            need(ref["problem"] == "nosub" and "NotAllowedError" in ref["errors"].get("subscribe", "") and "/direct/report:nosub" in out["refused"]["posts"],
+                 f"a refused sign-up isn't said: {ref}")
+            need(out["denied"]["r"]["problem"] == "denied" and out["asks"]["r"]["problem"] == "default" and "/direct/subscribe" not in out["denied"]["posts"] + out["asks"]["posts"],
+                 f"without permission the check goes on: {out['denied']} {out['asks']}")
+            hang = out["hang"]
+            need(hang["r"]["problem"] == "sw" and "no answer" in hang["r"]["errors"].get("ready", "") and hang["ms"] < 2000 and "/direct/report:sw" in hang["posts"],
+                 f"a serviceWorker.ready that never comes hangs the check: {hang}")
+            need(out["nopush"]["r"]["problem"] == "nosupport" and out["nopush"]["posts"] == ["/direct/report:nosupport"], f"a browser without push isn't said: {out['nopush']}")
+            need(out["reportHangs"]["ms"] < 250 and out["reportHangs"]["r"]["posted"] and out["reportFails"]["r"]["posted"], f"the check waits on its report: {out['reportHangs']} {out['reportFails']}")
+            # The worker: a notification refused as asked still shows plainly, what it saw is told, a failed report changes nothing.
+            sw_code = (ROOT / "status/direct-sw.js").read_text()
+            stand_in = """
+const run = async (refuse, reportFails) => {
+  const on = {}, shown = [], told = [];
+  const self = { addEventListener: (k, f) => { on[k] = f; }, clients: { matchAll: async () => [] }, location: { port: '8443' },
+    registration: { showNotification: async (t, o) => { if (refuse-- > 0) throw new TypeError('refused'); shown.push([t, Object.keys(o).length]); } } };
+  const fetch = async (p, o) => { told.push(JSON.parse(o.body)); if (reportFails) throw new Error('offline'); return {}; };
+  new Function('self', 'fetch', code)(self, fetch);
+  let done;
+  on.push({ data: { json: () => ({ title: 'Donna', body: 'hi' }) }, waitUntil: (p) => { done = p; } });
+  await done;
+  return { shown, told };
+};
+const code = process.argv[1];
+(async () => { console.log(JSON.stringify([await run(0, false), await run(1, false), await run(9, false), await run(0, true)])); process.exit(0); })();
+"""
+            r = subprocess.run([shutil.which("node") or "/opt/homebrew/bin/node", "-e", stand_in, sw_code], capture_output=True, text=True, timeout=30)
+            got = json.loads(r.stdout or "null") if r.returncode == 0 else r.stderr[-300:]
+            need(isinstance(got, list) and got[0]["told"][0]["shown"] == "yes" and got[0]["told"][0]["kind"] == "push" and len(got[0]["shown"]) == 1
+                 and got[1]["told"][0]["shown"] == "plain" and "refused" in got[1]["told"][0]["error"] and got[1]["shown"] == [["Donna", 2]]
+                 and got[2]["told"][0]["shown"] == "no" and got[3]["shown"] and "pushsubscriptionchange" in sw_code,
+                 f"the service worker doesn't show and tell: {got}")
             # H158: like a chat app, a day pill between days (Today, Yesterday, the weekday, else the date) and each
             # text's time in its bubble; drawn again past midnight. The page's own label code, run on fixed times.
             need("at.className = 'at'" in dh and "today === drawnOn" in dh and "t.textContent = day(m.at);" in dh,
@@ -15498,7 +15648,7 @@ print("OK")
         need(all(p.returncode == 0 for p in ps), f"a to-do writer failed: {errs[0][-600:]} {errs[1][-600:]}")
         text = (d / "challenges.md").read_text()
         need(sum(f"{w} item {i}" in text for w in "AB" for i in range(12)) == 24, "a to-do item was lost")
-        for f in ("todo.py", "notes.py", "games.py", "coaching.py"):
+        for f in ("todo.py", "notes.py", "games.py", "coaching.py", "trips.py"):
             src = (ROOT / "app" / f).read_text()
             need("threading.Lock" not in src and "hqlock.For(" in src, f"{f} still locks inside one process")
         need("hqlock" in (ROOT / "app/loose_ends.py").read_text() and "hqlock.locked(path)" in (ROOT / "routine/handover.py").read_text(), "the mail list's writers")
@@ -15865,7 +16015,9 @@ print("OK")
     async def flow224(self) -> str:
         """F102, no Claude: keys stay out of what's written. A key said on a call is masked in the transcript, in every kind of
         line; the words around it stay. The push key moves out of the workspace into HQ's own folder, mode 600, the same key,
-        and the file in the workspace is gone; a commit of the workspace leaves a file with a key out (flow 219)."""
+        and the file in the workspace is gone; a commit of the workspace leaves a file with a key out (flow 219). After the move
+        /direct/key and /direct.json give the public key that signs the pushes, on Donna's line and the team line; asking
+        for it never makes one."""
         import subprocess as _sp
         d = self.tmp / "F102-keys"
         d.mkdir(exist_ok=True)
@@ -15907,7 +16059,83 @@ print(json.dumps({"k": D.keys(), "f": str(D._keys_path()), "again": D.keys()}))
         need(o["k"]["public"] == "the-public-one" and o["again"]["private"] == "the-private-one", f"the key changed: {o}")
         need(o["f"].startswith(str(support)) and oct(os.stat(o["f"]).st_mode)[-3:] == "600", f"not in HQ's own folder, 600: {o['f']}")
         need(not (d / "HQ" / "direct-line" / "keys.json").exists(), "the key stayed in the workspace")
-        return "keys masked in every transcript line, the push key in HQ's own folder at 600"
+        # after the move the page gets the key that signs the pushes: the phone subscribes with it, also on the team line
+        import base64
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+        b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+        unb64 = lambda t: base64.urlsafe_b64decode(t + "=" * (-len(t) % 4))
+        priv = ec.generate_private_key(ec.SECP256R1())
+        pair = {"private": b64(priv.private_numbers().private_value.to_bytes(32, "big")), "made": "x",
+                "public": b64(priv.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint))}
+        ws2, sup2 = d / "moved", d / "moved-support"
+        line2 = ws2 / "HQ" / "direct-line"
+        line2.mkdir(parents=True)
+        (line2 / "keys.json").write_text(json.dumps(pair))
+        env2 = {**env, "HQ_SUPPORT": str(sup2), "HQ_FOLDER": str(ws2), "HQ_WORKSPACE": str(ws2), "HQ_ROADMAP": str(ws2 / "HQ/roadmap.md"),
+                "HQ_STATUS_PORT": str(_free_port()), "HQ_FIX_DRY": "1"}
+        child = r'''
+import json, os, sys
+sys.path.insert(0, sys.argv[1] + "/app"); sys.path.insert(0, sys.argv[1] + "/routine")
+import direct_line as D
+if sys.argv[2] == "team":
+    os.environ.update(D.team_env())
+print(json.dumps({"signed": D.vapid_header("https://push.example.com/send/a", D.keys()), "key": D.public_key()}))
+'''
+        def signs(line):
+            r = _sp.run([sys.executable, "-c", child, str(ROOT), line], capture_output=True, text=True, env=env2, cwd=str(ROOT), timeout=60)
+            need(r.returncode == 0, r.stderr[-600:])
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        main = signs("main")  # a push: this moves the key
+        need(not (line2 / "keys.json").exists(), "the key stayed in the workspace")
+        log = open(d / "server.log", "w")
+        srv = _sp.Popen([shutil.which("node") or "/opt/homebrew/bin/node", str(ROOT / "status/server.mjs"), "--quiet"], cwd=ROOT, env=env2, stdout=log, stderr=_sp.STDOUT)
+        def get(path):
+            with urllib.request.urlopen(f"http://127.0.0.1:{env2['HQ_STATUS_PORT']}{path}", timeout=60) as resp:
+                return json.loads(resp.read())
+        try:
+            for _ in range(50):
+                try:
+                    key = await asyncio.to_thread(lambda: get("/direct/key")["key"])
+                    break
+                except OSError:
+                    await asyncio.sleep(0.2)
+            else:
+                need(False, "the status server didn't start")
+            info = await asyncio.to_thread(get, "/direct.json")
+            team = await asyncio.to_thread(get, "/direct.json?line=team")
+        finally:
+            srv.terminate()
+            srv.wait(timeout=10)
+            log.close()
+        need(key == pair["public"] and info["agent"]["key"] == key and team["agent"]["key"] == key,
+             f"the page doesn't get the key: /direct/key {key!r}, /direct.json {info['agent'].get('key')!r}, team {team['agent'].get('key')!r}")
+        team_push = signs("team")
+        need(json.loads((sup2 / "push-keys.json").read_text())["public"] == key and team_push["key"] == key, f"another key was made: {team_push['key']}")
+        need(not list(ws2.rglob("keys.json")), "the team line made a key of its own in the workspace")
+        for said in (main["signed"], team_push["signed"]):
+            head, body, sig, public = re.fullmatch(r"vapid t=([\w-]+)\.([\w-]+)\.([\w-]+), k=([\w-]+)", said).groups()
+            raw = unb64(sig)
+            ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), unb64(key)).verify(
+                encode_dss_signature(int.from_bytes(raw[:32], "big"), int.from_bytes(raw[32:], "big")), f"{head}.{body}".encode(), ec.ECDSA(hashes.SHA256()))
+            need(public == key, f"a push is signed with another key than the page has: {public}")
+        # asking for the public key never makes one; only keys() does, once
+        child = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1] + "/app"); sys.path.insert(0, sys.argv[1] + "/routine")
+import direct_line as D
+print(json.dumps({"key": D.public_key(), "there": D._keys_path().exists()}))
+print(json.dumps({"made": D.keys()["public"], "key": D.public_key(), "same": D.keys()["public"]}))
+'''
+        empty = d / "empty"
+        (empty / "HQ").mkdir(parents=True)
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, cwd=str(ROOT), timeout=60,
+                    env={**env, "HQ_SUPPORT": str(d / "empty-support"), "HQ_FOLDER": str(empty), "HQ_WORKSPACE": str(empty)})
+        need(r.returncode == 0 and json.loads(r.stdout.strip().splitlines()[-2]) == {"key": "", "there": False}, f"asking for the key made one: {r.stdout}{r.stderr[-300:]}")
+        made = json.loads(r.stdout.strip().splitlines()[-1])
+        need(made["made"] and made["made"] == made["key"] == made["same"], f"a first key isn't made once: {made}")
+        return "keys masked in every transcript line, the push key in HQ's own folder at 600, the page and the team line get the key that signs the pushes"
 
     async def flow225(self) -> str:
         """F102, no Claude: the laptop's words reach the main, and each side says what it runs. On a stand-in pair: a note written on

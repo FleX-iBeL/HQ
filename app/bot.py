@@ -1283,7 +1283,7 @@ if __name__ == "__main__":
 
     _STATUS = f"http://127.0.0.1:{os.environ.get('HQ_STATUS_PORT', '4748')}"
     _DIRECT = ("/direct", "/direct.json", "/direct/key", "/direct/send", "/direct/subscribe", "/direct-sw.js",
-               "/hq-icon-180.png", "/hq-icon-192.png")
+               "/direct/report", "/direct-check.js", "/hq-icon-180.png", "/hq-icon-192.png")
 
     async def _direct(request: Request):
         head = {k: v for k, v in request.headers.items() if k.lower() in ("x-hq", "content-type")}
