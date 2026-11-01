@@ -1320,22 +1320,24 @@ def _stood_on(tags: list[str]) -> list[str]:
 
 
 def newest_release() -> str | None:
-    """Where the guard goes: the version this HQ went back to, if it did that on purpose; else the newest tag in the head's own history, tags at
-    the head included: a newer one that was only fetched isn't hers, an update brings that with what it does around it. A release the head stood
-    on counts too, also when it isn't in that history (a tag off dev's line, a stale copy of dev): never below where it stood. Only with none
-    of those, the newest one it has. Data only ever moves forward from there, by the routine's own minute. older_than_stood says when that won't do."""
+    """Where the guard goes: the version this HQ went back to, if it did that on purpose; else the newest release it really stood on: a newer one
+    that was only fetched, or that dev's history holds (every real release is on dev's line), isn't hers, an update brings that with what it
+    does around it, and it never goes below where it stood either. With none known, the newest tag in the head's own history, tags at the head
+    included; only then the newest one it has. Data only ever moves forward from there, by the routine's own minute. older_than_stood says
+    when that won't do."""
     tags = version_tags()
     to = "v" + str(gone_back().get("to") or "")
     if to in tags:
         return to
-    own = [t for t in git("tag", "--merged", "HEAD", timeout=20).stdout.split() if vtuple(t)] + _stood_on(tags)
-    return max(own or tags, key=vtuple) if own or tags else None
+    own = _stood_on(tags) or [t for t in git("tag", "--merged", "HEAD", timeout=20).stdout.split() if vtuple(t)] or tags
+    return max(own, key=vtuple) if own else None
 
 
 def older_than_stood(tag: str | None) -> str:
     """Why `tag` won't do: it's older than the version this copy stands on (a tag it lost, and GitHub out of reach), or it can't tell what it
-    stands on. "" when it's fine. A version she went back to on purpose is hers, so then only the newest tag there is counts. Going to an older
-    one would undo the data to a shape it never had on a guess."""
+    stands on. "" when it's fine. A version she went back to on purpose is hers, so then only the newest tag there is counts. And a release she
+    really stood on is fine below the head's version when that version has a tag of its own she never stood on: dev took her past it, she
+    wasn't there. Without that tag it can't be told from one she lost. Going to an older one would undo the data to a shape it never had on a guess."""
     tags = version_tags()
     if not tags or not tag:
         return ""
@@ -1343,7 +1345,7 @@ def older_than_stood(tag: str | None) -> str:
     top = max(tags, key=vtuple) if tag == "v" + str(gone_back().get("to") or "") else tag
     if not vtuple("v" + v):
         return "it can't tell which version it stands on, and it doesn't go to one on a guess"
-    if vtuple("v" + v) > vtuple(top):
+    if vtuple("v" + v) > vtuple(top) and not (tag in _stood_on(tags) and any(vtuple(t) == vtuple("v" + v) for t in tags)):
         return f"it stands on {v} and the newest release it can find is {vname(top)}, and it never goes to an older version than it stood on"
     return ""
 

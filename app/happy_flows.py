@@ -17519,7 +17519,7 @@ getattr(m, sys.argv[3])(Path(sys.argv[2]))
         need(c["g"]("tag", "-l", "v1.2.0") == "v1.2.0", "the newer tag isn't there")
         stood(c, "a newer tag fetched, dev pulled onto the older one")
         stood(make("git tag -d v1.2.0", "git merge -q origin/dev"), "a newer tag only on GitHub")
-        # never below where she stood, also when dev's history doesn't hold the release she was on: the head's reflog says it, and that wins from what's merged
+        # never below where she stood, also when dev's history doesn't hold the release she was on: the head's reflog says it
         stood(make("git checkout -q --detach v1.2.0", "git checkout -q origin/dev"), "she stood on the newer one, dev doesn't hold it", "v1.2.0")
         c = make("git fetch -q origin", "git format-patch -q v1.1.0..origin/dev -o ../pp-below", "git checkout -q --detach v1.0.0", "git am -q ../pp-below/*.patch")
         need(minute(c) and at(c) == tag(c), f"below her release with dev's patches on top: {c['g']('describe', '--tags', '--always')}")
@@ -17535,8 +17535,29 @@ getattr(m, sys.argv[3])(Path(sys.argv[2]))
         d["held"]["again"] = 0
         (c["hq"] / ".status/off-release.json").write_text(json.dumps(d))
         stood(c, "the tag back from GitHub")
+        # as real releases are: the tag on dev's line. A friend on the older one pulls a dev past it, so her head's history holds it, and she still goes back where she stood
+        make("git checkout -q origin/dev", "echo 1.3.0 > VERSION && echo released > on-the-line.txt && git add . && git commit -q -m 'HQ 1.3.0' && git tag -a v1.3.0 -m 'HQ 1.3.0'",
+             "echo past > past.txt && git add . && git commit -q -m 'work past 1.3.0' && git push -q origin HEAD:dev v1.3.0")
+        line = lambda c: need(not (c["hq"] / "on-the-line.txt").exists() and not (c["hq"] / "past.txt").exists(), "dev's line stayed")
+        c = make("git merge -q origin/dev")
+        need((c["hq"] / "VERSION").read_text().strip() == "1.3.0" and "v1.3.0" in c["g"]("tag", "--merged", "HEAD").split(), "the release isn't under her head")
+        stood(c, "a dev past a newer release on its line")
+        line(c)
+        stood(make("git tag -d v1.3.0", "git merge -q origin/dev"), "the same, with that tag still on GitHub")
+        c = make("git tag -d v1.3.0", "git merge -q origin/dev")
+        head = at(c)
+        hub.rename(away)
+        try:  # no tag for the version it stands on, and GitHub out of reach: it can't be told from a tag she lost
+            need(minute(c) and at(c) == head and not (c["hq"] / ".status/update-run.json").exists(), f"a guess, offline: {c['g']('describe', '--tags', '--always')}")
+        finally:
+            away.rename(hub)
+        d = json.loads((c["hq"] / ".status/off-release.json").read_text())
+        d["held"]["again"] = 0
+        (c["hq"] / ".status/off-release.json").write_text(json.dumps(d))
+        stood(c, "GitHub reached, the tag there")
+        line(c)
         return ("git checkout -, git switch -, FETCH_HEAD by xargs, a worktree branch, git am and a squash each put back on the newest release within the routine's minute, data as it was and no way forward left; the head moving in the minute "
-                "runs no data change of dev's; a job stopped for good by its exact pid and nothing else, an incident, a note and a text; her own commits stay, also with dev's patch or files; offline by its refs and never on a guess; never older than it stood on, and never a newer release she didn't stand on; "
+                "runs no data change of dev's; a job stopped for good by its exact pid and nothing else, an incident, a note and a text; her own commits stay, also with dev's patch or files; offline by its refs and never on a guess; never older than it stood on, and never a newer release she didn't stand on, also with that release on dev's line; "
                 "the maker's copy and an unreadable file untouched, also with HQ_MAKER=0 through tick.py and with the key lost, and a friend's fresh clone never matches that; a failing undo holds, starts nothing and tries again, on one backup branch")
 
     async def flow238(self) -> str:
@@ -28106,7 +28127,7 @@ FLOWS = {
     237: ("F104: friends only on released versions: a job on a friend's copy never pulls dev; headless on in the template; a feature in pieces stays off until its QA passed or his own words, logged", False, "flow237"),
     238: ("F106: a helper beside a call, with a stand-in for the model: started without a yes, the call goes on, the answer in the same call once; hung up it's a text on her line; boxed in minutes and turns; two at once; a used-up limit stops it", False, "flow238"),
     239: ("F106: a check she couldn't run is never answered around: the program says I couldn't check that when her reply doesn't", False, "flow239"),
-    243: ("F104: the guard on the state: every way onto dev puts a friend's copy back on the newest release within the routine's minute, no data change of dev's runs, the job stopped by its exact pid, said and written down; her own commits stay, also with dev's patch; offline never on a guess, never older than it stood on, no newer release that isn't in her history; the maker's copy never touched, whatever the environment or a lost key says; no way forward again; one backup branch", False, "flow243"),
+    243: ("F104: the guard on the state: every way onto dev puts a friend's copy back on the newest release within the routine's minute, no data change of dev's runs, the job stopped by its exact pid, said and written down; her own commits stay, also with dev's patch; offline never on a guess, never older than it stood on, no newer release she didn't stand on; the maker's copy never touched, whatever the environment or a lost key says; no way forward again; one backup branch", False, "flow243"),
     242: ("F106: one line on the status page shows the helper working for him right now", False, "flow242"),
     241: ("F106: a call's start is under the design's size for every agent, on a full workspace; nothing lost from the rules, each topic a lookup without a yes", False, "flow241"),
     230: ("F108: three writers at the same instant, 20 runs on Donna's line and the team line: all 9 lines land; a real repeat stays out", False, "flow230"),
