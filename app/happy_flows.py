@@ -10605,7 +10605,8 @@ setTimeout(() => {
         the drive takes with the traffic and when to leave; from two hours before the traffic is looked at again, and
         Donna texts once when it's time to leave and when the drive got ten minutes longer; public transport and car
         switch per appointment; at most DAILY_MAX looks a day; Google's and TomTom's answers read right; a call may ask
-        whether there's a key, never set it; the page, the server, the rules and the tutorial carry it."""
+        whether there's a key, never set it; the page, the server, the rules and the tutorial carry it. A change made
+        while a look waits on the network stands: the look doesn't write its older copy over it."""
         import http.server
         import threading as _th
         from policy import Policy, ALLOW, DENY
@@ -10637,6 +10638,12 @@ setTimeout(() => {
         drv.write_text("import sys, json\nsys.path.insert(0, sys.argv[1])\ncmd = sys.argv[2]\n"
                        "if cmd == 'check':\n    import trips\n    print(json.dumps(trips.check(float(sys.argv[3]))))\n"
                        "elif cmd == 'attach':\n    import trips, agenda\n    print(json.dumps(trips.attach(agenda._read()['events'])))\n"
+                       "elif cmd == 'race':\n    import trips, drive, subprocess\n    look = drive.look\n"
+                       "    def meanwhile(*a, **k):\n"
+                       "        for hand in (['on', 'Dentist', '--car'], ['place', 'Sam', 'Proefweg 3 Ergenshoven']):\n"
+                       "            subprocess.run([sys.executable, sys.argv[0], sys.argv[1], *hand], check=True, capture_output=True)\n"
+                       "        return look(*a, **k)\n"
+                       "    drive.look = meanwhile\n    print(json.dumps(trips.check(float(sys.argv[3]))))\n"
                        "elif cmd == 'switch':\n    import trips\n    trips.page_switch(sys.argv[3], sys.argv[4] == 'on', sys.argv[5])\n"
                        "elif cmd == 'listing':\n    import features\n    print(json.dumps(features.listing()))\n"
                        "elif cmd == 'drive':\n    import drive\n    sys.exit(drive.main(sys.argv[3:]))\n"
@@ -10711,6 +10718,16 @@ setTimeout(() => {
         e2 = data()["trips"]["e2"]
         need(r.returncode == 0 and e2["mode"] == "transit" and e2["link"].startswith("https://9292.nl/") and "drive" not in e2,
              f"back to public transport doesn't work: {r.stdout} {e2}")
+        # a change while the look in the background waits on the maps service: the change stands, the rest of the look too
+        asked = data()["trips"]["e1"]["drive"]["asked"]
+        r = run("race", str(now + 700))
+        got, e2 = data(), data()["trips"]["e2"]
+        need(r.returncode == 0 and e2["mode"] == "car" and e2["link"].startswith("https://www.google.com/maps/dir/?") and "drive" in e2,
+             f"a look undoes a change made while it looked: {r.stdout}{r.stderr} {e2}")
+        need("sam" in got["places"], f"a look undoes a place kept while it looked: {got['places']}")
+        need(got["trips"]["e1"]["drive"]["asked"] > asked, "the look's own finding on the other trip is lost")
+        r = run("on", "Dentist", "--transit")
+        need(r.returncode == 0 and data()["trips"]["e2"]["mode"] == "transit", f"it doesn't go back: {r.stdout}")
         # only driving on: every trip by car
         _f.switch("travel", False, d / "ws")
         att = {e["id"]: e.get("travel") for e in last(run("attach"))}
@@ -15498,7 +15515,7 @@ print("OK")
         need(all(p.returncode == 0 for p in ps), f"a to-do writer failed: {errs[0][-600:]} {errs[1][-600:]}")
         text = (d / "challenges.md").read_text()
         need(sum(f"{w} item {i}" in text for w in "AB" for i in range(12)) == 24, "a to-do item was lost")
-        for f in ("todo.py", "notes.py", "games.py", "coaching.py"):
+        for f in ("todo.py", "notes.py", "games.py", "coaching.py", "trips.py"):
             src = (ROOT / "app" / f).read_text()
             need("threading.Lock" not in src and "hqlock.For(" in src, f"{f} still locks inside one process")
         need("hqlock" in (ROOT / "app/loose_ends.py").read_text() and "hqlock.locked(path)" in (ROOT / "routine/handover.py").read_text(), "the mail list's writers")

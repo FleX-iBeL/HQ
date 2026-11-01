@@ -52,10 +52,16 @@ Google Maps' directions link (no key needed for that) and, from one look at the 
 drive takes and when to leave (DRIVE_SPARE minutes to spare, for parking). From DRIVE_BEFORE before, every DRIVE_EVERY,
 it looks again: Donna texts once when it's time to leave (LEAVE_AHEAD before), and when the drive got DRIVE_CHANGE
 minutes longer or shorter than she last said. A missing key or a refused one shows in the trip (why_not).
+
+The file has more than one writer, each its own process: the web server (the Travel button), a call's or Donna's
+script, and the look in the background, which the button and the routine both start. So every change takes hqlock
+(F102) for just the read and the write, never over the network, and a look works on a copy of the trips and at the end
+puts in only what nobody changed while it looked (_settle): a tap or a call's words during a look stay.
 """
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import io
 import json
@@ -64,7 +70,6 @@ import os
 import re
 import subprocess
 import sys
-import threading
 import time
 import urllib.request
 import zipfile
@@ -76,6 +81,7 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "routine"))
 import agenda  # noqa: E402
+import hqlock  # noqa: E402  F102: one lock across processes, unique temp files
 import travel  # noqa: E402
 
 FEEDS = os.environ.get("HQ_TRIPS_FEEDS", "https://gtfs.ovapi.nl/nl/")
@@ -101,7 +107,8 @@ DRIVE_EVERY = 10 * 60  # a look at the traffic this often then (about a dozen lo
 DRIVE_SPARE = 10  # minutes to spare when he gets there: parking, the walk in
 DRIVE_CHANGE = 10  # the drive this many minutes longer or shorter than last said is worth a text
 LEAVE_AHEAD = 20  # the time-to-leave text comes this many minutes before he should leave
-_lock = threading.Lock()
+HAND = ("on", "mode", "to_hand", "from_hand")  # what a person sets on a trip
+TOLD = ("sent", "news")  # what a look texted about a trip: stays, so it's never texted twice
 
 
 class NotFound(Exception):
@@ -137,6 +144,10 @@ def data_file() -> Path:
     return Path(os.environ.get("HQ_TRIPS_FILE") or agenda.data_file().with_name("calendar-travel.json"))
 
 
+_lock = hqlock.For(lambda: data_file())  # one read and write, never over the network
+_looking = hqlock.For(lambda: data_file().with_name("calendar-travel-look"))  # one look at a time; never a person's change
+
+
 def _read() -> dict:
     try:
         s = json.loads(data_file().read_text(encoding="utf8"))
@@ -153,7 +164,7 @@ def _read() -> dict:
 def _write(s: dict) -> None:
     p = data_file()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp")
+    tmp = hqlock.tmp(p)
     tmp.write_text(json.dumps(s, indent=1, ensure_ascii=False) + "\n", encoding="utf8")
     os.replace(tmp, p)
 
@@ -612,14 +623,19 @@ def turn_on(words: str, to: str = "", frm: str = "", mode: str = "") -> dict:
         change["from_hand"] = "" if _norm(frm) in {_norm(w) for w in travel.HOME_WORDS} else frm
         if not change["from_hand"]:
             change["from_hand"] = "home"
-    _set(e, change)
-    with _lock:  # look it up now, so the answer can say where from and to
+    base = _set(e, change)
+    key = _key(e.get("id", ""))
+    s = _read()  # look it up now, so the answer can say where from and to; the lock only around the write
+    try:
+        rec = plan(e, s, _events())
+    except (NotFound, travel.NotFound) as x:
+        rec = {**(s["trips"].get(key) or base), "why_not": str(x)}
+    with _lock:
         s = _read()
-        key = _key(e.get("id", ""))
-        try:
-            s["trips"][key] = plan(e, s, _events())
-        except (NotFound, travel.NotFound) as x:
-            s["trips"][key]["why_not"] = str(x)
+        now = s["trips"].get(key) or {}
+        if any(now.get(k) != base.get(k) for k in HAND):
+            return now  # changed by hand again meanwhile: the newest change stands
+        s["trips"][key] = rec | {k: now[k] for k in TOLD if k in now}
         _write(s)
         return s["trips"][key]
 
@@ -886,15 +902,35 @@ def notices(a: dict, b: dict, at: float, all_alerts: list[dict] | None = None,
     return out[:NOTICES_MAX]
 
 
+def _settle(base: dict, mine: dict, told: set[str], t: float) -> None:
+    """The end of a look: what it found goes in only for the trips nobody changed since it started (it can take a minute
+    on the network, and a tap, a call's words or a kept place can land in between; those stay, with their own look to
+    follow). A trip it texted about keeps that mark either way."""
+    with _lock:
+        s = _read()
+        for key in base.keys() | mine.keys():
+            now = s["trips"].get(key)
+            if now == base.get(key):
+                if key in mine:
+                    s["trips"][key] = mine[key]
+                else:
+                    s["trips"].pop(key, None)
+            elif now and key in told:
+                now.update({k: mine[key][k] for k in TOLD if k in mine[key]})
+        s["checked"] = t
+        _write(s)
+
+
 def check(now: float | None = None, dry: bool = False) -> list[tuple[str, str]]:
     """The routine's look: trips for new appointments, then the live ones. Texts each change once. [(key, facts)]."""
     if not on():
         return []
-    t = now or time.time()
-    evs = _events()
     texts: list[tuple[str, str]] = []
-    with _lock:
+    with _looking:
+        t = now or time.time()
+        evs = _events()
         s = _read()
+        base = copy.deepcopy(s["trips"])
         by = {_key(e.get("id", "")): e for e in evs}
         # new appointments away from home get travel by themselves; hand-off stays off; moved ones are looked up again
         for key, e in by.items():
@@ -959,9 +995,8 @@ def check(now: float | None = None, dry: bool = False) -> list[tuple[str, str]]:
             at = _ts(r.get("start", ""))
             if at and at < t - KEEP_DONE:
                 s["trips"].pop(k)
-        s["checked"] = t
         if not dry:
-            _write(s)
+            _settle(base, s["trips"], {k for k, _ in texts}, t)
     if texts and not dry:
         try:
             import pings
