@@ -1218,6 +1218,12 @@ def main(argv):
             j = find(jobs, int(args[0]))
             how = one_line(" ".join(args[1:])).replace("·", "-") or "the Mac went down"
             import crash
+            import cycles
+            if cycles.parse(j["text"]):  # H298: never a plain team job: her runner brings a session back as itself, through her wall; a step not at all
+                j["state"] = f"ended {now} by a crash"
+                write(text, jobs, on)
+                print(f"Job {j['n']} ended by a crash ({how}); it's an agent's own run, so only her runner can bring it back.")
+                return
             if crash.is_rerun(j["text"]):
                 j["state"] = f"ended {now} by a crash, again; not run again by itself"
                 write(text, jobs, on)

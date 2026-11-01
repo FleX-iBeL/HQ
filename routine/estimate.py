@@ -2016,6 +2016,32 @@ def on_done(n, text="", started_hhmm=None, at=None):
     return rec
 
 
+def fill_cost(n, text, cost, at):
+    """Harm 3 of H298: a run nothing measured still counts: its history line gets `cost`, at its estimate, inside the queue's lock. With no
+    line yet (it never reached the count) one is written, kept out of the estimates by what it says it is."""
+    rows, hit = [], False
+    try:
+        rows = open(HISTORY, encoding="utf8").read().splitlines()
+    except FileNotFoundError:
+        pass
+    for i, l in enumerate(rows):
+        try:
+            h = json.loads(l)
+        except Exception:
+            continue
+        if h.get("n") == n:
+            h.update(cost=cost, cost_how="estimate")
+            rows[i], hit = json.dumps(h), True
+    if not hit:
+        _append({"n": n, "kind": kind_for(text, (_load_state().get(str(n)) or {}).get("kind")), "est": None, "actual": 1, "done": int(at), "how": "clock", "cost": cost,
+                 "cost_how": "estimate", "machine": me()["name"], "mistake": "it never reached the count; its cost is the estimate"})
+        return
+    tmp = f"{HISTORY}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf8") as f:
+        f.write("\n".join(rows) + "\n")
+    os.replace(tmp, HISTORY)
+
+
 def run_used(n, minutes, turns):
     """F103: what a job's runs took, in its history line, inside the queue's lock. A job closes itself inside its run, and only once claude has
     exited does the runner know what it took, so this comes after on_done or before it, and it lands either way: on the line that's there, and

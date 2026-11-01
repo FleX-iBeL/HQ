@@ -76,9 +76,12 @@ if (process.argv.includes('--gate')) {
   } catch {}
   const now = new Date();
   const stale = noWall ? null : staleWords(saved, now);
+  // H298: --under N: an agent's own run has its line N points under the team's: near the limit the agents stop first.
+  const uf = process.argv.indexOf('--under');
+  const under = uf >= 0 && !noWall ? Number(process.argv[uf + 1]) || 0 : 0;
   if (process.argv.includes('--line')) {
     if (stale || !saved?.readable) process.exit(0);
-    const held = process.argv.includes('--reserve') && !noWall ? reserveOf(roadmapText) : 0;
+    const held = (process.argv.includes('--reserve') && !noWall ? reserveOf(roadmapText) : 0) + under;
     const v = usageVerdict(saved, lines, now, { weeklyOnly, reserve: held });
     console.log(v.stop ? `STOP. ${v.reason}` : 'OK to go on.');
     process.exit(v.stop ? 2 : 0);
@@ -96,7 +99,7 @@ if (process.argv.includes('--gate')) {
   const need = nf >= 0
     ? Object.fromEntries(String(process.argv[nf + 1] ?? '').split(',').map((p) => p.split('=')).filter(([k, v]) => k && Number.isFinite(Number(v))).map(([k, v]) => [k, Number(v)]))
     : undefined;
-  const reserve = process.argv.includes('--reserve') && !noWall ? reserveOf(roadmapText) : 0;
+  const reserve = (process.argv.includes('--reserve') && !noWall ? reserveOf(roadmapText) : 0) + under;
   const v = usageVerdict(saved, lines, now, { weeklyOnly, start: true, minutes, need: need && Object.keys(need).length ? need : undefined, reserve });
   console.log(v.stop ? `STOP. ${v.reason}` : weeklyOnly ? 'OK to go on (past the 5-hour line; the weekly lines are under).' : 'OK to go on.');
   process.exit(v.stop ? 2 : 0);

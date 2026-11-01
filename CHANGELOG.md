@@ -4,6 +4,14 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- The agents running themselves, safer in the ways that count (still off for everyone but the maker): a restart or a takeover never turns an agent's run into a team job, a held run isn't started over, every run counts against her share however it ended, and nothing of theirs starts or runs into the night. Near the limit they stop first, five points under the team.
+
+- What an agent can do by herself is by tool and target now: nothing goes out, nothing of yours is written over, your vision, your rules and her own settings are read-only, and each agent can do her own job: Donna keeps your calendar, each change logged where you can read it, and writes drafts. Mail stays drafts; one switch can open that later.
+
+- Fewer and truer texts from the agents: a tripwire is what really happened, never a word in something she read, in plain words, and a first refused try is only logged: repeating it is what reaches you. Her texts wait for you to wake up, have a date, and don't go out once they're no longer true. A run that fails says so once.
+
+- Your orders stay orders: a "now" at night waits for the morning and says so, a stop cancels only what you meant, a new session time really moves it, and on the backup your orders reach the main.
+
 - Phone notifications again: since the push key moved to HQ's own folder the page got an empty key, so a phone couldn't sign up or stay on the list. The page now gets the key that signs the pushes, on Moneypenny's line too, which no longer makes a key of its own.
 
 - A trip stays how you set it: switching an appointment between car and public transport, turning travel off or keeping a place while HQ was looking at your trips in the background could be undone by that look. Now your change stands, and the look only fills in the trips nobody touched.

@@ -18,15 +18,18 @@ Standard library only.
 """
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import hqlock  # noqa: E402
 import hqpaths  # noqa: E402
 
 REL = "HQ/ledger"
@@ -38,6 +41,27 @@ KEEP_SECTIONS = 400  # dated sections kept in the file; older ones go to <agent>
 _ORDER = re.compile(r"^- (\d{4}-\d\d-\d\d \d\d:\d\d) · (start|stop|standing) · \"(.*)\" · (open|now|planned|done|dropped)(?: · (.*))?$")
 _SECTION = re.compile(r"^## (.+)$", re.M)
 _DATED = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d) · (.*)$")
+
+
+_tls = threading.local()
+
+
+@contextlib.contextmanager
+def _locked(agent_id: str):
+    """Harm 9: a change to a ledger is read, changed and written under one lock across processes (20 notes and 5 orders at
+    once lost most of them). Nested in one thread it's the same lock."""
+    have = getattr(_tls, "have", None)
+    if have is None:
+        have = _tls.have = set()
+    if agent_id in have:
+        yield
+        return
+    with hqlock.locked(path(agent_id)):
+        have.add(agent_id)
+        try:
+            yield
+        finally:
+            have.discard(agent_id)
 
 
 def folder() -> Path:
@@ -84,7 +108,7 @@ def text(agent_id: str) -> str:
 
 def _write(agent_id: str, t: str) -> None:
     p = ensure(agent_id)
-    tmp = p.with_name(p.name + ".tmp")
+    tmp = hqlock.tmp(p)
     tmp.write_text(t, encoding="utf8")
     os.replace(tmp, p)
 
@@ -133,26 +157,26 @@ def entry(agent_id: str, what: str, lines: list[str] | None = None, now: dt.date
     body = "".join(f"- {' '.join(str(l).split())}\n" for l in (lines or []) if str(l).strip())
     if block is not None:
         body += "\n```json\n" + json.dumps(block, indent=1, ensure_ascii=False) + "\n```\n"
-    t = (text(agent_id) or head(agent_id)).rstrip("\n") + "\n\n"
-    t += f"## {title}\n\n{body}" if body else f"## {title}\n"
-    _write(agent_id, t)
-    _tidy(agent_id)
+    with _locked(agent_id):
+        t = (text(agent_id) or head(agent_id)).rstrip("\n") + "\n\n"
+        t += f"## {title}\n\n{body}" if body else f"## {title}\n"
+        _write(agent_id, t)
+        _tidy(agent_id)
     return title
 
 
 def note(agent_id: str, line: str) -> None:
     """One line under the newest dated section (a decision, what happened, a let-go)."""
-    t = text(agent_id) or head(agent_id)
-    secs = [s for s in sections(agent_id) if s["at"]]
     line = "- " + " ".join(str(line).split())
-    if not secs:
-        entry(agent_id, "notes", [line[2:]])
-        return
-    last = secs[-1]
-    body = t[last["start"]:last["end"]].rstrip("\n")
-    t = t[:last["start"]] + body + "\n" + line + "\n" + t[last["end"]:].lstrip("\n").join(["", ""]) \
-        if False else t[:last["start"]] + body + "\n" + line + "\n\n" + t[last["end"]:].lstrip("\n")
-    _write(agent_id, t)
+    with _locked(agent_id):
+        t = text(agent_id) or head(agent_id)
+        secs = [s for s in sections(agent_id) if s["at"]]
+        if not secs:
+            entry(agent_id, "notes", [line[2:]])
+            return
+        last = secs[-1]
+        body = t[last["start"]:last["end"]].rstrip("\n")
+        _write(agent_id, t[:last["start"]] + body + "\n" + line + "\n\n" + t[last["end"]:].lstrip("\n"))
 
 
 # -- orders --------------------------------------------------------------------------------------------------------
@@ -188,39 +212,41 @@ def add_order(agent_id: str, kind: str, words: str, now_: bool = False, when: dt
         raise ValueError("an order needs his words")
     when = when or dt.datetime.now()
     o = {"at": when.strftime(FMT), "kind": kind, "words": words, "state": "now" if (now_ and kind == "start") else "open", "note": ""}
-    t = text(agent_id) or head(agent_id)
-    i = t.find(ORDERS_HEAD + "\n")
-    if i < 0:
-        t = t.rstrip("\n") + f"\n\n{ORDERS_HEAD}\n\n"
+    with _locked(agent_id):
+        t = text(agent_id) or head(agent_id)
         i = t.find(ORDERS_HEAD + "\n")
-    j = t.find("\n## ", i + len(ORDERS_HEAD))
-    j = len(t) if j < 0 else j
-    block = t[i:j].rstrip("\n") + "\n" + _order_line(o) + "\n\n"
-    t = t[:i] + block + t[j:].lstrip("\n")
-    _write(agent_id, t)
-    o["n"] = len(orders(agent_id))
+        if i < 0:
+            t = t.rstrip("\n") + f"\n\n{ORDERS_HEAD}\n\n"
+            i = t.find(ORDERS_HEAD + "\n")
+        j = t.find("\n## ", i + len(ORDERS_HEAD))
+        j = len(t) if j < 0 else j
+        block = t[i:j].rstrip("\n") + "\n" + _order_line(o) + "\n\n"
+        t = t[:i] + block + t[j:].lstrip("\n")
+        _write(agent_id, t)
+        o["n"] = len(orders(agent_id))
     return o
 
 
 def set_order(agent_id: str, n: int, state: str, note_: str = "") -> bool:
     if state not in ORDER_STATES:
         raise ValueError(f"a state is one of {', '.join(ORDER_STATES)}")
-    t = text(agent_id)
-    sec = next((s for s in sections(agent_id) if s["title"] == ORDERS_HEAD[3:]), None)
-    if not sec:
-        return False
-    lines = t[sec["start"]:sec["end"]].split("\n")
-    k = 0
-    for i, l in enumerate(lines):
-        m = _ORDER.match(l)
-        if m:
-            k += 1
-            if k == n:
-                o = {"at": m.group(1), "kind": m.group(2), "words": m.group(3), "state": state,
-                     "note": " ".join(str(note_).split()) or (m.group(5) or "")}
-                lines[i] = _order_line(o)
-                _write(agent_id, t[:sec["start"]] + "\n".join(lines) + t[sec["end"]:])
-                return True
+    with _locked(agent_id):
+        t = text(agent_id)
+        sec = next((s for s in sections(agent_id) if s["title"] == ORDERS_HEAD[3:]), None)
+        if not sec:
+            return False
+        lines = t[sec["start"]:sec["end"]].split("\n")
+        k = 0
+        for i, l in enumerate(lines):
+            m = _ORDER.match(l)
+            if m:
+                k += 1
+                if k == n:
+                    o = {"at": m.group(1), "kind": m.group(2), "words": m.group(3), "state": state,
+                         "note": " ".join(str(note_).split()) or (m.group(5) or "")}
+                    lines[i] = _order_line(o)
+                    _write(agent_id, t[:sec["start"]] + "\n".join(lines) + t[sec["end"]:])
+                    return True
     return False
 
 

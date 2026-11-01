@@ -97,7 +97,11 @@ def recover(job, s, jobs, incidents, status, log, boot=None, panic_dir=PANIC_DIR
            else f"{what} went down and started again at {clock(boot)}")
     out = jobs("crashed", str(n), how).strip()
     m = re.search(r"requeued as job (\d+)", out)
-    if m:
+    if "only her runner" in out:  # H298
+        what = "An agent's own run: her runner brings it back through her wall, or not at all"
+        step = f"Job {n} stopped by a crash; an agent's run, it doesn't come back as a team job"
+        line = f"job {n}: {how}; an agent's run, left to her runner"
+    elif m:
         again = int(m.group(1))
         what = f"Queued it again as job {again}, at the top of the line, to pick up from where it left off"
         step = f"Job {n} stopped by a crash; it runs again as job {again}, first in line"

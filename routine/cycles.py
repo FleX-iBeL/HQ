@@ -13,9 +13,17 @@ before the next waiting job (H99's priority tag). The wall, four layers, each en
   1. before a run starts, the jobs' gate (the usage under each stop line, routine/tick.py) holds it like any job;
   2. during a run, a deterministic box in minutes and turns from the run's own stream (routine/runjob.py, piece 3);
   3. per agent per week, a share of the weekly limit (and a daily share, a third of it): a start past it is refused
-     (the run is skipped, written as skipped), read from the measured cost of her finished runs;
-  4. nothing of theirs runs outside her hours (8:00 to 22:00 by default) and nothing restarts itself: a boxed, stale or
-     skipped step is never retried by the runner; what waits at the hours' end is dropped to the morning.
+     (the run is skipped, written as skipped), read from the measured cost of every run of hers, whichever way it ended;
+  4. nothing of theirs runs outside her hours (8:00 to 22:00 by default) and nothing restarts itself: a boxed, held, stale
+     or skipped step is never retried by the runner; a run that wouldn't fit its box before the hours end doesn't start;
+     what waits at the hours' end is dropped to the morning. A restart or a takeover brings a session, a look or a
+     review back once, as itself, through this same wall, and a step never.
+
+The agents are the first to stop near the limit: their line is wall.AGENTS_UNDER points under the team's (tick.py).
+The hook (routine/cyclehook.py) stops what does real damage, and lets her do her job: Donna's calendar writes go through
+and are logged in her ledger. A mistake gets logged; repeating one is what reaches him. A text respects his Sleep block,
+has a date, and goes out only while it's true (say, batch, later). The state of the runner (the steps, what's queued,
+the caps) lives next to the ledgers in the workspace, so a takeover keeps it; it's read and written under one lock.
 
 The bigger session writes a cycle plan into her ledger (`cycles.py plan AGENT JSON`): the few things, the let-go,
 and the small steps, each with its goal, what done means, its named inputs, what it may do, when it runs, and what
@@ -37,9 +45,9 @@ into her ledger. The settings are the workspace's HQ/agents/cycles.json (numbers
                                                       session_minutes, session_turns, step_minutes, step_turns, steps_a_day
     python3 routine/cycles.py order AGENT start|stop|standing "HIS WORDS" [--now]   an order from a call or a text
     python3 routine/cycles.py plan AGENT 'JSON'       the bigger session's cycle plan (her own run writes it)
-    python3 routine/cycles.py done AGENT K "WHAT"     a small step says what came of it; failed AGENT K "WHY"
+    python3 routine/cycles.py done AGENT K "WHAT"     a small step says what came of it; failed AGENT K "WHY"; stale AGENT K "WHY"
     python3 routine/cycles.py ask AGENT "IF-THEN"     one question for him on her line, in if-then shape (once a day)
-    python3 routine/cycles.py batch AGENT "TEXT"      a text for her next batch (the low-information diet)
+    python3 routine/cycles.py batch AGENT "TEXT" [--until WHEN]   a text for her next batch (the low-information diet); it has a date
     python3 routine/cycles.py text AGENT "TEXT"       a text on her line now (a run's own, inside the day's cap)
     python3 routine/cycles.py ledger AGENT            her ledger
     python3 routine/cycles.py score [AGENT]           the weekly score now (written to her ledger with --write)
@@ -48,6 +56,7 @@ into her ledger. The settings are the workspace's HQ/agents/cycles.json (numbers
 """
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -55,6 +64,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -62,12 +72,14 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "app"))
+import hqlock  # noqa: E402
 import hqpaths  # noqa: E402
 import ledger  # noqa: E402
 
 FOLDER = Path(hqpaths.FOLDER)
 SETTINGS_REL = "HQ/agents/cycles.json"
-STATE = Path(os.environ.get("HQ_CYCLES_STATE") or (ROOT / ".status" / "cycles-state.json"))
+STATE_REL = "HQ/agents/cycles-state.json"  # harm 13: next to the ledgers, so a takeover has the steps, the caps and what's queued
+OLD_STATE = ROOT / ".status" / "cycles-state.json"  # where it was before; read once, when the new one isn't there yet
 PY = sys.executable
 FMT = "%Y-%m-%d %H:%M"
 MARK_CYCLE = "Agent cycle: "
@@ -80,13 +92,13 @@ QUESTIONS_MOST = 3
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 SHARED = ("HQ/roadmap.md", "challenges.md", "coaching/log.md", "inbox.md", "HQ/calendar.json", "HQ/sprint.json",
           "HQ/games.json", "HQ/coaching.json", "HQ/calendar-todo.json", "HQ/calendar-marks.json")
-# H298: an action outside every agent's limits, by the tool it would take (the handbook's "what she asks").
-OUTSIDE = (r"mcp__\w*gmail\w*__(send_message|reply|forward)", r"mcp__\w*calendar\w*__(create_event|update_event|delete_event)",
-           r"\bpush\.py\b", r"\brelease\.py\b", r"\bfeatures\.py (on|off)\b", r"\bbackend\.py (on|off)\b", r"\bjobs\.py (add|send-row|add-row|stop|on|off)\b",
-           r"\bgit (push|commit|reset|checkout)\b", r"\bcycles\.py set\b", r"handbook\.md", r"agents\.json")
-_OUTSIDE = re.compile("|".join(OUTSIDE), re.I)
-_EDIT = re.compile(r"^(Edit|Write|MultiEdit|NotebookEdit) (.+)$")
 _REALLY_REFUSED = re.compile(r"^(?:HQ: refused|refused\b)|\bhook error\b|isn't ready", re.I)  # F86: a round's own reading is full of the word: a grep of the code, a row
+STEP_GRACE = 60  # minutes a step may start late when no next step or his own "until" says otherwise [the fix round's pick]
+ASKS_A_DAY = 3  # questions a day, like the plan's; past it the ledger keeps them for Friday [the fix round's pick]
+REPEAT_DAYS = 7  # a refusal, a goal or a failing run counts as a repeat within this many days
+_STOP_WORDS = {"a", "an", "and", "any", "at", "be", "do", "dont", "for", "from", "her", "him", "his", "i", "in", "is", "it", "its", "me", "my", "no", "not", "of", "off", "on",
+               "or", "our", "please", "so", "that", "the", "them", "then", "this", "to", "up", "us", "we", "with", "you", "your", "stop", "drop", "leave", "cancel", "quit"}
+_tls = threading.local()
 
 
 # -- settings ---------------------------------------------------------------------------------------------------------
@@ -185,15 +197,23 @@ def set_setting(aid: str, key: str, value: str, base: Path | None = None) -> str
         m = re.fullmatch(r"(\d{1,2}:\d\d)\s*(?:-|to)\s*(\d{1,2}:\d\d)", v)
         if not m:
             return "hours are from-to, like 08:00-22:00."
-        a["hours"] = [_hhmm(m.group(1)), _hhmm(m.group(2))]
+        lo, hi = m.group(1), m.group(2)
+        if not (_is_time(lo) and _is_time(hi)) or _hhmm(lo) >= _hhmm(hi):
+            return "hours are from-to inside one day, like 08:00-22:00."
+        if not _hhmm(lo) <= a["session"]["at"] < _hhmm(hi):
+            return f"her session is at {a['session']['at']}, outside {_hhmm(lo)} to {_hhmm(hi)}: it would never run. Move it first."
+        a["hours"] = [_hhmm(lo), _hhmm(hi)]
     elif key == "batches":
-        ts = [x.strip() for x in re.split(r"[,; ]+", v) if x.strip()]
-        if not all(re.fullmatch(r"\d{1,2}:\d\d", x) for x in ts):
+        ts = [x.strip() for x in re.split(r"[,; ]+", v) if x.strip() and x.strip().lower() != "none"]
+        if not all(_is_time(x) for x in ts):
             return "batches are times, like 12:00,17:00 (or none)."
-        a["batches"] = [_hhmm(x) for x in ts if x.lower() != "none"]
+        a["batches"] = [_hhmm(x) for x in ts]
     elif key in ("session_at",):
-        if not re.fullmatch(r"\d{1,2}:\d\d", v):
+        if not _is_time(v):
             return "session_at is a time, like 08:30."
+        lo, hi = a.get("hours") or ["08:00", "22:00"]
+        if not lo <= _hhmm(v) < hi:
+            return f"session_at {_hhmm(v)} is outside her hours, {lo} to {hi}: it would never run. Change her hours first."
         a["session"]["at"] = _hhmm(v)
     elif key == "session_every":
         w = v.lower().rstrip("s")
@@ -213,26 +233,70 @@ def _hhmm(s: str) -> str:
     return f"{int(h):02d}:{int(m):02d}"
 
 
+def _is_time(s: str) -> bool:
+    m = re.fullmatch(r"(\d{1,2}):(\d\d)", s.strip())
+    return bool(m) and int(m.group(1)) < 24 and int(m.group(2)) < 60
+
+
 # -- the state (this computer's) --------------------------------------------------------------------------------------
 
+def state_path() -> Path:
+    return Path(os.environ.get("HQ_CYCLES_STATE") or (folder() / STATE_REL))
+
+
+_lock = hqlock.For(lambda: state_path())
+
+
 def _state() -> dict:
-    try:
-        d = json.loads(STATE.read_text(encoding="utf8"))
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    p = state_path()
+    for f in (p,) if os.environ.get("HQ_CYCLES_STATE") or p.exists() else (p, OLD_STATE):
+        try:
+            d = json.loads(f.read_text(encoding="utf8"))
+            return d if isinstance(d, dict) else {}
+        except (OSError, ValueError):
+            pass
+    return {}
 
 
 def _save_state(d: dict) -> None:
-    STATE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE.with_name(STATE.name + ".tmp")
+    p = state_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = hqlock.tmp(p)
     tmp.write_text(json.dumps(d, indent=1, ensure_ascii=False) + "\n", encoding="utf8")
-    os.replace(tmp, STATE)
+    os.replace(tmp, p)
+
+
+@contextlib.contextmanager
+def held():
+    """The state, read, changed and written under one lock across processes (a run's text and the routine's minute both
+    write it); nested, the same dict. Written only when it changed, and on the main only, by who calls this. What's to
+    be texted goes out after the lock is let go (_say_now), since a push can take a while."""
+    if getattr(_tls, "d", None) is not None:
+        yield _tls.d
+        return
+    _tls.out = []
+    try:
+        with _lock:
+            d = _tls.d = _state()
+            was = json.dumps(d, sort_keys=True)
+            try:
+                yield d
+            finally:
+                _tls.d = None
+                if json.dumps(d, sort_keys=True) != was:
+                    _save_state(d)
+    finally:
+        out, _tls.out = _tls.out, []
+        for a in out:
+            send(*a)
 
 
 def _agent_state(d: dict, aid: str) -> dict:
-    return d.setdefault("agents", {}).setdefault(aid, {"goals": {}, "boxed_streak": 0, "texts": {}, "batch": [],
-                                                       "asked": {}, "processed": [], "steps": {}, "skipped": {}})
+    st = d.setdefault("agents", {}).setdefault(aid, {})
+    for k, v in (("goals", {}), ("boxed_streak", 0), ("texts", {}), ("own_texts", {}), ("batch", []), ("later", []), ("asked", {}), ("asks", {}), ("processed", []),
+                 ("steps", {}), ("skipped", {}), ("held_out", {}), ("started", {}), ("run_start", {}), ("refusals", {}), ("back", {}), ("failing", {})):
+        st.setdefault(k, v)
+    return st
 
 
 # -- the agents and their lines -----------------------------------------------------------------------------------------
@@ -304,6 +368,8 @@ def parse(text: str) -> dict | None:
     """What a job or item is, when it's an agent's: {"agent", "kind" (session, look, review, step), "name", "k",
     "stamp", "goal", "item"} or None."""
     t = " ".join((text or "").split())
+    if t.startswith("Rerun of job") and "Then the job as it was: " in t:  # harm 1: whatever wrapped it, it's still hers
+        t = t.split("Then the job as it was: ", 1)[1]
     m = _JOB_HEAD.match(t)
     item = int(m.group(1)) if m else None
     if m:
@@ -364,6 +430,15 @@ def wanted(now: dt.datetime | None = None, base: Path | None = None) -> list[dic
     return out
 
 
+def _item_fits(item: dict, w: dict) -> bool:
+    """The repeating item is where the settings say: its day and its time."""
+    try:
+        at = dt.datetime.strptime(item["at"], FMT)
+    except ValueError:
+        return False
+    return item.get("every") == w["every"] and at.strftime("%H:%M") == w["at"] and (w["every"] == "day" or DAYS[at.weekday()] == w["every"])
+
+
 def reconcile(now: dt.datetime | None = None, base: Path | None = None, log=None) -> list[str]:
     """The planned items follow the settings: with the feature off (or an agent off) her cycles are cancelled; on,
     every cycle she should have is planned as a repeating priority item, once."""
@@ -386,10 +461,15 @@ def reconcile(now: dt.datetime | None = None, base: Path | None = None, log=None
             if j["state"] == "ready" or j["state"].startswith("held"):
                 _jobs("stop", str(j["n"]))
                 did.append(f"cancelled job {j['n']}: the feature is off")
-    have = {i["text"] for i in waiting}
     for w in want:
-        if w["text"] in have:
+        mine = [i for i in waiting if i["text"] == w["text"]]
+        rep = next((i for i in mine if i.get("every")), None)
+        if mine and not rep:  # a one-off (planned again for the morning) stands in for it until it has gone
             continue
+        if rep and _item_fits(rep, w):
+            continue
+        if rep:  # harm 11: a new time or day: the planned item follows the settings, within the minute
+            _schedule("cancel", str(rep["n"]))
         when = f"{w['every']} {w['at']}" if w["every"] != "day" else w["at"]
         code, out = _schedule("add", when, w["text"], "--priority", "--every", w["every"], "--kind", f"cycle-{w['agent']}")
         did.append(f"planned {w['agent']}'s {w['name']}: {out.splitlines()[0][:120] if out else code}")
@@ -431,8 +511,10 @@ def useful_until(parsed: dict, a: dict, job_at: dt.datetime, now: dt.datetime) -
         return job_at + dt.timedelta(hours=23) if any(lk.get("every", "day") == "day" for lk in a.get("looks") or [] if lk.get("name") == parsed["name"]) else job_at + dt.timedelta(days=6)
     if parsed["kind"] == "review":
         return job_at + dt.timedelta(days=1)
+    # a step: what the plan says (until the next one, her own until); one from before that: a while after its time
     hi = _t((a.get("hours") or ["08:00", "22:00"])[1])
-    return job_at.replace(hour=hi.hour, minute=hi.minute, second=0, microsecond=0)
+    end = job_at.replace(hour=hi.hour, minute=hi.minute, second=0, microsecond=0)
+    return min(end, job_at + dt.timedelta(minutes=STEP_GRACE))
 
 
 def used(aid: str, since: float, kinds: tuple = ("cycle", "step")) -> float:
@@ -482,77 +564,155 @@ def over_share(sh: dict, est: float) -> str | None:
     return None
 
 
+def _minutes_left(a: dict, now: dt.datetime) -> float:
+    hi = _t((a.get("hours") or ["08:00", "22:00"])[1])
+    return (now.replace(hour=hi.hour, minute=hi.minute, second=0, microsecond=0) - now.replace(second=0, microsecond=0)).total_seconds() / 60
+
+
 def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None, log=None) -> str:
     """Before the routine starts a cycle job (tick.py, with the jobs' gate after it): "go", "wait" (before her hours;
     nothing else starts meanwhile, the queue is the lane) or "skipped" (cancelled on the queue, written in her ledger:
-    outside her hours at the day's end, past its useful-until, over her share, a step past the day's count, or the
-    feature off)."""
+    held while it ran, outside her hours at the day's end, a box that doesn't fit before they end, past its useful-until,
+    over her share, a step past the day's count, or the feature off)."""
     now = now or dt.datetime.now()
     p = parse(job.get("text", ""))
     if not p:
         return "go"
+    settle(now, base, log)  # a run that just ended counts before the next one starts, whichever way it ended
     aid = p["agent"]
     a = agent_settings(aid, base)
-    d = _state()
-    st = _agent_state(d, aid)
-    job_at = _job_at(job, now)
+    with held() as d:
+        st = _agent_state(d, aid)
+        job_at = _job_at(job, now)
+        rec = st["steps"].get(_step_key(p)) if p["kind"] == "step" else None
 
-    def skip(why: str, morning: bool = False) -> str:
-        _jobs("stop", str(job["n"]))
+        def skip(why: str, morning: bool = False, ran: bool = False, tomorrow: bool = False) -> str:
+            if ran:  # it ran, and was held: what it used is hers, and the minute's ledger line says how it went
+                _charge(job, now)
+                st["held_out"][str(job["n"])] = why
+            _jobs("stop", str(job["n"]))
+            if p["kind"] == "fix":
+                import review
+                if not job.get("state", "").startswith("held"):  # F86: a round that never ran doesn't count; a held one ran
+                    review.round_refund(p["label"], p["mode"])
+                elif p["mode"] == "mark" and review.mark_ended(p["label"], f"her mark's run was held and then dropped: {why}"):  # a mark gets one run: never lost in silence
+                    ledger.note(aid, f"{p['label']} on the sit-down list: passed by the review, not marked")
+            ledger.entry(aid, f"{p['name']} skipped (job {job['n']})", [f"skipped: {why}"], now)
+            if not ran:
+                st["skipped"][str(job["n"])] = why
+            if rec is not None:
+                rec["state"] = "skipped"
+                _order_back(aid, rec, why, base)
+            if morning and p["kind"] in ("session", "review"):
+                _again(aid, p, a, job_at, now, base, tomorrow)
+            if log:
+                log(f"cycles: job {job['n']} ({aid}, {p['name']}) skipped: {why}")
+            return "skipped"
+
+        if job.get("state", "").startswith("held"):  # harm 2: the handbook: a boxed or held step is never retried by the runner
+            return skip("it was held while it ran, and a held run is never started again; the next bigger session decides", ran=True)
+        if not on(base) or not a.get("on"):
+            return skip("the agents running themselves is off" if not on(base) else "she's switched off")
+        if not in_hours(a, now):
+            lo, hi = a.get("hours") or ["08:00", "22:00"]
+            if now.time() >= _t(hi):
+                return skip(f"the day's hours end at {hi}; nothing of hers runs at night", morning=True)
+            return "wait"
+        u = _until(rec) if rec and rec.get("until") else useful_until(p, a, job_at, now)
+        if u and now > u:
+            return skip(f"too late to be useful (until {u:%A %H:%M})")
+        bx = box(p, base)["minutes"]
+        if a.get("hours", ["", "22:00"])[1] != "23:59" and _minutes_left(a, now) < bx:  # harm: the night: nothing of hers reaches past the hours' end
+            return skip(f"its box of {bx:g} minutes doesn't fit before the day's hours end; nothing of hers runs at night", morning=True, tomorrow=True)
+        why = over_share(shares(aid, now, base), _round_points(base) if p["kind"] == "fix" else _est_weekly(job))  # F86: a round's one price
+        if why:
+            return skip(why)
         if p["kind"] == "fix":
             import review
-            if not job.get("state", "").startswith("held"):  # F86: a round that never ran doesn't count; a held one ran
-                review.round_refund(p["label"], p["mode"])
-            elif p["mode"] == "mark" and review.mark_ended(p["label"], f"her mark's run was held and then dropped: {why}"):  # a mark gets one run: never lost in silence
-                ledger.note(aid, f"{p['label']} on the sit-down list: passed by the review, not marked")
-        ledger.entry(aid, f"{p['name']} skipped (job {job['n']})", [f"skipped: {why}"], now)
-        st["skipped"][str(job["n"])] = why
-        if morning and p["kind"] == "session":
-            lo = (a.get("hours") or ["08:00", "22:00"])[0]
-            nxt = (now + dt.timedelta(days=1)).replace(hour=_t(lo).hour, minute=_t(lo).minute, second=0, microsecond=0)
-            u = useful_until(p, a, job_at, now)
-            if u and u > nxt:
-                _schedule("add", nxt.strftime(FMT), cycle_text(aid, p["name"]), "--priority", "--kind", f"cycle-{aid}")
-                ledger.note(aid, f"planned again for {nxt:%A %H:%M}, inside its useful-until")
-        _save_state(d)
-        if log:
-            log(f"cycles: job {job['n']} ({aid}, {p['name']}) skipped: {why}")
-        return "skipped"
-
-    if not on(base) or not a.get("on"):
-        return skip("the agents running themselves is off" if not on(base) else "she's switched off")
-    if not in_hours(a, now):
-        lo, hi = a.get("hours") or ["08:00", "22:00"]
-        if now.time() >= _t(hi):
-            return skip(f"the day's hours end at {hi}; nothing of hers runs at night", morning=True)
-        return "wait"
-    u = useful_until(p, a, job_at, now)
-    if u and now > u:
-        return skip(f"too late to be useful (until {u:%A %H:%M})")
-    why = over_share(shares(aid, now, base), _round_points(base) if p["kind"] == "fix" else _est_weekly(job))  # F86: a round's one price
-    if why:
-        return skip(why)
-    if p["kind"] == "fix":
-        import review
-        if not review.round_wanted(p["label"], p["mode"]):
-            return skip("the row no longer needs it (changed or settled since)")
-    if p["kind"] == "step":
-        today = now.strftime("%Y-%m-%d")
-        n = sum(1 for k, v in st["steps"].items() if v.get("day") == today and v.get("started"))
-        if n >= int(a["step"].get("most_a_day") or 3):
-            return skip(f"the day's steps are used up ({n})")
-        why = stale(aid, p, d)
-        if why:
-            _jobs("stop", str(job["n"]))
-            ledger.entry(aid, f"step {p['k']} stale (job {job['n']})", [f"stale: {why}; not run"], now)
-            rec = st["steps"].get(_step_key(p)) or {}
-            rec["state"] = "stale"
-            st["steps"][_step_key(p)] = rec
-            _save_state(d)
-            if log:
-                log(f"cycles: job {job['n']} ({aid}, step {p['k']}) stale: {why}")
-            return "skipped"
+            if not review.round_wanted(p["label"], p["mode"]):
+                return skip("the row no longer needs it (changed or settled since)")
+        if p["kind"] == "step":
+            today = now.strftime("%Y-%m-%d")
+            n = st["started"].get(today, 0)
+            if n >= int(a["step"].get("most_a_day") or 3) and not (rec or {}).get("order"):  # his own "now" is his to give; it still counts
+                return skip(f"the day's steps are used up ({n})")
+            if rec is None:  # harm 16: no record of its plan here: nothing to check its inputs against, so it doesn't run
+                return skip("its plan isn't on record on this computer, so its inputs can't be checked")
+            why = stale(aid, p, d, base)
+            if why:
+                _jobs("stop", str(job["n"]))
+                st["skipped"][str(job["n"])] = why
+                ledger.entry(aid, f"step {p['k']} stale (job {job['n']})", [f"stale: {why}; not run"], now)
+                rec["state"] = "stale"  # quiet: he may well have done the thing; the goal stays free for her next plan
+                if log:
+                    log(f"cycles: job {job['n']} ({aid}, step {p['k']}) stale: {why}")
+                return "skipped"
     return "go"
+
+
+def started(job: dict, parsed: dict, now: dt.datetime | None = None) -> None:
+    """The routine really started this run (tick.start): the day's step count, and when it began."""
+    now = now or dt.datetime.now()
+    with held() as d:
+        st = _agent_state(d, parsed["agent"])
+        st["run_start"] = {k: v for k, v in list(st["run_start"].items())[-20:]}
+        st["run_start"][str(job["n"])] = now.strftime(FMT)
+        if parsed["kind"] == "step":
+            today = now.strftime("%Y-%m-%d")
+            st["started"] = {today: st["started"].get(today, 0) + 1}
+            rec = st["steps"].get(_step_key(parsed))
+            if rec is not None:
+                rec["state"], rec["started"] = "started", now.strftime(FMT)
+
+
+def out_of_hours(job: dict, now: dt.datetime | None = None, base: Path | None = None) -> bool:
+    """A running cycle past the hours' end (her hours changed, or a box's last moments): the routine ends it."""
+    p = parse(job.get("text", ""))
+    if not p:
+        return False
+    return not in_hours(agent_settings(p["agent"], base), now or dt.datetime.now())
+
+
+def _again(aid: str, p: dict, a: dict, job_at: dt.datetime, now: dt.datetime, base: Path | None, tomorrow: bool = False) -> bool:
+    """A session, a look or a review comes back at her next hours, as itself, once it's still useful then. Tomorrow: not again
+    today, where the same check would only send it round."""
+    lo = _t((a.get("hours") or ["08:00", "22:00"])[0])
+    nxt = now if in_hours(a, now) and not tomorrow else (now + (dt.timedelta(days=1) if now.time() >= lo else dt.timedelta(0))).replace(hour=lo.hour, minute=lo.minute, second=0, microsecond=0)
+    u = useful_until(p, a, job_at, now)
+    if not u or u <= nxt:
+        return False
+    _schedule("add", "now" if nxt == now else nxt.strftime(FMT), cycle_text(aid, p["name"]), "--priority", "--kind", f"cycle-{aid}")
+    ledger.note(aid, f"planned again for {nxt:%A %H:%M}, inside its useful-until")
+    return True
+
+
+def _order_back(aid: str, rec: dict, why: str, base: Path | None = None) -> None:
+    """His "now" that didn't get done is never lost: it's open again for her next session, and the ledger says why."""
+    n = rec.get("order")
+    if n:
+        ledger.set_order(aid, n, "open", f"back for her next session: {why}")
+
+
+def _charge(job: dict, now: dt.datetime) -> None:
+    """Harm 3: every run counts against her share, whichever way it ended: done writes its own line; paused, killed, crashed
+    and held get theirs here, from the same count (its own tokens, the readings), else at its estimate, never at nothing."""
+    import estimate
+    import jobs as q
+    n, text = job["n"], job.get("text", "")
+    if any(h.get("n") == n and h.get("cost") for h in estimate.history()):
+        return
+    rec = None
+    try:
+        with q.locked():
+            if not any(h.get("n") == n for h in estimate.history()):
+                rec = estimate.on_done(n, text)
+    except Exception as e:
+        print(f"(a run's cost couldn't be counted: {e!r})", file=sys.stderr)
+    if rec and rec.get("cost"):
+        return
+    est = _est_weekly(job)
+    with q.locked():
+        estimate.fill_cost(n, text, {"five": est, "weekly": est}, now.timestamp())
 
 
 def _job_at(job: dict, now: dt.datetime) -> dt.datetime:
@@ -590,7 +750,7 @@ def box(parsed: dict, base: Path | None = None) -> dict:
 
 def box_args(job: dict, parsed: dict, run_dir: str, base: Path | None = None) -> list[str]:
     b = box(parsed, base)
-    return ["--max-minutes", str(b["minutes"]), "--max-turns", str(b["turns"]), "--box-note",
+    return ["--max-minutes", str(b["minutes"]), "--max-turns", str(b["turns"]), "--agent", parsed["agent"], "--box-note",
             os.path.join(run_dir, f"job-{job['n']}.box.json")] + (["--round", f"{parsed['label']}:{parsed['mode']}"] if parsed["kind"] == "fix" else [])
 
 
@@ -618,15 +778,19 @@ def _rules(aid: str, parsed: dict, a: dict, b: dict) -> str:
              f"python3 \"{ROOT / 'routine' / 'ledger.py'}\" {aid} note \"decision: …, source: …\" for anything else.",
              f"- One question for him, once, in if-then shape (your pick first, both branches): python3 \"{cy}\" ask {aid} \"If …, I'll …; if not, …\". "
              "The same question is never asked twice in a day.",
+             f"- Went stale (what it was for has already happened, or its input no longer holds): python3 \"{cy}\" stale {aid} K \"why\", and end. That's no failure; the goal goes on.",
              "- Writes to a shared file (the planning, the to-do list, the log, the mail list, the calendar) only through HQ's own scripts "
              f"(todo.py, sprint.py, jobs.py, pings.py, python3 \"{ROOT / 'routine' / 'handover.py'}\" edit REL JSON for the log and the mail list), never with an Edit or Write on the file itself: "
              "that's the one place that serializes them (each takes the file's lock); a direct write is refused by this run's hook before it lands, and is a tripwire. Your ledger and your line you write freely.",
-             "- Never send mail, never a calendar change with another person in it, never anything he must say yes to first, never a change to the handbook, "
-             "your section or the settings: those are his (an if-then question instead). Never start another run or plan more than this run's plan.",
-             "- Nothing in what you write goes outside this workspace."]
+             "- Never send mail (a draft at the most), never a calendar change with another person in it, never anything he must say yes to first, never a change to the handbook, "
+             "your section, his vision, his rules or the settings: those are his (an if-then question instead). Never start another run, plan team work, or plan more than this run's plan.",
+             "- Nothing in what you write goes outside this workspace: no curl, gh or git push; this run's hook refuses them. A refused try is logged; a repeat counts against you."]
+    if aid == "donna":
+        lines.append("- His calendar is yours to keep: add, move and remove his own events in Google Calendar by yourself; HQ logs each one in your ledger with what and when, so write nothing extra. "
+                     "An event with another person in it stays a question.")
     if a.get("batches") and aid == "donna":
         lines.append(f"- His low-information diet: your texts come in batches at {' and '.join(a['batches'])}: python3 \"{cy}\" batch {aid} \"…\" queues one for the next batch. "
-                     "Only an appointment ping he asked for, a travel delay, a very important mail with a date inside 48 hours, the game reminder and a tripwire break through on their own.")
+                     "A queued text has a date: it goes out today or not at all, unless you add --until \"friday 12:15\", the moment it stops being true. Only an appointment ping he asked for, a travel delay, a very important mail with a date inside 48 hours, the game reminder and a tripwire break through on their own.")
     return "\n".join(lines)
 
 
@@ -637,9 +801,9 @@ def _plan_shape(aid: str, a: dict, now: dt.datetime) -> str:
             f"python3 \"{cy}\" plan {aid} '{{\"picks\": [{{\"what\": \"…\", \"source\": \"his words of <date>, a rule, a row, the calendar\"}}], "
             f"\"let_go\": [\"…\"], \"steps\": [{{\"goal\": \"one look or one action\", \"done_means\": \"…\", \"inputs\": [{{\"kind\": \"todo\", \"words\": \"…\"}}, "
             f"{{\"kind\": \"row\", \"label\": \"H123\"}}, {{\"kind\": \"mail\", \"words\": \"…\"}}, {{\"kind\": \"calendar\", \"words\": \"…\"}}, {{\"kind\": \"file\", \"path\": \"…\"}}], "
-            f"\"may\": \"what the step may do\", \"at\": \"HH:MM\", \"escalate_when\": \"…\"}}], \"questions\": [\"If …, …; if not, …\"], \"orders_done\": [1]}}'\n"
-            f"At most {PICKS_MOST} picks, at most {a['step'].get('most_a_day', 3)} steps, each at a time today between {lo} and {hi} and after now ({now:%H:%M}), "
-            "each with only the inputs it needs by name (the runner checks they still hold before the step runs; changed, the step is stale and doesn't run); "
+            f"\"may\": \"what the step may do\", \"at\": \"HH:MM\", \"until\": \"HH:MM, when it's too late to be of use (leave it out: until your next step, an hour at the most)\", \"escalate_when\": \"…\"}}], \"questions\": [\"If …, …; if not, …\"], \"orders_done\": [1]}}'\n"
+            f"At most {PICKS_MOST} picks, at most {a['step'].get('most_a_day', 3)} steps a day, a plan written earlier today included, each at a time today between {lo} and {hi} and after now ({now:%H:%M}), "
+            "each with only the inputs it needs by name, and each input there now (the runner checks they still hold before the step runs; changed, the step is stale and doesn't run); "
             f"a step is one look or one action inside its box ({a['step']['minutes']} minutes, {a['step']['turns']} turns). What you let go you name, so it's a decision. "
             "orders_done lists the numbers of his orders this plan takes up. The command refuses a plan with more, or a step without its goal, done_means or time; then fix it and run it again.")
 
@@ -755,7 +919,7 @@ def resolve(inp: dict, base: Path | None = None) -> str:
         if kind == "file":
             p = str(inp.get("path", ""))
             path = (base / p) if not os.path.isabs(p) else Path(p)
-            if ".." in p.split("/") or not path.exists():
+            if ".." in p.split("/") or not path.exists() or not str(path.resolve()).startswith(str(Path(base).resolve()) + os.sep):
                 return "(no such file)"
             t = path.read_text(encoding="utf8", errors="replace")
             m = re.fullmatch(r"(\d+)-(\d+)", str(inp.get("lines", "")))
@@ -778,11 +942,21 @@ def stale(aid: str, parsed: dict, d: dict | None = None, base: Path | None = Non
     rec = _agent_state(d, aid)["steps"].get(_step_key(parsed))
     if not rec:
         return None
-    for inp, fp in zip(rec.get("spec", {}).get("inputs") or [], rec.get("fps") or []):
-        now_fp = _fp(resolve(inp, base))
-        if now_fp != fp:
+    return _changed(rec.get("spec", {}).get("inputs") or [], rec.get("fps") or [], base)
+
+
+def _changed(inputs: list, fps: list, base: Path | None = None) -> str | None:
+    for inp, fp in zip(inputs, fps):
+        if _fp(resolve(inp, base)) != fp:
             return f"its input changed since the plan ({inp.get('kind')} {inp.get('label') or inp.get('words') or inp.get('path') or ''})".strip()
     return None
+
+
+def _until(rec: dict) -> dt.datetime | None:
+    try:
+        return dt.datetime.strptime(rec["until"], FMT)
+    except (KeyError, ValueError):
+        return None
 
 
 def _step_words(aid: str, parsed: dict, spec: dict, base: Path) -> str:
@@ -796,7 +970,7 @@ def _step_words(aid: str, parsed: dict, spec: dict, base: Path) -> str:
     for inp in spec.get("inputs") or []:
         out.append(f"\n[{inp.get('kind')} {inp.get('label') or inp.get('words') or inp.get('path') or ''}]\n{resolve(inp, base)}")
     out.append(f"\nA small step makes no new steps and plans nothing. End with python3 \"{cy}\" done {aid} {parsed['k']} \"what came of it\" "
-               f"(or python3 \"{cy}\" failed {aid} {parsed['k']} \"why\" when the check failed, or an ask when it's outside your limits).")
+               f"(or python3 \"{cy}\" stale {aid} {parsed['k']} \"why\" when there's nothing left to do, python3 \"{cy}\" failed {aid} {parsed['k']} \"why\" when the check failed, or an ask when it's outside your limits).")
     return "\n".join(out)
 
 
@@ -845,12 +1019,50 @@ def _norm_goal(g: str) -> str:
     return re.sub(r"[^a-z0-9 ]", "", " ".join(str(g).lower().split()))[:120]
 
 
+def _stem(w: str) -> str:
+    for end in ("ing", "ers", "er", "ed", "es", "s", "e"):
+        if w.endswith(end) and len(w) - len(end) >= 3:
+            return w[:-len(end)]
+    return w
+
+
+def _meant(words: str) -> set:
+    """What an order or a goal is about: its own words, without the small ones and the stop verbs."""
+    return {_stem(w) for w in _norm_goal(words).split() if w not in _STOP_WORDS and not w.isdigit()}
+
+
+def _about(order_words: str, goal: str) -> bool:
+    """A stop order is about this goal: all it names (of three or more words, two thirds), never a shared small word."""
+    want, have = _meant(order_words), _meant(goal)
+    hit = len(want & have)
+    return bool(want) and (hit == len(want) if len(want) <= 2 else hit >= max(2, (2 * len(want) + 2) // 3))
+
+
+TRIED = ("started", "failed", "boxed", "ended without saying what came of it")
+
+
+def _goal_open(st_: dict, g: str, now: dt.datetime) -> bool:
+    """Harm 7: the same goal tried without getting done: its last real try, in the last week, ended without done. A step that
+    never ran (stale because he did the thing, skipped, past its time) is no try, and neither is one of long ago."""
+    since = (now - dt.timedelta(days=REPEAT_DAYS)).strftime("%Y-%m-%d")
+    tried = False
+    for r in sorted((r for r in st_["steps"].values() if _norm_goal((r.get("spec") or {}).get("goal", "")) == g and r.get("day", "") >= since), key=lambda r: r.get("stamp", "")):
+        if r.get("state") == "done":
+            tried = False
+        elif r.get("state") in TRIED:
+            tried = True
+    return tried
+
+
 def plan(aid: str, raw: str, now: dt.datetime | None = None, base: Path | None = None, job: int | None = None) -> str:
     """The bigger session's plan: checked, written in her ledger, its steps planned as one-off priority items with
-    their inputs fingerprinted. Refuses (ValueError) a plan with too many picks or steps, or a step without its goal,
-    done_means or time."""
+    their inputs fingerprinted. Refuses (ValueError) a plan with too many picks or steps, the day's count included, a step
+    without its goal, done_means or time, an input that isn't there, and a plan from any run but a bigger session."""
     now = now or dt.datetime.now()
     base = base or folder()
+    run = _this_run()
+    if run and run["kind"] != "session":
+        raise ValueError("a small step makes no new steps; only the bigger session plans")
     a = agent_settings(aid, base)
     try:
         p = json.loads(raw)
@@ -862,85 +1074,130 @@ def plan(aid: str, raw: str, now: dt.datetime | None = None, base: Path | None =
     most = int(a["step"].get("most_a_day") or 3)
     if len(picks) > PICKS_MOST:
         raise ValueError(f"at most {PICKS_MOST} picks: the few things, the rest stays in chaos")
-    if len(steps) > most:
-        raise ValueError(f"at most {most} steps a day for you")
     lo, hi = a.get("hours") or ["08:00", "22:00"]
     for i, st in enumerate(steps, 1):
         if not isinstance(st, dict) or not str(st.get("goal", "")).strip() or not str(st.get("done_means", "")).strip():
             raise ValueError(f"step {i} needs its goal and what done means")
         at = str(st.get("at", "")).strip()
-        if not re.fullmatch(r"\d{1,2}:\d\d", at):
+        if not _is_time(at):
             raise ValueError(f"step {i} needs a time today, HH:MM")
         st["at"] = _hhmm(at)
         if not (_t(lo) <= _t(st["at"]) < _t(hi)):
             raise ValueError(f"step {i}'s time {st['at']} is outside your hours {lo} to {hi}")
+        if str(st.get("until", "")).strip() and not (_is_time(str(st["until"])) and _hhmm(str(st["until"])) > st["at"]):
+            raise ValueError(f"step {i}'s until is a time after its own, HH:MM")
         st["inputs"] = [x for x in (st.get("inputs") or []) if isinstance(x, dict) and x.get("kind")]
-    # the share: a session that would push her over it plans fewer steps
-    sh = shares(aid, now, base)
-    d = _state()
-    st_ = _agent_state(d, aid)
+        for x in st["inputs"]:
+            if resolve(x, base).startswith("(no such"):  # harm 16: an input that isn't there now could never go stale
+                raise ValueError(f"step {i}'s input isn't there ({ledger._input_words(x)}): name one that is, or none")
+    stops = [o["words"] for o in ledger.orders(aid, ("open", "planned")) if o["kind"] == "stop"]
+    today = now.strftime("%Y-%m-%d")
     stamp = now.strftime("%Y-%m-%d %H:%M")
-    kept, trip = [], []
-    for i, st in enumerate(steps, 1):
-        g = _norm_goal(st["goal"])
-        before = st_["goals"].get(g) or {}
-        if before.get("tries", 0) >= 1 and not before.get("done"):
-            trip.append(st["goal"])
-            tripwire(aid, "same goal twice", f"\"{st['goal']}\" was tried before without getting done; the step waits for his word", now, base, d)
-            continue
-        kept.append((i, st))
-    stamp_items = []
-    for i, st in kept:
-        fps = [_fp(resolve(x, base)) for x in st["inputs"]]
-        text = step_text(aid, stamp, i, st["goal"])
-        when = f"today {st['at']}" if _t(st["at"]) > now.time() else "now"
-        code, out = _schedule("add", when, text, "--priority", "--kind", f"step-{aid}")
-        m = re.search(r"Item (\d+) is planned", out)
-        st_["steps"][f"{aid}|{stamp}|{i}"] = {"spec": st, "fps": fps, "day": now.strftime("%Y-%m-%d"), "item": int(m.group(1)) if m else None,
-                                             "state": "planned" if code == 0 else "not planned", "stamp": stamp}
-        g = _norm_goal(st["goal"])
-        st_["goals"][g] = {"tries": (st_["goals"].get(g) or {}).get("tries", 0) + 1, "done": False, "at": stamp}
-        stamp_items.append(f"step {i} planned at {st['at']}" + ("" if code == 0 else f" (not planned: {out[:80]})"))
-    for n in p.get("orders_done") or []:
-        try:
-            ledger.set_order(aid, int(n), "planned", f"in the plan of {stamp}")
-        except Exception:
-            pass
-    _save_state(d)
-    p["stamp"] = stamp
-    p["steps"] = [st for _, st in kept]
-    title = ledger.write_plan(aid, p, job, now)
-    for q_ in (p.get("questions") or [])[:QUESTIONS_MOST]:
-        ask(aid, str(q_), now, base)
+    with held() as d:
+        st_ = _agent_state(d, aid)
+        already = sum(1 for r in st_["steps"].values() if r.get("day") == today and not r.get("order") and r.get("state") != "not planned")
+        if already + len(steps) > most:
+            raise ValueError(f"at most {most} steps a day for you: {already} planned today already, this plan has {len(steps)}")
+        kept, trip = [], []
+        for i, st in enumerate(steps, 1):
+            g = _norm_goal(st["goal"])
+            if any(_about(w, st["goal"]) for w in stops):  # on her let-go until she brings it back to him
+                ledger.note(aid, f"left out of the plan, he said to stop it: {st['goal']}")
+                continue
+            if _goal_open(st_, g, now):
+                gr = st_["goals"].setdefault(g, {})
+                trip.append(st["goal"])
+                if (gr.get("tripped") or "") < (now - dt.timedelta(days=REPEAT_DAYS)).strftime("%Y-%m-%d"):  # once; after that it's in the ledger until he answers
+                    gr["tripped"] = today
+                    tripwire(aid, "same goal twice", f"\"{st['goal']}\" was tried before without getting done; the step waits for his word", now, base)
+                else:
+                    ledger.note(aid, f"held again, tried before without done: {st['goal']}")
+                continue
+            kept.append((i, st))
+        times = sorted(st["at"] for _, st in kept)
+        stamp_items = []
+        for i, st in kept:
+            fps = [_fp(resolve(x, base)) for x in st["inputs"]]
+            text = step_text(aid, stamp, i, st["goal"])
+            when = f"today {st['at']}" if _t(st["at"]) > now.time() else "now"
+            code, out = _schedule("add", when, text, "--priority", "--kind", f"step-{aid}")
+            m = re.search(r"Item (\d+) is planned", out)
+            st_["steps"][f"{aid}|{stamp}|{i}"] = {"spec": st, "fps": fps, "day": today, "item": int(m.group(1)) if m else None,
+                                                 "state": "planned" if code == 0 else "not planned", "stamp": stamp,
+                                                 "until": _step_until(st, times, now, a).strftime(FMT)}
+            stamp_items.append(f"step {i} planned at {st['at']}" + ("" if code == 0 else f" (not planned: {out[:80]})"))
+        cut = (now - dt.timedelta(days=30)).strftime("%Y-%m-%d")
+        st_["steps"] = {k: v for k, v in st_["steps"].items() if v.get("day", "") >= cut}
+        for n in p.get("orders_done") or []:
+            try:
+                ledger.set_order(aid, int(n), "planned", f"in the plan of {stamp}")
+            except Exception:
+                pass
+        p["stamp"] = stamp
+        p["steps"] = [st for _, st in kept]
+        title = ledger.write_plan(aid, p, job, now)
+        for q_ in (p.get("questions") or [])[:QUESTIONS_MOST]:
+            ask(aid, str(q_), now, base)
     return (f"Plan written in {aid}'s ledger ({title}): {len(picks)} picks, {len(kept)} steps" + (f" ({', '.join(stamp_items)})" if stamp_items else "")
             + (f"; {len(trip)} step(s) held: the same goal was tried before without done" if trip else "") + ".")
 
 
-def step_done(aid: str, k: int, what: str, failed: bool = False, now: dt.datetime | None = None, base: Path | None = None) -> str:
+def _step_until(st: dict, times: list, now: dt.datetime, a: dict) -> dt.datetime:
+    """Harm 16: when a step stops being of use: her own until, else the next step's time, at the most STEP_GRACE after its own."""
+    day = now.replace(second=0, microsecond=0)
+    at = day.replace(hour=_t(st["at"]).hour, minute=_t(st["at"]).minute)
+    at = max(at, day)
+    end = day.replace(hour=_t(a["hours"][1]).hour, minute=_t(a["hours"][1]).minute)
+    if str(st.get("until", "")).strip():
+        u = _t(_hhmm(str(st["until"])))
+        return min(end, day.replace(hour=u.hour, minute=u.minute))
+    later = [x for x in times if x > st["at"]]
+    nxt = day.replace(hour=_t(later[0]).hour, minute=_t(later[0]).minute) if later else end
+    return min(end, nxt, at + dt.timedelta(minutes=STEP_GRACE))
+
+
+def _this_run() -> dict | None:
+    """The cycle job this process is part of (the runner sets HQ_JOB on her run), or None: a call, a person, the routine."""
+    n = os.environ.get("HQ_JOB") or ""
+    if not n.isdigit():
+        return None
+    try:
+        import jobs as q
+        j = next((x for x in q.read()[1] if x["n"] == int(n)), None)
+    except Exception:
+        return None
+    return parse(j["text"]) if j else None
+
+
+def step_done(aid: str, k: int, what: str, failed: bool = False, now: dt.datetime | None = None, base: Path | None = None, gone_stale: bool = False) -> str:
     """A small step says what came of it (her own run writes it): the ledger, the goal's record, a check failing
-    twice as a tripwire."""
+    twice as a tripwire. Stale: nothing was left to do; it ends quietly and the goal goes on."""
     now = now or dt.datetime.now()
-    d = _state()
-    st_ = _agent_state(d, aid)
-    cands = [(key, v) for key, v in st_["steps"].items() if key.endswith(f"|{k}") and v.get("state") not in ("stale",)]
-    cands.sort(key=lambda kv: kv[1].get("stamp", ""))
-    key, rec = (cands[-1] if cands else (None, None))
-    goal = (rec or {}).get("spec", {}).get("goal", f"step {k}")
-    g = _norm_goal(goal)
-    gr = st_["goals"].setdefault(g, {"tries": 1, "done": False})
-    if failed:
-        gr["failed"] = gr.get("failed", 0) + 1
-        if rec is not None:
-            rec["state"] = "failed"
-        ledger.note(aid, f"step {k} failed: {what}")
-        if gr["failed"] >= 2:
-            tripwire(aid, "a check failing twice", f"the check of \"{goal}\" failed twice ({what[:120]}); the step waits for his word", now, base, d)
-    else:
-        gr["done"] = True
-        if rec is not None:
-            rec["state"] = "done"
-        ledger.note(aid, f"step {k} done: {what}")
-    _save_state(d)
+    with held() as d:
+        st_ = _agent_state(d, aid)
+        cands = [(key, v) for key, v in st_["steps"].items() if key.endswith(f"|{k}") and v.get("state") not in ("stale",)]
+        cands.sort(key=lambda kv: kv[1].get("stamp", ""))
+        key, rec = (cands[-1] if cands else (None, None))
+        goal = (rec or {}).get("spec", {}).get("goal", f"step {k}")
+        g = _norm_goal(goal)
+        gr = st_["goals"].setdefault(g, {})
+        if gone_stale:
+            if rec is not None:
+                rec["state"] = "stale"
+            ledger.note(aid, f"step {k} stale: {what}")
+            return f"Step {k} is stale, written in {aid}'s ledger; the goal stays open for a next plan."
+        if failed:
+            gr["failed"] = gr.get("failed", 0) + 1
+            if rec is not None:
+                rec["state"] = "failed"
+            ledger.note(aid, f"step {k} failed: {what}")
+            if gr["failed"] >= 2:
+                tripwire(aid, "a check failing twice", f"the check of \"{goal}\" failed twice ({what[:120]}); the step waits for his word", now, base)
+        else:
+            gr["done"], gr["failed"] = True, 0
+            if rec is not None:
+                rec["state"] = "done"
+            ledger.note(aid, f"step {k} done: {what}")
     return f"Step {k} {'failed' if failed else 'done'}, written in {aid}'s ledger."
 
 
@@ -950,68 +1207,198 @@ def _today(now: dt.datetime) -> str:
     return now.strftime("%Y-%m-%d")
 
 
+def asleep(now: dt.datetime) -> bool:
+    """He's asleep (H212: his calendar's Sleep block, else the night hours). A test says so itself with HQ_ASLEEP."""
+    if os.environ.get("HQ_ASLEEP") in ("0", "1"):
+        return os.environ["HQ_ASLEEP"] == "1"
+    try:
+        import pings
+        return pings._asleep(now.timestamp())
+    except Exception:
+        return False
+
+
+def _day_end(a: dict, now: dt.datetime) -> dt.datetime:
+    hi = _t((a.get("hours") or ["08:00", "22:00"])[1])
+    return now.replace(hour=hi.hour, minute=hi.minute, second=0, microsecond=0)
+
+
+def _true(e: dict, now: dt.datetime, base: Path | None = None) -> str | None:
+    """Why a queued text isn't true any more, or None. It has a date, and what it stood on is still there."""
+    try:
+        if now > dt.datetime.strptime(e["until"], FMT):
+            return f"past its time ({e['until']})"
+    except (KeyError, ValueError):
+        return "it has no date"
+    return _changed(e.get("inputs") or [], e.get("fps") or [], base)
+
+
+def say(aid: str, text: str, why: str, now: dt.datetime, base: Path | None = None, until: dt.datetime | None = None) -> str:
+    """Her text now, or when he's up: due during his Sleep it waits until the block ends, and goes only if it's still true
+    then (the same way HQ's other texts do, H212). Goes out after the state's lock is let go."""
+    a = agent_settings(aid, base)
+    with held() as d:
+        if asleep(now):
+            end = until or (_day_end(a, now) if _day_end(a, now) > now else _day_end(a, now) + dt.timedelta(days=1))
+            _agent_state(d, aid)["later"].append({"text": text, "why": why, "at": now.strftime(FMT), "until": end.strftime(FMT), **_stands_on(aid, base)})
+            return "later"
+        _tls.out.append((aid, text, why, base))
+    return "sent"
+
+
+def _stands_on(aid: str, base: Path | None = None) -> dict:
+    """What a text from this run stands on: the step's inputs as they are now. Changed by the time it goes, it isn't true."""
+    run = _this_run()
+    if not run or run["kind"] != "step" or run["agent"] != aid:
+        return {}
+    rec = _agent_state(_state(), aid)["steps"].get(_step_key(run)) or {}
+    inputs = (rec.get("spec") or {}).get("inputs") or []
+    return {"inputs": inputs, "fps": [_fp(resolve(x, base)) for x in inputs]} if inputs else {}
+
+
+def later(now: dt.datetime | None = None, base: Path | None = None, log=None) -> list[str]:
+    """What waited for him to wake up goes now, each only while it's true."""
+    now = now or dt.datetime.now()
+    did = []
+    if asleep(now):
+        return did
+    with held() as d:
+        for aid in list((d.get("agents") or {})):
+            st_ = _agent_state(d, aid)
+            for e in st_["later"]:
+                no = _true(e, now, base)
+                if no:
+                    ledger.note(aid, f"not sent, {no}: {e['text'][:160]}")
+                else:
+                    _tls.out.append((aid, e["text"], e.get("why", "cycle"), base))
+                    did.append(f"{aid}: a text that waited for him to wake up")
+            st_["later"] = []
+    if log:
+        for x in did:
+            log(f"cycles: {x}")
+    return did
+
+
+def _batch_times(a: dict, now: dt.datetime, sent: str | None) -> list[dt.datetime]:
+    """The batch times still to come today (one in its quarter of an hour counts, if it hasn't gone)."""
+    out = []
+    for t in a.get("batches") or []:
+        bt = now.replace(hour=_t(t).hour, minute=_t(t).minute, second=0, microsecond=0)
+        if (bt > now or bt <= now < bt + dt.timedelta(minutes=15)) and sent != f"{_today(now)} {t}":
+            out.append(bt)
+    return sorted(out)
+
+
+def _when(words: str, now: dt.datetime) -> dt.datetime | None:
+    """A moment in plain words: HH:MM, tomorrow HH:MM, friday HH:MM or YYYY-MM-DD HH:MM; the next one."""
+    w = " ".join(str(words).lower().split())
+    try:
+        return dt.datetime.strptime(w, FMT)
+    except ValueError:
+        pass
+    m = re.fullmatch(r"(?:(today|tomorrow|\w+day) )?(\d{1,2}:\d\d)", w)
+    if not m or not _is_time(m.group(2)):
+        return None
+    t = _t(m.group(2))
+    at = now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+    if m.group(1) == "tomorrow":
+        return at + dt.timedelta(days=1)
+    if m.group(1) in DAYS:
+        return at + dt.timedelta(days=(DAYS.index(m.group(1)) - now.weekday()) % 7 or (7 if at <= now else 0))
+    if m.group(1) in (None, "today"):
+        return at if at > now or m.group(1) else at + dt.timedelta(days=1)
+    return None
+
+
 def ask(aid: str, text: str, now: dt.datetime | None = None, base: Path | None = None) -> str:
-    """One question for him on her line, in if-then shape, never the same one twice in a day. Donna's goes into her
-    next batch (unless she has no batches); the others' go now."""
+    """One question for him on her line, in if-then shape, never the same one twice in a day, at most ASKS_A_DAY a day. With
+    batches it goes into her next one, however far that is; without, now (or when he's up)."""
     now = now or dt.datetime.now()
     text = " ".join(str(text).split())
     if not text:
         return "An ask needs words."
-    d = _state()
-    st_ = _agent_state(d, aid)
-    key = _norm_goal(text)
-    asked = st_["asked"]
-    if asked.get(key) == _today(now):
-        _save_state(d)
-        return "Already asked today; not asked again."
-    asked[key] = _today(now)
     a = agent_settings(aid, base)
-    ledger.note(aid, f"escalated: {text}")
-    if a.get("batches"):
-        st_["batch"].append({"text": text, "at": now.strftime(FMT)})
-        _save_state(d)
-        return f"Queued for {aid}'s next batch ({', '.join(a['batches'])})."
-    _save_state(d)
-    send(aid, text, "cycle-ask", base)
+    with held() as d:
+        st_ = _agent_state(d, aid)
+        key = _norm_goal(text)
+        asked = st_["asked"]
+        today = _today(now)
+        if asked.get(key) == today:
+            return "Already asked today; not asked again."
+        if st_["asks"].get(today, 0) >= ASKS_A_DAY:
+            ledger.note(aid, f"kept for Friday, the day's questions are used up: {text}")
+            return f"The day's {ASKS_A_DAY} questions are used up; it's in the ledger for Friday."
+        asked[key] = today
+        st_["asks"] = {today: st_["asks"].get(today, 0) + 1}
+        ledger.note(aid, f"escalated: {text}")
+        if a.get("batches"):
+            nxt = _batch_times(a, now, st_.get("batch_sent")) or [(now + dt.timedelta(days=1)).replace(hour=_t(a["batches"][0]).hour, minute=_t(a["batches"][0]).minute, second=0, microsecond=0)]
+            st_["batch"].append({"text": text, "at": now.strftime(FMT), "until": (nxt[0] + dt.timedelta(minutes=15)).strftime(FMT)})
+            return f"Queued for {aid}'s next batch ({', '.join(a['batches'])})."
+        say(aid, text, "cycle-ask", now, base)
     return f"Asked on {aid}'s line."
 
 
-def batch(aid: str, text: str, now: dt.datetime | None = None, base: Path | None = None) -> str:
+def batch(aid: str, text: str, now: dt.datetime | None = None, base: Path | None = None, until: str | None = None) -> str:
+    """A text for her next batch. It has a date: today's, or the moment she names; it goes out only while it's true, so a
+    Friday text never lands on a Saturday. With no batch left before its date it isn't queued, and she's told."""
     now = now or dt.datetime.now()
     text = " ".join(str(text).split())
     if not text:
         return "A batch text needs words."
     a = agent_settings(aid, base)
-    d = _state()
-    st_ = _agent_state(d, aid)
-    if not a.get("batches"):
-        _save_state(d)
-        send(aid, text, "cycle", base)
-        return f"{aid} has no batches: sent on her line now."
-    st_["batch"].append({"text": text, "at": now.strftime(FMT)})
-    _save_state(d)
-    return f"Queued for {aid}'s next batch ({', '.join(a['batches'])})."
+    end = None
+    if until:
+        end = _when(until, now)
+        if end is None or end <= now:
+            return f"Not queued: --until is a moment still to come, like 17:30, tomorrow 12:15 or friday 12:15 (\"{until}\")."
+    with held() as d:
+        st_ = _agent_state(d, aid)
+        if not a.get("batches"):
+            say(aid, text, "cycle", now, base, end)
+            return f"{aid} has no batches: on her line now."
+        sent = st_.get("batch_sent")
+        times = _batch_times(a, now, sent)
+        for i in range(1, 8):  # the batches of the coming days, for a later date
+            day = now + dt.timedelta(days=i)
+            times += [day.replace(hour=_t(x).hour, minute=_t(x).minute, second=0, microsecond=0) for x in a["batches"]]
+        last = end or (_day_end(a, now) if _day_end(a, now) > now else now)
+        if not [x for x in sorted(times) if x <= last]:
+            return (f"Not queued: today's last batch has gone, and a queued text has a date. If it's still true later, say until when with --until; "
+                    "if not, it stays in your ledger.")
+        st_["batch"].append({"text": text, "at": now.strftime(FMT), "until": last.strftime(FMT), **_stands_on(aid, base)})
+    return f"Queued for {aid}'s next batch ({', '.join(a['batches'])}), good until {last:%A %H:%M}."
 
 
 def send_batches(now: dt.datetime | None = None, base: Path | None = None, log=None) -> list[str]:
-    """At each batch time (within the quarter after it), what's queued goes out as one text."""
+    """At each batch time (within the quarter after it), what's queued and still true goes out as one text. What's past
+    its date or stands on something that changed is dropped, with a line in her ledger, at any minute."""
     now = now or dt.datetime.now()
-    d = _state()
     did = []
-    for aid, a in settings(base)["agents"].items():
-        st_ = _agent_state(d, aid)
-        for t in a.get("batches") or []:
-            bt = now.replace(hour=_t(t).hour, minute=_t(t).minute, second=0, microsecond=0)
-            key = f"{_today(now)} {t}"
-            if bt <= now < bt + dt.timedelta(minutes=15) and st_.get("batch_sent") != key:
-                st_["batch_sent"] = key
-                if st_["batch"]:
-                    texts = [x["text"] for x in st_["batch"]]
-                    st_["batch"] = []
-                    send(aid, " ".join(texts) if len(texts) == 1 else "\n".join(f"- {x}" for x in texts), "cycle-batch", base)
-                    ledger.note(aid, f"batch at {t}: {len(texts)} text(s) sent")
-                    did.append(f"{aid}'s {t} batch: {len(texts)} text(s)")
-    _save_state(d)
+    with held() as d:
+        for aid, a in settings(base)["agents"].items():
+            st_ = _agent_state(d, aid)
+            keep = []
+            for e in st_["batch"]:
+                e.setdefault("until", (dt.datetime.strptime(e.get("at", now.strftime(FMT)), FMT).replace(hour=23, minute=59)).strftime(FMT))  # queued before they had a date: that day
+                no = _true(e, now, base)
+                if no:
+                    ledger.note(aid, f"not sent, {no}: {e['text'][:160]}")
+                else:
+                    keep.append(e)
+            st_["batch"] = keep
+            for t in a.get("batches") or []:
+                bt = now.replace(hour=_t(t).hour, minute=_t(t).minute, second=0, microsecond=0)
+                key = f"{_today(now)} {t}"
+                if bt <= now < bt + dt.timedelta(minutes=15) and st_.get("batch_sent") != key:
+                    st_["batch_sent"] = key
+                    if st_["batch"]:
+                        texts = [x["text"] for x in st_["batch"]]
+                        until = min(dt.datetime.strptime(x["until"], FMT) for x in st_["batch"])
+                        st_["batch"] = []
+                        say(aid, " ".join(texts) if len(texts) == 1 else "\n".join(f"- {x}" for x in texts), "cycle-batch", now, base, until)
+                        ledger.note(aid, f"batch at {t}: {len(texts)} text(s) sent")
+                        did.append(f"{aid}'s {t} batch: {len(texts)} text(s)")
     if log:
         for x in did:
             log(f"cycles: {x}")
@@ -1026,121 +1413,181 @@ TRIPWIRE_WORDS = {
     "an action outside my limits": "If you want it done, say yes and I'll do exactly that; if not, I leave it as it is.",
     "a write to a shared file outside the serialized place": "If you want that change, say go and I'll make it through HQ's own scripts; if not, nothing changed.",
     "a Ready mark refused on its fields": "If you give me the quote and the sources I'll mark it ready; if not, it stays on the sit-down list for Friday.",
+    "a run of mine failed": "If you want me to look at it now, say so; if not, I try again at its next time.",
 }
 
 
 def tripwire(aid: str, kind: str, detail: str, now: dt.datetime | None = None, base: Path | None = None, d: dict | None = None,
              text: bool = True) -> str:
-    """Counted by the runner: a line in her ledger, and one message on her line in if-then shape, at most her texts
-    a day; past that, the ledger only. A caller holding the state passes it (d) and saves it itself. text=False: the
-    ledger only, for a run that already put the same thing to him (F86: one text)."""
+    """Counted by the runner: a line in her ledger, and one message on her line in if-then shape, in plain words, at most her
+    texts a day; past that, the ledger only. text=False: the ledger only, for a run that already put the same thing to him (F86:
+    one text). Her own daily texts have a count of their own, so a tripwire never uses up her real reminder."""
     now = now or dt.datetime.now()
-    own = d is None
-    d = _state() if own else d
-    st_ = _agent_state(d, aid)
-    ledger.note(aid, f"tripwire ({kind}): {detail}")
-    if "refus" in kind:  # F103: a refused try is also on the one ledger the score reads
-        import mistakes
-        mistakes.add("refused", aid, f"{kind}: {detail}", where="her own cycle", base=base)
-    today = _today(now)
-    sent = st_["texts"].get(today, 0)
-    most = int(agent_settings(aid, base).get("tripwire_texts", 2))
-    if sent >= most or not text:
-        if own:
-            _save_state(d)
-        return "ledger only (the day's texts are used up)" if text else "ledger only (she put it to him herself)"
-    st_["texts"][today] = sent + 1
-    if own:
-        _save_state(d)
-    msg = f"A tripwire on my side: {kind}: {detail}. {TRIPWIRE_WORDS.get(kind, 'Say what you want me to do, and I do that.')}"
-    send(aid, msg, "tripwire", base)
+    with held() as d:
+        st_ = _agent_state(d, aid)
+        ledger.note(aid, f"tripwire ({kind}): {detail}")
+        if "refus" in kind:  # F103: a refused try is also on the one ledger the score reads
+            import mistakes
+            mistakes.add("refused", aid, f"{kind}: {detail}", where="her own cycle", base=base)
+        today = _today(now)
+        sent = st_["texts"].get(today, 0)
+        most = int(agent_settings(aid, base).get("tripwire_texts", 2))
+        if sent >= most or not text:
+            return "ledger only (the day's texts are used up)" if text else "ledger only (she put it to him herself)"
+        st_["texts"] = {today: sent + 1}
+        msg = f"A tripwire on my side: {kind}: {detail}. {TRIPWIRE_WORDS.get(kind, 'Say what you want me to do, and I do that.')}"
+        say(aid, msg, "tripwire", now, base)
     return "texted"
 
 
 # -- after a run: the ledger, the tripwires, the streaks ---------------------------------------------------------------------
 
+def _how_ended(job: dict, note: dict, st_: dict) -> str:
+    state = job.get("state", "")
+    if str(job["n"]) in st_["held_out"]:
+        return "held while it ran, not started again"
+    if note.get("boxed"):
+        return "boxed at its " + note["boxed"]
+    if "by a crash" in state:
+        return "ended by a crash"
+    if state.startswith("paused"):
+        return "paused, it used far more than it should"
+    return "done" if state.startswith("done") else state.split(" ")[0] or "ended"
+
+
+def _failed(job: dict, parsed: dict, note: dict, st_: dict, aid: str) -> str | None:
+    """Why this run failed, in plain words, or None: it stopped by itself without getting through. His stop, a hold, the
+    box and a crash of the computer are something else; a session that ended without a plan is a failure too."""
+    state = job.get("state", "")
+    n = str(job["n"])
+    if n in st_["held_out"] or "by a crash" in state or "hours ended" in state or state.startswith(("stopped", "cancelled")) or note.get("ended_by") == "signal":
+        return None
+    if state.startswith("paused"):
+        return "it used about four times what it should, so HQ stopped it"
+    if state.startswith("ended") or (note and not note.get("boxed") and (note.get("exit") not in (0, None) or note.get("error"))):
+        return "it stopped before it got anywhere" if not note or not note.get("steps") else "it stopped halfway with an error"
+    if parsed["kind"] == "session" and st_["run_start"].get(n):
+        sec, _ = ledger.plan(aid)
+        if not sec or sec["at"] < dt.datetime.strptime(st_["run_start"][n], FMT):
+            return "it ended without writing a plan"
+    return None
+
+
 def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Path | None = None, run_dir: str | None = None, log=None) -> dict:
-    """A finished cycle job, once: its box note into her ledger (minutes, turns, boxed), the tripwires the stream
-    shows (refused, outside her limits, a shared file written directly, a Ready mark refused), boxed twice in a row."""
+    """A run that's over, once, whichever way it ended: what it cost into her share, its box note into her ledger (minutes,
+    turns, how it ended), a run that failed said once, a crashed session back as itself, what the stream shows really
+    happened: a real refusal is logged, a repeat of it or a run that went past the hook is a tripwire, boxed twice in a row."""
     now = now or dt.datetime.now()
     aid = parsed["agent"]
-    d = _state()
-    st_ = _agent_state(d, aid)
-    if job["n"] in st_["processed"]:
-        return {}
-    st_["processed"] = (st_["processed"] + [job["n"]])[-200:]
-    if str(job["n"]) in st_["skipped"]:  # gatekeep stopped it before it ran and already wrote why
-        _save_state(d)
-        return {}
-    run_dir = run_dir or os.environ.get("HQ_JOB_RUN") or os.path.join(hqpaths.HQ, "scratch", "routine")
-    note = {}
-    try:
-        note = json.loads(Path(run_dir, f"job-{job['n']}.box.json").read_text(encoding="utf8"))
-    except (OSError, ValueError):
-        pass
-    cost = ""
-    try:
-        import estimate
-        h = next((h for h in estimate.history() if h.get("n") == job["n"]), None)
-        if h and h.get("cost"):
-            cost = f", cost {h['cost'].get('weekly', 0):g}% of the week"
-    except Exception:
-        pass
-    state = job.get("state", "")
-    how = ("boxed at its " + note["boxed"]) if note.get("boxed") else ("done" if state.startswith("done") else state.split(" ")[0] or "ended")
-    line = f"run: {how} · {note.get('minutes', '?')} min, {note.get('turns', '?')} turns, {note.get('steps', '?')} tool steps{cost} (job {job['n']})"
-    ledger.entry(aid, f"{parsed['name']} ran (job {job['n']})", [line], now)
-    if parsed["kind"] == "step":
-        rec = st_["steps"].get(_step_key(parsed))
+    with held() as d:
+        st_ = _agent_state(d, aid)
+        if job["n"] in st_["processed"]:
+            return {}
+        st_["processed"] = (st_["processed"] + [job["n"]])[-200:]
+        if str(job["n"]) in st_["skipped"]:  # gatekeep stopped it before it ran and already wrote why
+            return {}
+        run_dir = run_dir or os.environ.get("HQ_JOB_RUN") or os.path.join(hqpaths.HQ, "scratch", "routine")
+        note = {}
+        try:
+            note = json.loads(Path(run_dir, f"job-{job['n']}.box.json").read_text(encoding="utf8"))
+        except (OSError, ValueError):
+            pass
+        _charge(job, now)
+        state = job.get("state", "")
+        how = _how_ended(job, note, st_)
+        cost, took = "", {}
+        try:
+            import estimate
+            took = next((h for h in reversed(estimate.history()) if h.get("n") == job["n"]), {})
+            if took.get("cost"):
+                cost = f", cost {took['cost'].get('weekly', 0):g}% of the week" + (" (its estimate, nothing was measured)" if took.get("cost_how") == "estimate" else "")
+        except Exception:
+            pass
+        line = f"run: {how} · {note.get('minutes', took.get('actual', '?'))} min, {note.get('turns', '?')} turns, {note.get('steps', '?')} tool steps{cost} (job {job['n']})"
+        ledger.entry(aid, f"{parsed['name']} ran (job {job['n']})", [line], now)
+        if state.startswith("paused"):
+            _jobs("mark", str(job["n"]), f"ended {now:%H:%M}, paused for its usage; an agent's run isn't resumed")
+        rec = st_["steps"].get(_step_key(parsed)) if parsed["kind"] == "step" else None
         if rec is not None and rec.get("state") in ("planned", "started"):
             rec["state"] = "boxed" if note.get("boxed") else "ended without saying what came of it"
             ledger.note(aid, f"step {parsed['k']}: {rec['state']}")
-    if parsed["kind"] == "fix":  # F86: a round's texts are her sit-down, her no and the cap; what it tried or ran into stays in her ledger
-        import review
-        cut = bool(note.get("boxed") or state.startswith("ended"))
-        ledger.note(aid, f"{parsed['name']}: " + (f"cut off ({note.get('boxed') or state}); " + ("not marked, it stays on her list" if parsed["mode"] == "mark" else
-                                                  "the row stays flagged and not ready, the round counts")
-                                                  if cut else "ended; the review looks again if the words changed"))
-        if parsed["mode"] == "mark":
-            if review.mark_ended(parsed["label"], "her mark's run was cut off" if cut else "her mark's run ended with no mark and nothing for the sit-down list"):
-                ledger.note(aid, f"{parsed['label']} on the sit-down list: passed by the review, not marked")
+            _order_back(aid, rec, f"its run ended ({how}) before it was done", base)
+        if parsed["kind"] == "fix":  # F86: a round's texts are her sit-down, her no and the cap; what it tried or ran into stays in her ledger
+            import review
+            cut = bool(note.get("boxed") or state.startswith("ended") or str(job["n"]) in st_["held_out"])
+            ledger.note(aid, f"{parsed['name']}: " + (f"cut off ({note.get('boxed') or state}); " + ("not marked, it stays on her list" if parsed["mode"] == "mark" else
+                                                      "the row stays flagged and not ready, the round counts")
+                                                      if cut else "ended; the review looks again if the words changed"))
+            if parsed["mode"] == "mark":
+                if review.mark_ended(parsed["label"], "her mark's run was cut off" if cut else "her mark's run ended with no mark and nothing for the sit-down list"):
+                    ledger.note(aid, f"{parsed['label']} on the sit-down list: passed by the review, not marked")
+            else:
+                review.stop_stays(parsed["label"])
+            for r in [x for x in note.get("refused") or [] if _REALLY_REFUSED.search(x.get("said", ""))][:1]:
+                what = "a Ready mark refused" if "sprint.py ready" in r.get("tool", "") else "refused"
+                ledger.note(aid, f"{parsed['name']}: {what}: {_plain(r.get('said', ''))}")
+            if log:
+                log(f"cycles: job {job['n']} ({aid}, {parsed['name']}) {how}")
+            return note
+        if "by a crash" in state and parsed["kind"] in ("session", "look", "review"):  # harm 1: back as itself, once; a step never
+            key = f"{parsed['name']} {_job_at(job, now):%Y-%m-%d %H:%M}"
+            if key not in st_["back"] and _again(aid, parsed, agent_settings(aid, base), _job_at(job, now), now, base):
+                st_["back"] = {**dict(list(st_["back"].items())[-20:]), key: now.strftime(FMT)}
+        # a run that failed says so, once, until one gets through
+        why = _failed(job, parsed, note, st_, aid)
+        if why:
+            ledger.note(aid, f"{parsed['name']} failed: {why}")
+            if not st_["failing"].get("told"):  # once, whatever the day's cap of tripwires says: this one can't wait for the ledger
+                st_["failing"] = {"told": now.strftime(FMT)}
+                say(aid, f"My {parsed['name']} didn't get through: {why}. {TRIPWIRE_WORDS['a run of mine failed']}", "tripwire", now, base)
+        elif state.startswith("done") and not note.get("boxed"):
+            st_["failing"] = {}
+        # boxed twice in a row
+        if note.get("boxed"):
+            st_["boxed_streak"] = st_.get("boxed_streak", 0) + 1
+            if st_["boxed_streak"] >= 2:
+                tripwire(aid, "boxed twice in a row", f"two runs in a row ended at their box ({parsed['name']}, at its {note['boxed']})", now, base)
+                st_["boxed_streak"] = 0
         else:
-            review.stop_stays(parsed["label"])
-        for r in [x for x in note.get("refused") or [] if _REALLY_REFUSED.search(x.get("said", ""))][:1]:
-            what = "a Ready mark refused" if "sprint.py ready" in r.get("tool", "") else "refused"
-            ledger.note(aid, f"{parsed['name']}: {what}: {r.get('tool', '')[:80]}: {r.get('said', '')[:120]}")
-        _save_state(d)
-        if log:
-            log(f"cycles: job {job['n']} ({aid}, {parsed['name']}) {how}")
-        return note
-    # boxed twice in a row
-    if note.get("boxed"):
-        st_["boxed_streak"] = st_.get("boxed_streak", 0) + 1
-        if st_["boxed_streak"] >= 2:
-            tripwire(aid, "boxed twice in a row", f"two runs in a row ended at their box ({parsed['name']} at its {note['boxed']})", now, base, d)
             st_["boxed_streak"] = 0
-    else:
-        st_["boxed_streak"] = 0
-    # refused, outside her limits, a shared file written directly, a Ready mark refused
-    for r in note.get("refused") or []:
-        if "sprint.py ready" in r.get("tool", "") and aid == "moneypenny":
-            tripwire(aid, "a Ready mark refused on its fields", r.get("said", "")[:160], now, base, d)
-        else:
-            tripwire(aid, "a refused command or push", f"{r.get('tool', '')[:80]}: {r.get('said', '')[:120]}", now, base, d)
-        break
-    for t in note.get("tools") or []:
-        m = _EDIT.match(t)
-        if m and any(m.group(2).replace(os.sep, "/").endswith(x) for x in SHARED):
-            tripwire(aid, "a write to a shared file outside the serialized place", f"{m.group(1)} on {m.group(2)[-80:]}", now, base, d)
-            break
-    for t in note.get("tools") or []:
-        if _OUTSIDE.search(t):
-            tripwire(aid, "an action outside my limits", t[:160], now, base, d)
-            break
-    _save_state(d)
+        _what_really_happened(aid, parsed, note, now, base)
     if log:
         log(f"cycles: job {job['n']} ({aid}, {parsed['name']}) {how}")
     return note
+
+
+def _plain(said: str) -> str:
+    """What a refusal said, as a sentence for him: HQ's own words, never the tool line."""
+    s = re.sub(r"^(?:Exit code \d+\s*)?(?:PreToolUse:\S+ hook error:?\s*)?(?:\[[^\]]*\]:?\s*)?(?:HQ: refused:?\s*|Refused:?\s*)?", "", " ".join(str(said).split()))
+    return (s[:157] + "...") if len(s) > 160 else s
+
+
+def _what_really_happened(aid: str, parsed: dict, note: dict, now: dt.datetime, base: Path | None) -> None:
+    """Harm 6: from what really happened in the run, never from words in what it read. note["refused"] holds the calls that were
+    really refused (the hook, a refused script, a rejected push), note["uses"] the outward ones that went through."""
+    with held() as d:
+        st_ = _agent_state(d, aid)
+        since = (now - dt.timedelta(days=REPEAT_DAYS)).strftime(FMT)
+        st_["refusals"] = {k: v for k, v in st_["refusals"].items() if v >= since}
+        for r in (note.get("refused") or [])[:3]:
+            plain = _plain(r.get("said", ""))
+            mark = "sprint.py ready" in r.get("tool", "") and aid == "moneypenny"
+            key = hashlib.sha1(_norm_goal(plain).encode()).hexdigest()[:12]
+            if key in st_["refusals"]:  # the mistake made twice: that's what reaches him
+                tripwire(aid, "a Ready mark refused on its fields" if mark else "a refused command or push", plain, now, base)
+            else:
+                st_["refusals"][key] = now.strftime(FMT)
+                ledger.note(aid, f"refused, logged: {plain}")
+                import mistakes
+                mistakes.add("refused", aid, f"a refused try: {plain}", where="her own cycle", base=base)
+    import cyclehook
+    for u in note.get("uses") or []:  # past the hook: it wasn't loaded, or something it should have stopped went through
+        code, why = cyclehook.decide({"tool_name": u.get("name", ""), "tool_input": u.get("input") or {}}, False, None, (aid, parsed["kind"]))
+        if code:
+            shared = "shared file" in why
+            tripwire(aid, "a write to a shared file outside the serialized place" if shared else "an action outside my limits",
+                     f"this went through while it should have been stopped: {_plain(why)}", now, base)
+            break
 
 
 # -- orders from a call or a text --------------------------------------------------------------------------------------------
@@ -1148,20 +1595,21 @@ def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Pat
 def order(aid: str, kind: str, words: str, now_: bool = False, now: dt.datetime | None = None, base: Path | None = None) -> str:
     now = now or dt.datetime.now()
     base = base or folder()
+    if _this_run():
+        raise ValueError("orders are his, from a call or a text; a run of hers doesn't give itself one")
     o = ledger.add_order(aid, kind, words, now_, now)
     if kind == "stop":
-        # her matching waiting steps are cancelled at once, and it goes on her let-go
+        # her matching steps are cancelled at once (only what the order is about), and it goes on her let-go
         items, jobs_ = _items()
-        want = set(_norm_goal(words).split())
         n = 0
         for i in items:
             p = parse(i["text"])
-            if i["state"] == "waiting" and p["agent"] == aid and p["kind"] == "step" and want & set(_norm_goal(p["goal"]).split()):
+            if i["state"] == "waiting" and p["agent"] == aid and p["kind"] == "step" and _about(words, _full_goal(aid, p)):
                 _schedule("cancel", str(i["n"]))
                 n += 1
         for j in jobs_:
             p = parse(j["text"])
-            if (j["state"] == "ready" or j["state"].startswith("held")) and p["agent"] == aid and p["kind"] == "step" and want & set(_norm_goal(p["goal"]).split()):
+            if (j["state"] in ("ready",) or j["state"].startswith(("held", "running"))) and p["agent"] == aid and p["kind"] == "step" and _about(words, _full_goal(aid, p)):
                 _jobs("stop", str(j["n"]))
                 n += 1
         ledger.note(aid, f"let go, on his order: \"{words}\" ({n} step(s) cancelled)")
@@ -1190,17 +1638,52 @@ def order(aid: str, kind: str, words: str, now_: bool = False, now: dt.datetime 
         return f"Standing: written into {name}'s own section of the handbook."
     if now_:
         a = agent_settings(aid, base)
-        d = _state()
+        if not in_hours(a, now):  # harm 9: said out loud, kept, and the first thing she does at her hours
+            lo, hi = a.get("hours") or ["08:00", "22:00"]
+            ledger.set_order(aid, o["n"], "now", f"said outside her hours, waits for {lo}")
+            return f"Not now: nothing of {aid}'s runs between {hi} and {lo}. It's kept, and it's the first thing she does at {lo}. Tell him so."
+        return _order_step(aid, o, now, base)
+    return f"Noted for {aid}'s next bigger session: \"{words}\"."
+
+
+def _full_goal(aid: str, p: dict) -> str:
+    """A step's goal in full (its item carries the first 90 characters)."""
+    rec = _agent_state(_state(), aid)["steps"].get(_step_key(p)) or {}
+    return (rec.get("spec") or {}).get("goal") or p.get("goal", "")
+
+
+def _order_step(aid: str, o: dict, now: dt.datetime, base: Path | None) -> str:
+    """His "now": a small step at once, inside her box."""
+    words = o["words"]
+    stamp = now.strftime("%Y-%m-%d %H:%M")
+    hi = agent_settings(aid, base)["hours"][1]
+    with held() as d:
         st_ = _agent_state(d, aid)
-        stamp = now.strftime("%Y-%m-%d %H:%M")
         k = 0
+        while f"{aid}|{stamp}|{k}" in st_["steps"]:
+            k = max(k, 99) + 1
         spec = {"goal": words, "done_means": "what he asked for is done, or put to him as a question", "inputs": [], "may": "one look or one action inside your limits", "at": now.strftime("%H:%M")}
-        st_["steps"][f"{aid}|{stamp}|{k}"] = {"spec": spec, "fps": [], "day": now.strftime("%Y-%m-%d"), "state": "planned", "stamp": stamp, "order": o["n"]}
-        _save_state(d)
+        st_["steps"][f"{aid}|{stamp}|{k}"] = {"spec": spec, "fps": [], "day": now.strftime("%Y-%m-%d"), "state": "planned", "stamp": stamp, "order": o["n"],
+                                             "until": now.replace(hour=_t(hi).hour, minute=_t(hi).minute, second=0, microsecond=0).strftime(FMT)}
         code, out = _schedule("add", "now", step_text(aid, stamp, k, words), "--priority", "--kind", f"step-{aid}")
         ledger.set_order(aid, o["n"], "planned", "a step at once")
-        return f"Now: a step for {aid} planned at once ({out.splitlines()[0][:100] if out else code})."
-    return f"Noted for {aid}'s next bigger session: \"{words}\"."
+    return f"Now: a step for {aid} planned at once ({out.splitlines()[0][:100] if out else code})."
+
+
+def waiting_orders(now: dt.datetime | None = None, base: Path | None = None, log=None) -> list[str]:
+    """A "now" that came outside her hours runs first thing inside them."""
+    now = now or dt.datetime.now()
+    did = []
+    for aid, a in settings(base)["agents"].items():
+        if not a.get("on") or not in_hours(a, now) or not _agent(aid, base):
+            continue
+        for o in ledger.orders(aid, ("now",)):
+            _order_step(aid, o, now, base)
+            did.append(f"{aid}'s order of {o['at']} planned")
+    if log:
+        for x in did:
+            log(f"cycles: {x}")
+    return did
 
 
 # -- the monthly review (piece 9) and the weekly score ------------------------------------------------------------------------------
@@ -1250,24 +1733,26 @@ def proposal(aid: str, text: str, now: dt.datetime | None = None, base: Path | N
 
 
 def write_scores(now: dt.datetime | None = None, base: Path | None = None, force: bool = False, log=None) -> list[str]:
-    """Every week (Friday from 7 in the morning, once), each agent's score into her ledger."""
+    """Every week (Friday from 7 in the morning, once), each agent's score into her ledger. F103: on the maker's HQ whatever the
+    agents' switch says. Harm 14: a friend who never turned it on gets nothing written: no ledger, no state."""
     now = now or dt.datetime.now()
     import pokes
-    d = _state()
     week = (now - dt.timedelta(days=1)).strftime("%G-W%V")
     did = []
     if not force and not (now.weekday() == 4 and now.hour >= 7):
         return did
-    for ag in _agents(base):
-        aid = ag["id"]
-        st_ = _agent_state(d, aid)  # F103: whatever the agents' switch says, the score is written (C69)
-        if st_.get("scored") == week and not force:
-            continue
-        sc = pokes.score(ag, now, folder=base or folder(), plan=ledger.plan(aid)[1])
-        ledger.write_score(aid, week, {"pokes": sc["pokes"], "measures": sc["measures"]}, sc["lines"], now)
-        st_["scored"] = week
-        did.append(f"{aid}'s score for {week} written")
-    _save_state(d)
+    if not on(base) and not hqpaths.is_maker():
+        return did
+    with held() as d:
+        for ag in _agents(base):
+            aid = ag["id"]
+            st_ = _agent_state(d, aid)  # F103: whatever the agents' switch says, the score is written (C69)
+            if st_.get("scored") == week and not force:
+                continue
+            sc = pokes.score(ag, now, folder=base or folder(), plan=ledger.plan(aid)[1])
+            ledger.write_score(aid, week, {"pokes": sc["pokes"], "measures": sc["measures"]}, sc["lines"], now)
+            st_["scored"] = week
+            did.append(f"{aid}'s score for {week} written")
     if log:
         for x in did:
             log(f"cycles: {x}")
@@ -1282,9 +1767,17 @@ def finished_cycle_jobs() -> list[tuple[dict, dict]]:
     out = []
     for j in jobs_:
         p = parse(j["text"])
-        if p and j["state"].startswith(q.FINISHED):
+        if p and j["state"].startswith(q.FINISHED + ("paused",)):  # a paused run of hers is over: it isn't resumed
             out.append((j, p))
     return out
+
+
+def settle(now: dt.datetime | None = None, base: Path | None = None, log=None) -> list[int]:
+    done = []
+    for j, p in finished_cycle_jobs():
+        if after_run(j, p, now, base, log=log):
+            done.append(j["n"])
+    return done
 
 
 def drop_waiting(now: dt.datetime | None = None, base: Path | None = None, log=None) -> list[str]:
@@ -1325,7 +1818,7 @@ def fix_rounds(now: dt.datetime | None = None, base: Path | None = None, log=Non
     now = now or dt.datetime.now()
     aid = FIX_AGENT
     a = agent_settings(aid, base)
-    if not a.get("on") or not a.get("fix") or not in_hours(a, now) or not _agent(aid, base):
+    if not a.get("on") or not a.get("fix") or not in_hours(a, now) or _minutes_left(a, now) < a["step"]["minutes"] or not _agent(aid, base):
         return []
     import jobs as q
     import review
@@ -1346,19 +1839,16 @@ def fix_rounds(now: dt.datetime | None = None, base: Path | None = None, log=Non
         return did
     sh, est = shares(aid, now, base), _round_points(base)
     if over_share(sh, est):
-        d = _state()
-        st_ = _agent_state(d, aid)
-        if st_.get("fix_waits") != _today(now):
-            st_["fix_waits"] = _today(now)
-            ledger.note(aid, f"{pick['label']} waits for the next day's share ({sh['daily_used']:g} of {sh['daily_share']:g} points today, "
-                             f"{sh['weekly_used']:g} of {sh['weekly_share']:g} this week, a round about {est:g})")
-        never = 0 < min(sh["daily_share"], sh["weekly_share"]) < est  # no day's share ever holds a round (a smaller plan)
-        if never and not st_.get("fix_never"):
-            st_["fix_never"] = est
-            _save_state(d)
-            ask(aid, f"If you raise my daily share to at least {est:g} points, I'll fix flagged rows by myself; if not, they wait for our calls.")
-        else:
-            _save_state(d)
+        with held() as d:
+            st_ = _agent_state(d, aid)
+            if st_.get("fix_waits") != _today(now):
+                st_["fix_waits"] = _today(now)
+                ledger.note(aid, f"{pick['label']} waits for the next day's share ({sh['daily_used']:g} of {sh['daily_share']:g} points today, "
+                                 f"{sh['weekly_used']:g} of {sh['weekly_share']:g} this week, a round about {est:g})")
+            never = 0 < min(sh["daily_share"], sh["weekly_share"]) < est  # no day's share ever holds a round (a smaller plan)
+            if never and not st_.get("fix_never"):
+                st_["fix_never"] = est
+                ask(aid, f"If you raise my daily share to at least {est:g} points, I'll fix flagged rows by myself; if not, they wait for our calls.")
         return did + [f"{pick['label']} waits for the next day's share"]
     code, out = _schedule("add", "now", fix_text(aid, pick["label"], pick["mode"], pick["round"]), "--priority", "--kind", f"step-{aid}")
     if code:
@@ -1382,14 +1872,10 @@ def tick(now: dt.datetime | None = None, base: Path | None = None, log=None) -> 
     if not out["on"]:
         return out
     try:
-        done = []
-        for j, p in finished_cycle_jobs():
-            if after_run(j, p, now, base, log=log):
-                done.append(j["n"])
-        out["processed"] = done
+        out["processed"] = settle(now, base, log)
     except Exception as e:
         out["processed"] = [f"error: {e!r}"]
-    for name, fn in (("batches", send_batches), ("dropped", drop_waiting), ("reviews", plan_reviews), ("scores", write_scores), ("fixes", fix_rounds)):
+    for name, fn in (("batches", send_batches), ("later", later), ("orders", waiting_orders), ("dropped", drop_waiting), ("reviews", plan_reviews), ("scores", write_scores), ("fixes", fix_rounds)):
         try:
             out[name] = fn(now, base, log=log)
         except Exception as e:
@@ -1483,6 +1969,14 @@ def main(argv: list[str]) -> int:
         print(words())
         return 0
     cmd, rest = argv[0], argv[1:]
+    if cmd in ("set", "order") and _this_run():
+        print("Refused: the settings and the orders are his; a run of hers doesn't change them.")
+        return 2
+    # harm 9: on the backup a call's change goes to the main, as schedule.py's does: only the main writes these
+    if cmd in ("set", "order") and not os.environ.get("HQ_ROLE_HERE"):
+        import role
+        if role.is_backup():
+            return role.forward("cycles", list(argv))
     try:
         if cmd == "settings":
             print(settings_words())
@@ -1492,12 +1986,12 @@ def main(argv: list[str]) -> int:
             print(order(rest[0].lower(), rest[1].lower(), rest[2], now_="--now" in rest))
         elif cmd == "plan" and len(rest) == 2:
             print(plan(rest[0].lower(), rest[1], job=int(os.environ.get("HQ_JOB") or 0) or None))
-        elif cmd in ("done", "failed") and len(rest) == 3 and rest[1].isdigit():
-            print(step_done(rest[0].lower(), int(rest[1]), rest[2], failed=cmd == "failed"))
+        elif cmd in ("done", "failed", "stale") and len(rest) == 3 and rest[1].isdigit():
+            print(step_done(rest[0].lower(), int(rest[1]), rest[2], failed=cmd == "failed", gone_stale=cmd == "stale"))
         elif cmd == "ask" and len(rest) == 2:
             print(ask(rest[0].lower(), rest[1]))
-        elif cmd == "batch" and len(rest) == 2:
-            print(batch(rest[0].lower(), rest[1]))
+        elif cmd == "batch" and len(rest) in (2, 4) and (len(rest) == 2 or rest[2] == "--until"):
+            print(batch(rest[0].lower(), rest[1], until=rest[3] if len(rest) == 4 else None))
         elif cmd == "text" and len(rest) == 2:
             print(tripwire_free_text(rest[0].lower(), rest[1]))
         elif cmd == "proposal" and len(rest) == 2:
@@ -1528,20 +2022,18 @@ def main(argv: list[str]) -> int:
 
 
 def tripwire_free_text(aid: str, text: str, now: dt.datetime | None = None, base: Path | None = None) -> str:
-    """A run's own text on her line now (for what breaks through), inside the day's cap of texts."""
+    """A run's own text on her line now (for what breaks through), inside a day's cap of its own: a tripwire never uses it up."""
     now = now or dt.datetime.now()
-    d = _state()
-    st_ = _agent_state(d, aid)
     today = _today(now)
     most = int(agent_settings(aid, base).get("tripwire_texts", 2))
-    if st_["texts"].get(today, 0) >= most:
-        _save_state(d)
-        return "Not sent: the day's texts are used up; it goes in the ledger only."
-    st_["texts"][today] = st_["texts"].get(today, 0) + 1
-    _save_state(d)
-    ledger.note(aid, f"texted: {text}")
-    send(aid, text, "cycle", base)
-    return f"Sent on {aid}'s line."
+    with held() as d:
+        st_ = _agent_state(d, aid)
+        if st_["own_texts"].get(today, 0) >= most:
+            return "Not sent: the day's texts are used up; it goes in the ledger only."
+        st_["own_texts"] = {today: st_["own_texts"].get(today, 0) + 1}
+        ledger.note(aid, f"texted: {text}")
+        how = say(aid, text, "cycle", now, base)
+    return f"Sent on {aid}'s line." if how == "sent" else f"He's asleep: it goes on {aid}'s line when he's up, if it's still true then."
 
 
 if __name__ == "__main__":

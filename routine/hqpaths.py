@@ -341,9 +341,20 @@ def never_mail_tools() -> list[str]:
     return [f"mcp__claude_ai_Gmail__{t}" for t in NEVER_MAIL]
 
 
-def job_flags() -> list[str]:
+def may_send(agent: str) -> bool:
+    """H298: the one switch for mail. His decision of 1 November 2026: drafts only, built so one switch can open it later. An agent
+    sends only with `"mail": "send"` on her line in HQ/agents/cycles.json, on the maker's HQ. No script or call sets it: it's his, by hand."""
+    import json
+    try:
+        d = json.load(open(os.path.join(FOLDER, "HQ", "agents", "cycles.json"), encoding="utf8"))
+        return bool(is_maker()) and ((d.get("agents") or {}).get(agent) or {}).get("mail") == "send"
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def job_flags(agent: str | None = None) -> list[str]:
     """The flags every team job and cycle starts with, next to JOB_ENV."""
-    return ["--setting-sources", "user", "--disallowedTools", ",".join(never_mail_tools())]
+    return ["--setting-sources", "user"] + ([] if agent and may_send(agent) else ["--disallowedTools", ",".join(never_mail_tools())])
 
 
 def cells(line: str) -> list[str]:

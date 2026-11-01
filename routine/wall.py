@@ -17,8 +17,10 @@ What's here, read by the routine's minute (tick.py), the runner (runjob.py) and 
   - his day: between 8:00 and 22:00 no build starts without his stored say-so, with who and when (jobs.py now N).
   - a held job doesn't restart at night unless it was planned for the night, or he resumed it himself.
   - at most WIP items in progress: the next build waits until one is through QA.
-  - the order when it's tight: him live, the small routines (neither ever pass a gate), then the agents' cycles, then the
-    team. The reserve, taken off the stop lines for the last two, is on the roadmap (**Usage reserve: 15 points.**, usageline.py).
+  - the order in line: him live, the small routines (neither ever pass a gate), then the agents' cycles, then the team. Near the limit
+    the agents are the first to stop: their line is AGENTS_UNDER points under the team's (H298, decided 1 November 2026), so a cycle held
+    there lets the team's job behind it go. The reserve, taken off the stop lines for the last two, is on the roadmap
+    (**Usage reserve: 15 points.**, usageline.py).
   - pause (jobs.py pause): the running job held, nothing new starts, and no reviewer or first look starts.
 
 The gate itself is status/save-usage.mjs: a reading older than 30 minutes stops it, and --reserve takes the reserve off.
@@ -53,6 +55,7 @@ MOST_RESUMES = 2      # his words: "stop after 2 resumes"
 MOST_TIMES = 4        # his words: "in total it could get 4x it's initial estimate"
 NO_ESTIMATE_ALL = 240  # minutes in all for a job with no estimate: four times its 60
 WIP = 3
+AGENTS_UNDER = 5      # points of the week: Moneypenny's pick on the row, his to turn in batch 5
 PROOF_MAX = 3600      # a test run that says it's still on after this long has died
 BUILDS = ("build", "bigbuild")
 _PLANNED = re.compile(r"^scheduled item \d+, planned for [^:]*?(\d\d):\d\d:", re.I)

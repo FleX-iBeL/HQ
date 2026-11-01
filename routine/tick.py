@@ -372,9 +372,10 @@ def start(job):
                            "command": f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'statusline.py'))}"}}
     hook = f"/usr/bin/python3 {json.dumps(os.path.join(HERE, 'cyclehook.py'))}"
     if cycle:  # H298, piece 8: a cycle's writes to a shared file go only through HQ's own scripts (the hook refuses the rest)
+        hook += f" --agent {shlex.quote(cycle['agent'])} --kind {shlex.quote(cycle['kind'])}"  # the fix round: what she may do is by agent and kind
         if cycle["kind"] == "fix":  # F86: a round touches its one row
             hook += f" --fix {shlex.quote(cycle['label'])} {cycle['mode']}"
-        sett["hooks"] = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|mcp__.*",
+        sett["hooks"] = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|Agent|Task|mcp__.*",
                                          "hooks": [{"type": "command", "command": hook}]}]}
     else:  # F99: every job: no send, reply or forward through any connector
         sett["hooks"] = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|Bash|mcp__.*", "hooks": [{"type": "command", "command": hook + " --mail-only"}]}]}
@@ -411,6 +412,8 @@ JT=$(tty)
     except OSError:
         pass
     jobs("mark", str(n), "running since " + time.strftime("%H:%M"))
+    if cycle:
+        cycles.started(job, cycle)  # the day's step count, and when it began
     json.dump({"n": n, "pid": None, "started": time.time(), **({"box": box["minutes"]} if box and not headless else {}),
                "proof": wall.proof_seconds(n)}, open(STATE, "w"))
     open_window(cmd, f"job-{n}")
@@ -1175,6 +1178,7 @@ def at_the_line(job, s):
     its own chat). The reading comes from its own stream, every minute. True when it held it."""
     n = job["n"]
     g = subprocess.run([NODE, os.path.join(JV, "status", "save-usage.mjs"), "--gate", "--line", "--reserve"]
+                       + (["--under", str(wall.AGENTS_UNDER)] if cycles.is_cycle_job(job) else [])  # the agents stop first
                        + (["--weekly-only"] if job.get("past") else []), capture_output=True, text=True)
     if g.returncode == 0:
         return False
@@ -1228,6 +1232,8 @@ def usage_overrun(job, s):
     incidents.past("jobs", time.time(), time.time(), f"Job {n} {why}",
                    [(time.time(), "Ended its chat; it stops for good, and Moneypenny told him")], item=(job.get("item") or {}).get("id"))
     log(f"job {n} paused: {why}")
+    if cycles.is_cycle_job(job):  # her runner says so, once, on her own line (cycles.after_run); it isn't parked for a call
+        return True
     try:
         import pings
         pings._spawn("paused", usagecost.paused_words(n, job.get("text", ""), o), (job.get("item") or {}).get("id"))
@@ -1753,6 +1759,16 @@ def tick():
             log(f"job {n} ended without a done mark")
             return
         try:
+            if cycles.out_of_hours(job):  # H298: nothing of theirs at night, whatever got it there
+                end_chat(s.get("pid"))
+                jobs("mark", str(n), "ended " + time.strftime("%H:%M") + ": her hours ended")
+                clear()
+                quiet.clear_request()
+                log(f"job {n}: an agent's run ended at the end of her hours")
+                return
+        except Exception as e:
+            log(f"cycles: hours: {e!r}")
+        try:
             # H172, H221, H220: about four times the top of its estimated usage: paused for good.
             if usage_overrun(job, s):
                 return
@@ -1845,6 +1861,10 @@ def tick():
                 continue
             if verdict != "go":
                 return  # skipped and cancelled; the next minute takes the next job
+            g = gate_for(cand)
+            if g.returncode:  # near the limit the agents are the first to stop: the team's job behind it may still go
+                first_why = first_why or (cand, f"an agent's own run waits at her line: {g.stdout.strip()[:160]}")
+                continue
         job = cand
         break
     if job is None:
@@ -1866,9 +1886,7 @@ def tick():
     # past-the-line job held at the weekly line waits here quietly instead of being started every minute.
     # H172: it starts when its estimated usage (from the finished jobs like it) fits under each stop line; H141's
     # rates only for work with too little history (routine/usagecost.py).
-    g = subprocess.run([NODE, os.path.join(JV, "status", "save-usage.mjs"), "--gate", "--reserve"]  # F100: room kept for him
-                       + (["--weekly-only"] if job["past"] else []) + job_need(job),
-                       capture_output=True, text=True)
+    g = gate_for(job)
     if g.returncode:
         note = f"{job['n']} {g.stdout.strip()}"
         if not os.path.exists(GATE_NOTE) or open(GATE_NOTE).read() != note:
@@ -1882,6 +1900,14 @@ def tick():
     except OSError:
         pass
     start(job)
+
+
+def gate_for(job):
+    """The start check. An agent's own run has its line wall.AGENTS_UNDER points under the team's: near the limit she stops first."""
+    return subprocess.run([NODE, os.path.join(JV, "status", "save-usage.mjs"), "--gate", "--reserve"]  # F100: room kept for him
+                          + (["--under", str(wall.AGENTS_UNDER)] if cycles.is_cycle_job(job) else [])
+                          + (["--weekly-only"] if job["past"] else []) + job_need(job),
+                          capture_output=True, text=True)
 
 
 if __name__ == "__main__":
