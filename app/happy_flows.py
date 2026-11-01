@@ -16819,9 +16819,35 @@ print(ledger.text('donna')[-900:])
         (wa / "HQ/c.txt").write_text(kept)
         r = await asyncio.to_thread(up, b, eb, "back")
         need(json.loads(r.stdout.strip().splitlines()[-1]).get("ok") and tag_of(a) == tag_of(b) == "v1.1.0" and (wa / "HQ/b.txt").exists(), f"started on the backup: {tag_of(a)!r} {tag_of(b)!r} {r.stdout[-300:]} {r.stderr[-300:]} {(a / '.status/update-run.json').read_text()[-200:]}")
+        # the undo held and the move didn't: the words say what's true, and the routine's minute puts the data back
+        await asyncio.to_thread(go, "forward")
+        minute = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import tick; tick.data_minute()"
+        data_minute = lambda: _sp.run([sys.executable, "-c", minute, str(a)], capture_output=True, text=True, env={**ea, "HQ_DATA_MINUTE": "1"}, timeout=120)
+        await asyncio.to_thread(data_minute)
+        need((wa / "HQ/c.txt").exists(), "the data on the work line before the failing move")
+        head = g(a, "rev-parse", "HEAD")
+        (a / ".git/index.lock").write_text("")
+        r = await asyncio.to_thread(go, "back")
+        (a / ".git/index.lock").unlink()
+        said = json.loads((a / ".status/update-run.json").read_text())["message"]
+        need(g(a, "rev-parse", "HEAD") == head and (wa / "HQ/b.txt").exists() and "already undone: 002-second" in said and "stays where it was." not in said.replace("code stays where it was,", ""), f"a move that failed after a good undo says: {said!r}")
+        r = await asyncio.to_thread(data_minute)
+        need((wa / "HQ/c.txt").exists() and not (wa / "HQ/b.txt").exists(), f"the routine's minute didn't run it again, as the words said: {r.stderr[-300:]}")
+        # the other computer can't be told, whatever the reason: it stays pending, and the routine's minute tells it
+        code = ("import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import update\n"
+                "def boom(cmd): raise RuntimeError('the line fell over')\n"
+                "keep, update._peer = update._peer, boom\n"
+                "print(update.back_run('v1.1.0', True))")
+        r = await asyncio.to_thread(lambda: _sp.run([sys.executable, "-c", code, str(a)], capture_output=True, text=True, env=ea, timeout=120))
+        said = json.loads((a / ".status/update-run.json").read_text())["message"]
+        need(r.stdout.strip().splitlines()[-1] == "0" and tag_of(a) == "v1.1.0" and "didn't go through" not in said and (a / ".status/back-other.json").exists(), f"the telling fell over after the move: {said!r} {r.stdout[-200:]} {r.stderr[-300:]}")
+        need(g(b, "rev-parse", "--abbrev-ref", "HEAD") == "dev", "the other computer moved on a telling that fell over")
+        r = await asyncio.to_thread(data_minute)
+        need(tag_of(b) == "v1.1.0" and not (a / ".status/back-other.json").exists(), f"the routine's minute didn't tell it: {tag_of(b)} {r.stderr[-300:]}")
         srv.shutdown(); srv.server_close(); back_srv.shutdown(); back_srv.server_close()
         return ("both on the version before with the data undone, again one further, forward on the work line with the data back, the backup told later when it was off; a failing undo leaves both computers "
-                "where they were, started on the main or the backup; from the backup the main goes first, and with the main off nothing moves")
+                "where they were, started on the main or the backup; from the backup the main goes first, and with the main off nothing moves; a move that fails after a good undo says so and the routine puts the data back; "
+                "a telling that falls over stays pending until the routine's minute has told it")
 
     async def flow235(self) -> str:
         """F104, no Claude: a release that changes data is refused when its undo fails on a copy of the workspace: one that raises, one that
@@ -16985,10 +17011,12 @@ print(json.dumps(out))
                 "python3 -c \"import os; os.environ['HQ_MAKER'] = '1'\"", "HQ_WORKSPACE=/tmp/x python3 routine/push.py --pull",
                 "HQ_PRIVACY_PASSED=1 git push origin mine", "export HQ_PRIVACY_PASSED=1; git push", "HQ_UNDER_TEST=1 python3 routine/proof.py run 1", "HQ_ROLE_HERE=1 python3 routine/jobs.py done 1", "HQ_READY_FIELDS=0 python3 routine/sprint.py ready F1",
                 "echo '{\"maker\": true}' > HQ/features.json", "tee HQ/features.json < /tmp/x", "sed -i s/false/true/ HQ/features.json", "cp /tmp/x HQ/features.json", "mv /tmp/x /w/HQ/features.json",
-                "python3 -c \"open('HQ/features.json', 'w').write('{}')\"", "git checkout -- HQ/features.json", "curl -s -X POST -d x http://127.0.0.1:4748/api/features"]
+                "python3 -c \"open('HQ/features.json', 'w').write('{}')\"", "git checkout -- HQ/features.json", "curl -s -X POST -d x http://127.0.0.1:4748/api/features",
+                "perl -pi -e s/a/b/ HQ/features.json", "perl -i -pe 's/a/b/;s/c/d/' HQ/mistakes.jsonl", "ruby -pi -e 'gsub(/a/, \"b\")' HQ/trail.jsonl", "gawk -i inplace 1 HQ/features.json", "ed -s HQ/features.json", "printf 1d | ed -s HQ/features.json",
+                "ex -s -c wq HQ/features.json", "ex -sc '%s/a/b/|wq' HQ/features.json", "vim -es -c wq HQ/features.json", "vim -es -c '%s/a/b/|wq' HQ/trail.jsonl", "jq . x | sponge HQ/features.json"]
         fine = ["git log --oneline -3", "git status", "git diff origin/dev --stat", "git diff origin/dev --stat 2>/dev/null", "git log origin/dev -1", "git fetch origin", "git add a.txt; git commit -m one", "git stash",
                 "git checkout -b mine", "git checkout -- a.txt", "git reset --hard HEAD", "git reset --soft HEAD", "git merge v1.0.0", "cat HQ/features.json", "grep -n HQ_MAKER routine/hqpaths.py", "HQ_MAKER=0 python3 app/features.py",
-                "python3 app/features.py on calendar"]
+                "python3 app/features.py on calendar", "perl -ne print HQ/features.json", "awk 1 HQ/features.json", "grep ed HQ/features.json", "perl -pi -e s/a/b/ notes.txt", "ed -s notes.txt", "jq . x | sponge notes.txt"]
         code = """
 import json, sys
 sys.path.insert(0, sys.argv[1] + '/routine')
@@ -17118,6 +17146,11 @@ getattr(m, sys.argv[3])(Path(sys.argv[2]))
                         "        say(f'still reading, step {i}'); time.sleep(0.02)\n"
                         "if 'SLOW' in q:\n"
                         "    say('Half way: the first file says it was moved.'); time.sleep(float(open(sys.argv[0] + '.wait').read()))\n"
+                        "if 'GRANDCHILD' in q:\n"
+                        "    import signal, subprocess\n"
+                        "    c = subprocess.Popen([sys.executable, '-c', 'import signal, time; signal.signal(15, signal.SIG_IGN); time.sleep(25)'], start_new_session=True)\n"
+                        "    open(sys.argv[0] + '.grandchild', 'w').write(str(c.pid))\n"
+                        "    signal.signal(signal.SIGTERM, signal.SIG_IGN); say('Half way, with a child of its own.'); time.sleep(60)\n"
                         "if 'STUBBORN' in q:\n"
                         "    import signal; signal.signal(signal.SIGTERM, signal.SIG_IGN); say('Half way, and not stopping.'); time.sleep(60)\n"
                         "print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'The made-up answer: it stands in the second file.'}), flush=True)\n")
@@ -17126,6 +17159,243 @@ getattr(m, sys.argv[3])(Path(sys.argv[2]))
         env.update({"HQ_HELPERS": str(self.tmp / f"{tag}-helpers"), "HQ_HELPER_CLAUDE": str(fake), "HQ_UNDER_TEST": "1", "HQ_DIRECT_PLAIN": "1", "HQ_NO_PHONE": "1",
                     "HQ_USAGE": str(self.tmp / f"{tag}-usage.json")})
         return ws, env
+
+    def _friend(self, tag):
+        """F104: a throwaway GitHub with versions 1.0.0 and 1.1.0 and unreleased work on dev (a data change of its own), and `make`: a friend's
+        copy, a fresh clone detached at the newest version (as an update leaves it) with dev in reach, its own workspace at that version's data."""
+        import shutil as _sh, subprocess as _sp
+        tmp = self.tmp / tag
+        tmp.mkdir()
+        hub = tmp / "hub.git"
+        g = lambda cwd, *a: _sp.run(["git", *a], cwd=str(cwd), text=True, capture_output=True, check=True).stdout.strip()
+        _sp.run(["git", "init", "-q", "--bare", "-b", "dev", str(hub)], check=True)
+        a = tmp / "maker"
+        _sp.run(["git", "clone", "-q", str(hub), str(a)], check=True)
+        g(a, "checkout", "-q", "-b", "dev")
+        g(a, "config", "user.name", "t"); g(a, "config", "user.email", "t@example.com")
+        skip = _sh.ignore_patterns("__pycache__", "datachanges", "happy_flows.py", "web", "models", "*.md")
+        _sh.copytree(ROOT / "routine", a / "routine", ignore=skip)
+        (a / "routine/datachanges").mkdir()
+        (a / "app").mkdir()
+        for f in (ROOT / "app").glob("*.py"):
+            if f.name != "happy_flows.py":
+                _sh.copy(f, a / "app" / f.name)
+        (a / ".gitignore").write_text(".status/\nscratch/\nworkspace/\nupdates/\n__pycache__/\n")
+        change = 'WHAT = "{what}"\ndef do(f):\n    (f / "HQ/{new}").write_text((f / "HQ/{old}").read_text()); (f / "HQ/{old}").unlink()\ndef undo(f):\n    (f / "HQ/{old}").write_text((f / "HQ/{new}").read_text()); (f / "HQ/{new}").unlink()\n'
+        def version(v):
+            (a / "VERSION").write_text(v + "\n")
+            g(a, "add", "."); g(a, "commit", "-q", "-m", f"HQ {v}"); g(a, "tag", "-a", f"v{v}", "-m", f"HQ {v}")
+        version("1.0.0")
+        (a / "routine/datachanges/001-first.py").write_text(change.format(what="The first move", old="a.txt", new="b.txt"))
+        version("1.1.0")
+        (a / "routine/datachanges/002-second.py").write_text(change.format(what="The second move", old="b.txt", new="c.txt"))
+        (a / "work.txt").write_text("the work line\n")
+        g(a, "add", "."); g(a, "commit", "-q", "-m", "work past 1.1.0")
+        (a / "work2.txt").write_text("more of the work line\n")
+        g(a, "add", "."); g(a, "commit", "-q", "-m", "more work past 1.1.0")
+        g(a, "push", "-q", "origin", "dev", "--tags")
+        tips = {"n": 0}
+        def make(*before):
+            tips["n"] += 1
+            n = tips["n"]
+            hq = tmp / f"friend{n}"
+            _sp.run(["git", "clone", "-q", "-b", "dev", str(hub), str(hq)], check=True)
+            g(hq, "config", "user.name", "f"); g(hq, "config", "user.email", "f@example.com")
+            g(hq, "checkout", "-q", "--detach", "v1.1.0")
+            ws, sup, wk = tmp / f"friend{n}-ws", tmp / f"friend{n}-support", tmp / f"friend{n}-wk"
+            (ws / "HQ").mkdir(parents=True)
+            sup.mkdir(); wk.mkdir()
+            (ws / "HQ/b.txt").write_text("the data\n")
+            (ws / "HQ/data-changes.json").write_text('{"applied": ["001-first"]}')
+            (ws / "HQ/roadmap.md").write_text((ROOT / "template/HQ/roadmap.md").read_text())
+            e = {k: v for k, v in os.environ.items() if not k.startswith("HQ_")}
+            e.update({"HQ_UNDER_TEST": "1", "HQ_RELEASE_MINUTE": "1", "HQ_WORKSPACE": str(ws), "HQ_ROADMAP": str(ws / "HQ/roadmap.md"), "HQ_SUPPORT": str(sup), "HQ_UPDATE_WAIT": "1", "HQ_UPDATE_RESTART": "0", "HQ_UPDATE_URL": str(hub),
+                      "HQ_CALL_URL": "http://127.0.0.1:9", "HQ_DIRECT_PLAIN": "1", "HQ_NO_PHONE": "1", "HQ_DIRECT_DIR": str(ws / "HQ/direct-line"), "HQ_DIRECT_LOCAL": str(wk / "direct-line.json"), "HQ_ASLEEP": "0", "HQ_JOB_RUN": str(hq / "scratch/routine")})
+            for c in before:
+                _sp.run(c, shell=True, cwd=str(hq), capture_output=True, text=True, check=True, env=e)
+            return dict(hq=hq, ws=ws, env=e, g=lambda *x: g(hq, *x))
+        return dict(make=make, hub=hub, tmp=tmp)
+
+    async def flow243(self) -> str:
+        """F104, no Claude: the guard on the state. The ways a job's words got past the hook, each really run on a friend's copy detached at a
+        version with dev in reach: the routine's next minute puts it back on the newest release, undoes nothing it shouldn't, runs no data change of
+        dev's, stops the job by its exact pid and nothing else, says so and writes it down. Her own commits stay. Offline it goes by what its
+        refs know and never on a guess. The maker's copy is never touched. Nothing sends it forward again, and a failing undo holds it."""
+        import shutil as _sh, subprocess as _sp
+        f = self._friend("f104g")
+        make, hub = f["make"], f["hub"]
+        py = lambda c, code: _sp.run([sys.executable, "-c", "import json, os, sys; sys.path.insert(0, sys.argv[1] + '/routine')\n" + code, str(c["hq"])], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"]), timeout=120)
+        def minute(c):
+            r = py(c, "import update; print(json.dumps(update.release_minute()))")
+            need(r.returncode == 0, f"the guard's minute: {r.stdout[-300:]} {r.stderr[-600:]}")
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        at = lambda c: c["g"]("rev-parse", "HEAD")
+        tag = lambda c, t="v1.1.0": c["g"]("rev-parse", t + "^{commit}")
+        applied = lambda c: json.loads((c["ws"] / "HQ/data-changes.json").read_text())["applied"]
+        incs = lambda c: [i for i in json.loads(((c["hq"] / ".status/incidents.json").read_text()) if (c["hq"] / ".status/incidents.json").exists() else '{"incidents": []}')["incidents"] if i["key"] == "off-release"]
+        ways = {"git checkout -": "git checkout -q -",
+                "git switch -": "git switch -q -",
+                "FETCH_HEAD by xargs": "git fetch -q origin && git rev-parse FETCH_HEAD | xargs git merge -q",
+                "the worktree branch": "git fetch -q origin && git worktree add -q -b mine ../wt-$$ FETCH_HEAD && git merge -q mine",
+                "git am": "git fetch -q origin && git format-patch -q v1.1.0..origin/dev -o ../pp-$$ && git am -q ../pp-$$/*.patch",
+                "a squash": "git rev-parse origin/dev | xargs git merge -q --squash && git commit -q -m squashed"}
+        for name, way in ways.items():
+            c = make()
+            _sp.run(way, shell=True, cwd=str(c["hq"]), capture_output=True, text=True, check=True, env=c["env"], executable="/bin/bash")
+            need((c["hq"] / "work.txt").exists() and at(c) != tag(c), f"{name}: the way itself didn't move the copy")
+            said = minute(c)
+            need(said and at(c) == tag(c) and not (c["hq"] / "work.txt").exists(), f"{name}: still on the work line: {said} {at(c)} {(c['hq'] / '.status/update-run.json').read_text()[-300:]}")
+            need(c["g"]("status", "--porcelain") == "", f"{name}: left things behind: {c['g']('status', '--porcelain')}")
+            need(applied(c) == ["001-first"] and (c["ws"] / "HQ/b.txt").exists(), f"{name}: the data moved: {applied(c)}")
+            need(not (c["hq"] / ".status/back.json").exists(), f"{name}: it left a way forward")
+            need(minute(c) is None, f"{name}: a second minute still holds it")
+            need(not [i for i in incs(c) if not i.get("back")], f"{name}: the incident stayed open: {incs(c)}")
+        # through the routine's own minute: first of all, and the data change of dev's never runs, also when the head moves in the minute itself
+        c = make("git checkout -q -")
+        r = py(c, "import tick\ntick.role = None  # nothing may get this far\ntick.tick()\nprint('ok')")
+        need(r.returncode == 0 and r.stdout.strip().endswith("ok"), f"tick on a moved head: {r.stdout[-300:]} {r.stderr[-500:]}")
+        need(at(c) == tag(c) and applied(c) == ["001-first"], f"the routine's minute: {at(c)} {applied(c)}")
+        c = make()
+        code = ("import subprocess, tick\n"
+                "real = tick.role.tick\n"
+                "def moved(**k):\n"
+                "    subprocess.run(['git', 'checkout', '-q', '-'], check=True)\n"
+                "    return real(**k)\n"
+                "tick.role.tick = moved\n"
+                "ran = []\n"
+                "tick.data_minute = lambda: ran.append('data')\n"
+                "os.environ['HQ_DATA_MINUTE'] = '1'\n"
+                "tick.tick()\n"
+                "print(json.dumps(ran))")
+        r = py(c, code)
+        need(r.returncode == 0 and r.stdout.strip().splitlines()[-1] == "[]" and at(c) == tag(c) and applied(c) == ["001-first"], f"a head that moved in the minute: {r.stdout[-300:]} {r.stderr[-500:]} {applied(c)}")
+        # a job that runs is stopped by its exact pid, for good, and nothing else; the words go out and are kept
+        c = make("git checkout -q -")
+        r = _sp.run([sys.executable, str(c["hq"] / "routine/jobs.py"), "add", "F1|Take the work line by habit"], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"]))
+        n = re.search(r"(\d+)", r.stdout).group(1)
+        r = _sp.run([sys.executable, str(c["hq"] / "routine/jobs.py"), "mark", n, "running since 10:00"], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"]))
+        job = _sp.Popen(["sleep", "120"], start_new_session=True)
+        other = _sp.Popen(["sleep", "120"], start_new_session=True)
+        run = c["hq"] / "scratch/routine"
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "job.json").write_text(json.dumps({"n": int(n), "pid": job.pid, "started": time.time()}))
+        try:
+            need(minute(c) and at(c) == tag(c), "with a job running")
+            job.poll()
+            end = time.time() + 15
+            while time.time() < end and job.poll() is None:
+                await asyncio.sleep(0.1)
+            need(job.poll() is not None, "the job's still running")
+            need(other.poll() is None, "something else was stopped")
+            line = re.search(rf"^- Job {n} · (.*)$", (c["ws"] / "HQ/roadmap.md").read_text(), re.M).group(1)
+            need(line.startswith("stopped "), f"the job isn't stopped for good: {line}")
+            need(not (run / "job.json").exists(), "the job's record stayed")
+            i = incs(c)
+            need(len(i) == 1 and "isn't released" in i[0]["why"] and any("back on 1.1.0" in x["what"] and f"Stopped: job {n}" in x["what"] for x in i[0]["fixes"]), f"the incident: {i}")
+            note = list((c["hq"] / "updates").glob("went-back-*.md"))
+            need(len(note) == 1 and "work past 1.1.0" in note[0].read_text() and "back on 1.1.0" in note[0].read_text(), f"nothing written down: {note}")
+            thread = c["ws"] / "HQ/direct-line/thread.jsonl"
+            end = time.time() + 25
+            while time.time() < end and not thread.exists():
+                await asyncio.sleep(0.2)
+            need(thread.exists() and "isn't released" in thread.read_text() and "1.1.0" in thread.read_text(), f"no text: {thread.exists()}")
+            run_msg = json.loads((c["hq"] / ".status/update-run.json").read_text())
+            need(run_msg["state"] == "done" and "back on 1.1.0" in run_msg["message"], f"the page's line: {run_msg}")
+        finally:
+            for p in (job, other):
+                if p.poll() is None:
+                    p.kill()
+                p.wait()
+        # as it really runs: in the background, in a process of its own; the routine's minute doesn't wait for it
+        c = make("git checkout -q -")
+        c["env"].pop("HQ_UPDATE_WAIT")
+        need(minute(c), "the minute that starts it")
+        end = time.time() + 30
+        while time.time() < end and not (at(c) == tag(c) and '"done"' in ((c["hq"] / ".status/update-run.json").read_text() if (c["hq"] / ".status/update-run.json").exists() else "")):
+            await asyncio.sleep(0.2)
+        need(at(c) == tag(c) and minute(c) is None, f"in the background: {at(c)} {(c['hq'] / '.status/update-run.json').read_text()[-300:]}")
+        # her own commits are hers: on the version, on a branch of hers even if it's called dev, again and again, and one that repeats a released change
+        c = make("echo mine > mine.txt && git add . && git commit -q -m 'my own change'", "echo more >> mine.txt && git commit -q -am 'more of mine'")
+        head = at(c)
+        need(minute(c) is None and minute(c) is None and at(c) == head and not incs(c), f"her own commits: {at(c)} {incs(c)}")
+        c = make("git checkout -q -B dev v1.1.0", "echo mine > mine.txt && git add . && git commit -q -m 'mine, on a dev of my own'")
+        head = at(c)
+        need(minute(c) is None and at(c) == head and c["g"]("rev-parse", "--abbrev-ref", "HEAD") == "dev", "a dev of her own")
+        c = make("git checkout -q --detach v1.0.0", "git cherry-pick v1.1.0 >/dev/null")
+        head = at(c)
+        need(minute(c) is None and at(c) == head, "a commit repeating a released change")
+        # the maker's copy is never touched, and a file that can't be read is no ground to touch anything
+        c = make("git checkout -q -")
+        head = at(c)
+        c["env"]["HQ_MAKER"] = "1"
+        need(minute(c) is None and at(c) == head, "HQ_MAKER=1 was moved")
+        c["env"].pop("HQ_MAKER")
+        (c["ws"] / "HQ/features.json").write_text('{"maker": true}')
+        need(minute(c) is None and at(c) == head, "the maker's copy was moved")
+        (c["ws"] / "HQ/features.json").write_text('{"maker": tr')
+        need(minute(c) is None and at(c) == head, "moved on a file it couldn't read")
+        (c["ws"] / "HQ/features.json").write_text('{"off": []}')
+        need(minute(c) and at(c) == tag(c), "a friend's features.json")
+        # no way forward from the guard, and an old going back doesn't lead onto the work line either
+        r = _sp.run([sys.executable, str(c["hq"] / "routine/update.py"), "forward"], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"]))
+        need(at(c) == tag(c) and "hasn't gone back" in r.stdout, f"forward after the guard: {r.stdout} {r.stderr[-300:]}")
+        c = make("git checkout -q -")
+        r = _sp.run([sys.executable, str(c["hq"] / "routine/update.py"), "back"], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"]))
+        need(at(c) == tag(c) and (c["hq"] / ".status/back.json").exists(), f"a person's going back: {r.stdout} {r.stderr[-300:]}")
+        r = _sp.run([sys.executable, str(c["hq"] / "routine/update.py"), "forward"], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"]))
+        need(at(c) == tag(c) and "isn't released" in r.stdout and minute(c) is None, f"forward onto the work line: {r.stdout} {r.stderr[-300:]}")
+        # a friend who went back on purpose stays on the version she chose
+        c = make("git checkout -q --detach v1.0.0")
+        (c["hq"] / ".status").mkdir(exist_ok=True)
+        (c["hq"] / ".status/back.json").write_text(json.dumps({"to": "1.0.0", "from": "1.1.0", "branch": "", "head": tag(c), "at": 1}))
+        c["g"]("checkout", "-q", "dev")
+        need(minute(c) and at(c) == tag(c, "v1.0.0"), f"not back on the version she went back to: {c['g']('describe', '--tags')}")
+        # offline: what the local refs know is enough; what they don't know is never a guess
+        c = make("git checkout -q -")
+        head = at(c)
+        away = Path(str(hub) + ".away")
+        hub.rename(away)
+        try:
+            need(minute(c) and at(c) == tag(c), f"offline, with dev in its refs: {at(c)}")
+        finally:
+            away.rename(hub)
+        c = make("git checkout -q -", "git update-ref -d refs/remotes/origin/dev", "rm -f .git/FETCH_HEAD")
+        head = at(c)
+        hub.rename(away)
+        try:
+            need(minute(c) is None and at(c) == head, "gone back on a guess, offline, with nothing saying it's dev's")
+        finally:
+            away.rename(hub)
+        st = c["hq"] / ".status/off-release.json"
+        d = json.loads(st.read_text())
+        need(d["next"] - time.time() < 400, f"offline it should look again soon: {d}")
+        d["next"] = 0
+        st.write_text(json.dumps(d))
+        need(minute(c) and at(c) == tag(c), "online again, GitHub's dev says what it is")
+        need(not [x for x in c["g"]("for-each-ref", "--format=%(refname)", "refs/heads").split() if x not in ("refs/heads/dev",) and "hq-backup" not in x], "the guard made a branch of its own")
+        # a failing undo: it stays held, nothing starts, no update, it says what's true, and it tries again
+        c = make("git checkout -q -")
+        head = at(c)
+        (c["ws"] / "HQ/data-changes.json").write_text('{"applied": ["001-first", "002-second"]}')  # the routine that moved here ran dev's change, and c.txt is gone: the undo can't run
+        said = minute(c)
+        msg = json.loads((c["hq"] / ".status/update-run.json").read_text())
+        need(said and at(c) == head and msg["state"] == "failed" and "didn't go through" in msg["message"], f"a failing undo: {msg}")
+        need(minute(c), "not held after a failed going back")
+        r = py(c, "import tick; print(tick.release_minute())")
+        need(r.stdout.strip().splitlines()[-1] == "True", f"the routine doesn't hold: {r.stdout[-200:]} {r.stderr[-300:]}")
+        i = incs(c)
+        need(len(i) == 1 and not i[0].get("back") and any("tried again" in x["what"] for x in i[0]["fixes"]), f"the incident of a failed going back: {i}")
+        r = py(c, "import update\nupdate.status = lambda background=True: {'available': True, 'new_tag': 'v9.9.9', 'version': '1.1.0'}\nprint(json.dumps(update.start()))")
+        need("first" in r.stdout and not json.loads((c["hq"] / ".status/update-run.json").read_text()).get("step", "").startswith("Starting"), f"an update on top of it: {r.stdout[-300:]} {r.stderr[-300:]}")
+        (c["ws"] / "HQ/c.txt").write_text("the data\n"); (c["ws"] / "HQ/b.txt").unlink()
+        d = json.loads((c["hq"] / ".status/off-release.json").read_text())
+        d["held"]["again"] = 0
+        (c["hq"] / ".status/off-release.json").write_text(json.dumps(d))
+        need(minute(c) and at(c) == tag(c) and applied(c) == ["001-first"] and (c["ws"] / "HQ/b.txt").exists(), f"tried again: {at(c)} {applied(c)}")
+        need(minute(c) is None and not [x for x in incs(c) if not x.get("back")], "the incident stayed open")
+        return ("git checkout -, git switch -, FETCH_HEAD by xargs, a worktree branch, git am and a squash each put back on the newest release within the routine's minute, data as it was and no way forward left; the head moving in the minute "
+                "runs no data change of dev's; a job stopped for good by its exact pid and nothing else, an incident, a note and a text; her own commits stay; offline by its refs and never on a guess; the maker's copy and an unreadable file untouched; "
+                "a failing undo holds, starts nothing and tries again")
 
     async def flow238(self) -> str:
         """F106, with a stand-in for the model: a helper beside a call. The agent starts it without a yes, the call goes on at once, the answer
@@ -17267,6 +17537,24 @@ asyncio.run(main())
         gone, runs, words = json.loads(py(code, hid).stdout.strip().splitlines()[-1])
         need(hid not in runs and "ran out of its time" in words, f"it still shows as running: {runs} {words}")
         need("STUBBORN" not in h("list").stdout, "the helper list still shows the stopped helper")
+        # a child in a session of its own outlives the kill and holds the model's stdout: the record ends all the same, and the slot is free
+        fake = Path(env["HQ_HELPER_CLAUDE"])
+        for before in records():
+            if before["state"] == "running":
+                await asyncio.to_thread(wait, before["id"])
+        r = _sp.run([sys.executable, str(ROOT / "routine/helper.py"), "start", "This one has a GRANDCHILD holding its output"], capture_output=True, text=True, env={**env, "HQ_HELPER_BOX_S": "0.5"})
+        hid = next(x["id"] for x in records() if "GRANDCHILD" in x["question"])
+        d = await asyncio.to_thread(wait, hid, 15)
+        kid = int(Path(str(fake) + ".grandchild").read_text())
+        need(d["state"] == "stopped" and "Half way" in (d.get("answer") or ""), f"a helper past its box with a grandchild holding the pipe: {d}")
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import helper; print(len(helper.running()))"
+        need(py(code).stdout.strip().splitlines()[-1] == "0", "the slot is still taken")
+        end = time.time() + 5
+        while time.time() < end and alive(d.get("pid")):
+            await asyncio.sleep(0.1)
+        need(not alive(d.get("pid")), "the run itself is still waiting on the pipe")
+        need(alive(kid), "the stand-in's child was gone already, so this proved nothing")
+        os.kill(kid, 9)
         need(not _sp.run(["pgrep", "-f", str(self.tmp / "f106a-claude")], capture_output=True, text=True).stdout.strip(), "the stand-in that ignored the end still runs")
         # at most two at once; a limit used up
         (self.tmp / "f106a-claude.wait").write_text("3")
@@ -17367,10 +17655,19 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
         for reply in ("I can't believe how clean it all is.", "You can't go wrong with that one.", "It cannot be better."):
             out = await turn("Is the label check clean?", reply, refused)
             need(BLOCKED_LINE in out, f"a can't that says nothing about the check: {reply!r} {out!r}")
-        for reply in ("I can't check that from here.", "I couldn't actually run it.", "That can't be verified from here.", "I wasn't able to look at it.", "I can’t run that one."):
+        for reply in ("That's not allowed under rule four, so I left it.", "She refused the invitation last week.", "The nightly didn't run last night, the log says.", "No access code was needed for the door.",
+                      "You can't check out before noon at that hotel.", "The build didn't work on Friday, the team fixed it.", "It did not go through to the bank, he said.", "They couldn't read the map.",
+                      "She didn't check her mail.", "I said you can't check out early.", "The bank refused the payment.", "The doctor couldn't see you on Monday.", "I can't see why not."):
+            out = await turn("Is the label check clean?", reply, refused)
+            need(BLOCKED_LINE in out, f"a sentence that isn't her saying she couldn't check: {reply!r} {out!r}")
+        for reply in ("I can't check that from here.", "I couldn't actually run it.", "That can't be verified from here.", "I wasn't able to look at it.", "I can’t run that one.", "I couldn't check that one.", "I wasn't able to run the command, it was refused.",
+                      "That check didn't go through.", "I couldn't verify it.", "It can't be checked from here.", "I could not open the file.", "I haven't checked that yet.", "Shall I run it for you?", "Do you want me to look at the log?",
+                      "I wasn't allowed to read the mail.", "I didn't get to look at it.", "I cannot access the calendar from this call.", "I'm not able to check it right now.", "It wasn't verified.", "I was unable to reach the status page.",
+                      "The command was refused, so I don't know.", "Couldn't check that, the command was refused.", "Sorry, couldn't run it.", "I tried, but I can't get to the log from a call.", "I don't have access to the calendar from here.",
+                      "I have no way to check that on a call.", "My check was refused.", "It didn't go through.", "I never got to check that.", "The lookup failed, so I can't say.", "Honestly, I haven't been able to verify it."):
             out = await turn("Is the label check clean?", reply, refused)
             need(BLOCKED_LINE not in out, f"she said it herself, and heard it twice: {reply!r} {out!r}")
-        return "refused or waiting and answered around it: the program says I couldn't check that, written in the transcript; said by her, asked of him, or a look that ran: nothing added; a can't about something else doesn't count"
+        return "refused or waiting and answered around it: the program says I couldn't check that, written in the transcript; said by her, asked of him, or a look that ran: nothing added; only her saying that she couldn't check counts, not a can't or a refused about something else"
 
     async def flow242(self) -> str:
         """F106, no Claude: one line on the status page shows what's being worked on for him right now: a running helper is on /routines.json and
@@ -27667,6 +27964,7 @@ FLOWS = {
     237: ("F104: friends only on released versions: a job on a friend's copy never pulls dev; headless on in the template; a feature in pieces stays off until its QA passed or his own words, logged", False, "flow237"),
     238: ("F106: a helper beside a call, with a stand-in for the model: started without a yes, the call goes on, the answer in the same call once; hung up it's a text on her line; boxed in minutes and turns; two at once; a used-up limit stops it", False, "flow238"),
     239: ("F106: a check she couldn't run is never answered around: the program says I couldn't check that when her reply doesn't", False, "flow239"),
+    243: ("F104: the guard on the state: every way onto dev puts a friend's copy back on the newest release within the routine's minute, no data change of dev's runs, the job stopped by its exact pid, said and written down; her own commits stay; offline never on a guess; the maker's copy never touched; no way forward again", False, "flow243"),
     242: ("F106: one line on the status page shows the helper working for him right now", False, "flow242"),
     241: ("F106: a call's start is under the design's size for every agent, on a full workspace; nothing lost from the rules, each topic a lookup without a yes", False, "flow241"),
     230: ("F108: three writers at the same instant, 20 runs on Donna's line and the team line: all 9 lines land; a real repeat stays out", False, "flow230"),
