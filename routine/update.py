@@ -411,8 +411,14 @@ def changed_outside_local() -> list[str]:
 
 
 def _free_branch(name: str) -> str:
-    """F104: a branch name nothing has yet: going back twice within a minute saves twice, and so does a try after one that failed."""
+    """F104: a branch name nothing has yet: going back twice within a minute saves twice."""
     return next(n for n in (name, *(f"{name}-{i}" for i in range(2, 1000))) if git("rev-parse", "-q", "--verify", f"refs/heads/{n}", timeout=10).returncode)
+
+
+def _saved_already(head: str) -> str:
+    """F104: the backup branch that already holds exactly these commits: a try after one that failed saved nothing new."""
+    names = git("for-each-ref", f"--points-at={head}", "--format=%(refname:short)", "refs/heads/hq-backup/", timeout=20).stdout.split()
+    return next((n for n in names if re.search(r"-commits(-\d+)?$", n)), "")
 
 
 def backup(target: str) -> dict:
@@ -430,8 +436,10 @@ def backup(target: str) -> dict:
     head = git("rev-parse", "HEAD", timeout=10).stdout.strip()
     own = git("rev-list", "--count", f"{target}..HEAD", timeout=10).stdout.strip()
     if head and own and int(own) > 0:
-        name = _free_branch(f"hq-backup/{stamp}-before-{target}-commits")
-        git("branch", name, head, timeout=10, check=True)
+        name = _saved_already(head)
+        if not name:
+            name = _free_branch(f"hq-backup/{stamp}-before-{target}-commits")
+            git("branch", name, head, timeout=10, check=True)
         saved["commits"] = {"branch": name, "count": int(own)}
     return saved
 
