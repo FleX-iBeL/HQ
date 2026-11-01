@@ -1311,21 +1311,36 @@ def fetch_tags() -> None:
         pass
 
 
+def _stood_on(tags: list[str]) -> list[str]:
+    """The version tags whose very commit the head has stood on, by its reflog: what the head's history alone can't say."""
+    if not tags:
+        return []
+    seen = set(git("log", "-g", "--format=%H", "HEAD", timeout=20).stdout.split())
+    return [t for t, c in zip(tags, git("rev-parse", *[f"{t}^{{commit}}" for t in tags], timeout=20).stdout.split()) if c in seen]
+
+
 def newest_release() -> str | None:
-    """Where the guard goes: the version this HQ went back to, if it did that on purpose; else the newest one it has (the head may be an old
-    copy of dev), and data only ever moves forward from there, by the routine's own minute. older_than_stood says when that won't do."""
+    """Where the guard goes: the version this HQ went back to, if it did that on purpose; else the newest tag in the head's own history, tags at
+    the head included: a newer one that was only fetched isn't hers, an update brings that with what it does around it. A release the head stood
+    on counts too, also when it isn't in that history (a tag off dev's line, a stale copy of dev): never below where it stood. Only with none
+    of those, the newest one it has. Data only ever moves forward from there, by the routine's own minute. older_than_stood says when that won't do."""
     tags = version_tags()
     to = "v" + str(gone_back().get("to") or "")
-    return to if to in tags else (max(tags, key=vtuple) if tags else None)
+    if to in tags:
+        return to
+    own = [t for t in git("tag", "--merged", "HEAD", timeout=20).stdout.split() if vtuple(t)] + _stood_on(tags)
+    return max(own or tags, key=vtuple) if own or tags else None
 
 
-def older_than_stood() -> str:
-    """Why there's nothing to go back on: the newest tag this copy can find is older than the version it stands on (a tag it lost, and GitHub
-    out of reach), or it can't tell what it stands on. "" when it's fine. Going there would undo the data to a shape it never had on a guess."""
+def older_than_stood(tag: str | None) -> str:
+    """Why `tag` won't do: it's older than the version this copy stands on (a tag it lost, and GitHub out of reach), or it can't tell what it
+    stands on. "" when it's fine. A version she went back to on purpose is hers, so then only the newest tag there is counts. Going to an older
+    one would undo the data to a shape it never had on a guess."""
     tags = version_tags()
-    if not tags:
+    if not tags or not tag:
         return ""
-    v, top = local_version().get("version") or "", max(tags, key=vtuple)
+    v = local_version().get("version") or ""
+    top = max(tags, key=vtuple) if tag == "v" + str(gone_back().get("to") or "") else tag
     if not vtuple("v" + v):
         return "it can't tell which version it stands on, and it doesn't go to one on a guess"
     if vtuple("v" + v) > vtuple(top):
@@ -1409,7 +1424,8 @@ def _guard_hold(st: dict, hit: list[str], now: float, log) -> str:
     """Unreleased work under the head: held from here on, and going back, once now and again every GUARD_RETRY if that didn't go through.
     With nothing to go back on that isn't older than where it stood, it stays held and says so."""
     held = st.get("held") or {"since": now, "commits": len(hit), "first": _subject(hit[-1]), "item": _job_item()}
-    tag, why = newest_release(), older_than_stood()
+    tag = newest_release()
+    why = older_than_stood(tag)
     words = f"HQ stands on work that isn't released ({len(hit)} change{'s' if len(hit) != 1 else ''}): nothing starts until it's back on {vname(tag) if tag and not why else 'a released version'}"
     st["held"] = held
     if not _guard_due(st, now):
