@@ -4386,7 +4386,7 @@ console.log(JSON.stringify({{ problems: r.problems, current: r.current }}));"""
              "the app doesn't show her texts as Mac notifications that open her chat (H145)")
         need("push(" not in swift and "/direct/send" not in swift, "the app sends or pushes her texts itself (H145)")
         dh = (ROOT / "status/direct.html").read_text()
-        need("has('app')" in dh and "if (APP) document.querySelector('header a').remove();" in dh and "if (!SHEET && !APP) bellState();" in dh,
+        need("has('app')" in dh and "if (APP) document.querySelector('header a').remove();" in dh and "if (!APP) pushCheck();" in dh,
              "her chat in the app still shows the phone's back arrow or notification button (H145)")
         if sys.platform != "darwin":
             return ("seven made-up states judged like the status page; turning on starts only what's off, stops nothing; the strip's five "
@@ -11066,7 +11066,11 @@ setTimeout(() => {
         when something stays down and when it's back. A throwaway status server serves the chat and its service
         worker, refuses a send without the HQ header, signs a phone up, and his text gets her (canned) reply. Off a
         Mac her reply finds Claude on PATH (F27). H170: a web address in a text is a link to tap, only http and https.
-        F42: in a thread over 200 (the server sends the last 200) a new text still shows in the chat."""
+        F42: in a thread over 200 (the server sends the last 200) a new text still shows in the chat. F102: her chat in
+        the sheet (how the phone opens it) and the call page look after the phone on every open: the page's check, run
+        on stand-in browsers, re-posts a subscription, makes a missing one, says what stopped it, never hangs on
+        serviceWorker.ready and never waits on its report; the report is kept in .status and shown by info, not on the
+        page; a notification refused as asked still shows plainly and the worker says what it saw."""
         import base64
         import urllib.request
         sys.path.insert(0, str(ROOT / "routine"))
@@ -11236,7 +11240,10 @@ setTimeout(() => {
                     except Exception:
                         await asyncio.sleep(0.2)
                 code, page = await asyncio.to_thread(call, "/direct")
-                need(code == 200 and "/direct/send" in page and "pushManager" in page, "the chat page isn't served")
+                need(code == 200 and "/direct/send" in page, "the chat page isn't served")
+                need("/direct-check.js" in page, "her chat doesn't look after the phone (F102)")
+                code, check_js = await asyncio.to_thread(call, "/direct-check.js")
+                need(code == 200 and "pushManager" in check_js and "/direct/report" in check_js, "the page's check of her texts isn't served")
                 code, sw = await asyncio.to_thread(call, "/direct-sw.js")
                 need(code == 200 and "showNotification" in sw, "the service worker isn't served")
                 code, body = await asyncio.to_thread(call, "/direct.json")
@@ -11247,6 +11254,37 @@ setTimeout(() => {
                 need(code == 403, f"a send without the HQ header got {code}")
                 code, body = await asyncio.to_thread(call, "/direct/subscribe", {"subscription": {"endpoint": "https://push.example.com/c", "keys": {"p256dh": p256dh, "auth": auth}}, "device": "test"})
                 need(code == 200 and json.loads(body)["phones"] == 2, f"signing a phone up gave {code} {body}")
+                # F102: what the page and the worker saw: only from the page, kept on this computer, shown by info, never
+                # on the page's own /direct.json, the newest few only.
+                seen = {"kind": "page", "origin": "https://phone.example:8443", "page": "/direct?sheet", "frame": True, "standalone": True,
+                        "permission": "granted", "registered": True, "scope": "https://phone.example:8443/", "active": "activated",
+                        "subscription": "abcdefghijklmn", "posted": True, "problem": "", "errors": {"ready": "no answer in 6 seconds"},
+                        "ua": "stand-in", "secret": "not a field"}
+                code, _ = await asyncio.to_thread(call, "/direct/report", seen, False)
+                need(code == 403, f"a report without the HQ header got {code}")
+                t0 = time.time()
+                code, body = await asyncio.to_thread(call, "/direct/report", seen)
+                need(code == 200 and time.time() - t0 < 5, f"a report gave {code} {body} after {time.time() - t0:.1f}s")
+                for _ in range(100):
+                    if dl.page_reports()["reports"]:
+                        break
+                    await asyncio.sleep(0.1)
+                got = dl.page_reports()
+                need(got["reports"] and got["reports"][0]["subscription"] == "abcdefghijklmn" and got["reports"][0]["errors"] == {"ready": "no answer in 6 seconds"}
+                     and "secret" not in got["reports"][0], f"the page's report isn't kept as sent: {got}")
+                need("https://push.example.com/c"[-14:] in got["listed"], f"info doesn't list the phones by the page's tail: {got['listed']}")
+                need(dl.page_file().parent == dl.local_state_file().parent and dl.folder() not in dl.page_file().parents,
+                     f"the page's report is kept in the synced folder: {dl.page_file()}")
+                code, body = await asyncio.to_thread(call, "/direct.json")
+                need('"page"' not in body.split('"messages"')[0] and "abcdefghijklmn" not in body, "the page's report leaks into /direct.json")
+                shown = subprocess.run([sys.executable, str(APP / "direct_line.py"), "info"], capture_output=True, text=True, env=os.environ)
+                need(json.loads(shown.stdout)["page"]["reports"][0]["origin"] == "https://phone.example:8443", f"direct_line.py info doesn't show it: {shown.stdout[-300:]}")
+                for i in range(9):
+                    dl.report({"kind": "page", "page": f"/{i}"})
+                    dl.report({"kind": "push", "shown": "yes", "tag": str(i)})
+                rows = dl.page_reports()["reports"]
+                need(len(rows) == 2 * dl.PAGE_KEEP and rows[0]["kind"] in ("page", "push") and {"/8"} <= {r.get("page") for r in rows}
+                     and {"8"} <= {r.get("tag") for r in rows}, f"the report file doesn't keep the newest few of each: {rows}")
                 code, _ = await asyncio.to_thread(call, "/direct/send", {"text": "Is the job list done?"})
                 need(code == 200, f"his text got {code}")
                 for _ in range(100):
@@ -11309,7 +11347,102 @@ console.log(JSON.stringify({ one: [one.length, one[one.length - 1]], two: [two.l
                  "the call line doesn't pass her chat on to the status page")
             dh = (ROOT / "status/direct.html").read_text()
             need("location.port === '8443'" in dh and "'/manifest.webmanifest'" in dh, "the chat doesn't know it's opened through the call line")
-            need("has('sheet')" in dh and "if (!SHEET && !APP) bellState();" in dh, "her chat in the sheet still shows its back arrow or signs the phone up")
+            need("has('sheet')" in dh and "if (!APP) pushCheck();" in dh and "bellState" not in dh, "her chat in the sheet doesn't look after the phone")
+            # F102: the phone's own page does the same on every open, and what's wrong is said in one plain line.
+            need('"/direct/report"' in bot.split("_DIRECT = (")[1][:300] and '"/direct-check.js"' in bot.split("_DIRECT = (")[1][:300],
+                 "the call line doesn't pass the page's report on")
+            need(re.search(r'location\.port !== "8443".*?direct-check\.js.*?\}\)\(\);\n// M2: Free', web, re.S), "the call page doesn't look after the phone on every open")
+            need(all(w in dh for w in ('id="pushline"', "Settings, Notifications, HQ", "Close HQ and open it again", "Turn on her texts")),
+                 "her chat doesn't say in a plain line what's wrong")
+            # The check itself, on stand-in browsers: what it does with each phone, and that it can't hang.
+            js = (ROOT / "status/direct-check.js").read_text().replace("const LIMIT = 6000;", "const LIMIT = 300;")
+            need("LIMIT = 300" in js, "the check has no time limit")
+            stand_in = """
+const never = new Promise(() => {});
+const run = async (o = {}) => {
+  const posts = [];
+  const sub = { endpoint: 'https://web.push.apple.com/abc' + 'x'.repeat(14), options: o.noKey ? { applicationServerKey: null } : { applicationServerKey: Uint8Array.from(o.oldKey ? [9, 9, 9] : [4, 1, 2]).buffer },
+    toJSON() { return { endpoint: this.endpoint, keys: {} }; } };
+  const reg = { scope: 'https://phone.example:8443/', active: { state: 'activated' },
+    pushManager: { getSubscription: async () => o.none ? null : sub,
+      subscribe: async () => { if (o.refuse) throw Object.assign(new Error('needs a tap'), { name: 'NotAllowedError' }); posts.push('made'); return sub; } } };
+  const self = {}, top = o.frame ? {} : self;
+  const window = { self, top };
+  if (!o.nopush) { window.PushManager = 1; window.Notification = 1; }
+  const location = { origin: 'https://phone.example:8443', pathname: '/direct', search: o.frame ? '?sheet' : '' };
+  const navigator = { userAgent: 'stand-in', standalone: true };
+  if (!o.nopush) navigator.serviceWorker = { controller: {}, getRegistration: async () => reg, register: async () => reg,
+    ready: o.hang ? never : Promise.resolve(reg) };
+  const fetch = async (path, opt) => {
+    if (path === '/direct/key') return { json: async () => ({ key: 'BAEC' }) };
+    posts.push(path + (opt && path === '/direct/report' ? ':' + JSON.parse(opt.body).problem : ''));
+    if (path === '/direct/report' && o.reportHangs) return never;
+    if (path === '/direct/report' && o.reportFails) throw new Error('offline');
+    return { ok: true, status: 200 };
+  };
+  const Notification = { permission: o.permission || 'granted' };
+  const f = new Function('window', 'location', 'navigator', 'fetch', 'Notification', 'atob', 'URLSearchParams', code + '; return window.hqPush;');
+  const t0 = Date.now();
+  const r = await f(window, location, navigator, fetch, Notification, atob, URLSearchParams).check();
+  return { r, posts, ms: Date.now() - t0 };
+};
+const code = process.argv[1];
+(async () => {
+  const out = {};
+  for (const [name, o] of Object.entries({ there: {}, frame: { frame: true }, none: { none: true }, refused: { none: true, refuse: true }, denied: { permission: 'denied' },
+    asks: { permission: 'default' }, hang: { hang: true }, nopush: { nopush: true }, reportHangs: { reportHangs: true }, reportFails: { reportFails: true }, noKey: { noKey: true }, oldKey: { oldKey: true } })) out[name] = await run(o);
+  await new Promise((d) => setTimeout(d, 20));
+  console.log(JSON.stringify(out));
+  process.exit(0);
+})();
+"""
+            r = subprocess.run([shutil.which("node") or "/opt/homebrew/bin/node", "-e", stand_in, js], capture_output=True, text=True, timeout=60)
+            out = json.loads(r.stdout or "null") if r.returncode == 0 else None
+            need(isinstance(out, dict), f"the check doesn't run on a stand-in browser: {r.stderr[-400:]}")
+            there = out["there"]
+            need(there["r"]["posted"] and not there["r"]["made"] and there["r"]["problem"] == "" and "made" not in there["posts"] and "/direct/subscribe" in there["posts"]
+                 and there["posts"][-1] == "/direct/report:" and there["r"]["subscription"] == "x" * 14 and there["r"]["keyMatch"] is True,
+                 f"a subscription that's there isn't sent again: {there}")
+            need(there["r"]["registered"] and there["r"]["active"] == "activated" and there["r"]["scope"] == "https://phone.example:8443/" and there["r"]["controlled"]
+                 and there["r"]["standalone"] and not there["r"]["frame"] and there["r"]["origin"] == "https://phone.example:8443" and there["r"]["permission"] == "granted",
+                 f"the report doesn't say what the page sees: {there['r']}")
+            need(out["noKey"]["r"]["keyMatch"] is None and out["noKey"]["r"]["problem"] == "" and out["oldKey"]["r"]["keyMatch"] is False and out["oldKey"]["r"]["problem"] == "oldkey",
+                 f"which key a subscription was made with isn't told right: {out['noKey']} {out['oldKey']}")
+            need(out["frame"]["r"]["frame"] and out["frame"]["r"]["page"] == "/direct?sheet" and out["frame"]["r"]["posted"], f"in the sheet the check doesn't do the same: {out['frame']}")
+            need(out["none"]["r"]["made"] and out["none"]["r"]["posted"] and "made" in out["none"]["posts"], f"a missing subscription isn't made: {out['none']}")
+            ref = out["refused"]["r"]
+            need(ref["problem"] == "nosub" and "NotAllowedError" in ref["errors"].get("subscribe", "") and "/direct/report:nosub" in out["refused"]["posts"],
+                 f"a refused sign-up isn't said: {ref}")
+            need(out["denied"]["r"]["problem"] == "denied" and out["asks"]["r"]["problem"] == "default" and "/direct/subscribe" not in out["denied"]["posts"] + out["asks"]["posts"],
+                 f"without permission the check goes on: {out['denied']} {out['asks']}")
+            hang = out["hang"]
+            need(hang["r"]["problem"] == "sw" and "no answer" in hang["r"]["errors"].get("ready", "") and hang["ms"] < 2000 and "/direct/report:sw" in hang["posts"],
+                 f"a serviceWorker.ready that never comes hangs the check: {hang}")
+            need(out["nopush"]["r"]["problem"] == "nosupport" and out["nopush"]["posts"] == ["/direct/report:nosupport"], f"a browser without push isn't said: {out['nopush']}")
+            need(out["reportHangs"]["ms"] < 250 and out["reportHangs"]["r"]["posted"] and out["reportFails"]["r"]["posted"], f"the check waits on its report: {out['reportHangs']} {out['reportFails']}")
+            # The worker: a notification refused as asked still shows plainly, what it saw is told, a failed report changes nothing.
+            sw_code = (ROOT / "status/direct-sw.js").read_text()
+            stand_in = """
+const run = async (refuse, reportFails) => {
+  const on = {}, shown = [], told = [];
+  const self = { addEventListener: (k, f) => { on[k] = f; }, clients: { matchAll: async () => [] }, location: { port: '8443' },
+    registration: { showNotification: async (t, o) => { if (refuse-- > 0) throw new TypeError('refused'); shown.push([t, Object.keys(o).length]); } } };
+  const fetch = async (p, o) => { told.push(JSON.parse(o.body)); if (reportFails) throw new Error('offline'); return {}; };
+  new Function('self', 'fetch', code)(self, fetch);
+  let done;
+  on.push({ data: { json: () => ({ title: 'Donna', body: 'hi' }) }, waitUntil: (p) => { done = p; } });
+  await done;
+  return { shown, told };
+};
+const code = process.argv[1];
+(async () => { console.log(JSON.stringify([await run(0, false), await run(1, false), await run(9, false), await run(0, true)])); process.exit(0); })();
+"""
+            r = subprocess.run([shutil.which("node") or "/opt/homebrew/bin/node", "-e", stand_in, sw_code], capture_output=True, text=True, timeout=30)
+            got = json.loads(r.stdout or "null") if r.returncode == 0 else r.stderr[-300:]
+            need(isinstance(got, list) and got[0]["told"][0]["shown"] == "yes" and got[0]["told"][0]["kind"] == "push" and len(got[0]["shown"]) == 1
+                 and got[1]["told"][0]["shown"] == "plain" and "refused" in got[1]["told"][0]["error"] and got[1]["shown"] == [["Donna", 2]]
+                 and got[2]["told"][0]["shown"] == "no" and got[3]["shown"] and "pushsubscriptionchange" in sw_code,
+                 f"the service worker doesn't show and tell: {got}")
             # H158: like a chat app, a day pill between days (Today, Yesterday, the weekday, else the date) and each
             # text's time in its bubble; drawn again past midnight. The page's own label code, run on fixed times.
             need("at.className = 'at'" in dh and "today === drawnOn" in dh and "t.textContent = day(m.at);" in dh,

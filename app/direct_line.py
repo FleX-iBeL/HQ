@@ -17,7 +17,8 @@ Kept in the workspace's HQ/direct-line/, so both computers have it through the s
   thread.jsonl          the chat, one message per line: {"at", "from": "agent"|"me", "text", "why", "id"}
   subscriptions.json    the phones (and browsers) that allowed her notifications
   state.json            the very important mails she already texted about, a question waiting for his yes
-And per computer, in .status/direct-line.json: what she saw last minute (jobs, incidents), so she texts only on
+And per computer, in .status/direct-page.json (F102): what the phone itself reported, shown by `direct_line.py info`;
+and in .status/direct-line.json: what she saw last minute (jobs, incidents), so she texts only on
 a change; in HQ's own folder, push-keys.json (F102, mode 600, never synced): the VAPID key pair the subscriptions
 were made with. keys() signs with it and public_key() gives the page the same one.
 
@@ -55,7 +56,9 @@ it all stays with Donna as before.
 
 Off: HQ_DIRECT=0 in switches.env. Tests: HQ_DIRECT_DRY=1 (her reply is canned, nothing is pushed out).
 
-  python3 app/direct_line.py info                       her name and colour, the public key (JSON)
+  python3 app/direct_line.py info                       her name and colour, the public key, the phones, and what the
+                                                        phone itself last reported (JSON; F102: `page`)
+  python3 app/direct_line.py report                     the page's or the service worker's report, as JSON on stdin (F102)
   .venv/bin/python app/direct_line.py text WHY "FACTS"  write and push one text (WHY: jobs, mail, down, back, hello)
   .venv/bin/python app/direct_line.py team "FACTS"      Moneypenny texts him on her own line (H266)
   ... --team                                            any of these on her line (info, reply): what the page uses
@@ -533,6 +536,46 @@ def subscribe(sub: dict, device: str = "") -> int:
 def unsubscribe(endpoint: str) -> None:
     with _Lock("subs", push_folder()):
         _write(push_folder() / "subscriptions.json", [s for s in subscriptions() if s["endpoint"] != endpoint])
+
+
+# F102: what the phone itself sees of her texts, reported by the page on every open and by the service worker on every
+# push (status/direct-check.js, status/direct-sw.js, /direct/report). On this computer, next to her local state in
+# .status, never synced; the newest few of each kind; only these fields, cut short.
+PAGE_KEEP = 6
+PAGE_FIELDS = ("origin", "page", "frame", "top", "standalone", "permission", "registered", "scope", "active", "waiting",
+               "controlled", "subscription", "keyMatch", "made", "posted", "problem", "ua", "shown", "error", "tag")
+
+
+def page_file() -> Path:
+    return local_state_file().with_name("direct-page.json")
+
+
+def _short(v):
+    return v if isinstance(v, bool) or v is None else str(v)[:200]
+
+
+def report(body: dict) -> dict:
+    """Keep one report from the page (kind page) or the service worker (kind push)."""
+    kind = "push" if body.get("kind") == "push" else "page"
+    row = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "kind": kind}
+    row.update({k: _short(body[k]) for k in PAGE_FIELDS if k in body})
+    errors = body.get("errors")
+    if isinstance(errors, dict) and errors:
+        row["errors"] = {str(k)[:30]: str(v)[:200] for k, v in list(errors.items())[:10]}
+    path = page_file()
+    with _Lock("page", path.parent):
+        rows = _read(path, [])
+        rows = (rows if isinstance(rows, list) else []) + [row]
+        kept = [r for r in rows if r.get("kind") == "page"][-PAGE_KEEP:] + [r for r in rows if r.get("kind") == "push"][-PAGE_KEEP:]
+        _write(path, sorted(kept, key=lambda r: r.get("at", "")))
+    return row
+
+
+def page_reports() -> dict:
+    """For info: the newest reports, newest first, and the phones on the list by the same tail the page reports."""
+    rows = _read(page_file(), [])
+    rows = rows if isinstance(rows, list) else []
+    return {"listed": [s["endpoint"][-14:] for s in subscriptions()], "reports": list(reversed(rows))}
 
 
 def push(text: str, title: str | None = None, extra: dict | None = None) -> list[str]:
@@ -1359,7 +1402,10 @@ if __name__ == "__main__":
                 keys()
             except Exception:
                 pass
-        print(json.dumps(info()))
+        print(json.dumps({**info(), "page": page_reports()}, ensure_ascii=False))  # F102: the status server strips "page"
+    elif cmd == "report":  # F102: what the page or the service worker saw (/direct/report)
+        body = json.loads(sys.stdin.read() or "{}")
+        print(json.dumps(report(body if isinstance(body, dict) else {}), ensure_ascii=False))
     elif cmd == "text" and len(args) >= 2:
         item = ""  # F103
         if "--item" in args:

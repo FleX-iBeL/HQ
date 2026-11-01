@@ -1284,6 +1284,19 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
   });
   look();
   setInterval(look, 15000);
+  // F102: this page is what the home-screen icon opens, so her texts are looked after from here too, once on every
+  // open and when he comes back to it after a while (status/direct-check.js; a failure here touches nothing).
+  let pushAt = 0;
+  const pushLook = () => {
+    pushAt = Date.now();
+    if (window.hqPush) return void window.hqPush.check();
+    const s = document.createElement("script");
+    s.src = "/direct-check.js";
+    s.onload = () => window.hqPush && window.hqPush.check();
+    document.head.append(s);
+  };
+  pushLook();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - pushAt > 600000) pushLook(); });
 })();
 // M2: Free said plainly, for showing others (HQ 0.1): no connectors, no files, no notes, only the web.
 // H213 (19 October 2026): the main page no longer names the model, only what she's for.

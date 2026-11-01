@@ -60,6 +60,8 @@ const FILES = {
   // H80: the direct line, a chat with only her, and its service worker (scope /, for her texts on the lock screen)
   '/direct': ['status/direct.html', 'text/html; charset=utf-8'],
   '/direct-sw.js': ['status/direct-sw.js', 'text/javascript; charset=utf-8'],
+  // F102: what the phone sees of her texts, shared by her chat and the call page
+  '/direct-check.js': ['status/direct-check.js', 'text/javascript; charset=utf-8'],
   // H59: the version, a newer one and the changelog (the same file the call page loads)
   '/update-ui.js': ['status/update-ui.js', 'text/javascript; charset=utf-8'],
 };
@@ -474,6 +476,12 @@ function directTool(args, input = '') {
     if (input) p.stdin.end(input); else p.stdin.end();
   });
 }
+// What the page may see of the tool's info: the page's own reports stay out of it (F102, direct_line.py info shows them)
+async function agentInfo(args) {
+  const out = await directTool(args);
+  if (out) delete out.page;
+  return out;
+}
 async function threadLines(file) {
   try {
     return (await readFile(file, 'utf8')).split('\n').filter(Boolean).map((l) => {
@@ -499,13 +507,13 @@ async function directRoute(path0, req, res) {
   const json = (code, data) => res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(data));
   const team = new URL(req.url ?? '/', 'http://x').searchParams.get('line') === 'team';
   if (path0 === '/direct.json' && team) {
-    if (!teamInfo || !teamInfo.key) teamInfo = (await directTool(['info', '--team'])) || teamInfo;
+    if (!teamInfo || !teamInfo.key) teamInfo = (await agentInfo(['info', '--team'])) || teamInfo;
     // without Moneypenny the tool gives Donna: then her line is Donna's, as before
     const own = teamInfo && teamInfo.id !== (directInfo?.id ?? 'donna');
     return json(200, { agent: teamInfo, line: own ? 'team' : 'direct', messages: await directThread(own ? TEAM_DIR : DIRECT_DIR) });
   }
   if (path0 === '/direct.json' || path0 === '/direct/key') {
-    if (!directInfo || !directInfo.key) directInfo = (await directTool(['info'])) || directInfo;
+    if (!directInfo || !directInfo.key) directInfo = (await agentInfo(['info'])) || directInfo;
     if (path0 === '/direct/key') return json(directInfo ? 200 : 500, { key: directInfo?.key ?? '' });
     return json(200, { agent: directInfo, line: 'direct', messages: await directThread() });
   }
@@ -517,6 +525,11 @@ async function directRoute(path0, req, res) {
     if (out) directInfo = null;
     return json(out ? 200 : 400, out ?? { ok: false });
   }
+  // F102: what the page or the worker saw; kept in HQ's .status by the tool, and nobody waits on it
+  if (path0 === '/direct/report') {
+    directTool(['report'], JSON.stringify(body)).catch(() => {});
+    return json(200, { ok: true });
+  }
   const text = String(body.text ?? '').trim().slice(0, 4000);
   if (!text) return json(400, { ok: false, said: 'nothing to send' });
   // H217: where the phone is, sent along only when he allows his location; kept by app/travel.py before she reads it
@@ -524,7 +537,7 @@ async function directRoute(path0, req, res) {
     await new Promise((done) => execFile(DIRECT_PY, [join(root, 'app/travel.py'), 'here', String(body.lat), String(body.lon)],
       { timeout: 10000, cwd: root }, () => done()));
   }
-  if (body.line === 'team' && !teamInfo) teamInfo = await directTool(['info', '--team']);
+  if (body.line === 'team' && !teamInfo) teamInfo = await agentInfo(['info', '--team']);
   // H266: a text to Moneypenny goes into her own thread, and she answers it (the tool's --team)
   const toTeam = body.line === 'team' && teamInfo && teamInfo.id !== (directInfo?.id ?? 'donna');
   const dir = toTeam ? TEAM_DIR : DIRECT_DIR;
@@ -539,7 +552,7 @@ async function directRoute(path0, req, res) {
 
 const server = createServer(async (req, res) => {
   const path0 = (req.url ?? '/').split('?')[0];
-  if (path0 === '/direct.json' || path0 === '/direct/key' || path0 === '/direct/send' || path0 === '/direct/subscribe') {
+  if (path0 === '/direct.json' || path0 === '/direct/key' || path0 === '/direct/send' || path0 === '/direct/subscribe' || path0 === '/direct/report') {
     try { await directRoute(path0, req, res); } catch { if (!res.headersSent) res.writeHead(500).end('The direct line had a problem'); }
     return;
   }
