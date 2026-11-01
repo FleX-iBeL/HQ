@@ -16,11 +16,10 @@ the chat to answer needs Tailscale.
 Kept in the workspace's HQ/direct-line/, so both computers have it through the sync:
   thread.jsonl          the chat, one message per line: {"at", "from": "agent"|"me", "text", "why", "id"}
   subscriptions.json    the phones (and browsers) that allowed her notifications
-  keys.json             the VAPID key pair the subscriptions were made with (the same on both computers, so the
-                        backup can text the same phone)
   state.json            the very important mails she already texted about, a question waiting for his yes
 And per computer, in .status/direct-line.json: what she saw last minute (jobs, incidents), so she texts only on
-a change.
+a change; in HQ's own folder, push-keys.json (F102, mode 600, never synced): the VAPID key pair the subscriptions
+were made with. keys() signs with it and public_key() gives the page the same one.
 
 Donna texts first (H124, routine/pings.py): when an appointment he picked starts (why appt), a reminder he asked
 for (why remind), and now and then on her own about something on her own notes list (initiative).
@@ -394,8 +393,9 @@ def _unb64(s: str) -> bytes:
 
 
 def _keys_path() -> Path:
-    """F102: the push key lives in HQ's own folder, mode 600, never in the synced workspace. A test's line keeps its own."""
-    if os.environ.get("HQ_DIRECT_DIR") or os.environ.get("HQ_DIRECT_PUSH_DIR"):
+    """F102: the push key lives in HQ's own folder, mode 600, never in the synced workspace, also when the team line
+    pushes to Donna's phones from her folder (HQ_DIRECT_PUSH_DIR). A line elsewhere, a test's, keeps its own."""
+    if os.path.realpath(push_folder()) != os.path.realpath(os.path.join(hqpaths.DATA, "direct-line")):
         return push_folder() / "keys.json"
     return Path(hqpaths.SUPPORT) / "push-keys.json"
 
@@ -409,9 +409,9 @@ def _keep_key(path: Path, k: dict) -> None:
     os.replace(tmp, path)
 
 
-def keys() -> dict:
-    """The VAPID key pair, made once. F102: moved here from the workspace the first time it's asked for; the file that was
-    there goes, so the sync carries the key no further."""
+def _kept_keys() -> dict | None:
+    """The VAPID key pair that's here, or None; never makes one. F102: moved here from the workspace the first time it's
+    asked for; the file that was there goes, so the sync carries the key no further."""
     path = _keys_path()
     k = _read(path, None)
     if isinstance(k, dict) and k.get("private") and k.get("public"):
@@ -422,12 +422,21 @@ def keys() -> dict:
         _keep_key(path, k)
         old.unlink(missing_ok=True)
         return k
+    return None
+
+
+def keys() -> dict:
+    """The VAPID key pair, made once."""
+    k = _kept_keys()
+    if k:
+        return k
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives import serialization
     priv = ec.generate_private_key(ec.SECP256R1())
     raw = priv.private_numbers().private_value.to_bytes(32, "big")
     pub = priv.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
     k = {"private": _b64(raw), "public": _b64(pub), "made": time.strftime("%Y-%m-%d %H:%M")}
+    path = _keys_path()
     with _Lock("keys", push_folder()):
         again = _read(path, None)
         if isinstance(again, dict) and again.get("public"):
@@ -437,8 +446,9 @@ def keys() -> dict:
 
 
 def public_key() -> str:
-    k = _read(push_folder() / "keys.json", None)
-    return k["public"] if isinstance(k, dict) and k.get("public") else ""
+    """What the page subscribes a phone with: the public half of the key keys() signs with, or "" when there's none yet."""
+    k = _kept_keys()
+    return k["public"] if k else ""
 
 
 def _private(k: dict):

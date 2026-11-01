@@ -15882,7 +15882,9 @@ print("OK")
     async def flow224(self) -> str:
         """F102, no Claude: keys stay out of what's written. A key said on a call is masked in the transcript, in every kind of
         line; the words around it stay. The push key moves out of the workspace into HQ's own folder, mode 600, the same key,
-        and the file in the workspace is gone; a commit of the workspace leaves a file with a key out (flow 219)."""
+        and the file in the workspace is gone; a commit of the workspace leaves a file with a key out (flow 219). After the move
+        /direct/key and /direct.json give the public key that signs the pushes, on Donna's line and the team line; asking
+        for it never makes one."""
         import subprocess as _sp
         d = self.tmp / "F102-keys"
         d.mkdir(exist_ok=True)
@@ -15924,7 +15926,83 @@ print(json.dumps({"k": D.keys(), "f": str(D._keys_path()), "again": D.keys()}))
         need(o["k"]["public"] == "the-public-one" and o["again"]["private"] == "the-private-one", f"the key changed: {o}")
         need(o["f"].startswith(str(support)) and oct(os.stat(o["f"]).st_mode)[-3:] == "600", f"not in HQ's own folder, 600: {o['f']}")
         need(not (d / "HQ" / "direct-line" / "keys.json").exists(), "the key stayed in the workspace")
-        return "keys masked in every transcript line, the push key in HQ's own folder at 600"
+        # after the move the page gets the key that signs the pushes: the phone subscribes with it, also on the team line
+        import base64
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+        b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+        unb64 = lambda t: base64.urlsafe_b64decode(t + "=" * (-len(t) % 4))
+        priv = ec.generate_private_key(ec.SECP256R1())
+        pair = {"private": b64(priv.private_numbers().private_value.to_bytes(32, "big")), "made": "x",
+                "public": b64(priv.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint))}
+        ws2, sup2 = d / "moved", d / "moved-support"
+        line2 = ws2 / "HQ" / "direct-line"
+        line2.mkdir(parents=True)
+        (line2 / "keys.json").write_text(json.dumps(pair))
+        env2 = {**env, "HQ_SUPPORT": str(sup2), "HQ_FOLDER": str(ws2), "HQ_WORKSPACE": str(ws2), "HQ_ROADMAP": str(ws2 / "HQ/roadmap.md"),
+                "HQ_STATUS_PORT": str(_free_port()), "HQ_FIX_DRY": "1"}
+        child = r'''
+import json, os, sys
+sys.path.insert(0, sys.argv[1] + "/app"); sys.path.insert(0, sys.argv[1] + "/routine")
+import direct_line as D
+if sys.argv[2] == "team":
+    os.environ.update(D.team_env())
+print(json.dumps({"signed": D.vapid_header("https://push.example.com/send/a", D.keys()), "key": D.public_key()}))
+'''
+        def signs(line):
+            r = _sp.run([sys.executable, "-c", child, str(ROOT), line], capture_output=True, text=True, env=env2, cwd=str(ROOT), timeout=60)
+            need(r.returncode == 0, r.stderr[-600:])
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        main = signs("main")  # a push: this moves the key
+        need(not (line2 / "keys.json").exists(), "the key stayed in the workspace")
+        log = open(d / "server.log", "w")
+        srv = _sp.Popen([shutil.which("node") or "/opt/homebrew/bin/node", str(ROOT / "status/server.mjs"), "--quiet"], cwd=ROOT, env=env2, stdout=log, stderr=_sp.STDOUT)
+        def get(path):
+            with urllib.request.urlopen(f"http://127.0.0.1:{env2['HQ_STATUS_PORT']}{path}", timeout=60) as resp:
+                return json.loads(resp.read())
+        try:
+            for _ in range(50):
+                try:
+                    key = await asyncio.to_thread(lambda: get("/direct/key")["key"])
+                    break
+                except OSError:
+                    await asyncio.sleep(0.2)
+            else:
+                need(False, "the status server didn't start")
+            info = await asyncio.to_thread(get, "/direct.json")
+            team = await asyncio.to_thread(get, "/direct.json?line=team")
+        finally:
+            srv.terminate()
+            srv.wait(timeout=10)
+            log.close()
+        need(key == pair["public"] and info["agent"]["key"] == key and team["agent"]["key"] == key,
+             f"the page doesn't get the key: /direct/key {key!r}, /direct.json {info['agent'].get('key')!r}, team {team['agent'].get('key')!r}")
+        team_push = signs("team")
+        need(json.loads((sup2 / "push-keys.json").read_text())["public"] == key and team_push["key"] == key, f"another key was made: {team_push['key']}")
+        need(not list(ws2.rglob("keys.json")), "the team line made a key of its own in the workspace")
+        for said in (main["signed"], team_push["signed"]):
+            head, body, sig, public = re.fullmatch(r"vapid t=([\w-]+)\.([\w-]+)\.([\w-]+), k=([\w-]+)", said).groups()
+            raw = unb64(sig)
+            ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), unb64(key)).verify(
+                encode_dss_signature(int.from_bytes(raw[:32], "big"), int.from_bytes(raw[32:], "big")), f"{head}.{body}".encode(), ec.ECDSA(hashes.SHA256()))
+            need(public == key, f"a push is signed with another key than the page has: {public}")
+        # asking for the public key never makes one; only keys() does, once
+        child = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1] + "/app"); sys.path.insert(0, sys.argv[1] + "/routine")
+import direct_line as D
+print(json.dumps({"key": D.public_key(), "there": D._keys_path().exists()}))
+print(json.dumps({"made": D.keys()["public"], "key": D.public_key(), "same": D.keys()["public"]}))
+'''
+        empty = d / "empty"
+        (empty / "HQ").mkdir(parents=True)
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, cwd=str(ROOT), timeout=60,
+                    env={**env, "HQ_SUPPORT": str(d / "empty-support"), "HQ_FOLDER": str(empty), "HQ_WORKSPACE": str(empty)})
+        need(r.returncode == 0 and json.loads(r.stdout.strip().splitlines()[-2]) == {"key": "", "there": False}, f"asking for the key made one: {r.stdout}{r.stderr[-300:]}")
+        made = json.loads(r.stdout.strip().splitlines()[-1])
+        need(made["made"] and made["made"] == made["key"] == made["same"], f"a first key isn't made once: {made}")
+        return "keys masked in every transcript line, the push key in HQ's own folder at 600, the page and the team line get the key that signs the pushes"
 
     async def flow225(self) -> str:
         """F102, no Claude: the laptop's words reach the main, and each side says what it runs. On a stand-in pair: a note written on
