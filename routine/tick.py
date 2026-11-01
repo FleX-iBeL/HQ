@@ -34,7 +34,7 @@ H30: whatever goes down, why, what was done about it and when it was back goes i
 (routine/incidents.py), shown under Routines. The helper also checks the watchdog, and starts it again
 when it has stopped: the watchdog checks the helper, the helper checks the watchdog.
 """
-import importlib, json, os, re, signal, subprocess, sys, time
+import importlib, json, os, re, signal, subprocess, sys, time, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import routines  # H19: every routine writes its own line for the status page
@@ -300,8 +300,8 @@ def start(job):
         roadmap = ""
     plan = carryon.plan(job, roadmap, FOLDER)
     cycle = cycles.is_cycle_job(job)  # H298: an agent's own run: her prompt, a fresh session, the box, always headless
-    if cycle:
-        plan = {"mode": "new", "session": plan["session"]}
+    if cycle:  # always a fresh chat: a held run's own session id is taken ("already in use"), and the run would end at once
+        plan = {"mode": "new", "session": plan["session"] if plan["mode"] == "new" else str(uuid.uuid4())}
         prompt = cycles.prompt(job, cycle)
     elif plan["mode"] == "resume":
         prompt = carryon.resume_prompt(n, where, plan, job["text"], past_note)

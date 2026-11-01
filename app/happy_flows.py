@@ -14325,6 +14325,18 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             g = b.drive("gatekeep", b.noon())
             need(g["verdict"] == "skipped" and b.st()["F9301"]["fix"]["n"] == 1, f"a round that ran wasn't counted: {g} {b.st()['F9301']}")
 
+        def held_again(b):
+            b.flag("F9301", "no size named")
+            b.minute()
+            s = b.go("")
+            first = re.search(r"--session-id (\S+)", s["script"]).group(1)
+            b.tool("jobs.py", "mark", str(s["n"]), "held: usage over the line")  # its words unchanged, it goes again
+            own = Path(b.env["HQ_CLAUDE_PROJECTS"]) / "x"
+            own.mkdir(parents=True, exist_ok=True)
+            (own / f"{first}.jsonl").write_text("{}\n")
+            again = b.drive("start", extra=b.fake(""))
+            need(again["n"] == s["n"] and f"--session-id {first}" not in again["script"], f"a held run starts on its own session id, which claude refuses: {again['script'][-300:]}")
+
         def mark_lost(b):
             b.flag("F9301", "no size named")
             b.minute()
@@ -14370,6 +14382,8 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             b.tool("jobs.py", "pause", "made up")
             t = b.minute()
             need(not b.items() and not t["fixes"], f"a round with everything paused: {b.items()} {t}")
+            r = b.tool("sprint.py", "ready", "F9301")
+            need(r.returncode != 0 and "isn't ready" in (r.stdout + r.stderr), f"a pause took the review's gate away: {r.stdout} {r.stderr}")
 
         def small_plan(b):
             b.tool("usagecost.py", "plan", "set", "Pro")
@@ -14420,7 +14434,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 need(not b.items() and not [x for x in t["fixes"] if "round" in x], f"a fourth round on day {d}: {b.items()} {t}")
             need(b.texts().count("If you tell me what F9301 should say") == 1, "the cap's text came twice")
 
-        for name, fn in (("one price", one_price), ("his words", his_words), ("the row", the_row), ("what a round touches", touch), ("a held round", held),
+        for name, fn in (("one price", one_price), ("his words", his_words), ("the row", the_row), ("what a round touches", touch), ("a held round", held), ("held, then again", held_again),
                          ("a lost mark", mark_lost), ("one text", one_text), ("the review off", review_off), ("a smaller plan", small_plan),
                          ("two rows", two_rows), ("the cap for good", for_good)):
             step(name, fn)

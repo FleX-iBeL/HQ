@@ -220,7 +220,7 @@ def states(rows=None):
 def why_not_ready(row, st=None):
     """Why the review keeps a row from the Ready mark, in a few plain words, or None (also when reviews don't run
     here, or haven't started yet: then nothing waits on them)."""
-    if not on() or not _state()[1].get("since"):
+    if not (on() or q.is_paused()) or not _state()[1].get("since"):  # F86: a pause holds the reviewer, it doesn't open this gate
         return None
     st = st or states([row]).get(row["label"]) or {}
     s = st.get("state")
