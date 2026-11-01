@@ -1883,6 +1883,8 @@ if __name__ == "__main__":
         if release_minute():  # F104: before anything else runs
             routines.heartbeat()
             sys.exit(0)
+        if hqpaths.under_test() and os.environ.get("HQ_RELEASE_MINUTE") == "only":  # a flow's real tick.py: the guard, and no routine of a whole minute
+            sys.exit(0)
         try:
             helper_gap()
         except Exception as e:

@@ -1085,7 +1085,13 @@ def back(tag: str | None = None, tell: bool = True, first: bool = False) -> dict
 
 def back_run(tag: str, tell: bool, guard: bool = False) -> int:
     """`guard`: the guard on the release, not a person: it stops a job by exact pid and nothing else (the job for good: held, it would carry
-    on by itself and do the same again), keeps no way forward (back.json is what `forward` goes by), and writes down what happened."""
+    on by itself and do the same again), keeps no way forward (back.json is what `forward` goes by), and writes down what happened. Only on
+    a friend's copy, however this was started: it never moves the maker's."""
+    why = hqpaths.not_friend() if guard else ""
+    if why:
+        log(f"release guard: left alone: {why}")
+        print(f"The guard leaves this HQ alone: {why}.")
+        return 1
     say("updating", "Going back", **{"to": vname(tag)})
     told, undone, saved, moved = None, [], {}, False
     try:
@@ -1287,9 +1293,13 @@ def release_minute(log=None) -> str | None:
     """F104: the routine's first thing every minute. None: nothing's the matter, carry on. Words: this copy holds unreleased work (or is
     going back from it): start nothing on top of it this minute. Never on the maker's copy, and never on a guess: what can't be read or
     can't be told counts as nothing found. The look at GitHub only happens past a release, for a head it hasn't seen, or once an hour."""
-    if not has_git() or not hqpaths.is_friend():
+    if not has_git():
         return None
+    why = hqpaths.not_friend()
+    if why:
+        return _guard_doubt(why, log)
     st, now = read_json(GUARD_FILE), time.time()
+    st.pop("doubt", None)
     mine, tags = past_release()
     if not mine:
         return _guard_clear(st)
@@ -1307,6 +1317,19 @@ def release_minute(log=None) -> str | None:
         write_json(GUARD_FILE, st)
         return _guard_clear(st)
     return _guard_hold(st, hit, now, log)
+
+
+def _guard_doubt(why: str, say_it) -> None:
+    """Not surely a friend's: the guard does nothing, on anything. Past a release it says so, once for each reason, in the log and in its file;
+    on the maker's own copy there's nothing to say."""
+    if why == hqpaths.THE_MAKER or not past_release()[0]:
+        return None
+    st = read_json(GUARD_FILE)
+    if st.get("doubt") != why:
+        st["doubt"] = why
+        write_json(GUARD_FILE, st)
+        (say_it or log)(f"release guard: this HQ stands past a release, and it's left alone: {why}")
+    return None
 
 
 def _guard_clear(st: dict) -> None:

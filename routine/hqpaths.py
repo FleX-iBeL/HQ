@@ -366,24 +366,57 @@ def is_maker() -> bool:
         return False
 
 
-def is_friend() -> bool:
-    """F104: whether this HQ is surely not the maker's, for what acts on it (the guard on the release). is_maker() says no on a file it
-    can't read, and that's no ground to touch anything: a workspace that isn't there, or a features.json half written or broken, isn't a
-    friend's. A workspace that's there with no features.json is, the template has none, unless a second computer is set up: on a new
-    backup the file may simply not have come over yet."""
+THE_MAKER = "the maker's"  # F104: not_friend's plain answer on the maker's own copy, where there's nothing to say
+
+
+def _commits_as_maker() -> bool | None:
+    """F104: whether HQ's repo commits as the maker: its own config says the public name (push.own_identity sets it, only on a computer that
+    pushes with HQ's key). A friend's copy is a `git clone` over https, whose config has no name at all: her own name, if she sets one, is
+    never this one. None when it can't be told."""
+    try:
+        from push import PUBLIC_NAME
+        r = subprocess.run(["git", "-C", HQ, "config", "--local", "--get", "user.name"], capture_output=True, text=True, timeout=20)
+    except (ImportError, OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode not in (0, 1):  # 1: the name isn't set
+        return None
+    return r.stdout.strip() == PUBLIC_NAME
+
+
+def not_friend() -> str:
+    """F104: why this HQ doesn't count as a friend's for what acts on it, the guard on the release; "" when it does. What the workspace says
+    wins: HQ_MAKER=0 only ever closes things elsewhere and means nothing here. is_maker() says no on a file it can't read, and that's no ground
+    to touch anything: a workspace that isn't there, or a features.json half written or broken, isn't a friend's. A workspace that's there
+    with no features.json is, the template has none, unless a second computer is set up: on a new backup the file may simply not have come
+    over yet. And whatever the workspace says, a repo that commits as the maker isn't a friend's: a lost "maker" key can't send his copy back."""
     import json
-    env = os.environ.get("HQ_MAKER")
-    if env in ("0", "1"):
-        return env == "0"
+    if os.environ.get("HQ_MAKER") == "1":
+        return THE_MAKER
     p = os.path.join(FOLDER, "HQ", "features.json")
-    if not os.path.exists(p):
+    if os.path.exists(p):
+        try:
+            d = json.load(open(p, encoding="utf8"))
+        except (OSError, ValueError):
+            return "features.json can't be read"
+        if not isinstance(d, dict):
+            return "features.json can't be read"
+        if d.get("maker") is True:
+            return THE_MAKER
+    else:
         try:
             paired = bool(json.load(open(os.path.join(SUPPORT, "role.json"), encoding="utf8")).get("peer"))
         except (OSError, ValueError, AttributeError):
             paired = False
-        return os.path.exists(ROADMAP) and not paired
-    try:
-        d = json.load(open(p, encoding="utf8"))
-    except (OSError, ValueError):
-        return False
-    return isinstance(d, dict) and d.get("maker") is not True
+        if paired:
+            return "a second computer is set up and features.json hasn't come over"
+        if not os.path.exists(ROADMAP):
+            return "there's no workspace here"
+    as_maker = _commits_as_maker()
+    if as_maker is None:
+        return "it can't be told who this repo commits as"
+    return "this repo commits as the maker" if as_maker else ""
+
+
+def is_friend() -> bool:
+    """F104: whether this HQ is surely not the maker's, for what acts on it. See not_friend."""
+    return not not_friend()
