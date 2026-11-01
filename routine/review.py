@@ -935,8 +935,8 @@ def reword(label, payload):
         texts = S._grep_texts(S._ws())
         bad = [x for x in _new_quotes(line, new) if not S.quote_found(x, texts)]
         if bad:
-            sys.exit(f"Refused: a new quote isn't in a call, the notes or the log: {bad[0][:80]!r}. "
-                     "His words are never written for him; it goes on the sit-down list.")
+            sys.exit(f"Refused: a new quote isn't in a call, the notes or the log: {bad[0][:80]!r}. His words are never written for "
+                     "him; it goes on the sit-down list. (Not his words at all, a name or a label: write it without the quote marks.)")
         said = _new_claims(line, new)
         if said:
             sys.exit(f"Refused: this says what he said or chose without his words between quotes: {said[0][:80]!r}. "
