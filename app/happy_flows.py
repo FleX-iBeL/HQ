@@ -16784,6 +16784,34 @@ print(ledger.text('donna')[-900:])
         need(r.returncode == 0 and head(c) == tag(c, "v1.2.0"), f"the guard: {r.stdout[-200:]} {r.stderr[-300:]}")
         return "her own commits count as standing on the tag: one version back is the one below, forward brings them back; a version with no forward is refused, nothing moved"
 
+    async def flow246(self) -> str:
+        """F104, no Claude: the job hook stops the plain ways past the pre-push hook, a version back or forward, and running the data changes by hand, on any
+        job and any copy; a job's own work with the same words in it still goes. A word filter for an honest job."""
+        import subprocess as _sp
+        ways = ["git push --no-verify", "git push --no-verify origin dev", "git -C ../HQ push origin dev --no-verify", "git status && git push --no-verify", "git -c core.hooksPath=/dev/null push origin dev",
+                "git -c core.hookspath=/tmp/x push", 'git -c "core.hooksPath=/dev/null" push', "git -C ../HQ -c core.hooksPath=/dev/null push", "git config core.hooksPath /dev/null",
+                "python3 -c \"import subprocess; subprocess.run(['git', 'push', '--no-verify'])\"",
+                "python3 routine/update.py back", 'python3 "routine/update.py" back --tag v1.0.0', "python3 ../HQ/routine/update.py back-run v1.0.0 tell", "python3 routine/update.py forward", "cd ../HQ && python3 routine/update.py forward",
+                "python3 routine/update.py back-here v1.0.0", "python3 routine/update.py back-first v1.0.0", "python3 routine/update.py forward-here",
+                "python3 routine/datachange.py apply", "python3 ../HQ/routine/datachange.py apply", 'python3 "routine/datachange.py" apply']
+        fine = ["git push origin dev", "git push", "python3 routine/push.py", "python3 routine/update.py status", "python3 routine/update.py check --force", "python3 routine/update.py version", "python3 routine/datachange.py list",
+                "python3 routine/datachange.py try", "git commit -m 'refuse git push --no-verify'", "grep -n no-verify routine/cyclehook.py", "git config user.name", "git log --grep=core.hooksPath", "grep -n back routine/update.py"]
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import cyclehook as C
+ways, fine = json.load(sys.stdin)
+ask = lambda cmd, m: C.decide({'tool_name': 'Bash', 'tool_input': {'command': cmd}}, m)
+print(json.dumps({'got': [c for c in ways for m in (True, False) if ask(c, m)[0] != 2 or 'HQ: refused' not in ask(c, m)[1]], 'stopped': [c for c in fine for m in (True, False) if ask(c, m)[0] != 0]}))
+"""
+        for maker in ("1", "0"):
+            r = await asyncio.to_thread(lambda: _sp.run([sys.executable, "-c", code, str(ROOT)], input=json.dumps([ways, fine]), capture_output=True, text=True, env={**os.environ, "HQ_MAKER": maker}, cwd=str(ROOT), timeout=120))
+            need(r.returncode == 0, f"the job hook: {r.stderr[-400:]}")
+            o = json.loads(r.stdout.strip().splitlines()[-1])
+            need(not o["got"], f"a way past it still goes on {'the maker' if maker == '1' else 'a friend'}: {o['got']}")
+            need(not o["stopped"], f"a job can't do its own work: {o['stopped']}")
+        return f"{len(ways)} plain ways refused for every job on both kinds of copy, {len(fine)} ordinary commands go"
+
     async def flow250(self) -> str:
         """F106, no Claude: a stock Mac's python3 is 3.9, and agents run rules lookups with it. HQ's Python is read for what 3.9 can't: syntax past it, a `X | Y`
         annotation without the future import, or an f-string only 3.12 can read. No 3.9 here, so it reads the source; the checker is tried on made-up bad lines first."""
@@ -28330,6 +28358,7 @@ FLOWS = {
     238: ("F106: a helper beside a call, with a stand-in for the model: started without a yes, the call goes on, the answer in the same call once; hung up it's a text on her line; boxed in minutes and turns; two at once; a used-up limit stops it", False, "flow238"),
     239: ("F106: a check she couldn't run is never answered around: the program says I couldn't check that when her reply doesn't", False, "flow239"),
     250: ("F106: nothing in HQ's Python that a stock Mac's 3.9 can't read: no newer syntax, no X | Y annotation without the future import, what a rules lookup pulls in included", False, "flow250"),
+    246: ("F104: the job hook stops the plain ways past the pre-push hook, a version back or forward and the data changes by hand, on any job; ordinary work goes", False, "flow246"),
     245: ("F104: a friend's own commits past a tag count as standing on that tag: one version back is the one below; a version with no forward of its own is refused, nothing moved", False, "flow245"),
     244: ("F104: a data change runs only when committed, unchanged and on dev, or in the release she stands on; anything else is left alone and said once", False, "flow244"),
     243: ("F104: the guard on the state: every way onto dev puts a friend's copy back on the newest release within the routine's minute, no data change of dev's runs, the job stopped by its exact pid, said and written down; her own commits stay, also with dev's patch; offline never on a guess, never older than it stood on, no newer release she didn't stand on; the maker's copy never touched, whatever the environment or a lost key says; no way forward again; one backup branch", False, "flow243"),

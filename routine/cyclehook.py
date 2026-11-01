@@ -16,7 +16,8 @@ a cycle gets the shared-file part: `--mail-only` is how a team job's settings ca
 
 F104, F103, F106 (fix round of batch 3): every job, whatever its kind, is kept off the work line on a friend's copy (any way of
 moving the head onto commits she hasn't got released), off HQ's guard variables, off the switches and the two records, and it
-can't write the ledger or start a helper. The hook reads commands: what a script a job wrote does when it runs isn't seen here. The words
+can't write the ledger or start a helper, skip the pre-push hook, go back or forward a version, or run the data changes by hand. The hook reads
+commands: what a script a job wrote does when it runs isn't seen here: a word filter for an honest job, not a wall. The words
 of a command can't reach "never" for a friend's copy (`git checkout -` is ordinary git), so the plain ways stop here and the guard on the
 state is the routine's: update.release_minute, the first thing in every minute.
 """
@@ -65,6 +66,8 @@ _SETS_GUARD = re.compile(rf"{_GUARD}\s*\]?\s*(?:=(?!=)|:\s)"
 _MAKER_OFF = re.compile(r"\bHQ_MAKER\s*=\s*0(?=\s|$)")  # F104: only ever closes: qa.py's own advice for checking a feature in pieces
 _JOB_NO_LEDGER = re.compile(r"(?<![\w-])mistakes\.py\s+(?:add|put)\b|-m\s+mistakes\b|\bpython\S*\s[^|&]*\b(?:import|from)\s+mistakes\b")
 _JOB_NO_HELPER = re.compile(r"(?<![\w-])helper\.py\s+(?:start|run)\b|-m\s+helper\b|\bpython\S*\s[^|&]*\b(?:import|from)\s+helper\b")
+_JOB_NO_VERSIONS = re.compile(r"(?<![\w-])update\.py\s+(?:back|forward)(?:-run|-here|-first)?\b")  # F104: his, they end what runs and move both computers
+_JOB_NO_DATA = re.compile(r"(?<![\w-])datachange\.py\s+apply\b")  # F104: the routine's minute does that, on what's committed and on dev
 WAY = ("the planning through sprint.py, jobs.py or review.py reword, the to-do list through todo.py, the calendar through pings.py, "
        "the games through games.py, the log and the mail list through handover.py edit REL JSON; your ledger and "
        "your line you write freely")
@@ -161,6 +164,24 @@ def off_the_release(cmd: str) -> bool:
     return False
 
 
+def skips_hooks(t: str) -> bool:
+    """F104: a push past the pre-push hook: --no-verify, or git told to look for hooks elsewhere. Read as git reads it, so a commit message
+    that names them is no such thing."""
+    for piece in re.split(r"[;&|\n]+", t):
+        m = re.search(r"\bgit\s(.*)", piece, re.S)
+        if not m:
+            continue
+        words, i = m.group(1).split(), 0
+        while i < len(words) and words[i].startswith("-"):
+            if words[i] == "-c" and i + 1 < len(words) and words[i + 1].lower().startswith("core.hookspath"):
+                return True
+            i += 2 if words[i] in _GIT_ARG else 1
+        sub, args = (words[i], words[i + 1:]) if i < len(words) else ("", [])
+        if (sub == "push" and "--no-verify" in args) or (sub == "config" and any(a.lower() == "core.hookspath" for a in args)):
+            return True
+    return False
+
+
 def job_guard(cmd: str) -> str | None:
     """What no job's shell command does, of any kind, in a refusal's words; None when it's fine."""
     t = plain(cmd)
@@ -172,6 +193,12 @@ def job_guard(cmd: str) -> str | None:
         return "HQ: refused: a job doesn't write the ledger; only the program's pass and the wrap-up do."
     if _JOB_NO_HELPER.search(t):
         return "HQ: refused: a helper is for calls and texts; a job has its own time."
+    if skips_hooks(t):
+        return "HQ: refused: a push goes through the pre-push hook, the privacy check; a job never skips it."
+    if _JOB_NO_VERSIONS.search(t):
+        return "HQ: refused: going back or forward a version is his, on a call or on the status page; a job never does it."
+    if _JOB_NO_DATA.search(t):
+        return "HQ: refused: the routine runs the data changes, once they're committed and on dev; a job never runs them by hand."
     return None
 
 
