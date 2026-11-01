@@ -1774,7 +1774,8 @@ def tick():
     if not q["on"]:
         return
     try:
-        nightly_minute()  # F101: the night's test run is the routine's own
+        if not hqpaths.under_test():  # a flow's copy between 2:00 and 6:00 would start a whole nightly of its own, and outlive the flow
+            nightly_minute()  # F101: the night's test run is the routine's own
     except Exception as e:
         log(f"nightly: {e!r}")
     # H39: the waiting job highest on the list goes first (ready, or held for the usage and now

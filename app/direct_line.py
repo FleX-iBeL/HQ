@@ -917,7 +917,7 @@ def held_file() -> Path:
 
 def asleep(t: float | None = None) -> bool:
     """He's asleep now (pings._asleep: his calendar's Sleep block, else the night hours). A test says so itself."""
-    if hqpaths.under_test():
+    if hqpaths.under_test() or os.environ.get("HQ_ASLEEP"):
         return os.environ.get("HQ_ASLEEP") == "1"
     try:
         sys.path.insert(0, str(ROOT / "routine"))

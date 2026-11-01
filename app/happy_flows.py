@@ -524,6 +524,10 @@ class Live:
 
 # -- the flows -----------------------------------------------------------------------------
 
+# F104: a feature in pieces is on only with his say-so kept beside it: what the flows on the agents' cycles start from.
+AGENTS_ON = '{"off": [], "on": ["agents_run"], "maker": true, "say_so": {"agents_run": {"at": "2026-10-29 12:00", "how": "made up for a flow"}}}\n'
+
+
 class Run:
     def __init__(self, tmp: Path):
         self.tmp = tmp
@@ -1555,7 +1559,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
             shutil.rmtree(tmp, ignore_errors=True)
         # The real one: reads and reports, no Claude.
         r = subprocess.run(["python3", str(jv / "routine/usage-check.py")], capture_output=True, text=True, timeout=60)
-        need(r.returncode == 0 and "5-hour limit" in r.stdout, f"the usage check failed: {r.stdout.strip()} {r.stderr.strip()}")
+        need(r.returncode == 0 and re.search(r"5-hour limit|Weekly|No usage has been saved", r.stdout), f"the usage check failed: {r.stdout.strip()} {r.stderr.strip()}")  # F107: a plan may have no 5-hour limit
         first = r.stdout.strip().splitlines()[0]
         return f"stream saved; newer shown with its time; normal chat's reading kept; old called old; now: {first}"
 
@@ -2677,7 +2681,7 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         status page's data with curl on this computer. Changing anything in HQ still asks; curl
         anywhere else, or with options that send or save, asks. H103: web search and reading a web
         page never ask. No Claude turns."""
-        from policy import Policy, ALLOW, ASK
+        from policy import Policy, ALLOW, ASK, STATUS_PORT
         pol = Policy(config.FOLDER)
         hq = Path(os.path.realpath(ROOT))
         log = hq / "scratch/routine/mail.log"
@@ -2693,9 +2697,9 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
             ("Bash", {"command": f'ls -la "{hq}/scratch/routine" | head'}),
             ("Bash", {"command": f'cd "{hq}" && ls'}),
             ("Bash", {"command": f'git -C "{hq}" log --oneline -5'}),
-            ("Bash", {"command": "curl -s http://localhost:4748/routines.json"}),
-            ("Bash", {"command": "curl -sS --max-time 5 http://127.0.0.1:4748/usage.json"}),
-            ("Bash", {"command": "curl -s localhost:4748/jobs-history.json?h=6"}),
+            ("Bash", {"command": f"curl -s http://localhost:{STATUS_PORT}/routines.json"}),
+            ("Bash", {"command": f"curl -sS --max-time 5 http://127.0.0.1:{STATUS_PORT}/usage.json"}),
+            ("Bash", {"command": f"curl -s localhost:{STATUS_PORT}/jobs-history.json?h=6"}),
         ]
         for tool, inp in allow:
             need(v(tool, inp) == ALLOW, f"a call has to ask to read HQ: {tool} {inp}")
@@ -2734,6 +2738,37 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
         need("{HQ}" not in config.VOICE_RULES, "the call rules still have a placeholder")
         return f"{len(allow)} reads in HQ and the status page go freely; {len(ask)} changes or reads elsewhere still ask"
 
+    def _old_runs_gone(self, run_there, prefix: str, port: int, planted: str) -> None:
+        """Flows 61 and 63 clean up after themselves, but a run that was killed can't: its folder, its systemd units, its tmux sessions
+        and its status server stay, and the next run trips over them. What an earlier run of this flow left goes first (a run still
+        alive keeps its own). PLANTED makes a made-up dead run's leftovers, to show it goes."""
+        r = run_there(planted, capture_output=True)
+        need(r.returncode == 0, f"couldn't make up an old run's leftovers: {r.stderr.decode()[:200]}")
+        script = r"""
+U=@TAG@; T="$HOME/$U"; D="$HOME/.config/systemd/user"
+for s in $(tmux ls -F '#S' 2>/dev/null | grep "^$U-"); do tmux kill-session -t "=$s"; done
+systemctl --user stop "$U-*" 2>/dev/null
+P=$(ss -Hltnp "sport = :@PORT@" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+[ -n "$P" ] && case "$(readlink /proc/$P/cwd)" in "$T"*) kill "$P";; esac
+rm -rf "$T" "$D/$U"-* "$D"/*.wants/"$U"-*
+systemctl --user daemon-reload 2>/dev/null
+exit 0
+"""
+        seen = run_there(f'cd "$HOME" && ls -d {prefix}-* .config/systemd/user/{prefix}-* 2>/dev/null; tmux ls -F "#S" 2>/dev/null | grep "^{prefix}-"',
+                         capture_output=True).stdout.decode()
+        for tag in sorted(set(re.findall(rf"{prefix}-\d+", seen))):
+            try:
+                os.kill(int(tag.rsplit("-", 1)[1]), 0)
+                continue
+            except PermissionError:
+                continue
+            except (ProcessLookupError, OverflowError):
+                pass
+            run_there("bash -s", input=script.replace("@TAG@", tag).replace("@PORT@", str(port)).encode(), capture_output=True, timeout=60)
+        left = run_there(f'cd "$HOME" && ls -d {prefix}-99999999 .config/systemd/user/{prefix}-99999999-* 2>/dev/null; tmux ls -F "#S" 2>/dev/null | grep "^{prefix}-99999999"',
+                         capture_output=True).stdout.decode().strip()
+        need(not left, f"an old run's leftovers stayed: {left}")
+
     async def flow61(self) -> str:
         """H56.1: HQ's routine and watchdog on a Linux server. No Claude turns. On this computer: the Mac's own
         parts are as they were (where HQ keeps its memory, the programs, the crash check). With a Linux machine
@@ -2770,6 +2805,8 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
             return "; ".join(notes + ["the Linux part skipped: set HQ_TEST_LINUX=<ssh host> to run it on a Linux machine"])
         run_there = (lambda cmd, **k: sp.run(["ssh", "-o", "BatchMode=yes", host, cmd], **k)) if host else \
             (lambda cmd, **k: sp.run(["bash", "-c", cmd], **k))
+        self._old_runs_gone(run_there, "hqflow61", 4799, 'mkdir -p "$HOME/hqflow61-99999999/HQ" "$HOME/.config/systemd/user" && '
+                            'printf "[Service]\\nExecStart=/bin/true\\n" > "$HOME/.config/systemd/user/hqflow61-99999999-routine.service"')
         tag = f"hqflow61-{os.getpid()}"
         files = sp.run(["git", "-C", str(jv), "ls-files", "-co", "--exclude-standard"], capture_output=True, text=True).stdout
         files = "\n".join(l for l in files.splitlines() if l and not l.startswith("workspace"))
@@ -2795,6 +2832,7 @@ fail() { echo "FAIL $*"; exit 1; }
 [ -z "$SERVER_BEFORE" ] || fail "port $SP is already in use on the Linux machine"
 ss -Hltn "sport = :$CP" | grep -q . && fail "port $CP is already in use on the Linux machine"
 cp -r "$H/template" "$T/workspace" && ln -s "$T/workspace" "$H/workspace"
+mkdir -p "$H/scratch/routine" && date +%F > "$H/scratch/routine/nightly-started"  # its timer's routine, at night: no nightly of its own
 (cd "$H" && python3 routine/jobs.py mail-off >/dev/null) || fail "couldn't switch the test's mail check off"
 sh "$H/routine/install-linux.sh" --no-start >/dev/null || fail "the Linux install failed"
 for x in routine.timer watchdog.timer start.service; do
@@ -2910,6 +2948,7 @@ echo "ALL OK"
             return "; ".join(notes + ["the Linux part skipped: set HQ_TEST_LINUX=<ssh host> to run it on a Linux machine"])
         run_there = (lambda cmd, **k: sp.run(["ssh", "-o", "BatchMode=yes", host, cmd], **k)) if host else \
             (lambda cmd, **k: sp.run(["bash", "-c", cmd], **k))
+        self._old_runs_gone(run_there, "hqflow63", 4798, 'mkdir -p "$HOME/hqflow63-99999999/HQ" && tmux new-session -d -s hqflow63-99999999-job-1 "sleep 300"')
         tag = f"hqflow63-{os.getpid()}"
         files = sp.run(["git", "-C", str(jv), "ls-files", "-co", "--exclude-standard"], capture_output=True, text=True).stdout
         files = "\n".join(l for l in files.splitlines() if l and not l.startswith("workspace"))
@@ -6822,7 +6861,8 @@ print(json.dumps(o))
              "H174: the status page doesn't say what the totals count, or the team's guess isn't apart")
         code, body, _ = await asyncio.to_thread(http_get, "/routines.json", f"http://127.0.0.1:{os.environ.get('HQ_STATUS_PORT') or 4748}")
         live = json.loads(body) if code == 200 else {}
-        need("estimate" in live and "accuracy" in (live["estimate"] or {}), f"the live status server has no estimates: {code}")
+        if code or not os.environ.get("HQ_STATUS_PORT"):  # a throwaway copy with a status port of its own has no server there
+            need("estimate" in live and "accuracy" in (live["estimate"] or {}), f"the live status server has no estimates: {code}")
         q = json.loads(sp.run(["python3", str(jv / "routine/jobs.py"), "next"], capture_output=True, text=True).stdout)
         # The page in a headless browser only where there is one (a Mac); on a server the parts above suffice (H56.7).
         browsers = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
@@ -14126,7 +14166,7 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         _sh.copytree(ROOT / "template", ws)
         (ws / "HQ").mkdir(exist_ok=True)
         if maker:
-            (ws / "HQ/features.json").write_text('{"off": [], "on": ["agents_run"], "maker": true}\n')
+            (ws / "HQ/features.json").write_text(AGENTS_ON)
         status = self.tmp / f"h298-{name}-status"
         status.mkdir(exist_ok=True)
         run = self.tmp / f"h298-{name}-run"
@@ -16372,7 +16412,7 @@ print(json.dumps(release.on_the_record(old, 'v9.9.9', '9.9.9')))
 
     def _ledger_env(self, tag):
         ws, env = self._h298_ws(tag)
-        env.update({"HQ_UNDER_TEST": "1"})
+        env.update({"HQ_UNDER_TEST": "1", "HQ_MISTAKES_FAKE": "yes"})  # the second look says yes unless a flow says otherwise
         return ws, env
 
     async def flow232(self) -> str:
@@ -16508,7 +16548,58 @@ print(json.dumps(out))
         need(o["edit"] == o["trail"] == o["shell"] == o["put"] == "deny" and o["tag"] == o["score"] == o["after"] == "allow" and o["mail"] == "deny", f"the doors: {o}")
         rows = [json.loads(l) for l in (ws / "HQ/mistakes.jsonl").read_text().splitlines()]
         need(len(rows) == 6 and rows[-1]["kind"] == "refused" and rows[-1]["agent"] == "donna" and rows[-1]["handoff"] == "the agent to the outside", f"the refused mail: {rows[-1]}")
-        return "one line per mistake with the agent and his words, from the program, the wrap-up and a text; praise and an agent's words stay out; the doors hold"
+        # the wrap-up's gate: his words alone aren't a correction. The second look decides what the clear phrases don't catch
+        lines = lambda: (ws / "HQ/mistakes.jsonl").read_text().splitlines()
+        lo = ROOT / "scratch/mistakes-left-out.log"
+        from_here = lo.stat().st_size if lo.exists() else 0
+        said = lambda look, *a: _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "add", "correction", *a], capture_output=True, text=True, env={**env, "HQ_MISTAKES_FAKE": look}, cwd=str(ROOT))
+        had = len(lines())
+        r = said("no", "--call", rel, "--said", "No problem, thanks!")
+        need(r.returncode == 2 and "Left out" in r.stdout and len(lines()) == had, f"praise went in as a correction: {r.stdout}")
+        r = said("the model fell over", "--call", rel, "--said", "Hey, what's on the list?")
+        need(r.returncode == 2 and "look failed" in r.stdout and len(lines()) == had, f"a failed look isn't left out: {r.stdout}")
+        tail = lo.read_bytes()[from_here:].decode() if lo.exists() else ""
+        need("No problem, thanks!" in tail and "isn't a correction" in tail and "Hey, what's on the list?" in tail and "look failed" in tail, f"the left-out lines aren't in the log: {tail[-400:]}")
+        t3 = calls / "2026-10-30-1900.md"
+        t3.write_text(f"# Call\n\nStarted 19:00:00 · agent Donna · brain opus\n\n- 19:00:01 **{me}:** that's wrong, it was Friday\n- 19:00:09 **HQ:** Noted.\n- 19:01:00 **{me}:** keep it to the first two please\n")
+        r = said("no", "--call", t3.relative_to(ws).as_posix(), "--said", "that's wrong, it was Friday")
+        need(r.returncode == 0 and "donna" in r.stdout, f"a clear phrase went past the look: {r.stdout}")
+        r = said("yes", "--call", t3.relative_to(ws).as_posix(), "--said", "keep it to the first two")
+        need(r.returncode == 0 and "donna" in r.stdout, f"the second look's yes: {r.stdout}")
+        # a hand-off and an item given for a line that's already there land on that line; the file only grew
+        had = lines()
+        r = said("no", "--call", rel, "--said", "You keep saying yes", "--handoff", "Pepper to Moneypenny", "--item", "F9100")
+        need(r.returncode == 0 and len(lines()) == len(had) + 1 and lines()[:len(had)] == had, f"the hand-off and the item: {r.stdout} {r.stderr[-300:]}")
+        code = "import json, sys; sys.path.insert(0, sys.argv[1] + '/routine'); import mistakes; print(json.dumps(mistakes.read()))"
+        rows = json.loads(_sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT)).stdout.strip().splitlines()[-1])
+        hit = [d for d in rows if d["words"].startswith("You keep saying yes")]
+        need(len(hit) == 1 and hit[0]["handoff"] == "Pepper to Moneypenny" and hit[0].get("label") == "F9100" and hit[0].get("item"), f"not merged onto the line: {hit}")
+        r = said("no", "--call", rel, "--said", "You keep saying yes", "--handoff", "Pepper to Moneypenny", "--item", "F9100")
+        need("Already" in r.stdout and len(lines()) == len(had) + 1, f"merged twice: {r.stdout}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score", "--days", "4000"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need("Pepper to Moneypenny: 1" in r.stdout, f"the score doesn't read the merged line: {r.stdout}")
+        # a job writes no line: not the program's add or put, not the file, whatever kind of job
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import cyclehook as C
+out = {}
+for mail_only in (True, False):
+    for cmd in ('python3 routine/mistakes.py put \\'{"kind": "correction", "key": "x"}\\'', 'python3 "/some/routine/mistakes.py" add correction --call x --said "a b c"', 'python3 routine/mistakes.py add bug-after-qa F1 "what"',
+                'python3 -c "import mistakes; mistakes.add(1, 2, 3)"', 'cd routine && python3 -m mistakes put x', 'echo x >> HQ/mistakes.jsonl', 'cp /tmp/x HQ/trail.jsonl', 'rm HQ/mistakes.jsonl'):
+        out[f'{mail_only} {cmd}'] = C.decide({'tool_name': 'Bash', 'tool_input': {'command': cmd}}, mail_only)[0]
+    for tool in ('Edit', 'Write'):
+        out[f'{mail_only} {tool}'] = C.decide({'tool_name': tool, 'tool_input': {'file_path': '/w/HQ/mistakes.jsonl'}}, mail_only)[0]
+for cmd in ('python3 routine/mistakes.py score', 'python3 routine/mistakes.py list --days 3', 'python3 routine/trail.py follow F1'):
+    out[cmd] = C.decide({'tool_name': 'Bash', 'tool_input': {'command': cmd}}, True)[0]
+print(json.dumps(out))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env={**env, "HQ_MAKER": "1"}, cwd=str(ROOT))
+        need(r.returncode == 0, f"the job's door: {r.stderr[-400:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(all(v == 2 for k, v in o.items() if k.startswith(("True", "False"))) and not any(v for k, v in o.items() if not k.startswith(("True", "False"))), f"a job and the ledger: {o}")
+        return ("one line per mistake with the agent and his words, from the program, the wrap-up and a text; praise and an agent's words stay out; a line the clear phrases don't catch needs the "
+                "second look's yes, a no or a failed look is left out and logged; a hand-off and an item land on a line that's there; a job writes no line; the doors hold")
 
     async def flow233(self) -> str:
         """F103, no Claude: the score, per agent and per hand-off, from the ledger alone: a folder with nothing but the ledger. A QA fail,
@@ -16694,17 +16785,43 @@ print(ledger.text('donna')[-900:])
         code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import update; print(update.other_minute())"
         r = await asyncio.to_thread(lambda: _sp.run([sys.executable, "-c", code, str(a)], capture_output=True, text=True, env=ea, timeout=120))
         need(tag_of(b) == "v1.1.0" and not (a / ".status/back-other.json").exists(), f"the backup didn't hear it later: {tag_of(b)} {r.stdout[-300:]} {r.stderr[-300:]}")
-        srv.shutdown(); srv.server_close()
-        # a failing undo: HQ stays where it was, the data as it was
+        # a failing undo: both stay where they were, the data as it was, and the other computer hears nothing
         await asyncio.to_thread(go, "forward")
         code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import datachange; print(datachange.apply())"
         await asyncio.to_thread(lambda: _sp.run([sys.executable, "-c", code, str(a)], capture_output=True, text=True, env=ea))
-        head = g(a, "rev-parse", "HEAD")
+        head, headb = g(a, "rev-parse", "HEAD"), g(b, "rev-parse", "HEAD")
+        need(g(a, "rev-parse", "--abbrev-ref", "HEAD") == g(b, "rev-parse", "--abbrev-ref", "HEAD") == "dev", "the pair isn't on the work line before the failing undo")
+        kept = (wa / "HQ/c.txt").read_text()
         (wa / "HQ/c.txt").unlink()  # the undo of the second move now can't find what it needs
-        r = await asyncio.to_thread(lambda: up(a, {**ea, "HQ_SUPPORT": ea["HQ_SUPPORT"] + "-alone"}, "back"))
-        need(g(a, "rev-parse", "HEAD") == head and g(a, "rev-parse", "--abbrev-ref", "HEAD") == "dev" and "didn't go through" in (a / ".status/update-run.json").read_text(),
-             f"a failing undo moved HQ: {r.stdout[-300:]}")
-        return "both on the version before with the data undone, again one further, forward on the work line with the data back, the backup told later when it was off, a failing undo moves nothing"
+        def stayed(what, r):
+            need(g(a, "rev-parse", "HEAD") == head and g(a, "rev-parse", "--abbrev-ref", "HEAD") == "dev" and "didn't go through" in (a / ".status/update-run.json").read_text(),
+                 f"{what}: the main moved: {r.stdout[-300:]}")
+            need(g(b, "rev-parse", "HEAD") == headb and g(b, "rev-parse", "--abbrev-ref", "HEAD") == "dev", f"{what}: the other computer moved: {tag_of(b)} {r.stdout[-300:]}")
+            need(not (a / ".status/back.json").exists() and not (a / ".status/back-other.json").exists() and not (b / ".status/back.json").exists(), f"{what}: a mark stayed behind")
+        r = await asyncio.to_thread(go, "back")
+        stayed("a failing undo", r)
+        # started on the backup: the main goes first and tells it, so a failing undo leaves both there too
+        r = await asyncio.to_thread(up, b, eb, "back")
+        need(not json.loads(r.stdout.strip().splitlines()[-1]).get("ok") and "Nothing moved" in r.stdout and g(b, "rev-parse", "HEAD") == headb, f"the backup moved without the main: {r.stdout[-300:]}")
+        class ToMain(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *x): pass
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("content-length") or 0))
+                r = _sp.run([sys.executable, str(a / "routine/role.py"), "serve", "forward"], input=body.decode(), capture_output=True, text=True, env=ea, timeout=120)
+                out = (r.stdout.strip().splitlines() or ["{}"])[-1].encode()
+                self.send_response(200); self.send_header("content-type", "application/json"); self.end_headers(); self.wfile.write(out)
+        back_srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ToMain)
+        threading.Thread(target=back_srv.serve_forever, daemon=True).start()
+        cfgb = eb["HQ_SUPPORT"] + "/role.json"
+        cb = json.loads(Path(cfgb).read_text()); cb["peer"] = f"http://127.0.0.1:{back_srv.server_address[1]}"; Path(cfgb).write_text(json.dumps(cb))
+        r = await asyncio.to_thread(up, b, eb, "back")
+        stayed("a failing undo started on the backup", r)
+        (wa / "HQ/c.txt").write_text(kept)
+        r = await asyncio.to_thread(up, b, eb, "back")
+        need(json.loads(r.stdout.strip().splitlines()[-1]).get("ok") and tag_of(a) == tag_of(b) == "v1.1.0" and (wa / "HQ/b.txt").exists(), f"started on the backup: {tag_of(a)!r} {tag_of(b)!r} {r.stdout[-300:]} {r.stderr[-300:]} {(a / '.status/update-run.json').read_text()[-200:]}")
+        srv.shutdown(); srv.server_close(); back_srv.shutdown(); back_srv.server_close()
+        return ("both on the version before with the data undone, again one further, forward on the work line with the data back, the backup told later when it was off; a failing undo leaves both computers "
+                "where they were, started on the main or the backup; from the backup the main goes first, and with the main off nothing moves")
 
     async def flow235(self) -> str:
         """F104, no Claude: a release that changes data is refused when its undo fails on a copy of the workspace: one that raises, one that
@@ -16842,10 +16959,10 @@ print(json.dumps(out))
         g = lambda *a, cwd=hq: _sp.run(["git", "-C", str(cwd), *a], capture_output=True, text=True, check=True).stdout.strip()
         g("checkout", "-q", "-b", "dev"); g("config", "user.name", "t"); g("config", "user.email", "t@example.com")
         (hq / "routine").mkdir()
-        for f in ("push.py", "hqpaths.py"):
+        for f in ("push.py", "hqpaths.py", "cyclehook.py"):
             (hq / "routine" / f).write_text((ROOT / "routine" / f).read_text())
         (hq / "a.txt").write_text("1\n")
-        g("add", "."); g("commit", "-q", "-m", "one"); g("push", "-q", "origin", "dev")
+        g("add", "."); g("commit", "-q", "-m", "one"); g("tag", "v1.0.0"); g("push", "-q", "origin", "dev", "--tags")
         other = tmp / "other"
         _sp.run(["git", "clone", "-q", "-b", "dev", str(hub), str(other)], check=True)
         g("config", "user.name", "t", cwd=other); g("config", "user.email", "t@example.com", cwd=other)
@@ -16853,6 +16970,44 @@ print(json.dumps(out))
         g("add", ".", cwd=other); g("commit", "-q", "-m", "unreleased work", cwd=other); g("push", "-q", "origin", "dev", cwd=other)
         head = g("rev-parse", "HEAD")
         e = {k: v for k, v in env.items() if k != "HQ_MAKER"}
+        # every way round, on a friend's copy that really has dev's commits in reach: the job hook as it's called, nothing set by hand
+        friend = tmp / "friend"
+        _sp.run(["git", "clone", "-q", "-b", "dev", str(hub), str(friend)], check=True)
+        g("checkout", "-q", "--detach", "v1.0.0", cwd=friend)
+        work = g("rev-parse", "origin/dev", cwd=friend)
+        ways = ["git fetch origin && git merge FETCH_HEAD", "git fetch origin; git merge FETCH_HEAD", "git fetch origin\ngit reset --hard FETCH_HEAD", "git -C ../HQ merge FETCH_HEAD",
+                f"git merge {work}", f"git merge {work[:8]}", f"git reset --hard {work}", f"git cherry-pick {work}", f"git checkout {work}", f"git rebase {work}", f"git switch --detach {work}",
+                "git merge origin/dev", "git rebase origin/dev", "git cherry-pick origin/dev", "git checkout origin/dev -- .", "git reset --hard origin/nightly", "git merge origin/some-later-branch",
+                "git merge $(git rev-parse origin/dev)", "X=origin/dev; git merge $X", "git fetch origin dev:mine", "git branch -f mine origin/dev", "git update-ref refs/heads/mine origin/dev",
+                'git merge d"e"v', "sh -c 'git fetch origin && git merge FETCH_HEAD'", "python3 -c \"import subprocess; subprocess.run(['git', 'merge', 'FETCH_HEAD'])\"",
+                "git show origin/dev:routine/push.py > routine/push.py", "git diff HEAD origin/dev | git apply",
+                "HQ_MAKER=1 python3 routine/push.py --pull", "export HQ_MAKER=1; python3 routine/push.py --pull", "env HQ_MAKER=1 python3 routine/push.py --pull", "export HQ_MAKER", "declare -x HQ_MAKER=1",
+                "python3 -c \"import os; os.environ['HQ_MAKER'] = '1'\"", "HQ_WORKSPACE=/tmp/x python3 routine/push.py --pull",
+                "HQ_PRIVACY_PASSED=1 git push origin mine", "export HQ_PRIVACY_PASSED=1; git push", "HQ_UNDER_TEST=1 python3 routine/proof.py run 1", "HQ_ROLE_HERE=1 python3 routine/jobs.py done 1", "HQ_READY_FIELDS=0 python3 routine/sprint.py ready F1",
+                "echo '{\"maker\": true}' > HQ/features.json", "tee HQ/features.json < /tmp/x", "sed -i s/false/true/ HQ/features.json", "cp /tmp/x HQ/features.json", "mv /tmp/x /w/HQ/features.json",
+                "python3 -c \"open('HQ/features.json', 'w').write('{}')\"", "git checkout -- HQ/features.json", "curl -s -X POST -d x http://127.0.0.1:4748/api/features"]
+        fine = ["git log --oneline -3", "git status", "git diff origin/dev --stat", "git diff origin/dev --stat 2>/dev/null", "git log origin/dev -1", "git fetch origin", "git add a.txt; git commit -m one", "git stash",
+                "git checkout -b mine", "git checkout -- a.txt", "git reset --hard HEAD", "git reset --soft HEAD", "git merge v1.0.0", "cat HQ/features.json", "grep -n HQ_MAKER routine/hqpaths.py", "HQ_MAKER=0 python3 app/features.py",
+                "python3 app/features.py on calendar"]
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import cyclehook as C
+ways, fine = json.load(sys.stdin)
+ask = lambda cmd: C.decide({'tool_name': 'Bash', 'tool_input': {'command': cmd}}, True)[0]
+print(json.dumps({'got': [c for c in ways if ask(c) != 2], 'stopped': [c for c in fine if ask(c) != 0],
+                  'edit': [C.decide({'tool_name': t, 'tool_input': {'file_path': '/w/HQ/features.json'}}, m)[0] for t in ('Edit', 'Write') for m in (True, False)],
+                  'code': C.decide({'tool_name': 'Edit', 'tool_input': {'file_path': '/hq/template/HQ/features.json'}}, True)[0]}))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(friend)], input=json.dumps([ways, fine]), capture_output=True, text=True, env=e, cwd=str(friend))
+        need(r.returncode == 0, f"the job hook on a friend's copy: {r.stderr[-400:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(not o["got"], f"a way round on a friend's copy still goes: {o['got']}")
+        need(not o["stopped"], f"a friend's job can't do its own work: {o['stopped']}")
+        need(o["edit"] == [2, 2, 2, 2] and o["code"] == 0, f"Edit and Write on the switches: {o}")
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import push; print(push.pull())"
+        r = _sp.run([sys.executable, "-c", code, str(friend)], capture_output=True, text=True, env=e, cwd=str(friend))
+        need("stays on its released version" in r.stdout and g("rev-parse", "HEAD", cwd=friend) == g("rev-parse", "v1.0.0", cwd=friend), f"pull() called by hand on a friend's copy: {r.stdout} {r.stderr[-300:]}")
         r = _sp.run([sys.executable, str(hq / "routine/push.py"), "--pull"], capture_output=True, text=True, env={**e, "HQ_MAKER": "0"}, cwd=str(hq))
         need(r.returncode == 0 and "stays on its released version" in r.stdout and g("rev-parse", "HEAD") == head, f"a friend pulled dev: {r.stdout} {r.stderr[-300:]}")
         r = _sp.run([sys.executable, str(hq / "routine/push.py"), "--pull"], capture_output=True, text=True, env={**e, "HQ_MAKER": "1"}, cwd=str(hq))
@@ -16903,10 +17058,51 @@ print(json.dumps(out))
         need("his words: yes turn the half built" in d["say_so"]["half_built"]["how"] and d["say_so"]["half_built"]["at"], f"not logged: {d}")
         r = fe("off", "half_built")
         need(on() == "False" and json.loads((ms / "HQ/features.json").read_text()).get("say_so"), f"off: {r.stdout} {(ms / 'HQ/features.json').read_text()}")
+        # the file is no way in: written by hand it turns nothing on, here or on a friend's copy, and a call can't write it
+        (ms / "HQ/features.json").write_text('{"off": [], "on": ["half_built"], "maker": true}\n')
+        need(on() == "False", "an \"on\" written by hand turned an untested feature on")
+        (ms / "HQ/features.json").write_text('{"off": [], "on": ["half_built"], "say_so": {"half_built": {"at": "now", "how": "made up"}}}\n')
+        need(on() == "False", "a feature in pieces came on on a friend's copy because the file said so")
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/app')
+from pathlib import Path
+import policy as P
+pol = P.Policy(Path(sys.argv[2]))
+out = {'edit': pol.decide('Edit', {'file_path': sys.argv[2] + '/HQ/features.json', 'old_string': 'a', 'new_string': 'b'}).verdict,
+       'write': pol.decide('Write', {'file_path': sys.argv[2] + '/HQ/features.json', 'content': '{}'}).verdict}
+for k, c in (('redirect', 'echo x > HQ/features.json'), ('sed', 'sed -i s/a/b/ HQ/features.json'), ('tee', 'tee HQ/features.json < x'), ('copy', 'cp x HQ/features.json'), ('one-liner', 'python3 -c "open(\\'HQ/features.json\\', \\'w\\')"')):
+    out[k] = pol.decide('Bash', {'command': c}).verdict
+pol.after_call = True
+out['after'] = pol.decide('Edit', {'file_path': sys.argv[2] + '/HQ/features.json', 'old_string': 'a', 'new_string': 'b'}).verdict
+print(json.dumps(out))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(ms)], capture_output=True, text=True, env=me_env, cwd=str(ROOT))
+        need(r.returncode == 0, f"the call's door: {r.stderr[-400:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(set(o.values()) == {"deny"}, f"a call and the switches: {o}")
+        # what was on before the gate came stays on, once, by the version's data change; its undo puts the file back exactly
+        (ms / "HQ/features.json").write_text(json.dumps({"off": [], "on": ["half_built"], "maker": True}, indent=2) + "\n")
+        before = (ms / "HQ/features.json").read_bytes()
+        code = """
+import sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+from pathlib import Path
+import datachange as D
+m = D.load('001-features-said-before-the-gate')
+getattr(m, sys.argv[3])(Path(sys.argv[2]))
+"""
+        ch = lambda how: _sp.run([sys.executable, "-c", code, str(ROOT), str(ms), how], capture_output=True, text=True, env=me_env, cwd=str(ROOT))
+        need(on() == "False", "before the data change")
+        r = ch("do")
+        need(r.returncode == 0 and on() == "True" and "before HQ kept" in (ms / "HQ/features.json").read_text(), f"what was on before the gate: {r.stderr[-300:]}")
+        r = ch("undo")
+        need(r.returncode == 0 and (ms / "HQ/features.json").read_bytes() == before, f"its undo: {r.stderr[-300:]} {(ms / 'HQ/features.json').read_text()}")
         (ms / "HQ/features.json").write_text('{"off": [], "on": [], "maker": true}\n')
         rm.write_text(rm.read_text().replace(row, "| ⬜ | H9500 A half-built thing | His words. | QA passed (job 44, 30 October 2026 17:40): it held. | |\n"))
         need(on() == "True", "a feature whose QA passed stays off")
-        return "a friend's copy pulls nothing, by push.py or by hand, the maker's does; headless on in the template; a feature in pieces stays off until QA passed, or his own words, kept; made-up words don't turn it on"
+        return ("a friend's copy pulls nothing, by push.py, by hand or by any way round the hook knows, the maker's does; headless on in the template; a feature in pieces stays off until QA passed, or his own words, "
+                "kept; made-up words and the file written by hand don't turn it on, and neither a call nor a job can write it")
 
     def _helper_env(self, tag):
         """F106: a throwaway workspace and a stand-in for the model: it answers at once, or sleeps first (a question with SLOW in it), or
@@ -16922,6 +17118,8 @@ print(json.dumps(out))
                         "        say(f'still reading, step {i}'); time.sleep(0.02)\n"
                         "if 'SLOW' in q:\n"
                         "    say('Half way: the first file says it was moved.'); time.sleep(float(open(sys.argv[0] + '.wait').read()))\n"
+                        "if 'STUBBORN' in q:\n"
+                        "    import signal; signal.signal(signal.SIGTERM, signal.SIG_IGN); say('Half way, and not stopping.'); time.sleep(60)\n"
                         "print(json.dumps({'type': 'result', 'subtype': 'success', 'result': 'The made-up answer: it stands in the second file.'}), flush=True)\n")
         fake.chmod(0o755)
         (self.tmp / f"{tag}-claude.wait").write_text("1.5")
@@ -17059,6 +17257,17 @@ asyncio.run(main())
         hid = sorted(records(), key=lambda x: x["started"])[-1]["id"]
         d = wait(hid)
         need(d["state"] == "boxed" and d["why"] == "turns" and d["turns"] <= 12, f"the box in turns: {d}")
+        # one that ignores being told to end: a short grace, then it's killed; the record says stopped and the status line lets it go
+        r = _sp.run([sys.executable, str(ROOT / "routine/helper.py"), "start", "This one is STUBBORN and ignores the end of its box"], capture_output=True, text=True, env={**env, "HQ_HELPER_BOX_S": "0.5"})
+        hid = sorted(records(), key=lambda x: x["started"])[-1]["id"]
+        t0 = time.time()
+        d = await asyncio.to_thread(wait, hid, 15)
+        need(d["state"] == "stopped" and d["why"] == "minutes" and time.time() - t0 < 12 and "Half way" in d["answer"] and d.get("ended"), f"a helper past its box: {d}")
+        code = "import sys, json; sys.path.insert(0, sys.argv[1] + '/routine'); import helper; print(json.dumps([helper.alive(helper.load(sys.argv[2]).get('pid')), [x['id'] for x in helper.running()], helper.words(helper.load(sys.argv[2]))]))"
+        gone, runs, words = json.loads(py(code, hid).stdout.strip().splitlines()[-1])
+        need(hid not in runs and "ran out of its time" in words, f"it still shows as running: {runs} {words}")
+        need("STUBBORN" not in h("list").stdout, "the helper list still shows the stopped helper")
+        need(not _sp.run(["pgrep", "-f", str(self.tmp / "f106a-claude")], capture_output=True, text=True).stdout.strip(), "the stand-in that ignored the end still runs")
         # at most two at once; a limit used up
         (self.tmp / "f106a-claude.wait").write_text("3")
         for q in ("One more SLOW question for the box", "Another SLOW question for the box"):
@@ -17068,13 +17277,31 @@ asyncio.run(main())
         need(r.returncode == 2 and "already running" in r.stdout, f"a third at once: {r.stdout}")
         code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import helper, os, signal\nfor d in helper.running():\n    os.kill(d['pid'], signal.SIGKILL)\n    d['state'] = 'failed'; helper.save(d)"
         py(code)
+        # six at the same instant: the limit is a lock, not luck
+        (self.tmp / "f106a-claude.wait").write_text("4")
+        ps = [_sp.Popen([sys.executable, str(ROOT / "routine/helper.py"), "start", f"Number {i}, a SLOW question at the same instant"], stdout=_sp.PIPE, text=True, env=env, cwd=str(ROOT)) for i in range(6)]
+        outs = [(p.communicate(timeout=30)[0], p.returncode) for p in ps]
+        need(sum(c == 0 for _, c in outs) == 2 and sum("already running" in o for o, _ in outs) == 4, f"six at once: {outs}")
+        py(code)
+        # a job starts none; helpers are for calls and texts
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import cyclehook as C
+ask = lambda cmd, m: C.decide({'tool_name': 'Bash', 'tool_input': {'command': cmd}}, m)[0]
+print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for the box"', m) for m in (True, False)], 'quoted': ask('python3 "/some/routine/helper.py" start x', True), 'run': ask('python3 routine/helper.py run abc', True),
+                  'python': ask('python3 -c "import helper; helper.start(1)"', True), 'list': ask('python3 routine/helper.py list', True)}))
+"""
+        o = json.loads(py(code).stdout.strip().splitlines()[-1])
+        need(o == {"start": [2, 2], "quoted": 2, "run": 2, "python": 2, "list": 0}, f"a job and a helper: {o}")
         Path(env["HQ_USAGE"]).write_text(json.dumps({"limits": [{"label": "Weekly", "percent": 99, "resetsAt": "2099-01-01T00:00:00.000Z"}]}))
         r = h("start", "Is there room for one more question")
         need(r.returncode == 2 and "used up" in r.stdout, f"a used-up limit: {r.stdout}")
         Path(env["HQ_USAGE"]).write_text(json.dumps({"limits": [{"label": "Weekly", "percent": 90, "resetsAt": "2099-01-01T00:00:00.000Z"}]}))
         r = h("start", "Is there room for one more question")
         need(r.returncode == 0, f"under the limit, past the team's lines: {r.stdout}")
-        return "started without a yes in under two seconds, the answer in the call once at a quiet moment; hung up it's a text on her own line, once; boxed in minutes and turns and said so; two at once; a used-up limit stops it"
+        return ("started without a yes in under two seconds, the answer in the call once at a quiet moment; hung up it's a text on her own line, once; boxed in minutes and turns and said so; one that ignores the end "
+                "is killed and closed as stopped; two at once under a lock, six starts at the same instant get two; a used-up limit stops it; a job starts none")
 
     async def flow239(self) -> str:
         """F106, no Claude: a check she couldn't run is never answered around: a refused command in a turn whose reply doesn't say so gets the
@@ -17135,7 +17362,15 @@ asyncio.run(main())
         need(BLOCKED_LINE not in out, f"a check that ran: {out!r}")
         out = await turn("Move that mail to the trash.", "It's gone.", asked)
         need(BLOCKED_LINE in out, f"waiting for a yes and answered around it: {out!r}")
-        return "refused or waiting and answered around it: the program says I couldn't check that, written in the transcript; said by her, asked of him, or a look that ran: nothing added"
+        pol.pending.clear()
+        # only her saying she couldn't check or run it counts, not any "can't"
+        for reply in ("I can't believe how clean it all is.", "You can't go wrong with that one.", "It cannot be better."):
+            out = await turn("Is the label check clean?", reply, refused)
+            need(BLOCKED_LINE in out, f"a can't that says nothing about the check: {reply!r} {out!r}")
+        for reply in ("I can't check that from here.", "I couldn't actually run it.", "That can't be verified from here.", "I wasn't able to look at it.", "I can’t run that one."):
+            out = await turn("Is the label check clean?", reply, refused)
+            need(BLOCKED_LINE not in out, f"she said it herself, and heard it twice: {reply!r} {out!r}")
+        return "refused or waiting and answered around it: the program says I couldn't check that, written in the transcript; said by her, asked of him, or a look that ran: nothing added; a can't about something else doesn't count"
 
     async def flow242(self) -> str:
         """F106, no Claude: one line on the status page shows what's being worked on for him right now: a running helper is on /routines.json and
@@ -18146,7 +18381,7 @@ print("RESULT " + json.dumps(out))
         need(pol.decide("Bash", {"command": f"python3 {ROOT / 'routine/cycles.py'} friday"}).verdict == ALLOW
              and pol.decide("Bash", {"command": f"python3 {ROOT / 'routine/cycles.py'} tick"}).verdict == DENY, "the policy on the cycles script")
         # on: the items planned once
-        (ws / "HQ/features.json").write_text('{"off": [], "on": ["agents_run"], "maker": true}\n')
+        (ws / "HQ/features.json").write_text(AGENTS_ON)
         t = drive("tick")
         need(t["on"] is True and len(t["reconciled"]) == 5 and all(x.startswith("planned") for x in t["reconciled"]), f"on, the first minute: {t['reconciled']}")
         need(len(t.get("reviews", [])) == 3 and all("monthly review planned for Friday" in x for x in t["reviews"]), f"the monthly reviews (piece 9): {t.get('reviews')}")
@@ -19871,11 +20106,12 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
         d = self.tmp / "h266"
         d.mkdir()
         keys = ("HQ_DIRECT_DIR", "HQ_DIRECT_LOCAL", "HQ_DIRECT_DRY", "HQ_DIRECT", "HQ_TEAM_LINE", "HQ_TEAM_LINE_DIR",
-                "HQ_DIRECT_PUSH_TO", "HQ_UNDER_TEST", "HQ_DIRECT_TEAM", "HQ_DIRECT_AGENT", "HQ_DIRECT_PUSH_DIR")
+                "HQ_DIRECT_PUSH_TO", "HQ_UNDER_TEST", "HQ_DIRECT_TEAM", "HQ_DIRECT_AGENT", "HQ_DIRECT_PUSH_DIR", "HQ_ASLEEP")
         saved = {k: os.environ.get(k) for k in keys}
         for k in keys:
             os.environ.pop(k, None)
-        os.environ.update({"HQ_DIRECT_DIR": str(d / "line"), "HQ_DIRECT_LOCAL": str(d / "local.json"), "HQ_DIRECT_DRY": "1"})
+        # HQ_ASLEEP: a daytime text, whatever the hour of the run: at night F102 holds it for the morning, which is flow 223's
+        os.environ.update({"HQ_DIRECT_DIR": str(d / "line"), "HQ_DIRECT_LOCAL": str(d / "local.json"), "HQ_DIRECT_DRY": "1", "HQ_ASLEEP": "0"})
         team_dir = d / "team-line"
         srv = None
         try:
