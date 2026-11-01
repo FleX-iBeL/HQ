@@ -16949,6 +16949,127 @@ else:
         need(not lines(wb) and pending.exists() and "with the main away" in pending.read_text(), f"the main away: {lines(wb)} {r.stdout[-200:]} {r.stderr[-300:]}")
         return "a line written on the backup with the real workspace as base lands on the main, also a call's own scan; kept for later with the main away; a test's folder stays local"
 
+    async def flow249(self) -> str:
+        """F106, with a stand-in for the model: a helper never goes silent. A wrong claude path, a model that dies halfway, an error from the model, this process
+        told to stop or killed outright, a start that can't start: each ends as failed and is told, in the call or as a text, once. A run that hit its
+        turns gives what it had. A text that wouldn't go is tried again by the routine's minute."""
+        import signal as _sig, subprocess as _sp
+        ws, env = self._helper_env("f106d")
+        fake = Path(env["HQ_HELPER_CLAUDE"])
+        fake.write_text(fake.read_text().replace("q = sys.argv[2]\n", "q = sys.argv[2]\n"
+                        "if 'DIES' in q:\n"
+                        "    print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Half way: found the first file.'}]}}), flush=True); sys.exit(3)\n"
+                        "if 'MAXTURNS' in q:\n"
+                        "    print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Half way: found the first file.'}]}}), flush=True)\n"
+                        "    print(json.dumps({'type': 'result', 'subtype': 'error_max_turns', 'is_error': True}), flush=True); sys.exit(1)\n"
+                        "if 'ERRORS' in q:\n"
+                        "    print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': True, 'result': 'Not logged in'}), flush=True); sys.exit(0)\n"
+                        "if 'NOISE' in q:\n"
+                        "    print(json.dumps(['not', 'a', 'dict']), flush=True); print(json.dumps({'type': 'assistant', 'message': {'content': ['nor', 'this']}}), flush=True)\n"))
+        (self.tmp / "f106d-claude.wait").write_text("30")
+        folder = Path(env["HQ_HELPERS"])
+        thread = ws / "HQ/direct-line/thread.jsonl"
+        def h(*a, e=None):
+            return _sp.run([sys.executable, str(ROOT / "routine/helper.py"), *a], capture_output=True, text=True, env=e or env, cwd=str(ROOT), timeout=60)
+        py = lambda code, *a, e=None: _sp.run([sys.executable, "-c", "import json, sys; sys.path.insert(0, sys.argv[1] + '/routine'); import helper\n" + code, str(ROOT), *a], capture_output=True, text=True, env=e or env, cwd=str(ROOT), timeout=120)
+        rec = lambda hid: json.loads((folder / f"{hid}.json").read_text())
+        newest = lambda: sorted((json.loads(p.read_text()) for p in folder.glob("*.json") if not p.name.startswith("live-")), key=lambda d: d["started"])[-1]["id"]
+        def ended(hid, secs=20):
+            end = time.time() + secs
+            while time.time() < end:
+                d = rec(hid)
+                if d["state"] != "running" and (d.get("told") or d.get("call")):
+                    return d
+                time.sleep(0.05)
+            need(False, f"the helper never ended: {rec(hid)}")
+        def text_of(needle):
+            end = time.time() + 10
+            while time.time() < end:
+                if thread.exists() and needle in thread.read_text():
+                    break
+                time.sleep(0.05)
+            return sum(needle in json.loads(l).get("text", "") for l in thread.read_text().splitlines()) if thread.exists() else 0
+        # a wrong path, hung up: a text
+        wrong = {**env, "HQ_HELPER_CLAUDE": str(self.tmp / "no-such-claude")}
+        r = await asyncio.to_thread(h, "start", "Which report is WRONGPATH about?", e=wrong)
+        need(r.returncode == 0, f"start: {r.stdout}")
+        d = await asyncio.to_thread(ended, newest())
+        need(d["state"] == "failed" and d["told"] == "text" and text_of("WRONGPATH") == 1, f"a wrong path, no call on: {d} {thread.read_text() if thread.exists() else ''}")
+        need("didn't get an answer" in thread.read_text(), "the text doesn't say it failed")
+        # a wrong path, on a call: in the call, once
+        await asyncio.to_thread(py, "helper.live('c1', 'donna')")
+        await asyncio.to_thread(h, "start", "Which report is ONCALL about?", e=wrong)
+        d = await asyncio.to_thread(ended, newest())
+        r = await asyncio.to_thread(py, "got = helper.take('c1'); print(json.dumps([[x['state'], x['told'], helper.words(x)] for x in got])); print(json.dumps(helper.take('c1')))")
+        out = r.stdout.strip().splitlines()
+        need(d["state"] == "failed" and json.loads(out[0])[0][:2] == ["failed", "call"] and "the run failed" in json.loads(out[0])[0][2] and out[1] == "[]" and text_of("ONCALL") == 0, f"a wrong path on a call: {d} {r.stdout} {r.stderr[-300:]}")
+        await asyncio.to_thread(py, "helper.call_over('c1')")
+        # a model that dies halfway, and one that hits its turns: what it had
+        for word, state, shows in (("DIES", "failed", "What it had: Half way"), ("MAXTURNS", "boxed", "What it had: Half way"), ("ERRORS", "failed", "the run failed"), ("NOISE", "done", "The made-up answer")):
+            await asyncio.to_thread(h, "start", f"What does the {word} report say?")
+            d = await asyncio.to_thread(ended, newest())
+            need(d["state"] == state and d["told"] == "text" and text_of(word) == 1 and shows in [json.loads(l)["text"] for l in thread.read_text().splitlines() if word in l][0], f"{word}: {d} {thread.read_text()[-400:]}")
+        need("Not logged in" not in thread.read_text(), "an error from the model was passed on as the answer")
+        # told to stop: failed, with what it had
+        await asyncio.to_thread(h, "start", "Where is the SLOW one that gets a SIGTERM?")
+        hid = newest()
+        end = time.time() + 10
+        while time.time() < end and not rec(hid).get("pid"):
+            time.sleep(0.02)
+        await asyncio.to_thread(time.sleep, 0.8)
+        os.kill(rec(hid)["pid"], _sig.SIGTERM)
+        d = await asyncio.to_thread(ended, hid)
+        need(d["state"] == "failed" and d["told"] == "text" and text_of("SIGTERM") == 1 and "What it had: Half way" in thread.read_text().splitlines()[-1], f"told to stop: {d} {thread.read_text()[-300:]}")
+        # killed outright: nothing of its own runs, so the routine's minute finds it. Not before the pid is really gone
+        await asyncio.to_thread(h, "start", "Where is the SLOW one that gets a SIGKILL?")
+        hid = newest()
+        end = time.time() + 10
+        while time.time() < end and not rec(hid).get("pid"):
+            time.sleep(0.02)
+        pid = rec(hid)["pid"]
+        r = await asyncio.to_thread(py, "print(helper.minute())")
+        need(rec(hid)["state"] == "running", f"a run that's alive was called dead: {rec(hid)} {r.stderr[-300:]}")
+        os.kill(pid, _sig.SIGKILL)
+        end = time.time() + 5
+        while time.time() < end and Path(f"/proc/{pid}").exists() if sys.platform == "linux" else False:
+            time.sleep(0.05)
+        d = rec(hid); d["started"] -= 10; (folder / f"{hid}.json").write_text(json.dumps(d))
+        code = "import os; os.environ['HQ_HELPER_MINUTE'] = '1'; import tick; tick.tick()"
+        r = await asyncio.to_thread(py, code)
+        need(r.returncode == 0, f"the routine's minute: {r.stderr[-400:]}")
+        d = rec(hid)
+        need(d["state"] == "failed" and d["told"] == "text" and text_of("SIGKILL") == 1, f"killed outright: {d} {r.stdout[-200:]} {r.stderr[-300:]}")
+        # a start that can't start: she hears it at once, nothing else tells it
+        code = """
+def boom(*a, **k):
+    raise OSError('no such file')
+real = helper.subprocess.Popen
+helper.subprocess.Popen = boom
+print(json.dumps(helper.start('Which report CANTSTART, in a line?')))
+"""
+        r = await asyncio.to_thread(py, code)
+        said = json.loads(r.stdout.strip().splitlines()[-1])
+        d = rec(newest())
+        need(not said["ok"] and "couldn't start" in said["said"] and d["state"] == "failed" and d["told"] == "start", f"a start that can't start: {said} {d}")
+        # a text that won't go: not told, and the routine's minute tries again
+        d = rec(newest()); d.update({"id": "abcd0001", "told": None, "question": "Which report is RETRIED about?", "started": time.time() - 60, "ended": time.time()})
+        (folder / "abcd0001.json").write_text(json.dumps(d))
+        code = """
+real = helper.subprocess.run
+def boom(*a, **k):
+    raise OSError('no text today')
+helper.subprocess.run = boom
+print(helper.minute())
+print(json.dumps(helper.load('abcd0001')))
+helper.subprocess.run = real
+print(helper.minute())
+"""
+        r = await asyncio.to_thread(py, code)
+        out = r.stdout.strip().splitlines()
+        need(r.returncode == 0 and out[0] == "[]" and json.loads(out[1])["tries"] == 1 and not json.loads(out[1])["told"], f"a text that won't go: {r.stdout} {r.stderr[-300:]}")
+        need(rec("abcd0001")["told"] == "text" and text_of("RETRIED") == 1, f"tried again: {rec('abcd0001')} {r.stdout}")
+        return "a wrong path, a death halfway, an error, a stop, a kill and a start that can't start each end as failed and are told once; a run out of turns gives what it had; a text is tried again"
+
     async def flow250(self) -> str:
         """F106, no Claude: a stock Mac's python3 is 3.9, and agents run rules lookups with it. HQ's Python is read for what 3.9 can't: syntax past it, a `X | Y`
         annotation without the future import, or an f-string only 3.12 can read. No 3.9 here, so it reads the source; the checker is tried on made-up bad lines first."""
@@ -28495,6 +28616,7 @@ FLOWS = {
     238: ("F106: a helper beside a call, with a stand-in for the model: started without a yes, the call goes on, the answer in the same call once; hung up it's a text on her line; boxed in minutes and turns; two at once; a used-up limit stops it", False, "flow238"),
     239: ("F106: a check she couldn't run is never answered around: the program says I couldn't check that when her reply doesn't", False, "flow239"),
     250: ("F106: nothing in HQ's Python that a stock Mac's 3.9 can't read: no newer syntax, no X | Y annotation without the future import, what a rules lookup pulls in included", False, "flow250"),
+    249: ("F106: a helper never goes silent: a wrong claude path, a death halfway, an error, a stop, a kill and a start that can't start end as failed and are told once, in the call or by text; out of turns it gives what it had; a text that wouldn't go is tried again", False, "flow249"),
     248: ("F103: a ledger line written on the backup reaches the main with the real workspace as base, also a call's own scan; kept for later with the main away; a test's own folder stays local", False, "flow248"),
     247: ("F104: a say-so has to be a say-so: at every door his words also need a look's yes to this very thing; a no, garbage, a failed look and no stand-in refuse and say so", False, "flow247"),
     246: ("F104: the job hook stops the plain ways past the pre-push hook, a version back or forward and the data changes by hand, on any job; ordinary work goes", False, "flow246"),

@@ -15,6 +15,10 @@ don't hold it, only a used-up limit does.
 A record is `.status/helpers/ID.json`: {"id", "question", "agent", "call", "state" (running, done, boxed, stopped, failed), "started", "ended",
 "minutes", "turns", "box", "answer", "told" (call or text)}. HQ_HELPERS a test's own folder, HQ_HELPER_CLAUDE a stand-in for the model
 (same arguments, same stream). Standard library only.
+
+Whatever way a run fails, she said she'd come back, so it ends as `failed` and is told as a finished one is: a run that can't start or falls over
+says so itself, and one that died without a word is found by the call's watcher and the routine's minute (`minute`, on both computers), which also
+texts an answer whose call is gone. A run that hit its turns gives what it had.
 """
 from __future__ import annotations
 
@@ -41,6 +45,8 @@ LIVE_S = 15       # F106: a call that hasn't said it's on for this long counts a
 WATCH_S = 3       # F106: how often a call looks for an answer
 GRACE_S = 5       # F106: how long a helper past its box gets to end by itself before it's killed (then it's "stopped")
 PIPE_S = 1        # F106: how long the model's stdout gets once the model itself is gone; a child in a session of its own can hold it open for good
+LATE_S = 120      # F106: a run this far past its box isn't running, whatever its pid says (a pid can be taken by something else)
+TEXT_TRIES = 10   # F106: how many minutes the routine tries a text that wouldn't go; past that the line on the status page is what's left
 MODEL = "sonnet"  # F106: reading and finding, the reviewer's model
 ANSWER_MOST = 2000  # F106: the characters of an answer that go into a call or a text; the record keeps it whole
 TOOLS = "Read,Glob,Grep,WebSearch"
@@ -94,6 +100,44 @@ def alive(pid) -> bool:
 
 def running() -> list[dict]:
     return [d for d in everyone() if d.get("state") == "running" and (alive(d.get("pid")) or time.time() - (d.get("started") or 0) < 5)]
+
+
+def _finish(hid: str, **fields) -> dict | None:
+    """A run's end on its record, once, and a text when nobody's on its call. None when it had ended already."""
+    with hqlock.locked(path(hid)):
+        rec = load(hid)
+        if rec.get("state") != "running":
+            return None
+        rec.update({"ended": time.time(), **fields})
+        save(rec)
+    if not call_on(rec.get("call") or ""):
+        by_text(hid)
+    return rec
+
+
+def _gone(d: dict) -> bool:
+    """A record that says running with nothing running: its run died without a word."""
+    if d.get("state") != "running":
+        return False
+    age = time.time() - (d.get("started") or 0)
+    return age > (d.get("box") or {}).get("minutes", MINUTES) * 60 + LATE_S or (age >= 5 and not alive(d.get("pid")))
+
+
+def reap() -> list[str]:
+    """What died without a word ends as failed, here, as a run that fell over ends itself."""
+    done = []
+    for d in everyone():
+        if _gone(d) and _finish(d["id"], state="failed", answer=d.get("answer") or "", why="the run died"):
+            done.append(d["id"])
+    return done
+
+
+def minute() -> list[str]:
+    """F106: the routine's minute, on both computers: what died goes as failed, and an answer whose call is gone and that was never told goes
+    as a text (a call line that fell over never says it's over). What it sent."""
+    reap()
+    return [d["id"] for d in everyone() if d.get("state") != "running" and not d.get("told") and not call_on(d.get("call") or "")
+            and (d.get("tries") or 0) < TEXT_TRIES and by_text(d["id"])]
 
 
 # -- which call ----------------------------------------------------------------------------------------------------------
@@ -167,11 +211,16 @@ def start(question: str, agent: str = "", call: str = "") -> dict:
                "state": "running", "started": time.time(), "box": {"minutes": MINUTES, "turns": int(os.environ.get("HQ_HELPER_TURNS") or TURNS)}}
         save(rec)
     log = os.path.join(hqpaths.HQ, "scratch", "helper.log")
-    os.makedirs(os.path.dirname(log), exist_ok=True)
-    p = subprocess.Popen([sys.executable, os.path.abspath(__file__), "run", rec["id"]], cwd=hqpaths.HQ, stdin=subprocess.DEVNULL,
-                         stdout=open(log, "a"), stderr=subprocess.STDOUT, start_new_session=True)
-    rec["pid"] = p.pid
-    save(rec)
+    try:
+        os.makedirs(os.path.dirname(log), exist_ok=True)
+        p = subprocess.Popen([sys.executable, os.path.abspath(__file__), "run", rec["id"]], cwd=hqpaths.HQ, stdin=subprocess.DEVNULL,
+                             stdout=open(log, "a"), stderr=subprocess.STDOUT, start_new_session=True)
+    except OSError as e:  # she hears it here, so nothing else tells it
+        with hqlock.locked(path(rec["id"])):
+            save({**load(rec["id"]), "state": "failed", "ended": time.time(), "answer": "", "why": repr(e)[:200], "told": "start"})
+        return {"ok": False, "said": "No helper now: it couldn't start. Say so, and look at it yourself if it's a quick one."}
+    with hqlock.locked(path(rec["id"])):  # a run that's over already keeps its end
+        save({**load(rec["id"]), "pid": p.pid})
     return {"ok": True, "id": rec["id"], "said": f"A helper is on it, boxed at {MINUTES} minutes. Say you'll come back with it, and go on with him."}
 
 
@@ -191,11 +240,37 @@ def _command(question: str) -> list[str]:
 
 
 def run(hid: str) -> int:
+    """The run, and whatever way it falls over: the model that won't start, this process told to stop, anything else. It ends as failed, with
+    what it had."""
     rec = load(hid)
     if not rec:
         return 2
+    got = {"proc": None, "said": [], "turns": 0}
+
+    def stop(*_a) -> None:
+        raise SystemExit(1)
+
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        return _run(hid, rec, got)
+    except BaseException as e:
+        if got["proc"]:
+            try:
+                os.killpg(got["proc"].pid, signal.SIGKILL)
+            except OSError:
+                pass
+        print(f"helper {hid}: the run fell over: {e!r}", flush=True)
+        _finish(hid, state="failed", answer=got["said"][-1] if got["said"] else "", turns=got["turns"], why=repr(e)[:200],
+                minutes=round((time.time() - rec.get("started", time.time())) / 60, 2))
+        if got["proc"]:  # the reader may sit in a read that never ends: nothing here waits for it, not even the way out
+            sys.stdout.flush()
+            os._exit(1)
+        return 1
+
+
+def _run(hid: str, rec: dict, got: dict) -> int:
     box_s = float(os.environ.get("HQ_HELPER_BOX_S") or rec["box"]["minutes"] * 60)
-    p = subprocess.Popen(_command(rec["question"]), cwd=hqpaths.FOLDER, env={**os.environ, **hqpaths.JOB_ENV}, stdin=subprocess.DEVNULL,
+    p = got["proc"] = subprocess.Popen(_command(rec["question"]), cwd=hqpaths.FOLDER, env={**os.environ, **hqpaths.JOB_ENV}, stdin=subprocess.DEVNULL,
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, start_new_session=True)
     t0 = time.time()
     boxed = {"why": None, "killed": False}
@@ -224,24 +299,31 @@ def run(hid: str) -> int:
     timer = threading.Timer(box_s, end, args=("minutes",))
     timer.daemon = True
     timer.start()
-    turns, said, result = 0, [], ""
+    turns, said, result, broke = 0, got["said"], "", ""
 
     def read() -> None:
-        nonlocal turns, result
+        nonlocal turns, result, broke
         for line in p.stdout:
             try:
                 d = json.loads(line)
             except ValueError:
                 continue
+            if not isinstance(d, dict):
+                continue
             if d.get("type") == "assistant":
-                turns += 1
+                turns = got["turns"] = turns + 1
                 for b in (d.get("message") or {}).get("content") or []:
-                    if b.get("type") == "text" and b.get("text", "").strip():
+                    if isinstance(b, dict) and b.get("type") == "text" and b.get("text", "").strip():
                         said.append(b["text"].strip())
                 if turns > rec["box"]["turns"]:
                     end("turns")
             elif d.get("type") == "result":
-                result = (d.get("result") or "").strip()
+                if d.get("subtype") == "error_max_turns":  # claude's own count of the box: what it had still counts
+                    boxed["why"] = boxed["why"] or "turns"
+                elif d.get("is_error"):
+                    broke = str(d.get("result") or d.get("subtype") or "an error")[:200]
+                else:
+                    result = (d.get("result") or "").strip()
 
     # The pipe is read beside this: once the model is gone, what's left on the pipe gets PIPE_S and no more. A grandchild in its own
     # session outlives the kill and keeps the pipe open, and a run waiting on that would hold its record "running", and its slot, for good.
@@ -263,11 +345,8 @@ def run(hid: str) -> int:
         code = -1
     held = reader.is_alive()
     answer = result or (said[-1] if said else "")
-    rec = {**load(hid), "state": "stopped" if boxed["killed"] or (held and boxed["why"]) else "boxed" if boxed["why"] else ("done" if code == 0 and answer else "failed"), "ended": time.time(),
-           "minutes": round((time.time() - t0) / 60, 2), "turns": turns, "answer": answer, "why": boxed["why"] or ""}
-    save(rec)
-    if not call_on(rec.get("call") or ""):
-        by_text(hid)
+    state = "stopped" if boxed["killed"] or (held and boxed["why"]) else "boxed" if boxed["why"] else ("done" if code == 0 and answer and not broke else "failed")
+    _finish(hid, state=state, minutes=round((time.time() - t0) / 60, 2), turns=turns, answer=answer, why=boxed["why"] or broke)
     if held:  # the reader sits in a read that never ends: nothing here waits for it, not even the way out
         sys.stdout.flush()
         os._exit(0)
@@ -279,6 +358,8 @@ def words(rec: dict) -> str:
     a = (rec.get("answer") or "").strip()[:ANSWER_MOST]
     if rec.get("state") in ("boxed", "stopped"):
         return (f"It ran out of its time before it finished. What it had: {a}" if a else "It ran out of its time before it found anything.")
+    if rec.get("state") == "failed" and a:
+        return f"The run fell over before it finished. What it had: {a}"
     if rec.get("state") == "failed" or not a:
         return "It didn't get an answer: the run failed."
     return a
@@ -298,7 +379,8 @@ def _claim(hid: str, how: str) -> dict | None:
 
 
 def take(call: str) -> list[dict]:
-    """The finished answers for a call that's on; each comes out once."""
+    """The finished answers for a call that's on; each comes out once. A run that died comes out as a failed one."""
+    reap()
     out = []
     for d in everyone():
         if d.get("call") == call and d.get("state") != "running" and not d.get("told"):
@@ -320,13 +402,17 @@ def by_text(hid: str) -> bool:
                     "HQ_DIRECT_AGENT": "pepper", "HQ_DIRECT_COACHING": "1"})
     cmd = [py if os.path.exists(py) else sys.executable, os.path.join(hqpaths.HQ, "app", "direct_line.py"), *(["--team"] if who == "moneypenny" else []),
            "text", "helper", f"He asked on the call: {rec['question'][:200]}\nWhat came back: {words(rec)}"]
-    r = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=hqpaths.HQ, timeout=120)
-    if r.returncode:
-        print(f"the helper's text: {r.stderr[-300:]}", file=sys.stderr)
-        rec["told"] = None
-        save(rec)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=hqpaths.HQ, timeout=120)
+        code, err = r.returncode, r.stderr
+    except (OSError, subprocess.SubprocessError) as e:
+        code, err = 1, repr(e)
+    if code:
+        print(f"the helper's text: {err[-300:]}", file=sys.stderr)
+        with hqlock.locked(path(hid)):  # not told after all: the routine's minute tries again
+            save({**load(hid), "told": None, "tries": (rec.get("tries") or 0) + 1})
         import routines
-        routines.bad("helper", f"A helper's answer couldn't be texted: {r.stderr[-160:]}", every=3600)
+        routines.bad("helper", f"A helper's answer couldn't be texted: {err[-160:]}", every=3600)
         return False
     return True
 
@@ -337,6 +423,7 @@ def call_over(call: str) -> list[str]:
         os.remove(_live_path(call))
     except OSError:
         pass
+    reap()
     done = []
     for d in everyone():
         if d.get("call") == call and d.get("state") != "running" and not d.get("told") and by_text(d["id"]):

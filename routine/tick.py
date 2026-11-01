@@ -1324,6 +1324,14 @@ def became_main():
             log(f"role: {out.strip()}")
 
 
+def helper_minute():
+    """F106: on both computers: a helper that died without a word ends as failed and is told, and an answer whose call is gone goes as a text."""
+    import helper
+    sent = helper.minute()
+    if sent:
+        log(f"helpers: told by text: {', '.join(sent)}")
+
+
 def briefing_minute():
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
     import backend
@@ -1627,6 +1635,8 @@ def tick():
     # Fable, 27 October 2026: the briefing an agent starts with (backend switch `briefing`), made every minute from the
     # files, on both computers (each one's calls read its own), no Claude.
     guarded("briefing", briefing_minute)
+    if not hqpaths.under_test() or os.environ.get("HQ_HELPER_MINUTE"):
+        guarded("helpers", helper_minute)
     try:  # Fable, 27 October 2026: the planning index (only rewritten when the planning file changed)
         import planning_index
         planning_index.write()

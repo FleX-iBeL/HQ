@@ -12,6 +12,12 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 - A way back. `update.py back` puts HQ one version back in one step, on both computers, with what that version changed in your data undone; `update.py forward` brings it forward again. A release that changes data is refused unless its undo works on a copy, and it lists the change in the changelog.
 
+- A say-so has to be a say-so: where an agent quotes you for your yes (a feature that hasn't passed QA, a row that isn't ready, a job without its green tests, a flag, a build in the day, a release past its gates), it's no longer enough that the words are yours: a small look checks you're really saying yes to that very thing, and without that it's refused and says so.
+
+- A data change only runs on your data once it's committed and on dev, or in the release you stand on; anything else is left alone and said once in the routine's log. Going back with commits of your own past a version goes one version further down, and HQ refuses to go back to a version that has no way forward. Jobs can't go back or forward, skip the pre-push hook or run the data changes by hand.
+
+- A helper never goes silent: however its run fails, it ends as failed and you're told, in the call or by text, and one that ran out of turns gives what it had. A rules lookup works with a stock Mac's Python 3.9. A job's turns and minutes land in its history, and ledger lines written on the backup reach the main.
+
 - Friends stay on released versions: a job on a friend's HQ doesn't take the work line, and if one ever does, by whatever command, HQ sees it within a minute, goes back on its released version by itself, stops that job and says so. Your own commits are yours and stay. On the maker's HQ a feature still in pieces stays off until its QA passed, unless he says so, and that's kept. New workspaces run the team's jobs headless. The privacy check also runs as a pre-push hook, and HQ's old project name is gone from the code.
 
 - One id per request. An item gets its id when it's written, and the job, its QA, the release, a text and an incident carry it, so `trail.py follow` shows everything that happened to it, from the words to live.
