@@ -108,7 +108,7 @@ DRIVE_SPARE = 10  # minutes to spare when he gets there: parking, the walk in
 DRIVE_CHANGE = 10  # the drive this many minutes longer or shorter than last said is worth a text
 LEAVE_AHEAD = 20  # the time-to-leave text comes this many minutes before he should leave
 HAND = ("on", "mode", "to_hand", "from_hand")  # what a person sets on a trip
-TOLD = ("sent", "news")  # what a look texted about a trip: stays, so it's never texted twice
+TOLD = ("sent", "news", "seen_drive")  # what a look texted about a trip: stays, so it's never texted twice
 
 
 class NotFound(Exception):
