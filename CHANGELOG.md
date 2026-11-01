@@ -16,7 +16,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 - A way back. `update.py back` puts HQ one version back in one step, on both computers, with what that version changed in your data undone; `update.py forward` brings it forward again. A release that changes data is refused unless its undo works on a copy, and it lists the change in the changelog.
 
-- A say-so has to be a say-so: where an agent quotes you for your yes (a feature that hasn't passed QA, a row that isn't ready, a job without its green tests, a flag, a build in the day, a release past its gates), it's no longer enough that the words are yours: a small look checks you're really saying yes to that very thing, and without that it's refused and says so.
+- A say-so has to be a say-so: where an agent quotes you for your yes (a feature that hasn't passed QA, a row that isn't ready, a job without its green tests, a flag, a build in the day, a release past its gates), it's no longer enough that the words are yours, it has to be a yes to that very thing. A plain yes right after she names it counts, a bare "Ok" too, and a "wait" or "not yet" doesn't, the same every time; only what isn't clear gets a small look, and without that it's refused and says so.
 
 - A data change only runs on your data once it's committed and on dev, or in the release you stand on; anything else is left alone and said once in the routine's log. Going back with commits of your own past a version goes one version further down, and HQ refuses to go back to a version that has no way forward. Jobs can't go back or forward, skip the pre-push hook or run the data changes by hand.
 

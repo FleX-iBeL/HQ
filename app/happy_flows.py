@@ -13663,7 +13663,8 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         importlib.reload(qm)
         importlib.reload(rl)
         tmp = Path(tempfile.mkdtemp(prefix="hq-flow165-"))
-        real = (inc.FILE, pu.ROOT, rl.ROOT, rl.is_main, qm.q.ROADMAP)
+        import sprint as _sprint
+        real = (inc.FILE, pu.ROOT, rl.ROOT, rl.is_main, qm.q.ROADMAP, _sprint.RANKS)
         try:
             def g(*a, cwd=tmp):
                 return subprocess.run(["git", *a], cwd=cwd, text=True, capture_output=True, check=True)
@@ -13688,6 +13689,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             rl.ROOT = hq
             rl.is_main = lambda: True
             qm.q.ROADMAP = str(rm)
+            _sprint.RANKS = str(self.tmp / "sprint-F56.json")  # this process imported it with the real one: the say-so of --without-qa goes in the flow's own
             remote = lambda ref: subprocess.run(["git", "-C", str(hub), "rev-parse", "-q", "--verify", ref],
                                                 text=True, capture_output=True).stdout.strip()
             def work(label, name):
@@ -13745,7 +13747,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                  and remote("refs/heads/main") == g("rev-parse", "dev", cwd=hq).stdout.strip(), "--without-qa didn't take it all")
             need("QA" in rl.words(rl.status()), "release.py status doesn't say what QA holds")
         finally:
-            inc.FILE, pu.ROOT, rl.ROOT, rl.is_main, qm.q.ROADMAP = real
+            inc.FILE, pu.ROOT, rl.ROOT, rl.is_main, qm.q.ROADMAP, _sprint.RANKS = real
             shutil.rmtree(tmp, ignore_errors=True)
         return ("a finished build queues QA as Moneypenny (not for maintenance); a fail writes its line and a fix job, QA after the fix, "
                 "no fix job after three; the release takes only H281 (passed) as 0.4.5, holds H282 (failed) and H283 (behind it) on "
@@ -16963,6 +16965,40 @@ print(ledger.text('donna')[-900:])
         g(a, "commit", "-q", "-am", "only here")
         await asyncio.to_thread(minute, a, ea)
         need(not (wa / "HQ/ran5.txt").exists() and not (wa / "HQ/ran4.txt").exists(), "a file that isn't dev's ran")
+        # a change's number is what it is: renamed after it ran it doesn't run again, undo knows it by its number, a new number is left alone and the release refuses it
+        p = self._pair("f104r")
+        a, wa, ea, g = p["a"], p["wa"], p["ea"], p["g"]
+        count = wa / "HQ/count.txt"
+        once = 'WHAT = "x"\ndef do(f):\n    with open(f / "HQ/count.txt", "a") as o:\n        o.write("ran\\n")\ndef undo(f):\n    (f / "HQ/count.txt").unlink()\n'
+        dc = a / "routine/datachanges"
+        (dc / "003-m.py").write_text(once)
+        g(a, "add", "."); g(a, "commit", "-q", "-m", "a change"); g(a, "push", "-q", "origin", "dev")
+        base3 = g(a, "rev-parse", "HEAD")
+        await asyncio.to_thread(minute, a, ea, 2)
+        need(count.read_text() == "ran\n", "the change didn't run")
+        g(a, "mv", "routine/datachanges/003-m.py", "routine/datachanges/003-m-renamed.py"); g(a, "commit", "-q", "-m", "renamed"); g(a, "push", "-q", "origin", "dev")
+        await asyncio.to_thread(minute, a, ea, 2)
+        need(count.read_text() == "ran\n", f"a renamed change ran again: {count.read_text()!r} {applied(wa)}")
+        D = "import json, sys; sys.path.insert(0, sys.argv[1] + '/routine'); import datachange as D\n"
+        d = lambda code, *x: _sp.run([sys.executable, "-c", D + code, str(a), *x], capture_output=True, text=True, env=ea, timeout=60)
+        r = await asyncio.to_thread(d, "print(json.dumps([D.between(sys.argv[2], 'HEAD', sys.argv[1]), D.number_refuses(sys.argv[2], 'HEAD', sys.argv[1])]))", base3)
+        need(r.returncode == 0 and json.loads(r.stdout.strip().splitlines()[-1]) == [[], None], f"a rename at the release: {r.stdout} {r.stderr[-300:]}")
+        r = await asyncio.to_thread(d, "print(D.undo(['003-m-renamed']))")
+        need(r.returncode == 0 and not count.exists() and not [x for x in applied(wa) if x.startswith("003")], f"the undo by its number: {r.stdout} {r.stderr[-300:]} {applied(wa)}")
+        await asyncio.to_thread(minute, a, ea)
+        need(count.read_text() == "ran\n", "undone, it didn't run again")
+        g(a, "mv", "routine/datachanges/003-m-renamed.py", "routine/datachanges/005-m-again.py"); g(a, "commit", "-q", "-m", "a new number"); g(a, "push", "-q", "origin", "dev")
+        await asyncio.to_thread(minute, a, ea, 3)
+        need(count.read_text() == "ran\n" and said(a, "left alone: 005-m-again: it's 003-m-renamed under a new number") == 1, f"a new number ran it again: {count.read_text()!r} {said(a, '005-m-again')}")
+        r = await asyncio.to_thread(d, "print(D.number_refuses(sys.argv[2], 'HEAD', sys.argv[1]))", base3)
+        need("got a new number" in r.stdout or "005-m-again" in r.stdout, f"the release and a new number: {r.stdout} {r.stderr[-300:]}")
+        g(a, "mv", "routine/datachanges/005-m-again.py", "routine/datachanges/003-m-renamed.py")
+        (dc / "003-other.py").write_text(once)
+        g(a, "add", "."); g(a, "commit", "-q", "-m", "the same number"); g(a, "push", "-q", "origin", "dev")
+        await asyncio.to_thread(minute, a, ea, 2)
+        need(count.read_text() == "ran\n" and said(a, "left alone: 003-other: its number is") == 1, f"another change on a number that's taken: {said(a, '003-other')}")
+        r = await asyncio.to_thread(d, "print(D.number_refuses('v1.1.0', 'HEAD', sys.argv[1]))")
+        need("same number" in r.stdout, f"the release and two changes with one number: {r.stdout} {r.stderr[-300:]}")
         # a friend's copy: only the release she stands on, also past it with a commit of her own
         c = self._friend("f104i")["make"]()
         hq, ws, e = c["hq"], c["ws"], c["env"]
@@ -16976,7 +17012,7 @@ print(ledger.text('donna')[-900:])
         await asyncio.to_thread(minute, hq, e, 3)
         need(not (ws / "HQ/hers.txt").exists() and said(hq, "left alone: 003-hers: it isn't in v1.1.0") == 1, f"on a friend's copy: her own commit: {said(hq, '003-hers')}")
         need(applied(ws) == ["001-first"] and (ws / "HQ/b.txt").exists(), f"what's in her release didn't run: {applied(ws)}")
-        return "uncommitted, changed, only local or not in her release: left alone and said once; committed, unchanged and on dev runs, and what's in her release"
+        return "uncommitted, changed, only local or not in her release: left alone and said once; committed, unchanged and on dev runs, and what's in her release; a change's number is what it is"
 
     async def flow245(self) -> str:
         """F104, no Claude: the way back on a friend's copy and to an old version. With a commit of her own past a tag she stands on that tag: one version
@@ -17039,9 +17075,19 @@ print(ledger.text('donna')[-900:])
                 "python3 -c \"import subprocess; subprocess.run(['git', 'push', '--no-verify'])\"",
                 "python3 routine/update.py back", 'python3 "routine/update.py" back --tag v1.0.0', "python3 ../HQ/routine/update.py back-run v1.0.0 tell", "python3 routine/update.py forward", "cd ../HQ && python3 routine/update.py forward",
                 "python3 routine/update.py back-here v1.0.0", "python3 routine/update.py back-first v1.0.0", "python3 routine/update.py forward-here",
-                "python3 routine/datachange.py apply", "python3 ../HQ/routine/datachange.py apply", 'python3 "routine/datachange.py" apply']
+                "python3 routine/datachange.py apply", "python3 ../HQ/routine/datachange.py apply", 'python3 "routine/datachange.py" apply',
+                "git push --no-verif", "git push --no-veri origin dev", "git push origin dev \\\n  --no-verify", "python3 routine/update.py \\\n  back", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git push",
+                "export GIT_CONFIG_COUNT=1; export GIT_CONFIG_KEY_0=core.hooksPath; git push", "env GIT_CONFIG_KEY_0=core.hooksPath git push", "git --config-env=core.hooksPath=X push", "git --config-env core.hooksPath=X push",
+                "sh -c 'git push --no-verify'", "bash -lc \"git push --no-verify\"", "eval 'python3 routine/update.py back'", "bash <<EOF\ngit push --no-verify\nEOF", "python3 <<EOF\nimport subprocess\nsubprocess.run(['git', 'push', '--no-verify'])\nEOF",
+                "/usr/bin/git push --no-verify", "command git push --no-verify", "git commit -m 'one thing'; git push --no-verify", "git commit -m 'it is fine' && python3 routine/datachange.py apply"]
         fine = ["git push origin dev", "git push", "python3 routine/push.py", "python3 routine/update.py status", "python3 routine/update.py check --force", "python3 routine/update.py version", "python3 routine/datachange.py list",
-                "python3 routine/datachange.py try", "git commit -m 'refuse git push --no-verify'", "grep -n no-verify routine/cyclehook.py", "git config user.name", "git log --grep=core.hooksPath", "grep -n back routine/update.py"]
+                "python3 routine/datachange.py try", "git commit -m 'refuse git push --no-verify'", "grep -n no-verify routine/cyclehook.py", "git config user.name", "git log --grep=core.hooksPath", "grep -n back routine/update.py",
+                'git commit -m "job hook: update.py back and forward are his"', 'git commit -m "datachange.py apply only on what is committed"', 'git commit -m "one thing; git push --no-verify another"',
+                "git commit -F - <<EOF\nthe hook\ngit push --no-verify\npython3 routine/update.py back\nEOF", "git commit -m \"$(cat <<'EOF'\nthe hook\ngit push --no-verify\nEOF\n)\"",
+                'grep -n "update.py back" CHANGELOG.md routine/update.py', 'grep -n "datachange.py apply" CHANGELOG.md', 'grep -rn "git push --no-verify" routine', 'git log --grep="update.py back" --oneline',
+                'python3 routine/jobs.py done 12 "update.py back works on a copy"', 'python3 routine/jobs.py note 12 "datachange.py apply stays the routine\'s"', 'python3 routine/review.py reword F1 "git push --no-verify is refused"',
+                'python3 routine/handover.py edit HQ/x.md \'{"a": "python3 routine/update.py forward"}\'', 'echo "python3 routine/update.py back is his" >> scratch/x.txt', "git config --get core.hooksPath", "git config --get-all core.hooksPath", "git config core.hooksPath", "git config --list",
+                "grep update.py back.txt", "git status # git push --no-verify", "env | grep GIT_CONFIG_COUNT", "echo $GIT_CONFIG_COUNT", "cat <<EOF > scratch/x.sh\ngit push --no-verify\nEOF"]
         code = """
 import json, sys
 sys.path.insert(0, sys.argv[1] + '/routine')
@@ -17296,12 +17342,46 @@ print(helper.minute())
         out = r.stdout.strip().splitlines()
         need(r.returncode == 0 and out[0] == "[]" and json.loads(out[1])["tries"] == 1 and not json.loads(out[1])["told"], f"a text that won't go: {r.stdout} {r.stderr[-300:]}")
         need(rec("abcd0001")["told"] == "text" and text_of("RETRIED") == 1, f"tried again: {rec('abcd0001')} {r.stdout}")
-        return "a wrong path, a death halfway, an error, a stop, a kill and a start that can't start each end as failed and are told once; a run out of turns gives what it had; a text is tried again"
+        # a text that falls over after its line is written: tried again, and the thread says it's there: one line, nothing pushed twice
+        d = rec("abcd0001"); d.update({"id": "abcd0002", "told": None, "tries": 0, "question": "Which report FALLSOVER, in a line?"})
+        (folder / "abcd0002.json").write_text(json.dumps(d))
+        over = self.tmp / "f106e-over.py"
+        over.write_text("import json, sys\n"
+                        "sys.path.insert(0, sys.argv[1] + '/app')\n"
+                        "import direct_line as D\n"
+                        "a = sys.argv[2:]\n"
+                        "def boom(_t):\n"
+                        "    raise RuntimeError('the phone fell over')\n"
+                        "D.push = boom\n"
+                        "once = a[a.index('--once') + 1] if '--once' in a else ''\n"
+                        "print(D.text(a[1], a[2], once=once) if once else D.text(a[1], a[2]))\n")
+        code = """
+real = helper.subprocess.run
+times = {'n': 0}
+def falls(cmd, **k):
+    times['n'] += 1
+    return real([sys.executable, sys.argv[2], sys.argv[1], *cmd[2:]], **k)
+helper.subprocess.run = falls
+print(json.dumps([helper.minute(), helper.load('abcd0002').get('told'), helper.minute(), helper.load('abcd0002').get('told'), helper.minute()]))
+"""
+        r = await asyncio.to_thread(py, code, str(over))
+        need(r.returncode == 0, f"a text that falls over: {r.stdout[-300:]} {r.stderr[-400:]}")
+        lines = [json.loads(l) for l in thread.read_text().splitlines()]
+        got = [m for m in lines if "FALLSOVER" in m.get("text", "")]
+        need(len(got) == 1 and got[0]["id"] == "helper-abcd0002" and rec("abcd0002")["told"] == "text", f"told {len(got)} times: {got} {rec('abcd0002')} {r.stdout[-300:]}")
+        return "a wrong path, a death halfway, an error, a stop, a kill and a start that can't start each end as failed and are told once; a run out of turns gives what it had; a text is tried again, and one whose line is written isn't written twice"
 
     async def flow250(self) -> str:
-        """F106, no Claude: a stock Mac's python3 is 3.9, and agents run rules lookups with it. HQ's Python is read for what 3.9 can't: syntax past it, a `X | Y`
-        annotation without the future import, or an f-string only 3.12 can read. No 3.9 here, so it reads the source; the checker is tried on made-up bad lines first."""
-        import ast, io, tokenize
+        """F106, no Claude: a stock Mac's python3 is 3.9, and agents run rules lookups with it. With a real 3.9 on this computer every file of HQ compiles on it, every
+        module imports on it and a rules lookup runs on it. Without one, and always next to it, the source is read for what 3.9 can't: syntax past it, a `X | Y`
+        annotation without the future import or as a value, what its standard library lacks, an f-string only 3.12 can read. Both are tried on made-up bad modules first."""
+        import ast, glob, io, shutil as _sh, subprocess as _sp, tokenize
+        typed = {"dict", "list", "set", "tuple", "str", "int", "float", "bool", "bytes", "type", "object"}
+        def typeish(x) -> bool:
+            if isinstance(x, ast.BinOp) and isinstance(x.op, ast.BitOr):
+                return typeish(x.left) and typeish(x.right)
+            return (isinstance(x, ast.Name) and x.id in typed) or (isinstance(x, ast.Constant) and x.value is None) or (isinstance(x, ast.Subscript) and typeish(x.value))
+        newer_modules, newer_names, newer_attrs = {"tomllib"}, {("itertools", "pairwise"), ("itertools", "batched"), ("datetime", "UTC")}, {("itertools", "pairwise"), ("itertools", "batched"), ("datetime", "UTC"), ("dt", "UTC")}
         def problems(src: str, name: str) -> list[str]:
             try:
                 tree = ast.parse(src, feature_version=(3, 9))
@@ -17324,6 +17404,14 @@ print(helper.minute())
                     out.append(f"{name}:{n.lineno}: isinstance with X | Y")
                 if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "zip" and any(k.arg == "strict" for k in n.keywords):
                     out.append(f"{name}:{n.lineno}: zip with strict")
+                if isinstance(n, (ast.Assign, ast.AnnAssign)) and isinstance(n.value, ast.BinOp) and isinstance(n.value.op, ast.BitOr) and typeish(n.value):
+                    out.append(f"{name}:{n.lineno}: X | Y as a value")
+                if isinstance(n, ast.Import) and any(a.name.split(".")[0] in newer_modules for a in n.names):
+                    out.append(f"{name}:{n.lineno}: a module 3.9 hasn't got")
+                if isinstance(n, ast.ImportFrom) and (n.module in newer_modules or any((n.module, a.name) in newer_names for a in n.names)):
+                    out.append(f"{name}:{n.lineno}: something 3.9 hasn't got")
+                if isinstance(n, ast.Attribute) and (getattr(n.value, "id", ""), n.attr) in newer_attrs:
+                    out.append(f"{name}:{n.lineno}: {n.attr}, which 3.9 hasn't got")
             fstrings = []  # what 3.12 reads and 3.9 doesn't: inside an f-string's braces its own quote, or a backslash
             if hasattr(tokenize, "FSTRING_START"):
                 for t in tokenize.generate_tokens(io.StringIO(src).readline):
@@ -17337,9 +17425,11 @@ print(helper.minute())
                     elif fstrings and t.type == tokenize.STRING and ("\\" in t.string or (len(fstrings[-1]) == 1 and t.string.lstrip("rRbBuU")[0] == fstrings[-1][0])):
                         out.append(f"{name}:{t.start[0]}: a string with a backslash or the same quote inside an f-string's braces")
             return out
-        for bad in ("def f(a: dict | None): pass\n", "def f() -> str | None: pass\n", "x: int | None = 1\n", "match 1:\n    case 1: pass\n", "isinstance(1, int | str)\n", "zip([], [], strict=True)\n"):
+        plants = {"p_alias": "X = dict | None\n", "p_alias2": "from __future__ import annotations\nY = list[int] | None\n", "p_toml": "import tomllib\n", "p_pair": "from itertools import pairwise\n",
+                  "p_pair2": "import itertools\nx = itertools.pairwise\n", "p_utc": "import datetime\nx = datetime.UTC\n", "p_utc2": "from datetime import UTC\n"}
+        for bad in ("def f(a: dict | None): pass\n", "def f() -> str | None: pass\n", "x: int | None = 1\n", "match 1:\n    case 1: pass\n", "isinstance(1, int | str)\n", "zip([], [], strict=True)\n", *plants.values()):
             need(problems(bad, "x"), f"the check doesn't see: {bad!r}")
-        need(not problems("from __future__ import annotations\ndef f(a: dict | None): pass\nx = 1 | 2\n", "x"), "the check sees a fine line")
+        need(not problems("from __future__ import annotations\ndef f(a: dict | None): pass\nx = 1 | 2\nb = a | c\nimport datetime\ny = datetime.timezone.utc\n", "x"), "the check sees a fine line")
         if hasattr(tokenize, "FSTRING_START"):
             for bad in ('f"{d["a"]}"\n', "f'{chr(10).join([\"\\n\"])}'\n", 'f"{f"{1}"}"\n'):
                 need(problems(bad, "x"), f"the check doesn't see: {bad!r}")
@@ -17362,7 +17452,199 @@ print(helper.minute())
             for n in ast.walk(ast.parse(p.read_text(encoding="utf8"))):
                 todo += [a.name.split(".")[0] for a in n.names] if isinstance(n, ast.Import) else [n.module.split(".")[0]] if isinstance(n, ast.ImportFrom) and n.module else []
         need({"rules", "config", "agents", "handbook", "me"} <= seen, f"a rules lookup pulls in: {sorted(seen)}")
-        return f"{len(names)} files read, {len(seen)} of them what a rules lookup pulls in: nothing Python 3.9 can't read"
+        # a real 3.9, where this computer has one: a stock Mac's, or one uv keeps
+        def real39():
+            for c in [_sh.which("python3.9"), "/usr/bin/python3", _sh.which("python3"), *sorted(glob.glob(os.path.expanduser("~/.local/share/uv/python/cpython-3.9*/bin/python3.9")))]:
+                try:
+                    if c and _sp.run([c, "-c", "import sys; sys.exit(sys.version_info[:2] != (3, 9))"], capture_output=True, timeout=20).returncode == 0:
+                        return c
+                except (OSError, _sp.SubprocessError):
+                    pass
+            return None
+        py39 = await asyncio.to_thread(real39)
+        if not py39:
+            return f"{len(names)} files read, {len(seen)} of them what a rules lookup pulls in: nothing Python 3.9 can't read. No real 3.9 on this computer, so read only"
+        tmp = self.tmp / "f106py39"
+        (tmp / "plants").mkdir(parents=True)
+        for k, v in plants.items():
+            (tmp / "plants" / f"{k}.py").write_text(v)
+        runner = tmp / "imports.py"
+        runner.write_text("import importlib, json, signal, sys\nout = []\nfor f in sys.argv[2:]:\n    try:\n        compile(open(f, encoding='utf8').read(), f, 'exec', dont_inherit=True)\n    except SyntaxError as e:\n        out.append([f, 'SyntaxError', str(e)[:200]])\n"
+                          "def late(*a):\n    raise TimeoutError('its import never ended')\nsignal.signal(signal.SIGALRM, late)\n"
+                          "for n in sys.argv[1].split(','):\n    signal.alarm(20)\n    try:\n        importlib.import_module(n)\n    except ModuleNotFoundError as e:\n        out.append([n, 'missing', e.name])\n    except BaseException as e:\n        out.append([n, type(e).__name__, str(e)[:200]])\n    signal.alarm(0)\nprint(chr(10) + '@@' + json.dumps(out))\n")
+        ws, env = self._h298_ws("f106py39")
+        env.update({"HQ_UNDER_TEST": "1", "HQ_SUPPORT": str(tmp / "support"), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": os.pathsep.join([str(ROOT / "app"), str(ROOT / "routine"), str(tmp / "plants")])})
+        def on39(mods, files):
+            r = _sp.run([py39, str(runner), ",".join(mods), *files], stdin=_sp.DEVNULL, capture_output=True, text=True, env=env, cwd=str(tmp), timeout=240)
+            need("@@" in r.stdout, f"the run on 3.9 itself: {r.stdout[-300:]} {r.stderr[-500:]}")
+            rows = json.loads(r.stdout.rsplit("@@", 1)[1])
+            lang = ("SyntaxError", "TypeError", "AttributeError", "ImportError", "NameError", "TimeoutError")  # a script's own start, reading stdin say, isn't the language
+            return [x for x in rows if x[1] in lang or (x[1] == "missing" and x[2].split(".")[0] in sys.stdlib_module_names)]  # nor is a missing package of the venv's
+        got = await asyncio.to_thread(on39, sorted(plants), [])
+        need(len(got) == len(plants), f"a real 3.9 doesn't see the made-up modules: {got}")
+        mods = sorted({p.stem for p in names if p.parent.name in ("app", "routine") and "-" not in p.stem} - {"happy_flows", "test_a3", "test_a4", "test_turn", "make_samples"})
+        bad = await asyncio.to_thread(on39, mods, [str(p) for p in names])
+        need(not bad, f"{len(bad)} things a real 3.9 can't do: {bad[:10]}")
+        for how in ((), ("todo",)):
+            r = await asyncio.to_thread(lambda: _sp.run([py39, str(ROOT / "app/rules.py"), *how], capture_output=True, text=True, env=env, cwd=str(tmp), timeout=60))
+            need(r.returncode == 0 and r.stdout.strip(), f"a rules lookup on a real 3.9: {r.stdout[-200:]} {r.stderr[-400:]}")
+        return f"{len(names)} files read and compiled on a real 3.9, {len(mods)} modules imported on it and a rules lookup run, the made-up bad ones seen both ways"
+
+    async def flow251(self) -> str:
+        """F104, no Claude: a clear say-so is read by the program, so it comes out the same every time and doesn't need claude. With no stand-in here, the look can
+        only fail: what passes passed without it. A yes word, no holding word, tied to the thing or to the agent's line naming it passes, a bare Yes or Ok too; a
+        holding word with no yes word and a yes taken back are refused whatever a look would say; the rest goes to the look and refuses when it can't be had.
+        The newest place is the newest by time, and the look's context says who said what, with no tool lines."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f104m")
+        env.update({"HQ_UNDER_TEST": "1", "HQ_PROOF_ON": "1", "HQ_LOOK": "0", "HQ_NO_WALL": "1"})
+        env.pop("HQ_SAYSO_FAKE", None)
+        calls = ws / "HQ/calls"
+        calls.mkdir(parents=True, exist_ok=True)
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import sprint
+out = []
+for quote, names in json.load(sys.stdin):
+    out.append(sprint.his_yes(quote, 'the made-up thing', ws=sys.argv[2], names=names))
+print(json.dumps(out))
+"""
+        def ask(lines, *asks, fake=None, thread=None):
+            for p in calls.glob("*.md"):
+                p.unlink()
+            (calls / "2026-11-01-0900.md").write_text("# Call\n\nStarted 09:00:00 · agent Donna · brain sonnet\n\n" + "".join(lines))
+            e = {k: v for k, v in env.items()}
+            if fake is not None:
+                e["HQ_SAYSO_FAKE"] = fake
+            r = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], input=json.dumps(list(asks)), capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=60)
+            need(r.returncode == 0, f"his_yes: {r.stdout[-300:]} {r.stderr[-500:]}")
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        she = lambda t, c="09:00:00": f"- {c} **HQ:** {t}\n"
+        he = lambda t, c="09:00:10": f"- {c} **Me:** {t}\n"
+        asked = she("Should I close job 512? The test record is missing.")
+        job = ["job 512"]
+        for line, quote in (("Yes please do that", "Yes please do that"), ("Yes", "Yes"), ("Ok", "Ok"), ("Oke", "Oke"), ("Ja doe maar", "Ja doe maar"), ("Sure, go ahead *(typed)*", "go ahead"),
+                            ("Great, sounds good.", "sounds good"), ("Please do.", "Please do"), ("Perfect, let's do that.", "Perfect"), ("Yes do give it to the team", "Yes do give it to the team")):
+            for _ in range(3):
+                got = ask([asked, he(line)], [quote, job])[0]
+                need(got[0] == "HQ/calls/2026-11-01-0900.md" and not got[1], f"a plain yes refused: {line!r}: {got}")
+        got = ask([she("Done with that.", "08:59:00"), he("Yes, close job 512 now")], ["close job 512 now", job])[0]
+        need(got[0], f"a yes that names the thing itself: {got}")
+        # a tool line, a filler and her second line don't untie it; her line before last, or his own, do
+        got = ask([asked, she("It's the one from last night."), "- 09:00:05 `jobs.py list` · done\n", "- 09:00:06 *filler* Let me look\n", he("Ok")], ["Ok", job])[0]
+        need(got[0], f"across a tool line: {got}")
+        for lines in ([asked, he("Hm"), he("Ok", "09:00:20")], [asked, he("Hm"), she("Anything else?", "09:00:15"), he("Ok", "09:00:20")]):
+            got = ask(lines, ["Ok", job])[0]
+            need(not got[0] and "under 3 words" in got[1], f"a bare ok not tied to it: {got}")
+        # a yes in a word isn't a yes, and a quote of a word or two has to stand as a word
+        got = ask([asked, he("It was yesterday")], ["yes", job])[0]
+        need(not got[0] and "aren't in his own lines" in got[1], f"yes in yesterday: {got}")
+        # refused whatever a look would say
+        for line, quote in (("Yes but not right now", "Yes but not right now"), ("Ok not yet", "Ok not yet"), ("Wait", "Wait"), ("Don't do that", "Don't do that"), ("Nee, niet doen", "niet doen"),
+                            ("later please, I want to see it first", "later please I want"), ("no not that one", "not that one")):
+            for look in ("yes", None):
+                got = ask([asked, he(line)], [quote, job], fake=look)[0]
+                need(not got[0] and "aren't a yes" in got[1], f"a no that passed ({look}): {line!r}: {got}")
+        # not clear: the look's, so refused with no claude and passed by its yes
+        for line, quote in (("Thank you very much", "thank you very"), ("Thank you, that's great", "thank you that's great"), ("Can you do it?", "can you do it"), ("Yes, but only the first part", "only the first part"),
+                            ("Maybe go ahead with it", "maybe go ahead with"), ("Just also give it to the team", "give it to the team")):
+            got = ask([asked, he(line)], [quote, job])[0]
+            need(not got[0] and "look" in got[1], f"unclear without claude: {line!r}: {got}")
+            got = ask([asked, he(line)], [quote, job], fake="no")[0]
+            need(not got[0], f"the look's no: {line!r}: {got}")
+            need(ask([asked, he(line)], [quote, job], fake="yes")[0][0], f"the look's yes: {line!r}")
+        got = ask([she("Shall I put the laundry at six?"), he("Yes, put it at six please")], ["yes put it at six", job])[0]
+        need(not got[0], f"a yes to something else, with no claude: {got}")
+        # the newest place by time, not by kind; a yes on a thread answering her line there
+        (ws / "HQ/team-line").mkdir(exist_ok=True)
+        t = ws / "HQ/team-line/thread.jsonl"
+        old, new = 1700000000, time.mktime(time.strptime("2026-11-02 09:00:00", "%Y-%m-%d %H:%M:%S"))
+        for at, want in ((old, "HQ/calls/2026-11-01-0900.md"), (new, "HQ/team-line")):
+            t.write_text(json.dumps({"at": at - 5, "from": "agent", "text": "Shall I go on with the other thing?"}) + "\n" + json.dumps({"at": at, "from": "me", "text": "go ahead with it now"}) + "\n")
+            got = ask([she("Which one?"), he("go ahead with it now")], ["go ahead with it now", job], fake="yes")[0]
+            need(got[0] == want, f"the newest place: {got}, wanted {want}")
+        t.write_text(json.dumps({"at": new - 5, "from": "agent", "text": "Close job 512?"}) + "\n" + json.dumps({"at": new, "from": "me", "text": "Yes"}) + "\n")
+        need(ask([she("Which one?"), he("something else")], ["Yes", job])[0][0] == "HQ/team-line", "a bare yes on a thread, tied to her line there")
+        t.unlink()
+        # the look's context: who said what, no tool lines
+        peek = """
+import sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import os
+os.environ.pop('HQ_UNDER_TEST', None)
+import mistakes, sprint
+seen = []
+mistakes.ask = lambda system, text: seen.append(text) or 'no'
+print(sprint.his_yes('just also give it', 'the made-up thing', ws=sys.argv[2], names=['job 512']))
+print(seen[0])
+"""
+        (calls / "2026-11-01-0900.md").write_text("# Call\n\n" + he("Is it the old one?", "08:59:00") + "- 08:59:10 `grep something` · done\n" + asked + he("Just also give it to them"))
+        e = {k: v for k, v in env.items() if k not in ("HQ_UNDER_TEST", "HQ_PROOF_ON")}
+        r = _sp.run([sys.executable, "-c", peek, str(ROOT), str(ws)], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=60)
+        need(r.returncode == 0 and "He: Is it the old one?" in r.stdout and "The agent: Should I close job 512?" in r.stdout and "grep something" not in r.stdout, f"the look's context: {r.stdout[-500:]} {r.stderr[-300:]}")
+        # at a door, with a bare yes and no claude
+        job_py = lambda *a: _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        n = re.search(r"Job (\d+) is ready", job_py("add", "Build the made-up page", "--kind", "small").stdout).group(1)
+        (calls / "2026-11-01-0900.md").write_text("# Call\n\n" + she(f"It waits for the night. Start job {n} now?") + he("Yes"))
+        r = job_py("now", n, "--said", "Yes")
+        need(r.returncode == 0, f"the door with a bare yes: {r.stdout} {r.stderr[-300:]}")
+        return "a plain yes tied to the thing passes every time with no model, a bare one too; a no is refused whatever a look says; only the rest goes to the look; the newest place is by time, the look's context is named"
+
+    async def flow253(self) -> str:
+        """F17, F104, no Claude: a test never writes his sprint.json. With the throwaway workspace named as the real one: the refused add-row that used to keep its
+        say-so first, a release's say-so in a process that took the real path at import, and a plain sprint write are refused, the file untouched. Its own file still takes them."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f17s")
+        rm, spr = ws / "HQ/roadmap.md", ws / "HQ/sprint.json"
+        spr.write_text('{"say_so": []}\n')
+        before = spr.read_bytes()
+        env = {k: v for k, v in env.items() if k not in ("HQ_SPRINT", "HQ_ROLE_HERE")}
+        env.update({"HQ_UNDER_TEST": "1", "HQ_REAL_ROADMAP": str(rm), "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1", "HQ_LOOK": "0"})
+        job = lambda e, *a: _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=60)
+        rel = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import release; print(release.say_so(None, 'a release without QA'))"
+        rel_run = lambda e: _sp.run([sys.executable, "-c", rel, str(ROOT)], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=60)
+        put = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import sprint; sprint.keep_say_so(['H1'], '', 'a test')"
+        put_run = lambda e: _sp.run([sys.executable, "-c", put, str(ROOT)], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=60)
+        for name, go in (("add-row", lambda: job(env, "add-row", "Never on the real one", "--not-ready")), ("a release's say-so", lambda: rel_run(env)), ("a plain write", lambda: put_run(env))):
+            r = await asyncio.to_thread(go)
+            need(spr.read_bytes() == before, f"{name} wrote in the real folder: {spr.read_text()[:300]} {r.stdout[-200:]} {r.stderr[-200:]}")
+            need(r.returncode != 0 and "F17" in r.stdout + r.stderr, f"{name} wasn't refused: {r.stdout[-200:]} {r.stderr[-200:]}")
+        own = {**env, "HQ_SPRINT": str(self.tmp / "f17s-sprint.json")}
+        r = await asyncio.to_thread(put_run, own)
+        need(r.returncode == 0 and "a test" in Path(own["HQ_SPRINT"]).read_text(), f"its own file: {r.stdout[-200:]} {r.stderr[-300:]}")
+        return "a test's write in the real workspace's folder is refused, by a script and by a process that imported the real path; its own file takes it"
+
+    async def flow252(self) -> str:
+        """H230, no Claude, no network: "time to get going" can't go twice. A look texts it, a tap lands during that look, and a next look finds the leave time moved:
+        the mark that it was said stays with the trip."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("h230t")
+        env.update({"HQ_UNDER_TEST": "1", "HQ_TRIPS_FILE": str(ws / "HQ/calendar-travel.json")})
+        code = """
+import json, sys, time
+sys.path.insert(0, sys.argv[1] + '/app')
+import trips as T
+now = time.time()
+start = now + (40 + T.DRIVE_SPARE) * 60
+rec = {'start': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(start)), 'place': 'a', 'mode': 'car', 'drive': {'minutes': 40}, 'seen_drive': {'minutes': 40}}
+s = T._read(); s['trips']['k'] = json.loads(json.dumps(rec)); T._write(s)
+base = {'k': json.loads(json.dumps(rec))}
+mine = {'k': json.loads(json.dumps(rec))}
+first = T.drive_news(mine['k'], now)
+mine['k']['sent'] = [first[0][0]]
+s = T._read(); s['trips']['k']['place'] = 'b'; T._write(s)   # a tap during the look
+T._settle(base, mine, {'k'}, now)
+s = T._read()
+s['trips']['k']['drive'] = {'minutes': 42}                      # the leave time moved, a new key for it
+print(json.dumps({'first': [x[0] for x in first], 'again': [x[0] for x in T.drive_news(s['trips']['k'], now)], 'place': s['trips']['k']['place']}))
+"""
+        r = await asyncio.to_thread(lambda: _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60))
+        need(r.returncode == 0, f"the look: {r.stdout[-300:]} {r.stderr[-500:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(any(k.startswith("leave-") for k in o["first"]) and o["place"] == "b", f"the first text, or the tap: {o}")
+        need(not any(k.startswith("leave-") for k in o["again"]), f"time to get going went twice: {o}")
+        return "a tap during the look that texted keeps the mark: the leave text doesn't come again when the leave time moves"
 
     def _pair(self, tag):
         """F104: two throwaway HQs (git clones of a throwaway GitHub) with a workspace each, a main and a backup, the forward carried by
@@ -22737,7 +23019,7 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
         jobs("add-row", "Something", "--kind", "nope", "--not-ready", ok=False)
         need(rm.read_text() == same, "a refused add still changed the roadmap")
         real = os.environ.get("HQ_REAL_ROADMAP", str(ROADMAP))
-        jobs("add-row", "Never on the real one", "--not-ready", ok=False, e={**os.environ, "HQ_ROADMAP": real})
+        jobs("add-row", "Never on the real one", "--not-ready", ok=False, e={**os.environ, "HQ_ROADMAP": real, "HQ_SPRINT": str(self.tmp / "sprint-H160real.json")})
         fresh = self.tmp / "roadmap-H160-fresh.md"
         fresh.write_text((ROOT / "template/HQ/roadmap.md").read_text())
         jobs("add-row", "First wish", "--not-ready", e={**os.environ, "HQ_ROADMAP": str(fresh), "HQ_SPRINT": str(self.tmp / "sprint-H160f.json")})
@@ -28843,7 +29125,10 @@ FLOWS = {
     237: ("F104: friends only on released versions: a job on a friend's copy never pulls dev; headless on in the template; a feature in pieces stays off until its QA passed or his own words, logged", False, "flow237"),
     238: ("F106: a helper beside a call, with a stand-in for the model: started without a yes, the call goes on, the answer in the same call once; hung up it's a text on her line; boxed in minutes and turns; two at once; a used-up limit stops it", False, "flow238"),
     239: ("F106: a check she couldn't run is never answered around: the program says I couldn't check that when her reply doesn't", False, "flow239"),
-    250: ("F106: nothing in HQ's Python that a stock Mac's 3.9 can't read: no newer syntax, no X | Y annotation without the future import, what a rules lookup pulls in included", False, "flow250"),
+    253: ("F17, F104: a test never writes his sprint.json: a refused add-row, a release's say-so and a plain write are stopped at the door, its own file takes them", False, "flow253"),
+    252: ("H230: a tap during the look that texted keeps the mark: time to get going can't go twice", False, "flow252"),
+    251: ("F104: a clear say-so is read by the program: a plain yes tied to the thing passes every time with no model, a bare one too, a no is refused whatever a look says, only the rest goes to the look; the newest place by time, the look's context named", False, "flow251"),
+    250: ("F106: nothing in HQ's Python that a stock Mac's 3.9 can't read or run: on a real 3.9 where there is one, else by the source: no newer syntax, no X | Y as an annotation or a value, nothing its standard library lacks, what a rules lookup pulls in included", False, "flow250"),
     249: ("F106: a helper never goes silent: a wrong claude path, a death halfway, an error, a stop, a kill and a start that can't start end as failed and are told once, in the call or by text; out of turns it gives what it had; a text that wouldn't go is tried again", False, "flow249"),
     248: ("F103: a ledger line written on the backup reaches the main with the real workspace as base, also a call's own scan; kept for later with the main away; a test's own folder stays local", False, "flow248"),
     247: ("F104: a say-so has to be a say-so: at every door his words also need a look's yes to this very thing; a no, garbage, a failed look and no stand-in refuse and say so", False, "flow247"),
