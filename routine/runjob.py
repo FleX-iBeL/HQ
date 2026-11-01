@@ -147,7 +147,7 @@ def _jobs(*args: str) -> str:
 
 def _box_args(argv: list[str]) -> tuple[list[str], dict]:
     """H298: the box's options taken out of the chat arguments: {"minutes", "turns", "note"}."""
-    box, rest, i = {"minutes": None, "turns": None, "note": None, "state": False, "round": None, "agent": None}, [], 0
+    box, rest, i = {"minutes": None, "turns": None, "note": None, "state": False, "round": None, "agent": None, "allow": None}, [], 0
     while i < len(argv):
         a = argv[i]
         if a == "--box-state":
@@ -160,6 +160,10 @@ def _box_args(argv: list[str]) -> tuple[list[str], dict]:
             continue
         if a == "--agent" and i + 1 < len(argv):  # H298: whose cycle: her flags (hqpaths.job_flags)
             box["agent"] = argv[i + 1]
+            i += 2
+            continue
+        if a == "--allow-tool" and i + 1 < len(argv):  # H298: his yes: this one tool by permission flag, not through auto mode's own judgment; the hook still guards it
+            box["allow"] = argv[i + 1]
             i += 2
             continue
         if a in ("--max-minutes", "--max-turns", "--box-note") and i + 1 < len(argv):
@@ -241,7 +245,8 @@ def main(argv: list[str]) -> int:
     pfile = os.path.join(RUN, f"job-{n}.prompt")
     stream_log = os.path.join(RUN, f"job-{n}.stream.log")
     os.makedirs(RUN, exist_ok=True)
-    cmd = [CLAUDE, "-p", "--no-chrome", "--permission-mode", "auto", "--output-format", "stream-json", "--verbose",
+    perm = ["--permission-mode", "default", "--allowedTools", box["allow"]] if box["allow"] else ["--permission-mode", "auto"]
+    cmd = [CLAUDE, "-p", "--no-chrome", *perm, "--output-format", "stream-json", "--verbose",
            *hqpaths.job_flags(box["agent"]), *chat]  # F99: no project settings, the never-send list; tick gives --settings in `chat`
     if box["turns"]:
         cmd += ["--max-turns", str(box["turns"])]
@@ -268,7 +273,7 @@ def main(argv: list[str]) -> int:
         started_at = time.time()
         boxed = {"why": None}
         turns, tools, refused, last_tool, uses, asked = 0, [], [], None, [], {}
-        seen_turns, cal_failed = set(), []  # H298: a turn is one of the model's messages; the stream gives each block of it as an event of its own
+        seen_turns = set()  # H298: a turn is one of the model's messages; the stream gives each block of it as an event of its own
 
         def _box(why):
             if boxed["why"] is None:
@@ -344,8 +349,12 @@ def main(argv: list[str]) -> int:
                         elif really_refused(txt, block.get("is_error")):
                             if len(refused) < 50:
                                 refused.append({"tool": (call["step"] or "")[:LINE_MOST], "said": txt[:LINE_MOST * 2]})
-                        elif block.get("is_error") and call["name"].rsplit("__", 1)[-1] in ("create_event", "update_event", "delete_event"):
-                            cal_failed.append(txt[:LINE_MOST])
+                        elif box["agent"] and call["name"].startswith("mcp__") and call["name"].rsplit("__", 1)[-1] in ("create_event", "update_event", "delete_event"):
+                            try:  # what really came of it, as it comes: her ledger says done only once it was, and a kill can't lose it
+                                import cycles
+                                cycles.calendar_result(box["agent"], call["name"], call["input"], _result_text(block), not block.get("is_error"), n)
+                            except Exception as e:
+                                _log(lg, f"the calendar line wasn't written: {e!r}")
                         elif call["name"] and call["name"] not in READS and len(uses) < USES_MOST:
                             uses.append({"name": call["name"], "input": {k: (v[:2000] if isinstance(v, str) else v) for k, v in list(call["input"].items())[:12]}})
             elif t == "result":
@@ -370,7 +379,7 @@ def main(argv: list[str]) -> int:
         _write_note(box["note"], {"n": n, "minutes": minutes, "turns": turns, "steps": steps, "boxed": boxed["why"],
                                   "box": {"minutes": box["minutes"], "turns": box["turns"]}, "exit": code,
                                   "error": bool(is_error), "subtype": subtype, "result": (result or "")[:2000],
-                                  "tools": tools, "refused": refused, "uses": uses, "calendar_failed": cal_failed, "session": session,
+                                  "tools": tools, "refused": refused, "uses": uses, "session": session,
                                   "ended_by": "signal" if ended_by_signal["sig"] else ("box" if boxed["why"] else "itself")})
         sig = ended_by_signal["sig"]
         if sig:

@@ -144,7 +144,8 @@ def call_pokes(agent_id: str, agent_name: str, since: float, until: float, folde
 
 
 def repeats(aid: str, since: float, until: float, folder: Path | None = None) -> int:
-    """H298: the handbook: mistakes are allowed, repeats are not. A tripwire in her ledger is a mistake made twice: a goal, a box, a check, a refusal."""
+    """H298: the handbook: mistakes are allowed, repeats are not. A tripwire marked [repeat] is a mistake made twice: a goal, a box, a check, a refusal. Older lines have no
+    mark: the false ones of October don't count."""
     try:
         t = Path(os.environ.get("HQ_LEDGER_FOLDER") or Path(folder or FOLDER) / "HQ" / "ledger").joinpath(f"{aid}.md").read_text(encoding="utf8")
     except OSError:
@@ -155,7 +156,7 @@ def repeats(aid: str, since: float, until: float, folder: Path | None = None) ->
         if m:
             ts = dt.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M").timestamp()
             inside = since <= ts <= until
-        elif inside and l.startswith("- tripwire ("):
+        elif inside and l.startswith("- tripwire (") and l.rstrip().endswith("[repeat]"):
             n += 1
     return n
 

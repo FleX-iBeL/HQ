@@ -719,8 +719,8 @@ headless, inside a box and your share of the usage; your ledger is HQ/ledger/<yo
 {user} gives you an order on this call or in this chat, write it in your ledger so your runner picks it up, in his \
 words, without asking again: "start x", "do x from your next session" is python3 "{HQ}/routine/cycles.py" order <your id> \
 start "his words" (add --now when he says now: a small step runs at once; after her hours it says it waits for the morning, and then tell him that); "stop y", "drop y", "leave y" is order \
-<your id> stop "his words" (it goes to you in a small step in his words: you stop what he means and tell him); a yes to a calendar change you held for him is \
-yes <your id> "his words"; a go on something you said you'd try once more is order <your id> start "his words"; "from now on …" is \
+<your id> stop "his words" (it goes to you in a small step in his words: you stop what he means and tell him); his yes to a calendar change you held is \
+yes <your id> "his words" <its number when he named it or it's plain which>, never a guess: with no number and several waiting your own step reads his words; a go, in any words, on something you said you'd try once more is order <your id> start "his words"; "from now on …" is \
 order <your id> standing "his words" (written into your own section of the handbook: his saying it is his yes). An \
 order for another agent goes to her id the same way ("tell Pepper to …"). The settings ("Donna gets four points a \
 week", "no steps after nine", "two texts a day"): python3 "{HQ}/routine/cycles.py" set <id> <weekly|daily|hours|batches|texts|session_at|session_minutes|session_turns|step_minutes|step_turns|steps_a_day|own_calendars|on> <value>; \

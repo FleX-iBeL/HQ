@@ -66,8 +66,8 @@ _KEPT_SHELL = re.compile(
     rf">>?\s*[^\s|;&]*{_KEPT_NAME}"
     rf"|\bsed\s+(?:-[a-zA-Z]*\s+)*-i[^|;&]*{_KEPT_NAME}"
     rf"|\btee\b[^|;&]*{_KEPT_NAME}"
-    rf"|\b(?:cp|mv|rm|ln|truncate|dd|rsync|install|touch|chmod|unlink)\b[^|;&]*{_KEPT_NAME}"
-    rf"|\b(?:python3?|perl|ruby|node)\b\s+(?:-[cCeE]\b|-\s|<<)(?=[^|&]*(?:\s[wax]b?\+?\s|write|dump|unlink|remove|rename|replace|truncate))[^|&]*{_KEPT_NAME}"
+    rf"|(?<![\w-])(?:cp|mv|rm|ln|truncate|dd|rsync|install|touch|chmod|unlink)\b[^|;&]*{_KEPT_NAME}"
+    rf"|\b(?:python3?|perl|ruby|node)\b\s+(?:-[cCeE]\b|-\s|<<)(?=[^|&]*(?:\bopen\s+\S+\s+[wax]b?\+?\s|\.write|\bdump\b|unlink|os\.remove|os\.rename|os\.replace|shutil|truncate))[^|&]*{_KEPT_NAME}"
     rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{_KEPT_NAME}"
     rf"|{_IN_PLACE.format(name=_KEPT_NAME)}", re.I)
 # F104: what opens a gate when it's set by hand. HQ_ROUND (F86: a round only adds), HQ_MAKER (who the maker is), HQ_PRIVACY_PASSED (skips the pre-push hook), HQ_UNDER_TEST
@@ -111,7 +111,7 @@ OTHERS = ("attendees", "attendeeEmails", "addedAttendees", "addedAttendeeEmails"
 NEVER_SCRIPTS = {"push", "release", "update", "gitlock", "sync", "tick", "runjob", "proof", "datachange", "install-linux", "set-status", "set_status"}
 _JOB_WRITES = {"add", "add-row", "write-row", "feedback", "send-row", "tell", "stop", "overrule", "move", "on", "off", "pause", "now", "mail-on", "mail-off", "mail-fast",
                "mail-hourly", "resume", "done", "mark", "held", "boxed", "crashed", "guess", "mistake", "redo", "doing"}
-NO_SUBS = {"features": {"on", "off"}, "backend": {"on", "off"}, "cycles": {"set", "order", "yes", "tick"}, "schedule": {"add", "cancel", "move", "priority", "every", "promote"},
+NO_SUBS = {"features": {"on", "off"}, "backend": {"on", "off"}, "cycles": {"set", "order", "yes", "tick"}, "direct_line": {"text", "put", "add", "push", "send"}, "schedule": {"add", "cancel", "move", "priority", "every", "promote"},
            "jobs": _JOB_WRITES, "sprint": {"rank", "plan", "moscow", "ready"}, "review": {"clear", "reword", "add", "sitdown", "no", "pass", "run", "golden", "tick"},
            "qa": {"pass", "fail", "queue"}, "mistakes": {"add", "put"}}
 MAY_SUBS = {"moneypenny": {"jobs": {"stop", "resume", "tell", "write-row", "feedback"}, "sprint": {"rank", "moscow", "ready"}, "review": {"reword", "add", "sitdown", "no"}, "qa": {"queue"}}}
@@ -120,8 +120,8 @@ HIS = ("my-answers.md", "day-in-the-life.md", "day-in-the-life-stories.md", "lif
        "current-situation.md", "handbook.md", "cycles.json", "cycles-state.json", "backend.json", "features-in-pieces.json", "notes.md", "log-archive.md", "challenges-archive.md")
 _HIS_NAME = r"(?<![\w-])(?:" + "|".join(re.escape(x) for x in HIS) + r"|my[ _]notes\S*|HQ/calls/\S+)"
 _CODE_NAME = r"\S*(?<![\w-])(?:routine|app|status|template|install|workflows|desktop)/\S+"
-_WRITE_ON = (r">>?\s*[^\s|;&]*{n}|\bsed\s+(?:-[a-zA-Z]*\s+)*-i[^|;&\n]*{n}|\btee\b[^|;&\n]*{n}|\b(?:mv|rm|unlink|shred|truncate)\b[^|;&\n]*{n}"
-             r"|\b(?:cp|ln|install|dd)\b[^|;&\n]*{n}\s*(?:$|[|;&\n])|\bopen[\s(]+\S*{n}\S*[\s,]+\S*[wa]\b|{n}\S*\.write_(?:text|bytes)\b|\bgit\s+(?:checkout|restore)\b[^|;&\n]*{n}|" + _IN_PLACE)
+_WRITE_ON = (r">>?\s*[^\s|;&]*{n}|(?<![\w-])sed\s+(?:-[a-zA-Z]*\s+)*-i[^|;&\n]*{n}|(?<![\w-])tee\b[^|;&\n]*{n}|(?<![\w-])(?:mv|rm|unlink|shred|truncate)\b[^|;&\n]*{n}"
+             r"|(?<![\w-])(?:cp|ln|install|dd)\b[^|;&\n]*{n}\s*(?:$|[|;&\n])|\bopen[\s(]+\S*{n}\S*[\s,]+\S*[wa]\b|{n}\S*\.write_(?:text|bytes)\b|\bgit\s+(?:checkout|restore)\b[^|;&\n]*{n}|" + _IN_PLACE)
 _HIS_WRITE = re.compile(_WRITE_ON.format(n=_HIS_NAME, name=_HIS_NAME), re.I)
 _CODE_WRITE = re.compile(_WRITE_ON.format(n=_CODE_NAME, name=_CODE_NAME))
 _DELETES_ANY = re.compile(r"\bfind\b[^|;&\n]*\s-delete\b")
@@ -170,7 +170,16 @@ def is_his(path: str, cwd: str | None = None, aid: str = "") -> str | None:
         return "HQ's own code is built by the team, never by a cycle"
     if p.startswith(os.path.expanduser("~") + "/."):
         return "this computer's own settings aren't a cycle's to change"
+    if aid and p.startswith(folder + "/") and not shared_name(p) and not _her_place(p[len(folder) + 1:], name, aid):  # by default, not by a list: research, briefs, other agents' notes
+        return f"{name} isn't hers to write: a cycle writes her ledger, her notes and her line"
     return None
+
+
+LINES = {"donna": "HQ/direct-line/", "pepper": "HQ/coaching-line/", "moneypenny": "HQ/team-line/"}
+
+
+def _her_place(rel: str, name: str, aid: str) -> bool:
+    return (rel.startswith("HQ/ledger/") and name.startswith((f"{aid}.", f"{aid}-"))) or rel == f"HQ/notes-{aid}.md" or rel == f"HQ/agents/{aid}-about-herself.md" or rel.startswith(LINES.get(aid, "\0"))
 
 
 def tempfile_root() -> str:
@@ -193,6 +202,12 @@ def cycle_shell(cmd: str, aid: str, kind: str, cwd: str | None = None) -> str | 
     runs = ran(named)
     if aid and re.search(_WRITE_ON.format(n=rf"\S*HQ/ledger/(?!{re.escape(aid)}[.-])\S+", name=rf"\S*HQ/ledger/(?!{re.escape(aid)}[.-])\S+"), runs):
         return "HQ: refused: another agent's ledger is hers; a cycle writes only her own."
+    if re.search(r"\b(?:import|from)\s+direct_line\b", named):
+        return "HQ: refused: her texts go through cycles.py batch, ask or text, which wait for his sleep."
+    for m in re.finditer(r"(?<![0-9&>])>>?\s*([^\s|;&]+)", runs):  # a redirect is a write like any other
+        why = is_his(m.group(1), cwd, aid)
+        if why:
+            return f"HQ: refused: {why}."
     if _RUNS_CODE_TEXT.search(named) and _NET_CODE.search(named):
         return "HQ: refused: reaching outside HQ from a script isn't something a cycle does."
     if _SETS_JOB.search(runs):
@@ -230,6 +245,8 @@ def cycle_shell(cmd: str, aid: str, kind: str, cwd: str | None = None) -> str | 
         for script, sub, arg in _SCRIPT.findall(piece):
             if script in NEVER_SCRIPTS:
                 return f"HQ: refused: {script}.py isn't a cycle's to run."
+            if script == "direct_line" and sub in NO_SUBS["direct_line"]:
+                return "HQ: refused: her texts go through cycles.py batch, ask or text, which wait for his sleep."
             if sub in NO_SUBS.get(script, ()) and sub not in MAY_SUBS.get(aid, {}).get(script, ()):
                 return f"HQ: refused: {script}.py {sub} isn't this cycle's to do; put it to him as a question, or on the planning." if script != "cycles" else "HQ: refused: the settings and the orders are his; a question for him instead."
             if script == "cycles" and sub == "plan" and kind and kind != "session":
@@ -275,11 +292,18 @@ def _mirror(base: str | None = None) -> dict:
         return {}
 
 
-def _event(eid: str, m: dict) -> dict | None:
+def _event(eid: str, m: dict, mine: dict | None = None) -> dict | None:
+    if mine and eid in mine:
+        return mine[eid]
     for e in m.get("events") or []:
         if eid in (e.get("gid"), e.get("id"), e.get("eventId"), e.get("uid")) or str(e.get("gid") or "").startswith(eid + "_"):
             return e
     return None
+
+
+def _series(eid: str, m: dict) -> bool:
+    """This id is a whole series: the mirror's dates are its id and a date."""
+    return any(str(e.get("gid") or "").startswith(eid + "_") for e in m.get("events") or []) if eid else False
 
 
 def _moment(s: str) -> str:
@@ -299,70 +323,86 @@ def _span(a, b) -> str:
 
 
 def _named(e: dict) -> str:
-    return f"\"{e.get('title') or 'an event'}\", {_span(e.get('start'), e.get('end'))}"
+    return " ".join(f"\"{e.get('title') or 'an event'}\", {_span(e.get('start'), e.get('end'))}".split()).rstrip(",")
 
 
 def _key(last: str, inp: dict) -> str:
-    return f"{last}|{inp.get('eventId') or str(inp.get('summary')) + '|' + str(inp.get('startTime'))}"
+    """One held change: what it does, to what, where, with whom: his yes opens exactly this."""
+    guests = sorted(str(a.get("email") if isinstance(a, dict) else a) for k in OTHERS for a in (inp.get(k) or []))
+    return "|".join(str(x or "") for x in (last, inp.get("eventId"), inp.get("summary"), inp.get("startTime"), inp.get("endTime"), inp.get("calendarId"), ",".join(guests)))
 
 
 def _his_calendar(cal: str, aid: str, m: dict) -> bool:
-    """His own: his main calendar, and what his setting names. Anyone else's is a question first."""
+    """His own: his main calendar, and what his setting names. Anyone else's, by name or by address, is a question first."""
     name = next((c.get("name") for c in m.get("calendars") or [] if c.get("id") == cal), "")
-    if cal in ("", "primary") or name == "Main" or ("@" in cal and "calendar.google.com" not in cal):
+    if cal in ("", "primary") or name == "Main":
         return True
     import cycles
     own = cycles.agent_settings(aid).get("own_calendars") or []
-    return cal in own or name in own
+    return cal in own or (bool(name) and name in own)
 
 
 def _calendar_name(cal: str, m: dict) -> str:
     return next((c.get("name") for c in m.get("calendars") or [] if c.get("id") == cal), "") or "someone else's calendar"
 
 
-def calendar_hold(last: str, inp: dict, aid: str) -> tuple:
-    """(the hook's answer or None, what, why): a change with guests or on someone else's calendar waits for his yes: moving or removing one can mail other people."""
-    m = _mirror()
-    verb = {"create_event": "add", "update_event": "change", "delete_event": "remove"}[last]
-    what, why = None, None
+def _where(cal: str, m: dict) -> str:
+    """On which calendar, when it isn't his main one."""
+    return "" if cal in ("", "primary") or _calendar_name(cal, m) in ("Main",) else f" on {_calendar_name(cal, m)}"
+
+
+def calendar_what(last: str, inp: dict, mine: dict | None = None, base: str | None = None) -> str:
+    """The change in his words: its title and time, never an id."""
+    m = _mirror(base)
+    new = _named({"title": inp.get("summary"), "start": inp.get("startTime"), "end": inp.get("endTime")})
     if last == "create_event":
-        what = f"add {_named({'title': inp.get('summary'), 'start': inp.get('startTime'), 'end': inp.get('endTime')})}"
-        cal = str(inp.get("calendarId") or "")
-    else:
-        e = _event(str(inp.get("eventId") or ""), m)
+        return f"add {new}{_where(str(inp.get('calendarId') or ''), m)}"
+    eid = str(inp.get("eventId") or "")
+    e = _event(eid, m, mine)
+    was = (_named(e) if e else (new if inp.get("summary") else "an event I can't find in your calendar yet")) + _where(str(inp.get("calendarId") or (e or {}).get("cal") or ""), m)
+    if last == "delete_event":
+        return f"remove the whole series {was}" if _series(eid, m) else f"remove {was}"
+    to = [x for x in (str(inp.get("summary") or ""), _span(inp.get("startTime"), inp.get("endTime"))) if x]
+    return f"change {'the whole series ' if _series(eid, m) else ''}{was}" + (f" to {', '.join(to)}" if to else "")
+
+
+def calendar_hold(last: str, inp: dict, aid: str) -> tuple:
+    """(the hook's answer or None, what, why): a change with guests, on someone else's calendar, or to a whole series waits for his yes: it can mail other people. Her own new events are hers."""
+    import cycles
+    st_ = cycles._agent_state(cycles._state(), aid)
+    m = _mirror()
+    what, why = calendar_what(last, inp, st_["mine"]), None
+    cal = str(inp.get("calendarId") or "")
+    if last != "create_event":
+        eid = str(inp.get("eventId") or "")
+        e = _event(eid, m, st_["mine"])
         if e is None:
-            what, why = f"{verb} an event HQ doesn't know yet ({inp.get('eventId')})", "HQ can't see who's in it"
-            cal = ""
+            why = "HQ hasn't read it yet, so I can't see who's in it"
         else:
-            what = f"{verb} {_named(e)}"
-            cal = str(e.get("cal") or "")
-            why = "it has guests, and they'd get a mail" if e.get("others") else None
+            cal = cal or str(e.get("cal") or "")
+            if e.get("others"):
+                why = "it has guests, and they'd get a mail"
+            elif _series(eid, m):
+                why = "that's every date of it, not one"
     if any(inp.get(k) for k in OTHERS):
         why = "it has guests, and they'd get a mail"
     if not why and not _his_calendar(cal, aid, m):
         why = f"it's on {_calendar_name(cal, m)}"
     if not why:
         return None, what, why
-    import cycles
-    if cycles._agent_state(cycles._state(), aid)["allowed"].get(_key(last, inp), "") >= time.strftime("%Y-%m-%d %H:%M"):
+    if st_["allowed"].get(_key(last, inp), "") >= time.strftime("%Y-%m-%d %H:%M"):
         return None, what, why
     return f"HQ: held: {why}, so this waits for his yes and HQ has asked him. Leave it and go on.", what, why
 
 
-def calendar_line(name: str, inp: dict, base: str | None = None) -> str | None:
-    """Donna's calendar write, for her ledger, as he'd read it: what, when, what it was before."""
+def calendar_line(name: str, inp: dict, base: str | None = None, mine: dict | None = None) -> str | None:
+    """Her calendar write, for her ledger, as he'd read it: what, when, what it was before. Written once it worked (cycles.calendar_result)."""
     last = name.rsplit("__", 1)[-1]
     if not name.startswith("mcp__") or last not in CALENDAR_WRITES:
         return None
-    if last == "create_event":
-        return "calendar: added " + _named({"title": inp.get("summary"), "start": inp.get("startTime"), "end": inp.get("endTime")})
-    eid = str(inp.get("eventId") or "")
-    e = _event(eid, _mirror(base))
-    was = _named(e) if e else f"an event HQ didn't know ({eid})"
-    if last == "delete_event":
-        return f"calendar: removed {was}"
-    now = [x for x in (str(inp.get("summary") or ""), _span(inp.get("startTime"), inp.get("endTime")), str(inp.get("location") or "")) if x]
-    return f"calendar: changed {was}: now {', '.join(now) or 'its details'}"
+    w = calendar_what(last, inp, mine, base)
+    verb = {"add ": "added ", "remove ": "removed ", "change ": "changed "}
+    return "calendar: " + next(v + w[len(k):] for k, v in verb.items() if w.startswith(k))
 
 
 
@@ -645,23 +685,12 @@ def main() -> int:
     who = (a[a.index("--agent") + 1], a[a.index("--kind") + 1]) if "--agent" in a and "--kind" in a else None
     code, why = decide(ask, "--mail-only" in a, (a[a.index("--fix") + 1].upper(), a[a.index("--fix") + 2]) if "--fix" in a else None, who)
     tool, inp = str(ask.get("tool_name", "")), ask.get("tool_input") or {}
-    if not code and who:
-        line = calendar_line(tool, inp)
-        if line:  # in her ledger before it runs, so no way it ends can lose it
-            try:
-                import cycles
-                import ledger
-                ledger.note(who[0], f"{time.strftime('%Y-%m-%d %H:%M')} {line}")
-                with cycles.held() as d:  # his yes was for this one change
-                    cycles._agent_state(d, who[0])["allowed"].pop(_key(tool.rsplit("__", 1)[-1], inp), None)
-            except Exception as e:
-                print(f"(the calendar line wasn't written: {e!r})", file=sys.stderr)
     if code and why.startswith("HQ: held"):  # the question reaches him; it's no mistake of hers
         try:
             import cycles
             last = tool.rsplit("__", 1)[-1]
             _, what, reason = calendar_hold(last, inp, who[0])
-            cycles.hold(who[0], _key(last, inp), what, reason)
+            cycles.hold(who[0], _key(last, inp), what, reason, tool, inp)
         except Exception as e:
             print(f"(the question wasn't asked: {e!r})", file=sys.stderr)
     if code:

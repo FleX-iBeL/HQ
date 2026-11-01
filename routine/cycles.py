@@ -47,7 +47,8 @@ into her ledger. The settings are the workspace's HQ/agents/cycles.json (numbers
     python3 routine/cycles.py plan AGENT 'JSON'       the bigger session's cycle plan (her own run writes it)
     python3 routine/cycles.py done AGENT K "WHAT"     a small step says what came of it; failed AGENT K "WHY"; stale AGENT K "WHY"
     python3 routine/cycles.py ask AGENT "IF-THEN"     one question for him on her line, in if-then shape (once a day)
-    python3 routine/cycles.py yes AGENT "HIS WORDS" [N]  his yes to a held calendar change: it may go through, once
+    python3 routine/cycles.py yes AGENT "HIS WORDS" [N]  his yes to a held calendar change, question N when he named it; several waiting and no N: his words go to her
+    python3 routine/cycles.py open AGENT N, go AGENT N   a run reading his words opens question N, or says go on held goal N
     python3 routine/cycles.py stopstep AGENT K "WHY"  a stop order's run stops her step K; droptext AGENT N drops a queued text; stopped AGENT "WHAT"
     python3 routine/cycles.py batch AGENT "TEXT" [--until WHEN]   a text for her next batch (the low-information diet); it has a date
     python3 routine/cycles.py text AGENT "TEXT"       a text on her line now (a run's own, inside the day's cap)
@@ -302,7 +303,7 @@ def _agent_state(d: dict, aid: str) -> dict:
     st = d.setdefault("agents", {}).setdefault(aid, {})
     for k, v in (("goals", {}), ("boxed_streak", 0), ("texts", {}), ("own_texts", {}), ("batch", []), ("later", []), ("asked", {}), ("asks", {}), ("processed", []),
                  ("steps", {}), ("skipped", {}), ("held_out", {}), ("started", {}), ("run_start", {}), ("refusals", {}), ("back", {}), ("failing", {}),
-                 ("holds", []), ("allowed", {}), ("stopping", {})):
+                 ("holds", []), ("allowed", {}), ("stopping", {}), ("mine", {}), ("order_steps", {})):
         st.setdefault(k, v)
     return st
 
@@ -522,7 +523,7 @@ def useful_until(parsed: dict, a: dict, job_at: dt.datetime, now: dt.datetime) -
     # a step: what the plan says (until the next one, her own until); one from before that: a while after its time
     hi = _t((a.get("hours") or ["08:00", "22:00"])[1])
     end = job_at.replace(hour=hi.hour, minute=hi.minute, second=0, microsecond=0)
-    return min(end, job_at + dt.timedelta(minutes=STEP_GRACE))
+    return end if parsed["kind"] == "fix" else min(end, job_at + dt.timedelta(minutes=STEP_GRACE))  # a round isn't tied to a time of day
 
 
 def used(aid: str, since: float, kinds: tuple = ("cycle", "step")) -> float:
@@ -608,7 +609,11 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
             ledger.entry(aid, f"{p['name']} skipped (job {job['n']})", [f"skipped: {why}"], now)
             if not ran:
                 st["skipped"][str(job["n"])] = why
-            if rec is not None:
+            if rec is not None and rec.get("stop") and not ran:  # his stop isn't lost and isn't silent: he's told, it runs when it can
+                rec["state"] = "skipped"
+                ledger.set_order(aid, rec["order"], "now", f"waits: {why}")
+                say(aid, f"Your stop, \"{rec['spec'].get('words', '')}\", has to wait: {why}. It runs as soon as it can.", "cycle", now, base)
+            elif rec is not None:
                 rec["state"] = "skipped"
                 _order_back(aid, rec, why, base)
                 if rec.get("stop"):
@@ -619,6 +624,7 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
                 log(f"cycles: job {job['n']} ({aid}, {p['name']}) skipped: {why}")
             return "skipped"
 
+        stop_here = bool(rec and rec.get("stop"))
         if job.get("state", "").startswith("held"):  # harm 2: the handbook: a boxed or held step is never retried by the runner
             return skip("it was held while it ran, and a held run is never started again; the next bigger session decides", ran=True)
         if not on(base) or not a.get("on"):
@@ -627,6 +633,8 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
             lo, hi = a.get("hours") or ["08:00", "22:00"]
             if now.time() >= _t(hi):
                 return skip(f"the day's hours end at {hi}; nothing of hers runs at night", morning=True)
+            return "wait"
+        if st["stopping"] and not stop_here and p["kind"] != "fix":  # his stop comes first: it may be about this very run
             return "wait"
         u = _until(rec) if rec and rec.get("until") else useful_until(p, a, job_at, now)
         if u and now > u:
@@ -648,8 +656,6 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
                 return skip(f"the day's steps are used up ({n})")
             if rec is None:  # harm 16: no record of its plan here: nothing to check its inputs against, so it doesn't run
                 return skip("its plan isn't on record on this computer, so its inputs can't be checked")
-            if st["stopping"] and not rec.get("stop"):  # his stop comes first: it may be about this very step
-                return "wait"
             why = stale(aid, p, d, base)
             if why:
                 _jobs("stop", str(job["n"]))
@@ -764,7 +770,15 @@ def box(parsed: dict, base: Path | None = None) -> dict:
 def box_args(job: dict, parsed: dict, run_dir: str, base: Path | None = None) -> list[str]:
     b = box(parsed, base)
     return ["--max-minutes", str(b["minutes"]), "--max-turns", str(b["turns"]), "--agent", parsed["agent"], "--box-note",
-            os.path.join(run_dir, f"job-{job['n']}.box.json")] + (["--round", f"{parsed['label']}:{parsed['mode']}"] if parsed["kind"] == "fix" else [])
+            os.path.join(run_dir, f"job-{job['n']}.box.json")] + (["--round", f"{parsed['label']}:{parsed['mode']}"] if parsed["kind"] == "fix" else []) + _allow(parsed)
+
+
+def _allow(parsed: dict) -> list:
+    """His yes runs with exactly the one tool it opened, by permission flag, not past auto mode's own judgment: Claude Code refused a yes on a guest event as an unrequested commit."""
+    if parsed["kind"] != "step":
+        return []
+    y = (_step_spec(parsed["agent"], parsed) or {}).get("yes")
+    return ["--allow-tool", y["tool"]] if y else []
 
 
 # -- the prompts -----------------------------------------------------------------------------------------------------------
@@ -797,10 +811,11 @@ def _rules(aid: str, parsed: dict, a: dict, b: dict) -> str:
              "that's the one place that serializes them (each takes the file's lock); a direct write is refused by this run's hook before it lands, and is a tripwire. Your ledger and your line you write freely.",
              "- Never send mail (a draft at the most), never a calendar change with another person in it, never anything he must say yes to first, never a change to the handbook, "
              "your section, his vision, his rules or the settings: those are his (an if-then question instead). Never start another run, plan team work, or plan more than this run's plan.",
-             "- Nothing in what you write goes outside this workspace: no curl, gh or git push; this run's hook refuses them. A refused try is logged; a repeat counts against you."]
+             "- Nothing in what you write goes outside this workspace: no curl, gh or git push; this run's hook refuses them. A refused try is logged; a repeat counts against you.",
+             "- A text reaches him only through cycles.py batch, ask or text: they wait for his sleep. Other files of the workspace aren't yours to write: your ledger, your notes and your line are."]
     if aid == "donna":
         lines.append("- His calendar is yours to keep: add, move and remove his own events in Google Calendar by yourself; HQ logs each one in your ledger with what and when, so write nothing extra. "
-                     "An event with guests, or on someone else's calendar, HQ holds and asks him first: when a change comes back as held, that's done, leave it and go on.")
+                     "An event you made yourself is yours at once. An event with guests, on someone else's calendar, or a whole series, HQ holds and asks him first: when a change comes back as held, that's done, leave it and go on.")
     if a.get("batches") and aid == "donna":
         lines.append(f"- His low-information diet: your texts come in batches at {' and '.join(a['batches'])}: python3 \"{cy}\" batch {aid} \"…\" queues one for the next batch. "
                      "A queued text has a date: it goes out today or not at all, unless you add --until \"friday 12:15\", the moment it stops being true. Only an appointment ping he asked for, a travel delay, a very important mail with a date inside 48 hours, the game reminder and a tripwire break through on their own.")
@@ -983,12 +998,38 @@ def _stop_words(aid: str, parsed: dict, spec: dict) -> str:
     out += [f"- queued text {i}: {e['text'][:200]}" for i, e in enumerate(texts, 1)]
     out += ["Work out what he means, and stop that. A step: python3 \"{c}\" stopstep {a} K \"why\". A queued text: python3 \"{c}\" droptext {a} N.".format(c=cy, a=aid),
             "Then tell him, one short plain line, what you stopped: python3 \"{c}\" stopped {a} \"I stopped ...\". That's your last act.".format(c=cy, a=aid),
-            "If nothing here is what he means, or you're not sure which: never say nothing was cancelled. Ask: python3 \"{c}\" ask {a} \"If you mean ..., I'll stop that; if not, ...\".".format(c=cy, a=aid),
+            "If nothing here is what he means, or you're not sure which: never say nothing was cancelled. Ask, and that's your last act: python3 \"{c}\" ask {a} \"If you mean ..., I'll stop that; if not, ...\".".format(c=cy, a=aid),
             "Your next plans leave it out by themselves. If it was a reminder of his, pings.py is its way out. This run does nothing else."]
     return "\n".join(out)
 
 
+def _answer_words(aid: str, parsed: dict, spec: dict) -> str:
+    """His words, and what waits for his word."""
+    cy = ROOT / "routine" / "cycles.py"
+    st_ = _agent_state(_state(), aid)
+    out = [f"This step is one thing he said, in his own words: \"{spec.get('words', '')}\"", "What's waiting for his word, all of it:"]
+    out += [f"- question {h['n']}: {h['what']} ({h['why']})" for h in st_["holds"]]
+    out += [f"- goal {i}: {g} (tried before without getting done; you told him you'd try once more if he said go)" for i, g in enumerate(spec.get("goals") or [], 1)]
+    out += [f"Work out which one his words are for. He talks loosely: yeah, sure, go for it, sounds good, try it again all mean yes to something. A question: python3 \"{cy}\" open {aid} N. A goal: python3 \"{cy}\" go {aid} N.",
+            f"If they could be for more than one and it isn't clear which: open nothing, ask, with the numbers and titles: python3 \"{cy}\" ask {aid} \"Which one do you mean: ...? If you tell me the number, I do that one; if not, I leave them.\"",
+            ("If his words aren't about any of these, do what he asked as one look or one action: he said now." if spec.get("now") else
+             "If his words aren't about any of these, end: your next session has them. This run does nothing else.")]
+    return "\n".join(out)
+
+
+def _yes_words(aid: str, parsed: dict, spec: dict) -> str:
+    """His yes, what it opened, and the one call."""
+    y = spec["yes"]
+    return (f"He said yes, in his own words: \"{y['words']}\". That opened exactly this: {y['what']} ({y['why']}: he knows, and he said yes).\n"
+            f"Make this one call now, once, with exactly this input and nothing added: tool {y['tool']}, input {json.dumps(y['input'], ensure_ascii=False)}.\n"
+            "That's all this run has and all it does: no commands, no other tool. HQ reads the result and writes your ledger.")
+
+
 def _step_words(aid: str, parsed: dict, spec: dict, base: Path) -> str:
+    if spec.get("yes"):
+        return _yes_words(aid, parsed, spec)
+    if spec.get("answer"):
+        return _answer_words(aid, parsed, spec)
     if spec.get("words"):
         return _stop_words(aid, parsed, spec)
     cy = ROOT / "routine" / "cycles.py"
@@ -1370,6 +1411,9 @@ def ask(aid: str, text: str, now: dt.datetime | None = None, base: Path | None =
             return f"The day's {ASKS_A_DAY} questions are used up; it's in the ledger for Friday."
         asked[key] = today
         st_["asks"] = {today: st_["asks"].get(today, 0) + 1}
+        run = _this_run()
+        if run and run["kind"] == "step" and _step_key(run) in st_["steps"]:
+            st_["steps"][_step_key(run)]["asked"] = True  # a stop or a yes she asked about is answered, not lost
         ledger.note(aid, f"escalated: {text}")
         if a.get("batches"):
             nxt = _batch_times(a, now, st_.get("batch_sent")) or [(now + dt.timedelta(days=1)).replace(hour=_t(a["batches"][0]).hour, minute=_t(a["batches"][0]).minute, second=0, microsecond=0)]
@@ -1457,6 +1501,9 @@ TRIPWIRE_WORDS = {
 }
 
 
+NOT_REPEATS = ("an action outside my limits", "a write to a shared file outside the serialized place")  # those are one thing that went wrong; the rest are a mistake made twice
+
+
 def tripwire(aid: str, kind: str, detail: str, now: dt.datetime | None = None, base: Path | None = None, d: dict | None = None,
              text: bool = True) -> str:
     """Counted by the runner: a line in her ledger, and one message on her line in if-then shape, in plain words, at most her
@@ -1465,7 +1512,7 @@ def tripwire(aid: str, kind: str, detail: str, now: dt.datetime | None = None, b
     now = now or dt.datetime.now()
     with held() as d:
         st_ = _agent_state(d, aid)
-        ledger.note(aid, f"tripwire ({kind}): {detail}")
+        ledger.note(aid, f"tripwire ({kind}): {detail}" + (" [repeat]" if kind not in NOT_REPEATS else ""))
         if "refus" in kind:  # F103: a refused try is also on the one ledger the score reads
             import mistakes
             mistakes.add("refused", aid, f"{kind}: {detail}", where="her own cycle", base=base)
@@ -1475,7 +1522,8 @@ def tripwire(aid: str, kind: str, detail: str, now: dt.datetime | None = None, b
         if sent >= most or not text:
             return "ledger only (the day's texts are used up)" if text else "ledger only (she put it to him herself)"
         st_["texts"] = {today: sent + 1}
-        msg = f"A tripwire on my side: {kind}: {detail.rstrip(' .')}. {TRIPWIRE_WORDS.get(kind, 'Say what you want me to do, and I do that.')}"
+        d_ = detail.rstrip(" .")
+        msg = f"{d_[:1].upper() + d_[1:]}. {TRIPWIRE_WORDS.get(kind, 'Say what you want me to do, and I do that.')}"
         say(aid, msg, "tripwire", now, base)
     return "texted"
 
@@ -1550,13 +1598,24 @@ def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Pat
         if state.startswith("paused"):
             _jobs("mark", str(job["n"]), f"ended {now:%H:%M}, paused for its usage; an agent's run isn't resumed")
         rec = st_["steps"].get(_step_key(parsed)) if parsed["kind"] == "step" else None
-        if rec is not None and rec.get("stop"):  # his stop order's run is over, whatever came of it
+        if rec is not None and (rec.get("stop") or (rec.get("spec") or {}).get("answer")):  # his words' run is over, whatever came of it
             st_["stopping"].pop(str(rec.get("order")), None)
-            if rec.get("state") in ("planned", "started"):
+            if rec.get("asked"):
+                rec["state"] = "done"
+                ledger.set_order(aid, rec["order"], "done", "she asked him which")
+            elif rec.get("state") in ("planned", "started"):
                 rec["state"] = "ended without saying what came of it"
-                ledger.note(aid, f"his stop order's run ended without an answer: {rec['spec'].get('words', '')}")
-                _order_back(aid, rec, f"its run ended ({how}) with nothing stopped and nothing asked", base)
-                say(aid, f"I didn't get to your stop, \"{rec['spec'].get('words', '')}\". If it's still on, say it again; if not, I leave it.", "cycle", now, base)
+                _order_back(aid, rec, f"its run ended ({how}) with nothing done and nothing asked", base)
+                if rec.get("stop"):
+                    ledger.note(aid, f"his stop order's run ended without an answer: {rec['spec'].get('words', '')}")
+                    say(aid, f"I didn't get to your stop, \"{rec['spec'].get('words', '')}\". If it still stands, say it again; if not, I leave it.", "cycle", now, base)
+        elif rec is not None and (rec.get("spec") or {}).get("yes"):  # his yes: it worked, or it comes back to him, once
+            if rec.get("state") != "done":
+                y = rec["spec"]["yes"]
+                rec["state"] = "failed"
+                st_["holds"].append({k: y[k] for k in ("key", "what", "why", "tool", "input")} | {"n": y["n"], "at": now.strftime(FMT)})
+                ledger.set_order(aid, rec["order"], "open", "it didn't go through; the question stands again")
+                say(aid, f"Your yes on {y['what']} didn't go through{': ' + rec['why'] if rec.get('why') else ''}. If you want it, say yes again; if not, I leave it.", "cycle", now, base)
         elif rec is not None and rec.get("state") in ("planned", "started"):
             clean = state.startswith("done") and not note.get("boxed") and note.get("exit") in (0, None)
             rec["state"] = "boxed" if note.get("boxed") else "finished without a line of what came of it" if clean else "ended without saying what came of it"
@@ -1595,13 +1654,11 @@ def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Pat
                 say(aid, f"My {parsed['name']} didn't get through: {why}. {TRIPWIRE_WORDS['a run of mine failed']}", "tripwire", now, base)
         elif state.startswith("done") and not note.get("boxed"):
             st_["failing"] = {}
-        for c in note.get("calendar_failed") or []:
-            ledger.note(aid, f"calendar: that last change didn't go through: {_plain(c)}")
         # boxed twice in a row
         if note.get("boxed"):
             st_["boxed_streak"] = st_.get("boxed_streak", 0) + 1
             if st_["boxed_streak"] >= 2:
-                tripwire(aid, "boxed twice in a row", f"two runs in a row ended at their box ({parsed['name']}, at its {note['boxed']})", now, base)
+                tripwire(aid, "boxed twice in a row", f"two of my runs in a row ran out of their box ({parsed['name']})", now, base)
                 st_["boxed_streak"] = 0
         else:
             st_["boxed_streak"] = 0
@@ -1609,6 +1666,54 @@ def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Pat
     if log:
         log(f"cycles: job {job['n']} ({aid}, {parsed['name']}) {how}")
     return note
+
+
+def _short_why(said: str) -> str:
+    s = _plain(said)
+    s = re.sub(r"^(?:Error:?\s*|MCP error[^:]*:\s*)", "", s)
+    return (s[:117] + "...") if len(s) > 120 else s
+
+
+def calendar_result(aid: str, name: str, inp: dict, txt: str, ok: bool, job: int | None = None, now: dt.datetime | None = None, base: Path | None = None) -> None:
+    """What really came of a calendar call, read by the runner from the call's own result: her ledger says it was done only once it was, a failed one says which.
+    What she made goes on her own list at once: it's hers, she can move or remove it a minute later, HQ's copy of the calendar reads hourly."""
+    import cyclehook
+    now = now or dt.datetime.now()
+    last = name.rsplit("__", 1)[-1]
+    with held() as d:
+        st_ = _agent_state(d, aid)
+        rec = None
+        if job:
+            try:
+                import jobs as q
+                j = next((x for x in q.read()[1] if x["n"] == job), None)
+                p = parse(j["text"]) if j else None
+                rec = st_["steps"].get(_step_key(p)) if p and p["kind"] == "step" else None
+            except Exception:
+                rec = None
+        what = cyclehook.calendar_what(last, inp, st_["mine"], str(base) if base else None)
+        if not ok:
+            ledger.note(aid, f"{now:%Y-%m-%d %H:%M} calendar: this one didn't go through: {what}: {_short_why(txt)}")
+            if rec is not None:
+                rec["why"] = _short_why(txt)
+            return
+        ledger.note(aid, f"{now:%Y-%m-%d %H:%M} {cyclehook.calendar_line(name, inp, str(base) if base else None, st_['mine'])}")
+        eid = str(inp.get("eventId") or "")
+        if last == "create_event":
+            m = re.search(r"\"(?:id|eventId|event_id)\"\s*:\s*\"([^\"]+)\"", txt) or re.search(r"\b(?:id|eventId)\W{1,3}([\w-]{6,})", txt)
+            st_["mine"][m.group(1) if m else f"new-{now:%H%M%S}"] = {"title": inp.get("summary"), "start": inp.get("startTime"), "end": inp.get("endTime"), "cal": inp.get("calendarId") or "",
+                                                                 "others": any(inp.get(k) for k in cyclehook.OTHERS), "at": now.strftime(FMT)}
+        elif eid in st_["mine"] and last == "delete_event":
+            st_["mine"].pop(eid)
+        elif eid in st_["mine"]:
+            e = st_["mine"][eid]
+            e.update({k2: inp[k1] for k1, k2 in (("summary", "title"), ("startTime", "start"), ("endTime", "end")) if inp.get(k1)})
+        cut = (now - dt.timedelta(days=30)).strftime(FMT)
+        st_["mine"] = {k: v for k, v in st_["mine"].items() if v.get("at", "") >= cut}
+        st_["allowed"].pop(cyclehook._key(last, inp), None)
+        if rec is not None and (rec.get("spec") or {}).get("yes"):
+            rec["state"] = "done"
+            ledger.set_order(aid, rec["order"], "done", "it went through")
 
 
 def _plain(said: str) -> str:
@@ -1645,7 +1750,7 @@ def _what_really_happened(aid: str, parsed: dict, note: dict, now: dt.datetime, 
             mark = "sprint.py ready" in r.get("tool", "") and aid == "moneypenny"
             key = hashlib.sha1(_norm_goal(plain).encode()).hexdigest()[:12]
             if key in st_["refusals"]:  # the mistake made twice: that's what reaches him
-                tripwire(aid, "a Ready mark refused on its fields" if mark else "a refused command or push", "a row wasn't ready when I marked it" if mark else _to_him(r.get("said", "")), now, base)
+                tripwire(aid, "a Ready mark refused on its fields" if mark else "a refused command or push", "that's twice now: a row wasn't ready when I marked it" if mark else "that's twice now: " + _to_him(r.get("said", "")), now, base)
             else:
                 st_["refusals"][key] = now.strftime(FMT)
                 ledger.note(aid, f"refused, logged: {plain}")
@@ -1693,44 +1798,111 @@ def order(aid: str, kind: str, words: str, now_: bool = False, now: dt.datetime 
         p.write_text(t, encoding="utf8")
         ledger.set_order(aid, o["n"], "done", "written into her own section")
         return f"Standing: written into {name}'s own section of the handbook."
-    goal = _go(aid, words, now)  # "say go and I'll try once more": this order is that go
-    if goal:
-        ledger.set_order(aid, o["n"], "now" if now_ else "open", f"he says go on: {goal}")
+    if _waiting_for_word(aid, now):  # his words go to her, with what's waiting: she knows what he means, a list of phrases doesn't
+        return _answer_order(aid, o, now, base, now_)
     if now_:
         a = agent_settings(aid, base)
         if not in_hours(a, now):  # harm 9: said out loud, kept, and the first thing she does at her hours
             lo, hi = a.get("hours") or ["08:00", "22:00"]
             ledger.set_order(aid, o["n"], "now", f"said outside her hours, waits for {lo}")
             return f"Not now: nothing of {aid}'s runs between {hi} and {lo}. It's kept, and it's the first thing she does at {lo}. Tell him so."
-        return _order_step(aid, o, now, base, goal)
-    if goal:
-        return f"Go: she tries \"{goal}\" once more in her next session."
+        return _order_step(aid, o, now, base)
     return f"Noted for {aid}'s next bigger session: \"{words}\"."
 
 
-_BARE_GO = re.compile(r"(?:(?:yes|ok|okay|sure|please|then)\s+)*(?:go|go on|go ahead|do it|try again|try once more|yes|ok|okay|keep at it|keep going)(?:\s+(?:please|then|ahead))*", re.I)
+def _held_goals(st_: dict, now: dt.datetime) -> list:
+    """The goals held as tried without done, that wait for his go: newest first."""
+    since = (now - dt.timedelta(days=REPEAT_DAYS)).strftime("%Y-%m-%d")
+    out = sorted(((r["tripped"], g) for g, r in st_["goals"].items() if (r.get("tripped") or "") >= since and not r.get("go")), reverse=True)
+    return [g for _, g in out]
 
 
-def _go(aid: str, words: str, now: dt.datetime) -> str | None:
-    """The goal his order says go on, of the ones held as tried without done: named by its words, or a bare go for the newest. It may be planned once more."""
+def _goal_words(st_: dict, g: str) -> str:
+    return next((r["spec"]["goal"] for r in st_["steps"].values() if _norm_goal((r.get("spec") or {}).get("goal", "")) == g), g)
+
+
+def _waiting_for_word(aid: str, now: dt.datetime) -> bool:
+    st_ = _agent_state(_state(), aid)
+    return bool(st_["holds"] or _held_goals(st_, now))
+
+
+def _cant_run(aid: str, now: dt.datetime, base: Path | None) -> str | None:
+    """Why a small step of hers can't run now, in plain words, or None."""
+    a = agent_settings(aid, base)
+    lo, hi = a.get("hours") or ["08:00", "22:00"]
+    if not in_hours(a, now):
+        return f"nothing of {aid}'s runs until {lo}"
+    if hi != "23:59" and _minutes_left(a, now) < a["step"]["minutes"]:
+        return f"the day's hours are nearly over, so it's the first thing at {lo}"
+    try:
+        import usagecost
+        price = float(usagecost.cost_for(a["step"]["minutes"], "", f"step-{aid}").get("weekly") or 0)
+    except Exception:
+        price = 0.0
+    sh = shares(aid, now, base)
+    if over_share(sh, price):
+        return f"her share of the usage is used up for now ({sh['daily_used']:g} of {sh['daily_share']:g} today, {sh['weekly_used']:g} of {sh['weekly_share']:g} this week)"
+    return None
+
+
+def _answer_order(aid: str, o: dict, now: dt.datetime, base: Path | None, now_: bool = False) -> str:
+    """His words about what waits for his word: a small step of hers reads them."""
+    why = _cant_run(aid, now, base)
+    with held() as d:
+        _agent_state(d, aid)["order_steps"][str(o["n"])] = {"kind": "answer", "now": now_}
+    if why:
+        ledger.set_order(aid, o["n"], "now", f"waits: {why}")
+        return f"Kept: {why}. She reads it as soon as she can. Tell him so."
+    _order_step(aid, o, now, base, answer=True, now_flag=now_)
+    return f"She has it, in his words: \"{o['words']}\". She looks at what's waiting for his word and does what he means, or asks."
+
+
+def _rec_of_run(st_: dict, aid: str) -> dict | None:
+    run = _this_run()
+    return st_["steps"].get(_step_key(run)) if run and run["kind"] == "step" and run["agent"] == aid else None
+
+
+def open_hold(aid: str, n: int, now: dt.datetime | None = None, base: Path | None = None) -> str:
+    """A run reading his words says which question his yes is for. Only a run that was given his words can."""
+    now = now or dt.datetime.now()
     with held() as d:
         st_ = _agent_state(d, aid)
-        since = (now - dt.timedelta(days=REPEAT_DAYS)).strftime("%Y-%m-%d")
-        waiting = [(g, r) for g, r in st_["goals"].items() if (r.get("tripped") or "") >= since]
-        bare = bool(_BARE_GO.fullmatch(" ".join(_norm_goal(words).split())))
-        hit = [g for g, r in waiting if _about(words, g)] or ([max(waiting, key=lambda x: x[1]["tripped"])[0]] if bare and waiting else [])
-        if not hit:
-            return None
-        st_["goals"][hit[0]]["go"] = True
-        goal = next((r["spec"]["goal"] for r in st_["steps"].values() if _norm_goal((r.get("spec") or {}).get("goal", "")) == hit[0]), hit[0])
-        ledger.note(aid, f"he says go on, once more: {goal}")
-    return goal
+        rec = _rec_of_run(st_, aid)
+        if not rec or not (rec.get("spec") or {}).get("answer"):
+            return "Refused: only a run reading his own words can open a question."
+        h = next((x for x in st_["holds"] if x["n"] == n), None)
+        if not h:
+            return f"No question {n} is waiting."
+        rec["state"] = "done"
+        ledger.set_order(aid, rec["order"], "planned", f"question {n}")
+        return _opened(aid, st_, h, rec["spec"].get("words", ""), rec["order"], now, base) + " A step of yours makes the call, not this run: end here."
+
+
+def go_on(aid: str, n: int, now: dt.datetime | None = None, base: Path | None = None) -> str:
+    """A run reading his words says go on held goal n: it may be planned once more; with his now, at once."""
+    now = now or dt.datetime.now()
+    with held() as d:
+        st_ = _agent_state(d, aid)
+        rec = _rec_of_run(st_, aid)
+        if not rec or not (rec.get("spec") or {}).get("answer"):
+            return "Refused: only a run reading his own words can say go."
+        goals = rec["spec"].get("goals") or []
+        if not 1 <= n <= len(goals):
+            return f"No goal {n} is waiting."
+        g = _norm_goal(goals[n - 1])
+        st_["goals"].setdefault(g, {})["go"] = True
+        rec["state"] = "done"
+        ledger.note(aid, f"he says go on, once more: {goals[n - 1]}")
+        if rec["spec"].get("now"):
+            ledger.set_order(aid, rec["order"], "planned", f"he says go on: {goals[n - 1]}")
+            return _order_step(aid, {"n": rec["order"], "words": goals[n - 1]}, now, base, goal=goals[n - 1])
+        ledger.set_order(aid, rec["order"], "open", f"he says go on: {goals[n - 1]}")
+    return f"Go: \"{goals[n - 1]}\" goes in your next plan, once more. That's all this run does: end here."
 
 
 def _stop_order(aid: str, o: dict, now: dt.datetime, base: Path | None) -> str:
     """His stop, in his words, goes to her in a small step: she knows what he means, a word match doesn't (5 of 9 natural orders matched nothing). Till that step
-    has run no other step of hers starts; one that's running ends now: a step is small, and a stop must stop."""
-    a = agent_settings(aid, base)
+    has run nothing else of hers starts; one step that's running ends now: a step is small, and a stop must stop. It can't run now: he's told, and it runs when it can."""
     _, jobs_ = _items()
     n = 0
     for j in jobs_:
@@ -1739,14 +1911,39 @@ def _stop_order(aid: str, o: dict, now: dt.datetime, base: Path | None) -> str:
             _jobs("stop", str(j["n"]))
             n += 1
     with held() as d:
-        _agent_state(d, aid)["stopping"][str(o["n"])] = now.strftime(FMT)
+        st_ = _agent_state(d, aid)
+        st_["stopping"][str(o["n"])] = now.strftime(FMT)
+        st_["order_steps"][str(o["n"])] = {"kind": "stop"}
     ledger.note(aid, f"stop order: \"{o['words']}\"" + (f"; the step that was running ended ({n})" if n else ""))
-    if not in_hours(a, now):
-        lo, hi = a.get("hours") or ["08:00", "22:00"]
-        ledger.set_order(aid, o["n"], "now", f"said outside her hours, waits for {lo}")
-        return f"Kept: nothing of {aid}'s runs until {lo}, and this is the first thing she does then: she stops what he means and tells him. Tell him so."
+    why = _cant_run(aid, now, base)
+    if why:
+        ledger.set_order(aid, o["n"], "now", f"waits: {why}")
+        return f"Kept, not done yet: {why}. It's the first thing she does when she can, and nothing else of hers starts before it. Tell him so."
     _order_step(aid, o, now, base, stop=True)
     return f"She has it, in his words: \"{o['words']}\". She stops what he means and tells him what she stopped; nothing else of hers starts first."
+
+
+def stops_alive(now: dt.datetime, base: Path | None = None) -> None:
+    """A stop that lost its step (she was switched off, it was cancelled) doesn't block her for good: it runs again; a day old, he's told and it's dropped."""
+    items, jobs_ = _items()
+    live = {(p["agent"], p["stamp"], p["k"]) for p in (parse(x["text"]) for x in [i for i in items if i["state"] == "waiting"] + [j for j in jobs_ if not j["state"].startswith(("done", "stopped", "ended", "cancelled"))]) if p and p["kind"] == "step"}
+    with held() as d:
+        for aid, a in settings(base)["agents"].items():
+            if not a.get("on"):
+                continue
+            st_ = _agent_state(d, aid)
+            for n, ts in list(st_["stopping"].items()):
+                orders_ = {str(o["n"]): o for o in ledger.orders(aid)}
+                o = orders_.get(n)
+                has_step = any(k[0] == aid and (st_["steps"].get(f"{aid}|{k[1]}|{k[2]}") or {}).get("order") == int(n) for k in live)
+                old = dt.datetime.strptime(ts, FMT) < now - dt.timedelta(hours=24)
+                if o is None or (old and not has_step):
+                    st_["stopping"].pop(n)
+                    if o is not None:
+                        ledger.set_order(aid, int(n), "dropped", "a day old and never run")
+                        say(aid, f"I couldn't act on your stop, \"{o['words']}\". If it still stands, say it again.", "cycle", now, base)
+                elif not has_step and o["state"] != "now":
+                    ledger.set_order(aid, int(n), "now", "back: her step for it was gone")
 
 
 def planned_steps(aid: str) -> list[dict]:
@@ -1792,7 +1989,8 @@ def drop_text(aid: str, n: int, base: Path | None = None) -> str:
             return f"No queued text {n}."
         e = q_[n - 1]
         (st_["batch"] if n <= len(st_["batch"]) else st_["later"]).remove(e)
-        ledger.note(aid, f"queued text dropped, on his order: {e['text'][:120]}")
+        rec = _rec_of_run(st_, aid)
+        ledger.note(aid, f"queued text dropped{', on his order' if rec and rec.get('stop') else ''}: {e['text'][:120]}")
     return f"Queued text {n} is dropped."
 
 
@@ -1817,50 +2015,58 @@ def stopped(aid: str, what: str, now: dt.datetime | None = None, base: Path | No
     return "Said, and written in your ledger."
 
 
-def hold(aid: str, key: str, what: str, why: str, now: dt.datetime | None = None, base: Path | None = None) -> str:
-    """A calendar change the hook held: on her list with a number, and the question goes to him however many she asked today. Once a day for the same one."""
+def hold(aid: str, key: str, what: str, why: str, tool: str = "", inp: dict | None = None, now: dt.datetime | None = None, base: Path | None = None) -> str:
+    """A calendar change the hook held: all of it kept, with a short number and its title, and the question goes to him however many she asked today. One change, one question."""
     now = now or dt.datetime.now()
     with held() as d:
         st_ = _agent_state(d, aid)
         if any(h["key"] == key for h in st_["holds"]):
             return "already"
-        n = max([h["n"] for h in st_["holds"]] + [st_.get("hold_n", 0)]) + 1
-        st_["hold_n"] = n
-        st_["holds"].append({"n": n, "key": key, "what": what, "why": why, "at": now.strftime(FMT)})
-        ledger.note(aid, f"held, asked him first: {what} ({why})")
-        ask(aid, f"If you want me to {what}, say yes and I'll do it; if not, I leave it. {why[0].upper() + why[1:]}.", now, base, must=True)
+        used_ = {h["n"] for h in st_["holds"]}
+        n = next(i for i in range(1, len(used_) + 2) if i not in used_)
+        st_["holds"].append({"n": n, "key": key, "what": what, "why": why, "tool": tool, "input": inp or {}, "at": now.strftime(FMT)})
+        ledger.note(aid, f"held, asked him first ({n}): {what} ({why})")
+        ask(aid, f"({n}) If you want me to {what}, say yes and I'll do it; if not, I leave it. {why[0].upper() + why[1:]}.", now, base, must=True)
     return "asked"
 
 
-def yes(aid: str, words: str, n: int | None = None, now: dt.datetime | None = None, base: Path | None = None) -> str:
-    """His yes to a held calendar change: that one change may go through, for two days, and she does it in a step."""
-    now = now or dt.datetime.now()
-    with held() as d:
-        st_ = _agent_state(d, aid)
-        h = next((x for x in reversed(st_["holds"]) if n is None or x["n"] == n), None)
-        if not h:
-            return f"{aid} has no change waiting for a yes."
-        st_["holds"].remove(h)
-        st_["allowed"][h["key"]] = (now + dt.timedelta(days=2)).strftime(FMT)
-    o = ledger.add_order(aid, "start", f"He said yes ({words}): {h['what']}", True, now)
-    a = agent_settings(aid, base)
-    if not in_hours(a, now):
-        return f"Yes: {h['what']}. Nothing of hers runs now; it's the first thing she does at {a['hours'][0]}."
-    _order_step(aid, o, now, base)
+def _opened(aid: str, st_: dict, h: dict, words: str, order_n: int, now: dt.datetime, base: Path | None) -> str:
+    """His yes on one held change: it may go through, exactly as it was held, once, for two days. A step does it, with its one tool."""
+    st_["holds"].remove(h)
+    st_["batch"] = [e for e in st_["batch"] if h["what"] not in e["text"]]  # he answered: the question doesn't go out at the next batch
+    st_["later"] = [e for e in st_["later"] if h["what"] not in e["text"]]
+    st_["allowed"][h["key"]] = (now + dt.timedelta(days=2)).strftime(FMT)
+    st_["order_steps"][str(order_n)] = {"kind": "yes", "hold": h, "words": words}
+    why = _cant_run(aid, now, base)
+    if why:
+        ledger.set_order(aid, order_n, "now", f"his yes waits: {why}")
+        return f"Yes, on {h['what']}. {why[0].upper() + why[1:]}, and then she does it."
+    _order_step(aid, {"n": order_n, "words": words}, now, base, yes=h, words=words)
     return f"Yes: she does it now: {h['what']}."
 
 
+def yes(aid: str, words: str, n: int | None = None, now: dt.datetime | None = None, base: Path | None = None) -> str:
+    """His yes to a held calendar change. His number, or the only one waiting, opens it. Several and no number: his words go to her, and if it isn't clear which she asks. Never the newest by default."""
+    now = now or dt.datetime.now()
+    st0 = _agent_state(_state(), aid)
+    if not st0["holds"]:
+        return f"{aid} has no change waiting for a yes."
+    o = ledger.add_order(aid, "start", f"He said yes ({words})", True, now)
+    if n is None and len(st0["holds"]) > 1:
+        return _answer_order(aid, o, now, base)
+    with held() as d:
+        st_ = _agent_state(d, aid)
+        h = next((x for x in st_["holds"] if n is None or x["n"] == n), None)
+        if not h:
+            ledger.set_order(aid, o["n"], "dropped", f"no question {n}")
+            return f"No question {n} is waiting. Waiting: " + "; ".join(f"{x['n']}: {x['what']}" for x in st_["holds"])
+        return _opened(aid, st_, h, words, o["n"], now, base)
 
 
-def _full_goal(aid: str, p: dict) -> str:
-    """A step's goal in full (its item carries the first 90 characters)."""
-    rec = _agent_state(_state(), aid)["steps"].get(_step_key(p)) or {}
-    return (rec.get("spec") or {}).get("goal") or p.get("goal", "")
-
-
-def _order_step(aid: str, o: dict, now: dt.datetime, base: Path | None, goal: str | None = None, stop: bool = False) -> str:
-    """His "now": a small step at once, inside her box. goal: what it says go on. stop: his stop order, to act on."""
-    words = f"his stop order: {o['words']}" if stop else (goal or o["words"])
+def _order_step(aid: str, o: dict, now: dt.datetime, base: Path | None, goal: str | None = None, stop: bool = False, answer: bool = False, yes: dict | None = None,
+                words: str = "", now_flag: bool = False) -> str:
+    """His "now": a small step at once, inside her box. goal: what it says go on. stop: his stop order, to act on. answer: his words about what waits for his word. yes: the one held change he said yes to."""
+    label = f"his stop order: {o['words']}" if stop else f"his words: {o['words']}" if answer else f"he said yes: {yes['what']}" if yes else (goal or o["words"])
     stamp = now.strftime("%Y-%m-%d %H:%M")
     hi = agent_settings(aid, base)["hours"][1]
     with held() as d:
@@ -1868,24 +2074,38 @@ def _order_step(aid: str, o: dict, now: dt.datetime, base: Path | None, goal: st
         k = 0
         while f"{aid}|{stamp}|{k}" in st_["steps"]:
             k = max(k, 99) + 1
-        spec = {"goal": words, "done_means": "what he asked for is done, or put to him as a question", "inputs": [], "may": "one look or one action inside your limits", "at": now.strftime("%H:%M"),
-                **({"words": o["words"]} if stop else {})}
+        spec = {"goal": label, "done_means": "what he asked for is done, or put to him as a question", "inputs": [], "may": "one look or one action inside your limits", "at": now.strftime("%H:%M")}
+        if stop:
+            spec["words"] = o["words"]
+        if answer:
+            spec.update(answer=True, words=o["words"], now=now_flag, goals=[_goal_words(st_, g) for g in _held_goals(st_, now)])
+        if yes:
+            spec["yes"] = {**{k_: yes[k_] for k_ in ("n", "key", "what", "why", "tool", "input")}, "words": words}
         st_["steps"][f"{aid}|{stamp}|{k}"] = {"spec": spec, "fps": [], "day": now.strftime("%Y-%m-%d"), "state": "planned", "stamp": stamp, "order": o["n"], **({"stop": True} if stop else {}),
                                              "until": now.replace(hour=_t(hi).hour, minute=_t(hi).minute, second=0, microsecond=0).strftime(FMT)}
-        code, out = _schedule("add", "now", step_text(aid, stamp, k, words), "--priority", "--kind", f"step-{aid}")
+        code, out = _schedule("add", "now", step_text(aid, stamp, k, label), "--priority", "--kind", f"step-{aid}")
         ledger.set_order(aid, o["n"], "planned", "a step at once")
     return f"Now: a step for {aid} planned at once ({out.splitlines()[0][:100] if out else code})."
 
 
 def waiting_orders(now: dt.datetime | None = None, base: Path | None = None, log=None) -> list[str]:
-    """A "now" that came outside her hours runs first thing inside them."""
+    """What he said that couldn't run when he said it runs as soon as it can: outside her hours, near their end, over her share. A stop that lost its step comes back here too."""
     now = now or dt.datetime.now()
+    stops_alive(now, base)
     did = []
     for aid, a in settings(base)["agents"].items():
-        if not a.get("on") or not in_hours(a, now) or not _agent(aid, base):
+        if not a.get("on") or not _agent(aid, base):
             continue
         for o in ledger.orders(aid, ("now",)):
-            _order_step(aid, o, now, base, stop=o["kind"] == "stop")
+            if _cant_run(aid, now, base):
+                break
+            with held() as d:
+                os_ = _agent_state(d, aid)["order_steps"].get(str(o["n"])) or {}
+            kind = "stop" if o["kind"] == "stop" else os_.get("kind")
+            if kind == "yes":
+                _order_step(aid, {"n": o["n"], "words": os_.get("words", "")}, now, base, yes=os_["hold"], words=os_.get("words", ""))
+            else:
+                _order_step(aid, o, now, base, stop=kind == "stop", answer=kind == "answer", now_flag=os_.get("now", False))
             did.append(f"{aid}'s order of {o['at']} planned")
     if log:
         for x in did:
@@ -2205,6 +2425,10 @@ def main(argv: list[str]) -> int:
             print(proposal(rest[0].lower(), rest[1]))
         elif cmd == "yes" and len(rest) >= 2:
             print(yes(rest[0].lower(), rest[1], int(rest[2]) if len(rest) > 2 and rest[2].isdigit() else None))
+        elif cmd == "open" and len(rest) == 2 and rest[1].isdigit():
+            print(open_hold(rest[0].lower(), int(rest[1])))
+        elif cmd == "go" and len(rest) == 2 and rest[1].isdigit():
+            print(go_on(rest[0].lower(), int(rest[1])))
         elif cmd == "stopstep" and len(rest) == 3 and rest[1].isdigit():
             print(stop_step(rest[0].lower(), int(rest[1]), rest[2]))
         elif cmd == "droptext" and len(rest) == 2 and rest[1].isdigit():
