@@ -760,10 +760,11 @@ def golden_current():
 ADD_MOST = 4000  # F86: characters in one addition, about two pages; three rounds are 12,000. The review reads 24,000 of a row (_input)
 REVIEW_READS = 24000
 ROUNDS_DIR = os.path.join(E.DIR, "rounds")
+ROUND_QUIET = 300  # F86: seconds no row may have changed before a round starts, his five minutes
 ROUNDS = 3  # rounds an item, then the sit-down list and one text to him (F86, his yes 30 October 2026; F101: per item, not per day)
 STOP_WORDS = {"his": "needs him", "cap": f"{ROUNDS} rounds and the review still flags it", "mark": "her mark didn't land",
               "no": "she says no, it's his to decide, and only his words lift it, through review.py clear",
-              "broke": "a round changed more than its one addition; that was put back"}
+              "broke": "the planning changed during a round, outside its one addition"}
 
 
 def _stopped(e, fp):
@@ -829,7 +830,7 @@ def next_round(now=None):
         rv["rows"] = rs
         d["review"] = rv
         S._save(S.RANKS, d)
-    return {"pick": pick, "capped": capped}
+    return {"pick": None if pick and round_waits() else pick, "capped": capped}
 
 
 def round_started(pick, now=None):
@@ -920,22 +921,20 @@ def _new_quotes(old, new):
 
 
 # Quote marks: double, curly, guillemets, and single ones around words (an apostrophe isn't one).
-_DOUBLE = re.compile(r'["“„«]([^"“”„«»]*)["”“»]')
-_SINGLE = re.compile(r"(?<![\w'’])['‘]([^'‘’]+)['’](?![\w])")
-_ANY_MARK = re.compile(r'["“”„«»]')
-_CODE = re.compile(r"`[^`]*`")
+_OPEN, _CLOSE = '"“„«‹「『＂″‟', '"”“»›」』＂″'
+_DOUBLE = re.compile(f"[{_OPEN}]([^{_OPEN}{_CLOSE}]*)[{_CLOSE}]")
+_SINGLE = re.compile(r"(?<![\w'’])['‘‚]([^'‘’]+)['’](?![\w])")
+_ANY_MARK = re.compile(f"[{_OPEN}{_CLOSE}]")
 
 
 def _addition_why(words, about=""):
     """What's wrong with an addition of hers, or None. A quote in it must be one unbroken piece of one line of his (sprint.his_quote: his own
-    lines, never an agent's), and a team's mark can't stand in it: those are put by their own commands, in their own place. Code between
-    backticks is code: its quote marks are no quotes."""
-    words = _CODE.sub(" ", words)
+    lines, never an agent's), and a team's mark can't stand in it: those are put by their own commands, in their own place."""
     if S.TEAM_NOTE.search(words):
         return ("Refused: that has the shape of the team's mark (Built, Done, Fixed, QA passed or failed). A mark is put only by its own "
                 "command at its own place. Say it without that shape.")
     rest = words
-    for marks in (_DOUBLE, _SINGLE):
+    for marks in (_DOUBLE, _SINGLE):  # in backticks too: a quote is a quote
         for m in marks.finditer(rest):
             bit = m.group(1).strip()
             if re.search(r"…|\.\.\.", bit):
@@ -1068,14 +1067,52 @@ def _sha(line):
     return hashlib.sha256(line.encode()).hexdigest()
 
 
-def _planning_rows(text):
-    out, phase = [], False
+_ROW_LABEL = re.compile(r"^\| [^|]* \| ([A-Z]\d+(?:\.\d+)*)\b")
+
+
+def _keyed_rows(text):
+    """The labelled rows of the planning's phases, in order: {(label, which): line}. A label can stand in two tables."""
+    out, seen, phase = {}, {}, False
     for line in text.split("\n"):
         if line.startswith("## "):
             phase = line.startswith("## Phase")
-        elif phase and line.startswith("|"):
-            out.append(line)
+        elif phase:
+            m = _ROW_LABEL.match(line)
+            if m:
+                k = seen.get(m.group(1), 0)
+                seen[m.group(1)] = k + 1
+                out[(m.group(1), k)] = line
     return out
+
+
+def _queue(text):
+    """{"jobs": {n: line}, "items": {n: line}} as a planning's text has them."""
+    return {"jobs": {int(m.group(1)): m.group(0) for m in re.finditer(r"^- Job (\d+) · .*$", text, re.M)},
+            "items": {int(m.group(1)): m.group(0) for m in re.finditer(r"^- Item (\d+) · .*$", text, re.M)}}
+
+
+def round_waits():
+    """Why no round may start now, or "": a call is on, or a row changed in the last five minutes. seen_at comes from the file itself, so that also
+    covers the status page, a laptop chat and a call on the other computer."""
+    import helper
+    if helper.current():
+        return "a call is on"
+    now = _clock()
+    if any(now - (e.get("seen_at") or 0) < ROUND_QUIET for e in (_state()[1].get("rows") or {}).values()):
+        return "a row changed in the last five minutes"
+    return ""
+
+
+def _call_since(at):
+    """Whether a call was on at any moment since `at`: on now, or a transcript written since."""
+    import helper
+    if helper.current():
+        return True
+    calls = os.path.join(S._ws(), "HQ", "calls")
+    try:
+        return any(os.path.getmtime(os.path.join(calls, x)) > at for x in os.listdir(calls) if x.endswith(".md"))
+    except OSError:
+        return False
 
 
 def round_before(n, label, mode):
@@ -1084,73 +1121,142 @@ def round_before(n, label, mode):
     round_after(n)  # a held round that starts again: the last run's look first, if it never came
     with q.locked():
         text = open(q.ROADMAP, encoding="utf8").read()
-        ready = S._load(S.RANKS).get("ready") or {}
+        d, rv = _state()
     with open(os.path.join(ROUNDS_DIR, f"job-{n}.json"), "w", encoding="utf8") as f:
-        json.dump({"n": n, "label": label, "mode": mode, "planning": text, "ready": ready}, f)
+        json.dump({"n": n, "label": label, "mode": mode, "at": time.time(), "planning": text, "ready": d.get("ready") or {}, "rows": rv.get("rows") or {}}, f)
+
+
+def _reviewed(label, since):
+    """Whether a real review of this row passed since `since`: its line in the costs."""
+    try:
+        for line in open(COSTS, encoding="utf8"):
+            r = json.loads(line)
+            if r.get("row") == label and r.get("verdict") == "pass" and r.get("at", 0) >= int(since) - 1:
+                return True
+    except (OSError, ValueError):
+        pass
+    return False
+
+
+def _rows_back(text, before, back, gone):
+    """The planning with these rows as they were: row by row, never the whole file, unless no row is left in it at all, and then nothing is thrown away."""
+    was, now = _keyed_rows(before), _keyed_rows(text)
+    if not now:
+        return before
+    lines = text.split("\n")
+    for key in back:
+        lines[lines.index(now[key])] = was[key]
+    order = list(was)
+    for key in gone:
+        i = order.index(key)
+        after = next((was[k] for k in reversed(order[:i]) if was[k] in lines), None)
+        lines.insert(lines.index(after) + 1 if after else len(lines), was[key])
+    return "\n".join(lines)
 
 
 def round_after(n):
-    """The runner, after her session, or the routine's minute when the runner never got there: the planning against what stood before the round. This
-    carries the promise: only her one addition on her one row may differ, as the door wrote it, with the old ask whole. Anything else goes back, the round
-    counts, and the row is on the list with one text. A change in the same minutes by a call is put back too; what went back is kept beside (job-N.put-back.json)."""
+    """The runner, after her session, or the routine's minute when the runner never got there: what stood before the round against what stands now, row by row
+    by label, the queue, and the sprint file. Only her one addition on her one row is hers. A row she had no right to change goes back, and a row gone comes
+    back; what's new is kept and named, a job or item past a call's reach stopped but still there. What can't be told apart, a call being on in those minutes,
+    is kept and named: losing something he said is the worst outcome. What went back is kept beside (job-N.put-back.json), and one plain text says what happened."""
     p = os.path.join(ROUNDS_DIR, f"job-{n}.json")
     try:
         s = json.load(open(p, encoding="utf8"))
     except (OSError, ValueError):
         return ""
     label, mode, before = s["label"], s["mode"], s["planning"]
+    call = _call_since(s.get("at") or 0)
     with q.locked():
         try:
             text = open(q.ROADMAP, encoding="utf8").read()
         except OSError:
             text = ""
         d, rv = _state()
-        f = ((rv.get("rows") or {}).get(label) or {}).get("fix") or {}
-        was, now_ = _planning_rows(before), _planning_rows(text)
-        mine = next((r["line"] for r in S.open_rows(before) if r["label"] == label), None)
-        whole = len(was) != len(now_)
-        bad = [] if whole else [(a, b) for a, b in zip(was, now_) if a != b and not (
-            a == mine and mode == "fix" and S.ask_of(b).startswith(S.ask_of(a)) and (f.get("added") or {}).get("sha") == _sha(b))]
-        ready = d.get("ready") or {}
-        marks = [k for k, v in ready.items() if v != (s["ready"] or {}).get(k) and not (k == label and mode == "mark")]
-        if whole or bad:
-            os.makedirs(os.path.dirname(q.ROADMAP), exist_ok=True)
-            back = text
-            for a, b in bad:
-                back = back.replace(b, a, 1)
-            back = before if whole else back
-            tmp = f"{q.ROADMAP}.back.{os.getpid()}"
-            with open(tmp, "w", encoding="utf8") as fh:
-                fh.write(back)
-            os.replace(tmp, q.ROADMAP)
+        rs = rv.setdefault("rows", {})
+        f = (rs.get(label) or {}).get("fix") or {}
+        was, now_ = _keyed_rows(before), _keyed_rows(text)
+        back, kept = [], []
+        gone = [k for k in was if k not in now_]
+        for k, a in was.items():
+            b = now_.get(k)
+            if b is None or a == b:
+                continue
+            if k[0] == label and mode == "fix" and S.ask_of(b).startswith(S.ask_of(a)) and (f.get("added") or {}).get("sha") == _sha(b):
+                continue  # the line her door wrote
+            ca, cb = hqpaths.cells(a), hqpaths.cells(b)
+            only_more = ca[:2] == cb[:2] and ca[3:] == cb[3:] and S.ask_of(b).startswith(S.ask_of(a))  # nothing in it went: it can't have cost him a word
+            (kept if call or only_more and k[0] != label else back).append(k)
+        fresh = [k for k in now_ if k not in was]
+        q0, q1 = _queue(before), _queue(text)
+        jobs_new = {j: x for j, x in q1["jobs"].items() if j not in q0["jobs"] and not any(f"Scheduled item {i}," in x for i in q0["items"])}
+        items_new = {i: x for i, x in q1["items"].items() if i not in q0["items"] and not re.search(r"· Agent (?:fix|step|cycle)", x)}
+        ready, was_ready = d.get("ready") or {}, s.get("ready") or {}
+        open_now = {r["label"]: r for r in S.open_rows(text)} if text else {}
+        gained = [k for k, v in ready.items() if v != was_ready.get(k) and not (k == label and mode == "mark")]
+        lost = [k for k in was_ready if k not in ready and k in open_now and (rs.get(k) or {}).get("verdict") != "flag" and not _said_no(open_now[k])]
+        passed = [k for k, e in rs.items() if e.get("verdict") in ("pass", "cleared") and e.get("verdict") != ((s.get("rows") or {}).get(k) or {}).get("verdict")
+                  and not _reviewed(k, s.get("at") or 0)]
+        changed = bool(gone or back or kept or fresh or jobs_new or items_new or gained or lost or passed)
+        said, told = [], False
+        if changed:
+            if back or gone:
+                os.makedirs(os.path.dirname(q.ROADMAP), exist_ok=True)
+                tmp = f"{q.ROADMAP}.back.{os.getpid()}"
+                with open(tmp, "w", encoding="utf8") as fh:
+                    fh.write(_rows_back(text, before, back, gone))
+                os.replace(tmp, q.ROADMAP)
             with open(os.path.join(ROUNDS_DIR, f"job-{n}.put-back.json"), "w", encoding="utf8") as fh:
-                json.dump({"whole": whole, "rows": bad}, fh)
-        for k in marks:
-            ready.pop(k)
-        if marks:
+                json.dump({"call": call, "back": [[was[k], now_[k]] for k in back], "gone": [was[k] for k in gone], "kept": [[was[k], now_[k]] for k in kept], "new_rows": [now_[k] for k in fresh],
+                           "jobs": jobs_new, "items": items_new, "gained": {k: ready[k] for k in gained}, "lost": {k: was_ready[k] for k in lost}, "passed": {k: rs[k] for k in passed},
+                           "text": "" if _keyed_rows(text) else text}, fh)
+            if back or gone:
+                said.append("put back as it was: " + ", ".join(sorted({k[0] for k in back + gone})))
+            if kept:
+                said.append("changed and kept: " + ", ".join(sorted({k[0] for k in kept})))
+            if fresh:
+                said.append("new, kept: " + ", ".join(sorted({k[0] for k in fresh})))
+            if jobs_new or items_new:
+                said.append(("new in the queue, kept: " if call else "new in the queue, kept but stopped: ") + ", ".join([f"job {j}" for j in jobs_new] + [f"item {i}" for i in items_new]))
+            for k in gained if not call else []:
+                ready.pop(k)
+            for k in lost if not call else []:
+                ready[k] = was_ready[k]
+            for k in passed if not call else []:
+                if k in (s.get("rows") or {}):
+                    rs[k] = s["rows"][k]
+                else:
+                    rs.pop(k)
+            if gained or lost or passed:
+                said.append(("sprint file changed and kept: " if call else "sprint file put back: ") + ", ".join(sorted(set(gained + lost + passed))))
             d["ready"] = ready
-        broke = bool(whole or bad or marks)
-        if broke:
-            row = next((r for r in S.open_rows() if r["label"] == label), None)
-            rs = rv.setdefault("rows", {})
-            e = rs.setdefault(label, {})
-            f = e.setdefault("fix", {})
-            st = _stopped(e, S.ask_fp(row["line"])) if row else None
-            told = bool(st and st.get("kind") in ("his", "no") and st.get("round") == f.get("n"))
-            if row and not told:
-                f["stop"] = {"ask": S.ask_fp(row["line"]), "kind": "broke", "at": int(_clock()), "round": f.get("n"),
-                             "why": "the planning as a whole" if whole else f"{len(bad)} row(s)" + (f" and {len(marks)} Ready mark(s)" if marks else "") if bad else f"{len(marks)} Ready mark(s)"}
+            if not call and (back or gone or gained or lost or passed or jobs_new or items_new):
+                row = next((r for r in S.open_rows() if r["label"] == label), None)
+                e = rs.setdefault(label, {})
+                g = e.setdefault("fix", {})
+                st = _stopped(e, S.ask_fp(row["line"])) if row else None
+                told = bool(st and st.get("kind") in ("his", "no") and st.get("round") == g.get("n"))
+                if row and not told:
+                    g["stop"] = {"ask": S.ask_fp(row["line"]), "kind": "broke", "at": int(_clock()), "round": g.get("n"), "why": "; ".join(said)}
+            rv["round_said"] = (rv.get("round_said") or [])[-19:] + [{"at": int(_clock()), "label": label, "call": call, "words": "; ".join(said)}]
             d["review"] = rv
             S._save(S.RANKS, d)
     os.remove(p)
-    if not broke:
+    if not changed:
         return ""
     import cycles
     import ledger
-    ledger.note(cycles.FIX_AGENT, f"job {n}, round on {label}: it changed more than its one addition; put back by the program")
+    words = "; ".join(said)
+    if not call:
+        here = os.path.dirname(os.path.abspath(__file__))
+        for j in jobs_new:
+            subprocess.run([sys.executable, os.path.join(here, "jobs.py"), "stop", str(j)], capture_output=True, timeout=60)
+        for i in items_new:
+            subprocess.run([sys.executable, os.path.join(here, "schedule.py"), "cancel", str(i)], capture_output=True, timeout=60)
+    ledger.note(cycles.FIX_AGENT, f"after job {n}, the round on {label}" + (", a call on in those minutes" if call else "") + f": {words}")
     if not told:
-        cycles.ask(cycles.FIX_AGENT, f"If you want to go through what the round on {label} changed outside its one addition, I'll bring it to our next call; if not, it stays put back and {label} waits on my list.")
-    return f"round on {label}: put back"
+        cycles.ask(cycles.FIX_AGENT, f"The planning changed while my round on {label} ran" + (", with a call on, so I can't say who did what" if call else "") + f": {words}. "
+                   f"If any of that isn't what you want, tell me which and I'll set it right, the old words are kept; if not, it stays as it is.")
+    return f"after the round on {label}: {words}"
 
 
 def _rounds_left(log=None):
@@ -1225,11 +1331,15 @@ def sitdown_rows(rows=None):
 
 def sitdown_words(rows=None):
     sd = sitdown_rows(rows)
-    if not sd:
+    since = _clock() - 7 * 86400
+    after = [x for x in _state()[1].get("round_said") or [] if x.get("at", 0) > since]
+    if not sd and not after:
         return ""
-    return "\n".join(["ON YOUR SIT-DOWN LIST (F86): the loop stopped for these rows; each waits for his answer."]
+    return "\n".join((["ON YOUR SIT-DOWN LIST (F86): the loop stopped for these rows; each waits for his answer."] if sd else [])
                      + [f"- {r['label']} {q.one_line(r['title'])[:120]} ({STOP_WORDS.get(s.get('kind'), 'stopped')}): {s.get('why', '')}"
-                        + (f" What could work instead: {s['instead']}" if s.get("instead") else "") for r, s in sd])
+                        + (f" What could work instead: {s['instead']}" if s.get("instead") else "") for r, s in sd]
+                     + (["WHILE A ROUND RAN, this week (F86): raise these with him."] if after else [])
+                     + [f"- around {x['label']}: {x['words']}" for x in after])
 
 
 def role_writes():

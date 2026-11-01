@@ -775,7 +775,7 @@ def gate(text, job_text_, say_so=False, said=None):
 # Send to the team and a call's add), and that refusal is one of Moneypenny's tripwires (routine/cycles.py). Off, the
 # fields are only reported (sprint.py check, fields), nothing is refused: today's HQ exactly.
 
-NO_WORDS = re.compile(r"none,? found by (?:job \d+|QA(?: job \d+)?|the review|a check)\b", re.I)  # F86: a row found by a job, QA, the review or a check, where he said nothing
+NO_WORDS = re.compile(r"none,? found by (?:(?:QA )?job (\d+)|QA|the review|a check)\.?", re.I)  # F86: a row found by a job, QA, the review or a check, where he said nothing
 FIELD_LABELS = (("his_words", r"his words|their words|the user'?s words|your words"),
                 ("additions", r"my own additions|own additions|my additions"),
                 ("sources", r"sources?"))
@@ -911,6 +911,18 @@ def _source_ok(item, ws, labels):
     return None
 
 
+def _no_words_why(found_by, row, ws):
+    """F86: "none, found by" holds only where it's true: not on a row that holds a quote of his, not for a job that never was."""
+    if found_by.group(1) and int(found_by.group(1)) > max([j["n"] for j in q.read()[1]] + [0]):
+        return f"none, found by job {found_by.group(1)}: there is no such job"
+    texts, his = _grep_texts(ws), [line for _, line in his_lines(ws)]
+    for m in _QUOTES.finditer(ask_of(row["line"])):
+        words = _bare(m.group(1))
+        if len(words.split()) >= HIS_QUOTE_WORDS and (any(words in line for line in his) or quote_found(m.group(1), texts)):
+            return "none, found by: but this row holds a quote of his; his words go in the field, or it goes on the list"
+    return ""
+
+
 def ready_fields(row, ws=None):
     """The three mechanical fields of a row, each held: {"his_words": {"ok", "quotes", "found", "why"}, "additions":
     {"ok", "text", "why"}, "sources": {"ok", "named", "held", "why"}, "ok"}."""
@@ -924,10 +936,13 @@ def ready_fields(row, ws=None):
         for qt in quotes:
             found[qt] = quote_found(qt, texts)
     missing = [qt for qt, where in found.items() if not where]
-    found_by = NO_WORDS.match(ft["his_words"]) if not quotes else None
+    found_by = NO_WORDS.fullmatch(ft["his_words"].strip()) if not quotes else None
+    no_way = _no_words_why(found_by, row, ws) if found_by else ""
+    if found_by and no_way:
+        found_by = None
     out["his_words"] = {"ok": bool(found_by) or (bool(quotes) and not missing), "quotes": quotes, "found": found, "none": found_by.group(0) if found_by else "",
-                        "why": ("" if found_by else "no His words field" if not ft["his_words"] else "no quote in His words (put his words between quotes)"
-                                if not quotes else f"not found in the calls, the notes or the log: {missing[0][:60]!r}" if missing else "")}
+                        "why": ("" if found_by else no_way or ("no His words field" if not ft["his_words"] else "no quote in His words (put his words between quotes)"
+                                if not quotes else f"not found in the calls, the notes or the log: {missing[0][:60]!r}" if missing else ""))}
     # F81 (job 481): an addition of hers never goes into a row on her own say; it goes on the sit-down list, and only
     # with his yes is it written in, with the date. So the field may be left out or say "none"; when it says
     # something, it needs his yes with a date ("his yes, 29 October 2026"); an empty one still says nothing.

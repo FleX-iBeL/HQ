@@ -534,6 +534,8 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
         return skip(why)
     if p["kind"] == "fix":
         import review
+        if review.round_waits():
+            return "wait"
         if not review.round_wanted(p["label"], p["mode"]):
             return skip("the row no longer needs it (changed or settled since)")
     if p["kind"] == "step":
