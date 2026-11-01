@@ -5,9 +5,11 @@ His words: "yes exactly, i want here we put it on our roadmap and planning, and 
 undoable in one step, and the code alone doesn't undo what it did to the data. So a change to the data ships as a file in
 `routine/datachanges/` (README.md there) with `do`, `undo` and `WHAT`; which ones have run stands in the workspace's
 `HQ/data-changes.json`. The main runs a new one, the release tries its undo on a copy before it goes out, `update.py back` undoes.
+A file in the folder isn't enough to run on real data, jobs work in the live clone: it has to be committed, unchanged from HEAD, and on
+GitHub's dev on the maker's copy, in the release she stands on on a friend's. Anything else is left alone and said once in the routine's log.
 
     python3 routine/datachange.py list            every change, and whether it has run here
-    python3 routine/datachange.py apply           what hasn't run yet (the routine's minute, on the main)
+    python3 routine/datachange.py apply           what hasn't run yet and may (the routine's minute, on the main)
     python3 routine/datachange.py try [NAME …]    do and undo on a throwaway copy of the workspace; says what doesn't come back
 Standard library only.
 """
@@ -17,6 +19,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -30,6 +33,9 @@ import hqpaths  # noqa: E402
 
 REL = "routine/datachanges"
 STATE = os.path.join("HQ", "data-changes.json")
+LEFT = os.path.join(".status", "data-changes-left.json")  # what's been said about the changes left alone, per computer
+WORK_LINE = "refs/remotes/origin/dev"  # F104: GitHub's dev as this copy knows it, never a local branch of that name
+TAG = re.compile(r"^v(\d+)\.(\d+)(?:\.(\d+))?$")
 
 
 def _base(base=None) -> Path:
@@ -71,18 +77,77 @@ def _save(have: list[str], base=None) -> None:
     os.replace(tmp, p)
 
 
+def _git(root, *args: str) -> str:
+    """What git prints, or "" when it says no or can't be asked: what can't be told isn't run on real data."""
+    try:
+        r = subprocess.run(["git", "-C", str(root or hqpaths.HQ), *args], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout.strip() if not r.returncode else ""
+
+
+def _stands_on(root=None) -> str:
+    """The release this copy stands on: the newest version tag in the head's history."""
+    tags = [(tuple(int(x or 0) for x in m.groups()), m.group(0)) for m in map(TAG.match, _git(root, "tag", "--merged", "HEAD").split()) if m]
+    return max(tags)[1] if tags else ""
+
+
+def why_left(name: str, root=None) -> str:
+    """F104: why this change doesn't run here; "" when it may. Committed, unchanged from HEAD, and on GitHub's dev on the maker's copy, in the
+    release she stands on on a friend's, the same file each time."""
+    rel = f"{REL}/{name}.py"
+    here = _git(root, "rev-parse", "-q", "--verify", f"HEAD:{rel}")
+    if not here:
+        return "it isn't committed"
+    if _git(root, "status", "--porcelain", "--", rel):
+        return "it differs from what's committed"
+    if hqpaths.is_maker():
+        return "" if _git(root, "rev-parse", "-q", "--verify", f"{WORK_LINE}:{rel}") == here else "it isn't on GitHub's dev"
+    tag = _stands_on(root)
+    if not tag:
+        return "this copy stands on no release"
+    return "" if _git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}:{rel}") == here else f"it isn't in {tag}, the release this copy stands on"
+
+
+def _say_left(left: dict, root=None, log=None) -> None:
+    """F104: what's left alone, said once: a name goes in the log when it's new or its reason changes, not every minute."""
+    if not log:
+        return
+    p = os.path.join(str(root or hqpaths.HQ), LEFT)
+    try:
+        said = json.load(open(p, encoding="utf8"))
+    except (OSError, ValueError):
+        said = {}
+    if said == left:
+        return
+    for n, why in left.items():
+        if said.get(n) != why:
+            log(f"data change left alone: {n}: {why}")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = hqlock.tmp(p)
+    with open(tmp, "w", encoding="utf8") as f:
+        json.dump(left, f, indent=1)
+    os.replace(tmp, p)
+
+
 def apply(base=None, root=None, log=None) -> list[str]:
-    """Runs what hasn't run. On a first look nothing is taken as having run for code that has no change yet."""
-    did = []
+    """Runs what hasn't run and may (why_left). On a first look nothing is taken as having run for code that has no change yet."""
+    did, left = [], {}
     have = applied(base)
     for n in names(root):
-        if n not in have:
-            load(n, root).do(_base(base))
-            have.append(n)
-            _save(have, base)
-            did.append(n)
-            if log:
-                log(f"data change: {n}")
+        if n in have:
+            continue
+        why = why_left(n, root)
+        if why:
+            left[n] = why
+            continue
+        load(n, root).do(_base(base))
+        have.append(n)
+        _save(have, base)
+        did.append(n)
+        if log:
+            log(f"data change: {n}")
+    _say_left(left, root, log)
     return did
 
 
@@ -178,7 +243,7 @@ def main(argv: list[str]) -> int:
         print("\n".join(f"{n}: {'run here' if n in have else 'not run'}" for n in names()) or "No data changes.")
         return 0
     if cmd == "apply":
-        print("\n".join(apply()) or "Nothing to run.")
+        print("\n".join(apply(log=print)) or "Nothing to run.")
         return 0
     if cmd == "try":
         no = try_on_copy(argv[1:] or names())

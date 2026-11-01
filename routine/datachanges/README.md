@@ -13,5 +13,6 @@ def undo(folder):    # puts everything back exactly as do found it
     ...
 ```
 
-The main applies a new one within a minute (`routine/datachange.py`). `release.py main` lists them in the changelog and refuses a
+The main applies a new one within a minute (`routine/datachange.py`), once it's committed, unchanged from HEAD, and on GitHub's dev (on a
+friend's copy: in the release she stands on); a file that's only in the folder is left alone and said once in the routine's log. `release.py main` lists them in the changelog and refuses a
 release when an undo fails on a copy of the workspace. `update.py back` runs the undos of what it leaves behind, newest first.

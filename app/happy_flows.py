@@ -16675,6 +16675,63 @@ print(ledger.text('donna')[-900:])
         need(h["n"] == n and h["turns"] == 21 and h["run_minutes"] == 3.5 and h["based"] is not None, f"turns and minutes: {h}")
         return "the score per agent and per hand-off from a folder holding only the ledger; QA's fail and a bug after a pass on it; the week's score with the switch off; turns, minutes and the estimate's base kept"
 
+    async def flow244(self) -> str:
+        """F104, no Claude: a file in routine/datachanges/ doesn't run on real data because it's there. Through the routine's own data minute: on the
+        maker's copy only committed, unchanged from HEAD and on GitHub's dev; on a friend's only in the release she stands on. Anything else is left
+        alone and said once in the routine's log, not every minute."""
+        import subprocess as _sp
+        change = 'WHAT = "x"\ndef do(f):\n    (f / "HQ/{mark}").write_text("ran\\n")\ndef undo(f):\n    (f / "HQ/{mark}").unlink()\n'
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import tick; tick.data_minute()"
+        def minute(hq, env, times=1):
+            for _ in range(times):
+                r = _sp.run([sys.executable, "-c", code, str(hq)], capture_output=True, text=True, env=env, timeout=120)
+                need(r.returncode == 0, f"the data minute: {r.stdout[-300:]} {r.stderr[-600:]}")
+        def said(hq, what):
+            p = hq / "scratch/routine/routine.log"
+            return p.read_text().count(what) if p.exists() else 0
+        p = self._pair("f104h")
+        a, wa, ea, g = p["a"], p["wa"], p["ea"], p["g"]
+        applied = lambda ws: json.loads((ws / "HQ/data-changes.json").read_text())["applied"]
+        f = a / "routine/datachanges/003-new.py"
+        f.write_text(change.format(mark="ran3.txt"))
+        await asyncio.to_thread(minute, a, ea, 3)
+        need(not (wa / "HQ/ran3.txt").exists() and "003-new" not in applied(wa), "an uncommitted file ran on real data")
+        need(said(a, "left alone: 003-new: it isn't committed") == 1, f"said {said(a, 'left alone: 003-new')} times: uncommitted")
+        g(a, "add", str(f)); g(a, "commit", "-q", "-m", "a new data change")
+        await asyncio.to_thread(minute, a, ea, 3)
+        need(not (wa / "HQ/ran3.txt").exists(), "a change that's only committed here ran")
+        need(said(a, "left alone: 003-new: it isn't on GitHub's dev") == 1, f"said {said(a, 'isn')} times: not on dev")
+        g(a, "push", "-q", "origin", "dev")
+        f.write_text(f.read_text() + "# changed by hand\n")
+        await asyncio.to_thread(minute, a, ea, 3)
+        need(not (wa / "HQ/ran3.txt").exists(), "a change that differs from HEAD ran")
+        need(said(a, "left alone: 003-new: it differs from what's committed") == 1, "said more than once: differs")
+        g(a, "checkout", "--", str(f))
+        await asyncio.to_thread(minute, a, ea, 2)
+        need((wa / "HQ/ran3.txt").exists() and "003-new" in applied(wa), f"a change on dev didn't run: {applied(wa)}")
+        # the same name, another file than dev's
+        f4 = a / "routine/datachanges/004-other.py"
+        f4.write_text(change.format(mark="ran4.txt"))
+        g(a, "add", str(f4)); g(a, "commit", "-q", "-m", "another"); g(a, "push", "-q", "origin", "dev")
+        f4.write_text(change.format(mark="ran5.txt"))
+        g(a, "commit", "-q", "-am", "only here")
+        await asyncio.to_thread(minute, a, ea)
+        need(not (wa / "HQ/ran5.txt").exists() and not (wa / "HQ/ran4.txt").exists(), "a file that isn't dev's ran")
+        # a friend's copy: only the release she stands on, also past it with a commit of her own
+        c = self._friend("f104i")["make"]()
+        hq, ws, e = c["hq"], c["ws"], c["env"]
+        f = hq / "routine/datachanges/003-hers.py"
+        f.write_text(change.format(mark="hers.txt"))
+        await asyncio.to_thread(minute, hq, e, 3)
+        need(not (ws / "HQ/hers.txt").exists() and said(hq, "left alone: 003-hers: it isn't committed") == 1, "on a friend's copy: an uncommitted file")
+        c["g"]("add", str(f)); c["g"]("commit", "-q", "-m", "a change of her own")
+        (ws / "HQ/a.txt").write_text((ws / "HQ/b.txt").read_text()); (ws / "HQ/b.txt").unlink()
+        (ws / "HQ/data-changes.json").write_text('{"applied": []}')
+        await asyncio.to_thread(minute, hq, e, 3)
+        need(not (ws / "HQ/hers.txt").exists() and said(hq, "left alone: 003-hers: it isn't in v1.1.0") == 1, f"on a friend's copy: her own commit: {said(hq, '003-hers')}")
+        need(applied(ws) == ["001-first"] and (ws / "HQ/b.txt").exists(), f"what's in her release didn't run: {applied(ws)}")
+        return "uncommitted, changed, only local or not in her release: left alone and said once; committed, unchanged and on dev runs, and what's in her release"
+
     async def flow250(self) -> str:
         """F106, no Claude: a stock Mac's python3 is 3.9, and agents run rules lookups with it. HQ's Python is read for what 3.9 can't: syntax past it, a `X | Y`
         annotation without the future import, or an f-string only 3.12 can read. No 3.9 here, so it reads the source; the checker is tried on made-up bad lines first."""
@@ -28221,6 +28278,7 @@ FLOWS = {
     238: ("F106: a helper beside a call, with a stand-in for the model: started without a yes, the call goes on, the answer in the same call once; hung up it's a text on her line; boxed in minutes and turns; two at once; a used-up limit stops it", False, "flow238"),
     239: ("F106: a check she couldn't run is never answered around: the program says I couldn't check that when her reply doesn't", False, "flow239"),
     250: ("F106: nothing in HQ's Python that a stock Mac's 3.9 can't read: no newer syntax, no X | Y annotation without the future import, what a rules lookup pulls in included", False, "flow250"),
+    244: ("F104: a data change runs only when committed, unchanged and on dev, or in the release she stands on; anything else is left alone and said once", False, "flow244"),
     243: ("F104: the guard on the state: every way onto dev puts a friend's copy back on the newest release within the routine's minute, no data change of dev's runs, the job stopped by its exact pid, said and written down; her own commits stay, also with dev's patch; offline never on a guess, never older than it stood on, no newer release she didn't stand on; the maker's copy never touched, whatever the environment or a lost key says; no way forward again; one backup branch", False, "flow243"),
     242: ("F106: one line on the status page shows the helper working for him right now", False, "flow242"),
     241: ("F106: a call's start is under the design's size for every agent, on a full workspace; nothing lost from the rules, each topic a lookup without a yes", False, "flow241"),
