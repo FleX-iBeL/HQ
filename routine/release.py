@@ -216,9 +216,9 @@ def night_refuses() -> str | None:
 def say_so(said: str | None, what: str) -> bool:
     """F101: going past a gate takes his own words, found in his lines and kept; a flag alone is nothing."""
     import sprint as S
-    where = S.his_quote(said)
+    where, no = S.his_yes(said, f"releasing HQ to everyone: {what}")
     if not where:
-        print(f"No release: {what} needs --said with his own words, as they stand in a call, a text or a quick note.")
+        print(f"No release: {what} needs --said with his own words, as they stand in a call, a text or a quick note, saying yes to it: {no}.")
         return False
     S.keep_say_so([f"release: {what}"], " ".join((said or "").split()), where)
     return True

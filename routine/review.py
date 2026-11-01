@@ -649,10 +649,11 @@ def clear(label, words):
     words = q.one_line(words or "").strip()
     if not words:
         sys.exit("Clearing a flag needs his words, as he said them on the call.")
-    where = S.his_quote(words)
+    now = next((r for r in S.open_rows() if r["label"] == label), None)
+    where, no = S.his_yes(words, f"taking the review's flag off planning row {label}, so it goes on as it is: {(now or {}).get('line', '')[:400]}")
     if not where:
-        sys.exit(f"Refused: those words aren't in his own lines, so the flag on {label} stays. Quote at least three words "
-                 "he really said or typed in a call, a text or a quick note.")
+        sys.exit(f"Refused: {no}, so the flag on {label} stays. Quote at least three words he really said or typed in a call, a text or a "
+                 "quick note, saying yes to this.")
     with q.locked():
         row = next((r for r in S.open_rows() if r["label"] == label), None)
         if not row:

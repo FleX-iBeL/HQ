@@ -357,14 +357,14 @@ def switch(fid: str, on: bool, base: Path | None = None, said: str = "", tapped:
     if not f:
         return f"No switch {fid}. There are: {', '.join(i for i in ids() if is_on(i, base) or i in IDS)}."
     if on and untested(f, base):
-        quote = None
+        quote, no, title = None, "", f["name"].replace("{agent}", _agent())
         if said:
             sys.path.insert(0, str(ROOT / "routine"))
             import sprint
-            quote = sprint.his_quote(said)
+            quote, no = sprint.his_yes(said, f"turning on {title}, a feature that hasn't passed QA yet: {f.get('line') or 'still being built'}")
         if not quote and not tapped:
-            return (f"Refused: {f['name'].replace('{agent}', _agent())} hasn't passed QA yet ({f.get('row') or 'no row'}), so it stays off "
-                    "unless he says so: --said \"HIS WORDS\", a line he said or typed.")
+            return (f"Refused: {title} hasn't passed QA yet ({f.get('row') or 'no row'}), so it stays off "
+                    f"unless he says so: --said \"HIS WORDS\", a line he said or typed. {no.capitalize() + '.' if no else ''}").rstrip()
         _keep_say_so(base, fid, f"his words: {said}" if quote else "his tap in Settings")
     if f.get("workflow"):
         wf = _workflows()

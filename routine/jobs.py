@@ -469,8 +469,8 @@ def page_tap(n, ticket):
         return False
 
 
-def sayso(n, words, by="", ticket=None):
-    """F100: his say-so for a build in his day hours, kept with who and when: his own words (sprint.his_quote), or his tap
+def sayso(n, words, by="", ticket=None, what=""):
+    """F100: his say-so for a build in his day hours, kept with who and when: his own words (sprint.his_yes), or his tap
     on the status page (a ticket only its server can make good). Never from a job's own process. None when it doesn't stand."""
     if os.environ.get("HQ_IN_JOB"):
         return None
@@ -480,7 +480,10 @@ def sayso(n, words, by="", ticket=None):
         who, words = "the status page", "tapped now on the status page"
     else:
         import sprint as sp_
-        if not (words and sp_.his_quote(words)):
+        where, no = sp_.his_yes(words, f"starting this build now, in his day hours, instead of waiting for the night: {what[:300]}") if words else (None, "")
+        if not where:
+            if no:
+                print(f"({no})", file=sys.stderr)
             return None
         who = by or "a call"
     return {"at": time.strftime("%Y-%m-%d %H:%M"), "who": clean_mark(who).replace("·", "-"), "words": clean_mark(words)}
@@ -795,7 +798,7 @@ def main(argv):
                  "text": one_line(said).replace("·", "-")}
             carry(j, item)
             if at_once:
-                j["sayso"] = sayso(n, his)
+                j["sayso"] = sayso(n, his, what=j["text"])
                 if not j["sayso"]:
                     sys.exit("Refused: now takes his own words, --now --said \"HIS WORDS\", a line he said or typed, and a job can't give it to itself.")
             jobs.append(j)
@@ -874,7 +877,7 @@ def main(argv):
             j = find(jobs, int(args[0]))
             if not (j["state"] == "ready" or j["state"].startswith("held")):
                 sys.exit(f"Job {j['n']} is {j['state']}; only a waiting job can go now.")
-            s = sayso(j["n"], his, by, ticket)
+            s = sayso(j["n"], his, by, ticket, j["text"])
             if not s:
                 sys.exit("Refused: a build in his day hours goes only on his own say-so: --said with a line he said or typed, or his tap "
                          "on the status page. A job can't give it to itself.")
@@ -1154,8 +1157,9 @@ def main(argv):
                 no = proof.refuses(j, text)
                 if no:
                     import sprint as sp_
-                    if not (his and sp_.his_quote(his)):
-                        sys.exit(f"Refused: {no} The job stays open.")
+                    where, why = sp_.his_yes(his, f"closing job {j['n']} as done without its green test record ({no}): {j['text'][:300]}") if his else (None, "")
+                    if not where:
+                        sys.exit(f"Refused: {no} {why.capitalize() + '. ' if why else ''}The job stays open.")
                     proof.keep_say_so(j, his)
                 carry(j)
             # H187: an update that ended the job's chat holds it with its own reason (held N an update ...).

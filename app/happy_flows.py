@@ -14503,7 +14503,7 @@ tick.start(job); print('N', job['n'])
         goes and the say-so is kept with the quote and the time, for jobs.py and schedule.py alike."""
         import subprocess as _sp
         ws, env = self._h298_ws("f99say")
-        env.update({"HQ_REVIEW": "1", "HQ_PROOF_ON": "1"})
+        env.update({"HQ_REVIEW": "1", "HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes"})
         (ws / "HQ/calls").mkdir(parents=True, exist_ok=True)
         (ws / "HQ/calls/2026-01-10-0900.md").write_text(
             "# Call 10 January 2026, 09:00\n\nStarted 09:00:00 · agent Moneypenny · brain opus\n\n"
@@ -15172,7 +15172,7 @@ print("ON" if review.on() else "OFF")
         resumed it; in the morning a held build still needs his word."""
         import subprocess as _sp
         ws, env, d = self._wall_env("day", hour=14)
-        env["HQ_PROOF_ON"] = "1"  # his words are checked here, not passed as a test
+        env.update({"HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes"})  # his words are checked here, not passed as a test
         jobs, minute, state, new = self._wall_tools(env, d, ws)
         self._wall_usage(env)
         (ws / "HQ/direct-line").mkdir(exist_ok=True)
@@ -16060,7 +16060,7 @@ print("OK")
         the command and the request itself."""
         import subprocess as _sp
         ws, env, d = self._wall_env("sayso", hour=14)
-        env["HQ_PROOF_ON"] = "1"
+        env.update({"HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes"})
         (ws / "HQ/direct-line").mkdir(exist_ok=True)
         (ws / "HQ/direct-line/thread.jsonl").write_text(json.dumps({"at": 1, "from": "me", "text": "Build that one now please, I want it today"}) + "\n")
         jobs, minute, state, new = self._wall_tools(env, d, ws)
@@ -16812,6 +16812,76 @@ print(json.dumps({'got': [c for c in ways for m in (True, False) if ask(c, m)[0]
             need(not o["stopped"], f"a job can't do its own work: {o['stopped']}")
         return f"{len(ways)} plain ways refused for every job on both kinds of copy, {len(fine)} ordinary commands go"
 
+    async def flow247(self) -> str:
+        """F104, no Claude: a say-so has to be a say-so. At every door where his quote stands in for his yes, words of his that a look doesn't read as a yes to
+        this very thing are refused and say so, with a stand-in for the model: a no, garbage, a failed look and a test without a stand-in. A yes goes. The look
+        gets what it's about, his whole line and what was said just before it."""
+        import subprocess as _sp, types
+        ws, env = self._h298_ws("f104k")
+        pieces = self.tmp / "f104k-pieces.json"
+        pieces.write_text(json.dumps({"features": [{"id": "half_built", "name": "A half-built thing", "row": "H9500", "pieces": "two pieces"}]}))
+        env.update({"HQ_FEATURES_PIECES": str(pieces), "HQ_UNDER_TEST": "1", "HQ_PROOF_ON": "1", "HQ_REVIEW": "1", "HQ_LOOK": "0", "HQ_NO_WALL": "1"})
+        (ws / "HQ/features.json").write_text('{"off": [], "on": [], "maker": true}\n')
+        (ws / "HQ/calls").mkdir(parents=True, exist_ok=True)
+        (ws / "HQ/calls/2026-10-31-0900.md").write_text("# Call\n\n- 09:00:00 **HQ:** Shall I turn it on?\n- 09:00:10 **Me:** thank you very much for that, and yes go ahead with it\n")
+        rm = ws / "HQ/roadmap.md"
+        rm.write_text(rm.read_text().replace("| | Step | What you get | Model |\n|---|---|---|---|\n",
+                                              "| | Step | What you get | Model |\n|---|---|---|---|\n| ⬜ | H9500 A half-built thing | His words. | | |\n| ⬜ | H9301 A flagged row | Something to build. | | |\n", 1))
+        spr = Path(env.get("HQ_SPRINT") or ws / "HQ/sprint.json")
+        spr.write_text(json.dumps({"review": {"since": 1, "rows": {"H9301": {"verdict": "flag", "findings": ["a hole"], "ask": "x"}}}}))
+        words = "thank you very"
+        def tool(f, *a, look=None):
+            e = {k: v for k, v in env.items() if k != "HQ_SAYSO_FAKE"}
+            if look is not None:
+                e["HQ_SAYSO_FAKE"] = look
+            return _sp.run([sys.executable, str(ROOT / f), *a], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=120)
+        jobs = lambda *a, look=None: tool("routine/jobs.py", *a, look=look)
+        n = re.search(r"Job (\d+) is ready", jobs("add", "Build the made-up page", "--kind", "small").stdout).group(1)
+        m = re.search(r"Job (\d+) is ready", jobs("add", "Fix for F9502 (F56): another made-up thing.", "--kind", "small").stdout).group(1)
+        need(jobs("mark", m, "running since 10:00").returncode == 0, "no mark")
+        jobtext = "H9301 on the HQ roadmap: build it. Read the H9301 row."
+        rel = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import release; print('passed' if release.say_so(sys.argv[2], 'going past QA') else 'no')"
+        def release(*_a, look=None):
+            e = {k: v for k, v in env.items() if k != "HQ_SAYSO_FAKE"}
+            if look is not None:
+                e["HQ_SAYSO_FAKE"] = look
+            r = _sp.run([sys.executable, "-c", rel, str(ROOT), words], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=120)
+            return types.SimpleNamespace(returncode=0 if "passed" in r.stdout else 2, stdout=r.stdout, stderr=r.stderr)
+        doors = {"features.py on": lambda look: tool("app/features.py", "on", "half_built", "--said", words, look=look),
+                 "review.py clear": lambda look: tool("routine/review.py", "clear", "H9301", words, look=look),
+                 "--not-ready": lambda look: jobs("add", jobtext, "--not-ready", "--said", words, look=look),
+                 "done --said": lambda look: jobs("done", m, "--said", words, look=look),
+                 "now --said": lambda look: jobs("now", n, "--said", words, look=look),
+                 "the release": lambda look: release(look=look)}
+        for name, door in doors.items():
+            for look, shows in (("no", "aren't a yes"), ("banana", "failed"), (None, "failed")):
+                r = await asyncio.to_thread(door, look)
+                need(r.returncode != 0 and shows in (r.stdout + r.stderr), f"{name} with the look saying {look!r}: {r.stdout[-300:]} {r.stderr[-300:]}")
+            r = await asyncio.to_thread(door, "yes")
+            need(r.returncode == 0, f"{name}, a yes refused: {r.stdout[-300:]} {r.stderr[-300:]}")
+        need(jobs("add", jobtext, "--not-ready", "--said", "words he never said at all", look="yes").returncode != 0, "a yes from the look on words that aren't his")
+        # what the look is given: what it's about, his whole line, what was said before; and only a test gets a stand-in
+        code = """
+import sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import mistakes, sprint
+seen = []
+mistakes.ask = lambda system, text: seen.append((system, text)) or 'Yes.'
+import os; os.environ.pop('HQ_SAYSO_FAKE', None); os.environ.pop('HQ_UNDER_TEST', None)
+print(sprint.his_yes('thank you very', 'turning on the made-up thing', ws=sys.argv[2]))
+print(seen[0][1])
+os.environ['HQ_SAYSO_FAKE'] = 'yes'
+mistakes.ask = lambda system, text: 'no'
+print(sprint.his_yes('thank you very', 'turning on the made-up thing', ws=sys.argv[2]))
+"""
+        e = {k: v for k, v in env.items() if k not in ("HQ_UNDER_TEST", "HQ_SAYSO_FAKE", "HQ_PROOF_ON")}
+        r = await asyncio.to_thread(lambda: _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=120))
+        need(r.returncode == 0, f"the look itself: {r.stdout[-300:]} {r.stderr[-400:]}")
+        out = r.stdout
+        need("HQ/calls/2026-10-31-0900.md" in out.splitlines()[0] and "turning on the made-up thing" in out and "Shall I turn it on?" in out and "and yes go ahead with it" in out, f"what the look was given: {out}")
+        need("aren't a yes" in out.splitlines()[-1], f"a stand-in outside a test: {out}")
+        return "six doors: a no, garbage, a failed look and no stand-in refuse and say so, a yes goes; words that aren't his never get as far as the look"
+
     async def flow250(self) -> str:
         """F106, no Claude: a stock Mac's python3 is 3.9, and agents run rules lookups with it. HQ's Python is read for what 3.9 can't: syntax past it, a `X | Y`
         annotation without the future import, or an f-string only 3.12 can read. No 3.9 here, so it reads the source; the checker is tried on made-up bad lines first."""
@@ -17267,7 +17337,7 @@ print(json.dumps(out))
         ms, me_env = self._h298_ws("f104e")
         pieces = self.tmp / "f104-pieces.json"
         pieces.write_text(json.dumps({"features": [{"id": "half_built", "name": "A half-built thing", "row": "H9500", "pieces": "two pieces"}]}))
-        me_env.update({"HQ_FEATURES_PIECES": str(pieces), "HQ_UNDER_TEST": "1", "HQ_PROOF_ON": "1"})
+        me_env.update({"HQ_FEATURES_PIECES": str(pieces), "HQ_UNDER_TEST": "1", "HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes"})
         (ms / "HQ/features.json").write_text('{"off": [], "on": [], "maker": true}\n')
         rm = ms / "HQ/roadmap.md"
         row = "| ⬜ | H9500 A half-built thing | His words. | | |\n"
@@ -18366,7 +18436,7 @@ print("OK" if left == ["two"] and sum(x["text"] == "twice the same" for x in D.r
                           "for n in hit:\n    print(f'      {n}: FAILED - a stand-in failure')\n"
                           "print(f'{len(only) - len(hit)} of {len(only)} passed')\nsys.exit(1 if hit else 0)\n")
         runner.chmod(0o755)
-        env.update({"HQ_PROOF_ON": "1", "HQ_PROOF_ROOT": str(repo), "HQ_PROOF_DIR": str(self.tmp / f"{tag}-proofs"), "HQ_PROOF_RUNNER": str(runner)})
+        env.update({"HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes", "HQ_PROOF_ROOT": str(repo), "HQ_PROOF_DIR": str(self.tmp / f"{tag}-proofs"), "HQ_PROOF_RUNNER": str(runner)})
         return ws, env, repo, fails
 
     async def flow205(self) -> str:
@@ -28358,6 +28428,7 @@ FLOWS = {
     238: ("F106: a helper beside a call, with a stand-in for the model: started without a yes, the call goes on, the answer in the same call once; hung up it's a text on her line; boxed in minutes and turns; two at once; a used-up limit stops it", False, "flow238"),
     239: ("F106: a check she couldn't run is never answered around: the program says I couldn't check that when her reply doesn't", False, "flow239"),
     250: ("F106: nothing in HQ's Python that a stock Mac's 3.9 can't read: no newer syntax, no X | Y annotation without the future import, what a rules lookup pulls in included", False, "flow250"),
+    247: ("F104: a say-so has to be a say-so: at every door his words also need a look's yes to this very thing; a no, garbage, a failed look and no stand-in refuse and say so", False, "flow247"),
     246: ("F104: the job hook stops the plain ways past the pre-push hook, a version back or forward and the data changes by hand, on any job; ordinary work goes", False, "flow246"),
     245: ("F104: a friend's own commits past a tag count as standing on that tag: one version back is the one below; a version with no forward of its own is refused, nothing moved", False, "flow245"),
     244: ("F104: a data change runs only when committed, unchanged and on dev, or in the release she stands on; anything else is left alone and said once", False, "flow244"),
