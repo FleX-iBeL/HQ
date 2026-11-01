@@ -37,7 +37,7 @@ FREE = ("HQ/ledger/", "HQ/direct-line/", "HQ/coaching-line/", "HQ/team-line/", "
 EDITORS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 # F104, F103: the plain in-place writers: perl and ruby -i, gawk -i inplace, ed, ex, vim, sponge. What a script a job wrote does, a $(...) and
 # a path in a variable stay outside this on purpose: a job is an honest model doing something by habit, and those aren't habits.
-_IN_PLACE = (r"\b(?:perl|ruby)\s+(?:[^|&\n]*\s)?-[a-zA-Z]*i[^\s]*\s[^|&\n]*{name}"
+_IN_PLACE = (r"\b(?:perl|ruby)\s+(?:[^|&\n]*\s)?-[a-zA-Z0-9]*i[^\s]*\s[^|&\n]*{name}"
              r"|\bg?awk\s+(?:[^|&\n]*\s)?(?:-i\s*|--include[=\s]\s*)inplace\b[^|&\n]*{name}"
              r"|(?:^|[|;&(\n]\s*)(?:\S*/)?(?:ed|ex|vim?|nvim)\s[^;&\n]*{name}"
              r"|\bsponge\b[^|;&\n]*{name}")
