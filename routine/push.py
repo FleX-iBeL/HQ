@@ -184,7 +184,17 @@ def clear_old() -> list[str]:
 
 def pull() -> int:
     """F31: a job's start: dev from GitHub, fast-forward only. Uncommitted changes are left alone (git refuses
-    only when they'd be overwritten, and then says which)."""
+    only when they'd be overwritten, and then says which). F101, F104: a friend's HQ stays on its released version, however
+    this is reached."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import hqpaths
+        maker = hqpaths.is_maker()
+    except ImportError:  # F67's one-time start runs this file on its own, from GitHub, next to the old one
+        maker = True
+    if not maker:
+        print("This HQ stays on its released version: it doesn't pull the work line.")
+        return 0
     branch = git("branch", "--show-current").stdout.strip()
     if branch != WORK_BRANCH:
         print(f"Not pulled: HQ is on {branch or 'no branch'}, not {WORK_BRANCH}. Switch first: git -C <HQ> checkout {WORK_BRANCH}")
@@ -285,15 +295,6 @@ def main() -> int:
     if "--check" in sys.argv:
         return check_key()
     if "--pull" in sys.argv:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        try:
-            import hqpaths
-            maker = hqpaths.is_maker()
-        except ImportError:  # F67's one-time start runs this file on its own, from GitHub, next to the old one
-            maker = True
-        if not maker:  # F101 (C45): a friend's HQ stays on its released version
-            print("This HQ stays on its released version: it doesn't pull the work line.")
-            return 0
         return pull()
     if notes_waiting():
         return 3

@@ -91,7 +91,7 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "about_self": {"add"},  # F102: what an agent says about herself, written by the main
           "usagecost": {"plan"},  # F107: the plan in use, written only by the main
           "trail": {"put"}, "mistakes": {"put"}}  # F103: the record and the ledger, written only by the main
-TO_BOTH = {"update": {"back-here", "forward-here"}}  # F104: what the other computer takes whichever it is: the code, not the data
+TO_BOTH = {"update": {"back-here", "back-first", "forward-here"}}  # F104: what the other computer takes whichever it is: the code, not the data
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
            "coaching": os.path.join(os.path.dirname(HERE), "app", "coaching.py"),

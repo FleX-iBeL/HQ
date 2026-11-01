@@ -254,9 +254,11 @@ def qa_passed(f: dict) -> bool:
 
 def untested(f: dict, base: Path | None = None) -> bool:
     """F104: a feature in pieces on the maker's HQ stays off until its QA passed or he turned it on himself: the work line never
-    switches on untested work by itself, as the agents' cycles did on 30 October. What's in the file's "on" list got there through
-    `switch`, which asks for that."""
-    return bool(f.get("in_pieces")) and f["id"] not in (_state(base).get("on") or []) and not qa_passed(f)
+    switches on untested work by itself, as the agents' cycles did on 30 October. Only `switch` keeps his say-so, with the time; an
+    "on" in the file without it counts for nothing."""
+    d = _state(base)
+    said = f["id"] in (d.get("on") or []) and ((d.get("say_so") or {}).get(f["id"]) or {}).get("how")
+    return bool(f.get("in_pieces")) and not said and not qa_passed(f)
 
 
 def is_on(fid: str, base: Path | None = None) -> bool:

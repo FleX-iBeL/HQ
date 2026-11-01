@@ -148,13 +148,14 @@ WAYS_IN = {
     "hq/calendar-marks.json": "the page's own marks",
     "hq/mistakes.jsonl": f"python3 \"{HQ_ROUTINE / 'mistakes.py'}\" add correction (the ledger only ever grows, through its script)",
     "hq/trail.jsonl": "the record is written by HQ's own scripts, never by hand",
+    "hq/features.json": f"python3 \"{_APP / 'features.py'}\" on|off NAME (a feature in pieces only after its QA passed, or on his own words, and it's kept)",
 }
 ABOUT_WAY = f"python3 \"{_APP / 'about_self.py'}\" add AGENT \"FACT\""
 # What proves his words is written only by HQ: a call or a text never changes a transcript or a thread.
 _PROOF = re.compile(r"^hq/(calls/[^/]+\.md|(direct-line|coaching-line|team-line)/thread\.jsonl)$")
 _ABOUT_LIST = re.compile(r"^hq/agents/[^/]+-about-herself\.md$")
 # The same files through the shell: a redirect, sed -i, tee, a copy or move over them, a Python one-liner, a git restore.
-_GUARDED_NAME = (r"(?:roadmap\.md|sprint\.json|challenges\.md|inbox\.md|notes\.md|games\.json|coaching\.json|calendar\.json|mistakes\.jsonl|trail\.jsonl|"
+_GUARDED_NAME = (r"(?:roadmap\.md|sprint\.json|challenges\.md|inbox\.md|notes\.md|games\.json|coaching\.json|calendar\.json|mistakes\.jsonl|trail\.jsonl|(?<![\w-])features\.json|"
                  r"calendar-todo\.json|calendar-marks\.json|thread\.jsonl|[\w-]*-about-herself\.md)")
 _SHELL_WRITE = re.compile(
     rf">>?\s*[\"']?[^\s\"'|;&]*{_GUARDED_NAME}"

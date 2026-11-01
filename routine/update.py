@@ -46,8 +46,9 @@ A newer version is a tag vX.Y or vX.Y.Z on the public repo with a higher number.
 State: .status/update.json (the last check) and .status/update-run.json (the update), for the pages.
 Tests: HQ_UPDATE_URL (another repo, e.g. a folder), HQ_PLATFORM (pretend another computer), HQ_CALL_URL,
 F104: `back [--tag vX.Y.Z]` one version back (on the work line past a version: that version), in the background, here and on the other
-computer through the forward; the main runs the undos of the data changes it leaves behind (routine/datachange.py), the backup gets
-them by the sync; while back on the maker's HQ the team waits. `forward` the other way. Tests: HQ_UPDATE_WAIT in the foreground.
+computer through the forward; the main runs the undos of the data changes it leaves behind (routine/datachange.py) first and tells the
+other computer only once that held, so a failing undo leaves both where they were (started on the backup, the main goes first); the
+backup gets them by the sync; while back on the maker's HQ the team waits. `forward` the other way. Tests: HQ_UPDATE_WAIT in the foreground.
 HQ_UPDATE_RESTART=0 (restart nothing, end nothing), HQ_UPDATE_ROUTINE=0 (leave the routine and the watchdog alone).
 """
 from __future__ import annotations
@@ -399,8 +400,8 @@ def changed_outside_local() -> list[str]:
 
 
 def _free_branch(name: str) -> str:
-    """F104: a branch name nothing has yet: going back twice within a minute saves twice."""
-    return name + f"-{int(time.time())}" if not git("rev-parse", "-q", "--verify", f"refs/heads/{name}", timeout=10).returncode else name
+    """F104: a branch name nothing has yet: going back twice within a minute saves twice, and so does a try after one that failed."""
+    return next(n for n in (name, *(f"{name}-{i}" for i in range(2, 1000))) if git("rev-parse", "-q", "--verify", f"refs/heads/{n}", timeout=10).returncode)
 
 
 def backup(target: str) -> dict:
@@ -1032,12 +1033,18 @@ def _spawn(*args: str) -> None:
                      stdout=open(LOG, "a"), stderr=subprocess.STDOUT, start_new_session=True)
 
 
-def back(tag: str | None = None, tell: bool = True) -> dict:
+def back(tag: str | None = None, tell: bool = True, first: bool = False) -> dict:
     """F104: one version back, here and on the other computer, in one step. The work happens in the background (it ends what runs,
-    so also the shell a call started this from). Returns what was started."""
+    so also the shell a call started this from). Returns what was started. The main goes first, whichever computer it's started on:
+    only the main's undo can fail, and the other computer hears only once it held. `first`: the backup asked for this."""
     tag = tag or previous()
     if not tag or not vtuple(tag):
         return {"ok": False, "said": "There's no version before this one."}
+    import role
+    if tell and not first and role.is_backup():
+        if role.tell_other("update", ["back-first", tag]) == "told":
+            return {"ok": True, "said": f"Going back to {vname(tag)}: the main computer goes first, then this one.", "to": vname(tag)}
+        return {"ok": False, "said": "The main computer doesn't answer, and it has to go first. Nothing moved."}
     write_json(RUN_FILE, {"state": "waiting", "step": "Going back", "message": "", "at": time.time(), "from": local_version().get("version"), "to": vname(tag)})
     if os.environ.get("HQ_UPDATE_WAIT"):  # a test: in the foreground
         code = back_run(tag, tell)
@@ -1055,10 +1062,6 @@ def back_run(tag: str, tell: bool) -> int:
         old = local_version().get("version")
         was = {"call": listening(hqpaths.call_port()), "status": listening(hqpaths.status_port()),
                "call_pid": pid_on(hqpaths.call_port(), CALL_MARK)}
-        if tell:  # first, so the laptop is on its way even when this computer goes down halfway
-            told = _peer(["back-here", tag])
-            if not told:
-                tell_later(["back-here", tag])
         say("updating", "Ending what runs: the call, the job, the mail check")
         ended = force_out(stop_call=True)
         if git("rev-parse", "-q", "--verify", f"refs/tags/{tag}", timeout=10).returncode:
@@ -1077,6 +1080,10 @@ def back_run(tag: str, tell: bool) -> int:
         prior = gone_back()
         write_json(BACK_FILE, {"to": vname(tag), "from": prior.get("from") or old, "branch": prior.get("branch") or branch,
                                "head": prior.get("head") or before, "at": time.time()})
+        if tell:  # only now: what failed above left this computer where it was, and the other one with it
+            told = _peer(["back-here", tag])
+            if not told:
+                tell_later(["back-here", tag])
         say("updating", "Restarting what changed")
         done, todo = restart_new(changed, was)
         msg = f"Back on {vname(tag)}." + (f" Undone in your data: {', '.join(undone)}." if undone else "") + (
@@ -1115,6 +1122,9 @@ def main(argv: list[str]) -> int:
         return 0
     if cmd == "back-here" and len(argv) == 2:  # F104: the other computer said so, through the forward
         print(json.dumps(back(argv[1], tell=False)))
+        return 0
+    if cmd == "back-first" and len(argv) == 2:  # F104: started on the backup: this one goes first and tells it
+        print(json.dumps(back(argv[1], first=True)))
         return 0
     if cmd == "back-run" and len(argv) >= 2:
         return back_run(argv[1], argv[2:] != ["quiet"])
