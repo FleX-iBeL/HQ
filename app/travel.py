@@ -51,6 +51,7 @@ Only what the feeds say; nothing found, nothing said. `--no-notices` leaves them
 
 FROM is where the phone is, else home, when left out; "home" (or thuis) works for TO too.
 """
+from __future__ import annotations
 import argparse
 import base64
 import csv

@@ -1,4 +1,6 @@
 """HQ settings, in one place. Override any of them with an environment variable."""
+from __future__ import annotations  # F106: agents run rules lookups with plain python3, a stock Mac's is 3.9
+
 import json
 import re
 import os

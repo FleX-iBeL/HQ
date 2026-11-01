@@ -16675,6 +16675,72 @@ print(ledger.text('donna')[-900:])
         need(h["n"] == n and h["turns"] == 21 and h["run_minutes"] == 3.5 and h["based"] is not None, f"turns and minutes: {h}")
         return "the score per agent and per hand-off from a folder holding only the ledger; QA's fail and a bug after a pass on it; the week's score with the switch off; turns, minutes and the estimate's base kept"
 
+    async def flow250(self) -> str:
+        """F106, no Claude: a stock Mac's python3 is 3.9, and agents run rules lookups with it. HQ's Python is read for what 3.9 can't: syntax past it, a `X | Y`
+        annotation without the future import, or an f-string only 3.12 can read. No 3.9 here, so it reads the source; the checker is tried on made-up bad lines first."""
+        import ast, io, tokenize
+        def problems(src: str, name: str) -> list[str]:
+            try:
+                tree = ast.parse(src, feature_version=(3, 9))
+            except SyntaxError as e:
+                return [f"{name}:{e.lineno}: {e.msg}"]
+            future = any(isinstance(n, ast.ImportFrom) and n.module == "__future__" and any(a.name == "annotations" for a in n.names) for n in tree.body)
+            out = []
+            def union(a) -> bool:
+                return a is not None and any(isinstance(x, ast.BinOp) and isinstance(x.op, ast.BitOr) for x in ast.walk(a))
+            for n in ast.walk(tree):
+                anns = []
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    a = n.args
+                    anns = [n.returns] + [x.annotation for x in a.posonlyargs + a.args + a.kwonlyargs + [y for y in (a.vararg, a.kwarg) if y]]
+                elif isinstance(n, ast.AnnAssign):
+                    anns = [n.annotation]
+                if not future and any(union(a) for a in anns):
+                    out.append(f"{name}:{n.lineno}: a X | Y annotation without from __future__ import annotations")
+                if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "isinstance" and len(n.args) == 2 and isinstance(n.args[1], ast.BinOp):
+                    out.append(f"{name}:{n.lineno}: isinstance with X | Y")
+                if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "zip" and any(k.arg == "strict" for k in n.keywords):
+                    out.append(f"{name}:{n.lineno}: zip with strict")
+            fstrings = []  # what 3.12 reads and 3.9 doesn't: inside an f-string's braces its own quote, or a backslash
+            if hasattr(tokenize, "FSTRING_START"):
+                for t in tokenize.generate_tokens(io.StringIO(src).readline):
+                    if t.type == tokenize.FSTRING_START:
+                        q = t.string.lstrip("rRfFbBuU")
+                        if fstrings and q[0] == fstrings[-1][0]:
+                            out.append(f"{name}:{t.start[0]}: an f-string inside one with the same quote")
+                        fstrings.append(q)
+                    elif t.type == tokenize.FSTRING_END:
+                        fstrings.pop()
+                    elif fstrings and t.type == tokenize.STRING and ("\\" in t.string or (len(fstrings[-1]) == 1 and t.string.lstrip("rRbBuU")[0] == fstrings[-1][0])):
+                        out.append(f"{name}:{t.start[0]}: a string with a backslash or the same quote inside an f-string's braces")
+            return out
+        for bad in ("def f(a: dict | None): pass\n", "def f() -> str | None: pass\n", "x: int | None = 1\n", "match 1:\n    case 1: pass\n", "isinstance(1, int | str)\n", "zip([], [], strict=True)\n"):
+            need(problems(bad, "x"), f"the check doesn't see: {bad!r}")
+        need(not problems("from __future__ import annotations\ndef f(a: dict | None): pass\nx = 1 | 2\n", "x"), "the check sees a fine line")
+        if hasattr(tokenize, "FSTRING_START"):
+            for bad in ('f"{d["a"]}"\n', "f'{chr(10).join([\"\\n\"])}'\n", 'f"{f"{1}"}"\n'):
+                need(problems(bad, "x"), f"the check doesn't see: {bad!r}")
+        names = []
+        hits = []
+        for d in ("app", "routine", "routine/datachanges", "install", "status", "desktop"):
+            for p in sorted((ROOT / d).glob("*.py")):
+                names.append(p)
+                hits += problems(p.read_text(encoding="utf8"), str(p.relative_to(ROOT)))
+        need(len(names) > 100, f"it read only {len(names)} files")
+        need(not hits, f"{len(hits)} lines Python 3.9 can't read: {'; '.join(hits[:12])}")
+        # what a rules lookup pulls in, by its imports: every module of HQ's own is among the files read above
+        seen, todo = set(), ["rules"]
+        while todo:
+            m = todo.pop()
+            p = next((ROOT / d / f"{m}.py" for d in ("app", "routine") if (ROOT / d / f"{m}.py").exists()), None)
+            if not p or m in seen:
+                continue
+            seen.add(m)
+            for n in ast.walk(ast.parse(p.read_text(encoding="utf8"))):
+                todo += [a.name.split(".")[0] for a in n.names] if isinstance(n, ast.Import) else [n.module.split(".")[0]] if isinstance(n, ast.ImportFrom) and n.module else []
+        need({"rules", "config", "agents", "handbook", "me"} <= seen, f"a rules lookup pulls in: {sorted(seen)}")
+        return f"{len(names)} files read, {len(seen)} of them what a rules lookup pulls in: nothing Python 3.9 can't read"
+
     def _pair(self, tag):
         """F104: two throwaway HQs (git clones of a throwaway GitHub) with a workspace each, a main and a backup, the forward carried by
         a small web server in front of the backup's real role.py. Versions 1.0.0 and 1.1.0 and work past them, a data change in each."""
@@ -28154,6 +28220,7 @@ FLOWS = {
     237: ("F104: friends only on released versions: a job on a friend's copy never pulls dev; headless on in the template; a feature in pieces stays off until its QA passed or his own words, logged", False, "flow237"),
     238: ("F106: a helper beside a call, with a stand-in for the model: started without a yes, the call goes on, the answer in the same call once; hung up it's a text on her line; boxed in minutes and turns; two at once; a used-up limit stops it", False, "flow238"),
     239: ("F106: a check she couldn't run is never answered around: the program says I couldn't check that when her reply doesn't", False, "flow239"),
+    250: ("F106: nothing in HQ's Python that a stock Mac's 3.9 can't read: no newer syntax, no X | Y annotation without the future import, what a rules lookup pulls in included", False, "flow250"),
     243: ("F104: the guard on the state: every way onto dev puts a friend's copy back on the newest release within the routine's minute, no data change of dev's runs, the job stopped by its exact pid, said and written down; her own commits stay, also with dev's patch; offline never on a guess, never older than it stood on, no newer release she didn't stand on; the maker's copy never touched, whatever the environment or a lost key says; no way forward again; one backup branch", False, "flow243"),
     242: ("F106: one line on the status page shows the helper working for him right now", False, "flow242"),
     241: ("F106: a call's start is under the design's size for every agent, on a full workspace; nothing lost from the rules, each topic a lookup without a yes", False, "flow241"),

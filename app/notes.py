@@ -20,6 +20,7 @@ F102 (31 October 2026): only the main writes the notes, like the text lines (F58
 the server: on the backup a note goes to the main as a hand-over (`put`), kept in notes.here.md next to the notes (which never
 syncs) until the main's list brings it back, so his page shows it at once; the main can't be reached: it goes on by itself.
 """
+from __future__ import annotations
 import hashlib
 import json
 import os

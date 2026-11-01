@@ -13,6 +13,7 @@ Writes .status/jobs-backfill.json: {"made": t, "segments": [{"n", "st", "start",
 server only uses it for the time before its own minute-by-minute record starts.
     python3 "status/backfill-jobs.py"
 """
+from __future__ import annotations
 import datetime as dt
 import json
 import os
