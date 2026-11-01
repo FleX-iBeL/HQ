@@ -77,6 +77,14 @@ def real_support() -> str:
             os.environ["HQ_SUPPORT"] = saved
 
 
+def guard_beside_roadmap(path: str) -> None:
+    """F17, F104: stop when a test is about to write a file in the real workspace's own folder, next to its roadmap: a process can hold the real path
+    from its import, or from a refused run that keeps a line before it's refused."""
+    if under_test() and os.path.dirname(os.path.realpath(path)) == os.path.dirname(real_roadmap()):
+        sys.stderr.write(f"Refused (F17): a test may not write {os.path.basename(path)} in the real workspace.\n")
+        sys.exit(2)
+
+
 def guard_roadmap(path: str | None = None) -> None:
     """Stop with an error when a test is about to change the real workspace's roadmap (F17)."""
     if under_test() and os.path.realpath(path or ROADMAP) == real_roadmap():
