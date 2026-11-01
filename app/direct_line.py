@@ -357,8 +357,8 @@ def line_dir(name: str) -> Path | None:
     return None
 
 
-def add(sender: str, text: str, why: str = "", item: str = "") -> dict:
-    m = {"at": round(time.time(), 3), "from": sender, "text": text.strip(), "why": why, "id": secrets.token_hex(8),
+def add(sender: str, text: str, why: str = "", item: str = "", mid: str = "") -> dict:
+    m = {"at": round(time.time(), 3), "from": sender, "text": text.strip(), "why": why, "id": mid or secrets.token_hex(8),
          **({"item": item} if item else {})}  # F103: the id of the work it's about, carried as an argument
     where = folder()
     if _backup():
@@ -1018,10 +1018,13 @@ def _on_record(item: str, why: str, state: str, line: str = "") -> None:
         trail.step(item, "text", why=why, state=state, line=line)
 
 
-def text(why: str, facts: str, item: str = "") -> dict:
+def text(why: str, facts: str, item: str = "", once: str = "") -> dict:
     """Write one text from her into the thread and push it to his phone. H266: one of the team's kinds goes on
     Moneypenny's own line, from her, whoever sends it. F102: while he sleeps, only what can't wait. F103: item, the id of the
-    work it's about."""
+    work it's about. F106: once, the line's id when it may stand in the thread only one time: already there, nothing's written or pushed, so
+    a text that fell over after its line was written can be tried again."""
+    if once and any(m.get("id") == once for m in thread()):
+        return {"id": once, "already": True}
     if asleep():
         later = can_wait(why, facts)
         if later:
@@ -1033,10 +1036,10 @@ def text(why: str, facts: str, item: str = "") -> dict:
             facts = left
     if not on_team_line() and line_for(why) == "team":
         with _Env(team_env()):
-            m = text(why, facts, item)
+            m = text(why, facts, item, once)
         m["line"] = "team"
         return m
-    msg = add("agent", compose(why, facts), why, item)
+    msg = add("agent", compose(why, facts), why, item, once)
     msg["pushed"] = push(msg["text"])
     _on_record(item, why, "sent", msg.get("id", ""))
     return msg
@@ -1412,7 +1415,12 @@ if __name__ == "__main__":
             i = args.index("--item")
             item = args[i + 1] if i + 1 < len(args) else ""
             del args[i:i + 2]
-        m = text(args[1], args[2] if len(args) > 2 else "", item)
+        once = ""  # F106: a helper's answer, one line for each
+        if "--once" in args:
+            i = args.index("--once")
+            once = args[i + 1] if i + 1 < len(args) else ""
+            del args[i:i + 2]
+        m = text(args[1], args[2] if len(args) > 2 else "", item, once)
         print(json.dumps(m, ensure_ascii=False))
     elif cmd == "ring" and len(args) >= 2 and args[1].isdigit():
         print(json.dumps(ring(int(args[1])), ensure_ascii=False))

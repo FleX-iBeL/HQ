@@ -401,7 +401,7 @@ def by_text(hid: str) -> bool:
         env.update({"HQ_DIRECT_DIR": os.environ.get("HQ_COACHING_LINE") or os.path.join(hqpaths.FOLDER, "HQ", "coaching-line"),
                     "HQ_DIRECT_AGENT": "pepper", "HQ_DIRECT_COACHING": "1"})
     cmd = [py if os.path.exists(py) else sys.executable, os.path.join(hqpaths.HQ, "app", "direct_line.py"), *(["--team"] if who == "moneypenny" else []),
-           "text", "helper", f"He asked on the call: {rec['question'][:200]}\nWhat came back: {words(rec)}"]
+           "text", "helper", f"He asked on the call: {rec['question'][:200]}\nWhat came back: {words(rec)}", "--once", f"helper-{hid}"]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=hqpaths.HQ, timeout=120)
         code, err = r.returncode, r.stderr
