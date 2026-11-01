@@ -547,7 +547,7 @@ YES_SYSTEM = ("You read one thing a man said to his AI assistant on a call or in
 # have to ask a confirmation on the second one. Because otherwise our calls are gonna be just me having to say yes all the time and I don't want that."
 _YES_FIRM = r"yes|yeah|yep|yup|ok|okay|oke|oké|sure|go|go ahead|do it|do that|doe maar|doe het|ja|jep|prima|please do|absolutely"
 _YES_WORD = re.compile(rf"(?<![\w'])(?:{_YES_FIRM}|perfect|great|sounds good|correct)(?![\w'])")
-_YES_PLAIN = re.compile(rf"(?<![\w'])(?:{_YES_FIRM})(?![\w'])")  # praise alone next to a thanks is thanks
+_YES_PLAIN = re.compile(rf"(?<![\w'])(?:{_YES_FIRM})(?![\w'])")
 _HOLD_WORD = re.compile(r"(?<![\w'])(?:but|not|wait|later|don'?t|niet|nee|eerst)(?![\w'])")
 _TAKEN_BACK = re.compile(r"(?<![\w'])(?:but not|not (?:right )?now|not yet|not today|niet nu|nog niet|don'?t (?:do|go)|niet doen)(?![\w'])")  # outweighs a yes in the same line
 _NOT_SURE = re.compile(r"\?|(?<![\w'])(?:no|nope|maybe|perhaps|misschien|if|unless|first|hold|stop|never|\w+n't)(?![\w'])")  # no refusal: only not clear
@@ -561,14 +561,16 @@ def _names_it(text, names):
 def yes_reading(line, turn, names):
     """F104: "yes", "no", or "" when it isn't clear, for a line of his, the agent's turn right before it and what the thing goes by (its label or name).
     Clear yes: a yes word, no holding word, and the line or that turn names the thing: a bare "Ok" counts, it's tied to what she asked. Clear no: a
-    holding word and no yes word, or a yes taken back in the same line. No model, so the same line reads the same every time."""
+    holding word and no yes word, a yes taken back in the same line, or thanks. No model, so the same line reads the same every time."""
     low = " ".join(str(line).lower().replace("’", "'").split())
     if _TAKEN_BACK.search(low):
         return "no"
     yes = _YES_WORD.search(low)
     if _HOLD_WORD.search(low):
         return "" if yes else "no"
-    if not yes or _NOT_SURE.search(low) or (_THANKS.search(low) and not _YES_PLAIN.search(low)):
+    if _THANKS.search(low) and not _YES_PLAIN.search(low):
+        return "no"  # thanks, with praise at the most, is no yes to anything
+    if not yes or _NOT_SURE.search(low):
         return ""
     return "yes" if _names_it(low, names) or _names_it(" ".join(str(turn).lower().split()), names) else ""
 

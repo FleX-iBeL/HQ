@@ -17542,12 +17542,12 @@ print(json.dumps(out))
         need(not got[0] and "aren't in his own lines" in got[1], f"yes in yesterday: {got}")
         # refused whatever a look would say
         for line, quote in (("Yes but not right now", "Yes but not right now"), ("Ok not yet", "Ok not yet"), ("Wait", "Wait"), ("Don't do that", "Don't do that"), ("Nee, niet doen", "niet doen"),
-                            ("later please, I want to see it first", "later please I want"), ("no not that one", "not that one")):
+                            ("later please, I want to see it first", "later please I want"), ("no not that one", "not that one"), ("Thank you very much", "thank you very"), ("Thank you, that's great", "thank you that's great")):
             for look in ("yes", None):
                 got = ask([asked, he(line)], [quote, job], fake=look)[0]
                 need(not got[0] and "aren't a yes" in got[1], f"a no that passed ({look}): {line!r}: {got}")
         # not clear: the look's, so refused with no claude and passed by its yes
-        for line, quote in (("Thank you very much", "thank you very"), ("Thank you, that's great", "thank you that's great"), ("Can you do it?", "can you do it"), ("Yes, but only the first part", "only the first part"),
+        for line, quote in (("Can you do it?", "can you do it"), ("Yes, but only the first part", "only the first part"),
                             ("Maybe go ahead with it", "maybe go ahead with"), ("Just also give it to the team", "give it to the team")):
             got = ask([asked, he(line)], [quote, job])[0]
             need(not got[0] and "look" in got[1], f"unclear without claude: {line!r}: {got}")
