@@ -9,7 +9,8 @@ through this script (app/policy.py refuses the file itself).
 What goes in, and who writes it:
 - correction: his correction on a call or in a text. The after-call wrap-up tags them in the same run (a model reads the call, the
   program checks the quote is his, and takes the agent from the transcript, never from the one tagging), and a text's agent the same.
-  The clearest ones the program finds by itself (CLEAR below), so a call whose wrap-up never ran still counts.
+  The clearest ones the program finds by itself (CLEAR below), so a call whose wrap-up never ran still counts. Any other line a model
+  tags gets one short second look (second_look) before it's believed: his words alone don't make it a correction.
 - stop-asking, say-yes: his "stop asking" and "you just say yes" lines (C12), found by the program.
 - refused: a refused outward action (mail sent, replied, forwarded), from app/policy.py, routine/cyclehook.py and the cycles.
 - qa-fail: every QA fail, against the team's build (qa.py fail).
@@ -48,6 +49,13 @@ QUOTE_LEAST = 3  # F103: the shortest quote taken as his words, the same three w
 WORDS_KEPT = 600  # F103: how much of a line of his the ledger keeps; the transcript holds the rest
 THREADS = {"direct-line": "donna", "coaching-line": "pepper", "team-line": "moneypenny"}
 ONE_HANDOFF = re.compile(r"^[\w .'-]{1,40} to [\w .'-]{1,40}$")
+MERGED = ("handoff", "item", "label")  # what a later tag may add to a line that's already there
+LOOK_MODEL = "haiku"  # F103: the second look, the same small look as about_self's harvest
+LOOK_BUDGET = 0.05
+LOOK_TIMEOUT = 45
+LOOK_SYSTEM = ("You read one thing a man said to his AI assistant on a call or in a text, with what was said just before it. Is he correcting "
+               "the assistant here: telling it that it got something wrong, did what he didn't ask, or should have done otherwise? Thanks, "
+               "praise, a question, a plain no to a question and a new request are not corrections. Answer with one word: yes or no.")
 
 # What the program reads as a mistake from his own line, no model. Not "no", "wrong" or "what is this" on their own: those counted
 # "No problem, thanks!" and "what is this amazing thing". What needs reading between the lines is the wrap-up's.
@@ -85,6 +93,7 @@ def read(base=None, since: float | None = None, until: float | None = None) -> l
     out = []
     if not p:
         return out
+    more: dict = {}
     try:
         with open(p, encoding="utf8") as f:
             for l in f:
@@ -92,10 +101,14 @@ def read(base=None, since: float | None = None, until: float | None = None) -> l
                     d = json.loads(l)
                 except ValueError:
                     continue
-                if isinstance(d, dict) and d.get("kind") and (since is None or d.get("at", 0) >= since) and (until is None or d.get("at", 0) < until):
+                if isinstance(d, dict) and d.get("more"):  # what a later tag added to a line: the file itself only ever grows
+                    more.setdefault(d["more"], {}).update({k: d[k] for k in MERGED if d.get(k)})
+                elif isinstance(d, dict) and d.get("kind") and (since is None or d.get("at", 0) >= since) and (until is None or d.get("at", 0) < until):
                     out.append(d)
     except OSError:
         pass
+    for d in out:
+        d.update(more.get(d.get("key")) or {})
     return out
 
 
@@ -110,12 +123,17 @@ def _backup() -> bool:
 
 
 def _append(line: dict, base=None) -> bool:
-    """False when a line with its key is already there: one event, one line."""
+    """False when a line with its key is already there: one event, one line. A hand-off or an item it didn't have yet lands on that
+    line, as a line of its own that read() folds in."""
     p = path(base)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with hqlock.locked(p):
-        if any(d.get("key") == line["key"] for d in read(base)):
-            return False
+        have = next((d for d in read(base) if d.get("key") == line["key"]), None)
+        if have:
+            more = {k: line[k] for k in MERGED if line.get(k) and line[k] != have.get(k) and not (k == "handoff" and line[k] == HANDOFF.get(line["kind"]))}
+            if not more:
+                return False
+            line = {"more": line["key"], "at": line["at"], **more}
         with open(p, "a", encoding="utf8") as f:
             f.write(json.dumps(line, ensure_ascii=False) + "\n")
     return True
@@ -302,9 +320,54 @@ def sweep(all_of_it: bool = False, base=None) -> list[dict]:
     return got
 
 
+def _ask_model(words: str, before: str) -> str:
+    import subprocess
+    p = subprocess.run([hqpaths.tool("claude", "/opt/homebrew/bin/claude"), "-p", "--model", LOOK_MODEL, "--output-format", "json", "--tools", "",
+                        "--strict-mcp-config", "--setting-sources", "", "--max-budget-usd", str(LOOK_BUDGET), "--no-session-persistence",
+                        "--system-prompt", LOOK_SYSTEM],
+                       input=(f"Said just before it:\n{before}\n\n" if before else "") + f"What he said:\n{words}", capture_output=True, text=True, timeout=LOOK_TIMEOUT)
+    return json.loads(p.stdout).get("result") or ""
+
+
+def second_look(words: str, before: str = "") -> tuple[bool, str]:
+    """F103: is he correcting the agent here? (yes, why not). No tools, one word back. HQ_MISTAKES_FAKE stands in for Claude in the flows
+    (yes, no, or anything else for a look that failed), and a test never asks the real model. Never raises."""
+    fake = os.environ.get("HQ_MISTAKES_FAKE") if hqpaths.under_test() else None
+    try:
+        if fake is None and hqpaths.under_test():
+            raise RuntimeError("a test without a stand-in")
+        answer = (fake if fake is not None else _ask_model(words, before)).strip().lower()
+    except Exception as e:
+        return False, f"the second look failed: {e!r}"
+    if answer.startswith("yes"):
+        return True, ""
+    return False, "the second look says it isn't a correction" if answer.startswith("no") else f"the second look failed: it said {answer[:60]!r}"
+
+
+def _left_out(words: str, where: str, why: str) -> None:
+    """What a model tagged and the second look left out, with why, so it can be read back."""
+    try:
+        p = os.path.join(hqpaths.HQ, "scratch", "mistakes-left-out.log")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "a", encoding="utf8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} · {where} · {why} · {' '.join(str(words).split())[:WORDS_KEPT]}\n")
+    except OSError as e:
+        print(f"(the left-out log: {e!r})", file=sys.stderr)
+
+
+def _just_before(p: str, n: int) -> str:
+    """The lines of a transcript just before line n, for the second look."""
+    try:
+        lines = open(p, encoding="utf8", errors="replace").read().splitlines()
+    except OSError:
+        return ""
+    return "\n".join(l for l in lines[max(0, n - 4):n - 1] if l.strip())[-1500:]
+
+
 def tag(said: str, *, call: str = "", line: str = "", handoff: str = "", item: str = "", label: str = "", base=None) -> tuple[dict | None, str]:
     """A correction tagged by a model: (the line, what went wrong). The quote must stand in one of his own lines of that call or
-    thread; the agent comes from there. None and "" means it was already on the ledger."""
+    thread; the agent comes from there. A line the clear phrases don't catch gets the second look first. None and "" means it was
+    already on the ledger; a hand-off or an item given for a line that's there lands on that line."""
     quote = _bare(said)
     if len(quote.split()) < QUOTE_LEAST:
         return None, f"Refused: a quote of at least {QUOTE_LEAST} of his own words."
@@ -327,8 +390,14 @@ def tag(said: str, *, call: str = "", line: str = "", handoff: str = "", item: s
     hit = next((l for l in reversed(his) if quote in _bare(l["words"])), None)
     if not hit:
         return None, "Refused: those words aren't his in that call or line. Nothing written."
-    kind = clear_kind(hit["words"]) or "correction"
-    d = add(kind, hit["agent"], hit["words"], where=where, key=_key(where, hit["n"]), handoff=handoff, item=item, label=label,
+    kind = clear_kind(hit["words"])
+    key = _key(where, hit["n"])
+    if not kind and not any(d.get("key") == key for d in read(base)):
+        yes, why = second_look(hit["words"], _just_before(p, hit["n"]) if call else "")
+        if not yes:
+            _left_out(hit["words"], where, why)
+            return None, f"Left out: {why}. Nothing written."
+    d = add(kind or "correction", hit["agent"], hit["words"], where=where, key=key, handoff=handoff, item=item, label=label,
             by="the wrap-up" if call else "the agent", at=hit["at"], base=base)
     return d, ""
 
