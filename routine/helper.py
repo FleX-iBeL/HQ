@@ -40,6 +40,7 @@ LIMIT_FULL = 98   # F106: at this percent of the 5-hour or the weekly limit no h
 LIVE_S = 15       # F106: a call that hasn't said it's on for this long counts as hung up
 WATCH_S = 3       # F106: how often a call looks for an answer
 GRACE_S = 5       # F106: how long a helper past its box gets to end by itself before it's killed (then it's "stopped")
+PIPE_S = 1        # F106: how long the model's stdout gets once the model itself is gone; a child in a session of its own can hold it open for good
 MODEL = "sonnet"  # F106: reading and finding, the reviewer's model
 ANSWER_MOST = 2000  # F106: the characters of an answer that go into a call or a text; the record keeps it whole
 TOOLS = "Read,Glob,Grep,WebSearch"
@@ -224,7 +225,9 @@ def run(hid: str) -> int:
     timer.daemon = True
     timer.start()
     turns, said, result = 0, [], ""
-    try:
+
+    def read() -> None:
+        nonlocal turns, result
         for line in p.stdout:
             try:
                 d = json.loads(line)
@@ -239,19 +242,35 @@ def run(hid: str) -> int:
                     end("turns")
             elif d.get("type") == "result":
                 result = (d.get("result") or "").strip()
+
+    # The pipe is read beside this: once the model is gone, what's left on the pipe gets PIPE_S and no more. A grandchild in its own
+    # session outlives the kill and keeps the pipe open, and a run waiting on that would hold its record "running", and its slot, for good.
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    gone_at = None
+    while reader.is_alive():
+        reader.join(0.2)
+        if p.poll() is not None:
+            gone_at = gone_at or time.time()
+            if time.time() - gone_at > PIPE_S:
+                break
+    timer.cancel()
+    grace.cancel()
+    try:
         code = p.wait(timeout=10)
     except subprocess.TimeoutExpired:
         p.kill()
         code = -1
-    finally:
-        timer.cancel()
-        grace.cancel()
+    held = reader.is_alive()
     answer = result or (said[-1] if said else "")
-    rec = {**load(hid), "state": "stopped" if boxed["killed"] else "boxed" if boxed["why"] else ("done" if code == 0 and answer else "failed"), "ended": time.time(),
+    rec = {**load(hid), "state": "stopped" if boxed["killed"] or (held and boxed["why"]) else "boxed" if boxed["why"] else ("done" if code == 0 and answer else "failed"), "ended": time.time(),
            "minutes": round((time.time() - t0) / 60, 2), "turns": turns, "answer": answer, "why": boxed["why"] or ""}
     save(rec)
     if not call_on(rec.get("call") or ""):
         by_text(hid)
+    if held:  # the reader sits in a read that never ends: nothing here waits for it, not even the way out
+        sys.stdout.flush()
+        os._exit(0)
     return 0
 
 

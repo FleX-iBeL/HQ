@@ -69,13 +69,25 @@ class HelperFrame(DataFrame):
 
 
 # F106: what in her reply shows she said it couldn't be checked, or is asking for his yes; without it the program says the line.
-# Her saying she couldn't check or run it: a "can't" alone isn't that ("I can't believe how clean it all is").
-SAID_BLOCKED = re.compile(r"\b(?:couldn['’]?t|could not|can['’]?t|cannot|wasn['’]?t able to|weren['’]?t able to|not able to|unable to|wasn['’]?t allowed to|"
-                          r"didn['’]?t|did not|haven['’]?t|have not)\s+(?:(?:actually|really|even|quite|yet|directly|properly|fully)\s+)?(?:check|run|verify|confirm|look|read|open|reach|access|get (?:to|at|into))\w*\b|"
-                          r"\b(?:couldn['’]?t|could not|can['’]?t|cannot) be (?:checked|run|verified|confirmed)\b|"
-                          r"\b(?:wasn['’]?t|was not|isn['’]?t|is not) (?:checked|verified|confirmed)\b|"
-                          r"\b(didn['’]?t (work|go through|run)|no access|refused|not allowed|"
-                          r"needs? your|shall i|should i|want me to|do you want|okay to|is it ok)\b", re.I)
+# Only her saying that she herself couldn't check or run it counts: "I can't believe how clean it all is", "You can't check out before
+# noon", "She refused the invitation" and "The nightly didn't run" say nothing about the check. So: a first person (or no subject at
+# all, "Couldn't check that") with a can't and a checking word; the check itself as the subject ("That check didn't go through", "The
+# command was refused", "It can't be checked"); or the asking forms.
+_NO = r"(?:couldn['’]?t|could not|can['’]?t|can not|cannot|wasn['’]?t able to|weren['’]?t able to|not able to|unable to|(?:wasn['’]?t|weren['’]?t|not) allowed to|" \
+      r"(?:haven['’]?t|have not|hadn['’]?t|had not|never) been able to|didn['’]?t (?:get to|manage to)|did not (?:get to|manage to)|never got to|failed to|didn['’]?t|did not|haven['’]?t|have not|don['’]?t get to)"
+_CHECK = r"(?:(?:actually|really|even|quite|yet|directly|properly|fully)\s+)?(?:check(?!\s+(?:out|in)\b)|run|verify|confirm|look|read|open|reach|access|see(?!\s+(?:why|how)\b)|get (?:to|at|into))\w*\b"
+_THE_CHECK = r"(?:check|command|look|lookup|look-up|query|request|read|tool call|tool)s?"
+SAID_BLOCKED = re.compile(
+    rf"\b(?:i|we)\b(?:(?!\b(?:you|she|he|they)\b)[^.!?;\n]){{0,30}}?\b{_NO}\s+{_CHECK}|"        # I couldn't check, I'm not able to run, I tried but can't read
+    rf"(?:^|(?<=[.!?;:,]\s)|(?<=[—–-]\s))(?:sorry,?\s+)?{_NO}\s+{_CHECK}|"                      # Couldn't check that.
+    rf"\b(?:i|we)\b(?:(?!\b(?:you|she|he|they)\b)[^.!?;\n]){{0,20}}?\b(?:(?:don['’]?t|do not|didn['’]?t|did not) have|have no|had no|['’]ve got no)\s+(?:any\s+|the\s+)?(?:access|way (?:to|of)|permission)|"
+    rf"\b(?:i|we)\b\s+(?:was|were|got|am|['’]m|have been|['’]ve been)\s+(?:refused|blocked|denied)\b|"
+    rf"\b(?:{_THE_CHECK}|it|that|this(?: one)?|that one)\s+(?:(?:i\s+tried\s+)?(?:was|were|got|is|has been)\s+(?:refused|blocked|denied|not allowed)|"
+    rf"(?:couldn['’]?t|could not|can['’]?t|cannot) be (?:checked|run|verified|confirmed)|(?:wasn['’]?t|was not|isn['’]?t|is not) (?:checked|verified|confirmed))\b|"
+    rf"\b{_THE_CHECK}\s+(?:didn['’]?t|did not|won['’]?t|wouldn['’]?t)\s+(?:work|go through|run|finish)\b|\b{_THE_CHECK}\s+failed\b|"
+    rf"\b(?:it|that|this(?: one)?)\s+(?:didn['’]?t|did not|wouldn['’]?t)\s+(?:work|go through|run)\s*(?:[.,;:!?—–-]|$)|"
+    rf"\bpermission (?:was )?denied\b|\b(?:hq|the (?:hook|system|policy|guard|door))\s+(?:refused|blocked|denied)\b|"
+    rf"\b(?:needs? your|shall i|should i|want me to|do you want|okay to|is it ok)\b", re.I | re.M)
 BLOCKED_LINE = "I couldn't check that."
 
 
