@@ -105,12 +105,16 @@ def _jobs(*args: str) -> str:
 
 def _box_args(argv: list[str]) -> tuple[list[str], dict]:
     """H298: the box's options taken out of the chat arguments: {"minutes", "turns", "note"}."""
-    box, rest, i = {"minutes": None, "turns": None, "note": None, "state": False}, [], 0
+    box, rest, i = {"minutes": None, "turns": None, "note": None, "state": False, "round": None}, [], 0
     while i < len(argv):
         a = argv[i]
         if a == "--box-state":
             box["state"] = True
             i += 1
+            continue
+        if a == "--round" and i + 1 < len(argv):  # F86: this run is a round of the loop: LABEL:fix or LABEL:mark, for what she runs
+            box["round"] = argv[i + 1]
+            i += 2
             continue
         if a in ("--max-minutes", "--max-turns", "--box-note") and i + 1 < len(argv):
             v = argv[i + 1]
@@ -197,6 +201,8 @@ def main(argv: list[str]) -> int:
         cmd += ["--max-turns", str(box["turns"])]
     env = {**os.environ, **hqpaths.JOB_ENV, "HQ_HEADLESS": "1"}  # F99: none of his folder's files at the start
     env.setdefault("HQ_JOB", str(n))
+    if box["round"]:
+        env["HQ_ROUND"] = box["round"]
     with open(stream_log, "a") as lg, open(pfile, encoding="utf8") as prompt:
         _log(lg, f"job {n}: headless run started ({' '.join(chat) or 'a new session'})")
         proc = subprocess.Popen(cmd, stdin=prompt, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,

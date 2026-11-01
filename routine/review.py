@@ -45,7 +45,10 @@ Run the low usage Claude prompt check if your checklist passes."
     loop's state (in sprint.json, each row's "fix"); routine/cycles.py opens her short sessions: a round rewords the row
     (reword, that one row and nothing else) and the review looks again; once it passes, one short session for her
     mark, the review's pass first, hers second. A finding only he can answer is never filled in: sitdown puts it on
-    her sit-down list with one text on her line and the loop stops for that row. At most ROUNDS rounds an item,
+    her sit-down list with one text on her line and the loop stops for that row. A round can only add: what stands in
+    the row stays byte for byte, and her words go in one marked place (addition), read by the review as part of the
+    ask. And no is an answer too: a row that can't be done as asked, or isn't worth building, she says so (no): the
+    row stops, gets no Ready mark, and he decides. At most ROUNDS rounds an item,
     then the sit-down list, for good: no day starts them again. A stop holds until the row's words change. Rows flagged
     before the loop was switched on wait for her calls, unless they have a rank.
 
@@ -57,7 +60,10 @@ usage:
   python3 routine/review.py pass                 F80's one-time pass: every open row never really reviewed gets one
                                                  review, one after another (resumes; a failure is retried once, then named)
   python3 routine/review.py pass-result          what the pass found: each row's verdict, the failures, the total cost
-  python3 routine/review.py reword LABEL 'JSON'  F86: {"edits": [{"old": "...", "new": "..."}]} inside that one row
+  python3 routine/review.py reword LABEL 'JSON'  a call's way: {"edits": [{"old": "...", "new": "..."}]} inside that one row
+  python3 routine/review.py add LABEL "WORDS"    F86: what a round writes, or the words on stdin: added in one marked place, nothing else changes
+  python3 routine/review.py no LABEL "WHY" "WHAT COULD WORK INSTEAD" "If ..., I'll ...; if not, ..."
+                                                 F86: this can't be done as asked or isn't worth building: the row stops, one text, he decides
   python3 routine/review.py sitdown LABEL "THE OPEN POINT WITH YOUR FIX" "If ..., I'll ...; if not, ..."
                                                  F86: on her sit-down list, one text on her line, the loop stops for it
   python3 routine/review.py sitdown-list         F86: what waits for him
@@ -220,6 +226,9 @@ def states(rows=None):
 def why_not_ready(row, st=None):
     """Why the review keeps a row from the Ready mark, in a few plain words, or None (also when reviews don't run
     here, or haven't started yet: then nothing waits on them)."""
+    no_ = _said_no(row)
+    if no_:
+        return f"{row['label']} isn't ready: Moneypenny said no to it, and it's his to decide: {no_.get('why', '')}"
     if not (on() or q.is_paused()) or not _state()[1].get("since"):  # F86: a pause holds the reviewer, it doesn't open this gate
         return None
     st = st or states([row]).get(row["label"]) or {}
@@ -312,7 +321,7 @@ def _input(row):
 
 
 def _fake(row):
-    """HQ_REVIEW_FAKE (tests): "auto" flags a row whose ask holds "HOLE:" (the words after it the finding) and passes
+    """HQ_REVIEW_FAKE (tests): "auto" flags a row whose ask holds "HOLE:" (the words after it the finding, unless "FILLED:" and the same words stand in it) and passes
     the rest, and a row holding "FAILREVIEW" never answers; "fail" never answers for any row (a failed attempt, at HQ_REVIEW_FAKE_COST like the rest)."""
     how = os.environ.get("HQ_REVIEW_FAKE")
     cost = float(os.environ.get("HQ_REVIEW_FAKE_COST") or 0)
@@ -320,7 +329,7 @@ def _fake(row):
         return {"failed": True, "why": "the stand-in never answers", "cost": cost, "s": 0.0, "model": "fake", "effort": EFFORT}
     ask = S.ask_of(row["line"])
     m = re.search(r"HOLE:\s*([^.|]+)", ask)
-    if m:
+    if m and f"FILLED: {m.group(1).strip()}" not in ask:  # a round adds, it takes nothing away: an addition fills the hole
         return {"pass": False, "findings": [m.group(1).strip()], "cost": cost, "s": 0.0, "model": "fake", "effort": EFFORT}
     return {"pass": True, "findings": [], "cost": cost, "s": 0.0, "model": "fake", "effort": EFFORT}
 
@@ -662,6 +671,13 @@ def clear(label, words):
         d, rv = _state()
         rs = rv.get("rows") or {}
         e = rs.get(label) or {}
+        said_no = _stopped(e, S.ask_fp(row["line"]))
+        if said_no and said_no.get("kind") == "no":  # his decision on her no
+            e["fix"].pop("stop")
+            e["fix"]["no_lifted"] = {"words": words, "where": where, "at": int(_clock())}
+            if e.get("verdict") != "flag":
+                S._save(S.RANKS, d)
+                return e
         if e.get("verdict") != "flag":
             sys.exit(f"{label} has no flag to take off.")
         e.update({"ask": S.ask_fp(row["line"]), "verdict": "cleared", "at": int(_clock()),
@@ -740,13 +756,20 @@ def golden_current():
 # ---------- F86: the fix-and-review loop ----------
 
 ROUNDS = 3  # rounds an item, then the sit-down list and one text to him (F86, his yes 30 October 2026; F101: per item, not per day)
-STOP_WORDS = {"his": "needs him", "cap": f"{ROUNDS} rounds and the review still flags it", "mark": "her mark didn't land"}
+STOP_WORDS = {"his": "needs him", "cap": f"{ROUNDS} rounds and the review still flags it", "mark": "her mark didn't land",
+              "no": "she says no, it's his to decide"}
 
 
 def _stopped(e, fp):
     """The stop that holds on these words, or None: new words (his answer written in) lift it."""
     st = (e.get("fix") or {}).get("stop")
     return st if st and st.get("ask") == fp else None
+
+
+def _said_no(row):
+    """Her no on this row as its words stand, or None."""
+    st = _stopped((_state()[1].get("rows") or {}).get(row["label"]) or {}, S.ask_fp(row["line"]))
+    return st if st and st.get("kind") == "no" else None
 
 
 def _rounds(e):
@@ -788,7 +811,7 @@ def next_round(now=None):
                 continue
             f = e.setdefault("fix", {})
             if f.get("stop") and f["stop"].get("ask") != fp:  # new words lifted the stop; after the cap, rounds from nothing
-                if f.pop("stop").get("kind") == "cap":
+                if f.pop("stop").get("kind") in ("cap", "no"):  # both are endings: his answer gets rounds of its own
                     f["n"] = 0
             n = _rounds(e)
             if n >= ROUNDS:
@@ -862,7 +885,7 @@ def stop_stays(label):
         d, rv = _state()
         f = ((rv.get("rows") or {}).get(label) or {}).get("fix") or {}
         st = f.get("stop")
-        if row and st and st.get("kind") == "his" and st.get("round") == f.get("n"):
+        if row and st and st.get("kind") in ("his", "no") and st.get("round") == f.get("n"):
             st["ask"] = S.ask_fp(row["line"])
             S._save(S.RANKS, d)
 
@@ -877,9 +900,11 @@ def round_wanted(label, mode):
     return e.get("ask") == S.ask_fp(r["line"]) and e.get("verdict") == ("pass" if mode == "mark" else "flag")
 
 
-# Words that say what he said or chose. What's new with these in it needs his words between quotes, found (reword).
-_ATTRIBUTED = re.compile(r"\b(?:(?:he|the user)\s+(?:said|says|typed|wrote|told|answered|agreed|confirmed|chose|picked|decided|wants?)\b"
-                         r"|(?:his|their|the user'?s|your)\s+(?:words?|yes|say-so|answer|choice|pick|decision)\b)", re.I)
+def in_round():
+    """(label, "fix"|"mark") when this process is a round of the loop, or None. The runner sets HQ_ROUND on her session, so whatever she
+    runs has it, a script of hers too; a call and a person don't."""
+    label, _, mode = (os.environ.get("HQ_ROUND") or "").partition(":")
+    return (label.upper(), mode) if label and mode else None
 
 
 def _new_quotes(old, new):
@@ -888,14 +913,34 @@ def _new_quotes(old, new):
     return pick(new) - pick(old)
 
 
-def _new_claims(old, new):
-    """The new sentences that say what he said or chose, with no quote in them: nothing for the quote check to hold."""
-    said = lambda t: [m.group(0).lower() for m in _ATTRIBUTED.finditer(t)]  # noqa: E731
-    before, after = S.ask_of(old), S.ask_of(new)
-    grown = {w for w in set(said(after)) if said(after).count(w) > said(before).count(w)}
-    was = set(re.split(r"(?<=[.!?;])\s+", before))
-    return [x for x in re.split(r"(?<=[.!?;])\s+", after)
-            if x not in was and grown & set(said(x)) and not S._QUOTES.search(x)]
+# Quote marks: double, curly, guillemets, and single ones around words (an apostrophe isn't one).
+_DOUBLE = re.compile(r'["“„«]([^"“”„«»]*)["”“»]')
+_SINGLE = re.compile(r"(?<![\w'’])['‘]([^'‘’]+)['’](?![\w])")
+_ANY_MARK = re.compile(r'["“”„«»]')
+_CODE = re.compile(r"`[^`]*`")
+
+
+def _addition_why(words):
+    """What's wrong with an addition of hers, or None. A quote in it must be one unbroken piece of one line of his (sprint.his_quote: his own
+    lines, never an agent's), and a team's mark can't stand in it: those are put by their own commands, in their own place. Code between
+    backticks is code: its quote marks are no quotes."""
+    words = _CODE.sub(" ", words)
+    if S.TEAM_NOTE.search(words):
+        return ("Refused: that has the shape of the team's mark (Built, Done, Fixed, QA passed or failed). A mark is put only by its own "
+                "command at its own place. Say it without that shape.")
+    rest = words
+    for marks in (_DOUBLE, _SINGLE):
+        for m in marks.finditer(rest):
+            bit = m.group(1).strip()
+            if re.search(r"…|\.\.\.", bit):
+                return f"Refused: a quote of his is one unbroken piece of one line of his, with no … in it: {bit[:80]!r}."
+            if not S.his_quote(bit):
+                return (f"Refused: this between quote marks isn't in his own lines (a call, a text or a quick note of his; three words at least, and an "
+                        f"agent's line is never his): {bit[:80]!r}. Copy his words exactly, or take the quote marks off: a name or a label goes without.")
+        rest = marks.sub(" ", rest)
+    if _ANY_MARK.search(rest):
+        return "Refused: a quote mark with no partner. Quote marks stand only around his own words."
+    return None
 
 
 def _note_of(line):
@@ -907,11 +952,13 @@ def _note_of(line):
 
 
 def reword(label, payload):
-    """Her edits inside this one row's ask, all or nothing, under the queue's lock: its status, its label, its other cells
-    and the team's notes stay as they are, and a new quote anywhere in it, or a new line saying what he said or chose,
-    must be his words found in a call, the notes or the log: no guess written."""
+    """A call's edits inside this one row's ask, all or nothing, under the queue's lock: its status, its label, its other cells
+    and the team's notes stay as they are, and a new quote anywhere in it must be found in a call, the notes or the log. A round
+    never comes through here: it can only add (addition)."""
     import handover
     label = label.strip().upper()
+    if in_round():
+        sys.exit(f"Refused: a round can only add; everything in the row stays exactly as it is. Your words go through: python3 review.py add {label} with the words.")
     try:
         edits = json.loads(payload).get("edits") or []
         assert isinstance(edits, list) and edits and all(isinstance(x, dict) for x in edits)
@@ -937,10 +984,6 @@ def reword(label, payload):
         if bad:
             sys.exit(f"Refused: a new quote isn't in a call, the notes or the log: {bad[0][:80]!r}. His words are never written for "
                      "him; it goes on the sit-down list. (Not his words at all, a name or a label: write it without the quote marks.)")
-        said = _new_claims(line, new)
-        if said:
-            sys.exit(f"Refused: this says what he said or chose without his words between quotes: {said[0][:80]!r}. "
-                     "His words are never written for him; it goes on the sit-down list.")
         hqpaths.guard_roadmap(q.ROADMAP)
         tmp = f"{q.ROADMAP}.reword.{os.getpid()}"
         with open(tmp, "w", encoding="utf8") as f:
@@ -949,8 +992,52 @@ def reword(label, payload):
     return f"{label} changed; the review looks again once it's been quiet {QUIET // 60} minutes."
 
 
-def sitdown(label, what, ifthen, now=None):
-    """A finding only he can answer: on her sit-down list, the loop stops for this row, one text in if-then shape."""
+def addition(label, words, now=None):
+    """What a round writes: her words, under her name and the date, in one place: after everything that stands in the row's ask and before
+    the team's notes. The rest of the row stays byte for byte, so nothing of his can go, and nothing she writes can read as his."""
+    import cycles
+    label, words = label.strip().upper(), q.one_line(words or "").strip()
+    held = in_round()
+    if held and (held[0] != label or held[1] != "fix"):
+        sys.exit(f"Refused: this run is on {held[0]} ({held[1]}); only a round adds, and only to its own row.")
+    if not words:
+        sys.exit("Refused: no words to add.")
+    why = _addition_why(words)
+    if why:
+        sys.exit(why)
+    day = dt.datetime.fromtimestamp(now or _clock())
+    mine = f"{cycles.fix_name()}'s addition ({day.day} {day:%B %Y}): " + re.sub(r"(?<!\\)\|", r"\\|", words)
+    with q.locked():
+        text = open(q.ROADMAP, encoding="utf8").read()
+        row = next((r for r in S.open_rows(text) if r["label"] == label), None)
+        if not row:
+            sys.exit(f"Refused: {label} isn't an open row on the planning.")
+        line = row["line"]
+        cs = hqpaths.cells(line)
+        if len(cs) < 3:
+            sys.exit(f"Refused: {label} has no description to add to.")
+        at = S.team_note_at(cs[2])
+        ask, notes = (cs[2], "") if at is None else (cs[2][:at], cs[2][at:])
+        cs[2] = (ask.rstrip() + " " + mine + (" " + notes if notes else "")).strip()
+        new = hqpaths.join_cells(cs)
+        if "\n" in new or not S.ask_of(new).startswith(S.ask_of(line)) or _note_of(new) != _note_of(line):  # the promise, held once more on the result
+            sys.exit("Refused: the addition would change what stands in the row. Nothing written.")
+        was, will, held_ = S.field_texts(line), S.field_texts(new), S.ready_fields({"label": label, "line": new})
+        for key, name in (("his_words", "His words"), ("sources", "Sources")):  # what she writes she can't take back: a field of hers that won't hold doesn't go in
+            if not was[key] and will[key] and not held_[key]["ok"]:
+                sys.exit(f"Refused: the {name} in your addition wouldn't hold: {held_[key]['why']}. Nothing written; a round can't change it later, so put it right now.")
+        hqpaths.guard_roadmap(q.ROADMAP)
+        tmp = f"{q.ROADMAP}.reword.{os.getpid()}"
+        with open(tmp, "w", encoding="utf8") as f:
+            f.write(text.replace(line, new, 1))
+        os.replace(tmp, q.ROADMAP)
+    still = S.fields_why({"label": label, "line": new})
+    return (f"{label}: your addition is in; the review reads it as part of the row and looks again once it's been quiet {QUIET // 60} minutes."
+            + (f" Your mark will need: {still.split(': ', 1)[1]}." if still else " Its ready fields hold."))
+
+
+def sitdown(label, what, ifthen, now=None, kind="his", instead=""):
+    """A finding only he can answer: on her sit-down list, the loop stops for this row, one text in if-then shape. Her no goes the same way (no)."""
     import cycles
     import ledger
     label, what, ifthen = label.strip().upper(), q.one_line(what or "").strip(), q.one_line(ifthen or "").strip()
@@ -967,14 +1054,26 @@ def sitdown(label, what, ifthen, now=None):
         fp = S.ask_fp(row["line"])
         had = _stopped(e, fp)
         f = e.setdefault("fix", {})
-        f["stop"] = {"ask": fp, "kind": "his", "why": what, "at": int(now), "round": f.get("n")}
+        if not (had and had.get("kind") == "no"):  # her no stands: a sit-down after it in the same round doesn't replace it
+            f["stop"] = {"ask": fp, "kind": kind, "why": what, "at": int(now), "round": f.get("n")}
+            if instead:
+                f["stop"]["instead"] = instead
         rv["rows"] = rs
         d["review"] = rv
         S._save(S.RANKS, d)
-    if had and had.get("kind") == "his":
+    if had and had.get("kind") in ("his", "no"):
         return f"{label} was on the sit-down list already; no second text."
-    ledger.note(cycles.FIX_AGENT, f"{label} on the sit-down list: {what}")
+    ledger.note(cycles.FIX_AGENT, f"{label} on the sit-down list: " + (f"she says no: {what} Instead: {instead}" if kind == "no" else what))
     return f"{label} is on the sit-down list. " + cycles.ask(cycles.FIX_AGENT, ifthen)
+
+
+def no(label, why, instead, ifthen, now=None):
+    """The third way out of a round, beside improving a row and handing it to him: this can't be done as asked, or isn't worth building. The row
+    stops, gets no Ready mark, and nothing else on it changes; he decides. An ending, not a failed round."""
+    why, instead = q.one_line(why or "").strip(), q.one_line(instead or "").strip()
+    if not why or not instead:
+        sys.exit("Refused: a no says why, in one or two plain sentences, and what could work instead.")
+    return sitdown(label, why, ifthen, now, kind="no", instead=instead)
 
 
 def sitdown_rows(rows=None):
@@ -996,7 +1095,7 @@ def sitdown_words(rows=None):
         return ""
     return "\n".join(["ON YOUR SIT-DOWN LIST (F86): the loop stopped for these rows; each waits for his answer."]
                      + [f"- {r['label']} {q.one_line(r['title'])[:120]} ({STOP_WORDS.get(s.get('kind'), 'stopped')}): {s.get('why', '')}"
-                        for r, s in sd])
+                        + (f" What could work instead: {s['instead']}" if s.get("instead") else "") for r, s in sd])
 
 
 def role_writes():
@@ -1059,6 +1158,8 @@ def list_words():
 
 
 def main(argv):
+    if argv[:1] == ["add"] and len(argv) == 2:  # the words on stdin, also for a hand-over to the main
+        argv = [*argv, sys.stdin.read()]
     if argv and argv[0] in role_writes():
         import role
         if not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
@@ -1076,7 +1177,7 @@ def main(argv):
         print(json.dumps(ask_reviewer(row), indent=1))
     elif argv[0] == "clear" and len(argv) == 3:
         clear(argv[1], argv[2])
-        print(f"{argv[1].upper()}: the flag is off, his words kept with it.")
+        print(f"{argv[1].upper()}: the flag and any no of hers are off, his words kept with it.")
     elif argv[0] == "pass" and len(argv) == 1:
         run_pass()
     elif argv[0] == "pass-result":
@@ -1089,8 +1190,12 @@ def main(argv):
         print(flag_words() or "No flagged rows on the planning.")
     elif argv[0] == "reword" and len(argv) == 3:
         print(reword(argv[1], argv[2]))
+    elif argv[0] == "add" and len(argv) == 3:
+        print(addition(argv[1], argv[2]))
     elif argv[0] == "sitdown" and len(argv) == 4:
         print(sitdown(argv[1], argv[2], argv[3]))
+    elif argv[0] == "no" and len(argv) == 5:
+        print(no(argv[1], argv[2], argv[3], argv[4]))
     elif argv[0] == "sitdown-list":
         print(sitdown_words() or "Nothing on the sit-down list.")
     else:

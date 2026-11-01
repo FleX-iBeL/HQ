@@ -66,6 +66,9 @@ def _lock(rel):
 
 def edit(rel: str, payload: str) -> int:
     rel = rel.replace(os.sep, "/").lstrip("./")
+    if os.environ.get("HQ_ROUND") and rel == "HQ/roadmap.md":  # F86: a round only adds, through review.py add
+        print("Refused: a round can only add to its row, through review.py add.")
+        return 2
     if not role.one_writer(rel) or ".." in rel.split("/"):
         print(f"Refused: {rel} isn't one of the files only the main writes.")
         return 2

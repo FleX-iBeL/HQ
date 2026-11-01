@@ -14,10 +14,11 @@ F99 (30 October 2026): the same hook guards every team job against sending: any 
 refused, whatever the connector is called. A team job needs the planning (it writes its results in the row), so only
 a cycle gets the shared-file part: `--mail-only` is how a team job's settings call it.
 
-F86: a round of the fix-and-review loop (`--fix LABEL fix|mark`) touches its one row: a fix run rewords it, a mark run marks it (a
-mark run doesn't reword: rounds are counted, marks aren't, and that would be a loop with no cap), either puts it on the sit-down list;
-and her ledger. Nothing else of HQ's is written, no file is edited by hand, and no other text goes out: sitdown is the round's one
-text. Reading stays free.
+F86: a round of the fix-and-review loop (`--fix LABEL fix|mark`) touches its one row, through its proper commands: a fix run adds to
+it, a mark run marks it (a mark run doesn't add: rounds are counted, marks aren't, and that would be a loop with no cap), either puts it
+on the sit-down list or says no; and her ledger. Reading stays free. Like the rest here it's a filter for an honest session: it reads
+commands, not what a script does. What keeps the row safe is in the row's own doors: review.py adds and refuses the rest (HQ_ROUND),
+sprint.py ready holds the mark.
 
 F104, F103, F106 (fix round of batch 3): every job, whatever its kind, is kept off the work line on a friend's copy (any way of
 moving the head onto commits she hasn't got released), off HQ's guard variables, off the switches and the two records, and it
@@ -60,10 +61,10 @@ _KEPT_SHELL = re.compile(
     rf"|\b(?:python3?|perl|ruby|node)\b\s+(?:-[cCeE]\b|-\s|<<)[^|&]*{_KEPT_NAME}"
     rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{_KEPT_NAME}"
     rf"|{_IN_PLACE.format(name=_KEPT_NAME)}", re.I)
-# F104: what opens a gate when it's set by hand. HQ_MAKER (who the maker is), HQ_PRIVACY_PASSED (skips the pre-push hook), HQ_UNDER_TEST
+# F104: what opens a gate when it's set by hand. HQ_ROUND (F86: a round only adds), HQ_MAKER (who the maker is), HQ_PRIVACY_PASSED (skips the pre-push hook), HQ_UNDER_TEST
 # and HQ_PROOF_* (the gate on done), HQ_NO_WALL (the wall), HQ_ROLE_HERE (past the hand-over to the main), HQ_READY_FIELDS, HQ_REVIEW and
 # HQ_REVIEW_FAKE (the ready check and the reviewer). HQ_IN_JOB has its own line below.
-_GUARD = r"\bHQ_(?:MAKER|PRIVACY_PASSED|UNDER_TEST|PROOF_\w+|NO_WALL|ROLE_HERE|READY_FIELDS|REVIEW|REVIEW_FAKE)\b"
+_GUARD = r"\bHQ_(?:MAKER|PRIVACY_PASSED|UNDER_TEST|PROOF_\w+|NO_WALL|ROLE_HERE|READY_FIELDS|REVIEW|REVIEW_FAKE|ROUND)\b"
 _SETS_GUARD = re.compile(rf"{_GUARD}\s*\]?\s*(?:=(?!=)|:\s)"
                          rf"|\b(?:export|declare|typeset|readonly|local|unset|setenv|read)\b[^|;&\n]*{_GUARD}"
                          rf"|\benv\b[^|;&\n]*\s-u\s*{_GUARD}|\bprintf\s+-v\s*{_GUARD}"
@@ -178,7 +179,7 @@ def off_the_release(cmd: str) -> bool:
 
 def ran(cmd: str, depth: int = 0) -> str:
     """F104: a command with what would really run, near enough: a backslash line break is no break, and what only stands in it is out: what's inside
-    quotes as an argument with spaces in it (a commit message, a grep's pattern, a note), heredocs and comments. A quoted single word stays a word.
+    quotes as an argument with spaces or shell marks in it (a commit message, a grep's pattern, a note), heredocs and comments. A quoted single word stays a word.
     What a shell or Python is handed to run, by -c, eval or a heredoc, stays in, read the same way: there the quotes are the command."""
     cmd = cmd.replace("\\\n", " ")
     out, piece, waiting, i = [], "", [], 0
@@ -204,7 +205,7 @@ def ran(cmd: str, depth: int = 0) -> str:
                 j += 1
             i = j + 1
             runs = given(buf, bool(_RUNS_SHELL.search(piece)), bool(_RUNS_CODE.search(piece)))
-            put(f" {runs} " if runs else buf if not re.search(r"\s", buf) else " Q ")
+            put(f" {runs} " if runs else buf if not re.search(r"[\s;&|]", buf) else " Q ")  # a grep's 'a|b' is one argument, no pipe
         elif c == "#" and (not piece or piece[-1].isspace()):
             while i < len(cmd) and cmd[i] != "\n":
                 i += 1
@@ -295,22 +296,30 @@ def job_guard(cmd: str) -> str | None:
 
 # F86: what writes, besides role.WRITES (what a call may hand to the main); a round's own ways out are named in fix_guard.
 _FIX_ALSO = {"cycles": {"ask", "batch", "text", "plan", "order", "set", "done", "failed", "proposal"}, "direct_line": None, "handover": None,
-             "review": {"clear", "pass", "run", "golden", "tick"}}
-_SCRIPT = re.compile(r"(?<![\w-])([a-z_]+)\.py\s+(\S+)?\s*(\S+)?")
+             "review": {"clear", "pass", "run", "golden", "tick"}, "set-status": None, "set_status": None, "notes": None, "gitlock": None, "push": None,
+             "qa": {"pass", "fail", "queue"}, "jobs": {"mark", "held"}}
+_SCRIPT = re.compile(r"(?<![\w-])([a-z_-]+)\.py\b\s*(\S+)?\s*(\S+)?")
+_GIT_WRITES = {"checkout", "restore", "reset", "stash", "commit", "push", "pull", "fetch", "merge", "rebase", "apply", "am", "rm", "mv", "clean", "cherry-pick", "revert", "switch", "add",
+               "update-ref", "read-tree", "worktree", "clone"}  # reading stays free
+_BY_HAND = re.compile(r"\b(?:cp|mv|rm|ln|truncate|dd|rsync|install|unlink|tee)\b[^|;&\n]*(?:roadmap\.md|sprint\.json)")
+_MCP_READS = re.compile(r"(?:get|list|search|read|query|suggest)")
 
 
 def fix_guard(cmd: str, label: str, mode: str) -> str | None:
     """F86: what a round of the loop may not do with a shell command, in a refusal's words; None when it's fine."""
     import role
-    no = (f"HQ: refused: this run is one round on {label}: only " + (f"sprint.py ready {label}" if mode == "mark" else f"review.py reword {label}") +
-          f", review.py sitdown {label}, your ledger, and reading. What's left goes on the sit-down list.")
+    no = (f"HQ: refused: this run is one round on {label}: only " + (f"sprint.py ready {label}" if mode == "mark" else f"review.py add {label}") +
+          f", review.py sitdown {label}, review.py no {label}, your ledger, and reading. What's left goes on the sit-down list.")
     named = re.sub(r"[\"']([^\"'\n]*\.py)[\"']", lambda m: m.group(1).replace(" ", "_"), cmd)  # a path with a space in it stays one word
     for piece in re.split(r"[;&|\n]+", ran(named)):
+        git = re.search(r"(?:^|\s)git\s+(?:(?:-C|-c|--git-dir|--work-tree)\s+\S+\s+|-\S+\s+)*([a-z-]+)", piece)
+        if git and git.group(1) in _GIT_WRITES or _BY_HAND.search(piece):
+            return no
         if _says_only(piece):
             continue
         for script, sub, arg in _SCRIPT.findall(piece):
-            if script == "review" and sub in ("reword", "sitdown"):
-                if arg.upper() != label or sub == "reword" and mode == "mark":
+            if script == "review" and sub in ("reword", "add", "sitdown", "no"):
+                if arg.upper() != label or sub in ("reword", "add") and mode == "mark":
                     return no
             elif script == "sprint" and sub == "ready":
                 if mode != "mark" or arg.upper() != label:
@@ -340,8 +349,10 @@ def decide(ask: dict, mail_only: bool = False, fix: tuple | None = None) -> tupl
         return 2, "HQ: refused: a build in his day hours goes only on his own say-so; a job can't give it to itself."
     if mail_only:
         return 0, ""
-    if fix and name in EDITORS and not any(x in str(inp.get("file_path") or inp.get("notebook_path") or "").replace(os.sep, "/") for x in FREE):
-        return 2, f"HQ: refused {name}: this run is one round on {fix[0]}; it writes through review.py reword and your ledger, nothing by hand."
+    if fix and name in EDITORS and "HQ/ledger/" not in os.path.normpath(str(inp.get("file_path") or inp.get("notebook_path") or "")).replace(os.sep, "/"):
+        return 2, f"HQ: refused {name}: this run is one round on {fix[0]}; it writes through review.py add and your ledger, nothing by hand."
+    if fix and name.startswith("mcp__") and not _MCP_READS.match(name.rsplit("__", 1)[-1]):
+        return 2, f"HQ: refused {name}: this run is one round on {fix[0]}; a round reads, it doesn't write to the calendar or the mail."
     if fix and name == "Bash":
         why = fix_guard(str(inp.get("command") or ""), *fix)
         if why:

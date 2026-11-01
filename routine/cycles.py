@@ -74,6 +74,7 @@ MARK_CYCLE = "Agent cycle: "
 MARK_STEP = "Agent step: "
 MARK_FIX = "Agent fix: "
 FIX_AGENT = "moneypenny"  # F86: the loop is hers; the rows are hers to write
+FIX_TURNS = 60  # F86: a round's turns, in her step's minutes, its price: at 20, 5 of 11 real rounds ran out, 3 with nothing written; 15 real ones at 40 took 8 to 35 but for two a hook fault held up, all under 3 minutes
 PICKS_MOST = 3
 QUESTIONS_MOST = 3
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -498,9 +499,12 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
 
     def skip(why: str, morning: bool = False) -> str:
         _jobs("stop", str(job["n"]))
-        if p["kind"] == "fix" and not job.get("state", "").startswith("held"):  # F86: a round that never ran doesn't count; a held one ran
+        if p["kind"] == "fix":
             import review
-            review.round_refund(p["label"], p["mode"])
+            if not job.get("state", "").startswith("held"):  # F86: a round that never ran doesn't count; a held one ran
+                review.round_refund(p["label"], p["mode"])
+            elif p["mode"] == "mark" and review.mark_ended(p["label"], f"her mark's run was held and then dropped: {why}"):  # a mark gets one run: never lost in silence
+                ledger.note(aid, f"{p['label']} on the sit-down list: passed by the review, not marked")
         ledger.entry(aid, f"{p['name']} skipped (job {job['n']})", [f"skipped: {why}"], now)
         st["skipped"][str(job["n"])] = why
         if morning and p["kind"] == "session":
@@ -579,13 +583,15 @@ def box(parsed: dict, base: Path | None = None) -> dict:
     if parsed["kind"] == "look":
         lk = next((x for x in a.get("looks") or [] if x.get("name") == parsed["name"]), {})
         return {"minutes": lk.get("minutes", a["step"]["minutes"]), "turns": lk.get("turns", a["step"]["turns"])}
+    if parsed["kind"] == "fix":  # its price is her step's minutes (_round_points); turns cost nothing past those minutes
+        return {"minutes": a["step"]["minutes"], "turns": max(FIX_TURNS, a["step"]["turns"])}
     return {"minutes": a["step"]["minutes"], "turns": a["step"]["turns"]}
 
 
 def box_args(job: dict, parsed: dict, run_dir: str, base: Path | None = None) -> list[str]:
     b = box(parsed, base)
     return ["--max-minutes", str(b["minutes"]), "--max-turns", str(b["turns"]), "--box-note",
-            os.path.join(run_dir, f"job-{job['n']}.box.json")]
+            os.path.join(run_dir, f"job-{job['n']}.box.json")] + (["--round", f"{parsed['label']}:{parsed['mode']}"] if parsed["kind"] == "fix" else [])
 
 
 # -- the prompts -----------------------------------------------------------------------------------------------------------
@@ -804,20 +810,34 @@ def _fix_words(aid: str, parsed: dict) -> str:
     ask = sprint.ask_of(row["line"])
     st = review.states([row]).get(label, {}) if row.get("label") else {}
     sit = (f"python3 \"{rv}\" sitdown {label} \"the open point with your proposed solution\" \"If ..., I'll ...; if not, ...\"")
+    no_ = (f"python3 \"{rv}\" no {label} \"why, in one or two plain sentences\" \"what could work instead\" \"If ..., I'll ...; if not, ...\"")
     end = f"End with one line in your ledger: python3 \"{ROOT / 'routine' / 'ledger.py'}\" {aid} note \"{parsed['name']}: what you did\"."
     if parsed["mode"] == "mark":
         return (f"This run: one row, {label}. The review passed it, so your mark comes second. Nothing else is loaded.\n\nThe row:\n{ask}\n\n"
                 f"Hold it against your ready check yourself. It holds: python3 \"{ROOT / 'routine' / 'sprint.py'}\" ready {label}. "
-                f"It doesn't, or the mark is refused: nothing is forced, it goes to him: {sit}\n{end}")
+                f"It doesn't, or the mark is refused: nothing is forced, it goes to him: {sit} And if you now see it can't be done as asked or isn't worth building, "
+                f"say no, a good ending: {no_}\n{end}")
     finds = "\n".join(f"- {f}" for f in st.get("findings") or []) or "- (no findings written)"
+    fields = sprint.fields_words(row) if row.get("label") and sprint.fields_why(row) else ""
     return (f"This run: round {parsed['round']} of at most {review.ROUNDS} on one row of the planning, {label}. The review flagged it. "
-            f"Nothing else is loaded; look up only what a finding needs.\n\nThe row:\n{ask}\n\nThe review's findings:\n{finds}\n\n"
-            "For each finding, one of two:\n"
-            f"- You can ground it (his words with a date, a rule, a planning row, the code): improve the row, naming the source: "
-            f"python3 \"{rv}\" reword {label} '{{\"edits\": [{{\"old\": \"the exact words\", \"new\": \"the new words\"}}]}}' (this one row only; a shared file is "
-            "written no other way). The review looks again by itself.\n"
+            "Nothing else is loaded. Every command you need is in this prompt, so don't read HQ's code to learn how the loop works; look up only what a "
+            f"finding needs.\n\nThe row:\n{ask}\n\nThe review's findings:\n{finds}\n\n"
+            + (f"What your mark will need, the row's ready fields:\n{fields}\n\n" if fields else "") +
+            "A round can only add. Everything that stands in the row stays exactly as it is, every quote and every sentence; you can't change or take out a word. "
+            f"What you add goes in one place, and the program puts {fix_name()}'s addition with the date in front of it, so nothing you write can read as his:\n"
+            f"python3 \"{rv}\" add {label} <<'EOF'\nyour words, one go for all you add\nEOF\n"
+            "Quote marks only around his own words, copied from one line of his (his lines in the calls in HQ/calls, his texts, his quick notes) in one unbroken piece, "
+            "no … in it; an agent's line is never his. A name or a label goes without quote marks; code goes between backticks.\n"
+            "A ready field you can ground goes in the same addition. His words: a real quote of his. Sources: each item on its own between semicolons, and each one a planning row (F86), "
+            "a rule (rule 13), a dated call (call of 20 October 2026) or a file path; no line numbers, jobs or commits in that field, they read as a source that isn't there. "
+            "The command tells you if a field won't hold, and nothing is written then. A field that's there and wrong you can't change: that one is his.\n\n"
+            "Three ways out of this round, for the row as a whole:\n"
+            f"- You can ground it (his words with a date, a rule, a planning row, the code): add it, naming the source. The review reads your addition as part of the row and looks again by itself.\n"
             f"- Only he can answer it (his words are missing, a choice that's his, a number you'd pick): you never fill it in, not even marked as yours. {sit} "
             "That's his one text, and the loop stops for this row. All the open points of the row in that one command.\n"
+            f"- It can't be done as asked, or it isn't worth building: say no. {no_} "
+            "The row stops, gets no Ready mark, nothing else on it changes, and he decides. That's a good ending of a round, not a failed one. Getting a row through is not "
+            "the goal; a row that's right, or an honest no, is.\n"
             f"Never mark it ready in this round: the review's pass comes first, and your mark gets its own run after it.\n{end}")
 
 
@@ -1075,16 +1095,7 @@ def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Pat
         if rec is not None and rec.get("state") in ("planned", "started"):
             rec["state"] = "boxed" if note.get("boxed") else "ended without saying what came of it"
             ledger.note(aid, f"step {parsed['k']}: {rec['state']}")
-    # boxed twice in a row
-    if note.get("boxed"):
-        st_["boxed_streak"] = st_.get("boxed_streak", 0) + 1
-        if st_["boxed_streak"] >= 2:
-            tripwire(aid, "boxed twice in a row", f"two runs in a row ended at their box ({parsed['name']} at its {note['boxed']})", now, base, d)
-            st_["boxed_streak"] = 0
-    else:
-        st_["boxed_streak"] = 0
-    told = False  # F86: she already put the row to him: one text
-    if parsed["kind"] == "fix":  # F86: what the row's own words say (a "refused", a push.py) is no refusal or action of hers
+    if parsed["kind"] == "fix":  # F86: a round's texts are her sit-down, her no and the cap; what it tried or ran into stays in her ledger
         import review
         cut = bool(note.get("boxed") or state.startswith("ended"))
         ledger.note(aid, f"{parsed['name']}: " + (f"cut off ({note.get('boxed') or state}); " + ("not marked, it stays on her list" if parsed["mode"] == "mark" else
@@ -1093,16 +1104,27 @@ def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Pat
         if parsed["mode"] == "mark":
             if review.mark_ended(parsed["label"], "her mark's run was cut off" if cut else "her mark's run ended with no mark and nothing for the sit-down list"):
                 ledger.note(aid, f"{parsed['label']} on the sit-down list: passed by the review, not marked")
-            told = any(r["label"] == parsed["label"] and s.get("kind") == "his" for r, s in review.sitdown_rows())
         else:
             review.stop_stays(parsed["label"])
-        said = tuple(f"{w} {parsed['label']}" for w in ("reword", "sitdown")) + ("sprint.py show", "sprint.py fields")
-        note = {**note, "refused": [r for r in note.get("refused") or [] if _REALLY_REFUSED.search(r.get("said", "")) and not any(w in r.get("tool", "") for w in said)],
-                "tools": [t for t in note.get("tools") or [] if not any(w in t for w in said)]}
+        for r in [x for x in note.get("refused") or [] if _REALLY_REFUSED.search(x.get("said", ""))][:1]:
+            what = "a Ready mark refused" if "sprint.py ready" in r.get("tool", "") else "refused"
+            ledger.note(aid, f"{parsed['name']}: {what}: {r.get('tool', '')[:80]}: {r.get('said', '')[:120]}")
+        _save_state(d)
+        if log:
+            log(f"cycles: job {job['n']} ({aid}, {parsed['name']}) {how}")
+        return note
+    # boxed twice in a row
+    if note.get("boxed"):
+        st_["boxed_streak"] = st_.get("boxed_streak", 0) + 1
+        if st_["boxed_streak"] >= 2:
+            tripwire(aid, "boxed twice in a row", f"two runs in a row ended at their box ({parsed['name']} at its {note['boxed']})", now, base, d)
+            st_["boxed_streak"] = 0
+    else:
+        st_["boxed_streak"] = 0
     # refused, outside her limits, a shared file written directly, a Ready mark refused
     for r in note.get("refused") or []:
         if "sprint.py ready" in r.get("tool", "") and aid == "moneypenny":
-            tripwire(aid, "a Ready mark refused on its fields", r.get("said", "")[:160], now, base, d, text=not told)
+            tripwire(aid, "a Ready mark refused on its fields", r.get("said", "")[:160], now, base, d)
         else:
             tripwire(aid, "a refused command or push", f"{r.get('tool', '')[:80]}: {r.get('said', '')[:120]}", now, base, d)
         break
@@ -1279,6 +1301,11 @@ def drop_waiting(now: dt.datetime | None = None, base: Path | None = None, log=N
                 gatekeep(j, now, base, log)
                 did.append(f"job {j['n']} dropped at the hours' end")
     return did
+
+
+def fix_name(base: Path | None = None) -> str:
+    """Her name as his HQ has it, for the mark on what she adds."""
+    return (_agent(FIX_AGENT, base) or {}).get("name") or FIX_AGENT.capitalize()
 
 
 def _round_points(base: Path | None = None) -> float:

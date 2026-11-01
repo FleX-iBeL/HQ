@@ -756,6 +756,7 @@ _QUOTES = re.compile(r"[\"“”]([^\"“”]{%d,}?)[\"“”]" % QUOTE_MIN)
 _DATE = re.compile(r"\b(\d{1,2}) (January|February|March|April|May|June|July|August|September|October|November|December) (\d{4})\b", re.I)
 GREP_FILES = ("HQ/notes.md", "HQ/notes-cleared.md", "coaching/log.md", "coaching/log-archive.md")
 _NEXT_POINT = re.compile(r"\.\s+(?=[A-Z][a-z]+(?: [a-z]+){0,3}(?: means\b|:))")
+ADDITION = re.compile(r"(?:^|(?<=\s))[A-Z][\w -]*'s addition \(\d{1,2} [A-Z][a-z]+ \d{4}\):\s*")  # F86: a round's marked place; a field before it ends there
 
 
 def _ws():
@@ -789,6 +790,7 @@ def field_texts(line):
     for key, pat in FIELD_LABELS:
         for m in re.finditer(r"(?:^|[\s(;.,*])(?:" + pat + r")\s*:\s*", ask, re.I):
             pos.append((m.end(), key, m.start()))
+    pos += [(m.end(), None, m.start()) for m in ADDITION.finditer(ask)]
     pos.sort()
     out = {k: "" for k, _ in FIELD_LABELS}
     for i, (start, key, head) in enumerate(pos):
@@ -797,7 +799,7 @@ def field_texts(line):
         nxt = _NEXT_POINT.search(part)  # the next of the nine points ("Done means", "Test:", "Why:") ends the field
         if nxt:
             part = part[:nxt.start() + 1]
-        if not out[key]:
+        if key and not out[key]:
             out[key] = part.strip().strip("*").strip()
     return out
 

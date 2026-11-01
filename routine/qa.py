@@ -79,8 +79,15 @@ def gated(label: str, text: str) -> bool:
 
 
 def marks(line: str) -> list[tuple[str, str, str]]:
-    """The QA marks in a row, oldest first: (passed|failed, when, what)."""
-    return [(m.group(1), m.group(2), m.group(3).strip()) for m in MARK.finditer(line or "")]
+    """The QA marks in a row, oldest first: (passed|failed, when, what). F86: only at a mark's place, the row's result cells or the team's notes
+    at the end of its description: with the ask going on after it, it's words in the ask, whatever they look like."""
+    import sprint
+    cs = hqpaths.cells(line or "")
+    if len(cs) < 3:
+        return []
+    at = sprint.team_note_at(cs[2])
+    place = " | ".join(([] if at is None else [cs[2][at:]]) + cs[3:])
+    return [(m.group(1), m.group(2), m.group(3).strip()) for m in MARK.finditer(place)]
 
 
 def state(label: str, text: str | None = None) -> str | None:
