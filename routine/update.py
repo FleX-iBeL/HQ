@@ -398,13 +398,18 @@ def changed_outside_local() -> list[str]:
     return [ln[3:] for ln in r.stdout.splitlines() if ln.strip()]
 
 
+def _free_branch(name: str) -> str:
+    """F104: a branch name nothing has yet: going back twice within a minute saves twice."""
+    return name + f"-{int(time.time())}" if not git("rev-parse", "-q", "--verify", f"refs/heads/{name}", timeout=10).returncode else name
+
+
 def backup(target: str) -> dict:
     """Saves the user's changes and own commits on branches, never sent anywhere. Returns what it saved."""
     stamp = time.strftime("%Y%m%d-%H%M")
     saved = {}
     files = changed_outside_local()
     if files:
-        name = f"hq-backup/{stamp}-before-{target}-changes"
+        name = _free_branch(f"hq-backup/{stamp}-before-{target}-changes")
         # F32: a stash is a commit, and a fresh computer often has no git name and email yet.
         git(*IDENTITY, "stash", "push", "--include-untracked", "-m", f"HQ update backup before {target}", timeout=60, check=True)
         git("branch", name, "stash@{0}", timeout=10, check=True)
@@ -413,9 +418,7 @@ def backup(target: str) -> dict:
     head = git("rev-parse", "HEAD", timeout=10).stdout.strip()
     own = git("rev-list", "--count", f"{target}..HEAD", timeout=10).stdout.strip()
     if head and own and int(own) > 0:
-        name = f"hq-backup/{stamp}-before-{target}-commits"
-        if not git("rev-parse", "-q", "--verify", f"refs/heads/{name}", timeout=10).returncode:  # F104: back twice within a minute
-            name += f"-{int(time.time())}"
+        name = _free_branch(f"hq-backup/{stamp}-before-{target}-commits")
         git("branch", name, head, timeout=10, check=True)
         saved["commits"] = {"branch": name, "count": int(own)}
     return saved

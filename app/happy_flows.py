@@ -2953,6 +2953,7 @@ exec sleep 600
 FAKE
 chmod +x "$T/bin/claude"
 cd "$H"
+export HQ_BACKEND_HEADLESS_JOBS=0  # this flow checks a job in its window; the template's headless way has its own flows (F104)
 # A saved usage reading well under the lines, so the routine may start a job.
 python3 - <<'PYC'
 import json, time
@@ -16418,7 +16419,7 @@ print(ledger.text('donna')[-900:])
         (a / "routine/datachanges").mkdir()
         (a / "app").mkdir()
         _sh.copy(ROOT / "app/me.py", a / "app/me.py")
-        (a / ".gitignore").write_text(".status/\nscratch/\nworkspace/\n")
+        (a / ".gitignore").write_text(".status/\nscratch/\nworkspace/\n__pycache__/\n")
         change = 'WHAT = "{what}"\ndef do(f):\n    (f / "HQ/{new}").write_text((f / "HQ/{old}").read_text()); (f / "HQ/{old}").unlink()\ndef undo(f):\n    (f / "HQ/{old}").write_text((f / "HQ/{new}").read_text()); (f / "HQ/{new}").unlink()\n'
         def version(v):
             (a / "VERSION").write_text(v + "\n")
@@ -16616,6 +16617,7 @@ print(json.dumps(out))
         g = lambda *a: _sp.run(["git", "-C", str(hq), *a], capture_output=True, text=True)
         g("checkout", "-q", "-b", "dev"); g("config", "user.name", "t"); g("config", "user.email", "t@example.com")
         (hq / "app").mkdir(); (hq / "routine").mkdir()
+        (hq / ".gitignore").write_text("__pycache__/\n")  # as HQ's own: compiled files aren't HQ's
         for f in ("app/privacy.py", "app/me.py", "routine/hqpaths.py"):
             _sh.copy(ROOT / f, hq / f)
         env = {k: v for k, v in os.environ.items() if k not in ("HQ_PRIVACY_PASSED", "HQ_ROADMAP")}
@@ -16953,7 +16955,7 @@ asyncio.run(main())
         need(BLOCKED_LINE in out, f"waiting for a yes and answered around it: {out!r}")
         return "refused or waiting and answered around it: the program says I couldn't check that, written in the transcript; said by her, asked of him, or a look that ran: nothing added"
 
-    async def flow240(self) -> str:
+    async def flow242(self) -> str:
         """F106, no Claude: one line on the status page shows what's being worked on for him right now: a running helper is on /routines.json and
         on the page, in words; a finished one and one past its box aren't."""
         import shutil as _sh
@@ -18910,7 +18912,9 @@ out = {
  'plain': d('H900 on the HQ roadmap: a small change to a button'),
 }
 fri = time.mktime((2026, 10, 30, 9, 0, 0, 0, 0, -1)); thu = time.mktime((2026, 10, 29, 9, 0, 0, 0, 0, -1))
-out['due'] = [E.friday_due(thu), E.friday_due(fri), E.friday_due(fri + 60)]
+out['due'] = [E.friday_due(thu), E.friday_due(fri), E.friday_due(fri + 60)]  # F103: due until the text went
+E.friday_sent(fri + 60)
+out['due'].append(E.friday_due(fri + 120))
 out['report'] = E.friday_report(hist=[], now=fri)
 print(json.dumps({k: (v if not isinstance(v, dict) else {x: v.get(x) for x in ('est', 'latest', 'steps')}) for k, v in out.items()}))
 """], capture_output=True, text=True, env=env, cwd=str(ROOT))
@@ -18926,7 +18930,7 @@ print(json.dumps({k: (v if not isinstance(v, dict) else {x: v.get(x) for x in ('
             if isinstance(v, dict):
                 need(v["est"] < v["latest"] <= 3 * v["est"] + 1, f"the range is off for {k}: {v}")
         need(o["plain"]["steps"] is None, f"a plain job names steps: {o['plain']}")
-        need(o["due"] == [False, True, False], f"the Friday report isn't due once on a Friday morning: {o['due']}")
+        need(o["due"] == [False, True, True, False], f"the Friday report isn't due until it went out, once on a Friday morning: {o['due']}")
         need("no finished jobs" in o["report"], f"the Friday report with nothing finished: {o['report']}")
         r = sp.run(["node", "--input-type=module", "-e", """
 import { landing, landingWords, lineSettings } from './status/usage.mjs';
@@ -19266,9 +19270,10 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
         def sh(*args, extra=None, timeout=120):
             return _sp.run([py, *args], capture_output=True, text=True, timeout=timeout, env={**env, **(extra or {})})
 
-        # 1. the switches: all off on a fresh install; on, off, listed; a computer's own setting wins
+        # 1. the switches: on a fresh install the briefing and headless jobs on, the rest off; on, off, listed; a computer's own setting wins
         r = sh(root / "app" / "backend.py")
-        need(r.returncode == 0 and r.stdout.count(": off.") == 5, f"a fresh install isn't all off: {r.stdout}")
+        need(r.returncode == 0 and r.stdout.count(": off.") == 3 and "briefing: on" in r.stdout and "headless_jobs: on" in r.stdout,
+             f"a fresh install: the briefing and headless jobs on (F104, F106), the rest off: {r.stdout}")
         need(sh(root / "app" / "backend.py", "on", "briefing").returncode == 0, "the switch couldn't be turned on")
         need(": on." in sh(root / "app" / "backend.py").stdout, "the switch doesn't show on")
         need(sh(root / "app" / "backend.py", "on", "nonsense").returncode == 2, "an unknown switch was accepted")
@@ -25879,7 +25884,7 @@ print("H88OUT " + json.dumps(out))
             need("Workflows they turned on" not in config.voice_rules(), "switched off, the next call still has it")
         finally:
             config.FOLDER = was
-        need("config.voice_rules(" in (APP / "pipeline.py").read_text(), "the call doesn't read the rules fresh")
+        need("config.start_rules(" in (APP / "pipeline.py").read_text() and "voice_rules(context)" in (APP / "config.py").read_text(), "the call doesn't read the rules fresh")
         # the server, on its own folder
         await self.ensure_server()
         sf = Path(self.server.env["HQ_WORKFLOWS_FOLDER"])
@@ -27243,7 +27248,7 @@ FLOWS = {
     237: ("F104: friends only on released versions: a job on a friend's copy never pulls dev; headless on in the template; a feature in pieces stays off until its QA passed or his own words, logged", False, "flow237"),
     238: ("F106: a helper beside a call, with a stand-in for the model: started without a yes, the call goes on, the answer in the same call once; hung up it's a text on her line; boxed in minutes and turns; two at once; a used-up limit stops it", False, "flow238"),
     239: ("F106: a check she couldn't run is never answered around: the program says I couldn't check that when her reply doesn't", False, "flow239"),
-    240: ("F106: one line on the status page shows the helper working for him right now", False, "flow240"),
+    242: ("F106: one line on the status page shows the helper working for him right now", False, "flow242"),
     241: ("F106: a call's start is under the design's size for every agent, on a full workspace; nothing lost from the rules, each topic a lookup without a yes", False, "flow241"),
     230: ("F108: three writers at the same instant, 20 runs on Donna's line and the team line: all 9 lines land; a real repeat stays out", False, "flow230"),
     228: ("F107: Ultra with no 5-hour window: the past stays Max 5x, estimates, planning, nights and page on the week with no 5-hour left, then back on Max 5x with all of it", False, "flow228"),
