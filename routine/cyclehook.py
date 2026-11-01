@@ -16,7 +16,9 @@ a cycle gets the shared-file part: `--mail-only` is how a team job's settings ca
 
 F104, F103, F106 (fix round of batch 3): every job, whatever its kind, is kept off the work line on a friend's copy (any way of
 moving the head onto commits she hasn't got released), off HQ's guard variables, off the switches and the two records, and it
-can't write the ledger or start a helper. The hook reads commands: what a script a job wrote does when it runs isn't seen here.
+can't write the ledger or start a helper. The hook reads commands: what a script a job wrote does when it runs isn't seen here. The words
+of a command can't reach "never" for a friend's copy (`git checkout -` is ordinary git), so the plain ways stop here and the guard on the
+state is the routine's: update.release_minute, the first thing in every minute.
 """
 from __future__ import annotations
 
@@ -33,8 +35,14 @@ SHARED = ("HQ/roadmap.md", "challenges.md", "coaching/log.md", "inbox.md", "HQ/c
           "HQ/games.json", "HQ/coaching.json", "HQ/calendar-todo.json", "HQ/calendar-marks.json", "HQ/mistakes.jsonl", "HQ/trail.jsonl")
 FREE = ("HQ/ledger/", "HQ/direct-line/", "HQ/coaching-line/", "HQ/team-line/", "HQ/notes-")
 EDITORS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
-# a shell write on the file itself: a redirect into it, sed -i, tee, or a python open(..., "w") on it
-_SHELL_WRITE = r"(>>?\s*\S*{name})|(sed\s+-i\S*\s.*{name})|(tee\s+(-a\s+)?\S*{name})|(open\(\s*[\"'][^\"']*{name}[\"']\s*,\s*[\"'][wa])"
+# F104, F103: the plain in-place writers: perl and ruby -i, gawk -i inplace, ed, ex, vim, sponge. What a script a job wrote does, a $(...) and
+# a path in a variable stay outside this on purpose: a job is an honest model doing something by habit, and those aren't habits.
+_IN_PLACE = (r"\b(?:perl|ruby)\s+(?:[^|&\n]*\s)?-[a-zA-Z]*i[^\s]*\s[^|&\n]*{name}"
+             r"|\bg?awk\s+(?:[^|&\n]*\s)?(?:-i\s*|--include[=\s]\s*)inplace\b[^|&\n]*{name}"
+             r"|(?:^|[|;&(\n]\s*)(?:\S*/)?(?:ed|ex|vim?|nvim)\s[^;&\n]*{name}"
+             r"|\bsponge\b[^|;&\n]*{name}")
+# a shell write on the file itself: a redirect into it, sed -i, tee, a python open(..., "w") on it, or an in-place writer
+_SHELL_WRITE = r"(>>?\s*\S*{name})|(sed\s+-i\S*\s.*{name})|(tee\s+(-a\s+)?\S*{name})|(open\(\s*[\"'][^\"']*{name}[\"']\s*,\s*[\"'][wa])|" + _IN_PLACE
 # F104, F103: what no job writes, of any kind: the switches (features.py is the way, it keeps who and when) and the two records.
 KEPT = ("HQ/features.json", "HQ/mistakes.jsonl", "HQ/trail.jsonl")
 _KEPT_NAME = r"(?<![\w-])(?:features\.json|mistakes\.jsonl|trail\.jsonl)"
@@ -44,7 +52,8 @@ _KEPT_SHELL = re.compile(
     rf"|\btee\b[^|;&]*{_KEPT_NAME}"
     rf"|\b(?:cp|mv|rm|ln|truncate|dd|rsync|install|touch|chmod|unlink)\b[^|;&]*{_KEPT_NAME}"
     rf"|\b(?:python3?|perl|ruby|node)\b\s+(?:-[cCeE]\b|-\s|<<)[^|&]*{_KEPT_NAME}"
-    rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{_KEPT_NAME}", re.I)
+    rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{_KEPT_NAME}"
+    rf"|{_IN_PLACE.format(name=_KEPT_NAME)}", re.I)
 # F104: what opens a gate when it's set by hand. HQ_MAKER (who the maker is), HQ_PRIVACY_PASSED (skips the pre-push hook), HQ_UNDER_TEST
 # and HQ_PROOF_* (the gate on done), HQ_NO_WALL (the wall), HQ_ROLE_HERE (past the hand-over to the main), HQ_READY_FIELDS, HQ_REVIEW and
 # HQ_REVIEW_FAKE (the ready check and the reviewer). HQ_IN_JOB has its own line below.
