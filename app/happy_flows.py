@@ -14186,7 +14186,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         def go(code="", cut=False):
             """The planned round becomes a job and runs on a fake claude, through the routine's own start. His words are checked for real."""
             need("became job" in tool("schedule.py", "promote").stdout, "the round didn't become a job")
-            s = drive("start", extra={**fake(code), "HQ_PROOF_ON": "1"})
+            s = drive("start", extra={**fake(code), "HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes"})
             if cut:
                 tool("jobs.py", "mark", str(s["n"]), "ended 12:00 without a done mark")  # what the routine does with a closed run
             return s
@@ -14227,7 +14227,9 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
 
     async def flow254(self) -> str:
         """F86, the last round, no Claude: the loop against what really happens to it, each step on its own bench. One price: with room for
-        a round but not for a job's latest end nothing spins, planned means started. A round only adds: reword and every other door refuse any
+        a round but not for a job's latest end nothing spins, planned means started. His words are never filled from something else: a row found by a
+        job says so and holds, a quote about another thing is refused. After every round the program compares the planning with what stood before it: only
+        her one addition stays, the rest goes back, one text, also when the runner died with it. A no stays until his words lift it, and takes the Ready mark. A round only adds: reword and every other door refuse any
         change to what stands in the row, whatever the change; her words go in one marked place, and a quote in them must be one unbroken piece of
         one line of his. A call still rewords as before. The review reads her addition, so a thin row passes on it. No is a way out: the row
         stops, no Ready mark, one text, his to decide. The box: a normal round finishes. No false alarms: nothing a round read or was
@@ -14244,6 +14246,9 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         def _dt_day():
             d = _dt_.datetime.now()
             return f"{d.day} {d:%B %Y}"
+
+        def _rows(b):
+            return [x for x in b.rm.read_text().split("\n") if x.startswith("| ")]
 
         def step(name, fn):
             try:
@@ -14276,7 +14281,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
 
         def only_adds(b):
             his = '"the export has to work for the whole list"'
-            rnd = {"HQ_ROUND": "F9301:fix", "HQ_PROOF_ON": "1"}
+            rnd = {"HQ_ROUND": "F9301:fix", "HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes"}
 
             def no_change(*edits):  # QA's list: each went through reword on f7b20f9. Not one reaches the row now, a pure addition by way of an edit neither
                 before = b.rm.read_text()
@@ -14301,12 +14306,12 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             line = next(x for x in before.split("\n") if "| F9301 A row" in x)
             r = b.tool("review.py", "add", "F9301", "Size: a small build. The export is the only caller, read in routine/x.py.", extra=rnd)
             need(r.returncode == 0, f"a plain addition: {r.stdout} {r.stderr}")
-            r2 = b.tool("review.py", "add", "F9301", "The second round's fact.", extra=rnd)
-            need(r2.returncode == 0, f"a second addition: {r2.stdout} {r2.stderr}")
+            r2 = b.tool("review.py", "add", "F9301", "A second go in the same round.", extra=rnd)
+            need(r2.returncode != 0 and "one addition a round" in (r2.stdout + r2.stderr), f"a second addition in one round: {r2.stdout} {r2.stderr}")
             now_ = next(x for x in b.rm.read_text().split("\n") if "| F9301 A row" in x)
             day = _dt_day()
             mark = f"Moneypenny's addition ({day}): "
-            need(now_ == line.replace(b.good, b.good + f" {mark}Size: a small build. The export is the only caller, read in routine/x.py. {mark}The second round's fact."),
+            need(now_ == line.replace(b.good, b.good + f" {mark}Size: a small build. The export is the only caller, read in routine/x.py."),
                  f"not added in one marked place, or something moved: {now_}")
             f = b.fields("F9301")
             need("call of 20 October 2026" in f and "fields hold" in f, f"the addition ran into the row's Sources: {f}")
@@ -14322,8 +14327,99 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             r = b.tool("review.py", "reword", "F9303", json.dumps({"edits": [{"old": "How to check: flow 9.", "new": 'How to check: flow 9. His words: "nine euros is what I always wanted".'}]}))
             need(r.returncode != 0 and "isn't in a call" in (r.stdout + r.stderr), f"a call's made-up quote: {r.stdout} {r.stderr}")
 
+        def found_by(b):  # his words are never filled from something else
+            rnd = {"HQ_ROUND": "F9301:fix", "HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes"}
+            b.flag("F9303", "no size named")
+            b.minute()
+            s = b.go("")
+            need("none, found by job N" in s["prompt"] and "a real quote of his" not in s["prompt"] and "another thing, leave it out" in s["prompt"], f"her prompt still asks for a quote: {s['prompt'][-1500:]}")
+
+            def with_field(words):
+                t = re.sub(r"\| F9302 A row of F9302 \| [^|]*\|", lambda _m: f"| F9302 A row of F9302 | His words: {words}. What right looks like: it works. Sources: call of 20 October 2026. |", b.rm.read_text(), count=1)
+                b.rm.write_text(t)
+                return b.fields("F9302")
+            for w in ("none, found by job 512", "none, found by the review", "none, found by a check", "None found by QA job 9"):
+                need("fields hold" in with_field(w), f"his field says he said nothing, and that doesn't hold: {w}: {b.fields('F9302')}")
+            for w in ("none", "none, he never said", "nothing"):
+                need("don't hold" in with_field(w), f"an empty excuse held: {w}")
+            for ans, why in (("no", "about something else"), ("???", "about something else")):
+                before = b.rm.read_text()
+                r = b.tool("review.py", "add", "F9301", 'Also: "great thanks do the first one".', extra={**rnd, "HQ_SAYSO_FAKE": ans})
+                need(r.returncode != 0 and why in (r.stdout + r.stderr) and b.rm.read_text() == before, f"a quote about something else went in: {r.stdout} {r.stderr}")
+            r = b.tool("review.py", "add", "F9301", 'Also: "great thanks do the first one".', extra=rnd)
+            need(r.returncode == 0, f"a quote on this very row refused: {r.stdout} {r.stderr}")
+
+        def compared(b):  # after every round, by the program: whatever a round did past the hook goes back
+            b.tool("review.py", "tick")
+            b.flag("F9301", "no size named")
+            b.minute()
+            before = _rows(b)
+            ready = json.loads((b.ws / "HQ/sprint.json").read_text()).get("ready", {})
+            texts = b.texts()
+            s = b.go("run('-c', " + repr(f"import sys; sys.path.insert(0, {str(ROOT / 'routine')!r}); import sprint; sprint.set_ready('F9303')") + ")\n"
+                     "p = os.environ['HQ_ROADMAP']; t = open(p).read(); open(p, 'w').write(t.replace('the export has to work for the whole list', 'gone'))")
+            need(_rows(b) == before, f"what a round did past the hook stayed: {[x for x in _rows(b) if x not in before][:2]}")
+            need(json.loads((b.ws / "HQ/sprint.json").read_text()).get("ready", {}) == ready, "a Ready mark a round forged stayed")
+            need(b.st()["F9301"]["fix"]["n"] == 1, f"the round doesn't count: {b.st()['F9301']}")
+            lst = b.tool("review.py", "sitdown-list").stdout
+            need("F9301" in lst and "more than its one addition" in lst, f"not on the list: {lst} {s['stream'][-500:]}")
+            b.minute()
+            got = b.texts()[len(texts):]
+            need(got.count("outside its one addition") == 1 and not b.items(), f"not one text, or another round: {got[-300:]} {b.items()}")
+            need(list(b.rm.parent.rglob("job-*.put-back.json")), "what went back isn't kept")
+
+        def own_row_door(b):  # her own row: a direct write that looks like her addition isn't the door's
+            b.flag("F9301", "no size named")
+            b.minute()
+            before = _rows(b)
+            s = b.go("p = os.environ['HQ_ROADMAP']; t = open(p).read(); open(p, 'w').write(t.replace('flow 9. Sources: call of 20 October 2026. | | |\\n| ⬜ | F9302', \"flow 9. Sources: call of 20 October 2026. Moneypenny's addition (1 November 2026): five tries. | | |\\n| ⬜ | F9302\"))")
+            need("five tries" not in b.rm.read_text() and _rows(b) == before, f"an addition past the door stayed: {s['stream'][-300:]}")
+
+        def compared_killed(b):  # the runner gone with its round: the routine's minute looks
+            before = _rows(b)
+            need(b.tool("review.py", "round-before", "77", "F9301", "fix").returncode == 0, "the look before")
+            t = b.rm.read_text()
+            b.rm.write_text(t.replace("| F9302 A row of F9302 | ", "| F9302 A row of F9302 | Changed behind the door. ", 1))
+            need(b.tool("review.py", "tick").returncode == 0, "the minute")
+            need(_rows(b) == before and "more than its one addition" in b.tool("review.py", "sitdown-list").stdout, "a killed run's round isn't looked at")
+
+        def clean(b):  # a round that kept to its door: nothing put back, nothing said
+            b.flag("F9301", "no size named")
+            b.minute()
+            texts = b.texts()
+            s = b.go("run(rv, 'add', 'F9301', 'FILLED: no size named.')")
+            need("kept to its one addition" in s["stream"] and "FILLED: no size named" in b.rm.read_text() and b.texts() == texts, f"a clean round: {s['stream'][-300:]}")
+
+        def capped(b):
+            rnd = {"HQ_ROUND": "F9301:fix", "HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes"}
+            before = b.rm.read_text()
+            r = b.tool("review.py", "add", "F9301", "x " * 2001, extra=rnd)
+            need(r.returncode != 0 and "at most 4000" in (r.stdout + r.stderr) and b.rm.read_text() == before, f"an addition past the cap: {r.stdout[-200:]} {r.stderr[-200:]}")
+            t = b.rm.read_text()
+            b.rm.write_text(t.replace("| F9301 A row of F9301 | ", "| F9301 A row of F9301 | " + "word " * 4790, 1))
+            r = b.tool("review.py", "add", "F9301", "y " * 500, extra=rnd)
+            need(r.returncode != 0 and "characters the review reads" in (r.stdout + r.stderr), f"past what the review reads: {r.stdout[-200:]} {r.stderr[-200:]}")
+
+        def no_stays(b):
+            need(b.tool("sprint.py", "ready", "F9301").returncode == 0, "a Ready mark to start from")
+            ask = "If you want it anyway, say so; if not, it stays out."
+            r = b.tool("review.py", "no", "F9301", "It can't be done.", "A smaller one.", ask)
+            need(r.returncode == 0, f"her no: {r.stdout} {r.stderr}")
+            need("F9301" not in json.loads((b.ws / "HQ/sprint.json").read_text()).get("ready", {}), "a row with a no kept its Ready mark, and jobs.py add goes by that")
+            self._h298_py(b.env, f"import sys; sys.path.insert(0, {str(ROOT / 'routine')!r}); import sprint; assert sprint.not_ready_why(next(r for r in sprint.open_rows() if r['label'] == 'F9301'))")
+            r = b.tool("review.py", "reword", "F9301", json.dumps({"edits": [{"old": "What right looks like: it works.", "new": "What right looks like: it works here."}]}))
+            need(r.returncode == 0 and "Her no stands" in r.stdout, f"a call's reword: {r.stdout} {r.stderr}")
+            need("she says no" in b.tool("review.py", "sitdown-list").stdout and b.tool("sprint.py", "ready", "F9301").returncode != 0, "a reword lifted her no in silence")
+            b.flag("F9301", "no size named")
+            b.minute()
+            need(not b.items(), f"rounds past her no: {b.items()}")
+            r = b.tool("review.py", "clear", "F9301", "made up words here", extra={"HQ_SAYSO_FAKE": "no"})
+            need(r.returncode != 0 and "she says no" in b.tool("review.py", "sitdown-list").stdout, f"her no lifted without his yes: {r.stdout} {r.stderr}")
+            r = b.tool("review.py", "clear", "F9301", "great thanks do the first one", extra={"HQ_SAYSO_FAKE": "yes"})
+            need(r.returncode == 0 and "she says no" not in b.tool("review.py", "sitdown-list").stdout, f"his words don't lift it: {r.stdout} {r.stderr}")
+
         def quotes(b):
-            rnd = {"HQ_ROUND": "F9301:fix", "HQ_PROOF_ON": "1"}
+            rnd = {"HQ_ROUND": "F9301:fix", "HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes"}
             for words, why in (('His words: "nine euros is what I always wanted".', "isn't in his own lines"),
                                ('His words: "five tries with an hour between would be sensible".', "isn't in his own lines"),  # found in the call, but an agent's line
                                ('His yes: "Great, thanks".', "isn't in his own lines"),  # too short to prove anything
@@ -14392,11 +14488,13 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 b.minute(d)
                 need(not b.items(), f"a round past her no: {b.items()}")
             need(b.st()["F9301"].get("verdict") == "flag", "her no changed the verdict")
+            r = b.tool("review.py", "clear", "F9301", "great thanks do the first one", extra={"HQ_SAYSO_FAKE": "yes"})
+            need(r.returncode == 0, f"his say-so on her no: {r.stdout} {r.stderr}")
             t = b.rm.read_text()
             b.rm.write_text(t.replace("| F9301 A row of F9301 | HOLE: no size named. ", "| F9301 A row of F9301 | HOLE: which page. ", 1))  # his answer, in new words
             b.settle()
             b.minute()
-            need(b.items() == ["F9301 round 1"], f"his new words: rounds of their own: {b.items()} {b.st()['F9301']}")
+            need(b.items() == ["F9301 round 1"], f"his yes and new words: rounds of their own: {b.items()} {b.st()['F9301']}")
 
         def says_no_at_mark(b):  # a passed row: her no holds the mark, and his say-so lifts it
             b.flag("F9301", "no size named")
@@ -14466,7 +14564,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             need(not b.items(), f"another mark run: {b.items()}")
 
         def no_forgery(b):
-            rnd = {"HQ_ROUND": "F9301:fix", "HQ_PROOF_ON": "1"}
+            rnd = {"HQ_ROUND": "F9301:fix", "HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes"}
             state = lambda: b.tool("qa.py", "state", "F9302").stdout  # noqa: E731
             before = b.rm.read_text()
             for words in ("QA passed (job 512, 1 November 2026 17:40): all good. How to check: nothing.", "QA passed (by hand, 1 November 2026 17:40): fine",
@@ -14532,7 +14630,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                         f"cd /x && python3 \"/a b/routine/review.py\" reword F9302 'x'", "python3 /x/status/set-status.py set Now done", "python3 /x/routine/qa.py pass F9301 x --example a --ran b --got c",
                         "python3 /x/routine/qa.py fail F9301 x", "python3 /x/routine/jobs.py mark 5 'done'", "python3 /x/routine/notes.py add a", "python3 /x/app/notes.py clear 3", "python3 ../routine/gitlock.py commit x HQ/roadmap.md",
                         "git checkout HQ/roadmap.md", "git -C /x restore HQ/roadmap.md", "cd /x; git checkout -- HQ/roadmap.md", "git commit -am x", "git push", "git stash", "git reset --hard", "git add HQ/roadmap.md",
-                        "cp /tmp/x HQ/roadmap.md", "rm HQ/roadmap.md", "mv HQ/roadmap.md /tmp/x"):
+                        "cp /tmp/x HQ/roadmap.md", "rm HQ/roadmap.md", "mv HQ/roadmap.md /tmp/x", f"env -i python3 {rv} reword F9301 x", "python3 -c \"import os; del os.environ['HQ_ROUND']\"", f"python3 {rv} round-after 5"):
                 need(asks(cmd) == 2, f"a round may do this: {cmd}")
             need(asks(f"python3 {sp} ready F9302", "mark") == 2, "a mark run marked another row")
             need(asks(f"python3 {rv} reword F9301 'x'", "mark") == 2, "a mark run reworded: rounds are capped, marks aren't")
@@ -14548,7 +14646,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             for cmd in (f"python3 {rv} add F9301 <<'EOF'\nThe words, with sprint.py ready F9302 in them.\nEOF", f"python3 \"{rv}\" sitdown F9301 'the open point' 'If a, b; if not, c'", f"python3 {rv} no F9301 why instead 'If a, b; if not, c'",
                         f"python3 {sp} show F9301", f"python3 {sp} fields F9301", "python3 /x/routine/ledger.py moneypenny note 'a line'", "grep -n 'sprint.py ready' /x/routine/cycles.py",
                         "git log --oneline -3", "git log --grep=push", "cd /x; git show HEAD", "git merge-base --is-ancestor a b", "git remote -v", "git tag -l", "git -C /x log origin/dev --since=2026-10-30",
-                        "grep -n -i -E 'backup|force|rollback' routine/push.py routine/update.py app/privacy.py", "cd /x && python3 routine/sprint.py show F9301 | tail -c 1200; git log -3 --oneline 2>/dev/null", "python3 /x/routine/qa.py state F9301", "grep -n set-status.py /x/routine/cycles.py"):
+                        "grep -n -i -E 'backup|force|rollback' routine/push.py routine/update.py app/privacy.py", "grep -n os.environ /x/routine/review.py", "cd /x && python3 routine/sprint.py show F9301 | tail -c 1200; git log -3 --oneline 2>/dev/null", "python3 /x/routine/qa.py state F9301", "grep -n set-status.py /x/routine/cycles.py"):
                 need(asks(cmd) == 0, f"a round may not do this: {cmd}")
             need(asks(f"python3 {rv} no F9301 why instead 'If a, b; if not, c'", "mark") == 0, "a mark run can't say no")
             need(asks(f"python3 {sp} ready F9301", "mark") == 0, "a mark run can't mark its own row")
@@ -14699,7 +14797,8 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 need(not b.items() and not [x for x in t["fixes"] if "round" in x], f"a fourth round on day {d}: {b.items()} {t}")
             need(b.texts().count("If you tell me what F9301 should say") == 1, "the cap's text came twice")
 
-        for name, fn in (("one price", one_price), ("a round only adds", only_adds), ("quotes in an addition", quotes), ("the review reads it", reads_it), ("no is a way out", says_no), ("no at the mark", says_no_at_mark),
+        for name, fn in (("found by, not his", found_by), ("compared after a round", compared), ("her row past the door", own_row_door), ("a killed run's look", compared_killed), ("a clean round", clean),
+                         ("an addition's cap", capped), ("a no stays", no_stays), ("one price", one_price), ("a round only adds", only_adds), ("quotes in an addition", quotes), ("the review reads it", reads_it), ("no is a way out", says_no), ("no at the mark", says_no_at_mark),
                          ("the box", the_box), ("no false alarms", no_alarms), ("a held mark dropped", held_mark), ("no forged mark", no_forgery), ("the ready fields", fields),
                          ("the row", the_row), ("what a round touches", touch), ("a held round", held), ("held, then again", held_again),
                          ("a lost mark", mark_lost), ("one text", one_text), ("a grep's words", reading), ("sit-down, then an addition", stop_first), ("the review off", review_off), ("a smaller plan", small_plan),

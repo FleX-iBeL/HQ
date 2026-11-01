@@ -657,6 +657,33 @@ def his_said(parts, ws):
 
 NOT_HIS = "those words aren't in his own lines"
 NOT_A_YES = "those are his words, but they aren't a yes to this"
+NOT_ON_IT = "those are his words, but about something else"
+ON_IT_SYSTEM = ("You read one thing a man said to his AI assistant on a call or in a text, with what was said just before it, and an item from a planning list. "
+                "Was he talking about this item's own subject when he said it? Words he said about something else don't count, however well they seem to fit, "
+                "nor does a general remark that this item only happens to fall under. Answer with one word: yes or no.")
+
+
+def his_on(quote, about, ws=None):
+    """F86: (where, "") when a quote of his was said about this item, else (None, why not). His words are never filled from something else, and only a
+    reading can tell, so one small look; a no, garbage or a failed look refuses. HQ_SAYSO_FAKE stands in for it in the flows."""
+    if hqpaths.under_test() and not os.environ.get("HQ_PROOF_ON"):
+        return his_quote(quote, ws), ""
+    parts = [p for p in (_bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", quote or "")) if p]
+    hits = his_said(parts, ws or _ws()) if parts else []
+    if not hits:
+        return None, NOT_HIS
+    hit = hits[-1]
+    answer = os.environ.get("HQ_SAYSO_FAKE") if hqpaths.under_test() else None
+    try:
+        if answer is None:
+            if hqpaths.under_test():
+                raise RuntimeError("a test without a stand-in")
+            import mistakes
+            answer = mistakes.ask(ON_IT_SYSTEM, f"The item:\n{about}\n\n" + (f"Said just before it:\n{hit['before']}\n\n" if hit["before"] else "")
+                                  + f"What he said:\n{hit['line']}\n\nThe words quoted from it:\n{quote}")
+    except Exception as e:
+        return None, f"the look at his words failed ({type(e).__name__}), so they can't stand here"
+    return (hit["where"], "") if answer.strip().lower().startswith("yes") else (None, NOT_ON_IT)
 
 
 def his_yes(quote, about, ws=None, names=()):
@@ -748,6 +775,7 @@ def gate(text, job_text_, say_so=False, said=None):
 # Send to the team and a call's add), and that refusal is one of Moneypenny's tripwires (routine/cycles.py). Off, the
 # fields are only reported (sprint.py check, fields), nothing is refused: today's HQ exactly.
 
+NO_WORDS = re.compile(r"none,? found by (?:job \d+|QA(?: job \d+)?|the review|a check)\b", re.I)  # F86: a row found by a job, QA, the review or a check, where he said nothing
 FIELD_LABELS = (("his_words", r"his words|their words|the user'?s words|your words"),
                 ("additions", r"my own additions|own additions|my additions"),
                 ("sources", r"sources?"))
@@ -896,8 +924,9 @@ def ready_fields(row, ws=None):
         for qt in quotes:
             found[qt] = quote_found(qt, texts)
     missing = [qt for qt, where in found.items() if not where]
-    out["his_words"] = {"ok": bool(quotes) and not missing, "quotes": quotes, "found": found,
-                        "why": ("no His words field" if not ft["his_words"] else "no quote in His words (put his words between quotes)"
+    found_by = NO_WORDS.match(ft["his_words"]) if not quotes else None
+    out["his_words"] = {"ok": bool(found_by) or (bool(quotes) and not missing), "quotes": quotes, "found": found, "none": found_by.group(0) if found_by else "",
+                        "why": ("" if found_by else "no His words field" if not ft["his_words"] else "no quote in His words (put his words between quotes)"
                                 if not quotes else f"not found in the calls, the notes or the log: {missing[0][:60]!r}" if missing else "")}
     # F81 (job 481): an addition of hers never goes into a row on her own say; it goes on the sit-down list, and only
     # with his yes is it written in, with the date. So the field may be left out or say "none"; when it says
@@ -940,7 +969,7 @@ def fields_words(row, ws=None):
     f = ready_fields(row, ws)
     hw = f["his_words"]
     lines = [f"{row['label']}: the fields " + ("hold." if f["ok"] else "don't hold.")]
-    lines.append("- His words: " + ("found (" + ", ".join(f"{v}" for v in hw["found"].values() if v) + ")" if hw["ok"] else hw["why"]))
+    lines.append("- His words: " + (hw["none"] or "found (" + ", ".join(f"{v}" for v in hw["found"].values() if v) + ")" if hw["ok"] else hw["why"]))
     lines.append("- My own additions: " + (f"{f['additions']['text'][:80]}" if f["additions"]["ok"] else f["additions"]["why"]))
     lines.append("- Sources: " + (", ".join(f"{k} ({v})" for k, v in f["sources"]["held"].items()) if f["sources"]["ok"] else f["sources"]["why"]))
     return "\n".join(lines)
