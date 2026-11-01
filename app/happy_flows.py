@@ -17252,6 +17252,33 @@ getattr(m, sys.argv[3])(Path(sys.argv[2]))
             need(not (c["hq"] / ".status/back.json").exists(), f"{name}: it left a way forward")
             need(minute(c) is None, f"{name}: a second minute still holds it")
             need(not [i for i in incs(c) if not i.get("back")], f"{name}: the incident stayed open: {incs(c)}")
+        # the same tip again: what it sent back isn't kept as looked at, so it goes back every time, at once or after a clean minute, dev's data change never
+        # runs, and GitHub is looked at once for it. With GitHub's dev the same, nothing else would ever make it look again
+        data_tick = "import tick\ntick.role = None  # nothing may get this far\nos.environ['HQ_DATA_MINUTE'] = '1'\ntick.tick()\nprint('ok')"
+        for name, way in {"git checkout -": "git checkout -q -", "a merge of the same FETCH_HEAD": "git fetch -q origin && git rev-parse FETCH_HEAD | xargs git merge -q"}.items():
+            c = make()
+            for n in range(3):
+                _sp.run(way, shell=True, cwd=str(c["hq"]), capture_output=True, text=True, check=True, env=c["env"], executable="/bin/bash")
+                need((c["hq"] / "work.txt").exists(), f"{name}, time {n + 1}: the way itself didn't move the copy")
+                r = py(c, data_tick)
+                need(r.returncode == 0 and r.stdout.strip().endswith("ok"), f"{name}, time {n + 1}: the routine ran on: {r.stdout[-200:]} {r.stderr[-400:]}")
+                need(at(c) == tag(c) and applied(c) == ["001-first"] and (c["ws"] / "HQ/b.txt").exists(), f"{name}, time {n + 1}: still on the tip, or the data moved: {c['g']('describe', '--tags', '--always')} {applied(c)}")
+                if n == 0:
+                    looked = json.loads((c["hq"] / ".status/off-release.json").read_text())["next"]
+                    need(minute(c) is None, f"{name}: the clean minute after it")
+            need(json.loads((c["hq"] / ".status/off-release.json").read_text())["next"] == looked, f"{name}: GitHub was looked at again for a head it knew")
+            need(len(c["g"]("for-each-ref", "--format=%(refname:short)", "refs/heads/hq-backup/").split()) == 1, f"{name}: another backup branch for the same commits")
+            need(minute(c) is None and not [i for i in incs(c) if not i.get("back")], f"{name}: the incident stayed open: {incs(c)}")
+        # and a person's going back, the guard, forward, then the same tip
+        c = make()
+        run_update = lambda *a: _sp.run([sys.executable, str(c["hq"] / "routine/update.py"), *a], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"]))
+        run_update("back", "--tag", "v1.0.0")
+        c["g"]("checkout", "-q", "origin/dev")
+        need(minute(c) and at(c) == tag(c, "v1.0.0"), f"on the version she went back to: {c['g']('describe', '--tags', '--always')}")
+        r = run_update("forward")
+        need(at(c) == tag(c) and "Forward again" in r.stdout, f"forward: {r.stdout[-200:]} {r.stderr[-300:]}")
+        c["g"]("checkout", "-q", "origin/dev")
+        need(minute(c) and at(c) == tag(c) and "002-second" not in applied(c), f"the same tip after a going back and forward: {c['g']('describe', '--tags', '--always')} {applied(c)}")
         # through the routine's own minute: first of all, and the data change of dev's never runs, also when the head moves in the minute itself
         c = make("git checkout -q -")
         r = py(c, "import tick\ntick.role = None  # nothing may get this far\ntick.tick()\nprint('ok')")
@@ -17556,7 +17583,7 @@ getattr(m, sys.argv[3])(Path(sys.argv[2]))
         (c["hq"] / ".status/off-release.json").write_text(json.dumps(d))
         stood(c, "GitHub reached, the tag there")
         line(c)
-        return ("git checkout -, git switch -, FETCH_HEAD by xargs, a worktree branch, git am and a squash each put back on the newest release within the routine's minute, data as it was and no way forward left; the head moving in the minute "
+        return ("git checkout -, git switch -, FETCH_HEAD by xargs, a worktree branch, git am and a squash each put back on the newest release within the routine's minute, data as it was and no way forward left; the same tip again, by checkout and by merge, put back every time with the data untouched and no second look at GitHub; the head moving in the minute "
                 "runs no data change of dev's; a job stopped for good by its exact pid and nothing else, an incident, a note and a text; her own commits stay, also with dev's patch or files; offline by its refs and never on a guess; never older than it stood on, and never a newer release she didn't stand on, also with that release on dev's line; "
                 "the maker's copy and an unreadable file untouched, also with HQ_MAKER=0 through tick.py and with the key lost, and a friend's fresh clone never matches that; a failing undo holds, starts nothing and tries again, on one backup branch")
 

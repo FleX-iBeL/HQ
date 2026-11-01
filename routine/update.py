@@ -1136,6 +1136,9 @@ def back_run(tag: str, tell: bool, guard: bool = False) -> int:
             " The other computer hears it as soon as it answers." if told is False else "")
         if guard:
             msg = guard_done(tag, old, before, saved, undone, ended)
+            st = read_json(GUARD_FILE)
+            st.pop("held", None)  # back on a release: nothing is held, and the same head coming back is sent back at once, not after GUARD_RETRY
+            write_json(GUARD_FILE, st)
         say("done", "", msg, done=ended + done, todo=todo, saved=saved, undone=undone, finished=time.time())
         check(force=True)
         return 0
@@ -1371,16 +1374,18 @@ def release_minute(log=None) -> str | None:
     if st.get("head") == head and st.get("tips") == tips and not st.get("held"):
         write_json(GUARD_FILE, st)
         return None
-    st.update(head=head, tips=tips)
+    st["head"] = head
     hit = unreleased(mine, tags, tips)
     if hit and _guard_due(st, now):  # before it chooses where to go: a tag it lost may be all that's the matter
         fetch_tags()
         mine, tags = past_release()
         hit = unreleased(mine, tags, tips)
-    if not hit:
+    if not hit:  # only a head found fine is kept as looked at: one sent back is judged again if it comes back, also with GitHub's dev the same
+        st["tips"] = tips
         st.pop("held", None)
         write_json(GUARD_FILE, st)
         return _guard_clear(st)
+    st.pop("tips", None)
     return _guard_hold(st, hit, now, log)
 
 
