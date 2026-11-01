@@ -1020,13 +1020,14 @@ def run() -> int:
 
 def previous() -> str | None:
     """F104: one version back: the newest version tag under where HQ stands; on the work line past a version, that version. On a friend's
-    copy her own commits past a tag count as standing on that tag: one version back is the one below it, or she'd stay on the same version."""
+    copy her own commits past a tag count as standing on that tag: one version back is the one below it, or she'd stay on the same version.
+    Commits of dev's past it aren't hers: that's the work line, on her copy too."""
     at = set(git("tag", "--points-at", "HEAD", timeout=10).stdout.split())
     older = [t for t in git("tag", "--merged", "HEAD", timeout=10).stdout.split() if vtuple(t) and t not in at]
     if not older:
         return None
     newest = max(older, key=vtuple)
-    if at or not hqpaths.is_friend():
+    if at or not hqpaths.is_friend() or off_release():
         return newest
     below = [t for t in older if vtuple(t) < vtuple(newest)]
     return max(below, key=vtuple) if below else None

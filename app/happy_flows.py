@@ -16954,7 +16954,7 @@ else:
         told to stop or killed outright, a start that can't start: each ends as failed and is told, in the call or as a text, once. A run that hit its
         turns gives what it had. A text that wouldn't go is tried again by the routine's minute."""
         import signal as _sig, subprocess as _sp
-        ws, env = self._helper_env("f106d")
+        ws, env = self._helper_env("f106e")
         fake = Path(env["HQ_HELPER_CLAUDE"])
         fake.write_text(fake.read_text().replace("q = sys.argv[2]\n", "q = sys.argv[2]\n"
                         "if 'DIES' in q:\n"
@@ -16966,7 +16966,7 @@ else:
                         "    print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': True, 'result': 'Not logged in'}), flush=True); sys.exit(0)\n"
                         "if 'NOISE' in q:\n"
                         "    print(json.dumps(['not', 'a', 'dict']), flush=True); print(json.dumps({'type': 'assistant', 'message': {'content': ['nor', 'this']}}), flush=True)\n"))
-        (self.tmp / "f106d-claude.wait").write_text("30")
+        (self.tmp / "f106e-claude.wait").write_text("30")
         folder = Path(env["HQ_HELPERS"])
         thread = ws / "HQ/direct-line/thread.jsonl"
         def h(*a, e=None):
