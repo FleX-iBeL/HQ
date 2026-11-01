@@ -1295,12 +1295,34 @@ def _subject(sha: str) -> str:
     return git("log", "-1", "--format=%s", sha, timeout=10).stdout.strip()[:120]
 
 
+def fetch_tags() -> None:
+    """Every version tag GitHub has, when it's reached; offline nothing changes, and a tag that's here is never moved."""
+    try:
+        git("fetch", "--no-tags", "--quiet", "--no-write-fetch-head", UPSTREAM, "refs/tags/v*:refs/tags/v*", timeout=60)
+    except subprocess.SubprocessError:
+        pass
+
+
 def newest_release() -> str | None:
-    """Where the guard goes: the version this HQ went back to, if it did that on purpose; else the newest one it has. Never older than what
-    it stood on (the head may be an old copy of dev), and data only ever moves forward from there, by the routine's own minute."""
+    """Where the guard goes: the version this HQ went back to, if it did that on purpose; else the newest one it has (the head may be an old
+    copy of dev), and data only ever moves forward from there, by the routine's own minute. older_than_stood says when that won't do."""
     tags = version_tags()
     to = "v" + str(gone_back().get("to") or "")
     return to if to in tags else (max(tags, key=vtuple) if tags else None)
+
+
+def older_than_stood() -> str:
+    """Why there's nothing to go back on: the newest tag this copy can find is older than the version it stands on (a tag it lost, and GitHub
+    out of reach), or it can't tell what it stands on. "" when it's fine. Going there would undo the data to a shape it never had on a guess."""
+    tags = version_tags()
+    if not tags:
+        return ""
+    v, top = local_version().get("version") or "", max(tags, key=vtuple)
+    if not vtuple("v" + v):
+        return "it can't tell which version it stands on, and it doesn't go to one on a guess"
+    if vtuple("v" + v) > vtuple(top):
+        return f"it stands on {v} and the newest release it can find is {vname(top)}, and it never goes to an older version than it stood on"
+    return ""
 
 
 def release_minute(log=None) -> str | None:
@@ -1326,6 +1348,10 @@ def release_minute(log=None) -> str | None:
         return None
     st.update(head=head, tips=tips)
     hit = unreleased(mine, tags, tips)
+    if hit and _guard_due(st, now):  # before it chooses where to go: a tag it lost may be all that's the matter
+        fetch_tags()
+        mine, tags = past_release()
+        hit = unreleased(mine, tags, tips)
     if not hit:
         st.pop("held", None)
         write_json(GUARD_FILE, st)
@@ -1365,23 +1391,28 @@ def _guard_clear(st: dict) -> None:
     return None
 
 
-def _guard_hold(st: dict, hit: list[str], now: float, log) -> str:
-    """Unreleased work under the head: held from here on, and going back, once now and again every GUARD_RETRY if that didn't go through."""
-    held = st.get("held") or {"since": now, "commits": len(hit), "first": _subject(hit[-1]), "item": _job_item()}
-    tag = newest_release()
-    words = f"HQ stands on work that isn't released ({len(hit)} change{'s' if len(hit) != 1 else ''}): nothing starts until it's back on {vname(tag) if tag else 'a released version'}"
-    st["held"] = held
+def _guard_due(st: dict, now: float) -> bool:
+    """A going back can start now: none is under way, and the last try is long enough ago."""
     run = read_json(RUN_FILE)
-    busy = run.get("state") == "updating" and alive(run.get("pid"))
-    if busy or now < held.get("again", 0):
+    return not (run.get("state") == "updating" and alive(run.get("pid"))) and now >= (st.get("held") or {}).get("again", 0)
+
+
+def _guard_hold(st: dict, hit: list[str], now: float, log) -> str:
+    """Unreleased work under the head: held from here on, and going back, once now and again every GUARD_RETRY if that didn't go through.
+    With nothing to go back on that isn't older than where it stood, it stays held and says so."""
+    held = st.get("held") or {"since": now, "commits": len(hit), "first": _subject(hit[-1]), "item": _job_item()}
+    tag, why = newest_release(), older_than_stood()
+    words = f"HQ stands on work that isn't released ({len(hit)} change{'s' if len(hit) != 1 else ''}): nothing starts until it's back on {vname(tag) if tag and not why else 'a released version'}"
+    st["held"] = held
+    if not _guard_due(st, now):
         write_json(GUARD_FILE, st)
         return words
     held.update(again=now + GUARD_RETRY, tries=held.get("tries", 0) + 1, to=tag)
     write_json(GUARD_FILE, st)
     import incidents
     incidents.down(GUARD_KEY, words + f". The first: {held['first']}", at=held["since"], item=held.get("item"))
-    if not tag:  # nothing to go back on: it stays held, and the incident says so
-        guard_failed("this HQ has no released version it could go back on")
+    if why or not tag:  # nothing to go back on: it stays held, and the incident says so
+        guard_failed(why or "this HQ has no released version it could go back on")
         return words
     if log:
         log(f"release guard: {len(hit)} unreleased change(s) under the head, going back on {tag}")
