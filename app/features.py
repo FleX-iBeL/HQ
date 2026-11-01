@@ -361,7 +361,8 @@ def switch(fid: str, on: bool, base: Path | None = None, said: str = "", tapped:
         if said:
             sys.path.insert(0, str(ROOT / "routine"))
             import sprint
-            quote, no = sprint.his_yes(said, f"turning on {title}, a feature that hasn't passed QA yet: {f.get('line') or 'still being built'}")
+            names = (title, re.sub(r"^the ", "", title, flags=re.I), fid.replace("_", " "), f.get("row"))
+            quote, no = sprint.his_yes(said, f"turning on {title}, a feature that hasn't passed QA yet: {f.get('line') or 'still being built'}", names=names)
         if not quote and not tapped:
             return (f"Refused: {title} hasn't passed QA yet ({f.get('row') or 'no row'}), so it stays off "
                     f"unless he says so: --said \"HIS WORDS\", a line he said or typed. {no.capitalize() + '.' if no else ''}").rstrip()

@@ -217,6 +217,7 @@ def _load(path):
 
 
 def _save(path, d):
+    hqpaths.guard_beside_roadmap(path)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
@@ -542,68 +543,161 @@ YES_SYSTEM = ("You read one thing a man said to his AI assistant on a call or in
               "and dictates, so a short yes counts when what was said just before asks about this very thing, or when his words name it. A yes to "
               "something else doesn't count, nor do thanks, praise, a question, a doubt, a maybe, a wish for later, a no, or words that only happen to "
               "mention it. Answer with one word: yes or no.")
+# F104: his yes is read by the program when it's clear, the model only sees what isn't. His words: "you must put it on the roadmap ... And you don't
+# have to ask a confirmation on the second one. Because otherwise our calls are gonna be just me having to say yes all the time and I don't want that."
+_YES_FIRM = r"yes|yeah|yep|yup|ok|okay|oke|oké|sure|go|go ahead|do it|do that|doe maar|doe het|ja|jep|prima|please do|absolutely"
+_YES_WORD = re.compile(rf"(?<![\w'])(?:{_YES_FIRM}|perfect|great|sounds good|correct)(?![\w'])")
+_YES_PLAIN = re.compile(rf"(?<![\w'])(?:{_YES_FIRM})(?![\w'])")  # praise alone next to a thanks is thanks
+_HOLD_WORD = re.compile(r"(?<![\w'])(?:but|not|wait|later|don'?t|niet|nee|eerst)(?![\w'])")
+_TAKEN_BACK = re.compile(r"(?<![\w'])(?:but not|not (?:right )?now|not yet|not today|niet nu|nog niet|don'?t (?:do|go)|niet doen)(?![\w'])")  # outweighs a yes in the same line
+_NOT_SURE = re.compile(r"\?|(?<![\w'])(?:no|nope|maybe|perhaps|misschien|if|unless|first|hold|stop|never|\w+n't)(?![\w'])")  # no refusal: only not clear
+_THANKS = re.compile(r"(?<![\w'])(?:thanks?|bedankt|dank)(?![\w'])")
 
 
-def _said_around(where, parts, ws):
-    """F104: the newest line of his in `where` that holds a quote, whole, and what was said just before it: (line, before), "" when it's not found."""
-    rows = []  # (his?, the line)
+def _names_it(text, names):
+    return any(n and re.search(rf"(?<![\w-]){re.escape(str(n).lower())}(?![\w-])", text) for n in names)
+
+
+def yes_reading(line, turn, names):
+    """F104: "yes", "no", or "" when it isn't clear, for a line of his, the agent's turn right before it and what the thing goes by (its label or name).
+    Clear yes: a yes word, no holding word, and the line or that turn names the thing: a bare "Ok" counts, it's tied to what she asked. Clear no: a
+    holding word and no yes word, or a yes taken back in the same line. No model, so the same line reads the same every time."""
+    low = " ".join(str(line).lower().replace("’", "'").split())
+    if _TAKEN_BACK.search(low):
+        return "no"
+    yes = _YES_WORD.search(low)
+    if _HOLD_WORD.search(low):
+        return "" if yes else "no"
+    if not yes or _NOT_SURE.search(low) or (_THANKS.search(low) and not _YES_PLAIN.search(low)):
+        return ""
+    return "yes" if _names_it(low, names) or _names_it(" ".join(str(turn).lower().split()), names) else ""
+
+
+def _call_time(name, clock):
+    """When a transcript's line was said: its day from the file's name, its time from the line; past midnight the next day."""
+    m = re.match(r"(\d{4})-(\d\d)-(\d\d)-(\d\d)(\d\d)", name)
+    if not m:
+        return 0.0
+    h, mi, *sec = [int(x) for x in clock.split(":")]
+    y, mo, d, h0, m0 = (int(x) for x in m.groups())
+    t = time.mktime((y, mo, d, h, mi, sec[0] if sec else 0, 0, 0, -1))
+    return t + 86400 if (h, mi) < (h0, m0) else t
+
+
+def _spoken(ws):
+    """F104: what was said where, one list per place: (where, [{"who" ("he" or "she"), "text", "at"}]), the same places as his_lines."""
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "app"))
+    import me as _me
+    from pathlib import Path as _P
+    name = _me.load(_P(ws))["name"] or "Me"
+    line_re = re.compile(r"^- ([0-9:]+) \*\*([^*]+):\*\*\s*(.*)$")
+    calls = os.path.join(ws, "HQ", "calls")
     try:
-        if where.startswith("HQ/calls/"):
-            sys.path.insert(0, os.path.join(os.path.dirname(HERE), "app"))
-            import me as _me
-            from pathlib import Path as _P
-            mark = re.compile(rf"^- [0-9:]+ \*\*{re.escape(_me.load(_P(ws))['name'] or 'Me')}:\*\*\s*(.*)$")
-            for line in open(os.path.join(ws, where), encoding="utf8", errors="replace"):
-                m = mark.match(line)
-                rows.append((True, MARKS.sub("", m.group(1)).strip()) if m else (False, line.strip()))
-        elif where.startswith("HQ/notes"):
-            rows = [(True, l.strip()) for l in open(os.path.join(ws, where), encoding="utf8", errors="replace") if l.startswith("- ")]
-        else:
-            for line in open(os.path.join(ws, where, "thread.jsonl"), encoding="utf8", errors="replace"):
+        names = sorted(n for n in os.listdir(calls) if n.endswith(".md"))[-HIS_CALLS:]
+    except OSError:
+        names = []
+    for nm in names:
+        rows = []
+        try:
+            for line in open(os.path.join(calls, nm), encoding="utf8", errors="replace"):
+                m = line_re.match(line)  # a tool line, a filler or a system note isn't anyone speaking
+                if m:
+                    rows.append({"who": "he" if m.group(2) == name else "she", "text": MARKS.sub("", m.group(3)).strip(), "at": _call_time(nm, m.group(1))})
+        except OSError:
+            continue
+        yield f"HQ/calls/{nm}", rows
+    for line_name in HIS_THREADS:
+        rows = []
+        try:
+            for line in open(os.path.join(ws, "HQ", line_name, "thread.jsonl"), encoding="utf8", errors="replace"):
                 try:
                     d = json.loads(line)
                 except ValueError:
                     continue
                 if isinstance(d, dict) and d.get("text"):
-                    rows.append((d.get("from") == "me", " ".join(str(d["text"]).split())))
-    except OSError:
-        return "", ""
-    for i in range(len(rows) - 1, -1, -1):
-        if rows[i][0] and all(p in _bare(rows[i][1]) for p in parts):
-            before = "" if where.startswith("HQ/notes") else "\n".join(t for _h, t in rows[max(0, i - 4):i] if t)
-            return rows[i][1], before[-1500:]
-    return "", ""
+                    rows.append({"who": "he" if d.get("from") == "me" else "she", "text": " ".join(str(d["text"]).split()), "at": float(d.get("at") or 0)})
+        except (OSError, TypeError, ValueError):
+            continue
+        yield f"HQ/{line_name}", rows
+    for rel in ("HQ/notes.md", "HQ/notes-cleared.md"):
+        rows = []
+        try:
+            for line in open(os.path.join(ws, rel), encoding="utf8", errors="replace"):
+                if line.startswith("- "):
+                    m = re.search(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)", line)
+                    at = time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")) if m else 0.0
+                    rows.append({"who": "he", "text": line.strip(), "at": at})
+        except (OSError, ValueError):
+            continue
+        yield rel, rows
 
 
-def his_yes(quote, about, ws=None):
-    """F104: his say-so, everywhere his quote stands in for his yes: (where, ""), or (None, why not in plain words). First they must be his words
-    (his_quote), then one small look, the way of mistakes.second_look, asks whether he's saying yes to this very thing: `about`, in a line. A no,
-    garbage or a failed look refuses. HQ_SAYSO_FAKE stands in for Claude in the flows (yes, no, or anything else for a look that failed); a test
-    never asks the real model, and a test copy with no lines of his, that his_quote lets through, needs no look unless a flow gives a stand-in."""
-    where = his_quote(quote, ws)
-    if not where:
-        return None, "those words aren't in his own lines"
+def his_said(parts, ws):
+    """F104: every line of his that holds a quote, oldest first by the time it was said, whichever place it's in: {"where", "at", "line", "turn" (the agent's
+    lines right before it, none when he spoke last), "before" (what was said just before, each line named)}. A quote of a word or two has to stand
+    as whole words: "yes" isn't in "yesterday"."""
+    short = sum(len(p.split()) for p in parts) < HIS_QUOTE_WORDS
+    has = (lambda p, b: re.search(rf"(?<!\w){re.escape(p)}(?!\w)", b)) if short else (lambda p, b: p in b)
+    out = []
+    for where, rows in _spoken(ws):
+        for i, r in enumerate(rows):
+            if r["who"] != "he" or not all(has(p, _bare(r["text"])) for p in parts):
+                continue
+            turn = []
+            j = i - 1
+            while j >= 0 and rows[j]["who"] == "she" and len(turn) < 6:
+                turn.insert(0, rows[j]["text"])
+                j -= 1
+            lines = [("He: " if x["who"] == "he" else "The agent: ") + x["text"] for x in rows[max(0, i - 4):i]]
+            out.append({"where": where, "at": r["at"], "line": r["text"], "turn": " ".join(turn), "before": "\n".join(lines)[-1500:]})
+    return sorted(out, key=lambda x: x["at"])
+
+
+NOT_HIS = "those words aren't in his own lines"
+NOT_A_YES = "those are his words, but they aren't a yes to this"
+
+
+def his_yes(quote, about, ws=None, names=()):
+    """F104: his say-so, everywhere his quote stands in for his yes: (where, ""), or (None, why not in plain words). `about` is what it's taken as his yes
+    to, in a line; `names` what that goes by (its label, its feature name). They must be his words; then a clear yes passes and a clear no is refused by
+    the program (yes_reading), any newer line of his included, and only the rest goes to one small look, the way of mistakes.second_look. There a no,
+    garbage or a failed look refuses, and the floor of three words stays. HQ_SAYSO_FAKE stands in for Claude in the flows (yes, no, or anything else for
+    a look that failed); a test never asks the real model, and a test copy with no lines of his, that his_quote lets through, needs no look unless
+    a flow gives a stand-in."""
     fake = os.environ.get("HQ_SAYSO_FAKE") if hqpaths.under_test() else None
-    if hqpaths.under_test() and fake is None and not os.environ.get("HQ_PROOF_ON"):
-        return where, ""
-    ws = ws or _ws()
-    parts = [p for p in (_bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", quote or "")) if p]
-    where = ([w for w, line in his_lines(ws) if all(p in line for p in parts)] or [where])[-1]  # the newest place he said it
-    line, before = _said_around(where, parts, ws)
+    hit = None
+    if hqpaths.under_test() and not os.environ.get("HQ_PROOF_ON"):
+        where = his_quote(quote, ws)
+        if fake is None:
+            return where, ""
+    else:
+        ws = ws or _ws()
+        parts = [p for p in (_bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", quote or "")) if p]
+        hits = his_said(parts, ws) if parts else []
+        if not hits:
+            return None, NOT_HIS
+        clear = next((h for h in reversed(hits) if yes_reading(h["line"], h["turn"], names) == "yes"), None)
+        if clear:
+            return clear["where"], ""
+        hit, where = hits[-1], hits[-1]["where"]  # the newest place he said it
+        if yes_reading(hit["line"], hit["turn"], names) == "no":
+            return None, NOT_A_YES
+        if sum(len(p.split()) for p in parts) < HIS_QUOTE_WORDS:
+            return None, f"a quote under {HIS_QUOTE_WORDS} words only counts right after an agent line that names this"
     try:
         if fake is None and hqpaths.under_test():
             raise RuntimeError("a test without a stand-in")
         if fake is None:
             import mistakes
-            fake = mistakes.ask(YES_SYSTEM, f"It's being taken as his yes to: {about}\n\n" + (f"Said just before it:\n{before}\n\n" if before else "")
-                                + f"What he said:\n{line or quote}\n\nThe words quoted from it:\n{quote}")
+            fake = mistakes.ask(YES_SYSTEM, f"It's being taken as his yes to: {about}\n\n" + (f"Said just before it:\n{hit['before']}\n\n" if hit["before"] else "")
+                                + f"What he said:\n{hit['line']}\n\nThe words quoted from it:\n{quote}")
         answer = fake.strip().lower()
     except Exception as e:
         return None, f"the look at his words failed ({type(e).__name__}), so they don't count as a yes"
     if answer.startswith("yes"):
         return where, ""
     if answer.startswith("no"):
-        return None, "those are his words, but they aren't a yes to this"
+        return None, NOT_A_YES
     return None, f"the look at his words failed (it said {answer[:60]!r}), so they don't count as a yes"
 
 
@@ -632,7 +726,7 @@ def gate(text, job_text_, say_so=False, said=None):
         sys.exit("; ".join(whys) + ". Only rows marked ready go to the team; mark it ready first "
                  "(sprint.py ready LABEL), or, on his explicit say-so, add it with --not-ready --said \"his words\".")
     names = [r["label"] for r in rows if states.get(r["label"]) != "ready"]
-    where, no = his_yes(said, f"giving {', '.join(names)} to the team without the Ready mark, although: {'; '.join(whys)}")
+    where, no = his_yes(said, f"giving {', '.join(names)} to the team without the Ready mark, although: {'; '.join(whys)}", names=names)
     if not where:
         sys.exit("Refused: --not-ready needs --said with his own words, at least three of them, as they stand in a call, "
                  f"a text or a quick note of his, and his yes to this. {no.capitalize() + '.' if said else 'None were given.'}")

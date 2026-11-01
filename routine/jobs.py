@@ -469,6 +469,12 @@ def page_tap(n, ticket):
         return False
 
 
+def job_names(n, text):
+    """F104: what an agent's line calls a job: its number, and the row its words name first."""
+    m = re.search(r"(?<![\w.])[FH]\d{2,}\b", text or "")
+    return (f"job {n}", *( [m.group(0)] if m else [] ))
+
+
 def sayso(n, words, by="", ticket=None, what=""):
     """F100: his say-so for a build in his day hours, kept with who and when: his own words (sprint.his_yes), or his tap
     on the status page (a ticket only its server can make good). Never from a job's own process. None when it doesn't stand."""
@@ -480,7 +486,7 @@ def sayso(n, words, by="", ticket=None, what=""):
         who, words = "the status page", "tapped now on the status page"
     else:
         import sprint as sp_
-        where, no = sp_.his_yes(words, f"starting this build now, in his day hours, instead of waiting for the night: {what[:300]}") if words else (None, "")
+        where, no = sp_.his_yes(words, f"starting this build now, in his day hours, instead of waiting for the night: {what[:300]}", names=job_names(n, what)) if words else (None, "")
         if not where:
             if no:
                 print(f"({no})", file=sys.stderr)
@@ -1157,7 +1163,7 @@ def main(argv):
                 no = proof.refuses(j, text)
                 if no:
                     import sprint as sp_
-                    where, why = sp_.his_yes(his, f"closing job {j['n']} as done without its green test record ({no}): {j['text'][:300]}") if his else (None, "")
+                    where, why = sp_.his_yes(his, f"closing job {j['n']} as done without its green test record ({no}): {j['text'][:300]}", names=job_names(j["n"], j["text"])) if his else (None, "")
                     if not where:
                         sys.exit(f"Refused: {no} {why.capitalize() + '. ' if why else ''}The job stays open.")
                     proof.keep_say_so(j, his)

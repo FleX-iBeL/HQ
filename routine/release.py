@@ -216,7 +216,8 @@ def night_refuses() -> str | None:
 def say_so(said: str | None, what: str) -> bool:
     """F101: going past a gate takes his own words, found in his lines and kept; a flag alone is nothing."""
     import sprint as S
-    where, no = S.his_yes(said, f"releasing HQ to everyone: {what}")
+    names = ("without qa", "skip qa", "skipping qa", "past qa") if "QA" in what else ("past the night", "red night")
+    where, no = S.his_yes(said, f"releasing HQ to everyone: {what}", names=names)
     if not where:
         print(f"No release: {what} needs --said with his own words, as they stand in a call, a text or a quick note, saying yes to it: {no}.")
         return False
@@ -416,6 +417,9 @@ def cmd_part(h: dict, today: dt.date | None = None) -> int:
 def data_refuses(base: str, tip: str) -> str | None:
     """F104: a release that changes data needs an undo that works: tried on a copy of the workspace, from the code at the tip."""
     import datachange
+    no = datachange.number_refuses(base, tip, ROOT)
+    if no:
+        return f"No release: {no}. It stays on {push.NIGHTLY_BRANCH}; main stays at {version()}."
     new = datachange.between(base, tip, ROOT)
     if not new:
         return None
