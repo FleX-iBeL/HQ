@@ -16900,6 +16900,55 @@ print(sprint.his_yes('thank you very', 'turning on the made-up thing', ws=sys.ar
         need("aren't a yes" in out.splitlines()[-1], f"a stand-in outside a test: {out}")
         return "six doors: a no, garbage, a failed look and no stand-in refuse and say so, a yes goes; words that aren't his never get as far as the look"
 
+    async def flow248(self) -> str:
+        """F103, no Claude: a ledger line written on the backup reaches the main, by the real forward, also the way a call and the policy write it: with the
+        real workspace as base. With the main away it's kept for later, never in the backup's workspace. A test's own folder stays local."""
+        import http.server, subprocess as _sp, threading
+        p = self._pair("f103m")
+        a, b, wa, wb, ea, eb = p["a"], p["b"], p["wa"], p["wb"], p["ea"], p["eb"]
+        class ToMain(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *x): pass
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("content-length") or 0))
+                r = _sp.run([sys.executable, str(a / "routine/role.py"), "serve", "forward"], input=body.decode(), capture_output=True, text=True, env=ea, timeout=120)
+                out = (r.stdout.strip().splitlines() or ["{}"])[-1].encode()
+                self.send_response(200); self.send_header("content-type", "application/json"); self.end_headers(); self.wfile.write(out)
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ToMain)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        cfg = Path(eb["HQ_SUPPORT"]) / "role.json"
+        c = json.loads(cfg.read_text()); c["peer"] = f"http://127.0.0.1:{srv.server_address[1]}"; cfg.write_text(json.dumps(c))
+        (wb / "HQ/calls").mkdir()
+        (wb / "HQ/calls/2026-11-01-0900.md").write_text("# Call\n\nStarted 09:00:00 · agent Donna · brain sonnet\n\n- 09:00:10 **HQ:** Here you go.\n- 09:00:20 **Me:** that's wrong, I asked for the other one\n")
+        own = self.tmp / "f103m-own"
+        (own / "HQ").mkdir(parents=True)
+        code = """
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1] + '/routine')
+import mistakes as M
+base = Path(sys.argv[2])
+how = sys.argv[3]
+if how == 'policy':
+    print(M.add('refused', 'donna', 'a refused send, made up', where='a call or a text', base=base))
+elif how == 'call':
+    print(M.scan_call(str(base / 'HQ/calls/2026-11-01-0900.md'), base))
+else:
+    print(M.add('refused', 'donna', how, where='a call or a text', base=base))
+"""
+        run = lambda base, how: _sp.run([sys.executable, "-c", code, str(b), str(base), how], capture_output=True, text=True, env=eb, cwd=str(b), timeout=120)
+        lines = lambda ws: [json.loads(l)["words"] for l in (ws / "HQ/mistakes.jsonl").read_text().splitlines()] if (ws / "HQ/mistakes.jsonl").exists() else []
+        r = await asyncio.to_thread(run, wb, "policy")
+        need(r.returncode == 0 and "a refused send, made up" in lines(wa) and not lines(wb), f"the policy's line on the backup: {lines(wa)} {lines(wb)} {r.stdout[-200:]} {r.stderr[-300:]}")
+        r = await asyncio.to_thread(run, wb, "call")
+        need(r.returncode == 0 and any("that's wrong" in w for w in lines(wa)) and not lines(wb), f"a call's scan on the backup: {lines(wa)} {lines(wb)} {r.stderr[-300:]}")
+        r = await asyncio.to_thread(run, own, "a line of a test's own folder")
+        need(lines(own) == ["a line of a test's own folder"] and "a line of a test's own folder" not in lines(wa), f"a test's own folder: {lines(own)} {lines(wa)}")
+        srv.shutdown(); srv.server_close()
+        r = await asyncio.to_thread(run, wb, "with the main away")
+        pending = Path(eb["HQ_SUPPORT"]) / "role-pending.jsonl"
+        need(not lines(wb) and pending.exists() and "with the main away" in pending.read_text(), f"the main away: {lines(wb)} {r.stdout[-200:]} {r.stderr[-300:]}")
+        return "a line written on the backup with the real workspace as base lands on the main, also a call's own scan; kept for later with the main away; a test's folder stays local"
+
     async def flow250(self) -> str:
         """F106, no Claude: a stock Mac's python3 is 3.9, and agents run rules lookups with it. HQ's Python is read for what 3.9 can't: syntax past it, a `X | Y`
         annotation without the future import, or an f-string only 3.12 can read. No 3.9 here, so it reads the source; the checker is tried on made-up bad lines first."""
@@ -28446,6 +28495,7 @@ FLOWS = {
     238: ("F106: a helper beside a call, with a stand-in for the model: started without a yes, the call goes on, the answer in the same call once; hung up it's a text on her line; boxed in minutes and turns; two at once; a used-up limit stops it", False, "flow238"),
     239: ("F106: a check she couldn't run is never answered around: the program says I couldn't check that when her reply doesn't", False, "flow239"),
     250: ("F106: nothing in HQ's Python that a stock Mac's 3.9 can't read: no newer syntax, no X | Y annotation without the future import, what a rules lookup pulls in included", False, "flow250"),
+    248: ("F103: a ledger line written on the backup reaches the main with the real workspace as base, also a call's own scan; kept for later with the main away; a test's own folder stays local", False, "flow248"),
     247: ("F104: a say-so has to be a say-so: at every door his words also need a look's yes to this very thing; a no, garbage, a failed look and no stand-in refuse and say so", False, "flow247"),
     246: ("F104: the job hook stops the plain ways past the pre-push hook, a version back or forward and the data changes by hand, on any job; ordinary work goes", False, "flow246"),
     245: ("F104: a friend's own commits past a tag count as standing on that tag: one version back is the one below; a version with no forward of its own is refused, nothing moved", False, "flow245"),

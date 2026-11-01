@@ -122,6 +122,11 @@ def _backup() -> bool:
         return False
 
 
+def _workspace(base=None) -> bool:
+    """Whether a line goes in the real workspace, the only one with a main to hand it to; a test's own folder stays local."""
+    return base is None or os.path.realpath(str(base)) == os.path.realpath(hqpaths.FOLDER)
+
+
 def _append(line: dict, base=None) -> bool:
     """False when a line with its key is already there: one event, one line. A hand-off or an item it didn't have yet lands on that
     line, as a line of its own that read() folds in."""
@@ -151,7 +156,7 @@ def add(kind: str, agent: str, words: str, *, where: str = "", handoff: str = ""
     try:
         if not path(base):
             return None
-        if base is None and _backup():
+        if _workspace(base) and _backup():  # one-way sync: what's written here would stay here for good
             import role
             code, _o, _e, how = role.hand("mistakes", ["put", json.dumps(line, ensure_ascii=False)], timeout=15)
             if how == "kept" or (how == "main" and code == 0):
@@ -320,13 +325,21 @@ def sweep(all_of_it: bool = False, base=None) -> list[dict]:
     return got
 
 
-def _ask_model(words: str, before: str) -> str:
+def ask(system: str, text: str) -> str:
+    """One small look: haiku, no tools, nothing of the folder's. Raises when it fails."""
     import subprocess
     p = subprocess.run([hqpaths.tool("claude", "/opt/homebrew/bin/claude"), "-p", "--model", LOOK_MODEL, "--output-format", "json", "--tools", "",
                         "--strict-mcp-config", "--setting-sources", "", "--max-budget-usd", str(LOOK_BUDGET), "--no-session-persistence",
-                        "--system-prompt", LOOK_SYSTEM],
-                       input=(f"Said just before it:\n{before}\n\n" if before else "") + f"What he said:\n{words}", capture_output=True, text=True, timeout=LOOK_TIMEOUT)
-    return json.loads(p.stdout).get("result") or ""
+                        "--system-prompt", system],
+                       input=text, capture_output=True, text=True, timeout=LOOK_TIMEOUT)
+    d = json.loads(p.stdout)
+    if d.get("is_error"):
+        raise RuntimeError(f"the model said no: {str(d.get('result') or d.get('subtype'))[:120]}")
+    return d.get("result") or ""
+
+
+def _ask_model(words: str, before: str) -> str:
+    return ask(LOOK_SYSTEM, (f"Said just before it:\n{before}\n\n" if before else "") + f"What he said:\n{words}")
 
 
 def second_look(words: str, before: str = "") -> tuple[bool, str]:
