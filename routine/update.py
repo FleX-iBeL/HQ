@@ -1058,6 +1058,7 @@ def other_minute() -> str | None:
 
 
 def _spawn(*args: str) -> None:
+    os.makedirs(os.path.dirname(LOG), exist_ok=True)
     subprocess.Popen(scoped([sys.executable, os.path.abspath(__file__), *args], "update"), cwd=HQ, stdin=subprocess.DEVNULL,
                      stdout=open(LOG, "a"), stderr=subprocess.STDOUT, start_new_session=True)
 
@@ -1133,7 +1134,7 @@ def back_run(tag: str, tell: bool, guard: bool = False) -> int:
 
 def _not_through(e: Exception, tag: str, moved: bool, undone: list[str], saved: dict, guard: bool) -> str:
     """What's true after a going back that stopped halfway: which of the code, the data and the user's changes moved."""
-    why = str(e)[:200]
+    why = str(e)[:200].rstrip(". ")
     if moved:
         return f"Back on {vname(tag)}, but what came after it didn't finish: {why}."
     bits = [f"Going back didn't go through: {why}."]
@@ -1343,7 +1344,7 @@ def _guard_hold(st: dict, hit: list[str], now: float, log) -> str:
     import incidents
     incidents.down(GUARD_KEY, words + f". The first: {held['first']}", at=held["since"], item=held.get("item"))
     if not tag:  # nothing to go back on: it stays held, and the incident says so
-        incidents.fix(GUARD_KEY, "This HQ has no released version it could go back on")
+        guard_failed("this HQ has no released version it could go back on")
         return words
     if log:
         log(f"release guard: {len(hit)} unreleased change(s) under the head, going back on {tag}")
@@ -1404,7 +1405,8 @@ def guard_done(tag: str, old: str, head: str, saved: dict, undone: list[str], en
                            f"{time.strftime('%d %B %Y at %H:%M')}. For the Claude that runs this HQ: tell the user, in a sentence or two, then move this note into updates/done/.", "",
                            said, "", f"It stood on {head} (from {old or '?'}), past every version, with work from GitHub's work line under it. A friend's HQ only stands on released versions,",
                            "so the routine put it back; nothing of the work line was kept running. A job on this copy doesn't take the work line, by any command.", "",
-                           *([f"- What the user had of their own: `{b}`, never sent anywhere. Take over only their own commits from it (`git log {tag}..{b}`), not what came from the work line." for b in kept]),
+                           *([f"- Changes to HQ's own files, on `{saved['changes']['branch']}`, never sent anywhere: `git stash apply {saved['changes']['branch']}` brings them back."] if saved.get("changes") else []),
+                           *([f"- Commits, on `{saved['commits']['branch']}`, never sent anywhere. Those of the work line are on it too: take over only the user's own (`git log {tag}..{saved['commits']['branch']}`)."] if saved.get("commits") else []),
                            ""]))
     try:
         import incidents
@@ -1416,14 +1418,21 @@ def guard_done(tag: str, old: str, head: str, saved: dict, undone: list[str], en
     return said
 
 
-def guard_failed(e: Exception) -> None:
-    """It stays held and the guard tries again; the incident stays open, so the owner hears it in a text as with anything that stays down."""
+def guard_failed(why) -> None:
+    """It stays held and the guard tries again. The incident stays open, and the owner hears it now, once: while it's held the routine's
+    minute ends here, before the direct line's own look at what's down."""
+    words = f"HQ stands on work that isn't released and going back didn't go through: {str(why)[:200]}. Nothing starts until it's back; it's tried again"
     try:
         import incidents
-        incidents.fix(GUARD_KEY, f"Going back didn't go through, it's tried again: {str(e)[:200]}")
+        incidents.fix(GUARD_KEY, words)
     except Exception:
         pass
-    log(f"release guard: going back didn't go through: {e!r}")
+    log(f"release guard: {words}")
+    st = read_json(GUARD_FILE)
+    if st.get("held") and not st["held"].get("texted"):
+        st["held"]["texted"] = True
+        write_json(GUARD_FILE, st)
+        _guard_text(words)
 
 
 def _guard_text(said: str) -> None:

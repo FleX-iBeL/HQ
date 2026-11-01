@@ -17306,6 +17306,24 @@ getattr(m, sys.argv[3])(Path(sys.argv[2]))
                 if p.poll() is None:
                     p.kill()
                 p.wait()
+        # what runs goes on the released code as after a going back, never through a call: then it waits until the call has ended
+        c = make()
+        code = ("import update\n"
+                "ran, spawned = [], []\n"
+                "update.restart_new = lambda *a: (ran.append(a), ([], []))[1]\n"
+                "update._spawn = lambda *a: spawned.append(a)\n"
+                "update.calls_on = lambda: 1\n"
+                "update.guard_restart({})\n"
+                "update.release_minute()\n"
+                "during = [len(ran), len(spawned)]\n"
+                "update.calls_on = lambda: 0\n"
+                "os.environ.pop('HQ_UPDATE_RESTART')\n"
+                "update.release_minute()\n"
+                "update.release_minute()\n"
+                "update.guard_restart({'call': True})\n"
+                "print(json.dumps([during, spawned, ran[0][1]]))")
+        r = py(c, code)
+        need(r.returncode == 0 and json.loads(r.stdout.strip().splitlines()[-1]) == [[0, 0], [["restart-all", "guard"]], {"call": True, "guard": True}], f"a restart through a call: {r.stdout[-300:]} {r.stderr[-500:]}")
         # as it really runs: in the background, in a process of its own; the routine's minute doesn't wait for it
         c = make("git checkout -q -")
         c["env"].pop("HQ_UPDATE_WAIT")
@@ -17385,6 +17403,11 @@ getattr(m, sys.argv[3])(Path(sys.argv[2]))
         need(r.stdout.strip().splitlines()[-1] == "True", f"the routine doesn't hold: {r.stdout[-200:]} {r.stderr[-300:]}")
         i = incs(c)
         need(len(i) == 1 and not i[0].get("back") and any("tried again" in x["what"] for x in i[0]["fixes"]), f"the incident of a failed going back: {i}")
+        thread = c["ws"] / "HQ/direct-line/thread.jsonl"
+        end = time.time() + 25
+        while time.time() < end and "didn't go through" not in (thread.read_text() if thread.exists() else ""):
+            await asyncio.sleep(0.2)
+        need(thread.exists() and thread.read_text().count("didn't go through") == 1, "the owner wasn't told, once, that going back failed")
         r = py(c, "import update\nupdate.status = lambda background=True: {'available': True, 'new_tag': 'v9.9.9', 'version': '1.1.0'}\nprint(json.dumps(update.start()))")
         need("first" in r.stdout and not json.loads((c["hq"] / ".status/update-run.json").read_text()).get("step", "").startswith("Starting"), f"an update on top of it: {r.stdout[-300:]} {r.stderr[-300:]}")
         (c["ws"] / "HQ/c.txt").write_text("the data\n"); (c["ws"] / "HQ/b.txt").unlink()
