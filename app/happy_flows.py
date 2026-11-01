@@ -15532,6 +15532,188 @@ print("OK")
         need("mailguard.before()" in tsrc and "mailguard.after_run(" in tsrc and "mailguard.minute(" in tsrc, "the routine doesn't use the check")
         return "a marker gone backwards put back with an incident, lines kept, red after 2 hours in the day only"
 
+    async def flow240(self) -> str:
+        """F109, no Claude: the mail check finds mail by date again, and a marker that stands still doesn't stay silent. A stand-in
+        connector answers like the real one did on 1 November 2026: nothing to an epoch query, a date from midnight, 50 threads at
+        most with no page token, not in date order, no time in a search answer, five messages a thread. Only the model's reading is
+        stood in: the instructions come from the routine's real start, the sorting from the real command, the end of a run from the
+        routine and the guard. The first run after days of nothing picks up all of it and only that; a quiet run changes nothing
+        and says so; a run with mail moves the marker; mail just after the marker is found wherever a date's midnight falls. A good
+        run leaving the marker over 24 hours old opens an incident and Donna gets it; a check that was off or down doesn't."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env("mailsearch", hour=14)
+        child = r'''
+import calendar, json, os, random, re, subprocess, sys, time
+ROOT = sys.argv[1]
+sys.path.insert(0, ROOT + "/routine"); sys.path.insert(0, ROOT + "/app")
+import tick, mailguard as M, routines, incidents, direct_line
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+DAY, HOUR = 86400, 3600
+now = int(time.time())
+tick.open_window = lambda *a, **k: None
+tick.log = lambda m: None
+class Connector:
+    def __init__(self, zone=8):
+        self.zone, self.threads, self.n = zone, {}, 0
+    def mail(self, t, thread=None, subject=None):
+        self.n += 1
+        mid = format(((t * 1000 + 3847) << 20) | self.n, "x")
+        tid = thread or mid
+        self.threads.setdefault(tid, []).append({"id": mid, "threadId": tid, "t": t, "subject": subject or f"mail {self.n}"})
+        return tid
+    def _midnight(self, day):
+        return calendar.timegm(time.strptime(day, "%Y/%m/%d")) + self.zone * HOUR
+    def search(self, q):
+        if re.search(r"(after|before):\d{6,}", q):
+            return {}
+        a, b = re.search(r"after:(\S+)", q), re.search(r"before:(\S+)", q)
+        lo, hi = self._midnight(a.group(1)), self._midnight(b.group(1)) if b else 10 ** 12
+        found = [t for t, ms in self.threads.items() if any(lo <= m["t"] < hi for m in ms)]
+        random.Random(q).shuffle(found)
+        return {"resultCountEstimate": str(len(found)), "threads": [
+            {"id": t, "messageCount": len(self.threads[t]), "messages": [{k: m[k] for k in ("id", "threadId", "subject")} for m in self.threads[t][:5]]}
+            for t in found[:50]]} if found else {}
+    def get_thread(self, tid):
+        return {"id": tid, "messages": [{"id": m["id"], "subject": m["subject"], "internalDate": str(m["t"] * 1000)} for m in self.threads[tid]]}
+inbox = M.path()
+def marker_is(t):
+    text = re.sub(r"^Marker:.*$", f"Marker: {t} (a date)", open(inbox).read(), flags=re.M)
+    open(inbox, "w").write(text)
+said = {}
+def run(conn):
+    """One run: the routine's real start, the stand-in reader following what it was given, the routine's real end."""
+    tick.start_mail()
+    prompt = open(os.path.join(os.environ["HQ_JOB_RUN"], "mail-check.md")).read()
+    need("{SEARCHES}" not in prompt and "{MAILGUARD}" not in prompt, "the instructions weren't filled in")
+    qs = re.findall(r"^   - `(after:[^`]*)`", prompt, re.M)
+    cmd = re.search(r"`python3 (\S+) newer ID ID ID`", prompt).group(1)
+    need(qs and all(re.fullmatch(r"after:\d{4}/\d\d/\d\d( before:\d{4}/\d\d/\d\d)?", q) for q in qs), f"the searches: {qs}")
+    need(f"Bash(python3 {cmd} newer:*)" in tick.mail_tools()[0], "the run may not use the command it's told to")
+    answers, ids = {}, []
+    for q in qs:
+        for t in conn.search(q).get("threads", []):
+            answers[t["id"]] = t
+            ids += [m["id"] for m in t["messages"]]
+    r = subprocess.run([sys.executable, cmd, "newer", *ids], capture_output=True, text=True)
+    need(r.returncode == 0, r.stderr[-300:])
+    said["newer"] = r.stdout.strip()
+    maybe = set(r.stdout.split())
+    was = M.marker(open(inbox).read())
+    read = [t for t, a in answers.items() if maybe & {m["id"] for m in a["messages"]} or a["messageCount"] > len(a["messages"])]
+    said["read"], said["found"] = len(read), len(answers)
+    new = [m for t in read for m in conn.get_thread(t)["messages"] if int(m["internalDate"]) // 1000 > was]
+    if new:
+        top = max(int(m["internalDate"]) // 1000 for m in new)
+        text = re.sub(r"^Marker:.*$", f"Marker: {top} (a date)", open(inbox).read(), flags=re.M)
+        open(inbox, "w").write(text.rstrip("\n") + "\n" + "".join(f"- x · y · {m['subject']} · z · [Gmail](x)\n" for m in new))
+    words = f"Added {len(new)} mails." if new else "Nothing new since the marker."
+    open(os.path.join(os.environ["HQ_JOB_RUN"], "mail.log"), "w").write(f"--- 2026-11-01 10:00:00\n{words}\n--- exit 0\n")
+    json.dump({"pid": None, "started": time.time() - 200}, open(tick.MAIL_STATE, "w"))
+    tick.clear(tick.MAIL_PID)
+    need(tick.mail_running() is False, "the run didn't end")
+    need(routines.read()["mail"]["state"] == "ok" and routines.read()["mail"]["text"] == words, f"the run's line: {routines.read()['mail']}")
+    need(not incidents.is_down("maillist"), f"the guard refused the run: {incidents.is_down('maillist')}")
+    return new
+stuck = lambda: incidents.is_down("mailmarker")
+start = now - 5 * DAY - 1234
+marker_is(start)
+c = Connector()
+# 1. The first run after the fix: 70 mails in five days, more than one answer can hold, and what the marker already passed.
+for i in (40, 3000, 9000):
+    c.mail(start - i, subject=f"older {i}")
+c.mail(start, subject="older at the marker")
+long_ago = c.mail(start - 20 * DAY, subject="an old thread")
+c.mail(start + 500, thread=long_ago, subject="a new answer in it")
+crowded = c.mail(start - 9 * DAY, subject="crowded 0")
+for i in range(1, 6):
+    c.mail(start - 9 * DAY + i * 60, thread=crowded, subject=f"crowded {i}")
+c.mail(start + 600, thread=crowded, subject="past what a search shows")
+for i in range(70):
+    c.mail(start + 700 + i * 6000, subject=f"new {i}")
+newest = start + 700 + 69 * 6000
+need(c.search(f"after:{start}") == {} and len(c.search("after:" + time.strftime("%Y/%m/%d", time.gmtime(start - DAY)))["threads"]) == 50,
+     "the stand-in doesn't answer like the real connector")
+new = {m["subject"] for m in run(c)}
+want = {f"new {i}" for i in range(70)} | {"a new answer in it", "past what a search shows"}
+need(new == want, f"the first run missed {sorted(want - new)[:5]} and took {sorted(new - want)[:5]}")
+text = open(inbox).read()
+need(M.marker(text) == newest, f"the marker isn't the newest mail: {M.marker(text)} {newest}")
+need(not re.search(r"· (older|crowded \d|an old thread) ", text), "mail from before the marker was counted")
+need(M.last_good() and not stuck(), "the run didn't count as good")
+need(said["read"] < said["found"], f"the sorting saved no reads: {said}")
+# 2. A run with nothing new: the search isn't empty, nothing changes, and it says so.
+before = open(inbox).read()
+need(run(c) == [] and open(inbox).read() == before, "a quiet run changed the list")
+need(routines.read()["mail"]["text"].startswith("Nothing new"), "a quiet run doesn't say so")
+quiet = Connector()
+quiet.mail(newest - 3 * HOUR, subject="clearly older")
+need(run(quiet) == [] and said["newer"].startswith("None of these"), f"clearly older mail still has to be read: {said}")
+# 3. A run with mail moves the marker, and only forward.
+c.mail(newest + 90, subject="one more")
+need([m["subject"] for m in run(c)] == ["one more"] and M.marker(open(inbox).read()) == newest + 90, "a run with mail didn't move the marker")
+# 4. The marker's day: mail just after the marker is found, whatever zone a date's midnight counts in, at any hour.
+day = calendar.timegm((2030, 3, 10, 0, 0, 0))
+for zone in (8, 7, 0, -1, -14):
+    for h in range(0, 24):
+        m = day + h * HOUR
+        z = Connector(zone)
+        z.mail(m + 60, subject="after"), z.mail(m - 60, subject="before")
+        got = [x for q in M.searches(f"Marker: {m}", m + 2 * HOUR) for x in z.search(q).get("threads", [])]
+        need("after" in {x["messages"][0]["subject"] for x in got}, f"mail after the marker lost: zone {zone}, hour {h}")
+spring = calendar.timegm((2030, 3, 10, 18, 0, 0))
+days = M.searches(f"Marker: {spring} (a date)", spring + 4 * DAY)
+need(days[0] == "after:2030/03/10 before:2030/03/11" and days[-1] == "after:2030/03/14" and len(days) == 5, f"not the marker's day, up to an open search: {days}")
+need(M.searches("Marker: not set yet", spring)[0].startswith("after:2030/03/03"), "no marker isn't the last 7 days")
+need(len(M.searches("Marker: 1", spring)) <= M.MOST_SEARCHES + 1, "a very old marker gives too many searches")
+need(M.maybe_newer(["zz", "1", "1"], "Marker: 5") == ["zz", "1"], "what doesn't read as a time has to be read")
+# 5. A marker that stands still: 24 hours after the newest mail, with the runs good, it opens; Donna gets it; new mail closes it.
+os.environ["HQ_WALL_HOUR"] = "14"
+stamp = lambda t: open(M._ok_file(), "w").write(str(int(t)))
+stamp(now - 100)
+marker_is(now - 23 * HOUR)
+M.minute(True, incidents, routines, now)
+need(not stuck() and routines.read()["mailmarker"]["state"] == "ok", "open before 24 hours")
+got = []
+donna = lambda: direct_line.watch(None, main=False, spawn=lambda w, f: got.append((w, f)))
+donna()
+marker_is(now - 25 * HOUR)
+M.minute(True, incidents, routines, now)
+need(stuck() and "no new mail since" in stuck()["why"], "a marker over 24 hours old opened nothing")
+need(routines.read()["mailmarker"]["state"] == "down", "the line isn't red")
+need(M.minute(True, incidents, routines, now) == "ok", "the line of the checks themselves changed")
+data = incidents.read()
+for i in data["incidents"]:
+    i["down"] -= direct_line.DOWN_AFTER + 1
+incidents._write(data)
+donna()
+need(any(w == "down" and "mailmarker" in f and "no new mail since" in f for w, f in got), f"Donna wasn't told: {got}")
+M.minute(True, incidents, routines, now)
+need(len([i for i in incidents.read()["incidents"] if i["key"] == "mailmarker"]) == 1, "a second incident for the same stand-still")
+marker_is(now - 60)
+M.minute(True, incidents, routines, now)
+need(not stuck() and routines.read()["mailmarker"]["state"] == "ok", "new mail didn't close it")
+donna()
+need(any(w == "back" and "mailmarker" in f for w, f in got), f"Donna didn't say it's back: {got}")
+# 6. Not this: a check that was down has its own red line, and one turned off is off.
+stamp(now - 3 * DAY)
+marker_is(now - 3 * DAY - HOUR)
+need(M.minute(True, incidents, routines, now) == "stale" and not stuck(), "a check that didn't run read as a blind one")
+stamp(now - 100)
+M.minute(True, incidents, routines, now)
+need(stuck(), "a good run over an old marker opened nothing")
+need(M.minute(False, incidents, routines, now) == "off" and not stuck(), "off doesn't close it")
+print("OK")
+'''
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-900:])
+        mc, tpl = (ROOT / "routine/mail-check.md").read_text(), (ROOT / "template/inbox.md").read_text()
+        need("`after:<marker" not in mc and "`after:<marker" not in tpl, "the words still search by epoch")
+        need("{SEARCHES}" in mc and "internalDate" in mc and "after:YYYY/MM/DD" in tpl and "internalDate" in tpl, "the words don't search by date and compare each mail's own time")
+        need("['mailmarker'" in (ROOT / "status/index.html").read_text(), "the status page has no line for it")
+        return "70 mails over 5 days all found by date, older ones left, a quiet run says so, the marker moves, 24 hours still opens an incident Donna gets"
+
     async def flow222(self) -> str:
         """F102, no Claude: failures turn red. Through the routine's real minute: a reviewer that throws, or a review that doesn't run,
         turns its line red with an incident at that minute, and a good one closes it; the briefing and the cycles the same; a
@@ -27236,6 +27418,7 @@ FLOWS = {
     224: ("F102: a key is masked in every transcript line, the push key lives in HQ's own folder at 600", False, "flow224"),
     223: ("F102: one night rule: a text that can wait sends nothing and one summary at waking; what can't wait goes", False, "flow223"),
     222: ("F102: a failing reviewer, cycle, briefing, QA or release turns red with an incident within the minute; a broken lines file shows red", False, "flow222"),
+    240: ("F109: the mail check searches by date and counts only mail newer than the marker, against a stand-in connector that answers nothing to an epoch query; a marker standing still for 24 hours opens an incident Donna gets", False, "flow240"),
     221: ("F102: a mail run that moves the marker back or drops a very important line is put back with an incident; red after 2 hours between 8:00 and midnight", False, "flow221"),
     220: ("F102: two processes adding 150 notes lose none; one lock across processes for the to-do list, the notes, the games, the coaching file and the mail list", False, "flow220"),
     229: ("F107: the gate on a real reading with only the weekly windows: readable, on the week, the reserve and the age hold, the 5-hour back with a reading that has it", False, "flow229"),

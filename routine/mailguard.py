@@ -9,7 +9,13 @@ two lines share a key. Anything else: the old file back and an incident. A call 
 (handover.py, loose_ends.py) calls `touched`, so that isn't counted against the run. `minute` keeps the line on the status page:
 red when the last good run is over 2 hours ago between 8:00 and midnight.
 
+F109 (1 November 2026): the Gmail connector began answering nothing to `after:<epoch seconds>`, so every run said nothing was new
+and the marker stood still for days, with no failure anywhere. So the run gets its searches by date from here (`searches`),
+one a day, because an answer stops at 50 threads without saying more are left. A date counts from midnight, so `newer` sorts out
+what can't be new. And a good run that leaves the marker over 24 hours old opens an incident of its own, which Donna texts about.
+
     python3 routine/mailguard.py check BEFORE AFTER    what's wrong between two versions, one line each (none: it's fine)
+    python3 routine/mailguard.py newer ID ID ...       which of these Gmail ids may be newer than the marker
 """
 from __future__ import annotations
 
@@ -28,6 +34,12 @@ RUN = os.environ.get("HQ_JOB_RUN") or os.path.join(hqpaths.HQ, "scratch", "routi
 STALE_S = 2 * 3600
 HOURS = (8, 24)  # his words: between 8:00 and midnight
 KEY = "maillist"
+STUCK_KEY = "mailmarker"  # F109: its own incident: the two lines' rules for closing differ
+STUCK_S = 24 * 3600  # his item: real mail never stops that long
+EARLIEST_CLOCK = 12 * 3600  # the westernmost clock on earth: whichever zone a date counts from midnight in, this day starts in time
+MOST_SEARCHES = 31
+MARGIN_S = 600  # an id's time and the mail's own time differ by seconds
+FIRST_MAIL = 1072915200  # 2004: an id that reads as earlier isn't a time
 
 
 def path() -> str:
@@ -121,6 +133,72 @@ def after_run(ok: bool, incidents, routines, log=print) -> list[str]:
     return bad
 
 
+def _read() -> str:
+    try:
+        return open(path(), encoding="utf8").read()
+    except OSError:
+        return ""
+
+
+def _day(t: float) -> int:
+    return int((t - EARLIEST_CLOCK) // 86400)
+
+
+def _date(day: int) -> str:
+    return time.strftime("%Y/%m/%d", time.gmtime(day * 86400))
+
+
+def searches(text=None, now=None) -> list[str]:
+    """F109: what this run searches: a day at a time from the marker's day, the last one open. With a marker very far back the days
+    get wider, so a run never gets more than about a month of searches and no stretch of time is skipped. No marker: 7 days."""
+    now = time.time() if now is None else now
+    m = marker(_read() if text is None else text)
+    first, last = _day(now - 7 * 86400 if m is None else min(m, now)), _day(now)
+    step = (last - first) // MOST_SEARCHES + 1
+    return [f"after:{_date(d)} before:{_date(min(d + step, last))}" for d in range(first, last, step)] + [f"after:{_date(last)}"]
+
+
+def search_text() -> str:
+    """The searches, for the run's instructions."""
+    return "\n".join(f"   - `{q}`" for q in searches())
+
+
+def mail_time(mail_id: str):
+    """When a mail came in by its Gmail id (the top of the number is milliseconds, seconds off the mail's own time), or None. Gmail
+    doesn't promise this, so it only ever saves a read: what doesn't read as a time gets read."""
+    try:
+        t = (int(str(mail_id), 16) >> 20) / 1000
+    except ValueError:
+        return None
+    return t if FIRST_MAIL <= t <= time.time() + 86400 else None
+
+
+def maybe_newer(ids, text=None) -> list[str]:
+    """F109: the ids a run has to read: the rest are clearly older than the marker. The mail's own time then decides."""
+    m = marker(_read() if text is None else text)
+    out = []
+    for i in ids:
+        t = mail_time(i)
+        if (m is None or t is None or t >= m - MARGIN_S) and i not in out:
+            out.append(i)
+    return out
+
+
+def _marker_minute(last, incidents, routines) -> None:
+    """F109: the last good run left the marker over 24 hours old: no run failed, so nothing else says so. It counts from a good run,
+    so a check that was off or down doesn't read as this; those have their own line."""
+    m = marker(_read())
+    if m is None or last - m < STUCK_S:
+        incidents.up(STUCK_KEY)
+        text = "No mail seen yet" if m is None else "Newest mail seen " + time.strftime("%d %B %H:%M", time.localtime(m))
+        routines.beat(STUCK_KEY, state="ok", text=text, every=60)
+        return
+    why = (f"The mail check has found no new mail since {time.strftime('%d %B %H:%M', time.localtime(m))}, "
+           "and real mail never stops that long: the check itself may be blind")
+    incidents.down(STUCK_KEY, why)
+    routines.beat(STUCK_KEY, state="down", text=why[:200], every=60)
+
+
 def last_good():
     try:
         return float(open(_ok_file()).read().strip())
@@ -139,12 +217,15 @@ def minute(on, incidents, routines, now=None) -> str:
     now = now or time.time()
     if not on:
         routines.beat(KEY, state="off", text="The mail check is off", every=60)
+        routines.beat(STUCK_KEY, state="off", text="The mail check is off", every=60)
         incidents.up(KEY)
+        incidents.up(STUCK_KEY)
         return "off"
     last = last_good()
     if last is None:
         open(_ok_file(), "w").write(str(int(now)))
         last = now
+    _marker_minute(last, incidents, routines)
     old = now - last
     if old > STALE_S and in_hours(now):
         why = f"Not checked for {int(old // 3600)} h {int(old % 3600 // 60)} min"
@@ -162,6 +243,9 @@ def main(argv: list[str]) -> int:
     if len(argv) == 3 and argv[0] == "check":
         for p in problems(open(argv[1], encoding="utf8").read(), open(argv[2], encoding="utf8").read()):
             print(p)
+        return 0
+    if argv[:1] == ["newer"]:
+        print("\n".join(maybe_newer(argv[1:])) or "None of these can be newer than the marker")
         return 0
     print(__doc__)
     return 2
