@@ -42,6 +42,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -66,7 +67,7 @@ _KEPT_SHELL = re.compile(
     rf"|\bsed\s+(?:-[a-zA-Z]*\s+)*-i[^|;&]*{_KEPT_NAME}"
     rf"|\btee\b[^|;&]*{_KEPT_NAME}"
     rf"|\b(?:cp|mv|rm|ln|truncate|dd|rsync|install|touch|chmod|unlink)\b[^|;&]*{_KEPT_NAME}"
-    rf"|\b(?:python3?|perl|ruby|node)\b\s+(?:-[cCeE]\b|-\s|<<)[^|&]*{_KEPT_NAME}"
+    rf"|\b(?:python3?|perl|ruby|node)\b\s+(?:-[cCeE]\b|-\s|<<)(?=[^|&]*(?:\s[wax]b?\+?\s|write|dump|unlink|remove|rename|replace|truncate))[^|&]*{_KEPT_NAME}"
     rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{_KEPT_NAME}"
     rf"|{_IN_PLACE.format(name=_KEPT_NAME)}", re.I)
 # F104: what opens a gate when it's set by hand. HQ_ROUND (F86: a round only adds), HQ_MAKER (who the maker is), HQ_PRIVACY_PASSED (skips the pre-push hook), HQ_UNDER_TEST
@@ -94,11 +95,13 @@ OUTWARD = {"curl", "wget", "gh", "ssh", "scp", "sftp", "ftp", "rsync", "nc", "nc
 SYSTEM = {"sudo", "su", "systemctl", "service", "launchctl", "crontab", "at", "reboot", "shutdown", "halt", "poweroff", "kill", "pkill", "killall", "tmux", "screen", "nohup", "setsid",
           "docker", "pip", "pip3", "npm", "npx", "brew", "apt", "apt-get", "dnf", "yum", "chmod", "chown"}
 RUNS = {"claude", "codex", "openclaw"}
-WRAPPERS = {"env", "command", "exec", "time", "nice", "ionice", "timeout", "stdbuf", "xargs", "builtin", "eval", "bash", "sh", "zsh", "dash", "ksh"}
+WRAPPERS = {"env", "command", "exec", "time", "nice", "ionice", "timeout", "stdbuf", "xargs", "builtin", "eval", "bash", "sh", "zsh", "dash", "ksh",
+            "do", "then", "else", "elif", "if", "while", "until", "{", "!"}
 DELETERS = {"rm", "rmdir", "shred", "unlink", "truncate"}
 CODE_RUNNERS = {"python", "python3", "node", "perl", "ruby"}
-_NET_CODE = re.compile(r"\b(?:urllib|requests|httpx|aiohttp|http\.client|socket|smtplib|ftplib|paramiko|fetch)\b")
-NO_TOOLS = {"Agent", "Task", "RemoteTrigger", "CronCreate", "CronDelete", "SendMessage", "TeamCreate"}  # a run starts no other run
+_NET_CODE = re.compile(r"\b(?:import|from)\s+(?:urllib|requests|httpx|aiohttp|http\.client|socket|smtplib|ftplib|paramiko)\b|\burllib\.\w|\brequests\.(?:get|post|put|delete)\b|\bfetch\(")
+_RUNS_CODE_TEXT = re.compile(r"\b(?:python[\d.]*|node|perl|ruby)\b[^\n|;&]*(?:\s-[cCeE]\b|<<)")
+KNOWN_READS = {"Read", "Grep", "Glob", "LS", "NotebookRead", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch", "CronList", "ListAgents"}  # all else is by name below, or refused
 _READ_TOOL = re.compile(r"^(?:get|list|search|read|query|suggest|find|fetch|count|view|show|describe|lookup|check|download)(?:_|$)", re.I)
 CALENDAR_WRITES = {"create_event", "update_event", "delete_event"}
 DRAFTS = {"create_draft", "update_draft", "delete_draft"}
@@ -108,14 +111,14 @@ OTHERS = ("attendees", "attendeeEmails", "addedAttendees", "addedAttendeeEmails"
 NEVER_SCRIPTS = {"push", "release", "update", "gitlock", "sync", "tick", "runjob", "proof", "datachange", "install-linux", "set-status", "set_status"}
 _JOB_WRITES = {"add", "add-row", "write-row", "feedback", "send-row", "tell", "stop", "overrule", "move", "on", "off", "pause", "now", "mail-on", "mail-off", "mail-fast",
                "mail-hourly", "resume", "done", "mark", "held", "boxed", "crashed", "guess", "mistake", "redo", "doing"}
-NO_SUBS = {"features": {"on", "off"}, "backend": {"on", "off"}, "cycles": {"set", "order", "tick"}, "schedule": {"add", "cancel", "move", "priority", "every", "promote"},
+NO_SUBS = {"features": {"on", "off"}, "backend": {"on", "off"}, "cycles": {"set", "order", "yes", "tick"}, "schedule": {"add", "cancel", "move", "priority", "every", "promote"},
            "jobs": _JOB_WRITES, "sprint": {"rank", "plan", "moscow", "ready"}, "review": {"clear", "reword", "add", "sitdown", "no", "pass", "run", "golden", "tick"},
            "qa": {"pass", "fail", "queue"}, "mistakes": {"add", "put"}}
 MAY_SUBS = {"moneypenny": {"jobs": {"stop", "resume", "tell", "write-row", "feedback"}, "sprint": {"rank", "moscow", "ready"}, "review": {"reword", "add", "sitdown", "no"}, "qa": {"queue"}}}
 # what's his, read and never written by a cycle
 HIS = ("my-answers.md", "day-in-the-life.md", "day-in-the-life-stories.md", "lifestyle-design.md", "map.md", "rules.md", "me.md", "CLAUDE.md", "where-things-go.md",
-       "current-situation.md", "handbook.md", "cycles.json", "cycles-state.json", "backend.json", "features-in-pieces.json")
-_HIS_NAME = r"(?<![\w-])(?:" + "|".join(re.escape(x) for x in HIS) + r")"
+       "current-situation.md", "handbook.md", "cycles.json", "cycles-state.json", "backend.json", "features-in-pieces.json", "notes.md", "log-archive.md", "challenges-archive.md")
+_HIS_NAME = r"(?<![\w-])(?:" + "|".join(re.escape(x) for x in HIS) + r"|my[ _]notes\S*|HQ/calls/\S+)"
 _CODE_NAME = r"\S*(?<![\w-])(?:routine|app|status|template|install|workflows|desktop)/\S+"
 _WRITE_ON = (r">>?\s*[^\s|;&]*{n}|\bsed\s+(?:-[a-zA-Z]*\s+)*-i[^|;&\n]*{n}|\btee\b[^|;&\n]*{n}|\b(?:mv|rm|unlink|shred|truncate)\b[^|;&\n]*{n}"
              r"|\b(?:cp|ln|install|dd)\b[^|;&\n]*{n}\s*(?:$|[|;&\n])|\bopen[\s(]+\S*{n}\S*[\s,]+\S*[wa]\b|{n}\S*\.write_(?:text|bytes)\b|\bgit\s+(?:checkout|restore)\b[^|;&\n]*{n}|" + _IN_PLACE)
@@ -149,7 +152,7 @@ def never_mail(name: str) -> bool:
     return name.startswith("mcp__") and name.rsplit("__", 1)[-1] in hqpaths.NEVER_MAIL
 
 
-def is_his(path: str, cwd: str | None = None) -> str | None:
+def is_his(path: str, cwd: str | None = None, aid: str = "") -> str | None:
     """Whose this path is, in a refusal's words, when a cycle may not write it; None when it may."""
     import hqpaths
     folder, hq = os.path.normpath(hqpaths.FOLDER), os.path.normpath(hqpaths.HQ)
@@ -157,9 +160,11 @@ def is_his(path: str, cwd: str | None = None) -> str | None:
     name = os.path.basename(p)
     if not p.startswith(folder + "/") and p.startswith((tempfile_root(), hq + "/scratch/")):
         return None
-    if name in HIS or p.startswith((folder + "/.claude/", folder + "/.git/")):
+    if name in HIS or name.startswith("my notes") or p.startswith((folder + "/.claude/", folder + "/.git/", folder + "/HQ/calls/")):
         return f"{name} is his: a cycle reads it and never writes it; a change there is a question for him"
-    if p.startswith(folder + "/HQ/agents/") and not name.endswith("-about-herself.md"):
+    if p.startswith(folder + "/HQ/ledger/") and aid and not name.startswith(f"{aid}.") and not name.startswith(f"{aid}-"):
+        return f"{name} is another agent's ledger: a cycle writes only her own"
+    if p.startswith(folder + "/HQ/agents/") and not (name.endswith("-about-herself.md") and (not aid or name.startswith(f"{aid}-"))):
         return f"{name} is the agents' own setup: a cycle reads it and never writes it"
     if p.startswith(hq + "/") and not p.startswith(folder + "/"):
         return "HQ's own code is built by the team, never by a cycle"
@@ -184,8 +189,12 @@ def _program(piece: str) -> list:
 
 def cycle_shell(cmd: str, aid: str, kind: str, cwd: str | None = None) -> str | None:
     """What a cycle's shell line may not do, in plain words, by what would run and what it would touch; None when it's fine."""
-    named = re.sub(r"[\"']([^\"'\n]*(?:\.py|" + "|".join(re.escape(x) for x in HIS) + r"))[\"']", lambda m: m.group(1).replace(" ", "_"), cmd)
+    named = re.sub(r"[\"']([^\"'\n]*(?:\.py|my notes[^\"'\n]*|HQ/calls/[^\"'\n]*|" + "|".join(re.escape(x) for x in HIS) + r"))[\"']", lambda m: m.group(1).replace(" ", "_"), cmd)
     runs = ran(named)
+    if aid and re.search(_WRITE_ON.format(n=rf"\S*HQ/ledger/(?!{re.escape(aid)}[.-])\S+", name=rf"\S*HQ/ledger/(?!{re.escape(aid)}[.-])\S+"), runs):
+        return "HQ: refused: another agent's ledger is hers; a cycle writes only her own."
+    if _RUNS_CODE_TEXT.search(named) and _NET_CODE.search(named):
+        return "HQ: refused: reaching outside HQ from a script isn't something a cycle does."
     if _SETS_JOB.search(runs):
         return "HQ: refused: HQ_JOB says which run this is; a run never changes it."
     if _HIS_WRITE.search(runs):
@@ -216,8 +225,6 @@ def cycle_shell(cmd: str, aid: str, kind: str, cwd: str | None = None) -> str | 
             if m and m.group(1) in _GIT_WRITES:
                 return f"HQ: refused: git {m.group(1)} writes, and a cycle only reads git."
             continue
-        if prog in CODE_RUNNERS and re.search(r"\s-[cCeE]\b", " ".join(words)) and _NET_CODE.search(piece):
-            return "HQ: refused: reaching outside HQ from a script isn't something a cycle does."
         if _says_only(piece):
             continue
         for script, sub, arg in _SCRIPT.findall(piece):
@@ -238,48 +245,125 @@ def is_scratch(path: str) -> bool:
 
 def cycle_tool(name: str, inp: dict, aid: str, kind: str, cwd: str | None = None) -> str | None:
     """H298's fix round: what a cycle may not do with a tool, in plain words; None when it's fine."""
-    if name in NO_TOOLS:
-        return "HQ: refused: a run starts no other run; the box and the share wouldn't see it."
+    if name in KNOWN_READS:
+        return None
     if name.startswith("mcp__"):
         last = name.rsplit("__", 1)[-1]
         if _READ_TOOL.match(last):
             return None
         if last in POWERS.get(aid, ()):
-            if last in CALENDAR_WRITES and any(inp.get(k) for k in OTHERS):
-                return "HQ: refused: an event with another person in it sends them mail, so it's a question for him."
-            return None
+            return calendar_hold(last, inp, aid)[0] if last in CALENDAR_WRITES else None
         if re.search(r"trash|delete|remove|spam", last):
             return f"HQ: refused: deleting or trashing through a connector ({last}) isn't something a cycle does."
         if re.search(r"send|post|publish|reply|forward|share|invite|message", last):
             return f"HQ: refused: nothing goes out through a connector ({last}) from a cycle."
         return f"HQ: refused: a change through a connector ({last}) isn't this cycle's to make; a question for him instead."
     if name in EDITORS:
-        why = is_his(str(inp.get("file_path") or inp.get("notebook_path") or ""), cwd)
+        why = is_his(str(inp.get("file_path") or inp.get("notebook_path") or ""), cwd, aid)
         return f"HQ: refused: {why}." if why else None
     if name == "Bash":
         return cycle_shell(str(inp.get("command") or ""), aid, kind, cwd)
+    return f"HQ: refused: {name} isn't something a cycle uses: it works past her box, her share or her line."
+
+
+def _mirror(base: str | None = None) -> dict:
+    """His calendar as HQ last read it."""
+    import hqpaths
+    try:
+        return json.load(open(os.path.join(base or hqpaths.FOLDER, "HQ", "calendar.json"), encoding="utf8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _event(eid: str, m: dict) -> dict | None:
+    for e in m.get("events") or []:
+        if eid in (e.get("gid"), e.get("id"), e.get("eventId"), e.get("uid")) or str(e.get("gid") or "").startswith(eid + "_"):
+            return e
     return None
 
 
+def _moment(s: str) -> str:
+    """An event's time as he'd say it."""
+    import datetime as dt
+    try:
+        d = dt.datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except ValueError:
+        return str(s)
+    return f"{d:%a} {d.day} {d:%b}" + ("" if len(str(s)) == 10 else f" {d:%H:%M}")
+
+
+def _span(a, b) -> str:
+    """From to to, the same day said once."""
+    x, y = _moment(a) if a else "", _moment(b) if b else ""
+    return f"{x} to {y.split(' ')[-1] if x[:9] == y[:9] and len(x) > 10 else y}" if x and y else x or y
+
+
+def _named(e: dict) -> str:
+    return f"\"{e.get('title') or 'an event'}\", {_span(e.get('start'), e.get('end'))}"
+
+
+def _key(last: str, inp: dict) -> str:
+    return f"{last}|{inp.get('eventId') or str(inp.get('summary')) + '|' + str(inp.get('startTime'))}"
+
+
+def _his_calendar(cal: str, aid: str, m: dict) -> bool:
+    """His own: his main calendar, and what his setting names. Anyone else's is a question first."""
+    name = next((c.get("name") for c in m.get("calendars") or [] if c.get("id") == cal), "")
+    if cal in ("", "primary") or name == "Main" or ("@" in cal and "calendar.google.com" not in cal):
+        return True
+    import cycles
+    own = cycles.agent_settings(aid).get("own_calendars") or []
+    return cal in own or name in own
+
+
+def _calendar_name(cal: str, m: dict) -> str:
+    return next((c.get("name") for c in m.get("calendars") or [] if c.get("id") == cal), "") or "someone else's calendar"
+
+
+def calendar_hold(last: str, inp: dict, aid: str) -> tuple:
+    """(the hook's answer or None, what, why): a change with guests or on someone else's calendar waits for his yes: moving or removing one can mail other people."""
+    m = _mirror()
+    verb = {"create_event": "add", "update_event": "change", "delete_event": "remove"}[last]
+    what, why = None, None
+    if last == "create_event":
+        what = f"add {_named({'title': inp.get('summary'), 'start': inp.get('startTime'), 'end': inp.get('endTime')})}"
+        cal = str(inp.get("calendarId") or "")
+    else:
+        e = _event(str(inp.get("eventId") or ""), m)
+        if e is None:
+            what, why = f"{verb} an event HQ doesn't know yet ({inp.get('eventId')})", "HQ can't see who's in it"
+            cal = ""
+        else:
+            what = f"{verb} {_named(e)}"
+            cal = str(e.get("cal") or "")
+            why = "it has guests, and they'd get a mail" if e.get("others") else None
+    if any(inp.get(k) for k in OTHERS):
+        why = "it has guests, and they'd get a mail"
+    if not why and not _his_calendar(cal, aid, m):
+        why = f"it's on {_calendar_name(cal, m)}"
+    if not why:
+        return None, what, why
+    import cycles
+    if cycles._agent_state(cycles._state(), aid)["allowed"].get(_key(last, inp), "") >= time.strftime("%Y-%m-%d %H:%M"):
+        return None, what, why
+    return f"HQ: held: {why}, so this waits for his yes and HQ has asked him. Leave it and go on.", what, why
+
+
 def calendar_line(name: str, inp: dict, base: str | None = None) -> str | None:
-    """Donna's calendar write, for her ledger: what and when, with enough to put it back."""
+    """Donna's calendar write, for her ledger, as he'd read it: what, when, what it was before."""
     last = name.rsplit("__", 1)[-1]
     if not name.startswith("mcp__") or last not in CALENDAR_WRITES:
         return None
-    what = {"create_event": "added", "update_event": "changed", "delete_event": "removed"}[last]
-    title = str(inp.get("summary") or "").strip()
-    eid = str(inp.get("eventId") or "").strip()
-    if not title and eid:
-        try:
-            import hqpaths
-            ev = json.load(open(os.path.join(base or hqpaths.FOLDER, "HQ", "calendar.json"), encoding="utf8")).get("events") or []
-            e = next((x for x in ev if eid in (x.get("id"), x.get("eventId"), x.get("uid"))), {})
-            title, was = e.get("title") or "", f"{e.get('start', '')} to {e.get('end', '')}" if e else ""
-            title = f"{title} (was {was})" if was else title
-        except (OSError, ValueError):
-            pass
-    when = " to ".join(str(inp[k]) for k in ("startTime", "endTime") if inp.get(k))
-    return " ".join(f"calendar, {what}: {title or eid or 'an event'}{', ' + when if when else ''}{' (' + eid + ')' if eid else ''}".split())
+    if last == "create_event":
+        return "calendar: added " + _named({"title": inp.get("summary"), "start": inp.get("startTime"), "end": inp.get("endTime")})
+    eid = str(inp.get("eventId") or "")
+    e = _event(eid, _mirror(base))
+    was = _named(e) if e else f"an event HQ didn't know ({eid})"
+    if last == "delete_event":
+        return f"calendar: removed {was}"
+    now = [x for x in (str(inp.get("summary") or ""), _span(inp.get("startTime"), inp.get("endTime")), str(inp.get("location") or "")) if x]
+    return f"calendar: changed {was}: now {', '.join(now) or 'its details'}"
+
 
 
 _WORK_LINE = re.compile(r"\bgit\b[^|;&]*\b(?:pull|merge|rebase|checkout|switch|reset|fetch)\b[^|;&]*\b(?:origin/)?(?:dev|nightly)\b"
@@ -470,7 +554,7 @@ def job_guard(cmd: str) -> str | None:
 
 
 # F86: what writes, besides role.WRITES (what a call may hand to the main); a round's own ways out are named in fix_guard.
-_FIX_ALSO = {"cycles": {"ask", "batch", "text", "plan", "order", "set", "done", "failed", "stale", "proposal"}, "direct_line": None, "handover": None,
+_FIX_ALSO = {"cycles": {"ask", "batch", "text", "plan", "order", "set", "yes", "done", "failed", "stale", "stopstep", "droptext", "stopped", "proposal"}, "direct_line": None, "handover": None,
              "review": {"clear", "pass", "run", "golden", "tick"}, "set-status": None, "set_status": None, "notes": None, "gitlock": None, "push": None,
              "qa": {"pass", "fail", "queue"}, "jobs": {"mark", "held"}}
 _SCRIPT = re.compile(r"(?<![\w-])([a-z_-]+)\.py\b\s*(\S+)?\s*(\S+)?")
@@ -560,15 +644,26 @@ def main() -> int:
     a = sys.argv[1:]
     who = (a[a.index("--agent") + 1], a[a.index("--kind") + 1]) if "--agent" in a and "--kind" in a else None
     code, why = decide(ask, "--mail-only" in a, (a[a.index("--fix") + 1].upper(), a[a.index("--fix") + 2]) if "--fix" in a else None, who)
+    tool, inp = str(ask.get("tool_name", "")), ask.get("tool_input") or {}
     if not code and who:
-        line = calendar_line(str(ask.get("tool_name", "")), ask.get("tool_input") or {})
+        line = calendar_line(tool, inp)
         if line:  # in her ledger before it runs, so no way it ends can lose it
             try:
-                import time as _time
+                import cycles
                 import ledger
-                ledger.note(who[0], f"{_time.strftime('%Y-%m-%d %H:%M')} {line}")
+                ledger.note(who[0], f"{time.strftime('%Y-%m-%d %H:%M')} {line}")
+                with cycles.held() as d:  # his yes was for this one change
+                    cycles._agent_state(d, who[0])["allowed"].pop(_key(tool.rsplit("__", 1)[-1], inp), None)
             except Exception as e:
                 print(f"(the calendar line wasn't written: {e!r})", file=sys.stderr)
+    if code and why.startswith("HQ: held"):  # the question reaches him; it's no mistake of hers
+        try:
+            import cycles
+            last = tool.rsplit("__", 1)[-1]
+            _, what, reason = calendar_hold(last, inp, who[0])
+            cycles.hold(who[0], _key(last, inp), what, reason)
+        except Exception as e:
+            print(f"(the question wasn't asked: {e!r})", file=sys.stderr)
     if code:
         print(why, file=sys.stderr)
         if never_mail(str(ask.get("tool_name", ""))):  # F103: a refused outward action is a mistake on the ledger

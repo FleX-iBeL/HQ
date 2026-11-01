@@ -375,7 +375,7 @@ def start(job):
         hook += f" --agent {shlex.quote(cycle['agent'])} --kind {shlex.quote(cycle['kind'])}"  # the fix round: what she may do is by agent and kind
         if cycle["kind"] == "fix":  # F86: a round touches its one row
             hook += f" --fix {shlex.quote(cycle['label'])} {cycle['mode']}"
-        sett["hooks"] = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|Agent|Task|mcp__.*",
+        sett["hooks"] = {"PreToolUse": [{"matcher": ".*",  # every tool: the hook lets the known reads through, and refuses what it doesn't know
                                          "hooks": [{"type": "command", "command": hook}]}]}
     else:  # F99: every job: no send, reply or forward through any connector
         sett["hooks"] = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|Bash|mcp__.*", "hooks": [{"type": "command", "command": hook + " --mail-only"}]}]}

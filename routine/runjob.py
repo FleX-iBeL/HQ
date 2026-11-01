@@ -60,7 +60,7 @@ SCRIPT_SAID = _re.compile(r"^(?:Exit code \d+\s+)?(?:Refused\b|HQ: refused\b|\S+
 PUSH_SAID = _re.compile(r"\[(?:remote )?rejected\]|failed to push some refs")
 NOTE_MOST = 400  # tool lines kept in the box note
 USES_MOST = 120  # the calls that went through, kept for the runner's look
-READS = ("Read", "Grep", "Glob", "LS", "ToolSearch", "TodoWrite", "WebSearch")
+READS = ("Read", "Grep", "Glob", "LS", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch", "CronList", "ListAgents")
 KILL_GRACE = 5  # seconds between the ask and the kill; under the routine's ten (tick.end_chat), so the runner does it first [the fix round's pick]
 
 
@@ -268,6 +268,7 @@ def main(argv: list[str]) -> int:
         started_at = time.time()
         boxed = {"why": None}
         turns, tools, refused, last_tool, uses, asked = 0, [], [], None, [], {}
+        seen_turns, cal_failed = set(), []  # H298: a turn is one of the model's messages; the stream gives each block of it as an event of its own
 
         def _box(why):
             if boxed["why"] is None:
@@ -310,7 +311,10 @@ def main(argv: list[str]) -> int:
                 except Exception as e:
                     _log(lg, f"usage not saved: {e!r}")
             elif t == "assistant":
-                turns += 1
+                mid = (d.get("message") or {}).get("id") or d.get("uuid") or object()
+                if mid not in seen_turns and not boxed["why"]:
+                    seen_turns.add(mid)
+                    turns += 1
                 if box["turns"] and turns > box["turns"]:
                     _box("turns")
                 for block in (d.get("message") or {}).get("content") or []:
@@ -335,9 +339,13 @@ def main(argv: list[str]) -> int:
                     if isinstance(block, dict) and block.get("type") == "tool_result":
                         txt = " ".join(_result_text(block).split())
                         call = asked.pop(block.get("tool_use_id") or last_tool, None) or {"step": last_tool or "", "name": "", "input": {}}
-                        if really_refused(txt, block.get("is_error")):
+                        if "HQ: held" in txt[:400]:  # held for his yes: no mistake, and it didn't go through
+                            pass
+                        elif really_refused(txt, block.get("is_error")):
                             if len(refused) < 50:
                                 refused.append({"tool": (call["step"] or "")[:LINE_MOST], "said": txt[:LINE_MOST * 2]})
+                        elif block.get("is_error") and call["name"].rsplit("__", 1)[-1] in ("create_event", "update_event", "delete_event"):
+                            cal_failed.append(txt[:LINE_MOST])
                         elif call["name"] and call["name"] not in READS and len(uses) < USES_MOST:
                             uses.append({"name": call["name"], "input": {k: (v[:2000] if isinstance(v, str) else v) for k, v in list(call["input"].items())[:12]}})
             elif t == "result":
@@ -362,7 +370,7 @@ def main(argv: list[str]) -> int:
         _write_note(box["note"], {"n": n, "minutes": minutes, "turns": turns, "steps": steps, "boxed": boxed["why"],
                                   "box": {"minutes": box["minutes"], "turns": box["turns"]}, "exit": code,
                                   "error": bool(is_error), "subtype": subtype, "result": (result or "")[:2000],
-                                  "tools": tools, "refused": refused, "uses": uses, "session": session,
+                                  "tools": tools, "refused": refused, "uses": uses, "calendar_failed": cal_failed, "session": session,
                                   "ended_by": "signal" if ended_by_signal["sig"] else ("box" if boxed["why"] else "itself")})
         sig = ended_by_signal["sig"]
         if sig:

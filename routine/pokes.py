@@ -143,14 +143,32 @@ def call_pokes(agent_id: str, agent_name: str, since: float, until: float, folde
     return {"short": short, "calls": total}
 
 
+def repeats(aid: str, since: float, until: float, folder: Path | None = None) -> int:
+    """H298: the handbook: mistakes are allowed, repeats are not. A tripwire in her ledger is a mistake made twice: a goal, a box, a check, a refusal."""
+    try:
+        t = Path(os.environ.get("HQ_LEDGER_FOLDER") or Path(folder or FOLDER) / "HQ" / "ledger").joinpath(f"{aid}.md").read_text(encoding="utf8")
+    except OSError:
+        return 0
+    n, inside = 0, False
+    for l in t.splitlines():
+        m = re.match(r"## (\d{4}-\d\d-\d\d \d\d:\d\d) · ", l)
+        if m:
+            ts = dt.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M").timestamp()
+            inside = since <= ts <= until
+        elif inside and l.startswith("- tripwire ("):
+            n += 1
+    return n
+
+
 def pokes(agent: dict, since: float, until: float, folder: Path | None = None) -> dict:
     import mistakes
     t = text_pokes(agent["id"], since, until, folder)
     c = call_pokes(agent["id"], agent["name"], since, until, folder)
     kinds = mistakes.counts((agent["id"].lower(), agent["name"].lower()), since, until, folder or FOLDER)
     fixed = sum(kinds.get(k, 0) for k in HIS_MISTAKE_KINDS)
-    return {"status_questions": t["status"], "corrections": fixed, "short_calls": c["short"], "refused": kinds.get("refused", 0),
-            "total": t["status"] + fixed + c["short"], "his_texts": t["texts"], "calls": c["calls"], "texts_acted_on": t["acted"]}
+    rep = repeats(agent["id"], since, until, folder)
+    return {"status_questions": t["status"], "corrections": fixed, "short_calls": c["short"], "refused": kinds.get("refused", 0), "repeats": rep,
+            "total": t["status"] + fixed + c["short"] + rep, "his_texts": t["texts"], "calls": c["calls"], "texts_acted_on": t["acted"]}
 
 
 # -- each agent's own measures -----------------------------------------------------------------------------------------
@@ -384,6 +402,8 @@ NAMES = {"dated_items_done_before_their_date": "dated items done before their da
 def lines_of(agent: dict, p: dict, own: dict) -> list[str]:
     out = [f"pokes: {p['total']} (status questions {p['status_questions']}, corrections on the ledger {p['corrections']}, short calls "
            f"{p['short_calls']}; his texts {p['his_texts']}, calls with her {p['calls']})"]
+    if p.get("repeats"):
+        out.append(f"mistakes repeated: {p['repeats']}")
     if p.get("refused"):
         out.append(f"refused outward tries on the ledger: {p['refused']}")
     if agent.get("context") == "day":

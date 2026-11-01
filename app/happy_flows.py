@@ -14935,7 +14935,7 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
                "HQ_COACHING_LINE": str(ws / "HQ/coaching-line"), "HQ_TEAM_LINE_DIR": str(ws / "HQ/team-line"),
                "HQ_DIRECT_LOCAL": str(status / "direct-line.json"), "HQ_CYCLES_STATE": str(status / "cycles-state.json"),
                "HQ_ESTIMATES_DIR": str(status / "estimates"), "HQ_ACTIVITY": str(status / "job-activity.json"),
-               "HQ_LINES": str(status / "lines.json"), "HQ_BACKEND": str(ws / "HQ/backend.json"), "HQ_ASLEEP": "0"}
+               "HQ_LINES": str(status / "lines.json"), "HQ_BACKEND": str(ws / "HQ/backend.json"), "HQ_ASLEEP": "0", "HQ_CYCLES_OLD_STATE": str(status / "old-cycles-state.json")}
         for k in ("HQ_MAKER", "HQ_FEATURES_PIECES", "HQ_BACKEND_HEADLESS_JOBS", "HQ_BACKEND_BRIEFING"):
             env.pop(k, None)
         return ws, env
@@ -20614,6 +20614,9 @@ print("RESULT " + json.dumps(out))
         u = used()
         need(u > last, f"a held run isn't counted: {u} after {last}")
         last = u
+        n = b.job("donna", "morning look", b.thu, "10:30", "cancelled 10:31")  # one that never ran is nothing to count
+        b.py(f"cycles.settle(T({now!r}))")
+        need(used() == last and f"(job {n})" not in b.led(), "a job cancelled before it ran was counted")
         n = b.job("donna", "morning look", b.thu, "11:00", "ended 11:30 without a done mark")  # the next start sees it, before any minute
         n2 = b.job("donna", "morning look", b.thu, "11:40")
         b.py(f"out(cycles.gatekeep(J({n2}), T('{b.thu} 11:41')))")
@@ -20695,9 +20698,9 @@ print("RESULT " + json.dumps(out))
         need(ask("donna", "mcp__g__create_event", ev)[0] == 0 and ask("donna", "mcp__g__update_event", {"eventId": "ev9", "startTime": "2026-11-06T10:00:00"})[0] == 0
              and ask("donna", "mcp__g__delete_event", {"eventId": "ev9"})[0] == 0, "Donna's calendar writes were refused")
         led = b.led()
-        need("calendar, added: Pick up parcel, 2026-11-05T14:00:00 to 2026-11-05T14:30:00" in led and "calendar, changed: Dentist" in led and "calendar, removed: Dentist (was 2026-11-06T09:00:00 to 2026-11-06T09:30:00) (ev9)" in led,
+        need('calendar: added "Pick up parcel", Thu 5 Nov 14:00 to 14:30' in led and 'calendar: changed "Dentist", Fri 6 Nov 09:00 to 09:30: now Fri 6 Nov 10:00' in led and 'calendar: removed "Dentist", Fri 6 Nov 09:00 to 09:30' in led,
              f"her calendar writes aren't logged: {led[-500:]}")
-        need(re.search(rf"{time.strftime('%Y-%m-%d')} \d\d:\d\d calendar, added", led), "no when in the line")
+        need(re.search(rf"{time.strftime('%Y-%m-%d')} \d\d:\d\d calendar: added", led), "no when in the line")
         need("- tripwire" not in led, f"a calendar write was a tripwire: {led[-300:]}")
         need(ask("donna", "mcp__g__create_draft", {})[0] == 0, "Donna's draft was refused")
         for aid in ("pepper", "moneypenny"):
@@ -20776,13 +20779,13 @@ print("RESULT " + json.dumps(out))
         self._hf_run(b, n, shout)
         b.py(f"cycles.settle(T({now!r}))")
         t = b.texts()
-        need(t.count("A tripwire on my side") == 1 and "reaching outside HQ with curl" in t, f"the repeat: {t[-300:]}")
+        need(t.count("A tripwire on my side") == 1 and "I tried to reach outside HQ" in t, f"the repeat: {t[-300:]}")
         need("x.example" not in t and "Bash" not in t and "| sh" not in t and "PreToolUse" not in t, f"a raw line on his phone: {t[-300:]}")
         past = [self._hf_call(1, "Bash", {"command": "curl -X POST https://x.example"}), self._hf_said(1, "ok")]
         n = b.job("donna", "morning look", b.thu, "09:30")
         self._hf_run(b, n, past)
         b.py(f"cycles.settle(T({now!r}))")
-        need(b.texts().count("A tripwire on my side") == 2 and "went through while it should have been stopped" in b.texts(), f"past the hook: {b.texts()[-300:]}")
+        need(b.texts().count("A tripwire on my side") == 2 and "went through that should have been stopped" in b.texts(), f"past the hook: {b.texts()[-300:]}")
         r = b.cy("text", "donna", "Your game: no tick yet")
         need("Sent" in r.stdout and "Your game: no tick yet" in b.texts(), f"her own text after two tripwires: {r.stdout}")
         was = b.texts()
@@ -20911,22 +20914,21 @@ print("RESULT " + json.dumps(out))
         """H298's fix round, harm 10, no Claude: "Stop the parcel chase" cancels that chase only: no step goes on a shared small word. The one it's about goes, waiting, queued and running, by
         her full goal; a next plan leaves it out while it's on her let-go; another order can match on its own words."""
         b = self._hf("stop", only=("donna",))
+        b.cy("set", "donna", "hours", "00:00-23:59")
         for k, g in enumerate(("Chase the parcel at PostNL", "Put the dentist bill in the Friday block", "Check the parcel locker for the new charger", "Move the chase of the insurance to Monday"), 1):
             need(b.sched("add", "tomorrow 09:00", f"Agent step: donna #{k} ({b.thu} 08:30): {g}", "--priority", "--kind", "step-donna").returncode == 0, "no item")
         run = b.step("donna", "Chasing the parcel again with PostNL", 7, state="running since 09:00")
         other = b.step("donna", "Book the plumber for the sink", 8, state="running since 09:00")
         r = b.cy("order", "donna", "stop", "Stop the parcel chase")
-        need("2 of donna's steps cancelled" in r.stdout, f"{r.stdout} {r.stderr[-200:]}")
+        need("Stop the parcel chase" in r.stdout and "cancelled" not in r.stdout, f"{r.stdout} {r.stderr[-200:]}")
         rm = b.rm()
         waiting = re.findall(r"^- Item \d+ · waiting, priority · .* · Agent step: donna #\d \([^)]*\): (.*)$", rm, re.M)
-        need(set(waiting) == {"Put the dentist bill in the Friday block", "Check the parcel locker for the new charger", "Move the chase of the insurance to Monday"}, f"what's left: {waiting}")
-        need(b.state(run) == "stop asked" and b.state(other).startswith("running"), f"running: {b.state(run)} {b.state(other)}")
+        need(len(waiting) == 5 and "Put the dentist bill in the Friday block" in waiting and any("his stop order: Stop the parcel chase" in x for x in waiting), f"what's left: {waiting}")
+        need(b.state(run) == "stop asked" and b.state(other) == "stop asked", f"running: {b.state(run)} {b.state(other)}")
         p = json.dumps({"picks": [], "steps": [{"goal": "Chase the parcel once more", "done_means": "x", "at": "10:00"}, {"goal": "Pay the bill", "done_means": "x", "at": "11:00"}]})
         r = b.py(f"cycles._schedule = lambda *a: (0, 'Item 7 is planned')\nout(cycles.plan('donna', {p!r}, T('{b.fri} 09:00')))")
         need("1 steps" in r and "left out of the plan, he said to stop it: Chase the parcel once more" in b.led(), f"let-go ignored: {r}")
-        r = b.cy("order", "donna", "stop", "stop the the a it")
-        need("0 of donna's steps" in r.stdout, f"small words only: {r.stdout}")
-        return "that chase went, running too; the dentist, the locker and the insurance stayed; let-go holds in the next plan"
+        return "no step is cancelled on a shared word: his words go to her, a running step ends, the let-go holds in the next plan"
 
     async def flow265(self) -> str:
         """H298's fix round, harm 11, no Claude: session_at and session_every do what they say or refuse. The planned item moves within the minute, once, and the words say so; a time outside
@@ -21002,8 +21004,10 @@ print("RESULT " + json.dumps(out))
         old.write_text(json.dumps({"agents": {"pepper": {"goals": {"x": 1}}}}))
         keep = (b.ws / "HQ/agents/cycles-state.json").read_text()
         (b.ws / "HQ/agents/cycles-state.json").unlink()
-        r = b.py(f"cycles.OLD_STATE = __import__('pathlib').Path({str(old)!r})\nout(cycles._state())")
+        r = b.py("out(cycles._state())", extra={"HQ_CYCLES_OLD_STATE": str(old)})
         need(r.get("agents", {}).get("pepper"), f"the old file isn't read: {r}")
+        b.py("with cycles.held() as d:\n    d['x'] = 1\n", extra={"HQ_CYCLES_OLD_STATE": str(old)})
+        need(not old.exists() and (b.ws / "HQ/agents/cycles-state.json").exists(), "the old file is still where it was, once the new one is written")
         (b.ws / "HQ/agents/cycles-state.json").write_text(keep)
         ws2 = self.tmp / "h298-fix-laptop"
         _sh.copytree(b.ws, ws2)
@@ -21367,7 +21371,7 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         need("1 steps" in r[1], f"a plan on an empty ledger: {r}")
         n = b2.step("donna", "chase the parcel", 2, state="running since 10:00")
         b2.cy("order", "donna", "stop", "stop chasing the parcel")
-        need(b2.state(n) == "stop asked" and "let go, on his order" in b2.led(), f"stop while it runs: {b2.state(n)}")
+        need(b2.state(n) == "stop asked" and "stop order" in b2.led(), f"stop while it runs: {b2.state(n)}")
         b3 = self._hf("halfway3", only=("donna",))
         b3.py(f"out(cycles.reconcile(T('{b3.thu} 07:00')))")
         s = b3.sched("add", "tomorrow 09:00", f"Agent step: donna #1 ({b3.thu} 08:30): a look", "--priority", "--kind", "step-donna")
@@ -21386,6 +21390,344 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         need(any("bigger session" in x for x in t["reconciled"]) and b3.state(w).startswith("cancelled"), f"on again: {t}")
         need(f"(job {r})" in b3.led(), "the run that finished while off isn't in her ledger")
         return "killed mid-step counted, not retried, the next plan sees it; the cap holds; an empty ledger is fine; stop while it runs; off and on again from the next cycle"
+
+    def _hf_fake(self, b, code, name="h298-fix-agent"):
+        """A stand-in claude that runs as her: CY(...) is cycles.py with the run's own environment (HQ_JOB), and it says what came back."""
+        fake = self.tmp / f"{name}.py"
+        fake.write_text("#!/usr/bin/env python3\nimport json, os, subprocess, sys\nprompt = sys.stdin.read()\n"
+                        f"open({str(self.tmp / (name + '.prompt'))!r}, 'w').write(prompt)\n"
+                        "def out(d): print(json.dumps(d), flush=True)\n"
+                        "def CY(*a):\n    r = subprocess.run([sys.executable, %r, *a], capture_output=True, text=True)\n    return r.stdout + r.stderr\n"
+                        "out({'type': 'system', 'subtype': 'init', 'session_id': 's'})\n" % str(ROOT / "routine/cycles.py") + code +
+                        "\nout({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Done.'})\n")
+        fake.chmod(0o755)
+        return {"HQ_CLAUDE": str(fake)}
+
+    def _hf_steps(self, *parts):
+        """Every part is tried, whichever fails, so each shows on an older commit for what it tests."""
+        bad = []
+        for f in parts:
+            try:
+                f()
+            except Exception as e:
+                bad.append(f"{f.__name__}: {str(e)[:300]}")
+        need(not bad, f"{len(bad)} of {len(parts)} parts failed: " + " | ".join(bad))
+
+    async def flow275(self) -> str:
+        """H298, second fix round, 1: every text a cycle can send respects his Sleep block: a monthly proposal, an ask with no batches, a batch with no batches, her own text, a tripwire, a failing run. None goes while he's asleep, all go when he's up,
+        Friday's reviews after he's up."""
+        b = self._hf("sleep-all", only=("donna", "pepper"))
+        asleep = {"HQ_ASLEEP": "1"}
+        fri = f"{b.fri} 09:01"
+        b.py(f"out(cycles.proposal('donna', 'Drop the noon look', T({fri!r})))", extra=asleep)
+        b.py(f"out(cycles.proposal('pepper', 'Keep the Thursday draft', T({fri!r})))", extra=asleep)
+        b.py(f"out(cycles.ask('pepper', 'If the week holds, I keep it; if not, say so.', T({fri!r})))", extra=asleep)
+        b.py(f"out(cycles.batch('pepper', 'a line for you', T({fri!r})))", extra=asleep)
+        b.py(f"out(cycles.tripwire_free_text('donna', 'your own text', T({fri!r})))", extra=asleep)
+        b.py(f"out(cycles.tripwire('donna', 'boxed twice in a row', 'x', T({fri!r})))", extra=asleep)
+        b.job("donna", "morning look", b.fri, "09:00", "ended 09:01 without a done mark")
+        b.py(f"cycles.settle(T({fri!r}))", extra=asleep)
+        cl = b.ws / "HQ/coaching-line/thread.jsonl"
+        said = lambda: b.texts() + (cl.read_text() if cl.exists() else "")  # noqa: E731
+        need(not said().strip(), f"a text went in his sleep: {said()[-300:]}")
+        need(len(b.st("donna")["later"]) == 4 and len(b.st("pepper")["later"]) == 3, f"what waits: {b.st('donna')['later']}")
+        need("waiting for him to wake up" in b.py(f"out(cycles.proposal('donna', 'Another line', T({fri!r})))", extra=asleep), "what the run is told")
+        b.py(f"out(cycles.later(T('{b.fri} 09:30')))")
+        need(all(x in said() for x in ("Drop the noon look", "Keep the Thursday draft", "If the week holds", "a line for you", "your own text", "didn't get through")), f"not all went when he was up: {said()[-400:]}")
+        return "a proposal, an ask, a batch, her own text, a tripwire and a failing run all wait for his wake-up, then go"
+
+    async def flow276(self) -> str:
+        """H298, second fix round, 2: a calendar change reads in plain words, from a mirror in the shape of the real one (gid, cal, others): what, when, what it was before; a removal too: title and time, no code."""
+        import subprocess as _sp
+        b = self._hf("cal-line", only=("donna",))
+        (b.ws / "HQ/calendar.json").write_text(json.dumps({"calendars": [{"id": "him@example.com", "name": "Main"}], "events": [
+            {"id": "a1b2", "gid": "evt459801e467", "cal": "him@example.com", "calendar": "Main", "others": False, "title": "Dentist", "start": "2026-11-06T09:00:00+01:00", "end": "2026-11-06T09:30:00+01:00"}]}))
+        def hook(name, inp):
+            r = _sp.run([sys.executable, str(ROOT / "routine/cyclehook.py"), "--agent", "donna", "--kind", "step"], input=json.dumps({"tool_name": name, "tool_input": inp}), capture_output=True, text=True, env=b.env, cwd=str(ROOT))
+            need(r.returncode == 0, f"{name}: {r.stderr}")
+        hook("mcp__g__create_event", {"summary": "Pick up parcel", "startTime": "2026-11-05T14:00:00", "endTime": "2026-11-05T14:30:00"})
+        hook("mcp__g__update_event", {"eventId": "evt459801e467", "startTime": "2026-11-06T10:00:00", "endTime": "2026-11-06T10:30:00"})
+        hook("mcp__g__delete_event", {"eventId": "evt459801e467"})
+        led = b.led()
+        need('calendar: added "Pick up parcel", Thu 5 Nov 14:00 to 14:30' in led, f"an add: {led[-400:]}")
+        need('calendar: changed "Dentist", Fri 6 Nov 09:00 to 09:30: now Fri 6 Nov 10:00 to 10:30' in led, f"a change: {led[-400:]}")
+        need('calendar: removed "Dentist", Fri 6 Nov 09:00 to 09:30' in led, f"a removal: {led[-400:]}")
+        need("evt459801e467" not in led, "a bare id in what he reads")
+        return "added, changed and removed each read as what, when and what it was"
+
+    async def flow277(self) -> str:
+        """H298, second fix round, 3: the hook sees every tool: a cycle's settings match all of them, and what isn't a known read is refused, by name or not: CronCreate, RemoteTrigger, SendMessage, Workflow, PushNotification, ScheduleWakeup, a tool nobody has
+        heard of. WebFetch stays free. A team job's hook is as it was. The real start writes it so."""
+        import subprocess as _sp
+        b = self._hf("every-tool", only=("donna",))
+        def hook(name, *a):
+            return _sp.run([sys.executable, str(ROOT / "routine/cyclehook.py"), *a], input=json.dumps({"tool_name": name, "tool_input": {}}), capture_output=True, text=True, env=b.env, cwd=str(ROOT))
+        for name in ("CronCreate", "CronDelete", "RemoteTrigger", "SendMessage", "Workflow", "PushNotification", "ScheduleWakeup", "Monitor", "Skill", "TaskStop", "EnterWorktree", "SomethingNew", "Agent", "Task"):
+            r = hook(name, "--agent", "donna", "--kind", "step")
+            need(r.returncode == 2 and "HQ: refused" in r.stderr, f"{name} wasn't refused: {r.returncode} {r.stderr}")
+            need(hook(name, "--mail-only").returncode == 0, f"a team job's hook changed on {name}")
+        for name in ("Read", "Grep", "Glob", "ToolSearch", "WebSearch", "WebFetch", "CronList"):
+            need(hook(name, "--agent", "donna", "--kind", "step").returncode == 0, f"{name} was refused")
+        n = b.job("donna", "morning look", b.thu, "09:00")
+        fake = self._hf_fake(b, "pass\n")
+        b.drive("start", extra=fake)
+        sett = json.loads((Path(b.env["HQ_JOB_RUN"]) / "job-settings.json").read_text())
+        need(sett["hooks"]["PreToolUse"][0]["matcher"] == ".*", f"the matcher: {sett['hooks']}")
+        return "every tool reaches the hook; what isn't a known read is refused; WebFetch free; a team job as it was"
+
+    async def flow278(self) -> str:
+        """H298, second fix round, 4: on his own calendars she adds, changes and removes by herself. An event with guests (in the mirror or in the call), on someone else's calendar, or one HQ doesn't know: the hook holds it, it's no mistake, the
+        question reaches him past the day's cap, once. His yes opens that one change once, and she does it in a step; his own calendars can be named."""
+        import subprocess as _sp
+        b = self._hf("cal-hold", only=("donna",))
+        (b.ws / "HQ/calendar.json").write_text(json.dumps({"calendars": [{"id": "him@example.com", "name": "Main"}, {"id": "partner-calendar", "name": "Partner"}, {"id": "course-calendar", "name": "Course"}], "events": [
+            {"gid": "own1", "cal": "him@example.com", "others": False, "title": "Admin", "start": "2026-11-06T11:00:00+01:00", "end": "2026-11-06T12:00:00+01:00"},
+            {"gid": "guest1", "cal": "him@example.com", "others": True, "title": "Accountability call", "start": "2026-11-06T16:30:00+01:00", "end": "2026-11-06T17:00:00+01:00"},
+            {"gid": "her1", "cal": "partner-calendar", "others": False, "title": "Lecture", "start": "2026-11-09T11:00:00+01:00", "end": "2026-11-09T12:45:00+01:00"},
+            {"gid": "cmb1", "cal": "course-calendar", "others": False, "title": "Course block", "start": "2026-11-09T14:00:00+01:00", "end": "2026-11-09T15:00:00+01:00"}]}))
+        def hook(name, inp):
+            return _sp.run([sys.executable, str(ROOT / "routine/cyclehook.py"), "--agent", "donna", "--kind", "step"], input=json.dumps({"tool_name": name, "tool_input": inp}), capture_output=True, text=True, env=b.env, cwd=str(ROOT))
+        need(hook("mcp__g__delete_event", {"eventId": "own1"}).returncode == 0, "his own event was held")
+        for inp, say in (({"eventId": "guest1"}, "guests"), ({"eventId": "her1"}, "Partner"), ({"eventId": "nobody-knows"}, "can't see"), ({"eventId": "cmb1"}, "Course")):
+            r = hook("mcp__g__delete_event", inp)
+            need(r.returncode == 2 and "HQ: held" in r.stderr and say in r.stderr, f"{inp}: {r.returncode} {r.stderr}")
+        r = hook("mcp__g__update_event", {"eventId": "guest1", "startTime": "2026-11-06T18:00:00"})
+        need(r.returncode == 2, "a move with guests")
+        need(hook("mcp__g__create_event", {"summary": "Dinner", "startTime": "2026-11-07T19:00:00", "endTime": "2026-11-07T20:00:00", "calendarId": "partner-calendar"}).returncode == 2, "an add on her calendar")
+        need(hook("mcp__g__create_event", {"summary": "Lunch", "startTime": "2026-11-07T12:00:00", "endTime": "2026-11-07T13:00:00", "attendees": [{"email": "a@b.c"}]}).returncode == 2, "an add with a guest")
+        st = b.st()
+        need(len(st["holds"]) == 7, f"the holds: {[h['what'] for h in st['holds']]}")
+        q = [x["text"] for x in st["batch"]]
+        need(any('"Accountability call"' in x and "guests" in x and x.startswith("If you want me to remove") for x in q), f"the question doesn't reach him: {q}")
+        need(len(q) == 7, f"the day's cap stopped a question: {len(q)}")
+        hook("mcp__g__delete_event", {"eventId": "guest1"})
+        need(len(b.st()["holds"]) == 7, "the same change was asked twice")
+        need(not (b.ws / "HQ/mistakes.jsonl").exists() or "held" not in (b.ws / "HQ/mistakes.jsonl").read_text(), "a hold counted as a mistake")
+        # in a run: no refusal, no tripwire
+        n = b.job("donna", "morning look", b.thu, "09:00")
+        said = "PreToolUse:mcp__g__delete_event hook error: [/usr/bin/python3 x]: HQ: held: it has guests, and they'd get a mail, so this waits for his yes and HQ has asked him. Leave it and go on.\n"
+        note = self._hf_run(b, n, [self._hf_call(1, "mcp__g__delete_event", {"eventId": "guest1"}), self._hf_said(1, said, True)])
+        need(note["refused"] == [] and note["uses"] == [], f"a hold in the run: {note['refused']} {note['uses']}")
+        b.py(f"cycles.settle(T('{b.thu} 10:00'))")
+        need("- tripwire" not in b.led() and "refused, logged" not in b.led(), f"a hold read as a mistake: {b.led()[-300:]}")
+        # his yes: that one, once
+        n1 = next(h["n"] for h in b.st()["holds"] if h["key"] == "delete_event|guest1")
+        r = b.cy("yes", "donna", "yes move it", str(n1))
+        need(r.returncode == 0 and "she does it now" in r.stdout or "first thing" in r.stdout, f"his yes: {r.stdout} {r.stderr[-200:]}")
+        need(hook("mcp__g__delete_event", {"eventId": "guest1"}).returncode == 0, "his yes didn't open it")
+        need('calendar: removed "Accountability call"' in b.led(), "it isn't logged")
+        need(hook("mcp__g__delete_event", {"eventId": "guest1"}).returncode == 2, "his yes opened it twice")
+        need("he said yes" in b.rm().lower() or re.search(r'He said yes', b.led()), "no step for it")
+        need(b.cy("yes", "donna", "x", extra={"HQ_JOB": str(n)}).returncode != 0, "a run gave itself a yes")
+        # his own calendars by name
+        need("is now Course" in b.cy("set", "donna", "own_calendars", "Course").stdout, "the setting")
+        need(hook("mcp__g__delete_event", {"eventId": "cmb1"}).returncode == 0, "a calendar named his own is held")
+        need(hook("mcp__g__delete_event", {"eventId": "her1"}).returncode == 2, "hers isn't his")
+        return "his own go; guests, her calendar and an unknown event are held, no mistake, the question reaches him; his yes opens that one, once"
+
+    async def flow279(self) -> str:
+        """H298, second fix round, 5: a stop order in his own words: the nine natural ones QA tried. Each goes to her in plain text, his words, with all she has planned; the stand-in does what she does: stops the step she takes him to mean and says so.
+        The step really stops. Till then no other step of hers starts; a running one ends at once. Nothing matching: she asks, nobody says 0 cancelled. At night it waits and says so, first thing at 8:00."""
+        words = ("Leave the dentist alone", "drop the tax thing", "stop texting me about ring fit", "stop reminding me about the tax", "stop bugging me about the dentist please",
+                 "stop the dentist", "stop the tax step", "no more ring fit reminders", "forget the tax")
+        for i, w in enumerate(words):
+            b = self._hf(f"stop{i}", only=("donna",))
+            b.cy("set", "donna", "hours", "00:00-23:59")
+            for k, g in ((1, "Text him the dentist reminder"), (2, "Move the tax return into the Friday block"), (3, "Send the 20:00 ring fit reminder")):
+                b.py(f"with cycles.held() as d:\n    cycles._agent_state(d, 'donna')['steps']['donna|{b.thu} 08:30|{k}'] = {{'spec': {{'goal': {g!r}}}, 'fps': [], 'day': {b.thu!r}, 'state': 'planned', 'stamp': '{b.thu} 08:30'}}\n")
+                need(b.sched("add", "tomorrow 09:00", f"Agent step: donna #{k} ({b.thu} 08:30): {g}", "--priority", "--kind", "step-donna").returncode == 0, "no item")
+            r = b.cy("order", "donna", "stop", w)
+            need(w in r.stdout and "0 of" not in r.stdout and "cancelled" not in r.stdout, f"{w}: {r.stdout}")
+            need(len(re.findall(r"^- Item \d+ · waiting, priority · .* · Agent step: donna #\d \([^)]*\): (?:Text|Move|Send)", b.rm(), re.M)) == 3, "the program cancelled by words")
+            need("became job" in b.sched("promote").stdout, f"no step for his order: {b.rm()[-300:]}")
+            pick = 1 if "dentist" in w else 2 if "tax" in w else 3
+            fake = self._hf_fake(b, f"print(CY('stopstep', 'donna', '{pick}', 'he said so'), file=sys.stderr)\nprint(CY('stopped', 'donna', 'I stopped it.'), file=sys.stderr)\n")
+            s = b.drive("start", extra=fake)
+            p = s["prompt"]
+            need(w in p and "Text him the dentist reminder" in p and "Send the 20:00 ring fit reminder" in p and "stopstep" in p, f"not his words and her plan: {p[-500:]}")
+            need("If nothing here is what he means" in p, "she isn't told to ask")
+            left = re.findall(r"^- Item \d+ · waiting, priority · .* · Agent step: donna #(\d) ", b.rm(), re.M)
+            need(str(pick) not in left and len(left) == 2, f"{w}: step {pick} didn't stop: {left}")
+            need("I stopped it." in b.texts(), f"{w}: she didn't say so")
+            need(b.st()["stopping"] == {} and re.search(r"· stop · .* · done", b.led()), f"{w}: the order isn't done: {b.st().get('stopping')}")
+            gd = {1: "Text him the dentist reminder", 2: "Move the tax return into the Friday block", 3: "Send the 20:00 ring fit reminder"}[pick]
+            q = json.dumps({"picks": [], "steps": [{"goal": gd, "done_means": "x", "at": "21:00"}]})
+            r = b.py(f"cycles._schedule = lambda *a: (0, 'Item 7 is planned')\nout(cycles.plan('donna', {q!r}, T('{b.fri} 09:00')))")
+            need("0 steps" in r, f"the next plan took it back: {r}")
+        # nothing matches: she asks; meanwhile nothing else of hers starts
+        b = self._hf("stop-none", only=("donna",))
+        b.cy("set", "donna", "hours", "00:00-23:59")
+        n = b.step("donna", "Look at the pile", 1, day=b.thu)
+        b.cy("order", "donna", "stop", "leave the piano alone")
+        need(b.gate(n, f"{b.thu} 09:05") == "wait", "a step started before his stop was dealt with")
+        need("became job" in b.sched("promote").stdout, "no step")
+        fake = self._hf_fake(b, "print(CY('ask', 'donna', 'If you mean the piano reminder, I stop it; if not, tell me what you mean.'), file=sys.stderr)\n")
+        s = b.drive("start", extra=fake)
+        b.py(f"cycles.settle(T('{b.thu} 09:10'))")
+        need("0 of" not in b.led() and "If you mean the piano" in str(b.st()["batch"]), f"she didn't ask: {b.st()['batch']}")
+        need(b.gate(n, f"{b.thu} 09:15") == "go", "the step stays held after his stop was dealt with")
+        # a run that gets nowhere still tells him; it's open again
+        b = self._hf("stop-lost", only=("donna",))
+        b.cy("set", "donna", "hours", "00:00-23:59")
+        b.cy("order", "donna", "stop", "stop it")
+        b.sched("promote")
+        s = b.drive("start", extra=self._hf_fake(b, "pass\n"))
+        b.py(f"cycles.settle(T('{b.thu} 09:10'))")
+        need("I didn't get to your stop" in b.texts() and b.st()["stopping"] == {} and re.search(r'· stop · "stop it" · open', b.led()), f"a stop lost in silence: {b.texts()[-200:]}")
+        # a running step ends now; at night it waits and says so
+        b = self._hf("stopper", only=("donna",))
+        n = b.step("donna", "Text him something", 1, state="running since 09:00")
+        b.cy("order", "donna", "stop", "stop texting me")
+        need(b.state(n) == "stop asked", f"the running step: {b.state(n)}")
+        b = self._hf("stopnight", only=("donna",))
+        r = b.py(f"out(cycles.order('donna', 'stop', 'drop the tax thing', False, T('{b.thu} 23:30')))")
+        need("first thing" in r and "Agent step: donna" not in b.rm(), f"at night: {r}")
+        b.py(f"out(cycles.waiting_orders(T('{b.fri} 08:00')))")
+        need(re.search(r"Agent step: donna #0 \(.*his stop order: drop the tax thing", b.rm()), "not at 8:00")
+        return "nine orders in his own words each reached her and stopped the right step; nothing matching she asks; no other step starts first; a running one ends; at night it waits"
+
+    async def flow280(self) -> str:
+        """H298, second fix round, 6: "say go and I'll try once more": an order after it really does it: a plain go or one naming it opens the goal for the next plan, once; with now it runs at once with that goal. Another order opens nothing."""
+        b = self._hf("go", only=("donna",))
+        goal = "get the invoice out of the pile"
+        q = json.dumps({"picks": [], "steps": [{"goal": goal, "done_means": "x", "at": "21:00"}]})
+        plan = lambda day: b.py(f"cycles._schedule = lambda *a: (0, 'Item 7 is planned')\nout(cycles.plan('donna', {q!r}, T('{day} 09:00')))")  # noqa: E731
+        plan(b.thu)
+        b.cy("failed", "donna", "1", "no luck")
+        r = plan(b.fri)
+        need("held" in r and "say go" in b.texts(), f"held: {r} {b.texts()[-200:]}")
+        d3 = (b.thu_at + timedelta(days=2)).strftime("%Y-%m-%d")
+        r = b.cy("order", "donna", "start", "water the plants")
+        need("Noted" in r.stdout and "held" in plan(d3), "another order opened it")
+        r = b.cy("order", "donna", "start", "go")
+        need("once more" in r.stdout, f"the go: {r.stdout}")
+        need("he says go on" in b.led(), "her ledger doesn't say")
+        d4 = (b.thu_at + timedelta(days=3)).strftime("%Y-%m-%d")
+        r = plan(d4)
+        need("1 steps" in r and "held" not in r, f"the go did nothing: {r}")
+        b.cy("failed", "donna", "1", "still no luck")
+        d5 = (b.thu_at + timedelta(days=4)).strftime("%Y-%m-%d")
+        need("held" in plan(d5), "one go opened it for good")
+        b2 = self._hf("go2", only=("donna",))
+        b2.cy("set", "donna", "hours", "00:00-23:59")
+        q2 = json.dumps({"picks": [], "steps": [{"goal": goal, "done_means": "x", "at": "21:00"}]})
+        b2.py(f"cycles._schedule = lambda *a: (0, 'Item 7 is planned')\nout(cycles.plan('donna', {q2!r}, T('{b2.thu} 09:00')))")
+        b2.cy("failed", "donna", "1", "no luck")
+        b2.py(f"cycles._schedule = lambda *a: (0, 'Item 7 is planned')\nout(cycles.plan('donna', {q2!r}, T('{b2.fri} 09:00')))")
+        r = b2.cy("order", "donna", "start", "yes go ahead with the invoice", "--now")
+        need(r.stdout.startswith("Now:") and re.search(rf"Agent step: donna #0 \(.*{goal}", b2.rm()), f"go now: {r.stdout}")
+        return "a go opens the held goal once, by a plain go or its words, with now at once; another order doesn't"
+
+    async def flow281(self) -> str:
+        """H298, second fix round, 7: the box counts real turns: one of the model's messages is one turn, however many blocks the stream splits it into. Ten tool steps in two blocks each are ten turns."""
+        b = self._hf("turns", only=("donna",))
+        lines = []
+        for i in range(10):
+            m = f"msg{i}"
+            lines.append("{'type': 'assistant', 'message': {'id': %r, 'content': [{'type': 'text', 'text': 'looking'}]}}" % m)
+            lines.append("{'type': 'assistant', 'message': {'id': %r, 'content': [{'type': 'tool_use', 'id': %r, 'name': 'Bash', 'input': {'command': 'true'}}]}}" % (m, f"t{i}"))
+            lines.append(self._hf_said(i, "ok").replace(f"'t{i}'", f"'t{i}'"))
+        n = b.job("donna", "morning look", b.thu, "09:00")
+        note = self._hf_run(b, n, lines)
+        need(note["turns"] == 10 and note["boxed"] is None and note["steps"] == 10, f"turns: {note['turns']}, boxed {note['boxed']}")
+        import subprocess as _sp
+        n = b.job("donna", "morning look", b.thu, "09:10")
+        fake = self.tmp / "h298-turns.py"
+        fake.write_text("#!/usr/bin/env python3\nimport json, sys\nsys.stdin.read()\nfor i in range(30):\n    print(json.dumps({'type': 'assistant', 'message': {'id': f'm{i}', 'content': [{'type': 'text', 'text': 'x'}]}}), flush=True)\n    print(json.dumps({'type': 'assistant', 'message': {'id': f'm{i}', 'content': [{'type': 'tool_use', 'id': f't{i}', 'name': 'Bash', 'input': {}}]}}), flush=True)\nimport time; time.sleep(20)\n")
+        fake.chmod(0o755)
+        run = Path(b.env["HQ_JOB_RUN"])
+        (run / f"job-{n}.prompt").write_text("go")
+        b.jobs("mark", str(n), "running since 09:00")
+        _sp.run([sys.executable, str(ROOT / "routine/runjob.py"), str(n), "--session-id", "x", "--max-minutes", "5", "--max-turns", "12", "--box-note", str(run / f"job-{n}.box.json")], capture_output=True, text=True, env={**b.env, "HQ_CLAUDE": str(fake)}, timeout=60)
+        note = json.loads((run / f"job-{n}.box.json").read_text())
+        need(note["boxed"] == "turns" and 12 <= note["turns"] <= 14, f"the box at real turns: {note['turns']} {note['boxed']}")
+        return "ten messages in twenty blocks are ten turns; the box bites at real turns"
+
+    async def flow282(self) -> str:
+        """H298, second fix round, 8 and 9: a run nothing measured counts its estimate, not 0, also with a history line that says 0. A crash brings a session back once, held across crashes, whatever time the one that came back was planned for."""
+        def nothing_measured():
+            b = self._hf("zero", only=("donna",))
+            n = b.job("donna", "morning look", b.thu, "09:00", "ended 09:30 by a crash")
+            est = b.ws / "HQ/roadmap-estimates/job-estimates-history.jsonl"
+            with open(est, "a") as f:
+                f.write(json.dumps({"n": n, "kind": "cycle-donna", "est": 2, "actual": 48, "done": int(b.thu_at.timestamp()), "machine": "here", "cost": {"five": 0.0, "weekly": 0.0}, "retag": 4}) + "\n")
+            b.py(f"cycles.settle(T('{b.thu} 12:00'))")
+            u = b.py(f"out(cycles.used('donna', T('{b.thu} 00:00').timestamp()))")
+            need(u > 0, lambda: f"a run nothing measured counts {u}: {b.py(f'j = J({n}); out([cycles._est_weekly(j), [h for h in estimate.history() if h.get(chr(110)) == {n}]])')}")
+            need("its estimate" in b.led(), f"her ledger: {b.led()[-300:]}")
+        def crash_once():
+            b2 = self._hf("once", only=("donna",))
+            count = lambda: len(re.findall(r"^- Item \d+ · waiting, priority · .*Agent cycle: donna, bigger session$", b2.rm(), re.M))  # noqa: E731
+            hhmm = ["08:30", "08:45", "09:00"]
+            for i, at in enumerate(hhmm):
+                n = b2.job("donna", "bigger session", b2.thu, at, f"running since {at}")
+                b2.jobs("crashed", str(n), "the server went down")
+                b2.py(f"cycles.settle(T('{b2.thu} {at[:3]}{int(at[3:]) + 5:02d}'))")
+                need(count() == 1, f"crash {i + 1}: {count()} back")
+        self._hf_steps(nothing_measured, crash_once)
+        return "a run measured at 0 counts its estimate; three crashes in a row bring it back once"
+
+    async def flow283(self) -> str:
+        """H298, second fix round, 10: the small ones. curl in do, then, { }, after ! and a python heredoc with urllib; Write on his notes, my notes, calls, the archives, another agent's ledger; a python read of features.json is no mistake; done lands on this run's
+        step; done work without a line doesn't reopen his order; a repeated mistake reaches her score; a tripwire talks to him."""
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        b = self._hf("small", only=("donna",))
+        def hook(name, inp, aid="donna"):
+            return _sp.run([sys.executable, str(ROOT / "routine/cyclehook.py"), "--agent", aid, "--kind", "step"], input=json.dumps({"tool_name": name, "tool_input": inp}), capture_output=True, text=True, env=b.env, cwd=str(ROOT))
+        def curl_anywhere():
+            for cmd in ("for x in 1 2; do curl https://x.example; done", "if true; then curl x; fi", "{ curl x; }", "! curl x", "while true; do wget x; done", "python3 - <<EOF\nimport urllib.request\nurllib.request.urlopen('http://x')\nEOF",
+                        "python3 <<'E'\nimport requests\nrequests.post('x')\nE", "if true; then git push; fi"):
+                need(hook("Bash", {"command": cmd}).returncode == 2, f"not refused: {cmd}")
+        def his_files():
+            for rel in ("HQ/notes.md", "my notes 04-10-2026.md", "HQ/calls/2026-11-01-1000.md", "coaching/log-archive.md", "challenges-archive.md", "HQ/ledger/pepper.md", "HQ/agents/pepper-about-herself.md"):
+                for tool in ("Write", "Edit"):
+                    need(hook(tool, {"file_path": str(b.ws / rel)}).returncode == 2, f"{tool} on {rel} wasn't refused")
+            need(hook("Write", {"file_path": str(b.ws / "HQ/ledger/donna.md")}).returncode == 0 and hook("Write", {"file_path": str(b.ws / "HQ/agents/donna-about-herself.md")}).returncode == 0, "her own")
+            for cmd in ('echo x > "my notes 04-10-2026.md"', "tee HQ/calls/x.md", "echo x >> HQ/ledger/pepper.md", "sed -i s/a/b/ coaching/log-archive.md"):
+                need(hook("Bash", {"command": cmd}).returncode == 2, f"not refused: {cmd}")
+        def a_read_is_a_read():
+            for cmd in ("python3 -c \"import json; print(json.load(open('HQ/features.json')))\"", "python3 - <<E\nprint(open('HQ/mistakes.jsonl').read()[:100])\nE", "python3 -c \"print(open('HQ/trail.jsonl').read())\"", "echo requests are slow"):
+                r = hook("Bash", {"command": cmd})
+                need(r.returncode == 0, f"a read was refused: {cmd}: {r.stderr}")
+            need(hook("Bash", {"command": "python3 -c \"open('HQ/features.json', 'w').write('x')\""}).returncode == 2, "a python write on the switches")
+        def done_on_its_step():
+            # done lands on this run's step
+            b.cy("set", "donna", "hours", "00:00-23:59")
+            s1 = b.step("donna", "first order", 0, day=b.thu, state="running since 09:00")
+            b.py("d = cycles._state()\nst = cycles._agent_state(d, 'donna')\nst['steps']['donna|%s 09:01|0'] = {'spec': {'goal': 'second order'}, 'fps': [], 'day': %r, 'state': 'planned', 'stamp': '%s 09:01'}\ncycles._save_state(d)\n" % (b.thu, b.thu, b.thu))
+            b.cy("done", "donna", "0", "the first is done", extra={"HQ_JOB": str(s1)})
+            st = b.st()["steps"]
+            need(st[f"donna|{b.thu} 08:30|0"]["state"] == "done" and st[f"donna|{b.thu} 09:01|0"]["state"] == "planned", f"done landed on the wrong step: {[(k[-8:], v['state']) for k, v in st.items()]}")
+        def done_work():
+            # done work without a line
+            b2 = self._hf("small2", only=("donna",))
+            b2.py("import ledger\nledger.add_order('donna', 'start', 'draft the reply', True)\nledger.set_order('donna', 1, 'planned', 'a step at once')\n")
+            n = b2.step("donna", "draft the reply", 0, order=1, state="done 09:05")
+            (Path(b2.env["HQ_JOB_RUN"]) / f"job-{n}.box.json").write_text(json.dumps({"n": n, "minutes": 1, "turns": 3, "steps": 2, "boxed": None, "exit": 0, "error": False, "refused": [], "uses": []}))
+            b2.py(f"cycles.settle(T('{b2.thu} 09:10'))")
+            need(re.search(r'· "draft the reply" · done', b2.led()), f"done work reopened his order: {b2.led()[:500]}")
+            q = json.dumps({"picks": [], "steps": [{"goal": "draft the reply", "done_means": "x", "at": "21:00"}]})
+            need("1 steps" in b2.py(f"cycles._schedule = lambda *a: (0, 'Item 7 is planned')\nout(cycles.plan('donna', {q!r}, T('{b2.fri} 09:00')))"), "a clean end blocks the goal")
+        def repeat_on_the_score():
+            # a repeated mistake reaches her score, a first one doesn't
+            b3 = self._hf("small3", only=("donna",))
+            fri = f"{b3.fri} 09:00"
+            b3.py(f"out(cycles.tripwire('donna', 'boxed twice in a row', 'two runs in a row', T('{b3.thu} 10:00')))")
+            s = b3.py(f"import pokes\nout(pokes.score(cycles._agent('donna'), T({fri!r}), plan=None))")
+            need(s["pokes"]["repeats"] == 1 and s["pokes"]["total"] >= 1 and any("mistakes repeated: 1" in x for x in s["lines"]), f"the score: {s['pokes']} {s['lines'][:3]}")
+        def talks_to_him():
+            # a tripwire talks to him
+            b4 = self._hf("small4", only=("donna",))
+            bad = "PreToolUse:Bash hook error: [x]: HQ: refused: a change through a connector (label_thread) isn't this cycle's to make; a question for him instead.\n"
+            for at in ("09:00", "09:10"):
+                n = b4.job("donna", "morning look", b4.thu, at)
+                self._hf_run(b4, n, [self._hf_call(1, "mcp__g__label_thread", {}), self._hf_said(1, bad, True)])
+                b4.py(f"cycles.settle(T('{b4.thu} 10:00'))")
+            t = b4.texts()
+            need("A tripwire on my side" in t and " him" not in t and " his " not in t and "label_thread" not in t and ".." not in t and "as a question first" not in t, f"the text: {t[-300:]}")
+        self._hf_steps(curl_anywhere, his_files, a_read_is_a_read, done_on_its_step, done_work, repeat_on_the_score, talks_to_him)
+        return "the small ones"
 
     async def flow190(self) -> str:
         """H298, piece 6, no Claude: off means off. With the feature off (the default on every HQ, also the maker's):
@@ -21935,7 +22277,7 @@ print("ok")
         got = json.loads(m.group(1))
         sett = json.loads((Path(env["HQ_JOB_RUN"]) / "job-settings.json").read_text())
         hk = sett.get("hooks", {}).get("PreToolUse", [])
-        need(hk and "cyclehook.py" in hk[0]["hooks"][0]["command"] and "Edit" in hk[0]["matcher"] and "Bash" in hk[0]["matcher"], f"the cycle job's settings don't carry the hook: {sett}")
+        need(hk and "cyclehook.py" in hk[0]["hooks"][0]["command"] and hk[0]["matcher"] == ".*", f"the cycle job's settings don't carry the hook: {sett}")
         need("cyclehook" not in got["prompt"] and "the file's lock" in got["prompt"], "the prompt doesn't say the scripts serialize the shared files")
         # a normal job: the old settings, no hook (the feature on or off)
         _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), "add", "a plain test job: say done"], capture_output=True, text=True, env=env, cwd=str(ROOT))
@@ -30501,6 +30843,15 @@ echo "ALL OK"
 """
 
 FLOWS = {
+    275: ("H298, second fix round, 1: every text a cycle can send respects his Sleep block, proposals too", False, "flow275"),
+    276: ("H298, second fix round, 2: a calendar change reads in plain words: what, when, what it was", False, "flow276"),
+    277: ("H298, second fix round, 3: the hook sees every tool; what isn't a known read is refused", False, "flow277"),
+    278: ("H298, second fix round, 4: guests or someone else's calendar: the hook holds it, the question reaches him, his yes opens that one, once", False, "flow278"),
+    279: ("H298, second fix round, 5: a stop order in his own words goes to her; she stops what he means and says so, or asks; the step really stops", False, "flow279"),
+    280: ("H298, second fix round, 6: say go: an order after it really does it", False, "flow280"),
+    281: ("H298, second fix round, 7: the box counts real turns", False, "flow281"),
+    282: ("H298, second fix round, 8 and 9: a run nothing measured counts its estimate; a crash brings a session back once", False, "flow282"),
+    283: ("H298, second fix round, 10: the small ones", False, "flow283"),
     255: ("H298, fix round, harm 1: a restart or a takeover brings a cycle back only as a cycle, once, through her wall; a step never", False, "flow255"),
     256: ("H298, fix round, harm 2: a hold doesn't start a cycle from the top, on the routine's real minute", False, "flow256"),
     257: ("H298, fix round, harm 3: the share sees every run: paused, killed, crashed and held count, and the next start sees it", False, "flow257"),
