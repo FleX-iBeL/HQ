@@ -12,7 +12,7 @@ don't hold it, only a used-up limit does.
     python3 routine/helper.py list                       the helpers that run now, in a line each
     python3 routine/helper.py run ID                     the run itself, in the background
 
-A record is `.status/helpers/ID.json`: {"id", "question", "agent", "call", "state" (running, done, boxed, failed), "started", "ended",
+A record is `.status/helpers/ID.json`: {"id", "question", "agent", "call", "state" (running, done, boxed, stopped, failed), "started", "ended",
 "minutes", "turns", "box", "answer", "told" (call or text)}. HQ_HELPERS a test's own folder, HQ_HELPER_CLAUDE a stand-in for the model
 (same arguments, same stream). Standard library only.
 """
@@ -39,6 +39,7 @@ AT_ONCE = 2       # F106: how many run beside calls at once; a third is told to 
 LIMIT_FULL = 98   # F106: at this percent of the 5-hour or the weekly limit no helper starts: the live slice ends where the limit does
 LIVE_S = 15       # F106: a call that hasn't said it's on for this long counts as hung up
 WATCH_S = 3       # F106: how often a call looks for an answer
+GRACE_S = 5       # F106: how long a helper past its box gets to end by itself before it's killed (then it's "stopped")
 MODEL = "sonnet"  # F106: reading and finding, the reviewer's model
 ANSWER_MOST = 2000  # F106: the characters of an answer that go into a call or a text; the record keeps it whole
 TOOLS = "Read,Glob,Grep,WebSearch"
@@ -155,13 +156,15 @@ def start(question: str, agent: str = "", call: str = "") -> dict:
     question = " ".join(str(question).split())
     if len(question) < 8:
         return {"ok": False, "said": "What should it find out? Say it in a line."}
-    no = why_not()
-    if no:
-        return {"ok": False, "said": f"No helper now: {no}"}
-    on = current()
-    rec = {"id": secrets.token_hex(4), "question": question[:600], "agent": agent or on.get("agent") or "donna", "call": call or on.get("call") or "",
-           "state": "running", "started": time.time(), "box": {"minutes": MINUTES, "turns": int(os.environ.get("HQ_HELPER_TURNS") or TURNS)}}
-    save(rec)
+    os.makedirs(folder(), exist_ok=True)
+    with hqlock.locked(os.path.join(folder(), "start")):  # the limit holds: the record is there before the next one counts
+        no = why_not()
+        if no:
+            return {"ok": False, "said": f"No helper now: {no}"}
+        on = current()
+        rec = {"id": secrets.token_hex(4), "question": question[:600], "agent": agent or on.get("agent") or "donna", "call": call or on.get("call") or "",
+               "state": "running", "started": time.time(), "box": {"minutes": MINUTES, "turns": int(os.environ.get("HQ_HELPER_TURNS") or TURNS)}}
+        save(rec)
     log = os.path.join(hqpaths.HQ, "scratch", "helper.log")
     os.makedirs(os.path.dirname(log), exist_ok=True)
     p = subprocess.Popen([sys.executable, os.path.abspath(__file__), "run", rec["id"]], cwd=hqpaths.HQ, stdin=subprocess.DEVNULL,
@@ -194,9 +197,23 @@ def run(hid: str) -> int:
     p = subprocess.Popen(_command(rec["question"]), cwd=hqpaths.FOLDER, env={**os.environ, **hqpaths.JOB_ENV}, stdin=subprocess.DEVNULL,
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, start_new_session=True)
     t0 = time.time()
-    boxed = {"why": None}
+    boxed = {"why": None, "killed": False}
+
+    def kill() -> None:
+        boxed["killed"] = True
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+    grace = threading.Timer(GRACE_S, kill)
+    grace.daemon = True
 
     def end(why: str) -> None:
+        try:
+            grace.start()
+        except RuntimeError:  # a second reason to end: the first one's grace is running
+            pass
         boxed["why"] = boxed["why"] or why
         try:
             os.killpg(p.pid, signal.SIGTERM)
@@ -228,8 +245,9 @@ def run(hid: str) -> int:
         code = -1
     finally:
         timer.cancel()
+        grace.cancel()
     answer = result or (said[-1] if said else "")
-    rec = {**load(hid), "state": "boxed" if boxed["why"] else ("done" if code == 0 and answer else "failed"), "ended": time.time(),
+    rec = {**load(hid), "state": "stopped" if boxed["killed"] else "boxed" if boxed["why"] else ("done" if code == 0 and answer else "failed"), "ended": time.time(),
            "minutes": round((time.time() - t0) / 60, 2), "turns": turns, "answer": answer, "why": boxed["why"] or ""}
     save(rec)
     if not call_on(rec.get("call") or ""):
@@ -240,7 +258,7 @@ def run(hid: str) -> int:
 def words(rec: dict) -> str:
     """What comes back: the answer, or what's known when it didn't finish."""
     a = (rec.get("answer") or "").strip()[:ANSWER_MOST]
-    if rec.get("state") == "boxed":
+    if rec.get("state") in ("boxed", "stopped"):
         return (f"It ran out of its time before it finished. What it had: {a}" if a else "It ran out of its time before it found anything.")
     if rec.get("state") == "failed" or not a:
         return "It didn't get an answer: the run failed."

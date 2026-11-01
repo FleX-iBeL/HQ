@@ -69,7 +69,12 @@ class HelperFrame(DataFrame):
 
 
 # F106: what in her reply shows she said it couldn't be checked, or is asking for his yes; without it the program says the line.
-SAID_BLOCKED = re.compile(r"\b(couldn'?t|could not|can'?t|cannot|wasn'?t able|not able|unable|didn'?t (work|go through|run)|no access|refused|not allowed|"
+# Her saying she couldn't check or run it: a "can't" alone isn't that ("I can't believe how clean it all is").
+SAID_BLOCKED = re.compile(r"\b(?:couldn['’]?t|could not|can['’]?t|cannot|wasn['’]?t able to|weren['’]?t able to|not able to|unable to|wasn['’]?t allowed to|"
+                          r"didn['’]?t|did not|haven['’]?t|have not)\s+(?:(?:actually|really|even|quite|yet|directly|properly|fully)\s+)?(?:check|run|verify|confirm|look|read|open|reach|access|get (?:to|at|into))\w*\b|"
+                          r"\b(?:couldn['’]?t|could not|can['’]?t|cannot) be (?:checked|run|verified|confirmed)\b|"
+                          r"\b(?:wasn['’]?t|was not|isn['’]?t|is not) (?:checked|verified|confirmed)\b|"
+                          r"\b(didn['’]?t (work|go through|run)|no access|refused|not allowed|"
                           r"needs? your|shall i|should i|want me to|do you want|okay to|is it ok)\b", re.I)
 BLOCKED_LINE = "I couldn't check that."
 
