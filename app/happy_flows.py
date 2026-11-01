@@ -14117,6 +14117,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         t0 = int(_t.time())
         env.update({"HQ_LOOK": "0", "HQ_REVIEW_FAKE": "auto", "HQ_REVIEW_NOW": str(t0)})
         env.pop("HQ_REVIEW_QUIET", None)
+        env.pop("HQ_USAGE_PLAN", None)
         rm, sj = ws / "HQ/roadmap.md", ws / "HQ/sprint.json"
         (ws / "HQ/calls").mkdir(exist_ok=True)
         (ws / "HQ/calls/2026-10-20-1000.md").write_text("Him: the export has to work for the whole list\nHim: great thanks do the first one\n")
@@ -14207,8 +14208,13 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             tool("cycles.py", "set", a, "on", "off")
         tool("cycles.py", "set", "moneypenny", "batches", "")
         tool("cycles.py", "set", "moneypenny", "fix", "on")
+        tool("cycles.py", "set", "moneypenny", "daily", "50")  # any plan: a step that's about the share sets its own
+        tool("cycles.py", "set", "moneypenny", "weekly", "100")
         review_at(t0)  # the first start: every row taken as reviewed
-        minute()       # the loop's first look: rows flagged from here on are the loop's
+        minute()       # the loop's first look
+        d = json.loads(sj.read_text())
+        d["review"]["fix_since"] = 1  # any hour: every row flagged from here on is the loop's, whatever noon is to the clock
+        sj.write_text(json.dumps(d))
         return b
 
     def _f86_price(self, b) -> float:
@@ -14218,10 +14224,12 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         """F86, rechecked, no Claude: the loop against what really happens to it, each step on its own bench. One price: with room for
         a round but not for a job's latest end nothing spins, planned means started. His words: a made-up quote or a claimed yes
         is refused wherever it stands. The row: reword changes its words only, never its status, the team's notes, or
-        what the reviewer reads. What a round may touch: its own row only, through the hook. A round held at the usage line
-        counts, also when its words changed. A mark's run that ended with no mark is named, and a refused mark that went to
-        him is one text. The review off or everything paused: nothing opens. A smaller plan where no day's share holds a round:
-        said once. Two flagged rows: one at a time, each to its own cap. The cap holds on the next days too."""
+        what the reviewer reads. What a round may touch: its own row only, through the hook; a mark run doesn't reword. A round
+        held at the usage line counts, also when its words changed, and it can start again on a session of its own. A mark's run
+        that ended with no mark is named; a refused mark that went to him is one text; a grep of the code is no refusal; a sit-down
+        holds on what the round ended with. The review off or everything paused: nothing opens, and a pause keeps the gate on the
+        Ready mark. A smaller plan where no day's share holds a round: said once. Two flagged rows: one at a time, each to its
+        own cap. The cap holds on the next days too."""
         fails = []
 
         def step(name, fn):
@@ -14375,6 +14383,26 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             need(got.count("If the call is the source") == 1 and "tripwire" not in got.lower(), f"a refused mark that went to him isn't one text: {got[-500:]}")
             need("a Ready mark refused" in b.ledger(), "the refused mark isn't counted in her ledger")
 
+        def reading(b):  # a round's own reading is full of the word: a grep of the code is no refusal, and no second text
+            b.flag("F9301", "no size named")
+            b.minute()
+            before = b.texts()
+            b.go("run('-c', 'print(\"896: sys.exit(Refused: a new quote isnt in a call)\")')\n"
+                 "run(rv, 'sitdown', 'F9301', 'the size', 'If a small build is right, I write it in; if not, say the size.')")
+            b.minute()
+            got = b.texts()[len(before):]
+            need(got.count("If a small build is right") == 1 and "tripwire" not in got.lower(), f"a grep read as a refusal: {got[-400:]}")
+
+        def stop_first(b):  # the sit-down first, a reword after it in the same round: her own words don't lift it
+            b.flag("F9301", "no size named")
+            b.minute()
+            b.go("run(rv, 'sitdown', 'F9301', 'the size', 'If a small build is right, I write it in; if not, say the size.')\n"
+                 "run(rv, 'reword', 'F9301', json.dumps({'edits': [{'old': 'HOLE: no size named. ', 'new': 'HOLE: no size named yet. '}]}))")
+            b.minute()
+            b.settle()
+            b.minute()
+            need(not b.items() and "F9301" in b.tool("review.py", "sitdown-list").stdout, f"a round past the sit-down: {b.items()} {b.tool('review.py', 'sitdown-list').stdout}")
+
         def review_off(b):
             b.flag("F9301", "no size named")
             t = b.drive("tick", b.noon(), extra={"HQ_REVIEW": "0"})
@@ -14390,7 +14418,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             price = self._f86_price(b)
             need(price > 2, f"on Pro with no history a round is about {price}")
             b.flag("F9301", "no size named")
-            b.tool("cycles.py", "set", "moneypenny", "daily", f"{price / 2:g}")
+            b.tool("cycles.py", "set", "moneypenny", "daily", f"{price / 2:g}")  # as on a Pro plan with the template's 2 points and no history
             b.minute()
             first = b.texts()
             need(first.count("If you raise my daily share") == 1 and not b.items(), f"no share holds a round, and nothing said: {first[-400:]}")
@@ -14435,11 +14463,11 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             need(b.texts().count("If you tell me what F9301 should say") == 1, "the cap's text came twice")
 
         for name, fn in (("one price", one_price), ("his words", his_words), ("the row", the_row), ("what a round touches", touch), ("a held round", held), ("held, then again", held_again),
-                         ("a lost mark", mark_lost), ("one text", one_text), ("the review off", review_off), ("a smaller plan", small_plan),
+                         ("a lost mark", mark_lost), ("one text", one_text), ("a grep's words", reading), ("sit-down, then a reword", stop_first), ("the review off", review_off), ("a smaller plan", small_plan),
                          ("two rows", two_rows), ("the cap for good", for_good)):
             step(name, fn)
         need(not fails, "\n  ".join([f"{len(fails)} steps failed:"] + fails))
-        return "one price, his words and the row's parts held, a round touches its row, held counts, a lost mark named, one text, nothing with the review off, a small plan said once, two rows in turn, the cap for good"
+        return "one price, his words and the row's parts held, a round touches its row, held counts and starts again, a lost mark named, one text, nothing with the review off, a small plan said once, two rows in turn, the cap for good"
 
     async def flow198(self) -> str:
         """F81, no Claude: Moneypenny decides grounded, never by guessing. Her persona carries his why word for word at

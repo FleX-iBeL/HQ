@@ -85,6 +85,7 @@ OUTSIDE = (r"mcp__\w*gmail\w*__(send_message|reply|forward)", r"mcp__\w*calendar
            r"\bgit (push|commit|reset|checkout)\b", r"\bcycles\.py set\b", r"handbook\.md", r"agents\.json")
 _OUTSIDE = re.compile("|".join(OUTSIDE), re.I)
 _EDIT = re.compile(r"^(Edit|Write|MultiEdit|NotebookEdit) (.+)$")
+_REALLY_REFUSED = re.compile(r"^(?:HQ: refused|refused\b)|\bhook error\b|isn't ready", re.I)  # F86: a round's own reading is full of the word: a grep of the code, a row
 
 
 # -- settings ---------------------------------------------------------------------------------------------------------
@@ -1093,8 +1094,10 @@ def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Pat
             if review.mark_ended(parsed["label"], "her mark's run was cut off" if cut else "her mark's run ended with no mark and nothing for the sit-down list"):
                 ledger.note(aid, f"{parsed['label']} on the sit-down list: passed by the review, not marked")
             told = any(r["label"] == parsed["label"] and s.get("kind") == "his" for r, s in review.sitdown_rows())
+        else:
+            review.stop_stays(parsed["label"])
         said = tuple(f"{w} {parsed['label']}" for w in ("reword", "sitdown")) + ("sprint.py show", "sprint.py fields")
-        note = {**note, "refused": [r for r in note.get("refused") or [] if not any(w in r.get("tool", "") for w in said)],
+        note = {**note, "refused": [r for r in note.get("refused") or [] if _REALLY_REFUSED.search(r.get("said", "")) and not any(w in r.get("tool", "") for w in said)],
                 "tools": [t for t in note.get("tools") or [] if not any(w in t for w in said)]}
     # refused, outside her limits, a shared file written directly, a Ready mark refused
     for r in note.get("refused") or []:

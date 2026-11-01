@@ -854,6 +854,19 @@ def mark_ended(label, why, now=None):
     return True
 
 
+def stop_stays(label):
+    """A round over: a sit-down of this round holds on the words it ended with, also when she reworded after it. Else her
+    own words would lift it, and the next round would go past the text he already has."""
+    with q.locked():
+        row = next((r for r in S.open_rows() if r["label"] == label), None)
+        d, rv = _state()
+        f = ((rv.get("rows") or {}).get(label) or {}).get("fix") or {}
+        st = f.get("stop")
+        if row and st and st.get("kind") == "his" and st.get("round") == f.get("n"):
+            st["ask"] = S.ask_fp(row["line"])
+            S._save(S.RANKS, d)
+
+
 def round_wanted(label, mode):
     """Whether the round still has work when it starts (a call may have fixed the row meanwhile)."""
     with q.locked():
@@ -953,7 +966,8 @@ def sitdown(label, what, ifthen, now=None):
         e = rs.setdefault(label, {})
         fp = S.ask_fp(row["line"])
         had = _stopped(e, fp)
-        e.setdefault("fix", {})["stop"] = {"ask": fp, "kind": "his", "why": what, "at": int(now)}
+        f = e.setdefault("fix", {})
+        f["stop"] = {"ask": fp, "kind": "his", "why": what, "at": int(now), "round": f.get("n")}
         rv["rows"] = rs
         d["review"] = rv
         S._save(S.RANKS, d)
