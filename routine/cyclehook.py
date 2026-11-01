@@ -67,6 +67,13 @@ _MAKER_OFF = re.compile(r"\bHQ_MAKER\s*=\s*0(?=\s|$)")  # F104: only ever closes
 _JOB_NO_LEDGER = re.compile(r"(?<![\w-])mistakes\.py\s+(?:add|put)\b|-m\s+mistakes\b|\bpython\S*\s[^|&]*\b(?:import|from)\s+mistakes\b")
 _JOB_NO_HELPER = re.compile(r"(?<![\w-])helper\.py\s+(?:start|run)\b|-m\s+helper\b|\bpython\S*\s[^|&]*\b(?:import|from)\s+helper\b")
 _JOB_NO_VERSIONS = re.compile(r"(?<![\w-])update\.py\s+(?:back|forward)(?:-run|-here|-first)?\b")  # F104: his, they end what runs and move both computers
+_GIT_CONFIG = re.compile(r"(?<![\w$])GIT_CONFIG_(?:COUNT|KEY_\w+|PARAMETERS)\s*=|\bexport\b[^;&|\n]*GIT_CONFIG_(?:COUNT|KEY_|PARAMETERS)")  # F104: config by the environment
+_ONLY_SAYS = {"grep", "egrep", "fgrep", "rg", "ag", "cat", "head", "tail", "less", "more", "sed", "awk", "echo", "printf", "git", "ls", "wc", "diff", "sort", "uniq", "cut", "tr", "jq"}  # reads or prints its arguments
+_SHELL = r"(?:^|[\s/])(?:ba|z|da|k)?sh"
+_RUNS_SHELL = re.compile(rf"{_SHELL}\s+(?:-\S+\s+)*-\w*c\s*$|(?:^|\s)eval\s+$|{_SHELL}(?:\s+-\S+)*\s*<<<\s*$")
+_RUNS_CODE = re.compile(r"\bpython[\d.]*\s+(?:-\S+\s+)*-c\s*$")
+_FEEDS_SHELL = re.compile(rf"{_SHELL}(?:\s+-\S+)*\s*$")
+_FEEDS_CODE = re.compile(r"\bpython[\d.]*(?:\s+-\S+)*\s*$")
 _JOB_NO_DATA = re.compile(r"(?<![\w-])datachange\.py\s+apply\b")  # F104: the routine's minute does that, on what's committed and on dev
 WAY = ("the planning through sprint.py, jobs.py or review.py reword, the to-do list through todo.py, the calendar through pings.py, "
        "the games through games.py, the log and the mail list through handover.py edit REL JSON; your ledger and "
@@ -164,21 +171,98 @@ def off_the_release(cmd: str) -> bool:
     return False
 
 
+def ran(cmd: str, depth: int = 0) -> str:
+    """F104: a command with what would really run, near enough: a backslash line break is no break, and what only stands in it is out: what's inside
+    quotes as an argument with spaces in it (a commit message, a grep's pattern, a note), heredocs and comments. A quoted single word stays a word.
+    What a shell or Python is handed to run, by -c, eval or a heredoc, stays in, read the same way: there the quotes are the command."""
+    cmd = cmd.replace("\\\n", " ")
+    out, piece, waiting, i = [], "", [], 0
+
+    def put(s: str) -> None:
+        nonlocal piece
+        out.append(s)
+        piece += s
+
+    def given(body: str, shell: bool, code: bool) -> str:
+        return ran(body, depth + 1) if shell and depth < 3 else plain(body) if code else ""
+
+    while i < len(cmd):
+        c = cmd[i]
+        if c == "\\" and i + 1 < len(cmd):
+            put(cmd[i + 1])
+            i += 2
+        elif c in "'\"":
+            j, buf = i + 1, ""
+            while j < len(cmd) and cmd[j] != c:
+                j += 1 if c == '"' and cmd[j] == "\\" else 0
+                buf += cmd[j:j + 1]
+                j += 1
+            i = j + 1
+            runs = given(buf, bool(_RUNS_SHELL.search(piece)), bool(_RUNS_CODE.search(piece)))
+            put(f" {runs} " if runs else buf if not re.search(r"\s", buf) else " Q ")
+        elif c == "#" and (not piece or piece[-1].isspace()):
+            while i < len(cmd) and cmd[i] != "\n":
+                i += 1
+        elif cmd.startswith("<<<", i):
+            put("<<<")
+            i += 3
+        elif re.match(r"<<-?\s*['\"\\]?[\w.-]+", cmd[i:]):
+            m = re.match(r"<<-?\s*['\"\\]?([\w.-]+)['\"]?", cmd[i:])
+            waiting.append((m.group(1), bool(_FEEDS_SHELL.search(piece)), bool(_FEEDS_CODE.search(piece))))
+            i += m.end()
+        elif c == "\n":
+            out.append(c)
+            piece = ""
+            i += 1
+            for end, shell, code in waiting:
+                body = []
+                while i < len(cmd):
+                    nl = cmd.find("\n", i)
+                    nl = len(cmd) if nl < 0 else nl
+                    line, i = cmd[i:nl], nl + 1
+                    if line.strip() == end:
+                        break
+                    body.append(line)
+                out.append(given("\n".join(body), shell, code) + "\n")
+            waiting = []
+        elif c in ";&|":
+            out.append(c)
+            piece = ""
+            i += 1
+        else:
+            put(c)
+            i += 1
+    return "".join(out)
+
+
+def _says_only(piece: str) -> bool:
+    """A command that only reads or prints its arguments, whatever they say."""
+    words = [w for w in piece.split() if not re.match(r"[A-Za-z_]\w*=", w)]
+    return bool(words) and os.path.basename(words[0]) in _ONLY_SAYS
+
+
 def skips_hooks(t: str) -> bool:
-    """F104: a push past the pre-push hook: --no-verify, or git told to look for hooks elsewhere. Read as git reads it, so a commit message
-    that names them is no such thing."""
+    """F104: a push past the pre-push hook: --no-verify or its short forms, or git told to look for hooks elsewhere (`t` is what `ran` left). Read as
+    git reads it; reading the setting is no such thing."""
     for piece in re.split(r"[;&|\n]+", t):
         m = re.search(r"\bgit\s(.*)", piece, re.S)
         if not m:
             continue
         words, i = m.group(1).split(), 0
         while i < len(words) and words[i].startswith("-"):
-            if words[i] == "-c" and i + 1 < len(words) and words[i + 1].lower().startswith("core.hookspath"):
+            set_by = words[i + 1] if words[i] in ("-c", "--config-env") and i + 1 < len(words) else words[i].split("=", 1)[1] if words[i].startswith("--config-env=") else ""
+            if set_by.lower().startswith("core.hookspath"):
                 return True
-            i += 2 if words[i] in _GIT_ARG else 1
+            i += 2 if words[i] in _GIT_ARG or words[i] == "--config-env" else 1
         sub, args = (words[i], words[i + 1:]) if i < len(words) else ("", [])
-        if (sub == "push" and "--no-verify" in args) or (sub == "config" and any(a.lower() == "core.hookspath" for a in args)):
+        if sub == "push" and any(len(a) >= len("--no-v") and "--no-verify".startswith(a) for a in args):
             return True
+        low = [a.lower() for a in args]
+        if sub == "config" and "core.hookspath" in low:
+            at = low.index("core.hookspath")
+            reads = {"get", "list", "unset", "--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "--unset", "--unset-all"} & set(low[:at])
+            if at + 1 < len(low) and not reads:
+                return True
     return False
 
 
@@ -193,11 +277,13 @@ def job_guard(cmd: str) -> str | None:
         return "HQ: refused: a job doesn't write the ledger; only the program's pass and the wrap-up do."
     if _JOB_NO_HELPER.search(t):
         return "HQ: refused: a helper is for calls and texts; a job has its own time."
-    if skips_hooks(t):
+    runs = ran(cmd)
+    if skips_hooks(runs) or _GIT_CONFIG.search(runs):
         return "HQ: refused: a push goes through the pre-push hook, the privacy check; a job never skips it."
-    if _JOB_NO_VERSIONS.search(t):
+    pieces = [p for p in re.split(r"[;&|\n]+", runs) if not _says_only(p)]
+    if any(_JOB_NO_VERSIONS.search(p) for p in pieces):
         return "HQ: refused: going back or forward a version is his, on a call or on the status page; a job never does it."
-    if _JOB_NO_DATA.search(t):
+    if any(_JOB_NO_DATA.search(p) for p in pieces):
         return "HQ: refused: the routine runs the data changes, once they're committed and on dev; a job never runs them by hand."
     return None
 
