@@ -1556,6 +1556,24 @@ def updating():
     return u.get("state") == "updating" and alive(u.get("pid")) and time.time() - u.get("at", 0) < 1800
 
 
+def release_minute():
+    """F104: first of all, every minute, on a copy that isn't the maker's: does what's checked out hold unreleased work? True: it's going
+    back on the newest release and nothing starts on top of it this minute, above all no data change. A flow turns it on by HQ_RELEASE_MINUTE:
+    a flow's copy of HQ is often a friend's in name and stands past a version."""
+    if hqpaths.under_test() and not os.environ.get("HQ_RELEASE_MINUTE"):
+        return False
+    try:
+        import update
+        said = update.release_minute(log=log)
+    except Exception as e:  # a look that fails finds nothing: it never stops an HQ, and it's said
+        log(f"release guard: {e!r}")
+        routines.bad("release", f"The look at what's checked out failed: {e!r}", every=3600)
+        return False
+    if said:
+        routines.beat("jobs", state="waiting", text=said, every=60)
+    return bool(said)
+
+
 def gone_back():
     """F104: on the maker's HQ the team waits while it stands on an older version: a build there would land on no branch. A friend
     who went back carries on, on that version."""
@@ -1566,6 +1584,8 @@ def gone_back():
 
 
 def tick():
+    if release_minute():
+        return
     # H56.3: main or backup first. Alone (no other HQ set up) this is main at once, with no network and no line.
     try:
         r = role.tick(jobs_cmd=jobs, log=log, incidents=incidents, routines=routines, on_main=became_main)
@@ -1624,6 +1644,8 @@ def tick():
         return
     if not hqpaths.under_test() or os.environ.get("HQ_SAVE_QUIET"):
         save_minute()
+    if release_minute():  # F104: the head can have moved since this minute began, and a data change of dev's must never run
+        return
     if not hqpaths.under_test() or os.environ.get("HQ_DATA_MINUTE"):
         data_minute()
     if (not hqpaths.under_test() and int(time.time() / 60) % MISTAKES_EVERY == 0) or os.environ.get("HQ_MISTAKES_MINUTE"):
@@ -1857,6 +1879,9 @@ if __name__ == "__main__":
             sys.exit(0)
         if sys.argv[1:] == ["--usage-now"]:  # a test: the usage check, right away
             usage()
+            sys.exit(0)
+        if release_minute():  # F104: before anything else runs
+            routines.heartbeat()
             sys.exit(0)
         try:
             helper_gap()

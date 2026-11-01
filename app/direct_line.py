@@ -747,6 +747,7 @@ KINDS = {
     "paused": "You stopped one of the team's jobs because it used far more of his usage than it should have (the facts "
               "say which and how much). One or two short sentences: what got stopped in everyday words, why, and what "
               "happens next as the facts say it: it waits for his word, or it stops for good and the item gets split. No job numbers.",
+    "off-release": "HQ on this computer had moved onto work that isn't released yet, and it put itself back on its released version by itself. The facts say what happened, what got stopped and where anything of his own is kept. Two short sentences in everyday words: what happened and that it's fine now, and if something of his was set aside, where. No job numbers.",
     "helper": "He hung up while a helper was still looking something up for him on the call. The facts give what he asked and what came back: tell him, plainly and shortly.",
     "estimates": "Every Friday before the sprint planning: how the team's time estimates held this week (the facts give "
                  "the numbers). Two or three short sentences: how many landed inside their range, plainly when it's "

@@ -364,3 +364,26 @@ def is_maker() -> bool:
         return json.load(open(os.path.join(FOLDER, "HQ", "features.json"), encoding="utf8")).get("maker") is True
     except (OSError, ValueError, AttributeError):
         return False
+
+
+def is_friend() -> bool:
+    """F104: whether this HQ is surely not the maker's, for what acts on it (the guard on the release). is_maker() says no on a file it
+    can't read, and that's no ground to touch anything: a workspace that isn't there, or a features.json half written or broken, isn't a
+    friend's. A workspace that's there with no features.json is, the template has none, unless a second computer is set up: on a new
+    backup the file may simply not have come over yet."""
+    import json
+    env = os.environ.get("HQ_MAKER")
+    if env in ("0", "1"):
+        return env == "0"
+    p = os.path.join(FOLDER, "HQ", "features.json")
+    if not os.path.exists(p):
+        try:
+            paired = bool(json.load(open(os.path.join(SUPPORT, "role.json"), encoding="utf8")).get("peer"))
+        except (OSError, ValueError, AttributeError):
+            paired = False
+        return os.path.exists(ROADMAP) and not paired
+    try:
+        d = json.load(open(p, encoding="utf8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(d, dict) and d.get("maker") is not True

@@ -49,6 +49,9 @@ F104: `back [--tag vX.Y.Z]` one version back (on the work line past a version: t
 computer through the forward; the main runs the undos of the data changes it leaves behind (routine/datachange.py) first and tells the
 other computer only once that held, so a failing undo leaves both where they were (started on the backup, the main goes first); the
 backup gets them by the sync; while back on the maker's HQ the team waits. `forward` the other way. Tests: HQ_UPDATE_WAIT in the foreground.
+F104, the guard on the state: `release_minute`, the routine's first thing every minute on a copy that isn't the maker's. Words can't keep a job
+off the work line (`git checkout -` is ordinary git), so it looks at what's checked out: commits no version tag reaches that are on GitHub's
+dev. Then it goes back on the newest release as `back` does, stops a job that runs, and starts nothing on top of it.
 HQ_UPDATE_RESTART=0 (restart nothing, end nothing), HQ_UPDATE_ROUTINE=0 (leave the routine and the watchdog alone).
 """
 from __future__ import annotations
@@ -85,6 +88,12 @@ IDENTITY = ("-c", "user.name=HQ update", "-c", "user.email=hq-update@localhost")
 TAG = re.compile(r"^v(\d+)\.(\d+)(?:\.(\d+))?$")
 BACK_FILE = os.path.join(STATUS_DIR, "back.json")      # F104: this HQ went back: from where, to which version
 OTHER_FILE = os.path.join(STATUS_DIR, "back-other.json")  # F104: the other computer still has to hear it
+GUARD_FILE = os.path.join(STATUS_DIR, "off-release.json")  # F104: the guard's last look, and what it holds
+GUARD_KEY = "off-release"
+GUARD_LOOK = 3600      # F104: a head that's been looked at goes to GitHub again this often (a friend's own commits don't change by waiting)
+GUARD_OFFLINE = 300    # F104: after a look that didn't reach GitHub
+GUARD_RETRY = 900      # F104: a going back that didn't go through is tried again this often, and held until then
+WORK_LINE = ("dev", "nightly")
 
 
 def platform() -> str:
@@ -382,6 +391,8 @@ def start() -> dict:
     st = status(background=False)
     if not st["available"]:
         return st
+    if read_json(GUARD_FILE).get("held"):  # F104: no update on top of work that isn't released; the guard goes back first
+        return {**st, "said": "HQ is going back on its released version first; the update can start after that."}
     write_json(RUN_FILE, {"state": "waiting", "step": "Starting the update", "message": "", "at": time.time(),
                           "from": st["version"], "to": vname(st["new_tag"])})
     # H187: on Linux in its own scope: started from the status server, it would otherwise go down with it.
@@ -739,7 +750,8 @@ def restart(changed: list[str], was_running: dict) -> tuple[list[str], list[str]
     env = {**os.environ, "PATH": os.environ.get("PATH", "") + ":" + PATH}
     mac = platform() == "darwin"
     code = code_of(changed)
-    done += force_out()
+    if not was_running.get("guard"):  # F104: the guard stops a job by exact pid and nothing else, and it did that already
+        done += force_out()
 
     def ran(cmd, what, detach=False, name="part"):
         try:
@@ -965,6 +977,8 @@ def run() -> int:
         else:
             git("checkout", "--quiet", "--detach", tag, timeout=60, check=True)
         changed = [f for f in git("diff", "--name-only", before, "HEAD", timeout=30).stdout.splitlines() if f]
+        if os.path.exists(BACK_FILE):  # F104: on a version again by its own update: nothing to go forward to, and the data changes run again
+            os.remove(BACK_FILE)
         if made == tag:  # its own version wasn't on the public repo: everything that differed was set right
             changed = sorted(set(changed) | set(saved.get("changes", {}).get("files", [])))
         say("updating", "Restarting what changed")
@@ -1017,6 +1031,21 @@ def tell_later(cmd: list[str]) -> None:
     write_json(OTHER_FILE, {"cmd": cmd, "at": time.time()})
 
 
+def tell_now(cmd: list[str]) -> bool:
+    """F104: told, the pending line goes. Not told, whatever the reason, it stays, and the routine tries every minute (other_minute)."""
+    try:
+        told = _peer(cmd)
+    except Exception as e:
+        log(f"back: the other computer: {e!r}")
+        told = False
+    if told:
+        try:
+            os.remove(OTHER_FILE)
+        except OSError:
+            pass
+    return told
+
+
 def other_minute() -> str | None:
     """F104: from the routine's minute: the other computer was off when this one went back; try again."""
     d = read_json(OTHER_FILE)
@@ -1053,55 +1082,80 @@ def back(tag: str | None = None, tell: bool = True, first: bool = False) -> dict
     return {"ok": True, "said": f"Going back to {vname(tag)}, on this computer and the other one.", "to": vname(tag)}
 
 
-def back_run(tag: str, tell: bool) -> int:
+def back_run(tag: str, tell: bool, guard: bool = False) -> int:
+    """`guard`: the guard on the release, not a person: it stops a job by exact pid and nothing else (the job for good: held, it would carry
+    on by itself and do the same again), keeps no way forward (back.json is what `forward` goes by), and writes down what happened."""
     say("updating", "Going back", **{"to": vname(tag)})
-    told = None
+    told, undone, saved, moved = None, [], {}, False
     try:
         import datachange
         import role
         old = local_version().get("version")
         was = {"call": listening(hqpaths.call_port()), "status": listening(hqpaths.status_port()),
                "call_pid": pid_on(hqpaths.call_port(), CALL_MARK)}
-        say("updating", "Ending what runs: the call, the job, the mail check")
-        ended = force_out(stop_call=True)
+        say("updating", "Ending what runs: the job" if guard else "Ending what runs: the call, the job, the mail check")
+        ended = stop_job() if guard else force_out(stop_call=True)
         if git("rev-parse", "-q", "--verify", f"refs/tags/{tag}", timeout=10).returncode:
             git("fetch", "--no-tags", "--quiet", UPSTREAM, f"+refs/tags/{tag}:refs/tags/{tag}", timeout=120, check=True)
         say("updating", "Saving anything you changed")
         saved = backup(tag)
         before = git("rev-parse", "HEAD", timeout=10).stdout.strip()
         branch = git("symbolic-ref", "-q", "--short", "HEAD", timeout=10).stdout.strip()
-        undone = []
         if not role.is_backup():  # the workspace is the main's: the backup gets it back by the sync
             say("updating", "Undoing what the newer version changed in your data")
             undone = datachange.undo(datachange.between(tag, "HEAD"))
         say("updating", f"Moving HQ to {vname(tag)}")
         git("checkout", "--quiet", "--detach", tag, timeout=60, check=True)
+        moved = True
         changed = [f for f in git("diff", "--name-only", before, "HEAD", timeout=30).stdout.splitlines() if f]
         prior = gone_back()
-        write_json(BACK_FILE, {"to": vname(tag), "from": prior.get("from") or old, "branch": prior.get("branch") or branch,
-                               "head": prior.get("head") or before, "at": time.time()})
+        if not guard:
+            write_json(BACK_FILE, {"to": vname(tag), "from": prior.get("from") or old, "branch": prior.get("branch") or branch,
+                                   "head": prior.get("head") or before, "at": time.time()})
         if tell:  # only now: what failed above left this computer where it was, and the other one with it
-            told = _peer(["back-here", tag])
-            if not told:
-                tell_later(["back-here", tag])
+            tell_later(["back-here", tag])  # kept first: whatever happens to this run, the routine's minute tells it until it's told
+            told = tell_now(["back-here", tag])
         say("updating", "Restarting what changed")
-        done, todo = restart_new(changed, was)
+        done, todo = guard_restart(was) if guard else restart_new(changed, was)
         msg = f"Back on {vname(tag)}." + (f" Undone in your data: {', '.join(undone)}." if undone else "") + (
             " The other computer hears it as soon as it answers." if told is False else "")
+        if guard:
+            msg = guard_done(tag, old, before, saved, undone, ended)
         say("done", "", msg, done=ended + done, todo=todo, saved=saved, undone=undone, finished=time.time())
         check(force=True)
         return 0
     except Exception as e:
-        say("failed", "", f"Going back didn't go through: {str(e)[:200]}. HQ stays where it was.")
+        say("failed", "", _not_through(e, tag, moved, undone, saved, guard))
+        if guard:
+            guard_failed(e)
         return 1
+
+
+def _not_through(e: Exception, tag: str, moved: bool, undone: list[str], saved: dict, guard: bool) -> str:
+    """What's true after a going back that stopped halfway: which of the code, the data and the user's changes moved."""
+    why = str(e)[:200]
+    if moved:
+        return f"Back on {vname(tag)}, but what came after it didn't finish: {why}."
+    bits = [f"Going back didn't go through: {why}."]
+    if undone:
+        bits.append(f"HQ's code stays where it was, but in your data this is already undone: {', '.join(undone)}.")
+        bits.append("It stays undone until HQ stands on a released version." if guard else "The routine runs it again within a minute.")
+    else:
+        bits.append("HQ stays where it was.")
+    keep = [x["branch"] for x in (saved.get("changes"), saved.get("commits")) if x]
+    if keep:
+        bits.append(f"Your own changes are saved on {' and '.join(keep)}.")
+    return " ".join(bits)
 
 
 def forward(tell: bool = True) -> dict:
     """F104: the way forward again: this HQ back where it went back from, and the other computer too. The routine runs the data
-    changes again by itself."""
+    changes again by itself. Never onto unreleased work on a copy that isn't the maker's: the guard would only send it back again."""
     d = gone_back()
     if not d:
         return {"ok": False, "said": "This HQ hasn't gone back."}
+    if hqpaths.is_friend() and off_release(d.get("branch") or d.get("head") or "HEAD"):
+        return {"ok": False, "said": "Forward from here is work that isn't released yet, and this HQ stays on released versions. It stays where it is."}
     if tell and not _peer(["forward-here"]):
         tell_later(["forward-here"])
     if d.get("branch"):
@@ -1112,6 +1166,274 @@ def forward(tell: bool = True) -> dict:
     if not os.environ.get("HQ_UPDATE_WAIT"):
         _spawn("restart-all")
     return {"ok": True, "said": f"Forward again, on {git('describe', '--tags', '--always', timeout=10).stdout.strip()}."}
+
+
+# ---- F104: the guard on the release -----------------------------------------------------------------------------
+# A job on a friend's copy is an honest model doing something by habit, not an attacker. The job hook stops the plain ways by their words;
+# what it can't see, this sees by what's checked out, every minute, before anything else in the routine runs. What counts is "on GitHub's
+# dev and not in a release", never "the head isn't a tag": a friend's own commits are hers. Files of dev's in the folder with the head
+# where it was (a `git show` into a file, a raw download) aren't this guard's: nothing in the head says so.
+
+def version_tags() -> list[str]:
+    return [t for t in git("tag", "-l", timeout=20).stdout.split() if vtuple(t)]
+
+
+def past_release(head: str = "HEAD") -> tuple[list[str], list[str]]:
+    """(the commits under `head` that no version tag reaches, the version tags). Local, no network."""
+    tags = version_tags()
+    if not tags:
+        return [], []
+    return git("rev-list", head, *[f"^{t}" for t in tags], timeout=30).stdout.split(), tags
+
+
+def _repo_of(url: str) -> str:
+    """owner/name of a repo's address, whichever way it's written, or a folder's last two parts: the same for ssh, https and with .git."""
+    tail = re.sub(r"\.git/?$|/$", "", url.strip()).replace(":", "/").split("/")
+    return "/".join(tail[-2:]).lower()
+
+
+def work_line() -> list[str]:
+    """The tips of GitHub's work line this copy knows from its own refs: what a remote of HQ's own repo says, what the guard fetched, what
+    FETCH_HEAD says of it. Never a local branch called dev: that may be hers, with her own commits on it."""
+    want = _repo_of(UPSTREAM)
+    remotes = [r for r in git("remote", timeout=10).stdout.split() if _repo_of(git("remote", "get-url", r, timeout=10).stdout) == want]
+    refs = [f"refs/remotes/{r}/{b}" for r in remotes for b in WORK_LINE] + ["refs/hq/work-line/"]
+    tips = set(git("for-each-ref", "--format=%(objectname)", *refs, timeout=20).stdout.split())
+    try:
+        with open(os.path.join(HQ, git("rev-parse", "--git-path", "FETCH_HEAD", timeout=10).stdout.strip())) as f:  # join: an absolute path stays as it is
+            for ln in f:
+                m = re.match(r"([0-9a-f]{40})\t[^\t]*\tbranch '(?:dev|nightly)' of (.+)$", ln.rstrip("\n"))
+                if m and _repo_of(m[2]) == want and not git("cat-file", "-e", m[1], timeout=10).returncode:
+                    tips.add(m[1])
+    except OSError:
+        pass
+    return sorted(tips)
+
+
+def look_at_github() -> bool:
+    """GitHub's dev and nightly into refs/hq/work-line/, a place no checkout goes by itself. False when it can't be reached: what the
+    local refs know then stands, and a commit they don't know isn't called dev's on a guess."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "PATH": os.environ.get("PATH", "") + ":" + PATH}
+    try:
+        r = subprocess.run(["git", "ls-remote", "--heads", UPSTREAM, *WORK_LINE], capture_output=True, text=True, timeout=20, env=env)
+        if r.returncode:
+            return False
+        names = [ln.split("refs/heads/", 1)[1] for ln in r.stdout.splitlines() if "refs/heads/" in ln]
+        names = [n for n in names if n in WORK_LINE]
+        if names:
+            return not git("fetch", "--no-tags", "--quiet", "--no-write-fetch-head", UPSTREAM,
+                           *[f"+refs/heads/{n}:refs/hq/work-line/{n}" for n in names], timeout=60).returncode
+        return True
+    except Exception:
+        return False
+
+
+def _log(revs: list[str], *how: str) -> bytes:
+    env = {**os.environ, "PATH": os.environ.get("PATH", "") + ":" + PATH}
+    return subprocess.run(["git", "-C", HQ, "log", "--no-walk", *how, "--stdin"], input="\n".join(revs).encode(), capture_output=True, timeout=60, env=env).stdout
+
+
+def _patches(revs: list[str]) -> dict[str, str]:
+    """{patch id: commit}: the same change has the same id, whatever commit it's in."""
+    r = subprocess.run(["git", "-C", HQ, "patch-id", "--stable"], input=_log(revs, "-p", "--no-merges"), capture_output=True, timeout=60,
+                       env={**os.environ, "PATH": os.environ.get("PATH", "") + ":" + PATH})
+    return {ln.split()[0]: ln.split()[1] for ln in r.stdout.decode().splitlines() if len(ln.split()) == 2}
+
+
+def _trees(revs: list[str]) -> dict[str, str]:
+    """{tree: commit}: the same files have the same tree."""
+    return dict(ln.split() for ln in _log(revs, "--format=%T %H").decode().splitlines() if len(ln.split()) == 2)
+
+
+def unreleased(mine: list[str], tags: list[str], tips: list[str]) -> list[str]:
+    """Of the commits past a release, the ones that are GitHub's unreleased work: the very commit, the same change made again (`git am`, a
+    cherry-pick), or the same files as one of them (a squash). Not a commit that repeats something that was released: that's hers."""
+    if not mine or not tips:
+        return []
+    theirs = git("rev-list", *tips, *[f"^{t}" for t in tags], timeout=30).stdout.split()
+    if not theirs:
+        return []
+    same = set(theirs)
+    hit = [c for c in mine if c in same]
+    if hit:
+        return hit
+    ids = _patches(theirs)
+    hit = [c for i, c in _patches(mine).items() if i in ids]
+    of_theirs = _trees(theirs)
+    of_tags = set(git("rev-parse", *[f"{t}^{{tree}}" for t in tags], timeout=20).stdout.split())
+    return hit + [c for t, c in _trees(mine).items() if t in of_theirs and t not in of_tags and c not in hit]
+
+
+def off_release(head: str = "HEAD") -> list[str]:
+    """The unreleased commits under `head`, by what this copy knows now (no network)."""
+    mine, tags = past_release(head)
+    return unreleased(mine, tags, work_line())
+
+
+def _subject(sha: str) -> str:
+    return git("log", "-1", "--format=%s", sha, timeout=10).stdout.strip()[:120]
+
+
+def newest_release() -> str | None:
+    """Where the guard goes: the version this HQ went back to, if it did that on purpose; else the newest one it has. Never older than what
+    it stood on (the head may be an old copy of dev), and data only ever moves forward from there, by the routine's own minute."""
+    tags = version_tags()
+    to = "v" + str(gone_back().get("to") or "")
+    return to if to in tags else (max(tags, key=vtuple) if tags else None)
+
+
+def release_minute(log=None) -> str | None:
+    """F104: the routine's first thing every minute. None: nothing's the matter, carry on. Words: this copy holds unreleased work (or is
+    going back from it): start nothing on top of it this minute. Never on the maker's copy, and never on a guess: what can't be read or
+    can't be told counts as nothing found. The look at GitHub only happens past a release, for a head it hasn't seen, or once an hour."""
+    if not has_git() or not hqpaths.is_friend():
+        return None
+    st, now = read_json(GUARD_FILE), time.time()
+    mine, tags = past_release()
+    if not mine:
+        return _guard_clear(st)
+    head = git("rev-parse", "HEAD", timeout=10).stdout.strip()
+    if head and (st.get("head") != head or now >= st.get("next", 0)):
+        st["next"] = now + (GUARD_LOOK if look_at_github() else GUARD_OFFLINE)
+    tips = work_line()
+    if st.get("head") == head and st.get("tips") == tips and not st.get("held"):
+        write_json(GUARD_FILE, st)
+        return None
+    st.update(head=head, tips=tips)
+    hit = unreleased(mine, tags, tips)
+    if not hit:
+        st.pop("held", None)
+        write_json(GUARD_FILE, st)
+        return _guard_clear(st)
+    return _guard_hold(st, hit, now, log)
+
+
+def _guard_clear(st: dict) -> None:
+    """Nothing held: the incident closes, and parts the guard couldn't restart during a call get their turn."""
+    if st.get("held"):
+        st.pop("held")
+        write_json(GUARD_FILE, st)
+    try:
+        import incidents
+        if incidents.is_down(GUARD_KEY):
+            incidents.up(GUARD_KEY)
+    except Exception:
+        pass
+    if st.get("restart") and calls_on() == 0:
+        st.pop("restart")
+        write_json(GUARD_FILE, st)
+        if os.environ.get("HQ_UPDATE_RESTART") != "0":
+            _spawn("restart-all", "guard")
+    return None
+
+
+def _guard_hold(st: dict, hit: list[str], now: float, log) -> str:
+    """Unreleased work under the head: held from here on, and going back, once now and again every GUARD_RETRY if that didn't go through."""
+    held = st.get("held") or {"since": now, "commits": len(hit), "first": _subject(hit[-1]), "item": _job_item()}
+    tag = newest_release()
+    words = f"HQ stands on work that isn't released ({len(hit)} change{'s' if len(hit) != 1 else ''}): nothing starts until it's back on {vname(tag) if tag else 'a released version'}"
+    st["held"] = held
+    run = read_json(RUN_FILE)
+    busy = run.get("state") == "updating" and alive(run.get("pid"))
+    if busy or now < held.get("again", 0):
+        write_json(GUARD_FILE, st)
+        return words
+    held.update(again=now + GUARD_RETRY, tries=held.get("tries", 0) + 1, to=tag)
+    write_json(GUARD_FILE, st)
+    import incidents
+    incidents.down(GUARD_KEY, words + f". The first: {held['first']}", at=held["since"], item=held.get("item"))
+    if not tag:  # nothing to go back on: it stays held, and the incident says so
+        incidents.fix(GUARD_KEY, "This HQ has no released version it could go back on")
+        return words
+    if log:
+        log(f"release guard: {len(hit)} unreleased change(s) under the head, going back on {tag}")
+    if os.environ.get("HQ_UPDATE_WAIT"):  # a test: in the foreground
+        back_run(tag, False, guard=True)
+    else:
+        _spawn("back-run", tag, "guard")
+    return words
+
+
+def _job_item() -> str | None:
+    """The id of the work the running job holds, so the incident is a step of its record (F103)."""
+    try:
+        r = subprocess.run([sys.executable, os.path.join(HERE, "jobs.py"), "next"], capture_output=True, text=True, timeout=30)
+        running = json.loads(r.stdout).get("running") or []
+        return (running[0].get("item") or {}).get("id") if running else None
+    except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
+        return None
+
+
+def stop_job() -> list[str]:
+    """F104: a job that runs, stopped by exact pid, for good, and nothing else."""
+    n, pid = running_job(), window_pid("job.json", "job.pid")
+    if pid:
+        end_tree(pid)
+    if n:
+        subprocess.run([sys.executable, os.path.join(HERE, "jobs.py"), "mark", str(n), "stopped " + time.strftime("%H:%M")], capture_output=True, text=True)
+    for f in ("job.json", "job.pid"):
+        try:
+            os.remove(os.path.join(RUN_DIR, f))
+        except OSError:
+            pass
+    return [f"job {n}" + (f" (pid {pid})" if pid else "")] if n or pid else []
+
+
+def guard_restart(was: dict) -> tuple[list[str], list[str]]:
+    """What runs goes back on the released code as after `back`, only never through a call: then it waits until the call has ended."""
+    if calls_on() == 0:
+        return restart_new(["app/bot.py", "status/server.mjs"], {**was, "guard": True})
+    st = read_json(GUARD_FILE)
+    st["restart"] = True
+    write_json(GUARD_FILE, st)
+    return [], ["a call is on: what runs goes on the released code once it has ended"]
+
+
+def guard_done(tag: str, old: str, head: str, saved: dict, undone: list[str], ended: list[str]) -> str:
+    """Said and written down: the incident's line, a note beside the update notes for the Claude that runs this HQ, and a text."""
+    held = read_json(GUARD_FILE).get("held") or {}
+    kept = [x["branch"] for x in (saved.get("changes"), saved.get("commits")) if x]
+    said = (f"HQ had moved onto work that isn't released yet ({held.get('commits', 'some')} change{'' if held.get('commits') == 1 else 's'}, the first: {held.get('first', '?')}). "
+            f"It's back on {vname(tag)}." + (f" Stopped: {'; '.join(ended)}; it doesn't carry on by itself." if ended else "")
+            + (f" Undone in your data: {', '.join(undone)}." if undone else "")
+            + (f" Anything of your own is saved on {' and '.join(kept)}." if kept else ""))
+    os.makedirs(NOTES, exist_ok=True)
+    path = os.path.join(NOTES, f"went-back-{time.strftime('%Y%m%d-%H%M%S')}.md")
+    with open(path, "w") as f:
+        f.write("\n".join([f"# HQ went back on {vname(tag)} by itself", "",
+                           f"{time.strftime('%d %B %Y at %H:%M')}. For the Claude that runs this HQ: tell the user, in a sentence or two, then move this note into updates/done/.", "",
+                           said, "", f"It stood on {head} (from {old or '?'}), past every version, with work from GitHub's work line under it. A friend's HQ only stands on released versions,",
+                           "so the routine put it back; nothing of the work line was kept running. A job on this copy doesn't take the work line, by any command.", "",
+                           *([f"- What the user had of their own: `{b}`, never sent anywhere. Take over only their own commits from it (`git log {tag}..{b}`), not what came from the work line." for b in kept]),
+                           ""]))
+    try:
+        import incidents
+        incidents.fix(GUARD_KEY, said)
+    except Exception:
+        pass
+    log(f"release guard: {said}")
+    _guard_text(said)
+    return said
+
+
+def guard_failed(e: Exception) -> None:
+    """It stays held and the guard tries again; the incident stays open, so the owner hears it in a text as with anything that stays down."""
+    try:
+        import incidents
+        incidents.fix(GUARD_KEY, f"Going back didn't go through, it's tried again: {str(e)[:200]}")
+    except Exception:
+        pass
+    log(f"release guard: going back didn't go through: {e!r}")
+
+
+def _guard_text(said: str) -> None:
+    """The owner's texts, in the background: composing one can take a minute, and nothing here waits for it."""
+    py = os.path.join(HQ, ".venv", "bin", "python")
+    try:
+        subprocess.Popen([py if os.path.exists(py) else sys.executable, os.path.join(HQ, "app", "direct_line.py"), "text", "off-release", said], cwd=HQ, stdin=subprocess.DEVNULL,
+                         stdout=open(LOG, "a"), stderr=subprocess.STDOUT, start_new_session=True)
+    except Exception as e:
+        log(f"release guard: the text: {e!r}")
 
 
 def main(argv: list[str]) -> int:
@@ -1127,13 +1449,13 @@ def main(argv: list[str]) -> int:
         print(json.dumps(back(argv[1], first=True)))
         return 0
     if cmd == "back-run" and len(argv) >= 2:
-        return back_run(argv[1], argv[2:] != ["quiet"])
+        return back_run(argv[1], argv[2:] not in (["quiet"], ["guard"]), guard=argv[2:] == ["guard"])
     if cmd in ("forward", "forward-here"):
         print(json.dumps(forward(tell=cmd == "forward")))
         return 0
     if cmd == "restart-all":
         was = {"call": listening(hqpaths.call_port()), "status": listening(hqpaths.status_port()), "call_pid": pid_on(hqpaths.call_port(), CALL_MARK)}
-        restart_new(["app/bot.py", "status/server.mjs"], was)
+        restart_new(["app/bot.py", "status/server.mjs"], {**was, "guard": argv[1:] == ["guard"]})
         return 0
     if cmd == "status":
         print(json.dumps(status()))
