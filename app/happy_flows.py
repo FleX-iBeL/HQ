@@ -20183,6 +20183,7 @@ from pathlib import Path
 R.ROOT = Path(sys.argv[2]); R._ready = lambda need_clean=None: None
 R.to_nightly = lambda: 77
 R.version = lambda: '1.2.3'
+R.ahead = lambda a, b: 1; R.night_tied = lambda run, target: None  # F112 has its own flow for those
 print('EXIT', R.cmd_main(red_night='--past-the-night' in sys.argv, said=sys.argv[sys.argv.index('--said') + 1] if '--said' in sys.argv else None))
 """)
         def rel(*a):

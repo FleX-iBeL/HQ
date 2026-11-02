@@ -430,26 +430,78 @@ JT=$(tty)
 # F101 (C73): the night's test run is the routine's own, not a Claude job's: no usage, no line to wait behind, and a release
 # reads what it left. A failure is a job for the team.
 NIGHT_AT = (2, 0)  # the same time as the H169 item that ran it
+NIGHT_LATE = (5, 0)  # F112: a job still running by now no longer keeps the night waiting, or there'd be no night at all [Claude's choice]
 
 
-def nightly_minute(now=None):
-    now = now or time.localtime()
-    if (now.tm_hour, now.tm_min) < NIGHT_AT or now.tm_hour > 5:
-        return None
-    nf = os.path.join(RUN, "nightly-started")
-    day = time.strftime("%Y-%m-%d", now)
+def _pid_there(pid) -> bool:
     try:
-        if open(nf).read().strip() == day:
-            return None
-    except OSError:
-        pass
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True
+    except (OSError, TypeError):
+        return False
+
+
+def _night_start(day: str, tries: int, stamp: str) -> int:
+    nf = os.path.join(RUN, "nightly-started")
     os.makedirs(RUN, exist_ok=True)
-    open(nf, "w").write(day)
     out = open(os.path.join(RUN, "nightly.log"), "a")
     p = subprocess.Popen([sys.executable, os.path.join(HERE, "nightly.py"), "run", "--routine"], cwd=JV, stdin=subprocess.DEVNULL,
                          stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
-    log(f"the night's test run started (pid {p.pid})")
+    open(nf, "w").write(f"{day}\n{p.pid}\n{tries}\n{stamp}\n")
+    log(f"the night's test run started (pid {p.pid})" + (", once more: the first one died" if tries > 1 else ""))
     return p.pid
+
+
+def nightly_minute(now=None, busy=False):
+    """F112: once in the night's window, whatever the team's switch says. The marker holds the date, the pid, how many starts and when: a run
+    already going is left alone, a run that finished (green or red) is done, a run that died without a record starts once more, and a second
+    death is told once. A job that's running keeps the night waiting until NIGHT_LATE (busy): two runs at once go red by themselves."""
+    now = now or time.localtime()
+    if (now.tm_hour, now.tm_min) < NIGHT_AT or now.tm_hour > 5:
+        return None
+    import nightly
+    if nightly.running():
+        return None  # one started by hand or by a job is left alone too
+    day = time.strftime("%Y-%m-%d", now)
+    stamp = time.strftime("%Y-%m-%d %H:%M", now)
+    nf = os.path.join(RUN, "nightly-started")
+    try:
+        mark = open(nf).read().split("\n")
+    except OSError:
+        mark = [""]
+    if mark[0].strip() != day:
+        if busy and (now.tm_hour, now.tm_min) < NIGHT_LATE:
+            return None
+        return _night_start(day, 1, stamp)
+    if len(mark) < 2 or not mark[1].strip():
+        return None  # a date alone: nothing to look after
+    pid, tries, began = int(mark[1]), int(mark[2] or 1), mark[3].strip()
+    if _pid_there(pid):
+        return None
+    rec = nightly.last() or {}
+    if str(rec.get("at") or "") >= began:
+        return None  # it wrote its record: green or red, the night happened
+    if tries == 1:
+        return _night_start(day, 2, stamp)
+    if tries == 2:
+        open(nf, "w").write(f"{day}\n{pid}\n3\n{began}\n")
+        log("the night's test run died twice; no third start")
+        routines.bad("nightly", "The night's test run died twice, so there's no night for a release", every=86400)
+        nightly.morning("The night's test run died twice without a result, so there was no night and no release can go out on it. It starts again next night.")
+    return None
+
+
+def night_step(q) -> None:
+    """F112: the routine's own, before the team's switch and before a running job's branch: on the main of the maker's HQ only (a friend's HQ
+    doesn't release). A flow only gets here by asking for it (HQ_NIGHT_MINUTE): a copy between 2:00 and 6:00 would start a whole nightly of
+    its own, and outlive the flow."""
+    if hqpaths.under_test() and not os.environ.get("HQ_NIGHT_MINUTE"):
+        return
+    import nightly
+    if hqpaths.is_maker() and nightly.is_main():
+        nightly_minute(busy=bool(q.get("running")))
 
 
 def job_env() -> str:
@@ -1718,6 +1770,11 @@ def tick():
     if gone_back():  # F104: the mail check goes on, the team waits
         routines.beat("jobs", state="waiting", text="HQ went back a version: the team waits until it goes forward", every=60)
         return
+    if not handing_back:
+        try:
+            night_step(q)
+        except Exception as e:
+            log(f"nightly: {e!r}")
     try:
         mailguard.minute(q.get("mail", True), incidents, routines)  # F102: red when it hasn't been checked for 2 hours
     except Exception as e:
@@ -1824,10 +1881,14 @@ def tick():
     if not q["on"]:
         return
     try:
-        if not hqpaths.under_test():  # a flow's copy between 2:00 and 6:00 would start a whole nightly of its own, and outlive the flow
-            nightly_minute()  # F101: the night's test run is the routine's own
+        import nightly
+        going = nightly.running()
     except Exception as e:
         log(f"nightly: {e!r}")
+        going = None
+    if going:  # F112: a job's proof beside the night's run turns both red
+        routines.beat("jobs", state="waiting", text="The night's test run is going: the next job waits for it", every=60)
+        return
     # H39: the waiting job highest on the list goes first (ready, or held for the usage and now
     # given another go), not the oldest; a call can move them with jobs.py move.
     line = q.get("waiting")

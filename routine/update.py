@@ -87,6 +87,7 @@ PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 # F32: who the update's backup (a stash is a commit) is by, so it works on a computer whose git has no name yet.
 IDENTITY = ("-c", "user.name=HQ update", "-c", "user.email=hq-update@localhost")
 TAG = re.compile(r"^v(\d+)\.(\d+)(?:\.(\d+))?$")
+WAY_BACK = os.path.join(HQ, "routine", "way-back.json")  # F112: versions with no forward of their own, written by the release after them
 BACK_FILE = os.path.join(STATUS_DIR, "back.json")      # F104: this HQ went back: from where, to which version
 OTHER_FILE = os.path.join(STATUS_DIR, "back-other.json")  # F104: the other computer still has to hear it
 GUARD_FILE = os.path.join(STATUS_DIR, "off-release.json")  # F104: the guard's last look, and what it holds
@@ -1046,13 +1047,29 @@ def has_forward(tag: str) -> bool:
     return not r.returncode and bool(re.search(r"^def forward\(", r.stdout, re.M))
 
 
+def way_forward(tag: str) -> str | None:
+    """F112 (C52): how HQ gets forward again from that version: "own" (its own `forward`); "update bar" for one the release after it wrote down
+    (routine/way-back.json), the way it came forward the first time; None: there's no way, so no going back to it."""
+    if has_forward(tag):
+        return "own"
+    return "update bar" if tag in read_json(WAY_BACK) else None
+
+
 def no_forward_words(tag: str) -> str:
     return f"HQ can't go back to {vname(tag)}: that version has no way forward again, so it would be stuck there. Nothing moved."
 
 
 def gone_back() -> dict:
-    """F104: {"to", "from", "branch", "at"} while this HQ stands on an older version it went back to."""
-    return read_json(BACK_FILE)
+    """F104: {"to", "from", "branch", "at"} while this HQ stands on an older version it went back to. F112: an old version knows nothing of this
+    file, so once its own update has brought HQ forward the file is simply old."""
+    d = read_json(BACK_FILE)
+    if d.get("no_forward") and d.get("to") != file_version():
+        try:
+            os.remove(BACK_FILE)
+        except OSError:
+            pass
+        return {}
+    return d
 
 
 def _peer(cmd: list[str]) -> bool:
@@ -1104,7 +1121,7 @@ def back(tag: str | None = None, tell: bool = True, first: bool = False) -> dict
     tag = tag or previous()
     if not tag or not vtuple(tag):
         return {"ok": False, "said": "There's no version before this one."}
-    if not has_forward(tag):
+    if not way_forward(tag):
         return {"ok": False, "said": no_forward_words(tag)}
     import role
     if tell and not first and role.is_backup():
@@ -1128,9 +1145,11 @@ def back_run(tag: str, tell: bool, guard: bool = False) -> int:
         log(f"release guard: left alone: {why}")
         print(f"The guard leaves this HQ alone: {why}.")
         return 1
-    if not guard and not has_forward(tag):  # the guard goes where she stood, it isn't a going back she can undo
+    way = "guard" if guard else way_forward(tag)  # the guard goes where she stood, it isn't a going back she can undo
+    if not way:
         say("failed", "", no_forward_words(tag))
         return 1
+    old_way = way == "update bar"
     say("updating", "Going back", **{"to": vname(tag)})
     told, undone, saved, moved = None, [], {}, False
     try:
@@ -1150,6 +1169,8 @@ def back_run(tag: str, tell: bool, guard: bool = False) -> int:
         if not role.is_backup():  # the workspace is the main's: the backup gets it back by the sync
             say("updating", "Undoing what the newer version changed in your data")
             undone = datachange.undo(datachange.between(tag, "HEAD"))
+        if old_way and not hqpaths.is_friend():  # F112: that version's routine doesn't know the team has to wait: the switch says so instead
+            subprocess.run([sys.executable, os.path.join(HQ, "routine", "jobs.py"), "off"], capture_output=True, text=True, timeout=60)
         say("updating", f"Moving HQ to {vname(tag)}")
         git("checkout", "--quiet", "--detach", tag, timeout=60, check=True)
         moved = True
@@ -1157,7 +1178,7 @@ def back_run(tag: str, tell: bool, guard: bool = False) -> int:
         prior = gone_back()
         if not guard:
             write_json(BACK_FILE, {"to": vname(tag), "from": prior.get("from") or old, "branch": prior.get("branch") or branch,
-                                   "head": prior.get("head") or before, "at": time.time()})
+                                   "head": prior.get("head") or before, "at": time.time(), **({"no_forward": True} if old_way else {})})
         if tell:  # only now: what failed above left this computer where it was, and the other one with it
             tell_later(["back-here", tag])  # kept first: whatever happens to this run, the routine's minute tells it until it's told
             told = tell_now(["back-here", tag])
@@ -1165,6 +1186,10 @@ def back_run(tag: str, tell: bool, guard: bool = False) -> int:
         done, todo = guard_restart(was) if guard else restart_new(changed, was)
         msg = f"Back on {vname(tag)}." + (f" Undone in your data: {', '.join(undone)}." if undone else "") + (
             " The other computer hears it as soon as it answers." if told is False else "")
+        if old_way and hqpaths.is_friend():
+            msg += f" {vname(tag)} has no Forward button of its own: the update bar brings you back to {old}, and what was undone runs again then."
+        elif old_way:
+            msg += f" The team is off, because {vname(tag)} doesn't wait by itself. It has no forward of its own: git checkout {branch or before}, then the team on."
         if guard:
             msg = guard_done(tag, old, before, saved, undone, ended)
             st = read_json(GUARD_FILE)

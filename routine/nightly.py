@@ -144,6 +144,45 @@ def last() -> dict | None:
         return None
 
 
+def _git(*a: str, root: str | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", root or HQ, *a], capture_output=True, text=True)
+
+
+def here() -> tuple[str, list[str]]:
+    """F112: the commit HQ stands on, and the tracked files that differ from it: that's what a run really runs."""
+    dirty = [ln[3:] for ln in _git("status", "--porcelain").stdout.splitlines() if ln.strip() and not ln.startswith("??")]
+    return _git("rev-parse", "HEAD").stdout.strip(), dirty
+
+
+def whole_set(commit: str = "HEAD", root: str | None = None) -> int:
+    """F112: how many flows a whole night is at that commit, read from git: every quick flow, on Linux all but the Mac-only ones. A number of
+    its own, so a record with one flow in it isn't a night. 0 when it can't be read."""
+    flows = _git("show", f"{commit}:app/happy_flows.py", root=root).stdout
+    sets = _git("show", f"{commit}:routine/flowsets.py", root=root).stdout
+    block = flows.partition("\nFLOWS = {")[2].partition("\n}\n")[0]
+    quick = re.findall(r"^\s+(\d+): \(.*, False, \"\w+\"\),?\s*$", block, re.M)
+    out = re.search(r'^MAC_ONLY = "([\d,]*)"', sets, re.M)
+    left = set((out.group(1) if out else "").split(",")) if sys.platform != "darwin" else set()
+    return len([n for n in quick if n not in left])
+
+
+RUNNING = os.path.join(OUT, "running.json")  # F112: which run is going right now
+
+
+def running() -> dict | None:
+    """F112: the night's run that's going right now, on this HQ: {"pid", "at"}, or None. A run inside a test isn't one: it's the night's own flows."""
+    if hqpaths.under_test():
+        return None
+    try:
+        d = json.load(open(RUNNING, encoding="utf8"))
+        os.kill(int(d["pid"]), 0)
+        return d
+    except PermissionError:
+        return d
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def tonight(prev: dict | None, now: dt.datetime | None = None) -> dict | None:
     """The night prev belongs to, when it's still tonight's: {"night", "round", "rounds", "green"}; else None."""
     if not prev or not prev.get("at"):
@@ -157,7 +196,7 @@ def tonight(prev: dict | None, now: dt.datetime | None = None) -> dict | None:
     if not dt.timedelta(0) <= now - start < dt.timedelta(hours=NIGHT_HOURS):
         return None
     green = prev.get("exit") == 0 and bool(prev.get("ran")) and not prev.get("failed")
-    rounds = prev.get("rounds") or [{k: prev.get(k) for k in ("at", "ran", "passed", "failed", "exit", "minutes", "log")}]
+    rounds = prev.get("rounds") or [{k: prev.get(k) for k in ("at", "commit", "dirty", "ran", "passed", "failed", "exit", "minutes", "log")}]
     return {"night": night, "round": int(prev.get("round") or 1), "rounds": rounds, "green": green}
 
 
@@ -176,6 +215,10 @@ def run(again: bool = False, routine: bool = False) -> int:
         print("This computer isn't the main right now, so the nightly run is the main's. Nothing done.")
         return 0
     os.makedirs(OUT, exist_ok=True)
+    going = running()
+    if going:  # F112: two runs at once go red by themselves
+        print(f"A full run is already going (pid {going['pid']}, since {going.get('at')}): it's left alone, nothing more started.")
+        return 0
     if not again and not routine:  # F101: the routine already ran it: the H169 item has nothing left to run
         t = tonight(last(), stamp)
         if t and t["green"] and (last() or {}).get("routine"):
@@ -198,13 +241,21 @@ def run(again: bool = False, routine: bool = False) -> int:
     cmd = [_python(), os.path.join(HQ, "app", "happy_flows.py")] + flow_args()
     print(f"Round {n} of at most {ROUNDS}. Running: {' '.join(cmd[1:])}  (output in {log})", flush=True)
     t0 = time.time()
-    with open(log, "w", encoding="utf8") as f:
-        r = subprocess.run(cmd, cwd=HQ, stdout=f, stderr=subprocess.STDOUT)
+    commit, dirty = here()  # F112: what this run tests; a release reads it
+    json.dump({"pid": os.getpid(), "at": stamp.strftime("%Y-%m-%d %H:%M")}, open(RUNNING, "w"))
+    try:
+        with open(log, "w", encoding="utf8") as f:
+            r = subprocess.run(cmd, cwd=HQ, stdout=f, stderr=subprocess.STDOUT)
+    finally:
+        try:
+            os.remove(RUNNING)
+        except OSError:
+            pass
     out = open(log, encoding="utf8").read()
     mins = round((time.time() - t0) / 60)
     passed, ran = summary(out)
     failed = failures(out)
-    entry = {"at": stamp.strftime("%Y-%m-%d %H:%M"), "ran": ran, "passed": passed, "failed": failed,
+    entry = {"at": stamp.strftime("%Y-%m-%d %H:%M"), "commit": commit, "dirty": dirty, "ran": ran, "passed": passed, "failed": failed,
              "exit": r.returncode, "minutes": mins, "log": log}
     json.dump({**entry, "round": n, "rounds_max": ROUNDS, "night": night, "rounds": rounds + [entry], "routine": routine},
               open(os.path.join(OUT, "last.json"), "w"), indent=1)
@@ -216,6 +267,7 @@ def run(again: bool = False, routine: bool = False) -> int:
     else:
         routines.bad("nightly", f"{when}: {passed} of {ran} passed", every=86400)
     if r.returncode == 0 and ran and not failed:
+        hold_privacy()
         if n == 1:
             add_night(f"{when} all {ran} flows pass ({mins} min)")
             print(f"All {ran} flows pass ({mins} min). One line in the {ROW} row. Then the tutorial read: nightly.py tutorial.")
@@ -236,6 +288,18 @@ def run(again: bool = False, routine: bool = False) -> int:
         return 1
     print(f"That was the last of {ROUNDS} full runs: the night's work holds on nightly, not released.")
     return 3
+
+
+def hold_privacy() -> None:
+    """F112: a green night reads the history once, so what the release reads after it is only what's new (privacy.py holds what read clean).
+    What it finds isn't the night's to judge: the release refuses it."""
+    if hqpaths.under_test():
+        return
+    try:
+        p = subprocess.run([_python(), os.path.join(HQ, "app", "privacy.py"), "--history"], cwd=HQ, capture_output=True, text=True, timeout=3600)
+        print("Privacy check, for the release: " + ((p.stdout.strip().splitlines() or ["no answer"])[-1]))
+    except subprocess.SubprocessError as e:
+        print(f"Privacy check, for the release: not finished: {e!r}")
 
 
 TOUR = os.path.join(HQ, "app", "web", "tour.json")

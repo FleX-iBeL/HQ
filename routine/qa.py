@@ -400,60 +400,122 @@ def commits(root: str, base: str, tip: str) -> list[tuple[str, str]]:
     return [tuple(ln.split("\t", 1)) for ln in r.stdout.splitlines() if "\t" in ln]
 
 
+def brought(root: str, base: str, sha: str) -> list[tuple[str, str]]:
+    """F112: what a merge commit brings: (sha, subject) of the commits behind its other parents that the line didn't have yet, and that
+    aren't in the release already. Empty for anything else, and for a merge that brings nothing new (a version merged back)."""
+    parents = subprocess.run(["git", "-C", str(root), "rev-list", "--parents", "-n", "1", sha], text=True, capture_output=True).stdout.split()[1:]
+    if len(parents) < 2:
+        return []
+    r = subprocess.run(["git", "-C", str(root), "log", "--reverse", "--no-merges", "--format=%H%x09%s", sha, f"^{parents[0]}", f"^{base}"],
+                       text=True, capture_output=True)
+    return [tuple(ln.split("\t", 1)) for ln in r.stdout.splitlines() if "\t" in ln]
+
+
+# F112: the rows from before the gate. Written by hand, here and nowhere else: a row with commits on the line that never had a QA job because
+# the gate didn't exist yet. With a tag: the row went out in that version, so it doesn't hold, and every release that takes it says so. The
+# gate checks the tag against git, so a line here can't wave anything through. Without a tag: the row is in no version, its QA is real work,
+# and it's held with this why. New rows don't go here: this list only ever gets shorter.
+BEFORE_GATE = {
+    "F66": (None, "built 28 October, in no version yet: its QA is real work"),
+    "H227": ("v0.4.19", "out since 0.4.19; one later commit reads the tutorial against HQ, the night's own read, no QA job ever made for it"),
+    "F17": ("v0.4.19", "out since 0.4.19; one later commit guards the workspace's folder from a test, no QA job ever made for it"),
+    "H230": ("v0.4.19", "out since 0.4.19; two later fixes to a trip's times and its text, no QA job ever made for them"),
+}
+
+
+def in_version(root: str, label: str, tag: str) -> bool:
+    """F112: whether a commit naming this row stands in that version tag."""
+    r = subprocess.run(["git", "-C", str(root), "log", "--format=%s", tag], text=True, capture_output=True)
+    return r.returncode == 0 and any(label in subject_labels(s) for s in r.stdout.splitlines())
+
+
+def before_gate(root: str, label: str) -> dict | None:
+    """F112: what the list says of this row: {"label", "tag", "why", "shipped"}; None for a row that isn't on it."""
+    if label not in BEFORE_GATE:
+        return None
+    tag, why = BEFORE_GATE[label]
+    return {"label": label, "tag": tag, "why": why, "shipped": bool(tag) and in_version(root, label, tag)}
+
+
 def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: str | None = None) -> dict:
     """What the release can take: {"to": sha or None (the last commit it takes; None: nothing new it may take),
     "tip": dev's sha or None, "taken": [labels], "held": [{"label", "why"}], "behind": [labels that passed but come
-    after a held one], "all": bool}."""
+    after a held one], "before_gate": [what BEFORE_GATE let through, each with "goes": in what would go out], "all": bool}.
+    F112: it looks at what each commit brings: a merge passes when what it brought passed, and is held by the first thing it brought that
+    isn't; it names nothing itself for that."""
     root = root or ROOT
     text = q.read()[0] if text is None else text
     all_rows = rows(text)
     cs = commits(root, base, tip)
-    to, taken, held, behind, stop = None, [], [], [], False
+    to, taken, held, behind, stop, past = None, [], [], [], False, {}
+    held_label = lambda l: l in [h["label"] for h in held]
     for sha, subject in cs:
-        named = [l for l in subject_labels(subject) if l in all_rows]
-        need = [l for l in named if all_rows[l][1] in GATED]
-        bad = [l for l in need if state(l, text) != "passed"]
-        if not named and proof_on() and not only_free_files(root, sha):  # F101: nothing goes out that no item asked for
-            if not stop:
-                stop = True
-            held.append({"label": sha[:7], "why": f"this commit names no item: {subject[:70]}"})
-            continue
-        if bad and not stop:
-            stop = True
+        parts = brought(root, base, sha)
+        named_here = [l for l in subject_labels(subject) if l in all_rows]
+        parts = parts + ([(sha, subject)] if named_here or not parts else [])
+        need, bad, nameless = [], [], []
+        for s, subj in parts:
+            named = [l for l in subject_labels(subj) if l in all_rows]
+            for l in named:
+                if all_rows[l][1] not in GATED or l in need:
+                    continue
+                need.append(l)
+                if state(l, text) == "passed":
+                    continue
+                said = before_gate(root, l)
+                if said and said["shipped"]:
+                    past.setdefault(l, said)
+                else:
+                    bad.append((l, said))
+            if not named and proof_on() and not only_free_files(root, s):  # F101: nothing goes out that no item asked for
+                nameless.append((s, subj))
+        stop = stop or bool(bad or nameless)
         if stop:
-            for l in bad:
-                if l not in [h["label"] for h in held]:
-                    s = state(l, text)
-                    ms = marks(all_rows[l][0])
-                    why = (f"QA failed: {ms[-1][2].rstrip('.')}" if s == "failed" else "no QA yet")
-                    if s == "failed" and fails_in_a_row(all_rows[l][0]) >= MAX_FAILS:
-                        why += f" ({MAX_FAILS} times; it waits for a call)"
-                    held.append({"label": l, "why": why})
+            for s, subj in nameless:
+                held.append({"label": s[:7], "why": f"this commit names no item: {subj[:70]}"})
+            for l, said in bad:
+                if held_label(l):
+                    continue
+                st = state(l, text)
+                ms = marks(all_rows[l][0])
+                why = f"QA failed: {ms[-1][2].rstrip('.')}" if st == "failed" else (said["why"] if said and not said["tag"] else "no QA yet")
+                if st == "failed" and fails_in_a_row(all_rows[l][0]) >= MAX_FAILS:
+                    why += f" ({MAX_FAILS} times; it waits for a call)"
+                if said and said["tag"] and not said["shipped"]:
+                    why = f"listed as out in {said['tag']}, but no commit of it stands there"
+                held.append({"label": l, "why": why})
             for l in need:
-                if l not in bad and l not in behind and l not in taken:
+                if not held_label(l) and l not in behind and l not in taken and state(l, text) == "passed":
                     behind.append(l)
             continue
         to = sha
         for l in need:
-            if l not in taken:
+            if l not in taken and state(l, text) == "passed":
                 taken.append(l)
+            if l in past:
+                past[l]["goes"] = True
     tipsha = cs[-1][0] if cs else None
     return {"to": to, "tip": tipsha, "taken": taken, "held": held, "behind": [l for l in behind if l not in taken],
-            "all": bool(cs) and to == tipsha}
+            "before_gate": [{**x, "goes": bool(x.get("goes"))} for x in past.values()], "all": bool(cs) and to == tipsha}
+
+
+def before_words(h: dict, going: bool = False) -> str:
+    """F112: the rows from before the gate that this release takes without a QA mark, said every time."""
+    xs = [x for x in h.get("before_gate") or [] if x["goes"] or not going]
+    return "Released before the gate, no QA mark: " + "; ".join(f"{x['label']} ({x['why']})" for x in xs) + "." if xs else ""
 
 
 def hold_words(h: dict) -> str:
     if not h["tip"]:
         return "QA: nothing new since the last release, so nothing to hold."
+    before = before_words(h)
     if h["all"]:
-        return "QA: everything new has passed QA (or needs none)" + (f": {', '.join(h['taken'])}." if h["taken"] else ".")
-    parts = []
-    if h["taken"]:
-        parts.append(f"QA passed and goes out: {', '.join(h['taken'])}")
+        return "QA: everything new has passed QA (or needs none)" + (f": {', '.join(h['taken'])}." if h["taken"] else ".") + (f" {before}" if before else "")
+    parts = [f"QA passed and goes out: {', '.join(h['taken'])}" if h["taken"] else ("What goes out needs no QA" if h["to"] else "Nothing goes out")]
     parts.append("held on nightly: " + "; ".join(f"{x['label']} ({x['why']})" for x in h["held"]))
     if h["behind"]:
         parts.append(f"passed QA but built after it, so it waits too: {', '.join(h['behind'])}")
-    return "QA: " + ". ".join(parts) + "."
+    return "QA: " + ". ".join(parts) + "." + (f" {before}" if before else "")
 
 
 def _features():

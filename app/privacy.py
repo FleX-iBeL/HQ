@@ -19,10 +19,14 @@ than needed to find it.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
@@ -85,33 +89,86 @@ def scan_tree(pat: re.Pattern, root: Path = ROOT) -> list[str]:
     return hits
 
 
+def _clean_file(root: Path) -> Path:
+    return root / ".status" / "privacy-clean.json"
+
+
+def _clean_key(pat: re.Pattern) -> str:
+    return hashlib.sha256(pat.pattern.encode("utf8")).hexdigest()
+
+
+def _clean_held(pat: re.Pattern, root: Path) -> set[str]:
+    """F112: the commits and file versions already read clean against exactly these words. Other words: nothing is held."""
+    try:
+        d = json.load(open(_clean_file(root), encoding="utf8"))
+    except (OSError, ValueError):
+        return set()
+    return set(d.get("seen") or []) if d.get("key") == _clean_key(pat) else set()
+
+
+def _clean_keep(pat: re.Pattern, seen: set[str], root: Path) -> None:
+    path = _clean_file(root)
+    try:
+        path.parent.mkdir(exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps({"key": _clean_key(pat), "seen": sorted(seen)}), encoding="utf8")
+        os.replace(tmp, path)
+    except OSError:
+        pass  # held nothing: the next run reads it again, it only takes longer
+
+
+CLEAN_EVERY = 30  # seconds between saves, so a run that's stopped halfway keeps what it read [Claude's choice]
+
+
 def scan_history(pat: re.Pattern, root: Path = ROOT) -> list[str]:
-    """Every commit's message, author, and every version of every file in git's history."""
+    """Every commit's message, author, and every version of every file in git's history. F112: what was read clean against the same words
+    is held by its git id and not read again, a hit never is: a whole read takes minutes, and only new versions are new. One git process."""
     hits = []
+    seen = _clean_held(pat, root)
     log = subprocess.run(["git", "-C", str(root), "log", "--all", "--format=%H%x00%an%x00%ae%x00%cn%x00%ce%x00%B%x01"],
                          capture_output=True, text=True).stdout
     for entry in filter(str.strip, log.split("\x01")):
         sha, *rest = entry.strip().split("\x00")
-        for w in scan_text("\n".join(rest), pat):
-            hits.append(f"commit {sha[:8]} (author, committer or message): {w}")
-    blobs = subprocess.run(["git", "-C", str(root), "rev-list", "--all", "--objects"],
-                           capture_output=True, text=True).stdout.splitlines()
-    seen = set()
-    for line in blobs:
+        if sha in seen:
+            continue
+        found = [f"commit {sha[:8]} (author, committer or message): {w}" for w in scan_text("\n".join(rest), pat)]
+        hits += found
+        if not found:
+            seen.add(sha)
+    objects = subprocess.run(["git", "-C", str(root), "rev-list", "--all", "--objects"],
+                             capture_output=True, text=True).stdout.splitlines()
+    names, todo = set(), {}
+    for line in objects:
         sha, _, path = line.partition(" ")
-        if not path or sha in seen:
+        if not path:
             continue
-        seen.add(sha)
-        for w in scan_text(path, pat):
-            hits.append(f"history {path} (its name): {w}")
-        if BINARY.search(path):
-            continue
-        kind = subprocess.run(["git", "-C", str(root), "cat-file", "-t", sha], capture_output=True, text=True).stdout.strip()
-        if kind != "blob":
-            continue
-        body = subprocess.run(["git", "-C", str(root), "cat-file", "-p", sha], capture_output=True).stdout
-        for w in scan_text(body.decode("utf8", "replace"), pat):
-            hits.append(f"history {path} ({sha[:8]}): {w}")
+        if path not in names:
+            names.add(path)
+            hits += [f"history {path} (its name): {w}" for w in scan_text(path, pat)]
+        if sha not in seen and sha not in todo and not BINARY.search(path):
+            todo[sha] = path
+    if todo:
+        cat = subprocess.Popen(["git", "-C", str(root), "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        threading.Thread(target=lambda: (cat.stdin.write(("\n".join(todo) + "\n").encode()), cat.stdin.close()), daemon=True).start()
+        saved = time.time()
+        while True:
+            head = cat.stdout.readline().split()
+            if len(head) != 3:
+                break
+            sha, kind, size = head[0].decode(), head[1], int(head[2])
+            body = cat.stdout.read(size + 1)
+            if kind != b"blob":
+                seen.add(sha)
+                continue
+            found = [f"history {todo.get(sha, sha)} ({sha[:8]}): {w}" for w in scan_text(body.decode("utf8", "replace"), pat)]
+            hits += found
+            if not found:
+                seen.add(sha)
+            if time.time() - saved > CLEAN_EVERY:
+                _clean_keep(pat, seen, root)
+                saved = time.time()
+        cat.wait()
+    _clean_keep(pat, seen, root)
     return hits
 
 

@@ -109,7 +109,7 @@ LISTEN_MODULE = "mlx_whisper" if IS_MAC else "faster_whisper"
 # H56.5: the quick happy flows that hold on a Linux server today (the rest are written for the Mac). Since H169 in
 # one place, routine/flowsets.py, which the nightly run reads too.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "routine"))
-from flowsets import LINUX_FLOWS  # noqa: E402
+from flowsets import INSTALL_LEAVE_OUT, INSTALL_SECONDS_LINUX, INSTALL_SECONDS_MAC, LINUX_FLOWS  # noqa: E402
 VOICE_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 VOICE_FILES = {"kokoro-v1.0.onnx": 300_000_000, "voices-v1.0.bin": 25_000_000}  # minimum sizes
 
@@ -225,6 +225,22 @@ def serve_page() -> http.server.ThreadingHTTPServer | None:
 
 # ---------- helpers ----------
 
+def too_long_fix() -> str:
+    """F112: what to do about a step that ran out of time, for the system it's on."""
+    if IS_MAC:
+        return "If macOS showed a question, answer it and run the installer again."
+    return ("Nothing on Linux asks a question, so this computer was slow or busy. Run the installer again when it's quiet: "
+            "python3 install/install.py --test-only. The whole output is in scratch/install/install.log.")
+
+
+def install_flows() -> list[str]:
+    """F112: the flows the last step runs, on the system it's on."""
+    if IS_MAC:
+        return ["--quick", "--skip", INSTALL_LEAVE_OUT]
+    left = INSTALL_LEAVE_OUT.split(",")
+    return ["--quick", "--only", ",".join(n for n in LINUX_FLOWS.split(",") if n not in left)]
+
+
 def sh(cmd, timeout=600, env=None, cwd=None, check=True) -> subprocess.CompletedProcess:
     log("$ " + (cmd if isinstance(cmd, str) else " ".join(cmd)))
     full_env = dict(os.environ)
@@ -235,8 +251,7 @@ def sh(cmd, timeout=600, env=None, cwd=None, check=True) -> subprocess.Completed
         r = subprocess.run(cmd, shell=isinstance(cmd, str), capture_output=True, text=True,
                            timeout=timeout, env=full_env, cwd=cwd)
     except subprocess.TimeoutExpired:
-        raise Fail(f"took longer than {timeout} seconds: {cmd if isinstance(cmd, str) else ' '.join(cmd)}",
-                   "If macOS showed a question, answer it and run the installer again.")
+        raise Fail(f"took longer than {timeout} seconds: {cmd if isinstance(cmd, str) else ' '.join(cmd)}", too_long_fix())
     out = (r.stdout + r.stderr).strip()
     if out:
         log(out[-4000:])
@@ -767,8 +782,8 @@ class Installer:
         if FAKE:
             return "simulated (test)"
         py = os.path.join(HQ, ".venv", "bin", "python")
-        r = sh([py, os.path.join(HQ, "app", "happy_flows.py"), "--quick"] + ([] if IS_MAC else ["--only", LINUX_FLOWS]),
-               cwd=HQ, timeout=900, check=False)
+        r = sh([py, os.path.join(HQ, "app", "happy_flows.py")] + install_flows(), cwd=HQ,
+               timeout=INSTALL_SECONDS_MAC if IS_MAC else INSTALL_SECONDS_LINUX, check=False)
         last = [l for l in (r.stdout + r.stderr).splitlines() if " passed " in l]
         if r.returncode != 0:
             failed = [l.strip() for l in r.stdout.splitlines() if "FAILED" in l][:3]

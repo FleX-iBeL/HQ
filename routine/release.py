@@ -15,14 +15,16 @@ The daily release (H178, a repeating planned item at 2:05) runs after the nightl
   python3 "routine/release.py" status          tonight's run, what changed since it started (tests or HQ itself),
                                                dev against nightly and main, and the suggestion: sure, again or hesitate
   python3 "routine/release.py" nightly "WHY"   hesitating: the privacy check, then dev to nightly only; main stays
-  python3 "routine/release.py" main [--without-qa] [--past-the-night] [--said "HIS WORDS"]
+  python3 "routine/release.py" main [--without-qa] [--past-the-night] [--said "HIS WORDS"] [--version 1.0.0]
                                                sure: the privacy check, dev to nightly, then the next small version.
                                                F101: refused after a red or missing night and for a commit naming no item;
                                                Moneypenny decides when, inside those gates; past them only on his own words
                                                the H90 way (Coming next becomes it, VERSION, tag, main, back to dev);
                                                only the work whose row says QA passed (F56, qa.py): from the first
                                                commit for a row without it, the rest stays on dev and nightly;
-                                               --without-qa only on his explicit say-so on a call
+                                               --without-qa only on his explicit say-so on a call. F112: --version names the
+                                               version instead of the next small one. A second run on the same commit and the
+                                               same QA state does nothing and says so
   python3 "routine/release.py" log "LINE"      one line in the H178 row's Releases, newest first
 
 The night works in rounds (H226, 22 October 2026): round 1 is the full run; not green, everything it found is fixed and
@@ -127,11 +129,15 @@ def status() -> dict:
     tonight = bool(run) and run.get("at", "")[:10] == today.isoformat()
     changed = changed_since(run.get("at") if tonight else None)
     verdict, why = suggest(run, changed, tonight)
+    h = qa_hold()
+    refused = night_refuses(_target(h))  # F112: the advice can't say sure where the gate says no
+    if refused and verdict == "sure":
+        verdict, why = "hesitate", refused
     return {"main_computer": is_main(), "branch": out("branch", "--show-current"), "version": version(),
             "run": run, "tonight": tonight, "changed": changed,
             "dev_ahead_of_main": ahead(push.WORK_BRANCH, push.RELEASE_BRANCH),
             "dev_ahead_of_nightly": ahead(push.WORK_BRANCH, push.NIGHTLY_BRANCH),
-            "coming_next": coming_next(), "suggest": verdict, "why": why, "qa": qa_hold()}
+            "coming_next": coming_next(), "suggest": verdict, "why": why, "qa": h, "night_refuses": refused}
 
 
 def qa_hold() -> dict:
@@ -190,6 +196,9 @@ def cmd_nightly(why: str) -> int:
     if no:
         print(f"Nothing pushed: {no}.")
         return 0 if "isn't the main" in no else 2
+    if not ahead(push.WORK_BRANCH, push.NIGHTLY_BRANCH):  # F112: a second run does nothing, and says so
+        print(f"Nothing to do: {push.WORK_BRANCH} is already on {push.NIGHTLY_BRANCH}; main stays at {version()}.")
+        return 0
     r = to_nightly()
     if r:
         return r
@@ -198,11 +207,16 @@ def cmd_nightly(why: str) -> int:
     return 0
 
 
-def night_refuses() -> str | None:
-    """F101 (C43, C73): what the night says against a release, or None. A program reads it; suggest() is only advice."""
+def night_refuses(target: str | None = None) -> str | None:
+    """F101 (C43, C73): what the night says against a release of target (HEAD by default), or None. A program reads it; suggest() is only
+    advice. F112: a run still going isn't a night yet, and a green night counts for the commit it ran on (night_tied)."""
+    import nightly
     import proof
     if not proof.gate_on():
         return None
+    going = nightly.running()
+    if going:
+        return f"the night's test run is still going, since {going.get('at')}; the release reads what it says"
     run = last_run()
     if not run or run.get("at", "")[:10] != dt.date.today().isoformat():
         at = (run or {}).get("at")
@@ -210,7 +224,102 @@ def night_refuses() -> str | None:
     if run.get("failed") or not run.get("ran") or run.get("passed") != run.get("ran"):
         return (f"the night of {run.get('at')} was red: {run.get('passed')} of {run.get('ran')} passed"
                 + (f"; failed: {'; '.join(run.get('failed') or [])[:300]}" if run.get("failed") else ""))
+    return night_tied(run, target or "HEAD")
+
+
+def night_tied(run: dict, target: str) -> str | None:
+    """F112 (C73): a green night says something about the commit it ran on and nothing else. The record has to name it, it has to be a whole
+    night, and a release of a newer commit is refused unless only the free files changed since."""
+    import nightly
+    at, commit = run.get("at"), run.get("commit")
+    if not commit:
+        return f"the night of {at} names no commit, so it doesn't say what it tested"
+    if git("cat-file", "-e", f"{commit}^{{commit}}").returncode:
+        return f"the night of {at} ran on {commit[:7]}, which isn't in this repo"
+    whole = nightly.whole_set(commit, str(ROOT))
+    if not whole:
+        return f"how many flows a whole night is at {commit[:7]} can't be read"
+    if int(run.get("ran") or 0) < whole:
+        return f"the night of {at} ran {run.get('ran')} flows and a whole night is {whole}: that isn't a night"
+    dirty = [f for f in run.get("dirty") or [] if not f.startswith(qa.FREE_FILES)]
+    if dirty:
+        return f"the night of {at} ran with changes that weren't committed: {', '.join(dirty[:6])}"
+    if not git("merge-base", "--is-ancestor", target, commit).returncode:
+        return None
+    changed = [f for f in out("diff", "--name-only", commit, target).splitlines() if f and not f.startswith(qa.FREE_FILES)]
+    if changed:
+        return (f"the night ran on {commit[:7]} and this is newer: {len(changed)} file(s) of HQ changed since, {', '.join(changed[:6])}"
+                f"{' and more' if len(changed) > 6 else ''}")
     return None
+
+
+def _target(h: dict) -> str | None:
+    """What a release would put out: the last commit the hold takes when it doesn't take everything, else dev's tip."""
+    return h["to"] if h.get("to") and not h.get("all") else None
+
+
+LAST = "release-last.json"  # F112: what the release last did, so a second run on the same commit does nothing
+
+
+def _state() -> dict:
+    """What decides what a release does: dev, main and what the hold says."""
+    h = qa.hold(str(ROOT), push.RELEASE_BRANCH, push.WORK_BRANCH)
+    return {"dev": out("rev-parse", push.WORK_BRANCH), "main": out("rev-parse", push.RELEASE_BRANCH), "to": h.get("to"),
+            "held": sorted(x["label"] for x in h["held"])}
+
+
+def _keep(said: str) -> None:
+    folder = ROOT / "scratch" / "nightly"
+    folder.mkdir(parents=True, exist_ok=True)
+    json.dump({"state": _state(), "said": said, "at": dt.datetime.now().strftime("%Y-%m-%d %H:%M")}, open(folder / LAST, "w"), indent=1)
+
+
+def _done_before() -> dict | None:
+    try:
+        d = json.load(open(ROOT / "scratch" / "nightly" / LAST, encoding="utf8"))
+    except (OSError, ValueError):
+        return None
+    return d if d.get("state") == _state() else None
+
+
+def wanted_refuses(want: str | None, old: str) -> str | None:
+    """F112: a named version has to be a version, and newer than this one."""
+    if want is None:
+        return None
+    parts = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", want)
+    if not parts:
+        return f"{want} isn't a version like 1.0.0"
+    if tuple(int(x) for x in parts.groups()) <= tuple((int(x) for x in re.findall(r"\d+", old)[:3])):
+        return f"{want} isn't newer than {old}"
+    return None
+
+
+WAY_BACK = "routine/way-back.json"
+
+
+def way_back_file(folder: Path, old: str) -> list[str]:
+    """F112 (C52): the version before this release may be one whose own update.py has no `forward`. Going back to it still has to work: the
+    release writes that down, in the release itself, and update.py reads it: forward from there is the update bar, the way that version
+    came forward the first time. The files to commit along."""
+    tag = f"v{old}"
+    r = git("show", f"refs/tags/{tag}:routine/update.py")
+    if r.returncode or re.search(r"^def forward\(", r.stdout, re.M):
+        return []
+    path = folder / WAY_BACK
+    try:
+        d = json.load(open(path, encoding="utf8"))
+    except (OSError, ValueError):
+        d = {}
+    if tag not in d:
+        d[tag] = "the update bar"
+        path.write_text(json.dumps(d, indent=1) + "\n", encoding="utf8")
+    return [WAY_BACK]
+
+
+def tag_words(v: str, h: dict | None) -> str:
+    """F112: the version's own words: what went out from before the gate stands on the tag, so a release can't leave it unsaid."""
+    before = qa.before_words(h, going=True) if h else ""
+    return f"HQ {v}" + (f"\n\n{before}" if before else "")
 
 
 def say_so(said: str | None, what: str) -> bool:
@@ -225,12 +334,26 @@ def say_so(said: str | None, what: str) -> bool:
     return True
 
 
-def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: bool = False, said: str | None = None) -> int:
+def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: bool = False, said: str | None = None, want: str | None = None) -> int:
     no = _ready()
     if no:
         print(f"No release: {no}.")
         return 0 if "isn't the main" in no else 2
-    night = night_refuses()
+    no = wanted_refuses(want, version())
+    if no:
+        print(f"No release: {no}.")
+        return 2
+    plain = not without_qa and not red_night
+    before = _done_before() if plain else None
+    if before:  # F112: nothing changed since the last time: nothing pushed, nothing texted
+        print(f"Nothing to do: this commit ({out('rev-parse', '--short', push.WORK_BRANCH)}) went through the release on {before['at']}: "
+              f"{before['said']} Nothing has changed since, so nothing was pushed or sent.")
+        return 0
+    if not ahead(push.WORK_BRANCH, push.RELEASE_BRANCH):
+        print(f"No release: nothing new on {push.WORK_BRANCH} since {version()}.")
+        return 0
+    h = qa_hold() if without_qa else qa.hold(str(ROOT), push.RELEASE_BRANCH, push.WORK_BRANCH)
+    night = night_refuses(None if without_qa else _target(h))
     if night:
         if not red_night:
             print(f"No release: {night}. It stays on {push.NIGHTLY_BRANCH}; main stays at {version()}.")
@@ -242,11 +365,7 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
     r = to_nightly()  # always first to nightly
     if r:
         return r
-    if not ahead(push.WORK_BRANCH, push.RELEASE_BRANCH):
-        print(f"No release: nothing new on {push.WORK_BRANCH} since {version()}.")
-        return 0
     if not without_qa:  # F56: only work whose row says QA passed goes out
-        h = qa.hold(str(ROOT), push.RELEASE_BRANCH, push.WORK_BRANCH)
         if not h["all"] and h.get("to"):
             no = data_refuses(push.RELEASE_BRANCH, h["to"])  # F104: on the part that would go out
             if no:
@@ -266,8 +385,9 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
                        ". Nothing new goes out this time."))
             if not h["to"]:
                 print(f"No release: nothing new has passed QA yet; it stays on {push.NIGHTLY_BRANCH}, main stays at {version()}.")
+                _keep("nothing new had passed QA, so it stayed on nightly.")
                 return 0
-            return cmd_part(h, today)
+            return cmd_part(h, today, want)
     if not coming_next():
         print("No release: the changelog's Coming next is empty; write what's new for friends first, commit, then again.")
         return 2
@@ -279,7 +399,7 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
     today = today or dt.date.today()
     old_main = out("rev-parse", push.RELEASE_BRANCH)
     old = version()
-    v = next_version(old)
+    v = want or next_version(old)
     tag = f"v{v}"
     if not git("rev-parse", "-q", "--verify", f"refs/tags/{tag}").returncode:
         print(f"No release: the tag {tag} is already here.")
@@ -293,11 +413,12 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
     if readme.exists():
         files.append("README.md")
         readme.write_text(readme.read_text(encoding="utf8").replace(f"**{old}**", f"**{v}**", 1), encoding="utf8")
+    files += way_back_file(ROOT, old)
     msg = (f"HQ {v}: the changelog's Coming next becomes {v} ({today.day} {today:%B %Y}), VERSION {v}, the README's version "
            f"(H186, the nightly line)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
     steps = [("add", *files), ("commit", "-q", "-m", msg),
              ("checkout", "-q", push.RELEASE_BRANCH), ("merge", "-q", "--ff-only", push.WORK_BRANCH),
-             ("tag", "-a", tag, "-m", f"HQ {v}")]
+             ("tag", "-a", tag, "-m", tag_words(v, h))]
     for s in steps:
         g = git(*s)
         if g.returncode:
@@ -310,7 +431,10 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
         return _undo(old_main, tag, committed=True) or r
     r = push.push_branch(push.WORK_BRANCH) or push.push_nightly(push.WORK_BRANCH, [])
     print(f"Released {v} ({tag}) on {push.RELEASE_BRANCH}; {push.NIGHTLY_BRANCH} and {push.WORK_BRANCH} have it too.")
+    if qa.before_words(h, going=True):
+        print(qa.before_words(h, going=True))
     on_the_record(old_main, tag, v)
+    _keep(f"{v} went out.")
     return r
 
 
@@ -328,7 +452,7 @@ def _versioned(text: str, v: str, today: dt.date, lines: list[str]) -> str:
     return text[:m.start()] + new + text[m.end():].lstrip("\n")
 
 
-def cmd_part(h: dict, today: dt.date | None = None) -> int:
+def cmd_part(h: dict, today: dt.date | None = None, want: str | None = None) -> int:
     """F56: release only up to the last commit before the first one whose row hasn't passed QA (h["to"]). The version
     commit goes on top of that commit, in a worktree of its own; main and the tag go there; dev gets it merged back
     (its tree kept, the released lines moved under the version), so main stays an ancestor of dev."""
@@ -345,7 +469,7 @@ def cmd_part(h: dict, today: dt.date | None = None) -> int:
     lines = lines + [x for x in moved.splitlines() if x.strip()]
     old_main, old_dev = out("rev-parse", push.RELEASE_BRANCH), out("rev-parse", push.WORK_BRANCH)
     old = version()
-    v = next_version(old)
+    v = want or next_version(old)
     tag = f"v{v}"
     if not git("rev-parse", "-q", "--verify", f"refs/tags/{tag}").returncode:
         print(f"No release: the tag {tag} is already here.")
@@ -380,10 +504,11 @@ def cmd_part(h: dict, today: dt.date | None = None) -> int:
     if (wt / "README.md").exists():
         files.append("README.md")
         (wt / "README.md").write_text((wt / "README.md").read_text(encoding="utf8").replace(f"**{old}**", f"**{v}**", 1), encoding="utf8")
+    files += way_back_file(wt, old)
     if w("add", *files).returncode or w("commit", "-q", "-m", msg).returncode:
         return back("git couldn't commit the version.")
     rel = w("rev-parse", "HEAD").stdout.strip()
-    for step in (("branch", "-f", push.RELEASE_BRANCH, rel), ("tag", "-a", tag, "-m", f"HQ {v}", rel)):
+    for step in (("branch", "-f", push.RELEASE_BRANCH, rel), ("tag", "-a", tag, "-m", tag_words(v, h), rel)):
         if git(*step).returncode:
             return back(f"git {step[0]} failed.")
     # dev: merge the release in, keeping dev's own tree, then the same version change on dev's changelog.
@@ -395,6 +520,7 @@ def cmd_part(h: dict, today: dt.date | None = None) -> int:
     readme = ROOT / "README.md"
     if readme.exists():
         readme.write_text(readme.read_text(encoding="utf8").replace(f"**{old}**", f"**{v}**", 1), encoding="utf8")
+    way_back_file(ROOT, old)
     if git("add", *files).returncode or git("commit", "-q", "-m", f"HQ {v} back into dev: what's held stays under "
                                              f"Coming next (F56)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>").returncode:
         return back("git couldn't commit the merge on dev.")
@@ -410,7 +536,10 @@ def cmd_part(h: dict, today: dt.date | None = None) -> int:
     r = push.push_branch(push.WORK_BRANCH) or push.push_nightly(push.WORK_BRANCH, [])
     print(f"Released {v} ({tag}) on {push.RELEASE_BRANCH}, with the work that passed QA; what's held stays on "
           f"{push.WORK_BRANCH} and {push.NIGHTLY_BRANCH}.")
+    if qa.before_words(h, going=True):
+        print(qa.before_words(h, going=True))
     on_the_record(old_main, tag, v)
+    _keep(f"{v} went out, with what's held left on {push.WORK_BRANCH}.")
     return r
 
 
@@ -506,6 +635,8 @@ def words(s: dict) -> str:
     lines.append(f"dev is {s['dev_ahead_of_main']} ahead of main and {s['dev_ahead_of_nightly']} ahead of nightly; "
                  f"Coming next has {len(s['coming_next'])} lines")
     lines.append(f"Suggestion: {s['suggest']} ({s['why']})")
+    if s.get("night_refuses"):
+        lines.append(f"The release would refuse: {s['night_refuses']}")
     h = s.get("qa") or {}
     lines.append(f"QA cannot be read: {h['error']}" if h.get("error") else qa.hold_words(h))
     return "\n".join(lines)
@@ -525,7 +656,8 @@ def main(argv: list[str]) -> int:
         # F56: --without-qa only on his explicit say-so on a call; it releases everything on dev. F101: that say-so, and
         # going past a red night, is a quote found in his own lines (--said), kept with the time.
         said = argv[argv.index("--said") + 1] if "--said" in argv and argv.index("--said") + 1 < len(argv) else None
-        return cmd_main(without_qa="--without-qa" in argv, red_night="--past-the-night" in argv, said=said)
+        want = argv[argv.index("--version") + 1] if "--version" in argv and argv.index("--version") + 1 < len(argv) else None
+        return cmd_main(without_qa="--without-qa" in argv, red_night="--past-the-night" in argv, said=said, want=want)
     if cmd == "log" and len(argv) >= 2:
         if not add_line(" ".join(argv[1:])):
             print(f"No {ROW} row on the roadmap.")
