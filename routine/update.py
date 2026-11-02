@@ -1187,6 +1187,12 @@ def back_run(tag: str, tell: bool, guard: bool = False) -> int:
         done, todo = guard_restart(was) if guard else restart_new(changed, was)
         msg = f"Back on {vname(tag)}." + (f" Undone in your data: {', '.join(undone)}." if undone else "") + (
             " The other computer hears it as soon as it answers." if told is False else "")
+        kept = [x["branch"] for x in (saved.get("changes"), saved.get("commits")) if x]
+        if not guard:  # F112: where her own work is: what this saved, and what her updates saved before
+            kept += [b for b in git("for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads/hq-backup/", timeout=10).stdout.split()
+                     if b not in kept][:3]
+        if kept:
+            msg += f" Your own work is kept, nothing of it is lost: on {', '.join(kept)} (git checkout one of them to see it)."
         if old_way and hqpaths.is_friend():
             msg += f" {vname(tag)} has no Forward button of its own: the update bar brings you back to {old}, and what was undone runs again then."
         elif old_way:

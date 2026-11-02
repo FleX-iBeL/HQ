@@ -97,10 +97,11 @@ def changed_since(at: str | None, commit: str | None = None) -> dict:
     ran on when its record names it, with the same free files as the gate; the clock is only for a record that doesn't."""
     if not at:
         return {"tests": [], "hq": []}
+    free = TESTS + qa.FREE_FILES  # the same as the gate's
     if commit and not git("cat-file", "-e", f"{commit}^{{commit}}").returncode:
-        files, free = out("diff", "--name-only", commit, push.WORK_BRANCH), TESTS + qa.FREE_FILES
+        files = out("diff", "--name-only", commit, push.WORK_BRANCH)
     else:
-        files, free = out("log", f"--since={at}", "--name-only", "--format=", push.RELEASE_BRANCH + ".." + push.WORK_BRANCH), TESTS
+        files = out("log", f"--since={at}", "--name-only", "--format=", push.RELEASE_BRANCH + ".." + push.WORK_BRANCH)
     files = sorted({f for f in files.splitlines() if f.strip()})
     tests = [f for f in files if f.startswith(free)]
     return {"tests": tests, "hq": [f for f in files if f not in tests]}
@@ -245,12 +246,12 @@ def night_tied(run: dict, target: str) -> str | None:
         return f"how many flows a whole night is at {commit[:7]} can't be read"
     if int(run.get("ran") or 0) < whole:
         return f"the night of {at} ran {run.get('ran')} flows and a whole night is {whole}: that isn't a night"
-    dirty = [f for f in run.get("dirty") or [] if not f.startswith(qa.FREE_FILES)]
+    dirty = [f for f in run.get("dirty") or [] if not f.startswith(TESTS + qa.FREE_FILES)]
     if dirty:
         return f"the night of {at} ran with changes that weren't committed: {', '.join(dirty[:6])}"
     if not git("merge-base", "--is-ancestor", target, commit).returncode:
         return None
-    changed = [f for f in out("diff", "--name-only", commit, target).splitlines() if f and not f.startswith(qa.FREE_FILES)]
+    changed = [f for f in out("diff", "--name-only", commit, target).splitlines() if f and not f.startswith(TESTS + qa.FREE_FILES)]
     if changed:
         return (f"the night ran on {commit[:7]} and this is newer: {len(changed)} file(s) of HQ changed since, {', '.join(changed[:6])}"
                 f"{' and more' if len(changed) > 6 else ''}")
@@ -301,7 +302,7 @@ def wanted_refuses(want: str | None, old: str) -> str | None:
 WAY_BACK = "routine/way-back.json"
 
 
-def way_back_file(folder: Path, old: str) -> list[str]:
+def way_back_file(folder: Path, old: str, at: str = push.WORK_BRANCH) -> list[str]:
     """F112 (C52): the version before this release may be one whose own update.py has no `forward`. Going back to it still has to work: the
     release writes that down, in the release itself, and update.py reads it: forward from there is the update bar, the way that version
     came forward the first time. The files to commit along."""
@@ -309,6 +310,8 @@ def way_back_file(folder: Path, old: str) -> list[str]:
     r = git("show", f"refs/tags/{tag}:routine/update.py")
     if r.returncode or re.search(r"^def forward\(", r.stdout, re.M):
         return []
+    if "way-back.json" not in git("show", f"{at}:routine/update.py").stdout:
+        return []  # the version this goes into can't read it: going back from there stays refused, as that version's own code says
     path = folder / WAY_BACK
     try:
         d = json.load(open(path, encoding="utf8"))
@@ -343,10 +346,6 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
     if no:
         print(f"No release: {no}.")
         return 0 if "isn't the main" in no else 2
-    no = wanted_refuses(want, version())
-    if no:
-        print(f"No release: {no}.")
-        return 2
     plain = not without_qa and not red_night
     before = _done_before() if plain else None
     if before:  # F112: nothing changed since the last time: nothing pushed, nothing texted
@@ -354,8 +353,12 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
               f"{before['said']} Nothing has changed since, so nothing was pushed or sent.")
         return 0
     if not ahead(push.WORK_BRANCH, push.RELEASE_BRANCH):
-        print(f"No release: nothing new on {push.WORK_BRANCH} since {version()}.")
+        print(f"Nothing to do: nothing new on {push.WORK_BRANCH} since {version()}.")
         return 0
+    no = wanted_refuses(want, version())
+    if no:
+        print(f"No release: {no}.")
+        return 2
     h = qa_hold() if without_qa else qa.hold(str(ROOT), push.RELEASE_BRANCH, push.WORK_BRANCH)
     night = night_refuses(None if without_qa else _target(h))
     if night:
@@ -427,12 +430,12 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
         g = git(*s)
         if g.returncode:
             print(f"No release: git {s[0]} failed: {(g.stdout + g.stderr).strip()}")
-            return _undo(old_main, tag, committed=s[0] not in ("add", "commit"))
+            return _undo(old_main, tag, committed=s[0] not in ("add", "commit"), files=files)
     r = push.push_branch(push.RELEASE_BRANCH, release=True)
     git("checkout", "-q", push.WORK_BRANCH)
     if r:
         print("No release: GitHub refused main or the tags; put back as it was.")
-        return _undo(old_main, tag, committed=True) or r
+        return _undo(old_main, tag, committed=True, files=files) or r
     r = push.push_branch(push.WORK_BRANCH) or push.push_nightly(push.WORK_BRANCH, [])
     print(f"Released {v} ({tag}) on {push.RELEASE_BRANCH}; {push.NIGHTLY_BRANCH} and {push.WORK_BRANCH} have it too.")
     if qa.before_words(h, going=True):
@@ -489,6 +492,7 @@ def cmd_part(h: dict, today: dt.date | None = None, want: str | None = None) -> 
         git("merge", "--abort")
         git("checkout", "-q", push.WORK_BRANCH)
         git("reset", "-q", "--keep", old_dev)
+        _restore(files + [WAY_BACK], old_dev)
         git("tag", "-d", tag)
         git("branch", "-f", push.RELEASE_BRANCH, old_main)
         git("worktree", "remove", "--force", str(wt))
@@ -508,7 +512,7 @@ def cmd_part(h: dict, today: dt.date | None = None, want: str | None = None) -> 
     if (wt / "README.md").exists():
         files.append("README.md")
         (wt / "README.md").write_text((wt / "README.md").read_text(encoding="utf8").replace(f"**{old}**", f"**{v}**", 1), encoding="utf8")
-    files += way_back_file(wt, old)
+    files += way_back_file(wt, old, to)
     if w("add", *files).returncode or w("commit", "-q", "-m", msg).returncode:
         return back("git couldn't commit the version.")
     rel = w("rev-parse", "HEAD").stdout.strip()
@@ -524,7 +528,8 @@ def cmd_part(h: dict, today: dt.date | None = None, want: str | None = None) -> 
     readme = ROOT / "README.md"
     if readme.exists():
         readme.write_text(readme.read_text(encoding="utf8").replace(f"**{old}**", f"**{v}**", 1), encoding="utf8")
-    way_back_file(ROOT, old)
+    if WAY_BACK in files:  # dev the same as the release, never more
+        way_back_file(ROOT, old)
     if git("add", *files).returncode or git("commit", "-q", "-m", f"HQ {v} back into dev: what's held stays under "
                                              f"Coming next (F56)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>").returncode:
         return back("git couldn't commit the merge on dev.")
@@ -589,14 +594,27 @@ def on_the_record(old_main: str, tag: str, v: str) -> list[str]:
     return [i for i in ids if i]
 
 
-def _undo(old_main: str, tag: str, committed: bool) -> int:
+def _restore(files: list[str], at: str = "HEAD") -> None:
+    """F112: the release's own files as they stand in the commit before, index and folder both; one that wasn't there goes."""
+    for f in files:
+        if git("cat-file", "-e", f"{at}:{f}").returncode:
+            git("rm", "-q", "--cached", "--ignore-unmatch", "--", f)
+            try:
+                (ROOT / f).unlink()
+            except OSError:
+                pass
+        else:
+            git("checkout", "-q", at, "--", f)
+
+
+def _undo(old_main: str, tag: str, committed: bool, files: list[str] | None = None) -> int:
     git("checkout", "-q", push.WORK_BRANCH)
     git("tag", "-d", tag)
     git("branch", "-f", push.RELEASE_BRANCH, old_main)
     if committed:
         git("reset", "-q", "--keep", "HEAD~1")
-    else:
-        git("checkout", "-q", "--", *[f for f in ("CHANGELOG.md", "VERSION", "README.md") if (ROOT / f).exists()])
+    _restore(files or [f for f in ("CHANGELOG.md", "VERSION", "README.md", WAY_BACK) if (ROOT / f).exists()])
+    _restore([WAY_BACK])
     return 2
 
 
@@ -660,7 +678,13 @@ def main(argv: list[str]) -> int:
         # F56: --without-qa only on his explicit say-so on a call; it releases everything on dev. F101: that say-so, and
         # going past a red night, is a quote found in his own lines (--said), kept with the time.
         said = argv[argv.index("--said") + 1] if "--said" in argv and argv.index("--said") + 1 < len(argv) else None
-        want = argv[argv.index("--version") + 1] if "--version" in argv and argv.index("--version") + 1 < len(argv) else None
+        want = None
+        if "--version" in argv:  # F112: a version named is a number, never the next word or nothing
+            i = argv.index("--version") + 1
+            want = argv[i] if i < len(argv) and not argv[i].startswith("--") else ""
+            if not want:
+                print("No release: --version needs the version, like --version 1.0.0.")
+                return 2
         return cmd_main(without_qa="--without-qa" in argv, red_night="--past-the-night" in argv, said=said, want=want)
     if cmd == "log" and len(argv) >= 2:
         if not add_line(" ".join(argv[1:])):

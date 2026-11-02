@@ -224,7 +224,7 @@ def run(again: bool = False, routine: bool = False) -> int:
         return 0
     os.makedirs(OUT, exist_ok=True)
     going = running()
-    if going:  # F112: two runs at once go red by themselves
+    if going and int(going.get("pid") or 0) != os.getpid():  # F112: two runs at once go red by themselves; the routine marks this one before it starts
         print(f"A full run is already going (pid {going['pid']}, since {going.get('at')}): it's left alone, nothing more started.")
         return 0
     if not again and not routine:  # F101: the routine already ran it: the H169 item has nothing left to run

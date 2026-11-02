@@ -379,7 +379,10 @@ def subject_labels(subject: str) -> list[str]:
 
 
 # F101 (C73): a commit that names no item holds the release, unless it only touches the tests, the version or the changelog.
-FREE_FILES = ("app/happy_flows.py", "routine/flowsets.py", "VERSION", "CHANGELOG.md", "README.md", "updates/", "routine/way-back.json")  # F112: the last is the release's own
+# F112: the one set of free files, for the hold, the night and the release's status alike: the tests, the tutorial's text (flows 120 and 134 read it
+# the same night), the version, the changelog, and the release's own way-back file.
+FREE_FILES = ("app/happy_flows.py", "routine/flowsets.py", "app/test_", "app/web/tour.json", "VERSION", "CHANGELOG.md", "README.md", "updates/",
+              "routine/way-back.json")
 
 
 def proof_on() -> bool:
@@ -401,6 +404,23 @@ def commits(root: str, base: str, tip: str) -> list[tuple[str, str]]:
     return [tuple(ln.split("\t", 1)) for ln in r.stdout.splitlines() if "\t" in ln]
 
 
+def own_changes(root: str, sha: str) -> list[str] | None:
+    """F112: what a merge commit changes by itself, beyond what git makes of its parents on its own: the files where its tree differs from the
+    merge git would write (a conflict settled by hand, a file added or changed in the merge). None for a commit that isn't a merge."""
+    parents = subprocess.run(["git", "-C", str(root), "rev-list", "--parents", "-n", "1", sha], text=True, capture_output=True).stdout.split()[1:]
+    if len(parents) < 2:
+        return None
+    auto = None
+    if len(parents) == 2:
+        r = subprocess.run(["git", "-C", str(root), "merge-tree", "--write-tree", *parents], text=True, capture_output=True)
+        auto = (r.stdout.split() or [None])[0] if r.returncode in (0, 1) else None
+    if auto:
+        r = subprocess.run(["git", "-C", str(root), "diff", "--name-only", auto, f"{sha}^{{tree}}"], text=True, capture_output=True)
+    else:  # an older git or more than two parents: every file the merge differs in from all of them
+        r = subprocess.run(["git", "-C", str(root), "diff-tree", "--cc", "--name-only", "--no-commit-id", "-r", sha], text=True, capture_output=True)
+    return [f for f in r.stdout.splitlines() if f.strip()]
+
+
 def brought(root: str, base: str, sha: str) -> list[tuple[str, str]]:
     """F112: what a merge commit brings: (sha, subject) of the commits behind its other parents that the line didn't have yet, and that
     aren't in the release already. Empty for anything else, and for a merge that brings nothing new (a version merged back)."""
@@ -412,15 +432,15 @@ def brought(root: str, base: str, sha: str) -> list[tuple[str, str]]:
     return [tuple(ln.split("\t", 1)) for ln in r.stdout.splitlines() if "\t" in ln]
 
 
-# F112: the rows from before the gate. Written by hand, here and nowhere else: a row with commits on the line that never had a QA job because
-# the gate didn't exist yet. With a tag: the row went out in that version, so it doesn't hold, and every release that takes it says so. The
-# gate checks the tag against git, so a line here can't wave anything through. Without a tag: the row is in no version, its QA is real work,
-# and it's held with this why. New rows don't go here: this list only ever gets shorter.
+# F112: the rows from before the gate. Written by hand, here and nowhere else, by commit: each names the tag the row went out in and the commits on the
+# line that never had a QA job because the gate didn't exist yet. Those commits go out on this say; a new commit under the same row's name doesn't, it
+# needs its QA like any other, and a failed QA mark wins over the list. The gate checks the tag against git, so a line can't wave anything through.
+# Without a tag: the row is in no version, its QA is real work, and its commits are held with this why. The list only ever gets shorter.
 BEFORE_GATE = {
-    "F66": (None, "built 28 October, in no version yet: its QA is real work"),
-    "H227": ("v0.4.19", "out since 0.4.19; one later commit reads the tutorial against HQ, the night's own read, no QA job ever made for it"),
-    "F17": ("v0.4.19", "out since 0.4.19; one later commit guards the workspace's folder from a test, no QA job ever made for it"),
-    "H230": ("v0.4.19", "out since 0.4.19; two later fixes to a trip's times and its text, no QA job ever made for them"),
+    "F66": {"tag": None, "commits": ["6435c01"], "why": "built 28 October, in no version yet: its QA is real work"},
+    "H227": {"tag": "v0.4.19", "commits": ["f0f6300"], "why": "out since 0.4.19; one later commit reads the tutorial against HQ, the night's own read"},
+    "F17": {"tag": "v0.4.19", "commits": ["047e4c7"], "why": "out since 0.4.19; one later commit guards the workspace's folder from a test"},
+    "H230": {"tag": "v0.4.19", "commits": ["e69d82e", "b28db02"], "why": "out since 0.4.19; two later fixes to a trip's times and its text"},
 }
 
 
@@ -430,12 +450,15 @@ def in_version(root: str, label: str, tag: str) -> bool:
     return r.returncode == 0 and any(label in subject_labels(s) for s in r.stdout.splitlines())
 
 
-def before_gate(root: str, label: str) -> dict | None:
-    """F112: what the list says of this row: {"label", "tag", "why", "shipped"}; None for a row that isn't on it."""
-    if label not in BEFORE_GATE:
+def before_gate(root: str, label: str, sha: str | None = None) -> dict | None:
+    """F112: what the list says of this row and this commit: {"label", "tag", "why", "shipped", "covers"}; None for a row that isn't on it.
+    covers: the commit is one the list names."""
+    d = BEFORE_GATE.get(label)
+    if not d:
         return None
-    tag, why = BEFORE_GATE[label]
-    return {"label": label, "tag": tag, "why": why, "shipped": bool(tag) and in_version(root, label, tag)}
+    tag, why, cs = d.get("tag"), d.get("why") or "", d.get("commits") or []
+    return {"label": label, "tag": tag, "why": why, "commits": cs, "shipped": bool(tag) and in_version(root, label, tag),
+            "covers": bool(sha) and any(sha.startswith(c) for c in cs)}
 
 
 def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: str | None = None) -> dict:
@@ -455,35 +478,50 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
         named_here = [l for l in subject_labels(subject) if l in all_rows]
         parts = parts + ([(sha, subject)] if named_here or not parts else [])
         need, bad, nameless = [], [], []
+        mine = own_changes(root, sha)  # F112: a merge's own changes are its own, held like a commit naming no item
+        if mine is not None and not named_here and proof_on():
+            own = [f for f in mine if not f.startswith(FREE_FILES)]
+            if own:
+                nameless.append((sha, f"this merge changes files of its own: {', '.join(own[:5])}" + (" and more" if len(own) > 5 else "")))
         for s, subj in parts:
             named = [l for l in subject_labels(subj) if l in all_rows]
             for l in named:
-                if all_rows[l][1] not in GATED or l in need:
+                if all_rows[l][1] not in GATED:
                     continue
-                need.append(l)
-                if state(l, text) == "passed":
+                if l not in need:
+                    need.append(l)
+                st = state(l, text)
+                if st == "passed":
                     continue
-                said = before_gate(root, l)
-                if said and said["shipped"]:
+                said = before_gate(root, l, s)
+                if said and said["shipped"] and said["covers"] and st != "failed":
                     past.setdefault(l, said)
-                else:
-                    bad.append((l, said))
+                    continue
+                if not any(b[0] == l for b in bad):
+                    bad.append((l, said, s))
             if not named and proof_on() and not only_free_files(root, s):  # F101: nothing goes out that no item asked for
-                nameless.append((s, subj))
+                nameless.append((s, f"this commit names no item: {subj[:70]}"))
         stop = stop or bool(bad or nameless)
         if stop:
-            for s, subj in nameless:
-                held.append({"label": s[:7], "why": f"this commit names no item: {subj[:70]}"})
-            for l, said in bad:
+            for s, why in nameless:
+                held.append({"label": s[:7], "why": why})
+            for l, said, s in bad:
                 if held_label(l):
                     continue
                 st = state(l, text)
                 ms = marks(all_rows[l][0])
-                why = f"QA failed: {ms[-1][2].rstrip('.')}" if st == "failed" else (said["why"] if said and not said["tag"] else "no QA yet")
-                if st == "failed" and fails_in_a_row(all_rows[l][0]) >= MAX_FAILS:
-                    why += f" ({MAX_FAILS} times; it waits for a call)"
-                if said and said["tag"] and not said["shipped"]:
+                if st == "failed":
+                    why = f"QA failed: {ms[-1][2].rstrip('.')}"
+                    if fails_in_a_row(all_rows[l][0]) >= MAX_FAILS:
+                        why += f" ({MAX_FAILS} times; it waits for a call)"
+                elif said and not said["tag"]:
+                    why = said["why"]
+                elif said and not said["shipped"]:
                     why = f"listed as out in {said['tag']}, but no commit of it stands there"
+                elif said:
+                    why = f"no QA yet: {s[:7]} came after the list of what went out before the gate"
+                else:
+                    why = "no QA yet"
                 held.append({"label": l, "why": why})
             for l in need:
                 if not held_label(l) and l not in behind and l not in taken and state(l, text) == "passed":

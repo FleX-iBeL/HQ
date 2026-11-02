@@ -450,6 +450,12 @@ def _night_start(day: str, tries: int, stamp: str) -> int:
     p = subprocess.Popen([sys.executable, os.path.join(HERE, "nightly.py"), "run", "--routine"], cwd=JV, stdin=subprocess.DEVNULL,
                          stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
     open(nf, "w").write(f"{day}\n{p.pid}\n{tries}\n{stamp}\n")
+    try:  # F112: marked as running before this minute goes on, so no job starts beside it in the same minute; the run takes its own mark over
+        import nightly
+        os.makedirs(os.path.dirname(nightly._running_file()), exist_ok=True)
+        json.dump({"pid": p.pid, "at": stamp}, open(nightly._running_file(), "w"))
+    except Exception as e:
+        log(f"nightly: the running mark: {e!r}")
     log(f"the night's test run started (pid {p.pid})" + (", once more: the first one died" if tries > 1 else ""))
     return p.pid
 
