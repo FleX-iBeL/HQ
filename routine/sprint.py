@@ -840,7 +840,7 @@ def field_texts(line):
 
 
 def _grep_texts(ws):
-    """The texts a quote may be found in: the call transcripts, the quick notes, the log and its archive."""
+    """The texts a quote may be found in: the call transcripts, the quick notes, the log and its archive, his side of the text threads."""
     out = []
     calls = os.path.join(ws, "HQ", "calls")
     try:
@@ -858,6 +858,19 @@ def _grep_texts(ws):
             out.append((rel, _norm(open(os.path.join(ws, rel), encoding="utf8", errors="replace").read())))
         except OSError:
             pass
+    for line_name in HIS_THREADS:  # F105: his side of the text threads; an agent's line never counts
+        said = []
+        try:
+            for line in open(os.path.join(ws, "HQ", line_name, "thread.jsonl"), encoding="utf8", errors="replace"):
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(d, dict) and d.get("from") == "me" and d.get("text"):
+                    said.append(str(d["text"]))
+        except OSError:
+            continue
+        out.append((f"HQ/{line_name}/thread.jsonl", _norm("\n".join(said))))
     return out
 
 
@@ -911,7 +924,7 @@ def _source_ok(item, ws, labels):
             except OSError:
                 pass
         return None
-    for tok in re.findall(r"[\w./-]+\.(?:md|json|py|mjs|html|js|txt)", it):
+    for tok in re.findall(r"[\w./-]+\.(?:md|jsonl|json|py|mjs|html|js|txt)", it):
         for base in (ws, os.path.dirname(HERE)):
             if os.path.exists(os.path.join(base, tok)):
                 return tok
