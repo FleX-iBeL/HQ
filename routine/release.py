@@ -92,13 +92,17 @@ def ahead(a: str, b: str) -> int:
     return int(out("rev-list", "--count", f"{b}..{a}") or 0)
 
 
-def changed_since(at: str | None) -> dict:
-    """The files dev changed after tonight's run started (the night's fixes), split into tests and HQ itself."""
+def changed_since(at: str | None, commit: str | None = None) -> dict:
+    """The files dev changed after tonight's run started (the night's fixes), split into tests and HQ itself. F112: from the commit the night
+    ran on when its record names it, with the same free files as the gate; the clock is only for a record that doesn't."""
     if not at:
         return {"tests": [], "hq": []}
-    files = out("log", f"--since={at}", "--name-only", "--format=", push.RELEASE_BRANCH + ".." + push.WORK_BRANCH)
+    if commit and not git("cat-file", "-e", f"{commit}^{{commit}}").returncode:
+        files, free = out("diff", "--name-only", commit, push.WORK_BRANCH), TESTS + qa.FREE_FILES
+    else:
+        files, free = out("log", f"--since={at}", "--name-only", "--format=", push.RELEASE_BRANCH + ".." + push.WORK_BRANCH), TESTS
     files = sorted({f for f in files.splitlines() if f.strip()})
-    tests = [f for f in files if f.startswith(TESTS)]
+    tests = [f for f in files if f.startswith(free)]
     return {"tests": tests, "hq": [f for f in files if f not in tests]}
 
 
@@ -127,7 +131,7 @@ def status() -> dict:
     run = last_run()
     today = dt.date.today()
     tonight = bool(run) and run.get("at", "")[:10] == today.isoformat()
-    changed = changed_since(run.get("at") if tonight else None)
+    changed = changed_since(run.get("at") if tonight else None, run.get("commit") if tonight else None)
     verdict, why = suggest(run, changed, tonight)
     h = qa_hold()
     refused = night_refuses(_target(h))  # F112: the advice can't say sure where the gate says no

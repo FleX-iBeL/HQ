@@ -379,7 +379,7 @@ def subject_labels(subject: str) -> list[str]:
 
 
 # F101 (C73): a commit that names no item holds the release, unless it only touches the tests, the version or the changelog.
-FREE_FILES = ("app/happy_flows.py", "routine/flowsets.py", "VERSION", "CHANGELOG.md", "README.md", "updates/")
+FREE_FILES = ("app/happy_flows.py", "routine/flowsets.py", "VERSION", "CHANGELOG.md", "README.md", "updates/", "routine/way-back.json")  # F112: the last is the release's own
 
 
 def proof_on() -> bool:
