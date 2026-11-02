@@ -21790,6 +21790,9 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
         need(r.returncode == 2 and rm.read_bytes() == before, f"the line moved inside a call with no words: {r.stdout} {r.stderr}")
         r = self._f114_script(env, "usageline.py", "reserve", "40", words_from=str(call))
         need(r.returncode == 2 and rm.read_bytes() == before, f"the reserve moved inside a call: {r.stdout} {r.stderr}")
+        for extra in ({"HQ_WORDS_FROM": str(call)}, {"HQ_IN_JOB": "7"}):  # the least line has the reserve's guard (F116's least, the merge)
+            r = __import__("subprocess").run([sys.executable, str(ROOT / "routine/usageline.py"), "least", "10"], env={**env, **extra}, capture_output=True, text=True, cwd=str(ROOT))
+            need(r.returncode == 2 and "his own hand" in r.stderr and rm.read_bytes() == before, f"the least line moved from {extra}: {r.stdout} {r.stderr}")
         self._f114_hold(env, "Lunch with Alice")
         r = self._f114_script(env, "cycles.py", "yes", "donna", "ok", words_from=str(call))
         need(r.returncode == 2 and r.stdout.startswith("Refused"), f"a bare ok opened the lunch: {r.stdout} {r.stderr[-300:]}")
@@ -21877,7 +21880,11 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
             for cmd in (f"git -C {ROOT} grep -O'env HQ_ROLE_HERE=1 python3 {r}/cycles.py yes donna never 1' -n def -- routine/cycles.py",
                         f"git -C {ROOT} -c core.pager=x log -- routine/cycles.py", f"git -C {ROOT} log --output={self.tmp}/x -- routine/cycles.py",
                         f"git -C {ROOT} diff --ext-diff -- routine/cycles.py", f"git -C {ROOT} log --textconv -p -- routine/cycles.py",
-                        f"awk 'BEGIN{{system(\"id\")}}' {r}/cycles.py", f"python3 {r}/cycles.py list; python3 {r}/cycles.py yes donna ok"):
+                        f"awk 'BEGIN{{system(\"id\")}}' {r}/cycles.py", f"python3 {r}/cycles.py list; python3 {r}/cycles.py yes donna ok",
+                        # the re-check of 19aa6ad: a 2> strip that ate the ; after it, a $( ) or backticks
+                        f"grep -n x {r}/cycles.py 2>/dev/null; bash -c \"HQ_ROLE_HERE=1 python3 {r}/cycles.py yes donna never 1\"",
+                        f"python3 {r}/cycles.py list 2>$(env${{IFS}}HQ_ROLE_HERE=1${{IFS}}python3${{IFS}}{r}/cycles.py${{IFS}}yes${{IFS}}donna${{IFS}}never${{IFS}}1)",
+                        f"python3 {r}/cycles.py list 2>$(id)", f"python3 {r}/cycles.py list 2>`id`"):
                 d = pol.decide("Bash", {"command": cmd})
                 need(d.verdict == P.DENY and "plain command" in d.why, f"a read that runs something got through: {cmd}: {d.verdict} {d.why}")
         finally:

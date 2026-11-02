@@ -776,7 +776,7 @@ class Policy:
         # F114, the third check: a command that names cycles.py, usageline.py or feedback.py passes only in an allowed shape (a plain read,
         # one plain run, or another HQ script carrying the name in its text); every other shape is refused with the script named.
         m = _NAMES_SCRIPT.search(cmd)
-        if m and not self._script_shape_ok(re.sub(r"\s2>&1|\s2>\s*\S+", " ", cmd)):  # F114: where errors go isn't a shape
+        if m and not self._script_shape_ok(re.sub(r"(?<=\s)2>(?:/dev/null|&1)(?=\s|$)", " ", cmd)):  # F114: only these exact two, nothing after them
             return _wrapped(m.group(1))
         cmd = _hide_quoted_dollars(cmd)  # H281: awk's $1 and sed's $p in single quotes are text, not variables
         # 27 October 2026: ${n} of a plain for loop (for n in 1 2; do sed -n "${n}p" …) is filled in by _loops below.
