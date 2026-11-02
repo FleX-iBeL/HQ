@@ -20753,7 +20753,7 @@ print(json.dumps(o))
         linux = o["seen_linux"]
         need(linux["cmd"][0] == "--quick" and linux["cmd"][1] == "--only", f"the Linux set: {linux['cmd'][:2]}")
         chosen = linux["cmd"][2].split(",")
-        need("44" not in chosen and len(chosen) > 100, f"the set: {len(chosen)} flows, 44 in it: {'44' in chosen}")
+        need("44" not in chosen and "165" not in chosen and len(chosen) > 60, f"the set: {len(chosen)} flows, 44 in it: {'44' in chosen}")
         need("--skip" in o["seen_mac"]["cmd"] and o["seen_mac"]["timeout"] >= 3600, f"the Mac: {o['seen_mac']}")
         # the limit, against the last whole night here (none on a fresh copy: then there's nothing to hold it to)
         times, log = {}, None
@@ -24889,7 +24889,7 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
             qsrc = (ROOT / "routine/qa.py").read_text()
             need('tell("qa-failed"' in qsrc.split("def fail(")[1][:1200], "H266: qa.fail doesn't tell him")
             rsrc = (ROOT / "routine/release.py").read_text()
-            need('qa.tell("release-held"' in rsrc.split("def cmd_main(")[1][:2000], "H266: a held release isn't told")
+            need('qa.tell("release-held"' in rsrc.split("def cmd_main(")[1][:4000], "H266: a held release isn't told")
             tsrc = (ROOT / "routine/tick.py").read_text()
             need('direct_line.text("estimates"' in tsrc, "H266: the Friday estimates don't come from her")
             # 6. on a call only she may text there; her craft says how

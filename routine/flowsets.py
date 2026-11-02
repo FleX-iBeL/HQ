@@ -22,9 +22,12 @@ LINUX_NIGHTLY = "1,8,9,10,15,16,20,21,23,26,27,28,29,34,35,36,40,41,42,44,45,46,
 # Mac things by nature, so they're the first to bring back. The list by hand above forgot 18 flows; six of them hold on Linux.
 MAC_ONLY = "18,19,25,30,31,33,37,38,39,43,47,196"
 
-# F112: the installer's last step. A friend's first install isn't the night: the flows that take 40 seconds or more on the server stay the
-# night's (44 alone reads HQ's whole history, 579 s), the rest took 460 s on 2 November 2026. The limits are about four times what it took, and
-# a Mac runs more flows. [Claude's choice]
-INSTALL_LEAVE_OUT = "44,65,66,108,119,145,146,147,148,182"
+# F112: the installer's last step. A friend's first install isn't the night. Three kinds of flow stay the night's: those that take 40 seconds or more on
+# the server (44 alone reads HQ's whole history, 579 s); those that need a headless browser, which HQ doesn't install; and those that lean on the maker's
+# own planning or work line (106, 165, 171). Run on a real fresh install of 2 November 2026: the rest took about 5 minutes. The limits are several times
+# that, and a Mac runs more flows. [Claude's choice]
+INSTALL_LEAVE_OUT = ("44,65,66,108,119,145,146,147,148,182,"
+                     "73,79,84,87,91,92,112,116,118,120,124,130,131,137,138,139,140,149,151,153,154,156,160,166,193,"
+                     "106,165,171")
 INSTALL_SECONDS_LINUX = 1800
 INSTALL_SECONDS_MAC = 3600
