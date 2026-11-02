@@ -179,7 +179,8 @@ Run them before and after every update; they print a short pass/fail table at th
 Safe to run while the live phone line is up: the flows use their own server on port 7871
 (HQ_NO_PHONE=1, so Tailscale serve is never touched), calls in test mode (no file
 changes, no git, no calendar writes, never email) and a scratch folder that is deleted
-at the end. Flows 2-7 use Claude turns on the Max plan: about ten for a full run (one
+at the end. F111: every run works in a copy of HQ, behind routine/testwall.py: this script hashes the real records,
+starts itself again from a throwaway copy, compares when it's done, and goes red with what differs. Flows 2-7 use Claude turns on the Max plan: about ten for a full run (one
 Opus turn, for the Deep greeting). Flow 11 uses four more (reading a web page, the free call's warm-up and its answer).
 """
 from __future__ import annotations
@@ -8529,6 +8530,25 @@ setTimeout(() => {
                 "an okay keeps the call; a goodbye ends it once heard; more words after it keep it; H129: the goodbye note says what he's doing now (calendar, else to-do list), not for Moneypenny")
 
     async def flow85(self) -> str:
+        """F111: this flow drives the call service with a stand-in, and it opened two real Claude sessions on the way: none now."""
+        import brain as _brain
+        real_start = _brain.ClaudeBrain.start
+
+        real_ask = _brain.ClaudeBrain.ask
+
+        async def no_session(_self):
+            pass
+
+        async def no_turn(_self, _text, _retry=False):
+            return
+            yield
+        _brain.ClaudeBrain.start, _brain.ClaudeBrain.ask = no_session, no_turn
+        try:
+            return await self._flow85()
+        finally:
+            _brain.ClaudeBrain.start, _brain.ClaudeBrain.ask = real_start, real_ask
+
+    async def _flow85(self) -> str:
         """H79: ask for another agent by name: she hands over (the call ends as a hang-up does and the other one picks
         up a new call that continues it) or brings her in (a three-way call: one conversation, each turn the one who
         fits answers in her own model and voice). No Claude turns: a stand-in drives the real call service."""
@@ -15253,7 +15273,8 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
                "HQ_COACHING_LINE": str(ws / "HQ/coaching-line"), "HQ_TEAM_LINE_DIR": str(ws / "HQ/team-line"),
                "HQ_DIRECT_LOCAL": str(status / "direct-line.json"), "HQ_CYCLES_STATE": str(status / "cycles-state.json"),
                "HQ_ESTIMATES_DIR": str(status / "estimates"), "HQ_ACTIVITY": str(status / "job-activity.json"),
-               "HQ_LINES": str(status / "lines.json"), "HQ_BACKEND": str(ws / "HQ/backend.json"), "HQ_ASLEEP": "0", "HQ_CYCLES_OLD_STATE": str(status / "old-cycles-state.json")}
+               "HQ_LINES": str(status / "lines.json"), "HQ_BACKEND": str(ws / "HQ/backend.json"), "HQ_ASLEEP": "0", "HQ_CYCLES_OLD_STATE": str(status / "old-cycles-state.json"),
+               "HQ_INCIDENTS_FILE": str(status / "incidents.json"), "HQ_PROOF_DIR": str(status / "proofs")}  # F111: flow 255's takeover, flow 247's job
         for k in ("HQ_MAKER", "HQ_FEATURES_PIECES", "HQ_BACKEND_HEADLESS_JOBS", "HQ_BACKEND_BRIEFING"):
             env.pop(k, None)
         return ws, env
@@ -18230,7 +18251,8 @@ else:
         while time.time() < end and Path(f"/proc/{pid}").exists() if sys.platform == "linux" else False:
             time.sleep(0.05)
         d = rec(hid); d["started"] -= 10; (folder / f"{hid}.json").write_text(json.dumps(d))
-        code = "import os; os.environ['HQ_HELPER_MINUTE'] = '1'; import tick; tick.tick()"
+        # F111: tick() started the real hourly mail check here, a real model with his Gmail read tools: this flow is about the helper
+        code = "import os; os.environ['HQ_HELPER_MINUTE'] = '1'; import tick; tick.mail = lambda *a, **k: None; tick.tick()"
         r = await asyncio.to_thread(py, code)
         need(r.returncode == 0, f"the routine's minute: {r.stderr[-400:]}")
         d = rec(hid)
@@ -25099,11 +25121,16 @@ print(json.dumps([E.estimate_detail(t, hist=base + longs, kind='release')['est']
         # Writing the memory: free on a build call, asked on the others.
         note = str(mem / "h280-flow-probe.md")
         build_pol = Policy(config.FOLDER, memory_writes=True)
-        for tool in ("Write", "Edit"):
-            d = build_pol.decide(tool, {"file_path": note, "content": "x", "old_string": "a", "new_string": "b"})
-            need(d.verdict == ALLOW, f"a build call's {tool} to the memory asks: {d.why}")
-        d = build_pol.decide("Write", {"file_path": str(mem / "x.sh"), "content": "x"})
-        need(d.verdict == ASK, "a build call writes a file in the memory that isn't a note")
+        walled = os.environ.pop("CLAUDE_CONFIG_DIR", None)  # F111: the wall's empty one; a build call's place is under the home folder
+        try:
+            for tool in ("Write", "Edit"):
+                d = build_pol.decide(tool, {"file_path": note, "content": "x", "old_string": "a", "new_string": "b"})
+                need(d.verdict == ALLOW, f"a build call's {tool} to the memory asks: {d.why}")
+            d = build_pol.decide("Write", {"file_path": str(mem / "x.sh"), "content": "x"})
+            need(d.verdict == ASK, "a build call writes a file in the memory that isn't a note")
+        finally:
+            if walled:
+                os.environ["CLAUDE_CONFIG_DIR"] = walled
         d = Policy(config.FOLDER).decide("Write", {"file_path": note, "content": "x"})
         need(d.verdict == ASK, "a call that isn't about building writes the memory without a yes")
         need(Policy(config.FOLDER, dry_run=True, memory_writes=True).decide(
@@ -25731,7 +25758,10 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
         jobs("add-row", "Something", "--kind", "nope", "--not-ready", ok=False)
         need(rm.read_text() == same, "a refused add still changed the roadmap")
         real = os.environ.get("HQ_REAL_ROADMAP", str(ROADMAP))
+        trail_file = Path(real).parent / "trail.jsonl"
+        trail_was = trail_file.read_bytes() if trail_file.exists() else None
         jobs("add-row", "Never on the real one", "--not-ready", ok=False, e={**os.environ, "HQ_ROADMAP": real, "HQ_SPRINT": str(self.tmp / "sprint-H160real.json")})
+        need((trail_file.read_bytes() if trail_file.exists() else None) == trail_was, "F111: a refused add on the real roadmap left a line in the record")
         fresh = self.tmp / "roadmap-H160-fresh.md"
         fresh.write_text((ROOT / "template/HQ/roadmap.md").read_text())
         jobs("add-row", "First wish", "--not-ready", e={**os.environ, "HQ_ROADMAP": str(fresh), "HQ_SPRINT": str(self.tmp / "sprint-H160f.json")})
@@ -28481,6 +28511,7 @@ window.fetch = async (u, o) => {
         rm = d / "roadmap.md"
         rm.write_text((APP.parent / "template" / "HQ" / "roadmap.md").read_text())
         env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_FEEDBACK": str(d / "feedback.json"), "HQ_SPRINT": str(d / "sprint.json"),
+               "HQ_FEEDBACK_MAKER": str(d / "no-maker.json"),  # F111: U17 and U18 were this flow on a connected HQ
                "HQ_USER_NAME": "Sam", "HQ_ROLE_HERE": "1"}
         r = run([sys.executable, str(APP / "feedback.py"), "send", "The changelog jumps on my iPhone. It moves.", "--bug"], env=env, timeout=60)
         need(r.returncode == 0 and '"row": "U1"' in r.stdout, f"the first feedback didn't land as U1: {r.stdout} {r.stderr}")
@@ -28497,7 +28528,7 @@ window.fetch = async (u, o) => {
         import sprint as _sp
         rows = {x["label"]: x for x in _sp.open_rows(text)}
         need(_sp.is_bug(rows["U1"]) and not _sp.is_bug(rows["U2"]), "a bug sent as feedback isn't a bug on the planning")
-        keep = {k: os.environ.get(k) for k in ("HQ_FEEDBACK", "HQ_ROADMAP", "HQ_SPRINT")}
+        keep = {k: os.environ.get(k) for k in ("HQ_FEEDBACK", "HQ_ROADMAP", "HQ_SPRINT", "HQ_FEEDBACK_MAKER")}
         os.environ.update({k: env[k] for k in keep})
         try:
             st = lambda: {x["row"]: x["status"] for x in fbk.read()["items"]}
@@ -28542,6 +28573,201 @@ window.fetch = async (u, o) => {
             need(bit in page, f"the call page misses {bit}")
         return ("feedback lands on the planning in its own phase, one row each with who and when, bugs as bugs, never a "
                 "job; its status reads back to the sender; the backup hands it on; the page sends it from the notes sheet")
+
+    def _wall_site(self, tag: str):
+        """F111: a made-up real HQ to try the wall on: HQ's code and a copy of the workspace, every record there but one (a path missing
+        at both ends is the same), its own memory. Back to (site, its environment, its places, a run of its flows, the records' hashes)."""
+        import shutil as _sh, subprocess as sp, tempfile as _tf
+        import testwall
+        base = Path(_tf.mkdtemp(prefix=tag))
+        site = base / "hq"
+        left_out = {"workspace", "scratch", ".status", ".git", ".venv", "models", "HQ", "__pycache__"}
+        _sh.copytree(ROOT, site, ignore=lambda d, names: [n for n in names if n == "__pycache__" or (Path(d) == ROOT and n in left_out)])
+        for nm in (".venv", "models"):
+            os.symlink(os.path.realpath(ROOT / nm), site / nm)
+        _sh.copytree(ROOT / "workspace", site / "workspace", ignore=_sh.ignore_patterns(".git", "calls", "screens", "patches"))
+        (site / ".status").mkdir(exist_ok=True)
+        (site / "scratch").mkdir(exist_ok=True)
+        places = testwall.real_places(str(site), str(site / "workspace"))
+        for _name, rel, path in places:
+            pth = Path(path)
+            if rel == "HQ/team-line/thread.jsonl":
+                pth.unlink(missing_ok=True)
+            elif rel in (".status/proofs", "HQ/ledger"):
+                pth.mkdir(parents=True, exist_ok=True)
+                (pth / "one.json").write_text("{}\n")
+            elif not pth.exists():
+                pth.parent.mkdir(parents=True, exist_ok=True)
+                pth.write_text("{}\n" if rel.endswith(".json") else "a line\n")
+        env = {**os.environ, "HQ_SUPPORT": str(base / "state"), "HQ_TEST_PORT": str(_free_port())}
+
+        def go(*a, e=None, timeout=280):
+            return sp.run([sys.executable, str(site / "app/happy_flows.py"), *a], capture_output=True, text=True, env=e or env, cwd=str(site), timeout=timeout)
+        hashes = lambda: {k: v["sha"] for k, v in testwall.snapshot(places).items()}
+        return site, env, places, go, hashes
+
+    async def flow300(self) -> str:
+        """F111: the wall, no Claude. On a made-up real HQ: a run leaves every record byte for byte, a leftover folder goes first, a second run
+        behaves the same, a record missing at both ends is the same. A planted write to the incident log is refused and red from Python and
+        red from a shell, named, with its flow; a live routine's change is told apart, a refused write isn't. An emptied need() and an
+        emptied check in a flow's own script stop the run. A run that dies leaves nothing to restore: the next one goes red with what it
+        changed and is clean after that, and a change after its last sign of life is his own work."""
+        import signal as _sig, subprocess as sp
+        import nightly as _night
+        site, env, places, go, hashes = self._wall_site("w300")
+        log = site / ".status/incidents.json"
+        was = log.read_bytes()
+        before = hashes()
+        scratch = site / "scratch"
+        walls = lambda: [p.name for p in scratch.glob("test-wall-*")]
+        out = lambda r: r.stdout + r.stderr
+        (scratch / "test-wall-99999999").mkdir()
+        (scratch / "test-wall-99999999/left").write_text("from a run that died")
+        for i in (1, 2):
+            r = await asyncio.to_thread(go, "--only", "8")
+            need(r.returncode == 0 and "1 of 1 passed" in r.stdout, f"run {i}: {out(r)[-500:]}")
+            need("real files compared before and after, 0 differ" in r.stdout, f"run {i} didn't compare: {r.stdout[-400:]}")
+            need(hashes() == before, f"run {i} changed a record")
+            need(not walls(), f"run {i} left its folder: {walls()}")
+        need(not (site / "workspace/HQ/team-line/thread.jsonl").exists(), "the record missing at both ends came to be")
+        plain = (site / "app/happy_flows.py").read_text()
+
+        def plant(body, claude=False):
+            (site / "app/happy_flows.py").write_text(plain.replace("FLOWS = {\n", f"async def _planted(self):\n{body}\n    return 'planted'\nRun.flow9001 = _planted\n"
+                                                                   f"FLOWS = {{\n    9001: ('A planted flow', {claude}, 'flow9001'),\n", 1))
+        by_python = f"    open({str(log)!r}, 'a').write('a made-up crash')"
+        by_shell = f"    subprocess.run(['sh', '-c', 'printf x >> {log}'])"
+        plant(by_python)
+        r = await asyncio.to_thread(go, "--only", "9001")
+        need(r.returncode == 1 and hashes() == before and any("tried to write a real record" in x and "incidents.json" in x and "9001" in x for x in _night.failures(r.stdout)),
+             f"a planted write from Python wasn't refused and red: {out(r)[-600:]}")
+        plant(by_shell)
+        r = await asyncio.to_thread(go, "--only", "9001")
+        need(r.returncode == 1 and "1 of 1 passed" in r.stdout and any("the incident log" in x and "during flow 9001" in x for x in _night.failures(r.stdout)),
+             f"a planted write from a shell didn't turn the run red with its name: {out(r)[-600:]}")
+        need(not walls(), "a red run left its folder")
+        log.write_bytes(was)
+        # A live routine writes on: told apart, named. What a test's Python tried still turns it red.
+        (site / ".status/routines.json").write_text("{}\n")
+        r = await asyncio.to_thread(go, "--only", "9001")
+        need(r.returncode == 0 and "told apart" in r.stdout and "the incident log" in r.stdout, f"a change while the routine ran: {out(r)[-500:]}")
+        log.write_bytes(was)
+        plant(by_python)
+        r = await asyncio.to_thread(go, "--only", "9001")
+        need(r.returncode == 1 and log.read_bytes() == was, f"a live routine hid a refused write: {out(r)[-400:]}")
+        (site / ".status/routines.json").unlink()
+        # The canary: need() emptied, a flow's own check emptied. Nothing runs and it says why.
+        for broken, what in ((plain.replace("        raise Failed(message() if callable(message) else message)\n", "        pass\n", 1), "need() emptied"),
+                             (plain.replace('print("FAIL " + why); sys.exit(1)', "pass", 1), "a flow's own check emptied")):
+            need(broken != plain, f"{what}: nothing to empty")
+            (site / "app/happy_flows.py").write_text(broken)
+            r = await asyncio.to_thread(go, "--only", "8")
+            need(r.returncode == 1 and any("the canary" in x for x in _night.failures(r.stdout)) and "The waiting lines" not in r.stdout.split("== Result")[0],
+                 f"{what}: the run wasn't red, or a flow ran: {out(r)[-500:]}")
+        # A run that dies.
+        plant("    await asyncio.sleep(120)")
+
+        def die():
+            p = sp.Popen([sys.executable, str(site / "app/happy_flows.py"), "--only", "9001"], env=env, cwd=str(site), stdout=sp.DEVNULL, stderr=sp.DEVNULL, start_new_session=True)
+            end = time.time() + 60
+            while time.time() < end and not any((scratch / w / "flow").exists() for w in walls()):
+                time.sleep(0.1)
+            need(walls(), "the run to kill never started")
+            os.killpg(p.pid, _sig.SIGKILL)  # its own group, made above
+            p.wait()
+        await asyncio.to_thread(die)
+        need(walls() and hashes() == before, "a killed run changed something, or left no folder")
+        with open(log, "ab") as f:
+            f.write(b"written while it ran")
+        (site / "app/happy_flows.py").write_text(plain)
+        r = await asyncio.to_thread(go, "--only", "8")
+        need(r.returncode == 1 and any("the run that died changed a real record" in x and "the incident log" in x for x in _night.failures(r.stdout)),
+             f"the next run didn't go red with what differs: {out(r)[-500:]}")
+        need(not walls(), f"the dead run's folder stayed: {walls()}")
+        r = await asyncio.to_thread(go, "--only", "8")
+        need(r.returncode == 0, f"the run after that isn't clean: {out(r)[-400:]}")
+        log.write_bytes(was)
+        await asyncio.to_thread(go, "--only", "8")
+        plant("    await asyncio.sleep(120)")
+        await asyncio.to_thread(die)
+        state = Path(env["HQ_SUPPORT"]) / "test-wall.json"
+        d = json.loads(state.read_text())
+        d["alive"] = d["start"] = time.time() - 3600
+        state.write_text(json.dumps(d))
+        with open(log, "ab") as f:
+            f.write(b"his own work, an hour later")
+        (site / "app/happy_flows.py").write_text(plain)
+        r = await asyncio.to_thread(go, "--only", "8")
+        need(r.returncode == 0 and "his own work" in r.stdout, f"his own change between runs: {out(r)[-500:]}")
+        return "a run leaves the records as they were; a planted write is red from Python and from a shell; a live routine's change is told apart; an emptied check stops the run; a dead run's change is found, his own later one isn't"
+
+    async def flow301(self) -> str:
+        """F111: the named leaks, no Claude. On a made-up real HQ connected to a maker and a phone, both a stand-in listener: flows 106, 157, 247, 249 and
+        255 leave its records as they were, 255's crash reaches no text, 157 posts nothing to the maker, 249 uses no model, and the run prints
+        true counts: a quick flow stops at the stand-in, a flow marked as using Claude goes through, one line each."""
+        import base64 as _b64, http.server, threading
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        site, env, places, go, hashes = self._wall_site("w301")
+        posts: list[str] = []
+
+        class Box(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("content-length") or 0))
+                posts.append(self.path)
+                self.send_response(201)
+                self.end_headers()
+                self.wfile.write(b"{}")
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Box)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        at = f"http://127.0.0.1:{srv.server_address[1]}/"
+        ws = site / "workspace"
+        (ws / "HQ/feedback-maker.json").write_text(json.dumps({"name": "The maker", "url": at, "key": "k" * 32, "texts": True, "since": 1}))
+        phone = ec.generate_private_key(ec.SECP256R1()).public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+        b64 = lambda b: _b64.urlsafe_b64encode(b).decode().rstrip("=")
+        (ws / "HQ/direct-line").mkdir(parents=True, exist_ok=True)
+        (ws / "HQ/direct-line/subscriptions.json").write_text(json.dumps([{"endpoint": at + "push", "keys": {"p256dh": b64(phone), "auth": b64(b"0123456789abcdef")}}]))
+        fake = site.parent / "bin/claude"
+        fake.parent.mkdir()
+        calls = site.parent / "real-model-calls"
+        fake.write_text(f'#!/bin/sh\necho "$@" >> "{calls}"\necho "A made-up answer."\n')
+        fake.chmod(0o755)
+        e = {**env, "HQ_FEEDBACK_INSECURE": "1", "HQ_WALL_REAL_CLAUDE": str(fake), "HQ_CLAUDE": str(fake), "HQ_CLAUDE_CLI": str(fake), "HQ_HELPER_CLAUDE": str(fake),
+             "PATH": f"{fake.parent}{os.pathsep}{env['PATH']}"}
+        thread = ws / "HQ/direct-line/thread.jsonl"
+        lines = lambda: len(thread.read_text().splitlines())
+        # What the live routine does with the incident log: the first look takes stock, the next one says what it would text.
+        code = ("import sys; sys.path[:0] = [sys.argv[1] + '/app', sys.argv[1] + '/routine']\nimport direct_line as d, json\n"
+                "print(json.dumps(d.watch(None, main=False, dry=sys.argv[2] == 'dry')))\n")
+        live = {k: v for k, v in e.items() if k not in ("HQ_UNDER_TEST", "HQ_WALL", "PYTHONPATH", "HQ_NO_WALL")}
+        look = lambda how: run([sys.executable, "-c", code, str(site), how], env=live, timeout=60)
+        first = await asyncio.to_thread(look, "stock")
+        need(first.returncode == 0, f"the first look: {first.stderr[-300:]}")
+        before, said = hashes(), lines()
+        r = await asyncio.to_thread(lambda: go("--only", "106,157,247,249,255", e=e, timeout=520))
+        out = r.stdout + r.stderr
+        need(r.returncode == 0 and "5 of 5 passed" in r.stdout, f"the five flows on a connected HQ: {out[-900:]}")
+        need(hashes() == before, "a run of the five flows changed a real record")
+        need(not posts, f"something reached the stand-in listener: {posts}")
+        need(not calls.exists(), f"a quick flow reached the model: {calls.read_text()[:300] if calls.exists() else ''}")
+        need(lines() == said, "a text landed in the real thread")
+        need("0 real model runs, 0 stopped" in r.stdout, f"the run's own count: {r.stdout[-300:]}")
+        w = await asyncio.to_thread(look, "dry")
+        need(w.returncode == 0 and json.loads(w.stdout.strip().splitlines()[-1]) == [], f"the night's look found something to text: {w.stdout[-300:]} {w.stderr[-300:]}")
+        # True counts: a quick flow that asks the model is stopped there, a flow marked as using Claude goes through.
+        plain = (site / "app/happy_flows.py").read_text()
+        ask = "    r = subprocess.run(['claude', '-p', 'hello'], capture_output=True, text=True)\n    need({ok}, r.stderr)\n"
+        for marked, ok, count in ((False, "r.returncode == 1", "0 real model runs, 1 stopped"), (True, "'made-up' in r.stdout", "1 real model runs, 0 stopped")):
+            (site / "app/happy_flows.py").write_text(plain.replace("FLOWS = {\n", f"async def _planted(self):\n{ask.format(ok=ok)}    return 'asked'\nRun.flow9001 = _planted\n"
+                                                                   f"FLOWS = {{\n    9001: ('Asks the model', {marked}, 'flow9001'),\n", 1))
+            r = await asyncio.to_thread(lambda: go("--only", "9001", e=e))
+            need(r.returncode == 0 and count in r.stdout, f"marked {marked}: {(r.stdout + r.stderr)[-500:]}")
+            need(calls.exists() == marked, f"marked {marked}: the real one was {'not ' if marked else ''}reached")
+        srv.shutdown()
+        return "five flows on a connected HQ: records as they were, no text, nothing posted to the maker, no model; the run's counts are true for a stopped and a marked flow"
 
     async def flow113(self) -> str:
         """H194: HQ's own icon on a friend's fresh install. No Claude turns. A status server without HQ_LABEL (a
@@ -31632,6 +31858,8 @@ echo "ALL OK"
 """
 
 FLOWS = {
+    300: ("F111: the wall: a run leaves every real record byte for byte, a planted write turns it red and names it, an emptied check can't pass, a dead run's change is found and his own later change isn't", False, "flow300"),
+    301: ("F111: on a connected HQ the flows named on the night of 2 November reach no text, no maker and no model, and the run's counts are true", False, "flow301"),
     292: ("His no closes a held change, by number, the only one, or his loose words to her: a later yes can't open it, it isn't asked again, nobody gets anything", False, "flow292"),
     293: ("Her which one goes out past the day's cap, once, never kept for Friday; an answered question doesn't go out in a batch", False, "flow293"),
     291: ("The two branches where they meet: a round through the same runner and hook as a cycle, a cycle's writes in the round's journal, the five minutes, the agents off", False, "flow291"),
@@ -31932,11 +32160,43 @@ FLOWS = {
 # history, which grows every day (217 s on 23 October, 360 s on 27 October), and checks all of it: it gets
 # twenty minutes instead of checking less. Its time is in the summary, next to its limit, so a climb shows.
 FLOW_LIMIT = 360
-FLOW_LIMITS = {44: 1200}
+FLOW_LIMITS = {44: 1200, 300: 600, 301: 900}
 
 
 def limit_of(n: int) -> int:
     return FLOW_LIMITS.get(n, FLOW_LIMIT)
+
+
+async def one_flow(res: Result, method, n: int) -> None:
+    """One flow, and how it came out in res."""
+    try:
+        res.note = await asyncio.wait_for(method(), timeout=limit_of(n))
+        res.status = "PASS"
+    except Failed as e:
+        res.status, res.note = "FAIL", str(e)
+    except asyncio.TimeoutError as e:  # a wait inside the flow, or the flow's limit (six minutes, F63)
+        res.status, res.note = "FAIL", str(e) or f"took longer than its limit of {limit_of(n) // 60} minutes"
+    except Exception as e:  # a crash in a flow is a failed flow, not a failed run
+        res.status, res.note = "FAIL", f"{type(e).__name__}: {e}"
+
+
+async def canary() -> str | None:
+    """F111: the canary. With need() emptied every flow used to pass and nothing said so. Before the first flow a flow with a false
+    check goes the way every flow goes and has to fail; the small checks inside the flows' own scripts have to stop too. Why it
+    didn't, or None."""
+    async def bird():
+        need(False, "a false check")
+        return "it passed"
+    res = Result(0, "The canary")
+    await one_flow(res, bird, 0)
+    if res.status != "FAIL" or res.note != "a false check":
+        return f"the canary: a flow with a false check came out {res.status} ({res.note}), so a green run says nothing"
+    text = Path(__file__).read_text(encoding="utf8")
+    needs = re.findall(r"^def need\(ok, why\):\n((?: .*\n)+)", text, re.M)
+    fails = re.findall(r"^fail\(\) \{(.*)\}$", text, re.M)
+    if not all("sys.exit(1)" in b or "raise" in b for b in needs) or not all("exit 1" in b for b in fails):
+        return "the canary: a check inside a flow's own script no longer stops it, so a green run says nothing"
+    return None
 
 
 async def main(args) -> bool:
@@ -31956,11 +32216,17 @@ async def main(args) -> bool:
     sys.path.insert(0, str(ROOT / "routine"))
     import hqpaths as _hqp
     os.environ.setdefault("HQ_REAL_SUPPORT", _hqp.real_support())
+    import testwall
+    watch = testwall.Watch()
     tmp = Path(tempfile.mkdtemp(prefix="happy-flows-", dir=config.SCRATCH))
     run_ = Run(tmp)
     # Flow 7 closes the live call; if it runs, it must come after the others that use that call.
     results: list[Result] = []
     t_all = time.perf_counter()
+    dead = await canary()
+    if dead:
+        results.append(Result(0, "The canary", "FAIL", 0.0, dead))
+        chosen = []
     try:
         for n in chosen:
             name, uses_claude, method = FLOWS[n]
@@ -31969,18 +32235,15 @@ async def main(args) -> bool:
             if args.quick and uses_claude:
                 res.note = "skipped (--quick)"
                 continue
+            if testwall.outer_gone():  # F111: whoever started this run is gone, and its folder goes with it
+                print("The run that started this one is gone: stopping.", flush=True)
+                break
             print(f"\n-- {n} · {name}", flush=True)
+            testwall.mark(n, uses_claude)
             t = time.perf_counter()
-            try:
-                res.note = await asyncio.wait_for(getattr(run_, method)(), timeout=limit_of(n))
-                res.status = "PASS"
-            except Failed as e:
-                res.status, res.note = "FAIL", str(e)
-            except asyncio.TimeoutError as e:  # a wait inside the flow, or the flow's limit (six minutes, F63)
-                res.status, res.note = "FAIL", str(e) or f"took longer than its limit of {limit_of(n) // 60} minutes"
-            except Exception as e:  # a crash in a flow is a failed flow, not a failed run
-                res.status, res.note = "FAIL", f"{type(e).__name__}: {e}"
+            await one_flow(res, getattr(run_, method), n)
             res.secs = time.perf_counter() - t
+            watch.after(n)
             say(f"{res.status}: {res.note}")
     finally:
         try:
@@ -32006,7 +32269,10 @@ async def main(args) -> bool:
         print(f"      {r.num:>2}: {r.note}" if r.status != "FAIL" else f"      {r.num:>2}: FAILED - {r.note}")
     guard = "live server on 7860 untouched" if live_after == run_.live_pid_before else \
         f"WARNING: the live server's pid changed ({run_.live_pid_before} -> {live_after})"
-    print(f"\n{len(ran) - len(failed)} of {len(ran)} passed · {turns} Claude turns · {time.perf_counter() - t_all:.0f} s · {guard}")
+    real_runs, stopped = testwall.model_calls()  # F111: the true counts, from every call that went through the stand-in
+    print(f"\n{len(ran) - len(failed)} of {len(ran)} passed · {turns} Claude turns · {real_runs} real model runs, {stopped} stopped at the stand-in"
+          f" · {time.perf_counter() - t_all:.0f} s · {guard}")
+    testwall.finished()
     return not failed and live_after == run_.live_pid_before
 
 
@@ -32018,6 +32284,10 @@ if __name__ == "__main__":
     p.add_argument("--keep", action="store_true", help="keep the scratch folder")
     p.add_argument("-v", "--verbose", action="store_true")
     a = p.parse_args()
+    sys.path.insert(0, str(ROOT / "routine"))
+    import testwall as _wall  # F111: the flows run behind the wall, whoever starts them; here is the side outside it
+    if not _wall.inside(ROOT):
+        sys.exit(_wall.run(sys.argv[1:], ROOT, keep=a.keep))
     if a.verbose:
         from loguru import logger
         logger.remove()

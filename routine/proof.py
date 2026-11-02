@@ -163,7 +163,9 @@ def _copy() -> str:
 def _flows(wt: str, args: list[str], log) -> tuple[int, str]:
     runner = os.environ.get("HQ_PROOF_RUNNER")
     cmd = [runner] if runner else [nightly._python(), os.path.join(wt, "app", "happy_flows.py")]
-    r = subprocess.run(cmd + args, cwd=wt, capture_output=True, text=True)
+    # F111: the flows run behind the wall from the copy, and answer for the real HQ; this record's own log is written meanwhile
+    env = {**os.environ, "HQ_REAL_HQ": hqpaths.HQ, "HQ_WALL_OWN": os.path.realpath(getattr(log, "name", "") or os.devnull)}
+    r = subprocess.run(cmd + args, cwd=wt, capture_output=True, text=True, env=env)
     out = r.stdout + r.stderr
     log.write(out)
     return r.returncode, out
