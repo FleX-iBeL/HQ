@@ -448,6 +448,9 @@ def set_ready(label, on=True):
     d["ready"] = m
     d["set"] = int(time.time())
     _save(RANKS, d)
+    if on:
+        import trail  # F105
+        trail.step(trail.resolve(label), "ready")
     return bool(on)
 
 
@@ -817,10 +820,13 @@ def _norm(t):
     return " ".join(t.lower().split())
 
 
+_ROW_NOTE = re.compile(r'"?\s*\[Added on the status page, no call; the title is the first sentence\.\]')
+
+
 def field_texts(line):
     """{field: text} from the row's ask: each labelled part ("His words: …", "My own additions: …", "Sources: …") up to
     the next label or the end; "" when a label isn't there."""
-    ask = ask_of(line)
+    ask = _ROW_NOTE.sub(" ", ask_of(line))  # F105: the page's own note on a row is no part of its last field
     pos = []
     for key, pat in FIELD_LABELS:
         for m in re.finditer(r"(?:^|[\s(;.,*])(?:" + pat + r")\s*:\s*", ask, re.I):
@@ -840,7 +846,7 @@ def field_texts(line):
 
 
 def _grep_texts(ws):
-    """The texts a quote may be found in: the call transcripts, the quick notes, the log and its archive."""
+    """The texts a quote may be found in: the call transcripts, the quick notes, the log and its archive, his side of the text threads."""
     out = []
     calls = os.path.join(ws, "HQ", "calls")
     try:
@@ -858,6 +864,19 @@ def _grep_texts(ws):
             out.append((rel, _norm(open(os.path.join(ws, rel), encoding="utf8", errors="replace").read())))
         except OSError:
             pass
+    for line_name in HIS_THREADS:  # F105: his side of the text threads; an agent's line never counts
+        said = []
+        try:
+            for line in open(os.path.join(ws, "HQ", line_name, "thread.jsonl"), encoding="utf8", errors="replace"):
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(d, dict) and d.get("from") == "me" and d.get("text"):
+                    said.append(str(d["text"]))
+        except OSError:
+            continue
+        out.append((f"HQ/{line_name}/thread.jsonl", _norm("\n".join(said))))
     return out
 
 
@@ -911,7 +930,7 @@ def _source_ok(item, ws, labels):
             except OSError:
                 pass
         return None
-    for tok in re.findall(r"[\w./-]+\.(?:md|json|py|mjs|html|js|txt)", it):
+    for tok in re.findall(r"[\w./-]+\.(?:md|jsonl|json|py|mjs|html|js|txt)", it):
         for base in (ws, os.path.dirname(HERE)):
             if os.path.exists(os.path.join(base, tok)):
                 return tok
@@ -1570,6 +1589,8 @@ def plan_sprint(labels, night=None, now=None):
             said.append(f"{r['label']} couldn't be planned: {(res.stderr or res.stdout).strip()[:200]}")
             continue
         planned.append(r["label"])
+        import trail  # F105
+        trail.step(trail.resolve(r["label"]), "planned", at_night=time.strftime("%Y-%m-%d %H:%M", time.localtime(at)))
         said.append(f"{r['label']} planned for {_night_name(day, now)}, {time.strftime('%a %d %b %H:%M', time.localtime(at))}"
                     f" (about {E.dur(r['est'])}, done around {E.hhmm(r['eta'])}).")
     if L["line"]:

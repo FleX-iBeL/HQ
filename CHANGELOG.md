@@ -12,6 +12,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 - The privacy check only reads what's new in the history, so a release doesn't wait minutes for it.
 
+- The whole way from a text to Pepper to a new version now has a run of its own that checks every step, and a few things that stopped it are fixed: a request by text can get its Ready mark, a row written on a call says so, and every step of a request stays on one record (F105).
+
 - The agents running themselves, safer in the ways that count (still off for everyone but the maker): a restart or a takeover never turns an agent's run into a team job, a held run isn't started over, every run counts against her share however it ended, and nothing of theirs starts or runs into the night. Near the limit they stop first, five points under the team.
 
 - What an agent can do by herself is by tool and target now: nothing goes out, nothing of yours is written over, your vision, your rules and her own settings are read-only, and each agent can do her own job: Donna keeps your own calendars, each change logged in plain words with what it was before, and writes drafts. An event with guests, on someone else's calendar or a whole series she asks about first, by number and title; your yes does exactly that one, on the calendar it was for, and your no closes it for good. Mail stays drafts; one switch can open that later.
