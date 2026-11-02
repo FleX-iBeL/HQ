@@ -145,6 +145,19 @@ def line_text(key: str, moving: bool, number: int) -> str:
 
 
 def write(key: str, moving: bool, number: int | None) -> None:
+    import jobs  # F115: the planning file's one lock, the queue's: a switch here never undoes a planned line there
+    with jobs.locked():
+        _write(key, moving, number)
+
+
+def _replace(text: str) -> None:
+    hqpaths.guard_roadmap(ROADMAP)  # F17: a test never changes the real roadmap
+    tmp = f"{ROADMAP}.{os.getpid()}.tmp"
+    open(tmp, "w", encoding="utf8").write(text)
+    os.replace(tmp, ROADMAP)
+
+
+def _write(key: str, moving: bool, number: int | None) -> None:
     text, s = read()
     if s is None:
         sys.exit("The roadmap names no usage limit (**Usage limit: N%**), so there are no stop lines to switch.")
@@ -165,10 +178,7 @@ def write(key: str, moving: bool, number: int | None) -> None:
                 i = j
         lines.insert(i + 1, f"- {new} {WHAT[key]}")
         text = "\n".join(lines)
-    hqpaths.guard_roadmap(ROADMAP)  # F17: a test never changes the real roadmap
-    tmp = ROADMAP + ".tmp"
-    open(tmp, "w", encoding="utf8").write(text)
-    os.replace(tmp, ROADMAP)
+    _replace(text)
 
 
 RESERVE = re.compile(r"\*\*Usage reserve:\s*(\d{1,2})\b[^*]*\*\*")
@@ -181,6 +191,12 @@ def reserve_of(text: str) -> int:
 
 def write_reserve(n: int) -> None:
     """F100: taken off each stop line for the agents' cycles and the team; on the roadmap, so both HQs read the same one."""
+    import jobs  # F115: under the planning file's lock
+    with jobs.locked():
+        _write_reserve(n)
+
+
+def _write_reserve(n: int) -> None:
     text, s = read()
     if s is None:
         sys.exit("The roadmap names no usage limit (**Usage limit: N%**), so there are no stop lines to keep a reserve under.")
@@ -193,16 +209,22 @@ def write_reserve(n: int) -> None:
         lines.insert(i + 1, f"- {new} Taken off each stop line for the agents' cycles and the team, so his calls and the "
                             "small routines always have room (F100). Switched from a call.")
         text = "\n".join(lines)
-    hqpaths.guard_roadmap(ROADMAP)
-    tmp = ROADMAP + ".tmp"
-    open(tmp, "w", encoding="utf8").write(text)
-    os.replace(tmp, ROADMAP)
+    _replace(text)
+
+
+def _writes(argv: list[str]) -> bool:
+    rest = argv[1:] if argv and argv[0].lower() in ALIASES else argv
+    return bool(rest) and (rest[0] in ("moving", "fixed") or (argv[0] == "reserve" and len(argv) == 2))
 
 
 def main(argv: list[str]) -> int:
     if not argv:
         print(describe())
         return 0
+    if _writes(argv) and not os.environ.get("HQ_ROLE_HERE"):
+        import role  # F115: the planning file is the main's to write: on the backup a switch goes there
+        if role.is_backup():
+            return role.forward("usageline", list(argv))
     if argv[0] == "reserve":
         if len(argv) == 2:
             if not argv[1].isdigit() or int(argv[1]) > 50:
