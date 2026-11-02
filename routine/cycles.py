@@ -1832,6 +1832,8 @@ def order(aid: str, kind: str, words: str, now_: bool = False, now: dt.datetime 
             ledger.set_order(aid, o["n"], "now", f"said outside her hours, waits for {lo}")
             return f"Not now: nothing of {aid}'s runs between {hi} and {lo}. It's kept, and it's the first thing she does at {lo}. Tell him so."
         return _order_step(aid, o, now, base)
+    if not on(base):
+        return f"Noted for {aid}'s next bigger session: \"{words}\". Her looks at her list are off while the agents' switch is off."
     nx = next_look(aid, now, base) if agent_settings(aid, base).get("on") else None  # H308: her next look picks it up, not her bigger session
     if nx:
         return f"Noted for {aid}: her {nx[0]} ({nx[1]:%A %H:%M}) turns it into a step, so it doesn't wait for her next bigger session: \"{words}\"."
@@ -2288,11 +2290,13 @@ def next_look(aid: str, now: dt.datetime | None = None, base: Path | None = None
     now = now or dt.datetime.now()
     a = agent_settings(aid, base)
     hm = now.strftime("%H:%M")
-    with held() as d:
-        ld = _day_looks(_agent_state(d, aid), a, now)
-        for name, t in ld["times"]:
-            if t >= hm and t not in ld["done"]:
-                return name, now.replace(hour=_t(t).hour, minute=_t(t).minute, second=0, microsecond=0)
+    d = getattr(_tls, "d", None) or _state()  # a read: nothing written (inside the lock, what's held)
+    ld = ((d.get("agents") or {}).get(aid) or {}).get("looks_day") or {}
+    if ld.get("day") != now.strftime("%Y-%m-%d"):
+        ld = {"times": look_times(a), "done": []}
+    for name, t in ld["times"]:
+        if t >= hm and t not in ld["done"]:
+            return name, now.replace(hour=_t(t).hour, minute=_t(t).minute, second=0, microsecond=0)
     tm = look_times(a)
     if not tm:
         return None
@@ -2316,7 +2320,11 @@ def _take_orders(aid: str, a: dict, look: str, upto: str, now: dt.datetime, base
     with held() as d:
         st_ = _agent_state(d, aid)
         had = {str(r.get("order")) for r in st_["steps"].values() if r.get("order")}
-        todo = [o for o in ledger.orders(aid, ("open",)) if o["kind"] == "start" and o["at"] <= upto and str(o["n"]) not in had]
+        live = d.get("looks_live")  # an order from before the looks went live stays for her bigger session
+        if not live:
+            return did
+        todo = [o for o in ledger.orders(aid, ("open",)) if o["kind"] == "start" and live < o["at"] <= upto and str(o["n"]) not in had
+                and not ledger.LOOK_LABEL.match(o.get("note") or "")]
         if not todo:
             return did
         price = _step_price(aid, a)
@@ -2350,6 +2358,10 @@ def list_looks(now: dt.datetime | None = None, base: Path | None = None, log=Non
     now = now or dt.datetime.now()
     did = []
     hm = now.strftime("%H:%M")
+    if not on(base):
+        return did
+    with held() as d:
+        d.setdefault("looks_live", now.strftime(FMT))  # the first minute the looks run with the switch on
     for aid, a in settings(base)["agents"].items():
         if not a.get("on") or not _agent(aid, base):
             continue
