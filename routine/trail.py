@@ -155,6 +155,13 @@ def step(item: str | None, what: str, **facts) -> None:
         _put({"at": round(time.time(), 3), "id": item, "step": what, **{k: v for k, v in facts.items() if v not in (None, "", [])}})
     except Exception as e:
         _bad(e)
+        return
+    try:  # F116: after a failure, the next step written closes its red line
+        import routines
+        if (routines.read().get("record") or {}).get("state") == "down":
+            routines.good("record", "The record is written again", every=30 * 86400)
+    except Exception:
+        pass
 
 
 def follow(x: str) -> list[dict]:

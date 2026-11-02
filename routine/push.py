@@ -81,7 +81,7 @@ def went_through(what: str) -> None:
         import incidents
         if incidents.is_down("github"):
             incidents.fix("github", f"{what} went through again")
-            incidents.up("github")
+            incidents.up("github", what=f"{what} went through again")
     except Exception:
         pass
 

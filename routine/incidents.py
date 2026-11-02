@@ -20,10 +20,29 @@ EVENTS = os.path.join(hqpaths.SUPPORT, "events.jsonl")
 KEEP = 100
 
 
+def _real() -> bool:
+    """F116: a test leaves the real log as it is unless it named its own."""
+    return not hqpaths.under_test() or bool(os.environ.get("HQ_INCIDENTS_FILE"))
+
+
 def read():
     try:
         data = json.load(open(FILE))
-    except (OSError, ValueError):
+    except OSError:
+        data = {}
+    except ValueError:
+        # F116: an unreadable log was read as empty, and the next write put a new one over the history. Now it's kept aside, its
+        # own routine line goes red, and new incidents are written from here.
+        data = {}
+        if _real():
+            try:
+                os.replace(FILE, FILE + ".bad")
+                import routines
+                routines.beat("incidents-file", state="down", every=3600, last=time.time(),
+                              text=f"The incident log was unreadable; kept as {os.path.basename(FILE)}.bad, new incidents are written from here")
+            except Exception:
+                pass
+    if not isinstance(data, dict):
         data = {}
     data.setdefault("incidents", [])
     data.setdefault("events_seen", 0)
@@ -84,20 +103,32 @@ def fix(key, what, at=None):
         pass
 
 
-def up(key, at=None):
-    """The routine is back: closes its open incident, if any."""
+def up(key, at=None, what=None):
+    """The routine is back: closes its open incident, if any. F116: never without what fixed it: `what` is that, kept as the
+    incident's last fix when it has none yet (a fix written before it says it already). With no fix and no `what` the close
+    is refused: it stays open, and False comes back. True when it closed, None when nothing was open."""
     try:
         data = read()
         inc = _open(data, key)
-        if inc:
-            inc["back"] = at or time.time()
-            _write(data)
+        if not inc:
+            return None
+        when = at or time.time()
+        if not inc.get("fixes"):
+            if not str(what or "").strip():
+                return False
+            inc["fixes"] = [{"at": when, "what": str(what).strip()}]
+        inc["back"] = when
+        _write(data)
+        return True
     except Exception:
-        pass
+        return None
 
 
 def past(key, since, until, why, fixes, item=None):
-    """An outage that is already over when it's noticed (the helper itself was down). F103: item, the id of the work it hit."""
+    """An outage that is already over when it's noticed (the helper itself was down). F103: item, the id of the work it hit.
+    F116: closed from the start, so never without what fixed it: no fixes, and it's refused (False)."""
+    if not [w for _, w in fixes or [] if str(w).strip()]:
+        return False
     try:
         data = read()
         inc = {"id": f"{key}-{int(since)}", "key": key, "down": since, "why": why,

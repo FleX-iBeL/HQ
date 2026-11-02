@@ -1777,7 +1777,7 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         tick.FAST_WINDOW = ()  # the rest of this flow counts in hours, whatever the roadmap says
         now = time.time()
         open(tick.MAIL_LAST, "w").write(str(int(now // 3600 * 3600 - 3600 + 30)))  # last ran just after the previous hour
-        incidents.past("helper", now // 3600 * 3600 - 120, now - 30, "The MacBook was asleep", [])
+        incidents.past("helper", now // 3600 * 3600 - 120, now - 30, "The MacBook was asleep", [(now - 30, "It came back on its own")])  # F116: never without its fix
         if now % 3600 > tick.MAIL_LATE:
             tick.mail({"mail": True, "on": True})
             inc = incidents.is_down("mail")
@@ -20849,6 +20849,490 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
         need(_t.time() - t < 30 and any("f3.txt" in h for h in o["hits"]), f"the second read: {o}")
         return "what read clean isn't read again, a stopped read goes on, a new version is read, a hit stays a hit, other words read it all"
 
+    # -- F116: the status page says what's true. A test copy of the page: its own folder, port and stores, never the live one.
+    F116_ROADMAP = """# {mark} {state}
+
+## Now: the test step
+
+**Just finished:** nothing yet
+
+| Phase T | T1 🔨 |
+|---|---|
+
+- 10:00 started
+
+*Updated 2 November 2026, 10:00*
+
+---
+
+{extra}
+
+## The queue
+
+**Routine:** on
+
+{queue}
+
+## Phase T · A test phase
+
+| | Step | What you get |
+|---|---|---|
+| 🔨 | T1 A step | Something |
+"""
+
+    def _f116_site(self, name: str) -> Path:
+        site = self.tmp / name
+        if site.exists():
+            shutil.rmtree(site)
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        (site / ".status").mkdir()
+        (site / "support").mkdir()
+        self._f116_road(site)
+        return site
+
+    def _f116_road(self, site: Path, state: str = "BUILDING", queue: str = "", extra: str = "") -> None:
+        mark = {"BUILDING": "🔨", "WAITING": "⏸", "DONE": "✅", "STOPPED": "⚠️"}.get(state, "🔨")
+        words = "WAITING FOR YOU" if state == "WAITING" else state
+        site_roadmap(site).write_text(self.F116_ROADMAP.format(mark=mark, state=words, queue=queue, extra=extra), encoding="utf8")
+
+    @staticmethod
+    def _f116_lines(site: Path, lines: dict) -> None:
+        now = time.time()
+        data = {"helper": {"at": now, "state": "ok", "text": "Ran fine", "every": 60, "last": now}}
+        for k, v in lines.items():
+            data[k] = {"at": now, "every": 60, "last": now, **v}
+        (site / ".status/routines.json").write_text(json.dumps(data))
+        (site / "support").mkdir(exist_ok=True)
+        (site / "support/watchdog.json").write_text(json.dumps({"at": now, "state": "ok", "text": "Looked at the helper", "every": 300, "last": now}))
+
+    async def _f116_serve(self, site: Path, env: dict | None = None):
+        import socket
+        with socket.socket() as s_:
+            s_.bind(("127.0.0.1", 0))
+            port = s_.getsockname()[1]
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        e = {**os.environ, "HQ_STATUS_PORT": str(port), "HQ_SUPPORT": str(site / "support"), "HQ_LAPTOP": "0", "HQ_PEER_USAGE_CACHE": "0"}
+        for k in ("HQ_ROADMAP", "HQ_WORKSPACE", "HQ_CYCLES_STATE", "HQ_CYCLES_FOLDER", "HQ_CYCLES_OLD_STATE", "HQ_HELPERS", "HQ_LABEL", "HQ_USAGE"):
+            e.pop(k, None)
+        e.update(env or {})
+        proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=e, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        base = f"http://127.0.0.1:{port}"
+        for _ in range(60):
+            if http_get("/where.json", base)[0] == 200:
+                break
+            await asyncio.sleep(0.2)
+        return proc, base
+
+    @staticmethod
+    def _f116_stop(proc) -> None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    @staticmethod
+    def _f116_chrome() -> str:
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        need(Path(chrome).exists(), "no headless browser here to draw the page")
+        return chrome
+
+    async def _f116_dom(self, base: str) -> str:
+        """The page as drawn on a phone-wide screen, without the script's own text."""
+        r = await asyncio.to_thread(subprocess.run, [self._f116_chrome(), "--headless", "--no-sandbox", "--disable-gpu", "--virtual-time-budget=8000",
+                                                     f"--user-data-dir={self.tmp / 'f116-chrome'}", "--window-size=390,844", "--dump-dom", base + "/"],
+                                    capture_output=True, text=True, timeout=120)
+        return re.sub(r"<script\b.*?</script>", "", r.stdout, flags=re.S)
+
+    @staticmethod
+    def _f116_page(base: str) -> dict:
+        code, body, _ = http_get("/page.json", base)
+        need(code == 200, f"the status server has no page read (/page.json answers {code})")
+        return {k: v.get("data") for k, v in json.loads(body)["parts"].items()}
+
+    @staticmethod
+    def _f116_rows(dom: str) -> dict:
+        """Each routine line drawn: its name and its state."""
+        out = {}
+        for cls, inner in re.findall(r'<div class="routine ([a-z -]+)"[^>]*>(.*?)</div>', dom, re.S):
+            m = re.search(r'<span class="name">(.*?)</span>', inner, re.S)
+            if m:
+                out[m.group(1).replace("&#39;", "'")] = cls.split()[0]
+        return out
+
+    async def flow340(self) -> str:
+        """F116, no Claude: a store the page can't read shows red with which one: the routine lines, the incident log, the usage
+        reading, the agents' questions, the planning gone; never 'None so far' or 'Everything is working'. An unreadable incident
+        log is kept aside, never written over."""
+        site = self._f116_site("f116-broken")
+        self._f116_lines(site, {"mail": {"state": "ok", "text": "Checked"}})
+        st = site / ".status"
+        (st / "incidents.json").write_text(json.dumps({"incidents": [{"id": "mail-1", "key": "mail", "down": time.time() - 600, "why": "x",
+                                                                      "fixes": [{"at": time.time() - 500, "what": "y"}], "back": time.time() - 400}]}))
+        (st / "usage.json").write_text(json.dumps({"checkedAt": datetime.now(timezone.utc).isoformat(), "readable": True, "limits": []}))
+        cyc = site / "cycles-state.json"
+        cyc.write_text(json.dumps({"agents": {}}))
+        proc, base = await self._f116_serve(site, {"HQ_CYCLES_STATE": str(cyc)})
+        seen = []
+        try:
+            files = {"routines": st / "routines.json", "incidents": st / "incidents.json", "usage": st / "usage.json", "agents": cyc}
+            # Three at once, drawn: red, each named, nothing says all is well.
+            kept = {f: f.read_bytes() for f in (files["routines"], files["incidents"], files["usage"])}
+            for f in kept:
+                f.write_text("{not json")
+            dom = await self._f116_dom(base)
+            for store in ("routines", "incidents", "usage"):
+                need(re.search(rf'<div class="routine down broken"[^>]*data-store="{store}"', dom) or re.search(rf'data-store="{store}"[^>]*class="routine down broken"', dom),
+                     f"the {store} store isn't drawn as a red line of its own")
+                need(f'<li data-store="{store}">' in dom, f"the {store} store isn't in the red box on top")
+            need("Can't read the incident log" in dom and "None so far" not in dom, "a broken incident log reads as none so far")
+            need("Can't read the saved usage reading" in dom, "a broken usage reading isn't red")
+            need('title="Can\'t read: ' in dom or "title=\"Can't read: " in dom, "the light doesn't say what it can't read")
+            need("Everything is working" not in dom and "All working" not in dom, "the page says all is working while it can't read its stores")
+            for f in (files["routines"], files["incidents"], files["usage"]):
+                f.write_bytes(kept[f])
+            need(not self._f116_page(base)["truth"]["broken"], f"with every store readable the page says it can't read one: {self._f116_page(base)['truth']}")
+            for store, f in files.items():
+                good_ = f.read_bytes()
+                f.write_text("{not json")
+                b = self._f116_page(base)["truth"]["broken"]
+                need([x["store"] for x in b] == [store] and f.name in b[0]["file"] and b[0]["why"].startswith("it can't be read"),
+                     f"with {f.name} broken the page should name that one store: {b}")
+                f.write_bytes(good_)
+                seen.append(store)
+            # The planning gone: the server still answers and says so.
+            for f in (files["routines"], files["incidents"], files["usage"]):
+                f.write_text("{}")
+            (st / "incidents.json").write_text(json.dumps({"incidents": []}))
+            site_roadmap(site).unlink()
+            b = self._f116_page(base)["truth"]["broken"]
+            need([x["store"] for x in b] == ["roadmap"], f"with the planning gone the page doesn't say so: {b}")
+            dom = await self._f116_dom(base)
+            need("The planning and its status block" in dom and "The status server is not answering" not in dom,
+                 "with the planning gone the page says the server isn't answering, or doesn't name the planning")
+        finally:
+            self._f116_stop(proc)
+        # The incident log itself: an unreadable one is kept aside, its line goes red, the history isn't written over.
+        d = self.tmp / "f116-inc"
+        d.mkdir(exist_ok=True)
+        (d / "incidents.json").write_text('{"incidents": [{"id": "old"')
+        code = ("import sys, json; sys.path.insert(0, sys.argv[1] + '/routine'); import incidents, routines\n"
+                "incidents.down('mail', 'a test outage')\n"
+                "print(json.dumps({'lines': routines.read(), 'inc': incidents.read()}))")
+        env = {**os.environ, "HQ_INCIDENTS_FILE": str(d / "incidents.json"), "HQ_ROUTINES_FILE": str(d / "routines.json")}
+        r = await asyncio.to_thread(subprocess.run, [sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, timeout=60)
+        need(r.returncode == 0, f"the incident log: {r.stderr[-500:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need((d / "incidents.json.bad").exists() and (d / "incidents.json.bad").read_text() == '{"incidents": [{"id": "old"',
+             "an unreadable incident log wasn't kept aside as it was: the next write went over it")
+        need(o["lines"].get("incidents-file", {}).get("state") == "down", f"an unreadable incident log has no red line: {o['lines']}")
+        need([i["key"] for i in o["inc"]["incidents"]] == ["mail"], "after keeping it aside, new incidents aren't written")
+        return f"red with which one for {', '.join(seen)} and the planning gone, drawn on a phone-wide page; a broken incident log kept aside"
+
+    async def flow341(self) -> str:
+        """F116, no Claude: waiting for you is worked out, not hand-written: only when nothing runs (no job, no night's step) and
+        something is truly his: a job parked on him, a question of an agent's waiting for his word, a door waiting for his go."""
+        site = self._f116_site("f116-waiting")
+        self._f116_lines(site, {})
+        cyc = site / "cycles-state.json"
+        cyc.write_text(json.dumps({"agents": {}}))
+        running = "- Job 7 · running since 10:00 · agreed 2026-11-02 09:00 · build a test thing"
+        boxed = "- Job 9 · boxed: ran past its box · agreed 2026-11-02 09:00 · another test thing"
+        today = datetime.now().strftime("%Y-%m-%d %H:%M")
+        proc, base = await self._f116_serve(site, {"HQ_CYCLES_STATE": str(cyc)})
+        seen = []
+
+        def banner():
+            return self._f116_page(base)["truth"]["banner"]
+        try:
+            self._f116_road(site, "WAITING", "")
+            dom = await self._f116_dom(base)
+            need('data-state="WAITING"' not in dom and "Nothing is running and nothing waits for you" in dom,
+                 "the page draws a hand-written waiting for you while nothing runs and nothing is his")
+            self._f116_road(site, "WAITING", running)
+            b = banner()
+            need(b["state"] == "BUILDING" and "The status block said Waiting for you" in b["corrected"], f"a job runs, the block says waiting: {b}")
+            seen.append("a running job is never waiting")
+            self._f116_road(site, "WAITING", "")
+            b = banner()
+            need(b["state"] != "WAITING", f"nothing runs and nothing is his, the block says waiting: shown as {b}")
+            dom = await self._f116_dom(base)
+            need('data-state="DONE"' in dom and "Nothing is running and nothing waits for you" in dom, "the page draws a hand-written waiting")
+            seen.append("a hand-written waiting with nothing his isn't shown")
+            self._f116_road(site, "BUILDING", boxed)
+            b = banner()
+            need(b["state"] == "WAITING" and "Job 9 is parked" in b["line"], f"a job parked on him, nothing running: {b}")
+            dom = await self._f116_dom(base)
+            need('data-state="WAITING"' in dom and "Job 9 is parked" in dom, "the page doesn't draw waiting for a job parked on him")
+            seen.append("a job parked on him")
+            self._f116_road(site, "DONE", "")
+            cyc.write_text(json.dumps({"agents": {"donna": {"holds": [{"n": 3, "key": "k", "what": "move the dentist", "why": "a calendar change"}]}}}))
+            b = banner()
+            need(b["state"] == "WAITING" and "Donna's question 3" in b["line"], f"a question waiting for his word: {b}")
+            seen.append("a question in a text")
+            cyc.write_text(json.dumps({"agents": {"pepper": {"goals": {"book the trip": {"tripped": today}}}}}))
+            b = banner()
+            need(b["state"] == "WAITING" and "waits for your go" in b["line"], f"a door waiting for his yes: {b}")
+            seen.append("a door for his yes")
+            self._f116_lines(site, {"nightly": {"state": "running", "text": "The night's tests run"}})
+            b = banner()
+            need(b["state"] != "WAITING", f"the night's tests run: still waiting for him: {b}")
+            seen.append("not while a step runs")
+            self._f116_lines(site, {})
+            cyc.write_text(json.dumps({"agents": {"pepper": {"goals": {"book the trip": {"tripped": today, "go": today}}}}}))
+            b = banner()
+            need(b["state"] != "WAITING", f"his go was given: still waiting: {b}")
+        finally:
+            self._f116_stop(proc)
+        return "; ".join(seen)
+
+    async def flow342(self) -> str:
+        """F116, no Claude: Donna's watch, his reminders, the weather, his news, the calendar read and the coaching check-ins each
+        write a line every minute; made to throw, each goes red with an incident, on the page too; the next good minute closes it."""
+        site = self._f116_site("f116-parts")
+        self._f116_lines(site, {})
+        ws = site / "workspace"
+        code = r"""
+import sys, os, json, types
+sys.path.insert(0, sys.argv[1] + '/routine')
+import tick
+fail = sys.argv[2] == 'fail'
+def boom(*a, **k):
+    raise RuntimeError('a stand-in that fails')
+def mk(name, **fns):
+    m = types.ModuleType(name)
+    m.__dict__.update(fns)
+    sys.modules[name] = m
+val = lambda v: boom if fail else (lambda *a, **k: v)
+mk('direct_line', watch=val([]), text=lambda *a, **k: None)
+mk('pings', watch=val([]))
+mk('weather', start=val(False))
+mk('news', start=val(False))
+mk('agenda', start=val(False))
+mk('coaching', refresh=val([]))
+mk('trips', start=lambda *a, **k: False)
+mk('planning', start=lambda *a, **k: False)
+tick.estimate.friday_due = lambda *a, **k: False
+tick.role.acting = lambda *a, **k: 'main'
+tick.jobs = lambda *a, **k: '{}'
+tick.log = lambda *a, **k: None
+tick.direct_watch()
+import routines, incidents
+print(json.dumps({'lines': routines.read(), 'inc': incidents.read()['incidents']}))
+"""
+        env = {**os.environ, "HQ_ROUTINES_FILE": str(site / ".status/routines.json"), "HQ_INCIDENTS_FILE": str(site / ".status/incidents.json"),
+               "HQ_WORKSPACE": str(ws)}
+        keys = {"donna": "Donna's watch", "reminders": "Your reminders", "weather": "Weather", "news": "Your news", "calendar": "Calendar read", "coaching": "Coaching check-ins"}
+
+        async def minute(mode):
+            r = await asyncio.to_thread(subprocess.run, [sys.executable, "-c", code, str(ROOT), mode], capture_output=True, text=True, env=env, timeout=120, cwd=str(ROOT))
+            need(r.returncode == 0, f"Donna's minute: {r.stderr[-800:]}")
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        o = await minute("fail")
+        for k in keys:
+            x = o["lines"].get(k) or {}
+            need(x.get("state") == "down" and "a stand-in that fails" in x.get("text", ""), f"{k} threw, but its line isn't red: {x}")
+            need(any(i["key"] == k and not i.get("back") for i in o["inc"]), f"{k} threw, but no incident is open")
+        proc, base = await self._f116_serve(site)
+        try:
+            rows = self._f116_rows(await self._f116_dom(base))
+            for k, name in keys.items():
+                need(rows.get(name) == "down", f"{name} isn't drawn red on the page: {rows.get(name)}")
+        finally:
+            self._f116_stop(proc)
+        o = await minute("ok")
+        for k in keys:
+            need((o["lines"].get(k) or {}).get("state") == "ok", f"{k} ran fine again, its line isn't: {o['lines'].get(k)}")
+            inc = [i for i in o["inc"] if i["key"] == k]
+            need(inc and inc[-1].get("back") and inc[-1].get("fixes"), f"{k} ran fine again: its incident isn't closed with what fixed it: {inc}")
+        return "six lines; each red with an incident when it throws, drawn red on the page, closed with a fix the next good minute"
+
+    async def flow343(self) -> str:
+        """F116, no Claude: the lines that were written but never drawn (the ledger, the feedback mailbox, the data changes, the
+        record, the helpers beside a call, GitHub's About) each show on the page with their state; the About writes its own."""
+        site = self._f116_site("f116-drawn")
+        lines = {"mistakes": "down", "feedback": "ok", "data": "down", "record": "down", "helpers": "down", "about": "ok"}
+        names = {"mistakes": "The ledger of mistakes", "feedback": "Feedback mailbox", "data": "Data changes", "record": "The record of each item",
+                 "helpers": "Helpers beside a call", "about": "GitHub's About"}
+        self._f116_lines(site, {k: {"state": v, "text": f"a test line for {k}", "every": 3600} for k, v in lines.items()})
+        proc, base = await self._f116_serve(site)
+        try:
+            dom = await self._f116_dom(base)
+            rows = self._f116_rows(dom)
+            for k, st in lines.items():
+                need(rows.get(names[k]) == st, f"the {k} line isn't drawn as {st}: {rows.get(names[k])}")
+            need("4 not working" in dom, "the Routines heading doesn't count the red ones")
+        finally:
+            self._f116_stop(proc)
+        d = self.tmp / "f116-about"
+        d.mkdir(exist_ok=True)
+        code = ("import sys, json; sys.path.insert(0, sys.argv[1] + '/routine'); import about, routines\n"
+                "about._incident(False, 'GitHub said no'); a = routines.read().get('about')\n"
+                "about._incident(True, 'Set to the new version'); b = routines.read().get('about')\n"
+                "print(json.dumps([a, b]))")
+        env = {**os.environ, "HQ_INCIDENTS_FILE": str(d / "incidents.json"), "HQ_ROUTINES_FILE": str(d / "routines.json")}
+        r = await asyncio.to_thread(subprocess.run, [sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, timeout=60)
+        need(r.returncode == 0, f"the About: {r.stderr[-500:]}")
+        a, b = json.loads(r.stdout.strip().splitlines()[-1])
+        need((a or {}).get("state") == "down" and (b or {}).get("state") == "ok", f"the About doesn't write its own line: {a} {b}")
+        return "six lines drawn with their state, counted in the heading; the About writes its own"
+
+    async def flow344(self) -> str:
+        """F116, no Claude: an incident can't close without what fixed it: a close with none is refused and it stays open; with one
+        it closes and keeps it; a part that runs fine again says so as its fix; an old one closed without a fix shows its mark."""
+        d = self.tmp / "f116-close"
+        d.mkdir(exist_ok=True)
+        code = r"""
+import sys, json, time
+sys.path.insert(0, sys.argv[1] + '/routine')
+import incidents, routines
+o = {}
+incidents.down('x', 'it broke')
+o['bare'] = incidents.up('x')
+o['still'] = bool(incidents.is_down('x'))
+o['with'] = incidents.up('x', what='restarted it')
+o['x'] = [i for i in incidents.read()['incidents'] if i['key'] == 'x']
+incidents.down('y', 'it broke too')
+incidents.fix('y', 'did a thing')
+o['fixed'] = incidents.up('y')
+t = time.time()
+o['past'] = incidents.past('z', t - 60, t, 'over already', [])
+o['z'] = [i for i in incidents.read()['incidents'] if i['key'] == 'z']
+routines.bad('w', 'it failed')
+routines.good('w', 'it ran')
+o['w'] = [i for i in incidents.read()['incidents'] if i['key'] == 'w']
+print(json.dumps(o))
+"""
+        env = {**os.environ, "HQ_INCIDENTS_FILE": str(d / "incidents.json"), "HQ_ROUTINES_FILE": str(d / "routines.json")}
+        r = await asyncio.to_thread(subprocess.run, [sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, timeout=60)
+        need(r.returncode == 0, f"the incident log: {r.stderr[-500:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["bare"] is False and o["still"], f"a close without what fixed it wasn't refused: {o['bare']}, still open: {o['still']}")
+        x = o["x"][-1]
+        need(o["with"] is True and x.get("back") and x["fixes"] and x["fixes"][-1]["what"] == "restarted it", f"a close with what fixed it: {o['with']} {x}")
+        need(o["fixed"] is True, "a fix written before doesn't let it close")
+        need(o["past"] is False and not o["z"], f"an outage already over, with no fix, was written: {o['z']}")
+        w = o["w"][-1] if o["w"] else {}
+        need(w.get("back") and w["fixes"] and w["fixes"][-1]["what"].startswith("It ran fine again by itself"), f"a part that ran fine again: {w}")
+        # The page: an old one closed without a fix shows its mark; nothing is changed in the log.
+        site = self._f116_site("f116-nofix")
+        self._f116_lines(site, {})
+        old = {"incidents": [{"id": "call-1", "key": "call", "down": time.time() - 900, "why": "Down: calls won't connect", "fixes": [], "back": time.time() - 840}]}
+        (site / ".status/incidents.json").write_text(json.dumps(old))
+        proc, base = await self._f116_serve(site)
+        try:
+            dom = await self._f116_dom(base)
+            need("Closed without a fix" in dom, "an old incident closed without a fix has no mark on the page")
+        finally:
+            self._f116_stop(proc)
+        need(json.loads((site / ".status/incidents.json").read_text()) == old, "the page changed the old incident")
+        return "a bare close refused, a close with its fix kept, a past outage with none refused, a part back by itself says so; the old ones marked"
+
+    async def flow345(self) -> str:
+        """F116, no Claude: the page's stop line is where the gate stops: the gate's own number, with the reserve kept for his calls."""
+        site = self._f116_site("f116-line")
+        self._f116_road(site, extra="**Usage limit: 100%.**\n\n**5-hour line: fixed.**\n\n**Weekly line: fixed at 70%.**\n\n**Fable line: fixed at 90%.**")
+        self._f116_lines(site, {})
+        now = datetime.now(timezone.utc)
+        (site / ".status/usage.json").write_text(json.dumps({"checkedAt": now.isoformat(), "by": "a test", "readable": True, "plan": "Max",
+                                                              "limits": [{"label": "Weekly · all models", "percent": 60, "resetsAt": (now + timedelta(days=2)).isoformat()}]}))
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        env = {k: v for k, v in os.environ.items() if k not in ("HQ_NO_WALL", "HQ_ROADMAP", "HQ_WORKSPACE", "HQ_USAGE")}
+        r = await asyncio.to_thread(subprocess.run, [node, str(site / "status/save-usage.mjs"), "--gate", "--reserve"], capture_output=True, text=True, env=env, timeout=60)
+        m = re.search(r"its stop line is ([\d.]+)%", r.stdout)
+        need(m, f"the gate didn't stop at its line: {r.stdout.strip()} {r.stderr[-300:]}")
+        gate = m.group(1)
+        proc, base = await self._f116_serve(site)
+        try:
+            dom = await self._f116_dom(base)
+        finally:
+            self._f116_stop(proc)
+        drawn = re.findall(r"Stop line ([\d.]+)%", dom)
+        need(drawn == [gate], f"the page draws the stop line at {drawn}, the gate stops at {gate}%")
+        need("Stop line reached" in dom, "the page doesn't say the line is reached while the gate stops")
+        return f"the gate stops at {gate}%, the page draws {gate}% and says it's reached"
+
+    async def flow346(self) -> str:
+        """F116, no Claude: the phone page's weight: the page open in a phone-wide browser for a minute, against the real planning's
+        size, the status block and a routine line changing three times in it; the server's answer bytes counted by a counter in
+        front of it. Before: about 30 MB a minute; a tenth or less is 3 MB."""
+        site = self._f116_site("f116-weight")
+        self._f116_lines(site, {})
+        # A stand-in planning the size of his (1.4 MB on 2 November 2026): many rows, none of his words.
+        road = site_roadmap(site)
+        rows = "".join(f"| ⬜ | T{i} A stand-in row number {i} | " + "what it gives, in plain words, " * 20 + "|\n" for i in range(2200))
+        road.write_text(road.read_text(encoding="utf8") + rows, encoding="utf8")
+        for live in (".status/routines.json", ".status/incidents.json", ".status/usage.json"):
+            if (ROOT / live).exists():
+                shutil.copy(ROOT / live, site / live)
+        proc, base = await self._f116_serve(site)
+        counted = {"bytes": 0, "reads": 0}
+
+        async def pipe(r_, w_, count):
+            try:
+                while True:
+                    b = await r_.read(65536)
+                    if not b:
+                        break
+                    if count:
+                        counted["bytes"] += len(b)
+                    else:
+                        counted["reads"] += b.count(b"GET /")
+                    w_.write(b)
+                    await w_.drain()
+            except Exception:
+                pass
+            finally:
+                try:
+                    w_.close()
+                except Exception:
+                    pass
+
+        async def client(cr, cw):
+            try:
+                sr, sw = await asyncio.open_connection("127.0.0.1", int(base.rsplit(":", 1)[1]))
+            except OSError:
+                cw.close()
+                return
+            await asyncio.gather(pipe(cr, sw, False), pipe(sr, cw, True))
+        counter = await asyncio.start_server(client, "127.0.0.1", 0)
+        cport = counter.sockets[0].getsockname()[1]
+        browser = None
+        try:
+            browser = subprocess.Popen([self._f116_chrome(), "--headless", "--no-sandbox", "--disable-gpu", f"--user-data-dir={self.tmp / 'f116-weight-chrome'}",
+                                        "--window-size=390,844", f"http://127.0.0.1:{cport}/"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            await asyncio.sleep(15)  # the page loaded and settled: the first read of everything is part of opening it, not of the minute
+            start, reads = counted["bytes"], counted["reads"]
+            t0 = time.time()
+            text = road.read_text(encoding="utf8")
+            for i in range(3):
+                await asyncio.sleep(20)
+                text = text.replace("## Now: ", f"## Now: step {i} · ", 1) if i == 0 else text.replace(f"step {i - 1} · ", f"step {i} · ", 1)
+                road.write_text(text, encoding="utf8")
+                lines = json.loads((site / ".status/routines.json").read_text() or "{}")
+                lines.setdefault("helper", {})["at"] = time.time()
+                (site / ".status/routines.json").write_text(json.dumps(lines))
+            used = (counted["bytes"] - start) * 60 / (time.time() - t0)
+            reads = counted["reads"] - reads
+        finally:
+            if browser:
+                try:
+                    os.killpg(browser.pid, signal.SIGTERM)  # its own process group, started above: nothing else
+                except ProcessLookupError:
+                    pass
+                try:
+                    browser.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(browser.pid, signal.SIGKILL)
+            counter.close()
+            self._f116_stop(proc)
+        mb = used / 1e6
+        need(used > 0 and reads >= 15, f"the page isn't open and reading every three seconds: {reads} reads in the minute")
+        need(mb <= 3, f"the page used {mb:.1f} MB in a minute with the planning at {road.stat().st_size / 1e6:.1f} MB; a tenth of before is 3 MB")
+        return f"{mb:.2f} MB in a minute with the page open, {reads} reads (the planning {road.stat().st_size / 1e6:.1f} MB, its block changed three times)"
+
     async def flow335(self) -> str:
         """F112, no Claude: the installer's last step fits what it is on Linux: a set without the long flows, a limit it fits in going by the last night's own
         times, and out of time the fix line names the right system."""
@@ -32583,6 +33067,13 @@ FLOWS = {
     333: ("F112: back to a version with no forward of its own, once the release after it wrote that down; its own update brings HQ forward", False, "flow333"),
     334: ("F112: the history read holds what read clean, so a release's privacy check finishes; a hit is never held", False, "flow334"),
     335: ("F112: the installer's last step fits Linux: the set, the limit, and the fix line names the right system", False, "flow335"),
+    340: ("F116: a store the page can't read shows red with which one, never none so far or all working; a broken incident log kept aside", False, "flow340"),
+    341: ("F116: waiting for you is worked out: only when nothing runs and something is truly his (a parked job, a question, a door)", False, "flow341"),
+    342: ("F116: Donna's watch, reminders, weather, news, calendar and coaching each have a line; a throw goes red, on the page too", False, "flow342"),
+    343: ("F116: the six written lines (ledger, feedback, data, record, helpers, About) are drawn with their state", False, "flow343"),
+    344: ("F116: an incident can't close without what fixed it; the old ones without show their mark", False, "flow344"),
+    345: ("F116: the page's stop line is where the gate stops, the reserve kept", False, "flow345"),
+    346: ("F116: the phone page uses a tenth of what it did: bytes a minute with the page open, counted in front of the server", False, "flow346"),
     208: ("F101: the status block can't break the planning, the reviewer's answer needs all five probes and real quotes, three rounds an item, the night is the routine's, a friend stays on the release", False, "flow208"),
     207: ("F101: the release reads the night and refuses a red or missing one with the night named; a commit naming no item holds it", False, "flow207"),
     206: ("F101: QA's pass stands on a green run and a named comparison; a piece needs its switch on the hidden list", False, "flow206"),
