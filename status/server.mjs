@@ -1045,6 +1045,26 @@ const server = createServer(async (req, res) => {
     });
     return;
   }
+  // F115: the backup's every-minute hand-over to the main, on or off (routine/sync.py handover on|off, which the main
+  // writes). Off on the real pair until the dry run has been read with him. Needs the x-hq header, as the lid's switch.
+  if (path0 === '/api/handover') {
+    if (req.method !== 'POST' || req.headers['x-hq'] !== 'handover') {
+      res.writeHead(403).end('Only the HQ page can switch the hand-over');
+      return;
+    }
+    let body = {};
+    try { body = JSON.parse(await readBody(req)); } catch {}
+    const json = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
+    if (!['on', 'off'].includes(body.want)) {
+      res.writeHead(400).end('want is on or off');
+      return;
+    }
+    execFile('/usr/bin/python3', [join(root, 'routine/sync.py'), 'handover', body.want], { timeout: 120000 }, (err, out, errOut) => {
+      const said = String(out || errOut || '').trim() || (err ? 'It didn\'t answer.' : 'Done.');
+      res.writeHead(err ? 400 : 200, json).end(JSON.stringify({ ok: !err, said }));
+    });
+    return;
+  }
   // H83: which HQ this is, for the call page (another port, so it may read only this, nothing else).
   // H118: and which computer is main (role.py's badge, with its routine line; none when this HQ is on its own).
   if (path0 === '/where.json') {

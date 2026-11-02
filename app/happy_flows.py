@@ -20914,7 +20914,8 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                         "HQ_ROLE_ONLINE": "1", "HQ_ROLE_RETRY": "0.1", "HQ_BACKEND_ONE_WAY_SYNC": "1", "HQ_SYNC_GIT": "0",
                         "HQ_SYNC_QUIET": "0", "HQ_NO_PHONE": "1", "HQ_CLAUDE_CLI": "/bin/false", "HQ_DIRECT_PLAIN": "1",
                         "HQ_TODO_SWEEP": "0", "HQ_SYNCTHING_HOME": str(T / X / "st"), "HQ_STATUS_PORT": str(free()),
-                        "HQ_PORT": str(free()), "HQ_UNIT": f"{tag}-{X.lower()}", "HQ_ROLE_WAKETIME": "1"})
+                        "HQ_PORT": str(free()), "HQ_UNIT": f"{tag}-{X.lower()}", "HQ_ROLE_WAKETIME": "1",
+                        "HQ_ROUTINES_FILE": str(T / X / "routines.json")})
             P[X] = {"hq": hq, "ws": hq / "workspace", "state": T / X / "state", "env": env, "name": names[X], "port": ports[X]}
         for X, Y in (("A", "B"), ("B", "A")):
             (P[X]["state"] / "role.json").write_text(json.dumps({
@@ -20967,9 +20968,9 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
 
         def look(X):
             """One look of the routine on X: the role first, then the sync (with its hand-over), as tick.py does."""
-            return py(X, "import role, sync, inspect\nr = role.tick(log=print)\n"
+            return py(X, "import role, sync, inspect, routines\nr = role.tick(log=print)\n"
                          "kw = {'acting': r['acting']} if 'acting' in inspect.signature(sync.tick).parameters else {}\n"
-                         "sync.tick(main=r['acting'] == 'main' and not r.get('handing_back'), log=print, **kw)\n"
+                         "sync.tick(main=r['acting'] == 'main' and not r.get('handing_back'), log=print, routines=routines, **kw)\n"
                          "print('ACTING', role.acting())")
         P["look"] = look
 
@@ -21135,6 +21136,64 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
             need("Science" in a("HQ/news.json"), "the news setup didn't land on the main")
             need("Weekly line: fixed at 90%" in a("HQ/roadmap.md"), "the stop line didn't land on the main")
             need(a("HQ/chat-note.md") == "A chat on the laptop wrote this.\n", "the chat's file didn't reach the main")
+            # F115 after the check, finding 7: a chat's commit says what the main did with it, also when it kept its own
+            (A["ws"] / "HQ/chat-note.md").write_text("The main's own version of the note.\n")
+            (B["ws"] / "HQ/chat-note.md").write_text("A chat on the laptop wrote this, changed.\n")
+            r = await asyncio.to_thread(run, "B", "routine/gitlock.py", "commit", "A chat's note again", "HQ/chat-note.md",
+                                        env={"HQ_WORKSPACE": str(B["ws"])})
+            need(r.returncode == 0 and "kept" in r.stdout and "writes and commits" not in r.stdout,
+                 f"a chat's commit the main kept in the list says it was written: {r.stdout[-300:]}")
+            need(a("HQ/chat-note.md") == "The main's own version of the note.\n" and
+                 "A chat on the laptop wrote this, changed." in a("HQ/kept-from-both.md"), "the chat's other version isn't in the list")
+            seq = lambda text, lines: any(text.splitlines()[i:i + len(lines)] == lines for i in range(len(text.splitlines())))
+            send = ("import role, settle, json, sys\n"
+                    "t = sys.stdin.read()\n"
+                    "r = settle.send(role, ['file', 'workspace', os.environ['REL']], {'text': t, 'from': 'laptop'}, 'settle-' + os.environ['HID'])\n"
+                    "print(json.dumps(r))")
+            hand = lambda rel, text, hid: py("B", send, text, {"REL": rel, "HID": hid})
+            # finding 2: the same file sent twice is settled against the main's file as it is now, not answered from memory
+            r = await asyncio.to_thread(hand, "HQ/twice.md", "a\nX\n", "f115-twice")
+            need(r.returncode == 0 and a("HQ/twice.md") == "a\nX\n", f"a new file didn't land: {r.stdout} {r.stderr[-300:]}")
+            (A["ws"] / "HQ/twice.md").write_text("a\n")  # the main clears X
+            r = await asyncio.to_thread(hand, "HQ/twice.md", "a\nX\n", "f115-twice")
+            kept_ = a("HQ/kept-from-both.md")
+            need(a("HQ/twice.md") == "a\n" and seq(kept_[kept_.find("HQ/twice.md"):], ["X"]),
+                 f"the same hand-over again was answered from memory: the laptop's X isn't kept ({r.stdout[-200:]})")
+            # finding 3: the main's file stays as it is, and every difference goes in the list word for word, as whole blocks
+            cases = [
+                ("HQ/moved.md", "## 2. Urgent\n\n| a |\n| b |\n\n## 7. Done\n\n| c |\n",
+                 "## 2. Urgent\n\n| a |\n\n## 7. Done\n\n| c |\n| b |\n", [["## 7. Done", "| b |"], ["## 2. Urgent", "| b |"]], "a moved row"),
+                ("HQ/deleted.md", "## L\n\n| a |\n| b |\n| c |\n", "## L\n\n| a |\n| c |\n", [["## L", "| b |"]], "a deleted row"),
+                ("HQ/record.json", json.dumps({"items": [{"id": 3, "text": "t", "done": False}]}, indent=1),
+                 json.dumps({"items": [{"id": 3, "text": "t two", "done": False}]}, indent=1),
+                 [["{", ' "id": 3,', ' "text": "t two",', ' "done": false', "}"]], "a JSON record"),
+                ("HQ/week.md", "## Monday\n- Ring Fit\n\n## Tuesday\n- Gym\n", "## Monday\n- Ring Fit\n\n## Tuesday\n- Gym\n- Ring Fit\n",
+                 [["## Tuesday", "- Ring Fit"]], "a line repeated under another heading"),
+                ("HQ/cleaned.md", "# Log\n\n## e2\nsecond\n", "# Log\n\n## e1\nfirst\nHIS LINE\n\n## e2\nsecond\n",
+                 [["## e1", "first", "HIS LINE"]], "a stale copy of what the main cleaned up, with a line of his"),
+            ]
+            for rel, mine, his, blocks_, what in cases:
+                (A["ws"] / rel).write_text(mine)
+                r = await asyncio.to_thread(hand, rel, his, "f115-" + rel.replace("/", "-"))
+                kept_ = a("HQ/kept-from-both.md")
+                part = kept_[kept_.find("· " + rel + " ·"):] if ("· " + rel + " ·") in kept_ else ""
+                need(r.returncode == 0 and a(rel) == mine, f"{what}: the main's file didn't stay as it was: {a(rel)!r} {r.stdout[-200:]}")
+                need(part and all(seq(part.split("\n## 20")[0], b_) for b_ in blocks_),
+                     f"{what}: the laptop's version isn't in the list as whole blocks, word for word: {part[:600]!r}")
+            need("removed there" in kept_[kept_.find("HQ/deleted.md"):], "a row removed on the laptop isn't named as removed")
+            # finding 5: a big file in parts is written only when every part is there, by count and the hash of the whole
+            import base64 as _b64, hashlib as _hl
+            data = json.dumps({"text": "".join(f"line {i} of a big file\n" for i in range(6000)), "from": "laptop"})
+            b = _b64.b64encode(data.encode()).decode()
+            chunks = [b[i:i + 45000] for i in range(0, len(b), 45000)]
+            need(len(chunks) >= 3, "the test file is too small for three parts")
+            code = ("import role, json, sys\nch = json.loads(sys.stdin.read())\n"
+                    "for i, c in enumerate(ch):\n    if i != 1:\n"
+                    "        role.hand('settle', ['part', 'f115-gap', str(i), str(len(ch))], keep=False, hid=f'f115-gap-p{i}', stdin=c)\n"
+                    "print(role.hand('settle', ['file', 'workspace', 'HQ/gap.md', '--parts', 'f115-gap'], keep=False, hid='f115-gap-a')[:2])\n"
+                    "print(role.hand('settle', ['file', 'workspace', 'HQ/gap.md', '--parts', 'f115-gap', str(len(ch)), os.environ['SHA']], keep=False, hid='f115-gap-b')[:2])")
+            r = await asyncio.to_thread(py, "B", code, json.dumps(chunks), {"SHA": _hl.sha256(b.encode()).hexdigest()})
+            need(not (A["ws"] / "HQ/gap.md").exists(), f"a file with a part missing was written: {r.stdout[-300:]} {r.stderr[-300:]}")
             # the same hand-over twice (its answer lost, sent again): it runs once
             code = ("import role\nfor i in range(2):\n    print(role.hand('todo', ['add', '1', 'Sent twice', '--by', 'in the app'], hid='f115-twice')[3])")
             r = await asyncio.to_thread(py, "B", code)
@@ -21155,8 +21214,10 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
         finally:
             await asyncio.to_thread(P["stop"])
         return ("on the backup a switch, a kind, a note and a tick on an appointment, a workflow, the news setup, a stop line and a chat's "
-                "commit all landed on the main, the backup's own files the same byte for byte; a hand-over sent twice ran once; with the "
-                "main away a change was kept, said, and landed once at the next look")
+                "commit all landed on the main, the backup's own files the same byte for byte; a commit the main kept says so; the same file "
+                "settled twice against the main as it is now; a moved row, a deleted row, a JSON record, a repeated line and a stale copy "
+                "of what the main cleaned up left the main's file as it was, every difference in the list word for word; a big file with "
+                "a part missing not written; a hand-over sent twice ran once; with the main away a change was kept, said, and landed once")
 
     async def flow371(self) -> str:
         """F115, no Claude: what the laptop holds is settled, nothing of his lost. Two private Syncthings and two throwaway HQs, A
@@ -21169,6 +21230,12 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
         try:
             A, B, run, py, api, wait = P["A"], P["B"], P["run"], P["py"], P["api"], P["wait"]
             wa, wb = A["ws"], B["ws"]
+            # as on the real pair: the hand-over's switch off (his workspace doesn't have it)
+            bj = json.loads((wa / "HQ/backend.json").read_text())
+            bj["on"] = [x for x in bj.get("on", []) if x != "handover"]
+            (wa / "HQ/backend.json").write_text(json.dumps(bj, indent=2) + "\n")
+            wait(lambda: (wb / "HQ/backend.json").read_text() == (wa / "HQ/backend.json").read_text(), 60,
+                 "the switch's file didn't reach the laptop")
             # a file both change: the main first, while the sync is paused, then the laptop
             P["pause"](True)
             wait(lambda: not any(c.get("connected") for c in api("A", "/rest/system/connections")["connections"].values()), 30,
@@ -21196,6 +21263,20 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
             wait(lambda: P["local"]("B") > 0, 30, "the laptop shows nothing not handed over")
             n_local = P["local"]("B")
             copies = [p.name for p in wb.rglob("*") if ".sync-conflict-" in p.name]
+            # the switch off: the laptop's minute hands over nothing and says so; the dry run says what it would
+            r = await asyncio.to_thread(P["look"], "B")
+            line = json.loads((P["T"] / "B/routines.json").read_text()).get("sync", {})
+            need(not (wa / "HQ/calls/2026-10-29-2238.md").exists() and P["local"]("B") == n_local,
+                 f"with the switch off the laptop's minute handed things over: {r.stdout[-300:]}")
+            need(line.get("handover") == {"on": False} and "hand-over to the main is off" in line.get("text", ""),
+                 f"the sync line doesn't say the hand-over is off: {line}")
+            r = await asyncio.to_thread(run, "B", "routine/sync.py", "handover", "--dry")
+            need("HQ/calls/2026-10-29-2238.md" in r.stdout and not (wa / "HQ/calls/2026-10-29-2238.md").exists(),
+                 f"the dry run doesn't list the transcript, or handed it: {r.stdout[-300:]}")
+            r = await asyncio.to_thread(run, "B", "routine/sync.py", "handover", "on")
+            need(r.returncode == 0 and "handover" in json.loads((wa / "HQ/backend.json").read_text()).get("on", []),
+                 f"turning the switch on from the laptop didn't reach the main: {r.stdout[-300:]} {r.stderr[-200:]}")
+            wait(lambda: "handover" in (wb / "HQ/backend.json").read_text(), 60, "the switch didn't come back to the laptop")
             said_ = []
             for i in range(8):  # the routine's looks on B, a minute apart in life
                 r = await asyncio.to_thread(P["look"], "B")
@@ -21215,7 +21296,8 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
             kept = (wa / "HQ/kept-from-both.md").read_text() if (wa / "HQ/kept-from-both.md").exists() else ""
             need((wa / "HQ/calls/2026-10-29-2238.md").read_text() == call, "the call transcript didn't reach the main whole")
             need((wa / "HQ/screens/shot.png").read_bytes() == pic, "the picture didn't reach the main whole")
-            need("a line only the laptop wrote" in (wa / "challenges.md").read_text(), "the to-do line only the laptop added didn't land")
+            need("a line only the laptop wrote" not in (wa / "challenges.md").read_text() and "a line only the laptop wrote" in kept,
+                 "the to-do line only the laptop added isn't kept in the list (the main's file stays as it is)")
             need("The server's own line." in (wa / "me.md").read_text() and "The laptop's own line." not in (wa / "me.md").read_text(),
                  "the file both changed doesn't keep the main's")
             need("The laptop's own line." in kept and "me.md" in kept, f"the laptop's own line isn't in the list: {kept[-500:]}")
@@ -21247,8 +21329,8 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
         finally:
             await asyncio.to_thread(P["stop"])
         return (f"the laptop held {n_local} not handed over and {len(copies)} conflict copies: {looks} look(s) handed them all over "
-                f"(the transcript of {len(call) // 1000} KB in parts and the picture whole, the added line taken, the clash main wins with the laptop's line in the "
-                "list, the removed file kept and named, the copy that differed in nothing gone without an entry), none left and "
+                f"(the transcript of {len(call) // 1000} KB in parts and the picture whole, the added line and the clash in the list with the main's file as it was, "
+                "with the switch off first nothing handed and said, the removed file kept and named, the copy that differed in nothing gone without an entry), none left and "
                 "both the same; again and a copy coming back the same added nothing; a copy on the main settled main wins, no merge job")
 
     async def flow372(self) -> str:
@@ -21287,20 +21369,37 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
         kept = (T / "other/HQ/kept-from-both.md").read_text() if (T / "other/HQ/kept-from-both.md").exists() else ""
         need("the line as the main has it" in plan and "the line as the laptop has it" not in plan, f"GitHub doesn't have the main's line: {plan}")
         need("the line as the laptop has it" in kept and "HQ/plan.md" in kept, f"the other side's line isn't kept in the list: {kept[-400:]}")
+        # F115 after the check, finding 1: the main's side only removed lines (its log cycle moved an entry out) while the
+        # other side added one under it: GitHub's line is kept, word for word
+        (ws / "coaching").mkdir(exist_ok=True)
+        (ws / "coaching/log.md").write_text("# Log\n\n## entry one\nfirst\n\n## entry two\nsecond\n")
+        need(sp.run([sys.executable, str(ROOT / "routine/gitlock.py"), "commit", "the log", "coaching/log.md"], capture_output=True,
+                    text=True, env=env, timeout=120).returncode == 0, "couldn't commit the log")
+        G(T / "other", "pull", "-q")
+        (T / "other/coaching/log.md").write_text("# Log\n\n## entry one\nfirst\nHIS NEW LINE from the laptop\n\n## entry two\nsecond\n")
+        need(G(T / "other", "commit", "-q", "-am", "his line").returncode == 0 and G(T / "other", "push", "-q").returncode == 0, "the other side couldn't push")
+        (ws / "coaching/log.md").write_text("# Log\n\n## entry two\nsecond\n")
+        r = await asyncio.to_thread(sp.run, [sys.executable, str(ROOT / "routine/gitlock.py"), "commit", "the log cycle", "coaching/log.md"],
+                                    capture_output=True, text=True, env=env, timeout=120)
+        G(T / "other", "pull", "-q")
+        kept = (T / "other/HQ/kept-from-both.md").read_text() if (T / "other/HQ/kept-from-both.md").exists() else ""
+        need(r.returncode == 0 and ("HIS NEW LINE from the laptop" in kept or "HIS NEW LINE" in (T / "other/coaching/log.md").read_text()),
+             f"GitHub's line under the entry the main removed is gone, neither in the file nor in the list: rc {r.returncode} {kept[-300:]}")
         (ws / "HQ/plan.md").write_text((ws / "HQ/plan.md").read_text() + "- one more\n")
         r = await asyncio.to_thread(sp.run, [sys.executable, str(ROOT / "routine/gitlock.py"), "commit", "the next one", "HQ/plan.md"],
                                     capture_output=True, text=True, env=env, timeout=120)
         st = G(ws, "status", "-sb").stdout.splitlines()[0]
         need(r.returncode == 0 and "ahead" not in st and "behind" not in st, f"the next commit didn't go straight through: {r.returncode} {st} {r.stderr[-200:]}")
         return ("both sides changed the same line, the other pushed first: the main's commit settled it itself (its line on GitHub, "
-                "the other's line in the list), no incident, and the next commit went straight through")
+                "the other's line in the list), no incident; a line GitHub added under an entry the main removed is kept word for word; "
+                "and the next commit went straight through")
 
     async def flow373(self) -> str:
         """F115, no Claude: both-main ends by itself. Two private Syncthings and two throwaway HQs, A ("server") the chosen main.
         The line cut both ways (role lookups and the sync): B takes over, both act as main and both write. The line back: within
         two looks A, main before the cut, is the only main; B's writes from the cut reach A (a file A didn't have whole, the
-        clashing list main wins with B's row in the list he sees), nothing left on B. A computer back with "main" on its disk
-        from long ago doesn't act as main before its first look. And a hand-back waits for the sync: B, main while A was away,
+        clashing list main wins with B's row in the list he sees), nothing left on B. A main whose routine is late stays main
+        (never no main at all). And a hand-back waits for the sync: B, main while A was away,
         hands back only once what it wrote has reached A."""
         P = await asyncio.to_thread(self._f115_pair, "f115-both", True)
         try:
@@ -21356,15 +21455,18 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
             need((wa / "HQ/calls/2026-11-02-0900.md").exists(), "the laptop's call transcript from the cut didn't reach the main")
             need(P["local"]("B") == 0 and not [p for p in B["ws"].rglob("*") if ".sync-conflict-" in p.name],
                  f"something of the cut is still only on the laptop: {P['local']('B')}")
-            # a computer back with "main" on its disk from long ago doesn't act as main before its first look
+            # F115 after the check, finding 4: a main whose routine hasn't looked for a while stays main (the other isn't main),
+            # so there's never a time with no main; its look keeps it main
             s = json.loads((A["state"] / "role-state.json").read_text())
             s.update({"acting": "main", "last_look": time.time() - 3600})
             (A["state"] / "role-state.json").write_text(json.dumps(s))
             r = await asyncio.to_thread(run, "A", "routine/role.py", "acting")
-            need(r.stdout.strip() == "backup", f"a computer back from long ago acts as main before its first look: {r.stdout}")
+            rb_ = await asyncio.to_thread(run, "B", "routine/role.py", "acting")
+            need(r.stdout.strip() == "main" and rb_.stdout.strip() == "backup",
+                 f"with the main's routine an hour late nobody is main: A {r.stdout.strip()}, B {rb_.stdout.strip()}")
             await asyncio.to_thread(look, "A")
             need(acting("A") == "main" and (await asyncio.to_thread(run, "A", "routine/role.py", "acting")).stdout.strip() == "main",
-                 "the chosen main didn't take its role again at its first look")
+                 "the chosen main didn't stay main at its look")
             # the hand-back waits for the sync: A away (its line and its sync gone, its routine stopped), B takes over and writes
             P["cut"] = True
             P["pause"](True)
@@ -21401,7 +21503,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
             await asyncio.to_thread(P["stop"])
         return (f"in a cut both ways both were main and both wrote; {looks} look(s) after the line came back A was the only main, the "
                 "laptop's call and row from the cut reached it (the clash main wins, its row in the list), nothing left on the laptop; "
-                "a computer back from long ago acted as main only after its first look; a hand-back waited for the sync, then happened")
+                "a main an hour late stayed main, with the other the backup; a hand-back waited for the sync, then happened")
 
     async def flow374(self) -> str:
         """F115, no Claude: 60 switches at once lose none. Six processes, each its own feature, ten switches each, all at the same

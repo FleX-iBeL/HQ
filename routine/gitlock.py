@@ -127,12 +127,19 @@ def main_wins(branch):
                 except UnicodeDecodeError:
                     a = b = None
                 if a is not None:
-                    new, extra, _ = settle.decide(rel, a, b)
-                    if new is not None and rel.endswith(".jsonl"):
-                        open(os.path.join(FOLDER, rel), "w", encoding="utf8").write(new)  # a log of lines: every line of both
-                    elif extra:
+                    new, extra, _ = settle.decide(rel, a, b, "GitHub")
+                    if new is not None:  # a log of lines: every line of both
+                        open(os.path.join(FOLDER, rel), "w", encoding="utf8").write(new)
+                    # F115 (the check's finding 1): every line of GitHub's side that isn't in the file now is kept word
+                    # for word, whichever way the rule went (the main's side only removing lines included)
+                    now_have = set((new if new is not None else a).splitlines())
+                    gone = [l for l in b.splitlines() if l.strip() and l not in now_have]
+                    if gone and not extra:
+                        extra = ["[only on GitHub:]", *gone]
+                    if extra:
                         settle.keep(rel, extra, "GitHub", "A repo conflict: both sides changed this file. This computer's "
-                                    "version stayed (main wins); these lines were only on GitHub's side.", folder=FOLDER)
+                                    "version stayed (main wins); here is every difference of GitHub's side, word for "
+                                    "word.", folder=FOLDER)
                         kept.append(rel)
                 else:
                     stem, ext = os.path.splitext(rel)
@@ -176,7 +183,7 @@ def hand_over(files, role):
     import base64, hashlib, json
     if not files:
         sys.exit("gitlock: name the files to commit")
-    me, sent, waiting, refused = role.my_name(), [], [], []
+    me, sent, waiting, refused, said = role.my_name(), [], [], [], []
     for rel in files:
         p = os.path.join(FOLDER, rel)
         payload = {"from": me}
@@ -194,9 +201,13 @@ def hand_over(files, role):
         import settle
         code, out, err, how = settle.send(role, ["file", "workspace", rel], payload, hid)
         (sent if how == "main" and not code else waiting if how != "main" else refused).append(rel)
+        if how == "main" and not code:
+            said.append(" ".join(out.split()))
     if sent:
-        print(f"This HQ is the backup: handed {len(sent)} file{'s' * (len(sent) != 1)} to the main one, which writes and "
-              "commits {}.".format("it" if len(sent) == 1 else "them"))
+        # F115 (the check's finding 7): what the main did with each, in its own words: written and committed there, or
+        # its version kept and this one's differences in the list
+        print(f"This HQ is the backup: handed {len(sent)} file{'s' * (len(sent) != 1)} to the main one. It said: "
+              + " ".join(said))
     if waiting:
         print(f"The main one can't be reached right now: {', '.join(waiting)[:200]} stay{'s' * (len(waiting) == 1)} on "
               "this computer and go to the main by themselves at the next look once it answers.")

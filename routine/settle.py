@@ -9,11 +9,13 @@ and he shouldn't have to know which one he's on. The rules (Claude's proposal on
     that differs in nothing is removed. Settled means no copies left on the laptop and every kept difference in
     that list.
   - What the backup has that the main doesn't (written there while the main was away, or before a door was in
-    place) goes to the main through the door (`file`): a file the main doesn't have is written whole, a version
-    that only adds to the main's is taken as it is, a log of lines (.jsonl) gets every line of both, and anything
-    else is a clash: the main's stays and the other's own lines are kept in the list, named.
-  - Repeats: a hand-over has an id and a second one does nothing; a settled conflict that comes back is told once
-    (an entry in the list has an id; the same difference again adds nothing).
+    place) goes to the main through the door (`file`): a file the main doesn't have is written whole, a log of lines
+    (.jsonl) gets every line of both, and any other difference leaves the main's file as it is, with the other's
+    differing blocks kept word for word in the list (his decision after the check: nothing the main cleaned up comes
+    back by itself).
+  - Repeats: settling the same file twice is safe by itself (the main runs it again, never answers from memory); a
+    part of a big file has an id and a second one does nothing; a settled conflict that comes back is told once (an
+    entry in the list has an id; the same difference again adds nothing).
 
 The list is the workspace's HQ/kept-from-both.md, written only by the main (role.ONE_WRITER), newest first.
 
@@ -171,8 +173,87 @@ def merge_jsonl(a: str, b: str) -> str | None:
     return "".join(l + "\n" for l, _ in out)
 
 
-def decide(rel: str, main_text: str | None, other_text: str) -> tuple[str | None, list[str], str]:
-    """(what the file becomes, or None to leave it; the other's own lines to keep in the list; how, in words)."""
+def _heading(lines: list[str], i: int) -> str:
+    """The nearest heading above line i ("# …" to "###### …"), or ""."""
+    for k in range(min(i, len(lines)) - 1, -1, -1):
+        if re.match(r"^#{1,6}\s", lines[k]):
+            return lines[k]
+    return ""
+
+
+def _json_blocks(a, b, path: str, who: str) -> list[str]:
+    """F115 (the check's finding 3): a JSON file's differences as whole records, word for word (pretty-printed):
+    what only the other has, what the other changed, and what isn't in the other's version (named as removed there)."""
+    dump = lambda v: json.dumps(v, indent=1, ensure_ascii=False).splitlines()
+    name = path or "the whole file"
+    if a == b:
+        return []
+    if isinstance(a, dict) and isinstance(b, dict):
+        out = []
+        for k in list(a) + [k for k in b if k not in a]:
+            sub = f"{path}.{k}" if path else str(k)
+            if k not in b:
+                out += [f"[{sub}: not in {who}'s version, removed there:]", *dump(a[k])]
+            elif k not in a:
+                out += [f"[{sub}: only on {who}:]", *dump(b[k])]
+            elif a[k] != b[k]:
+                if isinstance(a[k], (dict, list)) and isinstance(b[k], type(a[k])):
+                    out += _json_blocks(a[k], b[k], sub, who)
+                else:
+                    out += [f"[{sub} as {who} has it:]", *dump(b[k])]
+        return out
+    if isinstance(a, list) and isinstance(b, list):
+        out = []
+        for x in b:
+            if x not in a:
+                out += [f"[a record in {name}, only on {who}:]", *dump(x)]
+        for x in a:
+            if x not in b:
+                out += [f"[a record in {name}, not in {who}'s version, removed there:]", *dump(x)]
+        return out
+    return [f"[{name} as {who} has it:]", *dump(b)]
+
+
+def blocks(rel: str, main_text: str, other_text: str, who: str = "the other computer") -> list[str]:
+    """F115 (the check's finding 3): every difference of the other's version against the main's, word for word, as
+    whole blocks: what's only in the other's under the heading it stands under (the heading copied as it is), and
+    what isn't in the other's version named as removed there. A JSON file by its whole records."""
+    try:
+        a, b = json.loads(main_text), json.loads(other_text)
+        if isinstance(a, (dict, list)) and isinstance(b, (dict, list)):
+            return _json_blocks(a, b, "", who)
+    except ValueError:
+        pass
+    import difflib
+    m, o = main_text.splitlines(), other_text.splitlines()
+    out = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, m, o, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        added, removed = o[j1:j2], m[i1:i2]
+        if not any(l.strip() for l in added + removed):
+            continue  # blank lines only
+        if [l for l in added if l.strip()]:
+            head = _heading(o, j1)
+            out.append(f"[only on {who}" + (", under its heading:]" if head and head not in added else ":]"))
+            if head and head not in added:
+                out.append(head)
+            out += added
+        if [l for l in removed if l.strip()]:
+            head = _heading(m, i1)
+            out.append(f"[not in {who}'s version, removed there" + (", under:]" if head and head not in removed else ":]"))
+            if head and head not in removed:
+                out.append(head)
+            out += removed
+    return out
+
+
+def decide(rel: str, main_text: str | None, other_text: str, who: str = "the other computer") -> tuple[str | None, list[str], str]:
+    """(what the file becomes, or None to leave it; the other's differences to keep in the list, word for word; how).
+    F115, his decision after the check (2 November 2026): the main's file is only written when the main doesn't have
+    it at all, or when a log of lines (.jsonl) gets lines the main's doesn't have. Any other difference leaves the
+    main's file as it is, so nothing the main cleaned up comes back by itself, and the other's whole differing blocks
+    go into the list."""
     if main_text is None:
         return other_text, [], "new here, written whole"
     if main_text == other_text:
@@ -181,16 +262,10 @@ def decide(rel: str, main_text: str | None, other_text: str) -> tuple[str | None
         merged = merge_jsonl(main_text, other_text)
         if merged is not None:
             return (None if merged == main_text else merged), [], "every line of both"
-    m, o = main_text.splitlines(), other_text.splitlines()
-    if _subseq(m, o):
-        return other_text, [], "it only added to the main's, taken as it is"
-    if _subseq(o, m):
-        return None, [], "the main had all of it already"
-    have = set(m)
-    extra = [l for l in o if l.strip() and l not in have]
-    if not extra:
+    kept = blocks(rel, main_text, other_text, who)
+    if not kept:
         return None, [], "nothing in it the main doesn't have"
-    return None, extra, "both changed it: the main's stays, the other's own lines are kept"
+    return None, kept, "they differ: the main's stays, the other's differences are kept word for word"
 
 
 # ---- on the main -----------------------------------------------------------------------------------------------------
@@ -291,7 +366,7 @@ def settle_file(what: str, rel: str, payload: dict, log=None) -> tuple[int, str]
             mine = None
         except (OSError, UnicodeDecodeError) as e:
             return 1, f"{label}: the main couldn't read its own: {e}"
-        new, extra, said = decide(rel, mine, other)
+        new, extra, said = decide(rel, mine, other, who)
         if new is not None:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             tmp = f"{path}.{os.getpid()}.settle.tmp"
@@ -304,7 +379,8 @@ def settle_file(what: str, rel: str, payload: dict, log=None) -> tuple[int, str]
             changed.append(rel)
     if extra:
         keep(rel if ws else f"Claude's memory: {rel}", extra, who,
-             f"Both computers changed this file. The main's version stayed; these lines were only in {who}'s.",
+             f"The two computers had this file differently. The main's version stayed as it is; here is every difference "
+             f"of {who}'s, word for word.",
              folder=folder_of("workspace"))
         changed.append(KEPT)
     if log:
@@ -380,18 +456,30 @@ PART = 45_000  # the status server takes a request of at most 100,000 characters
 
 def send(role, args: list[str], payload: dict, hid: str, timeout: float = 120):
     """F115: hand a file's settling to the main (role.hand, never kept here: the next look tries again), in parts when
-    it's big, each part with its own id. Returns hand()'s (code, out, err, how)."""
+    it's big, each part with its own id; the last call names how many parts and the hash of the whole, and the main
+    writes nothing unless every part is there and the whole matches (the check's finding 5). Returns hand()'s
+    (code, out, err, how)."""
     data = json.dumps(payload)
     if len(data) <= 60_000:
         return role.hand("settle", args, keep=False, hid=hid, stdin=data, timeout=timeout)
     b = base64.b64encode(data.encode("utf8")).decode()
     parts = [b[i:i + PART] for i in range(0, len(b), PART)]
-    for i, part in enumerate(parts):
-        r = role.hand("settle", ["part", hid, str(i), str(len(parts))], keep=False, hid=f"{hid}-p{i}", stdin=part,
+    whole = hashlib.sha256(b.encode()).hexdigest()
+    r = None
+    for again in ("", f"-r{int(time.time())}"):  # parts gone on the main (an old hand-over's): once more, fresh ids
+        for i, part in enumerate(parts):
+            r = role.hand("settle", ["part", hid, str(i), str(len(parts))], keep=False, hid=f"{hid}{again}-p{i}",
+                          stdin=part, timeout=timeout)
+            if r[3] != "main" or r[0]:
+                return r
+        r = role.hand("settle", args + ["--parts", hid, str(len(parts)), whole], keep=False, hid=hid, stdin="",
                       timeout=timeout)
-        if r[3] != "main" or r[0]:
+        if r[0] != PARTS_MISSING:
             return r
-    return role.hand("settle", args + ["--parts", hid], keep=False, hid=hid, stdin="", timeout=timeout)
+    return r
+
+
+PARTS_MISSING = 4
 
 
 def _parts_dir(hid: str) -> str:
@@ -436,27 +524,38 @@ def main(argv: list[str]) -> int:
         print(f"The main's {argv[1]} goes out as everyone's.")
         return 0
     if argv[0] == "part" and len(argv) == 4 and argv[2].isdigit() and argv[3].isdigit():
-        d = _parts_dir(argv[1])  # a part of a big file, kept until the file itself comes
+        d = _parts_dir(argv[1])  # a part of a big file, kept until the file itself comes, and two days after
         os.makedirs(d, exist_ok=True)
+        top = os.path.dirname(d)
+        for n in os.listdir(top):  # the parts of hand-overs that never finished, or finished long ago
+            with contextlib.suppress(OSError):
+                if time.time() - os.path.getmtime(os.path.join(top, n)) > 2 * 86400:
+                    import shutil
+                    shutil.rmtree(os.path.join(top, n), ignore_errors=True)
         tmp = os.path.join(d, f"{argv[2]}.{os.getpid()}.tmp")
         with open(tmp, "w") as f:
             f.write(sys.stdin.read())
         os.replace(tmp, os.path.join(d, argv[2]))
         print(f"Part {int(argv[2]) + 1} of {argv[3]} kept.")
         return 0
-    if argv[0] == "file" and len(argv) in (3, 5):
+    if argv[0] == "file" and len(argv) in (3, 7):
         if os.environ.get("HQ_ROLE_HERE") is None:
             sys.path.insert(0, HERE)
             import role
             if role.is_backup():
                 print("Refused: only the main settles; this one is the backup.")
                 return 3
-        parts = argv[4] if len(argv) == 5 and argv[3] == "--parts" else None
+        parts = argv[4] if len(argv) == 7 and argv[3] == "--parts" and argv[5].isdigit() else None
         try:
             if parts:
-                d = _parts_dir(parts)
-                names = sorted((n for n in os.listdir(d) if n.isdigit()), key=int)
-                raw = "".join(open(os.path.join(d, n)).read() for n in names)
+                d, n = _parts_dir(parts), int(argv[5])
+                if not all(os.path.isfile(os.path.join(d, str(i))) for i in range(n)):
+                    print(f"Not whole: some of the {n} parts aren't here.")
+                    return PARTS_MISSING
+                raw = "".join(open(os.path.join(d, str(i))).read() for i in range(n))
+                if hashlib.sha256(raw.encode()).hexdigest() != argv[6]:
+                    print("Not whole: the parts don't add up to the file that was sent.")
+                    return PARTS_MISSING
                 payload = json.loads(base64.b64decode(raw).decode("utf8"))
             else:
                 payload = json.loads(sys.stdin.read() or "{}")
@@ -465,9 +564,6 @@ def main(argv: list[str]) -> int:
             print("Refused: the file didn't come over whole.")
             return 2
         code, said = settle_file(argv[1], argv[2], payload)
-        if parts and not code:
-            import shutil
-            shutil.rmtree(_parts_dir(parts), ignore_errors=True)
         print(said)
         return code
     print(__doc__)

@@ -36,6 +36,7 @@ usage (from the workspace):
   python3 "routine/sync.py" remove              stop syncing (the folders leave Syncthing; the files stay)
   python3 "routine/sync.py" direction main|backup|two-way   the folders' direction on this computer (one-way sync)
   python3 "routine/sync.py" handover [--dry]    F115, on the backup: what it holds that the main doesn't, to the main
+  python3 "routine/sync.py" handover on|off     F115: the switch that lets the routine do that every minute
 Used by HQ itself: tick [--main|--backup] (the routine, every minute), align (an HQ that just became main), json.
 For tests: HQ_SYNCTHING_HOME (Syncthing's config folder), HQ_SYNC_GIT=0 (no commits, no align).
 """
@@ -517,6 +518,18 @@ def local_changed(fid):
         page += 1
 
 
+def handover_on() -> bool:
+    """F115: the backup's every-minute hand-over runs only with its switch on (app/backend.py, `handover`): off on
+    the real pair until the dry run has been read with him, on in a fresh install's template. By hand
+    (`sync.py handover`) it runs whatever the switch says."""
+    try:
+        sys.path.insert(0, os.path.join(hqpaths.HQ, "app"))
+        import backend
+        return backend.on("handover")
+    except Exception:
+        return False
+
+
 def remote_need(fid, device):
     """F115: what the other computer still needs of this folder from this one (Syncthing's view): after a cut both
     ways, the versions this one wrote while it was main too, which the main's send-only folder never takes."""
@@ -545,7 +558,7 @@ def handover(log=print, now=None, dry=False):
     now = now or time.time()
     me = role.my_name()
     acked = _load(HANDED, {}) if not dry else {}
-    acked = acked if isinstance(acked, dict) else {}
+    acked = {k: v for k, v in (acked if isinstance(acked, dict) else {}).items() if isinstance(v, dict) and "at" in v}
     for f in config().get("folders", []):
         try:
             items = local_changed(f["id"])
@@ -618,7 +631,12 @@ def handover(log=print, now=None, dry=False):
             if dry:
                 out["handed"].append(rel)
                 continue
-            if hid in acked:  # settled there already, as it is now: not sent again every minute
+            try:  # F115 (the check's finding 2): remembered by its content and its file's own time and size, so a file
+                st_ = os.stat(full)  # that came back to bytes it had before (typed again) is sent again
+                ck = f"{hid}|{st_.st_mtime_ns}|{st_.st_size}"
+            except OSError:
+                ck = f"{hid}|gone"
+            if ck in acked:  # settled there already, as it is now: not sent again every minute
                 out["handed"].append(rel)
                 if CONFLICT.search(rel):
                     try:
@@ -639,8 +657,8 @@ def handover(log=print, now=None, dry=False):
                 log(f"sync: handover: the main didn't take {rel}: {' '.join((said + err).split())[:200]}")
                 continue
             out["handed"].append(rel)
-            acked[hid] = time.time()
-            _save(HANDED, {k: v for k, v in acked.items() if time.time() - v < 14 * 86400})
+            acked[ck] = {"at": time.time(), "what": f["what"]}
+            _save(HANDED, {k: v for k, v in acked.items() if time.time() - v["at"] < 14 * 86400})
             log(f"sync: handed {rel} to the main: {' '.join(said.split())[:200]}")
             if CONFLICT.search(rel):
                 try:
@@ -675,6 +693,10 @@ def handover(log=print, now=None, dry=False):
                 if isinstance(st, dict) and st.get("receiveOnlyTotalItems"):
                     api(f"/rest/db/revert?folder={f['id']}", "POST", {})
                     out["reverted"].append(f["what"])
+                    # F115: what this folder handed over is forgotten once the main's copy is back: from here on
+                    # everything in it is sent again as new
+                    acked = {k: v for k, v in acked.items() if v.get("what") != f["what"]}
+                    _save(HANDED, acked)
                     log(f"sync: every change here in {f['what']} is with the main now; took the main's copy back")
             except Exception as e:
                 log(f"sync: handover: revert {f['what']}: {e!r}")
@@ -858,7 +880,8 @@ def tick(main=True, log=print, routines=None, incidents=None, acting=None):
     except Exception as e:
         log(f"sync: direction: {e!r}")
     handed = None
-    if not main and acting != "main" and one_way_on():
+    switch_on = handover_on()
+    if not main and acting != "main" and one_way_on() and switch_on:
         # F115: what this computer holds that the main doesn't goes over through the door, every look
         try:
             if any(f.get("local") for f in look().get("folders", [])) or conflicts() or (unsent() or 0) > 0:
@@ -896,8 +919,13 @@ def tick(main=True, log=print, routines=None, incidents=None, acting=None):
             text += f"; {n} difference{'s' * (n != 1)} from both computers kept for you to look at"
     except Exception:
         pass
+    sw = None
+    if not main and acting != "main" and one_way_on():  # F115: the backup's hand-over switch, on its line
+        sw = {"on": switch_on}
+        if not switch_on and (any(f.get("local") for f in seen.get("folders", [])) or found):
+            text += "; the hand-over to the main is off (sync.py handover on, or the switch here)"
     if routines:
-        routines.beat("sync", state=st, text=text, last=time.time(), next=time.time() + 60, every=60)
+        routines.beat("sync", state=st, text=text, last=time.time(), next=time.time() + 60, every=60, handover=sw)
     if incidents:
         if why:
             incidents.down("sync", why)
@@ -964,6 +992,11 @@ def main(argv):
         print("Changed: " + (", ".join(changed) if changed else "nothing (already so)"))
     elif cmd == "revert":
         print("Reverted: " + (", ".join(revert_local()) or "nothing"))
+    elif cmd == "handover" and len(argv) == 2 and argv[1] in ("on", "off"):
+        # F115: the switch of the every-minute hand-over (the workspace's backend switch, written by the main)
+        sys.path.insert(0, os.path.join(hqpaths.HQ, "app"))
+        import backend
+        print(backend.switch_said("handover", argv[1] == "on"))
     elif cmd == "handover":  # F115: by hand, on the backup: what it holds goes to the main (--dry: only say what)
         r = handover(dry="--dry" in argv)
         print(json.dumps(r, indent=1))

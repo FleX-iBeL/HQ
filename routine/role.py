@@ -96,7 +96,7 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "features": {"on", "off"}, "kinds": {"rename", "colour", "reset"}, "appt_notes": {"add", "clear"},
           "workflows": {"on", "off"}, "news": {"topic", "leave-out", "source"}, "planning": {"mark"},
           "usageline": {"moving", "fixed", "reserve", "five", "5-hour", "5h", "weekly", "week", "all", "fable"},
-          "settle": {"file", "override", "part"}}
+          "settle": {"file", "override", "part"}, "backend": {"on", "off"}}
 TO_BOTH = {"update": {"back-here", "back-first", "forward-here"}}  # F104: what the other computer takes whichever it is: the code, not the data
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
@@ -107,7 +107,7 @@ SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "notes": os.path.join(os.path.dirname(HERE), "app", "notes.py"),  # F102
            "about_self": os.path.join(os.path.dirname(HERE), "app", "about_self.py"),  # F102
            **{k: os.path.join(os.path.dirname(HERE), "app", f"{k}.py")  # F115: the page's other writers
-              for k in ("features", "kinds", "appt_notes", "workflows", "news", "planning")}}
+              for k in ("features", "kinds", "appt_notes", "workflows", "news", "planning", "backend")}}
 PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main (who asked, for her notes)
 
 # H203, in the user's words (call of 17 October 2026, 14:45): "i am even more confused, you give it to the server but
@@ -231,24 +231,21 @@ def acting() -> str:
     if not c:
         return "main"
     s = _load(STATE, {})
-    if s.get("acting") == "main" and stale(s):
-        # F115: a computer that comes back (a restart, a lid opened, the routine stopped) with "main" on its disk from
-        # before doesn't write as main until its first look has seen the other one: its writes go through the doors
-        # (kept here, run here at that look if it's still main), so they never clash with what the other wrote meanwhile.
-        return "backup"
+    # F115, after the check (his decision, 2 November 2026): a computer that's main stays main until its own look sees
+    # the other one as main with a fresher look; a stale look only stops it from taking over (tick), never makes it
+    # step down, so there's never a time with no main at all.
     if s.get("acting") in ("main", "backup"):
         return s["acting"]
     return "main" if chosen_main(c) == my_name(c) else "backup"
 
 
-STALE = TAKEOVER  # F115: a decision older than this (seconds since the last look) isn't trusted as main
-
-
-def stale(s=None, now=None) -> bool:
-    """F115: this computer's last look is too old to act as main on (only once it has looked at all)."""
+def stale(s=None, now=None, c=None) -> bool:
+    """F115: this computer's last look is older than the takeover time (the setting, else TAKEOVER): such a look
+    doesn't count towards taking over."""
     s = s if s is not None else _load(STATE, {})
+    c = c if c is not None else config()
     last = s.get("last_look")
-    return bool(last) and (now or time.time()) - float(last) > STALE
+    return bool(last) and (now or time.time()) - float(last) > max(float((c or {}).get("takeover") or TAKEOVER), AWAY_GAP)
 
 
 def is_backup() -> bool:
@@ -630,13 +627,17 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
         s["tailnet_off"] = False
     # F23: only minutes this computer was awake and looking count; a sleep, a restart or a stopped routine
     # starts the count again from when it was back.
+    prev_look_raw = s.get("last_look")
     s["awake_since"] = _awake_since(s, now)
     prev_look = s.get("last_look")
     s["last_look"] = now
     peer = c.get("peer_name") or "the other HQ"
     lost = now - max(s["peer_lost_since"], s["awake_since"]) if s.get("peer_lost_since") else 0
     takeover = float(c.get("takeover") or TAKEOVER)
-    gone = not p and lost >= takeover and int(s.get("lost_looks") or 0) >= LOST_LOOKS
+    # F115: a look that comes after a stale one (the routine stopped, a long minute: longer than the takeover time, and
+    # never less than a sleep's gap) never takes over by itself
+    gone = not p and lost >= takeover and int(s.get("lost_looks") or 0) >= LOST_LOOKS and \
+        not (prev_look_raw and now - float(prev_look_raw) > max(takeover, AWAY_GAP))
     chosen = chosen_main(c) == me
     was = s.get("acting")
     took = s.get("took_over")
@@ -1040,6 +1041,11 @@ def serve(kind: str) -> int:
             print(json.dumps({"code": 3, "out": "", "err": "This HQ isn't the main one right now.\n"}))
             return 3
         hid = str(d.get("id") or "")[:80]
+        if script == "settle" and args[0] in ("file", "override"):
+            # F115 (the check's finding 2): settling a file again is safe by itself and must look at the main's file as
+            # it is now, never answer from memory (a stale repeat would be called settled, and the revert wipe his
+            # change). Only the parts of a big file are kept by id.
+            hid = ""
         if not hid:
             code, out, err = _run_here(script, args, d.get("env"), d.get("stdin"))
             print(json.dumps({"code": code, "out": out, "err": err}))
