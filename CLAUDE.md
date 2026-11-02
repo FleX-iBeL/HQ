@@ -4,7 +4,7 @@ HQ is the app: a live voice call with Claude (the call line), a job queue the co
 
 ## Layout
 
-- `app/` the call line (Pipecat, Whisper, Kokoro, Claude through the Agent SDK), its call page in `app/web/`, and the happy flows (`app/happy_flows.py`).
+- `app/` the call line (Pipecat, Whisper, Kokoro, Claude through the Agent SDK), its call page in `app/web/`, and the happy flows (`app/happy_flows.py`). Every run of the flows works in a throwaway copy of HQ behind `routine/testwall.py`: the list of what counts as real is there, and a run goes red when one of those changed.
 - `routine/` the helper's every-minute routine (`tick.py`), the queue (`jobs.py`), the watchdog, the hourly mail check, the laptop readings.
 - `status/` the status page (`server.mjs`, port 4748).
 - `workspace/` the user's own files. Never part of this repo (`.gitignore`). HQ reads them through it: `routine/hqpaths.py`, `status/paths.mjs` and `app/config.py` all say the same: the workspace (or `HQ_WORKSPACE`), resolved; the roadmap with its status block and queue at `workspace/HQ/roadmap.md` (or `HQ_ROADMAP`); the call transcripts in `workspace/HQ/calls/`.

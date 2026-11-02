@@ -43,6 +43,9 @@ def path() -> str | None:
     if os.environ.get("HQ_TRAIL"):
         return os.environ["HQ_TRAIL"]
     if os.environ.get("HQ_ROADMAP"):
+        # F111: a test on the real roadmap is refused further on, by then it had left its line here: 6 of the first 9 in his record
+        if hqpaths.under_test() and os.path.realpath(hqpaths.ROADMAP) == hqpaths.real_roadmap():
+            return None
         return os.path.join(os.path.dirname(hqpaths.ROADMAP), "trail.jsonl")
     if hqpaths.under_test() and not os.environ.get("HQ_WORKSPACE"):
         return None
