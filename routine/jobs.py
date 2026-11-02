@@ -319,7 +319,7 @@ def write(text, jobs, on):
 ROW_NUM = re.compile(r"^\| [^|]* \| ([A-Z])(\d+)\b", re.M)
 
 
-def roadmap_row(text, said, bug=False):
+def roadmap_row(text, said, bug=False, by=""):
     """H160: a numbered row for work added on the status page, in Phase F (a bug) or Phase H (everything else),
     right after that phase's highest number, in the roadmap's own shape. Returns (text, label)."""
     letter = "F" if bug else "H"
@@ -347,12 +347,15 @@ def roadmap_row(text, said, bug=False):
     title = said.split(". ")[0].rstrip(".")
     if len(title) > 80:
         title = title[:80].rsplit(" ", 1)[0] + "…"
-    when = time.strftime("%-d %B %Y") + f" (status page, {time.strftime('%H:%M')})"
     label = f"{letter}{n}"
-    lines.insert(at + 1, f"| ⬜ | {label} {title} | {when}, typed: \"{said}\" [Added on the status page, no call; "
-                         f"the title is the first sentence.] | {said} | |")
+    if by:  # F105: a row written by a call or an agent's run says so: it isn't his typing on the page, and its fields end where it ends
+        lines.insert(at + 1, f"| ⬜ | {label} {title} | {time.strftime('%-d %B %Y')} ({by}, {time.strftime('%H:%M')}): {said} | {said} | |")
+    else:
+        when = time.strftime("%-d %B %Y") + f" (status page, {time.strftime('%H:%M')})"
+        lines.insert(at + 1, f"| ⬜ | {label} {title} | {when}, typed: \"{said}\" [Added on the status page, no call; "
+                             f"the title is the first sentence.] | {said} | |")
     import trail
-    trail.written(label, said)  # F103: the id is given here, when the item is written
+    trail.written(label, said, by=by)  # F103: the id is given here, when the item is written
     return text[:head] + "\n".join(lines) + text[end:], label
 
 
@@ -702,7 +705,8 @@ def main(argv):
                 no = qa.why_no_bug_after(after, text)
                 if no:
                     sys.exit(f"Refused: {no} Nothing written.")
-            text, label = roadmap_row(text, said, bug)
+            run_ = os.environ.get("HQ_JOB") or ""
+            text, label = roadmap_row(text, said, bug, by=f"job {run_}" if run_.isdigit() else "on a call")
             write(text, jobs, on)
             print(f"{label} is on the planning.")
             if after:

@@ -817,10 +817,13 @@ def _norm(t):
     return " ".join(t.lower().split())
 
 
+_ROW_NOTE = re.compile(r'"?\s*\[Added on the status page, no call; the title is the first sentence\.\]')
+
+
 def field_texts(line):
     """{field: text} from the row's ask: each labelled part ("His words: …", "My own additions: …", "Sources: …") up to
     the next label or the end; "" when a label isn't there."""
-    ask = ask_of(line)
+    ask = _ROW_NOTE.sub(" ", ask_of(line))  # F105: the page's own note on a row is no part of its last field
     pos = []
     for key, pat in FIELD_LABELS:
         for m in re.finditer(r"(?:^|[\s(;.,*])(?:" + pat + r")\s*:\s*", ask, re.I):
