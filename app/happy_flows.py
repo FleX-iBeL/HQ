@@ -18774,7 +18774,7 @@ g('add', '.', cwd=hq); g('commit', '-q', '-m', 'first', cwd=hq); g('tag', '-a', 
 g('push', '-q', 'origin', 'dev', 'main', '--tags', cwd=hq)
 pu.ROOT = rl.ROOT = hq
 rl.is_main = lambda: True
-rl.night_refuses = lambda: None
+rl.night_refuses = lambda target=None: None
 rl.qa.hold = lambda *a, **k: {'all': True, 'held': [], 'to': None, 'taken': []}
 rl.say_so = lambda *a, **k: True
 out = {}
