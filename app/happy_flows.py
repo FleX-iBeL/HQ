@@ -21349,6 +21349,8 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                 said[what] = r.stdout.strip()
             r = await asyncio.to_thread(run, "B", "routine/usageline.py", "weekly", "fixed", "90")
             need(r.returncode == 0, f"a stop line on the backup failed: {r.stdout[-200:]} {r.stderr[-200:]}")
+            r = await asyncio.to_thread(run, "B", "routine/usageline.py", "least", "20")  # F113's least line, set on the backup
+            need(r.returncode == 0, f"the least line on the backup failed: {r.stdout[-200:]} {r.stderr[-200:]}")
             (B["ws"] / "HQ/chat-note.md").write_text("A chat on the laptop wrote this.\n")
             before["HQ/chat-note.md"] = self._f115_files(B["ws"])["HQ/chat-note.md"]
             r = await asyncio.to_thread(run, "B", "routine/gitlock.py", "commit", "A chat's note", "HQ/chat-note.md",
@@ -21365,6 +21367,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
             need("map" in a("HQ/workflows.json") and (A["ws"] / "map.md").exists(), "the workflow didn't land on the main")
             need("Science" in a("HQ/news.json"), "the news setup didn't land on the main")
             need("Weekly line: fixed at 90%" in a("HQ/roadmap.md"), "the stop line didn't land on the main")
+            need("**Team line at least: 20 points.**" in a("HQ/roadmap.md"), "the least line set on the backup didn't land on the main")
             need(a("HQ/chat-note.md") == "A chat on the laptop wrote this.\n", "the chat's file didn't reach the main")
             # F115 after the check, finding 7: a chat's commit says what the main did with it, also when it kept its own
             (A["ws"] / "HQ/chat-note.md").write_text("The main's own version of the note.\n")
@@ -21503,6 +21506,10 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
             r = await asyncio.to_thread(run, "B", "routine/sync.py", "handover", "--dry")
             need("HQ/calls/2026-10-29-2238.md" in r.stdout and not (wa / "HQ/calls/2026-10-29-2238.md").exists(),
                  f"the dry run doesn't list the transcript, or handed it: {r.stdout[-300:]}")
+            for bad in (["OFF"], ["of"], ["on", "--dry"], ["--dry", "x"]):  # anything else refuses with a plain line, does nothing
+                r = await asyncio.to_thread(run, "B", "routine/sync.py", "handover", *bad)
+                need(r.returncode != 0 and "nothing was done" in r.stdout and not (wa / "HQ/calls/2026-10-29-2238.md").exists()
+                     and P["local"]("B") == n_local, f"sync.py handover {' '.join(bad)} didn't refuse plainly: {r.stdout[-200:]}")
             r = await asyncio.to_thread(run, "B", "routine/sync.py", "handover", "on")
             need(r.returncode == 0 and "handover" in json.loads((wa / "HQ/backend.json").read_text()).get("on", []),
                  f"turning the switch on from the laptop didn't reach the main: {r.stdout[-300:]} {r.stderr[-200:]}")

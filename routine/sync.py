@@ -997,6 +997,9 @@ def main(argv):
         sys.path.insert(0, os.path.join(hqpaths.HQ, "app"))
         import backend
         print(backend.switch_said("handover", argv[1] == "on"))
+    elif cmd == "handover" and argv[1:] not in ([], ["--dry"]):  # F115: exactly on, off, --dry or nothing
+        print("sync.py handover takes on, off, --dry or nothing; nothing was done.")
+        return 2
     elif cmd == "handover":  # F115: by hand, on the backup: what it holds goes to the main (--dry: only say what)
         r = handover(dry="--dry" in argv)
         print(json.dumps(r, indent=1))
