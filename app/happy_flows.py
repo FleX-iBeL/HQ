@@ -19974,6 +19974,184 @@ print("OK" if left == ["two"] and sum(x["text"] == "twice the same" for x in D.r
                 f"{donna[1] + team[1]} times two lines word for word the same in the same millisecond; a hand-over sent again stays once, "
                 "a line from before keeps the old key, the backup and the page tell two such lines apart")
 
+    def _f113_usage(self, env, five=None, weekly=None, five_in=None, week_in=None, age=0, plan="Ultra"):
+        """F113: a made-up reading. five_in and week_in: minutes until each window resets (negative: it reset that long ago)."""
+        now = datetime.now(timezone.utc)
+        iso = lambda x: x.strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+        limits = []
+        if five is not None:
+            limits.append({"label": "5-hour limit", "percent": five, "resetsAt": iso(now + timedelta(minutes=five_in))})
+        if weekly is not None:
+            limits.append({"label": "Weekly · all models", "percent": weekly, "resetsAt": iso(now + timedelta(minutes=week_in))})
+        Path(env["HQ_USAGE"]).write_text(json.dumps({"readable": True, "checkedAt": iso(now - timedelta(seconds=age)), "by": "a test",
+                                                     "plan": plan, "limits": limits}))
+
+    def _f113_gate(self, env):
+        import subprocess as _sp
+        return lambda *a: _sp.run(["node", str(ROOT / "status/save-usage.mjs"), "--gate", *a], capture_output=True, text=True, env=env, cwd=str(ROOT))
+
+    async def flow380(self) -> str:
+        """F113, no Claude: the first night after a weekly reset the team runs and the agents get their share. Fourteen hours into a
+        week the moving weekly line is still at its floor of 20 and he used 6 of it in his own day. The reserve of 15 used to make the
+        team's line 5 and the agents' 0, so nothing ran that night. Now the reserve never takes the team's line under 15: a team job
+        starts through the routine's real minute, an agent's run fits five points under it, and 0 brings the old line back."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env("f113-fresh")
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        gate = self._f113_gate(env)
+        week = 7 * 24 * 60
+        self._f113_usage(env, weekly=6, week_in=week - 14 * 60)
+        g = gate("--reserve", "--need", "five=0,weekly=2")
+        need(g.returncode == 0, f"the team's line on a fresh week: {g.stdout}")
+        g = gate("--reserve", "--under", "5", "--need", "five=0,weekly=1")
+        need(g.returncode == 0, f"the agents' share on a fresh week: {g.stdout}")
+        g = gate("--reserve", "--need", "five=0,weekly=10")
+        need(g.returncode == 2 and "doesn't fit under its stop line of 15%" in g.stdout, f"the team's room isn't 15 less his 6: {g.stdout}")
+        g = gate("--reserve", "--under", "5", "--need", "five=0,weekly=5")
+        need(g.returncode == 2 and "stop line of 10%" in g.stdout, f"the agents' line isn't 10: {g.stdout}")
+        n = new("Build the thing on the made-up page", "--guess", "5")
+        r = minute()
+        need(state(n).startswith("running") and r["opened"], f"the team didn't run on the first night of a week: {state(n)} {r['log'][-3:]}")
+        need(jobs("stop", n).returncode == 0, "no stop")
+        # the projection the planning and the status page use says the same
+        child = r"""
+import sys, time
+sys.path.insert(0, sys.argv[1] + "/routine")
+import usagecost as U
+now = time.time()
+p = U.Projection.here(now)
+assert p and p.reserve == 15 and p.least == 15, (p and p.reserve, p and getattr(p, "least", None))
+assert p.room("weekly", now) == 9.0, p.room("weekly", now)
+assert p.fits({"five": 0, "weekly": 2}, now), "doesn't fit now"
+print("OK")
+"""
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-800:])
+        # his number: 0 takes the whole reserve off again, as before
+        line = lambda *a: _sp.run([sys.executable, str(ROOT / "routine/usageline.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))  # noqa: E731
+        r = line("least", "0")
+        need(r.returncode == 0 and "**Team line at least: 0 points.**" in (ws / "HQ/roadmap.md").read_text(), r.stdout + r.stderr)
+        need(gate("--reserve", "--need", "five=0,weekly=2").returncode == 2, "least 0 didn't bring back the whole reserve")
+        need(line("least", "99").returncode == 2, "a least of 99")
+        r = line("least", "15")
+        need(r.returncode == 0 and "15 points at the least" in r.stdout, r.stdout + r.stderr)
+        need(gate("--reserve", "--need", "five=0,weekly=2").returncode == 0, "back at 15")
+        return "fourteen hours into a week the team's line is 15 and the agents' 10, a team job starts that night, his 0 brings the old line back"
+
+    async def flow381(self) -> str:
+        """F113, no Claude: the reserve still keeps his room later in the week. 42 hours in, the weekly line is 25: the team's line is 15
+        (10 of the reserve kept), so a reading of 12 still lets a job start and 15 doesn't. 100 hours in, the line is 59.5 and the
+        whole reserve of 15 is kept: at 45 nothing starts, though without the reserve it would, and the agents stop first."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env("f113-mid")
+        gate = self._f113_gate(env)
+        week = 7 * 24 * 60
+        self._f113_usage(env, weekly=12, week_in=week - 42 * 60)
+        g = gate("--reserve", "--need", "five=0,weekly=2")
+        need(g.returncode == 0, f"42 hours in, at 12: {g.stdout}")
+        self._f113_usage(env, weekly=15, week_in=week - 42 * 60)
+        g = gate("--reserve", "--need", "five=0,weekly=0")
+        need(g.returncode == 2 and "stop line is 15%" in g.stdout and "10 of the reserve of 15 points kept" in g.stdout, f"42 hours in, at 15: {g.stdout}")
+        self._f113_usage(env, weekly=45, week_in=week - 100 * 60)
+        g = gate("--reserve", "--need", "five=0,weekly=0")
+        need(g.returncode == 2 and "stop line is 44.5%" in g.stdout and "with the reserve of 15 points kept" in g.stdout, f"100 hours in, at 45: {g.stdout}")
+        need(gate("--need", "five=0,weekly=0").returncode == 0, "without the reserve it fits")
+        self._f113_usage(env, weekly=40, week_in=week - 100 * 60)
+        need(gate("--reserve", "--need", "five=0,weekly=2").returncode == 0, "100 hours in, at 40, the team")
+        g = gate("--reserve", "--under", "5", "--need", "five=0,weekly=0")
+        need(g.returncode == 2 and "stop line is 39.5%" in g.stdout, f"the agents don't stop first: {g.stdout}")
+        # a running job held at the line mid-week, the reserve kept
+        g = gate("--line", "--reserve")
+        need(g.returncode == 0, f"a running job at 40 under 44.5: {g.stdout}")
+        self._f113_usage(env, weekly=45, week_in=week - 100 * 60)
+        need(gate("--line", "--reserve").returncode == 2, "a running job at 45 isn't held mid-week")
+        child = r"""
+import sys, time
+sys.path.insert(0, sys.argv[1] + "/routine")
+import usagecost as U
+now = time.time()
+p = U.Projection.here(now)
+assert p.room("weekly", now) == -0.5, p.room("weekly", now)
+# from here, it fits when the moving line has climbed the reserve's 15 over his 45 and the need of 1
+at = p.fits_at({"five": 0, "weekly": 1}, now)
+assert at is not None and U.moving_line("weekly", p.read["weekly"]["reset"], at) >= 61, (at, at and U.moving_line("weekly", p.read["weekly"]["reset"], at))
+print("OK")
+"""
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-800:])
+        return "two days in the team's line climbs out of its least, mid-week the whole reserve of 15 is kept, the agents stop first"
+
+    async def flow382(self) -> str:
+        """F113, no Claude: a friend's plan with a 5-hour window, ten minutes after its reset. The moving 5-hour line is at its floor
+        of 10; less the reserve it was -5, so nothing started in the first half hour, and an agent's line was -10. Now the team's line
+        is 10 and the agents' 5, a job starts, and over the whole window the team's line never stands under 10."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env("f113-five")
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        gate = self._f113_gate(env)
+        week = 7 * 24 * 60
+        self._f113_usage(env, five=1, five_in=290, weekly=10, week_in=week - 100 * 60, plan="Max")
+        g = gate("--reserve", "--need", "five=2,weekly=0.5")
+        need(g.returncode == 0, f"the 5-hour at minute 10: {g.stdout}")
+        g = gate("--reserve", "--under", "5", "--need", "five=1,weekly=0.2")
+        need(g.returncode == 0, f"an agent at minute 10: {g.stdout}")
+        # a job of half an hour on a fresh plan (15 points at the start rate) waits for its room in this window, at the line of 10
+        n = new("Build the thing on the made-up page", "--guess", "5")
+        r = minute()
+        said = " ".join(r["log"][-3:])
+        need(state(n) == "ready" and "stop line of 10%" in said, f"the minute at minute 10 of a 5-hour window: {state(n)} {said}")
+        need(jobs("stop", n).returncode == 0, "no stop")
+        child = r"""
+import sys, time
+sys.path.insert(0, sys.argv[1] + "/routine")
+import usagecost as U
+now = time.time()
+p = U.Projection.here(now)
+assert p and p.reserve == 15, p
+low = min(p.room("five", now + 60 * m) + p.pct("five", now + 60 * m) for m in range(0, 290))
+assert low >= 10, f"the team's 5-hour line went down to {low}"
+t = now + 60 * 140  # 150 minutes in: the line is about 50, the whole reserve kept
+line = U.moving_line("five", p.read["five"]["reset"], t)
+mid = p.room("five", t) + p.pct("five", t)
+assert line > 45 and abs(mid - (line - 15)) < 0.01, (line, mid)
+at = p.fits_at({"five": 15, "weekly": 3}, now)  # the half-hour job: in this window, not never
+assert at is not None and at < p.read["five"]["reset"], (at, p.read["five"]["reset"])
+print("OK")
+"""
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-800:])
+        return "ten minutes into a 5-hour window the team's line is 10 and the agents' 5, a small job fits, a big one waits in the window, the line never under 10"
+
+    async def flow383(self) -> str:
+        """F113, no Claude: a job running across a 5-hour reset isn't held for it. Through the routine's real minute, a headless team
+        job: one minute after the reset the stream says 2%, which used to be over the line of -5; a reading from just before the reset,
+        92% with its reset now passed, used to count against a line of 85; neither holds it now. At its own line it is still held."""
+        ws, env, d = self._wall_env("f113-reset")
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        week = 7 * 24 * 60
+        self._f113_usage(env, five=1, five_in=120, weekly=10, week_in=week - 100 * 60, plan="Max")  # it starts before the reset
+        n = new("Build the thing on the made-up page", "--guess", "5")
+        r = minute()
+        need(state(n).startswith("running"), f"the job didn't start: {state(n)} {r['log'][-3:]}")
+        (Path(env["HQ_JOB_RUN"]) / "job.json").write_text(json.dumps({"n": int(n), "pid": 999999, "started": time.time() - 10}))
+        (Path(env["HQ_JOB_RUN"]) / "job.pid").write_text("999999")
+        rec = json.loads((Path(env["HQ_ESTIMATES"]) / "job-usage.json").read_text())
+        rec[n]["late"] = True
+        (Path(env["HQ_ESTIMATES"]) / "job-usage.json").write_text(json.dumps(rec))
+        # just before the reset: 92% of the 5-hour, its reset a minute gone, no fresh reading yet
+        self._f113_usage(env, five=92, five_in=-1, weekly=10, week_in=week - 100 * 60, age=120, plan="Max")
+        r = minute()
+        need(state(n).startswith("running") and not r["ended"], f"held on the number from before the reset: {state(n)} {r['log'][-3:]}")
+        # a minute after the reset the stream says 2%
+        self._f113_usage(env, five=2, five_in=299, weekly=10, week_in=week - 100 * 60, plan="Max")
+        r = minute()
+        need(state(n).startswith("running") and not r["ended"], f"held across the reset: {state(n)} {r['log'][-3:]}")
+        # at its own line it's still held
+        self._f113_usage(env, five=11, five_in=299, weekly=10, week_in=week - 100 * 60, plan="Max")
+        r = minute()
+        need(state(n).startswith("held") and r["ended"], f"not held at the team's line of 10: {state(n)} {r['log'][-3:]}")
+        return "a running job crosses a 5-hour reset: the old number and the fresh 2% don't hold it, its own line of 10 does"
+
     async def flow229(self) -> str:
         """F107, no Claude: the gate on a real reading of this shape: only the weekly windows, as the usage tool and a run's own stream
         give it. It's readable and nothing is kept of the old 5-hour; through the routine's real minute a job starts under the week's
@@ -33047,6 +33225,10 @@ FLOWS = {
     221: ("F102: a mail run that moves the marker back or drops a very important line is put back with an incident; red after 2 hours between 8:00 and midnight", False, "flow221"),
     220: ("F102: two processes adding 150 notes lose none; one lock across processes for the to-do list, the notes, the games, the coaching file and the mail list", False, "flow220"),
     229: ("F107: the gate on a real reading with only the weekly windows: readable, on the week, the reserve and the age hold, the 5-hour back with a reading that has it", False, "flow229"),
+    380: ("F113: the first night after a weekly reset the team runs and the agents get their share; the reserve never takes the team's line under 15, his 0 brings the old line back", False, "flow380"),
+    381: ("F113: later in the week the reserve still keeps his room: two days in it climbs out of its least, mid-week all 15 points are kept and the agents stop first", False, "flow381"),
+    382: ("F113: a plan with a 5-hour window at minute 10: the team's line is 10 and the agents' 5, a small job fits, a big one waits in the window, the line never under 10", False, "flow382"),
+    383: ("F113: a job running across a 5-hour reset isn't held for it: not on the number from before the reset, not on the fresh 2%; at its own line it is", False, "flow383"),
     231: ("F103: the record: an id given when the item is written, carried by the job, its QA, the release, a text and an incident; follow prints them all; the job's text names no row", False, "flow231"),
     232: ("F103: the ledger: a call with a correction adds one line with the agent and his words, from the program or the wrap-up, a quote that isn't his is refused, praise isn't counted, the file can't be written from a call, a refused mail is a line", False, "flow232"),
     233: ("F103: the score per agent and per hand-off from the ledger alone; a QA fail and a bug after a pass; the week's score with the switch off; turns, minutes and what each estimate stands on", False, "flow233"),

@@ -376,6 +376,9 @@ def tag_once(log=None):
 # ---------- the stop lines, as status/usage.mjs has them (lineSettings, movingLine, stopLine) ----------
 
 RESERVE = 15  # F100: points taken off each stop line for the agents' cycles and the team (Fable's default, his to turn)
+# F113: the reserve never takes the team's line under this (or under the stop line itself, when that's lower): LEAST in
+# status/usage.mjs says why. "**Team line at least: N points.**" on the roadmap turns it. [15 is Claude's pick.]
+LEAST = 15
 
 
 def line_settings(markdown):
@@ -412,6 +415,31 @@ def reserve_points(markdown=None):
             return RESERVE
     res = re.search(r"\*\*Usage reserve:\s*(\d{1,2})\b", markdown)
     return int(res.group(1)) if res else RESERVE
+
+
+def least_points(markdown=None):
+    """F113: the least the team's line stands at with the reserve taken off, from the roadmap (LEAST when it doesn't name one)."""
+    if markdown is None:
+        try:
+            markdown = open(hqpaths.ROADMAP, encoding="utf8").read()
+        except OSError:
+            return LEAST
+    m = re.search(r"\*\*Team line at least:\s*(\d{1,2})\b", markdown)
+    return int(m.group(1)) if m else LEAST
+
+
+def team_line(line, reserve=0, least=LEAST):
+    """F113: the team's line for a stop line: the reserve off, never under the least or the stop line (teamLine in usage.mjs)."""
+    if not reserve or line is None:
+        return line
+    return max(min(line, least), line - reserve)
+
+
+def line_for(team, reserve=0, least=LEAST):
+    """The lowest stop line whose team line reaches `team` (team_line turned round, for when a moving line gets there)."""
+    if not reserve or team <= least:
+        return team
+    return team + reserve
 
 
 def roadmap_lines():
@@ -479,15 +507,16 @@ class Projection:
     """The use on each line from now on: the reading now, plus the cost of the work planned before (added at its
     start), with each reset bringing the use back to 0 and the moving line back to its floor."""
 
-    def __init__(self, read, lines, now=None, reserve=0):
+    def __init__(self, read, lines, now=None, reserve=0, least=LEAST):
         self.read, self.lines, self.now = read, lines, (_now() if now is None else now)
         self.adds = []  # (t, {key: points})
         self.reserve = reserve  # F100: stays out of the room the team and the cycles count on
+        self.least = least  # F113: ... but never takes the team's line under this
 
     @classmethod
     def here(cls, now=None):
         r, lines = reading(now=now), roadmap_lines()
-        return cls(r, lines, now, reserve_points()) if r and lines else None
+        return cls(r, lines, now, reserve_points(), least_points()) if r and lines else None
 
     def _window(self, key, t):
         reset = self.read[key]["reset"]
@@ -515,8 +544,12 @@ class Projection:
     def counted(self, weekly_only=False):
         return [k for k in self.read if not (weekly_only and k == "five")]
 
+    def team(self, key, t):
+        """F113: the team's line at t: the stop line less the reserve, never under the least."""
+        return team_line(self.line(key, t), self.reserve, self.least)
+
     def room(self, key, t):
-        return round(self.line(key, t) - self.reserve - self.pct(key, t), 1)
+        return round(self.team(key, t) - self.pct(key, t), 1)
 
     def fits(self, need, t, weekly_only=False):
         return all(self.room(k, t) > _need(need, k) for k in self.counted(weekly_only))
@@ -539,7 +572,7 @@ class Projection:
                 c = None
                 if s and s["moving"] and reset is not None:
                     # The minute the moving line passes the use plus the need, in this window.
-                    target = self.pct(k, t) + self.reserve + need_k + 0.05
+                    target = line_for(self.pct(k, t) + need_k, self.reserve, self.least) + 0.05
                     win = LINES[k]["window"]
                     start = round(reset / 60) * 60 - win
                     begun = math.ceil((target - 0.05) * (win // 60) / 100)

@@ -112,6 +112,26 @@ export function reserveOf(markdown) {
 }
 
 /**
+ * F113 (2 November 2026): the reserve never takes the team's line under LEAST points (or under the stop line itself, when that's
+ * lower). A moving line starts its window at its floor (20 on a week, 10 on a 5-hour), so the full reserve made the team's weekly
+ * line 5 and the agents' 0 for the first 33 hours of a week, and a 5-hour line -5 for its first half hour: after a reset nothing
+ * ran, and a job across a 5-hour reset was held at once. In those hours the plan itself still has the rest of its window for him
+ * (at a line of 20 there's 80 left), so the reserve comes in as the line climbs: from a line of LEAST + reserve on (30 by
+ * default, about two days into a week, an hour and a half into a 5-hour window) the whole reserve is kept, as before.
+ * "**Team line at least: N points.**" on the roadmap turns it (usageline.py least N); 0 takes the reserve off in full again.
+ * [15 is Claude's pick: under it the team and the agents together get the room of a night's few jobs at the start of a week.]
+ */
+export const LEAST = 15;
+export function leastOf(markdown) {
+  return Number(/\*\*Team line at least:\s*(\d{1,2})\b/.exec(markdown ?? '')?.[1] ?? LEAST);
+}
+/** The team's line for a stop line, with the reserve taken off but never under the least (or the stop line, when that's lower). */
+export function teamLine(line, reserve = 0, least = LEAST) {
+  if (!reserve) return line;
+  return Math.max(Math.min(line, least), line - reserve);
+}
+
+/**
  * F100, his words of 30 October 2026: "A usage reading counts as too old after 30 minutes. Then nothing new starts until a
  * fresh one comes in." Why a saved reading is too old for the gate, in words, or null.
  */
@@ -203,7 +223,7 @@ export function roomNeeded(key, minutes = START_MINUTES) {
  *   needs room under each line for the job's estimated usage `need` in points (H172; Weekly Fable takes the weekly
  *   one), else for its estimate of `minutes` at START_ROOM's rates (H141, roomNeeded)
  */
-export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = false, start = false, minutes, need, reserve = 0 } = {}) {
+export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = false, start = false, minutes, need, reserve = 0, under = 0, least = LEAST } = {}) {
   if (!reading?.readable) return { stop: true, reason: 'The usage could not be read.' };
   if (!lines) return { stop: false, reason: '' };
   // A kept reading (F6) is old and from another session: shown, but never a stop.
@@ -212,11 +232,15 @@ export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = fa
     .filter((l) => !l.kept)
     .filter((l) => !weeklyOnly || /^weekly/i.test(l.label))
     .map((l) => {
-      const line = Math.round(10 * (stopLine(l, lines, now).line - reserve)) / 10;  // F100: the reserve stays out of it
+      // F100: the reserve stays out of it, F113: never under the least; H298: an agent's line is `under` points lower still.
+      const at = stopLine(l, lines, now).line;
+      const team = teamLine(at, reserve, least);
+      const line = Math.round(10 * (team - under)) / 10;
+      const kept = Math.round(10 * (at - team)) / 10;
       const key = lineKey(l.label) ?? 'five';
       const est = need ? Number(need[key] ?? need.weekly ?? 0) : null;
       const room = Math.round(10 * (line - l.percent)) / 10;
-      return { ...l, line, est, need: !start ? 0 : est !== null && Number.isFinite(est) ? est : roomNeeded(key, minutes), room };
+      return { ...l, line, kept, est, need: !start ? 0 : est !== null && Number.isFinite(est) ? est : roomNeeded(key, minutes), room };
     })
     .filter((l) => l.room <= l.need);
   if (over.length === 0) return { stop: false, reason: '' };
@@ -225,7 +249,7 @@ export function usageVerdict(reading, lines, now = new Date(), { weeklyOnly = fa
     reason: `${over
       .map((l) =>
         l.percent >= l.line
-          ? `${l.label} is at ${l.percent}%, its stop line is ${l.line}%${reserve ? ` with the reserve of ${reserve} points kept` : ''}`
+          ? `${l.label} is at ${l.percent}%, its stop line is ${l.line}%${reserve ? (l.kept < reserve ? ` with ${l.kept} of the reserve of ${reserve} points kept (the team's line stays at ${least}% at the least)` : ` with the reserve of ${reserve} points kept`) : ''}${under ? `, ${under} points under the team's for the agents` : ''}`
           : l.est !== null && Number.isFinite(l.est)
             ? `${l.label}: about ${Number.isFinite(minutes) && minutes > 0 ? `${Math.round(minutes)} min of work, estimated to use ` : ''}${l.need}% of it, doesn't fit under its stop line of ${l.line}%: there's ${l.room}% of room (at ${l.percent}%)`
             : `${l.label}: about ${Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes) : START_MINUTES} min of work needs ${l.need}% of room under its stop line of ${l.line}%, there's ${l.room}% (at ${l.percent}%)`,

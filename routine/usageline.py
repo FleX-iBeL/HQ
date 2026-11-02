@@ -22,6 +22,7 @@ A job let past the line still only skips the 5-hour line; the weekly lines alway
     python3 routine/usageline.py weekly fixed 95       the weekly all-models line fixed at 95%
     python3 routine/usageline.py fable moving|fixed [N]   the same for the weekly Fable line
     python3 routine/usageline.py reserve [N]           F100: the points kept for his calls and the small routines (0 to 50)
+    python3 routine/usageline.py least [N]             F113: the reserve never takes the team's line under N points (0 to 50)
 """
 from __future__ import annotations
 
@@ -199,9 +200,47 @@ def write_reserve(n: int) -> None:
     os.replace(tmp, ROADMAP)
 
 
+LEAST = re.compile(r"\*\*Team line at least:\s*(\d{1,2})\b[^*]*\*\*")
+
+
+def least_of(text: str) -> int:
+    m = LEAST.search(text)
+    return int(m.group(1)) if m else 15
+
+
+def write_least(n: int) -> None:
+    """F113: the reserve never takes the team's line under this; on the roadmap, next to the reserve."""
+    text, s = read()
+    if s is None:
+        sys.exit("The roadmap names no usage limit (**Usage limit: N%**), so there are no stop lines to keep a reserve under.")
+    new = f"**Team line at least: {n} points.**"
+    if LEAST.search(text):
+        text = LEAST.sub(lambda _: new, text, count=1)
+    else:
+        lines = text.split("\n")
+        i = max(j for j, l in enumerate(lines) if LIMIT.search(l) or RESERVE.search(l) or any(mode_re(k).search(l) for k in LINES))
+        lines.insert(i + 1, f"- {new} The reserve never takes the team's stop line under this (or under the stop line itself), so "
+                            "the first hours after a reset still have room for the team and the agents; from a line of this plus the "
+                            "reserve on, the whole reserve is kept (F113). 0 keeps the whole reserve always. Switched from a call.")
+        text = "\n".join(lines)
+    hqpaths.guard_roadmap(ROADMAP)
+    tmp = ROADMAP + ".tmp"
+    open(tmp, "w", encoding="utf8").write(text)
+    os.replace(tmp, ROADMAP)
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(describe())
+        return 0
+    if argv[0] == "least":
+        if len(argv) == 2:
+            if not argv[1].isdigit() or int(argv[1]) > 50:
+                print("The least line is a whole number of points from 0 to 50.", file=sys.stderr)
+                return 2
+            write_least(int(argv[1]))
+        print(f"The team's line stays at {least_of(read()[0])} points at the least when the reserve comes off "
+              f"(the reserve is {reserve_of(read()[0])} points).")
         return 0
     if argv[0] == "reserve":
         if len(argv) == 2:
