@@ -214,7 +214,8 @@ plain address opens without a yes; one with a query string or a login asks.
 '{"edits": [{"old": "...", "new": "..."}]}'. The agents' settings and the handbook (HQ/agents/), me.md and the backend's switches \
 are his: a change asks him first, and never through the shell. The mail switch is his own hand's, never set from here, not even \
 on his yes. Another agent's ledger and notes are hers alone. His yes to a held change and a switch of a usage stop line stand only on \
-his own words, as he said or typed them here; feedback that leaves this HQ waits for his yes here.""".replace("@HQ@", str(ROOT))
+his own words, as he said or typed them here; feedback that leaves this HQ waits for his yes here. Run cycles.py, usageline.py \
+and feedback.py only as a plain command of their own (python3 PATH ARGS, after a cd at the most, nothing else in the line).""".replace("@HQ@", str(ROOT))
 
 # H200 (17 October 2026, call at 14:45), in the user's words: "I realized this was actually the whole reason I started
 # building this. Because I know how much administrative work it is to maintain it, but now with HQ... It's super
