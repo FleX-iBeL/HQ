@@ -319,7 +319,7 @@ def write(text, jobs, on):
 ROW_NUM = re.compile(r"^\| [^|]* \| ([A-Z])(\d+)\b", re.M)
 
 
-def roadmap_row(text, said, bug=False):
+def roadmap_row(text, said, bug=False, by="", item=None):
     """H160: a numbered row for work added on the status page, in Phase F (a bug) or Phase H (everything else),
     right after that phase's highest number, in the roadmap's own shape. Returns (text, label)."""
     letter = "F" if bug else "H"
@@ -347,12 +347,15 @@ def roadmap_row(text, said, bug=False):
     title = said.split(". ")[0].rstrip(".")
     if len(title) > 80:
         title = title[:80].rsplit(" ", 1)[0] + "…"
-    when = time.strftime("%-d %B %Y") + f" (status page, {time.strftime('%H:%M')})"
     label = f"{letter}{n}"
-    lines.insert(at + 1, f"| ⬜ | {label} {title} | {when}, typed: \"{said}\" [Added on the status page, no call; "
-                         f"the title is the first sentence.] | {said} | |")
+    if by:  # F105: a row written by a call or an agent's run says so: it isn't his typing on the page, and its fields end where it ends
+        lines.insert(at + 1, f"| ⬜ | {label} {title} | {time.strftime('%-d %B %Y')} ({by}, {time.strftime('%H:%M')}): {said} | {said} | |")
+    else:
+        when = time.strftime("%-d %B %Y") + f" (status page, {time.strftime('%H:%M')})"
+        lines.insert(at + 1, f"| ⬜ | {label} {title} | {when}, typed: \"{said}\" [Added on the status page, no call; "
+                             f"the title is the first sentence.] | {said} | |")
     import trail
-    trail.written(label, said)  # F103: the id is given here, when the item is written
+    trail.written(label, said, by=by, item=item)  # F103: the id is given here, when the item is written
     return text[:head] + "\n".join(lines) + text[end:], label
 
 
@@ -694,15 +697,29 @@ def main(argv):
                 i = args.index("--after-qa")
                 after = (args[i + 1] if i + 1 < len(args) else "").upper()
                 args = args[:i] + args[i + 2:]
+            order_n = None  # F105: the order it's written for, as an argument: its id goes on with the row
+            if "--order" in args:
+                i = args.index("--order")
+                order_n = args[i + 1] if i + 1 < len(args) else ""
+                if not order_n.isdigit():
+                    sys.exit("--order wants the order's number.")
+                args = args[:i] + args[i + 2:]
             said = one_line(" ".join(a for a in args if a != "--bug")).replace("|", "/")
             if not said:
                 sys.exit("What goes on the planning? Write it in a line or two.")
+            if said.startswith("-"):  # F105: a run looked up its options and --help became a row
+                sys.exit("write-row THE-ROW [--bug] [--order N] [--after-qa LABEL]: a row starts with its words, not with a dash. Nothing written.")
             if after:
                 import qa
                 no = qa.why_no_bug_after(after, text)
                 if no:
                     sys.exit(f"Refused: {no} Nothing written.")
-            text, label = roadmap_row(text, said, bug)
+            run_ = os.environ.get("HQ_JOB") or ""
+            import trail
+            # F105: a job says its number; a reply to a text runs with the agent's line set (HQ_DIRECT_AGENT, app/direct_line.py), a call without
+            by = f"job {run_}" if run_.isdigit() else "in a text" if os.environ.get("HQ_DIRECT_AGENT") else "on a call"
+            text, label = roadmap_row(text, said, bug, by=by,
+                                      item=trail.of_order("moneypenny", int(order_n)) if order_n else None)
             write(text, jobs, on)
             print(f"{label} is on the planning.")
             if after:

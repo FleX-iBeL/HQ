@@ -905,7 +905,7 @@ def tick(main=True, log=print, routines=None, incidents=None, acting=None):
                 incidents.fix("sync", f"Merge job {n} queued for {os.path.basename(c['file'])}" if n else
                               f"Couldn't queue a merge job for {os.path.basename(c['file'])}")
         elif incidents.is_down("sync"):
-            incidents.up("sync")
+            incidents.up("sync", what="The sync went through again")
     return {"state": st, "text": text, "conflicts": len(found), "queued": [n for _, n in queued], "committed": committed}
 
 

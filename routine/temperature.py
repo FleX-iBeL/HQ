@@ -129,7 +129,7 @@ def main(dry=False):
     if x["lvl"] == "hot":
         incidents.down("temp", f"{x['cpu']:.0f}°C on the chip; {heat_words(x)}")
     else:
-        incidents.up("temp")
+        incidents.up("temp", what=f"Cooled down: {text}"[:200])
     return 0
 
 

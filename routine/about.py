@@ -76,9 +76,13 @@ def _incident(ok: bool, why: str) -> None:
         if ok:
             if incidents.is_down("about"):
                 incidents.fix("about", why)
-                incidents.up("about")
+                incidents.up("about", what=why)
         else:
             incidents.down("about", why[:200])
+        import routines  # F116: its own line, drawn on the status page
+        if routines._real():
+            import time
+            routines.beat("about", state="ok" if ok else "down", text=why[:200], last=time.time(), every=30 * 86400)
     except Exception:
         pass
 

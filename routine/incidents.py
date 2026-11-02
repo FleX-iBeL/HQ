@@ -20,10 +20,40 @@ EVENTS = os.path.join(hqpaths.SUPPORT, "events.jsonl")
 KEEP = 100
 
 
+def _real() -> bool:
+    """F116: a test leaves the real log as it is unless it named its own."""
+    return not hqpaths.under_test() or bool(os.environ.get("HQ_INCIDENTS_FILE"))
+
+
+def _aside():
+    """F116: where an unreadable log is kept: FILE.bad, then FILE.bad.2, .bad.3: one kept never goes under the next."""
+    if not os.path.exists(FILE + ".bad"):
+        return FILE + ".bad"
+    n = 2
+    while os.path.exists(f"{FILE}.bad.{n}"):
+        n += 1
+    return f"{FILE}.bad.{n}"
+
+
 def read():
     try:
         data = json.load(open(FILE))
-    except (OSError, ValueError):
+    except OSError:
+        data = {}
+    except ValueError:
+        # F116: an unreadable log was read as empty, and the next write put a new one over the history. Now it's kept aside, its
+        # own routine line goes red, and new incidents are written from here.
+        data = {}
+        if _real():
+            try:
+                aside = _aside()
+                os.replace(FILE, aside)
+                import routines
+                routines.beat("incidents-file", state="down", every=365 * 86400, last=time.time(), aside=os.path.basename(aside),
+                              text=f"The incident log was unreadable; kept as {os.path.basename(aside)}, new incidents are written from here")
+            except Exception:
+                pass
+    if not isinstance(data, dict):
         data = {}
     data.setdefault("incidents", [])
     data.setdefault("events_seen", 0)
@@ -37,6 +67,15 @@ def _write(data):
     with os.fdopen(fd, "w") as f:
         json.dump(data, f, indent=1)
     os.replace(tmp, FILE)
+    if _real():  # F116: a good log written again: its red line goes green, saying where the unreadable one is kept
+        try:
+            import routines
+            line = routines.read().get("incidents-file") or {}
+            if line.get("state") == "down":
+                routines.beat("incidents-file", state="ok", every=365 * 86400, last=time.time(),
+                              text=f"The incident log is written again; the unreadable one is kept as {line.get('aside') or os.path.basename(FILE) + '.bad'}")
+        except Exception:
+            pass
 
 
 def _open(data, key):
@@ -84,20 +123,32 @@ def fix(key, what, at=None):
         pass
 
 
-def up(key, at=None):
-    """The routine is back: closes its open incident, if any."""
+def up(key, at=None, what=None):
+    """The routine is back: closes its open incident, if any. F116: never without what fixed it: `what` is that, kept as the
+    incident's last fix when it has none yet (a fix written before it says it already). With no fix and no `what` the close
+    is refused: it stays open, and False comes back. True when it closed, None when nothing was open."""
     try:
         data = read()
         inc = _open(data, key)
-        if inc:
-            inc["back"] = at or time.time()
-            _write(data)
+        if not inc:
+            return None
+        when = at or time.time()
+        if not inc.get("fixes"):
+            if not str(what or "").strip():
+                return False
+            inc["fixes"] = [{"at": when, "what": str(what).strip()}]
+        inc["back"] = when
+        _write(data)
+        return True
     except Exception:
-        pass
+        return None
 
 
 def past(key, since, until, why, fixes, item=None):
-    """An outage that is already over when it's noticed (the helper itself was down). F103: item, the id of the work it hit."""
+    """An outage that is already over when it's noticed (the helper itself was down). F103: item, the id of the work it hit.
+    F116: closed from the start, so never without what fixed it: no fixes, and it's refused (False)."""
+    if not [w for _, w in fixes or [] if str(w).strip()]:
+        return False
     try:
         data = read()
         inc = {"id": f"{key}-{int(since)}", "key": key, "down": since, "why": why,

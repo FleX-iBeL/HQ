@@ -733,7 +733,7 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
             incidents.fix("role", f"This one took over as main at {_clock(now)} and started the routines")
         elif changed and was == "main" and s["acting"] == "backup" and took and incidents.is_down("role"):
             incidents.fix("role", f"{peer} was back; handed the main role back at {_clock(now)}")
-            incidents.up("role")
+            incidents.up("role", what=f"{peer} was back; handed the main role back at {_clock(now)}")
     if (changed or pending) and s["acting"] == "main" and on_main:
         try:
             on_main()
@@ -1006,7 +1006,7 @@ def _deliver_each(acting_now, p, c, log, lines, left):
                     elif isinstance(d, dict):
                         import incidents
                         if incidents.is_down(HANDOVER_KEY) and not any(x.get("refused") for x in lines):
-                            incidents.up(HANDOVER_KEY)
+                            incidents.up(HANDOVER_KEY, what="The main took what was handed over")
                     continue
         except Exception:
             pass
