@@ -13221,8 +13221,8 @@ window.fetch = async (url, opt) => {
         need(mf.said(at(2026, 10, 16, 22), now) == "today at 22:00" and mf.said(at(2026, 10, 18, 22), now) == "Sunday 18 October at 22:00",
              "the end isn't said back in plain words")
         # the switch, on a copy of the roadmap
-        rm = self.tmp / "roadmap-H149.md"
-        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
+        rm = self.tmp / "roadmap-H149.md"  # F105: the copy starts with the mail check on, whatever the real one says now
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on").replace("**Mail check:** off", "**Mail check:** on"))
         env = {**os.environ, "HQ_ROADMAP": str(rm)}
         def jobs(*a, ok=True):
             r = sp.run(["python3", str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
