@@ -63,7 +63,7 @@ def good(key, text="Ran fine", every=60):
         import incidents
         now = time.time()
         beat(key, state="ok", text=text[:200], last=now, next=now + every, every=every, why="")
-        incidents.up(key)
+        incidents.up(key, what=f"It ran fine again by itself: {text[:150]}")  # F116: never closed without what fixed it
 
 
 def bad(key, what, every=60, item=None):

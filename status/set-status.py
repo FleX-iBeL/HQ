@@ -61,7 +61,7 @@ block = f"""# {states[state]}
 
 """ + "\n".join(log[:8]) + f"""
 
-*Updated {time.strftime('%Y-%m-%d')}{' · ' + note if note else ''}*
+*Updated {time.strftime('%Y-%m-%d %H:%M')}{' · ' + note if note else ''}*
 """
 hqpaths.guard_roadmap(path)  # F17
 tmp = f"{path}.status.{os.getpid()}"

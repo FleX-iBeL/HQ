@@ -189,7 +189,7 @@ def _marker_minute(last, incidents, routines) -> None:
     so a check that was off or down doesn't read as this; those have their own line."""
     m = marker(_read())
     if m is None or last - m < STUCK_S:
-        incidents.up(STUCK_KEY)
+        incidents.up(STUCK_KEY, what="A good mail check moved the newest mail seen again")
         text = "No mail seen yet" if m is None else "Newest mail seen " + time.strftime("%d %B %H:%M", time.localtime(m))
         routines.beat(STUCK_KEY, state="ok", text=text, every=60)
         return
@@ -218,8 +218,8 @@ def minute(on, incidents, routines, now=None) -> str:
     if not on:
         routines.beat(KEY, state="off", text="The mail check is off", every=60)
         routines.beat(STUCK_KEY, state="off", text="The mail check is off", every=60)
-        incidents.up(KEY)
-        incidents.up(STUCK_KEY)
+        incidents.up(KEY, what="The mail check was turned off, so the list isn't watched")
+        incidents.up(STUCK_KEY, what="The mail check was turned off, so the newest mail isn't watched")
         return "off"
     last = last_good()
     if last is None:
@@ -234,7 +234,7 @@ def minute(on, incidents, routines, now=None) -> str:
         return "stale"
     was = incidents.is_down(KEY)
     if was and not str(was.get("why", "")).startswith("The mail check broke") or (was and old < 3600):
-        incidents.up(KEY)
+        incidents.up(KEY, what="The mail list was checked again")
     routines.beat(KEY, state="ok", text="Checked " + time.strftime("%H:%M", time.localtime(last)), every=60)
     return "ok"
 

@@ -17,7 +17,7 @@
  * stop lines' settings (moving or fixed, H91) are read by lineSettings in usage.mjs.
  */
 
-import { lineSettings } from './usage.mjs';
+import { lineSettings, reserveOf } from './usage.mjs';
 
 // H183: 🔁 marks the team's repeating work (Phase Maintenance): never open, never done.
 const MARKS = { '✅': 'done', '🔨': 'doing', '⬜': 'todo', '❓': 'ask', '🔁': 'repeat' };
@@ -194,6 +194,8 @@ export function parseRoadmap(markdown) {
     usageMoving: five ? five[1].toLowerCase() === 'moving' : true,
     // H91: the three stop lines (5-hour, weekly all models, weekly Fable), each moving or fixed.
     usageLines: lineSettings(markdown),
+    // F116: the points kept under each line for his calls; the gate takes them off, so the page does too.
+    usageReserve: reserveOf(markdown),
     state,
     title,
     headline: h2 ? plain(h2.slice(3)) : '',

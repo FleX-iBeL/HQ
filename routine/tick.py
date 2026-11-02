@@ -738,7 +738,7 @@ def mail_running():
     if ok:
         clear(MAIL_RETRY)
         failures.record("mail", True)
-        incidents.up("mail")
+        incidents.up("mail", what="The next mail check ran fine")
     else:
         # H30: a failed run didn't really run; try it again in ten minutes, twice at the most.
         # H42: with the reason from its own output, its last lines, and where its whole output is kept.
@@ -998,7 +998,7 @@ def usage():
     routines.beat("usage", state="ok" if r.returncode == 0 else "down", last=time.time(), next=time.time() + 60,
                   every=60, text=(first or "Ran") if r.returncode == 0 else f"Failed: {(r.stderr or r.stdout).strip()[:120]}")
     if r.returncode == 0:
-        incidents.up("usage")
+        incidents.up("usage", what="The next usage check ran fine")
     else:
         incidents.down("usage", f"Failed: {(r.stderr or r.stdout).strip()[:120]}")
 
@@ -1026,7 +1026,7 @@ def status_page():
         else:
             if fixed:
                 incidents.fix("phone", fixed)
-            incidents.up("phone")
+            incidents.up("phone", what="The status page and its phone address answer again")
     else:
         incidents.down("phone", text)
         if fixed:
@@ -1074,7 +1074,7 @@ def call_line():
     # answering without the phone address: turn the address on again. F102: a line that listens but doesn't answer
     # for 3 minutes is hung, with or without a call on it: that exact process ends, and it starts again.
     if state == "ok":
-        incidents.up("call")
+        incidents.up("call", what="The call line answers again")
         return
     inc = incidents.down("call", text)
     if not inc or not CALL_FIX:
@@ -1149,7 +1149,7 @@ def watchdog_check():
         at = 0
     now = time.time()
     if now - at <= 720:
-        incidents.up("watchdog")
+        incidents.up("watchdog", what="The watchdog wrote its line again")
         return
     inc = incidents.down("watchdog", f"No check from the watchdog since {clock(at)}" if at else "The watchdog has never checked in")
     tried = [f["at"] for f in (inc or {}).get("fixes", [])]
@@ -1342,10 +1342,10 @@ def on_backup():
     text = f"Runs on the main one, {peer}; this HQ is the backup"
     for key in ("mail", "jobs", "schedule"):
         routines.beat(key, state="ok", text=text, last=None, next=None, every=60, why="", detail=[], run="")
-    for key in ("maillist", "mailmarker", "saving", "cycles"):  # F102: these run on the main only; never overdue here
+    for key in ("maillist", "mailmarker", "saving", "cycles") + PART_LINES[1:]:  # F102: these run on the main only; never overdue here (F116: Donna's parts too)
         if key in routines.read():
             routines.beat(key, state="ok", text=text, last=None, next=None, every=60, why="")
-    incidents.up("mailmarker")  # F109: the main keeps that watch
+    incidents.up("mailmarker", what="This HQ is the backup now; the main keeps that watch")  # F109: the main keeps that watch
     clear(GATE_NOTE, TRUST_NOTE)
 
 
@@ -1448,6 +1448,8 @@ def data_minute():
         said = update.other_minute()
         if said:
             log(said)
+        if "data" in routines.read():  # F116: a failure's red line closes once the changes run again
+            routines.good("data", "The data changes ran", every=3600)
     except Exception as e:
         log(f"data changes: {e!r}")
         routines.bad("data", f"A data change failed: {e!r}", every=3600)
@@ -1546,6 +1548,21 @@ def feedback_minute():
         open(pidf, "w").write(str(p.pid))
 
 
+PART_LINES = ("donna", "reminders", "weather", "news", "calendar", "coaching")  # F116: the parts of Donna's minute, a line each
+
+
+def part_line(key, fn, name=None):
+    """F116: one part of Donna's minute: its own line on the status page every minute, red with an incident when it fails, so
+    nothing of hers goes quiet; the next good minute closes it. A failure never stops the next part."""
+    try:
+        said = fn()
+    except Exception as e:
+        log(f"{name or key}: {e!r}")
+        routines.bad(key, f"It failed: {e!r}", every=60)
+        return
+    routines.good(key, said or "Looked", every=60)
+
+
 def direct_watch():
     """H80: Donna texts on HQ's own direct line when the job list is finished, a very important mail comes in, or
     something stays down (and again when it's back). On the backup only this computer's own incidents (a takeover
@@ -1557,11 +1574,14 @@ def direct_watch():
     main = role.acting() == "main"
     q = json.loads(jobs("next")) if main else None
     # F28: each look on its own, so one that fails doesn't stop the others (the incidents' one did, from H80 on).
-    try:
+    # F116: and each has its own line on the status page: a failure turns it red and opens an incident (part_line).
+    def watch():
+        n = 0
         for why, facts in direct_line.watch(q, main=main):
             log(f"direct line: texting ({why})")
-    except Exception as e:
-        log(f"direct line: {e!r}")
+            n += 1
+        return f"Texted {n} just now" if n else "Looked; nothing to text"
+    part_line("donna", watch, "direct line")
     # H120: the weather every three hours in the day, on the main; she texts only when there's something to say.
     if main:
         # F66: every Friday morning, before the sprint planning, how the week's estimates held (H266: from
@@ -1574,12 +1594,13 @@ def direct_watch():
                 log("direct line: the Friday report on the estimates")
         except Exception as e:
             log(f"the Friday estimates report: {e!r}")
-        try:
+        def weather_():
             import weather
             if weather.start():
                 log("direct line: looking at the weather")
-        except Exception as e:
-            log(f"weather: {e!r}")
+                return "Looking at the weather now"
+            return "Looked; not due yet"
+        part_line("weather", weather_)
         # H229: travel on appointments: trips for new ones, and the live watch on the open data before each one.
         try:
             import trips
@@ -1588,26 +1609,29 @@ def direct_watch():
         except Exception as e:
             log(f"travel: {e!r}")
         # H236: their own news: the sources they picked, read about every hour (detached), kept when they fit.
-        try:
+        def news_():
             import news
             if news.start():
                 log("news: reading the sources")
-        except Exception as e:
-            log(f"news: {e!r}")
+                return "Reading the sources now"
+            return "Looked; not due yet"
+        part_line("news", news_)
         # H225: Life coaching's check-ins, kept in the background: one that comes due lands in the coaching line.
-        try:
+        def coaching_():
             import coaching
-            for key in coaching.refresh():
+            due = list(coaching.refresh())
+            for key in due:
                 log(f"coaching: a check-in is due ({key})")
-        except Exception as e:
-            log(f"coaching: {e!r}")
+            return f"A check-in is due: {', '.join(due)}" if due else "Looked; none due"
+        part_line("coaching", coaching_)
         # H101: his calendar, read only, every hour in the day, for the call page's calendar.
-        try:
+        def calendar_():
             import agenda
             if agenda.start():
                 log("calendar: reading it (read only)")
-        except Exception as e:
-            log(f"calendar: {e!r}")
+                return "Reading it now (read only)"
+            return "Looked; not due yet"
+        part_line("calendar", calendar_)
         # H143, H241: an appointment an old X moved to HQ Planning that still waits to go back where it came from.
         try:
             import planning
@@ -1617,12 +1641,14 @@ def direct_watch():
             log(f"planning: {e!r}")
         # H124: Donna texts first: a ping when an appointment he picked starts, a reminder he asked for, and now and
         # then on her own about something on her own notes. H125: her watches' matches and ends too.
-        try:
+        def pings_():
             import pings
+            n = 0
             for why, _ in pings.watch():
                 log(f"direct line: texting ({why})" if why != "initiative" else "direct line: her own look at her notes")
-        except Exception as e:
-            log(f"pings: {e!r}")
+                n += 1
+            return f"Texted {n} just now" if n else "Looked; nothing due"
+        part_line("reminders", pings_, "pings")
 
 
 def updating():
@@ -1877,7 +1903,7 @@ def tick():
         # quiet incident open, and the next quiet job's would have been added to that one.
         if incidents.is_down("jobs"):
             incidents.fix("jobs", f"Job {s.get('n')} isn't running any more (done or held)")
-            incidents.up("jobs")
+            incidents.up("jobs", what=f"Job {s.get('n')} isn't running any more (done or held)")
         clear()
         quiet.clear_request()  # H36: a nudge that wasn't picked up is for nobody now
     try:

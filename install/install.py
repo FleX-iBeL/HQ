@@ -147,7 +147,7 @@ class Checklist:
     def __init__(self, mode: str, steps: list):
         self.lock = threading.Lock()
         self.data = {
-            "run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "pid": os.getpid(),  # F116: a fresh install only while this runs
             "mode": mode, "fake": FAKE, "hq": HQ, "workspace": WORKSPACE,
             "heads_up": HEADS_UP if IS_MAC else HEADS_UP_LINUX, "machine": f"{platform.system()} {platform.machine()}",
             "phase": "setup" if mode != "test" else "test", "result": "running", "finished": None,

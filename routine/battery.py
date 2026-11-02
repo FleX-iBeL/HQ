@@ -106,7 +106,7 @@ def main(dry=False):
     if x["lvl"] == "low":
         incidents.down("battery", f"{x['pct']}% and on battery")
     else:
-        incidents.up("battery")
+        incidents.up("battery", what=f"Charged or on the charger again: {text}"[:200])
     return 0
 
 
