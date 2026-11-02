@@ -2120,22 +2120,39 @@ def _opened(aid: str, st_: dict, h: dict, words: str, order_n: int, now: dt.date
     return f"Yes: she does it now: {h['what']}."
 
 
-def his_yes_refused(aid: str, words: str, n: int | None = None) -> str:
-    """F114: why WORDS don't stand as his yes to her held change, or "". They must be a line he said or typed himself on a call or in a
-    chat (sprint.his_yes, transcripts and threads only: what the program wrote as his, never an agent's line or a quick note), read as a
-    yes to this. Words that open with no aren't a yes at all: they go to no() as before. Never from a run of hers or a job."""
+def his_yes_refused(aid: str, words: str, n: int | None = None, places: list | None = None, base: Path | None = None) -> str:
+    """F114: why WORDS don't stand as his yes to her held change, or "". They must be a line he said or typed himself, today, in this
+    call or this chat (PLACES, else HQ_WORDS_FROM, which the session sets for its tools; by hand, any of today's), the program's own lines
+    (a transcript or a thread, never an agent's line or a quick note), read as a yes, and fit the change: his line, or her question just
+    before it, names it (its title's words), as the yes step does when several wait. Words that open with no aren't a yes at all: they go
+    to no() as before. Never from a run of hers or a job."""
     if _SAYS_NO.match(words or ""):
         return ""
     if os.environ.get("HQ_IN_JOB"):
         return "a run can't give a yes"
     holds = [h for h in _agent_state(_state(), aid)["holds"] if n is None or h["n"] == n]
-    if not holds:
-        return ""  # nothing waits: yes() says so itself
-    names = [aid, *(m for h in holds for m in re.findall(r"\"([^\"]+)\"", h.get("what") or "")), *(f"question {h['n']}" for h in holds)]
+    if not holds and places is None:
+        return ""  # run by itself with nothing waiting: yes() says so itself
     import sprint
-    where, no = sprint.his_yes(words, f"letting {aid} make the change she held for his yes: " + "; ".join(h["what"] for h in holds),
-                               names=names, real_only=True)
-    return "" if where else (no or "those words aren't his")
+    import hqpaths as _hp
+    if _hp.under_test() and not os.environ.get("HQ_PROOF_ON"):  # a test copy without lines of his, as sprint.his_quote
+        return ""
+    hits = sprint.his_said_now(words, str(base or folder()), places if places is not None else sprint.words_from_env())
+    if not hits:
+        return "those aren't his words from this call or this chat, today"
+    if not any(sprint.a_yes(h["line"], h["turn"]) for h in hits):
+        return "those are his words, but they aren't a clear yes"
+    if not holds:
+        return ""  # his words, and nothing waits: yes() says so
+    if not any(sprint.a_yes(h["line"], h["turn"]) and any(yes_fits(h["line"] + " " + h["turn"], x) for x in holds) for h in hits):
+        return "those are his words, but they don't name this change, and neither does her question before them"
+    return ""
+
+
+def yes_fits(said: str, h: dict) -> bool:
+    """F114: these words name this held change: a word of its title (what's in quotes in its line, else the line) besides the small ones."""
+    title = " ".join(re.findall(r"\"([^\"]+)\"", h.get("what") or "")) or (h.get("what") or "")
+    return bool(_meant(said) & _meant(title))
 
 
 _SAYS_NO = re.compile(r"\s*(?:no|nope|nah|nee|don'?t|do not|never mind|nevermind|cancel that|not that)\b", re.I)

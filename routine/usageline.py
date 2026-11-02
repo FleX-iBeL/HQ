@@ -199,15 +199,48 @@ def write_reserve(n: int) -> None:
     os.replace(tmp, ROADMAP)
 
 
-def his_say_so(words: str, what: str) -> str:
-    """F114: why his words don't stand for this switch, or "" when they do: a line he said or typed himself on a call or in a chat
-    (sprint.his_yes, the transcripts and threads only), never a job's own process."""
+# F114 (the check's fix round): what names each line in his words. "The weekly Fable line" is the Fable one.
+LINE_WORDS = {"five": re.compile(r"\b(?:5|five)[- ]?h(?:ou)?rs?\b|\b5h\b"), "weekly": re.compile(r"\bweek(?:ly)?\b"),
+              "fable": re.compile(r"\bfable\b")}
+
+
+def names_line(key: str, line: str, number: int | None = None) -> bool:
+    """F114: his line names this stop line, or, naming no other line, its number."""
+    low = " ".join(str(line).lower().split())
+    named = {k for k, rx in LINE_WORDS.items() if rx.search(low)}
+    if "fable" in named:
+        named.discard("weekly")
+    if key in named:
+        return True
+    return not named and number is not None and bool(re.search(rf"(?<!\d){number}(?!\d)", low))
+
+
+def his_say_so(words: str | None, key: str, number: int | None = None, places: list | None | str = "env", ws: str | None = None) -> str:
+    """F114: why his words don't stand for switching this line, or "" when they do: a line he said or typed himself, today, on this call or
+    in this chat (HQ_WORDS_FROM, which the session sets for its tools; by hand, any of today's), the program's own lines only (a transcript
+    or a thread), not a no, and naming this line or its number. Never a job's own process; inside a call or a chat, never without words."""
     if os.environ.get("HQ_IN_JOB"):
         return "a job can't give itself his say-so"
     import sprint
-    where, no = sprint.his_yes(words, f"switching the usage stop line: {what}", names=("usage", "stop line", "the line", "weekly", "5-hour",
-                                                                                     "fable", "fixed", "moving"), real_only=True)
-    return "" if where else (no or "those words aren't his")
+    places = sprint.words_from_env() if places == "env" else places
+    if words is None:
+        return "this runs on a call or in a chat, so it needs his words with --said" if places is not None else ""
+    if hqpaths.under_test() and not os.environ.get("HQ_PROOF_ON"):  # a test copy without lines of his, as sprint.his_quote
+        return ""
+    hits = sprint.his_said_now(words, ws, places=places)
+    if not hits:
+        return "those aren't his words from this call or this chat, today"
+    ok = [h for h in hits if sprint.yes_reading(h["line"], h["turn"], ()) != "no"]
+    if not ok:
+        return "those are his words, but they say no"
+    if not any(names_line(key, h["line"], number) for h in ok):
+        return f"his words don't name this line ({LINES[key][0]}) or its number"
+    return ""
+
+
+def sprint_places():
+    import sprint
+    return sprint.words_from_env()
 
 
 def main(argv: list[str]) -> int:
@@ -221,14 +254,17 @@ def main(argv: list[str]) -> int:
         if not argv:
             print(describe())
             return 0
-        if argv[-1] in ("moving", "fixed") or (len(argv) > 1 and argv[-2] == "fixed") or argv[0] == "reserve":
-            why = his_say_so(said, " ".join(argv))
-            if why:
-                print(f"Refused: {why}. A usage stop line changes only on his own words: --said \"HIS WORDS\", a line he said or typed.",
-                      file=sys.stderr)
-                return 2
+    def refused(key, number=None):
+        why = his_say_so(said, key, number)
+        if why:
+            print(f"Refused: {why}. A usage stop line changes only on his own words: --said \"HIS WORDS\", a line he said or typed, "
+                  "naming the line (weekly, 5-hour or Fable) or its number.", file=sys.stderr)
+        return bool(why)
     if argv[0] == "reserve":
         if len(argv) == 2:
+            if os.environ.get("HQ_IN_JOB") or sprint_places() is not None:  # F114: not from a job, a call or a chat
+                print("Refused: the reserve is set on the status page or by his own hand.", file=sys.stderr)
+                return 2
             if not argv[1].isdigit() or int(argv[1]) > 50:
                 print("The reserve is a whole number of points from 0 to 50.", file=sys.stderr)
                 return 2
@@ -243,6 +279,8 @@ def main(argv: list[str]) -> int:
             print(describe_one(key, s[key]) if s else describe())
             return 0
     if argv[0] == "moving" and len(argv) == 1:
+        if refused(key):
+            return 2
         write(key, True, None)
     elif argv[0] == "fixed" and len(argv) in (1, 2):
         number = None
@@ -252,6 +290,8 @@ def main(argv: list[str]) -> int:
                 print("The fixed number is a whole percentage from 1 to 100.", file=sys.stderr)
                 return 2
             number = int(n)
+        if refused(key, number):
+            return 2
         write(key, False, number)
     else:
         print(__doc__.strip().split("\n\n")[-1], file=sys.stderr)

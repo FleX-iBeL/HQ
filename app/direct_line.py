@@ -1163,6 +1163,7 @@ def _answer(words: str) -> str:
     st = _read(_pending_file(), {})
     pol = _policy.Policy(_config.FOLDER)
     pol.agent = a["id"]  # F103
+    pol.words_from = [str(folder())]  # F114: his words count only from the thread this text came in
     pol.pending = [tuple(p) for p in st.get("pending") or []]
     if pol.pending:
         pol.answer(words)  # his yes (or no) to what she asked last time

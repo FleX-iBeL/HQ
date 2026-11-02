@@ -661,6 +661,42 @@ def his_said(parts, ws, real_only=False):
     return sorted(out, key=lambda x: x["at"])
 
 
+def words_from_env():
+    """F114: where this call's or this chat's own words are (HQ_WORDS_FROM, set by the session for its tools), or None outside one."""
+    v = os.environ.get("HQ_WORDS_FROM")
+    return [x for x in v.split(os.pathsep) if x] if v else None
+
+
+def place_of(path, ws):
+    """F114: a call's transcript or a chat's thread (its file or its folder) as his_said names where a line stands."""
+    p = os.path.realpath(str(path))
+    if p.endswith(".md"):
+        return "HQ/calls/" + os.path.basename(p)
+    if p.endswith(".jsonl"):
+        p = os.path.dirname(p)
+    return "HQ/" + os.path.basename(p)
+
+
+def his_said_now(quote, ws=None, places=None, day=None):
+    """F114 (the check's fix round): his own lines holding QUOTE that count at a door: from a transcript or a thread the program wrote,
+    only in PLACES when given (this call's transcript, the thread this text came in), and only from DAY (today by default).
+    His older lines, another call's and a quick note never open anything."""
+    ws = ws or _ws()
+    parts = [p for p in (_bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", quote or "")) if p]
+    if not parts:
+        return []
+    day = day or time.strftime("%Y-%m-%d")
+    want = {place_of(p, ws) for p in places} if places is not None else None  # an empty list: nowhere
+    return [h for h in his_said(parts, ws, real_only=True)
+            if (want is None or h["where"] in want) and time.strftime("%Y-%m-%d", time.localtime(h["at"] or 0)) == day]
+
+
+def a_yes(line, turn, names=()):
+    """F114: whether a line of his reads as a yes, with no model: a yes word and nothing holding it back (yes_reading isn't a no)."""
+    low = " ".join(str(line).lower().replace("’", "'").split())
+    return bool(_YES_WORD.search(low)) and not (_TAKEN_BACK.search(low) or _HOLD_WORD.search(low) or _NOT_SURE.search(low))
+
+
 NOT_HIS = "those words aren't in his own lines"
 NOT_A_YES = "those are his words, but they aren't a yes to this"
 NOT_ON_IT = "those are his words, but about something else"

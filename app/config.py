@@ -624,7 +624,7 @@ Fable is the last one from a normal chat, so say it's the last known one.
 where they stand, run python3 "{HQ}/routine/usageline.py" and tell him in a sentence or two. To switch one, \
 add which (5-hour, weekly or fable; nothing means the 5-hour one), then moving, or fixed and a number from 1 \
 to 100 when he names one ("fix the weekly one at 95": weekly fixed 95; "fix it at 60": fixed 60), and always --said with his \
-own words as he said or typed them (F114: weekly fixed 95 --said "fix the weekly one at 95"; without his words it's refused). Switch it \
+own words as he said or typed them on this call or in this chat, naming the line or its number (F114: weekly fixed 95 --said "fix the weekly one at 95"; anything else is refused). Switch it \
 on his ask, then tell him in a sentence what it said. A job let past the line still only skips the 5-hour \
 line; the weekly lines always count.
 - HQ itself, the app at {HQ}, you may read freely, the same as the workspace (H65): its files, \
@@ -728,7 +728,7 @@ headless, inside a box and your share of the usage; your ledger is HQ/ledger/<yo
 words, without asking again: "start x", "do x from your next session" is python3 "{HQ}/routine/cycles.py" order <your id> \
 start "his words" (add --now when he says now: a small step runs at once; after her hours it says it waits for the morning, and then tell him that); "stop y", "drop y", "leave y" is order \
 <your id> stop "his words" (it goes to you in a small step in his words: you stop what he means and tell him); his yes to a calendar change you held is \
-yes <your id> "his words" <its number when he named it or it's plain which>, his words exactly as he said or typed them on this call or in this chat, never your own (F114: words that aren't in a line of his are refused), never a guess: with no number and several waiting your own step reads his words; his no, in any words, to a change you held is no <your id> "his words" <its number when plain>: it's closed, nobody gets anything, and what opens with no is a no even when the question was to remove something and he says forget it; a go, in any words, on something you said you'd try once more is order <your id> start "his words"; "from now on …" is \
+yes <your id> "his words" <its number when he named it or it's plain which>, his words exactly as he said or typed them on this call or in this chat today, never your own, and they name the change or answer your question about it (F114: anything else is refused), never a guess: with no number and several waiting your own step reads his words; his no, in any words, to a change you held is no <your id> "his words" <its number when plain>: it's closed, nobody gets anything, and what opens with no is a no even when the question was to remove something and he says forget it; a go, in any words, on something you said you'd try once more is order <your id> start "his words"; "from now on …" is \
 order <your id> standing "his words" (written into your own section of the handbook: his saying it is his yes). An \
 order for another agent goes to her id the same way ("tell Pepper to …"). The settings ("Donna gets four points a \
 week", "no steps after nine", "two texts a day"): python3 "{HQ}/routine/cycles.py" set <id> <weekly|daily|hours|batches|texts|session_at|session_minutes|session_turns|step_minutes|step_turns|steps_a_day|own_calendars|on> <value>; \

@@ -164,7 +164,7 @@ HIS_SETUP = re.compile(r"^(me\.md|hq/backend\.json|hq/agents/(?![^/]+-about-hers
 PROGRAM_STATE = {"hq/agents/cycles-state.json": "the agents' cycles keep it themselves; his yes to a held change goes in through "
                                                 f"python3 \"{HQ_ROUTINE / 'cycles.py'}\" yes AGENT \"HIS WORDS\" [N]"}
 _LEDGER = re.compile(r"^hq/(?:ledger/([a-z0-9-]+?)(?:[.-][^/]*)?|notes-([a-z0-9-]+)\.md)$")
-_SAYS = f"--said \"HIS WORDS\" (a line he said or typed on this call or in this chat, word for word)"
+_SAYS = f"--said \"HIS WORDS\" (a line he said or typed on this call or in this chat, today, word for word)"
 # What proves his words is written only by HQ: a call or a text never changes a transcript or a thread.
 _PROOF = re.compile(r"^hq/(calls/[^/]+\.md|(direct-line|coaching-line|team-line)/thread\.jsonl)$")
 _ABOUT_LIST = re.compile(r"^hq/agents/[^/]+-about-herself\.md$")
@@ -184,18 +184,31 @@ _HIS_NAME = (r"(?:(?<![\w-])cycles(?:-state)?\.json|(?<![\w-])backend\.json|(?<!
              r"(?<![\w-])log\.md|hq/agents/[^\s\"'|;&]+)")
 
 
+# F114: what in code handed to python -c (as cyclehook.ran leaves it: no quotes, no brackets) writes or removes a file; a pure read doesn't.
+_CODE_WRITES = (r"[^|&\n]*(?:\bopen\s+\S+\s+[wax]b?\+?(?:\s|$)|\.write|\bdump\b|unlink|os\.remove|\brename|os\.replace|shutil|"
+                r"truncate|\bsystem\b|subprocess|Popen|\bexec\b|\bmkdir|rmtree)")
+
+
 def _writes_on(name: str) -> "re.Pattern":
     """F114: a shell line that writes a file of this name: a redirect into it, sed -i, tee, a copy or move over it, a one-liner, a git restore."""
     return re.compile(
         rf">>?\s*[\"']?[^\s\"'|;&]*{name}"
         rf"|\bsed\s+(?:-[a-zA-Z]*\s+)*-i[^|;&]*{name}"
         rf"|\btee\b[^|;&]*{name}"
-        rf"|\b(?:cp|mv|rm|ln|truncate|dd|rsync|install|touch|chmod|unlink)\b[^|;&]*{name}"
-        rf"|\b(?:python[\d.]*|perl|ruby|node)\s+(?:-\S+\s+)*-[a-zA-Z]*[ceE]\b[^|&\n]*{name}"  # code handed inline, its own ; and all
+        rf"|\b(?:mv|rm|truncate|touch|chmod|unlink|shred)\b[^|;&]*{name}"
+        rf"|\b(?:cp|ln|install|rsync)\b[^|;&\n]*{name}\s*(?:$|[|;&\n])|\bdd\b[^|;&]*\bof=\S*{name}"  # a copy out of it is a read
+        rf"|\b(?:python[\d.]*|perl|ruby|node)\s+(?:-\S+\s+)*-[a-zA-Z]*[ceE]\b(?={_CODE_WRITES})[^|&\n]*{name}"  # code handed inline that writes
         rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{name}", re.I)
 
 
 _SHELL_WRITE_HIS = _writes_on(_HIS_NAME)
+# F114: the scripts that stand on his own words or his yes, and what would run them past the policy's own reading of the line.
+_HIS_SCRIPTS = re.compile(r"(?<![\w-])(cycles|usageline|feedback)\.py\b")
+_ROUND = re.compile(r"\$\(|`|<<|(?:^|[\s;&|(])HQ_\w+\s*=|\b(?:env|eval|exec|xargs|source|nohup|sudo|timeout|nice|setsid|unset|export)\b"
+                    r"|(?<![\w.-])(?:ba|z|da|k)?sh\b|\bpython[\d.]*\s+(?:-\S+\s+)*-[a-zA-Z]*c\b|\b(?:perl|ruby|node)\b")
+_HIS_SCRIPT_WAY = {"cycles": f"python3 \"{HQ_ROUTINE / 'cycles.py'}\" yes AGENT \"HIS WORDS\" [N] (or its other commands)",
+                   "usageline": f"python3 \"{HQ_ROUTINE / 'usageline.py'}\" [weekly|5-hour|fable] moving|fixed [N] --said \"HIS WORDS\"",
+                   "feedback": f"python3 \"{_APP / 'feedback.py'}\" send \"THE WORDS\" --via agent, which asks him first"}
 _SHELL_LEDGER = r"(?:ledger/(?!{a}[.-])[^\s\"'|;&/]+|(?<![\w-])notes-(?!{a}\.md|cleared\.md)[\w-]+\.md)"
 
 
@@ -334,6 +347,8 @@ class Policy:
     after_call: bool = False  # F99: the after-call run: only the log, the lists and the transcript
     pending_turns: int = 0  # how many of his turns the pending questions have waited (answer, PENDING_TURNS)
     agent: str = ""  # F103: who's taking this turn, for the ledger's line on a refused outward action
+    # F114: where this call's or this chat's own words are (its transcript, the thread the text came in): his words count only there
+    words_from: list = field(default_factory=list)
 
     def __post_init__(self):
         self.folder = Path(os.path.realpath(self.folder))
@@ -548,6 +563,31 @@ class Policy:
                               + (f"; yours is HQ/ledger/{aid}.md (python3 \"{HQ_ROUTINE / 'ledger.py'}\" {aid} note \"…\")" if aid else ""),
                         door=True)
 
+    def _yes_refused(self, args: list[str]) -> str:
+        """F114: why cycles.py yes AGENT WORDS [N] doesn't stand on his words from this call or this chat, today, fitting the change; ""."""
+        try:
+            if str(HQ_ROUTINE) not in sys.path:
+                sys.path.insert(0, str(HQ_ROUTINE))
+            import cycles
+            aid, words = (args[2].lower() if len(args) > 2 else ""), (args[3] if len(args) > 3 else "")
+            n = int(args[4]) if len(args) > 4 and args[4].isdigit() else None
+            return cycles.his_yes_refused(aid, words, n, places=list(self.words_from), base=self.folder)
+        except Exception as e:
+            return f"his words couldn't be read ({type(e).__name__})"
+
+    def _line_refused(self, args: list[str], said: str) -> str:
+        """F114: why usageline.py's switch doesn't stand on his words from this call or this chat, today, naming the line; ""."""
+        try:
+            if str(HQ_ROUTINE) not in sys.path:
+                sys.path.insert(0, str(HQ_ROUTINE))
+            import usageline
+            rest = [a for i, a in enumerate(args[1:], 1) if a != "--said" and args[i - 1] != "--said"]
+            key = usageline.ALIASES.get(rest[0].lower(), "five") if rest else "five"
+            num = next((int(a.rstrip("%")) for a in rest if a.rstrip("%").isdigit()), None)
+            return usageline.his_say_so(said, key, num, places=list(self.words_from), ws=str(self.folder))
+        except Exception as e:
+            return f"his words couldn't be read ({type(e).__name__})"
+
     def _moves_mail_switch(self, path: str, tool: str, inp: dict) -> bool:
         """F114: whether this Edit, MultiEdit or Write of the agents' settings would set, change or take away the mail switch."""
         try:
@@ -628,6 +668,10 @@ class Policy:
                                   + LOG_WAY, door=bool(re.search(r"cycles(?:-state)?\.json", runs, re.I)))
         if _writes_on(_SHELL_LEDGER.format(a=re.escape((self.agent or "").lower() or "\x00"))).search(runs):  # F114
             return Decision(DENY, "another agent's ledger or notes is hers: only she writes it, whoever asks", door=True)
+        m = _HIS_SCRIPTS.search(runs)
+        if m and _ROUND.search(runs):  # F114: no way round them on a loose yes: an HQ_ setting in front, a wrapper, code that runs them
+            return Decision(DENY, f"{m.group(1)}.py runs only as a plain command of its own, never wrapped (bash -c, python -c, env, "
+                                  f"$( )) or with an HQ_ setting in front: {_HIS_SCRIPT_WAY[m.group(1)]}", door=True)
         cmd = _hide_quoted_dollars(cmd)  # H281: awk's $1 and sed's $p in single quotes are text, not variables
         # 27 October 2026: ${n} of a plain for loop (for n in 1 2; do sed -n "${n}p" …) is filled in by _loops below.
         loop_vars = re.findall(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b", cmd)
@@ -820,11 +864,12 @@ class Policy:
         # the Friday screen and the score. A plan, a step's outcome, a text or the routine's minute are her own runs'.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "cycles.py"):
             sub = args[1] if len(args) > 1 else "list"
-            if sub == "yes":  # F114: his yes is his own words in a real line, never one she types for him
-                words = args[3] if len(args) > 3 else ""
-                if not his_words_here(words, self.folder):
-                    return Decision(DENY, "a yes to a held change is his own words: cycles.py yes AGENT \"HIS WORDS\" [N], with words he "
-                                          "said or typed himself on this call or in this chat, word for word. Ask him, and use his answer", door=True)
+            if sub == "yes":  # F114: his yes is his own words from this call or this chat, today, fitting the change; never hers
+                why = self._yes_refused(args)
+                if why:
+                    return Decision(DENY, f"a yes to a held change is his own words ({why}): cycles.py yes AGENT \"HIS WORDS\" [N], with "
+                                          "words he said or typed himself on this call or in this chat, today, word for word, that name the "
+                                          "change. Ask him, and use his answer", door=True)
             if sub == "set" and len(args) > 3 and args[3].strip().lower() == "mail":  # F114: the mail switch is his own hand's
                 return Decision(DENY, _mail_words(), door=True)
             if sub in ("list", "show", "status", "settings", "set", "order", "yes", "no", "ledger", "friday", "score"):
@@ -963,9 +1008,10 @@ class Policy:
             if rest == ["moving"] or rest == ["fixed"] or (len(rest) == 2 and rest[0] == "fixed" and rest[1].rstrip("%").isdigit()):
                 if said is None:
                     return Decision(DENY, f"a usage stop line changes only on his own words: add {_SAYS}", door=True)
-                if not his_words_here(said, self.folder):
-                    return Decision(DENY, "those words aren't in a line of his on a call or in a chat: a usage stop line changes only on his "
-                                          f"own words, {_SAYS}", door=True)
+                why = self._line_refused(args, said)
+                if why:
+                    return Decision(DENY, f"a usage stop line changes only on his own words ({why}): {_SAYS}, naming the line "
+                                          "(weekly, 5-hour or Fable) or its number", door=True)
                 return Decision(ALLOW, "the usage stop lines, on his words")
             return Decision(DENY, "a usage line takes only moving, or fixed with a number, and his words with --said")
         # H214: a 9292 link door to door. Only looks places up (the government's open address service, the open
@@ -1293,24 +1339,6 @@ def _after_edit(text: str, tool: str, inp: dict) -> str | None:
             return None
         text = text.replace(old, new) if e.get("replace_all") else text.replace(old, new, 1)
     return text
-
-
-def his_words_here(words: str, folder) -> str:
-    """F114: where these words stand in a line the program itself wrote as his (a call's transcript, his side of a text thread), or "".
-    Never one an agent typed: a quick note can be added from a call, so it doesn't count here. A test copy without lines of his lets
-    them through unless the flow says so (HQ_PROOF_ON), as sprint.his_quote does."""
-    if str(HQ_ROUTINE) not in sys.path:
-        sys.path.insert(0, str(HQ_ROUTINE))
-    try:
-        import hqpaths
-        import sprint
-        if hqpaths.under_test() and not os.environ.get("HQ_PROOF_ON"):
-            return "a test"
-        parts = [p for p in (sprint._bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", words or "")) if p]
-        hits = sprint.his_said(parts, str(folder), real_only=True) if parts else []
-        return hits[-1]["where"] if hits else ""
-    except Exception:
-        return ""
 
 
 def in_memory(path: str, folder: Path) -> bool:
