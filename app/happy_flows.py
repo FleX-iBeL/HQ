@@ -21081,7 +21081,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                 out[str(p.relative_to(ws))] = hashlib.sha1(p.read_bytes()).hexdigest()
         return out
 
-    async def flow360(self) -> str:
+    async def flow370(self) -> str:
         """F115, no Claude: a tap on the backup lands on the main. A pair of throwaway HQs with one-way sync, B the backup: on B the
         page's own writers (a feature switch, a kind's name, a note on an appointment and its tick, a workflow switched on, the
         news setup, a stop line) and a chat's commit; B's workspace stays the same byte for byte and A writes every one. The same
@@ -21151,7 +21151,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                 "commit all landed on the main, the backup's own files the same byte for byte; a hand-over sent twice ran once; with the "
                 "main away a change was kept, said, and landed once at the next look")
 
-    async def flow361(self) -> str:
+    async def flow371(self) -> str:
         """F115, no Claude: what the laptop holds is settled, nothing of his lost. Two private Syncthings and two throwaway HQs, A
         the main sending only, B the backup receiving only. On B what his laptop has today, in kind: a call transcript the main
         doesn't have, a picture, a to-do row only added there, a file both changed (the main's stays, the laptop's own lines go in
@@ -21244,7 +21244,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                 "list, the removed file kept and named, the copy that differed in nothing gone without an entry), none left and "
                 "both the same; again and a copy coming back the same added nothing; a copy on the main settled main wins, no merge job")
 
-    async def flow362(self) -> str:
+    async def flow372(self) -> str:
         """F115, no Claude: a repo conflict settles itself, main wins with the other side kept. A workspace repo, its throwaway
         GitHub and another clone; both change the same line; the other pushes first; the main's commit then settles the clash
         itself: its own line stays, GitHub's line goes in the list he sees, the merge is pushed, no incident, and the next commit
@@ -21288,7 +21288,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
         return ("both sides changed the same line, the other pushed first: the main's commit settled it itself (its line on GitHub, "
                 "the other's line in the list), no incident, and the next commit went straight through")
 
-    async def flow363(self) -> str:
+    async def flow373(self) -> str:
         """F115, no Claude: both-main ends by itself. Two private Syncthings and two throwaway HQs, A ("server") the chosen main.
         The line cut both ways (role lookups and the sync): B takes over, both act as main and both write. The line back: within
         two looks A, main before the cut, is the only main; B's writes from the cut reach A (a file A didn't have whole, the
@@ -21394,7 +21394,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                 "laptop's call and row from the cut reached it (the clash main wins, its row in the list), nothing left on the laptop; "
                 "a computer back from long ago acted as main only after its first look; a hand-back waited for the sync, then happened")
 
-    async def flow364(self) -> str:
+    async def flow374(self) -> str:
         """F115, no Claude: 60 switches at once lose none. Six processes, each its own feature, ten switches each, all at the same
         moment on one features.json: after each of its own switches every process reads its own back, and at the end every one
         is as its last switch left it."""
@@ -21434,7 +21434,7 @@ print(json.dumps({"lost": lost}))
         need(lost == 0 and not [i for i in ids if i in off], f"{lost} of 60 switches were lost; off at the end: {off}")
         return "six processes, ten switches each at the same moment: none of the 60 lost, every one as its last switch left it"
 
-    async def flow365(self) -> str:
+    async def flow375(self) -> str:
         """F115, no Claude: 60 ticks with two writers give no error. A to-do list with 30 groceries and 30 items; one process ticks
         the groceries off and marks the items done, one by one, while two agents add rows above them all the time: every one of
         the 60 answers, none fails, every grocery and item is where it was sent, and every agent's row is there."""
@@ -21478,7 +21478,7 @@ print(json.dumps({"lost": lost}))
         need(rows == sum(added), f"an agent's row was lost: {rows} of {sum(added)}")
         return f"60 ticks and done marks beside two agents adding {sum(added)} rows: every one answered, none failed, nothing lost"
 
-    async def flow366(self) -> str:
+    async def flow376(self) -> str:
         """F115, no Claude: undo takes back his own last change. He adds an item in the app, an agent adds one after; his undo
         takes back his, the agent's row and its log line stay. The agent's own undo takes back hers. On the backup the page's
         undo goes to the main with who it's from."""
@@ -33619,13 +33619,13 @@ FLOWS = {
     188: ("H298, piece 4: the ready check's mechanical fields: His words a quote found in a call, the notes or the log; My own additions left out, none, or with his yes and its date (F81); Sources that exist (a row, a rule, a dated call, a file); with the feature on an empty or false field refuses the Ready mark", False, "flow188"),
     187: ("H298, piece 3: the deterministic box on a headless run (minutes from a wall clock, turns from the stream): past either the run is ended, done on the queue, its note written; the cycle kinds cycle-<agent> and step-<agent>", False, "flow187"),
     186: ("H298, piece 2: the identity fix: the harvest after a call or text keeps only first-person lines about her own office life; a transcript full of his life yields nothing about him", False, "flow186"),
-    360: ("F115: a tap on the backup lands on the main: the page's switch, kind, note and tick, workflow, news setup, stop line and a chat's commit, the backup's files the same; a hand-over sent twice runs once; kept with the main away, landing once", False, "flow360"),
-    361: ("F115: what the laptop holds is settled, nothing of his lost: a transcript, a picture, an added line, a clash main wins with the laptop's words in the list, a removed file, conflict copies; none left on the laptop, both the same; told once; a copy on the main main wins, no merge job", False, "flow361"),
-    362: ("F115: a repo conflict settles itself: main wins, GitHub's line kept in the list, pushed, no incident, the next commit straight through", False, "flow362"),
-    363: ("F115: both-main ends by itself: a cut both ways, both write; within two looks the one main before the cut is the only main, the other's writes reach it; back from long ago no main before its look; a hand-back waits for the sync", False, "flow363"),
-    364: ("F115: 60 switches at once lose none", False, "flow364"),
-    365: ("F115: 60 ticks and done marks with two agents writing give no error, nothing lost", False, "flow365"),
-    366: ("F115: undo takes back his own last change, an agent's after it stays; hers takes back hers", False, "flow366"),
+    370: ("F115: a tap on the backup lands on the main: the page's switch, kind, note and tick, workflow, news setup, stop line and a chat's commit, the backup's files the same; a hand-over sent twice runs once; kept with the main away, landing once", False, "flow370"),
+    371: ("F115: what the laptop holds is settled, nothing of his lost: a transcript, a picture, an added line, a clash main wins with the laptop's words in the list, a removed file, conflict copies; none left on the laptop, both the same; told once; a copy on the main main wins, no merge job", False, "flow371"),
+    372: ("F115: a repo conflict settles itself: main wins, GitHub's line kept in the list, pushed, no incident, the next commit straight through", False, "flow372"),
+    373: ("F115: both-main ends by itself: a cut both ways, both write; within two looks the one main before the cut is the only main, the other's writes reach it; back from long ago no main before its look; a hand-back waits for the sync", False, "flow373"),
+    374: ("F115: 60 switches at once lose none", False, "flow374"),
+    375: ("F115: 60 ticks and done marks with two agents writing give no error, nothing lost", False, "flow375"),
+    376: ("F115: undo takes back his own last change, an agent's after it stays; hers takes back hers", False, "flow376"),
     185: ("H298, piece 1: the handbook under each agent's character behind the switch (in pieces, off by default): the template's blank handbook and cycle defaults, off loads nothing, on loads part one and her own section, Moneypenny's craft trimmed", False, "flow185"),
 }
 
@@ -33634,7 +33634,7 @@ FLOWS = {
 # history, which grows every day (217 s on 23 October, 360 s on 27 October), and checks all of it: it gets
 # twenty minutes instead of checking less. Its time is in the summary, next to its limit, so a climb shows.
 FLOW_LIMIT = 360
-FLOW_LIMITS = {44: 1200, 300: 600, 301: 900, 302: 600, 303: 600, 361: 600, 363: 600}  # F115: two Syncthings each
+FLOW_LIMITS = {44: 1200, 300: 600, 301: 900, 302: 600, 303: 600, 371: 600, 373: 600}  # F115: two Syncthings each
 
 
 def limit_of(n: int) -> int:
