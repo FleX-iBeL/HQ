@@ -142,6 +142,7 @@
       .RELEASING { --band: #6639ba; }
       .WAITING { --band: #0b5fbf; }
       .DONE { --band: #1a7f37; }
+      .UNSURE { --band: #9a6700; }  /* F116: not sure: a stale block and nothing running known, yellow, never Done */
       .STOPPED, .PROBLEM { --band: #b42318; }
       .notes { margin: 0; padding: 0 4px; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px 16px; }
       .notes dt { color: var(--soft); }
@@ -550,7 +551,7 @@
       import { parseRoadmap } from './parse.mjs';
       import { hasFive, stopLine, usageVerdict, landing, landingWords, LAND_KINDS, windowsAhead, windowWords, daysAhead, dayWords } from './usage.mjs';
 
-      const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped' };
+      const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped', UNSURE: 'Not sure' };
       const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision', repeat: 'Repeats' };
       const app = document.getElementById('app');
       const WHERE = document.querySelector('meta[name="hq-where"]')?.content ?? '';  // H83, filled in by the server
@@ -943,10 +944,10 @@
       ];
 
       /** The last usage reading a session saved. The page cannot take one itself. */
-      function drawUsage(u, lines, E = null) {
+      function drawUsage(u, lines, E = null, reserve = 0, cant = null) {
         fiveOn = hasFive(u);  // F107: what's shown follows what the reading carries
         const age = u ? Date.now() - new Date(u.checkedAt).getTime() : 0;
-        const verdict = usageVerdict(u, lines, new Date());
+        const verdict = usageVerdict(u, lines, new Date(), { reserve });  // F116: the gate's own lines, the reserve kept
         // An old reading is shown dimmed: usage may have moved on since.
         const box = el('section', `usage${u && age > 20 * 60000 ? ' stale' : ''}`);
         const head = el('div', 'head');
@@ -955,7 +956,9 @@
           el('span', 'soft', u ? `Read ${ago(age)}${u.by ? ` by ${u.by}` : ''}${u.from ? `, on ${u.from}` : ''}` : 'No reading yet'),
         );
         box.append(head);
+        if (cant) box.append(el('p', 'alarm cant-read', cant.say ? `${cant.say} (${cant.file}).` : `Can't read the saved usage reading: ${cant.why} (${cant.file}). Work stops until it can be read.`));  // F116
         if (u && !u.readable) box.append(el('p', 'alarm', 'The last attempt to read the usage failed. Work stops until it can be read. The numbers below are the last known ones.'));
+        if (lines && reserve) box.append(el('p', 'soft reserve-note', `The stop lines are where the team and the agents stop: ${reserve} points under each are kept for your calls and the small routines.`));
         if (E?.usage_plan?.words) box.append(el('p', 'soft usage-plan', `Estimates ${E.usage_plan.words}.`));  // F107
         const card = el('div', 'card');
         // The context window first: it belongs to one session and never stops the work.
@@ -989,7 +992,8 @@
             card.append(row);
             continue;
           }
-          const at = stopLine(l, lines, new Date());
+          const at0 = stopLine(l, lines, new Date());
+          const at = at0 ? { ...at0, line: Math.round(10 * (at0.line - reserve)) / 10 } : null;  // F116: where the gate stops
           const fiveHour = /5-hour/i.test(l.label) && l.resetsAt ? new Date(l.resetsAt) : null;
           const row = meter(l.label.replace(' · ', ', '), u.plan && l === limits[0] ? `${u.plan} plan` : '', l.percent, l.resetsAt ? until(l.resetsAt) : '', at ? at.line : null, '', at ? at.next : null, fiveHour, at?.perHour ?? 0);
           // H176: after the used part, a piece per job and planned item, where it should land if it goes as estimated.
@@ -1596,10 +1600,25 @@
         ['cycles', 'The agents\' cycles', 'Their own runs, in their hours'],
         ['briefing', 'Briefing', 'What the agents start with, every minute'],
         ['routines-file', 'The routine lines', 'Their own file'],
+        // F116: written but never drawn before, and the parts of the minute that had no line at all.
+        ['incidents-file', 'The incident log', 'Its own file'],
+        ['mistakes', 'The ledger of mistakes', 'Its own pass every 5 minutes'],
+        ['feedback', 'Feedback mailbox', 'Looked at every 10 minutes'],
+        ['data', 'Data changes', 'A new version\'s changes to the data'],
+        ['record', 'The record of each item', 'Written at every step of an item'],
+        ['helpers', 'Helpers beside a call', 'Every minute'],
+        ['about', 'GitHub\'s About', 'Set at every release'],
+        ['donna', 'Donna\'s watch', 'Every minute: what she texts you about'],
+        ['reminders', 'Your reminders', 'Every minute: the pings and reminders you asked for'],
+        ['weather', 'Weather', 'Every three hours in the day'],
+        ['news', 'Your news', 'About every hour'],
+        ['calendar', 'Calendar read', 'Every hour in the day, read only'],
+        ['coaching', 'Coaching check-ins', 'Every minute: one that comes due'],
         ['temp', 'Laptop temperature', 'Every minute, free, no password'],
         ['battery', 'Laptop battery', 'Every minute, free'],
       ].filter(([key]) => LAPTOP || (key !== 'temp' && key !== 'battery'));  // H92
-      const OPTIONAL_LINES = new Set(['maillist', 'mailmarker', 'saving', 'review', 'qa', 'nightly', 'release', 'cycles', 'briefing', 'routines-file']);
+      const OPTIONAL_LINES = new Set(['maillist', 'mailmarker', 'saving', 'review', 'qa', 'nightly', 'release', 'cycles', 'briefing', 'routines-file',
+        'incidents-file', 'mistakes', 'feedback', 'data', 'record', 'helpers', 'about', 'donna', 'reminders', 'weather', 'news', 'calendar', 'coaching']);  // F116
       /** H88: with a second HQ, a heartbeat line for each computer (Laptop, VPS), right after Main or backup and
           the sync, in the order of their names; its graph bar too. Taken from the lines themselves. */
       let beats = [];
@@ -1621,7 +1640,7 @@
         el.textContent = say.length ? `For you now: ${say.join(' · ')}` : '';
       }
 
-      function drawRoutines(r) {
+      function drawRoutines(r, broken = []) {
         const box = el('section');
         const now = r?.now ?? Date.now() / 1000;
         const all = r?.routines ?? {};
@@ -1634,6 +1653,15 @@
         let hot = false;  // H35: a hot laptop is red, but it's not a routine that stopped working
         let lowBat = false;  // H37: low battery on battery is red too, but it's not a routine that stopped working
         const card = el('div', 'card');
+        // F116: what the page can't read is red, with which one, never grey or green.
+        for (const b of broken) {
+          bad++;
+          const row = el('div', 'routine down broken');
+          row.dataset.store = b.store;
+          row.title = `${b.file}: ${b.why}`;
+          row.append(el('i'), el('span', 'name', b.what), el('span', 'text', b.say ? `${b.say} (${b.file})` : `Can't read it: ${b.why} (${b.file})`), el('span', 'soft when'));
+          card.append(row);
+        }
         for (const [key, name, about] of routineList(all)) {
           const x = all[key];
           if ((key === 'role' || key === 'sync' || key === 'extensions' || OPTIONAL_LINES.has(key)) && !x) continue;  // H235: only with routines of their own  // H56.3/H56.4: an HQ on its own says nothing about them
@@ -1672,11 +1700,11 @@
         if (bad || hot || lowBat) fold.querySelector('summary .soft').style.color = 'var(--red)';
         // H21: red if any is red (H35: also a hot laptop), else yellow if any is waiting (H30) or the laptop is warm, else green.
         const light = el('i', `light${bad || hot || lowBat ? ' down' : busy ? ' running' : waiting ? ' waiting' : warm ? ' warm' : ''}`);
-        light.title = lowBat ? 'The battery is low and the laptop is not on the charger' : hot ? 'The laptop is hot or slowing itself down' : bad ? 'Something is not working' : busy ? 'A routine is running now' : waiting ? 'A routine is waiting on purpose' : warm ? 'The laptop is warm' : 'Everything is working';
+        light.title = lowBat ? 'The battery is low and the laptop is not on the charger' : hot ? 'The laptop is hot or slowing itself down' : broken.length ? `Can't read: ${broken.map((b) => b.what).join(', ')}` : bad ? 'Something is not working' : busy ? 'A routine is running now' : waiting ? 'A routine is waiting on purpose' : warm ? 'The laptop is warm' : 'Everything is working';
         fold.querySelector('summary .fold-title').append(light);
         fold.append(card);
         fold.append(drawUptime());
-        fold.append(drawIncidents(r?.incidents ?? [], now));
+        fold.append(drawIncidents(r?.incidents ?? [], now, broken.find((b) => b.store === 'incidents'), !!r?.noLog));
         box.append(fold);
         return box;
       }
@@ -1687,12 +1715,15 @@
 
       /** H30: the incident log. 10 October 2026: "it should also log somewhere in monitoring when
           services went disconnected and what it did to fix it." Newest first; a red edge is still down. */
-      function drawIncidents(list, now) {
+      function drawIncidents(list, now, cant = null, noLog = false) {
         const names = Object.fromEntries(routineList(null).map(([k, n]) => [k, n]));
         const open = list.filter((i) => !i.back).length;
-        const fold = foldPart('incidents', open > 0, 'Incidents', list.length ? `${open ? `${open} still down · ` : ''}last ${Math.min(list.length, 30)}` : 'None so far', true);
+        const fold = foldPart('incidents', open > 0 || !!cant, 'Incidents', cant ? (cant.say ? 'No incident log' : 'Can\'t read the incident log') : noLog ? 'No incident log yet' : list.length ? `${open ? `${open} still down · ` : ''}last ${Math.min(list.length, 30)}` : 'None so far', true);
+        if (cant) fold.querySelector('summary .soft').style.color = 'var(--red)';
         const box = el('div', 'incidents');
-        if (!list.length) box.append(el('p', 'soft', 'Nothing has gone down since the log started. When a routine goes down, it shows here: when, why, what was done, and when it was back.'));
+        if (cant) box.append(el('p', 'alarm cant-read', cant.say ? `${cant.say} (${cant.file}).` : `Can't read the incident log: ${cant.why} (${cant.file}). What went down isn't known from here until it can be read.`));  // F116
+        else if (noLog) box.append(el('p', 'soft no-log', 'No incident log yet: HQ was just installed. When a routine goes down, it shows here.'));
+        else if (!list.length) box.append(el('p', 'soft', 'Nothing has gone down since the log started. When a routine goes down, it shows here: when, why, what was done, and when it was back.'));
         for (const i of list) {
           const row = el('div', `incident${i.back ? '' : ' open'}`);
           const mins = Math.max(1, Math.round(((i.back ?? now) - i.down) / 60));
@@ -1710,7 +1741,7 @@
             const ul = el('ul');
             for (const f of i.fixes) ul.append(el('li', 'soft', `${clock(new Date(f.at * 1000))} ${f.what}`));
             row.append(ul);
-          }
+          } else if (i.back) row.append(el('div', 'soft no-fix', 'Closed without a fix: from before an incident needed what fixed it'));  // F116
           box.append(row);
         }
         fold.append(box);
@@ -2182,7 +2213,7 @@
       let lastDraw = null;
       function redraw() { if (lastDraw) { last = ''; tick(); } }
 
-      function draw(s, readAt, usage, routines) {
+      function draw(s, readAt, usage, routines, truth = null) {
         fiveOn = hasFive(usage);  // F107: before anything is drawn
         lastDraw = true;
         roadmapNow = s;
@@ -2214,14 +2245,30 @@
         app.append(top);
 
         const now = el('section', 'now');
-        const banner = el('div', `banner ${s.state ?? 'PROBLEM'}`);
-        banner.append(el('h1', '', s.state ? WORD[s.state] : 'Cannot read the status'));
-        if (s.headline) {
+        // F116: the banner is worked out from what runs and what's his (the server's truth), not the block's own heading.
+        // F116, the check's 2: an empty planning or a block it can't parse is "Can't read the status", red, with which file.
+        const B = truth ? truth.banner : (s.state ? { state: s.state, line: s.headline } : null);
+        const banner = el('div', `banner ${B?.state ?? 'PROBLEM'}`);
+        banner.dataset.state = B?.state ?? '';
+        banner.append(el('h1', '', B?.state ? WORD[B.state] : 'Can\'t read the status'));
+        if (!B?.state && truth?.cant) banner.append(el('p', 'cant-status', `${truth.cant.file}: ${truth.cant.why}`));
+        if (B?.line) {
           // "Now: t5 · …" reads better in the band as a sentence of its own.
-          const line = s.headline.replace(/^(Now|Next):\s*/, '');
+          const line = B.line.replace(/^(Now|Next):\s*/, '');
           banner.append(el('p', '', line.charAt(0).toUpperCase() + line.slice(1)));
         }
+        if (B?.corrected) banner.append(el('p', 'soft corrected', `${B.corrected}${B.saidLine ? `: ${B.saidLine.replace(/^(Now|Next):\s*/, '')}` : ''}. Worked out from what runs now.`));
         now.append(banner);
+        if (truth?.broken?.length) {
+          const ul = el('ul', 'problems cant-read');
+          ul.append(el('p', '', 'This page can\'t read:'));
+          for (const b of truth.broken) {
+            const li = el('li', '', `${b.what}: ${b.say ?? b.why} (${b.file})`);
+            li.dataset.store = b.store;
+            ul.append(li);
+          }
+          now.append(ul);
+        }
         if (s.problems.length) {
           const ul = el('ul', 'problems');
           ul.append(el('p', '', 'The status block at the top of the roadmap is not in the expected shape:'));
@@ -2242,9 +2289,9 @@
         }
         app.append(now);
 
-        app.append(drawRoutines(routines));
+        app.append(drawRoutines(routines, truth?.broken ?? []));
         if (LAPTOP) app.append(drawTemperature(routines));  // H92: no Laptop section on a server
-        app.append(drawUsage(usage, s.usageLines, routines?.estimate ?? null));  // H176: with where the work should land
+        app.append(drawUsage(usage, s.usageLines, routines?.estimate ?? null, s.usageReserve ?? 0, (truth?.broken ?? []).find((b) => b.store === 'usage')));  // H176: with where the work should land
 
         if (s.current) {
           const box = el('section');
@@ -2536,42 +2583,62 @@
         const foot = el('footer', 'head soft');
         foot.append(el('span', '', s.updated), el('span', '', 'Read from the roadmap'));
         app.append(foot);
-        document.title = `${s.state ? WORD[s.state] : 'Status'} · HQ`;
+        document.title = `${B?.state ? WORD[B.state] : 'Status'} · HQ`;
       }
 
+      // F116: one read every three seconds, of only the parts that changed (/page.json?have=…): the phone page used to fetch
+      // the whole planning, over a megabyte, every three seconds.
+      const parts = {};
+      let lastMinute = null;
+      const EMPTY = { state: null, title: '', headline: '', notes: [], current: null, log: [], updated: '', phases: [], queue: { on: true, jobs: [] }, schedule: null, problems: [], usageLines: null, usageReserve: 0 };
+      /** A status server from before F116 has no /page.json: the three reads it had, the same parts, nothing worked out. */
+      async function olderServer() {
+        const res = await fetch(`./roadmap.md?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error(String(res.status));
+        const text = await res.text();
+        const json = async (u) => fetch(`${u}?t=${Date.now()}`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        const [usage, routines] = await Promise.all([json('./usage.json'), json('./routines.json')]);
+        const { phases, ...head } = parseRoadmap(text);
+        const fp = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return `old${(h >>> 0).toString(16)}`; };
+        const mark = (data) => ({ h: fp(JSON.stringify(data ?? null)), data });
+        const { now, ...rest } = routines ?? {};
+        return { now: now ?? Date.now() / 1000, parts: { head: mark(head), phases: { h: fp(text), data: phases }, routines: mark(routines ? rest : null), usage: mark(usage), truth: mark(null) } };
+      }
       async function tick() {
+        let got;
         try {
-          const res = await fetch(`./roadmap.md?t=${Date.now()}`, { cache: 'no-store' });
-          if (!res.ok) throw new Error(String(res.status));
-          const text = await res.text();
-          // An older status server has no usage to give: the page then shows the roadmap alone.
-          const usageText = await fetch(`./usage.json?t=${Date.now()}`, { cache: 'no-store' })
-            .then((r) => (r.ok ? r.text() : 'null'))
-            .catch(() => 'null');
-          const routinesText = await fetch(`./routines.json?t=${Date.now()}`, { cache: 'no-store' })
-            .then((r) => (r.ok ? r.text() : 'null'))
-            .catch(() => 'null');
-          // Also once a minute, so "read 4 min ago" and "resets in" stay true.
-          let routines = null;
-          try { routines = JSON.parse(routinesText); } catch { routines = null; }
-          drawForYou(routines?.forYou);  // F106
-          const lines = routines ? JSON.stringify([routines.routines, routines.incidents, routines.temperature, routines.battery, routines.stats, routines.lidsleep, routines.estimate, routines.planning, routines.feedback, routines.agents]) : '';
-          const key = `${text}\n${usageText}\n${lines}\n${Math.floor(Date.now() / 60000)}`;
-          // H23: the graph's history, once a minute (and when the time span or a routine is switched).
-          if (key !== last) { await loadUptime(); await loadTemp(); }
-          if (key !== last) {
-            last = key;
-            let usage = null;
-            try { usage = JSON.parse(usageText); } catch { usage = null; }
-            const y = window.scrollY;
-            draw(parseRoadmap(text), new Date().toLocaleTimeString('en-GB'), usage, routines);
-            // F18: only put the page back when the redraw moved it; scrolling to the same place anyway stops
-            // the phone's swipe halfway (it seemed not to reach the bottom), and kept the page sideways too.
-            if (window.scrollY !== y || window.scrollX !== 0) window.scrollTo(0, y);
-          }
+          const have = Object.entries(parts).map(([k, x]) => `${k}:${x.h}`).join(',');
+          const res = await fetch(`./page.json?have=${encodeURIComponent(have)}`, { cache: 'no-store' });
+          if (res.status === 404) got = await olderServer();  // a status server from before F116, until it's restarted
+          else if (!res.ok) throw new Error(String(res.status));
+          else got = await res.json();
         } catch {
           last = '';
           app.replaceChildren(el('p', '', 'The status server is not answering. Start it with: node status/server.mjs (in HQ)'));
+          return;
+        }
+        for (const [k, x] of Object.entries(got.parts ?? {})) {
+          if ('data' in x) parts[k] = x;
+          else if (parts[k]) parts[k] = { ...parts[k], h: x.h };
+        }
+        const head = parts.head?.data ?? null;
+        const s = head ? { ...head, phases: parts.phases?.data ?? [] } : EMPTY;
+        const routines = parts.routines?.data ? { ...parts.routines.data, now: got.now } : null;
+        const usage = parts.usage?.data ?? null;
+        const truth = parts.truth?.data ?? null;
+        drawForYou(routines?.forYou);  // F106
+        // Also once a minute, so "read 4 min ago" and "resets in" stay true.
+        const minute = Math.floor(Date.now() / 60000);
+        const key = `${Object.entries(parts).map(([k, x]) => `${k}:${x.h}`).join(',')}\n${minute}`;
+        // H23: the graph's history, once a minute (and when the time span or a routine is switched).
+        if (minute !== lastMinute) { lastMinute = minute; await loadUptime(); await loadTemp(); }
+        if (key !== last) {
+          last = key;
+          const y = window.scrollY;
+          draw(s, new Date().toLocaleTimeString('en-GB'), usage, routines, truth);
+          // F18: only put the page back when the redraw moved it; scrolling to the same place anyway stops
+          // the phone's swipe halfway (it seemed not to reach the bottom), and kept the page sideways too.
+          if (window.scrollY !== y || window.scrollX !== 0) window.scrollTo(0, y);
         }
       }
       tick();

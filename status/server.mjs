@@ -8,7 +8,7 @@
 // It only listens on this MacBook (127.0.0.1), never on the network. The phone reaches it through
 // Tailscale serve (tailnet only), set up by status/phone.sh (H13).
 import { execFile, spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, openSync } from 'node:fs';
 import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest } from 'node:http';
@@ -16,6 +16,7 @@ import { request as httpsRequest } from 'node:https';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import { parseRoadmap as parseRoadmapRaw } from './parse.mjs';
 // Fable, 27 October 2026: the planning file is over a megabyte and was parsed on every read (every three seconds, and
 // once more for the jobs line). Now it's parsed once per change of the file: the same text gives the same result.
@@ -26,7 +27,7 @@ function parseRoadmap(text) {
   parsedCache = { text, out };
   return out;
 }
-import { ROADMAP } from './paths.mjs';
+import { FOLDER, ROADMAP } from './paths.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.env.HQ_STATUS_PORT ?? 4748);
@@ -249,9 +250,11 @@ async function otherUsage() {
   peerUsage = { at: Date.now(), data: ok ? { ...data, from: c.peer_name || 'the other HQ' } : null };
   return peerUsage.data;
 }
-async function usage(own) {
-  let mine = null;
-  try { mine = JSON.parse(await readFile(join(root, '.status/usage.json'), 'utf8')); } catch {}
+async function usageStore() {
+  return readStore('usage', join(root, '.status/usage.json'), { shape: isObject, missing: "There's no usage reading yet: work stops until a reading comes" });
+}
+async function usage(own, store = null) {
+  const mine = (store ?? (await usageStore())).data;
   if (own) return mine;
   const other = await otherUsage();
   if (!other) return mine;
@@ -323,27 +326,257 @@ async function forYouNow() {
   return out;
 }
 
+// F116: a store the page reads, and whether it could. A file that isn't there is no reading yet (null), not broken, unless it
+// must be there; a file that's there and can't be read is broken, with which one and why, so the page says so in red.
+const STORE_WORDS = {
+  roadmap: 'The planning and its status block', routines: 'The routine lines', incidents: 'The incident log',
+  usage: 'The saved usage reading', watchdog: "The watchdog's line", agents: "The agents' questions for you",
+  temperature: "The laptop's temperature", battery: "The laptop's battery", stats: "The laptop's totals", lidsleep: 'The lid-closed sleep',
+};
+function shortPath(path) {
+  return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path.startsWith(`${FOLDER}/`) ? `workspace/${path.slice(FOLDER.length + 1)}` : path;
+}
+function brokenStore(store, path, why, say = null) {
+  return { store, what: STORE_WORDS[store] ?? store, file: shortPath(path), why, ...(say ? { say } : {}) };
+}
+// F116, the check's 3: a file that isn't there is no reading, which the page says, never fine. `missing` is what to say then
+// (red); `fresh` is what to say instead in a fresh install's first minutes (grey, not broken).
+// The second check: "fresh" holds only while the installer's own process is alive (its pid in the checklist, and that pid really
+// running install.py) and within FRESH_MIN of the install's start, whichever ends first. A start in the future, a test round
+// (--test-only) or a checklist from before the pid was kept is never fresh: a killed install leaves "running" behind for good.
+const FRESH_MIN = 30;
+async function installerAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try { process.kill(pid, 0); } catch (e) { if (e.code !== 'EPERM') return false; }
+  try {
+    return (await readFile(`/proc/${pid}/cmdline`, 'utf8')).includes('install.py');
+  } catch {
+    return new Promise((resolve) => {
+      execFile('ps', ['-p', String(pid), '-o', 'command='], { timeout: 3000 }, (err, out) => resolve(!err && String(out).includes('install.py')));
+    });
+  }
+}
+async function freshInstall() {
+  try {
+    const c = JSON.parse(await readFile(join(root, 'scratch/install/checklist.json'), 'utf8'));
+    if (c?.mode === 'test' || c?.phase === 'test' || c?.finished) return false;
+    const start = Date.parse(String(c?.run ?? '').replace(' ', 'T'));
+    const age = Date.now() - start;
+    if (!Number.isFinite(start) || age < -60000 || age > FRESH_MIN * 60000) return false;
+    return await installerAlive(c.pid);
+  } catch {
+    return false;
+  }
+}
+async function readStore(store, path, { must = false, shape = null, missing = null, fresh = false } = {}) {
+  let text;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT' && missing && !fresh) return { data: null, missing: true, broken: brokenStore(store, path, "it isn't there", missing) };
+    if (e.code === 'ENOENT' && !must) return { data: null, missing: true, broken: null };
+    return { data: null, broken: brokenStore(store, path, e.code === 'ENOENT' ? "it isn't there" : `it can't be opened (${e.code ?? e.message})`) };
+  }
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    return { data: null, broken: brokenStore(store, path, `it can't be read: ${String(e.message).slice(0, 120)}`) };
+  }
+  if (shape && !shape(data)) return { data: null, broken: brokenStore(store, path, "it isn't in the shape it should be") };
+  return { data, broken: null };
+}
+const isObject = (d) => d !== null && typeof d === 'object' && !Array.isArray(d);
+
 // H19/H20: every routine's own line, plus the watchdog's, which lives outside the Documents folder.
 async function routines() {
-  const read = async (path) => {
-    try { return JSON.parse(await readFile(path, 'utf8')); } catch { return null; }
+  const broken = [];
+  const missing = new Set();
+  const fresh = await freshInstall();
+  const read = async (store, path, opts) => {
+    const r = await readStore(store, path, opts);
+    if (r.broken) broken.push(r.broken);
+    if (r.missing) missing.add(store);
+    return r.data;
   };
-  const data = (await read(join(root, '.status/routines.json'))) ?? {};
-  const dog = await read(join(SUPPORT, 'watchdog.json'));
+  const ROUTINES_MISSING = "The routine hasn't written its lines: nothing here says whether anything runs";
+  const data = (await read('routines', join(root, '.status/routines.json'), { shape: isObject, fresh, missing: ROUTINES_MISSING })) ?? {};
+  // The second check's 3: a file of routine lines that holds nothing ({}) says as little as a missing one.
+  if (!fresh && !broken.some((b) => b.store === 'routines') && Object.keys(data).length === 0 && !missing.has('routines')) {
+    broken.push(brokenStore('routines', join(root, '.status/routines.json'), 'it holds no lines', ROUTINES_MISSING));
+  }
+  const dog = await read('watchdog', join(SUPPORT, 'watchdog.json'), { shape: isObject });
   if (dog) data.watchdog = dog;
   // H30: the incident log (what went down, why, what was done, when it was back), newest first.
-  const inc = (await read(join(root, '.status/incidents.json')))?.incidents ?? [];
+  const inc = (await read('incidents', join(root, '.status/incidents.json'), { shape: (d) => isObject(d) && Array.isArray(d.incidents ?? []), fresh, missing: "There's no incident log: what went down isn't known from here" }))?.incidents ?? [];
   // H35: the laptop's latest temperature reading (routine/temperature.py, every minute).
-  const temperature = await read(join(root, '.status/temperature.json'));
+  const temperature = await read('temperature', join(root, '.status/temperature.json'));
   // H37: the laptop's latest battery reading (routine/battery.py, every minute).
-  const battery = await read(join(root, '.status/battery.json'));
+  const battery = await read('battery', join(root, '.status/battery.json'));
   // H44: CPU, GPU, memory, disk and network (routine/stats.py, every minute).
-  const stats = await read(join(root, '.status/stats.json'));
+  const stats = await read('stats', join(root, '.status/stats.json'));
   // H45: whether the laptop keeps working with the lid closed (routine/lidsleep.py, every minute).
-  const lidsleep = await read(join(root, '.status/lidsleep.json'));
+  const lidsleep = await read('lidsleep', join(root, '.status/lidsleep.json'));
   const forYou = await forYouNow();  // F106: what's being worked on for him right now
   const [estimate, planning, feedback, agents] = await Promise.all([estimates(), sprint(), feedbackBox(['list'], 20000), cyclesFriday()]);
-  return { forYou, now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback, agents };
+  const noLog = missing.has('incidents') && fresh;  // F116: a fresh install's first minutes: "No incident log yet", grey
+  return { broken, noLog, forYou, now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback, agents };
+}
+
+// F116: what truly waits for him, from what's kept, never from the status block: a job parked on him (boxed, waiting for a
+// call to resume or drop it), a question of an agent's waiting in a text for his word (her holds), and a door waiting for
+// his yes (a goal she held as tried, waiting for his go). The same as routine/cycles.py's _waiting_for_word, read here.
+const CYCLES_STATE = process.env.HQ_CYCLES_STATE || join(process.env.HQ_CYCLES_FOLDER || FOLDER, 'HQ/agents/cycles-state.json');
+const CYCLES_OLD = process.env.HQ_CYCLES_OLD_STATE || join(root, '.status/cycles-state.json');
+const REPEAT_DAYS = 7;
+const NAME = (aid) => aid.charAt(0).toUpperCase() + aid.slice(1);
+async function whatsHis(p) {
+  const his = [];
+  for (const j of p?.queue?.jobs ?? []) {
+    if (/^boxed/.test(j.state)) his.push({ kind: 'job', what: `Job ${j.n} is parked for you to resume or drop: ${j.text.slice(0, 100)}` });
+  }
+  let st = await readStore('agents', CYCLES_STATE, { shape: isObject });
+  if (!st.data && !st.broken) st = await readStore('agents', CYCLES_OLD, { shape: isObject });
+  const since = new Date(Date.now() - REPEAT_DAYS * 86400000);
+  const day = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, '0')}-${String(since.getDate()).padStart(2, '0')}`;
+  for (const [aid, a] of Object.entries(st.data?.agents ?? {})) {
+    for (const h of Array.isArray(a?.holds) ? a.holds : []) {
+      his.push({ kind: 'question', what: `${NAME(aid)}'s question ${h.n} waits for your word: ${String(h.what ?? '').slice(0, 100)}` });
+    }
+    for (const [g, r] of Object.entries(isObject(a?.goals) ? a.goals : {})) {
+      if (String(r?.tripped ?? '') >= day && !r?.go) his.push({ kind: 'door', what: `${NAME(aid)} waits for your go on: ${String(g).slice(0, 100)}` });
+    }
+  }
+  return { his, broken: st.broken };
+}
+
+// F116: what runs now: a job (the team's, or an agent's step, which runs as a job), or the night's tests, a release or QA.
+const WORK_LINES = { nightly: "The night's tests", release: 'The release', qa: 'QA' };
+function runningNow(p, lines, now) {
+  const out = [];
+  for (const j of p?.queue?.jobs ?? []) {
+    if (/^(running|stop asked)/.test(j.state)) out.push(`Job ${j.n}: ${j.text.slice(0, 100)}`);
+  }
+  for (const [k, words] of Object.entries(WORK_LINES)) {
+    const x = lines?.[k];
+    if (x?.state === 'running' && now - (x.at ?? 0) <= (x.every ?? 60) * 2 + 60) out.push(`${words}: ${x.text ?? 'running'}`);
+  }
+  return out;
+}
+
+// F116: the banner, worked out from what runs and what's his; the status block's own state only where it fits what runs.
+// Waiting for you only when nothing runs and something is truly his. Something runs: the block's Building, Testing or
+// Releasing, else Building with what runs. Nothing runs and nothing is his: the block's Stopped (it says why), else Done.
+const BLOCK_WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped' };
+// F116, the check's 1: when the block was written, from its Updated line (set-status.py writes the minute; an older block only the
+// day, with its newest log line's time). Fresh for STALE_MIN minutes; after that it reads as stale, and says so.
+const STALE_MIN = 30;
+const BUSY = ['BUILDING', 'TESTING', 'RELEASING'];
+function blockAt(p) {
+  const m = /Updated\s+(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}:\d{2}))?/.exec(p?.updated ?? '');
+  const t = m ? (m[2] ?? p?.log?.[0]?.time) : null;
+  if (!t) return null;
+  const at = new Date(`${m[1]}T${t.padStart(5, '0')}:00`).getTime() / 1000;
+  return Number.isFinite(at) ? at : null;
+}
+const hhmm = (t) => { const d = new Date(t * 1000); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+// The second check: a block written more than FUTURE_MIN ahead of now isn't fresh; it says its time can't be right.
+const FUTURE_MIN = 5;
+function banner(p, running, his, now = Date.now() / 1000) {
+  const said = p?.state ?? null;
+  const at = blockAt(p);
+  const future = at !== null && at - now > FUTURE_MIN * 60;
+  const fresh = at !== null && !future && now - at <= STALE_MIN * 60;
+  const head = p?.headline ?? '';
+  const when = at === null ? 'with no time on it' : future ? `with a time in the future (${hhmm(at)}), which can't be right` : `at ${hhmm(at)}, ${Math.round((now - at) / 60)} minutes ago`;
+  const stale = said && !fresh ? `The status block said ${BLOCK_WORD[said]} ${when}: stale` : '';
+  const out = (state, line, corrected = '') => ({ state, line, said, saidLine: head, fresh, at, corrected });
+  const differs = (state) => (said && state !== said ? `The status block said ${BLOCK_WORD[said]}` : '');
+  // Running: a job, the night's tests, a release, QA; and a chat's own Building, Testing or Releasing while it's fresh.
+  if (running.length || (fresh && BUSY.includes(said))) {
+    const st = BUSY.includes(said) && (fresh || !running.length) ? said : 'BUILDING';
+    const line = fresh && BUSY.includes(said) ? head : running.join(' · ');
+    return out(st, line, st !== said ? differs(st) : stale);
+  }
+  // Waiting is worked out: only when nothing runs and something is truly his.
+  if (his.length) return out('WAITING', his.map((h) => h.what).join(' · '), said === 'WAITING' ? '' : stale || differs('WAITING'));
+  // Held by the usage line, paused, or the routine off: stopped, whatever the block says.
+  const held = (p?.queue?.jobs ?? []).filter((j) => /^(held|paused)/.test(j.state));
+  if (held.length || p?.queue?.on === false) {
+    const line = fresh && said === 'STOPPED' ? head : held.length ? held.map((j) => `Job ${j.n} ${j.state}`).join(' · ') : 'The routine is off: nothing starts';
+    return out('STOPPED', line, said === 'STOPPED' ? '' : stale || differs('STOPPED'));
+  }
+  if (fresh && said === 'STOPPED') return out('STOPPED', head);
+  // Done only from a block that says Done. Anything else with nothing running that HQ knows of is "not sure", in yellow: a chat's
+  // 40-minute test run reads Testing for 30 minutes, then not sure, never Done; a newer block puts it right.
+  if (said === 'DONE' && !future) return out('DONE', head || 'Nothing is running and nothing waits for you');
+  if (!said) return out('UNSURE', "The status block names no state, and nothing running is known: not sure what's going on");
+  const what = said === 'WAITING'
+    ? `The status block said Waiting for you ${when}, and nothing waiting for you is known here (no parked job, question or door): not sure`
+    : said === 'STOPPED'
+      ? `The status block said Stopped ${when}, and nothing held is known: not sure it's still stopped`
+      : `The status block said ${BLOCK_WORD[said]} ${when}, and nothing running is known: not sure it's done`;
+  return out('UNSURE', what, '');
+}
+
+// F116: what the page shows, in parts, each with its own fingerprint. The page says which it has (?have=name:h,…) and gets only
+// the parts that changed: the planning (over a megabyte) only when it changes, never every three seconds.
+const partCache = new Map();
+function part(name, data) {
+  const json = JSON.stringify(data ?? null);
+  const was = partCache.get(name);
+  if (was && was.json === json) return was;
+  const x = { json, h: createHash('sha1').update(json).digest('hex').slice(0, 12) };
+  partCache.set(name, x);
+  return x;
+}
+let phasesCache = { out: null, part: null };
+async function pageData(have) {
+  let text = null;
+  let roadBroken = null;
+  try {
+    text = await readFile(ROADMAP, 'utf8');
+  } catch (e) {
+    roadBroken = brokenStore('roadmap', ROADMAP, e.code === 'ENOENT' ? "it isn't there" : `it can't be opened (${e.code ?? e.message})`);
+  }
+  let p = text !== null ? parseRoadmap(text) : null;
+  if (text !== null && !text.trim()) {
+    roadBroken = brokenStore('roadmap', ROADMAP, "it's empty");
+    p = null;
+  } else if (p?.problems?.length) {
+    roadBroken = brokenStore('roadmap', ROADMAP, `its status block can't be read: ${p.problems.join(' ')}`);
+  }
+  const r = await routines();
+  const u = await usageStore();
+  const h = await whatsHis(p);
+  const { now, broken: rBroken, ...rest } = r;
+  const running = runningNow(p, rest.routines, now);
+  const broken = [roadBroken, ...rBroken, u.broken, h.broken].filter(Boolean);
+  let phases;
+  if (p && phasesCache.out === p) phases = phasesCache.part;
+  else {
+    phases = part('phases', p ? p.phases : null);
+    phasesCache = { out: p, part: phases };
+  }
+  const head = p ? { ...p, phases: undefined } : null;
+  const parts = {
+    head: part('head', head),
+    phases,
+    routines: part('routines', rest),
+    usage: part('usage', await usage(false, u)),
+    truth: part('truth', { banner: p && !roadBroken ? banner(p, running, h.his, now) : null, cant: roadBroken, broken, his: h.his, running }),
+  };
+  const out = Object.entries(parts).map(([k, x]) => (have.get(k) === x.h ? `"${k}":{"h":"${x.h}"}` : `"${k}":{"h":"${x.h}","data":${x.json}}`));
+  return `{"now":${now},"parts":{${out.join(',')}}}`;
+}
+
+// F116: an answer over a kilobyte goes zipped when the browser takes it (every browser does).
+function sendBody(req, res, code, type, body) {
+  const head = { 'content-type': type, 'cache-control': 'no-store', vary: 'accept-encoding' };
+  const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body));
+  if (buf.length > 1024 && /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) {
+    res.writeHead(code, { ...head, 'content-encoding': 'gzip' }).end(gzipSync(buf));
+  } else res.writeHead(code, head).end(buf);
 }
 
 // H23: every minute the state of each routine is written down, also when the helper is gone (its lines then
@@ -835,33 +1068,43 @@ const server = createServer(async (req, res) => {
     res.writeHead(out ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(out));
     return;
   }
+  // F116: the page's one read every three seconds: only the parts it doesn't have yet.
+  if (path0 === '/page.json') {
+    const have = new Map(String(new URL(req.url, 'http://x').searchParams.get('have') ?? '').split(',').filter(Boolean).map((x) => x.split(':')));
+    try {
+      sendBody(req, res, 200, 'application/json; charset=utf-8', await pageData(have));
+    } catch (e) {
+      res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }).end(`The status server couldn't put the page together: ${e?.message ?? e}`);
+    }
+    return;
+  }
   if ((req.url ?? '/').split('?')[0] === '/temperature-history.json') {
     const hours = Number(new URL(req.url, 'http://x').searchParams.get('h') ?? 24) || 24;
-    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ now: Date.now() / 1000, samples: await temperatureHistory(hours) }));
+    sendBody(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ now: Date.now() / 1000, samples: await temperatureHistory(hours) }));
     return;
   }
   if ((req.url ?? '/').split('?')[0] === '/battery-history.json') {
     const hours = Number(new URL(req.url, 'http://x').searchParams.get('h') ?? 24) || 24;
-    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ now: Date.now() / 1000, samples: await temperatureHistory(hours, '.status/battery-history.jsonl') }));
+    sendBody(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ now: Date.now() / 1000, samples: await temperatureHistory(hours, '.status/battery-history.jsonl') }));
     return;
   }
   if ((req.url ?? '/').split('?')[0] === '/stats-history.json') {
     const hours = Number(new URL(req.url, 'http://x').searchParams.get('h') ?? 24) || 24;
-    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ now: Date.now() / 1000, samples: await temperatureHistory(hours, '.status/stats-history.jsonl') }));
+    sendBody(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ now: Date.now() / 1000, samples: await temperatureHistory(hours, '.status/stats-history.jsonl') }));
     return;
   }
   if ((req.url ?? '/').split('?')[0] === '/routines-history.json') {
     const hours = Number(new URL(req.url, 'http://x').searchParams.get('h') ?? 24) || 24;
-    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ now: Date.now() / 1000, samples: await history(hours) }));
+    sendBody(req, res, 200, 'application/json; charset=utf-8', JSON.stringify({ now: Date.now() / 1000, samples: await history(hours) }));
     return;
   }
   if ((req.url ?? '/').split('?')[0] === '/jobs-history.json') {
     const hours = Number(new URL(req.url, 'http://x').searchParams.get('h') ?? 24) || 24;
-    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(await jobsHistory(hours)));
+    sendBody(req, res, 200, 'application/json; charset=utf-8', JSON.stringify(await jobsHistory(hours)));
     return;
   }
   if ((req.url ?? '/').split('?')[0] === '/routines.json') {
-    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(await routines()));
+    sendBody(req, res, 200, 'application/json; charset=utf-8', JSON.stringify(await routines()));
     return;
   }
   if ((req.url ?? '/').split('?')[0] === '/usage.json') {
@@ -879,7 +1122,8 @@ const server = createServer(async (req, res) => {
     const path = (req.url ?? '/').split('?')[0];
     const file = (LABEL && LABELLED[path]) || entry[0];
     const body = labelled(path, await readFile(file.startsWith('/') ? file : join(root, file)));
-    res.writeHead(200, { 'content-type': entry[1], 'cache-control': 'no-store' }).end(body);
+    if (path === '/roadmap.md') sendBody(req, res, 200, entry[1], body);  // F116: over a megabyte, zipped for a browser
+    else res.writeHead(200, { 'content-type': entry[1], 'cache-control': 'no-store' }).end(body);
   } catch {
     // No usage reading yet is not an error: the page says so.
     if (entry[0].endsWith('usage.json') || entry[0].endsWith('checklist.json')) {

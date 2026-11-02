@@ -70,7 +70,7 @@ def _tell(down, why=""):
     if down:
         incidents.down(PUSH_KEY, why)
     else:
-        incidents.up(PUSH_KEY)
+        incidents.up(PUSH_KEY, what="The push went through again")
 
 
 def push():
