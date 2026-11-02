@@ -41,7 +41,7 @@ WORDS = ("On the status page, when nothing is on the schedule, it just says Noth
 OLD, NEW = "Nothing planned.", "Nothing planned yet."
 PAGE = "status/index.html"
 HOLD_UPS = ("her Thursday session brought to now", "the night's 22:00 brought to now", "the night's 2:00 brought to now",
-            "his yes at the sprint planning", "his hours for her set to the whole day")
+            "his yes at the sprint planning", "his say-so for a build in his day hours", "his hours for her set to the whole day")
 OFF = ("HQ_UNDER_TEST", "HQ_ROADMAP", "HQ_SPRINT", "HQ_ROLE_HERE", "HQ_WORKSPACE", "HQ_TEST_PORT", "HQ_PORT", "HQ_STATUS_PORT", "HQ_UNIT", "HQ_SUPPORT",
        "HQ_NO_WALL", "HQ_DIRECT_DIR", "HQ_DIRECT_AGENT", "HQ_DIRECT_TEAM", "HQ_DIRECT_PUSH_DIR", "HQ_CLAUDE_CLI", "HQ_CLAUDE")
 
@@ -252,6 +252,19 @@ def his_text(env, root, words: str, real: bool) -> None:
             raise RuntimeError(r.stderr[-300:])
 
 
+NOW_WORDS = "Yes, build job {n} now, I'm here."
+
+
+def day_yes(env, root, n: int) -> bool:
+    """His say-so for a build in his day hours (8:00 to 22:00), when the run isn't at night: his line, then jobs.py now with it."""
+    code = "import sys; sys.path.insert(0, 'app')\nimport coaching\ncoaching.add('me', sys.argv[1], '')\n"
+    words = NOW_WORDS.format(n=n)
+    subprocess.run([PY, "-c", code, words], cwd=str(root / "HQ"), env=env, capture_output=True)
+    r = _run({**env, "HQ_ROLE_HERE": "1"}, root, "routine/jobs.py", "now", str(n), "--said", words)
+    (root / "now.out").write_text(r.stdout + r.stderr)
+    return r.returncode == 0
+
+
 def tick(env, root) -> None:
     subprocess.run([PY, "routine/tick.py"], cwd=str(root / "HQ"), env=env, capture_output=True, timeout=240)
 
@@ -373,7 +386,7 @@ def standin_run(root: Path, deadline_s: int = 280) -> dict:
     env["HQ_RELEASE_MINUTE"] = "0"
     his_text(env, root, WORDS, real=False)
     her_session(env, root)
-    t0, label, said, night_done, released = time.time(), None, False, False, False
+    t0, label, said, night_done, released, said_now = time.time(), None, False, False, False, False
     clock = time.time()
     while time.time() - t0 < deadline_s:
         clock += 301  # the review's own clock: a round waits for five quiet minutes
@@ -390,6 +403,9 @@ def standin_run(root: Path, deadline_s: int = 280) -> dict:
                 return {"label": label, "missing": [f"the plan refused: {(r.stdout + r.stderr)[-200:]}"], "stopped": "planned"}
         if "planned" in have and "job" not in have:
             bring(env, root, f"{label} on the HQ roadmap")
+        added = next((d["job"] for d in follow(env, root, label) if d.get("step") == "job" and d.get("state") == "added"), None)
+        if added and not said_now and "job" in have and not any(d.get("step") == "job" and d.get("state") == "done" for d in follow(env, root, label)):
+            said_now = day_yes(env, root, added)
         if "qa" in have and any(d.get("state") == "passed" for d in follow(env, root, label)) and not released:
             night(env, root, real=False)
             r = _run(env, root, "routine/release.py", "main")
@@ -423,7 +439,7 @@ def real_run(root: Path, workspace: str, deadline_s: int = 14400, until: str | N
     say = lambda s: print(time.strftime("%H:%M"), s, flush=True)  # noqa: E731
     his_text(env, root, WORDS + " Can we change that?", real=True)
     say("his text is on Pepper's line")
-    t0, label, planned, nighted, released = time.time(), None, False, False, False
+    t0, label, planned, nighted, released, said_now = time.time(), None, False, False, False, False
     while time.time() - t0 < deadline_s:
         time.sleep(30)
         item, lab = order_item(env, root)
@@ -447,6 +463,10 @@ def real_run(root: Path, workspace: str, deadline_s: int = 14400, until: str | N
             say(f"his yes at the sprint planning for {label}, typed by the driver")
         if "planned" in have and "job" not in have and bring(env, root, f"{label} on the HQ roadmap"):
             say("the clock: the night's 22:00 brought to now")
+        added = next((d["job"] for d in lines if d.get("step") == "job" and d.get("state") == "added"), None)
+        if added and not said_now and dt.datetime.now().hour >= 8 and not any(d.get("step") == "job" and d.get("state") == "done" for d in lines):
+            said_now = day_yes(env, root, added)
+            say(f"his say-so for job {added} in his day hours, typed by the driver")
         if any(d.get("step") == "qa" and d.get("state") == "passed" for d in lines) and not nighted:
             nighted = True
             say("the night's check starts on the copy")
