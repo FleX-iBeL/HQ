@@ -66,6 +66,7 @@ sys.path.insert(0, HERE)
 import estimate as E  # noqa: E402
 import hqpaths  # noqa: E402
 import jobs as q  # noqa: E402
+import roundlog  # noqa: E402
 
 RANKS = os.environ.get("HQ_SPRINT") or os.path.join(os.path.dirname(q.ROADMAP), "sprint.json")
 ESTS = os.path.join(E.DIR, "sprint-estimates.json")
@@ -218,6 +219,8 @@ def _load(path):
 
 def _save(path, d):
     hqpaths.guard_beside_roadmap(path)
+    if path == RANKS:  # F86: who wrote while a round ran
+        roundlog.sprint(path, d)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
@@ -657,6 +660,33 @@ def his_said(parts, ws):
 
 NOT_HIS = "those words aren't in his own lines"
 NOT_A_YES = "those are his words, but they aren't a yes to this"
+NOT_ON_IT = "those are his words, but about something else"
+ON_IT_SYSTEM = ("You read one thing a man said to his AI assistant on a call or in a text, with what was said just before it, and an item from a planning list. "
+                "Was he talking about this item's own subject when he said it? Words he said about something else don't count, however well they seem to fit, "
+                "nor does a general remark that this item only happens to fall under. Answer with one word: yes or no.")
+
+
+def his_on(quote, about, ws=None):
+    """F86: (where, "") when a quote of his was said about this item, else (None, why not). His words are never filled from something else, and only a
+    reading can tell, so one small look; a no, garbage or a failed look refuses. HQ_SAYSO_FAKE stands in for it in the flows."""
+    if hqpaths.under_test() and not os.environ.get("HQ_PROOF_ON"):
+        return his_quote(quote, ws), ""
+    parts = [p for p in (_bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", quote or "")) if p]
+    hits = his_said(parts, ws or _ws()) if parts else []
+    if not hits:
+        return None, NOT_HIS
+    hit = hits[-1]
+    answer = os.environ.get("HQ_SAYSO_FAKE") if hqpaths.under_test() else None
+    try:
+        if answer is None:
+            if hqpaths.under_test():
+                raise RuntimeError("a test without a stand-in")
+            import mistakes
+            answer = mistakes.ask(ON_IT_SYSTEM, f"The item:\n{about}\n\n" + (f"Said just before it:\n{hit['before']}\n\n" if hit["before"] else "")
+                                  + f"What he said:\n{hit['line']}\n\nThe words quoted from it:\n{quote}")
+    except Exception as e:
+        return None, f"the look at his words failed ({type(e).__name__}), so they can't stand here"
+    return (hit["where"], "") if answer.strip().lower().startswith("yes") else (None, NOT_ON_IT)
 
 
 def his_yes(quote, about, ws=None, names=()):
@@ -748,6 +778,11 @@ def gate(text, job_text_, say_so=False, said=None):
 # Send to the team and a call's add), and that refusal is one of Moneypenny's tripwires (routine/cycles.py). Off, the
 # fields are only reported (sprint.py check, fields), nothing is refused: today's HQ exactly.
 
+PROGRAM_WORDS = 15
+_PROGRAM_TEXT = re.compile(r"\b[\w.-]+\.(?:md|py|json|jsonl|sh|mjs)\b|\([FH]\d+\)")
+QUOTE_OPEN, QUOTE_CLOSE = '"“„«‹「『＂″‟❝〝`', '"”“»›」』＂″❞〞〟`'
+QUOTE_MARKS = (re.compile(f"[{QUOTE_OPEN}]([^{QUOTE_OPEN}{QUOTE_CLOSE}]*)[{QUOTE_CLOSE}]"), re.compile(r"(?<![\w'’])['‘‚]([^'‘’]+)['’](?![\w])"))  # an apostrophe is no quote
+NO_WORDS = re.compile(r"none,? found by (?:(?:QA )?job (\d+)|QA|the review|a check)\.?", re.I)  # F86: a row found by a job, QA, the review or a check, where he said nothing
 FIELD_LABELS = (("his_words", r"his words|their words|the user'?s words|your words"),
                 ("additions", r"my own additions|own additions|my additions"),
                 ("sources", r"sources?"))
@@ -883,6 +918,34 @@ def _source_ok(item, ws, labels):
     return None
 
 
+def _no_words_why(found_by, row):
+    """F86: "none, found by" holds only where it's true. Any quotation of three words or more in the ask refuses it, wherever it came from, and job N must
+    be a real job of this row: the row names it as where it came from, or the job's text names this row. What her own addition says doesn't count. The one
+    exception is a program's own text quoted in a row (a flow's message, a job's line): short, and with a file name or a row label in brackets."""
+    line, ask = row["line"], ask_of(row["line"])
+    for marks in QUOTE_MARKS:
+        for m in marks.finditer(ask):
+            words = len(_bare(m.group(1)).split())
+            if words >= HIS_QUOTE_WORDS and not (words <= PROGRAM_WORDS and _PROGRAM_TEXT.search(m.group(1))):
+                return f"none, found by: but this row holds a quotation, {m.group(1)[:50]!r}; his words go in the field, or it goes on the list"
+    if not found_by.group(1):
+        return ""
+    n = int(found_by.group(1))
+    jobs_ = q.read()[1]
+    if n <= 0 or n > max([j["n"] for j in jobs_] + [0]):
+        return f"none, found by job {n}: there is no such job"
+    mark = ADDITION.search(ask)
+    own = ask[:mark.start()] if mark else ask
+    cs = hqpaths.cells(line)
+    at = team_note_at(cs[2]) if len(cs) > 2 else None
+    notes = " ".join(cs[3:]) + (" " + cs[2][at:] if at is not None else "")
+    named = re.search(rf"\b[Jj]obs? (?:\d+(?:, | and ))*{n}\b", (own + " " + notes).replace(found_by.group(0), ""))
+    text = next((j["text"] for j in jobs_ if j["n"] == n), "")
+    if named or re.search(rf"(?<![\w.]){re.escape(row['label'])}(?![\w.])", text):
+        return ""
+    return f"none, found by job {n}: that job isn't this row's: the row doesn't name it and its text doesn't name {row['label']}"
+
+
 def ready_fields(row, ws=None):
     """The three mechanical fields of a row, each held: {"his_words": {"ok", "quotes", "found", "why"}, "additions":
     {"ok", "text", "why"}, "sources": {"ok", "named", "held", "why"}, "ok"}."""
@@ -896,9 +959,13 @@ def ready_fields(row, ws=None):
         for qt in quotes:
             found[qt] = quote_found(qt, texts)
     missing = [qt for qt, where in found.items() if not where]
-    out["his_words"] = {"ok": bool(quotes) and not missing, "quotes": quotes, "found": found,
-                        "why": ("no His words field" if not ft["his_words"] else "no quote in His words (put his words between quotes)"
-                                if not quotes else f"not found in the calls, the notes or the log: {missing[0][:60]!r}" if missing else "")}
+    found_by = NO_WORDS.fullmatch(ft["his_words"].strip()) if not quotes else None
+    no_way = _no_words_why(found_by, row) if found_by else ""
+    if found_by and no_way:
+        found_by = None
+    out["his_words"] = {"ok": bool(found_by) or (bool(quotes) and not missing), "quotes": quotes, "found": found, "none": found_by.group(0) if found_by else "",
+                        "why": ("" if found_by else no_way or ("no His words field" if not ft["his_words"] else "no quote in His words (put his words between quotes)"
+                                if not quotes else f"not found in the calls, the notes or the log: {missing[0][:60]!r}" if missing else ""))}
     # F81 (job 481): an addition of hers never goes into a row on her own say; it goes on the sit-down list, and only
     # with his yes is it written in, with the date. So the field may be left out or say "none"; when it says
     # something, it needs his yes with a date ("his yes, 29 October 2026"); an empty one still says nothing.
@@ -940,7 +1007,7 @@ def fields_words(row, ws=None):
     f = ready_fields(row, ws)
     hw = f["his_words"]
     lines = [f"{row['label']}: the fields " + ("hold." if f["ok"] else "don't hold.")]
-    lines.append("- His words: " + ("found (" + ", ".join(f"{v}" for v in hw["found"].values() if v) + ")" if hw["ok"] else hw["why"]))
+    lines.append("- His words: " + (hw["none"] or "found (" + ", ".join(f"{v}" for v in hw["found"].values() if v) + ")" if hw["ok"] else hw["why"]))
     lines.append("- My own additions: " + (f"{f['additions']['text'][:80]}" if f["additions"]["ok"] else f["additions"]["why"]))
     lines.append("- Sources: " + (", ".join(f"{k} ({v})" for k, v in f["sources"]["held"].items()) if f["sources"]["ok"] else f["sources"]["why"]))
     return "\n".join(lines)

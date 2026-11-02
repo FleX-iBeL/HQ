@@ -670,9 +670,9 @@ class Policy:
         # F77: the automatic review of the planning's rows: read it, and take a flag off on his say-so (sprint.json only).
         if prog in ("python3", "python") and args and self.hq_script(args[0], "review.py"):
             sub = args[1] if len(args) > 1 else "list"
-            if sub in ("list", "flags", "clear", "reword"):  # F99: reword is a call's way to change an open row
+            if sub in ("list", "flags", "clear", "reword", "keep"):  # F99: reword is a call's way to change an open row; F86: keep, his keep it
                 return Decision(ALLOW, "the planning's review and its flags")
-            return Decision(DENY, "from a call, the review script takes list, flags, clear or reword")
+            return Decision(DENY, "from a call, the review script takes list, flags, clear, reword or keep")
         # H173: the usage counts, read only: what a job or a call cost on its own tokens, the rate, the room now.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usagecost.py"):
             sub = args[1] if len(args) > 1 else ""

@@ -647,6 +647,8 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
             return skip(why)
         if p["kind"] == "fix":
             import review
+            if review.round_waits():  # F86: no round on a call or within five minutes of a change; it stays on the queue
+                return "wait"
             if not review.round_wanted(p["label"], p["mode"]):
                 return skip("the row no longer needs it (changed or settled since)")
         if p["kind"] == "step":
@@ -1073,8 +1075,10 @@ def _fix_words(aid: str, parsed: dict) -> str:
             f"What you add goes in one place, and the program puts {fix_name()}'s addition with the date in front of it, so nothing you write can read as his:\n"
             f"python3 \"{rv}\" add {label} <<'EOF'\nyour words, one go for all you add\nEOF\n"
             "Quote marks only around his own words, copied from one line of his (his lines in the calls in HQ/calls, his texts, his quick notes) in one unbroken piece, "
-            "no … in it; an agent's line is never his. A name or a label goes without quote marks; code goes between backticks.\n"
-            "A ready field you can ground goes in the same addition. His words: a real quote of his. Sources: each item on its own between semicolons, and each one a planning row (F86), "
+            "no … in it; an agent's line is never his. A name, a label or a command goes without quote marks or backticks.\n"
+            "A ready field you can ground goes in the same addition. His words: only what he said about this very row. A row found by QA, the team, the review or a check, where he said nothing, "
+            "says so, and that holds: His words: none, found by job N (a job the row names or that names the row), or by the review, or a check; never on a row with a quotation in it. A quote he said about something else never goes in: if you'd have to explain that he said it about "
+            "another thing, leave it out. If he asked for this and his words are needed and missing, that's the list. Sources: each item on its own between semicolons, and each one a planning row (F86), "
             "a rule (rule 13), a dated call (call of 20 October 2026) or a file path; no line numbers, jobs or commits in that field, they read as a source that isn't there. "
             "The command tells you if a field won't hold, and nothing is written then. A field that's there and wrong you can't change: that one is his.\n\n"
             "Three ways out of this round, for the row as a whole:\n"

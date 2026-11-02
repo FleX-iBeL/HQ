@@ -91,6 +91,9 @@ def edit(rel: str, payload: str) -> int:
         except (LookupError, ValueError) as e:
             print(f"Not written: {e}.")
             return 1
+        if rel == "HQ/roadmap.md":  # F86: who wrote while a round ran
+            import roundlog
+            roundlog.planning(path, new)
         tmp = f"{path}.handover.{os.getpid()}"
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(new)

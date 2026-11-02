@@ -254,10 +254,14 @@ def main(argv: list[str]) -> int:
     env.setdefault("HQ_JOB", str(n))
     if box["round"]:
         env["HQ_ROUND"] = box["round"]
+        subprocess.run([PY, os.path.join(HERE, "review.py"), "round-before", str(n), *box["round"].split(":")], timeout=120)  # F86: what stands before her session, kept outside it
     with open(stream_log, "a") as lg, open(pfile, encoding="utf8") as prompt:
         _log(lg, f"job {n}: headless run started ({' '.join(chat) or 'a new session'})")
         proc = subprocess.Popen(cmd, stdin=prompt, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                cwd=FOLDER, env=env, bufsize=1, start_new_session=True)
+                                cwd=FOLDER, env=env, bufsize=1, start_new_session=True)  # its own group, so the box can kill all of it (H298); a round's session is known as hers (F86)
+        if box["round"]:
+            import roundlog
+            roundlog.session(n, proc.pid)
         ended_by_signal = {"sig": None}
 
         def _end(sig, frame):
@@ -364,6 +368,9 @@ def main(argv: list[str]) -> int:
                 if subtype == "error_max_turns" and box["turns"]:  # claude's own count of the same box
                     boxed["why"] = boxed["why"] or "turns"
         code = proc.wait()
+        if box["round"]:  # F86: the planning against what stood before the round
+            r = subprocess.run([PY, os.path.join(HERE, "review.py"), "round-after", str(n)], capture_output=True, text=True, timeout=120)
+            _log(lg, (r.stdout + r.stderr).strip()[-400:] or "the round kept to its one addition")
         if windows:
             try:
                 usagelive.save(windows, f"job {n}")

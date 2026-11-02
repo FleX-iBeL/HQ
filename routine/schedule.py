@@ -134,6 +134,7 @@ def write(text, items):
             head, sep, rest = text.partition("\n---\n")
             text = head + sep + "\n" + body + rest.lstrip("\n")
     jobs.hqpaths.guard_roadmap(jobs.ROADMAP)  # F17
+    jobs.roundlog.planning(jobs.ROADMAP, text)  # F86: who wrote while a round ran
     tmp = jobs.ROADMAP + ".tmp"
     open(tmp, "w", encoding="utf8").write(text)
     os.replace(tmp, jobs.ROADMAP)

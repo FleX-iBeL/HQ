@@ -100,7 +100,7 @@ WRAPPERS = {"env", "command", "exec", "time", "nice", "ionice", "timeout", "stdb
 DELETERS = {"rm", "rmdir", "shred", "unlink", "truncate"}
 CODE_RUNNERS = {"python", "python3", "node", "perl", "ruby"}
 _NET_CODE = re.compile(r"\b(?:import|from)\s+(?:urllib|requests|httpx|aiohttp|http\.client|socket|smtplib|ftplib|paramiko)\b|\burllib\.\w|\brequests\.(?:get|post|put|delete)\b|\bfetch\(")
-_RUNS_CODE_TEXT = re.compile(r"\b(?:python[\d.]*|node|perl|ruby)\b[^\n|;&]*(?:\s-[cCeE]\b|<<)")
+_RUNS_CODE_TEXT = re.compile(r"\b(?:python[\d.]*|node|perl|ruby)\s+(?:-[a-zA-Z]*[cCeE]\b|-\s*<<|<<)")  # code it's handed, not a script's own heredoc: a round's words may name anything
 KNOWN_READS = {"Read", "Grep", "Glob", "LS", "NotebookRead", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch", "CronList", "ListAgents"}  # all else is by name below, or refused
 _READ_TOOL = re.compile(r"^(?:get|list|search|read|query|suggest|find|fetch|count|view|show|describe|lookup|check|download)(?:_|$)", re.I)
 CALENDAR_WRITES = {"create_event", "update_event", "delete_event"}
@@ -112,7 +112,7 @@ NEVER_SCRIPTS = {"push", "release", "update", "gitlock", "sync", "tick", "runjob
 _JOB_WRITES = {"add", "add-row", "write-row", "feedback", "send-row", "tell", "stop", "overrule", "move", "on", "off", "pause", "now", "mail-on", "mail-off", "mail-fast",
                "mail-hourly", "resume", "done", "mark", "held", "boxed", "crashed", "guess", "mistake", "redo", "doing"}
 NO_SUBS = {"features": {"on", "off"}, "backend": {"on", "off"}, "cycles": {"set", "order", "yes", "tick"}, "direct_line": {"text", "put", "add", "push", "send"}, "schedule": {"add", "cancel", "move", "priority", "every", "promote"},
-           "jobs": _JOB_WRITES, "sprint": {"rank", "plan", "moscow", "ready"}, "review": {"clear", "reword", "add", "sitdown", "no", "pass", "run", "golden", "tick"},
+           "jobs": _JOB_WRITES, "sprint": {"rank", "plan", "moscow", "ready"}, "review": {"clear", "reword", "add", "sitdown", "no", "pass", "run", "golden", "tick", "keep", "round-before", "round-after"},
            "qa": {"pass", "fail", "queue"}, "mistakes": {"add", "put"}}
 MAY_SUBS = {"moneypenny": {"jobs": {"stop", "resume", "tell", "write-row", "feedback"}, "sprint": {"rank", "moscow", "ready"}, "review": {"reword", "add", "sitdown", "no"}, "qa": {"queue"}}}
 # what's his, read and never written by a cycle
@@ -202,7 +202,7 @@ def cycle_shell(cmd: str, aid: str, kind: str, cwd: str | None = None) -> str | 
     runs = ran(named)
     if aid and re.search(_WRITE_ON.format(n=rf"\S*HQ/ledger/(?!{re.escape(aid)}[.-])\S+", name=rf"\S*HQ/ledger/(?!{re.escape(aid)}[.-])\S+"), runs):
         return "HQ: refused: another agent's ledger is hers; a cycle writes only her own."
-    if re.search(r"\b(?:import|from)\s+direct_line\b", named):
+    if _RUNS_CODE_TEXT.search(named) and re.search(r"\b(?:import|from)\s+direct_line\b", named):
         return "HQ: refused: her texts go through cycles.py batch, ask or text, which wait for his sleep."
     for m in re.finditer(r"(?<![0-9&>])>>?\s*([^\s|;&]+)", runs):  # a redirect is a write like any other
         why = is_his(m.group(1), cwd, aid)
@@ -594,8 +594,8 @@ def job_guard(cmd: str) -> str | None:
 
 
 # F86: what writes, besides role.WRITES (what a call may hand to the main); a round's own ways out are named in fix_guard.
-_FIX_ALSO = {"cycles": {"ask", "batch", "text", "plan", "order", "set", "yes", "done", "failed", "stale", "stopstep", "droptext", "stopped", "proposal"}, "direct_line": None, "handover": None,
-             "review": {"clear", "pass", "run", "golden", "tick"}, "set-status": None, "set_status": None, "notes": None, "gitlock": None, "push": None,
+_FIX_ALSO = {"cycles": {"ask", "batch", "text", "plan", "order", "set", "yes", "done", "failed", "stale", "stopstep", "droptext", "stopped", "open", "go", "proposal"}, "direct_line": None, "handover": None,
+             "review": {"clear", "pass", "run", "golden", "tick", "round-before", "round-after", "keep"}, "set-status": None, "set_status": None, "notes": None, "gitlock": None, "push": None,
              "qa": {"pass", "fail", "queue"}, "jobs": {"mark", "held"}}
 _SCRIPT = re.compile(r"(?<![\w-])([a-z_-]+)\.py\b\s*(\S+)?\s*(\S+)?")
 _GIT_WRITES = {"checkout", "restore", "reset", "stash", "commit", "push", "pull", "fetch", "merge", "rebase", "apply", "am", "rm", "mv", "clean", "cherry-pick", "revert", "switch", "add",
@@ -616,6 +616,8 @@ def fix_guard(cmd: str, label: str, mode: str) -> str | None:
             return no
         if _says_only(piece):
             continue
+        if re.search(r"\benv\s+-i\b|\bos\.environ\b", piece):  # HQ_ROUND stays on what she runs
+            return no
         for script, sub, arg in _SCRIPT.findall(piece):
             if script == "review" and sub in ("reword", "add", "sitdown", "no"):
                 if arg.upper() != label or sub in ("reword", "add") and mode == "mark":
