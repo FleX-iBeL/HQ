@@ -21639,6 +21639,17 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
             for cmd in rounds:
                 d = pol.decide("Bash", {"command": cmd})
                 need(d.verdict == P.DENY and "plain command" in d.why, f"a shape that isn't allowed got through: {cmd}: {d.verdict} {d.why}")
+            # F114, the re-check: where errors go isn't a shape, awk that prints reads, read-only runs side by side; git's running options aren't reads
+            for cmd in (f"grep -n foo {r}/cycles.py 2>/dev/null", f"python3 {r}/usageline.py 2>&1 | tail -3", f"awk 'NR<3' {r}/cycles.py",
+                        f"python3 {r}/cycles.py list; python3 {r}/cycles.py list"):
+                d = pol.decide("Bash", {"command": cmd})
+                need(d.verdict != P.DENY, f"an honest command was refused: {cmd}: {d.verdict} {d.why}")
+            for cmd in (f"git -C {ROOT} grep -O'env HQ_ROLE_HERE=1 python3 {r}/cycles.py yes donna never 1' -n def -- routine/cycles.py",
+                        f"git -C {ROOT} -c core.pager=x log -- routine/cycles.py", f"git -C {ROOT} log --output={self.tmp}/x -- routine/cycles.py",
+                        f"git -C {ROOT} diff --ext-diff -- routine/cycles.py", f"git -C {ROOT} log --textconv -p -- routine/cycles.py",
+                        f"awk 'BEGIN{{system(\"id\")}}' {r}/cycles.py", f"python3 {r}/cycles.py list; python3 {r}/cycles.py yes donna ok"):
+                d = pol.decide("Bash", {"command": cmd})
+                need(d.verdict == P.DENY and "plain command" in d.why, f"a read that runs something got through: {cmd}: {d.verdict} {d.why}")
         finally:
             self._f114_unproof(was)
         rr = self._f114_script(env, "cycles.py", "yes", "donna", "nice", "1", words_from=str(call))
@@ -21746,8 +21757,38 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
             need(r.returncode == 2 and r.stdout.startswith("Refused"), f"the script opened the coffee on {x!r}: {r.stdout} {r.stderr[-300:]}")
         r = self._f114_script(env, "usageline.py", "fable", "fixed", "95", "--said", "fix the weekly at 95 and the fable at 80", words_from=str(call))
         need(r.returncode == 2 and rm.read_bytes() == before, f"the script fixed the Fable line at the weekly's number: {r.stdout} {r.stderr}")
+        # F114, the re-check: his clear yeses with an action on it or that, and the firm words a hold word cancels
+        acts, holds = ["perfect, put it in", "great, put it in", "nice, put it in", "that's perfect", "put it in"], \
+            ["ok, skip it", "ok, forget it", "sure, I'll do it myself", "ok, good question"]
+        call.write_text(call.read_text() + "".join(f"- 01:1{i}:00 **HQ:** Shall I put the coffee with Mira in?\n- 01:1{i}:10 **Me:** {x}\n"
+                                                   for i, x in enumerate(acts + holds))
+                        + "- 01:30:00 **HQ:** Shall I fix the weekly line at 95?\n- 01:30:10 **Me:** perfect, fix it\n"
+                        + "- 01:31:00 **HQ:** Shall I fix the weekly line at 95?\n- 01:31:10 **Me:** great, the weekly one at 95\n")
+        was = self._f114_proof(env)
+        try:
+            for x in holds:
+                d = self._f114_policy(ws, "donna").decide("Bash", {"command": f"python3 {ROOT}/routine/cycles.py yes donna \"{x}\""})
+                need(d.verdict == P.DENY, f"{x!r} opened the coffee: {d.why}")
+            for x in acts:
+                d = self._f114_policy(ws, "donna").decide("Bash", {"command": f"python3 {ROOT}/routine/cycles.py yes donna \"{x}\""})
+                need(d.verdict == P.ALLOW, f"his clear yes {x!r} was refused: {d.why}")
+            for x in ("perfect, fix it", "great, the weekly one at 95"):
+                d = self._f114_policy(ws, "moneypenny").decide("Bash", {"command": f"{ul} weekly fixed 95 --said \"{x}\""})
+                need(d.verdict == P.ALLOW, f"his clear yes {x!r} to her stop line question was refused: {d.why}")
+                d = self._f114_policy(ws, "moneypenny").decide("Bash", {"command": f"{ul} 5-hour fixed 95 --said \"{x}\""})
+                need(d.verdict == P.DENY, f"{x!r} moved the 5-hour line: {d.why}")
+        finally:
+            self._f114_unproof(was)
+        for x in holds:
+            r = self._f114_script(env, "cycles.py", "yes", "donna", x, words_from=str(call))
+            need(r.returncode == 2 and r.stdout.startswith("Refused"), f"the script opened the coffee on {x!r}: {r.stdout} {r.stderr[-300:]}")
+        r = self._f114_script(env, "cycles.py", "yes", "donna", "perfect, put it in", words_from=str(call))
+        need(r.returncode == 0 and not r.stdout.startswith("Refused"), f"the script refused his perfect, put it in: {r.stdout} {r.stderr[-300:]}")  # the yes step takes it from there
+        r = self._f114_script(env, "usageline.py", "weekly", "fixed", "95", "--said", "perfect, fix it", words_from=str(call))
+        need(r.returncode == 0 and "fixed at 95%" in rm.read_text(), f"the script refused his perfect, fix it: {r.stdout} {r.stderr}")
         return (f"his yes to her question fixes the weekly line at 95 and nothing else; {len(shorts)} lines with a short word in passing and "
-                f"{len(own)} lines of his that aren't that instruction open nothing")
+                f"{len(own)} lines of his that aren't that instruction open nothing; {len(acts) + 2} clear yeses with an action open, "
+                f"{len(holds)} held back don't")
 
     async def flow393(self) -> str:
         """F114, the second check, no Claude: a number tied to no line opens nothing, and words that name no line move none. "Yes add it,

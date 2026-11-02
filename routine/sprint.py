@@ -701,14 +701,25 @@ def a_yes(line, turn, names=()):
     low = " ".join(str(line).lower().replace("’", "'").split())
     bare = " ".join(re.sub(r"[^\w' ]", " ", low).split())
     said = bool(_YES_PLAIN.search(low) or _A_YES_PHRASE.search(low) or _A_YES_ALONE.fullmatch(bare))
-    return said and not (_TAKEN_BACK.search(low) or _HOLD_WORD.search(low) or _NOT_SURE.search(low) or _A_HOLD.search(low))
+    return said and not held_back(low)
+
+
+def held_back(line):
+    """F114: words in his line that hold a yes back (but, wait, not now, maybe, leave it, skip, forget it, question …)."""
+    low = " ".join(str(line).lower().replace("’", "'").split())
+    return bool(_TAKEN_BACK.search(low) or _HOLD_WORD.search(low) or _NOT_SURE.search(low) or _A_HOLD.search(low))
 
 
 # F114, the third check: the short words count only as the whole line ("nice", "yes, fine"), the phrases anywhere, and these hold a yes back.
-_A_YES_ALONE = re.compile(r"(?:(?:yes|ok|okay|yeah)\s+)?(?:nice|lovely|cool|fine|good|alright|all right|great|perfect)(?:\s+(?:yes|ok|okay|yeah))?")
+_SHORT_YES = r"(?:nice|lovely|cool|fine|good|alright|all right|great|perfect|awesome|excellent)"
+_ACT_ON_IT = r"(?:put|add|book|fix|move|do|change|plan|make|set)\s+(?:it|that)(?:\s+(?:in|on|up))?"
+# F114, the last round: a short word alone, a short word with only an action on it or that ("perfect, put it in", "do that"), or "that's
+# perfect", "that works", "fine by me"; at most a yes or ok in front and a please after. The hold words below still win.
+_A_YES_ALONE = re.compile(rf"(?:(?:yes|ok|okay|yeah)\s+)?(?:{_SHORT_YES}(?:\s+(?:yes|ok|okay|yeah))?|(?:{_SHORT_YES}\s+)?{_ACT_ON_IT}"
+                          rf"|that'?s\s+(?:perfect|great|fine|good)|that\s+works|fine\s+by\s+me)(?:\s+please)?")
 _A_YES_PHRASE = re.compile(r"(?<![\w'])(?:sounds good|sounds great|correct|go for it|let'?s do it|definitely)(?![\w'])")
 _A_HOLD = re.compile(r"(?<![\w'])(?:leave it|as it is|i'?m good|i'?m fine|i'?m ok(?:ay)?|think about|thinking about|sleep on it|not now|later|"
-                     r"wait|hold on|no need|nothing to change|let me think|never mind)(?![\w'])")
+                     r"wait|hold on|no need|nothing to change|let me think|never mind|skip|forget it|myself|noted|i know|i saw|question)(?![\w'])")
 
 
 NOT_HIS = "those words aren't in his own lines"

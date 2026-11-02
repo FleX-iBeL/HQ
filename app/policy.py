@@ -208,7 +208,12 @@ _NAMES_SCRIPT = re.compile(r"(cycles|usageline|feedback)\.py\b")
 # F114, the third check: the programs of a plain read of these scripts. No interpreter, no shell, no wrapper (env, xargs, find, exec,
 # eval, source, nice, timeout), nothing that runs what it's given.
 _READS_OF_SCRIPTS = {"grep", "egrep", "fgrep", "rg", "cat", "head", "tail", "wc", "ls", "cut", "nl", "sort", "uniq", "diff", "cmp", "stat",
-                     "file", "cd", "echo", "sed", "git"}
+                     "file", "cd", "echo", "sed", "awk", "git"}
+# F114, the last round: git's options that run a program or write a file, never part of a plain read.
+_GIT_RUNS = re.compile(r"^(?:-O|--open-files-in-pager|-c|--output|--ext-diff|--textconv|--exec|-x)")
+# the read-only commands of the scripts themselves, which may stand side by side in one line
+_SCRIPT_READS = {"cycles.py": {"list", "show", "status", "settings", "ledger", "friday", "score"}, "usageline.py": {"", "5-hour", "five", "5h",
+                 "weekly", "week", "fable"}, "feedback.py": {""}}
 _GIT_READS_OF_SCRIPTS = {"log", "diff", "show", "blame", "status", "ls-files", "grep"}
 
 
@@ -252,13 +257,22 @@ def _plain_read_piece(p: list[str]) -> bool:
     prog, args = p[0], p[1:]
     if prog not in _READS_OF_SCRIPTS:
         return False
-    if prog == "sed":
-        return not isinstance(_program_files("sed", args), Decision)
+    if prog in ("sed", "awk"):  # awk only with a program that prints (no system(), no | or > inside it)
+        return not isinstance(_program_files(prog, args), Decision)
     if prog == "git":
         while args and args[0] in ("-C", "--no-pager"):
             args = args[2:] if args[0] == "-C" else args[1:]
-        return bool(args) and args[0] in _GIT_READS_OF_SCRIPTS
+        return bool(args) and args[0] in _GIT_READS_OF_SCRIPTS and not any(_GIT_RUNS.match(a) for a in args)
     return True
+
+
+def _script_read_run(p: list[str]) -> bool:
+    """F114, the last round: a plain run of one of the scripts' read-only commands (cycles.py list, usageline.py weekly)."""
+    p = _no_timeout(p)
+    if len(p) < 2 or p[0] not in ("python", "python3") or re.search(r"\s", p[1]) or Path(p[1]).name not in _SCRIPT_READS:
+        return False
+    rest = p[2:]
+    return (rest[0] if rest else "") in _SCRIPT_READS[Path(p[1]).name] and len(rest) <= 1
 
 
 _HIS_SCRIPT_WAY = {"cycles": f"python3 \"{HQ_ROUTINE / 'cycles.py'}\" yes AGENT \"HIS WORDS\" [N] (or its other commands)",
@@ -655,6 +669,8 @@ class Policy:
         pieces, joins = shaped
         if all(_plain_read_piece(p) for p in pieces):
             return True
+        if all(_plain_read_piece(p) or _script_read_run(p) for p in pieces):  # cycles.py list; cycles.py list
+            return True
         i = 1 if pieces[0][0] == "cd" and len(pieces[0]) == 2 and joins and joins[0] == "&&" else 0
         if i >= len(pieces):
             return False
@@ -760,7 +776,7 @@ class Policy:
         # F114, the third check: a command that names cycles.py, usageline.py or feedback.py passes only in an allowed shape (a plain read,
         # one plain run, or another HQ script carrying the name in its text); every other shape is refused with the script named.
         m = _NAMES_SCRIPT.search(cmd)
-        if m and not self._script_shape_ok(cmd):
+        if m and not self._script_shape_ok(re.sub(r"\s2>&1|\s2>\s*\S+", " ", cmd)):  # F114: where errors go isn't a shape
             return _wrapped(m.group(1))
         cmd = _hide_quoted_dollars(cmd)  # H281: awk's $1 and sed's $p in single quotes are text, not variables
         # 27 October 2026: ${n} of a plain for loop (for n in 1 2; do sed -n "${n}p" …) is filled in by _loops below.

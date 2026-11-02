@@ -234,6 +234,9 @@ _DENIED = re.compile(r"\b(?:shouldn't|should not|mustn't|must not|don't|do not|d
                      r"(?:mov(?:e|es|ed|ing)|fix(?:es|ed|ing)?)\b")
 
 
+_LEAD_YES = re.compile(r"(?:(?:yes|ok|okay|yeah)[\s,!.]+)?(?:nice|lovely|cool|fine|good|alright|great|perfect|awesome|excellent|yes|ok|okay|yeah|sure)\b[\s,!.]")
+
+
 def _mentions(low: str) -> list:
     """F114: where each line is named in these words, in order, as (start, key); "the weekly Fable line" is one mention, of Fable."""
     found = sorted((m.start(), m.end(), k) for k, rx in LINE_WORDS.items() for m in rx.finditer(low))
@@ -275,7 +278,8 @@ def opens(key: str, number: int | None, moving: bool, line: str, turn: str = "")
     mine = _paired(low)
     if mine:
         asked = _DENIED.sub(" ", low)  # "it shouldn't keep moving" is a way denied, not a doubt
-        if _NOT_AN_ORDER.search(asked) or not (_ORDER.search(asked) or sprint_yes(line, turn)):
+        answers = bool(_LEAD_YES.match(asked)) and set(_paired(hers_low)) == {key} and not _held(line)  # "great, the weekly one at 95"
+        if _NOT_AN_ORDER.search(asked) or not (_ORDER.search(asked) or sprint_yes(line, turn) or answers):
             return False
         if key not in mine:
             return False
@@ -303,6 +307,11 @@ def opens(key: str, number: int | None, moving: bool, line: str, turn: str = "")
         return True
     his = numbers_in(low)
     return number in his if his else number in hers[key]["numbers"]
+
+
+def _held(line: str) -> bool:
+    import sprint
+    return sprint.held_back(line)
 
 
 def sprint_yes(line: str, turn: str) -> bool:
