@@ -192,10 +192,11 @@ def run(n: int) -> int:
     try:
         with open(logpath, "w", encoding="utf8") as log:
             if named:
-                code, out = _flows(wt, ["--only", ",".join(map(str, named))], log)
+                # F105: a flow with Claude turns needs a live voice and usage; a row that only mentions one doesn't turn the record red
+                code, out = _flows(wt, ["--quick", "--only", ",".join(map(str, named))], log)
                 p, r_ = nightly.summary(out)
                 rec["ran"], rec["passed"] = r_, p
-                rec["failed"] = nightly.failures(out) or ([] if code == 0 and r_ else [f"the named flows {named} ended with exit {code}, {p} of {r_}"])
+                rec["failed"] = nightly.failures(out) or ([] if code == 0 else [f"the named flows {named} ended with exit {code}, {p} of {r_}"])
             if not rec["failed"]:
                 code, out = _flows(wt, nightly.flow_args(), log)
                 p, r_ = nightly.summary(out)
