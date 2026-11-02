@@ -481,6 +481,7 @@ def main_device():
 QUIET = float(os.environ.get("HQ_SYNC_QUIET") or 600)  # a file changed here this recently is left for the next look (a call may still be writing it)
 SKIP = ("HQ/calendar.json",)  # the backup's own read of the calendar: the main reads Google itself
 HANDOVER_MOST = 20_000_000
+HANDED = os.path.join(SUPPORT, "sync-handed.json")  # F115: the hand-overs the main has settled (their ids), on this computer
 
 
 def unsent():
@@ -543,6 +544,8 @@ def handover(log=print, now=None, dry=False):
     out = {"handed": [], "kept_here": [], "failed": [], "reverted": [], "unreached": False}
     now = now or time.time()
     me = role.my_name()
+    acked = _load(HANDED, {}) if not dry else {}
+    acked = acked if isinstance(acked, dict) else {}
     for f in config().get("folders", []):
         try:
             items = local_changed(f["id"])
@@ -615,6 +618,15 @@ def handover(log=print, now=None, dry=False):
             if dry:
                 out["handed"].append(rel)
                 continue
+            if hid in acked:  # settled there already, as it is now: not sent again every minute
+                out["handed"].append(rel)
+                if CONFLICT.search(rel):
+                    try:
+                        os.remove(full)
+                        done[rel] = None
+                    except OSError:
+                        pass
+                continue
             import settle as _settle
             code, said, err, how = _settle.send(role, ["file", f["what"], base_rel], payload, hid)
             if how != "main":
@@ -627,6 +639,8 @@ def handover(log=print, now=None, dry=False):
                 log(f"sync: handover: the main didn't take {rel}: {' '.join((said + err).split())[:200]}")
                 continue
             out["handed"].append(rel)
+            acked[hid] = time.time()
+            _save(HANDED, {k: v for k, v in acked.items() if time.time() - v < 14 * 86400})
             log(f"sync: handed {rel} to the main: {' '.join(said.split())[:200]}")
             if CONFLICT.search(rel):
                 try:

@@ -20961,8 +20961,9 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
 
         def look(X):
             """One look of the routine on X: the role first, then the sync (with its hand-over), as tick.py does."""
-            return py(X, "import role, sync\nr = role.tick(log=print)\n"
-                         "sync.tick(main=r['acting'] == 'main' and not r.get('handing_back'), acting=r['acting'], log=print)\n"
+            return py(X, "import role, sync, inspect\nr = role.tick(log=print)\n"
+                         "kw = {'acting': r['acting']} if 'acting' in inspect.signature(sync.tick).parameters else {}\n"
+                         "sync.tick(main=r['acting'] == 'main' and not r.get('handing_back'), log=print, **kw)\n"
                          "print('ACTING', role.acting())")
         P["look"] = look
 
@@ -21373,16 +21374,18 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
             P["cut"] = False  # A answers again, but its sync isn't up yet
             woke = {"HQ_ROLE_WAKETIME": str(time.time())}
             for i in range(3):
-                await asyncio.to_thread(py, "A", "import role, sync\nr = role.tick(log=print)\n"
-                                        "sync.tick(main=r['acting'] == 'main' and not r.get('handing_back'), acting=r['acting'], log=print)", None, woke)
+                await asyncio.to_thread(py, "A", "import role, sync, inspect\nr = role.tick(log=print)\n"
+                                        "kw = {'acting': r['acting']} if 'acting' in inspect.signature(sync.tick).parameters else {}\n"
+                                        "sync.tick(main=r['acting'] == 'main' and not r.get('handing_back'), log=print, **kw)", None, woke)
                 await asyncio.to_thread(look, "B")
             need(acting("B") == "main", "B handed back before what it wrote had reached A")
             need(not (wa / "HQ/written-while-away.md").exists(), "the test is wrong: the file is on A already")
             P["pause"](False)
             for i in range(20):
                 time.sleep(2)
-                await asyncio.to_thread(py, "A", "import role, sync\nr = role.tick(log=print)\n"
-                                        "sync.tick(main=r['acting'] == 'main' and not r.get('handing_back'), acting=r['acting'], log=print)", None, woke)
+                await asyncio.to_thread(py, "A", "import role, sync, inspect\nr = role.tick(log=print)\n"
+                                        "kw = {'acting': r['acting']} if 'acting' in inspect.signature(sync.tick).parameters else {}\n"
+                                        "sync.tick(main=r['acting'] == 'main' and not r.get('handing_back'), log=print, **kw)", None, woke)
                 await asyncio.to_thread(look, "B")
                 if acting("B") == "backup" and acting("A") == "main":
                     break
