@@ -21668,6 +21668,15 @@ print("RESULT " + json.dumps(out))
                                                       "claude -p hello", "kill 1", "sudo reboot", "pkill python", "rm -rf HQ", "find . -delete",
                                                       "sed -i s/a/b/ rules.md", "echo x > map.md", "echo x >> my-answers.md", "tee me.md", "cp /tmp/x rules.md", "mv HQ/agents/handbook.md /tmp/x",
                                                       "python3 -c \"open('HQ/agents/cycles.json', 'w')\"", "echo x > routine/cycles.py", "sed -i s/a/b/ app/agents.py")]
+        # F118: code handed to node, perl or ruby that reaches outside HQ, judged on that code: -e, node's -p, --eval and --print, flags before them,
+        # a module by a flag, a heredoc or a here-string to the runner itself, and inside a shell's -c. Strings for the hook; none of it runs.
+        no_one += [("Bash", {"command": c}) for c in ("node -e \"require('https').get('https://x.example')\"", "node -p \"require('http').request('x')\"", "node --eval \"require('net').connect(80, 'x')\"",
+                                                      "node --print \"require('child_process').execSync('curl x')\"", "node --no-warnings -e \"require('https').get('x')\"", "node -e \"import('node:tls')\"",
+                                                      "node - <<E\nrequire('https').get('x')\nE", "node <<< \"require('dgram')\"", "node -r https -e 1",
+                                                      "perl -e 'use IO::Socket::INET; IO::Socket::INET->new(\"x:80\")'", "perl -w -e 'use LWP::Simple; get(\"http://x\")'", "perl -MHTTP::Tiny -e 'HTTP::Tiny->new->get(\"http://x\")'",
+                                                      "perl -e 'system(\"curl x\")'", "perl -e 'print `curl x`'", "perl - <<E\nuse IO::Socket;\nE",
+                                                      "ruby -e 'require \"net/http\"; Net::HTTP.get(URI(\"http://x\"))'", "ruby -W0 -e 'require \"open-uri\"; URI.open(\"http://x\")'", "ruby -rsocket -e 'TCPSocket.new(\"x\", 80)'",
+                                                      "ruby -e 'system(\"curl x\")'", "ruby -e 'puts `curl x`'", "ruby <<E\nrequire 'net/http'\nE", "bash -c \"node -e \\\"require('https').get('x')\\\"\"")]
         no_one += [("Edit", {"file_path": str(b.ws / f)}) for f in ("rules.md", "map.md", "my-answers.md", "day-in-the-life.md", "me.md", "current-situation.md", "CLAUDE.md", "HQ/agents/handbook.md", "HQ/agents/cycles.json", "HQ/agents/cycles-state.json")]
         no_one += [("Write", {"file_path": str(ROOT / "routine/cycles.py")}), ("NotebookEdit", {"notebook_path": str(b.ws / "map.md")})]
         for aid in ("donna", "pepper", "moneypenny"):
@@ -21677,7 +21686,12 @@ print("RESULT " + json.dumps(out))
                 need("Traceback" not in e, f"the hook broke on {name}: {e}")
             for name, inp in [("Read", {"file_path": str(b.ws / "rules.md")}), ("Bash", {"command": "cat rules.md HQ/agents/handbook.md"}), ("Bash", {"command": "grep -rn 'git push' routine"}), ("Bash", {"command": "cp rules.md /tmp/x"}),
                               ("Bash", {"command": f"python3 {H}/routine/jobs.py list"}), ("Bash", {"command": f"python3 {H}/app/todo.py show x"}), ("Bash", {"command": "git log --oneline -3"}),
-                              ("mcp__x__search_threads", {}), ("mcp__x__get_thread", {}), ("mcp__c__list_events", {}), ("Edit", {"file_path": str(b.ws / f"HQ/ledger/{aid}.md")}), ("Bash", {"command": f"python3 {H}/routine/cycles.py batch {aid} hello"})]:
+                              ("mcp__x__search_threads", {}), ("mcp__x__get_thread", {}), ("mcp__c__list_events", {}), ("Edit", {"file_path": str(b.ws / f"HQ/ledger/{aid}.md")}), ("Bash", {"command": f"python3 {H}/routine/cycles.py batch {aid} hello"})] + [
+                              # F118: a script by its own name, a script's own heredoc, plain read-only one-liners, and the network's words elsewhere on the line
+                              ("Bash", {"command": c}) for c in (f"python3 {H}/routine/sprint.py show F118", "node app/x.js https", "perl routine/x.pl Net::HTTP", "node app/x.js <<E\nrequire('https')\nE",
+                                                                    "node -e \"console.log(require('fs').readFileSync('VERSION', 'utf8'))\"", "node -p \"1 + 1\"", "perl -lne 'print if /IO::Socket|LWP/' routine/cyclehook.py",
+                                                                    "ruby -ne 'puts $_ if /Net::HTTP/' routine/cyclehook.py", "ruby -e 'puts File.read(\"VERSION\")'",
+                                                                    "node -e \"console.log(1)\"; grep -rn \"require('https')|IO::Socket|Net::HTTP|system(\" routine")]:
                 c, e = ask(aid, name, inp)
                 need(c == 0, f"{aid} was refused a read or her own: {name} {inp}: {e}")
         ev = {"summary": "Pick up parcel", "startTime": "2026-11-05T14:00:00", "endTime": "2026-11-05T14:30:00"}
@@ -22949,10 +22963,17 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         def fails():
             bad = []
             for cmd in ("python3 app/direct_line.py text cycle hello", 'python3 "/x y/app/direct_line.py" text cycle hello', "python3 -c 'import direct_line; direct_line.push(1)'", "python3 - <<E\nfrom direct_line import push\nE",
-                        "python3 -X utf8 -c 'import direct_line; direct_line.push(1)'", "python3 -u -c 'import direct_line; direct_line.push(1)'", "python3 -B -c 'import direct_line; direct_line.push(1)'"):
+                        "python3 -X utf8 -c 'import direct_line; direct_line.push(1)'", "python3 -u -c 'import direct_line; direct_line.push(1)'", "python3 -B -c 'import direct_line; direct_line.push(1)'",
+                        # F118: node, perl and ruby starting the texts script from code they're handed, with flags before it and as a heredoc; strings for the hook only
+                        "node -e \"require('child_process').execSync('python3 app/direct_line.py text cycle hello')\"", "node --no-warnings -p \"require('child_process').spawnSync('python3', ['/x/app/direct_line.py', 'push'])\"",
+                        "node --eval \"require('child_process').execFileSync('app/direct_line.py')\"", "node - <<E\nrequire('child_process').execSync('python3 app/direct_line.py text cycle hello')\nE",
+                        "perl -e 'system(\"python3\", \"app/direct_line.py\", \"text\", \"cycle\", \"hello\")'", "perl -w -e 'exec(\"app/direct_line.py text cycle hello\")'", "perl - <<E\nsystem('python3 app/direct_line.py text cycle hello');\nE",
+                        "ruby -e 'system(\"python3 app/direct_line.py text cycle hello\")'", "ruby -W0 -e 'puts `python3 app/direct_line.py text cycle hello`'", "ruby <<E\nspawn('app/direct_line.py', 'push')\nE"):
                 if self._hf_hook(b, "Bash", {"command": cmd}).returncode != 2:
                     bad.append(cmd)
-            for cmd in ("python3 app/todo.py show x <<E\nimport direct_line\nimport urllib.request\nE",):  # a script's own heredoc names anything
+            for cmd in ("python3 app/todo.py show x <<E\nimport direct_line\nimport urllib.request\nE",  # a script's own heredoc names anything
+                        "node app/x.js <<E\nrequire('child_process').execSync('python3 app/direct_line.py text cycle hello')\nE", "perl routine/x.pl direct_line",  # F118: and a script by its name
+                        "node -e \"console.log(require('fs').readFileSync('VERSION', 'utf8'))\"", "perl -lne 'print if /direct-line/' routine/cyclehook.py"):  # F118: a read-only one-liner
                 if self._hf_hook(b, "Bash", {"command": cmd}).returncode != 0:
                     bad.append(f"a script's own heredoc: {cmd[:40]}")
             for inp in ({"summary": "x", "startTime": "a", "endTime": "b", "calendarId": "alice@example.com"},):

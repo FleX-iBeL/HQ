@@ -103,6 +103,22 @@ _NET_CODE = re.compile(r"\b(?:import|from)\s+(?:urllib|requests|httpx|aiohttp|ht
 # code it's handed: by -c or -e after any flags before it (python3 -X utf8 -c, -u, -B), or a heredoc to the runner itself after its own flags only,
 # never a script's own heredoc: a round's words may name anything
 _RUNS_CODE_TEXT = re.compile(r"\b(?:python[\d.]*|node|perl|ruby)\b(?:[^\n|;&]*?\s-[a-zA-Z]*[cCeE]\b|(?:\s+(?:-[XW]\s+\S+|-[a-zA-Z]+))*\s+-?\s*<<)")
+# F118: code handed inline to node, perl or ruby (`ran` collects it), judged on that code only, by each language's own words for reaching the
+# network or starting another program. A script run by its file name, a script's own heredoc and the rest of the line aren't read here.
+_LANGS = {"node": "node", "nodejs": "node", "perl": "perl", "ruby": "ruby"}
+_CODE_FLAG = {"node": re.compile(r"-[a-zA-Z]*[ep]|--(?:eval|print)=?|<<<"), "perl": re.compile(r"-[a-zA-Z]*[eE]|<<<"), "ruby": re.compile(r"-[a-zA-Z]*e|<<<")}
+_VALUE_FLAG = re.compile(r"-[rIMmxCW]|--(?:require|import|loader|experimental-loader|input-type|title)")
+_MODULE_FLAG = {"node": re.compile(r"(?:-r|--require|--import)(?:=|\s+)(\S+)"), "perl": re.compile(r"(?<!\S)-[Mm]-?\s*([\w:]+)"), "ruby": re.compile(r"(?<!\S)-r\s*(\S+)")}
+_MODULE_AS = {"node": "require('{}');", "perl": "use {};", "ruby": "require '{}';"}
+_NODE_NET = r"(?:node:)?(?:https?|http2|net|tls|dgram|dns|child_process|cluster|worker_threads|inspector|undici|axios|node-fetch|got|ws|request)"
+_INLINE_NET = {
+    "node": re.compile(rf"\b(?:require|import)\s*\(\s*[`'\"]{_NODE_NET}[`'\"]|\b(?:from|import)\s*[`'\"]{_NODE_NET}[`'\"]"
+                       r"|\bfetch\b|\bXMLHttpRequest\b|\bWebSocket\b|\bEventSource\b|\bprocess\.binding\b|\bsendBeacon\b"),
+    "perl": re.compile(r"\bIO::Socket|\bSocket\b|\bLWP\b|\bHTTP::|\bNet::|\bMojo::|\bWWW::|\bsocket\s*\(|\b(?:system|exec|qx|syscall)\b|`"
+                       r"|\bopen\w*\b[^;]*(?:-\||\|-|\|\s*['\"]|['\"]\s*\|)"),
+    "ruby": re.compile(r"\bNet::|\bopen-uri\b|\bOpenURI\b|\bURI\.open\b|\b(?:TCP|UDP|UNIX)?Socket\b|['\"](?:socket|net/\w+|open3)['\"]|\bOpen3\b"
+                       r"|\b(?:HTTParty|Faraday|RestClient|Excon|Typhoeus)\b|\b(?:system|exec|spawn|syscall)\b|`|%x|\bIO\.popen\b|\bopen\s*\(?\s*['\"]\|"),
+}
 KNOWN_READS = {"Read", "Grep", "Glob", "LS", "NotebookRead", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch", "CronList", "ListAgents"}  # all else is by name below, or refused
 _READ_TOOL = re.compile(r"^(?:get|list|search|read|query|suggest|find|fetch|count|view|show|describe|lookup|check|download)(?:_|$)", re.I)
 CALENDAR_WRITES = {"create_event", "update_event", "delete_event"}
@@ -202,10 +218,18 @@ def cycle_shell(cmd: str, aid: str, kind: str, cwd: str | None = None) -> str | 
     """What a cycle's shell line may not do, in plain words, by what would run and what it would touch; None when it's fine."""
     named = re.sub(r"[\"']([^\"'\n]*(?:\.py|my notes[^\"'\n]*|HQ/calls/[^\"'\n]*|" + "|".join(re.escape(x) for x in HIS) + r"))[\"']", lambda m: m.group(1).replace(" ", "_"), cmd)
     runs = ran(named)
+    inline = []
+    bare = ran(cmd, found=inline)  # F118: what node, perl and ruby are handed to run, each piece of code on its own, quoted or not
+    inline += filter(None, map(_bare_inline, re.split(r"[;&|\n]+", bare)))
     if aid and re.search(_WRITE_ON.format(n=rf"\S*HQ/ledger/(?!{re.escape(aid)}[.-])\S+", name=rf"\S*HQ/ledger/(?!{re.escape(aid)}[.-])\S+"), runs):
         return "HQ: refused: another agent's ledger is hers; a cycle writes only her own."
     if _RUNS_CODE_TEXT.search(named) and re.search(r"\b(?:import|from)\s+direct_line\b", named):
         return "HQ: refused: her texts go through cycles.py batch, ask or text, which wait for his sleep."
+    for lang, code in inline:
+        if re.search(r"\bdirect_line\b", code):
+            return "HQ: refused: her texts go through cycles.py batch, ask or text, which wait for his sleep."
+        if _INLINE_NET[lang].search(without_patterns(code)):
+            return f"HQ: refused: reaching outside HQ, or starting another program, from code handed to {lang} isn't something a cycle does."
     for m in re.finditer(r"(?<![0-9&>])>>?\s*([^\s|;&]+)", runs):  # a redirect is a write like any other
         why = is_his(m.group(1), cwd, aid)
         if why:
@@ -480,10 +504,50 @@ def off_the_release(cmd: str) -> bool:
     return False
 
 
-def ran(cmd: str, depth: int = 0) -> str:
+def inline_lang(piece: str, fed: bool = False) -> str | None:
+    """F118: the language when this piece of a line is node, perl or ruby about to be handed code: by -e (node also -p, --eval, --print) after
+    only its own flags (their values, and perl's earlier -e code), or, `fed`, a heredoc to the runner itself. None for a script run by its name."""
+    words = _program(piece)
+    lang = _LANGS.get(re.sub(r"[\d.]+$", "", os.path.basename(words[0]))) if words else None
+    if not lang:
+        return None
+    rest = words[1:]
+    if fed:
+        return lang if all(w.startswith("-") for w in rest) else None
+    if not rest or not _CODE_FLAG[lang].fullmatch(rest[-1]):
+        return None
+    for i, w in enumerate(rest[:-1]):
+        if not w.startswith("-") and not (i and (_VALUE_FLAG.fullmatch(rest[i - 1]) or _CODE_FLAG[lang].fullmatch(rest[i - 1]))):
+            return None
+    return lang
+
+
+def _bare_inline(piece: str) -> tuple | None:
+    """F118: code handed to node, perl or ruby without quotes (node -r https -e 1), as (language, code); a quoted one `ran` already handed over."""
+    words = _program(piece)
+    for j in range(1, len(words) - 1):
+        lang = inline_lang(" ".join(words[:j + 1]))
+        if lang:
+            return lang, _with_modules(lang, " ".join(words[:j + 1]), words[j + 1])
+    return None
+
+
+def without_patterns(code: str) -> str:
+    """F118: inline code without the patterns a read-only one-liner matches against (perl -ne 'print if /IO::Socket/'), so their words aren't
+    taken for what the code does; a pattern code can run inside ((?{ }), (??{ }), #{ }) stays."""
+    return re.sub(r"(^|[\s(,;!&|~])m?/((?:\\.|[^/\n\\])+)/[a-z]*", lambda m: m.group(0) if re.search(r"\(\?\??\{|#\{", m.group(2)) else m.group(1) + " ", code)
+
+
+def _with_modules(lang: str, piece: str, code: str) -> str:
+    """F118: a module the runner is told to load by a flag (perl -MIO::Socket, ruby -rsocket, node -r https) counts as part of its code."""
+    return "".join(_MODULE_AS[lang].format(m) + "\n" for m in _MODULE_FLAG[lang].findall(piece)) + code
+
+
+def ran(cmd: str, depth: int = 0, found: list | None = None) -> str:
     """F104: a command with what would really run, near enough: a backslash line break is no break, and what only stands in it is out: what's inside
     quotes as an argument with spaces or shell marks in it (a commit message, a grep's pattern, a note), heredocs and comments. A quoted single word stays a word.
-    What a shell or Python is handed to run, by -c, eval or a heredoc, stays in, read the same way: there the quotes are the command."""
+    What a shell or Python is handed to run, by -c, eval or a heredoc, stays in, read the same way: there the quotes are the command.
+    F118: `found` collects what node, perl or ruby are handed to run, as (language, code), also inside a shell's -c or heredoc."""
     cmd = cmd.replace("\\\n", " ")
     out, piece, waiting, i = [], "", [], 0
 
@@ -493,7 +557,7 @@ def ran(cmd: str, depth: int = 0) -> str:
         piece += s
 
     def given(body: str, shell: bool, code: bool) -> str:
-        return ran(body, depth + 1) if shell and depth < 3 else plain(body) if code else ""
+        return ran(body, depth + 1, found) if shell and depth < 3 else plain(body) if code else ""
 
     while i < len(cmd):
         c = cmd[i]
@@ -507,6 +571,9 @@ def ran(cmd: str, depth: int = 0) -> str:
                 buf += cmd[j:j + 1]
                 j += 1
             i = j + 1
+            lang = inline_lang(piece) if found is not None else None
+            if lang:
+                found.append((lang, _with_modules(lang, piece, buf)))
             runs = given(buf, bool(_RUNS_SHELL.search(piece)), bool(_RUNS_CODE.search(piece)))
             put(f" {runs} " if runs else buf if not re.search(r"[\s;&|]", buf) else " Q ")  # a grep's 'a|b' is one argument, no pipe
         elif c == "#" and (not piece or piece[-1].isspace()):
@@ -517,13 +584,13 @@ def ran(cmd: str, depth: int = 0) -> str:
             i += 3
         elif re.match(r"<<-?\s*['\"\\]?[\w.-]+", cmd[i:]):
             m = re.match(r"<<-?\s*['\"\\]?([\w.-]+)['\"]?", cmd[i:])
-            waiting.append((m.group(1), bool(_FEEDS_SHELL.search(piece)), bool(_FEEDS_CODE.search(piece))))
+            waiting.append((m.group(1), bool(_FEEDS_SHELL.search(piece)), bool(_FEEDS_CODE.search(piece)), inline_lang(piece, fed=True) if found is not None else None, piece))
             i += m.end()
         elif c == "\n":
             out.append(c)
             piece = ""
             i += 1
-            for end, shell, code in waiting:
+            for end, shell, code, lang, at in waiting:
                 body = []
                 while i < len(cmd):
                     nl = cmd.find("\n", i)
@@ -532,6 +599,8 @@ def ran(cmd: str, depth: int = 0) -> str:
                     if line.strip() == end:
                         break
                     body.append(line)
+                if lang:
+                    found.append((lang, _with_modules(lang, at, "\n".join(body))))
                 out.append(given("\n".join(body), shell, code) + "\n")
             waiting = []
         elif c in ";&|":
