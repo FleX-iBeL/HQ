@@ -170,7 +170,11 @@ def whole_set(commit: str = "HEAD", root: str | None = None) -> int:
     return len([n for n in quick if n not in left])
 
 
-RUNNING = os.path.join(OUT, "running.json")  # F112: which run is going right now
+RUNNING = None  # F112: a test's own file; otherwise running.json in OUT
+
+
+def _running_file() -> str:
+    return RUNNING or os.path.join(OUT, "running.json")
 
 
 def running() -> dict | None:
@@ -178,7 +182,7 @@ def running() -> dict | None:
     if hqpaths.under_test() and not os.environ.get("HQ_NIGHT_MINUTE"):
         return None
     try:
-        d = json.load(open(RUNNING, encoding="utf8"))
+        d = json.load(open(_running_file(), encoding="utf8"))
         os.kill(int(d["pid"]), 0)
         return d
     except PermissionError:
@@ -246,13 +250,13 @@ def run(again: bool = False, routine: bool = False) -> int:
     print(f"Round {n} of at most {ROUNDS}. Running: {' '.join(cmd[1:])}  (output in {log})", flush=True)
     t0 = time.time()
     commit, dirty = here()  # F112: what this run tests; a release reads it
-    json.dump({"pid": os.getpid(), "at": stamp.strftime("%Y-%m-%d %H:%M")}, open(RUNNING, "w"))
+    json.dump({"pid": os.getpid(), "at": stamp.strftime("%Y-%m-%d %H:%M")}, open(_running_file(), "w"))
     try:
         with open(log, "w", encoding="utf8") as f:
             r = subprocess.run(cmd, cwd=HQ, stdout=f, stderr=subprocess.STDOUT)
     finally:
         try:
-            os.remove(RUNNING)
+            os.remove(_running_file())
         except OSError:
             pass
     out = open(log, encoding="utf8").read()
