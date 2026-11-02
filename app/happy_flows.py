@@ -20541,40 +20541,31 @@ print(json.dumps(o))
         need(o["before"] == o["after"] == 0 and o["busy"] == 0 and o["going"] == 0, f"it started outside its window, beside a job or beside a run: {o}")
         need(o["late"] == 1 and o["once"] == 1, f"a job past five, or a second start: {o}")
         need(o["red_is_done"] == 0 and o["died_once"] == 2 and o["died_twice"] == 0 and o["told"] == 1 and o["bad"] == 1 and "died twice" in o["words"] and o["next_night"] == 1, f"a dead night: {o}")
-        # tick itself gets there, with the team off and with a job running; a friend's HQ and a flow's copy don't start it
-        code = """
-import sys, os, json
-sys.path.insert(0, sys.argv[1] + '/routine')
-import tick, nightly
-calls = []
-tick.nightly_minute = lambda now=None, busy=False: calls.append(busy)
-tick.log = lambda m: None
-real = tick.jobs
-fake = {}
-def jobs(*a):
-    return json.dumps(fake['q']) if a and a[0] == 'next' and fake.get('q') else real(*a)
-tick.jobs = jobs
-q = json.loads(real('next'))
-o = {'on': q['on']}
-try:
-    tick.tick()
-except SystemExit:
-    pass
-o['off'] = list(calls); calls.clear()
-fake['q'] = {**q, 'running': [{'n': 7, 'state': 'running', 'text': 'A job', 'kind': 'small'}]}
-try:
-    tick.tick()
-except (SystemExit, Exception):
-    pass
-o['job'] = list(calls); calls.clear()
-print(json.dumps(o))
-"""
-        off = _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), "off"], capture_output=True, text=True, env=e, cwd=str(ROOT))
+        # the routine's real minute gets there, with the team off and with a job running (the wall's stand-ins for the rest of the minute)
+        wws, wenv, d = self._wall_env("f112night")
+        jobs, minute, state, new = self._wall_tools(wenv, d, wws)
+        hook = ("import nightly\n"
+                "tick.nightly_minute = lambda now=None, busy=False: caught.setdefault('night', []).append(busy)\n"
+                "if os.environ.get('F112_GOING'):\n    nightly.running = lambda: {'pid': 1, 'at': 'x'}\n")
+        drv = (d / "driver.py").read_text()
+        need('for j in (sys.argv[4:] or ["1"]):' in drv, "the wall's driver changed")
+        (d / "driver.py").write_text(drv.replace('for j in (sys.argv[4:] or ["1"]):', hook + 'for j in (sys.argv[4:] or ["1"]):'))
+        self._wall_usage(wenv)
+        n = new("Build the thing on the made-up page")
+        r = minute(HQ_NIGHT_MINUTE="1", F112_GOING="1")  # no job starts beside the night
+        need(state(n) == "ready" and not r["opened"] and any("night" in (b.get("text") or "") for b in r["beats"] if b["key"] == "jobs"), f"a job goes on beside the night: {state(n)} {r['opened']}")
+        need(r.get("night") == [False], f"the minute doesn't reach the night: {r.get('night')}")
+        r = minute(HQ_NIGHT_MINUTE="1")
+        need(state(n).startswith("running") and r["opened"], f"the job doesn't start: {state(n)} {r['log'][-2:]}")
+        (Path(wenv["HQ_JOB_RUN"]) / "job.json").write_text(json.dumps({"n": int(n), "pid": 999999, "started": time.time() - 10}))
+        (Path(wenv["HQ_JOB_RUN"]) / "job.pid").write_text("999999")
+        r = minute(HQ_NIGHT_MINUTE="1")
+        need(r.get("night") == [True], f"with a job running the minute doesn't reach the night: {r.get('night')}")
+        jobs("mark", n, "cancelled")
+        off = jobs("off")
         need(off.returncode == 0, f"the switch: {off.stdout} {off.stderr[-300:]}")
-        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env={**e, "HQ_NIGHT_MINUTE": "1"}, cwd=str(ROOT), timeout=120)
-        need(r.returncode == 0, f"the routine's minute: {r.stdout[-300:]} {r.stderr[-800:]}")
-        o = json.loads(r.stdout.strip().splitlines()[-1])
-        need(o["on"] is False and o["off"] == [False] and o["job"] == [True], f"tick doesn't reach the night: {o}")
+        r = minute(HQ_NIGHT_MINUTE="1")
+        need(r.get("night") == [False], f"with the team off the minute doesn't reach the night: {r.get('night')}")
         code = """
 import sys, os, json
 sys.path.insert(0, sys.argv[1] + '/routine')
@@ -20587,27 +20578,6 @@ print(json.dumps(calls))
         for what, more, want in (("the maker's", {"HQ_NIGHT_MINUTE": "1"}, [False]), ("a friend's", {"HQ_NIGHT_MINUTE": "1", "HQ_MAKER": "0"}, []), ("a flow's copy", {}, [])):
             r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env={**e, **more}, cwd=str(ROOT))
             need(r.returncode == 0 and json.loads(r.stdout.strip().splitlines()[-1]) == want, f"{what} HQ: {r.stdout[-200:]} {r.stderr[-300:]}")
-        # no job starts beside the night
-        code = """
-import sys, os, json
-sys.path.insert(0, sys.argv[1] + '/routine')
-import tick, nightly
-tick.nightly_minute = lambda now=None, busy=False: None
-tick.log = lambda m: None
-said, started = [], []
-real = tick.routines.beat
-tick.routines.beat = lambda *a, **k: (said.append(k.get('text') or ''), real(*a, **k))[1]
-nightly.running = lambda: {'pid': 1, 'at': 'x'}
-tick.schedule_promote = lambda: started.append('promote')
-tick.tick()
-print(json.dumps({'said': [s for s in said if 'night' in s], 'started': started}))
-"""
-        on = _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), "on"], capture_output=True, text=True, env=e, cwd=str(ROOT))
-        need(on.returncode == 0, f"the switch: {on.stdout} {on.stderr[-300:]}")
-        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=120)
-        need(r.returncode == 0, f"beside the night: {r.stdout[-300:]} {r.stderr[-800:]}")
-        o = json.loads(r.stdout.strip().splitlines()[-1])
-        need(o["said"] and not o["started"], f"a job goes on beside the night: {o}")
         # a real run writes what it ran on
         hq = h["hq"]
         code = """
