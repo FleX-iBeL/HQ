@@ -20932,7 +20932,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                     pass
 
                 def _role(self, kind, body=""):
-                    if P["cut"]:  # a broken line: no answer at all
+                    if P["cut"] or len(body) > 100000:  # a broken line: no answer at all (server.mjs drops a body over 100,000)
                         self.close_connection = True
                         try:
                             self.connection.shutdown(socket.SHUT_RDWR)
@@ -21168,7 +21168,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                  "the pause didn't cut the sync")
             (wa / "me.md").write_text((wa / "me.md").read_text() + "\nThe server's own line.\n")
             (wb / "me.md").write_text((wb / "me.md").read_text() + "\nThe laptop's own line.\n")
-            call = "# Call 29 October 22:38\n\n" + "".join(f"He: line {i} of the call.\n" for i in range(300))
+            call = "# Call 29 October 22:38\n\n" + "".join(f"He: line {i} of the call, as long as a real one gets.\n" for i in range(3000))
             (wb / "HQ/calls").mkdir(exist_ok=True)
             (wb / "HQ/calls/2026-10-29-2238.md").write_text(call)
             pic = os.urandom(5000)
@@ -21240,7 +21240,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
         finally:
             await asyncio.to_thread(P["stop"])
         return (f"the laptop held {n_local} not handed over and {len(copies)} conflict copies: {looks} look(s) handed them all over "
-                "(the transcript and the picture whole, the added line taken, the clash main wins with the laptop's line in the "
+                f"(the transcript of {len(call) // 1000} KB in parts and the picture whole, the added line taken, the clash main wins with the laptop's line in the "
                 "list, the removed file kept and named, the copy that differed in nothing gone without an entry), none left and "
                 "both the same; again and a copy coming back the same added nothing; a copy on the main settled main wins, no merge job")
 
@@ -27625,8 +27625,11 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
             said = []
             left = sy.settle(sy.conflicts(), said.append)
             need(not same.exists() and not lock.exists(), f"a copy that needs no merge is still there: {said}")
-            need([c["copy"] for c in left] == [str(real)] and real.exists(), f"a real conflict wasn't left for its merge job: {left}")
-            real.unlink()
+            # F115: a real one is settled main wins: the file keeps the main's, the other's words go in the list, the copy goes
+            kept_ = ws / "HQ" / "kept-from-both.md"
+            need(not left and not real.exists() and (ws / "notes.md").read_text() == "one\n"
+                 and kept_.exists() and "two" in kept_.read_text(), f"a real conflict wasn't settled main wins: {left} {said}")
+            kept_.unlink()
             # call transcripts nobody committed: the main commits them after half an hour, a fresh one waits
             def g(*a, cwd=ws):
                 return subprocess.run(["git", *a], cwd=cwd, text=True, capture_output=True, check=True)

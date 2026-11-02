@@ -615,8 +615,8 @@ def handover(log=print, now=None, dry=False):
             if dry:
                 out["handed"].append(rel)
                 continue
-            code, said, err, how = role.hand("settle", ["file", f["what"], base_rel], keep=False, hid=hid,
-                                             stdin=json.dumps(payload), timeout=120)
+            import settle as _settle
+            code, said, err, how = _settle.send(role, ["file", f["what"], base_rel], payload, hid)
             if how != "main":
                 out["unreached"] = True
                 log(f"sync: handover: the main can't be reached; {rel} and the rest wait for the next look")

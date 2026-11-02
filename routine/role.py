@@ -96,7 +96,7 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "features": {"on", "off"}, "kinds": {"rename", "colour", "reset"}, "appt_notes": {"add", "clear"},
           "workflows": {"on", "off"}, "news": {"topic", "leave-out", "source"}, "planning": {"mark"},
           "usageline": {"moving", "fixed", "reserve", "five", "5-hour", "5h", "weekly", "week", "all", "fable"},
-          "settle": {"file", "override"}}
+          "settle": {"file", "override", "part"}}
 TO_BOTH = {"update": {"back-here", "back-first", "forward-here"}}  # F104: what the other computer takes whichever it is: the code, not the data
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222

@@ -191,8 +191,8 @@ def hand_over(files, role):
                 payload["b64"] = base64.b64encode(raw).decode()
             key = hashlib.sha1(raw).hexdigest()
         hid = "settle-" + hashlib.sha1(f"workspace|{rel}|{key}".encode()).hexdigest()[:24]
-        code, out, err, how = role.hand("settle", ["file", "workspace", rel], keep=False, hid=hid,
-                                        stdin=json.dumps(payload), timeout=120)
+        import settle
+        code, out, err, how = settle.send(role, ["file", "workspace", rel], payload, hid)
         (sent if how == "main" and not code else waiting if how != "main" else refused).append(rel)
     if sent:
         print(f"This HQ is the backup: handed {len(sent)} file{'s' * (len(sent) != 1)} to the main one, which writes and "

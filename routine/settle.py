@@ -54,6 +54,16 @@ def kept_path(folder: str | None = None) -> str:
     return os.environ.get("HQ_KEPT_FILE") or os.path.join(folder or hqpaths.FOLDER, KEPT)
 
 
+def _guard(path: str) -> None:
+    """A test never writes his real workspace (F17's rule, for this file too)."""
+    if not hqpaths.under_test():
+        return
+    real = os.path.dirname(os.path.dirname(hqpaths.real_roadmap()))
+    p = os.path.realpath(path)
+    if real and (p == real or p.startswith(real.rstrip(os.sep) + os.sep)):
+        raise PermissionError(f"Refused (F17): a test may not write the real workspace ({path})")
+
+
 @contextlib.contextmanager
 def file_lock(path: str):
     """The one lock of a shared file: the roadmap takes the queue's, every other file its own (hqlock)."""
@@ -85,6 +95,7 @@ def keep(rel: str, lines: list[str], who: str, why: str, folder: str | None = No
     """One entry in the list (newest first). Returns its id; nothing is added when that id is there already."""
     eid = eid or entry_id(rel, lines, why)
     p = kept_path(folder)
+    _guard(p)
     with file_lock(p):
         try:
             text = open(p, encoding="utf8").read()
@@ -220,6 +231,10 @@ def settle_file(what: str, rel: str, payload: dict, log=None) -> tuple[int, str]
         return 2, f"Refused: there's no {what} folder here."
     who = str(payload.get("from") or "the other computer")[:60]
     path = os.path.join(base, rel)
+    try:
+        _guard(path)
+    except PermissionError as e:
+        return 2, str(e)
     ws = what == "workspace"
     label = rel if ws else f"Claude's memory: {rel}"
     if payload.get("deleted"):
@@ -322,14 +337,18 @@ def settle_copy(c: dict, main_device: str | None, other_name: str, log=None) -> 
     # Which of the two is the main's: Syncthing says who last changed the file as it is now (its short device id);
     # when that's the other computer, the file is the other's version and the copy the main's. (The id in a copy's
     # name isn't a safe guide: on this Syncthing it names the version that won, not the one in the copy.)
+    # With one-way sync the main's folder only sends: nothing from the other side ever changes its files, so the file
+    # is always the main's. Two-way, the one who changed the file last is the side that won.
     copy_is_main = False
     try:
         import sync
         import urllib.parse
+        if sync.one_way_on():
+            raise StopIteration
         d = sync.api(f"/rest/db/file?folder={c['folder']}&file={urllib.parse.quote(rel)}")
         by = str(((d or {}).get("local") or {}).get("modifiedBy") or "")
         copy_is_main = bool(by and main_device and file_raw is not None and not main_device.upper().startswith(by.upper()))
-    except Exception:
+    except (Exception, StopIteration):
         pass
     main_raw, other_raw = (copy_raw, file_raw) if copy_is_main else (file_raw, copy_raw)
     path = c["file"]
@@ -354,6 +373,29 @@ def settle_copy(c: dict, main_device: str | None, other_name: str, log=None) -> 
     if log:
         log(f"sync: conflict copy {os.path.basename(c['copy'])} settled, main wins: {said}")
     return True
+
+
+PART = 45_000  # the status server takes a request of at most 100,000 characters: a bigger file goes in parts
+
+
+def send(role, args: list[str], payload: dict, hid: str, timeout: float = 120):
+    """F115: hand a file's settling to the main (role.hand, never kept here: the next look tries again), in parts when
+    it's big, each part with its own id. Returns hand()'s (code, out, err, how)."""
+    data = json.dumps(payload)
+    if len(data) <= 60_000:
+        return role.hand("settle", args, keep=False, hid=hid, stdin=data, timeout=timeout)
+    b = base64.b64encode(data.encode("utf8")).decode()
+    parts = [b[i:i + PART] for i in range(0, len(b), PART)]
+    for i, part in enumerate(parts):
+        r = role.hand("settle", ["part", hid, str(i), str(len(parts))], keep=False, hid=f"{hid}-p{i}", stdin=part,
+                      timeout=timeout)
+        if r[3] != "main" or r[0]:
+            return r
+    return role.hand("settle", args + ["--parts", hid], keep=False, hid=hid, stdin="", timeout=timeout)
+
+
+def _parts_dir(hid: str) -> str:
+    return os.path.join(hqpaths.SUPPORT, "settle-parts", re.sub(r"[^A-Za-z0-9_-]", "", hid)[:80])
 
 
 def _folders() -> list[dict]:
@@ -393,20 +435,39 @@ def main(argv: list[str]) -> int:
             return 1
         print(f"The main's {argv[1]} goes out as everyone's.")
         return 0
-    if argv[0] == "file" and len(argv) == 3:
+    if argv[0] == "part" and len(argv) == 4 and argv[2].isdigit() and argv[3].isdigit():
+        d = _parts_dir(argv[1])  # a part of a big file, kept until the file itself comes
+        os.makedirs(d, exist_ok=True)
+        tmp = os.path.join(d, f"{argv[2]}.{os.getpid()}.tmp")
+        with open(tmp, "w") as f:
+            f.write(sys.stdin.read())
+        os.replace(tmp, os.path.join(d, argv[2]))
+        print(f"Part {int(argv[2]) + 1} of {argv[3]} kept.")
+        return 0
+    if argv[0] == "file" and len(argv) in (3, 5):
         if os.environ.get("HQ_ROLE_HERE") is None:
             sys.path.insert(0, HERE)
             import role
             if role.is_backup():
                 print("Refused: only the main settles; this one is the backup.")
                 return 3
+        parts = argv[4] if len(argv) == 5 and argv[3] == "--parts" else None
         try:
-            payload = json.loads(sys.stdin.read() or "{}")
+            if parts:
+                d = _parts_dir(parts)
+                names = sorted((n for n in os.listdir(d) if n.isdigit()), key=int)
+                raw = "".join(open(os.path.join(d, n)).read() for n in names)
+                payload = json.loads(base64.b64decode(raw).decode("utf8"))
+            else:
+                payload = json.loads(sys.stdin.read() or "{}")
             assert isinstance(payload, dict)
-        except (ValueError, AssertionError):
-            print("Refused: no payload given.")
+        except (OSError, ValueError, AssertionError):
+            print("Refused: the file didn't come over whole.")
             return 2
         code, said = settle_file(argv[1], argv[2], payload)
+        if parts and not code:
+            import shutil
+            shutil.rmtree(_parts_dir(parts), ignore_errors=True)
         print(said)
         return code
     print(__doc__)
