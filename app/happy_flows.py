@@ -23198,7 +23198,7 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         his yes at the sprint planning; the job with a green record; QA by a job of its own; the night; the release, a tag on the stand-in remote.
         Every hand-off is read from the record under one id and from what the record points at. And what stopped the real run: a quote on his
         side of a text thread counts and an agent's line on it doesn't; a thread counts as a source; the page's note doesn't break a row's last
-        field; a row a call or a run writes says so; a row that passes the first time gets its mark run; a Claude flow a row only mentions
+        field; a row a call, a text or a run writes says so, and an order's id is its newest match; the stand-in night names its commit; a row that passes the first time gets its mark run; a Claude flow a row only mentions
         stays out of the proof."""
         import shutil as _sh
         import subprocess as _sp
@@ -23230,6 +23230,21 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         r = tool("jobs.py", "write-row", "A row from a run. Done means: it works. Sources: rule 1.", HQ_JOB="77", HQ_ROLE_HERE="1")
         row = next((l for l in rm.read_text().splitlines() if "A row from a run" in l), "")
         check(r.returncode == 0 and "(job 77," in row and "status page" not in row and "typed:" not in row, f"a run's row reads as his typing on the page: {row[:160]}")
+        r = tool("jobs.py", "write-row", "A row from a text. Done means: it works. Sources: rule 1.", HQ_JOB="", HQ_DIRECT_AGENT="pepper", HQ_ROLE_HERE="1")
+        row = next((l for l in rm.read_text().splitlines() if "A row from a text" in l), "")
+        check(r.returncode == 0 and "(in a text," in row, f"a row written while she answers a text doesn't say so: {row[:160]}")
+        r = tool("jobs.py", "write-row", "A row from a call. Done means: it works. Sources: rule 1.", HQ_JOB="", HQ_DIRECT_AGENT="", HQ_ROLE_HERE="1")
+        row = next((l for l in rm.read_text().splitlines() if "A row from a call" in l), "")
+        check(r.returncode == 0 and "(on a call," in row, f"a row written on a call doesn't say so: {row[:160]}")
+        # an order's number is its place in her list: after the list starts over, the newest order with that number is the one
+        code = ("import sys, json; sys.path.insert(0, %r)\nimport trail\nold = trail.order('moneypenny', 9301, 'an old request')\n"
+                "new = trail.order('moneypenny', 9301, 'a new request')\nprint(json.dumps([old, new, trail.of_order('moneypenny', 9301)]))") % str(ROOT / "routine")
+        r = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, env={**env, "HQ_TRAIL": str(ws / "HQ/f105-trail.jsonl")})
+        try:
+            old_id, new_id, got_id = json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            old_id = new_id = got_id = None
+        check(new_id and old_id != new_id and got_id == new_id, f"a reset list hands a new row an old request's id: {(r.stdout + r.stderr)[-200:]}")
         before = rm.read_text()
         r = tool("jobs.py", "write-row", "--help", HQ_ROLE_HERE="1")
         check(r.returncode != 0 and rm.read_text() == before, "write-row --help became a row")
@@ -23272,6 +23287,15 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
             except (ValueError, IndexError):
                 got = {"label": None, "missing": [f"the run ended: {(r.stdout + r.stderr)[-400:]}"], "stopped": ""}
             check(not got["missing"], f"the chain stopped at {got.get('stopped')}: {'; '.join(got['missing'])}")
+            # the stand-in night names the commit it stands in for, a whole night at it, as the real night does (F112)
+            try:
+                rec = json.loads((root / "HQ/scratch/nightly/last.json").read_text())
+            except (OSError, ValueError):
+                rec = {}
+            c = str(rec.get("commit") or "")
+            known = bool(c) and _sp.run(["git", "-C", str(root / "HQ"), "cat-file", "-e", c + "^{commit}"], capture_output=True).returncode == 0
+            check(known and rec.get("standin") and int(rec.get("ran") or 0) > 1 and rec.get("ran") == rec.get("passed"),
+                  f"the stand-in night doesn't name a commit of the copy with a whole night at it: {json.dumps(rec)[:200]}")
         finally:
             _sp.run([sys.executable, str(ROOT / "routine/chainrun.py"), "clean", str(root), "7843", "4743"], capture_output=True, text=True)
         if bad:
