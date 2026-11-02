@@ -411,7 +411,9 @@ def real_run(root: Path, workspace: str, deadline_s: int = 14400, until: str | N
             (root / "HQ/.status").mkdir(exist_ok=True)
             shutil.copy(p, root / "HQ/.status" / src)
     loop = root / "tick-loop.sh"
-    loop.write_text("#!/bin/bash\ncd \"$1\"\nwhile true; do\n  " + PY + " routine/tick.py >> ../tick.log 2>&1\n  sleep 60\ndone\n")
+    # the mail check is off here, so nothing brings a usage reading while the queue is idle, and past 30 minutes nothing starts: a tiny run every 20 minutes stands in for its ride-along
+    loop.write_text("#!/bin/bash\ncd \"$1\"\nn=0\nwhile true; do\n  " + PY + " routine/tick.py >> ../tick.log 2>&1\n  n=$((n + 1))\n  if [ $((n % 20)) = 1 ]; then\n"
+                    "    echo 'say ok' | claude -p --model haiku --output-format stream-json --verbose --tools '' --setting-sources user 2>/dev/null | " + PY + " routine/stream-usage.py >/dev/null 2>&1\n  fi\n  sleep 60\ndone\n")
     p = subprocess.Popen(["bash", str(loop), str(root / "HQ")], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     (root / "pids").write_text(f"{p.pid}\n")
     say = lambda s: print(time.strftime("%H:%M"), s, flush=True)  # noqa: E731
