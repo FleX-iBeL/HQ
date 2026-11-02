@@ -791,7 +791,7 @@ def _rounds(e):
 
 def next_round(now=None):
     """The routine's look, for routine/cycles.py: {"pick": {"label", "mode": "mark"|"fix", "round"} or None, "capped":
-    [labels that just went on the sit-down list]}. A mark for a row the loop got past the review comes first, then the
+    [labels that just went on the sit-down list]}. A mark for a row past the review comes first (since F105 also one that passed the first time), then the
     flagged rows, ranked first (F87's rank 1 goes first). Only a verdict on the row's current words counts: changed
     words wait for their review. Rows flagged before the loop was on (fix_since) are left to her calls, unless ranked."""
     now = now or _clock()
@@ -811,8 +811,8 @@ def next_round(now=None):
         for r in order:
             e, label, fp = rs.get(r["label"]) or {}, r["label"], S.ask_fp(r["line"])
             f = e.get("fix") or {}
-            if e.get("ask") == fp and e.get("verdict") == "pass" and f and marks.get(label) != "ready" \
-                    and f.get("marked") != fp and not _stopped(e, fp):
+            if e.get("ask") == fp and e.get("verdict") == "pass" and (f or int(e.get("at") or 0) >= since) and marks.get(label) != "ready" \
+                    and f.get("marked") != fp and not _stopped(e, fp):  # F105: a row that passes the first time gets its mark run too
                 pick = {"label": label, "mode": "mark", "round": 0}
                 break
         for r in ([] if pick else order):
