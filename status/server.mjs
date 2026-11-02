@@ -482,13 +482,46 @@ function blockAt(p) {
 const hhmm = (t) => { const d = new Date(t * 1000); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 // The second check: a block written more than FUTURE_MIN ahead of now isn't fresh; it says its time can't be right.
 const FUTURE_MIN = 5;
-function banner(p, running, his, now = Date.now() / 1000) {
+// The third check: "1 minute ago", not "1 minutes ago".
+function minutesAgo(secs) {
+  const n = Math.round(secs / 60);
+  if (n < 1) return 'just now';
+  if (n < 90) return n === 1 ? '1 minute ago' : `${n} minutes ago`;
+  const h = Math.round(n / 60);
+  return h < 48 ? `${h} hours ago` : `${Math.round(h / 24)} days ago`;
+}
+// Who wrote the status block: the routine (its own fixed lines, tick.py's status()), a job (the queue's job marked done in the
+// minutes right after the block was written), or a chat.
+const ROUTINE_LINES = /^(?:(?:Now|Next):\s*)?Job \d+ (?:is done; job \d+ waits for its turn|isn't running|waits for the usage line)/;
+function writer(p, at) {
+  if (ROUTINE_LINES.test(p?.headline ?? '')) return { kind: 'routine', words: 'The routine said' };
+  if (at !== null) {
+    for (const j of p?.queue?.jobs ?? []) {
+      const m = /^done (\d{1,2}):(\d{2})/.exec(j.state);
+      if (!m) continue;
+      const d = new Date(at * 1000);
+      d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+      const gap = d.getTime() / 1000 - at;
+      if (gap >= -60 && gap <= 600) return { kind: 'job', words: `Job ${j.n} said` };
+    }
+  }
+  return { kind: 'chat', words: 'A chat said' };
+}
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function whenSaid(at, now) {
+  if (at === null) return '(with no time on it)';
+  const d = new Date(at * 1000);
+  const today = new Date(now * 1000).toDateString() === d.toDateString();
+  return today ? `at ${hhmm(at)}, ${minutesAgo(now - at)},` : `on ${d.getDate()} ${MONTHS[d.getMonth()]} at ${hhmm(at)},`;
+}
+const headText = (head) => { const h = String(head ?? '').replace(/^(Now|Next):\s*/, '').trim(); return h ? `: ${h}` : ''; };
+function banner(p, running, his, now = Date.now() / 1000, lines = null) {
   const said = p?.state ?? null;
   const at = blockAt(p);
   const future = at !== null && at - now > FUTURE_MIN * 60;
   const fresh = at !== null && !future && now - at <= STALE_MIN * 60;
   const head = p?.headline ?? '';
-  const when = at === null ? 'with no time on it' : future ? `with a time in the future (${hhmm(at)}), which can't be right` : `at ${hhmm(at)}, ${Math.round((now - at) / 60)} minutes ago`;
+  const when = at === null ? 'with no time on it' : future ? `with a time in the future (${hhmm(at)}), which can't be right` : `at ${hhmm(at)}, ${minutesAgo(now - at)}`;
   const stale = said && !fresh ? `The status block said ${BLOCK_WORD[said]} ${when}: stale` : '';
   const out = (state, line, corrected = '') => ({ state, line, said, saidLine: head, fresh, at, corrected });
   const differs = (state) => (said && state !== said ? `The status block said ${BLOCK_WORD[said]}` : '');
@@ -500,12 +533,24 @@ function banner(p, running, his, now = Date.now() / 1000) {
   }
   // Waiting is worked out: only when nothing runs and something is truly his.
   if (his.length) return out('WAITING', his.map((h) => h.what).join(' · '), said === 'WAITING' ? '' : stale || differs('WAITING'));
-  // Held by the usage line, paused, or the routine off: stopped, whatever the block says.
-  const held = (p?.queue?.jobs ?? []).filter((j) => /^(held|paused)/.test(j.state));
-  if (held.length || p?.queue?.on === false) {
-    const line = fresh && said === 'STOPPED' ? head : held.length ? held.map((j) => `Job ${j.n} ${j.state}`).join(' · ') : 'The routine is off: nothing starts';
+  // The third check's B: a Waiting written by a chat or a job is trusted as written, for as long as no newer block replaces it (a
+  // question stays open until it's answered, so its age doesn't make it untrue); the line says who wrote it and when.
+  const who = writer(p, at);
+  const jobs = p?.queue?.jobs ?? [];
+  const inLine = jobs.filter((j) => j.state === 'ready');
+  if (said === 'WAITING' && !future && who.kind !== 'routine') return out('WAITING', `${who.words} ${whenSaid(at, now)} it's waiting for you${headText(head)}`);
+  // Held by the usage line, paused, or the routine off: stopped, whatever the block says. The third check's A: with nothing running
+  // and the routine on, a ready job is waiting in line too (the gate holds it: the usage line, the hours), said with the gate's reason.
+  const held = jobs.filter((j) => /^(held|paused)/.test(j.state));
+  if (held.length || inLine.length || p?.queue?.on === false) {
+    const gate = lines?.jobs?.state === 'waiting' && lines.jobs.text ? lines.jobs.text : '';
+    const line = p?.queue?.on === false ? 'The routine is off: nothing starts'
+      : held.length ? held.map((j) => `Job ${j.n} ${j.state}`).join(' · ')
+        : gate || (said === 'STOPPED' && head ? head.replace(/^(Now|Next):\s*/, '') : `Job ${inLine[0].n} waits in line: nothing has started it yet`);
     return out('STOPPED', line, said === 'STOPPED' ? '' : stale || differs('STOPPED'));
   }
+  // The routine's own Waiting ("Job N isn't running"), with no job in line: trusted as written too.
+  if (said === 'WAITING' && !future) return out('WAITING', `${who.words} ${whenSaid(at, now)} it's waiting for you${headText(head)}`);
   if (fresh && said === 'STOPPED') return out('STOPPED', head);
   // Done only from a block that says Done. Anything else with nothing running that HQ knows of is "not sure", in yellow: a chat's
   // 40-minute test run reads Testing for 30 minutes, then not sure, never Done; a newer block puts it right.
@@ -564,7 +609,7 @@ async function pageData(have) {
     phases,
     routines: part('routines', rest),
     usage: part('usage', await usage(false, u)),
-    truth: part('truth', { banner: p && !roadBroken ? banner(p, running, h.his, now) : null, cant: roadBroken, broken, his: h.his, running }),
+    truth: part('truth', { banner: p && !roadBroken ? banner(p, running, h.his, now, rest.routines) : null, cant: roadBroken, broken, his: h.his, running }),
   };
   const out = Object.entries(parts).map(([k, x]) => (have.get(k) === x.h ? `"${k}":{"h":"${x.h}"}` : `"${k}":{"h":"${x.h}","data":${x.json}}`));
   return `{"now":${now},"parts":{${out.join(',')}}}`;
