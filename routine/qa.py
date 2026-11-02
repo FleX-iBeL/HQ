@@ -404,21 +404,62 @@ def commits(root: str, base: str, tip: str) -> list[tuple[str, str]]:
     return [tuple(ln.split("\t", 1)) for ln in r.stdout.splitlines() if "\t" in ln]
 
 
+def _auto_tree(root: str, parents: list[str]) -> str | None:
+    """The tree git writes by itself for a merge of two parents (conflicts left in), or None."""
+    if len(parents) != 2:
+        return None
+    r = subprocess.run(["git", "-C", str(root), "merge-tree", "--write-tree", *parents], text=True, capture_output=True)
+    return (r.stdout.split() or [None])[0] if r.returncode in (0, 1) else None
+
+
+def _parents(root: str, sha: str) -> list[str]:
+    return subprocess.run(["git", "-C", str(root), "rev-list", "--parents", "-n", "1", sha], text=True, capture_output=True).stdout.split()[1:]
+
+
 def own_changes(root: str, sha: str) -> list[str] | None:
     """F112: what a merge commit changes by itself, beyond what git makes of its parents on its own: the files where its tree differs from the
     merge git would write (a conflict settled by hand, a file added or changed in the merge). None for a commit that isn't a merge."""
-    parents = subprocess.run(["git", "-C", str(root), "rev-list", "--parents", "-n", "1", sha], text=True, capture_output=True).stdout.split()[1:]
+    parents = _parents(root, sha)
     if len(parents) < 2:
         return None
-    auto = None
-    if len(parents) == 2:
-        r = subprocess.run(["git", "-C", str(root), "merge-tree", "--write-tree", *parents], text=True, capture_output=True)
-        auto = (r.stdout.split() or [None])[0] if r.returncode in (0, 1) else None
+    auto = _auto_tree(root, parents)
     if auto:
         r = subprocess.run(["git", "-C", str(root), "diff", "--name-only", auto, f"{sha}^{{tree}}"], text=True, capture_output=True)
     else:  # an older git or more than two parents: every file the merge differs in from all of them
         r = subprocess.run(["git", "-C", str(root), "diff-tree", "--cc", "--name-only", "--no-commit-id", "-r", sha], text=True, capture_output=True)
     return [f for f in r.stdout.splitlines() if f.strip()]
+
+
+def own_diff(root: str, sha: str, files: list[str]) -> str | None:
+    """F112: a fingerprint of a merge's own changes in these files, as its QA read them; None when git can't make the merge to compare with."""
+    import hashlib
+    auto = _auto_tree(root, _parents(root, sha))
+    if not auto:
+        return None
+    r = subprocess.run(["git", "-C", str(root), "diff", auto, f"{sha}^{{tree}}", "--", *sorted(files)], text=True, capture_output=True)
+    return hashlib.sha256(r.stdout.encode("utf8")).hexdigest()[:16] if r.returncode == 0 else None
+
+
+# F112: merges whose own changes had a QA of their own. Written by hand, next to BEFORE_GATE: the merge, the row it's QA'd under, the record that passed
+# it (with a fix it goes only together with), and exactly what that QA read: the files and the fingerprint of those changes. A listed merge whose own
+# changes are anything else, whose row hasn't passed, or whose fix isn't on the line with it, is held as before.
+MERGES_PASSED = {
+    "6fff93a": {"row": "H298", "record": "HQ/handoff-foundation-qa-f112.md, \"QA of the merge 6fff93a's own changes\", with the hook's fix b860621",
+                "with": "b860621", "files": ["routine/cyclehook.py", "routine/cycles.py", "routine/review.py", "routine/runjob.py"], "diff": "cc97a792ed15d259"},
+}
+
+
+def merge_passed(root: str, sha: str, own: list[str], text: str) -> tuple[str | None, str]:
+    """F112: (the commit it goes with, or "" for none; why not, when it's held). A listed merge passes on exactly what its QA read."""
+    entry = next((v for k, v in MERGES_PASSED.items() if sha.startswith(k)), None)
+    held = f"this merge changes files of its own: {', '.join(own[:5])}" + (" and more" if len(own) > 5 else "")
+    if not entry:
+        return None, held
+    if sorted(own) != sorted(entry["files"]) or own_diff(root, sha, own) != entry["diff"]:
+        return None, held + "; they aren't what its QA read"
+    if state(entry["row"], text) != "passed":
+        return None, held + f"; its row {entry['row']} hasn't passed QA"
+    return entry.get("with") or "", ""
 
 
 def brought(root: str, base: str, sha: str) -> list[tuple[str, str]]:
@@ -472,7 +513,14 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
     all_rows = rows(text)
     cs = commits(root, base, tip)
     to, taken, held, behind, stop, past = None, [], [], [], False, {}
+    pending, waiting = None, []  # F112: a passed merge that goes only together with its fix: (merge, fix), and the rows on the way to it
     held_label = lambda l: l in [h["label"] for h in held]
+
+    def wait_held(why):
+        held.append({"label": pending[0][:7], "why": f"its own changes passed QA, but it goes only together with {pending[1]}, {why}"})
+        for l in waiting:
+            if l not in behind and state(l, text) == "passed":
+                behind.append(l)
     for sha, subject in cs:
         parts = brought(root, base, sha)
         named_here = [l for l in subject_labels(subject) if l in all_rows]
@@ -482,7 +530,11 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
         if mine is not None and not named_here and proof_on():
             own = [f for f in mine if not f.startswith(FREE_FILES)]
             if own:
-                nameless.append((sha, f"this merge changes files of its own: {', '.join(own[:5])}" + (" and more" if len(own) > 5 else "")))
+                fix, why = merge_passed(root, sha, own, text)
+                if fix is None:
+                    nameless.append((sha, why))
+                elif fix and not pending:
+                    pending = (sha, fix)
         for s, subj in parts:
             named = [l for l in subject_labels(subj) if l in all_rows]
             for l in named:
@@ -501,7 +553,11 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
                     bad.append((l, said, s))
             if not named and proof_on() and not only_free_files(root, s):  # F101: nothing goes out that no item asked for
                 nameless.append((s, f"this commit names no item: {subj[:70]}"))
+        was_stopped = stop
         stop = stop or bool(bad or nameless)
+        if stop and pending and not was_stopped:
+            wait_held("which is held behind it")
+            pending = None
         if stop:
             for s, why in nameless:
                 held.append({"label": s[:7], "why": why})
@@ -527,12 +583,19 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
                 if not held_label(l) and l not in behind and l not in taken and state(l, text) == "passed":
                     behind.append(l)
             continue
+        if pending:  # the rows on the way to the fix go when the fix does
+            waiting += [l for l in need if l not in waiting]
+            if not sha.startswith(pending[1]):
+                continue
+            need, waiting, pending = waiting, [], None
         to = sha
         for l in need:
             if l not in taken and state(l, text) == "passed":
                 taken.append(l)
             if l in past:
                 past[l]["goes"] = True
+    if pending:
+        wait_held("which isn't on this line yet")
     tipsha = cs[-1][0] if cs else None
     return {"to": to, "tip": tipsha, "taken": taken, "held": held, "behind": [l for l in behind if l not in taken],
             "before_gate": [{**x, "goes": bool(x.get("goes"))} for x in past.values()], "all": bool(cs) and to == tipsha}

@@ -20251,6 +20251,7 @@ R.ROOT = Path(sys.argv[2]); push.ROOT = R.ROOT
 R.is_main = lambda: True
 nightly.RUNNING = sys.argv[3]
 qa.BEFORE_GATE = json.loads(os.environ.get('F112_LIST') or '{}')
+qa.MERGES_PASSED = json.loads(os.environ.get('F112_MERGES') or '{}')
 told, pushes = [], []
 qa.tell = lambda *a, **k: told.append(a)
 real = R.to_nightly
@@ -20414,6 +20415,33 @@ print('COUNTS', json.dumps({'told': len(told), 'pushes': len(pushes)}))
         merge = g("rev-parse", "HEAD")
         o, w = hold("t6")
         need(not o["all"] and o["held"] and o["held"][0]["label"] == merge[:7] and "extra.py" in o["held"][0]["why"], f"a merge's own file went along: {o}")
+        # a merge can be passed: listed with its row and exactly what its QA read, it goes; anything else is held as before
+        sys.path.insert(0, str(ROOT / "routine"))
+        import qa as _qm
+        fp = _qm.own_diff(str(hq), merge, ["extra.py"])
+        listed = lambda **k: json.dumps({merge[:7]: {"row": "F9802", "record": "a test's", "with": "", "files": ["extra.py"], "diff": fp, **k}})
+        h["env"]["F112_MERGES"] = listed()
+        o, w = hold("t6")
+        need(o["all"] and not o["held"], f"a passed merge is held: {o}")
+        h["env"]["F112_MERGES"] = listed(files=["other.py"])
+        o, w = hold("t6")
+        need(not o["all"] and o["held"][0]["label"] == merge[:7] and "aren't what its QA read" in o["held"][0]["why"], f"a merge listed for other files went: {o}")
+        h["env"]["F112_MERGES"] = listed(diff="0" * 16)
+        o, w = hold("t6")
+        need(not o["all"] and "aren't what its QA read" in o["held"][0]["why"], f"a merge whose changes aren't the ones read went: {o}")
+        h["env"]["F112_MERGES"] = listed(row="F9805")
+        o, w = hold("t6")
+        need(not o["all"] and "hasn't passed QA" in o["held"][0]["why"], f"a merge under a row without QA went: {o}")
+        h["env"]["F112_MERGES"] = listed(**{"with": "abcdef1"})
+        o, w = hold("t6")
+        need(not o["all"] and o["to"] == g("rev-parse", "dev") and "isn't on this line yet" in o["held"][0]["why"], f"a merge went without its fix: {o}")
+        g("checkout", "-q", "t6")
+        fix = work("F9802", "the fix it goes with")
+        h["env"]["F112_MERGES"] = listed(**{"with": fix[:7]})
+        o, w = hold("t6")
+        need(o["all"] and not o["held"], f"a merge with its fix on the line is held: {o}")
+        h["env"]["F112_MERGES"] = ""
+        g("checkout", "-q", "dev")
         g("checkout", "-q", "-b", "t7", "dev")
         g("merge", "-q", "--no-ff", "--no-commit", "-X", "ours", "side2")
         (hq / "CHANGELOG.md").write_text((hq / "CHANGELOG.md").read_text() + "\n- settled by hand\n")
@@ -20436,6 +20464,12 @@ print('COUNTS', json.dumps({'told': len(told), 'pushes': len(pushes)}))
         import qa as _qa
         f66 = _qa.BEFORE_GATE.get("F66") or {}
         need(isinstance(f66, dict) and f66.get("tag") is None and f66.get("why") and f66.get("commits"), f"F66 has no answer by commit: {f66}")
+        for m, d in _qa.MERGES_PASSED.items():  # the real list of passed merges holds what its QA read
+            need(d["row"] and d["record"] and d["files"] and d["diff"], f"merge {m} is listed without its row, record or what was read: {d}")
+            if _sp.run(["git", "-C", str(ROOT), "cat-file", "-e", f"{m}^{{commit}}"], capture_output=True).returncode == 0:
+                own = [f for f in _qa.own_changes(str(ROOT), m) if not f.startswith(_qa.FREE_FILES)]
+                need(sorted(own) == sorted(d["files"]) and _qa.own_diff(str(ROOT), m, own) == d["diff"], f"merge {m} isn't what its QA read: {own}")
+                need(not d.get("with") or _sp.run(["git", "-C", str(ROOT), "cat-file", "-e", f"{d['with']}^{{commit}}"], capture_output=True).returncode == 0, f"merge {m}'s fix isn't here")
         for label, d in _qa.BEFORE_GATE.items():
             need(d["why"].strip() and d["commits"], f"{label} has no why or no commits")
             tag = d["tag"]
@@ -20713,12 +20747,17 @@ print('EXIT', N.run(routine=True))
         setup(c)
         to = c["g"]("rev-parse", "v1.2.0^{commit}")
         (c["hq"] / "mine.txt").write_text("her own work\n")
+        c["g"]("branch", "hq-backup/20261101-1200-before-v1.3.0-commits", "v1.1.0")  # what her update onto 1.3.0 saved of her own
         r = await asyncio.to_thread(up, c, "back")
         need(said(r).get("ok") and head(c) == to, f"back to a version the release wrote down: {r.stdout[-300:]} {r.stderr[-300:]}")
         words = (c["hq"] / ".status/update-run.json").read_text()
         need("no Forward button" in words and "update bar" in words and "1.3.0" in words, f"the words: {words[-400:]}")
         kept = c["g"]("for-each-ref", "--format=%(refname:short)", "refs/heads/hq-backup/").split()
-        need(kept and any(b in words for b in kept) and "own work" in words, f"the words don't say where her work is: {kept} {words[-400:]}")
+        mine = [b for b in kept if b.endswith("-before-v1.2.0-changes") or "-before-v1.3.0-" in b]
+        release = [b for b in kept if b.endswith("-before-v1.2.0-commits")]
+        need(len(mine) == 2 and all(b in words for b in mine) and "own work" in words, f"the words don't say where her work is: {kept} {words[-400:]}")
+        message = json.loads(words).get("message") or ""
+        need(release and not any(b in message for b in release), f"the words name the saved version as her work: {release} {message}")
         back = json.loads((c["hq"] / ".status/back.json").read_text())
         need(back.get("no_forward") and back.get("to") == "1.2.0", f"the note: {back}")
         # that version's own update brings it forward; an old version leaves the note behind, 1.3.0 clears it

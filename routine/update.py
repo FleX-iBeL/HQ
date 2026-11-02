@@ -1137,6 +1137,20 @@ def back(tag: str | None = None, tell: bool = True, first: bool = False) -> dict
     return {"ok": True, "said": f"Going back to {vname(tag)}, on this computer and the other one.", "to": vname(tag)}
 
 
+def own_work(saved: dict, head: str, old: str | None) -> list[str]:
+    """F112: the backup branches with her own work on them, for the words after going back: what she hadn't committed, her own commits when
+    there are any past the versions (a version's own commits saved on the way back aren't hers), and what her update onto the version she's
+    leaving saved before it moved."""
+    kept = [saved["changes"]["branch"]] if saved.get("changes") else []
+    mine = git("rev-list", "--count", head, "--not", "--tags=v*", timeout=10).stdout.strip() if head else ""
+    if saved.get("commits") and mine.isdigit() and int(mine) > 0:
+        kept.append(saved["commits"]["branch"])
+    if old:
+        kept += [b for b in git("for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads/hq-backup/", timeout=10).stdout.split()
+                 if f"-before-v{old}-" in b and b not in kept]
+    return kept
+
+
 def back_run(tag: str, tell: bool, guard: bool = False) -> int:
     """`guard`: the guard on the release, not a person: it stops a job by exact pid and nothing else (the job for good: held, it would carry
     on by itself and do the same again), keeps no way forward (back.json is what `forward` goes by), and writes down what happened. Only on
@@ -1187,10 +1201,7 @@ def back_run(tag: str, tell: bool, guard: bool = False) -> int:
         done, todo = guard_restart(was) if guard else restart_new(changed, was)
         msg = f"Back on {vname(tag)}." + (f" Undone in your data: {', '.join(undone)}." if undone else "") + (
             " The other computer hears it as soon as it answers." if told is False else "")
-        kept = [x["branch"] for x in (saved.get("changes"), saved.get("commits")) if x]
-        if not guard:  # F112: where her own work is: what this saved, and what her updates saved before
-            kept += [b for b in git("for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads/hq-backup/", timeout=10).stdout.split()
-                     if b not in kept][:3]
+        kept = own_work(saved, before, old) if not guard else []
         if kept:
             msg += f" Your own work is kept, nothing of it is lost: on {', '.join(kept)} (git checkout one of them to see it)."
         if old_way and hqpaths.is_friend():
