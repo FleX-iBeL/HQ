@@ -22,6 +22,7 @@ A job let past the line still only skips the 5-hour line; the weekly lines alway
     python3 routine/usageline.py weekly fixed 95       the weekly all-models line fixed at 95%
     python3 routine/usageline.py fable moving|fixed [N]   the same for the weekly Fable line
     python3 routine/usageline.py reserve [N]           F100: the points kept for his calls and the small routines (0 to 50)
+    python3 routine/usageline.py least [N]             F113: the reserve never takes the team's line under N points (0 to 50)
 """
 from __future__ import annotations
 
@@ -171,12 +172,40 @@ def write(key: str, moving: bool, number: int | None) -> None:
     os.replace(tmp, ROADMAP)
 
 
-RESERVE = re.compile(r"\*\*Usage reserve:\s*(\d{1,2})\b[^*]*\*\*")
+RESERVE = re.compile(r"\*\*Usage reserve:\s*([0-9]{1,2})\b[^*]*\*\*")
+# F113: where the usage settings stand on the roadmap: a line of its own (a list item or a paragraph), never a table's row
+SETTING = re.compile(r"^(?:- )?\*\*(?:Usage limit|Usage reserve|Team line at least|Weekly limit|5-hour line|Weekly line|Fable line):")
 
 
 def reserve_of(text: str) -> int:
     m = RESERVE.search(text)
-    return int(m.group(1)) if m else 15
+    return min(50, int(m.group(1))) if m else 15  # F113: 0 to 50, as the command
+
+
+def points(word: str) -> int | None:
+    """F113: a whole number of points from 0 to 50 typed on the command line, or None (a "²" is no number)."""
+    return int(word) if re.fullmatch(r"[0-9]{1,2}", word or "") and int(word) <= 50 else None
+
+
+def insert_setting(text: str, new: str, words: str) -> str:
+    """F113: a new usage setting goes right after the last of the usage settings, in their own list or paragraphs; never into a
+    phase table or after a heading further down, where an older row may quote a setting."""
+    lines = text.split("\n")
+    first = next((j for j, l in enumerate(lines) if SETTING.match(l)), None)
+    if first is None:
+        first = next(j for j, l in enumerate(lines) if LIMIT.search(l) and not l.lstrip().startswith("|"))
+    last = first
+    for j in range(first + 1, len(lines)):
+        l = lines[j]
+        if l.startswith("#") or l.lstrip().startswith("|") or l.strip() == "---":
+            break
+        if SETTING.match(l):
+            last = j
+    if lines[last].startswith("- "):
+        lines.insert(last + 1, f"- {new} {words}")
+    else:
+        lines[last + 1:last + 1] = ["", f"{new} {words}"]
+    return "\n".join(lines)
 
 
 def write_reserve(n: int) -> None:
@@ -188,11 +217,34 @@ def write_reserve(n: int) -> None:
     if RESERVE.search(text):
         text = RESERVE.sub(lambda _: new, text, count=1)
     else:
-        lines = text.split("\n")
-        i = max(j for j, l in enumerate(lines) if LIMIT.search(l) or any(mode_re(k).search(l) for k in LINES))
-        lines.insert(i + 1, f"- {new} Taken off each stop line for the agents' cycles and the team, so his calls and the "
-                            "small routines always have room (F100). Switched from a call.")
-        text = "\n".join(lines)
+        text = insert_setting(text, new, "Taken off each stop line for the agents' cycles and the team, so his calls and the "
+                                         "small routines always have room (F100). Switched from a call.")
+    hqpaths.guard_roadmap(ROADMAP)
+    tmp = ROADMAP + ".tmp"
+    open(tmp, "w", encoding="utf8").write(text)
+    os.replace(tmp, ROADMAP)
+
+
+LEAST = re.compile(r"\*\*Team line at least:\s*([0-9]{1,2})\b[^*]*\*\*")
+
+
+def least_of(text: str) -> int:
+    m = LEAST.search(text)
+    return min(50, int(m.group(1))) if m else 15  # 0 to 50, as the command
+
+
+def write_least(n: int) -> None:
+    """F113: the reserve never takes the team's line under this; on the roadmap, next to the reserve."""
+    text, s = read()
+    if s is None:
+        sys.exit("The roadmap names no usage limit (**Usage limit: N%**), so there are no stop lines to keep a reserve under.")
+    new = f"**Team line at least: {n} points.**"
+    if LEAST.search(text):
+        text = LEAST.sub(lambda _: new, text, count=1)
+    else:
+        text = insert_setting(text, new, "The reserve never takes the team's stop line under this (or under the stop line itself), so "
+                                         "the first hours after a reset still have room for the team and the agents; from a line of this plus "
+                                         "the reserve on, the whole reserve is kept (F113). 0 keeps the whole reserve always. Switched from a call.")
     hqpaths.guard_roadmap(ROADMAP)
     tmp = ROADMAP + ".tmp"
     open(tmp, "w", encoding="utf8").write(text)
@@ -371,15 +423,27 @@ def main(argv: list[str]) -> int:
             print(f"Refused: {why}. A usage stop line changes only on his own words: --said \"HIS WORDS\", a line he said or typed, "
                   "naming the line (weekly, 5-hour or Fable) or its number.", file=sys.stderr)
         return bool(why)
+    if argv[0] == "least":
+        if len(argv) == 2:
+            if os.environ.get("HQ_IN_JOB") or sprint_places() is not None:  # F114: not from a job, a call or a chat, as the reserve
+                print("Refused: the least line is set on the status page or by his own hand.", file=sys.stderr)
+                return 2
+            if points(argv[1]) is None:
+                print("The least line is a whole number of points from 0 to 50.", file=sys.stderr)
+                return 2
+            write_least(points(argv[1]))
+        print(f"The team's line stays at {least_of(read()[0])} points at the least when the reserve comes off "
+              f"(the reserve is {reserve_of(read()[0])} points).")
+        return 0
     if argv[0] == "reserve":
         if len(argv) == 2:
             if os.environ.get("HQ_IN_JOB") or sprint_places() is not None:  # F114: not from a job, a call or a chat
                 print("Refused: the reserve is set on the status page or by his own hand.", file=sys.stderr)
                 return 2
-            if not argv[1].isdigit() or int(argv[1]) > 50:
+            if points(argv[1]) is None:
                 print("The reserve is a whole number of points from 0 to 50.", file=sys.stderr)
                 return 2
-            write_reserve(int(argv[1]))
+            write_reserve(points(argv[1]))
         print(f"The reserve is {reserve_of(read()[0])} points: taken off each stop line for the agents' cycles and the team.")
         return 0
     key = "five"

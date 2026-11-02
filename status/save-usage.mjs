@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseRoadmap } from './parse.mjs';
 import { ROADMAP } from './paths.mjs';
-import { lineKey, reserveOf, staleWords, stopLine, usageReading, usageVerdict } from './usage.mjs';
+import { leastOf, lineKey, reserveOf, staleWords, stopLine, usageReading, usageVerdict, windowPassed } from './usage.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const flag = process.argv.indexOf('--by');
@@ -79,10 +79,14 @@ if (process.argv.includes('--gate')) {
   // H298: --under N: an agent's own run has its line N points under the team's: near the limit the agents stop first.
   const uf = process.argv.indexOf('--under');
   const under = uf >= 0 && !noWall ? Number(process.argv[uf + 1]) || 0 : 0;
+  // F100: the reserve; F113: never down under the team's least line.
+  const reserve = process.argv.includes('--reserve') && !noWall ? reserveOf(roadmapText) : 0;
+  const least = leastOf(roadmapText);
   if (process.argv.includes('--line')) {
     if (stale || !saved?.readable) process.exit(0);
-    const held = (process.argv.includes('--reserve') && !noWall ? reserveOf(roadmapText) : 0) + under;
-    const v = usageVerdict(saved, lines, now, { weeklyOnly, reserve: held });
+    // F113: a window whose reset has passed is empty, as for the start check: a job across a reset isn't held on the old number.
+    saved.limits = saved.limits.filter((l) => !windowPassed(l, saved, now));
+    const v = usageVerdict(saved, lines, now, { weeklyOnly, reserve, under, least });
     console.log(v.stop ? `STOP. ${v.reason}` : 'OK to go on.');
     process.exit(v.stop ? 2 : 0);
   }
@@ -90,7 +94,7 @@ if (process.argv.includes('--gate')) {
     console.log(`STOP. ${stale}`);
     process.exit(2);
   }
-  if (saved?.readable) saved.limits = saved.limits.filter((l) => !l.resetsAt || Date.parse(l.resetsAt) > now.getTime());
+  if (saved?.readable) saved.limits = saved.limits.filter((l) => !windowPassed(l, saved, now));  // F113: an unreadable reset is held
   // H141: a new job needs room under each line for its own estimate.
   const mf = process.argv.indexOf('--minutes');
   const minutes = mf >= 0 ? Number(process.argv[mf + 1]) : undefined;
@@ -99,8 +103,7 @@ if (process.argv.includes('--gate')) {
   const need = nf >= 0
     ? Object.fromEntries(String(process.argv[nf + 1] ?? '').split(',').map((p) => p.split('=')).filter(([k, v]) => k && Number.isFinite(Number(v))).map(([k, v]) => [k, Number(v)]))
     : undefined;
-  const reserve = (process.argv.includes('--reserve') && !noWall ? reserveOf(roadmapText) : 0) + under;
-  const v = usageVerdict(saved, lines, now, { weeklyOnly, start: true, minutes, need: need && Object.keys(need).length ? need : undefined, reserve });
+  const v = usageVerdict(saved, lines, now, { weeklyOnly, start: true, minutes, need: need && Object.keys(need).length ? need : undefined, reserve, under, least });
   console.log(v.stop ? `STOP. ${v.reason}` : weeklyOnly ? 'OK to go on (past the 5-hour line; the weekly lines are under).' : 'OK to go on.');
   process.exit(v.stop ? 2 : 0);
 }

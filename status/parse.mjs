@@ -17,7 +17,7 @@
  * stop lines' settings (moving or fixed, H91) are read by lineSettings in usage.mjs.
  */
 
-import { lineSettings, reserveOf } from './usage.mjs';
+import { leastOf, lineSettings, reserveOf } from './usage.mjs';
 
 // H183: 🔁 marks the team's repeating work (Phase Maintenance): never open, never done.
 const MARKS = { '✅': 'done', '🔨': 'doing', '⬜': 'todo', '❓': 'ask', '🔁': 'repeat' };
@@ -196,6 +196,8 @@ export function parseRoadmap(markdown) {
     usageLines: lineSettings(markdown),
     // F116: the points kept under each line for his calls; the gate takes them off, so the page does too.
     usageReserve: reserveOf(markdown),
+    // F113: ... but never down under the team's least line, as the gate.
+    usageLeast: leastOf(markdown),
     state,
     title,
     headline: h2 ? plain(h2.slice(3)) : '',

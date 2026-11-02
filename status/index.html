@@ -142,7 +142,7 @@
       .RELEASING { --band: #6639ba; }
       .WAITING { --band: #0b5fbf; }
       .DONE { --band: #1a7f37; }
-      .UNSURE { --band: #9a6700; }  /* F116: not sure: a stale block and nothing running known, yellow, never Done */
+      .UNSURE, .LATER { --band: #9a6700; }  /* F116: not sure: a stale block and nothing running known, yellow, never Done */
       .STOPPED, .PROBLEM { --band: #b42318; }
       .notes { margin: 0; padding: 0 4px; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px 16px; }
       .notes dt { color: var(--soft); }
@@ -549,9 +549,9 @@
     <script>HQUpdate.mount({ line: document.getElementById('hqu-line'), banner: document.getElementById('hqu-banner') });</script>
     <script type="module">
       import { parseRoadmap } from './parse.mjs';
-      import { hasFive, stopLine, usageVerdict, landing, landingWords, LAND_KINDS, windowsAhead, windowWords, daysAhead, dayWords } from './usage.mjs';
+      import { hasFive, stopLine, teamLine, LEAST, LINES, usageVerdict, landing, landingWords, LAND_KINDS, windowsAhead, windowWords, daysAhead, dayWords } from './usage.mjs';
 
-      const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped', UNSURE: 'Not sure' };
+      const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped', UNSURE: 'Not sure', LATER: 'Waits for the night' };
       const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision', repeat: 'Repeats' };
       const app = document.getElementById('app');
       const WHERE = document.querySelector('meta[name="hq-where"]')?.content ?? '';  // H83, filled in by the server
@@ -943,11 +943,27 @@
         { label: 'Weekly · Fable', test: /fable/i },
       ];
 
+      /** F113: where the gate stops for this limit: the stop line less the reserve, never under the least (teamLine). While the
+       *  least holds it flat, it moves again once the stop line passes the least plus the reserve. */
+      function teamAt(at0, l, reserve, least) {
+        const line = Math.round(10 * teamLine(at0.line, reserve, least)) / 10;
+        let next = at0.next;
+        const key = /5-hour/i.test(l.label) ? 'five' : /fable/i.test(l.label) ? 'fable' : 'weekly';
+        const reset = Date.parse(l.resetsAt ?? '');
+        if (reserve && at0.moving && Number.isFinite(reset) && at0.line < least + reserve && LINES[key]) {
+          const win = LINES[key].windowMs, minutes = win / 60000;
+          const start = Math.round(reset / 60000) * 60000 - win;
+          const at = start + (Math.ceil(((least + reserve + 0.05) * minutes) / 100) - 1) * 60000;
+          next = at > Date.now() ? new Date(at).toISOString() : null;
+        }
+        return { ...at0, line, next };
+      }
+
       /** The last usage reading a session saved. The page cannot take one itself. */
-      function drawUsage(u, lines, E = null, reserve = 0, cant = null) {
+      function drawUsage(u, lines, E = null, reserve = 0, cant = null, least = LEAST) {
         fiveOn = hasFive(u);  // F107: what's shown follows what the reading carries
         const age = u ? Date.now() - new Date(u.checkedAt).getTime() : 0;
-        const verdict = usageVerdict(u, lines, new Date(), { reserve });  // F116: the gate's own lines, the reserve kept
+        const verdict = usageVerdict(u, lines, new Date(), { reserve, least });  // F116: the gate's own lines, the reserve kept; F113: never under the least
         // An old reading is shown dimmed: usage may have moved on since.
         const box = el('section', `usage${u && age > 20 * 60000 ? ' stale' : ''}`);
         const head = el('div', 'head');
@@ -958,7 +974,7 @@
         box.append(head);
         if (cant) box.append(el('p', 'alarm cant-read', cant.say ? `${cant.say} (${cant.file}).` : `Can't read the saved usage reading: ${cant.why} (${cant.file}). Work stops until it can be read.`));  // F116
         if (u && !u.readable) box.append(el('p', 'alarm', 'The last attempt to read the usage failed. Work stops until it can be read. The numbers below are the last known ones.'));
-        if (lines && reserve) box.append(el('p', 'soft reserve-note', `The stop lines are where the team and the agents stop: ${reserve} points under each are kept for your calls and the small routines.`));
+        if (lines && reserve) box.append(el('p', 'soft reserve-note', `The stop lines are where the team and the agents stop: ${reserve} points under each are kept for your calls and the small routines${least ? `, fewer early in a window, so the team's line never stands under ${least}%` : ''}.`));
         if (E?.usage_plan?.words) box.append(el('p', 'soft usage-plan', `Estimates ${E.usage_plan.words}.`));  // F107
         const card = el('div', 'card');
         // The context window first: it belongs to one session and never stops the work.
@@ -993,7 +1009,7 @@
             continue;
           }
           const at0 = stopLine(l, lines, new Date());
-          const at = at0 ? { ...at0, line: Math.round(10 * (at0.line - reserve)) / 10 } : null;  // F116: where the gate stops
+          const at = at0 ? teamAt(at0, l, reserve, least) : null;  // F116: where the gate stops; F113: the same sum as the gate
           const fiveHour = /5-hour/i.test(l.label) && l.resetsAt ? new Date(l.resetsAt) : null;
           const row = meter(l.label.replace(' · ', ', '), u.plan && l === limits[0] ? `${u.plan} plan` : '', l.percent, l.resetsAt ? until(l.resetsAt) : '', at ? at.line : null, '', at ? at.next : null, fiveHour, at?.perHour ?? 0);
           // H176: after the used part, a piece per job and planned item, where it should land if it goes as estimated.
@@ -2257,6 +2273,7 @@
           const line = B.line.replace(/^(Now|Next):\s*/, '');
           banner.append(el('p', '', line.charAt(0).toUpperCase() + line.slice(1)));
         }
+        if (B?.also) banner.append(el('p', 'also', B.also.charAt(0).toUpperCase() + B.also.slice(1)));  // F116: a chat's Waiting under a stop
         if (B?.corrected) banner.append(el('p', 'soft corrected', `${B.corrected}${B.saidLine ? `: ${B.saidLine.replace(/^(Now|Next):\s*/, '')}` : ''}. Worked out from what runs now.`));
         now.append(banner);
         if (truth?.broken?.length) {
@@ -2291,7 +2308,7 @@
 
         app.append(drawRoutines(routines, truth?.broken ?? []));
         if (LAPTOP) app.append(drawTemperature(routines));  // H92: no Laptop section on a server
-        app.append(drawUsage(usage, s.usageLines, routines?.estimate ?? null, s.usageReserve ?? 0, (truth?.broken ?? []).find((b) => b.store === 'usage')));  // H176: with where the work should land
+        app.append(drawUsage(usage, s.usageLines, routines?.estimate ?? null, s.usageReserve ?? 0, (truth?.broken ?? []).find((b) => b.store === 'usage'), s.usageLeast ?? LEAST));  // H176: with where the work should land
 
         if (s.current) {
           const box = el('section');
@@ -2590,7 +2607,7 @@
       // the whole planning, over a megabyte, every three seconds.
       const parts = {};
       let lastMinute = null;
-      const EMPTY = { state: null, title: '', headline: '', notes: [], current: null, log: [], updated: '', phases: [], queue: { on: true, jobs: [] }, schedule: null, problems: [], usageLines: null, usageReserve: 0 };
+      const EMPTY = { state: null, title: '', headline: '', notes: [], current: null, log: [], updated: '', phases: [], queue: { on: true, jobs: [] }, schedule: null, problems: [], usageLines: null, usageReserve: 0, usageLeast: 15 };
       /** A status server from before F116 has no /page.json: the three reads it had, the same parts, nothing worked out. */
       async function olderServer() {
         const res = await fetch(`./roadmap.md?t=${Date.now()}`, { cache: 'no-store' });
