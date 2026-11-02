@@ -251,7 +251,7 @@ async function otherUsage() {
   return peerUsage.data;
 }
 async function usageStore() {
-  return readStore('usage', join(root, '.status/usage.json'), { shape: isObject });
+  return readStore('usage', join(root, '.status/usage.json'), { shape: isObject, missing: "There's no usage reading yet: work stops until a reading comes" });
 }
 async function usage(own, store = null) {
   const mine = (store ?? (await usageStore())).data;
@@ -336,15 +336,29 @@ const STORE_WORDS = {
 function shortPath(path) {
   return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path.startsWith(`${FOLDER}/`) ? `workspace/${path.slice(FOLDER.length + 1)}` : path;
 }
-function brokenStore(store, path, why) {
-  return { store, what: STORE_WORDS[store] ?? store, file: shortPath(path), why };
+function brokenStore(store, path, why, say = null) {
+  return { store, what: STORE_WORDS[store] ?? store, file: shortPath(path), why, ...(say ? { say } : {}) };
 }
-async function readStore(store, path, { must = false, shape = null } = {}) {
+// F116, the check's 3: a file that isn't there is no reading, which the page says, never fine. `missing` is what to say then
+// (red); `fresh` is what to say instead in a fresh install's first minutes (grey, not broken).
+const FRESH_MIN = 10;
+async function freshInstall() {
+  try {
+    const c = JSON.parse(await readFile(join(root, 'scratch/install/checklist.json'), 'utf8'));
+    if (c?.result === 'running' && !c.finished) return true;
+    const at = Date.parse(String(c?.finished ?? '').replace(' ', 'T'));
+    return Number.isFinite(at) && Date.now() - at < FRESH_MIN * 60000;
+  } catch {
+    return false;
+  }
+}
+async function readStore(store, path, { must = false, shape = null, missing = null, fresh = false } = {}) {
   let text;
   try {
     text = await readFile(path, 'utf8');
   } catch (e) {
-    if (e.code === 'ENOENT' && !must) return { data: null, broken: null };
+    if (e.code === 'ENOENT' && missing && !fresh) return { data: null, missing: true, broken: brokenStore(store, path, "it isn't there", missing) };
+    if (e.code === 'ENOENT' && !must) return { data: null, missing: true, broken: null };
     return { data: null, broken: brokenStore(store, path, e.code === 'ENOENT' ? "it isn't there" : `it can't be opened (${e.code ?? e.message})`) };
   }
   let data;
@@ -361,16 +375,19 @@ const isObject = (d) => d !== null && typeof d === 'object' && !Array.isArray(d)
 // H19/H20: every routine's own line, plus the watchdog's, which lives outside the Documents folder.
 async function routines() {
   const broken = [];
+  const missing = new Set();
+  const fresh = await freshInstall();
   const read = async (store, path, opts) => {
     const r = await readStore(store, path, opts);
     if (r.broken) broken.push(r.broken);
+    if (r.missing) missing.add(store);
     return r.data;
   };
-  const data = (await read('routines', join(root, '.status/routines.json'), { shape: isObject })) ?? {};
+  const data = (await read('routines', join(root, '.status/routines.json'), { shape: isObject, fresh, missing: "The routine hasn't written its lines: nothing here says whether anything runs" })) ?? {};
   const dog = await read('watchdog', join(SUPPORT, 'watchdog.json'), { shape: isObject });
   if (dog) data.watchdog = dog;
   // H30: the incident log (what went down, why, what was done, when it was back), newest first.
-  const inc = (await read('incidents', join(root, '.status/incidents.json'), { shape: (d) => isObject(d) && Array.isArray(d.incidents ?? []) }))?.incidents ?? [];
+  const inc = (await read('incidents', join(root, '.status/incidents.json'), { shape: (d) => isObject(d) && Array.isArray(d.incidents ?? []), fresh, missing: "There's no incident log: what went down isn't known from here" }))?.incidents ?? [];
   // H35: the laptop's latest temperature reading (routine/temperature.py, every minute).
   const temperature = await read('temperature', join(root, '.status/temperature.json'));
   // H37: the laptop's latest battery reading (routine/battery.py, every minute).
@@ -381,7 +398,8 @@ async function routines() {
   const lidsleep = await read('lidsleep', join(root, '.status/lidsleep.json'));
   const forYou = await forYouNow();  // F106: what's being worked on for him right now
   const [estimate, planning, feedback, agents] = await Promise.all([estimates(), sprint(), feedbackBox(['list'], 20000), cyclesFriday()]);
-  return { broken, forYou, now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback, agents };
+  const noLog = missing.has('incidents') && fresh;  // F116: a fresh install's first minutes: "No incident log yet", grey
+  return { broken, noLog, forYou, now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback, agents };
 }
 
 // F116: what truly waits for him, from what's kept, never from the status block: a job parked on him (boxed, waiting for a
@@ -429,16 +447,48 @@ function runningNow(p, lines, now) {
 // Waiting for you only when nothing runs and something is truly his. Something runs: the block's Building, Testing or
 // Releasing, else Building with what runs. Nothing runs and nothing is his: the block's Stopped (it says why), else Done.
 const BLOCK_WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped' };
-function banner(p, running, his) {
+// F116, the check's 1: when the block was written, from its Updated line (set-status.py writes the minute; an older block only the
+// day, with its newest log line's time). Fresh for STALE_MIN minutes; after that it reads as stale, and says so.
+const STALE_MIN = 30;
+const BUSY = ['BUILDING', 'TESTING', 'RELEASING'];
+function blockAt(p) {
+  const m = /Updated\s+(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}:\d{2}))?/.exec(p?.updated ?? '');
+  const t = m ? (m[2] ?? p?.log?.[0]?.time) : null;
+  if (!t) return null;
+  const at = new Date(`${m[1]}T${t.padStart(5, '0')}:00`).getTime() / 1000;
+  return Number.isFinite(at) ? at : null;
+}
+const hhmm = (t) => { const d = new Date(t * 1000); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+function banner(p, running, his, now = Date.now() / 1000) {
   const said = p?.state ?? null;
-  const out = (state, line) => ({ state, line, said, saidLine: p?.headline ?? '', corrected: !!said && state !== said ? `The status block said ${BLOCK_WORD[said]}` : '' });
-  if (running.length) {
-    const st = ['BUILDING', 'TESTING', 'RELEASING'].includes(said) ? said : 'BUILDING';
-    return out(st, st === said ? (p?.headline ?? '') : running.join(' · '));
+  const at = blockAt(p);
+  const fresh = at !== null && now - at <= STALE_MIN * 60;
+  const head = p?.headline ?? '';
+  const stale = said && !fresh
+    ? `The status block said ${BLOCK_WORD[said]} ${at === null ? 'with no time on it' : `at ${hhmm(at)}, ${Math.round((now - at) / 60)} minutes ago`}: stale`
+    : '';
+  const out = (state, line, corrected = '') => ({ state, line, said, saidLine: head, fresh, at, corrected });
+  const differs = (state) => (said && state !== said ? `The status block said ${BLOCK_WORD[said]}` : '');
+  // Running: a job, the night's tests, a release, QA; and a chat's own Building, Testing or Releasing while it's fresh.
+  if (running.length || (fresh && BUSY.includes(said))) {
+    const st = BUSY.includes(said) && (fresh || !running.length) ? said : 'BUILDING';
+    const line = fresh && BUSY.includes(said) ? head : running.join(' · ');
+    return out(st, line, st !== said ? differs(st) : stale);
   }
-  if (his.length) return out('WAITING', his.map((h) => h.what).join(' · '));
-  if (said === 'STOPPED') return out('STOPPED', p?.headline ?? '');
-  return out('DONE', said === 'DONE' ? (p?.headline ?? '') : 'Nothing is running and nothing waits for you');
+  // Waiting is worked out: only when nothing runs and something is truly his.
+  if (his.length) return out('WAITING', his.map((h) => h.what).join(' · '), said === 'WAITING' ? '' : stale || differs('WAITING'));
+  // Held by the usage line, paused, or the routine off: stopped, whatever the block says.
+  const held = (p?.queue?.jobs ?? []).filter((j) => /^(held|paused)/.test(j.state));
+  if (held.length || p?.queue?.on === false) {
+    const line = fresh && said === 'STOPPED' ? head : held.length ? held.map((j) => `Job ${j.n} ${j.state}`).join(' · ') : 'The routine is off: nothing starts';
+    return out('STOPPED', line, said === 'STOPPED' ? '' : stale || differs('STOPPED'));
+  }
+  if (fresh && said === 'STOPPED') return out('STOPPED', head);
+  if (fresh && said === 'WAITING') {
+    return out('STOPPED', 'Nothing runs, and nothing is waiting for you: no parked job, no question, no door', differs('STOPPED'));
+  }
+  // Done only when nothing runs, nothing is his, and the block says Done or says nothing fresh.
+  return out('DONE', fresh && said === 'DONE' ? head : 'Nothing is running and nothing waits for you', said === 'DONE' ? '' : stale || differs('DONE'));
 }
 
 // F116: what the page shows, in parts, each with its own fingerprint. The page says which it has (?have=name:h,…) and gets only
@@ -461,7 +511,13 @@ async function pageData(have) {
   } catch (e) {
     roadBroken = brokenStore('roadmap', ROADMAP, e.code === 'ENOENT' ? "it isn't there" : `it can't be opened (${e.code ?? e.message})`);
   }
-  const p = text !== null ? parseRoadmap(text) : null;
+  let p = text !== null ? parseRoadmap(text) : null;
+  if (text !== null && !text.trim()) {
+    roadBroken = brokenStore('roadmap', ROADMAP, "it's empty");
+    p = null;
+  } else if (p?.problems?.length) {
+    roadBroken = brokenStore('roadmap', ROADMAP, `its status block can't be read: ${p.problems.join(' ')}`);
+  }
   const r = await routines();
   const u = await usageStore();
   const h = await whatsHis(p);
@@ -480,7 +536,7 @@ async function pageData(have) {
     phases,
     routines: part('routines', rest),
     usage: part('usage', await usage(false, u)),
-    truth: part('truth', { banner: p ? banner(p, running, h.his) : null, broken, his: h.his, running }),
+    truth: part('truth', { banner: p && !roadBroken ? banner(p, running, h.his, now) : null, cant: roadBroken, broken, his: h.his, running }),
   };
   const out = Object.entries(parts).map(([k, x]) => (have.get(k) === x.h ? `"${k}":{"h":"${x.h}"}` : `"${k}":{"h":"${x.h}","data":${x.json}}`));
   return `{"now":${now},"parts":{${out.join(',')}}}`;

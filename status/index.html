@@ -955,7 +955,7 @@
           el('span', 'soft', u ? `Read ${ago(age)}${u.by ? ` by ${u.by}` : ''}${u.from ? `, on ${u.from}` : ''}` : 'No reading yet'),
         );
         box.append(head);
-        if (cant) box.append(el('p', 'alarm cant-read', `Can't read the saved usage reading: ${cant.why} (${cant.file}). Work stops until it can be read.`));  // F116
+        if (cant) box.append(el('p', 'alarm cant-read', cant.say ? `${cant.say} (${cant.file}).` : `Can't read the saved usage reading: ${cant.why} (${cant.file}). Work stops until it can be read.`));  // F116
         if (u && !u.readable) box.append(el('p', 'alarm', 'The last attempt to read the usage failed. Work stops until it can be read. The numbers below are the last known ones.'));
         if (lines && reserve) box.append(el('p', 'soft reserve-note', `The stop lines are where the team and the agents stop: ${reserve} points under each are kept for your calls and the small routines.`));
         if (E?.usage_plan?.words) box.append(el('p', 'soft usage-plan', `Estimates ${E.usage_plan.words}.`));  // F107
@@ -1658,7 +1658,7 @@
           const row = el('div', 'routine down broken');
           row.dataset.store = b.store;
           row.title = `${b.file}: ${b.why}`;
-          row.append(el('i'), el('span', 'name', b.what), el('span', 'text', `Can't read it: ${b.why} (${b.file})`), el('span', 'soft when'));
+          row.append(el('i'), el('span', 'name', b.what), el('span', 'text', b.say ? `${b.say} (${b.file})` : `Can't read it: ${b.why} (${b.file})`), el('span', 'soft when'));
           card.append(row);
         }
         for (const [key, name, about] of routineList(all)) {
@@ -1703,7 +1703,7 @@
         fold.querySelector('summary .fold-title').append(light);
         fold.append(card);
         fold.append(drawUptime());
-        fold.append(drawIncidents(r?.incidents ?? [], now, broken.find((b) => b.store === 'incidents')));
+        fold.append(drawIncidents(r?.incidents ?? [], now, broken.find((b) => b.store === 'incidents'), !!r?.noLog));
         box.append(fold);
         return box;
       }
@@ -1714,13 +1714,14 @@
 
       /** H30: the incident log. 10 October 2026: "it should also log somewhere in monitoring when
           services went disconnected and what it did to fix it." Newest first; a red edge is still down. */
-      function drawIncidents(list, now, cant = null) {
+      function drawIncidents(list, now, cant = null, noLog = false) {
         const names = Object.fromEntries(routineList(null).map(([k, n]) => [k, n]));
         const open = list.filter((i) => !i.back).length;
-        const fold = foldPart('incidents', open > 0 || !!cant, 'Incidents', cant ? 'Can\'t read the incident log' : list.length ? `${open ? `${open} still down · ` : ''}last ${Math.min(list.length, 30)}` : 'None so far', true);
+        const fold = foldPart('incidents', open > 0 || !!cant, 'Incidents', cant ? (cant.say ? 'No incident log' : 'Can\'t read the incident log') : noLog ? 'No incident log yet' : list.length ? `${open ? `${open} still down · ` : ''}last ${Math.min(list.length, 30)}` : 'None so far', true);
         if (cant) fold.querySelector('summary .soft').style.color = 'var(--red)';
         const box = el('div', 'incidents');
-        if (cant) box.append(el('p', 'alarm cant-read', `Can't read the incident log: ${cant.why} (${cant.file}). What went down isn't known from here until it can be read.`));  // F116
+        if (cant) box.append(el('p', 'alarm cant-read', cant.say ? `${cant.say} (${cant.file}).` : `Can't read the incident log: ${cant.why} (${cant.file}). What went down isn't known from here until it can be read.`));  // F116
+        else if (noLog) box.append(el('p', 'soft no-log', 'No incident log yet: HQ was just installed. When a routine goes down, it shows here.'));
         else if (!list.length) box.append(el('p', 'soft', 'Nothing has gone down since the log started. When a routine goes down, it shows here: when, why, what was done, and when it was back.'));
         for (const i of list) {
           const row = el('div', `incident${i.back ? '' : ' open'}`);
@@ -2244,10 +2245,12 @@
 
         const now = el('section', 'now');
         // F116: the banner is worked out from what runs and what's his (the server's truth), not the block's own heading.
-        const B = truth?.banner ?? (s.state ? { state: s.state, line: s.headline } : null);
+        // F116, the check's 2: an empty planning or a block it can't parse is "Can't read the status", red, with which file.
+        const B = truth ? truth.banner : (s.state ? { state: s.state, line: s.headline } : null);
         const banner = el('div', `banner ${B?.state ?? 'PROBLEM'}`);
         banner.dataset.state = B?.state ?? '';
-        banner.append(el('h1', '', B?.state ? WORD[B.state] : 'Cannot read the status'));
+        banner.append(el('h1', '', B?.state ? WORD[B.state] : 'Can\'t read the status'));
+        if (!B?.state && truth?.cant) banner.append(el('p', 'cant-status', `${truth.cant.file}: ${truth.cant.why}`));
         if (B?.line) {
           // "Now: t5 · …" reads better in the band as a sentence of its own.
           const line = B.line.replace(/^(Now|Next):\s*/, '');
@@ -2259,7 +2262,7 @@
           const ul = el('ul', 'problems cant-read');
           ul.append(el('p', '', 'This page can\'t read:'));
           for (const b of truth.broken) {
-            const li = el('li', '', `${b.what}: ${b.why} (${b.file})`);
+            const li = el('li', '', `${b.what}: ${b.say ?? b.why} (${b.file})`);
             li.dataset.store = b.store;
             ul.append(li);
           }

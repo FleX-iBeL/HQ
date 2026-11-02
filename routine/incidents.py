@@ -25,6 +25,16 @@ def _real() -> bool:
     return not hqpaths.under_test() or bool(os.environ.get("HQ_INCIDENTS_FILE"))
 
 
+def _aside():
+    """F116: where an unreadable log is kept: FILE.bad, then FILE.bad.2, .bad.3: one kept never goes under the next."""
+    if not os.path.exists(FILE + ".bad"):
+        return FILE + ".bad"
+    n = 2
+    while os.path.exists(f"{FILE}.bad.{n}"):
+        n += 1
+    return f"{FILE}.bad.{n}"
+
+
 def read():
     try:
         data = json.load(open(FILE))
@@ -36,10 +46,11 @@ def read():
         data = {}
         if _real():
             try:
-                os.replace(FILE, FILE + ".bad")
+                aside = _aside()
+                os.replace(FILE, aside)
                 import routines
-                routines.beat("incidents-file", state="down", every=3600, last=time.time(),
-                              text=f"The incident log was unreadable; kept as {os.path.basename(FILE)}.bad, new incidents are written from here")
+                routines.beat("incidents-file", state="down", every=365 * 86400, last=time.time(), aside=os.path.basename(aside),
+                              text=f"The incident log was unreadable; kept as {os.path.basename(aside)}, new incidents are written from here")
             except Exception:
                 pass
     if not isinstance(data, dict):
@@ -56,6 +67,15 @@ def _write(data):
     with os.fdopen(fd, "w") as f:
         json.dump(data, f, indent=1)
     os.replace(tmp, FILE)
+    if _real():  # F116: a good log written again: its red line goes green, saying where the unreadable one is kept
+        try:
+            import routines
+            line = routines.read().get("incidents-file") or {}
+            if line.get("state") == "down":
+                routines.beat("incidents-file", state="ok", every=365 * 86400, last=time.time(),
+                              text=f"The incident log is written again; the unreadable one is kept as {line.get('aside') or os.path.basename(FILE) + '.bad'}")
+        except Exception:
+            pass
 
 
 def _open(data, key):
