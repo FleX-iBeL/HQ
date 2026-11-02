@@ -21037,8 +21037,9 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                 f.write_bytes(good_)
                 seen.append(store)
             # The planning gone: the server still answers and says so.
-            for f in (files["routines"], files["incidents"], files["usage"]):
+            for f in (files["incidents"], files["usage"]):
                 f.write_text("{}")
+            self._f116_lines(site, {"mail": {"state": "ok", "text": "Checked"}})  # F116: lines holding nothing are red now, so real ones
             (st / "incidents.json").write_text(json.dumps({"incidents": []}))
             site_roadmap(site).unlink()
             b = self._f116_page(base)["truth"]["broken"]
