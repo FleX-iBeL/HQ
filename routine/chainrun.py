@@ -10,7 +10,7 @@ standing in for GitHub, the phones, the mail and the calendar left out, only Mon
 real tick runs by itself. Two ways to run it:
 
     python3 routine/chainrun.py standin ROOT                  stand-ins for the model; flow 294, every night
-    python3 routine/chainrun.py real ROOT --workspace PATH    the real model and a copy of the workspace; flow 295, by hand
+    python3 routine/chainrun.py real ROOT --workspace PATH [--until STEP] [--ports A B]    the real model and a copy of the workspace; flow 295, by hand
     python3 routine/chainrun.py check ROOT LABEL              the hand-offs of one item, read from the record and what it points at
     python3 routine/chainrun.py clean ROOT                    the copy's processes by their pids, then its folder
 
@@ -400,9 +400,9 @@ def standin_run(root: Path, deadline_s: int = 280) -> dict:
     return {"label": label, "missing": missing, "stopped": where_it_stands(env, root, label)}
 
 
-def real_run(root: Path, workspace: str, deadline_s: int = 14400) -> dict:
+def real_run(root: Path, workspace: str, deadline_s: int = 14400, until: str | None = None, ports=(7841, 4741), test_port=7881) -> dict:
     """The real model, the real tick every minute, nobody helping but the clock and his two yeses. Printed as it goes."""
-    env = build(root, workspace=workspace, standin=False)
+    env = build(root, workspace=workspace, standin=False, ports=ports, test_port=test_port)
     set_old_aside(env, root)
     for src in ("job-usage.json", "job-estimates.json", "usage.json", "usage-rate.json"):
         p = Path(workspace).resolve().parent / ".status" / src
@@ -430,6 +430,9 @@ def real_run(root: Path, workspace: str, deadline_s: int = 14400) -> dict:
         label = lab
         lines = follow(env, root, label)
         have = {d.get("step") for d in lines}
+        if until and until in have:
+            say(f"{label} reached {until}: " + " ".join(f"{d.get('step')}:{d.get('state') or d.get('verdict') or ''}" for d in lines))
+            return {"label": label, "missing": [], "stopped": until}
         if "ready" in have and not planned:
             subprocess.run([PY, "app/direct_line.py", "--team", "me"], cwd=str(root / "HQ"), env=env, text=True, capture_output=True,
                            input=json.dumps({"text": f"Morning. {label} is such a small one, yes plan it for tonight please, just that one."}))
@@ -478,7 +481,9 @@ def main(argv: list[str]) -> int:
         print(json.dumps(got, ensure_ascii=False))
         return 1 if got["missing"] else 0
     if cmd == "real" and len(argv) > 3 and argv[2] == "--workspace":
-        got = real_run(Path(argv[1]), argv[3])
+        until = argv[argv.index("--until") + 1] if "--until" in argv else None
+        ports = (int(argv[argv.index("--ports") + 1]), int(argv[argv.index("--ports") + 2])) if "--ports" in argv else (7841, 4741)
+        got = real_run(Path(argv[1]), argv[3], until=until, ports=ports, test_port=ports[0] + 40)
         print(json.dumps(got, ensure_ascii=False))
         return 1 if got["missing"] else 0
     if cmd == "check" and len(argv) > 2:
