@@ -21091,9 +21091,16 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
         def banner():
             return self._f116_page(base)["truth"]["banner"]
         try:
+            # The second check's repro first: a block saying Testing, written 35 minutes ago, nothing on the queue.
+            self._f116_road(site, "TESTING", "", ago=35)
+            b = banner()
+            need(b["state"] == "UNSURE" and "said Testing" in b["line"] and "not sure it's done" in b["line"] and re.search(r"3[56] minutes ago", b["line"]),
+                 f"a 35 minute old Testing with nothing running: {b}")
+            dom = await self._f116_dom(base)
+            need('data-state="UNSURE"' in dom and 'data-state="DONE"' not in dom and "not sure it's done" in dom, "the page shows a stale Testing as Done")
             self._f116_road(site, "WAITING", "")
             dom = await self._f116_dom(base)
-            need('data-state="WAITING"' not in dom and "Nothing is running and nothing waits for you" in dom,
+            need('data-state="WAITING"' not in dom and 'data-state="DONE"' not in dom and "nothing waiting for you is known here" in dom,
                  "the page draws a hand-written waiting for you while nothing runs and nothing is his")
             self._f116_road(site, "WAITING", running)
             b = banner()
@@ -21103,7 +21110,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
             b = banner()
             need(b["state"] != "WAITING", f"nothing runs and nothing is his, the block says waiting: shown as {b}")
             dom = await self._f116_dom(base)
-            need('data-state="DONE"' in dom and "Nothing is running and nothing waits for you" in dom, "the page draws a hand-written waiting")
+            need('data-state="UNSURE"' in dom and "Not sure" in dom, "the page draws a hand-written waiting, or calls it Done")
             seen.append("a hand-written waiting with nothing his isn't shown")
             self._f116_road(site, "BUILDING", boxed)
             b = banner()
@@ -21139,21 +21146,36 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
             b = banner()
             need(b["state"] == "BUILDING", f"a chat's fresh Building with a job parked on him: shown as {b['state']}, a chat runs")
             seen.append("a chat's fresh block counts as running")
-            # Written 40 minutes ago: stale, and it says so; nothing runs, nothing his: Done.
+            # Written 35 and 40 minutes ago, nothing on the queue: not sure, in yellow, never Done (a chat's long test run goes on).
             self._f116_road(site, "BUILDING", "", ago=40)
             b = banner()
-            need(b["state"] == "DONE" and "stale" in b["corrected"] and re.search(r"4[01] minutes ago", b["corrected"]), f"a 40 minute old Building: {b}")
-            dom = await self._f116_dom(base)
-            need('data-state="DONE"' in dom and "stale" in dom, "the page doesn't say the block is stale")
-            seen.append("a stale one says so")
+            need(b["state"] == "UNSURE" and re.search(r"4[01] minutes ago", b["line"]), f"a 40 minute old Building: {b}")
+            seen.append("a stale busy one is not sure, never Done")
+            # A time in the future isn't fresh: on the Updated line, or a day-only block whose newest log line is later than now.
+            self._f116_road(site, "BUILDING", "", ago=-180)
+            b = banner()
+            need(b["state"] == "UNSURE" and "in the future" in b["line"] and not b["fresh"], f"a block dated three hours ahead: {b}")
+            later = datetime.now() + timedelta(minutes=20)
+            if later.date() == datetime.now().date():
+                self._f116_road(site, "BUILDING", "", ago=0)
+                road = site_roadmap(site)
+                txt = road.read_text(encoding="utf8")
+                txt = re.sub(r"\*Updated [^*]*\*", f"*Updated {datetime.now():%Y-%m-%d} · day only*", txt).replace("- 10:00 started", f"- {later:%H:%M} started")
+                road.write_text(txt, encoding="utf8")
+                b = banner()
+                need(b["state"] == "UNSURE" and not b["fresh"], f"a day-only block with a log line later than now: {b}")
+            seen.append("a time in the future isn't fresh")
             # Done only when the block says Done or nothing fresh: a fresh waiting with nothing his is neither.
             self._f116_road(site, "DONE", "", ago=5)
             b = banner()
             need(b["state"] == "DONE" and not b["corrected"], f"a fresh Done: {b}")
+            self._f116_road(site, "DONE", "", ago=300)
+            b = banner()
+            need(b["state"] == "DONE", f"a Done from five hours ago: still Done, nothing newer replaced it: {b}")
             self._f116_road(site, "WAITING", "", ago=5)
             b = banner()
             need(b["state"] not in ("DONE", "WAITING"), f"a fresh waiting with nothing his: shown as {b['state']}")
-            seen.append("Done only when nothing fresh says otherwise")
+            seen.append("Done only from a block that says Done")
         finally:
             self._f116_stop(proc)
         return "; ".join(seen)
@@ -21452,19 +21474,50 @@ print(json.dumps(o))
             need("The routine hasn't written its lines" in dom and "work stops until a reading comes" in dom and "There's no incident log" in dom
                  and "None so far" not in dom, "the page doesn't draw the missing files red, each with what it means")
             seen.append("missing lines, usage and log red")
-            # A fresh install's first minutes: the lines and the log aren't there yet, and that's said in grey; the usage still stops work.
+            # A fresh install's first minutes: the lines and the log aren't there yet, said in grey, but only while the installer itself
+            # runs (its pid, really install.py) and within 30 minutes of its start. The usage still stops work.
             (site / "scratch/install").mkdir(parents=True, exist_ok=True)
-            done = lambda mins: (site / "scratch/install/checklist.json").write_text(json.dumps(
-                {"result": "passed", "finished": (datetime.now() - timedelta(minutes=mins)).strftime("%Y-%m-%d %H:%M:%S")}))
-            done(1)
-            b = {x["store"] for x in self._f116_page(base)["truth"]["broken"]}
-            need(b == {"usage"}, f"a fresh install's first minute: {sorted(b)} red")
+            fake = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)", str(site / "install/install.py")])  # a stand-in installer's process
+
+            def checklist(start_mins, pid, **kw):
+                (site / "scratch/install/checklist.json").write_text(json.dumps({"run": (datetime.now() - timedelta(minutes=start_mins)).strftime("%Y-%m-%d %H:%M:%S"),
+                                                                                   "pid": pid, "mode": "setup", "phase": "setup", "result": "running", "finished": None, **kw}))
+            red = lambda: {x["store"] for x in self._f116_page(base)["truth"]["broken"]}
+            try:
+                checklist(1, fake.pid)
+                need(red() == {"usage"}, f"a fresh install, its installer running, a minute in: {sorted(red())} red")
+                dom = await self._f116_dom(base)
+                need("No incident log yet" in dom and "There's no incident log" not in dom, "a fresh install doesn't say no incident log yet, in grey")
+                checklist(40, fake.pid)
+                need(red() == {"routines", "usage", "incidents"}, f"40 minutes after the start, the installer still there: {sorted(red())} red")
+                checklist(-120, fake.pid)
+                need(red() == {"routines", "usage", "incidents"}, f"an install starting in two hours: {sorted(red())} red")
+                checklist(1, fake.pid, mode="test", phase="test")
+                need(red() == {"routines", "usage", "incidents"}, f"a test round (--test-only) a minute in: {sorted(red())} red")
+                checklist(1, None)
+                need(red() == {"routines", "usage", "incidents"}, f"a checklist without the installer's pid: {sorted(red())} red")
+                checklist(1, os.getpid())
+                need(red() == {"routines", "usage", "incidents"}, f"a pid that isn't the installer: {sorted(red())} red")
+            finally:
+                fake.terminate()
+                fake.wait(timeout=10)
+            # The check's repro: the install was killed, its checklist says running for good.
+            checklist(1, fake.pid)
+            need(red() == {"routines", "usage", "incidents"}, f"a killed install that still says running: {sorted(red())} red")
             dom = await self._f116_dom(base)
-            need("No incident log yet" in dom and "There's no incident log" not in dom, "a fresh install doesn't say no incident log yet, in grey")
-            done(120)
-            b = {x["store"] for x in self._f116_page(base)["truth"]["broken"]}
-            need(b == {"routines", "usage", "incidents"}, f"two hours after the install, missing files: {sorted(b)} red")
-            seen.append("a fresh install's first minutes grey, later red")
+            need("The routine hasn't written its lines" in dom and "There's no incident log" in dom and "Everything is working" not in dom,
+                 "a killed install shows the missing lines and log as fine")
+            (site / "scratch/install/checklist.json").unlink()
+            # A file of routine lines that holds nothing says as little as a missing one.
+            (st / "routines.json").write_text("{}")
+            self._f116_lines(site, {})
+            (st / "routines.json").write_text("{}")
+            b = {x["store"]: x for x in self._f116_page(base)["truth"]["broken"]}
+            need(set(b) == {"routines"} and "hasn't written its lines" in b["routines"].get("say", ""), f"routines.json holding {{}}: {sorted(b)}")
+            dom = await self._f116_dom(base)
+            need("Everything is working" not in dom and "The routine hasn't written its lines" in dom, "an empty file of routine lines shows all working")
+            seen.append("routine lines holding nothing red")
+            seen.append("grey only while the installer runs, within 30 minutes of its start")
         finally:
             self._f116_stop(proc)
         return "; ".join(seen)

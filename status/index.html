@@ -142,6 +142,7 @@
       .RELEASING { --band: #6639ba; }
       .WAITING { --band: #0b5fbf; }
       .DONE { --band: #1a7f37; }
+      .UNSURE { --band: #9a6700; }  /* F116: not sure: a stale block and nothing running known, yellow, never Done */
       .STOPPED, .PROBLEM { --band: #b42318; }
       .notes { margin: 0; padding: 0 4px; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px 16px; }
       .notes dt { color: var(--soft); }
@@ -550,7 +551,7 @@
       import { parseRoadmap } from './parse.mjs';
       import { hasFive, stopLine, usageVerdict, landing, landingWords, LAND_KINDS, windowsAhead, windowWords, daysAhead, dayWords } from './usage.mjs';
 
-      const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped' };
+      const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped', UNSURE: 'Not sure' };
       const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision', repeat: 'Repeats' };
       const app = document.getElementById('app');
       const WHERE = document.querySelector('meta[name="hq-where"]')?.content ?? '';  // H83, filled in by the server

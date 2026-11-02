@@ -341,13 +341,29 @@ function brokenStore(store, path, why, say = null) {
 }
 // F116, the check's 3: a file that isn't there is no reading, which the page says, never fine. `missing` is what to say then
 // (red); `fresh` is what to say instead in a fresh install's first minutes (grey, not broken).
-const FRESH_MIN = 10;
+// The second check: "fresh" holds only while the installer's own process is alive (its pid in the checklist, and that pid really
+// running install.py) and within FRESH_MIN of the install's start, whichever ends first. A start in the future, a test round
+// (--test-only) or a checklist from before the pid was kept is never fresh: a killed install leaves "running" behind for good.
+const FRESH_MIN = 30;
+async function installerAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try { process.kill(pid, 0); } catch (e) { if (e.code !== 'EPERM') return false; }
+  try {
+    return (await readFile(`/proc/${pid}/cmdline`, 'utf8')).includes('install.py');
+  } catch {
+    return new Promise((resolve) => {
+      execFile('ps', ['-p', String(pid), '-o', 'command='], { timeout: 3000 }, (err, out) => resolve(!err && String(out).includes('install.py')));
+    });
+  }
+}
 async function freshInstall() {
   try {
     const c = JSON.parse(await readFile(join(root, 'scratch/install/checklist.json'), 'utf8'));
-    if (c?.result === 'running' && !c.finished) return true;
-    const at = Date.parse(String(c?.finished ?? '').replace(' ', 'T'));
-    return Number.isFinite(at) && Date.now() - at < FRESH_MIN * 60000;
+    if (c?.mode === 'test' || c?.phase === 'test' || c?.finished) return false;
+    const start = Date.parse(String(c?.run ?? '').replace(' ', 'T'));
+    const age = Date.now() - start;
+    if (!Number.isFinite(start) || age < -60000 || age > FRESH_MIN * 60000) return false;
+    return await installerAlive(c.pid);
   } catch {
     return false;
   }
@@ -383,7 +399,12 @@ async function routines() {
     if (r.missing) missing.add(store);
     return r.data;
   };
-  const data = (await read('routines', join(root, '.status/routines.json'), { shape: isObject, fresh, missing: "The routine hasn't written its lines: nothing here says whether anything runs" })) ?? {};
+  const ROUTINES_MISSING = "The routine hasn't written its lines: nothing here says whether anything runs";
+  const data = (await read('routines', join(root, '.status/routines.json'), { shape: isObject, fresh, missing: ROUTINES_MISSING })) ?? {};
+  // The second check's 3: a file of routine lines that holds nothing ({}) says as little as a missing one.
+  if (!fresh && !broken.some((b) => b.store === 'routines') && Object.keys(data).length === 0 && !missing.has('routines')) {
+    broken.push(brokenStore('routines', join(root, '.status/routines.json'), 'it holds no lines', ROUTINES_MISSING));
+  }
   const dog = await read('watchdog', join(SUPPORT, 'watchdog.json'), { shape: isObject });
   if (dog) data.watchdog = dog;
   // H30: the incident log (what went down, why, what was done, when it was back), newest first.
@@ -459,14 +480,16 @@ function blockAt(p) {
   return Number.isFinite(at) ? at : null;
 }
 const hhmm = (t) => { const d = new Date(t * 1000); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+// The second check: a block written more than FUTURE_MIN ahead of now isn't fresh; it says its time can't be right.
+const FUTURE_MIN = 5;
 function banner(p, running, his, now = Date.now() / 1000) {
   const said = p?.state ?? null;
   const at = blockAt(p);
-  const fresh = at !== null && now - at <= STALE_MIN * 60;
+  const future = at !== null && at - now > FUTURE_MIN * 60;
+  const fresh = at !== null && !future && now - at <= STALE_MIN * 60;
   const head = p?.headline ?? '';
-  const stale = said && !fresh
-    ? `The status block said ${BLOCK_WORD[said]} ${at === null ? 'with no time on it' : `at ${hhmm(at)}, ${Math.round((now - at) / 60)} minutes ago`}: stale`
-    : '';
+  const when = at === null ? 'with no time on it' : future ? `with a time in the future (${hhmm(at)}), which can't be right` : `at ${hhmm(at)}, ${Math.round((now - at) / 60)} minutes ago`;
+  const stale = said && !fresh ? `The status block said ${BLOCK_WORD[said]} ${when}: stale` : '';
   const out = (state, line, corrected = '') => ({ state, line, said, saidLine: head, fresh, at, corrected });
   const differs = (state) => (said && state !== said ? `The status block said ${BLOCK_WORD[said]}` : '');
   // Running: a job, the night's tests, a release, QA; and a chat's own Building, Testing or Releasing while it's fresh.
@@ -484,11 +507,16 @@ function banner(p, running, his, now = Date.now() / 1000) {
     return out('STOPPED', line, said === 'STOPPED' ? '' : stale || differs('STOPPED'));
   }
   if (fresh && said === 'STOPPED') return out('STOPPED', head);
-  if (fresh && said === 'WAITING') {
-    return out('STOPPED', 'Nothing runs, and nothing is waiting for you: no parked job, no question, no door', differs('STOPPED'));
-  }
-  // Done only when nothing runs, nothing is his, and the block says Done or says nothing fresh.
-  return out('DONE', fresh && said === 'DONE' ? head : 'Nothing is running and nothing waits for you', said === 'DONE' ? '' : stale || differs('DONE'));
+  // Done only from a block that says Done. Anything else with nothing running that HQ knows of is "not sure", in yellow: a chat's
+  // 40-minute test run reads Testing for 30 minutes, then not sure, never Done; a newer block puts it right.
+  if (said === 'DONE' && !future) return out('DONE', head || 'Nothing is running and nothing waits for you');
+  if (!said) return out('UNSURE', "The status block names no state, and nothing running is known: not sure what's going on");
+  const what = said === 'WAITING'
+    ? `The status block said Waiting for you ${when}, and nothing waiting for you is known here (no parked job, question or door): not sure`
+    : said === 'STOPPED'
+      ? `The status block said Stopped ${when}, and nothing held is known: not sure it's still stopped`
+      : `The status block said ${BLOCK_WORD[said]} ${when}, and nothing running is known: not sure it's done`;
+  return out('UNSURE', what, '');
 }
 
 // F116: what the page shows, in parts, each with its own fingerprint. The page says which it has (?have=name:h,…) and gets only
