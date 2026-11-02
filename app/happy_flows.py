@@ -28690,7 +28690,7 @@ window.fetch = async (u, o) => {
         await asyncio.to_thread(go, "--only", "8")
         plant("    await asyncio.sleep(120)")
         await asyncio.to_thread(die)
-        state = Path(env["HQ_SUPPORT"]) / "test-wall.json"
+        state = max((Path(env["HQ_SUPPORT"]) / "test-wall").glob("*.json"), key=lambda f: f.stat().st_mtime)  # the run that died
         d = json.loads(state.read_text())
         d["alive"] = d["start"] = time.time() - 3600
         state.write_text(json.dumps(d))
@@ -28749,7 +28749,8 @@ window.fetch = async (u, o) => {
         before, said = hashes(), lines()
         r = await asyncio.to_thread(lambda: go("--only", "106,157,247,249,255", e=e, timeout=520))
         out = r.stdout + r.stderr
-        need(r.returncode == 0 and "5 of 5 passed" in r.stdout, f"the five flows on a connected HQ: {out[-900:]}")
+        import nightly as _night
+        need(r.returncode == 0 and "5 of 5 passed" in r.stdout, f"the five flows on a connected HQ: {_night.failures(r.stdout)[:4]} {out[-400:]}")
         need(hashes() == before, "a run of the five flows changed a real record")
         need(not posts, f"something reached the stand-in listener: {posts}")
         need(not calls.exists(), f"a quick flow reached the model: {calls.read_text()[:300] if calls.exists() else ''}")
@@ -28768,6 +28769,134 @@ window.fetch = async (u, o) => {
             need(calls.exists() == marked, f"marked {marked}: the real one was {'not ' if marked else ''}reached")
         srv.shutdown()
         return "five flows on a connected HQ: records as they were, no text, nothing posted to the maker, no model; the run's counts are true for a stopped and a marked flow"
+
+    @staticmethod
+    def _planted(site: Path, plain: str, body: str, claude: bool = False) -> None:
+        """F111: site's flows with one more, flow 9001, whose body is the given lines."""
+        (site / "app/happy_flows.py").write_text(plain.replace("FLOWS = {\n", f"async def _planted(self):\n{body}\n    return 'planted'\nRun.flow9001 = _planted\n"
+                                                               f"FLOWS = {{\n    9001: ('A planted flow', {claude}, 'flow9001'),\n", 1))
+
+    async def flow302(self) -> str:
+        """F111: runs that overlap, no Claude. Two made-up HQs on one computer with one memory folder: a run on the second while one runs on the first is
+        green and leaves the first one's run alone; a second run on the same HQ beside it too; the first then ends green. A stored run whose pid is
+        another process now counts as dead, and its change is found."""
+        import subprocess as sp
+        import nightly as _night
+        import testwall
+        a_site, a_env, a_places, a_go, _a_hash = self._wall_site("w302a")
+        b_site, b_env, _b_places, b_go, _b_hash = self._wall_site("w302b")
+        b_env = {**b_env, "HQ_SUPPORT": a_env["HQ_SUPPORT"]}
+        for _name, _rel, path in testwall.real_places(str(b_site), str(b_site / "workspace")):  # the second HQ's records are its own
+            pth = Path(path)
+            for f in ([pth] if pth.is_file() else sorted(pth.glob("*")) if pth.is_dir() else []):
+                with open(f, "a") as h:
+                    h.write("the second HQ's own\n")
+        plain = (a_site / "app/happy_flows.py").read_text()
+        self._planted(a_site, plain, "    await asyncio.sleep(25)")
+        walls = lambda: sorted(p.name for p in (a_site / "scratch").glob("test-wall-*"))
+        first = sp.Popen([sys.executable, str(a_site / "app/happy_flows.py"), "--only", "9001"], env=a_env, cwd=str(a_site), stdout=sp.PIPE, stderr=sp.STDOUT, text=True)
+        try:
+            end = time.time() + 60
+            while time.time() < end and not any((a_site / "scratch" / w / "flow").exists() for w in walls()):
+                await asyncio.sleep(0.2)
+            mine = walls()
+            need(mine, "the first run never started")
+            r = await asyncio.to_thread(b_go, "--only", "8", e=b_env)
+            need(r.returncode == 0 and not _night.failures(r.stdout), f"a run on the other HQ beside it went red: {_night.failures(r.stdout)[:3]} {r.stdout[-300:]}")
+            need(set(mine) <= set(walls()), "the run on the other HQ took the first one's folder")
+            r = await asyncio.to_thread(a_go, "--only", "8")
+            need(r.returncode == 0 and not _night.failures(r.stdout) and "another run on this HQ is going" in r.stdout,
+                 f"a second run on the same HQ beside it: {_night.failures(r.stdout)[:3]} {r.stdout[-300:]}")
+            need(set(mine) <= set(walls()), "the second run on the same HQ took the first one's folder")
+            out, _ = await asyncio.to_thread(first.communicate, None, 120)
+        finally:
+            if first.poll() is None:
+                first.kill()
+        need(first.returncode == 0 and not _night.failures(out), f"the first run, after the two beside it: {_night.failures(out)[:3]} {out[-300:]}")
+        (a_site / "app/happy_flows.py").write_text(plain)
+        # A stored run whose pid is alive but another process now: dead, and what it changed is found.
+        states = Path(a_env["HQ_SUPPORT"]) / "test-wall"
+        need(not list(states.glob(f"{testwall._key(str(a_site))}-*.json")), "a finished run left its state")
+        snap = testwall.snapshot(a_places)
+        snap[".status/incidents.json"]["sha"] = "not what it is now"
+        states.mkdir(parents=True, exist_ok=True)
+        (states / f"{testwall._key(str(a_site))}-{os.getpid()}.json").write_text(json.dumps(
+            {"real_hq": os.path.realpath(a_site), "start": time.time(), "alive": time.time(), "pid": os.getpid(), "started": "Thu Jan  1 00:00:00 1970",
+             "done": False, "hashes": snap}))
+        r = await asyncio.to_thread(a_go, "--only", "8")
+        need(r.returncode == 1 and any("the run that died changed a real record" in x and "the incident log" in x for x in _night.failures(r.stdout)),
+             f"a reused pid kept a dead run alive: {r.stdout[-400:]}")
+        return "two HQs on one computer and two runs on one HQ overlap without a false line; a reused pid doesn't keep a dead run alive"
+
+    async def flow303(self) -> str:
+        """F111: the four holes the independent check found, no Claude. A Python a flow starts with PYTHONPATH of its own still has the hook, the copy's
+        own and python3 on the path; a maker and phones named in a setting reach nothing; a claude reached by its own path is refused in a quick flow and
+        counted in a marked one, so the count is never 0 when one ran."""
+        import base64 as _b64, http.server, threading
+        import nightly as _night
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        site, env, places, go, hashes = self._wall_site("w303")
+        base = site.parent
+        log = site / ".status/incidents.json"
+        was = log.read_bytes()
+        plain = (site / "app/happy_flows.py").read_text()
+        # PYTHONPATH of a flow's own
+        write = f"open({str(log)!r}, 'a').write('x')"
+        self._planted(site, plain, f"    e = {{**os.environ, 'PYTHONPATH': '/nonexistent'}}\n"
+                                   f"    subprocess.run([sys.executable, '-c', {write!r}], env=e, capture_output=True)\n"
+                                   f"    subprocess.run(['python3', '-c', {write!r}], env=e, capture_output=True)")
+        r = await asyncio.to_thread(go, "--only", "9001")
+        refused = [x for x in _night.failures(r.stdout) if "tried to write a real record" in x and "9001" in x]
+        need(log.read_bytes() == was and r.returncode == 1 and len(refused) == 2, f"PYTHONPATH of its own took the hook away: {r.stdout[-500:]}")
+        # a maker and phones named in a setting
+        posts: list[str] = []
+
+        class Box(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("content-length") or 0))
+                posts.append(self.path)
+                self.send_response(201)
+                self.end_headers()
+                self.wfile.write(b"{}")
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Box)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        at = f"http://127.0.0.1:{srv.server_address[1]}/"
+        (base / "maker.json").write_text(json.dumps({"name": "The maker", "url": at, "key": "k" * 32, "texts": True, "since": 1}))
+        (base / "phones").mkdir()
+        phone = ec.generate_private_key(ec.SECP256R1()).public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+        b64 = lambda b: _b64.urlsafe_b64encode(b).decode().rstrip("=")
+        (base / "phones/subscriptions.json").write_text(json.dumps([{"endpoint": at + "push", "keys": {"p256dh": b64(phone), "auth": b64(b"0123456789abcdef")}}]))
+        e = {**env, "HQ_FEEDBACK_MAKER": str(base / "maker.json"), "HQ_FEEDBACK_INSECURE": "1", "HQ_DIRECT_PUSH_DIR": str(base / "phones")}
+        self._planted(site, plain, "    rm = self.tmp / 'fb-roadmap.md'\n    rm.write_text((ROOT / 'template/HQ/roadmap.md').read_text())\n"
+                                   "    fe = {**os.environ, 'HQ_ROADMAP': str(rm), 'HQ_FEEDBACK': str(self.tmp / 'fb.json'), 'HQ_SPRINT': str(self.tmp / 'fb-sprint.json')}\n"
+                                   "    subprocess.run([sys.executable, str(APP / 'feedback.py'), 'send', 'A test that reaches nobody'], env=fe, capture_output=True, timeout=60)\n"
+                                   "    subprocess.run([sys.executable, '-c', 'import sys; sys.path.insert(0, sys.argv[1]); import direct_line; print(direct_line.push(\"A test text\"))', str(APP)],"
+                                   " capture_output=True, timeout=60)")
+        r = await asyncio.to_thread(lambda: go("--only", "9001", e=e))
+        srv.shutdown()
+        need(r.returncode == 0 and not posts, f"a maker or a phone named in a setting was reached: {posts} {r.stdout[-300:]}")
+        # a claude by its own path
+        fake = base / "own/claude"
+        fake.parent.mkdir()
+        calls = base / "own-calls"
+        fake.write_text(f'#!/bin/sh\necho "$@" >> "{calls}"\necho "A made-up answer."\n')
+        fake.chmod(0o755)
+        by_path = (f"    e = {{k: v for k, v in os.environ.items() if k != 'CLAUDE_CONFIG_DIR'}}\n"
+                   f"    for how in ([{str(fake)!r}, '-p', 'hello'], {str(fake) + ' -p hello'!r}):\n"
+                   f"        try:\n            subprocess.run(how, env=e, shell=isinstance(how, str), capture_output=True)\n"
+                   f"        except PermissionError:\n            pass")
+        own = {**env, "HQ_WALL_REAL_CLAUDE": str(fake)}  # this made-up HQ's real claude, as a computer's own install is
+        for marked, count, ran in ((False, "0 real model runs, 2 stopped", False), (True, "2 real model runs, 0 stopped", True)):
+            self._planted(site, plain, by_path, claude=marked)
+            r = await asyncio.to_thread(lambda: go("--only", "9001", e=own))
+            need(r.returncode == 0 and count in r.stdout and calls.exists() == ran, f"a claude by its own path, marked {marked}: {r.stdout[-400:]}")
+        (site / "app/happy_flows.py").write_text(plain)
+        need(hashes() is not None and log.read_bytes() == was, "the incident log changed")
+        return "PYTHONPATH of a flow's own keeps the hook; a maker and phones in a setting reach nothing; a claude by its own path is refused unmarked, counted marked"
 
     async def flow113(self) -> str:
         """H194: HQ's own icon on a friend's fresh install. No Claude turns. A status server without HQ_LABEL (a
@@ -31859,6 +31988,8 @@ echo "ALL OK"
 
 FLOWS = {
     300: ("F111: the wall: a run leaves every real record byte for byte, a planted write turns it red and names it, an emptied check can't pass, a dead run's change is found and his own later change isn't", False, "flow300"),
+    302: ("F111: runs that overlap: two HQs on one computer and two runs on one HQ don't turn each other red, and a reused pid doesn't keep a dead run alive", False, "flow302"),
+    303: ("F111: the wall's four holes: PYTHONPATH of a flow's own keeps the hook, a maker and phones in a setting reach nothing, a claude by its own path is refused or counted", False, "flow303"),
     301: ("F111: on a connected HQ the flows named on the night of 2 November reach no text, no maker and no model, and the run's counts are true", False, "flow301"),
     292: ("His no closes a held change, by number, the only one, or his loose words to her: a later yes can't open it, it isn't asked again, nobody gets anything", False, "flow292"),
     293: ("Her which one goes out past the day's cap, once, never kept for Friday; an answered question doesn't go out in a batch", False, "flow293"),
@@ -32160,7 +32291,7 @@ FLOWS = {
 # history, which grows every day (217 s on 23 October, 360 s on 27 October), and checks all of it: it gets
 # twenty minutes instead of checking less. Its time is in the summary, next to its limit, so a climb shows.
 FLOW_LIMIT = 360
-FLOW_LIMITS = {44: 1200, 300: 600, 301: 900}
+FLOW_LIMITS = {44: 1200, 300: 600, 301: 900, 302: 600, 303: 600}
 
 
 def limit_of(n: int) -> int:
