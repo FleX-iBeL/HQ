@@ -21110,7 +21110,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
     # -- F116: the status page says what's true. A test copy of the page: its own folder, port and stores, never the live one.
     F116_ROADMAP = """# {mark} {state}
 
-## Now: the test step
+## Now: {step}
 
 **Just finished:** nothing yet
 
@@ -21148,12 +21148,12 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
         self._f116_road(site)
         return site
 
-    def _f116_road(self, site: Path, state: str = "BUILDING", queue: str = "", extra: str = "", ago: float | None = None) -> None:
+    def _f116_road(self, site: Path, state: str = "BUILDING", queue: str = "", extra: str = "", ago: float | None = None, step: str = "the test step") -> None:
         """ago: minutes since the block was written (the minute on its Updated line); None: an older block, the day only, long ago."""
         mark = {"BUILDING": "🔨", "WAITING": "⏸", "DONE": "✅", "STOPPED": "⚠️"}.get(state, "🔨")
         words = "WAITING FOR YOU" if state == "WAITING" else state
         updated = "2026-10-01" if ago is None else (datetime.now() - timedelta(minutes=ago)).strftime("%Y-%m-%d %H:%M")
-        site_roadmap(site).write_text(self.F116_ROADMAP.format(mark=mark, state=words, queue=queue, extra=extra, updated=updated), encoding="utf8")
+        site_roadmap(site).write_text(self.F116_ROADMAP.format(mark=mark, state=words, queue=queue, extra=extra, updated=updated, step=step), encoding="utf8")
 
     @staticmethod
     def _f116_lines(site: Path, lines: dict) -> None:
@@ -21329,20 +21329,90 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                  f"a 35 minute old Testing with nothing running: {b}")
             dom = await self._f116_dom(base)
             need('data-state="UNSURE"' in dom and 'data-state="DONE"' not in dom and "not sure it's done" in dom, "the page shows a stale Testing as Done")
+            # The third check's A: the routine's Stopped "Job 8 waits for the usage line", 40 minutes old, job 8 ready in the queue.
+            ready8 = "- Job 8 · ready · agreed 2026-11-02 09:00 · a test job"
+            self._f116_lines(site, {"jobs": {"state": "waiting", "text": "Job 8 waits for the usage line: Weekly · all models is at 70%, its stop line is 55%"}})
+            self._f116_road(site, "STOPPED", ready8, ago=40, step="Job 8 waits for the usage line")
+            b = banner()
+            need(b["state"] == "STOPPED" and "its stop line is 55%" in b["line"], f"a job waiting at the usage line, 40 minutes on: {b}")
+            dom = await self._f116_dom(base)
+            need('data-state="STOPPED"' in dom and "its stop line is 55%" in dom, "the page doesn't draw a job at the usage line as stopped, with the gate's reason")
+            self._f116_lines(site, {})
+            b = banner()
+            need(b["state"] == "STOPPED" and "Job 8 waits for the usage line" in b["line"], f"a job in line, the gate's line not written yet: {b}")
+            seen.append("a job waiting at the usage line is stopped, with the gate's reason")
+            # The third check's B: a chat's Waiting, two hours old, is trusted as written, saying who and when.
+            self._f116_road(site, "WAITING", "", ago=120, step="him to try the mic on the phone")
+            b = banner()
+            need(b["state"] == "WAITING" and b["line"].startswith("A chat said at ") and "2 hours ago" in b["line"]
+                 and "it's waiting for you: him to try the mic on the phone" in b["line"], f"a chat's Waiting, two hours old: {b}")
+            dom = await self._f116_dom(base)
+            need('data-state="WAITING"' in dom and "A chat said at " in dom, "the page doesn't draw a chat's Waiting as waiting, saying who")
+            # The routine's own Waiting, and a job's.
+            self._f116_road(site, "WAITING", "", ago=90, step="Job 7 isn't running (ended 10:00 without a done mark); nothing runs now")
+            b = banner()
+            need(b["state"] == "WAITING" and b["line"].startswith("The routine said at "), f"the routine's own Waiting: {b}")
+            at6 = datetime.now() - timedelta(minutes=60)
+            done6 = (at6 + timedelta(minutes=2)).strftime("%H:%M")
+            self._f116_road(site, "WAITING", f"- Job 6 · done {done6} on {at6:%Y-%m-%d} · agreed 2026-11-02 09:00 · a test build", ago=60, step="built, waiting for him to try it")
+            b = banner()
+            if at6.date() == datetime.now().date():
+                need(b["state"] == "WAITING" and b["line"].startswith("Job 6 said at "), f"a job's Waiting: {b}")
+            self._f116_road(site, "WAITING", "", ago=1, step="your answer")
+            b = banner()
+            need(b["state"] == "WAITING" and re.search(r"\b(1 minute|2 minutes) ago", b["line"]) and "1 minutes" not in b["line"], f"the wording, a minute on: {b}")
+            # The fourth check's 1: a done mark from another day, or one without its day, doesn't make a chat's Waiting a job's.
+            mark = (at6 + timedelta(minutes=7)).strftime("%H:%M")
+            self._f116_road(site, "WAITING", f"- Job 6 · done {mark} · agreed 2026-11-01 09:00 · an old build", ago=60, step="your answer on the plan")
+            b = banner()
+            need(b["state"] == "WAITING" and b["line"].startswith("A chat said at "), f"a chat's Waiting, an old done mark without its day at a fitting time: {b}")
+            yesterday = (at6 - timedelta(days=1)).strftime("%Y-%m-%d")
+            self._f116_road(site, "WAITING", f"- Job 6 · done {mark} on {yesterday} · agreed 2026-11-01 09:00 · an old build", ago=60, step="your answer on the plan")
+            b = banner()
+            need(b["state"] == "WAITING" and b["line"].startswith("A chat said at "), f"a chat's Waiting, a job done yesterday at a fitting time: {b}")
+            self._f116_road(site, "WAITING", f"- Job 6 · done {mark} · agreed 2026-11-01 09:00 · an old build", ago=60, step="Job 6 · built, waiting for him to try it")
+            b = banner()
+            need(b["state"] == "WAITING" and b["line"].startswith("Job 6 said at "), f"a Waiting whose Now line names job 6: {b}")
+            seen.append("a job's Waiting only by its own Now line or a done mark of that day")
+            # The fourth check's 2: an old chat Waiting doesn't hide a held job or the routine off; it's named on a second line.
+            self._f116_road(site, "WAITING", "- Job 8 · held: usage over the line · agreed 2026-11-02 09:00 · a test job", ago=180, step="your answer")
+            b = banner()
+            need(b["state"] == "STOPPED" and "Job 8 held" in b["line"] and "and a chat said at " in b.get("also", "") and "3 hours ago" in b.get("also", ""),
+                 f"a held job under a chat's Waiting from 3 hours ago: {b}")
+            dom = await self._f116_dom(base)
+            need('data-state="STOPPED"' in dom and "And a chat said at " in dom, "the page doesn't draw the held job as stopped with the chat's Waiting under it")
+            self._f116_road(site, "WAITING", "", ago=180, step="your answer")
+            road = site_roadmap(site)
+            road.write_text(road.read_text(encoding="utf8").replace("**Routine:** on", "**Routine:** off"), encoding="utf8")
+            b = banner()
+            need(b["state"] == "STOPPED" and "routine is off" in b["line"] and "and a chat said at " in b.get("also", ""), f"the routine off under a chat's Waiting: {b}")
+            seen.append("a held job or the routine off comes before a Waiting")
+            # The fourth check's 3: a build that waits only for the night is said calmly, in yellow; the usage line stays red.
+            self._f116_road(site, "DONE", "- Job 8 · ready · agreed 2026-11-02 09:00 · a test build", ago=20, step="all done")
+            for gate in ("Job 8 waits for the usage line: no build starts between 8:00 and 22:00 without his say-so; it waits for the night, or jobs.py now 8",
+                         "Job 8 waits: no build starts between 8:00 and 22:00 without his say-so; it waits for the night"):
+                self._f116_lines(site, {"jobs": {"state": "waiting", "text": gate}})
+                b = banner()
+                need(b["state"] == "LATER" and b["line"].startswith("Job 8 waits for the night"), f"a build waiting for the night ({gate}): {b}")
+            dom = await self._f116_dom(base)
+            need('data-state="LATER"' in dom and "Waits for the night" in dom and 'data-state="STOPPED"' not in dom, "the page draws a build waiting for the night as a stop")
+            self._f116_lines(site, {"jobs": {"state": "waiting", "text": "Job 8 waits for the usage line: Weekly · all models is at 70%, its stop line is 55%"}})
+            b = banner()
+            need(b["state"] == "STOPPED", f"a build at the usage line isn't red any more: {b}")
+            self._f116_lines(site, {})
+            seen.append("a build waiting for the night calmly, the usage line red")
+            seen.append("a Waiting as written is trusted, saying who and when")
             self._f116_road(site, "WAITING", "")
             dom = await self._f116_dom(base)
-            need('data-state="WAITING"' not in dom and 'data-state="DONE"' not in dom and "nothing waiting for you is known here" in dom,
-                 "the page draws a hand-written waiting for you while nothing runs and nothing is his")
+            need('data-state="WAITING"' in dom and "A chat said on " in dom and 'data-state="DONE"' not in dom,
+                 "an old Waiting nothing newer replaced isn't drawn as written, with its day")
             self._f116_road(site, "WAITING", running)
             b = banner()
             need(b["state"] == "BUILDING" and "The status block said Waiting for you" in b["corrected"], f"a job runs, the block says waiting: {b}")
             seen.append("a running job is never waiting")
             self._f116_road(site, "WAITING", "")
             b = banner()
-            need(b["state"] != "WAITING", f"nothing runs and nothing is his, the block says waiting: shown as {b}")
-            dom = await self._f116_dom(base)
-            need('data-state="UNSURE"' in dom and "Not sure" in dom, "the page draws a hand-written waiting, or calls it Done")
-            seen.append("a hand-written waiting with nothing his isn't shown")
+            need(b["state"] == "WAITING" and not b["corrected"], f"nothing runs and nothing is his, the block says waiting: shown as {b}")
             self._f116_road(site, "BUILDING", boxed)
             b = banner()
             need(b["state"] == "WAITING" and "Job 9 is parked" in b["line"], f"a job parked on him, nothing running: {b}")
@@ -21396,7 +21466,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                 b = banner()
                 need(b["state"] == "UNSURE" and not b["fresh"], f"a day-only block with a log line later than now: {b}")
             seen.append("a time in the future isn't fresh")
-            # Done only when the block says Done or nothing fresh: a fresh waiting with nothing his is neither.
+            # Done only when the block says Done; a fresh waiting, as written.
             self._f116_road(site, "DONE", "", ago=5)
             b = banner()
             need(b["state"] == "DONE" and not b["corrected"], f"a fresh Done: {b}")
@@ -21405,7 +21475,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
             need(b["state"] == "DONE", f"a Done from five hours ago: still Done, nothing newer replaced it: {b}")
             self._f116_road(site, "WAITING", "", ago=5)
             b = banner()
-            need(b["state"] not in ("DONE", "WAITING"), f"a fresh waiting with nothing his: shown as {b['state']}")
+            need(b["state"] == "WAITING" and b["line"].startswith("A chat said at "), f"a fresh waiting with nothing his: shown as {b}")
             seen.append("Done only from a block that says Done")
         finally:
             self._f116_stop(proc)
