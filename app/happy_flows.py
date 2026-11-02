@@ -13243,8 +13243,8 @@ window.fetch = async (url, opt) => {
         need(mf.said(at(2026, 10, 16, 22), now) == "today at 22:00" and mf.said(at(2026, 10, 18, 22), now) == "Sunday 18 October at 22:00",
              "the end isn't said back in plain words")
         # the switch, on a copy of the roadmap
-        rm = self.tmp / "roadmap-H149.md"
-        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
+        rm = self.tmp / "roadmap-H149.md"  # F105: the copy starts with the mail check on, whatever the real one says now
+        rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on").replace("**Mail check:** off", "**Mail check:** on"))
         env = {**os.environ, "HQ_ROADMAP": str(rm)}
         def jobs(*a, ok=True):
             r = sp.run(["python3", str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env)
@@ -23903,6 +23903,131 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         self._hf_steps(one_waiting, several, number, words_to_her, a_no_never_opens, not_hers)
         return "his no closes it: by number, the only one, or his words to her; a later yes can't open it and it isn't asked again"
 
+    async def flow294(self) -> str:
+        """F105, no Claude: the whole chain, with stand-ins for the model. On a copy with its own remote and the routine's real tick: his text
+        on Pepper's line and her order; Moneypenny's session writes the row for that order; the review flags it and a round fills it; the mark;
+        his yes at the sprint planning; the job with a green record; QA by a job of its own; the night; the release, a tag on the stand-in remote.
+        Every hand-off is read from the record under one id and from what the record points at. And what stopped the real run: a quote on his
+        side of a text thread counts and an agent's line on it doesn't; a thread counts as a source; the page's note doesn't break a row's last
+        field; a row a call, a text or a run writes says so, and an order's id is its newest match; the stand-in night names its commit; a row that passes the first time gets its mark run; a Claude flow a row only mentions
+        stays out of the proof."""
+        import shutil as _sh
+        import subprocess as _sp
+        bad = []
+        def check(ok, what):
+            if not ok:
+                bad.append(what)
+        # his side of a thread, a thread as a source, the page's note
+        ws, env = self._h298_ws("f105")
+        (ws / "HQ/coaching-line").mkdir(exist_ok=True)
+        (ws / "HQ/coaching-line/thread.jsonl").write_text(
+            json.dumps({"at": 1, "from": "me", "text": "I want the empty card to say something softer"}) + "\n"
+            + json.dumps({"at": 2, "from": "agent", "text": "Pepper made this sentence up all by herself"}) + "\n")
+        rm = ws / "HQ/roadmap.md"
+        rows = ("| ⬜ | H9201 A softer card | What's asked: softer. His words: \"the empty card to say something softer\". My own additions: none. Sources: HQ/coaching-line/thread.jsonl. | | |\n"
+                "| ⬜ | H9202 An agent's line | His words: \"made this sentence up all by herself\". My own additions: none. Sources: rule 1. | | |\n"
+                "| ⬜ | H9203 The note | His words: \"the empty card to say something softer\". My own additions: none. Sources: rule 1.\" [Added on the status page, no call; the title is the first sentence.] | | |\n")
+        head = "## Phase H · Features\n\nWhat's new: things HQ should build or manage next.\n\n| | Step | What you get | Model |\n|---|---|---|---|\n"
+        rm.write_text(rm.read_text().replace(head, head + rows))
+        need("H9201" in rm.read_text(), "the made-up rows didn't go in")
+        env = {**env, "HQ_REVIEW": "0", "HQ_SPRINT": str(ws / "HQ/sprint.json")}
+        (ws / "rules.md").write_text("# Rules\n\n1. Talk like a person.\n")
+        tool = lambda name, *a, **kw: _sp.run([sys.executable, str(ROOT / "routine" / name), *a], capture_output=True, text=True, env={**env, **kw}, cwd=str(ROOT))  # noqa: E731
+        out = tool("sprint.py", "fields", "H9201", "H9202", "H9203", HQ_READY_FIELDS="1").stdout
+        check("H9201: the fields hold." in out, "his side of a text thread doesn't count, or a thread isn't a source")
+        check("H9202: the fields don't hold." in out, "an agent's line on a thread counts as his words")
+        check("H9203: the fields hold." in out, "the page's note breaks a row's last field")
+        # a row a run or a call writes
+        r = tool("jobs.py", "write-row", "A row from a run. Done means: it works. Sources: rule 1.", HQ_JOB="77", HQ_ROLE_HERE="1")
+        row = next((l for l in rm.read_text().splitlines() if "A row from a run" in l), "")
+        check(r.returncode == 0 and "(job 77," in row and "status page" not in row and "typed:" not in row, f"a run's row reads as his typing on the page: {row[:160]}")
+        r = tool("jobs.py", "write-row", "A row from a text. Done means: it works. Sources: rule 1.", HQ_JOB="", HQ_DIRECT_AGENT="pepper", HQ_ROLE_HERE="1")
+        row = next((l for l in rm.read_text().splitlines() if "A row from a text" in l), "")
+        check(r.returncode == 0 and "(in a text," in row, f"a row written while she answers a text doesn't say so: {row[:160]}")
+        r = tool("jobs.py", "write-row", "A row from a call. Done means: it works. Sources: rule 1.", HQ_JOB="", HQ_DIRECT_AGENT="", HQ_ROLE_HERE="1")
+        row = next((l for l in rm.read_text().splitlines() if "A row from a call" in l), "")
+        check(r.returncode == 0 and "(on a call," in row, f"a row written on a call doesn't say so: {row[:160]}")
+        # an order's number is its place in her list: after the list starts over, the newest order with that number is the one
+        code = ("import sys, json; sys.path.insert(0, %r)\nimport trail\nold = trail.order('moneypenny', 9301, 'an old request')\n"
+                "new = trail.order('moneypenny', 9301, 'a new request')\nprint(json.dumps([old, new, trail.of_order('moneypenny', 9301)]))") % str(ROOT / "routine")
+        r = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, env={**env, "HQ_TRAIL": str(ws / "HQ/f105-trail.jsonl")})
+        try:
+            old_id, new_id, got_id = json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            old_id = new_id = got_id = None
+        check(new_id and old_id != new_id and got_id == new_id, f"a reset list hands a new row an old request's id: {(r.stdout + r.stderr)[-200:]}")
+        before = rm.read_text()
+        r = tool("jobs.py", "write-row", "--help", HQ_ROLE_HERE="1")
+        check(r.returncode != 0 and rm.read_text() == before, "write-row --help became a row")
+        # a row that passes the first time gets its mark run
+        rm2, env2 = self._sprint_env("F105")
+        env2.update({"HQ_ROLE_HERE": "1", "HQ_REVIEW_FAKE": "auto", "HQ_LOOK": "0"})
+        code = ("import sys, json, time; sys.path.insert(0, %r)\nimport review as R, sprint as S\nrows = S.open_rows()\nr = next(x for x in rows if x['label'] == 'H9001')\n"
+                "d = {'review': {'fix_since': int(time.time()) - 900, 'since': 1, 'rows': {'H9001': {'ask': S.ask_fp(r['line']), 'seen': S.ask_fp(r['line']), 'seen_at': 1, 'verdict': 'pass', 'at': int(time.time()) - 600}}}}\n"
+                "json.dump(d, open(S.RANKS, 'w'))\nprint(json.dumps(R.next_round()))") % str(ROOT / "routine")
+        r = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, env=env2)
+        check('"mark"' in r.stdout, f"a row that passed the first time gets no mark run: {(r.stdout + r.stderr)[-200:]}")
+        # a Claude flow a row only mentions stays out of the proof
+        pw, penv, repo, _ = self._proof_env("f105p")
+        seen = self.tmp / "f105-proof-args"
+        run_ = self.tmp / "f105-runner"
+        run_.write_text(f"#!/usr/bin/env python3\nimport sys\nopen({str(seen)!r}, 'a').write(' '.join(sys.argv[1:]) + chr(10))\nprint('== Result')\nprint('1 of 1 passed')\n")
+        run_.chmod(0o755)
+        penv = {**penv, "HQ_PROOF_RUNNER": str(run_)}
+        pt = lambda name, *a: _sp.run([sys.executable, str(ROOT / "routine" / name), *a], capture_output=True, text=True, env=penv, cwd=str(ROOT))  # noqa: E731
+        r = pt("jobs.py", "add", "Fix for F9501 (F56): a wording. Checks in the style of flow 4 stay.", "--kind", "small")
+        n = (re.search(r"Job (\d+) is ready", r.stdout) or [0, ""])[1]
+        need(n, f"no job: {r.stdout} {r.stderr}")
+        pt("jobs.py", "mark", n, "running since 10:00")
+        pt("proof.py", "run", n)
+        first = (seen.read_text().splitlines() or [""])[0] if seen.exists() else ""
+        check("--only 4" in first and "--quick" in first, f"the proof ran a Claude flow a row only mentions: {first}")
+        # the chain itself
+        sys.path.insert(0, str(ROOT / "routine"))
+        import hqpaths
+        if not hqpaths.IS_LINUX:
+            if bad:
+                raise Failed("; ".join(bad))
+            return "the chain's own run is on Linux; the checks around it pass"
+        root = Path(os.path.expanduser("~")) / f"hqflow294-{os.getpid()}"
+        keep = {k: os.environ.get(k) for k in ("HQ_CHAIN_NAME",)}
+        try:
+            r = await asyncio.to_thread(_sp.run, [sys.executable, str(ROOT / "routine/chainrun.py"), "standin", str(root)], capture_output=True, text=True, timeout=330)
+            try:
+                got = json.loads(r.stdout.strip().splitlines()[-1])
+            except (ValueError, IndexError):
+                got = {"label": None, "missing": [f"the run ended: {(r.stdout + r.stderr)[-400:]}"], "stopped": ""}
+            check(not got["missing"], f"the chain stopped at {got.get('stopped')}: {'; '.join(got['missing'])}")
+            # the stand-in night names the commit it stands in for, a whole night at it, as the real night does (F112)
+            try:
+                rec = json.loads((root / "HQ/scratch/nightly/last.json").read_text())
+            except (OSError, ValueError):
+                rec = {}
+            c = str(rec.get("commit") or "")
+            known = bool(c) and _sp.run(["git", "-C", str(root / "HQ"), "cat-file", "-e", c + "^{commit}"], capture_output=True).returncode == 0
+            check(known and rec.get("standin") and int(rec.get("ran") or 0) > 1 and rec.get("ran") == rec.get("passed"),
+                  f"the stand-in night doesn't name a commit of the copy with a whole night at it: {json.dumps(rec)[:200]}")
+        finally:
+            _sp.run([sys.executable, str(ROOT / "routine/chainrun.py"), "clean", str(root), "7843", "4743"], capture_output=True, text=True)
+        if bad:
+            raise Failed("; ".join(bad))
+        return f"{got['label']}: {got['stopped']}"
+
+    async def flow295(self) -> str:
+        """F105, the real run, by hand, a few points of the week: --only 295 with HQ_CHAIN_WORKSPACE naming the workspace to copy. One small
+        request on a copy with the real model and the routine's real tick every minute; the clock and his two yeses are the driver's, said as it goes."""
+        import subprocess as _sp
+        src = os.environ.get("HQ_CHAIN_WORKSPACE")
+        if not src:
+            return "skipped: set HQ_CHAIN_WORKSPACE to run it"
+        root = Path(os.path.expanduser("~")) / f"hqchain-{os.getpid()}"
+        try:
+            r = await asyncio.to_thread(_sp.run, [sys.executable, str(ROOT / "routine/chainrun.py"), "real", str(root), "--workspace", src], text=True, timeout=14400)
+            need(r.returncode == 0, "the chain stopped; its lines say where")
+        finally:
+            _sp.run([sys.executable, str(ROOT / "routine/chainrun.py"), "clean", str(root)], capture_output=True, text=True)
+        return "every hand-off holds"
+
     async def flow293(self) -> str:
         """Her "which one do you mean" after a bare yes goes out the way a held question does: past the day's cap, once, never kept for Friday. An answered question doesn't go out in a batch: not the held one, not her which one, not one he answered while he slept."""
         lunch = {"summary": "Lunch with Alice", "startTime": "2026-11-07T12:00:00", "endTime": "2026-11-07T13:00:00", "attendees": [{"email": "alice@example.com"}]}
@@ -33426,6 +33551,8 @@ FLOWS = {
     303: ("F111: the wall's four holes: PYTHONPATH of a flow's own keeps the hook, a maker and phones in a setting reach nothing, a claude by its own path is refused or counted", False, "flow303"),
     301: ("F111: on a connected HQ the flows named on the night of 2 November reach no text, no maker and no model, and the run's counts are true", False, "flow301"),
     292: ("His no closes a held change, by number, the only one, or his loose words to her: a later yes can't open it, it isn't asked again, nobody gets anything", False, "flow292"),
+    294: ("The whole chain with stand-ins: his text, Pepper, Moneypenny, the review, the mark, the plan, the job, QA, the night and the release, each read from its record under one id", False, "flow294"),
+    295: ("The whole chain for real on a copy, by hand", True, "flow295"),
     293: ("Her which one goes out past the day's cap, once, never kept for Friday; an answered question doesn't go out in a batch", False, "flow293"),
     291: ("The two branches where they meet: a round through the same runner and hook as a cycle, a cycle's writes in the round's journal, the five minutes, the agents off", False, "flow291"),
     284: ("H298, third fix round, 1 and 4: his yes really happens, as held: his words, one tool by flag, added only after it worked, on the calendar it was held for", False, "flow284"),
@@ -33731,7 +33858,7 @@ FLOWS = {
 # history, which grows every day (217 s on 23 October, 360 s on 27 October), and checks all of it: it gets
 # twenty minutes instead of checking less. Its time is in the summary, next to its limit, so a climb shows.
 FLOW_LIMIT = 360
-FLOW_LIMITS = {44: 1200, 300: 600, 301: 900, 302: 600, 303: 600}
+FLOW_LIMITS = {44: 1200, 294: 420, 295: 14500, 300: 600, 301: 900, 302: 600, 303: 600}
 
 
 def limit_of(n: int) -> int:

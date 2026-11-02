@@ -861,6 +861,8 @@ def prompt(job: dict, parsed: dict, base: Path | None = None, now: dt.datetime |
         if orders:
             parts.append("His orders waiting for you (take each up in this plan, or say in your ledger why not):\n" +
                          "\n".join(f"{o['n']}. {o['kind']}: \"{o['words']}\" ({o['at']})" + (f" [{o['note']}]" if o.get("note") else "") for o in orders))
+            if aid == FIX_AGENT:  # F105: the order's id goes on with the row
+                parts.append(f"A row you write for one of them: python3 \"{ROOT / 'routine' / 'jobs.py'}\" write-row --order N \"THE ROW\", N its number: his request's record goes on under the row.")
         sc = ledger.scores(aid)
         if sc:
             parts.append("Your newest score (computed by HQ, not by you):\n" + "\n".join(f"- {k}: {v}" for k, v in sc[-1][1].items() if k != "week"))
@@ -1044,6 +1046,8 @@ def _step_words(aid: str, parsed: dict, spec: dict, base: Path) -> str:
            "Its inputs, as they are now (checked against the plan before this run started; nothing else is loaded):"]
     for inp in spec.get("inputs") or []:
         out.append(f"\n[{inp.get('kind')} {inp.get('label') or inp.get('words') or inp.get('path') or ''}]\n{resolve(inp, base)}")
+    if spec.get("order") and aid == FIX_AGENT:  # F105
+        out.append(f"\nA row you write for this: python3 \"{ROOT / 'routine' / 'jobs.py'}\" write-row --order {spec['order']} \"THE ROW\": his request's record goes on under the row.")
     out.append(f"\nA small step makes no new steps and plans nothing. End with python3 \"{cy}\" done {aid} {parsed['k']} \"what came of it\" "
                f"(or python3 \"{cy}\" stale {aid} {parsed['k']} \"why\" when there's nothing left to do, python3 \"{cy}\" failed {aid} {parsed['k']} \"why\" when the check failed, or an ask when it's outside your limits).")
     return "\n".join(out)
@@ -1783,6 +1787,9 @@ def order(aid: str, kind: str, words: str, now_: bool = False, now: dt.datetime 
     if _this_run():
         raise ValueError("orders are his, from a call or a text; a run of hers doesn't give itself one")
     o = ledger.add_order(aid, kind, words, now_, now)
+    if kind == "start":  # F105: a request gets its one id at the hand-off, so everything after it is on one record
+        import trail
+        trail.order(aid, o["n"], words, by=os.environ.get("HQ_DIRECT_AGENT") or "")
     if kind == "stop":
         return _stop_order(aid, o, now, base)
     if kind == "standing":
@@ -2190,6 +2197,8 @@ def _order_step(aid: str, o: dict, now: dt.datetime, base: Path | None, goal: st
         while f"{aid}|{stamp}|{k}" in st_["steps"]:
             k = max(k, 99) + 1
         spec = {"goal": label, "done_means": "what he asked for is done, or put to him as a question", "inputs": [], "may": "one look or one action inside your limits", "at": now.strftime("%H:%M")}
+        if not (stop or answer or yes):
+            spec["order"] = o["n"]  # F105
         if stop:
             spec["words"] = o["words"]
         if answer:
