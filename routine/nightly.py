@@ -33,6 +33,10 @@ times." So: round 1 is the full run; green ends the night's testing. Not green: 
 ROUNDS full runs. last.json holds the latest round and every round of tonight, so the release (release.py) reads
 whether the night ended green, and after which round.
 
+F112 (2 November 2026): the routine starts the night itself, once, with the team off too (tick.nightly_minute); a run writes the commit it ran on and
+any change that wasn't committed, whole_set says how many flows a whole night is at that commit, and the release counts a green night only for that
+commit and its free files (release.night_tied). One run at a time (running): a second start is left out, and no job starts beside it.
+
 The tutorial stays right (H227, 22 October 2026). The user on the call at 12:13: "If we keep adding features and
 changing things, then the tutorial still needs to work the same." and "Yeah, every night is fine. It doesn't need to
 skip it. ... Just included. Every night is good." Two parts, every night, no skipping: happy flow 134 (in both sets)
@@ -171,7 +175,7 @@ RUNNING = os.path.join(OUT, "running.json")  # F112: which run is going right no
 
 def running() -> dict | None:
     """F112: the night's run that's going right now, on this HQ: {"pid", "at"}, or None. A run inside a test isn't one: it's the night's own flows."""
-    if hqpaths.under_test():
+    if hqpaths.under_test() and not os.environ.get("HQ_NIGHT_MINUTE"):
         return None
     try:
         d = json.load(open(RUNNING, encoding="utf8"))

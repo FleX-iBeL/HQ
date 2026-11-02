@@ -1752,6 +1752,11 @@ def tick():
         schedule_line()
     except Exception as e:
         log(f"schedule line: {e!r}")
+    if not handing_back and not updating() and not gone_back():
+        try:
+            night_step(q)  # F112: no window, no team and no job in it; before all three
+        except Exception as e:
+            log(f"nightly: {e!r}")
     if not hqpaths.window_kind():
         # H56.1: off a Mac without tmux (H56.2) or the user's own local/open-window, there's no window for a
         # job or the mail check; both wait here, shown as off, and nothing is started.
@@ -1770,11 +1775,6 @@ def tick():
     if gone_back():  # F104: the mail check goes on, the team waits
         routines.beat("jobs", state="waiting", text="HQ went back a version: the team waits until it goes forward", every=60)
         return
-    if not handing_back:
-        try:
-            night_step(q)
-        except Exception as e:
-            log(f"nightly: {e!r}")
     try:
         mailguard.minute(q.get("mail", True), incidents, routines)  # F102: red when it hasn't been checked for 2 hours
     except Exception as e:

@@ -4,6 +4,14 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- A release can really go out, and its gate tells the truth: it looks at what each commit brings, so a merge of finished work goes along; the night's test run starts by itself, also with the team off, and says which commit it ran on, and a release of anything newer is refused unless only tests changed. Running a release twice on the same commit does nothing the second time and says so.
+
+- Going back one version from here to 0.4.19 works, here and on the other computer. 0.4.19 has no Forward button of its own, so going back says so, and the update bar brings you forward again, the same way you came.
+
+- A first install on Linux finishes: its last step runs the tests that fit a first install, its time fits them, and if it runs out of time it tells you what to do on Linux, not on a Mac.
+
+- The privacy check only reads what's new in the history, so a release doesn't wait minutes for it.
+
 - The agents running themselves, safer in the ways that count (still off for everyone but the maker): a restart or a takeover never turns an agent's run into a team job, a held run isn't started over, every run counts against her share however it ended, and nothing of theirs starts or runs into the night. Near the limit they stop first, five points under the team.
 
 - What an agent can do by herself is by tool and target now: nothing goes out, nothing of yours is written over, your vision, your rules and her own settings are read-only, and each agent can do her own job: Donna keeps your own calendars, each change logged in plain words with what it was before, and writes drafts. An event with guests, on someone else's calendar or a whole series she asks about first, by number and title; your yes does exactly that one, on the calendar it was for, and your no closes it for good. Mail stays drafts; one switch can open that later.

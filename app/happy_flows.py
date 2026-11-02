@@ -20239,6 +20239,567 @@ print(json.dumps(qa.hold(sys.argv[2], 'main', 'dev', open(sys.argv[3], encoding=
         need(h["to"], f"what came before it should still go: {h}")
         return "a red or missing night refuses the release with the night named, only his own words go past it; a commit naming no item holds it, tests and the version don't"
 
+    F112_FLOWS = (
+        'import sys\nFLOWS = {\n    1: ("a", False, "flow1"),\n    2: ("b", False, "flow2"),\n    3: ("c", False, "flow3"),\n    4: ("d", False, "flow4"),\n'
+        '    5: ("e", True, "flow5"),\n}\nprint("== Result")\nprint("4 of 4 passed")\n')
+    F112_DRIVER = """
+import sys, json, os, datetime as dt
+sys.path.insert(0, sys.argv[1] + '/routine')
+from pathlib import Path
+import push, qa, nightly, release as R
+R.ROOT = Path(sys.argv[2]); push.ROOT = R.ROOT
+R.is_main = lambda: True
+nightly.RUNNING = sys.argv[3]
+qa.BEFORE_GATE = json.loads(os.environ.get('F112_LIST') or '{}')
+told, pushes = [], []
+qa.tell = lambda *a, **k: told.append(a)
+real = R.to_nightly
+R.to_nightly = lambda: (pushes.append(1), real())[1]
+cmd = sys.argv[4]
+if cmd == 'main':
+    print('EXIT', R.cmd_main(want=sys.argv[5] if len(sys.argv) > 5 else None))
+elif cmd == 'nightly':
+    print('EXIT', R.cmd_nightly('a test'))
+elif cmd == 'status':
+    print(R.words(R.status()))
+    print('EXIT', 0)
+elif cmd == 'hold':
+    print('HOLD', json.dumps(qa.hold(str(R.ROOT), 'main', sys.argv[5])))
+    print('WORDS', qa.hold_words(qa.hold(str(R.ROOT), 'main', sys.argv[5])))
+print('COUNTS', json.dumps({'told': len(told), 'pushes': len(pushes)}))
+"""
+
+    def _f112_hq(self, name: str, shipped=(), rows: str = "", old_update: str = "def forward():\n    pass\n"):
+        """F112: a throwaway HQ on a throwaway GitHub (a bare repo), at version 1.0.0 on main and dev, its own rows on a throwaway planning, a whole
+        night of four flows, and rel(cmd, ...): release.py's gates for real, with what was pushed and texted counted. The list of rows from before the
+        gate is the test's own (F112_LIST)."""
+        import subprocess as _sp
+        ws, env = self._h298_ws(f"f112{name}")
+        tmp = self.tmp / f"f112{name}"
+        tmp.mkdir()
+        hub, hq = tmp / "hub.git", tmp / "hq"
+        _sp.run(["git", "init", "-q", "--bare", "-b", "dev", str(hub)], check=True)
+        _sp.run(["git", "clone", "-q", str(hub), str(hq)], check=True, capture_output=True)
+        g = lambda *a: _sp.run(["git", "-C", str(hq), *a], capture_output=True, text=True, check=True).stdout.strip()
+        g("checkout", "-q", "-b", "dev")
+        g("config", "user.name", "T"); g("config", "user.email", "t@example.com")
+        for d in ("app", "routine"):
+            (hq / d).mkdir()
+        (hq / "app/privacy.py").write_text("print('Nothing personal found.')\n")
+        (hq / "app/happy_flows.py").write_text(self.F112_FLOWS)
+        (hq / "routine/flowsets.py").write_text('MAC_ONLY = ""\n')
+        (hq / "routine/update.py").write_text(old_update)
+        (hq / ".gitignore").write_text("scratch/\n.status/\n")
+        (hq / "CHANGELOG.md").write_text("# Changelog\n\n## Coming next\n\n## 1.0.0 · 1 October 2026\n\n- old\n")
+        (hq / "VERSION").write_text("1.0.0\n")
+        (hq / "README.md").write_text("# HQ\n\nHQ is at version **1.0.0** (what's new).\n")
+        g("add", "."); g("commit", "-q", "-m", "HQ 1.0.0")
+        for l in shipped:
+            (hq / f"{l}.py").write_text("x = 1\n")
+            g("add", "."); g("commit", "-q", "-m", f"{l}: the first part")
+        g("tag", "-a", "v1.0.0", "-m", "HQ 1.0.0")
+        g("branch", "main"); g("push", "-q", "origin", "dev", "main", "--tags")
+        road = ws / "HQ/roadmap.md"
+        road.write_text(road.read_text() + "\n## Phase F · Bugs\n\n" + rows)
+        drv = tmp / "drv.py"
+        drv.write_text(self.F112_DRIVER)
+        running = tmp / "running.json"
+        env.update({"HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes", "HQ_MAKER": "1"})
+
+        def rel(*a, env_more=None):
+            r = _sp.run([sys.executable, str(drv), str(ROOT), str(hq), str(running), *a], capture_output=True, text=True, env={**env, **(env_more or {})}, cwd=str(ROOT), timeout=120)
+            need("COUNTS" in r.stdout, lambda: f"release {a}: {r.stdout[-600:]} {r.stderr[-900:]}")
+            n = json.loads(r.stdout.rsplit("COUNTS", 1)[1])
+            return r.stdout, int(r.stdout.rsplit("EXIT", 1)[1].split()[0]) if "EXIT" in r.stdout else None, n
+
+        def work(label, name, path=None):
+            f = hq / (path or f"{name}.py")
+            f.parent.mkdir(exist_ok=True)
+            f.write_text(f"{name} = 1\n")
+            log = (hq / "CHANGELOG.md").read_text()
+            (hq / "CHANGELOG.md").write_text(log.replace("## Coming next\n", f"## Coming next\n\n- {name}.\n", 1))
+            g("add", "."); g("commit", "-q", "-m", f"{label}: {name}" if label else name)
+            return g("rev-parse", "HEAD")
+
+        def night(**k):
+            (hq / "scratch/nightly").mkdir(parents=True, exist_ok=True)
+            d = {"at": datetime.now().strftime("%Y-%m-%d 02:00"), "ran": 4, "passed": 4, "failed": [], "exit": 0, "commit": g("rev-parse", "HEAD")}
+            d.update(k)
+            (hq / "scratch/nightly/last.json").write_text(json.dumps(d))
+
+        remote = lambda ref: _sp.run(["git", "-C", str(hub), "rev-parse", "-q", "--verify", ref], text=True, capture_output=True).stdout.strip()
+        return {"ws": ws, "env": env, "hq": hq, "hub": hub, "g": g, "rel": rel, "work": work, "night": night, "remote": remote, "road": road, "running": running}
+
+    async def flow330(self) -> str:
+        """F112, no Claude: the hold looks at what each commit brings. A merge passes when what it brought passed and is held by what it brought that
+        didn't; a commit that names nothing and only touches the free files passes; a version merged back brings nothing. The list of rows from before
+        the gate: a row out in a version doesn't hold and is said, one in no version is named held with its why, and the list can't wave through a
+        row the tag doesn't hold. status says what would go and what's held. The real list says F66 is held and its tags are true."""
+        import subprocess as _sp
+        passed = lambda l: f"| ✅ | {l} A row | What's wrong. | QA passed (job 5, 30 October 2026 10:00): tried it. | |\n"
+        open_ = lambda l: f"| ⬜ | {l} A row | What's wrong. | | |\n"
+        rows = "".join(passed(l) for l in ("F9802", "F9803")) + "".join(open_(l) for l in ("F9801", "F9804", "F9805", "F9806", "F9807"))
+        h = self._f112_hq("g", shipped=("F9801",), rows=rows)
+        hq, g, work = h["hq"], h["g"], h["work"]
+        lst = json.dumps({"F9801": ["v1.0.0", "out since 1.0.0, one later fix"], "F9806": [None, "in no version: its QA is real work"], "F9807": ["v1.0.0", "says it went out"]})
+        h["env"]["F112_LIST"] = lst
+        def hold(tip):
+            out, _, _ = h["rel"]("hold", tip)
+            return json.loads(out.split("HOLD ", 1)[1].splitlines()[0]), out.split("WORDS ", 1)[1].splitlines()[0]
+        work("F9802", "two")
+        g("checkout", "-q", "-b", "side", "main")
+        work("F9803", "three")
+        g("checkout", "-q", "dev")
+        g("merge", "-q", "--no-ff", "-m", "Merge the side branch", "-X", "ours", "side")
+        work("", "Nightly: a test made stable", "app/happy_flows.py")
+        work("F9801", "one again")
+        o, w = hold("dev")
+        need(o["all"] and not o["held"], f"a merge of passed work, or a tests commit, or a row out in a version holds: {o}")
+        need("F9803" in o["taken"], f"what the merge brought isn't counted: {o}")
+        need([x["label"] for x in o["before_gate"]] == ["F9801"] and o["before_gate"][0]["goes"] and "F9801" in w and "before the gate" in w, f"it isn't said: {o} {w}")
+        # a version merged back into dev brings nothing new
+        g("checkout", "-q", "main")
+        (hq / "VERSION").write_text("1.0.1\n")
+        g("commit", "-q", "-am", "HQ 1.0.1")
+        g("checkout", "-q", "dev")
+        g("merge", "-q", "--no-ff", "--no-commit", "-s", "ours", "main")
+        (hq / "VERSION").write_text("1.0.1\n")
+        g("add", "VERSION"); g("commit", "-q", "-m", "HQ 1.0.1 back into dev")
+        o, w = hold("dev")
+        need(o["all"], f"a version merged back holds: {o}")
+        go_to = g("rev-parse", "dev")
+        # a merge that brings a row without QA, and one that brings a commit naming nothing
+        g("checkout", "-q", "-b", "bad", "main")
+        work("F9804", "four")
+        g("checkout", "-q", "-b", "t1", "dev")
+        g("merge", "-q", "--no-ff", "-m", "Join the other branch", "-X", "ours", "bad")
+        o, w = hold("t1")
+        need(not o["all"] and o["to"] == go_to and [x["label"] for x in o["held"]] == ["F9804"] and "no QA" in o["held"][0]["why"], f"a merge of unpassed work: {o}")
+        need("F9804" in w and "Merge" not in w and "Join" not in w, f"the row isn't what's named: {w}")
+        g("checkout", "-q", "-b", "nameless", "main")
+        last = work("", "a quiet change")
+        g("checkout", "-q", "-b", "t2", "dev")
+        g("merge", "-q", "--no-ff", "-m", "Join it", "-X", "ours", "nameless")
+        o, w = hold("t2")
+        need(not o["all"] and o["held"][0]["label"] == last[:7] and "names no item" in o["held"][0]["why"], f"a merge bringing a commit naming nothing: {o}")
+        # in no version: named held with its why, what's behind it says so, nothing goes
+        g("checkout", "-q", "-b", "t3", "main")
+        work("F9806", "six")
+        work("F9802", "two more")
+        o, w = hold("t3")
+        need(o["to"] is None and o["held"] == [{"label": "F9806", "why": "in no version: its QA is real work"}] and o["behind"] == ["F9802"], f"a row in no version: {o}")
+        need("Nothing goes out" in w and "F9806" in w and "real work" in w and "F9802" in w, f"the words: {w}")
+        # a line can't wave a row through: the tag has to hold it
+        g("checkout", "-q", "-b", "t4", "main")
+        work("F9807", "seven")
+        o, w = hold("t4")
+        need(not o["all"] and "no commit of it stands there" in o["held"][0]["why"], f"the list waved it through: {o}")
+        # status says it all
+        g("checkout", "-q", "dev")
+        g("checkout", "-q", "-B", "dev", "t3")
+        out, _, _ = h["rel"]("status")
+        need("F9806" in out and "held" in out and "F9802" in out, f"status: {out[-500:]}")
+        # the real list
+        sys.path.insert(0, str(ROOT / "routine"))
+        import qa as _qa
+        need(_qa.BEFORE_GATE.get("F66", ("x",))[0] is None and _qa.BEFORE_GATE["F66"][1], f"F66 has no answer: {_qa.BEFORE_GATE.get('F66')}")
+        for label, (tag, why) in _qa.BEFORE_GATE.items():
+            need(why.strip(), f"{label} has no why")
+            known = _sp.run(["git", "-C", str(ROOT), "rev-parse", "-q", "--verify", f"refs/tags/{tag}"], capture_output=True).returncode == 0 if tag else False
+            need(not known or _qa.in_version(str(ROOT), label, tag), f"{label} isn't in {tag}")
+        return "a merge passes on what it brought and is held by what it brought, a version merged back passes, a row out in a version is said, F66 is named held, the list can't wave one through"
+
+    async def flow331(self) -> str:
+        """F112, no Claude: a release on a copy to a bare repo, each refusal and the happy path. The night counts for the commit it ran on: no night, a
+        red one, one flow, no commit, changes not committed, a newer commit of HQ, a run still going: refused, nothing pushed. A newer commit of only
+        the free files goes. A second run on the same commit does nothing and says so, also when it held; status changes nothing. A named version goes
+        out as that version, an older one is refused, and the version after one with no forward writes it down."""
+        passed = lambda l: f"| ✅ | {l} A row | What's wrong. | QA passed (job 5, 30 October 2026 10:00): tried it. | |\n"
+        h = self._f112_hq("n", rows=passed("F9811") + "| ⬜ | F9812 A row | What's wrong. | | |\n", old_update="x = 1\n")
+        hq, g, work, night, rel, remote = h["hq"], h["g"], h["work"], h["night"], h["rel"], h["remote"]
+        (hq / "routine/update.py").write_text("def forward():\n    pass\n")
+        g("add", "."); g("commit", "-q", "-m", "F9811: a way forward")
+        first = work("F9811", "a")
+        second = work("F9811", "b", "routine/wall.py")
+        main0 = remote("refs/heads/main")
+        def refused(what, *words, **k):
+            out, code, n = rel("main", **k)
+            need(code == 2 and all(w in out for w in words), f"{what}: {code} {out[-500:]}")
+            need(n["pushes"] == 0 and remote("refs/heads/main") == main0 and not remote("refs/tags/v1.0.1"), f"{what}: something went out: {n} {out[-300:]}")
+        refused("no night", "no test run tonight")
+        night(ran=4, passed=3, failed=["3: FAILED - a test"])
+        refused("a red night", "was red", "3: FAILED")
+        night(at="2020-01-01 02:00")
+        refused("an old night", "no test run tonight")
+        night(ran=1, passed=1)
+        refused("one flow", "ran 1 flows", "isn't a night")
+        night(commit=None)
+        refused("no commit", "names no commit")
+        night(dirty=["routine/tick.py"])
+        refused("uncommitted changes", "weren't committed", "routine/tick.py")
+        night(commit=first)
+        refused("a commit after the night's run", "this is newer", "routine/wall.py", first[:7])
+        night()
+        h["running"].write_text(json.dumps({"pid": os.getpid(), "at": "x 02:00"}))
+        refused("a run still going", "still going", env_more={"HQ_NIGHT_MINUTE": "1"})
+        h["running"].unlink()
+        out, _, _ = rel("status")
+        night(commit=first)
+        out, _, _ = rel("status")
+        need("Suggestion: hesitate" in out and "The release would refuse" in out and "this is newer" in out, f"status doesn't say what the gate says: {out[-500:]}")
+        # the happy path, with a test fixed after the night
+        night()
+        work("", "Nightly: a test made stable", "app/happy_flows.py")
+        (hq / "app/happy_flows.py").write_text(self.F112_FLOWS)
+        g("add", "."); g("commit", "-q", "-m", "Nightly: the flows back")
+        out, code, n = rel("main")
+        need(code == 0 and "Released 1.0.1" in out and n["pushes"] == 1, f"the release: {code} {out[-500:]}")
+        tip = g("rev-parse", "dev")
+        need(remote("refs/heads/main") == tip == remote("refs/heads/dev") == remote("refs/heads/nightly") and remote("refs/tags/v1.0.1"), "the release isn't on the bare repo")
+        need(json.loads(g("show", "v1.0.1:routine/way-back.json")) == {"v1.0.0": "the update bar"}, "the release after a version with no forward doesn't write it down")
+        # again on the same commit: nothing, and it says so
+        out, code, n = rel("main")
+        need(code == 0 and "Nothing to do" in out and n == {"told": 0, "pushes": 0}, f"a second run: {code} {out[-400:]}")
+        need(g("rev-parse", "dev") == tip and remote("refs/heads/main") == tip and not remote("refs/tags/v1.0.2"), "a second run moved something")
+        before = sorted((str(p), p.read_bytes()) for p in hq.rglob("*") if p.is_file() and ".git/" not in str(p))
+        rel("status"); rel("status")
+        need(sorted((str(p), p.read_bytes()) for p in hq.rglob("*") if p.is_file() and ".git/" not in str(p)) == before and g("rev-parse", "dev") == tip, "status changed something")
+        out, code, n = rel("nightly")
+        need(code == 0 and "already on nightly" in out and n["pushes"] == 0, f"nightly again: {out[-300:]}")
+        # held: told once, the second run stays quiet
+        work("F9812", "c")
+        night()
+        out, code, n = rel("main")
+        need(code == 0 and "No release" in out and n == {"told": 1, "pushes": 1} and "F9812" in out, f"a held release: {code} {n} {out[-400:]}")
+        out, code, n = rel("main")
+        need(code == 0 and "Nothing to do" in out and n == {"told": 0, "pushes": 0}, f"a held release, again: {code} {n} {out[-400:]}")
+        # it passes QA: the same commit goes, as a version he named
+        h["road"].write_text(h["road"].read_text().replace("| ⬜ | F9812 A row | What's wrong. | | |", passed("F9812").strip()))
+        out, code, n = rel("main", "0.1.0")
+        need(code == 2 and "isn't newer" in out and n["pushes"] == 0, f"an older version: {out[-300:]}")
+        out, code, n = rel("main", "1.0")
+        need(code == 2 and "isn't a version" in out, f"half a version: {out[-300:]}")
+        out, code, n = rel("main", "2.0.0")
+        need(code == 0 and "Released 2.0.0" in out and remote("refs/tags/v2.0.0") and (hq / "VERSION").read_text().strip() == "2.0.0" and "**2.0.0**" in (hq / "README.md").read_text(), f"version 2.0.0: {code} {out[-400:]}")
+        return "no night, a red one, one flow, no commit, uncommitted changes, a newer commit and a run still going are refused with nothing pushed; a newer test fix goes; a second run does nothing and says so; status changes nothing; 2.0.0 by name"
+
+    async def flow332(self) -> str:
+        """F112, no Claude: the night is the routine's, whatever the team's switch says and also with a job running: tick reaches it. Once in the window, a
+        run going is left alone, a finished one (green or red) is done, a dead one starts once more, a second death is told once, a job keeps it waiting
+        until five, a friend's HQ and a flow's copy don't start it, and a job doesn't start beside it. A run writes the commit it ran on."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f112tick")
+        h = self._f112_hq("t")
+        night_run = self.tmp / "f112t-run"
+        night_run.mkdir()
+        e = {**env, "HQ_JOB_RUN": str(night_run), "HQ_MAKER": "1"}
+        out = night_run / "out"
+        code = """
+import sys, os, json, time, subprocess, signal
+sys.path.insert(0, sys.argv[1] + '/routine')
+import tick, nightly
+dead = subprocess.Popen(['true']); dead.wait()
+pids = {'next': os.getpid()}
+started, told, bad = [], [], []
+class P:
+    def __init__(s): s.pid = pids['next']
+tick.subprocess = type('S', (), {'Popen': staticmethod(lambda *a, **k: started.append(a[0]) or P()), 'DEVNULL': -3, 'STDOUT': -2})
+tick.log = lambda m: None
+rec = {'r': None}
+go = {'r': None}
+nightly.last = lambda: rec['r']
+nightly.running = lambda: go['r']
+nightly.morning = lambda t: told.append(t)
+tick.routines.bad = lambda *a, **k: bad.append(a)
+at = lambda d, h, m: time.struct_time((2026, 10, d, h, m, 0, 5, 300, 0))
+o = {}
+tick.nightly_minute(at(1, 1, 59)); o['before'] = len(started)
+tick.nightly_minute(at(1, 6, 0)); o['after'] = len(started)
+tick.nightly_minute(at(1, 2, 0), busy=True); tick.nightly_minute(at(1, 4, 59), busy=True); o['busy'] = len(started)
+go['r'] = {'pid': 1}
+tick.nightly_minute(at(1, 2, 0)); o['going'] = len(started)
+go['r'] = None
+tick.nightly_minute(at(1, 5, 0), busy=True); o['late'] = len(started)
+tick.nightly_minute(at(1, 5, 1)); o['once'] = len(started)
+pids['next'] = dead.pid
+tick.nightly_minute(at(2, 2, 0)); a = len(started)
+rec['r'] = {'at': '2026-10-02 02:00', 'failed': ['1: FAILED - x']}
+tick.nightly_minute(at(2, 2, 1)); o['red_is_done'] = len(started) - a
+rec['r'] = {'at': '2026-10-01 05:00'}
+a = len(started)
+tick.nightly_minute(at(3, 2, 0)); tick.nightly_minute(at(3, 2, 1)); o['died_once'] = len(started) - a
+a = len(started)
+tick.nightly_minute(at(3, 2, 2)); tick.nightly_minute(at(3, 2, 3)); tick.nightly_minute(at(3, 2, 4)); o['died_twice'] = len(started) - a
+o['told'] = len(told); o['bad'] = len(bad); o['words'] = told[-1] if told else ''
+a = len(started)
+tick.nightly_minute(at(4, 2, 0)); o['next_night'] = len(started) - a
+print(json.dumps(o))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=e, cwd=str(ROOT))
+        need(r.returncode == 0, f"the night's minute: {r.stdout[-300:]} {r.stderr[-800:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["before"] == o["after"] == 0 and o["busy"] == 0 and o["going"] == 0, f"it started outside its window, beside a job or beside a run: {o}")
+        need(o["late"] == 1 and o["once"] == 1, f"a job past five, or a second start: {o}")
+        need(o["red_is_done"] == 0 and o["died_once"] == 2 and o["died_twice"] == 0 and o["told"] == 1 and o["bad"] == 1 and "died twice" in o["words"] and o["next_night"] == 1, f"a dead night: {o}")
+        # tick itself gets there, with the team off and with a job running; a friend's HQ and a flow's copy don't start it
+        code = """
+import sys, os, json
+sys.path.insert(0, sys.argv[1] + '/routine')
+import tick, nightly
+calls = []
+tick.nightly_minute = lambda now=None, busy=False: calls.append(busy)
+tick.log = lambda m: None
+real = tick.jobs
+fake = {}
+def jobs(*a):
+    return json.dumps(fake['q']) if a and a[0] == 'next' and fake.get('q') else real(*a)
+tick.jobs = jobs
+q = json.loads(real('next'))
+o = {'on': q['on']}
+try:
+    tick.tick()
+except SystemExit:
+    pass
+o['off'] = list(calls); calls.clear()
+fake['q'] = {**q, 'running': [{'n': 7, 'state': 'running', 'text': 'A job', 'kind': 'small'}]}
+try:
+    tick.tick()
+except (SystemExit, Exception):
+    pass
+o['job'] = list(calls); calls.clear()
+print(json.dumps(o))
+"""
+        off = _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), "off"], capture_output=True, text=True, env=e, cwd=str(ROOT))
+        need(off.returncode == 0, f"the switch: {off.stdout} {off.stderr[-300:]}")
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env={**e, "HQ_NIGHT_MINUTE": "1"}, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0, f"the routine's minute: {r.stdout[-300:]} {r.stderr[-800:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["on"] is False and o["off"] == [False] and o["job"] == [True], f"tick doesn't reach the night: {o}")
+        code = """
+import sys, os, json
+sys.path.insert(0, sys.argv[1] + '/routine')
+import tick
+calls = []
+tick.nightly_minute = lambda now=None, busy=False: calls.append(busy)
+tick.night_step({'running': []})
+print(json.dumps(calls))
+"""
+        for what, more, want in (("the maker's", {"HQ_NIGHT_MINUTE": "1"}, [False]), ("a friend's", {"HQ_NIGHT_MINUTE": "1", "HQ_MAKER": "0"}, []), ("a flow's copy", {}, [])):
+            r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env={**e, **more}, cwd=str(ROOT))
+            need(r.returncode == 0 and json.loads(r.stdout.strip().splitlines()[-1]) == want, f"{what} HQ: {r.stdout[-200:]} {r.stderr[-300:]}")
+        # no job starts beside the night
+        code = """
+import sys, os, json
+sys.path.insert(0, sys.argv[1] + '/routine')
+import tick, nightly
+tick.nightly_minute = lambda now=None, busy=False: None
+tick.log = lambda m: None
+said, started = [], []
+real = tick.routines.beat
+tick.routines.beat = lambda *a, **k: (said.append(k.get('text') or ''), real(*a, **k))[1]
+nightly.running = lambda: {'pid': 1, 'at': 'x'}
+tick.schedule_promote = lambda: started.append('promote')
+tick.tick()
+print(json.dumps({'said': [s for s in said if 'night' in s], 'started': started}))
+"""
+        on = _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), "on"], capture_output=True, text=True, env=e, cwd=str(ROOT))
+        need(on.returncode == 0, f"the switch: {on.stdout} {on.stderr[-300:]}")
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0, f"beside the night: {r.stdout[-300:]} {r.stderr[-800:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["said"] and not o["started"], f"a job goes on beside the night: {o}")
+        # a real run writes what it ran on
+        hq = h["hq"]
+        code = """
+import sys, os, json
+sys.path.insert(0, sys.argv[1] + '/routine')
+import nightly as N
+N.HQ, N.OUT, N.RUNNING = sys.argv[2], sys.argv[2] + '/scratch/nightly', sys.argv[2] + '/scratch/running.json'
+N.is_main = lambda: True; N._python = lambda: sys.executable; N.flow_args = lambda: []
+print('EXIT', N.run(routine=True))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(hq)], capture_output=True, text=True, env=h["env"], cwd=str(ROOT), timeout=60)
+        need("EXIT 0" in r.stdout, f"a run: {r.stdout[-400:]} {r.stderr[-600:]}")
+        d = json.loads((hq / "scratch/nightly/last.json").read_text())
+        need(d["commit"] == h["g"]("rev-parse", "HEAD") and d["dirty"] == [] and d["ran"] == 4 and d["routine"] is True, f"the record: {d}")
+        need(not (hq / "scratch/running.json").exists(), "the run's mark stays")
+        return "tick reaches the night with the team off and with a job running; once in the window, a dead one once more, a second death told once; a job doesn't start beside it; its record names the commit"
+
+    async def flow333(self) -> str:
+        """F112, no Claude: back to a version with no forward of its own works once the release after it wrote that down: the words say the update bar is
+        the way forward, that version's own update brings HQ forward, what was undone runs again, and the note of going back doesn't stay behind. On the
+        maker's copy the team goes off first. A version the release didn't write down stays refused (flow 245)."""
+        import subprocess as _sp
+        make = self._friend("f112w")["make"]
+        up = lambda c, *x: _sp.run([sys.executable, str(c["hq"] / "routine/update.py"), *x], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"]), timeout=120)
+        said = lambda r: json.loads(r.stdout.strip().splitlines()[-1])
+        head = lambda c: c["g"]("rev-parse", "HEAD")
+        def setup(c):
+            p = c["hq"] / "routine/update.py"
+            good = p.read_text()
+            p.write_text(re.sub(r"^def forward\(", "def onward(", good, flags=re.M))
+            (c["hq"] / "VERSION").write_text("1.2.0\n")
+            c["g"]("add", "VERSION", "routine/update.py"); c["g"]("commit", "-q", "-m", "HQ 1.2.0, as a version before forward"); c["g"]("tag", "v1.2.0")
+            p.write_text(good)
+            (c["hq"] / "VERSION").write_text("1.3.0\n")
+            (c["hq"] / "routine/way-back.json").write_text(json.dumps({"v1.2.0": "the update bar"}))
+            c["g"]("add", "VERSION", "routine/update.py", "routine/way-back.json"); c["g"]("commit", "-q", "-m", "HQ 1.3.0"); c["g"]("tag", "v1.3.0")
+            c["g"]("push", "-q", "origin", "v1.2.0", "v1.3.0")
+        c = make()
+        setup(c)
+        to = c["g"]("rev-parse", "v1.2.0^{commit}")
+        r = await asyncio.to_thread(up, c, "back")
+        need(said(r).get("ok") and head(c) == to, f"back to a version the release wrote down: {r.stdout[-300:]} {r.stderr[-300:]}")
+        words = (c["hq"] / ".status/update-run.json").read_text()
+        need("no Forward button" in words and "update bar" in words and "1.3.0" in words, f"the words: {words[-400:]}")
+        back = json.loads((c["hq"] / ".status/back.json").read_text())
+        need(back.get("no_forward") and back.get("to") == "1.2.0", f"the note: {back}")
+        # that version's own update brings it forward; an old version leaves the note behind, 1.3.0 clears it
+        keep = (c["hq"] / ".status/back.json").read_text()
+        r = await asyncio.to_thread(up, c, "check", "--force")
+        r = await asyncio.to_thread(up, c, "run")
+        need(r.returncode == 0 and head(c) == c["g"]("rev-parse", "v1.3.0^{commit}"), f"forward by the update: {r.stdout[-300:]} {r.stderr[-300:]} {(c['hq'] / '.status/update-run.json').read_text()[-300:]}")
+        (c["hq"] / ".status/back.json").write_text(keep)
+        rr = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import update; print(update.gone_back())", str(c["hq"])], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"]))
+        need(rr.stdout.strip().splitlines()[-1] == "{}" and not (c["hq"] / ".status/back.json").exists(), f"the old note stays: {rr.stdout[-200:]} {rr.stderr[-300:]}")
+        # and back again from there works the same; a tag not written down is refused
+        r = await asyncio.to_thread(up, c, "back")
+        need(said(r).get("ok") and head(c) == to, f"back a second time: {r.stdout[-300:]}")
+        # the maker's copy: the team off first, and the words say how forward goes
+        c = self._friend("f112x")["make"]()
+        setup(c)
+        env = {**c["env"], "HQ_MAKER": "1"}
+        road = c["ws"] / "HQ/roadmap.md"
+        if not road.exists():
+            shutil.copy(ROOT / "template/HQ/roadmap.md", road)
+        r = _sp.run([sys.executable, str(c["hq"] / "routine/jobs.py"), "on"], capture_output=True, text=True, env={**env, "HQ_ROADMAP": str(road)}, cwd=str(c["hq"]))
+        r = _sp.run([sys.executable, str(c["hq"] / "routine/update.py"), "back"], capture_output=True, text=True, env={**env, "HQ_ROADMAP": str(road)}, cwd=str(c["hq"]), timeout=120)
+        words = (c["hq"] / ".status/update-run.json").read_text()
+        need(said(r).get("ok") and "The team is off" in words and "git checkout" in words, f"the maker's copy: {r.stdout[-300:]} {words[-400:]}")
+        r = _sp.run([sys.executable, str(c["hq"] / "routine/jobs.py"), "next"], capture_output=True, text=True, env={**env, "HQ_ROADMAP": str(road)}, cwd=str(c["hq"]))
+        need(json.loads(r.stdout)["on"] is False, f"the team stayed on: {r.stdout[:200]}")
+        return "back to a version the release wrote down: the words name the update bar, its own update brings HQ forward, the old note goes; on the maker's copy the team goes off first"
+
+    async def flow334(self) -> str:
+        """F112, no Claude: the history read is held: what read clean against the same words isn't read again, so a release's check is over in seconds after
+        the first; a hit is never held and a new version is read; other words read it all again; a read that's stopped keeps what it read."""
+        import subprocess as _sp
+        import time as _t
+        repo = self.tmp / "f112p"
+        repo.mkdir()
+        g = lambda *a: _sp.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True).stdout.strip()
+        g("init", "-q", "-b", "main"); g("config", "user.email", "t@example.com"); g("config", "user.name", "T")
+        for i in range(12):
+            (repo / f"f{i}.txt").write_text(f"line {i}\n" * 50)
+        g("add", "."); g("commit", "-q", "-m", "first")
+        code = """
+import sys, json, re
+sys.path.insert(0, sys.argv[1] + '/app')
+import privacy as P
+from pathlib import Path
+root = Path(sys.argv[2])
+pat = P.pattern(json.loads(sys.argv[3]))
+read = []
+real = P.scan_text
+limit = int(sys.argv[4])
+def count(text, p):
+    if text.startswith('line') or text.startswith('zz'):
+        read.append(1)
+        if limit and len(read) >= limit:
+            raise KeyboardInterrupt
+    return real(text, p)
+P.scan_text = count
+P.CLEAN_EVERY = 0
+try:
+    hits = P.scan_history(pat, root)
+except KeyboardInterrupt:
+    hits = ['stopped']
+print(json.dumps({'hits': hits, 'read': len(read)}))
+"""
+        def scan(words=("sometestword",), limit=0):
+            r = _sp.run([sys.executable, "-c", code, str(ROOT), str(repo), json.dumps(list(words)), str(limit)], capture_output=True, text=True)
+            need(r.returncode == 0, f"the read: {r.stdout[-300:]} {r.stderr[-800:]}")
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        o = scan(limit=5)
+        need(o["hits"] == ["stopped"], f"the stop: {o}")
+        o = scan()
+        need(not o["hits"] and 0 < o["read"] <= 8, f"a read that was stopped doesn't go on from what it had: {o}")
+        o = scan()
+        need(not o["hits"] and o["read"] == 0, f"it read it all again: {o}")
+        (repo / "new.txt").write_text("zz with sometestword in it\n")
+        g("add", "."); g("commit", "-q", "-m", "second")
+        o = scan()
+        need(o["read"] == 1 and len(o["hits"]) == 1 and "sometestword" in o["hits"][0], f"a new version isn't read: {o}")
+        o = scan()
+        need(len(o["hits"]) == 1, f"a hit got held: {o}")
+        g("rm", "-q", "new.txt"); g("commit", "-q", "-m", "gone again")
+        o = scan()
+        need(len(o["hits"]) == 1 and "new.txt" in o["hits"][0], f"a hit in the history got lost: {o}")
+        o = scan(("line 3",))
+        need(any("f3.txt" in h for h in o["hits"]) and o["read"] >= 12, f"other words didn't read it all again: {o}")
+        # a release's check, twice: the second is held by what it read
+        t = _t.time()
+        o = scan(("line 3",))
+        need(_t.time() - t < 30 and any("f3.txt" in h for h in o["hits"]), f"the second read: {o}")
+        return "what read clean isn't read again, a stopped read goes on, a new version is read, a hit stays a hit, other words read it all"
+
+    async def flow335(self) -> str:
+        """F112, no Claude: the installer's last step fits what it is on Linux: a set without the long flows, a limit it fits in going by the last night's own
+        times, and out of time the fix line names the right system."""
+        import subprocess as _sp
+        code = """
+import sys, os, json, importlib.util
+spec = importlib.util.spec_from_file_location('install', sys.argv[1] + '/install/install.py')
+I = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(I)
+I.log = lambda m: None
+o = {}
+for mac in (False, True):
+    I.IS_MAC = mac
+    try:
+        I.sh(['sleep', '5'], timeout=0.2)
+    except I.Fail as e:
+        o['mac' if mac else 'linux'] = [e.why, e.fix]
+    seen = {}
+    class R:
+        returncode = 0; stdout = '110 of 110 passed · 0 Claude turns'; stderr = ''
+    I.sh = (lambda real: real)(I.sh) if False else I.sh
+    keep = I.sh
+    I.sh = lambda cmd, **k: (seen.update({'cmd': cmd, **k}), R())[1]
+    inst = I.Installer.__new__(I.Installer)
+    inst.skip = []
+    I.FAKE = False
+    os.environ.pop('HQ_INSTALL_FAKE', None)
+    o['flows_mac' if mac else 'flows_linux'] = [seen, inst.t_flows()] if not seen else None
+    o['seen_mac' if mac else 'seen_linux'] = {'cmd': seen['cmd'][2:], 'timeout': seen['timeout']}
+    I.sh = keep
+print(json.dumps(o))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+        need(r.returncode == 0, f"the installer: {r.stdout[-300:]} {r.stderr[-800:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need("Linux" in o["linux"][1] and "macOS" not in o["linux"][1] and "--test-only" in o["linux"][1], f"the fix line on Linux: {o['linux']}")
+        need("macOS" in o["mac"][1], f"the fix line on a Mac: {o['mac']}")
+        linux = o["seen_linux"]
+        need(linux["cmd"][0] == "--quick" and linux["cmd"][1] == "--only", f"the Linux set: {linux['cmd'][:2]}")
+        chosen = linux["cmd"][2].split(",")
+        need("44" not in chosen and len(chosen) > 100, f"the set: {len(chosen)} flows, 44 in it: {'44' in chosen}")
+        need("--skip" in o["seen_mac"]["cmd"] and o["seen_mac"]["timeout"] >= 3600, f"the Mac: {o['seen_mac']}")
+        # the limit, against the last whole night here (none on a fresh copy: then there's nothing to hold it to)
+        times, log = {}, None
+        try:
+            log = json.loads((ROOT / "scratch/nightly/last.json").read_text()).get("log")
+            for ln in open(log, encoding="utf8", errors="replace").read().rpartition("== Result")[2].splitlines():
+                m = re.match(r"\s*(\d+)\s+.*\s(?:PASS|FAIL)\s+(\d+) s", ln)
+                if m:
+                    times[m[1]] = int(m[2])
+        except (OSError, ValueError, TypeError):
+            pass
+        if len(times) > 100:
+            took = sum(times.get(n, 0) for n in chosen)
+            need(took * 2 <= linux["timeout"], f"{took} s on the last night against a limit of {linux['timeout']} s")
+        return f"the Linux set is {len(chosen)} flows in {linux['timeout']} s, the fix line names the right system"
+
     async def flow208(self) -> str:
         """F101, no Claude: the rest of the hand-offs. The status block is written under the lock, whole, through a temp file,
         and refused without its separator; twenty writers next to the queue lose nothing. The reviewer's answer needs all
@@ -31905,6 +32466,12 @@ FLOWS = {
     212: ("F100: every job has a box in minutes and turns, past it boxed not done and not started again, 60 with no estimate, the test run not counted", False, "flow212"),
     211: ("F107: the estimates know their plan: every past job says Max 5x, on Max 20x the percents are a quarter and the minutes stay, five jobs on it make its own rate, the old numbers come back, each line its own ratio, the report followed once, the planning names it", False, "flow211"),
     209: ("F101: a change to the reviewer shows, a row let through fails the golden set, and the real set has been run on this reviewer", False, "flow209"),
+    330: ("F112: the hold looks at what each commit brings: a merge passes on what it brought, the rows from before the gate are said or named held", False, "flow330"),
+    331: ("F112: a release on a copy to a bare repo, each refusal and the happy path: the night counts for its own commit, a second run does nothing", False, "flow331"),
+    332: ("F112: the night is the routine's with the team off and with a job running: once, a dead one once more, a job doesn't start beside it", False, "flow332"),
+    333: ("F112: back to a version with no forward of its own, once the release after it wrote that down; its own update brings HQ forward", False, "flow333"),
+    334: ("F112: the history read holds what read clean, so a release's privacy check finishes; a hit is never held", False, "flow334"),
+    335: ("F112: the installer's last step fits Linux: the set, the limit, and the fix line names the right system", False, "flow335"),
     208: ("F101: the status block can't break the planning, the reviewer's answer needs all five probes and real quotes, three rounds an item, the night is the routine's, a friend stays on the release", False, "flow208"),
     207: ("F101: the release reads the night and refuses a red or missing one with the night named; a commit naming no item holds it", False, "flow207"),
     206: ("F101: QA's pass stands on a green run and a named comparison; a piece needs its switch on the hidden list", False, "flow206"),

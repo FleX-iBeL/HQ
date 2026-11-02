@@ -19,7 +19,8 @@ How it goes:
   MAX_FAILS failed QAs in a row no fix job is queued by itself: it waits for a call, and the morning text says so.
 - The release (release.py) walks dev's commits since main, oldest first; each names its rows at the start of its
   subject ("H283: ..."). A commit for a row in Phase F or H without "QA passed" stops the walk: main gets the work
-  before it, the rest stays on dev and nightly, and the morning text names what was held and why (hold()).
+  before it, the rest stays on dev and nightly, and the morning text names what was held and why (hold()). F112: a merge
+  commit is what it brings, and BEFORE_GATE is the one list of rows from before the gate, each said or named held.
   A commit without a row (a version, a nightly test fix, a merge) or for a row elsewhere (maintenance) goes along.
 
 F71 (28 October 2026): QA jobs since 27 October mostly took one or two minutes, and their write-ups said what was
@@ -390,7 +391,7 @@ def only_free_files(root: str, sha: str) -> bool:
     r = subprocess.run(["git", "-C", str(root), "show", "--first-parent", "--format=", "--name-only", sha],
                        text=True, capture_output=True)
     files = [f for f in r.stdout.splitlines() if f.strip()]
-    return bool(files) and all(f.startswith(FREE_FILES) for f in files)
+    return r.returncode == 0 and all(f.startswith(FREE_FILES) for f in files)  # F112: a commit that changes nothing changes nothing
 
 
 def commits(root: str, base: str, tip: str) -> list[tuple[str, str]]:

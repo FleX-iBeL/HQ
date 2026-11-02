@@ -46,7 +46,8 @@ A newer version is a tag vX.Y or vX.Y.Z on the public repo with a higher number.
 State: .status/update.json (the last check) and .status/update-run.json (the update), for the pages.
 Tests: HQ_UPDATE_URL (another repo, e.g. a folder), HQ_PLATFORM (pretend another computer), HQ_CALL_URL,
 F104: `back [--tag vX.Y.Z]` one version back (on the work line past a version: that version; on a friend's copy with commits of her own past a
-tag: the one below it; never to a version with no `forward` of its own), in the background, here and on the other
+tag: the one below it; never to a version with no `forward` of its own, unless the release after it wrote that down, routine/way-back.json:
+F112, then the update bar is the way forward from there), in the background, here and on the other
 computer through the forward; the main runs the undos of the data changes it leaves behind (routine/datachange.py) first and tells the
 other computer only once that held, so a failing undo leaves both where they were (started on the backup, the main goes first); the
 backup gets them by the sync; while back on the maker's HQ the team waits. `forward` the other way. Tests: HQ_UPDATE_WAIT in the foreground.
