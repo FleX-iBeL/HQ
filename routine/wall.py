@@ -20,7 +20,8 @@ What's here, read by the routine's minute (tick.py), the runner (runjob.py) and 
   - the order in line: him live, the small routines (neither ever pass a gate), then the agents' cycles, then the team. Near the limit
     the agents are the first to stop: their line is AGENTS_UNDER points under the team's (H298, decided 1 November 2026), so a cycle held
     there lets the team's job behind it go. The reserve, taken off the stop lines for the last two, is on the roadmap
-    (**Usage reserve: 15 points.**, usageline.py).
+    (**Usage reserve: 15 points.**, usageline.py). F113: the reserve never takes the team's line under 15 points (**Team line at
+    least: 15 points.**), so the first hours after a reset have room for the team and the agents; from a line of 30 on it's all kept.
   - pause (jobs.py pause): the running job held, nothing new starts, and no reviewer or first look starts.
 
 The gate itself is status/save-usage.mjs: a reading older than 30 minutes stops it, and --reserve takes the reserve off.

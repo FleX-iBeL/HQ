@@ -1189,7 +1189,8 @@ def main(argv):
                 carry(j)
             # H187: an update that ended the job's chat holds it with its own reason (held N an update ...).
             why = one_line(" ".join(args[1:])).replace("·", "-") if cmd == "held" else ""
-            j["state"] = f"done {now}" if cmd == "done" else f"held: {why or 'usage over the line'}"
+            day = time.strftime("%Y-%m-%d", time.localtime(at_epoch)) if at_epoch else time.strftime("%Y-%m-%d")  # F116: which day it was done
+            j["state"] = f"done {now} on {day}" if cmd == "done" else f"held: {why or 'usage over the line'}"
             qa_job = None
             if cmd == "done" and not was.startswith("done"):
                 # F56: a finished build for a row in Bugs or Features gets a QA job, run as Moneypenny.
