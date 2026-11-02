@@ -381,7 +381,7 @@ async function routines() {
   const lidsleep = await read('lidsleep', join(root, '.status/lidsleep.json'));
   const forYou = await forYouNow();  // F106: what's being worked on for him right now
   const [estimate, planning, feedback, agents] = await Promise.all([estimates(), sprint(), feedbackBox(['list'], 20000), cyclesFriday()]);
-  return { forYou, now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback, agents, broken };
+  return { broken, forYou, now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback, agents };
 }
 
 // F116: what truly waits for him, from what's kept, never from the status block: a job parked on him (boxed, waiting for a

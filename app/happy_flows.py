@@ -24852,7 +24852,7 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
                 "def down(k, why, detail=None):\n    d = _r(); d[k] = why; _w(d)\n"
                 "def is_down(k):\n    return k in _r()\n"
                 "def fix(k, what):\n    pass\n"
-                "def up(k):\n    d = _r(); d.pop(k, None); _w(d)\n")
+                "def up(k, at=None, what=None):\n    d = _r(); d.pop(k, None); _w(d)\n")  # F116: a close says what fixed it
         _sp.run(["git", "init", "-q", "--bare", "-b", "dev", str(srv / "FleX-iBeL/HQ.git")], env=env, check=True)
         g(up, "init", "-q", "-b", "dev")
         (up / "routine").mkdir()
