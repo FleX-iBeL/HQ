@@ -21617,11 +21617,34 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
             need(not (ws / "HQ/mistakes.jsonl").exists() or not (ws / "HQ/mistakes.jsonl").read_text().strip(), "an honest read went on the ledger")
             d = pol.decide("Bash", {"command": f"timeout 30 bash -c \"python3 {r}/cycles.py yes donna nice 1\""})
             need(d.verdict == P.DENY and "plain command" in d.why, f"a run inside bash -c after timeout got through: {d.verdict} {d.why}")
+            # F114, the third check: an allowlist. More plain reads and plain runs that pass, and every way round in the check that doesn't
+            for cmd in (f"wc -l {r}/cycles.py", f"ls {r}/cycles.py && echo ok", f"git -C {ROOT} log --oneline -3 -- routine/cycles.py",
+                        f"cd {ROOT} && python3 routine/cycles.py list | head -5", f"python3 {r}/jobs.py write-row \"a row about cycles.py and its yes\""):
+                d = pol.decide("Bash", {"command": cmd})
+                need(d.verdict != P.DENY, f"an honest command was refused: {cmd}: {d.verdict} {d.why}")
+            rounds = [f"bash -c \"HQ_ROLE_HERE=1 python3 -W ignore routine/cycles.py yes donna 'never said' 1\"",  # hole A
+                      f"HQ_ROLE_HERE=1 python3 -W ignore routine/cycles.py yes donna 'never said' 1",
+                      f"sh -c \"HQ_WORDS_FROM= python3 -W ignore routine/usageline.py fable fixed 5 --said x\"",
+                      f"python3 \"routine/ x/../cycles.py\" list ; bash -c \"HQ_ROLE_HERE=1 python3 routine/cycles.py yes donna 'never said' 1\"",  # hole B
+                      f"python3 \"/tmp/a b/cycles.py\" list ; env HQ_ROLE_HERE=1 python3 routine/cycles.py yes donna 'never said' 1",
+                      f"bash -c \"python3 {r}/cycles.py yes donna ok\"", f"sh -c 'python3 {r}/usageline.py weekly fixed 99'",
+                      f"bash -c \"cd {ROOT} && python3 routine/cycles.py yes donna ok\"", f"echo x | xargs python3 {r}/cycles.py yes donna",
+                      f"find {ROOT} -name cycles.py -exec python3 {{}} yes donna ok ;", f"find {ROOT} -name cycles.py -exec python3 {{}} yes donna ok +",
+                      f"python3 {r}/cycles.py list; HQ_ROLE_HERE=1 python3 {r}/cycles.py yes donna ok", f"env python3 {a}/feedback.py send \"x y\"",
+                      f"timeout 5 env HQ_ROLE_HERE=1 python3 {r}/cycles.py yes donna ok", f"timeout -s KILL 5 python3 {r}/cycles.py yes donna ok",
+                      f"nice python3 {r}/cycles.py yes donna ok", f"eval python3 {r}/cycles.py yes donna ok", f"exec python3 {r}/cycles.py yes donna ok",
+                      f"source {r}/cycles.py", f"echo $(python3 {r}/cycles.py yes donna ok)", f"python3 {r}/cycles.py list > {self.tmp}/out.txt",
+                      f"python3 {r}/cycles.py list && bash -c \"python3 {r}/cycles.py yes donna ok\"", f"python3 -m py_compile {r}/cycles.py",
+                      f"python3 -u {r}/cycles.py list", f"/usr/bin/python3 {r}/cycles.py list"]
+            for cmd in rounds:
+                d = pol.decide("Bash", {"command": cmd})
+                need(d.verdict == P.DENY and "plain command" in d.why, f"a shape that isn't allowed got through: {cmd}: {d.verdict} {d.why}")
         finally:
             self._f114_unproof(was)
         rr = self._f114_script(env, "cycles.py", "yes", "donna", "nice", "1", words_from=str(call))
         need(rr.returncode == 0 and "Mira" in rr.stdout, f"his nice didn't open the coffee: {rr.stdout} {rr.stderr[-300:]}")
-        return "reads of the scripts pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused"
+        return (f"reads of the scripts pass and stay off the ledger, timeout N is fine, his nice is judged on its words; {len(rounds)} other shapes "
+                "refused, holes A and B among them")
 
     async def flow391(self) -> str:
         """F114, the second check, no Claude: a yes fits a held change only by its own words. With the lunch with Alice, the dentist on
@@ -21682,7 +21705,49 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
         need(r.returncode == 2 and "**5-hour line: moving.**" in rm.read_text(), f"the script moved the 5-hour line: {r.stdout} {r.stderr}")
         r = self._f114_script(env, "usageline.py", "weekly", "fixed", "95", "--said", "yes please do that", words_from=str(call))
         need(r.returncode == 0 and "fixed at 95%" in rm.read_text(), f"the script refused his yes to her question: {r.stdout} {r.stderr}")
-        return "his yes to her question fixes the weekly line at 95 and nothing else"
+        # F114, the third check: a short word counts only as the whole line, and these hold a yes back; end to end for a line and a change
+        shorts = ["good question", "cool it", "I'm good", "leave it, it's fine", "it's fine as it is", "good, leave it as it is",
+                  "all good, nothing to change", "good morning", "good night", "nice try", "good grief", "cool story", "lovely weather",
+                  "alright, let me think about it", "cool, I'll think about it", "good point, let me sleep on it", "hmm fine I guess"]
+        rm.write_text(rm.read_text().replace("**Weekly line: fixed at 95%.**", "**Weekly line: moving; fixed at 95% when switched.**"))
+        before = rm.read_bytes()
+        call = self._f114_said(ws, *[("Shall I fix the weekly line at 95?", x) for x in shorts])
+        self._f114_hold(env, "Coffee with Mira")
+        call.write_text(call.read_text() + "".join(f"- 00:4{i}:00 **HQ:** Shall I put the coffee with Mira in?\n- 00:4{i}:10 **Me:** {x}\n"
+                                                   for i, x in enumerate(("good question", "leave it, it's fine", "I'm good"))))
+        # his own line naming the line: an instruction or a yes, its number paired with its line, the way he asked for
+        own = [("why is the weekly line fixed at 95?", "weekly fixed 95"), ("should we fix the weekly line at 95?", "weekly fixed 95"),
+               ("maybe fix the weekly line at 95", "weekly fixed 95"), ("the weekly line is at 95 right now I think", "weekly fixed 95"),
+               ("what's the weekly line doing?", "weekly moving"), ("fix the weekly line at 95, it shouldn't keep moving", "weekly moving"),
+               ("fix the weekly at 95 and the fable at 80", "fable fixed 95")]
+        call.write_text(call.read_text() + "".join(f"- 00:5{i}:00 **HQ:** Anything else?\n- 00:5{i}:10 **Me:** {x}\n" for i, (x, _) in enumerate(own)))
+        was = self._f114_proof(env)
+        try:
+            pol = self._f114_policy(ws, "moneypenny")
+            for x in shorts:
+                d = pol.decide("Bash", {"command": f"{ul} weekly fixed 95 --said \"{x}\""})
+                need(d.verdict == P.DENY, f"{x!r} fixed the weekly line: {d.why}")
+            for x in ("good question", "leave it, it's fine", "I'm good"):
+                d = self._f114_policy(ws, "donna").decide("Bash", {"command": f"python3 {ROOT}/routine/cycles.py yes donna \"{x}\""})
+                need(d.verdict == P.DENY, f"{x!r} opened the coffee: {d.why}")
+            for x, cmd in own:
+                d = pol.decide("Bash", {"command": f"{ul} {cmd} --said \"{x}\""})
+                need(d.verdict == P.DENY, f"his own words opened what he didn't ask for: {x!r} as {cmd}: {d.why}")
+            for x, cmd in (("fix the weekly at 95 and the fable at 80", "fable fixed 80"), ("fix the weekly at 95 and the fable at 80", "weekly fixed 95"),
+                           ("fix the weekly line at 95, it shouldn't keep moving", "weekly fixed 95")):
+                d = pol.decide("Bash", {"command": f"{ul} {cmd} --said \"{x}\""})
+                need(d.verdict == P.ALLOW, f"his instruction was refused: {x!r} as {cmd}: {d.why}")
+        finally:
+            self._f114_unproof(was)
+        for x in ("good question", "leave it, it's fine", "I'm good", "cool it"):
+            r = self._f114_script(env, "usageline.py", "weekly", "fixed", "95", "--said", x, words_from=str(call))
+            need(r.returncode == 2 and rm.read_bytes() == before, f"the script fixed the weekly line on {x!r}: {r.stdout} {r.stderr}")
+            r = self._f114_script(env, "cycles.py", "yes", "donna", x, words_from=str(call))
+            need(r.returncode == 2 and r.stdout.startswith("Refused"), f"the script opened the coffee on {x!r}: {r.stdout} {r.stderr[-300:]}")
+        r = self._f114_script(env, "usageline.py", "fable", "fixed", "95", "--said", "fix the weekly at 95 and the fable at 80", words_from=str(call))
+        need(r.returncode == 2 and rm.read_bytes() == before, f"the script fixed the Fable line at the weekly's number: {r.stdout} {r.stderr}")
+        return (f"his yes to her question fixes the weekly line at 95 and nothing else; {len(shorts)} lines with a short word in passing and "
+                f"{len(own)} lines of his that aren't that instruction open nothing")
 
     async def flow393(self) -> str:
         """F114, the second check, no Claude: a number tied to no line opens nothing, and words that name no line move none. "Yes add it,
@@ -27852,7 +27917,8 @@ window.fetch = async (url, opt) => {
             f'cd {hq} && python3 routine/schedule.py list 2>&1 | head -40',
             f'grep -n "^Item" {saved}',
             f'cd {hq} && python3 routine/schedule.py move 124 "2026-10-26 01:00" && for l in F49 H244; do '
-            f'python3 routine/sprint.py ready "$l" on 2>&1 | tail -1; done && python3 routine/usageline.py 5-hour moving --said "put it back on moving"',
+            f'python3 routine/sprint.py ready "$l" on 2>&1 | tail -1; done',
+            f'cd {hq} && python3 routine/usageline.py 5-hour moving --said "put it back on moving"',  # F114: a plain run of its own
             f'cd {hq} && python3 routine/sprint.py moscow H277 must 2>&1 | tail -1',
             f'cd {hq} && python3 routine/sprint.py ready H277 on 2>&1 | tail -1; python3 routine/sprint.py list | head -80',
             f'cd {hq} && for l in H277 H245; do python3 routine/jobs.py send-row $l 2>&1 | tail -1; done',

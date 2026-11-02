@@ -204,10 +204,12 @@ def _writes_on(name: str) -> "re.Pattern":
 _SHELL_WRITE_HIS = _writes_on(_HIS_NAME)
 # F114: the scripts that stand on his own words or his yes, and what would run them past the policy's own reading of the line.
 _HIS_NAMES = ("cycles.py", "usageline.py", "feedback.py")
-# A run of one of them, as cyclehook.ran leaves a line: python with it, or it as the program of a piece (after VAR= settings and wrappers).
-_RUN_SCRIPT = re.compile(r"(?:(?<![\w.-])python[\d.]*\s+(?:-\S+\s+)*|(?:^|[;&|(\n`]|\$\()\s*(?:[A-Za-z_]\w*=\S*\s+)*"
-                         r"(?:(?:env|exec|nohup|sudo|nice|setsid|xargs|eval|source|timeout\s+\S+)\s+)*)"
-                         r"[\"']?[^\s\"';&|]*(?<![\w-])(cycles|usageline|feedback)\.py\b")
+_NAMES_SCRIPT = re.compile(r"(cycles|usageline|feedback)\.py\b")
+# F114, the third check: the programs of a plain read of these scripts. No interpreter, no shell, no wrapper (env, xargs, find, exec,
+# eval, source, nice, timeout), nothing that runs what it's given.
+_READS_OF_SCRIPTS = {"grep", "egrep", "fgrep", "rg", "cat", "head", "tail", "wc", "ls", "cut", "nl", "sort", "uniq", "diff", "cmp", "stat",
+                     "file", "cd", "echo", "sed", "git"}
+_GIT_READS_OF_SCRIPTS = {"log", "diff", "show", "blame", "status", "ls-files", "grep"}
 
 
 def _no_timeout(seg: list[str]) -> list[str]:
@@ -215,14 +217,50 @@ def _no_timeout(seg: list[str]) -> list[str]:
     return seg[2:] if len(seg) > 2 and seg[0] == "timeout" and re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", seg[1]) else seg
 
 
-def _plain_run(seg: list[str]) -> bool:
-    """F114: a piece that is python running one of these scripts by its path, and nothing else around it."""
-    return len(seg) > 1 and seg[0] in ("python", "python3") and Path(seg[1]).name in _HIS_NAMES
-
-
 def _wrapped(name: str) -> "Decision":
-    return Decision(DENY, f"{name}.py runs only as a plain command of its own (timeout N in front is fine), never inside bash -c, python "
-                          f"-c, env, xargs, $( ) or with a setting in front: {_HIS_SCRIPT_WAY[name]}", door=True)
+    return Decision(DENY, f"{name}.py runs only as a plain command of its own, `[cd DIR &&] python3 PATH/{name}.py ARGS` (one timeout N in "
+                          f"front and a | head or | tail after are fine, nothing else in the line), and is read only with plain reads (grep, "
+                          f"sed -n, cat, head, tail, wc, ls, git log): {_HIS_SCRIPT_WAY[name]}", door=True)
+
+
+def _shape_pieces(cmd: str):
+    """F114: a line as pieces of words and the marks between them; None for anything but words joined by &&, ; and |."""
+    if re.search(r"`|\$\(|<<|\$\{", cmd):
+        return None
+    lex = shlex.shlex(cmd, posix=True, punctuation_chars="();<>|&\n")
+    lex.whitespace = " \t\r"
+    lex.whitespace_split = True
+    try:
+        tokens = list(lex)
+    except ValueError:
+        return None
+    pieces, joins = [[]], []
+    for tok in tokens:
+        if tok in ("&&", "|", ";"):
+            pieces.append([])
+            joins.append(tok)
+        elif tok and set(tok) <= set("();<>|&\n"):
+            return None  # a redirect, a subshell, an ||
+        else:
+            pieces[-1].append(tok)
+    if any(not p for p in pieces):
+        return None
+    return pieces, joins
+
+
+def _plain_read_piece(p: list[str]) -> bool:
+    prog, args = p[0], p[1:]
+    if prog not in _READS_OF_SCRIPTS:
+        return False
+    if prog == "sed":
+        return not isinstance(_program_files("sed", args), Decision)
+    if prog == "git":
+        while args and args[0] in ("-C", "--no-pager"):
+            args = args[2:] if args[0] == "-C" else args[1:]
+        return bool(args) and args[0] in _GIT_READS_OF_SCRIPTS
+    return True
+
+
 _HIS_SCRIPT_WAY = {"cycles": f"python3 \"{HQ_ROUTINE / 'cycles.py'}\" yes AGENT \"HIS WORDS\" [N] (or its other commands)",
                    "usageline": f"python3 \"{HQ_ROUTINE / 'usageline.py'}\" [weekly|5-hour|fable] moving|fixed [N] --said \"HIS WORDS\"",
                    "feedback": f"python3 \"{_APP / 'feedback.py'}\" send \"THE WORDS\" --via agent, which asks him first"}
@@ -605,6 +643,40 @@ class Policy:
         except Exception as e:
             return f"his words couldn't be read ({type(e).__name__})"
 
+    def _script_shape_ok(self, cmd: str) -> bool:
+        """F114, the third check: an allowlist for a line that names cycles.py, usageline.py or feedback.py. It passes only as
+        (a) a plain read: every piece a read program (grep, sed -n, cat, head, tail, wc, ls, git log …), nothing that runs anything;
+        (b) one plain run: `[cd DIR &&] python3 PATH/SCRIPT ARGS [| head|tail …]`, one `timeout N` in front at the most, nothing else;
+        (c) [Claude's pick] one plain run of another of HQ's scripts that only carries the name in its words (a planning row, a note).
+        No VAR= setting, no $( ), backticks, heredoc or redirect anywhere."""
+        shaped = _shape_pieces(cmd)
+        if shaped is None:
+            return False
+        pieces, joins = shaped
+        if all(_plain_read_piece(p) for p in pieces):
+            return True
+        i = 1 if pieces[0][0] == "cd" and len(pieces[0]) == 2 and joins and joins[0] == "&&" else 0
+        if i >= len(pieces):
+            return False
+        run = _no_timeout(pieces[i])
+        if run[0] == "timeout":
+            return False  # timeout with options of its own, or twice
+        rest, rest_joins = pieces[i + 1:], joins[i:]
+        if any(j != "|" for j in rest_joins) or any(p[0] not in ("head", "tail") or any(not re.fullmatch(r"-?\w+", a) for a in p[1:])
+                                                     for p in rest):
+            return False
+        if len(run) < 2 or run[0] not in ("python", "python3") or run[1].startswith("-") or re.search(r"\s", run[1]):
+            return False
+        if Path(run[1]).name in _HIS_NAMES:
+            return True
+        # (c) another of HQ's scripts: the name may only be in its words, never one of the three as a path of its own
+        base = Path(pieces[0][1]).expanduser() if i == 1 else self.folder
+        if not base.is_absolute():
+            base = self.folder / base
+        target = Path(run[1]).expanduser()
+        target = Path(os.path.realpath(target if target.is_absolute() else base / target))
+        return HQ_ROOT in target.parents and target.suffix == ".py" and not any(Path(a).name in _HIS_NAMES for a in run[2:])
+
     def _moves_mail_switch(self, path: str, tool: str, inp: dict) -> bool:
         """F114: whether this Edit, MultiEdit or Write of the agents' settings would set, change or take away the mail switch."""
         try:
@@ -685,16 +757,17 @@ class Policy:
                                   + LOG_WAY, door=bool(re.search(r"cycles(?:-state)?\.json", runs, re.I)))
         if _writes_on(_SHELL_LEDGER.format(a=re.escape((self.agent or "").lower() or "\x00"))).search(runs):  # F114
             return Decision(DENY, "another agent's ledger or notes is hers: only she writes it, whoever asks", door=True)
-        # F114: cycles.py, usageline.py and feedback.py run only as a plain command of their own (timeout N in front is fine). Naming
-        # them is no run (a grep or a sed of the file reads it); running them inside a wrapper, code or an HQ_ setting is no plain command.
-        ran_here = [m.group(1) for m in _RUN_SCRIPT.finditer(runs)]
-        wrapped = (lambda: _wrapped(ran_here[0])) if ran_here else None
+        # F114, the third check: a command that names cycles.py, usageline.py or feedback.py passes only in an allowed shape (a plain read,
+        # one plain run, or another HQ script carrying the name in its text); every other shape is refused with the script named.
+        m = _NAMES_SCRIPT.search(cmd)
+        if m and not self._script_shape_ok(cmd):
+            return _wrapped(m.group(1))
         cmd = _hide_quoted_dollars(cmd)  # H281: awk's $1 and sed's $p in single quotes are text, not variables
         # 27 October 2026: ${n} of a plain for loop (for n in 1 2; do sed -n "${n}p" …) is filled in by _loops below.
         loop_vars = re.findall(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b", cmd)
         probe = re.sub(r"\$\{(%s)\}" % "|".join(map(re.escape, loop_vars)), "", cmd) if loop_vars else cmd
         if re.search(r"`|\$\(|\$\{|<<", probe):
-            return wrapped() if wrapped else _ask("run a shell command", "a complex shell command")
+            return _ask("run a shell command", "a complex shell command")
         cmd = re.sub(r"\s2>\s*/dev/null|\s2>&1", " ", cmd)
         lex = shlex.shlex(cmd, posix=True, punctuation_chars="();<>|&\n")
         lex.whitespace = " \t\r"
@@ -702,21 +775,19 @@ class Policy:
         try:
             tokens = list(lex)
         except ValueError:
-            return wrapped() if wrapped else _ask("run a shell command", "a shell command that doesn't parse")
+            return _ask("run a shell command", "a shell command that doesn't parse")
         segments: list[list[str]] = [[]]
         for tok in tokens:
             if tok in ("&&", "|", ";", "||"):
                 segments.append([])
             elif tok and set(tok) <= set("();<>|&\n"):
-                return wrapped() if wrapped else _ask("run a shell command", "a complex shell command")
+                return _ask("run a shell command", "a complex shell command")
             else:
                 segments[-1].append(tok)
         segments = _loops(segments)
         if segments is None:
-            return wrapped() if wrapped else _ask("run a shell command", "a shell loop it can't follow")
+            return _ask("run a shell command", "a shell loop it can't follow")
         segments = [_no_timeout(seg) for seg in segments]  # F114: timeout N in front of a command changes nothing it may do
-        if wrapped and sum(1 for seg in segments if _plain_run(seg)) < len(ran_here):
-            return wrapped()
         # H277: several steps chained count as one; a cd carries over to the steps after it.
         results: list[tuple[list[str], Decision]] = []
         self._cwd = None

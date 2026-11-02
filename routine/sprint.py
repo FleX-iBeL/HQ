@@ -695,13 +695,20 @@ def his_said_now(quote, ws=None, places=None, day=None):
 
 
 def a_yes(line, turn, names=()):
-    """F114: whether a line of his reads as a yes, with no model: a yes word and nothing holding it back (yes_reading isn't a no)."""
+    """F114: whether a line of his reads as a yes, with no model. A firm yes word anywhere (yes, ok, sure, go ahead, do it …) or a short one
+    that is the whole line (nice, lovely, cool, fine, good, alright, great, perfect; with at most a yes or ok around it), and nothing holding it
+    back: "good question", "I'm good", "leave it, it's fine" or "alright, let me think about it" are no yes."""
     low = " ".join(str(line).lower().replace("’", "'").split())
-    return bool(_YES_WORD.search(low) or _A_YES_MORE.search(low)) and not (_TAKEN_BACK.search(low) or _HOLD_WORD.search(low) or _NOT_SURE.search(low))
+    bare = " ".join(re.sub(r"[^\w' ]", " ", low).split())
+    said = bool(_YES_PLAIN.search(low) or _A_YES_PHRASE.search(low) or _A_YES_ALONE.fullmatch(bare))
+    return said and not (_TAKEN_BACK.search(low) or _HOLD_WORD.search(low) or _NOT_SURE.search(low) or _A_HOLD.search(low))
 
 
-# F114, the second check: the other short ways he says yes (his "nice" to her question), as the call's own yes reading has them.
-_A_YES_MORE = re.compile(r"(?<![\w'])(?:nice|lovely|cool|fine|good|alright|all right|great|sounds great|go for it|let'?s do it|absolutely|definitely)(?![\w'])")
+# F114, the third check: the short words count only as the whole line ("nice", "yes, fine"), the phrases anywhere, and these hold a yes back.
+_A_YES_ALONE = re.compile(r"(?:(?:yes|ok|okay|yeah)\s+)?(?:nice|lovely|cool|fine|good|alright|all right|great|perfect)(?:\s+(?:yes|ok|okay|yeah))?")
+_A_YES_PHRASE = re.compile(r"(?<![\w'])(?:sounds good|sounds great|correct|go for it|let'?s do it|definitely)(?![\w'])")
+_A_HOLD = re.compile(r"(?<![\w'])(?:leave it|as it is|i'?m good|i'?m fine|i'?m ok(?:ay)?|think about|thinking about|sleep on it|not now|later|"
+                     r"wait|hold on|no need|nothing to change|let me think|never mind)(?![\w'])")
 
 
 NOT_HIS = "those words aren't in his own lines"

@@ -216,36 +216,93 @@ def lines_named(text: str) -> set:
 
 def numbers_in(text: str) -> set:
     """F114: the numbers in these words, the 5 of "5-hour" left out."""
-    low = LINE_WORDS["five"].sub(" ", _norm(text))
-    return {int(x) for x in re.findall(r"(?<![\d.:])(\d{1,3})(?![\d.:])", low)}
+    return {n for _, n in _numbers_at(_norm(text))}
+
+
+def _numbers_at(low: str) -> list:
+    blank = LINE_WORDS["five"].sub(lambda m: " " * len(m.group(0)), low)
+    return [(m.start(), int(m.group(1))) for m in re.finditer(r"(?<![\d.:])(\d{1,3})(?![\d.:])", blank)]
 
 
 _FIX = re.compile(r"\bfix(?:es|ed|ing)?\b")
 _MOVE = re.compile(r"\bmov(?:e|es|ed|ing)\b")
+# F114, the third check: what isn't an instruction (a question, a doubt, a wish), and a way said only to be denied ("it shouldn't keep moving").
+_NOT_AN_ORDER = re.compile(r"\?|^(?:why|what|what's|how|when|where|who|which|is|are|was|were|do|does|did|should|shall|could|would|can|will|has|have)\b"
+                           r"|\b(?:maybe|perhaps|should|shouldn't|might|i think|i guess|probably|wonder|not sure|right now|at the moment)\b")
+_ORDER = re.compile(r"\b(?:fix|set|put|move|make|change|turn|switch|pin|lock|bring|keep|let)\b")
+_DENIED = re.compile(r"\b(?:shouldn't|should not|mustn't|must not|don't|do not|doesn't|does not|not|never|no longer|stop(?:s|ped)?)\s+(?:\w+\s+){0,3}?"
+                     r"(?:mov(?:e|es|ed|ing)|fix(?:es|ed|ing)?)\b")
+
+
+def _mentions(low: str) -> list:
+    """F114: where each line is named in these words, in order, as (start, key); "the weekly Fable line" is one mention, of Fable."""
+    found = sorted((m.start(), m.end(), k) for k, rx in LINE_WORDS.items() for m in rx.finditer(low))
+    out = []
+    for i, (a, b, k) in enumerate(found):
+        if k == "weekly" and any(k2 == "fable" and 0 <= a2 - b <= 12 for a2, _, k2 in found[i + 1:]):
+            continue
+        out.append((a, k))
+    return out
+
+
+def _paired(low: str) -> dict:
+    """F114, the third check: per line named, its numbers and the way asked for, from the part of the words that belongs to it: a number
+    goes to the line named last before it (else the first one after it); a way said only to be denied doesn't count."""
+    marks = _mentions(low)
+    if not marks:
+        return {}
+    clean = _DENIED.sub(" ", low)
+    out = {k: {"numbers": set(), "moving": False, "fixed": False} for _, k in marks}
+    for at, n in _numbers_at(low):
+        owner = next((k for a, k in reversed(marks) if a <= at), marks[0][1])
+        out[owner]["numbers"].add(n)
+    for i, (a, k) in enumerate(marks):
+        part = clean[(0 if i == 0 else a):(marks[i + 1][0] if i + 1 < len(marks) else len(clean))]
+        moving, fixed = bool(_MOVE.search(part)), bool(_FIX.search(part)) or bool(out[k]["numbers"])
+        if not moving and not fixed:  # the way said once for the whole line ("fix the weekly at 95 and the fable at 80")
+            moving, fixed = bool(_MOVE.search(clean)), bool(_FIX.search(clean))
+        out[k]["moving"] |= moving and not fixed
+        out[k]["fixed"] |= fixed
+    return out
 
 
 def opens(key: str, number: int | None, moving: bool, line: str, turn: str = "") -> bool:
-    """F114, the second check: whether his line, or his yes to her question just before it, opens exactly this: the line it names (one,
-    this one), the way (moving, or fixed), and the number, tied to the line: in his own words when he names the line, else in her
-    question; a number he says in passing that her question doesn't tie to a line opens nothing. His own numbers always win."""
-    mine, hers = lines_named(line), lines_named(turn)
+    """F114: whether his line, or his yes to her question just before it, opens exactly this: the line, the way (moving or fixed) and the
+    number. Third check: his own line must be an instruction or a yes, never a question, a maybe or a should; a number belongs to the line
+    it's paired with in the words; moving or fixed is what he asked for, not a word in a "shouldn't". When his line names no line, his yes
+    to her question that names exactly one opens it, at his number or else hers; a number in passing opens nothing."""
+    low, hers_low = _norm(line), _norm(turn)
+    mine = _paired(low)
     if mine:
-        source, text = mine, line
-    elif hers and sprint_yes(line, turn):
-        source, text = hers, turn
-    else:
-        return False  # neither names a line: ask him which one
-    if source != {key}:
-        return False
-    said = _norm(line + " " + text)
+        asked = _DENIED.sub(" ", low)  # "it shouldn't keep moving" is a way denied, not a doubt
+        if _NOT_AN_ORDER.search(asked) or not (_ORDER.search(asked) or sprint_yes(line, turn)):
+            return False
+        if key not in mine:
+            return False
+        got = mine[key]
+        if moving:
+            return got["moving"]
+        if got["moving"]:
+            return False
+        if number is None:
+            return True
+        if got["numbers"]:
+            return number in got["numbers"]
+        hers = _paired(hers_low)
+        return set(hers) == {key} and number in hers[key]["numbers"]
+    hers = _paired(hers_low)
+    if set(hers) != {key} or not sprint_yes(line, turn):
+        return False  # neither names one line: ask him which one
+    clean = _DENIED.sub(" ", low)
+    asked_move, asked_fix = bool(_MOVE.search(clean)), bool(_FIX.search(clean))
     if moving:
-        return not (_FIX.search(said) and not _MOVE.search(said))
-    if _MOVE.search(_norm(text)) and not _FIX.search(_norm(text)):
+        return (asked_move or hers[key]["moving"]) and not asked_fix
+    if asked_move and not asked_fix or (hers[key]["moving"] and not asked_fix and not numbers_in(low)):
         return False
     if number is None:
         return True
-    his = numbers_in(line)
-    return number in his if his else number in numbers_in(text)
+    his = numbers_in(low)
+    return number in his if his else number in hers[key]["numbers"]
 
 
 def sprint_yes(line: str, turn: str) -> bool:
