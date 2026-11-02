@@ -1157,7 +1157,7 @@ def initiative_due(now: float | None = None, s: dict | None = None) -> bool:
     i = s.get("initiative") or {}
     if i.get("day") == d.strftime("%Y-%m-%d") and int(i.get("texts") or 0) >= INITIATIVE_MAX:
         return False
-    if t - float(i.get("looked") or 0) < INITIATIVE_EVERY:
+    if t - float(i.get("looked") or 0) < INITIATIVE_EVERY and not i.get("held"):  # F114: a look held through his Sleep goes when it ends
         return False
     return bool(her_notes())
 
@@ -1211,8 +1211,13 @@ def watch(now: float | None = None, spawn=None, dry: bool = False) -> list[tuple
         sent = [r for r in s["reminders"] if r.get("sent")]
         s["reminders"] = [r for r in s["reminders"] if not r.get("sent")] + sent[-KEEP_SENT:]
         if initiative_due(t, s):
-            s["initiative"] = {**(s.get("initiative") or {}), "looked": t}
-            out.append(("initiative", ""))
+            i = s.get("initiative") or {}
+            if _asleep(t):  # F114: her own look waits for the end of his Sleep: written down once, kept through a restart, a repeat dropped
+                if not i.get("held"):
+                    s["initiative"] = {**i, "held": t}
+            else:  # awake: the look goes now, once, and the held mark with it
+                s["initiative"] = {**{k: v for k, v in i.items() if k != "held"}, "looked": t}
+                out.append(("initiative", ""))
         # H152: written only when something changed. It was written every minute, so the file was nearly always
         # on its way to the other computer, and a crash or a write there in between made a conflict copy.
         if not dry and json.dumps(s, sort_keys=True) != before:
@@ -1221,6 +1226,17 @@ def watch(now: float | None = None, spawn=None, dry: bool = False) -> list[tuple
         for why, facts in out:
             (spawn or _spawn)(why, facts)
     return out
+
+
+def initiative_hold(now: float | None = None) -> None:
+    """F114: her own look came while he sleeps (direct_line.initiative saw it): written down, so it goes once when his Sleep ends."""
+    t = now or time.time()
+    with _Lock():
+        s = read()
+        i = s.get("initiative") or {}
+        if not i.get("held"):
+            s["initiative"] = {**i, "held": t}
+            _write(s)
 
 
 def initiative_sent(now: float | None = None) -> None:

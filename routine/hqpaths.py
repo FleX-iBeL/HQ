@@ -352,6 +352,26 @@ def may_send(agent: str) -> bool:
         return False
 
 
+MAIL_SWITCH_REL = "HQ/agents/cycles.json"
+MAIL_SWITCH_WORDS = ("the mail switch is his, set only by his own hand in Settings: never from a call, a text or a job "
+                     "(F114). Leave the mail setting as it is")
+
+
+def mail_switch(text: str | None) -> dict:
+    """F114: each agent's mail setting in a cycles.json text, {agent: value}; {} when it doesn't read."""
+    import json
+    try:
+        d = json.loads(text or "")
+        return {str(k): v.get("mail") for k, v in (d.get("agents") or {}).items() if isinstance(v, dict) and "mail" in v}
+    except (ValueError, AttributeError, TypeError):
+        return {}
+
+
+def mail_switch_changed(old: str | None, new: str | None) -> bool:
+    """F114: whether a new cycles.json text changes the mail switch of any agent (set, changed or taken away)."""
+    return mail_switch(old) != mail_switch(new)
+
+
 def job_flags(agent: str | None = None) -> list[str]:
     """The flags every team job and cycle starts with, next to JOB_ENV."""
     return ["--setting-sources", "user"] + ([] if agent and may_send(agent) else ["--disallowedTools", ",".join(never_mail_tools())])

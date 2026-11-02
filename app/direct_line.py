@@ -1089,6 +1089,10 @@ in between (H127), no notes or system talk. If not, answer only the word QUIET.
 def initiative() -> dict | None:
     """H124: her own look at her notes (from pings.watch, a few times a day). She texts only when one is worth it."""
     import pings
+    if asleep():  # F114: never while he sleeps, whatever started it: the look is written down and goes once when his Sleep ends
+        pings.initiative_hold()
+        print(time.strftime("%Y-%m-%d %H:%M:%S"), "initiative: he's asleep, held for the end of his Sleep")
+        return None
     facts = pings.initiative_facts()
     if os.environ.get("HQ_DIRECT_DRY") == "1" or os.environ.get("HQ_DIRECT_PLAIN") == "1":
         words = os.environ.get("HQ_INITIATIVE_SAYS", QUIET)
@@ -1159,6 +1163,7 @@ def _answer(words: str) -> str:
     st = _read(_pending_file(), {})
     pol = _policy.Policy(_config.FOLDER)
     pol.agent = a["id"]  # F103
+    pol.words_from = [str(folder())]  # F114: his words count only from the thread this text came in
     pol.pending = [tuple(p) for p in st.get("pending") or []]
     if pol.pending:
         pol.answer(words)  # his yes (or no) to what she asked last time

@@ -151,6 +151,20 @@ WAYS_IN = {
     "hq/features.json": f"python3 \"{_APP / 'features.py'}\" on|off NAME (a feature in pieces only after its QA passed, or on his own words, and it's kept)",
 }
 ABOUT_WAY = f"python3 \"{_APP / 'about_self.py'}\" add AGENT \"FACT\""
+# F114 (2 November 2026, his words on the status page: "The doors hold on calls and texts too ... one wall, not two"): the same
+# tiers on a call and in a text as in an agent's own cycle (routine/cyclehook.py). The coaching log has its script (the lock,
+# and on the backup the main writes it); the after-call run still writes it itself, alone, as before.
+LOG_REL = "coaching/log.md"
+LOG_WAY = (f"python3 \"{HQ_ROUTINE / 'handover.py'}\" edit coaching/log.md "
+           f"'{{\"edits\": [{{\"old\": \"...\", \"new\": \"...\"}}]}}' (each old text once, all or nothing, with the log's lock)")
+# His own setup, which a cycle reads and never writes: the agents' settings and the handbook, what HQ reads about him, the backend's
+# switches. On a call or in a text a change asks him first, like his vision; through the shell it's refused (an Edit he says yes to).
+HIS_SETUP = re.compile(r"^(me\.md|hq/backend\.json|hq/agents/(?![^/]+-about-herself\.md$)[^/]+)$")
+# Written only by HQ's own programs: a held change's yes in it is his words, through cycles.py yes.
+PROGRAM_STATE = {"hq/agents/cycles-state.json": "the agents' cycles keep it themselves; his yes to a held change goes in through "
+                                                f"python3 \"{HQ_ROUTINE / 'cycles.py'}\" yes AGENT \"HIS WORDS\" [N]"}
+_LEDGER = re.compile(r"^hq/(?:ledger/([a-z0-9-]+?)(?:[.-][^/]*)?|notes-([a-z0-9-]+)\.md)$")
+_SAYS = f"--said \"HIS WORDS\" (a line he said or typed on this call or in this chat, today, word for word)"
 # What proves his words is written only by HQ: a call or a text never changes a transcript or a thread.
 _PROOF = re.compile(r"^hq/(calls/[^/]+\.md|(direct-line|coaching-line|team-line)/thread\.jsonl)$")
 _ABOUT_LIST = re.compile(r"^hq/agents/[^/]+-about-herself\.md$")
@@ -164,6 +178,109 @@ _SHELL_WRITE = re.compile(
     rf"|\b(?:cp|mv|rm|ln|truncate|dd|rsync|install|touch|chmod)\b[^|;&]*{_GUARDED_NAME}"
     rf"|\bpython3?\s+-c\b[^|;&]*{_GUARDED_NAME}"
     rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{_GUARDED_NAME}", re.I)
+# F114: his own setup and the log through the shell, refused also with a yes: the agents' settings (the mail switch is in them),
+# their state, the handbook, me.md, the backend's switches and the coaching log. An Edit he says yes to, or the log's script.
+_HIS_NAME = (r"(?:(?<![\w-])cycles(?:-state)?\.json|(?<![\w-])backend\.json|(?<![\w-])handbook\.md|(?<![\w-])me\.md|(?<![\w-])agents\.json|"
+             r"(?<![\w-])log\.md|hq/agents/[^\s\"'|;&]+)")
+
+
+# F114: what in code handed to python -c (as cyclehook.ran leaves it: no quotes, no brackets) writes or removes a file; a pure read doesn't.
+_CODE_WRITES = (r"[^|&\n]*(?:\bopen\s+\S+\s+[wax]b?\+?(?:\s|$)|\.write|\bdump\b|unlink|os\.remove|\brename|os\.replace|shutil|"
+                r"truncate|\bsystem\b|subprocess|Popen|\bexec\b|\bmkdir|rmtree)")
+
+
+def _writes_on(name: str) -> "re.Pattern":
+    """F114: a shell line that writes a file of this name: a redirect into it, sed -i, tee, a copy or move over it, a one-liner, a git restore."""
+    return re.compile(
+        rf">>?\s*[\"']?[^\s\"'|;&]*{name}"
+        rf"|\bsed\s+(?:-[a-zA-Z]*\s+)*-i[^|;&]*{name}"
+        rf"|\btee\b[^|;&]*{name}"
+        rf"|\b(?:mv|rm|truncate|touch|chmod|unlink|shred)\b[^|;&]*{name}"
+        rf"|\b(?:cp|ln|install|rsync)\b[^|;&\n]*{name}\s*(?:$|[|;&\n])|\bdd\b[^|;&]*\bof=\S*{name}"  # a copy out of it is a read
+        rf"|\b(?:python[\d.]*|perl|ruby|node)\s+(?:-\S+\s+)*-[a-zA-Z]*[ceE]\b(?={_CODE_WRITES})[^|&\n]*{name}"  # code handed inline that writes
+        rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{name}", re.I)
+
+
+_SHELL_WRITE_HIS = _writes_on(_HIS_NAME)
+# F114: the scripts that stand on his own words or his yes, and what would run them past the policy's own reading of the line.
+_HIS_NAMES = ("cycles.py", "usageline.py", "feedback.py")
+_NAMES_SCRIPT = re.compile(r"(cycles|usageline|feedback)\.py\b")
+# F114, the third check: the programs of a plain read of these scripts. No interpreter, no shell, no wrapper (env, xargs, find, exec,
+# eval, source, nice, timeout), nothing that runs what it's given.
+_READS_OF_SCRIPTS = {"grep", "egrep", "fgrep", "rg", "cat", "head", "tail", "wc", "ls", "cut", "nl", "sort", "uniq", "diff", "cmp", "stat",
+                     "file", "cd", "echo", "sed", "awk", "git"}
+# F114, the last round: git's options that run a program or write a file, never part of a plain read.
+_GIT_RUNS = re.compile(r"^(?:-O|--open-files-in-pager|-c|--output|--ext-diff|--textconv|--exec|-x)")
+# the read-only commands of the scripts themselves, which may stand side by side in one line
+_SCRIPT_READS = {"cycles.py": {"list", "show", "status", "settings", "ledger", "friday", "score"}, "usageline.py": {"", "5-hour", "five", "5h",
+                 "weekly", "week", "fable"}, "feedback.py": {""}}
+_GIT_READS_OF_SCRIPTS = {"log", "diff", "show", "blame", "status", "ls-files", "grep"}
+
+
+def _no_timeout(seg: list[str]) -> list[str]:
+    """F114: `timeout N python3 …` is the command after it."""
+    return seg[2:] if len(seg) > 2 and seg[0] == "timeout" and re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", seg[1]) else seg
+
+
+def _wrapped(name: str) -> "Decision":
+    return Decision(DENY, f"{name}.py runs only as a plain command of its own, `[cd DIR &&] python3 PATH/{name}.py ARGS` (one timeout N in "
+                          f"front and a | head or | tail after are fine, nothing else in the line), and is read only with plain reads (grep, "
+                          f"sed -n, cat, head, tail, wc, ls, git log): {_HIS_SCRIPT_WAY[name]}", door=True)
+
+
+def _shape_pieces(cmd: str):
+    """F114: a line as pieces of words and the marks between them; None for anything but words joined by &&, ; and |."""
+    if re.search(r"`|\$\(|<<|\$\{", cmd):
+        return None
+    lex = shlex.shlex(cmd, posix=True, punctuation_chars="();<>|&\n")
+    lex.whitespace = " \t\r"
+    lex.whitespace_split = True
+    try:
+        tokens = list(lex)
+    except ValueError:
+        return None
+    pieces, joins = [[]], []
+    for tok in tokens:
+        if tok in ("&&", "|", ";"):
+            pieces.append([])
+            joins.append(tok)
+        elif tok and set(tok) <= set("();<>|&\n"):
+            return None  # a redirect, a subshell, an ||
+        else:
+            pieces[-1].append(tok)
+    if any(not p for p in pieces):
+        return None
+    return pieces, joins
+
+
+def _plain_read_piece(p: list[str]) -> bool:
+    prog, args = p[0], p[1:]
+    if prog not in _READS_OF_SCRIPTS:
+        return False
+    if prog in ("sed", "awk"):  # awk only with a program that prints (no system(), no | or > inside it)
+        return not isinstance(_program_files(prog, args), Decision)
+    if prog == "git":
+        while args and args[0] in ("-C", "--no-pager"):
+            args = args[2:] if args[0] == "-C" else args[1:]
+        return bool(args) and args[0] in _GIT_READS_OF_SCRIPTS and not any(_GIT_RUNS.match(a) for a in args)
+    return True
+
+
+def _script_read_run(p: list[str]) -> bool:
+    """F114, the last round: a plain run of one of the scripts' read-only commands (cycles.py list, usageline.py weekly)."""
+    p = _no_timeout(p)
+    if len(p) < 2 or p[0] not in ("python", "python3") or re.search(r"\s", p[1]) or Path(p[1]).name not in _SCRIPT_READS:
+        return False
+    rest = p[2:]
+    return (rest[0] if rest else "") in _SCRIPT_READS[Path(p[1]).name] and len(rest) <= 1
+
+
+_HIS_SCRIPT_WAY = {"cycles": f"python3 \"{HQ_ROUTINE / 'cycles.py'}\" yes AGENT \"HIS WORDS\" [N] (or its other commands)",
+                   "usageline": f"python3 \"{HQ_ROUTINE / 'usageline.py'}\" [weekly|5-hour|fable] moving|fixed [N] --said \"HIS WORDS\"",
+                   "feedback": f"python3 \"{_APP / 'feedback.py'}\" send \"THE WORDS\" --via agent, which asks him first"}
+_SHELL_LEDGER = r"(?:ledger/(?!{a}[.-])[^\s\"'|;&/]+|(?<![\w-])notes-(?!{a}\.md|cleared\.md)[\w-]+\.md)"
+
+
 # F99: the after-call run is alone with nobody to ask: it writes the log and the lists, and adds the transcript.
 AFTER_CALL_EDIT = "coaching/log.md"
 AFTER_CALL_ADD = re.compile(r"^(coaching/log\.md|challenges\.md|hq/agents/[^/]+-about-herself\.md|hq/calls/[^/]+\.md)$")
@@ -213,6 +330,7 @@ class Decision:
     question: str = ""  # for ASK: what HQ asks, in plain words
     retry: bool = False  # H78: a DENY that's only "not yet": do what `why` says, then make the same call again
     handed: bool = False  # H203: not made here, but done: the backup handed it to the main, which wrote it (or will)
+    door: bool = False  # F114: a refused try at one of his doors (his switch, his yes, another agent's ledger): on the ledger, once
 
 
 # -- the lists -------------------------------------------------------------------
@@ -298,6 +416,8 @@ class Policy:
     after_call: bool = False  # F99: the after-call run: only the log, the lists and the transcript
     pending_turns: int = 0  # how many of his turns the pending questions have waited (answer, PENDING_TURNS)
     agent: str = ""  # F103: who's taking this turn, for the ledger's line on a refused outward action
+    # F114: where this call's or this chat's own words are (its transcript, the thread the text came in): his words count only there
+    words_from: list = field(default_factory=list)
 
     def __post_init__(self):
         self.folder = Path(os.path.realpath(self.folder))
@@ -327,7 +447,7 @@ class Policy:
                     self.pending_turns = 0
         summary = summarize(tool, inp or {})
         self.log.append((tool, summary, d))
-        if d.verdict == DENY and not self.dry_run and outward(tool, inp or {}):
+        if d.verdict == DENY and not self.dry_run and (d.door or outward(tool, inp or {})):
             self._on_the_ledger(tool, summary, d)
         if callable(self.listener):
             try:
@@ -340,7 +460,10 @@ class Policy:
         """F103: a refused outward action is a mistake on the ledger, once per thing tried."""
         try:
             sys.path.insert(0, str(HQ_ROUTINE))
+            import hqpaths
             import mistakes
+            if hqpaths.under_test() and str(self.folder) == os.path.dirname(os.path.dirname(hqpaths.real_roadmap())):
+                return  # F114: a test's refusal never lands on his real ledger (the agent "unknown" lines of 31 October)
             mistakes.add("refused", self.agent or "unknown", f"{summary}: {d.why}", where="a call or a text", base=self.folder,
                          key=f"refused|{self.agent}|{tool}|{summary}"[:200])
         except Exception:
@@ -471,19 +594,116 @@ class Policy:
         way = WAYS_IN.get(low)
         if way:
             return Decision(DENY, f"{rel.name} is never edited directly, whoever asks: use {way}", retry=True)
+        if low == LOG_REL and not self.after_call:  # F114: the log through its script, also on a yes
+            return Decision(DENY, f"the coaching log is never edited directly on a call or in a text: use {LOG_WAY}", retry=True)
         if _PROOF.match(low):
             return Decision(DENY, f"{rel.name} is what proves his words, and only HQ writes it")
         if _ABOUT_LIST.match(low):
             return Decision(DENY, f"her list only takes what passes the filter: use {ABOUT_WAY}", retry=True)
-        if rel.name.casefold() == "claude.md" or low in VISION_FILES:
+        theirs = self._not_hers(low, rel.name)
+        if theirs:
+            return theirs
+        if low in PROGRAM_STATE:  # F114: a yes written in by hand would be his yes typed by an agent
+            return Decision(DENY, f"{rel.name} is written only by HQ's own programs, whoever asks: {PROGRAM_STATE[low]}", door=True)
+        if low == hqpaths_mail_rel() and self._moves_mail_switch(path, tool, inp or {}):  # F114: not even with a yes
+            return Decision(DENY, _mail_words(), door=True)
+        if rel.name.casefold() == "claude.md" or low in VISION_FILES or HIS_SETUP.match(low):
             key = (tool, _key(inp or {}))
             if key in self.approved:  # his yes for exactly this change; on the backup it still goes to the main below
                 self.approved.discard(key)
             else:
-                return _ask(f"change {rel.name}, which is yours", "his vision, map, rules or CLAUDE.md (F99)")
+                return _ask(f"change {rel.name}, which is yours",
+                            "his own setup: the agents' settings, the handbook, me.md or the backend (F114)" if HIS_SETUP.match(low)
+                            else "his vision, map, rules or CLAUDE.md (F99)")
         if is_backup() and one_writer(rel.as_posix()):
             return self._hand_over(tool, rel.as_posix(), inp or {})
         return Decision(ALLOW, "writing in the folder")
+
+    def _not_hers(self, low: str, name: str) -> Decision | None:
+        """F114: another agent's ledger or own notes, as in a cycle: each agent writes only her own. With no agent named, none."""
+        m = _LEDGER.match(low)
+        if not m:
+            return None
+        aid, name = (self.agent or "").lower(), name.casefold()
+        if aid and ((low.startswith("hq/ledger/") and name.startswith((f"{aid}.", f"{aid}-"))) or low == f"hq/notes-{aid}.md"):
+            return None
+        whose = "another agent's ledger" if low.startswith("hq/ledger/") else "another agent's own notes"
+        return Decision(DENY, f"{name} is {whose}: only she writes it, whoever asks"
+                              + (f"; yours is HQ/ledger/{aid}.md (python3 \"{HQ_ROUTINE / 'ledger.py'}\" {aid} note \"…\")" if aid else ""),
+                        door=True)
+
+    def _yes_refused(self, args: list[str]) -> str:
+        """F114: why cycles.py yes AGENT WORDS [N] doesn't stand on his words from this call or this chat, today, fitting the change; ""."""
+        try:
+            if str(HQ_ROUTINE) not in sys.path:
+                sys.path.insert(0, str(HQ_ROUTINE))
+            import cycles
+            aid, words = (args[2].lower() if len(args) > 2 else ""), (args[3] if len(args) > 3 else "")
+            n = int(args[4]) if len(args) > 4 and args[4].isdigit() else None
+            return cycles.his_yes_refused(aid, words, n, places=list(self.words_from), base=self.folder)
+        except Exception as e:
+            return f"his words couldn't be read ({type(e).__name__})"
+
+    def _line_refused(self, args: list[str], said: str) -> str:
+        """F114: why usageline.py's switch doesn't stand on his words from this call or this chat, today, naming the line; ""."""
+        try:
+            if str(HQ_ROUTINE) not in sys.path:
+                sys.path.insert(0, str(HQ_ROUTINE))
+            import usageline
+            rest = [a for i, a in enumerate(args[1:], 1) if a != "--said" and args[i - 1] != "--said"]
+            key = usageline.ALIASES.get(rest[0].lower(), "five") if rest else "five"
+            num = next((int(a.rstrip("%")) for a in rest if a.rstrip("%").isdigit()), None)
+            return usageline.his_say_so(said, key, num, places=list(self.words_from), ws=str(self.folder), moving="moving" in rest)
+        except Exception as e:
+            return f"his words couldn't be read ({type(e).__name__})"
+
+    def _script_shape_ok(self, cmd: str) -> bool:
+        """F114, the third check: an allowlist for a line that names cycles.py, usageline.py or feedback.py. It passes only as
+        (a) a plain read: every piece a read program (grep, sed -n, cat, head, tail, wc, ls, git log …), nothing that runs anything;
+        (b) one plain run: `[cd DIR &&] python3 PATH/SCRIPT ARGS [| head|tail …]`, one `timeout N` in front at the most, nothing else;
+        (c) [Claude's pick] one plain run of another of HQ's scripts that only carries the name in its words (a planning row, a note).
+        No VAR= setting, no $( ), backticks, heredoc or redirect anywhere."""
+        shaped = _shape_pieces(cmd)
+        if shaped is None:
+            return False
+        pieces, joins = shaped
+        if all(_plain_read_piece(p) for p in pieces):
+            return True
+        if all(_plain_read_piece(p) or _script_read_run(p) for p in pieces):  # cycles.py list; cycles.py list
+            return True
+        i = 1 if pieces[0][0] == "cd" and len(pieces[0]) == 2 and joins and joins[0] == "&&" else 0
+        if i >= len(pieces):
+            return False
+        run = _no_timeout(pieces[i])
+        if run[0] == "timeout":
+            return False  # timeout with options of its own, or twice
+        rest, rest_joins = pieces[i + 1:], joins[i:]
+        if any(j != "|" for j in rest_joins) or any(p[0] not in ("head", "tail") or any(not re.fullmatch(r"-?\w+", a) for a in p[1:])
+                                                     for p in rest):
+            return False
+        if len(run) < 2 or run[0] not in ("python", "python3") or run[1].startswith("-") or re.search(r"\s", run[1]):
+            return False
+        if Path(run[1]).name in _HIS_NAMES:
+            return True
+        # (c) another of HQ's scripts: the name may only be in its words, never one of the three as a path of its own
+        base = Path(pieces[0][1]).expanduser() if i == 1 else self.folder
+        if not base.is_absolute():
+            base = self.folder / base
+        target = Path(run[1]).expanduser()
+        target = Path(os.path.realpath(target if target.is_absolute() else base / target))
+        return HQ_ROOT in target.parents and target.suffix == ".py" and not any(Path(a).name in _HIS_NAMES for a in run[2:])
+
+    def _moves_mail_switch(self, path: str, tool: str, inp: dict) -> bool:
+        """F114: whether this Edit, MultiEdit or Write of the agents' settings would set, change or take away the mail switch."""
+        try:
+            old = Path(path).read_text(encoding="utf8")
+        except OSError:
+            old = ""
+        new = _after_edit(old, tool, inp)
+        if new is None:  # the edit wouldn't apply (its text isn't there): nothing changes
+            return False
+        import hqpaths
+        return hqpaths.mail_switch_changed(old, new)
 
     def _hand_over(self, tool: str, rel: str, inp: dict) -> Decision:
         """H203: on the backup, a change to a file only the main writes goes to the main, which makes it on its own
@@ -546,6 +766,18 @@ class Policy:
         # subshells, variables or here-documents (quoted text may contain anything).
         if _SHELL_WRITE.search(cmd):  # F99: the same files through the shell, also with a yes
             return Decision(DENY, "those files are never written through the shell, whoever asks: use their own script")
+        runs = _what_runs(cmd)  # F114: a text in quotes (a log line, a note) isn't a command; code handed to python -c or sh -c is
+        if _SHELL_WRITE_HIS.search(runs):  # F114: his own setup and the log, also with a yes
+            return Decision(DENY, "his own setup (the agents' settings and state, the handbook, me.md, the backend) and the coaching log are "
+                                  "never written through the shell, whoever asks: his files with an Edit he says yes to, the log with "
+                                  + LOG_WAY, door=bool(re.search(r"cycles(?:-state)?\.json", runs, re.I)))
+        if _writes_on(_SHELL_LEDGER.format(a=re.escape((self.agent or "").lower() or "\x00"))).search(runs):  # F114
+            return Decision(DENY, "another agent's ledger or notes is hers: only she writes it, whoever asks", door=True)
+        # F114, the third check: a command that names cycles.py, usageline.py or feedback.py passes only in an allowed shape (a plain read,
+        # one plain run, or another HQ script carrying the name in its text); every other shape is refused with the script named.
+        m = _NAMES_SCRIPT.search(cmd)
+        if m and not self._script_shape_ok(re.sub(r"(?<=\s)2>(?:/dev/null|&1)(?=\s|$)", " ", cmd)):  # F114: only these exact two, nothing after them
+            return _wrapped(m.group(1))
         cmd = _hide_quoted_dollars(cmd)  # H281: awk's $1 and sed's $p in single quotes are text, not variables
         # 27 October 2026: ${n} of a plain for loop (for n in 1 2; do sed -n "${n}p" …) is filled in by _loops below.
         loop_vars = re.findall(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b", cmd)
@@ -571,6 +803,7 @@ class Policy:
         segments = _loops(segments)
         if segments is None:
             return _ask("run a shell command", "a shell loop it can't follow")
+        segments = [_no_timeout(seg) for seg in segments]  # F114: timeout N in front of a command changes nothing it may do
         # H277: several steps chained count as one; a cd carries over to the steps after it.
         results: list[tuple[list[str], Decision]] = []
         self._cwd = None
@@ -598,7 +831,7 @@ class Policy:
                         step = " ".join(w.replace(_DOLLAR, "$") for w in seg)[:90]
                         d = Decision(d.verdict, f"only the step `{step}`: {d.why}. The other steps of that command "
                                                 f"are fine on their own: run them again without this step",
-                                     question=d.question, retry=d.retry, handed=d.handed)
+                                     question=d.question, retry=d.retry, handed=d.handed, door=d.door)
                     return d
         return Decision(ALLOW, "; ".join(dict.fromkeys(d.why for _, d in results)))
 
@@ -709,7 +942,10 @@ class Policy:
         if prog in ("python3", "python") and args and self.hq_script(args[0], "handover.py"):
             if len(args) == 4 and args[1] == "edit" and args[2] == "inbox.md":
                 return Decision(ALLOW, "an edit of the mail list, with its lock")
-            return Decision(DENY, "from a call, the handover script only edits the mail list (edit inbox.md JSON)")
+            if len(args) == 4 and args[1] == "edit" and args[2] == LOG_REL:  # F114: the log's way in, since the file itself is refused
+                return Decision(ALLOW, "an edit of the coaching log, with its lock")
+            return Decision(DENY, "from a call, the handover script only edits the mail list or the coaching log "
+                                  "(edit inbox.md JSON, edit coaching/log.md JSON)")
         # F99: the status block's way in, since the planning file itself is refused.
         if prog in ("python3", "python") and args and self.status_script(args[0], "set-status.py"):
             return Decision(ALLOW, "the status block")
@@ -735,6 +971,14 @@ class Policy:
         # the Friday screen and the score. A plan, a step's outcome, a text or the routine's minute are her own runs'.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "cycles.py"):
             sub = args[1] if len(args) > 1 else "list"
+            if sub == "yes":  # F114: his yes is his own words from this call or this chat, today, fitting the change; never hers
+                why = self._yes_refused(args)
+                if why:
+                    return Decision(DENY, f"a yes to a held change is his own words ({why}): cycles.py yes AGENT \"HIS WORDS\" [N], with "
+                                          "words he said or typed himself on this call or in this chat, today, word for word, that name the "
+                                          "change. Ask him, and use his answer", door=True)
+            if sub == "set" and len(args) > 3 and args[3].strip().lower() == "mail":  # F114: the mail switch is his own hand's
+                return Decision(DENY, _mail_words(), door=True)
             if sub in ("list", "show", "status", "settings", "set", "order", "yes", "no", "ledger", "friday", "score"):
                 return Decision(ALLOW, "the agents' own cycles: the settings, an order, her ledger, the Friday screen")
             return Decision(DENY, "from a call, the cycles script takes list, settings, set, order, ledger, friday or score; "
@@ -755,6 +999,9 @@ class Policy:
                 return Decision(ALLOW, "reading an item's record")
             return Decision(DENY, "from a call, the record is only read: trail.py follow ID")
         if prog in ("python3", "python") and args and self.hq_script(args[0], "ledger.py"):
+            if len(args) > 2 and args[2] == "note" and args[1].strip().lower() != (self.agent or "").lower():  # F114: only her own
+                return Decision(DENY, f"{args[1]}'s ledger is hers: only she writes it, whoever asks"
+                                      + (f"; yours: ledger.py {self.agent} note \"…\"" if self.agent else ""), door=True)
             if len(args) <= 2 or args[2] in ("show", "list", "orders", "plan", "scores", "note"):
                 return Decision(ALLOW, "an agent's ledger")
             return Decision(DENY, "from a call, the ledger script reads, or adds a note")
@@ -790,7 +1037,10 @@ class Policy:
         # H247 (c): feedback for HQ, sent after their yes on a call or in a text (the rule reads it back first), the list
         # with each one's status, and the texts' switch. Connecting to a maker is only by the link they send.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "feedback.py"):
-            if len(args) == 1 or args[1] in ("send", "texts"):
+            if len(args) > 1 and args[1] == "send":  # F114: it leaves this HQ, so his yes on this very call or chat, asked here
+                said = " ".join(a for i, a in enumerate(args[2:], 2) if a not in ("--bug", "--via") and args[i - 1] != "--via")
+                return _ask(f"send this to the maker as feedback: \"{' '.join(said.split())[:300]}\"", "feedback that leaves this HQ (F114)")
+            if len(args) == 1 or args[1] in ("texts",):
                 return Decision(ALLOW, "feedback for HQ, after their yes")
             return Decision(DENY, "the feedback script takes send (after their yes) or texts; connecting is by the link")
         # H222: the six-week games, the workspace's own HQ/games.json: read, tick a day, count, a note, the diary, a
@@ -854,13 +1104,23 @@ class Policy:
         # H87, H91: the three usage stop lines (5-hour, weekly, fable), each moving every minute or fixed at a
         # number. Reads them, or switches one: [5-hour|weekly|fable] moving, or fixed with or without a number.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usageline.py"):
-            rest = args[1:]
+            rest, said = args[1:], None
+            if "--said" in rest:  # F114: a switch only on his own words
+                i = rest.index("--said")
+                said, rest = (rest[i + 1] if i + 1 < len(rest) else ""), rest[:i] + rest[i + 2:]
             if rest and rest[0].lower() in ("5-hour", "five", "5h", "weekly", "week", "fable"):
                 rest = rest[1:]
-            if (len(args) == 1 or rest == [] and len(args) == 2 or rest == ["moving"] or rest == ["fixed"]
-                    or (len(rest) == 2 and rest[0] == "fixed" and rest[1].rstrip("%").isdigit())):
+            if len(args) == 1 or rest == [] and len(args) == 2:
                 return Decision(ALLOW, "the usage stop lines")
-            return Decision(DENY, "a usage line takes only moving, or fixed with a number")
+            if rest == ["moving"] or rest == ["fixed"] or (len(rest) == 2 and rest[0] == "fixed" and rest[1].rstrip("%").isdigit()):
+                if said is None:
+                    return Decision(DENY, f"a usage stop line changes only on his own words: add {_SAYS}", door=True)
+                why = self._line_refused(args, said)
+                if why:
+                    return Decision(DENY, f"a usage stop line changes only on his own words ({why}): {_SAYS}, naming the line "
+                                          "(weekly, 5-hour or Fable) or its number", door=True)
+                return Decision(ALLOW, "the usage stop lines, on his words")
+            return Decision(DENY, "a usage line takes only moving, or fixed with a number, and his words with --said")
         # H214: a 9292 link door to door. Only looks places up (the government's open address service, the open
         # station list) and prints a link; it changes nothing.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "travel.py"):
@@ -1143,6 +1403,49 @@ def _hide_quoted_dollars(cmd: str) -> str:
         out.append(_DOLLAR if (c == "$" and (single or lone)) else c)
         i += 1
     return "".join(out)
+
+
+def _what_runs(cmd: str) -> str:
+    """F114: a shell line as the cycles' hook reads it (cyclehook.ran): a quoted text with spaces in it is out, what's handed to a shell
+    or to Python to run stays in. On a failure the line as it is."""
+    try:
+        if str(HQ_ROUTINE) not in sys.path:
+            sys.path.insert(0, str(HQ_ROUTINE))
+        import cyclehook
+        return cyclehook.ran(cmd)
+    except Exception:
+        return cmd
+
+
+def hqpaths_mail_rel() -> str:
+    """F114: where the mail switch lives, relative and casefolded as _edit compares paths."""
+    if str(HQ_ROUTINE) not in sys.path:
+        sys.path.insert(0, str(HQ_ROUTINE))
+    import hqpaths
+    return hqpaths.MAIL_SWITCH_REL.casefold()
+
+
+def _mail_words() -> str:
+    if str(HQ_ROUTINE) not in sys.path:
+        sys.path.insert(0, str(HQ_ROUTINE))
+    import hqpaths
+    return hqpaths.MAIL_SWITCH_WORDS
+
+
+def _after_edit(text: str, tool: str, inp: dict) -> str | None:
+    """F114: a file's text after an Edit, MultiEdit or Write, as the tool would leave it; None when an edit wouldn't apply."""
+    if tool == "Write":
+        c = inp.get("content")
+        return c if isinstance(c, str) else None
+    edits = inp.get("edits") if tool == "MultiEdit" else [inp]
+    for e in edits or []:
+        if not isinstance(e, dict):
+            return None
+        old, new = str(e.get("old_string") or ""), str(e.get("new_string") or "")
+        if not old or old not in text:
+            return None
+        text = text.replace(old, new) if e.get("replace_all") else text.replace(old, new, 1)
+    return text
 
 
 def in_memory(path: str, folder: Path) -> bool:

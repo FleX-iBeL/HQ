@@ -183,6 +183,8 @@ def call_session_options(
         # K3 (9 October 2026): tool search back on, so the connector tools are loaded when she needs
         # them instead of read on every step; the waiting line covers the extra seconds.
         env={"ENABLE_TOOL_SEARCH": "true" if _config.TOOLS_ON_DEMAND else "false",
+             # F114: where this call's or this chat's own words are, so cycles.py and usageline.py read his words only there
+             **({"HQ_WORDS_FROM": os.pathsep.join(map(str, policy.words_from))} if getattr(policy, "words_from", None) else {}),
              **({"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1"} if quick_context else {})},
         stderr=lambda line: logger.debug(f"claude cli: {line}"),
     )

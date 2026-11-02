@@ -131,7 +131,8 @@ _JOB_WRITES = {"add", "add-row", "write-row", "feedback", "send-row", "tell", "s
                "mail-hourly", "resume", "done", "mark", "held", "boxed", "crashed", "guess", "mistake", "redo", "doing"}
 NO_SUBS = {"features": {"on", "off"}, "backend": {"on", "off"}, "cycles": {"set", "order", "yes", "no", "tick"}, "direct_line": {"text", "put", "add", "push", "send"}, "schedule": {"add", "cancel", "move", "priority", "every", "promote"},
            "jobs": _JOB_WRITES, "sprint": {"rank", "plan", "moscow", "ready"}, "review": {"clear", "reword", "add", "sitdown", "no", "pass", "run", "golden", "tick", "keep", "round-before", "round-after"},
-           "qa": {"pass", "fail", "queue"}, "mistakes": {"add", "put"}}
+           "qa": {"pass", "fail", "queue"}, "mistakes": {"add", "put"},
+           "feedback": {"send", "connect", "disconnect", "texts"}}  # F114: feedback leaves this HQ: his yes on a call or in a chat, never a cycle's
 MAY_SUBS = {"moneypenny": {"jobs": {"stop", "resume", "tell", "write-row", "feedback"}, "sprint": {"rank", "moscow", "ready"}, "review": {"reword", "add", "sitdown", "no"}, "qa": {"queue"}}}
 # what's his, read and never written by a cycle
 HIS = ("my-answers.md", "day-in-the-life.md", "day-in-the-life-stories.md", "lifestyle-design.md", "map.md", "rules.md", "me.md", "CLAUDE.md", "where-things-go.md",
@@ -663,7 +664,12 @@ def job_guard(cmd: str) -> str | None:
         return "HQ: refused: going back or forward a version is his, on a call or on the status page; a job never does it."
     if any(_JOB_NO_DATA.search(p) for p in pieces):
         return "HQ: refused: the routine runs the data changes, once they're committed and on dev; a job never runs them by hand."
+    if any(_JOB_NO_USAGE_LINE.search(p) for p in pieces):  # F114: the same tier as a call, where it takes his own words
+        return "HQ: refused: the usage stop lines are his: they change on his own words on a call or a chat, or on the status page; a job never moves them."
     return None
+
+
+_JOB_NO_USAGE_LINE = re.compile(r"(?<![\w-])usageline\.py\b(?:\s+(?:5-hour|five|5h|weekly|week|fable))?\s+(?:moving|fixed|reserve\s+\d)")
 
 
 # F86: what writes, besides role.WRITES (what a call may hand to the main); a round's own ways out are named in fix_guard.
@@ -703,6 +709,56 @@ def fix_guard(cmd: str, label: str, mode: str) -> str | None:
     return None
 
 
+# F114: his lists, which a team job writes only through their own scripts (each takes the file's lock and keeps the log line), and the
+# agents' settings and state (the mail switch, a held change's yes), which no job writes at all. The planning and the coaching log stay a
+# job's: it writes its results in its row, and a refused pull or push in the log (F31).
+JOB_LISTS = {
+    "challenges.md": "python3 ../HQ/app/todo.py (add, done, letgo, move, tick, rename, order, undo)",
+    "inbox.md": "python3 ../HQ/routine/handover.py edit inbox.md JSON",
+    "HQ/notes.md": "python3 ../HQ/app/notes.py (add, clear, restore)",
+    "HQ/games.json": "python3 ../HQ/app/games.py",
+    "HQ/coaching.json": "python3 ../HQ/app/coaching.py",
+    "HQ/calendar-todo.json": "python3 ../HQ/app/todo.py (plan, unplan)",
+    "HQ/agents/cycles.json": "python3 ../HQ/routine/cycles.py set AGENT KEY VALUE; the mail switch is his own hand's, in Settings",
+    "HQ/agents/cycles-state.json": "nothing: the agents' cycles keep it themselves, and his yes goes in only through his own words",
+}
+
+
+def _in_workspace(path: str, cwd: str | None) -> str | None:
+    """F114: the path relative to his workspace when it's inside it (the real one this HQ serves), else None."""
+    import hqpaths
+    folder = os.path.realpath(hqpaths.FOLDER)
+    try:
+        p = os.path.realpath(os.path.join(cwd or folder, os.path.expanduser(path or "")))
+    except (TypeError, ValueError):
+        return None
+    return p[len(folder) + 1:] if p.startswith(folder + "/") else None
+
+
+def job_list_write(name: str, inp: dict, cwd: str | None = None) -> str | None:
+    """F114: a team job's direct write of one of his lists, or of the agents' settings or state, in a refusal's words; None when it's fine.
+    Only the real workspace counts: a test copy elsewhere is the job's own."""
+    if name in EDITORS:
+        rel = _in_workspace(str(inp.get("file_path") or inp.get("notebook_path") or ""), cwd)
+        if rel in JOB_LISTS:
+            return f"HQ: refused {name} on {rel}: {_job_what(rel)}: {JOB_LISTS[rel]}."
+        return None
+    if name != "Bash":
+        return None
+    runs = ran(str(inp.get("command") or ""))
+    for rel, way in JOB_LISTS.items():
+        base = rel.rsplit("/", 1)[-1]
+        for tok in set(re.findall(rf"[^\s\"'|;&<>()]*(?<![\w-]){re.escape(base)}", runs)):
+            if _in_workspace(tok, cwd) == rel and re.search(_WRITE_ON.format(n=re.escape(tok), name=re.escape(tok)), runs, re.I):
+                return f"HQ: refused a shell write on {rel}: {_job_what(rel)}: {way}."
+    return None
+
+
+def _job_what(rel: str) -> str:
+    return ("a job never writes the agents' settings or state by hand" if rel.startswith("HQ/agents/")
+            else "a job writes his lists only through their own scripts")
+
+
 def decide(ask: dict, mail_only: bool = False, fix: tuple | None = None, who: tuple | None = None) -> tuple[int, str]:
     import hqpaths
     name, inp = str(ask.get("tool_name", "")), ask.get("tool_input") or {}
@@ -724,7 +780,8 @@ def decide(ask: dict, mail_only: bool = False, fix: tuple | None = None, who: tu
     if name == "Bash" and re.search(r"jobs\.py[\"']?\s+(?:now\b|(?:add|add-row|send-row)\b[^\n]*\s--now\b)|/api/team\b|/api/sayso\b|/api/forward\b|\bHQ_IN_JOB\b", str(inp.get("command") or "")):
         return 2, "HQ: refused: a build in his day hours goes only on his own say-so; a job can't give it to itself."
     if mail_only:
-        return 0, ""
+        why = job_list_write(name, inp, ask.get("cwd"))  # F114: a team job writes his lists only through their own scripts
+        return (2, why) if why else (0, "")
     if fix and name in EDITORS and "HQ/ledger/" not in os.path.normpath(str(inp.get("file_path") or inp.get("notebook_path") or "")).replace(os.sep, "/"):
         return 2, f"HQ: refused {name}: this run is one round on {fix[0]}; it writes through review.py add and your ledger, nothing by hand."
     if fix and name.startswith("mcp__") and not _MCP_READS.match(name.rsplit("__", 1)[-1]):

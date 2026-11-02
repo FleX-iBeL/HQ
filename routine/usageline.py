@@ -272,16 +272,187 @@ def _writes(argv: list[str]) -> bool:
     return bool(rest) and (rest[0] in ("moving", "fixed") or (argv[0] in ("reserve", "least") and len(argv) == 2))
 
 
+# F114 (the check's fix round): what names each line in his words. "The weekly Fable line" is the Fable one.
+LINE_WORDS = {"five": re.compile(r"\b(?:5|five)[- ]?h(?:ou)?rs?\b|\b5h\b"), "weekly": re.compile(r"\bweek(?:ly)?\b"),
+              "fable": re.compile(r"\bfable\b")}
+
+
+def _norm(text: str) -> str:
+    return " ".join(str(text).lower().replace("’", "'").split())
+
+
+def lines_named(text: str) -> set:
+    """F114: which stop lines these words name ("the weekly Fable line" is the Fable one)."""
+    named = {k for k, rx in LINE_WORDS.items() if rx.search(_norm(text))}
+    return named - {"weekly"} if "fable" in named else named
+
+
+def numbers_in(text: str) -> set:
+    """F114: the numbers in these words, the 5 of "5-hour" left out."""
+    return {n for _, n in _numbers_at(_norm(text))}
+
+
+def _numbers_at(low: str) -> list:
+    blank = LINE_WORDS["five"].sub(lambda m: " " * len(m.group(0)), low)
+    return [(m.start(), int(m.group(1))) for m in re.finditer(r"(?<![\d.:])(\d{1,3})(?![\d.:])", blank)]
+
+
+_FIX = re.compile(r"\bfix(?:es|ed|ing)?\b")
+_MOVE = re.compile(r"\bmov(?:e|es|ed|ing)\b")
+# F114, the third check: what isn't an instruction (a question, a doubt, a wish), and a way said only to be denied ("it shouldn't keep moving").
+_NOT_AN_ORDER = re.compile(r"\?|^(?:why|what|what's|how|when|where|who|which|is|are|was|were|do|does|did|should|shall|could|would|can|will|has|have)\b"
+                           r"|\b(?:maybe|perhaps|should|shouldn't|might|i think|i guess|probably|wonder|not sure|right now|at the moment)\b")
+_ORDER = re.compile(r"\b(?:fix|set|put|move|make|change|turn|switch|pin|lock|bring|keep|let)\b")
+_DENIED = re.compile(r"\b(?:shouldn't|should not|mustn't|must not|don't|do not|doesn't|does not|not|never|no longer|stop(?:s|ped)?)\s+(?:\w+\s+){0,3}?"
+                     r"(?:mov(?:e|es|ed|ing)|fix(?:es|ed|ing)?)\b")
+
+
+_LEAD_YES = re.compile(r"(?:(?:yes|ok|okay|yeah)[\s,!.]+)?(?:nice|lovely|cool|fine|good|alright|great|perfect|awesome|excellent|yes|ok|okay|yeah|sure)\b[\s,!.]")
+
+
+def _mentions(low: str) -> list:
+    """F114: where each line is named in these words, in order, as (start, key); "the weekly Fable line" is one mention, of Fable."""
+    found = sorted((m.start(), m.end(), k) for k, rx in LINE_WORDS.items() for m in rx.finditer(low))
+    out = []
+    for i, (a, b, k) in enumerate(found):
+        if k == "weekly" and any(k2 == "fable" and 0 <= a2 - b <= 12 for a2, _, k2 in found[i + 1:]):
+            continue
+        out.append((a, k))
+    return out
+
+
+def _paired(low: str) -> dict:
+    """F114, the third check: per line named, its numbers and the way asked for, from the part of the words that belongs to it: a number
+    goes to the line named last before it (else the first one after it); a way said only to be denied doesn't count."""
+    marks = _mentions(low)
+    if not marks:
+        return {}
+    clean = _DENIED.sub(" ", low)
+    out = {k: {"numbers": set(), "moving": False, "fixed": False} for _, k in marks}
+    for at, n in _numbers_at(low):
+        owner = next((k for a, k in reversed(marks) if a <= at), marks[0][1])
+        out[owner]["numbers"].add(n)
+    for i, (a, k) in enumerate(marks):
+        part = clean[(0 if i == 0 else a):(marks[i + 1][0] if i + 1 < len(marks) else len(clean))]
+        moving, fixed = bool(_MOVE.search(part)), bool(_FIX.search(part)) or bool(out[k]["numbers"])
+        if not moving and not fixed:  # the way said once for the whole line ("fix the weekly at 95 and the fable at 80")
+            moving, fixed = bool(_MOVE.search(clean)), bool(_FIX.search(clean))
+        out[k]["moving"] |= moving and not fixed
+        out[k]["fixed"] |= fixed
+    return out
+
+
+def opens(key: str, number: int | None, moving: bool, line: str, turn: str = "") -> bool:
+    """F114: whether his line, or his yes to her question just before it, opens exactly this: the line, the way (moving or fixed) and the
+    number. Third check: his own line must be an instruction or a yes, never a question, a maybe or a should; a number belongs to the line
+    it's paired with in the words; moving or fixed is what he asked for, not a word in a "shouldn't". When his line names no line, his yes
+    to her question that names exactly one opens it, at his number or else hers; a number in passing opens nothing."""
+    low, hers_low = _norm(line), _norm(turn)
+    mine = _paired(low)
+    if mine:
+        asked = _DENIED.sub(" ", low)  # "it shouldn't keep moving" is a way denied, not a doubt
+        answers = bool(_LEAD_YES.match(asked)) and set(_paired(hers_low)) == {key} and not _held(line)  # "great, the weekly one at 95"
+        if _NOT_AN_ORDER.search(asked) or not (_ORDER.search(asked) or sprint_yes(line, turn) or answers):
+            return False
+        if key not in mine:
+            return False
+        got = mine[key]
+        if moving:
+            return got["moving"]
+        if got["moving"]:
+            return False
+        if number is None:
+            return True
+        if got["numbers"]:
+            return number in got["numbers"]
+        hers = _paired(hers_low)
+        return set(hers) == {key} and number in hers[key]["numbers"]
+    hers = _paired(hers_low)
+    if set(hers) != {key} or not sprint_yes(line, turn):
+        return False  # neither names one line: ask him which one
+    clean = _DENIED.sub(" ", low)
+    asked_move, asked_fix = bool(_MOVE.search(clean)), bool(_FIX.search(clean))
+    if moving:
+        return (asked_move or hers[key]["moving"]) and not asked_fix
+    if asked_move and not asked_fix or (hers[key]["moving"] and not asked_fix and not numbers_in(low)):
+        return False
+    if number is None:
+        return True
+    his = numbers_in(low)
+    return number in his if his else number in hers[key]["numbers"]
+
+
+def _held(line: str) -> bool:
+    import sprint
+    return sprint.held_back(line)
+
+
+def sprint_yes(line: str, turn: str) -> bool:
+    import sprint
+    return sprint.a_yes(line, turn)
+
+
+def names_line(key: str, line: str, number: int | None = None) -> bool:
+    """F114 (first round, kept for its callers): his line alone opens this line, fixed at this number."""
+    return opens(key, number, False, line)
+
+
+def his_say_so(words: str | None, key: str, number: int | None = None, places: list | None | str = "env", ws: str | None = None,
+               moving: bool = False) -> str:
+    """F114: why his words don't stand for switching this line, or "" when they do: a line he said or typed himself, today, on this call or
+    in this chat (HQ_WORDS_FROM, which the session sets for its tools; by hand, any of today's), the program's own lines only (a transcript
+    or a thread), not a no, and naming this line or its number. Never a job's own process; inside a call or a chat, never without words."""
+    if os.environ.get("HQ_IN_JOB"):
+        return "a job can't give itself his say-so"
+    import sprint
+    places = sprint.words_from_env() if places == "env" else places
+    if words is None:
+        return "this runs on a call or in a chat, so it needs his words with --said" if places is not None else ""
+    if hqpaths.under_test() and not os.environ.get("HQ_PROOF_ON"):  # a test copy without lines of his, as sprint.his_quote
+        return ""
+    hits = sprint.his_said_now(words, ws, places=places)
+    if not hits:
+        return "those aren't his words from this call or this chat, today"
+    ok = [h for h in hits if sprint.yes_reading(h["line"], h["turn"], ()) != "no"]
+    if not ok:
+        return "those are his words, but they say no"
+    if not any(opens(key, number, moving, h["line"], h["turn"]) for h in ok):
+        return (f"his words, or your question just before his yes, don't name this line ({LINES[key][0]}) and what to do with it"
+                + (f" at {number}" if number is not None else "") + "; when neither names a line, ask him which one")
+    return ""
+
+
+def sprint_places():
+    import sprint
+    return sprint.words_from_env()
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(describe())
         return 0
+    said = None
+    if "--said" in argv:  # F114: from a call or a chat, a switch stands on his own words; the status page is his own hand
+        i = argv.index("--said")
+        said, argv = (argv[i + 1] if i + 1 < len(argv) else ""), argv[:i] + argv[i + 2:]
+        if not argv:
+            print(describe())
+            return 0
+    def refused(key, number=None, moving=False):
+        why = his_say_so(said, key, number, moving=moving)
+        if why:
+            print(f"Refused: {why}. A usage stop line changes only on his own words: --said \"HIS WORDS\", a line he said or typed, "
+                  "naming the line (weekly, 5-hour or Fable) or its number.", file=sys.stderr)
+        return bool(why)
     if _writes(argv) and not os.environ.get("HQ_ROLE_HERE"):
         import role  # F115: the planning file is the main's to write: on the backup a switch goes there
         if role.is_backup():
-            return role.forward("usageline", list(argv))
+            return role.forward("usageline", list(argv) + (["--said", said] if said is not None else []))
     if argv[0] == "least":
         if len(argv) == 2:
+            if os.environ.get("HQ_IN_JOB") or sprint_places() is not None:  # F114: not from a job, a call or a chat, as the reserve
+                print("Refused: the least line is set on the status page or by his own hand.", file=sys.stderr)
+                return 2
             if points(argv[1]) is None:
                 print("The least line is a whole number of points from 0 to 50.", file=sys.stderr)
                 return 2
@@ -291,6 +462,9 @@ def main(argv: list[str]) -> int:
         return 0
     if argv[0] == "reserve":
         if len(argv) == 2:
+            if os.environ.get("HQ_IN_JOB") or sprint_places() is not None:  # F114: not from a job, a call or a chat
+                print("Refused: the reserve is set on the status page or by his own hand.", file=sys.stderr)
+                return 2
             if points(argv[1]) is None:
                 print("The reserve is a whole number of points from 0 to 50.", file=sys.stderr)
                 return 2
@@ -305,6 +479,8 @@ def main(argv: list[str]) -> int:
             print(describe_one(key, s[key]) if s else describe())
             return 0
     if argv[0] == "moving" and len(argv) == 1:
+        if refused(key, moving=True):
+            return 2
         write(key, True, None)
     elif argv[0] == "fixed" and len(argv) in (1, 2):
         number = None
@@ -314,6 +490,8 @@ def main(argv: list[str]) -> int:
                 print("The fixed number is a whole percentage from 1 to 100.", file=sys.stderr)
                 return 2
             number = int(n)
+        if refused(key, number):
+            return 2
         write(key, False, number)
     else:
         print(__doc__.strip().split("\n\n")[-1], file=sys.stderr)

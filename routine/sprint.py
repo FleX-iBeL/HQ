@@ -640,14 +640,17 @@ def _spoken(ws):
         yield rel, rows
 
 
-def his_said(parts, ws):
+def his_said(parts, ws, real_only=False):
     """F104: every line of his that holds a quote, oldest first by the time it was said, whichever place it's in: {"where", "at", "line", "turn" (the agent's
     lines right before it, none when he spoke last), "before" (what was said just before, each line named)}. A quote of a word or two has to stand
-    as whole words: "yes" isn't in "yesterday"."""
+    as whole words: "yes" isn't in "yesterday". F114: real_only, only a transcript or a thread, the lines the program itself writes as his; a quick
+    note can be added from a call (notes.py add), so it doesn't stand for his yes at a door."""
     short = sum(len(p.split()) for p in parts) < HIS_QUOTE_WORDS
     has = (lambda p, b: re.search(rf"(?<!\w){re.escape(p)}(?!\w)", b)) if short else (lambda p, b: p in b)
     out = []
     for where, rows in _spoken(ws):
+        if real_only and not where.startswith(("HQ/calls/", "HQ/direct-line", "HQ/coaching-line", "HQ/team-line")):
+            continue
         for i, r in enumerate(rows):
             if r["who"] != "he" or not all(has(p, _bare(r["text"])) for p in parts):
                 continue
@@ -659,6 +662,64 @@ def his_said(parts, ws):
             lines = [("He: " if x["who"] == "he" else "The agent: ") + x["text"] for x in rows[max(0, i - 4):i]]
             out.append({"where": where, "at": r["at"], "line": r["text"], "turn": " ".join(turn), "before": "\n".join(lines)[-1500:]})
     return sorted(out, key=lambda x: x["at"])
+
+
+def words_from_env():
+    """F114: where this call's or this chat's own words are (HQ_WORDS_FROM, set by the session for its tools), or None outside one."""
+    v = os.environ.get("HQ_WORDS_FROM")
+    return [x for x in v.split(os.pathsep) if x] if v else None
+
+
+def place_of(path, ws):
+    """F114: a call's transcript or a chat's thread (its file or its folder) as his_said names where a line stands."""
+    p = os.path.realpath(str(path))
+    if p.endswith(".md"):
+        return "HQ/calls/" + os.path.basename(p)
+    if p.endswith(".jsonl"):
+        p = os.path.dirname(p)
+    return "HQ/" + os.path.basename(p)
+
+
+def his_said_now(quote, ws=None, places=None, day=None):
+    """F114 (the check's fix round): his own lines holding QUOTE that count at a door: from a transcript or a thread the program wrote,
+    only in PLACES when given (this call's transcript, the thread this text came in), and only from DAY (today by default).
+    His older lines, another call's and a quick note never open anything."""
+    ws = ws or _ws()
+    parts = [p for p in (_bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", quote or "")) if p]
+    if not parts:
+        return []
+    day = day or time.strftime("%Y-%m-%d")
+    want = {place_of(p, ws) for p in places} if places is not None else None  # an empty list: nowhere
+    return [h for h in his_said(parts, ws, real_only=True)
+            if (want is None or h["where"] in want) and time.strftime("%Y-%m-%d", time.localtime(h["at"] or 0)) == day]
+
+
+def a_yes(line, turn, names=()):
+    """F114: whether a line of his reads as a yes, with no model. A firm yes word anywhere (yes, ok, sure, go ahead, do it …) or a short one
+    that is the whole line (nice, lovely, cool, fine, good, alright, great, perfect; with at most a yes or ok around it), and nothing holding it
+    back: "good question", "I'm good", "leave it, it's fine" or "alright, let me think about it" are no yes."""
+    low = " ".join(str(line).lower().replace("’", "'").split())
+    bare = " ".join(re.sub(r"[^\w' ]", " ", low).split())
+    said = bool(_YES_PLAIN.search(low) or _A_YES_PHRASE.search(low) or _A_YES_ALONE.fullmatch(bare))
+    return said and not held_back(low)
+
+
+def held_back(line):
+    """F114: words in his line that hold a yes back (but, wait, not now, maybe, leave it, skip, forget it, question …)."""
+    low = " ".join(str(line).lower().replace("’", "'").split())
+    return bool(_TAKEN_BACK.search(low) or _HOLD_WORD.search(low) or _NOT_SURE.search(low) or _A_HOLD.search(low))
+
+
+# F114, the third check: the short words count only as the whole line ("nice", "yes, fine"), the phrases anywhere, and these hold a yes back.
+_SHORT_YES = r"(?:nice|lovely|cool|fine|good|alright|all right|great|perfect|awesome|excellent)"
+_ACT_ON_IT = r"(?:put|add|book|fix|move|do|change|plan|make|set)\s+(?:it|that)(?:\s+(?:in|on|up))?"
+# F114, the last round: a short word alone, a short word with only an action on it or that ("perfect, put it in", "do that"), or "that's
+# perfect", "that works", "fine by me"; at most a yes or ok in front and a please after. The hold words below still win.
+_A_YES_ALONE = re.compile(rf"(?:(?:yes|ok|okay|yeah)\s+)?(?:{_SHORT_YES}(?:\s+(?:yes|ok|okay|yeah))?|(?:{_SHORT_YES}\s+)?{_ACT_ON_IT}"
+                          rf"|that'?s\s+(?:perfect|great|fine|good)|that\s+works|fine\s+by\s+me)(?:\s+please)?")
+_A_YES_PHRASE = re.compile(r"(?<![\w'])(?:sounds good|sounds great|correct|go for it|let'?s do it|definitely)(?![\w'])")
+_A_HOLD = re.compile(r"(?<![\w'])(?:leave it|as it is|i'?m good|i'?m fine|i'?m ok(?:ay)?|think about|thinking about|sleep on it|not now|later|"
+                     r"wait|hold on|no need|nothing to change|let me think|never mind|skip|forget it|myself|noted|i know|i saw|question)(?![\w'])")
 
 
 NOT_HIS = "those words aren't in his own lines"
@@ -692,7 +753,7 @@ def his_on(quote, about, ws=None):
     return (hit["where"], "") if answer.strip().lower().startswith("yes") else (None, NOT_ON_IT)
 
 
-def his_yes(quote, about, ws=None, names=()):
+def his_yes(quote, about, ws=None, names=(), real_only=False):
     """F104: his say-so, everywhere his quote stands in for his yes: (where, ""), or (None, why not in plain words). `about` is what it's taken as his yes
     to, in a line; `names` what that goes by (its label, its feature name). They must be his words; then a clear yes passes and a clear no is refused by
     the program (yes_reading), any newer line of his included, and only the rest goes to one small look, the way of mistakes.second_look. There a no,
@@ -708,7 +769,7 @@ def his_yes(quote, about, ws=None, names=()):
     else:
         ws = ws or _ws()
         parts = [p for p in (_bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", quote or "")) if p]
-        hits = his_said(parts, ws) if parts else []
+        hits = his_said(parts, ws, real_only) if parts else []
         if not hits:
             return None, NOT_HIS
         clear = next((h for h in reversed(hits) if yes_reading(h["line"], h["turn"], names) == "yes"), None)

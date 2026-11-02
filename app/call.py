@@ -135,6 +135,7 @@ class Call:
             context = agents.context_of(self.agent)
             self.context = "all" if context == "day" and self.load == "deep" else context
             self.policy.agent = self.agent["id"]  # F103
+            self.policy.words_from = [str(self.transcript.path)] if self.transcript.path else []  # F114: his words count only on this call
             self.policy.memory_writes = self.context == "build"  # H280: her lessons stay
             self.policy.team_texts = self.context == "build"  # H266: she texts him on her own line
             # H282: her own thinking time (Moneypenny high), the rest as before; a three-way keeps the first one's
