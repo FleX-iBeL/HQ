@@ -20257,7 +20257,7 @@ real = R.to_nightly
 R.to_nightly = lambda: (pushes.append(1), real())[1]
 cmd = sys.argv[4]
 if cmd == 'main':
-    print('EXIT', R.cmd_main(want=sys.argv[5] if len(sys.argv) > 5 else None))
+    print('EXIT', R.cmd_main(**({'want': sys.argv[5]} if len(sys.argv) > 5 else {})))
 elif cmd == 'nightly':
     print('EXIT', R.cmd_nightly('a test'))
 elif cmd == 'status':
