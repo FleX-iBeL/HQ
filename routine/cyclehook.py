@@ -86,7 +86,7 @@ _GIT_CONFIG = re.compile(r"(?<![\w$])GIT_CONFIG_(?:COUNT|KEY_\w+|PARAMETERS)\s*=
 _ONLY_SAYS = {"grep", "egrep", "fgrep", "rg", "ag", "cat", "head", "tail", "less", "more", "sed", "awk", "echo", "printf", "git", "ls", "wc", "diff", "sort", "uniq", "cut", "tr", "jq"}  # reads or prints its arguments
 _SHELL = r"(?:^|[\s/])(?:ba|z|da|k)?sh"
 _RUNS_SHELL = re.compile(rf"{_SHELL}\s+(?:-\S+\s+)*-\w*c\s*$|(?:^|\s)eval\s+$|{_SHELL}(?:\s+-\S+)*\s*<<<\s*$")
-_RUNS_CODE = re.compile(r"\bpython[\d.]*\s+(?:-\S+\s+)*-c\s*$")
+_RUNS_CODE = re.compile(r"\bpython[\d.]*\s+(?:(?:-[XW]\s+\S+|-\S+)\s+)*-c\s*$")  # -X and -W take a value
 _FEEDS_SHELL = re.compile(rf"{_SHELL}(?:\s+-\S+)*\s*$")
 _FEEDS_CODE = re.compile(r"\bpython[\d.]*(?:\s+-\S+)*\s*$")
 _JOB_NO_DATA = re.compile(r"(?<![\w-])datachange\.py\s+apply\b")  # F104: the routine's minute does that, on what's committed and on dev
@@ -100,7 +100,9 @@ WRAPPERS = {"env", "command", "exec", "time", "nice", "ionice", "timeout", "stdb
 DELETERS = {"rm", "rmdir", "shred", "unlink", "truncate"}
 CODE_RUNNERS = {"python", "python3", "node", "perl", "ruby"}
 _NET_CODE = re.compile(r"\b(?:import|from)\s+(?:urllib|requests|httpx|aiohttp|http\.client|socket|smtplib|ftplib|paramiko)\b|\burllib\.\w|\brequests\.(?:get|post|put|delete)\b|\bfetch\(")
-_RUNS_CODE_TEXT = re.compile(r"\b(?:python[\d.]*|node|perl|ruby)\s+(?:-[a-zA-Z]*[cCeE]\b|-\s*<<|<<)")  # code it's handed, not a script's own heredoc: a round's words may name anything
+# code it's handed: by -c or -e after any flags before it (python3 -X utf8 -c, -u, -B), or a heredoc to the runner itself after its own flags only,
+# never a script's own heredoc: a round's words may name anything
+_RUNS_CODE_TEXT = re.compile(r"\b(?:python[\d.]*|node|perl|ruby)\b(?:[^\n|;&]*?\s-[a-zA-Z]*[cCeE]\b|(?:\s+(?:-[XW]\s+\S+|-[a-zA-Z]+))*\s+-?\s*<<)")
 KNOWN_READS = {"Read", "Grep", "Glob", "LS", "NotebookRead", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch", "CronList", "ListAgents"}  # all else is by name below, or refused
 _READ_TOOL = re.compile(r"^(?:get|list|search|read|query|suggest|find|fetch|count|view|show|describe|lookup|check|download)(?:_|$)", re.I)
 CALENDAR_WRITES = {"create_event", "update_event", "delete_event"}

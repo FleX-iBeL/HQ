@@ -21623,7 +21623,8 @@ print("RESULT " + json.dumps(out))
                   ("mcp__c__respond_to_event", {}), ("Agent", {}), ("Task", {})]
         no_one += [("Bash", {"command": c}) for c in ("curl -X POST https://x.example/a", "wget https://x.example", "gh pr list", "gh api repos", "git push origin main", "git push", "git commit -m a",
                                                       "git -C /x reset --hard", "ssh host ls", "scp a b:c", "env A=1 curl x", "echo $(curl x)", "timeout 5 wget x", "bash -c 'curl x'",
-                                                      "python3 -c 'import urllib.request'", f"python3 {H}/routine/push.py", f"python3 {H}/routine/release.py", f"python3 {H}/routine/schedule.py add now x",
+                                                      "python3 -c 'import urllib.request'", "python3 -X utf8 -c 'import urllib.request'", "python3 -u -c 'import urllib.request'",
+                                                      "python3 -B -c 'import urllib.request'", "python3 -X utf8 - <<E\nimport urllib.request\nE", f"python3 {H}/routine/push.py", f"python3 {H}/routine/release.py", f"python3 {H}/routine/schedule.py add now x",
                                                       f"python3 {H}/routine/cycles.py set donna weekly 99", f"python3 {H}/routine/jobs.py add x", f"python3 {H}/app/features.py off agents_run",
                                                       "claude -p hello", "kill 1", "sudo reboot", "pkill python", "rm -rf HQ", "find . -delete",
                                                       "sed -i s/a/b/ rules.md", "echo x > map.md", "echo x >> my-answers.md", "tee me.md", "cp /tmp/x rules.md", "mv HQ/agents/handbook.md /tmp/x",
@@ -22908,9 +22909,13 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         self._hf_mirror(b)
         def fails():
             bad = []
-            for cmd in ("python3 app/direct_line.py text cycle hello", 'python3 "/x y/app/direct_line.py" text cycle hello', "python3 -c 'import direct_line; direct_line.push(1)'", "python3 - <<E\nfrom direct_line import push\nE"):
+            for cmd in ("python3 app/direct_line.py text cycle hello", 'python3 "/x y/app/direct_line.py" text cycle hello', "python3 -c 'import direct_line; direct_line.push(1)'", "python3 - <<E\nfrom direct_line import push\nE",
+                        "python3 -X utf8 -c 'import direct_line; direct_line.push(1)'", "python3 -u -c 'import direct_line; direct_line.push(1)'", "python3 -B -c 'import direct_line; direct_line.push(1)'"):
                 if self._hf_hook(b, "Bash", {"command": cmd}).returncode != 2:
                     bad.append(cmd)
+            for cmd in ("python3 app/todo.py show x <<E\nimport direct_line\nimport urllib.request\nE",):  # a script's own heredoc names anything
+                if self._hf_hook(b, "Bash", {"command": cmd}).returncode != 0:
+                    bad.append(f"a script's own heredoc: {cmd[:40]}")
             for inp in ({"summary": "x", "startTime": "a", "endTime": "b", "calendarId": "alice@example.com"},):
                 if self._hf_hook(b, "mcp__g__create_event", inp).returncode != 2:
                     bad.append("an address")
