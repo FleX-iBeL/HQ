@@ -42,7 +42,7 @@ OLD, NEW = "Nothing planned.", "Nothing planned yet."
 PAGE = "status/index.html"
 HOLD_UPS = ("her Thursday session brought to now", "the night's 22:00 brought to now", "the night's 2:00 brought to now",
             "his yes at the sprint planning", "his hours for her set to the whole day")
-OFF = ("HQ_ROADMAP", "HQ_SPRINT", "HQ_ROLE_HERE", "HQ_WORKSPACE", "HQ_TEST_PORT", "HQ_PORT", "HQ_STATUS_PORT", "HQ_UNIT", "HQ_SUPPORT",
+OFF = ("HQ_UNDER_TEST", "HQ_ROADMAP", "HQ_SPRINT", "HQ_ROLE_HERE", "HQ_WORKSPACE", "HQ_TEST_PORT", "HQ_PORT", "HQ_STATUS_PORT", "HQ_UNIT", "HQ_SUPPORT",
        "HQ_NO_WALL", "HQ_DIRECT_DIR", "HQ_DIRECT_AGENT", "HQ_DIRECT_TEAM", "HQ_DIRECT_PUSH_DIR", "HQ_CLAUDE_CLI", "HQ_CLAUDE")
 
 

@@ -22538,6 +22538,8 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         first = (seen.read_text().splitlines() or [""])[0] if seen.exists() else ""
         check("--only 4" in first and "--quick" in first, f"the proof ran a Claude flow a row only mentions: {first}")
         # the chain itself
+        sys.path.insert(0, str(ROOT / "routine"))
+        import hqpaths
         if not hqpaths.IS_LINUX:
             if bad:
                 raise Failed("; ".join(bad))
