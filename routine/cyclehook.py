@@ -111,7 +111,7 @@ OTHERS = ("attendees", "attendeeEmails", "addedAttendees", "addedAttendeeEmails"
 NEVER_SCRIPTS = {"push", "release", "update", "gitlock", "sync", "tick", "runjob", "proof", "datachange", "install-linux", "set-status", "set_status"}
 _JOB_WRITES = {"add", "add-row", "write-row", "feedback", "send-row", "tell", "stop", "overrule", "move", "on", "off", "pause", "now", "mail-on", "mail-off", "mail-fast",
                "mail-hourly", "resume", "done", "mark", "held", "boxed", "crashed", "guess", "mistake", "redo", "doing"}
-NO_SUBS = {"features": {"on", "off"}, "backend": {"on", "off"}, "cycles": {"set", "order", "yes", "tick"}, "direct_line": {"text", "put", "add", "push", "send"}, "schedule": {"add", "cancel", "move", "priority", "every", "promote"},
+NO_SUBS = {"features": {"on", "off"}, "backend": {"on", "off"}, "cycles": {"set", "order", "yes", "no", "tick"}, "direct_line": {"text", "put", "add", "push", "send"}, "schedule": {"add", "cancel", "move", "priority", "every", "promote"},
            "jobs": _JOB_WRITES, "sprint": {"rank", "plan", "moscow", "ready"}, "review": {"clear", "reword", "add", "sitdown", "no", "pass", "run", "golden", "tick", "keep", "round-before", "round-after"},
            "qa": {"pass", "fail", "queue"}, "mistakes": {"add", "put"}}
 MAY_SUBS = {"moneypenny": {"jobs": {"stop", "resume", "tell", "write-row", "feedback"}, "sprint": {"rank", "moscow", "ready"}, "review": {"reword", "add", "sitdown", "no"}, "qa": {"queue"}}}
@@ -392,6 +392,8 @@ def calendar_hold(last: str, inp: dict, aid: str) -> tuple:
         return None, what, why
     if st_["allowed"].get(_key(last, inp), "") >= time.strftime("%Y-%m-%d %H:%M"):
         return None, what, why
+    if _key(last, inp) in st_["closed"]:
+        return f"HQ: held: he said no to this one, so it stays as it is. Leave it and go on.", what, why
     return f"HQ: held: {why}, so this waits for his yes and HQ has asked him. Leave it and go on.", what, why
 
 
@@ -594,7 +596,7 @@ def job_guard(cmd: str) -> str | None:
 
 
 # F86: what writes, besides role.WRITES (what a call may hand to the main); a round's own ways out are named in fix_guard.
-_FIX_ALSO = {"cycles": {"ask", "batch", "text", "plan", "order", "set", "yes", "done", "failed", "stale", "stopstep", "droptext", "stopped", "open", "go", "proposal"}, "direct_line": None, "handover": None,
+_FIX_ALSO = {"cycles": {"ask", "batch", "text", "plan", "order", "set", "yes", "no", "done", "failed", "stale", "stopstep", "droptext", "stopped", "open", "close", "go", "proposal"}, "direct_line": None, "handover": None,
              "review": {"clear", "pass", "run", "golden", "tick", "round-before", "round-after", "keep"}, "set-status": None, "set_status": None, "notes": None, "gitlock": None, "push": None,
              "qa": {"pass", "fail", "queue"}, "jobs": {"mark", "held"}}
 _SCRIPT = re.compile(r"(?<![\w-])([a-z_-]+)\.py\b\s*(\S+)?\s*(\S+)?")

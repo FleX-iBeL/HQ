@@ -90,7 +90,7 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "notes": {"put", "clear-id", "restore-id"},  # F102: his quick notes, like the text lines
           "about_self": {"add"},  # F102: what an agent says about herself, written by the main
           "usagecost": {"plan"},  # F107: the plan in use, written only by the main
-          "cycles": {"set", "order", "yes"},  # H298: the agents' settings and his orders are the main's to write
+          "cycles": {"set", "order", "yes", "no"},  # H298: the agents' settings and his orders are the main's to write
           "trail": {"put"}, "mistakes": {"put"}}  # F103: the record and the ledger, written only by the main
 TO_BOTH = {"update": {"back-here", "back-first", "forward-here"}}  # F104: what the other computer takes whichever it is: the code, not the data
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),

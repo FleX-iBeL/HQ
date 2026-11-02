@@ -22388,6 +22388,136 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         self._hf_steps(round_hook, settings_and_session, the_journal, the_gate, agents_off, put_back_text)
         return "a round keeps to its row and place with the new defaults and gets all it needs; a cycle's write is in the journal; the five minutes hold; off nothing starts"
 
+    async def flow292(self) -> str:
+        """His no closes the question. The only one waiting, or his number: closed at once. Several and no number: his words go to her, she closes the one they fit, the others stand. A later yes can't open it, the same change isn't asked again and doesn't go through; nothing of it stays
+        in the batch; a run not given his words can't close, and a run can't say no for him."""
+        b = self._hf("no", only=("donna",))
+        self._hf_mirror(b)
+        b.cy("set", "donna", "hours", "00:00-23:59")
+        lunch = {"summary": "Lunch with Alice", "startTime": "2026-11-07T12:00:00", "endTime": "2026-11-07T13:00:00", "attendees": [{"email": "alice@example.com"}]}
+        tool = "mcp__g__create_event"
+        def one_waiting():
+            b1 = self._hf("no1", only=("donna",))
+            self._hf_mirror(b1)
+            self._hf_hook(b1, tool, lunch)
+            need(len(b1.st()["batch"]) == 1, "no question")
+            r = b1.cy("no", "donna", "no, forget the lunch with Alice")
+            need("closed" in r.stdout, f"his no: {r.stdout} {r.stderr[-200:]}")
+            st = b1.st()
+            need(not st["holds"] and not st["allowed"] and not st["batch"], f"it stands: {st['holds']} {st['batch']}")
+            need("closed on his no" in b1.led(), b1.led()[-200:])
+            need("no change waiting" in b1.cy("yes", "donna", "yes").stdout, "a later yes found it")
+            b7 = self._hf("no7", only=("donna",))
+            self._hf_mirror(b7)
+            b7.cy("set", "donna", "hours", "00:00-23:59")
+            self._hf_hook(b7, tool, lunch)
+            r = b7.cy("yes", "donna", "yes the call")
+            need("She has it" in r.stdout and not b7.st()["allowed"], f"a yes naming something else opened the only one: {r.stdout}")
+            b8 = self._hf("no8", only=("donna",))
+            self._hf_mirror(b8)
+            b8.cy("set", "donna", "hours", "00:00-23:59")
+            self._hf_hook(b8, tool, lunch)
+            need("she does it now" in b8.cy("yes", "donna", "yeah sure, the lunch").stdout, "a yes naming this one")
+            r = self._hf_hook(b1, tool, lunch)
+            need(r.returncode == 2 and "said no" in r.stderr and not b1.st()["holds"] and not b1.st()["batch"], f"asked again: {r.stderr}")
+        def several():
+            self._hf_hook(b, tool, lunch)
+            self._hf_hook(b, "mcp__g__delete_event", {"eventId": "guest1"})
+            r = b.cy("no", "donna", "nah, forget the lunch with Alice")
+            need("She has it" in r.stdout and len(b.st()["holds"]) == 2, f"several: {r.stdout}")
+            need("became job" in b.sched("promote").stdout, "no step")
+            s = b.drive("start", extra=self._hf_fake(b, "print(CY('close', 'donna', '1'), file=sys.stderr)\n"))
+            need("nah, forget the lunch with Alice" in s["prompt"] and "close donna N" in s["prompt"], f"her step: {s['prompt'][-500:]}")
+            st = b.st()
+            need([h["n"] for h in st["holds"]] == [2] and not st["allowed"] and all("Lunch" not in e["text"] for e in st["batch"]), f"the wrong one: {st['holds']} {st['batch']}")
+            need("Refused" not in str(s.get("stdout")), "")
+            need("she does it now" in b.cy("yes", "donna", "yes").stdout and "Accountability" in str(b.st()["allowed"]) + b.rm(), "the other one stands")
+        def number():
+            b2 = self._hf("no2", only=("donna",))
+            self._hf_mirror(b2)
+            self._hf_hook(b2, tool, lunch)
+            self._hf_hook(b2, "mcp__g__delete_event", {"eventId": "guest1"})
+            need("closed" in b2.cy("no", "donna", "not that one", "2").stdout and [h["n"] for h in b2.st()["holds"]] == [1], "his number")
+            need("No question 9" in b2.cy("no", "donna", "no", "9").stdout, "a number that isn't there")
+        def words_to_her():
+            b3 = self._hf("no3", only=("donna",))
+            self._hf_mirror(b3)
+            b3.cy("set", "donna", "hours", "00:00-23:59")
+            self._hf_hook(b3, tool, lunch)
+            r = b3.cy("order", "donna", "start", "forget it, no lunch")
+            need("She has it" in r.stdout, r.stdout)
+            b3.sched("promote")
+            b3.drive("start", extra=self._hf_fake(b3, "print(CY('close', 'donna', '1'), file=sys.stderr)\n"))
+            need(not b3.st()["holds"] and "closed on his no" in b3.led(), "an order in loose words")
+        def a_no_never_opens():
+            b5 = self._hf("no5", only=("donna",))
+            self._hf_mirror(b5)
+            b5.cy("set", "donna", "hours", "00:00-23:59")
+            self._hf_hook(b5, "mcp__g__delete_event", {"eventId": "guest1"})
+            r = b5.cy("yes", "donna", "no, forget the call")
+            need("closed" in r.stdout and not b5.st()["allowed"] and not b5.st()["holds"], f"a no opened it: {r.stdout}")
+            b6 = self._hf("no6", only=("donna",))
+            self._hf_mirror(b6)
+            b6.cy("set", "donna", "hours", "00:00-23:59")
+            self._hf_hook(b6, tool, lunch)
+            self._hf_hook(b6, "mcp__g__delete_event", {"eventId": "guest1"})
+            b6.cy("order", "donna", "start", "no, forget the call")
+            b6.sched("promote")
+            b6.drive("start", extra=self._hf_fake(b6, "print(CY('open', 'donna', '2'), file=sys.stderr)\n"))
+            need(not b6.st()["allowed"] and len(b6.st()["holds"]) == 2, "her run opened on a no")
+
+        def not_hers():
+            b4 = self._hf("no4", only=("donna",))
+            self._hf_mirror(b4)
+            self._hf_hook(b4, tool, lunch)
+            n = b4.step("donna", "something else", 3)
+            need("Refused" in b4.cy("close", "donna", "1", extra={"HQ_JOB": str(n)}).stdout and b4.cy("no", "donna", "x", extra={"HQ_JOB": str(n)}).returncode != 0, "any run closed it")
+            need(len(b4.st()["holds"]) == 1, "it was closed")
+        self._hf_steps(one_waiting, several, number, words_to_her, a_no_never_opens, not_hers)
+        return "his no closes it: by number, the only one, or his words to her; a later yes can't open it and it isn't asked again"
+
+    async def flow293(self) -> str:
+        """Her "which one do you mean" after a bare yes goes out the way a held question does: past the day's cap, once, never kept for Friday. An answered question doesn't go out in a batch: not the held one, not her which one, not one he answered while he slept."""
+        lunch = {"summary": "Lunch with Alice", "startTime": "2026-11-07T12:00:00", "endTime": "2026-11-07T13:00:00", "attendees": [{"email": "alice@example.com"}]}
+        def setup(name):
+            b = self._hf(name, only=("donna",))
+            self._hf_mirror(b)
+            b.cy("set", "donna", "hours", "00:00-23:59")
+            self._hf_hook(b, "mcp__g__create_event", lunch)
+            self._hf_hook(b, "mcp__g__delete_event", {"eventId": "guest1"})
+            return b
+        which = "Which one do you mean: 1, the lunch, or 2, the call? If you tell me the number, I do that one; if not, I leave them."
+        def past_the_cap():
+            b = setup("which-cap")
+            for i in range(4):
+                b.cy("ask", "donna", f"If question {i} is fine, I go on; if not, say so.")
+            b.cy("yes", "donna", "sure")
+            b.sched("promote")
+            s = b.drive("start", extra=self._hf_fake(b, f"print(CY('ask', 'donna', {which!r}), file=sys.stderr)\nprint('SECOND', CY('ask', 'donna', 'Which do you mean, the lunch or the call? Say which.'), file=sys.stderr)\n"))
+            b.py(f"cycles.settle(T('{b.thu} 10:00'))")
+            qs = [e["text"] for e in b.st()["batch"]]
+            need(sum("Which" in x for x in qs) == 1, f"her which one: {qs}")
+            need("kept for Friday" not in b.led().split("Which one")[-1], "kept for Friday")
+        def answered_by_number():
+            b = setup("which-ans")
+            b.cy("yes", "donna", "sure")
+            b.sched("promote")
+            b.drive("start", extra=self._hf_fake(b, f"print(CY('ask', 'donna', {which!r}), file=sys.stderr)\n"))
+            b.py(f"cycles.settle(T('{b.thu} 10:00'))")
+            need(b.cy("yes", "donna", "the lunch", "1").returncode == 0, "his number")
+            qs = [e["text"] for e in b.st()["batch"]]
+            need(not any("Which" in x or "Lunch" in x for x in qs), f"an answered question stays in the batch: {qs}")
+            b.py(f"out(cycles.send_batches(T('{b.thu} 12:01')))")
+            need("Which one" not in b.texts() and "Lunch with Alice" not in b.texts(), "it went out")
+        def answered_asleep():
+            b = setup("which-sleep")
+            with_later = "with cycles.held() as d:\n    st = cycles._agent_state(d, 'donna')\n    st['later'] = st['batch']; st['batch'] = []\n"
+            b.py(with_later)
+            b.cy("yes", "donna", "the lunch", "1")
+            need(not any("Lunch" in e["text"] for e in b.st()["later"]), "answered while he slept, it still waits to go")
+        self._hf_steps(past_the_cap, answered_by_number, answered_asleep)
+        return "her which one goes past the cap, once; an answered question goes nowhere"
+
     async def flow190(self) -> str:
         """H298, piece 6, no Claude: off means off. With the feature off (the default on every HQ, also the maker's):
         the runner's minute plans nothing and cancels nothing it didn't plan, the schedule and the queue stay as they
@@ -31502,6 +31632,8 @@ echo "ALL OK"
 """
 
 FLOWS = {
+    292: ("His no closes a held change, by number, the only one, or his loose words to her: a later yes can't open it, it isn't asked again, nobody gets anything", False, "flow292"),
+    293: ("Her which one goes out past the day's cap, once, never kept for Friday; an answered question doesn't go out in a batch", False, "flow293"),
     291: ("The two branches where they meet: a round through the same runner and hook as a cycle, a cycle's writes in the round's journal, the five minutes, the agents off", False, "flow291"),
     284: ("H298, third fix round, 1 and 4: his yes really happens, as held: his words, one tool by flag, added only after it worked, on the calendar it was held for", False, "flow284"),
     285: ("H298, third fix round, 2: an event she made is hers at once; a question never shows an id", False, "flow285"),

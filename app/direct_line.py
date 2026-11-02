@@ -1192,6 +1192,14 @@ def _answer(words: str) -> str:
         resume=resume)
     b = _brain.ClaudeBrain(model=a["model"], system_prompt="", cwd=_config.FOLDER, options=opts)
     prompt = (f"The chat so far, newest last:\n{history}\n\n" if history else "") + f"His new text:\n{words}"
+    try:  # H298: what he may be answering: a held change's question can still be in a batch
+        sys.path.insert(0, str(ROOT / "routine"))
+        import cycles
+        waits = cycles.waiting_words(a["id"]) if cycles.on() else ""
+        if waits:
+            prompt = f"{waits} A yes or a no in his text is about these first.\n\n" + prompt
+    except Exception as e:
+        print(f"reply: what waits: {e!r}", file=sys.stderr)
 
     async def go():
         out = []

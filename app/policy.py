@@ -735,7 +735,7 @@ class Policy:
         # the Friday screen and the score. A plan, a step's outcome, a text or the routine's minute are her own runs'.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "cycles.py"):
             sub = args[1] if len(args) > 1 else "list"
-            if sub in ("list", "show", "status", "settings", "set", "order", "yes", "ledger", "friday", "score"):
+            if sub in ("list", "show", "status", "settings", "set", "order", "yes", "no", "ledger", "friday", "score"):
                 return Decision(ALLOW, "the agents' own cycles: the settings, an order, her ledger, the Friday screen")
             return Decision(DENY, "from a call, the cycles script takes list, settings, set, order, ledger, friday or score; "
                                   "a plan, a step's outcome and the minute are her own runs'")
