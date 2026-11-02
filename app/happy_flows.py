@@ -21201,13 +21201,13 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
         and check names an old line of that kind without changing it."""
         import subprocess as _sp
         ws, env = self._h298_ws("f114kind")
-        his = ["has a GP appointment next week for a stool sample", "has been on sick leave since the end of August",
-               "wakes up at night because of her bladder", "has been seeing a psychologist about old anxiety",
-               "goes to bed around two and gets up at ten", "can't fall asleep before midnight most nights",
-               "slept badly again after a late night", "lives on the fourth floor of a flat in the south east of the city",
-               "rents her place from a big housing company", "moved in with her partner this summer",
-               "has a dentist check-up on Thursday at 11:00", "sees the company doctor on the 22nd",
-               "keeps Tuesday and Thursday afternoons for the office", "takes medication for her digestion every morning"]
+        his = ["has a GP appointment next week about her knee", "has been on sick leave since the spring",
+               "wakes up at night with a sore back", "sees a therapist about her fear of flying",
+               "goes to bed around eleven and gets up at six", "can't fall asleep after a scary film",
+               "slept badly again after the storm", "lives above a bakery near the station",
+               "rents a small studio from a housing company", "moved house in the spring",
+               "has a dentist check-up on Friday at 15:30", "sees the physio on the 14th",
+               "keeps Friday afternoons for the office", "takes pills for her hay fever every morning"]
         own = ["thinks the coffee on the second floor is too strong", "goes running on Sundays", "keeps a small fern on the windowsill",
                "I'm a morning person", "prefers a flat white to an espresso", "is tired of small talk at the coffee machine",
                "hums along to the radio while she files", "Good at crosswords, bad at small talk"]
@@ -21232,10 +21232,10 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                     env={**env, "HQ_ABOUT_FAKE": fake}, cwd=str(ROOT))
         need(r.returncode == 0, f"harvest-call failed: {r.stderr[-400:]}")
         kept = [l[2:] for l in lst["donna"].read_text().splitlines() if l.startswith("- ")]
-        need(not any(any(w in k for w in ("GP", "sick", "bladder", "psycholog", "bed", "asleep", "slept", "fourth floor", "rents", "moved", "dentist",
-                                           "doctor", "afternoons", "medication")) for k in kept), f"the harvest kept his kind: {kept}")
+        need(not any(any(w in k for w in ("GP", "sick", "sore back", "therapist", "bed", "asleep", "slept", "bakery", "rents", "moved", "dentist",
+                                           "physio", "afternoons", "pills")) for k in kept), f"the harvest kept his kind: {kept}")
         need(any("cactus" in k for k in kept), f"the harvest lost her own life: {kept}")
-        lst["donna"].write_text(lst["donna"].read_text() + "- has a dentist check-up on Thursday at 11:00 (1 Nov)\n")
+        lst["donna"].write_text(lst["donna"].read_text() + "- has a dentist check-up on Friday at 15:30 (1 Nov)\n")
         b = lst["donna"].read_bytes()
         r = _sp.run([sys.executable, str(APP / "about_self.py"), "check"], capture_output=True, text=True, env=env, cwd=str(ROOT))
         need(r.returncode == 0 and "dentist" in r.stdout and "cactus" not in r.stdout and lst["donna"].read_bytes() == b, f"check: {r.stdout} {r.stderr}")

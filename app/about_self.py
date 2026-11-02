@@ -299,7 +299,7 @@ _HEALTH = re.compile(
     r"therap(?:y|ies|ist)|counsell?(?:or|ing)|clinics?|hospitals?|surgery|dentists?|diagnos\w*|symptoms?|medication|medical|medicines?|"
     r"pills?|prescriptions?|bladder|digestion|digestive|bowels?|stool|cramps?|pains?|painful|injur(?:y|ed|ies)|anxiety|anxious|"
     r"panic attacks?|depress(?:ion|ed|ive)|ptsd|trauma\w*|diabetes|blood (?:test|tests|sample|samples|pressure)|allerg(?:y|ies|ic)|"
-    r"migraines?|fodmap|ibs|recover(?:y|ing) from|sick leave|reintegrat\w*|company doctor)\b")
+    r"migraines?|recover(?:y|ing) from|sick leave|hay fever)\b")
 _SLEEP = re.compile(
     r"\b(?:sleep|sleeps|sleeping|sleepless|slept|asleep|insomnia|naps?|napping|bed ?time|bedtime|goes to bed|go to bed|went to bed|"
     r"in bed|gets up|got up|get up|wak(?:e|es|ing|ened) up|woke|alarms?|night owl|tired(?! of)|exhausted|nightmares?|"
