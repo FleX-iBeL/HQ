@@ -356,17 +356,21 @@ def switch(fid: str, on: bool, base: Path | None = None, said: str = "", tapped:
     f = next((x for x in everything() if x["id"] == fid and not (x.get("in_pieces") and not maker(base))), None)
     if not f:
         return f"No switch {fid}. There are: {', '.join(i for i in ids() if is_on(i, base) or i in IDS)}."
-    if on and untested(f, base):
+    if on and f.get("in_pieces"):
+        needs = untested(f, base)
         quote, no, title = None, "", f["name"].replace("{agent}", _agent())
         if said:
             sys.path.insert(0, str(ROOT / "routine"))
             import sprint
             names = (title, re.sub(r"^the ", "", title, flags=re.I), fid.replace("_", " "), f.get("row"))
-            quote, no = sprint.his_yes(said, f"turning on {title}, a feature that hasn't passed QA yet: {f.get('line') or 'still being built'}", names=names)
-        if not quote and not tapped:
+            what = f"turning on {title}, a feature that hasn't passed QA yet" if needs else f"turning on {title}"
+            quote, no = sprint.his_yes(said, f"{what}: {f.get('line') or 'still being built'}", names=names)
+        if needs and not quote and not tapped:
             return (f"Refused: {title} hasn't passed QA yet ({f.get('row') or 'no row'}), so it stays off "
                     f"unless he says so: --said \"HIS WORDS\", a line he said or typed. {no.capitalize() + '.' if no else ''}").rstrip()
-        _keep_say_so(base, fid, f"his words: {said}" if quote else "his tap in Settings")
+        if quote or tapped:
+            # his say-so is on record whenever he really gave it, whether or not QA has passed, so a tap is never lost
+            _keep_say_so(base, fid, f"his words: {said}" if quote else "his tap in Settings")
     if f.get("workflow"):
         wf = _workflows()
         return wf.turn_on(_wf_folder(), f["workflow"]) if on else wf.turn_off(_wf_folder(), f["workflow"])
