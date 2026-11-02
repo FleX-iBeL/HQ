@@ -22514,6 +22514,9 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         r = tool("jobs.py", "write-row", "A row from a run. Done means: it works. Sources: rule 1.", HQ_JOB="77", HQ_ROLE_HERE="1")
         row = next((l for l in rm.read_text().splitlines() if "A row from a run" in l), "")
         check(r.returncode == 0 and "(job 77," in row and "status page" not in row and "typed:" not in row, f"a run's row reads as his typing on the page: {row[:160]}")
+        before = rm.read_text()
+        r = tool("jobs.py", "write-row", "--help", HQ_ROLE_HERE="1")
+        check(r.returncode != 0 and rm.read_text() == before, "write-row --help became a row")
         # a row that passes the first time gets its mark run
         rm2, env2 = self._sprint_env("F105")
         env2.update({"HQ_ROLE_HERE": "1", "HQ_REVIEW_FAKE": "auto", "HQ_LOOK": "0"})

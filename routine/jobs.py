@@ -707,6 +707,8 @@ def main(argv):
             said = one_line(" ".join(a for a in args if a != "--bug")).replace("|", "/")
             if not said:
                 sys.exit("What goes on the planning? Write it in a line or two.")
+            if said.startswith("-"):  # F105: a run looked up its options and --help became a row
+                sys.exit("write-row THE-ROW [--bug] [--order N] [--after-qa LABEL]: a row starts with its words, not with a dash. Nothing written.")
             if after:
                 import qa
                 no = qa.why_no_bug_after(after, text)
