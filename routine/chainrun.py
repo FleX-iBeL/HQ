@@ -304,9 +304,17 @@ def night(env, root, real: bool) -> None:
     if real:
         subprocess.run([PY, "routine/nightly.py", "run", "--routine"], cwd=str(root / "HQ"), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=7200)
         return
+    # F105 onto dev: the record names the commit it stands in for and counts a whole night at it, read by the copy's own nightly.py the
+    # way the real night reads them (here() and whole_set()), so the release holds the stand-in to F112 like any night
+    code = ("import sys, json; sys.path.insert(0, 'routine')\nimport nightly\n"
+            "c, d = nightly.here()\nprint(json.dumps([c, d, nightly.whole_set(c)]))")
+    r = subprocess.run([PY, "-c", code], cwd=str(root / "HQ"), env=env, text=True, capture_output=True)
+    commit, dirty, whole = json.loads(r.stdout or "[null, [], 0]")
+    at = time.strftime("%Y-%m-%d %H:%M")
+    entry = {"at": at, "commit": commit, "dirty": dirty, "ran": whole, "passed": whole, "failed": [], "exit": 0, "minutes": 0, "standin": True}
     d = root / "HQ/scratch/nightly"
     d.mkdir(parents=True, exist_ok=True)
-    (d / "last.json").write_text(json.dumps({"at": time.strftime("%Y-%m-%d %H:%M"), "ran": 1, "passed": 1, "failed": [], "exit": 0, "round": 1, "rounds_max": 3}))
+    (d / "last.json").write_text(json.dumps({**entry, "round": 1, "rounds_max": 3, "night": at, "rounds": [entry], "routine": True}))
 
 
 STEPS = ("order", "written", "review", "ready", "planned", "job added", "job done", "qa", "release")
