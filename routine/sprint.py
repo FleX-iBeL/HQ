@@ -637,14 +637,17 @@ def _spoken(ws):
         yield rel, rows
 
 
-def his_said(parts, ws):
+def his_said(parts, ws, real_only=False):
     """F104: every line of his that holds a quote, oldest first by the time it was said, whichever place it's in: {"where", "at", "line", "turn" (the agent's
     lines right before it, none when he spoke last), "before" (what was said just before, each line named)}. A quote of a word or two has to stand
-    as whole words: "yes" isn't in "yesterday"."""
+    as whole words: "yes" isn't in "yesterday". F114: real_only, only a transcript or a thread, the lines the program itself writes as his; a quick
+    note can be added from a call (notes.py add), so it doesn't stand for his yes at a door."""
     short = sum(len(p.split()) for p in parts) < HIS_QUOTE_WORDS
     has = (lambda p, b: re.search(rf"(?<!\w){re.escape(p)}(?!\w)", b)) if short else (lambda p, b: p in b)
     out = []
     for where, rows in _spoken(ws):
+        if real_only and not where.startswith(("HQ/calls/", "HQ/direct-line", "HQ/coaching-line", "HQ/team-line")):
+            continue
         for i, r in enumerate(rows):
             if r["who"] != "he" or not all(has(p, _bare(r["text"])) for p in parts):
                 continue
@@ -689,7 +692,7 @@ def his_on(quote, about, ws=None):
     return (hit["where"], "") if answer.strip().lower().startswith("yes") else (None, NOT_ON_IT)
 
 
-def his_yes(quote, about, ws=None, names=()):
+def his_yes(quote, about, ws=None, names=(), real_only=False):
     """F104: his say-so, everywhere his quote stands in for his yes: (where, ""), or (None, why not in plain words). `about` is what it's taken as his yes
     to, in a line; `names` what that goes by (its label, its feature name). They must be his words; then a clear yes passes and a clear no is refused by
     the program (yes_reading), any newer line of his included, and only the rest goes to one small look, the way of mistakes.second_look. There a no,
@@ -705,7 +708,7 @@ def his_yes(quote, about, ws=None, names=()):
     else:
         ws = ws or _ws()
         parts = [p for p in (_bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", quote or "")) if p]
-        hits = his_said(parts, ws) if parts else []
+        hits = his_said(parts, ws, real_only) if parts else []
         if not hits:
             return None, NOT_HIS
         clear = next((h for h in reversed(hits) if yes_reading(h["line"], h["turn"], names) == "yes"), None)

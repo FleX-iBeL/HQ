@@ -91,6 +91,9 @@ def edit(rel: str, payload: str) -> int:
         except (LookupError, ValueError) as e:
             print(f"Not written: {e}.")
             return 1
+        if rel == hqpaths.MAIL_SWITCH_REL and hqpaths.mail_switch_changed(text, new):  # F114: his own hand's, never handed over
+            print(f"Refused: {hqpaths.MAIL_SWITCH_WORDS}.")
+            return 2
         if rel == "HQ/roadmap.md":  # F86: who wrote while a round ran
             import roundlog
             roundlog.planning(path, new)
@@ -128,6 +131,14 @@ def put(rel: str, payload: str) -> int:
         return 2
     path = hqpaths.ROADMAP if rel == "HQ/roadmap.md" else os.path.join(hqpaths.FOLDER, rel)
     with _lock(rel):
+        if rel == hqpaths.MAIL_SWITCH_REL:  # F114: the mail switch is his own hand's, never handed over
+            try:
+                was = open(path, encoding="utf-8").read()
+            except OSError:
+                was = ""
+            if hqpaths.mail_switch_changed(was, text):
+                print(f"Refused: {hqpaths.MAIL_SWITCH_WORDS}.")
+                return 2
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = f"{path}.handover.{os.getpid()}"
         with open(tmp, "w", encoding="utf-8") as f:

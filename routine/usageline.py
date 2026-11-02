@@ -199,10 +199,34 @@ def write_reserve(n: int) -> None:
     os.replace(tmp, ROADMAP)
 
 
+def his_say_so(words: str, what: str) -> str:
+    """F114: why his words don't stand for this switch, or "" when they do: a line he said or typed himself on a call or in a chat
+    (sprint.his_yes, the transcripts and threads only), never a job's own process."""
+    if os.environ.get("HQ_IN_JOB"):
+        return "a job can't give itself his say-so"
+    import sprint
+    where, no = sprint.his_yes(words, f"switching the usage stop line: {what}", names=("usage", "stop line", "the line", "weekly", "5-hour",
+                                                                                     "fable", "fixed", "moving"), real_only=True)
+    return "" if where else (no or "those words aren't his")
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(describe())
         return 0
+    said = None
+    if "--said" in argv:  # F114: from a call or a chat, a switch stands on his own words; the status page is his own hand
+        i = argv.index("--said")
+        said, argv = (argv[i + 1] if i + 1 < len(argv) else ""), argv[:i] + argv[i + 2:]
+        if not argv:
+            print(describe())
+            return 0
+        if argv[-1] in ("moving", "fixed") or (len(argv) > 1 and argv[-2] == "fixed") or argv[0] == "reserve":
+            why = his_say_so(said, " ".join(argv))
+            if why:
+                print(f"Refused: {why}. A usage stop line changes only on his own words: --said \"HIS WORDS\", a line he said or typed.",
+                      file=sys.stderr)
+                return 2
     if argv[0] == "reserve":
         if len(argv) == 2:
             if not argv[1].isdigit() or int(argv[1]) > 50:

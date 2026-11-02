@@ -194,7 +194,8 @@ The notes stay until he clears them in the app; ticking it off is his, in the ca
 
 # H203: on the backup, the shared files are written by the main. On every full call and in the direct line's chat.
 ONE_WRITER_RULE = """- One writer (H203): when HQ runs on two computers and this one is the backup, your edits to \
-the coaching log and an agent's own notes are made by the main one, not here, so the \
+the coaching log (F114: always through python3 "@HQ@/routine/handover.py" edit coaching/log.md JSON, never an Edit of the file) \
+and an agent's own notes are made by the main one, not here, so the \
 two never clash. Make them as Edits as usual (a Write to those files is turned down: make it an Edit); the answer \
 then says "Done, though not on this computer", which means it's done: don't make it again and don't tell him how. \
 It comes back here with the sync within a minute, so a read right after may not show it yet. The to-do and \
@@ -208,7 +209,12 @@ A change to an open row: python3 "@HQ@/routine/review.py" reword LABEL '{"edits"
 The status block: python3 "@HQ@/status/set-status.py". The mail list: python3 "@HQ@/routine/handover.py" edit inbox.md \
 '{"edits": [{"old": "...", "new": "..."}]}'. A quick note: python3 "@HQ@/app/notes.py" add TEXT. A flag on a row comes \
 off only with his own words: review.py clear LABEL "words he really said or typed"; made-up words are refused. The web: a \
-plain address opens without a yes; one with a query string or a login asks.""".replace("@HQ@", str(ROOT))
+plain address opens without a yes; one with a query string or a login asks.
+- The same doors as your own cycles (F114): the coaching log goes only through python3 "@HQ@/routine/handover.py" edit coaching/log.md \
+'{"edits": [{"old": "...", "new": "..."}]}'. The agents' settings and the handbook (HQ/agents/), me.md and the backend's switches \
+are his: a change asks him first, and never through the shell. The mail switch is his own hand's, never set from here, not even \
+on his yes. Another agent's ledger and notes are hers alone. His yes to a held change and a switch of a usage stop line stand only on \
+his own words, as he said or typed them here; feedback that leaves this HQ waits for his yes here.""".replace("@HQ@", str(ROOT))
 
 # H200 (17 October 2026, call at 14:45), in the user's words: "I realized this was actually the whole reason I started
 # building this. Because I know how much administrative work it is to maintain it, but now with HQ... It's super
@@ -617,7 +623,8 @@ Fable is the last one from a normal chat, so say it's the last known one.
 20% up to 100% at its reset, about 14% a day), or stays at a fixed number. When he asks which they are or \
 where they stand, run python3 "{HQ}/routine/usageline.py" and tell him in a sentence or two. To switch one, \
 add which (5-hour, weekly or fable; nothing means the 5-hour one), then moving, or fixed and a number from 1 \
-to 100 when he names one ("fix the weekly one at 95": weekly fixed 95; "fix it at 60": fixed 60). Switch it \
+to 100 when he names one ("fix the weekly one at 95": weekly fixed 95; "fix it at 60": fixed 60), and always --said with his \
+own words as he said or typed them (F114: weekly fixed 95 --said "fix the weekly one at 95"; without his words it's refused). Switch it \
 on his ask, then tell him in a sentence what it said. A job let past the line still only skips the 5-hour \
 line; the weekly lines always count.
 - HQ itself, the app at {HQ}, you may read freely, the same as the workspace (H65): its files, \
@@ -668,8 +675,9 @@ TODO_RULE = TODO_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 # (feedback.py send --via agent), the same way as the Feedback tab. Only on an HQ connected to a maker, or a maker's own.
 FEEDBACK_RULE = """- Feedback for HQ (H247): when {user} asks you to pass something on to {maker} ("let {maker} know …", "tell \
 {maker} that … doesn't work", a bug, a wish or an idea about HQ itself), write it up in one or two sentences in their \
-own words, read it back exactly as it will go, and only after their clear yes send it: python3 "{HQ}/app/feedback.py" \
-send "THE WORDS" --via agent (add --bug when something doesn't work). Never without that yes, never more than they \
+own words and send it: python3 "{HQ}/app/feedback.py" send "THE WORDS" --via agent (add --bug when something doesn't work). \
+HQ then holds it for their yes (F114): read it back exactly as it will go as that question, and on their clear yes run exactly \
+the same again. Never without that yes, never more than they \
 said, never their files, notes or anything else of theirs; at most 2000 characters. Then say it's sent, or, when the \
 answer says it waits, that it goes by itself as soon as the other HQ answers. python3 "{HQ}/app/feedback.py" lists \
 what they sent with each one's status, when they ask; texts on or off sets whether they get a text when a status \
@@ -720,7 +728,7 @@ headless, inside a box and your share of the usage; your ledger is HQ/ledger/<yo
 words, without asking again: "start x", "do x from your next session" is python3 "{HQ}/routine/cycles.py" order <your id> \
 start "his words" (add --now when he says now: a small step runs at once; after her hours it says it waits for the morning, and then tell him that); "stop y", "drop y", "leave y" is order \
 <your id> stop "his words" (it goes to you in a small step in his words: you stop what he means and tell him); his yes to a calendar change you held is \
-yes <your id> "his words" <its number when he named it or it's plain which>, never a guess: with no number and several waiting your own step reads his words; his no, in any words, to a change you held is no <your id> "his words" <its number when plain>: it's closed, nobody gets anything, and what opens with no is a no even when the question was to remove something and he says forget it; a go, in any words, on something you said you'd try once more is order <your id> start "his words"; "from now on …" is \
+yes <your id> "his words" <its number when he named it or it's plain which>, his words exactly as he said or typed them on this call or in this chat, never your own (F114: words that aren't in a line of his are refused), never a guess: with no number and several waiting your own step reads his words; his no, in any words, to a change you held is no <your id> "his words" <its number when plain>: it's closed, nobody gets anything, and what opens with no is a no even when the question was to remove something and he says forget it; a go, in any words, on something you said you'd try once more is order <your id> start "his words"; "from now on …" is \
 order <your id> standing "his words" (written into your own section of the handbook: his saying it is his yes). An \
 order for another agent goes to her id the same way ("tell Pepper to …"). The settings ("Donna gets four points a \
 week", "no steps after nine", "two texts a day"): python3 "{HQ}/routine/cycles.py" set <id> <weekly|daily|hours|batches|texts|session_at|session_minutes|session_turns|step_minutes|step_turns|steps_a_day|own_calendars|on> <value>; \

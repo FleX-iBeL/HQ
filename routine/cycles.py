@@ -2120,6 +2120,24 @@ def _opened(aid: str, st_: dict, h: dict, words: str, order_n: int, now: dt.date
     return f"Yes: she does it now: {h['what']}."
 
 
+def his_yes_refused(aid: str, words: str, n: int | None = None) -> str:
+    """F114: why WORDS don't stand as his yes to her held change, or "". They must be a line he said or typed himself on a call or in a
+    chat (sprint.his_yes, transcripts and threads only: what the program wrote as his, never an agent's line or a quick note), read as a
+    yes to this. Words that open with no aren't a yes at all: they go to no() as before. Never from a run of hers or a job."""
+    if _SAYS_NO.match(words or ""):
+        return ""
+    if os.environ.get("HQ_IN_JOB"):
+        return "a run can't give a yes"
+    holds = [h for h in _agent_state(_state(), aid)["holds"] if n is None or h["n"] == n]
+    if not holds:
+        return ""  # nothing waits: yes() says so itself
+    names = [aid, *(m for h in holds for m in re.findall(r"\"([^\"]+)\"", h.get("what") or "")), *(f"question {h['n']}" for h in holds)]
+    import sprint
+    where, no = sprint.his_yes(words, f"letting {aid} make the change she held for his yes: " + "; ".join(h["what"] for h in holds),
+                               names=names, real_only=True)
+    return "" if where else (no or "those words aren't his")
+
+
 _SAYS_NO = re.compile(r"\s*(?:no|nope|nah|nee|don'?t|do not|never mind|nevermind|cancel that|not that)\b", re.I)
 
 
@@ -2483,6 +2501,16 @@ def main(argv: list[str]) -> int:
     if cmd in ("set", "order", "yes", "no") and _this_run():
         print("Refused: the settings and the orders are his; a run of hers doesn't change them.")
         return 2
+    if cmd == "set" and len(rest) == 3 and rest[1].strip().lower() == "mail":  # F114
+        import hqpaths as _hp
+        print(f"Refused: {_hp.MAIL_SWITCH_WORDS}.")
+        return 2
+    if cmd == "yes" and len(rest) >= 2 and not os.environ.get("HQ_ROLE_HERE"):  # F114: his yes is his own words in a real line
+        why = his_yes_refused(rest[0].lower(), rest[1], int(rest[2]) if len(rest) > 2 and rest[2].isdigit() else None)
+        if why:
+            print(f"Refused: {why}. A yes to a held change is his own words: cycles.py yes AGENT \"HIS WORDS\" [N], a line he said or typed "
+                  "on a call or in a chat; an agent's words never stand for it.")
+            return 2
     # harm 9: on the backup a call's change goes to the main, as schedule.py's does: only the main writes these
     if cmd in ("set", "order", "yes", "no") and not os.environ.get("HQ_ROLE_HERE"):
         import role

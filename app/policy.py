@@ -151,6 +151,20 @@ WAYS_IN = {
     "hq/features.json": f"python3 \"{_APP / 'features.py'}\" on|off NAME (a feature in pieces only after its QA passed, or on his own words, and it's kept)",
 }
 ABOUT_WAY = f"python3 \"{_APP / 'about_self.py'}\" add AGENT \"FACT\""
+# F114 (2 November 2026, his words on the status page: "The doors hold on calls and texts too ... one wall, not two"): the same
+# tiers on a call and in a text as in an agent's own cycle (routine/cyclehook.py). The coaching log has its script (the lock,
+# and on the backup the main writes it); the after-call run still writes it itself, alone, as before.
+LOG_REL = "coaching/log.md"
+LOG_WAY = (f"python3 \"{HQ_ROUTINE / 'handover.py'}\" edit coaching/log.md "
+           f"'{{\"edits\": [{{\"old\": \"...\", \"new\": \"...\"}}]}}' (each old text once, all or nothing, with the log's lock)")
+# His own setup, which a cycle reads and never writes: the agents' settings and the handbook, what HQ reads about him, the backend's
+# switches. On a call or in a text a change asks him first, like his vision; through the shell it's refused (an Edit he says yes to).
+HIS_SETUP = re.compile(r"^(me\.md|hq/backend\.json|hq/agents/(?![^/]+-about-herself\.md$)[^/]+)$")
+# Written only by HQ's own programs: a held change's yes in it is his words, through cycles.py yes.
+PROGRAM_STATE = {"hq/agents/cycles-state.json": "the agents' cycles keep it themselves; his yes to a held change goes in through "
+                                                f"python3 \"{HQ_ROUTINE / 'cycles.py'}\" yes AGENT \"HIS WORDS\" [N]"}
+_LEDGER = re.compile(r"^hq/(?:ledger/([a-z0-9-]+?)(?:[.-][^/]*)?|notes-([a-z0-9-]+)\.md)$")
+_SAYS = f"--said \"HIS WORDS\" (a line he said or typed on this call or in this chat, word for word)"
 # What proves his words is written only by HQ: a call or a text never changes a transcript or a thread.
 _PROOF = re.compile(r"^hq/(calls/[^/]+\.md|(direct-line|coaching-line|team-line)/thread\.jsonl)$")
 _ABOUT_LIST = re.compile(r"^hq/agents/[^/]+-about-herself\.md$")
@@ -164,6 +178,27 @@ _SHELL_WRITE = re.compile(
     rf"|\b(?:cp|mv|rm|ln|truncate|dd|rsync|install|touch|chmod)\b[^|;&]*{_GUARDED_NAME}"
     rf"|\bpython3?\s+-c\b[^|;&]*{_GUARDED_NAME}"
     rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{_GUARDED_NAME}", re.I)
+# F114: his own setup and the log through the shell, refused also with a yes: the agents' settings (the mail switch is in them),
+# their state, the handbook, me.md, the backend's switches and the coaching log. An Edit he says yes to, or the log's script.
+_HIS_NAME = (r"(?:(?<![\w-])cycles(?:-state)?\.json|(?<![\w-])backend\.json|(?<![\w-])handbook\.md|(?<![\w-])me\.md|(?<![\w-])agents\.json|"
+             r"(?<![\w-])log\.md|hq/agents/[^\s\"'|;&]+)")
+
+
+def _writes_on(name: str) -> "re.Pattern":
+    """F114: a shell line that writes a file of this name: a redirect into it, sed -i, tee, a copy or move over it, a one-liner, a git restore."""
+    return re.compile(
+        rf">>?\s*[\"']?[^\s\"'|;&]*{name}"
+        rf"|\bsed\s+(?:-[a-zA-Z]*\s+)*-i[^|;&]*{name}"
+        rf"|\btee\b[^|;&]*{name}"
+        rf"|\b(?:cp|mv|rm|ln|truncate|dd|rsync|install|touch|chmod|unlink)\b[^|;&]*{name}"
+        rf"|\b(?:python[\d.]*|perl|ruby|node)\s+(?:-\S+\s+)*-[a-zA-Z]*[ceE]\b[^|&\n]*{name}"  # code handed inline, its own ; and all
+        rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{name}", re.I)
+
+
+_SHELL_WRITE_HIS = _writes_on(_HIS_NAME)
+_SHELL_LEDGER = r"(?:ledger/(?!{a}[.-])[^\s\"'|;&/]+|(?<![\w-])notes-(?!{a}\.md|cleared\.md)[\w-]+\.md)"
+
+
 # F99: the after-call run is alone with nobody to ask: it writes the log and the lists, and adds the transcript.
 AFTER_CALL_EDIT = "coaching/log.md"
 AFTER_CALL_ADD = re.compile(r"^(coaching/log\.md|challenges\.md|hq/agents/[^/]+-about-herself\.md|hq/calls/[^/]+\.md)$")
@@ -213,6 +248,7 @@ class Decision:
     question: str = ""  # for ASK: what HQ asks, in plain words
     retry: bool = False  # H78: a DENY that's only "not yet": do what `why` says, then make the same call again
     handed: bool = False  # H203: not made here, but done: the backup handed it to the main, which wrote it (or will)
+    door: bool = False  # F114: a refused try at one of his doors (his switch, his yes, another agent's ledger): on the ledger, once
 
 
 # -- the lists -------------------------------------------------------------------
@@ -327,7 +363,7 @@ class Policy:
                     self.pending_turns = 0
         summary = summarize(tool, inp or {})
         self.log.append((tool, summary, d))
-        if d.verdict == DENY and not self.dry_run and outward(tool, inp or {}):
+        if d.verdict == DENY and not self.dry_run and (d.door or outward(tool, inp or {})):
             self._on_the_ledger(tool, summary, d)
         if callable(self.listener):
             try:
@@ -340,7 +376,10 @@ class Policy:
         """F103: a refused outward action is a mistake on the ledger, once per thing tried."""
         try:
             sys.path.insert(0, str(HQ_ROUTINE))
+            import hqpaths
             import mistakes
+            if hqpaths.under_test() and str(self.folder) == os.path.dirname(os.path.dirname(hqpaths.real_roadmap())):
+                return  # F114: a test's refusal never lands on his real ledger (the agent "unknown" lines of 31 October)
             mistakes.add("refused", self.agent or "unknown", f"{summary}: {d.why}", where="a call or a text", base=self.folder,
                          key=f"refused|{self.agent}|{tool}|{summary}"[:200])
         except Exception:
@@ -471,19 +510,55 @@ class Policy:
         way = WAYS_IN.get(low)
         if way:
             return Decision(DENY, f"{rel.name} is never edited directly, whoever asks: use {way}", retry=True)
+        if low == LOG_REL and not self.after_call:  # F114: the log through its script, also on a yes
+            return Decision(DENY, f"the coaching log is never edited directly on a call or in a text: use {LOG_WAY}", retry=True)
         if _PROOF.match(low):
             return Decision(DENY, f"{rel.name} is what proves his words, and only HQ writes it")
         if _ABOUT_LIST.match(low):
             return Decision(DENY, f"her list only takes what passes the filter: use {ABOUT_WAY}", retry=True)
-        if rel.name.casefold() == "claude.md" or low in VISION_FILES:
+        theirs = self._not_hers(low, rel.name)
+        if theirs:
+            return theirs
+        if low in PROGRAM_STATE:  # F114: a yes written in by hand would be his yes typed by an agent
+            return Decision(DENY, f"{rel.name} is written only by HQ's own programs, whoever asks: {PROGRAM_STATE[low]}", door=True)
+        if low == hqpaths_mail_rel() and self._moves_mail_switch(path, tool, inp or {}):  # F114: not even with a yes
+            return Decision(DENY, _mail_words(), door=True)
+        if rel.name.casefold() == "claude.md" or low in VISION_FILES or HIS_SETUP.match(low):
             key = (tool, _key(inp or {}))
             if key in self.approved:  # his yes for exactly this change; on the backup it still goes to the main below
                 self.approved.discard(key)
             else:
-                return _ask(f"change {rel.name}, which is yours", "his vision, map, rules or CLAUDE.md (F99)")
+                return _ask(f"change {rel.name}, which is yours",
+                            "his own setup: the agents' settings, the handbook, me.md or the backend (F114)" if HIS_SETUP.match(low)
+                            else "his vision, map, rules or CLAUDE.md (F99)")
         if is_backup() and one_writer(rel.as_posix()):
             return self._hand_over(tool, rel.as_posix(), inp or {})
         return Decision(ALLOW, "writing in the folder")
+
+    def _not_hers(self, low: str, name: str) -> Decision | None:
+        """F114: another agent's ledger or own notes, as in a cycle: each agent writes only her own. With no agent named, none."""
+        m = _LEDGER.match(low)
+        if not m:
+            return None
+        aid, name = (self.agent or "").lower(), name.casefold()
+        if aid and ((low.startswith("hq/ledger/") and name.startswith((f"{aid}.", f"{aid}-"))) or low == f"hq/notes-{aid}.md"):
+            return None
+        whose = "another agent's ledger" if low.startswith("hq/ledger/") else "another agent's own notes"
+        return Decision(DENY, f"{name} is {whose}: only she writes it, whoever asks"
+                              + (f"; yours is HQ/ledger/{aid}.md (python3 \"{HQ_ROUTINE / 'ledger.py'}\" {aid} note \"…\")" if aid else ""),
+                        door=True)
+
+    def _moves_mail_switch(self, path: str, tool: str, inp: dict) -> bool:
+        """F114: whether this Edit, MultiEdit or Write of the agents' settings would set, change or take away the mail switch."""
+        try:
+            old = Path(path).read_text(encoding="utf8")
+        except OSError:
+            old = ""
+        new = _after_edit(old, tool, inp)
+        if new is None:  # the edit wouldn't apply (its text isn't there): nothing changes
+            return False
+        import hqpaths
+        return hqpaths.mail_switch_changed(old, new)
 
     def _hand_over(self, tool: str, rel: str, inp: dict) -> Decision:
         """H203: on the backup, a change to a file only the main writes goes to the main, which makes it on its own
@@ -546,6 +621,13 @@ class Policy:
         # subshells, variables or here-documents (quoted text may contain anything).
         if _SHELL_WRITE.search(cmd):  # F99: the same files through the shell, also with a yes
             return Decision(DENY, "those files are never written through the shell, whoever asks: use their own script")
+        runs = _what_runs(cmd)  # F114: a text in quotes (a log line, a note) isn't a command; code handed to python -c or sh -c is
+        if _SHELL_WRITE_HIS.search(runs):  # F114: his own setup and the log, also with a yes
+            return Decision(DENY, "his own setup (the agents' settings and state, the handbook, me.md, the backend) and the coaching log are "
+                                  "never written through the shell, whoever asks: his files with an Edit he says yes to, the log with "
+                                  + LOG_WAY, door=bool(re.search(r"cycles(?:-state)?\.json", runs, re.I)))
+        if _writes_on(_SHELL_LEDGER.format(a=re.escape((self.agent or "").lower() or "\x00"))).search(runs):  # F114
+            return Decision(DENY, "another agent's ledger or notes is hers: only she writes it, whoever asks", door=True)
         cmd = _hide_quoted_dollars(cmd)  # H281: awk's $1 and sed's $p in single quotes are text, not variables
         # 27 October 2026: ${n} of a plain for loop (for n in 1 2; do sed -n "${n}p" …) is filled in by _loops below.
         loop_vars = re.findall(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b", cmd)
@@ -598,7 +680,7 @@ class Policy:
                         step = " ".join(w.replace(_DOLLAR, "$") for w in seg)[:90]
                         d = Decision(d.verdict, f"only the step `{step}`: {d.why}. The other steps of that command "
                                                 f"are fine on their own: run them again without this step",
-                                     question=d.question, retry=d.retry, handed=d.handed)
+                                     question=d.question, retry=d.retry, handed=d.handed, door=d.door)
                     return d
         return Decision(ALLOW, "; ".join(dict.fromkeys(d.why for _, d in results)))
 
@@ -709,7 +791,10 @@ class Policy:
         if prog in ("python3", "python") and args and self.hq_script(args[0], "handover.py"):
             if len(args) == 4 and args[1] == "edit" and args[2] == "inbox.md":
                 return Decision(ALLOW, "an edit of the mail list, with its lock")
-            return Decision(DENY, "from a call, the handover script only edits the mail list (edit inbox.md JSON)")
+            if len(args) == 4 and args[1] == "edit" and args[2] == LOG_REL:  # F114: the log's way in, since the file itself is refused
+                return Decision(ALLOW, "an edit of the coaching log, with its lock")
+            return Decision(DENY, "from a call, the handover script only edits the mail list or the coaching log "
+                                  "(edit inbox.md JSON, edit coaching/log.md JSON)")
         # F99: the status block's way in, since the planning file itself is refused.
         if prog in ("python3", "python") and args and self.status_script(args[0], "set-status.py"):
             return Decision(ALLOW, "the status block")
@@ -735,6 +820,13 @@ class Policy:
         # the Friday screen and the score. A plan, a step's outcome, a text or the routine's minute are her own runs'.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "cycles.py"):
             sub = args[1] if len(args) > 1 else "list"
+            if sub == "yes":  # F114: his yes is his own words in a real line, never one she types for him
+                words = args[3] if len(args) > 3 else ""
+                if not his_words_here(words, self.folder):
+                    return Decision(DENY, "a yes to a held change is his own words: cycles.py yes AGENT \"HIS WORDS\" [N], with words he "
+                                          "said or typed himself on this call or in this chat, word for word. Ask him, and use his answer", door=True)
+            if sub == "set" and len(args) > 3 and args[3].strip().lower() == "mail":  # F114: the mail switch is his own hand's
+                return Decision(DENY, _mail_words(), door=True)
             if sub in ("list", "show", "status", "settings", "set", "order", "yes", "no", "ledger", "friday", "score"):
                 return Decision(ALLOW, "the agents' own cycles: the settings, an order, her ledger, the Friday screen")
             return Decision(DENY, "from a call, the cycles script takes list, settings, set, order, ledger, friday or score; "
@@ -755,6 +847,9 @@ class Policy:
                 return Decision(ALLOW, "reading an item's record")
             return Decision(DENY, "from a call, the record is only read: trail.py follow ID")
         if prog in ("python3", "python") and args and self.hq_script(args[0], "ledger.py"):
+            if len(args) > 2 and args[2] == "note" and args[1].strip().lower() != (self.agent or "").lower():  # F114: only her own
+                return Decision(DENY, f"{args[1]}'s ledger is hers: only she writes it, whoever asks"
+                                      + (f"; yours: ledger.py {self.agent} note \"…\"" if self.agent else ""), door=True)
             if len(args) <= 2 or args[2] in ("show", "list", "orders", "plan", "scores", "note"):
                 return Decision(ALLOW, "an agent's ledger")
             return Decision(DENY, "from a call, the ledger script reads, or adds a note")
@@ -790,7 +885,10 @@ class Policy:
         # H247 (c): feedback for HQ, sent after their yes on a call or in a text (the rule reads it back first), the list
         # with each one's status, and the texts' switch. Connecting to a maker is only by the link they send.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "feedback.py"):
-            if len(args) == 1 or args[1] in ("send", "texts"):
+            if len(args) > 1 and args[1] == "send":  # F114: it leaves this HQ, so his yes on this very call or chat, asked here
+                said = " ".join(a for i, a in enumerate(args[2:], 2) if a not in ("--bug", "--via") and args[i - 1] != "--via")
+                return _ask(f"send this to the maker as feedback: \"{' '.join(said.split())[:300]}\"", "feedback that leaves this HQ (F114)")
+            if len(args) == 1 or args[1] in ("texts",):
                 return Decision(ALLOW, "feedback for HQ, after their yes")
             return Decision(DENY, "the feedback script takes send (after their yes) or texts; connecting is by the link")
         # H222: the six-week games, the workspace's own HQ/games.json: read, tick a day, count, a note, the diary, a
@@ -854,13 +952,22 @@ class Policy:
         # H87, H91: the three usage stop lines (5-hour, weekly, fable), each moving every minute or fixed at a
         # number. Reads them, or switches one: [5-hour|weekly|fable] moving, or fixed with or without a number.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usageline.py"):
-            rest = args[1:]
+            rest, said = args[1:], None
+            if "--said" in rest:  # F114: a switch only on his own words
+                i = rest.index("--said")
+                said, rest = (rest[i + 1] if i + 1 < len(rest) else ""), rest[:i] + rest[i + 2:]
             if rest and rest[0].lower() in ("5-hour", "five", "5h", "weekly", "week", "fable"):
                 rest = rest[1:]
-            if (len(args) == 1 or rest == [] and len(args) == 2 or rest == ["moving"] or rest == ["fixed"]
-                    or (len(rest) == 2 and rest[0] == "fixed" and rest[1].rstrip("%").isdigit())):
+            if len(args) == 1 or rest == [] and len(args) == 2:
                 return Decision(ALLOW, "the usage stop lines")
-            return Decision(DENY, "a usage line takes only moving, or fixed with a number")
+            if rest == ["moving"] or rest == ["fixed"] or (len(rest) == 2 and rest[0] == "fixed" and rest[1].rstrip("%").isdigit()):
+                if said is None:
+                    return Decision(DENY, f"a usage stop line changes only on his own words: add {_SAYS}", door=True)
+                if not his_words_here(said, self.folder):
+                    return Decision(DENY, "those words aren't in a line of his on a call or in a chat: a usage stop line changes only on his "
+                                          f"own words, {_SAYS}", door=True)
+                return Decision(ALLOW, "the usage stop lines, on his words")
+            return Decision(DENY, "a usage line takes only moving, or fixed with a number, and his words with --said")
         # H214: a 9292 link door to door. Only looks places up (the government's open address service, the open
         # station list) and prints a link; it changes nothing.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "travel.py"):
@@ -1143,6 +1250,67 @@ def _hide_quoted_dollars(cmd: str) -> str:
         out.append(_DOLLAR if (c == "$" and (single or lone)) else c)
         i += 1
     return "".join(out)
+
+
+def _what_runs(cmd: str) -> str:
+    """F114: a shell line as the cycles' hook reads it (cyclehook.ran): a quoted text with spaces in it is out, what's handed to a shell
+    or to Python to run stays in. On a failure the line as it is."""
+    try:
+        if str(HQ_ROUTINE) not in sys.path:
+            sys.path.insert(0, str(HQ_ROUTINE))
+        import cyclehook
+        return cyclehook.ran(cmd)
+    except Exception:
+        return cmd
+
+
+def hqpaths_mail_rel() -> str:
+    """F114: where the mail switch lives, relative and casefolded as _edit compares paths."""
+    if str(HQ_ROUTINE) not in sys.path:
+        sys.path.insert(0, str(HQ_ROUTINE))
+    import hqpaths
+    return hqpaths.MAIL_SWITCH_REL.casefold()
+
+
+def _mail_words() -> str:
+    if str(HQ_ROUTINE) not in sys.path:
+        sys.path.insert(0, str(HQ_ROUTINE))
+    import hqpaths
+    return hqpaths.MAIL_SWITCH_WORDS
+
+
+def _after_edit(text: str, tool: str, inp: dict) -> str | None:
+    """F114: a file's text after an Edit, MultiEdit or Write, as the tool would leave it; None when an edit wouldn't apply."""
+    if tool == "Write":
+        c = inp.get("content")
+        return c if isinstance(c, str) else None
+    edits = inp.get("edits") if tool == "MultiEdit" else [inp]
+    for e in edits or []:
+        if not isinstance(e, dict):
+            return None
+        old, new = str(e.get("old_string") or ""), str(e.get("new_string") or "")
+        if not old or old not in text:
+            return None
+        text = text.replace(old, new) if e.get("replace_all") else text.replace(old, new, 1)
+    return text
+
+
+def his_words_here(words: str, folder) -> str:
+    """F114: where these words stand in a line the program itself wrote as his (a call's transcript, his side of a text thread), or "".
+    Never one an agent typed: a quick note can be added from a call, so it doesn't count here. A test copy without lines of his lets
+    them through unless the flow says so (HQ_PROOF_ON), as sprint.his_quote does."""
+    if str(HQ_ROUTINE) not in sys.path:
+        sys.path.insert(0, str(HQ_ROUTINE))
+    try:
+        import hqpaths
+        import sprint
+        if hqpaths.under_test() and not os.environ.get("HQ_PROOF_ON"):
+            return "a test"
+        parts = [p for p in (sprint._bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", words or "")) if p]
+        hits = sprint.his_said(parts, str(folder), real_only=True) if parts else []
+        return hits[-1]["where"] if hits else ""
+    except Exception:
+        return ""
 
 
 def in_memory(path: str, folder: Path) -> bool:

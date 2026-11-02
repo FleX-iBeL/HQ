@@ -2729,9 +2729,9 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
                  f"a web lookup after hang-up is refused: {tool}")
         # The workspace still works as before, through HQ's workspace link too.
         need(v("Read", {"file_path": str(config.FOLDER / "rules.md")}) == ALLOW, "reading the workspace now asks")
-        need(v("Edit", {"file_path": str(config.FOLDER / "coaching/log.md")}) == ALLOW, "writing in the workspace now asks")
+        need(v("Edit", {"file_path": str(config.FOLDER / "current-situation.md")}) == ALLOW, "writing in the workspace now asks")  # F114: the log has its script
         if (ROOT / "workspace").exists():
-            need(v("Edit", {"file_path": str(ROOT / "workspace" / "coaching/log.md")}) == ALLOW,
+            need(v("Edit", {"file_path": str(ROOT / "workspace" / "current-situation.md")}) == ALLOW,
                  "writing through HQ's workspace link is counted as HQ")
         need("H65" in config.VOICE_RULES and "localhost:4748/routines.json" in config.VOICE_RULES
              and "mail.log" in config.VOICE_RULES, "the call rules don't say HQ may be read freely")
@@ -11781,9 +11781,11 @@ print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now),
         # A call: reads it, makes it move, fixes it at a number; nothing else.
         pol = Policy(config.FOLDER)
         c = f'python3 "{ROOT}/routine/usageline.py"'
-        for extra in ("", " moving", " fixed", " fixed 60", " weekly", " weekly moving", " weekly fixed 95", " fable fixed",
-                      " fable fixed 80%", " 5-hour moving"):
-            need(pol.decide("Bash", {"command": c + extra}).verdict == ALLOW, f"a call can't run the line switch with '{extra.strip()}'")
+        said = ' --said "fix it like that please"'  # F114: a switch stands on his own words (a test copy has none of his lines)
+        for extra in ("", " weekly"):
+            need(pol.decide("Bash", {"command": c + extra}).verdict == ALLOW, f"a call can't read the line with '{extra.strip()}'")
+        for extra in (" moving", " fixed", " fixed 60", " weekly moving", " weekly fixed 95", " fable fixed", " fable fixed 80%", " 5-hour moving"):
+            need(pol.decide("Bash", {"command": c + extra + said}).verdict == ALLOW, f"a call can't run the line switch with '{extra.strip()}'")
         for extra in (" fixed sixty", " off", " moving 60", " weekly off", " fable fixed sixty", " monthly moving", " weekly fable moving"):
             need(pol.decide("Bash", {"command": c + extra}).verdict == DENY, f"a call may run the line switch with '{extra.strip()}'")
         need("usageline.py" in config.VOICE_RULES and "every minute" in config.VOICE_RULES and "weekly fixed 95" in config.VOICE_RULES
@@ -15462,7 +15464,8 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
             d = v("Bash", command=cmd)
             need(d.verdict == P.ALLOW, f"the way in is shut: {cmd}: {d.verdict} {d.why}")
         need(v("Bash", command=f"python3 {hq}/routine/handover.py edit HQ/roadmap.md '{{}}'").verdict == P.DENY, "handover opens the planning")
-        need(v("Edit", file_path=str(ws / "coaching/log.md")).verdict == P.ALLOW, "the log is shut for a call")
+        d = v("Edit", file_path=str(ws / "coaching/log.md"))
+        need(d.verdict == P.DENY and "handover.py" in d.why, f"the log isn't through its script on a call: {d}")  # F114
         need(v("Edit", file_path=str(ws / "current-situation.md")).verdict == P.ALLOW, "an ordinary file is shut for a call")
         for url in ("https://example.com/page", "http://news.example.org/a/b.html", "https://example.com/a#part"):
             need(v("WebFetch", url=url).verdict == P.ALLOW, f"a plain address asks: {url}")
@@ -20849,6 +20852,475 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
         need(_t.time() - t < 30 and any("f3.txt" in h for h in o["hits"]), f"the second read: {o}")
         return "what read clean isn't read again, a stopped read goes on, a new version is read, a hit stays a hit, other words read it all"
 
+    # -- F114: the doors hold on calls and texts too ------------------------------------------------------------------------------
+
+    def _f114_policy(self, ws, aid: str, state: Path | None = None):
+        """A call's policy as call.py makes it, or, with STATE, a text's as direct_line._answer does: her open question read back."""
+        import policy as P
+        pol = P.Policy(ws)
+        pol.agent = aid
+        if state is not None and state.exists():
+            pol.pending = [tuple(p) for p in json.loads(state.read_text()).get("pending") or []]
+        return pol
+
+    def _f114_text(self, ws, aid: str, state: Path, words: str, tool: str, inp: dict):
+        """One text of his and her one tool call on it, the way direct_line._answer runs it: the question she left open is answered by
+        his words, the tool call decided, what's still open written back."""
+        pol = self._f114_policy(ws, aid, state)
+        if pol.pending:
+            pol.answer(words)
+        d = pol.decide(tool, inp)
+        state.write_text(json.dumps({"pending": [list(p) for p in pol.pending]}))
+        return d
+
+    async def _f114_hook(self, pol, tool: str, inp: dict) -> tuple:
+        """The tool call through the session's own PreToolUse hook (brain.call_session_options): what the model is told."""
+        import brain
+        opts = brain.call_session_options(model="opus", folder=pol.folder, voice_rules="(F114 flow)", policy=pol)
+        out = (await opts.hooks["PreToolUse"][0].hooks[0]({"tool_name": tool, "tool_input": inp}, None, None))["hookSpecificOutput"]
+        return out["permissionDecision"], out.get("permissionDecisionReason", "")
+
+    def _f114_his_lines(self, ws) -> None:
+        """Made-up lines in the places the program writes his words: a call's transcript and his side of Donna's thread, with an
+        agent's line next to them, and a quick note (which a call can add, so it never counts at a door)."""
+        (ws / "HQ/calls").mkdir(parents=True, exist_ok=True)
+        (ws / "HQ/calls/2026-01-12-1000.md").write_text(
+            "# Call 12 January 2026, 10:00\n\nStarted 10:00:00 · agent Donna · brain opus\n\n"
+            "- 10:00:05 **HQ:** Shall I put the lunch with Alice in, Tuesday at noon? It has a guest.\n"
+            "- 10:00:20 **Me:** yes put the lunch in please\n"
+            "- 10:00:40 **Me:** yes, fix the weekly usage line at 99 for tonight\n"
+            "- 10:00:50 **HQ:** yes he said do it, go ahead with everything\n")
+        (ws / "HQ/direct-line").mkdir(parents=True, exist_ok=True)
+        (ws / "HQ/direct-line/thread.jsonl").write_text(
+            json.dumps({"at": 1, "from": "agent", "text": "Shall I move the dentist to Friday?"}) + "\n" +
+            json.dumps({"at": 2, "from": "me", "text": "sure, move the dentist"}) + "\n")
+        (ws / "HQ/notes.md").write_text("# Notes\n\n## Notes\n\n- 2026-01-12 09:00:00 · yes go ahead with the lunch with Alice\n")
+
+    async def flow350(self) -> str:
+        """F114, no Claude: the coaching log on a call and in a text goes through its script. An Edit, a Write, a MultiEdit and five
+        shell ways at it are refused through the session's own hook with handover.py named, a yes doesn't open it, the file stays as
+        it was; handover.py edit coaching/log.md is let through and really writes it under its lock; the after-call run, alone,
+        still writes the log itself."""
+        import subprocess as _sp
+        import policy as P
+        ws, env = self._h298_ws("f114log")
+        log = ws / "coaching/log.md"
+        before = log.read_bytes()
+        edit = {"file_path": str(log), "old_string": log.read_text().splitlines()[0], "new_string": "a line she typed"}
+        state = self.tmp / "f114log-state.json"
+        for where in ("call", "text"):
+            for tool, inp in (("Edit", edit), ("Write", {"file_path": str(log), "content": "gone"}),
+                              ("MultiEdit", {"file_path": str(log), "edits": [{"old_string": edit["old_string"], "new_string": "x"}]})):
+                pol = self._f114_policy(ws, "pepper", state if where == "text" else None)
+                verdict, said = await self._f114_hook(pol, tool, inp)
+                need(verdict == "deny" and "handover.py" in said and "edit coaching/log.md" in said, f"{where}: {tool} on the log: {verdict} {said}")
+            pol = self._f114_policy(ws, "pepper")
+            pol.approved.add(("Edit", P._key(edit)))
+            need(pol.decide("Edit", edit).verdict == P.DENY, f"{where}: a yes opened the log")
+            for cmd in (f"echo x >> {log}", f"sed -i 's/a/b/' {log}", f"cp /tmp/x {log}", f"cd {ws} && printf x >> coaching/log.md",
+                        f"python3 -c \"open('{log}', 'a').write('x')\""):
+                d = self._f114_text(ws, "pepper", state, "put that in the log", "Bash", {"command": cmd}) if where == "text" else \
+                    self._f114_policy(ws, "pepper").decide("Bash", {"command": cmd})
+                need(d.verdict == P.DENY and "handover.py" in d.why, f"{where}: the shell got at the log: {cmd}: {d.verdict} {d.why}")
+            need(log.read_bytes() == before, f"{where}: the log changed")
+            way = f"python3 {ROOT}/routine/handover.py edit coaching/log.md '{{\"edits\": [{{\"old\": \"a\", \"new\": \"b\"}}]}}'"
+            d = self._f114_policy(ws, "pepper").decide("Bash", {"command": way})
+            need(d.verdict == P.ALLOW, f"{where}: the log's own script is shut: {d.why}")
+        first = log.read_text().splitlines()[0]
+        r = _sp.run([sys.executable, str(ROOT / "routine/handover.py"), "edit", "coaching/log.md",
+                     json.dumps({"edits": [{"old": first, "new": first + " (F114 flow)"}]})], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0 and log.read_text().splitlines()[0] == first + " (F114 flow)", f"the log's script didn't write: {r.stdout} {r.stderr}")
+        after = P.Policy(ws)
+        after.unattended, after.after_call = True, True
+        need(after.decide("Edit", {"file_path": str(log), "old_string": "(F114 flow)", "new_string": "x"}).verdict == P.ALLOW,
+             "the after-call run can't write the log")
+        return "the log is refused on a call and in a text (Edit, Write, MultiEdit, the shell, a yes) with its script named, the file unchanged; the script writes it; the wrap-up still does"
+
+    async def flow351(self) -> str:
+        """F114, no Claude: his own setup asks him, on a call and in a text. An Edit of the agents' settings, the handbook, the agents'
+        list, me.md or the backend's switches asks (the hook tells her to check it with him), with nobody to ask it's refused, his yes
+        opens that one change once and not the next; through the shell it's refused also after his yes; the cycles' state is refused
+        whatever happens, with cycles.py named."""
+        import policy as P
+        ws, env = self._h298_ws("f114his")
+        (ws / "HQ/agents/agents.json").write_text('{"agents": []}\n')
+        (ws / "HQ/backend.json").write_text('{"briefing": false}\n')
+        (ws / "HQ/agents/cycles-state.json").write_text('{"agents": {}}\n')
+        files = ("HQ/agents/cycles.json", "HQ/backend.json", "HQ/agents/handbook.md", "me.md", "HQ/agents/agents.json")
+        before = {rel: (ws / rel).read_bytes() for rel in files + ("HQ/agents/cycles-state.json",)}
+        state = self.tmp / "f114his-state.json"
+        for rel in files:
+            inp = {"file_path": str(ws / rel), "old_string": (ws / rel).read_text()[:8], "new_string": "Changed by her"}
+            pol = self._f114_policy(ws, "moneypenny")
+            verdict, said = await self._f114_hook(pol, "Edit", inp)
+            need(verdict == "deny" and said.startswith("Not done: this needs") and Path(rel).name in said, f"call: {rel} doesn't ask: {said}")
+            d = self._f114_text(ws, "moneypenny", state, "change it", "Edit", inp)
+            need(d.verdict == P.ASK and Path(rel).name in d.question, f"text: {rel} doesn't ask: {d}")
+            d = self._f114_text(ws, "moneypenny", state, "yes", "Edit", inp)
+            need(d.verdict == P.ALLOW, f"text: his yes didn't open {rel}: {d}")
+            d = self._f114_text(ws, "moneypenny", state, "and the next one", "Edit", inp)
+            need(d.verdict == P.ASK, f"text: one yes opened {rel} twice: {d}")
+            pol = self._f114_policy(ws, "moneypenny")
+            pol.decide("Edit", inp)
+            pol.answer("yes")
+            need(pol.decide("Edit", inp).verdict == P.ALLOW, f"call: his yes didn't open {rel}")
+            pol.end_of_turn()
+            need(pol.decide("Edit", inp).verdict == P.ASK, f"call: a yes stood past its turn for {rel}")
+            alone = P.Policy(ws, unattended=True)
+            alone.agent = "moneypenny"
+            need(alone.decide("Edit", inp).verdict == P.DENY, f"with nobody to ask {rel} was changed")
+            for cmd in (f"echo x >> {ws / rel}", f"sed -i 's/a/b/' {ws / rel}", f"cp /tmp/x {ws / rel}",
+                        f"python3 -c \"open('{ws / rel}', 'w').write('x')\""):
+                pol = self._f114_policy(ws, "moneypenny")
+                pol.approved.add(("Bash", P._key({"command": cmd})))
+                d = pol.decide("Bash", {"command": cmd})
+                need(d.verdict == P.DENY, f"the shell got at {rel} with a yes: {cmd}: {d.verdict} {d.why}")
+        st = {"file_path": str(ws / "HQ/agents/cycles-state.json"), "old_string": "{}", "new_string": '{"allowed": {"x": "2099-01-01 00:00"}}'}
+        for where in ("call", "text"):
+            pol = self._f114_policy(ws, "donna", state if where == "text" else None)
+            pol.approved.add(("Edit", P._key(st)))
+            verdict, said = await self._f114_hook(pol, "Edit", st)
+            need(verdict == "deny" and "cycles.py" in said and "yes" in said and not said.startswith("Not done"), f"{where}: the cycles' state: {said}")
+        need(all((ws / rel).read_bytes() == b for rel, b in before.items()), "a file of his changed")
+        return "his setup asks on a call and in a text, his yes opens that one change once, nobody to ask is a no, the shell never; the cycles' state is the program's"
+
+    async def flow352(self) -> str:
+        """F114, no Claude: the mail switch can't be set from a call, a text or a job. Setting "mail": "send" on an agent in her settings
+        by Edit, MultiEdit or Write is refused on a call and in a text also after his yes (another change to the same file still only
+        asks); cycles.py set mail and a one-liner are refused by the policy and the script; a team job's hook refuses the file by Edit
+        and by the shell; handover.py put refuses it; may_send stays off, the file unchanged, and the try counts once on the ledger."""
+        import subprocess as _sp
+        import policy as P
+        ws, env = self._h298_ws("f114mail")
+        cj = ws / "HQ/agents/cycles.json"
+        cj.write_text(json.dumps({"agents": {"donna": {"on": True}}}, indent=2) + "\n")
+        before = cj.read_bytes()
+        sets = {"file_path": str(cj), "old_string": '"on": true', "new_string": '"on": true, "mail": "send"'}
+        other = {"file_path": str(cj), "old_string": '"on": true', "new_string": '"on": false'}
+        state = self.tmp / "f114mail-state.json"
+        for where in ("call", "text"):
+            for tool, inp in (("Edit", sets), ("MultiEdit", {"file_path": str(cj), "edits": [{"old_string": sets["old_string"], "new_string": sets["new_string"]}]}),
+                              ("Write", {"file_path": str(cj), "content": json.dumps({"agents": {"donna": {"on": True, "mail": "send"}}})})):
+                pol = self._f114_policy(ws, "donna", state if where == "text" else None)
+                pol.approved.add((tool, P._key(inp)))  # his yes, and still no
+                verdict, said = await self._f114_hook(pol, tool, inp)
+                need(verdict == "deny" and "his own hand" in said and "Settings" in said and not said.startswith("Not done"), f"{where}: {tool} set the mail: {said}")
+            need(self._f114_policy(ws, "donna").decide("Edit", other).verdict == P.ASK, f"{where}: another change of her settings doesn't ask")
+            for cmd in (f"python3 {ROOT}/routine/cycles.py set donna mail send",
+                        f"python3 -c \"import json; p='{cj}'; d=json.load(open(p)); d['agents']['donna']['mail']='send'; json.dump(d, open(p, 'w'))\"",
+                        f"cp /tmp/x {cj}"):
+                d = self._f114_text(ws, "donna", state, "yes", "Bash", {"command": cmd}) if where == "text" else \
+                    self._f114_policy(ws, "donna").decide("Bash", {"command": cmd})
+                need(d.verdict == P.DENY, f"{where}: the mail switch through the shell: {cmd}: {d.verdict} {d.why}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/cycles.py"), "set", "donna", "mail", "send"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 2 and "his own hand" in r.stdout, f"cycles.py set mail: {r.returncode} {r.stdout}")
+        hook = [sys.executable, str(ROOT / "routine/cyclehook.py"), "--mail-only"]
+        for tool, inp in (("Edit", sets), ("Write", {"file_path": str(cj), "content": "{}"}),
+                          ("Bash", {"command": f"echo '{{}}' > HQ/agents/cycles.json"})):
+            r = _sp.run(hook, input=json.dumps({"tool_name": tool, "tool_input": inp, "cwd": str(ws)}), capture_output=True, text=True, env=env)
+            need(r.returncode == 2 and "refused" in r.stderr, f"a team job's hook let {tool} on the settings through: {r.returncode} {r.stderr}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/handover.py"), "put", "HQ/agents/cycles.json",
+                     json.dumps({"text": json.dumps({"agents": {"donna": {"on": True, "mail": "send"}}})})], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 2 and "his own hand" in r.stdout, f"handover put set the mail switch: {r.returncode} {r.stdout}")
+        need(cj.read_bytes() == before, "the settings changed")
+        r = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import hqpaths; print(hqpaths.may_send('donna'))", str(ROOT / "routine")],
+                    capture_output=True, text=True, env=env)
+        need(r.stdout.strip() == "False", f"she may send: {r.stdout} {r.stderr}")
+        led = [json.loads(l) for l in (ws / "HQ/mistakes.jsonl").read_text().splitlines()] if (ws / "HQ/mistakes.jsonl").exists() else []
+        edits = [l for l in led if l["kind"] == "refused" and l["agent"] == "donna" and l["words"].startswith("Edit cycles.json")]
+        need(len(edits) == 1, f"the same refused try isn't counted once: {len(edits)} lines")
+        return "no Edit, MultiEdit, Write, script, one-liner, team job or hand-over sets the mail switch, not even on his yes; she can't send; counted once"
+
+    async def flow353(self) -> str:
+        """F114, no Claude: each agent writes only her own ledger and notes, on a call and in a text. Donna's Edit or Write of Pepper's or
+        Moneypenny's ledger or notes, a shell write at them and ledger.py note for another agent are refused; her own pass; a look at
+        another's ledger passes; the same refused try twice is one line on the ledger, the same way both times."""
+        import policy as P
+        ws, env = self._h298_ws("f114led")
+        (ws / "HQ/ledger").mkdir(parents=True, exist_ok=True)
+        for a in ("donna", "pepper", "moneypenny"):
+            (ws / f"HQ/ledger/{a}.md").write_text(f"# {a}\n")
+            (ws / f"HQ/notes-{a}.md").write_text(f"# {a}'s notes\n")
+        before = {p: p.read_bytes() for p in (ws / "HQ").rglob("*.md")}
+        state = self.tmp / "f114led-state.json"
+        theirs = [("Edit", {"file_path": str(ws / "HQ/ledger/pepper.md"), "old_string": "#", "new_string": "##"}),
+                  ("Write", {"file_path": str(ws / "HQ/ledger/moneypenny.md"), "content": "gone"}),
+                  ("Edit", {"file_path": str(ws / "HQ/notes-pepper.md"), "old_string": "#", "new_string": "##"}),
+                  ("Bash", {"command": f"echo x >> {ws}/HQ/ledger/pepper.md"}),
+                  ("Bash", {"command": f"cd {ws} && sed -i 's/a/b/' HQ/notes-moneypenny.md"}),
+                  ("Bash", {"command": f"python3 {ROOT}/routine/ledger.py pepper note \"Pepper said so\""})]
+        for where in ("call", "text"):
+            for tool, inp in theirs:
+                pol = self._f114_policy(ws, "donna", state if where == "text" else None)
+                verdict, said = await self._f114_hook(pol, tool, inp)
+                need(verdict == "deny" and ("hers" in said or "only she writes it" in said), f"{where}: {tool} {inp}: {verdict} {said}")
+            for tool, inp in (("Edit", {"file_path": str(ws / "HQ/ledger/donna.md"), "old_string": "#", "new_string": "##"}),
+                              ("Edit", {"file_path": str(ws / "HQ/notes-donna.md"), "old_string": "#", "new_string": "##"}),
+                              ("Bash", {"command": f"python3 {ROOT}/routine/ledger.py donna note \"her own note\""}),
+                              ("Bash", {"command": f"python3 {ROOT}/routine/ledger.py pepper show"})):
+                d = self._f114_policy(ws, "donna").decide(tool, inp)
+                need(d.verdict == P.ALLOW, f"{where}: her own or a look is shut: {tool} {inp}: {d.why}")
+        need(all(p.read_bytes() == b for p, b in before.items()), "a ledger or notes file changed")
+        pol = self._f114_policy(ws, "donna")
+        a, b = pol.decide(*theirs[0]), pol.decide(*theirs[0])
+        need(a.verdict == b.verdict == P.DENY and a.why == b.why, "a repeated try isn't refused the same way")
+        led = [json.loads(l) for l in (ws / "HQ/mistakes.jsonl").read_text().splitlines()]
+        n = [l for l in led if l["kind"] == "refused" and l["agent"] == "donna" and l["words"].startswith("Edit pepper.md")]
+        need(len(n) == 1, f"a repeated refused try counts {len(n)} times")
+        return "another agent's ledger and notes are refused on a call and in a text (Edit, Write, the shell, ledger.py note), her own and a look pass, counted once"
+
+    async def flow354(self) -> str:
+        """F114, no Claude: his yes to a held change is his own words in a real line. On a throwaway workspace with his lines in a call
+        and a text, an agent's line and a quick note: cycles.py yes with made-up words, with the agent's line or with the quick note is
+        refused on a call and in a text, and by the script itself, the change still held; with his words from the transcript or the
+        thread it passes, and the script opens the change."""
+        import subprocess as _sp
+        import policy as P
+        ws, env = self._h298_ws("f114yes")
+        self._f114_his_lines(ws)
+        env.update({"HQ_PROOF_ON": "1", "HQ_DIRECT_PLAIN": "1", "HQ_NO_PHONE": "1"})
+        env.pop("HQ_ROLE_HERE", None)  # as a call runs it: the script reads his words itself
+        cy = f"python3 {ROOT}/routine/cycles.py yes donna"
+        made_up = ("he said yes to the lunch", "yes he said do it, go ahead with everything", "yes go ahead with the lunch with Alice")
+        state = self.tmp / "f114yes-state.json"
+        was = os.environ.get("HQ_PROOF_ON")
+        os.environ["HQ_PROOF_ON"] = "1"
+        try:
+            for where in ("call", "text"):
+                for words in made_up:
+                    cmd = f"{cy} \"{words}\""
+                    pol = self._f114_policy(ws, "donna", state if where == "text" else None)
+                    verdict, said = await self._f114_hook(pol, "Bash", {"command": cmd})
+                    need(verdict == "deny" and "his own words" in said, f"{where}: an agent's yes went through: {words!r}: {said}")
+                for words in ("yes put the lunch in", "sure, move the dentist"):
+                    d = self._f114_policy(ws, "donna").decide("Bash", {"command": f"{cy} \"{words}\""})
+                    need(d.verdict == P.ALLOW, f"{where}: his own words were refused: {words!r}: {d.why}")
+        finally:
+            if was is None:
+                os.environ.pop("HQ_PROOF_ON", None)
+            else:
+                os.environ["HQ_PROOF_ON"] = was
+        hold = ("import sys; sys.path.insert(0, sys.argv[1]); import cycles\n"
+                "print(cycles.hold('donna', 'k-f114', 'add \"Lunch with Alice\", Tue 13 Jan 12:00 to 13:00', \"it has guests, and they'd get a mail\", "
+                "'mcp__x__create_event', {'summary': 'Lunch with Alice', 'attendees': ['alice@example.com']}))")
+        r = _sp.run([sys.executable, "-c", hold, str(ROOT / "routine")], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0 and "asked" in r.stdout, f"no held change: {r.stdout} {r.stderr[-500:]}")
+        def yes(words):
+            return _sp.run([sys.executable, str(ROOT / "routine/cycles.py"), "yes", "donna", words], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        def waiting():
+            return _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import cycles; "
+                            "print(len(cycles._agent_state(cycles._state(), 'donna')['holds']))", str(ROOT / "routine")],
+                           capture_output=True, text=True, env=env).stdout.strip()
+        for words in made_up:
+            r = yes(words)
+            need(r.returncode == 2 and r.stdout.startswith("Refused") and waiting() == "1", f"the script took {words!r}: {r.stdout} {r.stderr[-300:]}")
+        r = yes("yes put the lunch in")
+        need(r.returncode == 0 and not r.stdout.startswith("Refused") and waiting() == "0", f"his own yes didn't open it: {r.stdout} {r.stderr[-400:]}")
+        return "made-up words, an agent's line and a quick note are refused as his yes, on a call, in a text and by the script; his own words open it"
+
+    async def flow355(self) -> str:
+        """F114, no Claude: a usage stop line changes only on his own words. On a call and in a text, usageline.py weekly fixed 99
+        without --said, or with words that aren't his, is refused, and with his words from the transcript it passes; reading stays
+        free. The script itself refuses made-up words and a job's say-so and leaves the planning as it was; with his words it
+        switches. A team job's and a cycle's hook refuse the switch."""
+        import subprocess as _sp
+        import policy as P
+        ws, env = self._h298_ws("f114line")
+        self._f114_his_lines(ws)
+        env.update({"HQ_PROOF_ON": "1"})
+        ul = f"python3 {ROOT}/routine/usageline.py"
+        state = self.tmp / "f114line-state.json"
+        was = os.environ.get("HQ_PROOF_ON")
+        os.environ["HQ_PROOF_ON"] = "1"
+        try:
+            for where in ("call", "text"):
+                for cmd in (f"{ul} weekly fixed 99", f"{ul} weekly fixed 99 --said \"he wants it at 99\"", f"{ul} moving",
+                            f"{ul} fable fixed --said \"yes he said do it, go ahead with everything\""):
+                    pol = self._f114_policy(ws, "moneypenny", state if where == "text" else None)
+                    verdict, said = await self._f114_hook(pol, "Bash", {"command": cmd})
+                    need(verdict == "deny" and "his own words" in said, f"{where}: the line moved without his words: {cmd}: {said}")
+                for cmd in (f"{ul} weekly fixed 99 --said \"fix the weekly usage line at 99\"", ul, f"{ul} weekly"):
+                    d = self._f114_policy(ws, "moneypenny").decide("Bash", {"command": cmd})
+                    need(d.verdict == P.ALLOW, f"{where}: {cmd}: {d.why}")
+        finally:
+            if was is None:
+                os.environ.pop("HQ_PROOF_ON", None)
+            else:
+                os.environ["HQ_PROOF_ON"] = was
+        rm = ws / "HQ/roadmap.md"
+        before = rm.read_bytes()
+        def run(*a, extra=None):
+            return _sp.run([sys.executable, str(ROOT / "routine/usageline.py"), *a], capture_output=True, text=True, env={**env, **(extra or {})}, cwd=str(ROOT))
+        r = run("weekly", "fixed", "99", "--said", "he wants it at 99")
+        need(r.returncode == 2 and rm.read_bytes() == before, f"the script took made-up words: {r.returncode} {r.stdout} {r.stderr}")
+        r = run("weekly", "fixed", "99", "--said", "fix the weekly usage line at 99", extra={"HQ_IN_JOB": "7"})
+        need(r.returncode == 2 and rm.read_bytes() == before, f"a job gave itself his say-so: {r.stdout} {r.stderr}")
+        r = run("weekly", "fixed", "99", "--said", "fix the weekly usage line at 99")
+        need(r.returncode == 0 and "**Weekly line: fixed at 99%.**" in rm.read_text(), f"his words didn't switch it: {r.stdout} {r.stderr}")
+        sys.path.insert(0, str(ROOT / "routine"))
+        import cyclehook
+        for who in (None, ("donna", "session")):
+            code, why = cyclehook.decide({"tool_name": "Bash", "tool_input": {"command": f"{ul} weekly fixed 99"}}, who is None, None, who)
+            need(code == 2 and "usage" in why, f"{'a team job' if who is None else 'a cycle'} may move the line: {code} {why}")
+        return "without his words, or with made-up or an agent's words, the line doesn't move on a call, in a text, by the script or from a job; his words move it"
+
+    async def flow356(self) -> str:
+        """F114, no Claude: feedback that leaves this HQ goes only after his yes on that same call or chat. feedback.py send asks (the
+        question carries the words that would go), his yes opens exactly that once, the next turn asks again; in a text his next text's
+        yes opens it; with nobody to ask it's refused; a cycle's hook refuses it; nothing was sent."""
+        import policy as P
+        ws, env = self._h298_ws("f114fb")
+        send = {"command": f"python3 \"{ROOT}/app/feedback.py\" send \"the changelog jumps on the phone\" --via agent"}
+        pol = self._f114_policy(ws, "donna")
+        verdict, said = await self._f114_hook(pol, "Bash", send)
+        need(verdict == "deny" and said.startswith("Not done: this needs") and "the changelog jumps on the phone" in said, f"call: it went on her word: {said}")
+        pol.answer("yes")
+        need(pol.decide("Bash", send).verdict == P.ALLOW, "call: his yes didn't open it")
+        pol.end_of_turn()
+        need(pol.decide("Bash", send).verdict == P.ASK, "call: a yes stood for the next one too")
+        state = self.tmp / "f114fb-state.json"
+        d = self._f114_text(ws, "donna", state, "tell the maker the changelog jumps", "Bash", send)
+        need(d.verdict == P.ASK and "the changelog jumps" in d.question, f"text: it went on her word: {d}")
+        d = self._f114_text(ws, "donna", state, "yes send it", "Bash", send)
+        need(d.verdict == P.ALLOW, f"text: his yes in the chat didn't open it: {d}")
+        d = self._f114_text(ws, "donna", state, "thanks", "Bash", send)
+        need(d.verdict == P.ASK, f"text: one yes sent twice: {d}")
+        alone = P.Policy(ws, unattended=True)
+        need(alone.decide("Bash", send).verdict == P.DENY, "after the call it went with nobody to ask")
+        sys.path.insert(0, str(ROOT / "routine"))
+        import cyclehook
+        code, why = cyclehook.decide({"tool_name": "Bash", "tool_input": send}, False, None, ("donna", "session"))
+        need(code == 2, f"a cycle may send feedback: {why}")
+        need(not (ws / "HQ/feedback.json").exists(), "something was sent")
+        return "feedback asks with its words on a call and in a text, his yes there opens it once, nobody to ask is a no, a cycle never"
+
+    async def flow357(self) -> str:
+        """F114, no Claude: her list refuses his life by its kind. Fourteen made-up facts of the kinds that came back before (health,
+        sleep, where someone lives, a calendar), naming no one, are each refused by add on any agent's list and by the harvest even
+        when she said them in the first person and the look hands them back as hers; lines of her own about herself are still kept,
+        and check names an old line of that kind without changing it."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f114kind")
+        his = ["has a GP appointment next week for a stool sample", "has been on sick leave since the end of August",
+               "wakes up at night because of her bladder", "has been seeing a psychologist about old anxiety",
+               "goes to bed around two and gets up at ten", "can't fall asleep before midnight most nights",
+               "slept badly again after a late night", "lives on the fourth floor of a flat in the south east of the city",
+               "rents her place from a big housing company", "moved in with her partner this summer",
+               "has a dentist check-up on Thursday at 11:00", "sees the company doctor on the 22nd",
+               "keeps Tuesday and Thursday afternoons for the office", "takes medication for her digestion every morning"]
+        own = ["thinks the coffee on the second floor is too strong", "goes running on Sundays", "keeps a small fern on the windowsill",
+               "I'm a morning person", "prefers a flat white to an espresso", "is tired of small talk at the coffee machine",
+               "hums along to the radio while she files", "Good at crosswords, bad at small talk"]
+        def add(aid, fact):
+            return _sp.run([sys.executable, str(APP / "about_self.py"), "add", aid, fact], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        lst = {a: ws / f"HQ/agents/{a}-about-herself.md" for a in ("donna", "pepper", "moneypenny")}
+        for i, fact in enumerate(his):
+            aid = ("donna", "pepper", "moneypenny")[i % 3]
+            r = add(aid, fact)
+            need(r.returncode == 1 and "refused" in r.stderr, f"add kept {fact!r} for {aid}: {r.stdout} {r.stderr}")
+        need(not any(p.exists() for p in lst.values()), "a refused fact was written")
+        for fact in own:
+            r = add("donna", fact)
+            need(r.returncode == 0 and "kept" in r.stdout, f"her own life is refused: {fact!r}: {r.stdout} {r.stderr}")
+        call = ws / "HQ/calls/2026-01-12-1100.md"
+        call.parent.mkdir(parents=True, exist_ok=True)
+        call.write_text("# Call 12 January 2026, 11:00\n\nStarted 11:00:00 · agent Donna · brain opus\n\n"
+                        + "".join(f"- 11:0{i % 10} **HQ:** I {f.replace('has ', 'have ', 1).replace('her ', 'my ')}.\n" for i, f in enumerate(his))
+                        + "- 11:09 **HQ:** I keep a tiny cactus by my keyboard.\n")
+        fake = json.dumps({"new": [{"agent": "Donna", "fact": f} for f in his + ["keeps a tiny cactus by her keyboard"]]})
+        r = _sp.run([sys.executable, str(APP / "about_self.py"), "harvest-call", str(call)], capture_output=True, text=True,
+                    env={**env, "HQ_ABOUT_FAKE": fake}, cwd=str(ROOT))
+        need(r.returncode == 0, f"harvest-call failed: {r.stderr[-400:]}")
+        kept = [l[2:] for l in lst["donna"].read_text().splitlines() if l.startswith("- ")]
+        need(not any(any(w in k for w in ("GP", "sick", "bladder", "psycholog", "bed", "asleep", "slept", "fourth floor", "rents", "moved", "dentist",
+                                           "doctor", "afternoons", "medication")) for k in kept), f"the harvest kept his kind: {kept}")
+        need(any("cactus" in k for k in kept), f"the harvest lost her own life: {kept}")
+        lst["donna"].write_text(lst["donna"].read_text() + "- has a dentist check-up on Thursday at 11:00 (1 Nov)\n")
+        b = lst["donna"].read_bytes()
+        r = _sp.run([sys.executable, str(APP / "about_self.py"), "check"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0 and "dentist" in r.stdout and "cactus" not in r.stdout and lst["donna"].read_bytes() == b, f"check: {r.stdout} {r.stderr}")
+        return f"all {len(his)} made-up facts of his kind refused by add and by the harvest; {len(own)} of her own kept; check names an old one"
+
+    async def flow358(self) -> str:
+        """F114, no Claude: a team job writes his lists only through their own scripts. The job's hook (cyclehook.py --mail-only, as
+        tick.start writes it into every job's settings) refuses an Edit, a Write and shell writes on the to-do list, the mail list, his
+        quick notes, the games, the coaching file and the planned to-do blocks in his workspace, each with its script named; the
+        planning, the coaching log, the scripts themselves, reading, and a copy outside his workspace pass."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f114job")
+        hook = [sys.executable, str(ROOT / "routine/cyclehook.py"), "--mail-only"]
+        def run(tool, **inp):
+            r = _sp.run(hook, input=json.dumps({"tool_name": tool, "tool_input": inp, "cwd": str(ws)}), capture_output=True, text=True, env=env)
+            return r.returncode, r.stderr
+        outside = self.tmp / "f114job-copy"
+        outside.mkdir(exist_ok=True)
+        for rel, script in (("challenges.md", "todo.py"), ("inbox.md", "handover.py"), ("HQ/notes.md", "notes.py"),
+                            ("HQ/games.json", "games.py"), ("HQ/coaching.json", "coaching.py"), ("HQ/calendar-todo.json", "todo.py")):
+            for tool, inp in (("Edit", {"file_path": str(ws / rel), "old_string": "a", "new_string": "b"}),
+                              ("Write", {"file_path": str(ws / rel), "content": "x"}),
+                              ("Bash", {"command": f"echo x >> {rel}"}), ("Bash", {"command": f"printf 'a row' >> {ws / rel}"}),
+                              ("Bash", {"command": f"cp /tmp/x {ws / rel}"}), ("Bash", {"command": f"sed -i 's/a/b/' {rel}"})):
+                code, why = run(tool, **inp)
+                need(code == 2 and script in why, f"a team job's {tool} on {rel} passed: {code} {why}")
+            for tool, inp in (("Edit", {"file_path": str(outside / Path(rel).name), "old_string": "a", "new_string": "b"}),
+                              ("Bash", {"command": f"echo x >> {outside / Path(rel).name}"}), ("Bash", {"command": f"cat {rel}"})):
+                code, why = run(tool, **inp)
+                need(code == 0, f"a team job can't touch its own copy or read: {tool} {inp}: {why}")
+        for tool, inp in (("Edit", {"file_path": str(ws / "HQ/roadmap.md"), "old_string": "a", "new_string": "b"}),
+                          ("Edit", {"file_path": str(ws / "coaching/log.md"), "old_string": "a", "new_string": "b"}),
+                          ("Bash", {"command": "python3 ../HQ/app/todo.py add 1 \"a row\""}),
+                          ("Bash", {"command": "python3 ../HQ/routine/handover.py edit inbox.md '{\"edits\": []}'"})):
+            code, why = run(tool, **inp)
+            need(code == 0, f"a team job's own way is shut: {tool} {inp}: {why}")
+        return "a team job's Edit, Write and shell writes on his lists are refused with the script named; the planning, the log, the scripts and its own copies pass"
+
+    async def flow359(self) -> str:
+        """F114, no Claude: Donna's own look waits for the end of his Sleep. With her notes and his Sleep until 09:30, the look that's due
+        at 09:00 isn't started: it's written down once, the repeats during Sleep are dropped, a new process (a restart) still has it;
+        at 09:31 it goes once and the next minutes nothing more; her look started by hand while he sleeps texts nothing and is held."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f114look")
+        env.update({"HQ_DIRECT_PLAIN": "1", "HQ_INITIATIVE_SAYS": "Still want me to chase the plumber's quote?", "HQ_NO_PHONE": "1"})
+        code = """
+import sys, json, datetime as dt
+sys.path[:0] = [sys.argv[1] + '/routine', sys.argv[1] + '/app']
+import pings
+wake = dt.datetime(2099, 1, 2, 9, 30).timestamp()
+pings._asleep = lambda t: t < wake
+if sys.argv[2] == 'note':
+    pings.note_add("Chase the plumber's quote")
+spawned = []
+for h, m in json.loads(sys.argv[3]):
+    pings.watch(dt.datetime(2099, 1, 2, h, m).timestamp(), spawn=lambda w, f: spawned.append(w))
+print(json.dumps({'spawned': spawned, 'initiative': pings.read().get('initiative') or {}}))
+"""
+        def watch(first, times):
+            r = _sp.run([sys.executable, "-c", code, str(ROOT), first, json.dumps(times)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+            need(r.returncode == 0, f"the watch: {r.stderr[-600:]}")
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        o = watch("note", [[9, 0]])
+        need(o["spawned"] == [] and o["initiative"].get("held"), f"her look went while he sleeps: {o}")
+        held = o["initiative"]["held"]
+        o = watch("", [[9, 5], [9, 15], [9, 29]])
+        need(o["spawned"] == [] and o["initiative"].get("held") == held, f"a repeat during his Sleep wasn't dropped: {o}")
+        o = watch("", [[9, 31], [9, 32], [9, 45]])
+        need(o["spawned"] == ["initiative"] and not o["initiative"].get("held"), f"the held look didn't go once at the end of Sleep: {o}")
+        o = watch("", [[10, 0], [11, 0]])
+        need(o["spawned"] == [], f"the held look went twice: {o}")
+        by_hand = """
+import sys, json
+sys.path[:0] = [sys.argv[1] + '/routine', sys.argv[1] + '/app']
+import direct_line, pings
+n = len(direct_line.thread())
+m = direct_line.initiative()
+print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.read().get('initiative') or {}).get('held')}))
+"""
+        r = _sp.run([sys.executable, "-c", by_hand, str(ROOT)], capture_output=True, text=True, env={**env, "HQ_ASLEEP": "1"}, cwd=str(ROOT))
+        need(r.returncode == 0, f"her look by hand: {r.stderr[-600:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["m"] is None and o["grew"] == 0 and o["held"], f"her look by hand texted him while he sleeps: {o}")
+        return "her look in his Sleep is held once, kept through a new process, goes once at its end; started by hand while he sleeps it texts nothing"
+
     async def flow335(self) -> str:
         """F112, no Claude: the installer's last step fits what it is on Linux: a set without the long flows, a limit it fits in going by the last night's own
         times, and out of time the fix line names the right system."""
@@ -21714,7 +22186,7 @@ print("RESULT " + json.dumps(out))
              and ask("donna", "Bash", {"command": f"python3 {H}/routine/jobs.py stop 7"})[0] == 2, "jobs.py stop by agent")
         # one switch for mail: off now; on the maker's copy by hand for one agent, and no setting reaches it
         need(ask("donna", "mcp__x__send_message", {})[0] == 2, "mail isn't refused")
-        need("No setting called mail" in b.cy("set", "donna", "mail", "send").stdout, "a setting reaches the mail switch")
+        need("his own hand" in b.cy("set", "donna", "mail", "send").stdout, "a setting reaches the mail switch")  # F114: refused by name
         cfg = b.ws / "HQ/agents/cycles.json"
         d = json.loads(cfg.read_text())
         d["agents"]["donna"]["mail"] = "send"
@@ -26211,7 +26683,7 @@ window.fetch = async (url, opt) => {
             f'cd {hq} && python3 routine/schedule.py list 2>&1 | head -40',
             f'grep -n "^Item" {saved}',
             f'cd {hq} && python3 routine/schedule.py move 124 "2026-10-26 01:00" && for l in F49 H244; do '
-            f'python3 routine/sprint.py ready "$l" on 2>&1 | tail -1; done && python3 routine/usageline.py 5-hour moving',
+            f'python3 routine/sprint.py ready "$l" on 2>&1 | tail -1; done && python3 routine/usageline.py 5-hour moving --said "put it back on moving"',
             f'cd {hq} && python3 routine/sprint.py moscow H277 must 2>&1 | tail -1',
             f'cd {hq} && python3 routine/sprint.py ready H277 on 2>&1 | tail -1; python3 routine/sprint.py list | head -80',
             f'cd {hq} && for l in H277 H245; do python3 routine/jobs.py send-row $l 2>&1 | tail -1; done',
@@ -29081,7 +29553,13 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
         pol = policy.Policy(folder=self.tmp)
         ok = pol.decide("Bash", {"command": f'python3 "{APP}/feedback.py" send "the changelog jumps" --via agent'})
         no = pol.decide("Bash", {"command": f'python3 "{APP}/feedback.py" connect "https://x"'})
-        need(ok.verdict == policy.ALLOW and no.verdict == policy.DENY, f"the policy: send {ok}, connect {no}")
+        need(ok.verdict == policy.ASK and "the changelog jumps" in ok.question and no.verdict == policy.DENY,
+             f"the policy: send {ok}, connect {no}")  # F114: it leaves this HQ, so his yes on this very call
+        pol.pending, pol.approved = [], set()
+        pol.decide("Bash", {"command": f'python3 "{APP}/feedback.py" send "the changelog jumps" --via agent'})
+        pol.answer("yes")
+        ok = pol.decide("Bash", {"command": f'python3 "{APP}/feedback.py" send "the changelog jumps" --via agent'})
+        need(ok.verdict == policy.ALLOW, f"his yes on this call didn't send it: {ok}")
         return ("two HQs: invite, connect, the earlier one across, typed and call sends as U rows with the maker's name, the "
                 "status back with a text (none when off), offline waits, no second row on a retry, limits, words only, a "
                 "taken-back key gets nothing; the rule reads back and waits for a yes; a call may send, never connect")
@@ -31042,7 +31520,7 @@ print("H88OUT " + json.dumps(out))
             {"name": "backup", "peer": f"http://127.0.0.1:{port}/", "peer_name": "main", "main": "main", "chosen_at": 1}))
         (base / "backup" / "support" / "role-state.json").write_text(json.dumps({"acting": "backup"}))
         decide_py = ("import json, sys; sys.path.insert(0, sys.argv[1]); import policy, brain\n"
-                     "p = policy.Policy(sys.argv[2]); d = p.decide(sys.argv[3], json.loads(sys.argv[4]))\n"
+                     "p = policy.Policy(sys.argv[2]); p.agent = 'donna'; d = p.decide(sys.argv[3], json.loads(sys.argv[4]))\n"
                      "print(json.dumps({'verdict': d.verdict, 'why': d.why, 'retry': d.retry, 'handed': d.handed,"
                      " 'text': brain.refusal_text(d) if d.verdict != 'allow' else ''}))")
 
@@ -31056,7 +31534,13 @@ print("H88OUT " + json.dumps(out))
             return (ws[side] / rel).read_text()
         try:
             # an Edit on each of the main's files: made by the main, not here
-            for rel in ("coaching/log.md", "HQ/notes-donna.md"):  # F99: the planning, the mail list and the to-do list have their scripts
+            # F114: the log has its script on a call too (handover.py edit coaching/log.md JSON), so it's refused, not handed over
+            before = text("backup", "coaching/log.md")
+            d = decide("backup", "Edit", {"file_path": str(ws["backup"] / "coaching/log.md"), "old_string": before.splitlines()[0],
+                                          "new_string": "x"})
+            need(d["verdict"] == "deny" and not d["handed"] and "handover.py" in d["why"] and text("backup", "coaching/log.md") == before,
+                 f"an Edit to the log on the backup wasn't refused with its script: {d}")
+            for rel in ("HQ/notes-donna.md",):  # F99: the planning, the mail list and the to-do list have their scripts
                 before = text("backup", rel)
                 old = before.splitlines()[0]
                 d = decide("backup", "Edit", {"file_path": str(ws["backup"] / rel), "old_string": old,
@@ -31066,9 +31550,9 @@ print("H88OUT " + json.dumps(out))
                 need(text("backup", rel) == before, f"the backup wrote {rel} itself")
                 need(text("main", rel).startswith(old + " (H203 flow)"), f"the main didn't write {rel}")
             # MultiEdit too
-            d = decide("backup", "MultiEdit", {"file_path": str(ws["backup"] / "coaching/log.md"), "edits": [
+            d = decide("backup", "MultiEdit", {"file_path": str(ws["backup"] / "HQ/notes-donna.md"), "edits": [
                 {"old_string": "(H203 flow)", "new_string": "(H203 flow, again)"}]})
-            need(d["handed"] and "(H203 flow, again)" in text("main", "coaching/log.md"), f"a MultiEdit wasn't handed over: {d}")
+            need(d["handed"] and "(H203 flow, again)" in text("main", "HQ/notes-donna.md"), f"a MultiEdit wasn't handed over: {d}")
             # a text the main's copy doesn't have: not yet, nothing written
             was = text("main", "HQ/notes-donna.md")
             d = decide("backup", "Edit", {"file_path": str(ws["backup"] / "HQ/notes-donna.md"), "old_string": "nowhere in it 203",
@@ -31077,15 +31561,15 @@ print("H88OUT " + json.dumps(out))
                  f"an Edit the main's copy can't take wasn't a not yet: {d}")
             need(text("main", "HQ/notes-donna.md") == was, "the main wrote a change it couldn't make")
             # a Write: an Edit only
-            d = decide("backup", "Write", {"file_path": str(ws["backup"] / "coaching/log.md"), "content": "gone"})
-            need(d["retry"] and "Edit" in d["why"] and text("backup", "coaching/log.md") != "gone"
-                 and text("main", "coaching/log.md") != "gone", f"a Write on the backup wasn't turned into an Edit: {d}")
+            d = decide("backup", "Write", {"file_path": str(ws["backup"] / "HQ/notes-donna.md"), "content": "gone"})
+            need(d["retry"] and "Edit" in d["why"] and text("backup", "HQ/notes-donna.md") != "gone"
+                 and text("main", "HQ/notes-donna.md") != "gone", f"a Write on the backup wasn't turned into an Edit: {d}")
             # any other file: written here, as before
             d = decide("backup", "Edit", {"file_path": str(ws["backup"] / "plain.md"), "old_string": "one", "new_string": "two"})
             need(d["verdict"] == "allow", f"an Edit to another file on the backup wasn't allowed: {d}")
             # on the main itself: allowed, nothing handed
             n = len(seen)
-            d = decide("main", "Edit", {"file_path": str(ws["main"] / "coaching/log.md"), "old_string": "again", "new_string": "x"})
+            d = decide("main", "Edit", {"file_path": str(ws["main"] / "HQ/notes-donna.md"), "old_string": "again", "new_string": "x"})
             need(d["verdict"] == "allow" and len(seen) == n, f"an Edit on the main wasn't simply allowed: {d}")
             # the to-do list and her reminders from the backup: the main writes them, with who asked
             r = sp.run([sys.executable, str(ROOT / "app/todo.py"), "add", "1", "H203 flow item", "--by", "a call"],
@@ -31103,8 +31587,8 @@ print("H88OUT " + json.dumps(out))
             # the main down: kept, sent on at the next look
             srv.shutdown()
             srv.server_close()
-            first = text("backup", "coaching/log.md").splitlines()[0]
-            d = decide("backup", "Edit", {"file_path": str(ws["backup"] / "coaching/log.md"), "old_string": first,
+            first = text("backup", "HQ/notes-donna.md").splitlines()[0]
+            d = decide("backup", "Edit", {"file_path": str(ws["backup"] / "HQ/notes-donna.md"), "old_string": first,
                                           "new_string": first + " (kept)"})
             pend = base / "backup" / "support" / "role-pending.jsonl"
             need(d["handed"] and "kept" in d["why"] and pend.exists() and "(kept)" in pend.read_text(),
@@ -31114,7 +31598,7 @@ print("H88OUT " + json.dumps(out))
             r = sp.run([sys.executable, str(ROOT / "routine/role.py"), "tick"], capture_output=True, text=True,
                        env=env("backup", HQ_ROLE_ONLINE="1"), timeout=120)
             need(r.returncode == 0 and '"backup"' in r.stdout, f"the backup's look: {r.stdout}{r.stderr}")
-            need("(kept)" in text("main", "coaching/log.md") and not pend.exists(), "the kept change didn't go over at the next look")
+            need("(kept)" in text("main", "HQ/notes-donna.md") and not pend.exists(), "the kept change didn't go over at the next look")
             # the call rules and Donna's say it
             import direct_line as dl
             for name, t in (("the call rules", config.VOICE_RULES), ("Donna's chat rules", dl._text_rules())):
@@ -32326,6 +32810,16 @@ echo "ALL OK"
 """
 
 FLOWS = {
+    350: ("F114: the coaching log on a call and in a text goes through its script: Edit, Write, MultiEdit, the shell and a yes refused with handover.py named, the file unchanged; the script writes it; the wrap-up still does", False, "flow350"),
+    351: ("F114: his own setup (the agents' settings, the handbook, me.md, the backend) asks on a call and in a text, his yes opens that one change once, nobody to ask is a no, the shell never; the cycles' state is the program's", False, "flow351"),
+    352: ("F114: the mail switch can't be set from a call, a text or a job: not by Edit, Write, MultiEdit, a script, a one-liner, a team job's hook or a hand-over, not even on his yes; counted once", False, "flow352"),
+    353: ("F114: each agent writes only her own ledger and notes on a call and in a text; another's is refused by every tool and ledger.py; a repeated try counts once", False, "flow353"),
+    354: ("F114: his yes to a held change is his own words in a real line: made-up words, an agent's line and a quick note refused on a call, in a text and by the script; his own open it", False, "flow354"),
+    355: ("F114: a usage stop line changes only on his own words: refused without them on a call, in a text, by the script and from a job; his words move it", False, "flow355"),
+    356: ("F114: feedback that leaves this HQ waits for his yes on that same call or chat, once; nobody to ask is a no; a cycle never sends it", False, "flow356"),
+    357: ("F114: her list refuses his life by its kind: fourteen made-up facts of health, sleep, where someone lives and a calendar refused by add and the harvest; her own life kept", False, "flow357"),
+    358: ("F114: a team job writes his lists only through their own scripts: the job's hook refuses Edit, Write and shell writes on them with the script named; the planning, the log and its own copies pass", False, "flow358"),
+    359: ("F114: Donna's own look waits for the end of his Sleep: held once, kept through a restart, goes once when it ends; by hand while he sleeps it texts nothing", False, "flow359"),
     292: ("His no closes a held change, by number, the only one, or his loose words to her: a later yes can't open it, it isn't asked again, nobody gets anything", False, "flow292"),
     293: ("Her which one goes out past the day's cap, once, never kept for Friday; an answered question doesn't go out in a batch", False, "flow293"),
     291: ("The two branches where they meet: a round through the same runner and hook as a cycle, a cycle's writes in the round's journal, the five minutes, the agents off", False, "flow291"),

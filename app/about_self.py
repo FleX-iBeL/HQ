@@ -290,6 +290,40 @@ def not_about_her(fact: str) -> bool:
     return low.endswith("?") or bool(_REPLY.search(low) or _ORDER.search(low))
 
 
+# F114 (2 November 2026, the checklist re-run: of 14 facts of the kind that came back before, 12 passed, health, sleep and where he lives
+# among them, worded without a name): a fact is also refused by its kind, whoever it names. An agent's own life is her desk, her
+# opinions, her moods, her habits and the office; her health, her sleep, where she lives and a calendar are the kinds his own life comes
+# back in, so they're never kept, on any way in (the harvest, the wrap-up and a call or a text all go through `add`).
+_HEALTH = re.compile(
+    r"\b(?:health|healthy|ill|illness|sick|sickness|burn-?out|burned out|burnt out|doctors?|gp|huisarts|physio\w*|psycholog\w*|psychiatr\w*|"
+    r"therap(?:y|ies|ist)|counsell?(?:or|ing)|clinics?|hospitals?|surgery|dentists?|diagnos\w*|symptoms?|medication|medical|medicines?|"
+    r"pills?|prescriptions?|bladder|digestion|digestive|bowels?|stool|cramps?|pains?|painful|injur(?:y|ed|ies)|anxiety|anxious|"
+    r"panic attacks?|depress(?:ion|ed|ive)|ptsd|trauma\w*|diabetes|blood (?:test|tests|sample|samples|pressure)|allerg(?:y|ies|ic)|"
+    r"migraines?|fodmap|ibs|recover(?:y|ing) from|sick leave|reintegrat\w*|company doctor)\b")
+_SLEEP = re.compile(
+    r"\b(?:sleep|sleeps|sleeping|sleepless|slept|asleep|insomnia|naps?|napping|bed ?time|bedtime|goes to bed|go to bed|went to bed|"
+    r"in bed|gets up|got up|get up|wak(?:e|es|ing|ened) up|woke|alarms?|night owl|tired(?! of)|exhausted|nightmares?|"
+    r"restless nights?|late nights?)\b")
+_HOME = re.compile(
+    r"\b(?:lives?|living) (?:in|at|on|near|above|below|by|with|just)\b|\bmov(?:ed|ing|es?) (?:in|into|house|to a new|out)\b|"
+    r"\b(?:address|postcode|post code|zip code|landlord|landlady|tenant|rent|rents|rented|renting|neighbou?rs?|neighbou?rhood|"
+    r"house number|front door|housing)\b|"
+    r"\b(?:a|her|the|his|my|their|our|new) (?:flat|apartment|studio)\b(?!\s+white)|\b\d+(?:st|nd|rd|th) floor\b|"
+    r"\b\w+(?:straat|street|laan|weg|gracht|plein|kade|road|avenue)\s+\d+")
+_CALENDAR = re.compile(
+    rf"\b(?:appointments?|calendar|agenda|meetings? (?:at|on|with)|booked|bookings?|time ?blocks?|schedule[ds]?|office days?|deadlines?|"
+    rf"due (?:on|by)|on the \d{{1,2}}(?:st|nd|rd|th))\b|"
+    rf"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?(?: and \w+days?)? (?:afternoons?|mornings?|evenings?|nights?)\b|"
+    rf"\b{_DAY}\b.*\b{_CLOCK}\b|\b{_CLOCK}\b.*\b{_DAY}\b")
+KINDS = (("health", _HEALTH), ("sleep", _SLEEP), ("where someone lives", _HOME), ("a calendar", _CALENDAR))
+
+
+def his_kind(fact: str) -> str:
+    """F114: the kind of his life FACT is about (health, sleep, where someone lives, a calendar), or ""."""
+    low = " ".join(_KEPT_DAY.sub("", _MARKS.sub("", str(fact))).lower().replace("’", "'").split())
+    return next((k for k, rx in KINDS if rx.search(low)), "")
+
+
 def refused(folder: Path | None, fact: str) -> str:
     """F98: why FACT can't be kept as hers, or "". The one filter on every way in."""
     folder = folder or _folder()
@@ -300,6 +334,9 @@ def refused(folder: Path | None, fact: str) -> str:
         return "it's about him, not her"
     if plans_a_day(fact):
         return "it's the shape of planning a day, which is her work for him, not her own life"
+    kind = his_kind(fact)
+    if kind:  # F114: by its kind, not only by a name
+        return f"it's about {kind}, the kind of thing that's his life, never kept as hers"
     names, calendar = _life_names(folder)
     for n in sorted(names, key=len, reverse=True):
         if re.search(rf"(?<![\w-]){re.escape(n.lower())}(?![\w-])", low):
