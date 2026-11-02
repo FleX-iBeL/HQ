@@ -1484,7 +1484,7 @@ def _guard_clear(st: dict) -> None:
     try:
         import incidents
         if incidents.is_down(GUARD_KEY):
-            incidents.up(GUARD_KEY)
+            incidents.up(GUARD_KEY, what="Nothing is held any more: the parts it held may run again")
     except Exception:
         pass
     if st.get("restart") and calls_on() == 0:

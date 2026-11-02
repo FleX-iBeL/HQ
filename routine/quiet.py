@@ -220,7 +220,7 @@ def check(n, s, save, status, beat, incidents, log, now=None, is_online=None):
         if nudges or s.get("stuck") or s.get("offline"):
             how = (f"after try {nudges}" if nudges else "on its own, once the internet was back")
             incidents.fix("jobs", f"Job {n} is working again, {how}")
-            incidents.up("jobs")
+            incidents.up("jobs", what=f"Job {n} is working again, {how}")
             if s.get("stuck"):
                 status("BUILDING", f"Job {n} · working again after it was stuck", f"job {n} is working again ({how})")
             log(f"job {n} is working again ({how})")
