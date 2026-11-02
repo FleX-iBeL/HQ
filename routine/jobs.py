@@ -716,7 +716,9 @@ def main(argv):
                     sys.exit(f"Refused: {no} Nothing written.")
             run_ = os.environ.get("HQ_JOB") or ""
             import trail
-            text, label = roadmap_row(text, said, bug, by=f"job {run_}" if run_.isdigit() else "on a call",
+            # F105: a job says its number; a reply to a text runs with the agent's line set (HQ_DIRECT_AGENT, app/direct_line.py), a call without
+            by = f"job {run_}" if run_.isdigit() else "in a text" if os.environ.get("HQ_DIRECT_AGENT") else "on a call"
+            text, label = roadmap_row(text, said, bug, by=by,
                                       item=trail.of_order("moneypenny", int(order_n)) if order_n else None)
             write(text, jobs, on)
             print(f"{label} is on the planning.")
