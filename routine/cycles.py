@@ -2137,7 +2137,8 @@ def his_yes_refused(aid: str, words: str, n: int | None = None, places: list | N
         return ""
     if os.environ.get("HQ_IN_JOB"):
         return "a run can't give a yes"
-    holds = [h for h in _agent_state(_state(), aid)["holds"] if n is None or h["n"] == n]
+    waiting = _agent_state(_state(), aid)["holds"]
+    holds = [h for h in waiting if n is None or h["n"] == n]
     if not holds and places is None:
         return ""  # run by itself with nothing waiting: yes() says so itself
     import sprint
@@ -2151,15 +2152,32 @@ def his_yes_refused(aid: str, words: str, n: int | None = None, places: list | N
         return "those are his words, but they aren't a clear yes"
     if not holds:
         return ""  # his words, and nothing waits: yes() says so
-    if not any(sprint.a_yes(h["line"], h["turn"]) and any(yes_fits(h["line"] + " " + h["turn"], x) for x in holds) for h in hits):
-        return "those are his words, but they don't name this change, and neither does her question before them"
-    return ""
+    for h in hits:  # F114, the second check: only by its own words, and only when that's the one change his line and her question name
+        if sprint.a_yes(h["line"], h["turn"]):
+            named = [x for x in waiting if yes_fits(h["line"] + " " + h["turn"], x)]
+            if len(named) == 1 and named[0] in holds:
+                return ""
+    return ("those are his words, but they don't name this one change by its own words (or name more than one), and neither does her "
+            "question before them: ask him again by its name")
+
+
+# F114, the second check: words a title shares with any ordinary sentence ("I'll sort it on this call"), which never name a change alone.
+_COMMON = {_stem(w) for w in ("call", "calls", "lunch", "dinner", "breakfast", "drinks", "coffee", "meeting", "meet", "appointment", "event",
+                               "today", "tonight", "tomorrow", "this", "that", "next", "week", "weekend", "morning", "afternoon", "evening",
+                               "night", "noon", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "with",
+                               "time", "hour", "block", "slot", "add", "put", "move", "change", "remove", "plan", "book", "chat", "talk",
+                               "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")}
+
+
+def title_words(h: dict) -> set:
+    """F114: a held change's own words: its title's (what's in quotes in its line, else the line), not the common ones."""
+    title = " ".join(re.findall(r"\"([^\"]+)\"", h.get("what") or "")) or (h.get("what") or "")
+    return _meant(title) - _COMMON
 
 
 def yes_fits(said: str, h: dict) -> bool:
-    """F114: these words name this held change: a word of its title (what's in quotes in its line, else the line) besides the small ones."""
-    title = " ".join(re.findall(r"\"([^\"]+)\"", h.get("what") or "")) or (h.get("what") or "")
-    return bool(_meant(said) & _meant(title))
+    """F114: these words name this held change by one of its own words (title_words), never by a common word like call or lunch."""
+    return bool(_meant(said) & title_words(h))
 
 
 _SAYS_NO = re.compile(r"\s*(?:no|nope|nah|nee|don'?t|do not|never mind|nevermind|cancel that|not that)\b", re.I)

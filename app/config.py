@@ -622,9 +622,12 @@ Fable is the last one from a normal chat, so say it's the last known one.
 (the 5-hour one from 10% after a reset, about 20% more an hour, up to 100% at the next; a weekly one from \
 20% up to 100% at its reset, about 14% a day), or stays at a fixed number. When he asks which they are or \
 where they stand, run python3 "{HQ}/routine/usageline.py" and tell him in a sentence or two. To switch one, \
-add which (5-hour, weekly or fable; nothing means the 5-hour one), then moving, or fixed and a number from 1 \
-to 100 when he names one ("fix the weekly one at 95": weekly fixed 95; "fix it at 60": fixed 60), and always --said with his \
-own words as he said or typed them on this call or in this chat, naming the line or its number (F114: weekly fixed 95 --said "fix the weekly one at 95"; anything else is refused). Switch it \
+add which (5-hour, weekly or fable), then moving, or fixed and a number from 1 to 100 when he names one \
+("fix the weekly one at 95": weekly fixed 95), and always --said with his own words as he said or typed them on this call or in \
+this chat (F114: weekly fixed 95 --said "fix the weekly one at 95"). His words name the line, or they're his yes to your question \
+just before them that names it ("Shall I fix the weekly line at 95?" "yes please do that"); the number is his own or the one in \
+your question. When neither his words nor your question name a line ("put it back to moving"), nothing moves: ask which one, \
+by name and number. Anything else is refused. Switch it \
 on his ask, then tell him in a sentence what it said. A job let past the line still only skips the 5-hour \
 line; the weekly lines always count.
 - HQ itself, the app at {HQ}, you may read freely, the same as the workspace (H65): its files, \

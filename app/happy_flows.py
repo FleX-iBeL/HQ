@@ -21472,10 +21472,10 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
         try:
             pol = self._f114_policy(ws, "moneypenny")
             for cmd in (f"{ul} 5-hour fixed 99 {weekly}", f"{ul} fixed 99 {weekly}", f"{ul} fable fixed 99 {weekly}", f"{ul} 5-hour moving {weekly}",
-                        f"{ul} fixed 70 {sixty}", f"{ul} weekly moving {sixty}"):
+                        f"{ul} fixed 70 {sixty}", f"{ul} weekly moving {sixty}", f"{ul} weekly fixed 60 {sixty}"):  # her question tied 60 to the 5-hour line
                 d = pol.decide("Bash", {"command": cmd})
                 need(d.verdict == P.DENY and "name" in d.why, f"his words moved a line they don't name: {cmd}: {d.verdict} {d.why}")
-            for cmd in (f"{ul} weekly fixed 99 {weekly}", f"{ul} 5-hour fixed 60 {sixty}", f"{ul} weekly fixed 60 {sixty}"):
+            for cmd in (f"{ul} weekly fixed 99 {weekly}", f"{ul} 5-hour fixed 60 {sixty}"):
                 d = pol.decide("Bash", {"command": cmd})
                 need(d.verdict == P.ALLOW, f"words naming the line or its number were refused: {cmd}: {d.why}")
         finally:
@@ -21581,6 +21581,132 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
         need(led.exists() and any(json.loads(l)["words"].startswith("Bash: python3 -c") for l in led.read_text().splitlines()),
              "the write to her settings isn't on the ledger")
         return "a read one-liner and a copy out aren't writes and stay off the ledger; writing them is refused"
+
+    def _f114_said(self, ws, *pairs) -> Path:
+        """Today's call with her question and his answer after it, pair by pair."""
+        call = ws / self._f114_call()
+        call.write_text(call.read_text() + "".join(f"- 00:0{5 + i}:00 **HQ:** {q}\n- 00:0{5 + i}:10 **Me:** {a}\n" for i, (q, a) in enumerate(pairs)))
+        return call
+
+    async def flow390(self) -> str:
+        """F114, the second check, no Claude: naming a script isn't running it. A grep, a sed, a cat or a head of cycles.py, usageline.py or
+        feedback.py is a plain read, with whatever words it has (export, env, sh), and stays off the ledger; timeout N in front of a real
+        run is fine; his one-word "nice" to her question is judged on its words, not taken for a wrapper; a run inside bash -c, even after
+        timeout, is still refused."""
+        import policy as P
+        ws, env = self._f114_env("f114name2")
+        self._f114_his_lines(ws)
+        call = self._f114_said(ws, ("Shall I put the coffee with Mira in?", "nice"))
+        self._f114_hold(env, "Coffee with Mira")
+        r, a = ROOT / "routine", ROOT / "app"
+        was = self._f114_proof(env)
+        try:
+            pol = self._f114_policy(ws, "donna")
+            for cmd in (f"grep -n export {r}/cycles.py", f"grep -n env {r}/usageline.py | head", f"sed -n 1,20p {a}/feedback.py | grep sh",
+                        f"cat {a}/feedback.py | head -5", f"cd {ROOT} && grep -c nice routine/cycles.py",
+                        f"timeout 30 python3 {r}/usageline.py weekly fixed 99 --said \"fix the weekly usage line at 99\"",
+                        f"python3 {r}/cycles.py yes donna nice 1"):
+                d = pol.decide("Bash", {"command": cmd})
+                need(d.verdict == P.ALLOW, f"an honest command was refused: {cmd}: {d.verdict} {d.why}")
+            need(not (ws / "HQ/mistakes.jsonl").exists() or not (ws / "HQ/mistakes.jsonl").read_text().strip(), "an honest read went on the ledger")
+            d = pol.decide("Bash", {"command": f"timeout 30 bash -c \"python3 {r}/cycles.py yes donna nice 1\""})
+            need(d.verdict == P.DENY and "plain command" in d.why, f"a run inside bash -c after timeout got through: {d.verdict} {d.why}")
+        finally:
+            self._f114_unproof(was)
+        rr = self._f114_script(env, "cycles.py", "yes", "donna", "nice", "1", words_from=str(call))
+        need(rr.returncode == 0 and "Mira" in rr.stdout, f"his nice didn't open the coffee: {rr.stdout} {rr.stderr[-300:]}")
+        return "reads of the scripts pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused"
+
+    async def flow391(self) -> str:
+        """F114, the second check, no Claude: a yes fits a held change only by its own words. With the lunch with Alice, the dentist on
+        Friday and a call with Bram held, his "yes go ahead" after "Shall I put the lunch in? I'll sort it on this call." opens none of
+        them (call and lunch are common words); after a question naming two of them, neither; after "Shall I put the lunch with Alice in?"
+        only the lunch; by the policy and by the script."""
+        import policy as P
+        ws, env = self._f114_env("f114common")
+        self._f114_his_lines(ws)
+        self._f114_hold(env, "Lunch with Alice", "Dentist on Friday", "Call with Bram")
+        cy = f"python3 {ROOT}/routine/cycles.py yes donna \"yes go ahead\""
+        call = self._f114_said(ws, ("Shall I put the lunch in? I'll sort it on this call.", "yes go ahead"))
+        was = self._f114_proof(env)
+        try:
+            for n in ("1", "2", "3"):
+                d = self._f114_policy(ws, "donna").decide("Bash", {"command": f"{cy} {n}"})
+                need(d.verdict == P.DENY and "by its name" in d.why, f"a common word opened change {n}: {d.verdict} {d.why}")
+        finally:
+            self._f114_unproof(was)
+        for n in ("1", "3"):
+            r = self._f114_script(env, "cycles.py", "yes", "donna", "yes go ahead", n, words_from=str(call))
+            need(r.returncode == 2 and r.stdout.startswith("Refused"), f"the script opened {n} on a common word: {r.stdout} {r.stderr[-300:]}")
+        call.write_text(call.read_text().replace("Shall I put the lunch in? I'll sort it on this call.", "Shall I put the lunch with Alice and the dentist in?"))
+        was = self._f114_proof(env)
+        try:
+            for n in ("1", "2"):
+                d = self._f114_policy(ws, "donna").decide("Bash", {"command": f"{cy} {n}"})
+                need(d.verdict == P.DENY, f"a question naming two opened {n}: {d.why}")
+            call.write_text(call.read_text().replace("Shall I put the lunch with Alice and the dentist in?", "Shall I put the lunch with Alice in?"))
+            need(self._f114_policy(ws, "donna").decide("Bash", {"command": f"{cy} 1"}).verdict == P.ALLOW, "the lunch named by Alice didn't open")
+            need(self._f114_policy(ws, "donna").decide("Bash", {"command": f"{cy} 3"}).verdict == P.DENY, "the lunch's yes opened the call")
+        finally:
+            self._f114_unproof(was)
+        r = self._f114_script(env, "cycles.py", "yes", "donna", "yes go ahead", "1", words_from=str(call))
+        need(r.returncode == 0 and "Alice" in r.stdout, f"the script didn't open the lunch: {r.stdout} {r.stderr[-300:]}")
+        return "common words open nothing, two named open nothing, the lunch named by its own word opens only the lunch"
+
+    async def flow392(self) -> str:
+        """F114, the second check, no Claude: his yes to her own stop line question. She asks "Shall I fix the weekly line at 95?", he says
+        "yes please do that": that fixes the weekly line at 95, and only that (not at 90, not the 5-hour or the Fable line, not moving);
+        by the policy and by the script."""
+        import policy as P
+        ws, env = self._f114_env("f114ask")
+        self._f114_his_lines(ws)
+        call = self._f114_said(ws, ("Shall I fix the weekly line at 95?", "yes please do that"))
+        ul, said = f"python3 {ROOT}/routine/usageline.py", "--said \"yes please do that\""
+        was = self._f114_proof(env)
+        try:
+            pol = self._f114_policy(ws, "moneypenny")
+            need(pol.decide("Bash", {"command": f"{ul} weekly fixed 95 {said}"}).verdict == P.ALLOW, "his yes to her question was refused")
+            for cmd in (f"{ul} weekly fixed 90 {said}", f"{ul} 5-hour fixed 95 {said}", f"{ul} fable fixed 95 {said}", f"{ul} weekly moving {said}"):
+                d = pol.decide("Bash", {"command": cmd})
+                need(d.verdict == P.DENY, f"his yes opened what she didn't ask: {cmd}: {d.why}")
+        finally:
+            self._f114_unproof(was)
+        rm = ws / "HQ/roadmap.md"
+        r = self._f114_script(env, "usageline.py", "5-hour", "fixed", "95", "--said", "yes please do that", words_from=str(call))
+        need(r.returncode == 2 and "**5-hour line: moving.**" in rm.read_text(), f"the script moved the 5-hour line: {r.stdout} {r.stderr}")
+        r = self._f114_script(env, "usageline.py", "weekly", "fixed", "95", "--said", "yes please do that", words_from=str(call))
+        need(r.returncode == 0 and "fixed at 95%" in rm.read_text(), f"the script refused his yes to her question: {r.stdout} {r.stderr}")
+        return "his yes to her question fixes the weekly line at 95 and nothing else"
+
+    async def flow393(self) -> str:
+        """F114, the second check, no Claude: a number tied to no line opens nothing, and words that name no line move none. "Yes add it,
+        it's at 12 by the way" after a question about a note opens no line at 12; "put it back to moving" after a question naming no line
+        moves neither the 5-hour line nor any other, and the rules say to ask which one; by the policy and by the script."""
+        import policy as P
+        import config
+        ws, env = self._f114_env("f114num")
+        self._f114_his_lines(ws)
+        call = self._f114_said(ws, ("Shall I add that note for you?", "yes add it, it's at 12 by the way"),
+                               ("Anything else on the usage?", "yes put it back to moving"))
+        ul = f"python3 {ROOT}/routine/usageline.py"
+        was = self._f114_proof(env)
+        try:
+            pol = self._f114_policy(ws, "moneypenny")
+            for cmd in (f"{ul} fixed 12 --said \"it's at 12 by the way\"", f"{ul} weekly fixed 12 --said \"it's at 12 by the way\"",
+                        f"{ul} moving --said \"put it back to moving\"", f"{ul} 5-hour moving --said \"put it back to moving\"",
+                        f"{ul} weekly moving --said \"put it back to moving\""):
+                d = pol.decide("Bash", {"command": cmd})
+                need(d.verdict == P.DENY and "ask him which one" in d.why, f"words naming no line moved one: {cmd}: {d.verdict} {d.why}")
+        finally:
+            self._f114_unproof(was)
+        rm = ws / "HQ/roadmap.md"
+        before = rm.read_bytes()
+        for args in (("fixed", "12", "--said", "it's at 12 by the way"), ("moving", "--said", "put it back to moving")):
+            r = self._f114_script(env, "usageline.py", *args, words_from=str(call))
+            need(r.returncode == 2 and rm.read_bytes() == before, f"the script moved a line: {args}: {r.stdout} {r.stderr}")
+        need("nothing moves: ask which one" in config.VOICE_RULES and "nothing means the 5-hour one" not in config.VOICE_RULES,
+             "the rule and the code don't agree on words that name no line")
+        return "a number in passing opens nothing, and words naming no line move none: the rule and the code both say ask which one"
 
     async def flow335(self) -> str:
         """F112, no Claude: the installer's last step fits what it is on Linux: a set without the long flows, a limit it fits in going by the last night's own
@@ -33529,6 +33655,10 @@ echo "ALL OK"
 """
 
 FLOWS = {
+    390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
+    391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
+    392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),
+    393: ("F114, the second check: a number in passing opens no line, words naming no line move none, and the rule says the same", False, "flow393"),
     360: ("F114, the check's round: his words count only from this call or this chat: another call's or the chat's open nothing here, by the policy or the scripts; this call's own do", False, "flow360"),
     361: ("F114, the check's round: his words count only from today: two real lines of 28 and 30 October open nothing now; the same yes said today does", False, "flow361"),
     362: ("F114, the check's round: a stop line's say-so names that line or its number: weekly words never move the 5-hour or the Fable line, a number only itself", False, "flow362"),

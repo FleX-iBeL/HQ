@@ -697,7 +697,11 @@ def his_said_now(quote, ws=None, places=None, day=None):
 def a_yes(line, turn, names=()):
     """F114: whether a line of his reads as a yes, with no model: a yes word and nothing holding it back (yes_reading isn't a no)."""
     low = " ".join(str(line).lower().replace("’", "'").split())
-    return bool(_YES_WORD.search(low)) and not (_TAKEN_BACK.search(low) or _HOLD_WORD.search(low) or _NOT_SURE.search(low))
+    return bool(_YES_WORD.search(low) or _A_YES_MORE.search(low)) and not (_TAKEN_BACK.search(low) or _HOLD_WORD.search(low) or _NOT_SURE.search(low))
+
+
+# F114, the second check: the other short ways he says yes (his "nice" to her question), as the call's own yes reading has them.
+_A_YES_MORE = re.compile(r"(?<![\w'])(?:nice|lovely|cool|fine|good|alright|all right|great|sounds great|go for it|let'?s do it|absolutely|definitely)(?![\w'])")
 
 
 NOT_HIS = "those words aren't in his own lines"

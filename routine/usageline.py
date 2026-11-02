@@ -204,18 +204,62 @@ LINE_WORDS = {"five": re.compile(r"\b(?:5|five)[- ]?h(?:ou)?rs?\b|\b5h\b"), "wee
               "fable": re.compile(r"\bfable\b")}
 
 
-def names_line(key: str, line: str, number: int | None = None) -> bool:
-    """F114: his line names this stop line, or, naming no other line, its number."""
-    low = " ".join(str(line).lower().split())
-    named = {k for k, rx in LINE_WORDS.items() if rx.search(low)}
-    if "fable" in named:
-        named.discard("weekly")
-    if key in named:
+def _norm(text: str) -> str:
+    return " ".join(str(text).lower().replace("’", "'").split())
+
+
+def lines_named(text: str) -> set:
+    """F114: which stop lines these words name ("the weekly Fable line" is the Fable one)."""
+    named = {k for k, rx in LINE_WORDS.items() if rx.search(_norm(text))}
+    return named - {"weekly"} if "fable" in named else named
+
+
+def numbers_in(text: str) -> set:
+    """F114: the numbers in these words, the 5 of "5-hour" left out."""
+    low = LINE_WORDS["five"].sub(" ", _norm(text))
+    return {int(x) for x in re.findall(r"(?<![\d.:])(\d{1,3})(?![\d.:])", low)}
+
+
+_FIX = re.compile(r"\bfix(?:es|ed|ing)?\b")
+_MOVE = re.compile(r"\bmov(?:e|es|ed|ing)\b")
+
+
+def opens(key: str, number: int | None, moving: bool, line: str, turn: str = "") -> bool:
+    """F114, the second check: whether his line, or his yes to her question just before it, opens exactly this: the line it names (one,
+    this one), the way (moving, or fixed), and the number, tied to the line: in his own words when he names the line, else in her
+    question; a number he says in passing that her question doesn't tie to a line opens nothing. His own numbers always win."""
+    mine, hers = lines_named(line), lines_named(turn)
+    if mine:
+        source, text = mine, line
+    elif hers and sprint_yes(line, turn):
+        source, text = hers, turn
+    else:
+        return False  # neither names a line: ask him which one
+    if source != {key}:
+        return False
+    said = _norm(line + " " + text)
+    if moving:
+        return not (_FIX.search(said) and not _MOVE.search(said))
+    if _MOVE.search(_norm(text)) and not _FIX.search(_norm(text)):
+        return False
+    if number is None:
         return True
-    return not named and number is not None and bool(re.search(rf"(?<!\d){number}(?!\d)", low))
+    his = numbers_in(line)
+    return number in his if his else number in numbers_in(text)
 
 
-def his_say_so(words: str | None, key: str, number: int | None = None, places: list | None | str = "env", ws: str | None = None) -> str:
+def sprint_yes(line: str, turn: str) -> bool:
+    import sprint
+    return sprint.a_yes(line, turn)
+
+
+def names_line(key: str, line: str, number: int | None = None) -> bool:
+    """F114 (first round, kept for its callers): his line alone opens this line, fixed at this number."""
+    return opens(key, number, False, line)
+
+
+def his_say_so(words: str | None, key: str, number: int | None = None, places: list | None | str = "env", ws: str | None = None,
+               moving: bool = False) -> str:
     """F114: why his words don't stand for switching this line, or "" when they do: a line he said or typed himself, today, on this call or
     in this chat (HQ_WORDS_FROM, which the session sets for its tools; by hand, any of today's), the program's own lines only (a transcript
     or a thread), not a no, and naming this line or its number. Never a job's own process; inside a call or a chat, never without words."""
@@ -233,8 +277,9 @@ def his_say_so(words: str | None, key: str, number: int | None = None, places: l
     ok = [h for h in hits if sprint.yes_reading(h["line"], h["turn"], ()) != "no"]
     if not ok:
         return "those are his words, but they say no"
-    if not any(names_line(key, h["line"], number) for h in ok):
-        return f"his words don't name this line ({LINES[key][0]}) or its number"
+    if not any(opens(key, number, moving, h["line"], h["turn"]) for h in ok):
+        return (f"his words, or your question just before his yes, don't name this line ({LINES[key][0]}) and what to do with it"
+                + (f" at {number}" if number is not None else "") + "; when neither names a line, ask him which one")
     return ""
 
 
@@ -254,8 +299,8 @@ def main(argv: list[str]) -> int:
         if not argv:
             print(describe())
             return 0
-    def refused(key, number=None):
-        why = his_say_so(said, key, number)
+    def refused(key, number=None, moving=False):
+        why = his_say_so(said, key, number, moving=moving)
         if why:
             print(f"Refused: {why}. A usage stop line changes only on his own words: --said \"HIS WORDS\", a line he said or typed, "
                   "naming the line (weekly, 5-hour or Fable) or its number.", file=sys.stderr)
@@ -279,7 +324,7 @@ def main(argv: list[str]) -> int:
             print(describe_one(key, s[key]) if s else describe())
             return 0
     if argv[0] == "moving" and len(argv) == 1:
-        if refused(key):
+        if refused(key, moving=True):
             return 2
         write(key, True, None)
     elif argv[0] == "fixed" and len(argv) in (1, 2):

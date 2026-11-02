@@ -203,9 +203,26 @@ def _writes_on(name: str) -> "re.Pattern":
 
 _SHELL_WRITE_HIS = _writes_on(_HIS_NAME)
 # F114: the scripts that stand on his own words or his yes, and what would run them past the policy's own reading of the line.
-_HIS_SCRIPTS = re.compile(r"(?<![\w-])(cycles|usageline|feedback)\.py\b")
-_ROUND = re.compile(r"\$\(|`|<<|(?:^|[\s;&|(])HQ_\w+\s*=|\b(?:env|eval|exec|xargs|source|nohup|sudo|timeout|nice|setsid|unset|export)\b"
-                    r"|(?<![\w.-])(?:ba|z|da|k)?sh\b|\bpython[\d.]*\s+(?:-\S+\s+)*-[a-zA-Z]*c\b|\b(?:perl|ruby|node)\b")
+_HIS_NAMES = ("cycles.py", "usageline.py", "feedback.py")
+# A run of one of them, as cyclehook.ran leaves a line: python with it, or it as the program of a piece (after VAR= settings and wrappers).
+_RUN_SCRIPT = re.compile(r"(?:(?<![\w.-])python[\d.]*\s+(?:-\S+\s+)*|(?:^|[;&|(\n`]|\$\()\s*(?:[A-Za-z_]\w*=\S*\s+)*"
+                         r"(?:(?:env|exec|nohup|sudo|nice|setsid|xargs|eval|source|timeout\s+\S+)\s+)*)"
+                         r"[\"']?[^\s\"';&|]*(?<![\w-])(cycles|usageline|feedback)\.py\b")
+
+
+def _no_timeout(seg: list[str]) -> list[str]:
+    """F114: `timeout N python3 …` is the command after it."""
+    return seg[2:] if len(seg) > 2 and seg[0] == "timeout" and re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", seg[1]) else seg
+
+
+def _plain_run(seg: list[str]) -> bool:
+    """F114: a piece that is python running one of these scripts by its path, and nothing else around it."""
+    return len(seg) > 1 and seg[0] in ("python", "python3") and Path(seg[1]).name in _HIS_NAMES
+
+
+def _wrapped(name: str) -> "Decision":
+    return Decision(DENY, f"{name}.py runs only as a plain command of its own (timeout N in front is fine), never inside bash -c, python "
+                          f"-c, env, xargs, $( ) or with a setting in front: {_HIS_SCRIPT_WAY[name]}", door=True)
 _HIS_SCRIPT_WAY = {"cycles": f"python3 \"{HQ_ROUTINE / 'cycles.py'}\" yes AGENT \"HIS WORDS\" [N] (or its other commands)",
                    "usageline": f"python3 \"{HQ_ROUTINE / 'usageline.py'}\" [weekly|5-hour|fable] moving|fixed [N] --said \"HIS WORDS\"",
                    "feedback": f"python3 \"{_APP / 'feedback.py'}\" send \"THE WORDS\" --via agent, which asks him first"}
@@ -584,7 +601,7 @@ class Policy:
             rest = [a for i, a in enumerate(args[1:], 1) if a != "--said" and args[i - 1] != "--said"]
             key = usageline.ALIASES.get(rest[0].lower(), "five") if rest else "five"
             num = next((int(a.rstrip("%")) for a in rest if a.rstrip("%").isdigit()), None)
-            return usageline.his_say_so(said, key, num, places=list(self.words_from), ws=str(self.folder))
+            return usageline.his_say_so(said, key, num, places=list(self.words_from), ws=str(self.folder), moving="moving" in rest)
         except Exception as e:
             return f"his words couldn't be read ({type(e).__name__})"
 
@@ -668,16 +685,16 @@ class Policy:
                                   + LOG_WAY, door=bool(re.search(r"cycles(?:-state)?\.json", runs, re.I)))
         if _writes_on(_SHELL_LEDGER.format(a=re.escape((self.agent or "").lower() or "\x00"))).search(runs):  # F114
             return Decision(DENY, "another agent's ledger or notes is hers: only she writes it, whoever asks", door=True)
-        m = _HIS_SCRIPTS.search(runs)
-        if m and _ROUND.search(runs):  # F114: no way round them on a loose yes: an HQ_ setting in front, a wrapper, code that runs them
-            return Decision(DENY, f"{m.group(1)}.py runs only as a plain command of its own, never wrapped (bash -c, python -c, env, "
-                                  f"$( )) or with an HQ_ setting in front: {_HIS_SCRIPT_WAY[m.group(1)]}", door=True)
+        # F114: cycles.py, usageline.py and feedback.py run only as a plain command of their own (timeout N in front is fine). Naming
+        # them is no run (a grep or a sed of the file reads it); running them inside a wrapper, code or an HQ_ setting is no plain command.
+        ran_here = [m.group(1) for m in _RUN_SCRIPT.finditer(runs)]
+        wrapped = (lambda: _wrapped(ran_here[0])) if ran_here else None
         cmd = _hide_quoted_dollars(cmd)  # H281: awk's $1 and sed's $p in single quotes are text, not variables
         # 27 October 2026: ${n} of a plain for loop (for n in 1 2; do sed -n "${n}p" …) is filled in by _loops below.
         loop_vars = re.findall(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b", cmd)
         probe = re.sub(r"\$\{(%s)\}" % "|".join(map(re.escape, loop_vars)), "", cmd) if loop_vars else cmd
         if re.search(r"`|\$\(|\$\{|<<", probe):
-            return _ask("run a shell command", "a complex shell command")
+            return wrapped() if wrapped else _ask("run a shell command", "a complex shell command")
         cmd = re.sub(r"\s2>\s*/dev/null|\s2>&1", " ", cmd)
         lex = shlex.shlex(cmd, posix=True, punctuation_chars="();<>|&\n")
         lex.whitespace = " \t\r"
@@ -685,18 +702,21 @@ class Policy:
         try:
             tokens = list(lex)
         except ValueError:
-            return _ask("run a shell command", "a shell command that doesn't parse")
+            return wrapped() if wrapped else _ask("run a shell command", "a shell command that doesn't parse")
         segments: list[list[str]] = [[]]
         for tok in tokens:
             if tok in ("&&", "|", ";", "||"):
                 segments.append([])
             elif tok and set(tok) <= set("();<>|&\n"):
-                return _ask("run a shell command", "a complex shell command")
+                return wrapped() if wrapped else _ask("run a shell command", "a complex shell command")
             else:
                 segments[-1].append(tok)
         segments = _loops(segments)
         if segments is None:
-            return _ask("run a shell command", "a shell loop it can't follow")
+            return wrapped() if wrapped else _ask("run a shell command", "a shell loop it can't follow")
+        segments = [_no_timeout(seg) for seg in segments]  # F114: timeout N in front of a command changes nothing it may do
+        if wrapped and sum(1 for seg in segments if _plain_run(seg)) < len(ran_here):
+            return wrapped()
         # H277: several steps chained count as one; a cd carries over to the steps after it.
         results: list[tuple[list[str], Decision]] = []
         self._cwd = None
