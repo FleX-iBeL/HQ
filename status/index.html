@@ -142,7 +142,7 @@
       .RELEASING { --band: #6639ba; }
       .WAITING { --band: #0b5fbf; }
       .DONE { --band: #1a7f37; }
-      .UNSURE { --band: #9a6700; }  /* F116: not sure: a stale block and nothing running known, yellow, never Done */
+      .UNSURE, .LATER { --band: #9a6700; }  /* F116: not sure: a stale block and nothing running known, yellow, never Done */
       .STOPPED, .PROBLEM { --band: #b42318; }
       .notes { margin: 0; padding: 0 4px; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px 16px; }
       .notes dt { color: var(--soft); }
@@ -551,7 +551,7 @@
       import { parseRoadmap } from './parse.mjs';
       import { hasFive, stopLine, usageVerdict, landing, landingWords, LAND_KINDS, windowsAhead, windowWords, daysAhead, dayWords } from './usage.mjs';
 
-      const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped', UNSURE: 'Not sure' };
+      const WORD = { BUILDING: 'Building', TESTING: 'Testing', RELEASING: 'Merging and releasing', WAITING: 'Waiting for you', DONE: 'Done', STOPPED: 'Stopped', UNSURE: 'Not sure', LATER: 'Waits for the night' };
       const STEP_WORD = { done: 'Done', doing: 'In progress', todo: 'Not started', ask: 'Needs your decision', repeat: 'Repeats' };
       const app = document.getElementById('app');
       const WHERE = document.querySelector('meta[name="hq-where"]')?.content ?? '';  // H83, filled in by the server
@@ -2257,6 +2257,7 @@
           const line = B.line.replace(/^(Now|Next):\s*/, '');
           banner.append(el('p', '', line.charAt(0).toUpperCase() + line.slice(1)));
         }
+        if (B?.also) banner.append(el('p', 'also', B.also.charAt(0).toUpperCase() + B.also.slice(1)));  // F116: a chat's Waiting under a stop
         if (B?.corrected) banner.append(el('p', 'soft corrected', `${B.corrected}${B.saidLine ? `: ${B.saidLine.replace(/^(Now|Next):\s*/, '')}` : ''}. Worked out from what runs now.`));
         now.append(banner);
         if (truth?.broken?.length) {

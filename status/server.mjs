@@ -493,19 +493,33 @@ function minutesAgo(secs) {
 // Who wrote the status block: the routine (its own fixed lines, tick.py's status()), a job (the queue's job marked done in the
 // minutes right after the block was written), or a chat.
 const ROUTINE_LINES = /^(?:(?:Now|Next):\s*)?Job \d+ (?:is done; job \d+ waits for its turn|isn't running|waits for the usage line)/;
+// The fourth check: a done mark from before F116 has only a time, and old jobs stay on the queue for days. So a Waiting is a job's
+// only when the block's own Now line names that job, or when the job's done mark ("done HH:MM on YYYY-MM-DD") is from the block's
+// own day, in the minutes right after it. A mark without its day is never that day.
+const localDay = (t) => { const d = new Date(t * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 function writer(p, at) {
   if (ROUTINE_LINES.test(p?.headline ?? '')) return { kind: 'routine', words: 'The routine said' };
+  const jobs = p?.queue?.jobs ?? [];
+  const named = /\bJob (\d+)\b/.exec(p?.headline ?? '');
+  if (named && jobs.some((j) => j.n === Number(named[1]))) return { kind: 'job', words: `Job ${named[1]} said` };
   if (at !== null) {
-    for (const j of p?.queue?.jobs ?? []) {
-      const m = /^done (\d{1,2}):(\d{2})/.exec(j.state);
-      if (!m) continue;
-      const d = new Date(at * 1000);
-      d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+    for (const j of jobs) {
+      const m = /^done (\d{1,2}):(\d{2}) on (\d{4}-\d{2}-\d{2})/.exec(j.state);
+      if (!m || m[3] !== localDay(at)) continue;
+      const d = new Date(`${m[3]}T${m[1].padStart(2, '0')}:${m[2]}:00`);
       const gap = d.getTime() / 1000 - at;
       if (gap >= -60 && gap <= 600) return { kind: 'job', words: `Job ${j.n} said` };
     }
   }
   return { kind: 'chat', words: 'A chat said' };
+}
+// The fourth check's 3: a build that waits only for the night (the wall's day hours), said calmly, not as a fault.
+const NIGHT_ONLY = /no build starts between (\d+:00) and (\d+:00) without his say-so; it waits for the night(?:, or jobs\.py now \d+)?\.?\s*$/;
+function nightOnly(gate) {
+  const m = NIGHT_ONLY.exec(gate ?? '');
+  if (!m) return null;
+  const rest = gate.slice(0, m.index).replace(/^Job \d+ waits(?: for the usage line)?:?\s*/, '').trim();
+  return rest ? null : { from: m[1], to: m[2] };
 }
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 function whenSaid(at, now) {
@@ -538,19 +552,27 @@ function banner(p, running, his, now = Date.now() / 1000, lines = null) {
   const who = writer(p, at);
   const jobs = p?.queue?.jobs ?? [];
   const inLine = jobs.filter((j) => j.state === 'ready');
-  if (said === 'WAITING' && !future && who.kind !== 'routine') return out('WAITING', `${who.words} ${whenSaid(at, now)} it's waiting for you${headText(head)}`);
-  // Held by the usage line, paused, or the routine off: stopped, whatever the block says. The third check's A: with nothing running
-  // and the routine on, a ready job is waiting in line too (the gate holds it: the usage line, the hours), said with the gate's reason.
+  const waitingSaid = said === 'WAITING' && !future ? `${who.words} ${whenSaid(at, now)} it's waiting for you${headText(head)}` : '';
+  const chatWaits = waitingSaid && who.kind !== 'routine';
+  // The fourth check's 2: a held or paused job, or the routine off, is a real stop and comes before a Waiting; a chat's Waiting is
+  // named on a second line under it.
   const held = jobs.filter((j) => /^(held|paused)/.test(j.state));
-  if (held.length || inLine.length || p?.queue?.on === false) {
+  if (held.length || p?.queue?.on === false) {
+    const line = p?.queue?.on === false ? 'The routine is off: nothing starts' : held.map((j) => `Job ${j.n} ${j.state}`).join(' · ');
+    return { ...out('STOPPED', line, said === 'STOPPED' || chatWaits ? '' : stale || differs('STOPPED')), ...(chatWaits ? { also: `and ${waitingSaid.charAt(0).toLowerCase()}${waitingSaid.slice(1)}` } : {}) };
+  }
+  if (chatWaits) return out('WAITING', waitingSaid);
+  // The third check's A: with nothing running and the routine on, a ready job is waiting in line (the gate holds it), said with the
+  // gate's reason. The fourth check's 3: when the only reason is the wall's day hours, it waits for the night, calmly, in yellow.
+  if (inLine.length) {
     const gate = lines?.jobs?.state === 'waiting' && lines.jobs.text ? lines.jobs.text : '';
-    const line = p?.queue?.on === false ? 'The routine is off: nothing starts'
-      : held.length ? held.map((j) => `Job ${j.n} ${j.state}`).join(' · ')
-        : gate || (said === 'STOPPED' && head ? head.replace(/^(Now|Next):\s*/, '') : `Job ${inLine[0].n} waits in line: nothing has started it yet`);
+    const night = nightOnly(gate);
+    if (night) return out('LATER', `Job ${inLine[0].n} waits for the night: no build starts between ${night.from} and ${night.to} without your say-so`);
+    const line = gate || (said === 'STOPPED' && head ? head.replace(/^(Now|Next):\s*/, '') : `Job ${inLine[0].n} waits in line: nothing has started it yet`);
     return out('STOPPED', line, said === 'STOPPED' ? '' : stale || differs('STOPPED'));
   }
   // The routine's own Waiting ("Job N isn't running"), with no job in line: trusted as written too.
-  if (said === 'WAITING' && !future) return out('WAITING', `${who.words} ${whenSaid(at, now)} it's waiting for you${headText(head)}`);
+  if (waitingSaid) return out('WAITING', waitingSaid);
   if (fresh && said === 'STOPPED') return out('STOPPED', head);
   // Done only from a block that says Done. Anything else with nothing running that HQ knows of is "not sure", in yellow: a chat's
   // 40-minute test run reads Testing for 30 minutes, then not sure, never Done; a newer block puts it right.
