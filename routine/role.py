@@ -96,7 +96,7 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "features": {"on", "off"}, "kinds": {"rename", "colour", "reset"}, "appt_notes": {"add", "clear"},
           "workflows": {"on", "off"}, "news": {"topic", "leave-out", "source"}, "planning": {"mark"},
           "usageline": {"moving", "fixed", "reserve", "five", "5-hour", "5h", "weekly", "week", "all", "fable"},
-          "settle": {"file"}}
+          "settle": {"file", "override"}}
 TO_BOTH = {"update": {"back-here", "back-first", "forward-here"}}  # F104: what the other computer takes whichever it is: the code, not the data
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
@@ -531,7 +531,9 @@ def _stayed(s, p, was, takeover, prev_look=None) -> bool:
     if was != "main" or not p.get("took_over", True) or not at:
         return False
     at = float(at)
-    if float(s.get("awake_since") or 0) > at or float(prev_look or 0) < at:
+    # F115: awake and looking without a break since before the takeover is enough (awake_since starts again after any
+    # gap); its last look needn't have come after it: a cut can heal within the minute after the other took over.
+    if float(s.get("awake_since") or 0) > at or not prev_look:
         return False
     return not (s.get("offline_seen") and float(s["offline_seen"]) >= at - takeover - 120)
 

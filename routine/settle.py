@@ -361,6 +361,28 @@ def main(argv: list[str]) -> int:
         for e in es[:20]:
             print(f"- {e['at']} · {e['file']} · from {e['from']}")
         return 0
+    if argv[0] == "override" and len(argv) == 2:
+        # F115: the backup has handed over what the main still needed from it; the main's own versions go out as
+        # everyone's (Syncthing's override on its send-only folder). Only on the main, only a send-only folder.
+        sys.path.insert(0, HERE)
+        import role, sync
+        if role.is_backup():
+            print("Refused: only the main does this.")
+            return 3
+        f = next((x for x in sync.config().get("folders", []) if x["what"] == argv[1]), None)
+        if not f:
+            print(f"There's no {argv[1]} folder here.")
+            return 1
+        try:
+            if (sync.api(f"/rest/config/folders/{f['id']}") or {}).get("type") != "sendonly":
+                print("Not a send-only folder here; nothing to do.")
+                return 0
+            sync.api(f"/rest/db/override?folder={f['id']}", "POST", {})
+        except Exception as e:
+            print(f"Couldn't: {e}")
+            return 1
+        print(f"The main's {argv[1]} goes out as everyone's.")
+        return 0
     if argv[0] == "file" and len(argv) == 3:
         if os.environ.get("HQ_ROLE_HERE") is None:
             sys.path.insert(0, HERE)

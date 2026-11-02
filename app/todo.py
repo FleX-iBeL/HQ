@@ -391,7 +391,8 @@ def _write(p: Path, before: str, lines: list[str], what: str, swept: list | None
         # takes back his own last change, never an agent's that came after it.
         slots = _undo_slots()
         slots[by or ""] = {"file": str(p), "before": before, "after": text, "after_sha": hashlib.sha1(text.encode()).hexdigest(),
-                           "what": what, "at": _now().timestamp()} | ({"swept": swept} if swept else {}) \
+                           "what": what, "seq": max([int(v.get("seq") or 0) for v in slots.values()] + [0]) + 1} \
+            | ({"swept": swept} if swept else {}) \
             | ({"links_before": links_before, "links_after": json.loads(json.dumps(links_after))}
                if links_before is not None and links_after is not None else
                {"links_before": links_before} if links_before is not None else {})
@@ -1001,7 +1002,7 @@ def undo(by: str | None = None) -> dict:
     with _lock:
         slots = _undo_slots()
         if by is None:
-            key = max(slots, key=lambda k: slots[k].get("at") or 0, default=None)
+            key = max(slots, key=lambda k: slots[k].get("seq") or 0, default=None)  # the newest of anyone's
         else:
             key = by if by in slots else None
         if key is None:
