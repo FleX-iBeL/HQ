@@ -2587,13 +2587,27 @@
       const parts = {};
       let lastMinute = null;
       const EMPTY = { state: null, title: '', headline: '', notes: [], current: null, log: [], updated: '', phases: [], queue: { on: true, jobs: [] }, schedule: null, problems: [], usageLines: null, usageReserve: 0 };
+      /** A status server from before F116 has no /page.json: the three reads it had, the same parts, nothing worked out. */
+      async function olderServer() {
+        const res = await fetch(`./roadmap.md?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error(String(res.status));
+        const text = await res.text();
+        const json = async (u) => fetch(`${u}?t=${Date.now()}`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        const [usage, routines] = await Promise.all([json('./usage.json'), json('./routines.json')]);
+        const { phases, ...head } = parseRoadmap(text);
+        const fp = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return `old${(h >>> 0).toString(16)}`; };
+        const mark = (data) => ({ h: fp(JSON.stringify(data ?? null)), data });
+        const { now, ...rest } = routines ?? {};
+        return { now: now ?? Date.now() / 1000, parts: { head: mark(head), phases: { h: fp(text), data: phases }, routines: mark(routines ? rest : null), usage: mark(usage), truth: mark(null) } };
+      }
       async function tick() {
         let got;
         try {
           const have = Object.entries(parts).map(([k, x]) => `${k}:${x.h}`).join(',');
           const res = await fetch(`./page.json?have=${encodeURIComponent(have)}`, { cache: 'no-store' });
-          if (!res.ok) throw new Error(String(res.status));
-          got = await res.json();
+          if (res.status === 404) got = await olderServer();  // a status server from before F116, until it's restarted
+          else if (!res.ok) throw new Error(String(res.status));
+          else got = await res.json();
         } catch {
           last = '';
           app.replaceChildren(el('p', '', 'The status server is not answering. Start it with: node status/server.mjs (in HQ)'));
