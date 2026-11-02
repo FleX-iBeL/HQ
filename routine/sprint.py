@@ -778,6 +778,7 @@ def gate(text, job_text_, say_so=False, said=None):
 # Send to the team and a call's add), and that refusal is one of Moneypenny's tripwires (routine/cycles.py). Off, the
 # fields are only reported (sprint.py check, fields), nothing is refused: today's HQ exactly.
 
+PROGRAM_WORDS = 15
 _PROGRAM_TEXT = re.compile(r"\b[\w.-]+\.(?:md|py|json|jsonl|sh|mjs)\b|\([FH]\d+\)")
 QUOTE_OPEN, QUOTE_CLOSE = '"“„«‹「『＂″‟❝〝`', '"”“»›」』＂″❞〞〟`'
 QUOTE_MARKS = (re.compile(f"[{QUOTE_OPEN}]([^{QUOTE_OPEN}{QUOTE_CLOSE}]*)[{QUOTE_CLOSE}]"), re.compile(r"(?<![\w'’])['‘‚]([^'‘’]+)['’](?![\w])"))  # an apostrophe is no quote
@@ -920,11 +921,12 @@ def _source_ok(item, ws, labels):
 def _no_words_why(found_by, row):
     """F86: "none, found by" holds only where it's true. Any quotation of three words or more in the ask refuses it, wherever it came from, and job N must
     be a real job of this row: the row names it as where it came from, or the job's text names this row. What her own addition says doesn't count. The one
-    exception is a program's own text quoted in a row (a flow's message, a job's line): it carries a file name or a row label in brackets."""
+    exception is a program's own text quoted in a row (a flow's message, a job's line): short, and with a file name or a row label in brackets."""
     line, ask = row["line"], ask_of(row["line"])
     for marks in QUOTE_MARKS:
         for m in marks.finditer(ask):
-            if len(_bare(m.group(1)).split()) >= HIS_QUOTE_WORDS and not _PROGRAM_TEXT.search(m.group(1)):
+            words = len(_bare(m.group(1)).split())
+            if words >= HIS_QUOTE_WORDS and not (words <= PROGRAM_WORDS and _PROGRAM_TEXT.search(m.group(1))):
                 return f"none, found by: but this row holds a quotation, {m.group(1)[:50]!r}; his words go in the field, or it goes on the list"
     if not found_by.group(1):
         return ""

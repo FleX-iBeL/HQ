@@ -1049,6 +1049,7 @@ def addition(label, words, now=None):
             if not was[key] and will[key] and not held_[key]["ok"]:
                 sys.exit(f"Refused: the {name} in your addition wouldn't hold: {held_[key]['why']}. Nothing written; a round can't change it later, so put it right now.")
         hqpaths.guard_roadmap(q.ROADMAP)
+        roundlog.planning(q.ROADMAP, text.replace(line, new, 1))  # a laptop chat's add is a door too
         tmp = f"{q.ROADMAP}.reword.{os.getpid()}"
         with open(tmp, "w", encoding="utf8") as fh:
             fh.write(text.replace(line, new, 1))
@@ -1102,11 +1103,20 @@ def round_before(n, label, mode):
         json.dump({"n": n, "label": label, "mode": mode, "at": time.time(), "planning": text, "ready": d.get("ready") or {}, "rows": rv.get("rows") or {}}, f)
 
 
-def _rows_back(text, before, back, gone):
-    """The planning with these rows as they were, row by row. A file cut in half, a heading gone with it, comes back whole from what stood before."""
+def _rows_back(text, before, back, gone, wrote=()):
+    """The planning with these rows as they were, row by row. A file cut in half, a phase heading gone with it, comes back whole from what stood before, with
+    what a door wrote on its rows in those minutes."""
     was, now = roundlog.keyed_rows(before), roundlog.keyed_rows(text)
-    if not now or _cut(text, before):
-        return before
+    if _cut(text, before):
+        lines, seen = before.split("\n"), {}
+        for line in text.split("\n"):  # by label wherever it stands: its heading may be what went
+            m = re.match(r"\| [^|]* \| ([A-Z]\d+(?:\.\d+)*)\b", line)
+            if m:
+                k = (m.group(1), seen.get(m.group(1), 0))
+                seen[m.group(1)] = k[1] + 1
+                if f"row {k[0]}" in wrote and k in was:
+                    lines[lines.index(was[k])] = line
+        return "\n".join(lines)
     lines = text.split("\n")
     for key in back:
         lines[lines.index(now[key])] = was[key]
@@ -1119,7 +1129,7 @@ def _rows_back(text, before, back, gone):
 
 
 def _cut(text, before):
-    return not text.strip() or any(x.startswith("## ") and x not in text for x in before.split("\n"))
+    return not roundlog.keyed_rows(text) or any(x.startswith("## Phase") and x not in text for x in before.split("\n"))  # the status headings move by themselves
 
 
 def _the_change(old, new):
@@ -1183,7 +1193,7 @@ def round_after(n):
                 os.makedirs(os.path.dirname(q.ROADMAP), exist_ok=True)
                 tmp = f"{q.ROADMAP}.back.{os.getpid()}"
                 with open(tmp, "w", encoding="utf8") as fh:
-                    fh.write(_rows_back(text, before, back, gone))
+                    fh.write(_rows_back(text, before, back, gone, wrote))
                 os.replace(tmp, q.ROADMAP)
             with open(os.path.join(ROUNDS_DIR, f"job-{n}.put-back.json"), "w", encoding="utf8") as fh:
                 json.dump({"n": n, "label": label, "call": call, "back": [[was[k], now_[k]] for k in back], "gone": [was[k] for k in gone], "kept": [[was[k], now_.get(k, "")] for k in kept],

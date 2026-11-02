@@ -207,7 +207,10 @@ def main(argv: list[str]) -> int:
     with open(stream_log, "a") as lg, open(pfile, encoding="utf8") as prompt:
         _log(lg, f"job {n}: headless run started ({' '.join(chat) or 'a new session'})")
         proc = subprocess.Popen(cmd, stdin=prompt, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                cwd=FOLDER, env=env, bufsize=1)
+                                cwd=FOLDER, env=env, bufsize=1, start_new_session=bool(box["round"]))  # F86: a round's session, so what runs in it is known as hers
+        if box["round"]:
+            import roundlog
+            roundlog.session(n, proc.pid)
         ended_by_signal = {"sig": None}
 
         def _end(sig, frame):

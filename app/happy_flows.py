@@ -14172,7 +14172,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             b.seq[0] += 1
             f = self.tmp / f"{name}-fake-{b.seq[0]}.py"
             f.write_text("#!/usr/bin/env python3\nimport json, sys, os, subprocess\nrv, sp = os.environ['F86_REVIEW'], os.environ['F86_SPRINT']\nsys.stdin.read()\n"
-                         "def other(*a):\n    e = dict(os.environ)\n    e.pop('HQ_ROUND', None)\n    r = subprocess.run([sys.executable, *a], capture_output=True, text=True, env=e)\n    assert r.returncode == 0, r.stdout + r.stderr\n"
+                         "def other(*a, own=False):\n    e = dict(os.environ)\n    e.pop('HQ_ROUND', None)\n    r = subprocess.run([sys.executable, *a], capture_output=True, text=True, env=e, start_new_session=not own)\n    assert own or r.returncode == 0, r.stdout + r.stderr\n"
                          "def out(d): print(json.dumps(d), flush=True)\ndef run(*a):\n    r = subprocess.run([sys.executable, *a], capture_output=True, text=True)\n"
                          "    out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': ' '.join(a)[:150]}}]}})\n"
                          "    out({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': r.stdout + r.stderr}]}})\n"
@@ -14358,6 +14358,9 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             t = re.sub(r"\| F9302 A row of F9302 \| [^|]*\|", lambda _m: '| F9302 A row of F9302 | The flow says "notes.md counts as only the main". His words: none, found by the review. Sources: call of 20 October 2026. |', b.rm.read_text(), count=1)
             b.rm.write_text(t)
             need("fields hold" in b.fields("F9302"), f"a program's own text quoted in a row: {b.fields('F9302')}")
+            t = re.sub(r"\| F9302 A row of F9302 \| [^|]*\|", lambda _m: '| F9302 A row of F9302 | The note says "' + "word " * 15 + 'in notes.md". His words: none, found by the review. Sources: call of 20 October 2026. |', b.rm.read_text(), count=1)
+            b.rm.write_text(t)
+            need("holds a quotation" in b.fields("F9302"), f"a long quotation passed as a program's text: {b.fields('F9302')}")
             for quoted in ('"the export has to work for the whole list"', '"a line typed on the page"', "‘typed on the page once’"):  # in no call, text or note: still a quotation
                 t = re.sub(r"\| F9302 A row of F9302 \| [^|]*\|", lambda _m: f'| F9302 A row of F9302 | His words: none, found by the review. What he wanted: {quoted}. Sources: call of 20 October 2026. |', b.rm.read_text(), count=1)
                 b.rm.write_text(t)
@@ -14535,6 +14538,45 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             need(b.tool("review.py", "keep").returncode != 0, "keep it twice")
             import agents
             need("review.py keep" in next(a for a in agents.DEFAULTS if a["id"] == "moneypenny")["craft"], "her rule doesn't name it")
+
+        def status_move(b):  # a status heading moving isn't a heading gone: nothing comes back whole, and a door's words stay
+            b.flag("F9301", "no size named")
+            b.minute()
+            heading = next(x for x in b.rm.read_text().split("\n") if x.startswith("## ") and not x.startswith("## Phase"))
+            moved = "## Now and next"
+            ho = str(ROOT / "routine/handover.py")
+            b.go(f"other({ho!r}, 'edit', 'HQ/roadmap.md', json.dumps({{'edits': [{{'old': '| F9302 A row of F9302 | His words: ', 'new': '| F9302 A row of F9302 | From a chat. His words: '}}]}}))\n"
+                 f"p = os.environ['HQ_ROADMAP']; t = open(p).read(); open(p, 'w').write(t.replace({heading!r}, {moved!r}).replace('| F9303 A row of F9303 | His words: ', '| F9303 A row of F9303 | No door. His words: '))")
+            t = b.rm.read_text()
+            need("From a chat. His words" in t, "a status move put the whole planning back and took a chat's words with it")
+            need("No door. His words" not in t and moved in t, "the one no-door change didn't go back on its own")
+
+        def phase_gone(b):  # a phase heading gone: whole again, and what a door wrote stays
+            b.flag("F9301", "no size named")
+            b.minute()
+            ho = str(ROOT / "routine/handover.py")
+            b.go(f"other({ho!r}, 'edit', 'HQ/roadmap.md', json.dumps({{'edits': [{{'old': '| F9302 A row of F9302 | His words: ', 'new': '| F9302 A row of F9302 | From a chat. His words: '}}]}}))\n"
+                 "p = os.environ['HQ_ROADMAP']; t = open(p).read(); open(p, 'w').write(t.replace('## Phase F', '## Gone'))")
+            t = b.rm.read_text()
+            need("## Phase F" in t and "From a chat. His words" in t, f"a phase heading gone: {'## Phase F' in t}, a door's words: {'From a chat' in t}")
+
+        def add_is_door(b):  # an add from a laptop chat during a round on another row
+            b.flag("F9301", "no size named")
+            b.minute()
+            texts = b.texts()
+            s = b.go("other(rv, 'add', 'F9302', 'A fact from a laptop chat.')")
+            need("A fact from a laptop chat" in b.rm.read_text() and "kept to its one addition" in s["stream"] and b.texts() == texts, f"an add from a chat was put back: {s['stream'][-300:]}")
+
+        def her_session(b):  # stripped of its marker, a process of hers is still hers: no door, so it goes back
+            need(b.tool("sprint.py", "ready", "F9303").returncode == 0, "a Ready mark to start from")
+            b.flag("F9301", "no size named")
+            b.minute()
+            before = _rows(b)
+            ho = str(ROOT / "routine/handover.py")
+            b.go(f"other({ho!r}, 'edit', 'HQ/roadmap.md', json.dumps({{'edits': [{{'old': '| F9302 A row of F9302 | His words: ', 'new': '| F9302 A row of F9302 | Forged. His words: '}}]}}), own=True)\n"
+                 "other(sp, 'ready', 'F9303', 'off', own=True)")
+            need(_rows(b) == before, "a process of the round's session read as a door")
+            need("F9303" in json.loads((b.ws / "HQ/sprint.json").read_text()).get("ready", {}), "a mark her session took off stayed off")
 
         def moved_row(b):
             b.flag("F9301", "no size named")
@@ -14974,7 +15016,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 need(not b.items() and not [x for x in t["fixes"] if "round" in x], f"a fourth round on day {d}: {b.items()} {t}")
             need(b.texts().count("If you tell me what F9301 should say") == 1, "the cap's text came twice")
 
-        for name, fn in (("found by, not his", found_by), ("compared after a round", compared), ("her row past the door", own_row_door), ("a killed run's look", compared_killed), ("a clean round", clean), ("row by row", row_by_row), ("the file emptied", emptied), ("a call starts after", call_starts), ("rounds wait", waits), ("forged outside the rows", forged), ("a door's write stays", journaled), ("the last net", last_net), ("a moved row", moved_row), ("a file cut in half", cut_file),
+        for name, fn in (("found by, not his", found_by), ("compared after a round", compared), ("her row past the door", own_row_door), ("a killed run's look", compared_killed), ("a clean round", clean), ("row by row", row_by_row), ("the file emptied", emptied), ("a call starts after", call_starts), ("rounds wait", waits), ("forged outside the rows", forged), ("a door's write stays", journaled), ("the last net", last_net), ("a status move", status_move), ("a phase heading gone", phase_gone), ("add is a door", add_is_door), ("her own session", her_session), ("a moved row", moved_row), ("a file cut in half", cut_file),
                          ("an addition's cap", capped), ("a no stays", no_stays), ("one price", one_price), ("a round only adds", only_adds), ("quotes in an addition", quotes), ("the review reads it", reads_it), ("no is a way out", says_no), ("no at the mark", says_no_at_mark),
                          ("the box", the_box), ("no false alarms", no_alarms), ("a held mark dropped", held_mark), ("no forged mark", no_forgery), ("the ready fields", fields),
                          ("the row", the_row), ("what a round touches", touch), ("a held round", held), ("held, then again", held_again),

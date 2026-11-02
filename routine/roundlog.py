@@ -4,8 +4,9 @@
 While a round of the fix-and-review loop runs, every write to the planning and to the sprint file through HQ's own doors (jobs.py, schedule.py, handover.py,
 review.py reword, sprint.py, and so the status page and the calls, which go through those scripts) leaves one short line in the round's journal:
 .status/rounds/job-N.journal.jsonl: what (a row, a job, an item, a Ready mark, a verdict), which door, when. It's written where the file is written, from what
-really changes, so no door can be left out by forgetting a word. The round's own session carries HQ_ROUND, so its own writes leave no line. review.round_after
-reads the journal: what stands in it stays as it is.
+really changes, so no door can be left out by forgetting a word. The round's own session leaves no line: the runner starts it in a session of its own and notes
+which (job-N.sid), so a process of hers counts as the round with HQ_ROUND stripped from its environment too. review.round_after reads the journal: what stands
+in it stays as it is.
 """
 from __future__ import annotations
 
@@ -38,6 +39,30 @@ def running() -> list[str]:
         return []
 
 
+def session(n: int, sid: int) -> None:
+    """The runner: this round's session."""
+    with open(os.path.join(folder(), f"job-{n}.sid"), "w", encoding="utf8") as f:
+        f.write(str(sid))
+
+
+def mine() -> bool:
+    """Whether this process is a round's own: by its marker, or by the session or process group the runner started it in."""
+    if os.environ.get("HQ_ROUND"):
+        return True
+    here = {os.getsid(0), os.getpgrp()}
+    try:
+        names = [x for x in os.listdir(folder()) if x.endswith(".sid")]
+    except OSError:
+        return False
+    for x in names:
+        try:
+            if int(open(os.path.join(folder(), x), encoding="utf8").read().strip()) in here:
+                return True
+        except (OSError, ValueError):
+            pass
+    return False
+
+
 def keyed_rows(text: str) -> dict:
     """The labelled rows of the planning's phases, in order: {(label, which): line}. A label can stand in two tables."""
     out, seen, phase = {}, {}, False
@@ -61,7 +86,7 @@ def queue(text: str) -> dict:
 
 def note(whats) -> None:
     """Lines in the journal of every round running. Never in a round's own session, and it never stops a write."""
-    names = running() if not os.environ.get("HQ_ROUND") else []
+    names = running() if not mine() else []
     whats = sorted(set(whats))
     if not names or not whats:
         return
@@ -77,7 +102,7 @@ def note(whats) -> None:
 
 def planning(path: str, new: str) -> None:
     """A door is about to write the planning: what changes, in the journal."""
-    if os.environ.get("HQ_ROUND") or not running():
+    if not running() or mine():
         return
     try:
         old = open(path, encoding="utf8").read()
@@ -93,7 +118,7 @@ def planning(path: str, new: str) -> None:
 
 def sprint(path: str, new: dict) -> None:
     """A door is about to write the sprint file: Ready marks and verdicts that change, in the journal."""
-    if os.environ.get("HQ_ROUND") or not running():
+    if not running() or mine():
         return
     try:
         old = json.load(open(path, encoding="utf8"))
