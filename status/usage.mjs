@@ -108,7 +108,7 @@ export function lineSettings(markdown) {
 /** F100: the points kept for his calls and the small routines, taken off each line for the cycles and the team. */
 export const RESERVE = 15;
 export function reserveOf(markdown) {
-  return Number(/\*\*Usage reserve:\s*(\d{1,2})\b/.exec(markdown ?? '')?.[1] ?? RESERVE);
+  return Math.min(50, Number(/\*\*Usage reserve:\s*([0-9]{1,2})\b/.exec(markdown ?? '')?.[1] ?? RESERVE));  // F113: 0 to 50, as the command
 }
 
 /**
@@ -123,8 +123,18 @@ export function reserveOf(markdown) {
  */
 export const LEAST = 15;
 export function leastOf(markdown) {
-  return Number(/\*\*Team line at least:\s*(\d{1,2})\b/.exec(markdown ?? '')?.[1] ?? LEAST);
+  return Math.min(50, Number(/\*\*Team line at least:\s*([0-9]{1,2})\b/.exec(markdown ?? '')?.[1] ?? LEAST));  // 0 to 50, as the command
 }
+/**
+ * F113: has this limit's window reset since the reading was taken? Only when its reset time parses and the reading was taken
+ * before it: a reset time that can't be read is held, the same as one that's missing, so it never opens room by itself.
+ */
+export function windowPassed(l, reading, now = new Date()) {
+  const reset = Date.parse(l?.resetsAt ?? '');
+  const checked = Date.parse(reading?.checkedAt ?? '');
+  return Number.isFinite(reset) && Number.isFinite(checked) && checked < reset && reset <= now.getTime();
+}
+
 /** The team's line for a stop line, with the reserve taken off but never under the least (or the stop line, when that's lower). */
 export function teamLine(line, reserve = 0, least = LEAST) {
   if (!reserve) return line;

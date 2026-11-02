@@ -413,8 +413,8 @@ def reserve_points(markdown=None):
             markdown = open(hqpaths.ROADMAP, encoding="utf8").read()
         except OSError:
             return RESERVE
-    res = re.search(r"\*\*Usage reserve:\s*(\d{1,2})\b", markdown)
-    return int(res.group(1)) if res else RESERVE
+    res = re.search(r"\*\*Usage reserve:\s*([0-9]{1,2})\b", markdown)
+    return min(50, int(res.group(1))) if res else RESERVE  # F113: 0 to 50, as the command
 
 
 def least_points(markdown=None):
@@ -424,8 +424,8 @@ def least_points(markdown=None):
             markdown = open(hqpaths.ROADMAP, encoding="utf8").read()
         except OSError:
             return LEAST
-    m = re.search(r"\*\*Team line at least:\s*(\d{1,2})\b", markdown)
-    return int(m.group(1)) if m else LEAST
+    m = re.search(r"\*\*Team line at least:\s*([0-9]{1,2})\b", markdown)
+    return min(50, int(m.group(1))) if m else LEAST  # 0 to 50, as the command
 
 
 def team_line(line, reserve=0, least=LEAST):
@@ -487,12 +487,14 @@ def reading(path=None, now=None):
     if not r.get("readable"):
         return {}
     out = {}
+    checked = _iso(r.get("checkedAt"))
     for l in r.get("limits") or []:
         k = line_key(l.get("label"))
         if not k or l.get("kept") or not isinstance(l.get("percent"), (int, float)):
             continue
         pct, reset = float(l["percent"]), _iso(l.get("resetsAt"))
-        if reset is not None and reset <= now:
+        # F113: passed only when the reset parses and the reading was taken before it (windowPassed in usage.mjs); else held
+        if reset is not None and checked is not None and checked < reset <= now:
             w = LINES[k]["window"]
             while reset <= now:
                 reset += w

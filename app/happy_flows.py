@@ -20042,6 +20042,35 @@ print("OK")
         r = line("least", "15")
         need(r.returncode == 0 and "15 points at the least" in r.stdout, r.stdout + r.stderr)
         need(gate("--reserve", "--need", "five=0,weekly=2").returncode == 0, "back at 15")
+        for word in ("least", "reserve"):
+            r = line(word, "²")
+            need(r.returncode == 2 and "whole number of points from 0 to 50" in r.stderr and "Traceback" not in r.stderr, f"{word} ²: {r.stdout} {r.stderr[-300:]}")
+        # a number past 50 written on the roadmap by hand counts as 50, for every reader
+        rm = ws / "HQ/roadmap.md"
+        keep = rm.read_text()
+        rm.write_text(keep.replace("**Team line at least: 15 points.**", "**Team line at least: 99 points.**").replace("**Usage reserve: 15 points.**", "**Usage reserve: 70 points.**"))
+        child = r"""
+import sys
+sys.path.insert(0, sys.argv[1] + "/routine")
+import usagecost as U, usageline as L
+t = open(U.hqpaths.ROADMAP).read()
+print(U.least_points(), U.reserve_points(), L.least_of(t), L.reserve_of(t))
+"""
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        need(r.stdout.split() == ["50", "50", "50", "50"], f"the readers don't clamp to 50: {r.stdout} {r.stderr[-300:]}")
+        r = _sp.run(["node", "--input-type=module", "-e", f"import {{ leastOf, reserveOf }} from {json.dumps((ROOT / 'status/usage.mjs').as_uri())}; import {{ readFileSync }} from 'node:fs';"
+                     f" const t = readFileSync({json.dumps(str(rm))}, 'utf8'); console.log(leastOf(t), reserveOf(t));"], capture_output=True, text=True, env=env, timeout=60)
+        need(r.stdout.split() == ["50", "50"], f"the page and the gate don't clamp to 50: {r.stdout} {r.stderr[-300:]}")
+        # with neither line on the roadmap and an older phase row quoting a setting further down, they're written next to the settings
+        bare = "\n".join(l for l in keep.split("\n") if "**Team line at least:" not in l and "**Usage reserve:" not in l)
+        bare += "\n\n## Phase Z · Old\n\n| | Step | What |\n|---|---|---|\n| ✅ | Z1 An old row | it said **Usage limit: 70%.** once |\n"
+        rm.write_text(bare)
+        need(line("least", "15").returncode == 0 and line("reserve", "15").returncode == 0, "no write")
+        out = rm.read_text().split("\n")
+        at = {k: next(i for i, l in enumerate(out) if k in l) for k in ("**Usage limit:", "**Team line at least: 15 points.**", "**Usage reserve: 15 points.**", "## Phase Z")}
+        need(at["**Usage limit:"] < at["**Team line at least: 15 points.**"] < at["## Phase Z"] and at["**Usage reserve: 15 points.**"] < at["## Phase Z"]
+             and all(not out[at[k]].startswith("|") for k in at), f"written in the wrong place: {at}")
+        rm.write_text(keep)
         return "fourteen hours into a week the team's line is 15 and the agents' 10, a team job starts that night, his 0 brings the old line back"
 
     async def flow381(self) -> str:
@@ -20156,7 +20185,30 @@ print("OK")
         self._f113_usage(env, five=11, five_in=299, weekly=10, week_in=week - 100 * 60, plan="Max")
         r = minute()
         need(state(n).startswith("held") and r["ended"], f"not held at the team's line of 10: {state(n)} {r['log'][-3:]}")
-        return "a running job crosses a 5-hour reset: the old number and the fresh 2% don't hold it, its own line of 10 does"
+        # an unreadable reset time is held, as a missing one: it never counts as a passed window, at the start or while running
+        import subprocess as _sp
+        gate = self._f113_gate(env)
+        now = datetime.now(timezone.utc)
+        def odd(reset, checked=now):
+            Path(env["HQ_USAGE"]).write_text(json.dumps({"readable": True, "checkedAt": checked.strftime("%Y-%m-%dT%H:%M:%SZ"), "by": "a test", "plan": "Max",
+                                                         "limits": [{"label": "Weekly · all models", "percent": 95, "resetsAt": reset}]}))
+        child = r"""
+import sys
+sys.path.insert(0, sys.argv[1] + "/routine")
+import usagecost as U
+r = U.reading()
+print(r["weekly"]["pct"])
+"""
+        for what, reset, checked in (("a reset time of 'soon'", "soon", now),
+                                     ("a reset before the reading was taken", (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"), now)):
+            odd(reset, checked)
+            g = gate("--line", "--reserve")
+            need(g.returncode == 2, f"{what}: a running job isn't held at 95%: {g.stdout}")
+            g = gate("--reserve", "--need", "five=0,weekly=0")
+            need(g.returncode == 2, f"{what}: a job starts at 95%: {g.stdout}")
+            r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+            need(r.stdout.strip() == "95.0", f"{what}: the projection counts it as empty: {r.stdout} {r.stderr[-300:]}")
+        return "a running job crosses a 5-hour reset: the old number and the fresh 2% don't hold it, its own line of 10 does; an unreadable reset holds"
 
     async def flow229(self) -> str:
         """F107, no Claude: the gate on a real reading of this shape: only the weekly windows, as the usage tool and a run's own stream
@@ -21523,7 +21575,28 @@ print(json.dumps(o))
         drawn = re.findall(r"Stop line ([\d.]+)%", dom)
         need(drawn == [gate], f"the page draws the stop line at {drawn}, the gate stops at {gate}%")
         need("Stop line reached" in dom, "the page doesn't say the line is reached while the gate stops")
-        return f"the gate stops at {gate}%, the page draws {gate}% and says it's reached"
+        # F113: early in a window the reserve never takes the team's line under 15 (or the stop line itself), on the page as at the gate
+        moving = "**Usage limit: 100%.**\n\n**5-hour line: moving.**\n\n**Weekly line: moving.**\n\n**Fable line: fixed at 90%.**"
+        iso = lambda x: x.isoformat()  # noqa: E731
+        cases = [("14 hours into a week at 6%", [{"label": "Weekly · all models", "percent": 6, "resetsAt": iso(now + timedelta(hours=154))}], ["15"]),
+                 ("a 5-hour plan at minute 10", [{"label": "5-hour limit", "percent": 1, "resetsAt": iso(now + timedelta(minutes=290))},
+                                                 {"label": "Weekly · all models", "percent": 10, "resetsAt": iso(now + timedelta(hours=68))}], ["10", "44.5"])]
+        for what, limits, want in cases:
+            self._f116_road(site, extra=moving)
+            (site / ".status/usage.json").write_text(json.dumps({"checkedAt": datetime.now(timezone.utc).isoformat(), "by": "a test", "readable": True,
+                                                                  "plan": "Max", "limits": limits}))
+            r = await asyncio.to_thread(subprocess.run, [node, str(site / "status/save-usage.mjs"), "--gate", "--reserve", "--need", "five=0,weekly=0"],
+                                        capture_output=True, text=True, env=env, timeout=60)
+            need(r.returncode == 0, f"{what}: the gate stops: {r.stdout.strip()}")
+            proc, base = await self._f116_serve(site)
+            try:
+                dom = await self._f116_dom(base)
+            finally:
+                self._f116_stop(proc)
+            drawn = re.findall(r"Stop line (-?[\d.]+)%", dom)
+            need(drawn == want, f"{what}: the page draws the stop line at {drawn}, the gate's are {want}")
+            need("Stop line reached" not in dom, f"{what}: the page says the line is reached while the gate lets work start")
+        return f"the gate stops at {gate}%, the page draws {gate}% and says it's reached; early in a window it draws the team's 15% and 10%, not reached"
 
     async def flow346(self) -> str:
         """F116, no Claude: the phone page's weight: the page open in a phone-wide browser for a minute, against the real planning's

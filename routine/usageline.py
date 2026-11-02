@@ -172,12 +172,40 @@ def write(key: str, moving: bool, number: int | None) -> None:
     os.replace(tmp, ROADMAP)
 
 
-RESERVE = re.compile(r"\*\*Usage reserve:\s*(\d{1,2})\b[^*]*\*\*")
+RESERVE = re.compile(r"\*\*Usage reserve:\s*([0-9]{1,2})\b[^*]*\*\*")
+# F113: where the usage settings stand on the roadmap: a line of its own (a list item or a paragraph), never a table's row
+SETTING = re.compile(r"^(?:- )?\*\*(?:Usage limit|Usage reserve|Team line at least|Weekly limit|5-hour line|Weekly line|Fable line):")
 
 
 def reserve_of(text: str) -> int:
     m = RESERVE.search(text)
-    return int(m.group(1)) if m else 15
+    return min(50, int(m.group(1))) if m else 15  # F113: 0 to 50, as the command
+
+
+def points(word: str) -> int | None:
+    """F113: a whole number of points from 0 to 50 typed on the command line, or None (a "²" is no number)."""
+    return int(word) if re.fullmatch(r"[0-9]{1,2}", word or "") and int(word) <= 50 else None
+
+
+def insert_setting(text: str, new: str, words: str) -> str:
+    """F113: a new usage setting goes right after the last of the usage settings, in their own list or paragraphs; never into a
+    phase table or after a heading further down, where an older row may quote a setting."""
+    lines = text.split("\n")
+    first = next((j for j, l in enumerate(lines) if SETTING.match(l)), None)
+    if first is None:
+        first = next(j for j, l in enumerate(lines) if LIMIT.search(l) and not l.lstrip().startswith("|"))
+    last = first
+    for j in range(first + 1, len(lines)):
+        l = lines[j]
+        if l.startswith("#") or l.lstrip().startswith("|") or l.strip() == "---":
+            break
+        if SETTING.match(l):
+            last = j
+    if lines[last].startswith("- "):
+        lines.insert(last + 1, f"- {new} {words}")
+    else:
+        lines[last + 1:last + 1] = ["", f"{new} {words}"]
+    return "\n".join(lines)
 
 
 def write_reserve(n: int) -> None:
@@ -189,23 +217,20 @@ def write_reserve(n: int) -> None:
     if RESERVE.search(text):
         text = RESERVE.sub(lambda _: new, text, count=1)
     else:
-        lines = text.split("\n")
-        i = max(j for j, l in enumerate(lines) if LIMIT.search(l) or any(mode_re(k).search(l) for k in LINES))
-        lines.insert(i + 1, f"- {new} Taken off each stop line for the agents' cycles and the team, so his calls and the "
-                            "small routines always have room (F100). Switched from a call.")
-        text = "\n".join(lines)
+        text = insert_setting(text, new, "Taken off each stop line for the agents' cycles and the team, so his calls and the "
+                                         "small routines always have room (F100). Switched from a call.")
     hqpaths.guard_roadmap(ROADMAP)
     tmp = ROADMAP + ".tmp"
     open(tmp, "w", encoding="utf8").write(text)
     os.replace(tmp, ROADMAP)
 
 
-LEAST = re.compile(r"\*\*Team line at least:\s*(\d{1,2})\b[^*]*\*\*")
+LEAST = re.compile(r"\*\*Team line at least:\s*([0-9]{1,2})\b[^*]*\*\*")
 
 
 def least_of(text: str) -> int:
     m = LEAST.search(text)
-    return int(m.group(1)) if m else 15
+    return min(50, int(m.group(1))) if m else 15  # 0 to 50, as the command
 
 
 def write_least(n: int) -> None:
@@ -217,12 +242,9 @@ def write_least(n: int) -> None:
     if LEAST.search(text):
         text = LEAST.sub(lambda _: new, text, count=1)
     else:
-        lines = text.split("\n")
-        i = max(j for j, l in enumerate(lines) if LIMIT.search(l) or RESERVE.search(l) or any(mode_re(k).search(l) for k in LINES))
-        lines.insert(i + 1, f"- {new} The reserve never takes the team's stop line under this (or under the stop line itself), so "
-                            "the first hours after a reset still have room for the team and the agents; from a line of this plus the "
-                            "reserve on, the whole reserve is kept (F113). 0 keeps the whole reserve always. Switched from a call.")
-        text = "\n".join(lines)
+        text = insert_setting(text, new, "The reserve never takes the team's stop line under this (or under the stop line itself), so "
+                                         "the first hours after a reset still have room for the team and the agents; from a line of this plus "
+                                         "the reserve on, the whole reserve is kept (F113). 0 keeps the whole reserve always. Switched from a call.")
     hqpaths.guard_roadmap(ROADMAP)
     tmp = ROADMAP + ".tmp"
     open(tmp, "w", encoding="utf8").write(text)
@@ -235,19 +257,19 @@ def main(argv: list[str]) -> int:
         return 0
     if argv[0] == "least":
         if len(argv) == 2:
-            if not argv[1].isdigit() or int(argv[1]) > 50:
+            if points(argv[1]) is None:
                 print("The least line is a whole number of points from 0 to 50.", file=sys.stderr)
                 return 2
-            write_least(int(argv[1]))
+            write_least(points(argv[1]))
         print(f"The team's line stays at {least_of(read()[0])} points at the least when the reserve comes off "
               f"(the reserve is {reserve_of(read()[0])} points).")
         return 0
     if argv[0] == "reserve":
         if len(argv) == 2:
-            if not argv[1].isdigit() or int(argv[1]) > 50:
+            if points(argv[1]) is None:
                 print("The reserve is a whole number of points from 0 to 50.", file=sys.stderr)
                 return 2
-            write_reserve(int(argv[1]))
+            write_reserve(points(argv[1]))
         print(f"The reserve is {reserve_of(read()[0])} points: taken off each stop line for the agents' cycles and the team.")
         return 0
     key = "five"
