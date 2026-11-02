@@ -323,9 +323,14 @@ def start(job):
                "Never main, never the version tags. " if hqpaths.is_maker() else
                "This HQ stays on its released version: never pull the work line (dev), and push nothing. ")  # F101 (C45)
             # F101: a program passes a build, not the job.
-            + f"Before the done mark of a build, commit, then run python3 {json.dumps(os.path.join(HERE, 'proof.py'))} run {n}: it "
-              "runs the flows your row names and the quick set on a copy and keeps the record; done is refused without a "
-              "green one for the commit HQ is on. "
+            + (f"Before the done mark of a build, commit, then run python3 {json.dumps(os.path.join(HERE, 'proof.py'))} run {n}: it "
+               "runs the flows your row names and the quick set on a copy and keeps the record; done is refused without a "
+               "green one for the commit HQ is on. " if not _headless() else
+               # F105: a full run takes over half an hour and a tool call ends at ten minutes, which took the run with it, and the box went on
+               "A build needs a green record, and the runner makes it: commit and push your work, write the result, and end the run; "
+               "when you end, the runner runs the proof itself (the flows your row names and the quick set, on a copy) and marks the job done. "
+               "Never start proof.py yourself, not in the background either: it takes over half an hour and a tool call ends at ten minutes. "
+               "A red record comes back to you with what failed. ")
             +
             # H168: the team estimates itself: its own guess at the start, kept next to the computed one and the real time.
             f"After reading the job's row, before building, write down your own guess of how many minutes this job will "

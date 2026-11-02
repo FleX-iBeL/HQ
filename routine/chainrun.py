@@ -193,9 +193,11 @@ elif "planned for the team at the sprint planning" in prompt:
     open(log, "w", encoding="utf8").write(t.replace("## Coming next\n", f"## Coming next\n\n- The page says it better ({label}).\n", 1))
     subprocess.run(["git", "add", "-A", "status", "CHANGELOG.md"], cwd=HQ)
     subprocess.run(["git", "commit", "-q", "-m", f"{label}: the page says it better"], cwd=HQ)
-    run("proof.py", "run", n)
     subprocess.run(["git", "push", "-q", "origin", "dev"], cwd=HQ, env={**os.environ, "HQ_PRIVACY_PASSED": "1"})
-    run("jobs.py", "done", n)
+    if "the runner runs the proof itself" not in prompt:  # a job that has to run it itself is cut off at ten minutes on the real thing
+        run("proof.py", "run", n)
+        run("jobs.py", "done", n)
+        open(os.environ["HQ_CHAIN_LOG"], "a").write("PROOF LEFT TO THE JOB\n")
 elif prompt.lstrip().startswith("let's go") and re.search(r"QA of (\S+) \(F56\)", prompt):
     label = re.search(r"QA of (\S+) \(F56\)", prompt)[1]
     run("qa.py", "pass", label, "the page's wording, tried for real", "--example", "empty schedule", "--ran", "the page", "--got", os.environ["HQ_CHAIN_NEW"], "--job", n, "--compared", "the empty card, 1 of 1 right")
@@ -397,6 +399,8 @@ def standin_run(root: Path, deadline_s: int = 280) -> dict:
             break
         time.sleep(1)
     missing = hand_offs(env, root, label, want_round=True) if label else ["no row was written"]
+    if "PROOF LEFT TO THE JOB" in (root / "standin.log").read_text():
+        missing.append("the job was told to run the proof itself")
     return {"label": label, "missing": missing, "stopped": where_it_stands(env, root, label)}
 
 
