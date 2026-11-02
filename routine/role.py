@@ -531,9 +531,11 @@ def _stayed(s, p, was, takeover, prev_look=None) -> bool:
     if was != "main" or not p.get("took_over", True) or not at:
         return False
     at = float(at)
-    # F115: awake and looking without a break since before the takeover is enough (awake_since starts again after any
-    # gap); its last look needn't have come after it: a cut can heal within the minute after the other took over.
+    # F115: its last look may have come just before the takeover, when the cut heals within the minute after it: then
+    # that look must be recent (less than the takeover time ago, and less than a sleep's gap), so it never left.
     if float(s.get("awake_since") or 0) > at or not prev_look:
+        return False
+    if float(prev_look) < at and time.time() - float(prev_look) >= min(takeover, AWAY_GAP):
         return False
     return not (s.get("offline_seen") and float(s["offline_seen"]) >= at - takeover - 120)
 

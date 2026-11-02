@@ -16559,15 +16559,12 @@ print("OK")
         (ws / "HQ/fine.md").write_text("the main's words\n")
         os.utime(ws / "HQ/fine.md", (old, old))
         minute()
-        need(any(i["key"] == "workspace-push" and not i.get("back") for i in inc()), f"no incident for a clash: {inc()}")
-        need("the main's words" in (ws / "HQ/fine.md").read_text() and not (ws / ".git/MERGE_HEAD").exists(), "the merge wasn't taken back")
-        # settled by hand: the next look pushes what was left, and the incident closes
-        g("fetch", "-q", "origin")
-        g("merge", "-q", "-X", "ours", "--no-edit", "origin/main")
-        minute()
-        need("the main's words" in on_github("HQ/fine.md").stdout, "what was left unpushed wasn't pushed")
-        need(not any(i["key"] == "workspace-push" and not i.get("back") for i in inc()), "the incident stays open")
-        return "a note on GitHub after its ten minutes, a key kept out, a refused push merged, a clash an incident, a late push"
+        # F115: a clash settles itself, main wins with the other side kept: no incident, nothing waits on him
+        need(not any(i["key"] == "workspace-push" and not i.get("back") for i in inc()), f"a clash opened an incident: {inc()}")
+        need("the main's words" in on_github("HQ/fine.md").stdout and not (ws / ".git/MERGE_HEAD").exists(),
+             "the main's words didn't win on GitHub, or the merge was left half done")
+        need("the chat's words" in on_github("HQ/kept-from-both.md").stdout, "the other side's words weren't kept in the list")
+        return "a note on GitHub after its ten minutes, a key kept out, a refused push merged, a clash settled itself main wins with the other's words kept"
 
     async def flow220(self) -> str:
         """F102, no Claude: two writers can't wipe each other. Two processes adding 150 notes at once lose none, with no errors
@@ -21316,6 +21313,7 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                 if acting("B") == "main":
                     break
                 time.sleep(1.5)
+            await asyncio.to_thread(look, "A")  # the minute after: A looks on, not seeing B
             need(acting("A") == "main" and acting("B") == "main", f"the cut didn't make both main: A {acting('A')}, B {acting('B')}")
             ra = await asyncio.to_thread(run, "A", "app/todo.py", "add", "1", "The server's row in the cut", "--by", "in the app")
             rb = await asyncio.to_thread(run, "B", "app/todo.py", "add", "1", "The laptop's row in the cut", "--by", "in the app")
@@ -33111,24 +33109,18 @@ st A PATCH /rest/config/devices/$IB '{"paused": false}' >/dev/null
 wait_for "ls '$WA' '$WB' | grep -q 'shared.sync-conflict-'" 60 || fail "no conflict copy came: $(ls "$WA" "$WB" | grep shared)"
 wait_for "[ \$(ls '$WA' | grep -c 'shared') -ge 2 ]" 30 || fail "the conflict copy didn't reach A"
 ra routine/sync.py conflicts | grep -q "shared.md" || fail "the conflict isn't listed"
-OUT=$(ra routine/sync.py tick); echo "$OUT" | grep -q '"queued": \[[0-9]' || fail "no merge job was queued: $OUT"
-grep -q "Sync conflict (H56.4)" "$WA/HQ/roadmap.md" || fail "the merge job isn't on the queue"
-ra routine/sync.py tick | grep -q '"queued": \[\]' || fail "a second look queued it again"
-[ "$(grep -c "Sync conflict (H56.4)" "$WA/HQ/roadmap.md")" = 1 ] || fail "the merge job was queued more than once"
-grep -q 'conflict cop' "$T/A/HQ/.status/routines.json" || fail "the sync line doesn't say there's a conflict"
-python3 -c "import json,sys; d=json.load(open(sys.argv[1])); i=[x for x in d['incidents'] if x['key']=='sync' and not x.get('back')]; assert i and i[0]['fixes'], d" "$T/A/HQ/.status/incidents.json" || fail "the conflict isn't in the incidents with its merge job"
-wait_for "ls '$WB' | grep -q 'shared.sync-conflict-'" 30 || fail "the conflict copy didn't reach B"
-rb routine/sync.py tick --backup | grep -q '"queued": \[\]' || fail "the backup queued a merge too"
-grep -q 'the main one merges it' "$T/B/HQ/.status/routines.json" || fail "the backup's line doesn't say the main merges it"
-echo "OK both changed the same note: both versions kept, the line and the incidents say so, one merge job queued on the main"
-
-# The merge (here by hand, as the job would): one file with both, the copy gone; then green.
-C=$(ls "$WA" | grep 'shared.sync-conflict-' | head -1)
-{ echo "the laptop's version"; echo "the server's version"; } > "$WA/shared.md"; rm -f "${WA:?}/${C:?}"
-wait_for "! ls '$WB' | grep -q 'shared.sync-conflict-' && grep -q \"server's\" '$WB/shared.md' && grep -q \"laptop's\" '$WB/shared.md'" 30 || fail "the merge didn't reach B"
-wait_for "ra routine/sync.py tick | grep -q '\"state\": \"ok\"'" 30 || fail "the line didn't go green after the merge: $(ra routine/sync.py tick)"
-python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert not [x for x in d['incidents'] if x['key']=='sync' and not x.get('back')]" "$T/A/HQ/.status/incidents.json" || fail "the incident didn't close"
-echo "OK once merged the copy is gone on both, the line is green and the incident closed"
+# F115: main wins. The main's version stays in the file, the other's goes in the list he sees, the copy goes; no merge job.
+SEEN="$(ls "$WA" | grep shared | tr '\n' ' ') A=${IA:0:7} B=${IB:0:7}"
+OUT=$(ra routine/sync.py tick); echo "$OUT" | grep -q '"queued": \[\]' || fail "a merge job was queued: $OUT"
+grep -q "Sync conflict (H56.4)" "$WA/HQ/roadmap.md" && fail "a merge job is on the queue"
+ls "$WA" | grep -q 'shared.sync-conflict-' && fail "the conflict copy is still on the main"
+[ "$(cat "$WA/shared.md")" = "the laptop's version" ] || fail "the main's version didn't stay: $(cat "$WA/shared.md") ($SEEN; $(grep -h settle "$T/A/HQ/scratch/routine/routine.log" 2>/dev/null | tail -3))"
+grep -q "the server's version" "$WA/HQ/kept-from-both.md" || fail "the other's version isn't kept in the list"
+wait_for "! ls '$WB' | grep -q 'shared.sync-conflict-' && grep -q \"laptop's\" '$WB/shared.md'" 60 || fail "the settled file didn't reach B"
+rb routine/sync.py tick --backup | grep -q '"queued": \[\]' || fail "the backup queued a merge"
+wait_for "ra routine/sync.py tick | grep -q '\"state\": \"ok\"'" 30 || fail "the line didn't go green after settling: $(ra routine/sync.py tick)"
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])) if __import__('os').path.exists(sys.argv[1]) else {'incidents': []}; assert not [x for x in d['incidents'] if x['key']=='sync' and not x.get('back')]" "$T/A/HQ/.status/incidents.json" || fail "an incident stayed open"
+echo "OK both changed the same note: main wins, the other's version kept in the list, the copy gone on both, no merge job, green"
 
 # An HQ that becomes main lines its git up with GitHub, keeping the files.
 cp "$WB/shared.md" "$T/keep.md"
@@ -33430,7 +33422,7 @@ FLOWS = {
     63: ("H56.2: job windows and the mail check on Linux, in tmux: a throwaway job and mail check", False, "flow63"),
     64: ("F16: the call page fits the screen before, during and after a call; no scrolling into white space", False, "flow64"),
     65: ("H56.3: main and backup: two throwaway HQs hand the main role back and forth; alone, an HQ is simply main", False, "flow65"),
-    66: ("H56.4: the two-way sync: two private Syncthings, both ways, video left out, conflicts kept and merged, only the main commits", False, "flow66"),
+    66: ("H56.4: the two-way sync: two private Syncthings, both ways, video left out, conflicts settled main wins with the other kept (F115), only the main commits", False, "flow66"),
     67: ("F17: a test never changes the real job list, schedule or status block, nor uses the real pairing", False, "flow67"),
     68: ("H72: the hidden Yes: hold the greyed-out Send, slide onto Yes, let go sends Yes", False, "flow68"),
     69: ("H76, H77: each agent her own character on calls, HQ's defaults a workspace can change", False, "flow69"),
@@ -33588,7 +33580,7 @@ FLOWS = {
     228: ("F107: Ultra with no 5-hour window: the past stays Max 5x, estimates, planning, nights and page on the week with no 5-hour left, then back on Max 5x with all of it", False, "flow228"),
     227: ("F102: the status page never hangs on a slow script: the last answer at once, one run at a time", False, "flow227"),
     226: ("F100: his say-so for a daytime build: a job's process, the old variable and a made-up ticket refused, only the status page's own tap counts", False, "flow226"),
-    219: ("F102: a note written in the app is on GitHub after its ten minutes with no one naming it; a key stays out; a refused push merges; a clash is an incident", False, "flow219"),
+    219: ("F102: a note written in the app is on GitHub after its ten minutes with no one naming it; a key stays out; a refused push merges; a clash settles itself, main wins (F115)", False, "flow219"),
     218: ("F100: a headless job saves the stream's limits as they come and reads no status line; the routine holds it at the line", False, "flow218"),
     217: ("F100: near the reserve a team job is refused, his to turn; cycles before the team, a bug ahead of the features, three items in progress at most, five a night with each test run counted", False, "flow217"),
     216: ("F100: no build in the day without his say-so, kept with who and when; a held job doesn't restart at night unless planned", False, "flow216"),

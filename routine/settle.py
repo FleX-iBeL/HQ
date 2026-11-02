@@ -313,14 +313,24 @@ def settle_copy(c: dict, main_device: str | None, other_name: str, log=None) -> 
         if log:
             log(f"settle: couldn't read {c['copy']}: {e}")
         return False
-    m = re.search(r"\.sync-conflict-\d{8}-\d{6}-([A-Z0-9]{7})", os.path.basename(c["copy"]))
-    copy_is_main = bool(m and main_device and main_device.upper().startswith(m.group(1)))
     base = os.path.dirname(c["file"])
     for f in _folders():
         if c["file"].startswith(f["path"].rstrip("/") + "/"):
             base = f["path"]
             break
     rel = os.path.relpath(c["file"], base)
+    # Which of the two is the main's: Syncthing says who last changed the file as it is now (its short device id);
+    # when that's the other computer, the file is the other's version and the copy the main's. (The id in a copy's
+    # name isn't a safe guide: on this Syncthing it names the version that won, not the one in the copy.)
+    copy_is_main = False
+    try:
+        import sync
+        import urllib.parse
+        d = sync.api(f"/rest/db/file?folder={c['folder']}&file={urllib.parse.quote(rel)}")
+        by = str(((d or {}).get("local") or {}).get("modifiedBy") or "")
+        copy_is_main = bool(by and main_device and file_raw is not None and not main_device.upper().startswith(by.upper()))
+    except Exception:
+        pass
     main_raw, other_raw = (copy_raw, file_raw) if copy_is_main else (file_raw, copy_raw)
     path = c["file"]
     with file_lock(path):
