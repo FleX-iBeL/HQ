@@ -448,6 +448,9 @@ def set_ready(label, on=True):
     d["ready"] = m
     d["set"] = int(time.time())
     _save(RANKS, d)
+    if on:
+        import trail  # F105
+        trail.step(trail.resolve(label), "ready")
     return bool(on)
 
 
@@ -1586,6 +1589,8 @@ def plan_sprint(labels, night=None, now=None):
             said.append(f"{r['label']} couldn't be planned: {(res.stderr or res.stdout).strip()[:200]}")
             continue
         planned.append(r["label"])
+        import trail  # F105
+        trail.step(trail.resolve(r["label"]), "planned", at_night=time.strftime("%Y-%m-%d %H:%M", time.localtime(at)))
         said.append(f"{r['label']} planned for {_night_name(day, now)}, {time.strftime('%a %d %b %H:%M', time.localtime(at))}"
                     f" (about {E.dur(r['est'])}, done around {E.hhmm(r['eta'])}).")
     if L["line"]:

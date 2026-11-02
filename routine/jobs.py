@@ -319,7 +319,7 @@ def write(text, jobs, on):
 ROW_NUM = re.compile(r"^\| [^|]* \| ([A-Z])(\d+)\b", re.M)
 
 
-def roadmap_row(text, said, bug=False, by=""):
+def roadmap_row(text, said, bug=False, by="", item=None):
     """H160: a numbered row for work added on the status page, in Phase F (a bug) or Phase H (everything else),
     right after that phase's highest number, in the roadmap's own shape. Returns (text, label)."""
     letter = "F" if bug else "H"
@@ -355,7 +355,7 @@ def roadmap_row(text, said, bug=False, by=""):
         lines.insert(at + 1, f"| ⬜ | {label} {title} | {when}, typed: \"{said}\" [Added on the status page, no call; "
                              f"the title is the first sentence.] | {said} | |")
     import trail
-    trail.written(label, said, by=by)  # F103: the id is given here, when the item is written
+    trail.written(label, said, by=by, item=item)  # F103: the id is given here, when the item is written
     return text[:head] + "\n".join(lines) + text[end:], label
 
 
@@ -697,6 +697,13 @@ def main(argv):
                 i = args.index("--after-qa")
                 after = (args[i + 1] if i + 1 < len(args) else "").upper()
                 args = args[:i] + args[i + 2:]
+            order_n = None  # F105: the order it's written for, as an argument: its id goes on with the row
+            if "--order" in args:
+                i = args.index("--order")
+                order_n = args[i + 1] if i + 1 < len(args) else ""
+                if not order_n.isdigit():
+                    sys.exit("--order wants the order's number.")
+                args = args[:i] + args[i + 2:]
             said = one_line(" ".join(a for a in args if a != "--bug")).replace("|", "/")
             if not said:
                 sys.exit("What goes on the planning? Write it in a line or two.")
@@ -706,7 +713,9 @@ def main(argv):
                 if no:
                     sys.exit(f"Refused: {no} Nothing written.")
             run_ = os.environ.get("HQ_JOB") or ""
-            text, label = roadmap_row(text, said, bug, by=f"job {run_}" if run_.isdigit() else "on a call")
+            import trail
+            text, label = roadmap_row(text, said, bug, by=f"job {run_}" if run_.isdigit() else "on a call",
+                                      item=trail.of_order("moneypenny", int(order_n)) if order_n else None)
             write(text, jobs, on)
             print(f"{label} is on the planning.")
             if after:

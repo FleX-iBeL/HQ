@@ -455,6 +455,8 @@ def _attempt(label, now_fn=_clock, extra=None):
             e.update({"ask": fp, "verdict": "pass" if a["pass"] else "flag", "findings": a["findings"], "at": now,
                       "cost": a.get("cost"), "s": a.get("s"), "model": a.get("model"), "effort": a.get("effort")})
             e.pop("tries", None)
+            import trail  # F105: the verdict on the item's record
+            trail.step(trail.resolve(label), "review", verdict="pass" if a["pass"] else "flag", findings=len(a["findings"]))
             e.pop("next_try", None)
             e.pop("cleared_words", None)
             if not a["pass"]:
@@ -849,6 +851,8 @@ def round_started(pick, now=None):
             f["marked"] = e.get("ask")
         else:
             f.update({"day": _today(now), "n": _rounds(e) + 1, "at": int(now)})
+            import trail  # F105
+            trail.step(trail.resolve(pick["label"]), "round", n=f["n"])
         S._save(S.RANKS, d)
 
 

@@ -35,7 +35,7 @@ REL = os.path.join("HQ", "trail.jsonl")
 ID = re.compile(r"^r-[0-9a-f]{8}$")
 LABEL = re.compile(r"^[A-Z]\d+(\.\d+)*$")
 WORDS_KEPT = 400  # F103: how much of an item's first words the record keeps; the row itself holds them whole
-STEPS = ("written", "job", "qa", "release", "text", "incident")
+STEPS = ("written", "job", "qa", "release", "text", "incident", "order", "review", "round", "ready", "planned")
 
 
 def path() -> str | None:
@@ -121,12 +121,32 @@ def label_of(item: str) -> str | None:
     return None
 
 
-def written(label: str, words: str = "", by: str = "") -> str:
-    """An item is written: its id, a new one unless the label has one. The id comes back whatever happens to the file."""
+def order(agent: str, n: int, words: str = "", by: str = "") -> str:
+    """F105: a request handed to an agent's own list gets its id here, before there's a row: his words and the time are the first line."""
+    item = "r-" + secrets.token_hex(4)
+    try:
+        _put({"at": round(time.time(), 3), "id": item, "step": "order", "agent": agent, "n": n,
+              "words": " ".join(str(words).split())[:WORDS_KEPT], **({"by": by} if by else {})})
+    except Exception as e:
+        _bad(e)
+    return item
+
+
+def of_order(agent: str, n: int) -> str | None:
+    """The id of order n on an agent's list, or None (an order from before the record)."""
+    for d in lines():
+        if d.get("step") == "order" and d.get("agent") == agent and d.get("n") == n:
+            return d["id"]
+    return None
+
+
+def written(label: str, words: str = "", by: str = "", item: str | None = None) -> str:
+    """An item is written: its id, a new one unless the label has one, or the id of the order it was written for (F105).
+    The id comes back whatever happens to the file."""
     have = of(label)
     if have:
         return have
-    item = "r-" + secrets.token_hex(4)
+    item = item or "r-" + secrets.token_hex(4)
     try:
         _put({"at": round(time.time(), 3), "id": item, "step": "written", "label": label,
               "words": " ".join(str(words).split())[:WORDS_KEPT], **({"by": by} if by else {})})
@@ -171,7 +191,7 @@ def _when(d: dict) -> str:
 
 def say(d: dict) -> str:
     s = d.get("step")
-    bits = [f"{k} {d[k]}" for k in ("label", "job", "state", "commit", "version", "tag", "why", "key", "line") if d.get(k) not in (None, "")]
+    bits = [f"{k} {d[k]}" for k in ("label", "agent", "n", "by", "verdict", "findings", "job", "state", "commit", "version", "tag", "why", "key", "line", "at_night", "night") if d.get(k) not in (None, "")]
     tail = f": {d['words']}" if d.get("words") else ""
     return f"{_when(d)} · {s} · " + ", ".join(bits) + tail
 
