@@ -136,8 +136,9 @@ def order(agent: str, n: int, words: str = "", by: str = "") -> str:
 
 
 def of_order(agent: str, n: int) -> str | None:
-    """The id of order n on an agent's list, or None (an order from before the record)."""
-    for d in lines():
+    """The id of order n on an agent's list, or None (an order from before the record). The newest match: n is the order's place in her
+    list, so after her list starts over an older request can have the same n."""
+    for d in reversed(lines()):
         if d.get("step") == "order" and d.get("agent") == agent and d.get("n") == n:
             return d["id"]
     return None
