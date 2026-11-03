@@ -1,7 +1,10 @@
 {
   "on": [
     "briefing",
+    "open_line",
     "headless_jobs",
+    "one_way_sync",
+    "planning_index",
     "handover"
   ]
 }

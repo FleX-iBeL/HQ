@@ -20236,6 +20236,82 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
         need("donna on a Deep call: the whole folder" in r.stdout, f"the report doesn't name a Deep start: {r.stdout}")
         return f"without switches over the cap, with the briefing under it, the undo only its own file; a Deep start measured whole ({o['deep']['total']} bytes)"
 
+    async def flow470(self) -> str:
+        """H301, no Claude: at the stable version the five backend switches are on by default. A fresh install (the installer's own
+        workspace step, the way flow 440 runs it) has all five on and counts the data change as run; an HQ that updates with one of HQ's
+        own earlier files (each template's from before, and change 002's) gets the five once, and its undo gives back the file byte for
+        byte; a file with switches set by hand stays exactly as it is, and so does one turned since. With two HQs the file is a synced one
+        the main writes, so the backup gets the main's."""
+        import importlib.util, shutil as _sh, subprocess as _sp
+        five = ["briefing", "open_line", "headless_jobs", "one_way_sync", "planning_index"]
+        tmp = self.tmp / "h301"
+        hq = tmp / "HQ"
+        hq.mkdir(parents=True)
+        skip = _sh.ignore_patterns("__pycache__")
+        for d in ("install", "template", "routine", "app"):
+            _sh.copytree(ROOT / d, hq / d, ignore=skip, symlinks=True)
+        ws, sup = tmp / "ws", tmp / "support"
+        sup.mkdir()
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_")}
+        env.update({"HQ_WORKSPACE": str(ws), "HQ_SUPPORT": str(sup), "HQ_INSTALL_FAKE": "1", "HQ_UNDER_TEST": "1"})
+        code = ("import importlib.util, json, sys, types\n"
+                "spec = importlib.util.spec_from_file_location('hq_install', sys.argv[1] + '/install/install.py')\n"
+                "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+                "print(json.dumps(m.Installer(types.SimpleNamespace(skip='')).workspace()))\n")
+        r = _sp.run([sys.executable, "-c", code, str(hq)], capture_output=True, text=True, env=env, cwd=str(hq), timeout=120)
+        need(r.returncode == 0 and (ws / "HQ/backend.json").exists(), f"the installer's workspace step: {r.stdout[-300:]} {r.stderr[-600:]}")
+        look = ("import json, sys; sys.path.insert(0, sys.argv[1] + '/app'); import backend; from pathlib import Path\n"
+                "print(json.dumps({n: backend.on(n, Path(sys.argv[2])) for n in backend.SWITCHES}))\n")
+        r = _sp.run([sys.executable, "-c", look, str(hq), str(ws)], capture_output=True, text=True, env=env, timeout=60)
+        fresh = json.loads(r.stdout.strip().splitlines()[-1])
+        need(all(fresh[n] for n in five), f"a fresh install doesn't have all five on: {fresh}")
+        p = next((ROOT / "routine/datachanges").glob("003-*.py"), None)
+        need(p is not None, "no data change for an HQ that updates")
+        applied = json.loads((ws / "HQ/data-changes.json").read_text())["applied"]
+        need(p.stem in applied, f"a fresh install would run the update's change on its new folder: {applied}")
+        spec = importlib.util.spec_from_file_location("h301_003", p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        before = (ws / "HQ/backend.json").read_text()
+        m.do(ws)
+        need((ws / "HQ/backend.json").read_text() == before, "the change wrote over a fresh install's file")
+        # An HQ that updates: each of HQ's own files from before gets the five, and the undo gives the file back as it was.
+        f = ws / "HQ/backend.json"
+        for i, old in enumerate(('{\n  "on": [\n    "briefing",\n    "headless_jobs",\n    "handover"\n  ]\n}\n',
+                                 '{\n  "on": [\n    "briefing",\n    "headless_jobs"\n  ]\n}\n', '{\n  "on": [\n    "headless_jobs"\n  ]\n}\n',
+                                 '{\n  "on": [\n    "briefing"\n  ],\n  "set_by": "HQ: this workspace had no switches yet"\n}\n')):
+            f.write_text(old)
+            m.do(ws)
+            r = _sp.run([sys.executable, "-c", look, str(hq), str(ws)], capture_output=True, text=True, env=env, timeout=60)
+            now = json.loads(r.stdout.strip().splitlines()[-1])
+            need(all(now[n] for n in five), f"HQ's earlier file {i + 1} didn't get the five: {now}")
+            need(now["handover"] == ("handover" in old), f"the hand-over was changed on file {i + 1}: {now}")
+            m.do(ws)
+            need(json.loads(f.read_text())["on"] == [n for n in m.ORDER if n in five or n in old], f"a second run changed it again: {f.read_text()}")
+            m.undo(ws)
+            need(f.read_text() == old, f"the undo didn't give file {i + 1} back as it was: {f.read_text()!r}")
+        # The person's own choices stay: a switch set by hand, and one turned after the change.
+        for own in ('{"on": ["briefing", "handover"]}\n', '{"on": ["briefing", "headless_jobs", "planning_index"]}\n', '{"on": []}\n',
+                    '{"on": ["briefing", "headless_jobs", "handover"], "mine": 1}\n'):
+            f.write_text(own)
+            m.do(ws)
+            need(f.read_text() == own, f"a file with switches set by hand was changed: {own!r} became {f.read_text()!r}")
+            m.undo(ws)
+            need(f.read_text() == own, f"the undo changed a file it didn't make: {own!r}")
+        f.write_text('{"on": ["briefing", "headless_jobs", "handover"]}\n')
+        m.do(ws)
+        turned = ("import sys, os; sys.path.insert(0, sys.argv[1] + '/app'); import backend; backend.switch('open_line', False)\n")
+        r = _sp.run([sys.executable, "-c", turned, str(hq)], capture_output=True, text=True, env={**env, "HQ_BACKEND": str(f)}, timeout=60)
+        need(r.returncode == 0 and "open_line" not in json.loads(f.read_text())["on"], f"a switch can't be turned off after it: {r.stderr[-300:]}")
+        after = f.read_text()
+        m.undo(ws)
+        need(f.read_text() == after, "the undo took back a switch turned since")
+        # Two HQs: the file is a synced one only the main writes, so the backup gets the main's.
+        sys.path.insert(0, str(ROOT / "routine"))
+        import role as _role
+        need(not any("HQ/backend.json".startswith(x) for x in _role.LOCAL_ON_BACKUP), "the switches' file stays local on the backup")
+        return "a fresh install has all five on and counts the change as run; HQ's four earlier files get the five once and undo byte for byte; switches set by hand, or turned since, stay"
+
     async def flow241(self) -> str:
         """F106, no Claude: a call's start is under the size the design sets, for every agent, on a workspace filled with made-up work: a long
         to-do list, a long status block, many planning rows, a big handbook. No life file is loaded whole; nothing of the rules is lost: every
@@ -36502,6 +36578,7 @@ FLOWS = {
     441: ("The small list: a download says why it can't go back yet, never that there's no version before; made a git copy with one tag, one back is found", False, "flow441"),
     442: ("The small list: forward brings back what she hadn't committed when she went back, and says so; where it can't land it stays on its branch, named", False, "flow442"),
     443: ("The small list: a workspace without backend switches gets the briefing and every start is under the cap; the undo takes back only its own file; a Deep start is measured whole", False, "flow443"),
+    470: ("H301: the five backend switches on by default at the stable version: a fresh install has all five; an HQ that updates gets them once unless it set its own; the undo gives its file back", False, "flow470"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),
