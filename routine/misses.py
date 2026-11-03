@@ -186,6 +186,22 @@ def _raised_today(st: dict, now: float) -> bool:
     return bool(r) and raise_id(float(r)) == raise_id(now)
 
 
+def _line_raised() -> float:
+    """When the newest repeat stands on her line (Donna's, without hers): the text itself, which reaches the other computer
+    through the sync, so a new main after a takeover knows when the last one went though its own state doesn't. 0 for none."""
+    try:
+        dl = _dl()
+        if dl.line_for("estimate-misses") == "team" and not dl.on_team_line():
+            with dl._Env(dl.team_env()):
+                msgs = dl.thread()
+        else:
+            msgs = dl.thread()
+        return max((float(m.get("at") or 0) for m in msgs if m.get("why") == "estimate-misses" and not m.get("quiet")), default=0.0)
+    except Exception as e:
+        print(f"(her line couldn't be read for the last repeat: {e!r})", file=sys.stderr)
+        return 0.0
+
+
 def _gap_left(st: dict, now: float) -> bool:
     """Less than GAP_S since the last repeat that really went: a pending one waits, and the wait isn't a try."""
     r = st.get("raised")
@@ -253,6 +269,10 @@ def sweep(hist: list[dict] | None = None, now: float | None = None) -> dict:
             told.append(job_key(h))
         st["told"] = told  # every missed job by number, no cap: past any number of misses none is told twice
         why = repeats(hist) if new else []
+        if why or st.get("pending"):  # its own record of the last repeat, else the newest on her line (a takeover's empty state)
+            seen = _line_raised()
+            if seen > float(st.get("raised") or 0):
+                st["raised"] = seen
         if why and not _raised_today(st, now):
             p = st.get("pending") or {}
             same = p.get("id") == raise_id(now)  # today's repeat again: its tries go on; a new day's starts over
