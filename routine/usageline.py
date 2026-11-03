@@ -442,7 +442,7 @@ def main(argv: list[str]) -> int:
             return 0
     import role
     handed = role.handed_words() if _writes(argv) else None
-    if _writes(argv) and os.environ.get("HQ_ROLE_HERE") and not handed:
+    if _writes(argv) and role.is_handed() and not handed:
         # F115 with F114 (the combined check): a handed switch stands only on words the backup checked at its own door
         print("Refused: a switch handed over from the other computer carries no words it checked there.", file=sys.stderr)
         return 2
