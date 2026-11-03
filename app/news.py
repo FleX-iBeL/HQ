@@ -112,7 +112,7 @@ def _read(p: Path, empty):
 
 def _write(p: Path, d) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1) + "\n", encoding="utf8")
     os.replace(tmp, p)
 
@@ -433,6 +433,17 @@ def _setup_lines(s: dict) -> str:
 
 def change(argv: list[str], f: Path | None = None) -> str:
     f = f or folder()
+    sys.path.insert(0, str(ROOT / "routine"))
+    import role
+    h = role.door(f / SETUP, "news", list(argv))  # F115: on the backup the main writes the setup
+    if h is not None:
+        return role.door_said(h, "Your news setup")
+    import hqlock  # F115: one change at a time across processes
+    with hqlock.locked(f / SETUP):
+        return _change(argv, f)
+
+
+def _change(argv: list[str], f: Path) -> str:
     d = setup(f)
     what, how, rest = argv[0], argv[1] if len(argv) > 1 else "", argv[2:]
     opts, args, i = {}, [], 0

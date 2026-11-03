@@ -143,7 +143,7 @@ def plan(log_text: str, archive_text: str, now: dt.datetime, hours: float = HOUR
 
 
 def _write(path: Path, text: str) -> None:
-    tmp = path.with_name(path.name + ".h100-tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.h100-tmp")
     tmp.write_text(text)
     os.replace(tmp, path)
 
@@ -154,6 +154,13 @@ def move(folder: Path | str, now: dt.datetime | None = None, hours: float = HOUR
     log_p, arch_p = folder / LOG, folder / ARCHIVE
     if not log_p.exists():
         return 0
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import hqlock  # F115: the log's one lock, the same a call's hand-over edit takes
+    with hqlock.locked(log_p):
+        return _move(log_p, arch_p, now, hours, dry)
+
+
+def _move(log_p: Path, arch_p: Path, now: dt.datetime, hours: float, dry: bool) -> int:
     before = log_p.read_text()
     arch = arch_p.read_text() if arch_p.exists() else ""
     new_log, new_arch, n = plan(before, arch, now, hours)

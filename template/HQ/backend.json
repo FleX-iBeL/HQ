@@ -1,6 +1,7 @@
 {
   "on": [
     "briefing",
-    "headless_jobs"
+    "headless_jobs",
+    "handover"
   ]
 }

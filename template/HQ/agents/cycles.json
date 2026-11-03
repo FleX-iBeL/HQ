@@ -1,5 +1,5 @@
 {
-  "_about": "The agents run themselves: each agent's own cycle (routine/cycles.py). Numbers only; nothing personal. Changed in Settings or on a call (cycles.py set AGENT KEY VALUE). weekly_share and daily_share are points of the weekly usage limit; hours is when her cycles may run; a box is minutes and turns.",
+  "_about": "The agents run themselves: each agent's own cycle (routine/cycles.py). Numbers only; nothing personal. Changed in Settings or on a call (cycles.py set AGENT KEY VALUE). weekly_share and daily_share are points of the weekly usage limit; hours is when her cycles may run; a box is minutes and turns; looks_a_day is how often a day she looks at her own list inside her hours (morning, midday, evening), turning a new order into its step.",
   "agents": {
     "donna": {
       "on": true,
@@ -8,6 +8,7 @@
       "hours": ["08:00", "22:00"],
       "batches": ["12:00", "17:00"],
       "tripwire_texts": 2,
+      "looks_a_day": 3,
       "session": {"at": "08:30", "every": "day", "minutes": 10, "turns": 30, "useful_until": "12:00"},
       "step": {"minutes": 3, "turns": 10, "most_a_day": 6},
       "looks": []
@@ -19,6 +20,7 @@
       "hours": ["08:00", "22:00"],
       "batches": [],
       "tripwire_texts": 2,
+      "looks_a_day": 3,
       "session": {"at": "20:00", "every": "thursday", "minutes": 20, "turns": 60, "useful_until": "friday 09:30"},
       "step": {"minutes": 5, "turns": 15, "most_a_day": 2},
       "looks": [
@@ -34,6 +36,7 @@
       "hours": ["08:00", "22:00"],
       "batches": ["12:00"],
       "tripwire_texts": 2,
+      "looks_a_day": 3,
       "session": {"at": "21:00", "every": "thursday", "minutes": 40, "turns": 120, "useful_until": "friday 12:30"},
       "step": {"minutes": 5, "turns": 20, "most_a_day": 3},
       "looks": [

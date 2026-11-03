@@ -146,6 +146,19 @@ def line_text(key: str, moving: bool, number: int) -> str:
 
 
 def write(key: str, moving: bool, number: int | None) -> None:
+    import jobs  # F115: the planning file's one lock, the queue's: a switch here never undoes a planned line there
+    with jobs.locked():
+        _write(key, moving, number)
+
+
+def _replace(text: str) -> None:
+    hqpaths.guard_roadmap(ROADMAP)  # F17: a test never changes the real roadmap
+    tmp = f"{ROADMAP}.{os.getpid()}.tmp"
+    open(tmp, "w", encoding="utf8").write(text)
+    os.replace(tmp, ROADMAP)
+
+
+def _write(key: str, moving: bool, number: int | None) -> None:
     text, s = read()
     if s is None:
         sys.exit("The roadmap names no usage limit (**Usage limit: N%**), so there are no stop lines to switch.")
@@ -166,10 +179,7 @@ def write(key: str, moving: bool, number: int | None) -> None:
                 i = j
         lines.insert(i + 1, f"- {new} {WHAT[key]}")
         text = "\n".join(lines)
-    hqpaths.guard_roadmap(ROADMAP)  # F17: a test never changes the real roadmap
-    tmp = ROADMAP + ".tmp"
-    open(tmp, "w", encoding="utf8").write(text)
-    os.replace(tmp, ROADMAP)
+    _replace(text)
 
 
 RESERVE = re.compile(r"\*\*Usage reserve:\s*([0-9]{1,2})\b[^*]*\*\*")
@@ -210,6 +220,12 @@ def insert_setting(text: str, new: str, words: str) -> str:
 
 def write_reserve(n: int) -> None:
     """F100: taken off each stop line for the agents' cycles and the team; on the roadmap, so both HQs read the same one."""
+    import jobs  # F115: under the planning file's lock
+    with jobs.locked():
+        _write_reserve(n)
+
+
+def _write_reserve(n: int) -> None:
     text, s = read()
     if s is None:
         sys.exit("The roadmap names no usage limit (**Usage limit: N%**), so there are no stop lines to keep a reserve under.")
@@ -219,10 +235,7 @@ def write_reserve(n: int) -> None:
     else:
         text = insert_setting(text, new, "Taken off each stop line for the agents' cycles and the team, so his calls and the "
                                          "small routines always have room (F100). Switched from a call.")
-    hqpaths.guard_roadmap(ROADMAP)
-    tmp = ROADMAP + ".tmp"
-    open(tmp, "w", encoding="utf8").write(text)
-    os.replace(tmp, ROADMAP)
+    _replace(text)
 
 
 LEAST = re.compile(r"\*\*Team line at least:\s*([0-9]{1,2})\b[^*]*\*\*")
@@ -235,6 +248,12 @@ def least_of(text: str) -> int:
 
 def write_least(n: int) -> None:
     """F113: the reserve never takes the team's line under this; on the roadmap, next to the reserve."""
+    import jobs  # F115: under the planning file's lock
+    with jobs.locked():
+        _write_least(n)
+
+
+def _write_least(n: int) -> None:
     text, s = read()
     if s is None:
         sys.exit("The roadmap names no usage limit (**Usage limit: N%**), so there are no stop lines to keep a reserve under.")
@@ -245,10 +264,12 @@ def write_least(n: int) -> None:
         text = insert_setting(text, new, "The reserve never takes the team's stop line under this (or under the stop line itself), so "
                                          "the first hours after a reset still have room for the team and the agents; from a line of this plus "
                                          "the reserve on, the whole reserve is kept (F113). 0 keeps the whole reserve always. Switched from a call.")
-    hqpaths.guard_roadmap(ROADMAP)
-    tmp = ROADMAP + ".tmp"
-    open(tmp, "w", encoding="utf8").write(text)
-    os.replace(tmp, ROADMAP)
+    _replace(text)
+
+
+def _writes(argv: list[str]) -> bool:
+    rest = argv[1:] if argv and argv[0].lower() in ALIASES else argv
+    return bool(rest) and (rest[0] in ("moving", "fixed") or (argv[0] in ("reserve", "least") and len(argv) == 2))
 
 
 # F114 (the check's fix round): what names each line in his words. "The weekly Fable line" is the Fable one.
@@ -411,18 +432,42 @@ def main(argv: list[str]) -> int:
         print(describe())
         return 0
     said = None
+    orig = [a for a in argv]
     if "--said" in argv:  # F114: from a call or a chat, a switch stands on his own words; the status page is his own hand
         i = argv.index("--said")
         said, argv = (argv[i + 1] if i + 1 < len(argv) else ""), argv[:i] + argv[i + 2:]
+        orig = list(argv)
         if not argv:
             print(describe())
             return 0
+    import role
+    handed = role.handed_words() if _writes(argv) else None
+    if _writes(argv) and os.environ.get("HQ_ROLE_HERE") and not handed:
+        # F115 with F114 (the combined check): a handed switch stands only on words the backup checked at its own door
+        print("Refused: a switch handed over from the other computer carries no words it checked there.", file=sys.stderr)
+        return 2
+
     def refused(key, number=None, moving=False):
+        if handed:  # checked on the backup, against the call or chat it came from: trusted here, and where it came from noted
+            role.note_handed(f"usageline {' '.join(orig)}", handed)
+            return False
         why = his_say_so(said, key, number, moving=moving)
         if why:
             print(f"Refused: {why}. A usage stop line changes only on his own words: --said \"HIS WORDS\", a line he said or typed, "
                   "naming the line (weekly, 5-hour or Fable) or its number.", file=sys.stderr)
         return bool(why)
+
+    def to_main():
+        """F115: on the backup a switch that passed its checks here goes to the main, which writes the planning file, with the
+        words checked here. None when this computer writes it itself."""
+        if os.environ.get("HQ_ROLE_HERE") or not role.is_backup():
+            return None
+        hits = []
+        if said is not None and sprint_places() is not None:
+            import sprint
+            hits = sprint.his_said_now(said, None, sprint_places())
+        return role.forward("usageline", list(orig) + (["--said", said] if said is not None else []),
+                            env=role.checked_env(said, hits))
     if argv[0] == "least":
         if len(argv) == 2:
             if os.environ.get("HQ_IN_JOB") or sprint_places() is not None:  # F114: not from a job, a call or a chat, as the reserve
@@ -431,6 +476,11 @@ def main(argv: list[str]) -> int:
             if points(argv[1]) is None:
                 print("The least line is a whole number of points from 0 to 50.", file=sys.stderr)
                 return 2
+            if handed:
+                role.note_handed(f"usageline {' '.join(orig)}", handed)
+            r = to_main()
+            if r is not None:
+                return r
             write_least(points(argv[1]))
         print(f"The team's line stays at {least_of(read()[0])} points at the least when the reserve comes off "
               f"(the reserve is {reserve_of(read()[0])} points).")
@@ -443,6 +493,11 @@ def main(argv: list[str]) -> int:
             if points(argv[1]) is None:
                 print("The reserve is a whole number of points from 0 to 50.", file=sys.stderr)
                 return 2
+            if handed:
+                role.note_handed(f"usageline {' '.join(orig)}", handed)
+            r = to_main()
+            if r is not None:
+                return r
             write_reserve(points(argv[1]))
         print(f"The reserve is {reserve_of(read()[0])} points: taken off each stop line for the agents' cycles and the team.")
         return 0
@@ -456,6 +511,9 @@ def main(argv: list[str]) -> int:
     if argv[0] == "moving" and len(argv) == 1:
         if refused(key, moving=True):
             return 2
+        r = to_main()
+        if r is not None:
+            return r
         write(key, True, None)
     elif argv[0] == "fixed" and len(argv) in (1, 2):
         number = None
@@ -467,6 +525,9 @@ def main(argv: list[str]) -> int:
             number = int(n)
         if refused(key, number):
             return 2
+        r = to_main()
+        if r is not None:
+            return r
         write(key, False, number)
     else:
         print(__doc__.strip().split("\n\n")[-1], file=sys.stderr)

@@ -68,7 +68,7 @@ def _own() -> dict:
 def _save(d: dict) -> None:
     p = kinds_file()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(d, indent=1, ensure_ascii=False) + "\n", encoding="utf8")
     os.replace(tmp, p)
 
@@ -117,16 +117,36 @@ def find(word: str) -> str:
     raise KeyError(word)
 
 
+def _handed(args: list[str]) -> bool:
+    """F115: on the backup the main writes the kinds (role.door). True when it went there (or is kept for it); a
+    refusal is a ValueError, as the page says it."""
+    import role
+    h = role.door(kinds_file(), "kinds", args)
+    if h is None:
+        return False
+    if h[0]:
+        raise ValueError(role.door_said(h) or "the main didn't take it")
+    return True
+
+
+def _locked():
+    import hqlock  # F115: one change at a time across processes
+    return hqlock.locked(kinds_file())
+
+
 def rename(kid: str, name: str) -> list[dict]:
     kid = find(kid)
     name = " ".join(str(name or "").split())[:NAME_MAX]
     if not name:
         raise ValueError("a name, please")
-    d = _own()
-    o = d.get(kid) if isinstance(d.get(kid), dict) else {}
-    o["name"] = name
-    d[kid] = o
-    _save(d)
+    if _handed(["rename", kid, name]):
+        return kinds()
+    with _locked():
+        d = _own()
+        o = d.get(kid) if isinstance(d.get(kid), dict) else {}
+        o["name"] = name
+        d[kid] = o
+        _save(d)
     return kinds()
 
 
@@ -135,19 +155,25 @@ def recolour(kid: str, colour: str) -> list[dict]:
     colour = str(colour or "").strip().lower()
     if colour not in BY_NAME:
         raise ValueError("one of Google's colours: " + ", ".join(BY_NAME))
-    d = _own()
-    o = d.get(kid) if isinstance(d.get(kid), dict) else {}
-    o["colour"] = colour
-    d[kid] = o
-    _save(d)
+    if _handed(["colour", kid, colour]):
+        return kinds()
+    with _locked():
+        d = _own()
+        o = d.get(kid) if isinstance(d.get(kid), dict) else {}
+        o["colour"] = colour
+        d[kid] = o
+        _save(d)
     return kinds()
 
 
 def reset(kid: str) -> list[dict]:
     kid = find(kid)
-    d = _own()
-    if d.pop(kid, None) is not None:
-        _save(d)
+    if _handed(["reset", kid]):
+        return kinds()
+    with _locked():
+        d = _own()
+        if d.pop(kid, None) is not None:
+            _save(d)
     return kinds()
 
 

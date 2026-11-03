@@ -35,14 +35,16 @@ tripwires are counted here, never judged by the agent (the same goal twice witho
 a refused command or push, a check failing twice, an action outside her limits, a write to a shared file outside the
 serialized place, for Moneypenny a Ready mark refused on its fields); each becomes one message on her own line, in
 if-then shape, at most her texts a day, and the step waits. Orders he gives her on a call or in a text are written
-in her ledger (`cycles.py order`) and picked up here. Every week the routine computes her score (routine/pokes.py)
+in her ledger (`cycles.py order`) and picked up here. H308: she looks at her own list a few times a day inside her hours (looks_a_day,
+three by default: morning, midday, evening); each look turns a new order into its step, inside her share, and the order
+carries its item's label; one that doesn't fit waits for her next look and her ledger says so. Every week the routine computes her score (routine/pokes.py)
 into her ledger. The settings are the workspace's HQ/agents/cycles.json (numbers; the template ships the defaults).
 
     python3 routine/cycles.py                         what runs, each agent's share used this week, what's planned
     python3 routine/cycles.py settings                the settings, per agent
     python3 routine/cycles.py set AGENT KEY VALUE     on|off, fix (F86's loop, on|off), weekly, daily, hours (08:00-22:00), batches (12:00,17:00),
                                                       texts (tripwire texts a day), session_at, session_every,
-                                                      session_minutes, session_turns, step_minutes, step_turns, steps_a_day
+                                                      session_minutes, session_turns, step_minutes, step_turns, steps_a_day, looks_a_day
     python3 routine/cycles.py order AGENT start|stop|standing "HIS WORDS" [--now]   an order from a call or a text
     python3 routine/cycles.py plan AGENT 'JSON'       the bigger session's cycle plan (her own run writes it)
     python3 routine/cycles.py done AGENT K "WHAT"     a small step says what came of it; failed AGENT K "WHY"; stale AGENT K "WHY"
@@ -100,6 +102,7 @@ _REALLY_REFUSED = re.compile(r"^(?:HQ: refused|refused\b)|\bhook error\b|isn't r
 STEP_GRACE = 60  # minutes a step may start late when no next step or his own "until" says otherwise [the fix round's pick]
 ASKS_A_DAY = 3  # questions a day, like the plan's; past it the ledger keeps them for Friday [the fix round's pick]
 LEAST_CHARGE = 0.1  # points a run nothing measured counts at the least: what a real session costs, 0.03 to 0.21 so far [the fix round's pick]
+LOOKS_MOST = 12  # H308: looks at her own list a day, at the most
 REPEAT_DAYS = 7  # a refusal, a goal or a failing run counts as a repeat within this many days
 _STOP_WORDS = {"a", "an", "and", "any", "at", "be", "do", "dont", "for", "from", "her", "him", "his", "i", "in", "is", "it", "its", "me", "my", "no", "not", "of", "off", "on",
                "or", "our", "please", "so", "that", "the", "them", "then", "this", "to", "up", "us", "we", "with", "you", "your", "stop", "drop", "leave", "cancel", "quit", "go", "ahead", "yes", "ok", "okay", "try", "again", "once", "more"}
@@ -122,7 +125,7 @@ def on(base: Path | None = None) -> bool:
 
 DEFAULT_AGENT = {"on": True, "fix": False, "weekly_share": 2, "daily_share": 1, "hours": ["08:00", "22:00"], "batches": [], "tripwire_texts": 2,
                  "session": {"at": "09:00", "every": "day", "minutes": 10, "turns": 30, "useful_until": "12:00"},
-                 "step": {"minutes": 3, "turns": 10, "most_a_day": 3}, "looks": []}
+                 "step": {"minutes": 3, "turns": 10, "most_a_day": 3}, "looks": [], "looks_a_day": 3}
 
 
 def _template_settings() -> dict:
@@ -164,7 +167,7 @@ def _save_settings(d: dict, base: Path | None = None) -> None:
 
 
 SET_KEYS = ("on", "fix", "weekly", "daily", "hours", "batches", "texts", "session_at", "session_every", "session_minutes",
-            "session_turns", "session_until", "step_minutes", "step_turns", "steps_a_day", "own_calendars")
+            "session_turns", "session_until", "step_minutes", "step_turns", "steps_a_day", "looks_a_day", "own_calendars")
 
 
 def set_setting(aid: str, key: str, value: str, base: Path | None = None) -> str:
@@ -198,6 +201,10 @@ def set_setting(aid: str, key: str, value: str, base: Path | None = None) -> str
         else:
             which, what = key.split("_")
             a[which][what] = n if what == "minutes" else int(n)
+    elif key == "looks_a_day":  # H308: how often a day she looks at her own list; today's looks stay as they were, the new number counts from tomorrow
+        if not re.fullmatch(r"\d{1,2}", v) or not 0 <= int(v) <= LOOKS_MOST:
+            return f"looks_a_day is a whole number from 0 to {LOOKS_MOST}."
+        a["looks_a_day"] = int(v)
     elif key == "hours":
         m = re.fullmatch(r"(\d{1,2}:\d\d)\s*(?:-|to)\s*(\d{1,2}:\d\d)", v)
         if not m:
@@ -232,7 +239,7 @@ def set_setting(aid: str, key: str, value: str, base: Path | None = None) -> str
     else:
         return f"No setting called {key}. The settings: {', '.join(SET_KEYS)}."
     _save_settings(d, base)
-    return f"{aid}: {key} is now {v}."
+    return f"{aid}: {key} is now {v}." + (" It counts from tomorrow; today's looks stay as they were." if key == "looks_a_day" else "")
 
 
 def _hhmm(s: str) -> str:
@@ -668,6 +675,8 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
                 if log:
                     log(f"cycles: job {job['n']} ({aid}, step {p['k']}) stale: {why}")
                 return "skipped"
+    if p["kind"] == "look":  # H308: every look reads her own list first; a named look takes what's on it up to now
+        _take_orders(aid, a, p["name"], now.strftime(FMT), now, base)
     return "go"
 
 
@@ -1823,6 +1832,11 @@ def order(aid: str, kind: str, words: str, now_: bool = False, now: dt.datetime 
             ledger.set_order(aid, o["n"], "now", f"said outside her hours, waits for {lo}")
             return f"Not now: nothing of {aid}'s runs between {hi} and {lo}. It's kept, and it's the first thing she does at {lo}. Tell him so."
         return _order_step(aid, o, now, base)
+    if not on(base):
+        return f"Noted for {aid}'s next bigger session: \"{words}\". Her looks at her list are off while the agents' switch is off."
+    nx = next_look(aid, now, base) if agent_settings(aid, base).get("on") else None  # H308: her next look picks it up, not her bigger session
+    if nx:
+        return f"Noted for {aid}: her {nx[0]} ({nx[1]:%A %H:%M}) turns it into a step, so it doesn't wait for her next bigger session: \"{words}\"."
     return f"Noted for {aid}'s next bigger session: \"{words}\"."
 
 
@@ -2161,6 +2175,46 @@ def his_yes_refused(aid: str, words: str, n: int | None = None, places: list | N
             "question before them: ask him again by its name")
 
 
+def his_yes_line(words: str, base: Path | None = None) -> tuple[str, dict | None]:
+    """F115 with F114: on the backup, the first checks of his yes, whatever its own copy of the holds says: his own line, today, in this
+    call or this chat (or by hand, any of today's), read as a yes. (why, his line) — why is "" when it stands; the line is None when there's
+    none to carry (a test copy without lines of his). The fit to a change is the main's to check, against its own holds."""
+    if _SAYS_NO.match(words or ""):
+        return "", None
+    if os.environ.get("HQ_IN_JOB"):
+        return "a run can't give a yes", None
+    import sprint
+    import hqpaths as _hp
+    if _hp.under_test() and not os.environ.get("HQ_PROOF_ON"):
+        return "", None
+    hits = sprint.his_said_now(words, str(base or folder()), sprint.words_from_env())
+    if not hits:
+        return "those aren't his words from this call or this chat, today", None
+    yes_ = [h for h in hits if sprint.a_yes(h["line"], h["turn"])]
+    if not yes_:
+        return "those are his words, but they aren't a clear yes", None
+    return "", yes_[0]
+
+
+def handed_yes_refused(aid: str, d: dict, n: int | None = None) -> str:
+    """F115 with F114: on the main, a yes the backup checked: does his line (or her question just before it) name exactly one of the
+    main's own holds by its own words? "" when it does, or when nothing waits (yes() says so), or for a test copy without lines of his."""
+    waiting = _agent_state(_state(), aid)["holds"]
+    holds = [h for h in waiting if n is None or h["n"] == n]
+    if not waiting:
+        return ""
+    if not d.get("line"):
+        import hqpaths as _hp
+        if _hp.under_test() and not os.environ.get("HQ_PROOF_ON"):
+            return ""
+        return "the other computer sent no line of his to fit to a change"
+    named = [x for x in waiting if yes_fits(d["line"] + " " + (d.get("turn") or ""), x)]
+    if len(named) == 1 and named[0] in holds:
+        return ""
+    return ("those are his words, but they don't name this one change by its own words (or name more than one), and neither does her "
+            "question before them: ask him again by its name")
+
+
 # F114, the second check: words a title shares with any ordinary sentence ("I'll sort it on this call"), which never name a change alone.
 _COMMON = {_stem(w) for w in ("call", "calls", "lunch", "dinner", "breakfast", "drinks", "coffee", "meeting", "meet", "appointment", "event",
                                "today", "tonight", "tomorrow", "this", "that", "next", "week", "weekend", "morning", "afternoon", "evening",
@@ -2204,7 +2258,7 @@ def yes(aid: str, words: str, n: int | None = None, now: dt.datetime | None = No
 
 
 def _order_step(aid: str, o: dict, now: dt.datetime, base: Path | None, goal: str | None = None, stop: bool = False, answer: bool = False, yes: dict | None = None,
-                words: str = "", now_flag: bool = False) -> str:
+                words: str = "", now_flag: bool = False, look: str = "") -> str:
     """His "now": a small step at once, inside her box. goal: what it says go on. stop: his stop order, to act on. answer: his words about what waits for his word. yes: the one held change he said yes to."""
     label = f"his stop order: {o['words']}" if stop else f"his words: {o['words']}" if answer else f"he said yes: {yes['what']}" if yes else (goal or o["words"])
     stamp = now.strftime("%Y-%m-%d %H:%M")
@@ -2226,8 +2280,143 @@ def _order_step(aid: str, o: dict, now: dt.datetime, base: Path | None, goal: st
         st_["steps"][f"{aid}|{stamp}|{k}"] = {"spec": spec, "fps": [], "day": now.strftime("%Y-%m-%d"), "state": "planned", "stamp": stamp, "order": o["n"], **({"stop": True} if stop else {}),
                                              "until": now.replace(hour=_t(hi).hour, minute=_t(hi).minute, second=0, microsecond=0).strftime(FMT)}
         code, out = _schedule("add", "now", step_text(aid, stamp, k, label), "--priority", "--kind", f"step-{aid}")
-        ledger.set_order(aid, o["n"], "planned", "a step at once")
+        item = re.match(r"Item (\d+)\b", out or "")
+        if look:  # H308: the order carries its item's label, so a later or a doubled look makes no second one
+            st_["steps"][f"{aid}|{stamp}|{k}"]["look"] = look
+        ledger.set_order(aid, o["n"], "planned", (f"item {item.group(1)}, step #{k}, from her {look}" if item else f"step #{k}, from her {look}") if look else "a step at once")
     return f"Now: a step for {aid} planned at once ({out.splitlines()[0][:100] if out else code})."
+
+
+# -- her looks at her own list (H308) -----------------------------------------------------------------------------------------
+
+def _mins(hhmm: str) -> int:
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def look_times(a: dict) -> list[list]:
+    """Her looks at her own list in a day, [[name, "HH:MM"], ...]: looks_a_day of them inside her hours, the first an hour
+    after they start, the last three hours before they end, the rest evenly between (hours 8:00 to 22:00 and three looks:
+    9:00, 14:00 and 19:00). Hours too short for that: evenly inside them. [The times are the builder's pick.]"""
+    n = max(0, min(int(a.get("looks_a_day", 3) or 0), LOOKS_MOST))
+    if not n:
+        return []
+    lo, hi = a.get("hours") or ["08:00", "22:00"]
+    lo_m, hi_m = _mins(lo), _mins(hi)
+    first, last = lo_m + 60, hi_m - 180
+    if last <= first:
+        ts = [lo_m + (hi_m - lo_m) * (2 * i + 1) // (2 * n) for i in range(n)]
+    elif n == 1:
+        ts = [(first + last) // 2]
+    else:
+        ts = [first + (last - first) * i // (n - 1) for i in range(n)]
+    ts = sorted({max(lo_m, t - t % 5) for t in ts})
+    names = {1: ["midday look"], 2: ["morning look", "evening look"], 3: ["morning look", "midday look", "evening look"]}.get(len(ts)) \
+        or [f"look {i + 1} of {len(ts)}" for i in range(len(ts))]
+    return [[names[i], f"{t // 60:02d}:{t % 60:02d}"] for i, t in enumerate(ts)]
+
+
+def _day_looks(st_: dict, a: dict, now: dt.datetime) -> dict:
+    """Today's looks, fixed at the day's first minute: a change to looks_a_day or her hours counts from the next day."""
+    today = now.strftime("%Y-%m-%d")
+    ld = st_.get("looks_day") or {}
+    if ld.get("day") != today:
+        ld = st_["looks_day"] = {"day": today, "times": look_times(a), "done": []}
+    return ld
+
+
+def next_look(aid: str, now: dt.datetime | None = None, base: Path | None = None) -> tuple[str, dt.datetime] | None:
+    """Her next look at her own list: (its name, when), today's if one is still to come, else tomorrow's first."""
+    now = now or dt.datetime.now()
+    a = agent_settings(aid, base)
+    hm = now.strftime("%H:%M")
+    d = getattr(_tls, "d", None) or _state()  # a read: nothing written (inside the lock, what's held)
+    ld = ((d.get("agents") or {}).get(aid) or {}).get("looks_day") or {}
+    if ld.get("day") != now.strftime("%Y-%m-%d"):
+        ld = {"times": look_times(a), "done": []}
+    for name, t in ld["times"]:
+        if t >= hm and t not in ld["done"]:
+            return name, now.replace(hour=_t(t).hour, minute=_t(t).minute, second=0, microsecond=0)
+    tm = look_times(a)
+    if not tm:
+        return None
+    return tm[0][0], (now + dt.timedelta(days=1)).replace(hour=_t(tm[0][1]).hour, minute=_t(tm[0][1]).minute, second=0, microsecond=0)
+
+
+def _step_price(aid: str, a: dict) -> float:
+    try:
+        import usagecost
+        return float(usagecost.cost_for(a["step"]["minutes"], "", f"step-{aid}").get("weekly") or 0)
+    except Exception:
+        return 0.0
+
+
+def _take_orders(aid: str, a: dict, look: str, upto: str, now: dt.datetime, base: Path | None) -> list[str]:
+    """A look reads her own list first: every new order on it up to `upto` ("YYYY-MM-DD HH:MM") becomes its step, at once,
+    as many as fit her share; the order then carries its item's label. An order that has had a step is never made one again
+    here (a held or skipped one is her next bigger session's). What doesn't fit waits for her next look, and her ledger says
+    so, with the room it needed."""
+    did = []
+    with held() as d:
+        st_ = _agent_state(d, aid)
+        had = {str(r.get("order")) for r in st_["steps"].values() if r.get("order")}
+        live = d.get("looks_live")  # an order from before the looks went live stays for her bigger session
+        if not live:
+            return did
+        todo = [o for o in ledger.orders(aid, ("open",)) if o["kind"] == "start" and live < o["at"] <= upto and str(o["n"]) not in had
+                and not ledger.LOOK_LABEL.match(o.get("note") or "")]
+        if not todo:
+            return did
+        price = _step_price(aid, a)
+        sh = shares(aid, now, base)
+        lo, hi = a.get("hours") or ["08:00", "22:00"]
+        why = None
+        if not in_hours(a, now) or (hi != "23:59" and _minutes_left(a, now) < a["step"]["minutes"]):
+            why = f"the day's hours end at {hi}; nothing of hers runs at night"
+        took = 0
+        for o in todo:
+            why = why or over_share(sh, price * (took + 1))
+            if why:
+                break
+            _order_step(aid, o, now, base, look=look)
+            took += 1
+            did.append(f"{aid}'s {look}: her order {o['n']} is a step")
+        left = len(todo) - took
+        if left:
+            nx = next_look(aid, now + dt.timedelta(minutes=1), base)
+            ledger.entry(aid, f"{look} waits", [f"waits: {why}",
+                                               f"the room it needed: about {price * left:g} points, for {left} order{'s' if left > 1 else ''} on her list",
+                                               f"her {nx[0]} ({nx[1]:%A %H:%M}) looks again" if nx else "her next bigger session reads them"], now)
+            did.append(f"{aid}'s {look} waits: {why}")
+    return did
+
+
+def list_looks(now: dt.datetime | None = None, base: Path | None = None, log=None) -> list[str]:
+    """H308: every agent looks at her own list a few times a day (looks_a_day, three by default: morning, midday, evening),
+    so what he hands over is picked up the same day and not at her bigger session. A look is the routine's, no run of a model:
+    it turns the new orders into their steps, and each step runs through her wall like any other."""
+    now = now or dt.datetime.now()
+    did = []
+    hm = now.strftime("%H:%M")
+    if not on(base):
+        return did
+    with held() as d:
+        d.setdefault("looks_live", now.strftime(FMT))  # the first minute the looks run with the switch on
+    for aid, a in settings(base)["agents"].items():
+        if not a.get("on") or not _agent(aid, base):
+            continue
+        with held() as d:
+            ld = _day_looks(_agent_state(d, aid), a, now)
+            due = [x for x in ld["times"] if x[1] <= hm and x[1] not in ld["done"]]
+            if not due:
+                continue
+            ld["done"] = ld["done"] + [x[1] for x in due]  # marked first: a doubled minute finds it done
+            name, t = due[-1]
+            did += _take_orders(aid, a, f"{name} at {t}", f"{ld['day']} {t}", now, base)
+    if log:
+        for x in did:
+            log(f"cycles: {x}")
+    return did
 
 
 def waiting_orders(now: dt.datetime | None = None, base: Path | None = None, log=None) -> list[str]:
@@ -2444,7 +2633,7 @@ def tick(now: dt.datetime | None = None, base: Path | None = None, log=None) -> 
         out["processed"] = settle(now, base, log)
     except Exception as e:
         out["processed"] = [f"error: {e!r}"]
-    for name, fn in (("batches", send_batches), ("later", later), ("orders", waiting_orders), ("dropped", drop_waiting), ("reviews", plan_reviews), ("scores", write_scores), ("fixes", fix_rounds)):
+    for name, fn in (("batches", send_batches), ("later", later), ("looks", list_looks), ("orders", waiting_orders), ("dropped", drop_waiting), ("reviews", plan_reviews), ("scores", write_scores), ("fixes", fix_rounds)):
         try:
             out[name] = fn(now, base, log=log)
         except Exception as e:
@@ -2469,7 +2658,8 @@ def words(base: Path | None = None, now: dt.datetime | None = None) -> str:
                    f"steps {a['step']['minutes']} min, {a['step']['turns']} turns, at most {a['step'].get('most_a_day', 3)} a day; hours {a['hours'][0]} to {a['hours'][1]}"
                    + (f"; batches {', '.join(a['batches'])}" if a.get("batches") else "") + f"; {a.get('tripwire_texts', 2)} tripwire texts a day"
                    + ("; the fix loop on" if a.get("fix") else "")
-                   + "".join(f"; {lk['name']} {lk.get('every', 'day')} at {lk['at']}" for lk in a.get("looks") or []))
+                   + "".join(f"; {lk['name']} {lk.get('every', 'day')} at {lk['at']}" for lk in a.get("looks") or [])
+                   + (f"; her list looked at {len(look_times(a))} times a day ({', '.join(x[1] for x in look_times(a))})" if look_times(a) else "; her list only at her bigger session"))
     for ag in _agents(base):
         w = waiting_words(ag["id"])
         if w:
@@ -2549,15 +2739,31 @@ def main(argv: list[str]) -> int:
         import hqpaths as _hp
         print(f"Refused: {_hp.MAIL_SWITCH_WORDS}.")
         return 2
-    if cmd == "yes" and len(rest) >= 2 and not os.environ.get("HQ_ROLE_HERE"):  # F114: his yes is his own words in a real line
-        why = his_yes_refused(rest[0].lower(), rest[1], int(rest[2]) if len(rest) > 2 and rest[2].isdigit() else None)
+    import role
+    yes_n = int(rest[2]) if cmd == "yes" and len(rest) > 2 and rest[2].isdigit() else None
+    if cmd == "yes" and len(rest) >= 2 and os.environ.get("HQ_ROLE_HERE") and not _SAYS_NO.match(rest[1]):
+        # F115 with F114 (the combined check): a handed yes stands on the words the backup checked, and fits a change by the main's own
+        # holds, never by the backup's copy of them, which can be behind
+        d = role.handed_words()
+        why = "a yes handed over from the other computer carries no words it checked there" if not d else \
+            handed_yes_refused(rest[0].lower(), d, yes_n)
         if why:
             print(f"Refused: {why}. A yes to a held change is his own words: cycles.py yes AGENT \"HIS WORDS\" [N], a line he said or typed "
                   "on a call or in a chat; an agent's words never stand for it.")
             return 2
+        role.note_handed(f"cycles yes {rest[0]}", d)
+    elif cmd == "yes" and len(rest) >= 2:  # F114: his yes is his own words in a real line
+        backup = role.is_backup()
+        why, hit = his_yes_line(rest[1]) if backup else ("", None)
+        why = why or ("" if backup else his_yes_refused(rest[0].lower(), rest[1], yes_n))
+        if why:
+            print(f"Refused: {why}. A yes to a held change is his own words: cycles.py yes AGENT \"HIS WORDS\" [N], a line he said or typed "
+                  "on a call or in a chat; an agent's words never stand for it.")
+            return 2
+        if backup:  # checked here: his line goes to the main, which fits it to its own holds
+            return role.forward("cycles", list(argv), env=role.checked_env(rest[1], [hit] if hit else []))
     # harm 9: on the backup a call's change goes to the main, as schedule.py's does: only the main writes these
     if cmd in ("set", "order", "yes", "no") and not os.environ.get("HQ_ROLE_HERE"):
-        import role
         if role.is_backup():
             return role.forward("cycles", list(argv))
     try:

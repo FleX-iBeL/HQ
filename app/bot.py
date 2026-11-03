@@ -901,8 +901,8 @@ if __name__ == "__main__":
             else:
                 return JSONResponse({"error": "no change asked"}, status_code=400)
             import role as _role
-            code, out_, err_, how = await asyncio.to_thread(_role.hand, "todo", args + ([] if args[0] == "undo" else
-                                                                                         ["--by", by]))
+            # F115: undo too carries who: his undo takes back his own last change, not an agent's after it
+            code, out_, err_, how = await asyncio.to_thread(_role.hand, "todo", args + ["--by", by])
             if code:
                 return JSONResponse({"error": " ".join((out_ + " " + err_).split())[:300] or "the main didn't take it"},
                                     status_code=409)
@@ -936,7 +936,7 @@ if __name__ == "__main__":
             elif isinstance(ask.get("repeat"), str) and isinstance(ask.get("rule"), str):  # H245
                 said = await asyncio.to_thread(_todo.repeat, ask["repeat"], ask["rule"][:200] or "off", by)
             elif ask.get("undo") is True:
-                said = await asyncio.to_thread(_todo.undo)
+                said = await asyncio.to_thread(_todo.undo, by)  # F115: his own last change
             else:
                 return JSONResponse({"error": "no change asked"}, status_code=400)
         except KeyError as e:

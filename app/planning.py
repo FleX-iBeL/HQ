@@ -224,6 +224,20 @@ def set_mark(key: str, mark: str, now: float | None = None) -> dict:
     appointment an old X moved to HQ Planning goes back, whatever the tap; the work itself runs after (start())."""
     if mark not in ("done", "x", ""):
         raise ValueError("a mark is done, x or nothing")
+    import role
+    h = role.door(marks_file(), "planning", ["mark", key, mark])  # F115: on the backup the main keeps the marks
+    if h is not None:
+        if h[0] and "no such" in (h[1] + h[2]):
+            raise KeyError("no such appointment")
+        if h[0]:
+            raise ValueError(" ".join((h[1] + h[2]).split()) or "the main didn't take it")
+        return _read()
+    import hqlock  # F115: one tap at a time across processes
+    with hqlock.locked(marks_file()):
+        return _set_mark(key, mark, now)
+
+
+def _set_mark(key: str, mark: str, now: float | None = None) -> dict:
     t = now or time.time()
     s = _read()
     marks = _marks(s)
@@ -588,7 +602,11 @@ if __name__ == "__main__":
     elif cmd == "work":
         print(time.strftime("%Y-%m-%d %H:%M:%S"), "planning:", work(), "changed")
     elif cmd == "mark" and len(args) >= 2:
-        set_mark(args[1], args[2] if len(args) > 2 else "")
+        try:
+            set_mark(args[1], args[2] if len(args) > 2 else "")
+        except KeyError:
+            print("no such appointment")
+            sys.exit(1)
         start()
         print("marked")
     else:

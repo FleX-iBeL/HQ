@@ -52,7 +52,7 @@ edits to the files only the main writes go the same way, through hand()).
 """
 from __future__ import annotations
 
-import contextlib, fcntl, http.client, json, os, socket, ssl, subprocess, sys, time
+import contextlib, fcntl, hashlib, http.client, json, os, socket, ssl, subprocess, sys, time, uuid
 import urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -91,7 +91,12 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "about_self": {"add"},  # F102: what an agent says about herself, written by the main
           "usagecost": {"plan"},  # F107: the plan in use, written only by the main
           "cycles": {"set", "order", "yes", "no"},  # H298: the agents' settings and his orders are the main's to write
-          "trail": {"put"}, "mistakes": {"put"}}  # F103: the record and the ledger, written only by the main
+          "trail": {"put"}, "mistakes": {"put"},  # F103: the record and the ledger, written only by the main
+          # F115: the page's other writers, a chat's commit and the stop lines, so a tap on the backup lands on the main
+          "features": {"on", "off"}, "kinds": {"rename", "colour", "reset"}, "appt_notes": {"add", "clear"},
+          "workflows": {"on", "off"}, "news": {"topic", "leave-out", "source"}, "planning": {"mark"},
+          "usageline": {"moving", "fixed", "reserve", "least", "five", "5-hour", "5h", "weekly", "week", "all", "fable"},
+          "settle": {"file", "override", "part"}, "backend": {"on", "off"}}
 TO_BOTH = {"update": {"back-here", "back-first", "forward-here"}}  # F104: what the other computer takes whichever it is: the code, not the data
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
@@ -100,8 +105,11 @@ SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "set_status": os.path.join(os.path.dirname(HERE), "status", "set-status.py"),  # F101
            "direct_line": os.path.join(os.path.dirname(HERE), "app", "direct_line.py"),  # H225, F58; the rest are routine/<script>.py
            "notes": os.path.join(os.path.dirname(HERE), "app", "notes.py"),  # F102
-           "about_self": os.path.join(os.path.dirname(HERE), "app", "about_self.py")}  # F102
-PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main (who asked, for her notes)
+           "about_self": os.path.join(os.path.dirname(HERE), "app", "about_self.py"),  # F102
+           **{k: os.path.join(os.path.dirname(HERE), "app", f"{k}.py")  # F115: the page's other writers
+              for k in ("features", "kinds", "appt_notes", "workflows", "news", "planning", "backend")}}
+PASS_ENV = ("HQ_PINGS_BY",  # what a handed request may carry over to the main (who asked, for her notes)
+            "HQ_CHECKED_WORDS")  # F115 with F114: his words, checked at the door on the backup, and where they stood
 
 # H203, in the user's words (call of 17 October 2026, 14:45): "i am even more confused, you give it to the server but
 # then also do it yourself? why?", then "ok, is there also other things you'd be better to hand over while that one
@@ -111,7 +119,8 @@ PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main 
 ONE_WRITER = ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "HQ/games.json", "HQ/coaching.json",
               "HQ/sprint.json",  # H269: the planning's ranks
               "HQ/calendar-todo.json",  # H243: which block a to-do is planned in
-              "HQ/usage-plan.json")  # F107: the plan in use
+              "HQ/usage-plan.json",  # F107: the plan in use
+              "HQ/kept-from-both.md")  # F115: what both computers had, the main's kept, the other's words here
 
 
 LOCAL_ON_BACKUP = ("HQ/calls/", "HQ/direct-line/", "HQ/team-line/", "HQ/notes.md", "HQ/calendar.json")  # H266: her line too; the backup's own, until handed over
@@ -223,9 +232,21 @@ def acting() -> str:
     if not c:
         return "main"
     s = _load(STATE, {})
+    # F115, after the check (his decision, 2 November 2026): a computer that's main stays main until its own look sees
+    # the other one as main with a fresher look; a stale look only stops it from taking over (tick), never makes it
+    # step down, so there's never a time with no main at all.
     if s.get("acting") in ("main", "backup"):
         return s["acting"]
     return "main" if chosen_main(c) == my_name(c) else "backup"
+
+
+def stale(s=None, now=None, c=None) -> bool:
+    """F115: this computer's last look is older than the takeover time (the setting, else TAKEOVER): such a look
+    doesn't count towards taking over."""
+    s = s if s is not None else _load(STATE, {})
+    c = c if c is not None else config()
+    last = s.get("last_look")
+    return bool(last) and (now or time.time()) - float(last) > max(float((c or {}).get("takeover") or TAKEOVER), AWAY_GAP)
 
 
 def is_backup() -> bool:
@@ -508,7 +529,11 @@ def _stayed(s, p, was, takeover, prev_look=None) -> bool:
     if was != "main" or not p.get("took_over", True) or not at:
         return False
     at = float(at)
-    if float(s.get("awake_since") or 0) > at or float(prev_look or 0) < at:
+    # F115: its last look may have come just before the takeover, when the cut heals within the minute after it: then
+    # that look must be recent (less than the takeover time ago, and less than a sleep's gap), so it never left.
+    if float(s.get("awake_since") or 0) > at or not prev_look:
+        return False
+    if float(prev_look) < at and time.time() - float(prev_look) >= min(takeover, AWAY_GAP):
         return False
     return not (s.get("offline_seen") and float(s["offline_seen"]) >= at - takeover - 120)
 
@@ -529,6 +554,32 @@ def _main_still_there(c):
     except Exception:
         pass
     return ""
+
+
+HANDBACK_WAIT = 600  # F115: the longest a hand-back waits for the sync; after it what's left goes through the doors
+
+
+def _unsent(s, now, log=None) -> str:
+    """F115: '' when what this computer has reached the other one (or there's no sync, or it waited long enough);
+    else what it's waiting for, in words."""
+    try:
+        import sync
+        if not sync.is_set():
+            return ""
+        n = sync.unsent()
+    except Exception:
+        return ""
+    if n == 0:
+        s.pop("handback_wait", None)
+        return ""
+    since = s.setdefault("handback_wait", now)
+    if now - float(since) >= HANDBACK_WAIT:
+        if log:
+            log(f"role: handing back without waiting longer for the sync ({n if n is not None else 'unknown'} left); "
+                "what's left goes over through the doors")
+        s.pop("handback_wait", None)
+        return ""
+    return "the sync of what this one wrote" if n is None else f"the sync ({n} file{'s' * (n != 1)} to go)"
 
 
 def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -> dict:
@@ -577,13 +628,17 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
         s["tailnet_off"] = False
     # F23: only minutes this computer was awake and looking count; a sleep, a restart or a stopped routine
     # starts the count again from when it was back.
+    prev_look_raw = s.get("last_look")
     s["awake_since"] = _awake_since(s, now)
     prev_look = s.get("last_look")
     s["last_look"] = now
     peer = c.get("peer_name") or "the other HQ"
     lost = now - max(s["peer_lost_since"], s["awake_since"]) if s.get("peer_lost_since") else 0
     takeover = float(c.get("takeover") or TAKEOVER)
-    gone = not p and lost >= takeover and int(s.get("lost_looks") or 0) >= LOST_LOOKS
+    # F115: a look that comes after a stale one (the routine stopped, a long minute: longer than the takeover time, and
+    # never less than a sleep's gap) never takes over by itself
+    gone = not p and lost >= takeover and int(s.get("lost_looks") or 0) >= LOST_LOOKS and \
+        not (prev_look_raw and now - float(prev_look_raw) > max(takeover, AWAY_GAP))
     chosen = chosen_main(c) == me
     was = s.get("acting")
     took = s.get("took_over")
@@ -631,6 +686,14 @@ def tick(jobs_cmd=None, log=None, incidents=None, routines=None, on_main=None) -
                 s["main_back"], s["back_looks"] = None, 0
             if p and s["back_looks"] >= BACK_LOOKS:
                 doing = busy()
+                if not doing and p.get("acting") != "main":
+                    # F115: the hand-back waits for the sync: what this one wrote as main has reached the other
+                    # first, or the other would start as main without it (the checklist re-run's third hole). Not
+                    # when the other is acting main too (a cut both ways that just healed): then this one steps down
+                    # at once and what it wrote meanwhile goes over through the doors (sync.handover).
+                    doing = _unsent(s, now, log)
+                else:
+                    s.pop("handback_wait", None)
                 if doing:
                     s["handing_back"] = True
                     changed = _set(s, "main", f"{peer} is back; this one hands the main role back once {doing} is done", log)
@@ -733,23 +796,30 @@ def _env(env):
     return {k: str(v) for k, v in (env or {}).items() if k in PASS_ENV}
 
 
-def _run_here(script, args, env=None):
+def _run_here(script, args, env=None, stdin=None):
     r = subprocess.run([PY, _script_path(script), *args], capture_output=True, text=True, timeout=120,
-                       env={**os.environ, **_env(env), "HQ_ROLE_HERE": "1"})
+                       env={**os.environ, **_env(env), "HQ_ROLE_HERE": "1"},
+                       input=stdin if isinstance(stdin, str) else None)  # F115: a whole file goes in on stdin
     return r.returncode, r.stdout, r.stderr
 
 
-def hand(script: str, args: list[str], env: dict | None = None, timeout: float = 90) -> tuple[int, str, str, str]:
+def hand(script: str, args: list[str], env: dict | None = None, timeout: float = 90, keep: bool = True,
+         hid: str = "", stdin: str | None = None) -> tuple[int, str, str, str]:
     """H203: hand a write to the main. Returns (code, out, err, how): how is 'main' (the main ran it; code, out and
     err are its own), 'kept' (the main can't be reached: kept here, it goes on by itself, or runs here when this one
-    takes over), 'refused' (the main said no) or 'alone' (no other HQ, or a test on the real pairing)."""
+    takes over), 'refused' (the main said no) or 'alone' (no other HQ, or a test on the real pairing).
+    F115: every hand-over has an id (hid, or a new one), kept with it when it waits here, so the main runs it once
+    however often it's sent: an answer lost on the way and the request sent again does nothing the second time.
+    keep=False: when the main can't be reached nothing is kept; how is then 'unreached' (the hand-over of what's
+    left on this computer tries again by itself at its next look)."""
     if _test_on_real_pairing():
         return 3, "", "Refused (F17): a test may not hand anything to the other HQ through the real pairing.\n", "alone"
     c = config()
     if not c:  # nothing to hand it to
         return 3, "", "This HQ isn't paired; nothing to hand it to.\n", "alone"
     peer = c.get("peer_name") or "the main HQ"
-    req = {"script": script, "args": args, **({"env": _env(env)} if _env(env) else {})}
+    req = {"script": script, "args": args, "id": hid or uuid.uuid4().hex, **({"env": _env(env)} if _env(env) else {}),
+           **({"stdin": stdin} if isinstance(stdin, str) else {})}
     try:
         code, d = _request(c["peer"].rstrip("/") + "/api/forward", req, "forward", timeout=timeout)
         if code == 200 and isinstance(d, dict):
@@ -759,9 +829,12 @@ def hand(script: str, args: list[str], env: dict | None = None, timeout: float =
             return 1, "", f"The main one ({peer}) refused it: {e.code}\n", "refused"
     except Exception:
         pass
+    if not keep:
+        return 1, "", f"The main one ({peer}) can't be reached right now.\n", "unreached"
     os.makedirs(SUPPORT, exist_ok=True)
-    with open(PENDING, "a") as f:
-        f.write(json.dumps({**req, "at": time.time()}) + "\n")
+    with _pending_lock():
+        with open(PENDING, "a") as f:
+            f.write(json.dumps({**req, "at": time.time()}) + "\n")
     return 0, (f"This HQ is the backup, and the main one ({peer}) can't be reached right now. The request is kept "
                f"here: it goes to {peer} as soon as it answers, or runs here if this one takes over as main in the "
                "next minutes.\n"), "", "kept"
@@ -778,6 +851,103 @@ def forward(script: str, args: list[str], env: dict | None = None) -> int:
     sys.stdout.write(out)
     sys.stderr.write(err)
     return code
+
+
+def door(path, script: str, args: list[str], env: dict | None = None):
+    """F115, every writer hands over or says it can't. A write to a file in the workspace, from wherever on this
+    computer (the page, a call, a chat, a script): None when this computer writes it itself (it's the main, or on its
+    own, or this is the main running a handed request, or the file isn't one only the main writes); otherwise the
+    write goes to the main as `script args` (role.WRITES) and this is hand()'s (code, out, err, how). The checklist
+    re-run of 2 November 2026 found a switch, a colour, a calendar note, a workflow and the news setup tapped on the
+    laptop written there only, never reaching the server or GitHub. His words: "sometimes my laptop crashes"."""
+    if os.environ.get("HQ_ROLE_HERE"):
+        return None
+    try:
+        rel = os.path.relpath(os.path.realpath(os.fspath(path)), hqpaths.FOLDER)
+    except (TypeError, ValueError):
+        return None
+    if rel == ".." or rel.startswith(".." + os.sep) or not one_writer(rel) or not is_backup():
+        return None
+    return hand(script, [str(a) for a in args], env)
+
+
+def door_said(h, what: str = "") -> str:
+    """The plain answer for a write that went through door(): what the main said, or that it's kept for it."""
+    code, out, err, how = h
+    if how == "main":
+        return (" ".join(out.split()) or f"{what} is written by the main.").strip() + \
+            " It comes back here with the sync in a moment."
+    return " ".join((out + " " + err).split())
+
+
+@contextlib.contextmanager
+def _pending_lock():
+    """F115: the requests kept here are added and taken off by different processes; one at a time."""
+    os.makedirs(SUPPORT, exist_ok=True)
+    with open(os.path.join(SUPPORT, "role-pending.lock"), "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+HANDED = os.path.join(SUPPORT, "role-handed.json")  # F115: the ids of hand-overs the main has run, with their answers
+HANDED_DAYS = 14
+
+
+def _handed_lock(hid: str):
+    os.makedirs(os.path.join(SUPPORT, "role-handed-locks"), exist_ok=True)
+    name = hashlib.sha1(hid.encode()).hexdigest()[:16]
+    return open(os.path.join(SUPPORT, "role-handed-locks", name + ".lock"), "a")
+
+
+def handed(hid: str):
+    """F115: the main's answer to a hand-over it already ran, or None."""
+    d = _load(HANDED, {})
+    return d.get(hid) if isinstance(d, dict) else None
+
+
+def _keep_handed(hid: str, answer: dict) -> None:
+    with _pending_lock():
+        d = _load(HANDED, {})
+        d = d if isinstance(d, dict) else {}
+        now = time.time()
+        d = {k: v for k, v in d.items() if isinstance(v, dict) and now - float(v.get("at") or 0) < HANDED_DAYS * 86400}
+        d[hid] = {**answer, "at": now}
+        if len(d) > 5000:
+            d = dict(sorted(d.items(), key=lambda kv: kv[1].get("at") or 0)[-5000:])
+        _save(HANDED, d)
+
+
+CHECKED = "HQ_CHECKED_WORDS"
+
+
+def checked_env(said: str | None, hits: list | None = None) -> dict:
+    """F115 with F114 (the combined check, 3 November 2026): the backup checked his words at its own door (his line in this call's or
+    this chat's own transcript, or his own hand with no call or chat), so it hands the change over with what it checked: the words, his
+    line and her turn before it, where they stood, and which computer checked them. The main trusts that and records it; a handed
+    change that carries none is refused there."""
+    h = (hits or [None])[0] or {}
+    return {CHECKED: json.dumps({"by": my_name(), "said": said or "", "line": h.get("line", ""), "turn": h.get("turn", ""),
+                                 "where": h.get("where") or ("his own hand" if said is None else ""), "at": time.time()})}
+
+
+def handed_words() -> dict | None:
+    """F115 with F114: on the main, running a handed request: the words the backup checked, or None (not handed, or none carried)."""
+    if not os.environ.get("HQ_ROLE_HERE"):
+        return None
+    try:
+        d = json.loads(os.environ.get(CHECKED) or "")
+        return d if isinstance(d, dict) and d.get("by") else None
+    except ValueError:
+        return None
+
+
+def note_handed(what: str, d: dict) -> None:
+    """F115 with F114: where the words of a handed change came from, in the routine's log on the main."""
+    _log(f"{what}: on his words checked on {d.get('by')}: \"{(d.get('said') or d.get('line') or '')[:160]}\" "
+         f"({d.get('where') or 'no place'})")
 
 
 def tell_other(script: str, args: list[str], timeout: float = 30) -> str:
@@ -811,19 +981,43 @@ def _refused(r, why, left, log):
 
 
 def _deliver(acting_now, p, c, jobs_cmd, log):
-    """Requests kept on the backup: run here once this one is main, or sent to the main once it answers."""
+    """Requests kept on the backup: run here once this one is main, or sent to the main once it answers.
+    F115: read and written back under the kept requests' own lock, so one kept while this runs is never lost."""
     try:
-        lines = [json.loads(l) for l in open(PENDING) if l.strip()]
+        with _pending_lock():
+            lines = [json.loads(l) for l in open(PENDING) if l.strip()]
     except (OSError, ValueError):
         return
     left = []
+    _deliver_each(acting_now, p, c, log, lines, left)
+    key = lambda r: r.get("id") or json.dumps({k: v for k, v in r.items() if k not in ("refused", "why")}, sort_keys=True)
+    seen = {key(r) for r in lines}
+    with _pending_lock():
+        try:
+            now_lines = [json.loads(l) for l in open(PENDING) if l.strip()]
+        except (OSError, ValueError):
+            now_lines = []
+        left += [r for r in now_lines if key(r) not in seen]  # kept while this ran
+        if left:
+            with open(PENDING + ".tmp", "w") as f:
+                f.writelines(json.dumps(r) + "\n" for r in left)
+            os.replace(PENDING + ".tmp", PENDING)
+        else:
+            try:
+                os.remove(PENDING)
+            except OSError:
+                pass
+
+
+def _deliver_each(acting_now, p, c, log, lines, left):
+    """One pass over the kept requests: what isn't done goes into left."""
     for r in lines:
         try:
             if acting_now == "main":
                 if r.get("refused", 0) >= REFUSALS:
                     left.append(r)  # kept for a person: tried enough, an incident says so
                     continue
-                code, out, err = _run_here(r["script"], r["args"], r.get("env"))
+                code, out, err = _run_here(r["script"], r["args"], r.get("env"), r.get("stdin"))
                 if log:
                     log(f"role: ran a kept request here: {r['script']} {' '.join(r['args'])[:80]} -> {code}")
                 if code:
@@ -849,15 +1043,6 @@ def _deliver(acting_now, p, c, jobs_cmd, log):
         except Exception:
             pass
         left.append(r)
-    if left:
-        with open(PENDING + ".tmp", "w") as f:
-            f.writelines(json.dumps(r) + "\n" for r in left)
-        os.replace(PENDING + ".tmp", PENDING)
-    else:
-        try:
-            os.remove(PENDING)
-        except OSError:
-            pass
 
 
 def serve(kind: str) -> int:
@@ -886,7 +1071,28 @@ def serve(kind: str) -> int:
         if not both and acting() != "main":
             print(json.dumps({"code": 3, "out": "", "err": "This HQ isn't the main one right now.\n"}))
             return 3
-        code, out, err = _run_here(script, args, d.get("env"))
+        hid = str(d.get("id") or "")[:80]
+        if script == "settle" and args[0] in ("file", "override"):
+            # F115 (the check's finding 2): settling a file again is safe by itself and must look at the main's file as
+            # it is now, never answer from memory (a stale repeat would be called settled, and the revert wipe his
+            # change). Only the parts of a big file are kept by id.
+            hid = ""
+        if not hid:
+            code, out, err = _run_here(script, args, d.get("env"), d.get("stdin"))
+            print(json.dumps({"code": code, "out": out, "err": err}))
+            return 0
+        # F115: the same hand-over twice (its answer lost on the way, sent again from the kept list) runs once; the
+        # second gets the first one's answer. One at a time per id, so two at the same moment don't both run.
+        with _handed_lock(hid) as lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+            was = handed(hid)
+            if was:
+                print(json.dumps({"code": was.get("code", 0), "out": was.get("out", ""), "err": was.get("err", ""),
+                                  "repeat": True}))
+                return 0
+            code, out, err = _run_here(script, args, d.get("env"), d.get("stdin"))
+            if code == 0:
+                _keep_handed(hid, {"code": code, "out": out[-2000:], "err": err[-1000:], "script": script})
         print(json.dumps({"code": code, "out": out, "err": err}))
         return 0
     return 2

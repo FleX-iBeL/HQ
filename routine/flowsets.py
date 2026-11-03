@@ -26,7 +26,7 @@ MAC_ONLY = "18,19,25,30,31,33,37,38,39,43,47,196"
 # the server (44 alone reads HQ's whole history, 579 s); those that need a headless browser, which HQ doesn't install; and those that lean on the maker's
 # own planning or work line (106, 165, 171). Run on a real fresh install of 2 November 2026: the rest took about 5 minutes. The limits are several times
 # that, and a Mac runs more flows. [Claude's choice]
-INSTALL_LEAVE_OUT = ("44,65,66,108,119,145,146,147,148,182,"
+INSTALL_LEAVE_OUT = ("44,65,66,108,119,145,146,147,148,182,371,373,"  # F115: 371 and 373 run two Syncthings, about a minute each
                      "73,79,84,87,91,92,112,116,118,120,124,130,131,137,138,139,140,149,151,153,154,156,160,166,193,"
                      "106,165,171,410")
 INSTALL_SECONDS_LINUX = 1800

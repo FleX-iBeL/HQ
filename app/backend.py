@@ -30,6 +30,9 @@ SWITCHES = {
                     "every write to the main. Off: both send and receive, with conflict copies merged after.",
     "planning_index": "The planning file is read through an index the routine keeps (a row by its place), never "
                       "whole. Off: the scripts parse the whole file each time.",
+    "handover": "With one-way sync, the backup hands what it holds that the main doesn't (its own changes, its "
+                "conflict copies) to the main every minute, and takes the main's copy back once all of it is there "
+                "(F115). Off: it waits, said on the sync line; `sync.py handover` does it once by hand.",
 }
 
 
@@ -85,6 +88,19 @@ def switch(name: str, want: bool) -> dict:
     return d
 
 
+def switch_said(name: str, want: bool) -> str:
+    """F115: a switch flipped from wherever: on the backup the main writes the file (role.door), as every synced file."""
+    if name not in SWITCHES:
+        return f"No switch called {name!r}. The switches: {', '.join(SWITCHES)}."
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+    import role
+    h = role.door(file(), "backend", ["on" if want else "off", name])
+    if h is not None:
+        return role.door_said(h, "The switch")
+    switch(name, want)
+    return f"{name} is {'on' if want else 'off'}."
+
+
 def words() -> str:
     out = []
     for s in listing():
@@ -100,12 +116,11 @@ def main(argv: list[str]) -> int:
         print(words())
         return 0
     if argv[0] in ("on", "off") and len(argv) == 2:
-        try:
-            switch(argv[1], argv[0] == "on")
-        except KeyError:
+        if argv[1] not in SWITCHES:
             print(f"No switch called {argv[1]!r}. The switches: {', '.join(SWITCHES)}.")
             return 2
-        print(f"{argv[1]} is {argv[0]} from the next call, text or job.")
+        said = switch_said(argv[1], argv[0] == "on")
+        print(said if not said.endswith(f"{argv[0]}.") else f"{argv[1]} is {argv[0]} from the next call, text or job.")
         return 0
     print(__doc__)
     return 2
