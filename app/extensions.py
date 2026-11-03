@@ -349,13 +349,13 @@ def _flow_hq(e: dict, tmp: Path, files: list[str]) -> tuple[Path, Path, Path]:
 
 def _flow_env(t: Path, hq: Path, ws: Path, mine: Path) -> dict:
     """Nothing of the real HQ's own settings (no HQ_ variable at all, HQ_REAL_* included), and every place HQ or the person's
-    computer keeps things inside the throwaway folder: HQ's memory (HQ_SUPPORT), the home folder, the status files. A flow
-    never texts anyone."""
+    computer keeps things inside the throwaway folder: HQ's memory (HQ_SUPPORT), the home folder, the status files. PWD is
+    the flow's own folder (it starts there) and OLDPWD goes, so neither names a real place. A flow never texts anyone."""
     home = t / "home"
     for sub in ("tmp", "status", "support", "home", "home/.local/state", "home/.config"):
         (t / sub).mkdir(parents=True, exist_ok=True)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("HQ_", "XDG_"))}
-    env.update({"HOME": str(home), "XDG_STATE_HOME": str(home / ".local/state"), "XDG_CONFIG_HOME": str(home / ".config"),
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("HQ_", "XDG_")) and k != "OLDPWD"}
+    env.update({"PWD": str(mine), "HOME": str(home), "XDG_STATE_HOME": str(home / ".local/state"), "XDG_CONFIG_HOME": str(home / ".config"),
                 "HQ_ROOT": str(hq), "HQ_WORKSPACE": str(ws), "HQ_FOLDER": str(ws), "HQ_EXTENSION": str(mine),
                 "HQ_EXTENSIONS_FOLDER": str(ws / "HQ" / "extensions"), "HQ_ROADMAP": str(ws / "HQ" / "roadmap.md"),
                 "HQ_SUPPORT": str(t / "support"), "HQ_STATUS_DIR": str(t / "status"),

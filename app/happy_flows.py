@@ -20955,8 +20955,10 @@ print(json.dumps(out))
                 "assert not [k for k in os.environ if k.startswith('HQ_REAL_')], 'a real setting came along'\n"
                 "assert os.path.realpath(root).startswith(os.path.realpath(tempfile.gettempdir())), root\n"
                 "assert os.path.realpath(os.path.join(root, 'workspace')) == os.path.join(os.path.realpath(root), 'workspace'), 'the workspace is a link'\n"
+                "assert 'OLDPWD' not in os.environ and os.path.realpath(os.environ.get('PWD', '')) == os.path.realpath(os.getcwd()), 'PWD or OLDPWD names another place'\n"
+                "assert os.path.realpath(os.environ['PWD']).startswith(os.path.realpath(root)), os.environ['PWD']\n"
                 "sys.path.insert(0, os.path.join(root, 'routine')); import hqpaths\n"
-                "for d in (os.path.join(root, 'workspace'), os.path.expanduser('~'), hqpaths.support_dir(), hqpaths.real_support()):\n"
+                "for d in (os.path.join(root, 'workspace'), os.path.join(os.environ['PWD'], 'workspace'), os.path.expanduser('~'), hqpaths.support_dir(), hqpaths.real_support()):\n"
                 "    os.makedirs(d, exist_ok=True); open(os.path.join(d, tag), 'w').write('x')\n"
                 "print('wrote into the copy only')\n" % tag)
             (g / "flows" / "bg.sh").write_text("sleep 333.49 &\necho 'left a child'\nexit 0\n")
