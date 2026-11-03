@@ -43,6 +43,7 @@
     border-radius: 10px; margin: 10px 0 4px; }
   .m .at { float: right; color: var(--dim); font-size: 11px; margin: 6px 0 -4px 10px; white-space: nowrap; }
   .me .at { color: rgba(255, 255, 255, .75); }
+  .m.quiet { opacity: .7; font-size: 13px; font-style: italic; background: transparent; box-shadow: none; }
   #typing { color: var(--dim); font-size: 13px; padding: 0 16px 6px; min-height: 18px; }
   form { display: flex; gap: 8px; padding: 8px 12px 12px; border-top: 1px solid #2a2e36; }
   textarea { flex: 1; resize: none; background: var(--panel); color: var(--text); border: 1px solid #2a2e36;
@@ -157,7 +158,7 @@
         lastDay = dayKey(m.at);
       }
       const d = document.createElement('div');
-      d.className = 'm ' + (m.from === 'me' ? 'me' : 'agent');
+      d.className = 'm ' + (m.from === 'me' ? 'me' : 'agent') + (m.quiet ? ' quiet' : '');  // F79: her note for herself
       linked(d, m.text || '');
       const at = document.createElement('span');
       at.className = 'at';
@@ -187,7 +188,7 @@
       }
       lineHere = d.line || '';
       draw(d.messages || []);
-      const last = (d.messages || []).slice(-1)[0];
+      const last = (d.messages || []).filter((m) => !m.quiet).slice(-1)[0];  // F79: her quiet note isn't her answer
       waiting = !!(last && last.from === 'me');
       document.getElementById('typing').textContent = waiting && info ? info.name + ' is typing…' : '';
     } catch {

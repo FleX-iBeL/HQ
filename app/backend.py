@@ -3,8 +3,10 @@
 The rebuild of the backend (the briefing an agent starts with, the open line that keeps her session between calls
 and texts, the team's jobs run headless, the one-way sync between two HQs, the planning index) runs behind
 switches, so a bad day is one switch back instead of a rollback: in the user's words, "i am a bit scared to just
-push without any rollback possibilities". Every switch starts off on a fresh install; the maker's workspace turns
-them on. The file is the workspace's `HQ/backend.json`: {"on": ["briefing", …]}. A computer can override one with
+push without any rollback possibilities". At the stable version (H301) those five are on by default: a fresh install
+has them on from the template, and an HQ that updates gets them once, by its data change (routine/datachanges/003),
+unless its file holds switches set by hand; each can still be turned off. The file is the workspace's
+`HQ/backend.json`: {"on": ["briefing", …]}. A computer can override one with
 HQ_BACKEND_<NAME>=1 or 0 (a test, or one computer only), and HQ_BACKEND names another file.
 
     python3 app/backend.py                  the switches and what each does

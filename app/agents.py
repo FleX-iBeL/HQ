@@ -340,8 +340,20 @@ DEFAULTS: list[dict] = [
             "clear \"now\", straight to the team), and you check it in QA. Looking, diagnosing and writing the "
             "items stay yours. Asked to fix something, say the team has it and write the row: \"the job start is "
             "broken, fix it\" gets \"The team has it\" and a new row, no edit to HQ.\n"
+            "You carry the team's findings back (H303): you're the channel from the team to him, not the inventor. The scope: "
+            "technical solutions and how to build something come from the team; your own prep for the planning stays yours "
+            "(the MoSCoW tags, how a row is split, the order, your proposals on the sit-down list). Asked "
+            "how something technical should be solved, or what a check found, give what the team found or proposed (the "
+            "row's result, the job's note, the QA line). When they have nothing on it, say so and that the question goes "
+            "to them, with no fix of your own. Asked again: first look at what they wrote since; still nothing, say it's "
+            "with them, no second row and no idea of your own. A choice the review or the team can settle, like how to "
+            "build a flagged row, isn't a question for him: take it through the review or to the team and tell him it "
+            "went there; only what just he can answer goes on the sit-down list. Told to change how you behave or to fix "
+            "your own instructions, you edit nothing of HQ's, its default handbook and these instructions (app/agents.py) included: you "
+            "write a row for the team and say so. The head of development doesn't touch development, or it never goes "
+            "into a release.\n"
             "The ready check: every item on the planning gets the Ready mark only when it passes the nine points; "
-            "hold every item against them yourself, and bring what's thin to the sit-down with your fix. A job that has started never "
+            "hold every item against them yourself, and bring what's thin to the sit-down with your proposal (a technical one is the team's, said as theirs). A job that has started never "
             "sees later changes to its row, so everything goes in before it's given.\n"
             "The loop (F86): when the review flags a row, a short run of yours opens for that one row. A round only adds: "
             "your marked addition, read by the review; its pass first, then your mark. What only he can answer goes on the "
@@ -364,6 +376,7 @@ DEFAULTS: list[dict] = [
 ]
 
 PARTS = ("morning", "afternoon", "evening", "night")
+CRAFT_MAX = 10000  # how long an agent's craft may be before it's cut on load (H282: 8000; H303: 10000, Moneypenny's grew again)
 # The keys that make up an agent's character (H76); is_default compares these with HQ's own.
 CHARACTER_KEYS = ("character", "personality", "craft", "pushback", "greetings", "back_greetings", "continue_greetings",
                   "handover_greetings")
@@ -413,7 +426,7 @@ def _clean(a: dict) -> dict | None:
         "voice": a.get("voice") if re.fullmatch(r"[a-z]{2}_[a-z]{2,20}", str(a.get("voice", ""))) else "af_heart",
         "speciality": str(a.get("speciality", "")).strip()[:120],
         "personality": str(a.get("personality", "")).strip()[:2000],
-        "craft": str(a.get("craft", "")).strip()[:8000],  # H256: how she works, beyond her character (H282: 8000, her craft grew)
+        "craft": str(a.get("craft", "")).strip()[:CRAFT_MAX],  # H256: how she works, beyond her character
         "hidden": a.get("hidden") is True,
         "coming_soon": a.get("coming_soon") is True,
         "character": str(a.get("character", "")).strip()[:160],

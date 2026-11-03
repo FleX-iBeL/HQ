@@ -22,7 +22,8 @@ What goes in, and who writes it:
     python3 routine/mistakes.py add bug-after-qa LABEL "WHAT WAS FOUND"
     python3 routine/mistakes.py scan [--call PATH | --all]    the program's own pass; without a target, what's new since the last pass
     python3 routine/mistakes.py list [--days N] [--agent A]
-    python3 routine/mistakes.py score [--days N] [--json]     per agent and per hand-off, from the ledger alone
+    python3 routine/mistakes.py score [--days N] [--json]     per agent and per hand-off, from the ledger alone; with what the pass read
+                                                              and couldn't (F97) and what the second looks cost (.status/mistakes-looks.jsonl)
     python3 routine/mistakes.py put JSON                      the main writes a line the backup handed over (role.WRITES)
 Standard library only.
 """
@@ -189,12 +190,38 @@ def _his_name(base=None) -> str:
     return _me.load(Path(_folder(base)))["name"] or "Me"
 
 
+_ENDED = re.compile(r"^Ended \d\d:\d\d(?::\d\d)?", re.M)
+
+
+def read_call(p: str, base=None) -> tuple[list[dict] | None, str, bool]:
+    """F97: (his lines, why it couldn't be read, whether the call has ended). None and a why when the transcript can't be
+    opened or isn't a transcript, so the pass counts it as not read and tries it again, never as a call with nothing in it."""
+    try:
+        text = open(p, encoding="utf8", errors="replace").read()
+    except OSError as e:
+        return None, f"it can't be opened ({e.strerror or type(e).__name__})", False
+    first = next((l for l in text.splitlines() if l.strip()), "")
+    if not first.startswith("# "):
+        try:
+            old = time.time() - os.path.getmtime(p) >= OPEN_DAYS * 86400
+        except OSError:
+            old = False
+        if old and not any(_LINE.match(l) for l in text.splitlines()):
+            return [], "", True  # F97: a stub nobody wrote into for a day: read, and nothing in it
+        return None, "it isn't in a transcript's shape (no heading)", False
+    return _his_lines(p, text, base), "", bool(_ENDED.search(text))
+
+
 def call_lines(p: str, base=None) -> list[dict]:
     """His lines of a transcript: {"n" (its line number), "words", "agent" (who spoke just before him, else the call's agent)}."""
     try:
         text = open(p, encoding="utf8", errors="replace").read()
     except OSError:
         return []
+    return _his_lines(p, text, base)
+
+
+def _his_lines(p: str, text: str, base=None) -> list[dict]:
     me = _his_name(base).lower()
     h = _HEAD.search(text)
     agent = (h.group(1) or "").strip() if h else ""
@@ -221,23 +248,34 @@ def _when(day, line: str) -> float | None:
         return None
 
 
-def thread_lines(line: str, base=None) -> list[dict]:
-    """His lines of a text thread: {"n" (the line's id), "words", "agent", "at"}."""
+def read_thread(line: str, base=None) -> tuple[list[dict], int, str]:
+    """F97: (his lines of a text thread, how many of its lines couldn't be read, why the thread itself couldn't be, else '').
+    A thread that isn't there is an empty one, not an unread one."""
     p = os.path.join(_folder(base), "HQ", line, "thread.jsonl")
-    out = []
+    out, bad = [], 0
     try:
         with open(p, encoding="utf8", errors="replace") as f:
             for l in f:
+                if not l.strip():
+                    continue
                 try:
                     d = json.loads(l)
                 except ValueError:
+                    bad += 1
                     continue
                 if isinstance(d, dict) and d.get("from") == "me" and d.get("text"):
                     out.append({"n": d.get("id") or f"{d.get('at')}", "words": str(d["text"]).strip(), "agent": THREADS[line],
                                 "at": d.get("at")})
-    except OSError:
+    except FileNotFoundError:
         pass
-    return out
+    except OSError as e:
+        return [], 0, f"it can't be opened ({e.strerror or type(e).__name__})"
+    return out, bad, ""
+
+
+def thread_lines(line: str, base=None) -> list[dict]:
+    """His lines of a text thread: {"n" (the line's id), "words", "agent", "at"}."""
+    return read_thread(line, base)[0]
 
 
 def clear_kind(words: str) -> str | None:
@@ -257,89 +295,246 @@ def _key(where: str, n) -> str:
     return hashlib.sha256(f"{where}#{n}".encode()).hexdigest()[:16]
 
 
-def scan_call(p: str, base=None) -> list[dict]:
-    where = _where_call(p, base)
+def _scan_lines(lines, where, base=None) -> list[dict]:
     got = []
-    for l in call_lines(p, base):
+    for l in lines:
         kind = clear_kind(l["words"])
         if kind:
             d = add(kind, l["agent"], l["words"], where=where, key=_key(where, l["n"]), at=l["at"], base=base)
             if d:
                 got.append(d)
     return got
+
+
+def scan_call(p: str, base=None) -> list[dict]:
+    return _scan_lines(call_lines(p, base), _where_call(p, base), base)
 
 
 def scan_thread(line: str, since: float = 0, base=None) -> list[dict]:
-    where = f"HQ/{line}"
-    got = []
-    for l in thread_lines(line, base):
-        if float(l["at"] or 0) <= since:
-            continue
-        kind = clear_kind(l["words"])
-        if kind:
-            d = add(kind, l["agent"], l["words"], where=where, key=_key(where, l["n"]), at=l["at"], base=base)
-            if d:
-                got.append(d)
-    return got
+    return _scan_lines([l for l in thread_lines(line, base) if float(l["at"] or 0) > since], f"HQ/{line}", base)
 
 
 def _state_file() -> str:
-    return os.path.join(hqpaths.HQ, ".status", "mistakes-scan.json")
+    return os.environ.get("HQ_MISTAKES_SCAN") or os.path.join(hqpaths.HQ, ".status", "mistakes-scan.json")
+
+
+def _load_state() -> dict:
+    try:
+        st = json.load(open(_state_file()))
+        return st if isinstance(st, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+OPEN_DAYS = 1  # F97: a transcript without its Ended line is read again each pass this long after its last change (a call still going)
+
+
+def _call_names(base=None) -> tuple[str, list[str]]:
+    calls = os.path.join(_folder(base), "HQ", "calls")
+    try:
+        return calls, sorted(n for n in os.listdir(calls) if n.endswith(".md"))
+    except OSError:
+        return calls, []
 
 
 def sweep(all_of_it: bool = False, base=None) -> list[dict]:
     """What's new in the transcripts and the threads since the last pass (on the main, from the routine's minute): the program's
-    part for what reached the main without a wrap-up here, a call's from the backup and every text."""
-    try:
-        st = json.load(open(_state_file()))
-    except (OSError, ValueError):
-        st = {}
-    calls = os.path.join(_folder(base), "HQ", "calls")
-    try:
-        names = sorted(n for n in os.listdir(calls) if n.endswith(".md"))
-    except OSError:
-        names = []
-    if not st and not all_of_it:  # the first pass starts now; what came before is `scan --all`, once
-        st = {"calls": names[-1] if names else "", "threads": time.time()}
-        names = []
-    got = []
-    last = "" if all_of_it else st.get("calls", "")
-    newest = st.get("calls", "")
-    for n in names:
-        if n > last:
-            got += scan_call(os.path.join(calls, n), base)
-            newest = max(newest, n)
-    since = 0 if all_of_it else float(st.get("threads") or 0)
+    part for what reached the main without a wrap-up here, a call's from the backup and every text.
+
+    F97: every transcript it hasn't read yet, by name, not only the names after the newest it saw, so one that reaches the main late
+    with an older name is read too. One that can't be read is kept as not read, with why, and tried again the next pass; a call
+    still going (no Ended line) is read again until it ends. The threads go by the ids of his lines, not their times."""
+    st = _load_state()
     now = time.time()
-    for line in THREADS:
-        got += scan_thread(line, since, base)
+    calls, names = _call_names(base)
+    read_ = dict(st.get("read") or {})
+    if "read" not in st and st.get("calls"):  # a state from before F97: what the old pass had passed counts as read
+        read_ = {n: now for n in names if n <= st["calls"]}
+    seen = {k: set(v) for k, v in (st.get("thread_ids") or {}).items()}
+    first = not st and not all_of_it
+    lines = {line: read_thread(line, base) for line in THREADS}
+    if first:  # the first pass starts now; what came before is `scan --all`, once
+        read_ = {n: now for n in names}
+        seen = {line: {l["n"] for l in got[0]} for line, got in lines.items()}
+    elif not st.get("thread_ids") and st.get("threads"):
+        seen = {line: {l["n"] for l in got[0] if float(l["at"] or 0) <= float(st["threads"])} for line, got in lines.items()}
+    unread = {} if all_of_it else dict(st.get("unread") or {})
+    got = []
+    for n in names:
+        if n in read_ and not all_of_it:
+            continue
+        p = os.path.join(calls, n)
+        his, why, ended = read_call(p, base)
+        if his is None:
+            was = unread.get(n) or {}
+            unread[n] = {"why": why, "tries": int(was.get("tries") or 0) + 1, "first": was.get("first") or round(now), "last": round(now)}
+            continue
+        unread.pop(n, None)
+        got += _scan_lines(his, _where_call(p, base), base)
+        try:
+            still = not ended and now - os.path.getmtime(p) < OPEN_DAYS * 86400
+        except OSError:
+            still = False
+        if still:
+            read_.pop(n, None)
+        else:
+            read_[n] = round(now)
+    for n in list(unread):
+        if n not in names:  # gone from the folder: nothing left to read
+            unread.pop(n)
+    texts = {}
+    for line, (his, bad, why) in lines.items():
+        new = his if all_of_it else [l for l in his if l["n"] not in seen.get(line, set())]
+        got += _scan_lines(new, f"HQ/{line}", base)
+        if not why:
+            seen[line] = {l["n"] for l in his}  # what's still in the thread; older ids fell off it
+        texts[line] = {"bad": bad, "why": why}
     if base is None:
         try:
             os.makedirs(os.path.dirname(_state_file()), exist_ok=True)
             tmp = hqlock.tmp(_state_file())
             with open(tmp, "w") as f:
-                json.dump({"calls": newest, "threads": now}, f)
+                json.dump({"calls": max(names) if names else st.get("calls", ""), "threads": now, "read": read_, "unread": unread,
+                           "thread_ids": {k: sorted(v) for k, v in seen.items()}, "texts": texts}, f)
             os.replace(tmp, _state_file())
         except OSError:
             pass
     return got
 
 
-def ask(system: str, text: str) -> str:
-    """One small look: haiku, no tools, nothing of the folder's. Raises when it fails."""
+def reading(since: float | None = None, until: float | None = None, base=None) -> dict:
+    """F97: what the ledger's pass has read, so a score that couldn't read a call or a text never reads as zero: the calls of the
+    period (by the day in their name) read, not read (with why, tried again each pass) and not looked at yet; his texts of the period
+    read and not looked at yet, the threads or lines that couldn't be read. From the pass's own state and the folder, no model."""
+    st = _load_state()
+    read_, unread = st.get("read") or {}, st.get("unread") or {}
+    if "read" not in st and st.get("calls"):  # a state from before F97
+        read_ = {n: 0 for n in _call_names(base)[1] if n <= st["calls"]}
+
+    def inside(name: str) -> bool:
+        m = re.match(r"(\d{4}-\d\d-\d\d)-(\d\d)(\d\d)", name)
+        if not m:
+            return True
+        try:
+            t = time.mktime(time.strptime(f"{m.group(1)} {m.group(2)}:{m.group(3)}", "%Y-%m-%d %H:%M"))
+        except ValueError:
+            return True
+        return (since is None or t >= since) and (until is None or t < until)
+
+    names = [n for n in _call_names(base)[1] if inside(n)]
+    out = {"calls_read": sum(1 for n in names if n in read_), "calls_not_read": sorted(n for n in names if n in unread),
+           "calls_waiting": sum(1 for n in names if n not in read_ and n not in unread), "texts_read": 0, "texts_waiting": 0,
+           "texts_not_read": 0, "threads_not_read": [], "passed": bool(st)}
+    out["why"] = {n: unread[n].get("why", "") for n in out["calls_not_read"]}
+    seen = st.get("thread_ids") or {}
+    texts = st.get("texts") or {}
+    for line in THREADS:
+        his, bad, why = read_thread(line, base)
+        if why or (texts.get(line) or {}).get("why"):
+            out["threads_not_read"].append(line)
+            continue
+        out["texts_not_read"] += bad
+        for l in his:
+            if (since is None or float(l["at"] or 0) >= since) and (until is None or float(l["at"] or 0) < until):
+                out["texts_read" if l["n"] in set(seen.get(line) or ()) else "texts_waiting"] += 1
+    return out
+
+
+def reading_words(r: dict) -> str:
+    """The pass's reading in one line, for the score."""
+    if not r.get("passed"):
+        return "The pass over the calls and texts hasn't run here yet, so nothing below is counted from them."
+    calls = f"{r['calls_read']} call{'' if r['calls_read'] == 1 else 's'}"
+    texts = f"{r['texts_read']} of his text{'' if r['texts_read'] == 1 else 's'}"
+    out = f"Read {calls} and {texts}"
+    no = len(r["calls_not_read"]) + r["texts_not_read"] + len(r["threads_not_read"])
+    if no:
+        bits = ([f"{len(r['calls_not_read'])} call{'' if len(r['calls_not_read']) == 1 else 's'} ("
+                 + "; ".join(f"{n}: {r['why'].get(n) or 'not read'}" for n in r["calls_not_read"][:5]) + ")"] if r["calls_not_read"] else [])
+        bits += [f"{r['texts_not_read']} line{'' if r['texts_not_read'] == 1 else 's'} in the text threads"] if r["texts_not_read"] else []
+        bits += [f"the thread {t}" for t in r["threads_not_read"]]
+        out += f"; couldn't read {', '.join(bits)}, tried again each pass"
+    else:
+        out += "; none it couldn't read"
+    wait = r["calls_waiting"] + r["texts_waiting"]
+    if wait:
+        out += f"; {r['calls_waiting']} call{'' if r['calls_waiting'] == 1 else 's'} and {r['texts_waiting']} text{'' if r['texts_waiting'] == 1 else 's'} not looked at yet"
+    return out + "."
+
+
+def looks_file() -> str:
+    """F97: what each second look really cost, one line per look, the way routine/review.py keeps .status/reviews.jsonl."""
+    return os.environ.get("HQ_MISTAKES_LOOKS") or os.path.join(hqpaths.HQ, ".status", "mistakes-looks.jsonl")
+
+
+def _keep_look(what: str, t0: float, cost, why: str = "") -> None:
+    line = {"at": round(time.time(), 3), "what": what, "model": LOOK_MODEL, "cost": cost, "s": round(time.time() - t0, 1),
+            **({"failed": True, "why": why[:200]} if why else {})}
+    try:
+        os.makedirs(os.path.dirname(looks_file()), exist_ok=True)
+        with hqlock.locked(looks_file()):
+            with open(looks_file(), "a", encoding="utf8") as f:
+                f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    except OSError as e:
+        print(f"(the looks' cost: {e!r})", file=sys.stderr)
+
+
+def looks(since: float | None = None, until: float | None = None) -> dict:
+    """F97: the second looks of a period: how many, how many failed, what they cost in all (a look with no cost known counted apart)."""
+    out = {"looks": 0, "failed": 0, "cost": 0.0, "unknown": 0}
+    try:
+        with open(looks_file(), encoding="utf8") as f:
+            for l in f:
+                try:
+                    d = json.loads(l)
+                except ValueError:
+                    continue
+                if not isinstance(d, dict) or (since is not None and d.get("at", 0) < since) or (until is not None and d.get("at", 0) >= until):
+                    continue
+                out["looks"] += 1
+                out["failed"] += bool(d.get("failed"))
+                if isinstance(d.get("cost"), (int, float)):
+                    out["cost"] += d["cost"]
+                else:
+                    out["unknown"] += 1
+    except OSError:
+        pass
+    out["cost"] = round(out["cost"], 4)
+    return out
+
+
+def looks_words(x: dict) -> str:
+    if not x["looks"]:
+        return "The second looks: none in this period, so they cost nothing."
+    return (f"The second looks: {x['looks']}, ${x['cost']:.4f} in all" + (f" ({x['failed']} failed)" if x["failed"] else "")
+            + (f"; {x['unknown']} with no cost known" if x["unknown"] else "") + ".")
+
+
+def ask(system: str, text: str, what: str = "") -> str:
+    """One small look: haiku, no tools, nothing of the folder's. Raises when it fails. what: kept as a line of its own in looks_file(),
+    with what it cost (F97), also when it failed."""
     import subprocess
-    p = subprocess.run([hqpaths.tool("claude", "/opt/homebrew/bin/claude"), "-p", "--model", LOOK_MODEL, "--output-format", "json", "--tools", "",
-                        "--strict-mcp-config", "--setting-sources", "", "--max-budget-usd", str(LOOK_BUDGET), "--no-session-persistence",
-                        "--system-prompt", system],
-                       input=text, capture_output=True, text=True, timeout=LOOK_TIMEOUT)
-    d = json.loads(p.stdout)
-    if d.get("is_error"):
-        raise RuntimeError(f"the model said no: {str(d.get('result') or d.get('subtype'))[:120]}")
+    t0, cost = time.time(), None
+    try:
+        p = subprocess.run([hqpaths.tool("claude", "/opt/homebrew/bin/claude"), "-p", "--model", LOOK_MODEL, "--output-format", "json", "--tools", "",
+                            "--strict-mcp-config", "--setting-sources", "", "--max-budget-usd", str(LOOK_BUDGET), "--no-session-persistence",
+                            "--system-prompt", system],
+                           input=text, capture_output=True, text=True, timeout=LOOK_TIMEOUT)
+        d = json.loads(p.stdout)
+        cost = d.get("total_cost_usd") if isinstance(d, dict) else None
+        if d.get("is_error"):
+            raise RuntimeError(f"the model said no: {str(d.get('result') or d.get('subtype'))[:120]}")
+    except Exception as e:
+        if what:
+            _keep_look(what, t0, cost, str(e) or repr(e))
+        raise
+    if what:
+        _keep_look(what, t0, cost)
     return d.get("result") or ""
 
 
 def _ask_model(words: str, before: str) -> str:
-    return ask(LOOK_SYSTEM, (f"Said just before it:\n{before}\n\n" if before else "") + f"What he said:\n{words}")
+    return ask(LOOK_SYSTEM, (f"Said just before it:\n{before}\n\n" if before else "") + f"What he said:\n{words}", what="second look")
 
 
 def second_look(words: str, before: str = "") -> tuple[bool, str]:
@@ -499,8 +694,11 @@ def main(argv: list[str]) -> int:
         return 0
     if cmd == "score":
         days = float(_opt(args, "--days") or 7)
-        t = tally(read(None, time.time() - days * 86400))
-        print(json.dumps(t, indent=1, ensure_ascii=False) if "--json" in args else score_words(t, days))
+        since = time.time() - days * 86400
+        t = tally(read(None, since))
+        t["reading"], t["looks"] = reading(since), looks(since)  # F97: what it read and couldn't, and what the second looks cost
+        print(json.dumps(t, indent=1, ensure_ascii=False) if "--json" in args else
+              score_words(t, days) + "\n" + reading_words(t["reading"]) + "\n" + looks_words(t["looks"]))
         return 0
     if cmd == "put" and args:
         d = json.loads(args[0])

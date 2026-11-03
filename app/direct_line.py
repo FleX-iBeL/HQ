@@ -61,6 +61,7 @@ Off: HQ_DIRECT=0 in switches.env. Tests: HQ_DIRECT_DRY=1 (her reply is canned, n
   python3 app/direct_line.py report                     the page's or the service worker's report, as JSON on stdin (F102)
   .venv/bin/python app/direct_line.py text WHY "FACTS"  write and push one text (WHY: jobs, mail, down, back, hello)
   .venv/bin/python app/direct_line.py team "FACTS"      Moneypenny texts him on her own line (H266)
+  python3 app/direct_line.py note WHY "FACTS"           a note for her on her line, never pushed (F79: a slip of the estimates)
   ... --team                                            any of these on her line (info, reply): what the page uses
   .venv/bin/python app/direct_line.py reply             answer his newest texts
   .venv/bin/python app/direct_line.py initiative        her own look at her notes: a text, or quiet (H124)
@@ -91,7 +92,7 @@ import agents as _agents  # noqa: E402  stdlib only
 VENV_PY = ROOT / ".venv" / "bin" / "python"
 AGENT_ID = os.environ.get("HQ_DIRECT_AGENT", "donna")  # at import; agent() reads the variable each time (H266)
 TEAM_AGENT = "moneypenny"  # H266: the team line is hers
-TEAM_KINDS = ("jobs", "paused", "nightly", "estimates", "qa-failed", "release-held", "team")
+TEAM_KINDS = ("jobs", "paused", "nightly", "estimates", "qa-failed", "release-held", "team", "estimate-miss", "estimate-misses")
 DOWN_AFTER = 180  # an incident open this long gets a text; a takeover or a refused pull or push (F31) gets one at once
 KEEP = 400  # messages kept in the thread
 SYNC_CONFLICT = "Both sides changed"  # F58: routine/sync.py's CONFLICT_WHY, an incident she never texts about
@@ -357,9 +358,9 @@ def line_dir(name: str) -> Path | None:
     return None
 
 
-def add(sender: str, text: str, why: str = "", item: str = "", mid: str = "") -> dict:
+def add(sender: str, text: str, why: str = "", item: str = "", mid: str = "", quiet: bool = False) -> dict:
     m = {"at": round(time.time(), 3), "from": sender, "text": text.strip(), "why": why, "id": mid or secrets.token_hex(8),
-         **({"item": item} if item else {})}  # F103: the id of the work it's about, carried as an argument
+         **({"item": item} if item else {}), **({"quiet": True} if quiet else {})}  # F103: the id of the work it's about, carried as an argument
     where = folder()
     if _backup():
         try:
@@ -380,6 +381,8 @@ def unanswered() -> list[dict]:
     out = []
     for m in reversed(thread()):
         if m["from"] != "me":
+            if m.get("quiet"):  # F79: a note for her own eyes isn't an answer to him
+                continue
             break
         out.insert(0, m)
     return out
@@ -680,6 +683,9 @@ PLAIN = {
     "release-held": ["Not everything went out with the release: {facts}",
                      "I held part of the release back: {facts}"],
     "team": ["{facts}"],
+    "estimate-miss": ["{facts}"],
+    "estimate-misses": ["Our estimates keep slipping, and I want you to know: {facts}",
+                        "The estimates missed again, more than I'll let pass: {facts}"],
     "travel": ["Heads up for your trip: {facts}",
                "Change on your way there: {facts}"],
     "missed-call": ["Missed call. {facts}",
@@ -804,14 +810,24 @@ KINDS = {
     "off-release": "HQ on this computer had moved onto work that isn't released yet, and it goes back on its released version by itself. The facts say how far that got, what got stopped and where anything of his own is kept. Two short sentences in everyday words: what happened, whether it's fine now or still being tried, and if something of his was set aside, where. No job numbers.",
     "helper": "He hung up while a helper was still looking something up for him on the call. The facts give what he asked and what came back: tell him, plainly and shortly.",
     "estimates": "Every Friday before the sprint planning: how the team's time estimates held this week (the facts give "
-                 "the numbers). Two or three short sentences: how many landed inside their range, plainly when it's "
-                 "below eight in ten, and which kinds of work missed. Numbers are fine here, he plans with them.",
+                 "the numbers). Two or three short sentences: how many finished by the latest end they were given, plainly when "
+                 "it's below nine in ten, and which kinds of work missed. Numbers are fine here, he plans with them.",
     "qa-failed": "You checked the team's work on something and it didn't pass (the facts say what and what's off). A "
                  "short text: what didn't pass in everyday words, what's off in one line, and that it went back to "
                  "the team for a fix (or, when the facts say so, that it waits for him). No job numbers, no file names.",
     "release-held": "A release went out without some of the work, because that work hasn't passed your check yet (the "
                     "facts say what went out and what's held). One or two short sentences, plain: what's held back "
                     "and why, and that it goes out once it passes.",
+    "estimate-miss": "A note for yourself, never texted to him: one of the team's jobs ran past the latest end its estimate gave it "
+                     "(the facts say which, its range and its real time). It's yours to handle; he only hears about it when it repeats.",
+    "estimate-misses": "The team's jobs keep running past the latest end their estimates gave them, more often than the bar he "
+                       "accepted (at most 1 job in 20 past it), or the same kind twice in a row (the facts say which jobs, their "
+                       "range and real time, and which rule it broke). Each single slip was yours to handle, and he didn't hear "
+                       "about it; this is the repeat, so you raise it. Two or three short sentences: what keeps slipping in "
+                       "everyday words, how often against the bar, and that it's for him to look at. Nothing is being done "
+                       "about it yet unless the facts say so, so never say you're doing or fixing something; if you have an "
+                       "idea, say it plainly as a proposal for him to say yes or no to (\"I'd suggest ...\"). Numbers are "
+                       "fine here, he plans with them.",
     "team": "Something you, as head of the team, want him to know without waiting for a call: a decision you need "
             "from him, a heads-up, what you found (the facts say it). A short text in your own words; when you need "
             "a decision, end with the one question, plainly.",
@@ -1046,6 +1062,24 @@ def text(why: str, facts: str, item: str = "", once: str = "") -> dict:
     return msg
 
 
+def note(why: str, facts: str, item: str = "", once: str = "") -> dict:
+    """F79, his words of 1 November 2026: "i dont want to hear it when it slips, moneypenny needs to know". A note on her own line
+    for her, never pushed to his phone: written as it is (no Claude), it stands in her thread, so she has it when she answers
+    there, and the line's reply doesn't take it for an answer to him. once: the line's id, so the same note stands there once."""
+    if not on_team_line():
+        if line_for(why) != "team":  # no line of hers (no Moneypenny, HQ_TEAM_LINE=0): never on Donna's, which he reads
+            return {"skipped": "no team line"}
+        with _Env(team_env()):
+            m = note(why, facts, item, once)
+        m["line"] = "team"
+        return m
+    if once and any(m.get("id") == once for m in thread()):
+        return {"id": once, "already": True}
+    msg = add("agent", facts, why, item, once, quiet=True)
+    _on_record(item, why, "noted for her", msg.get("id", ""))
+    return msg
+
+
 def ring(n: int) -> dict:
     """H238: the agent's call rings on his phone: a push notification "<agent> is calling", what it's about; one tap
     opens HQ and starts the call with her (the service worker opens the call page with ?ring=N). Not in her chat: a
@@ -1141,7 +1175,7 @@ def reply() -> str | None:
             if not mine:
                 break
             words = "\n".join(m["text"] for m in mine)
-            answer = _answer(words)
+            answer = _answer(words, [m.get("id") for m in mine])
             msg = add("agent", answer, "reply")
             push(answer)
             _harvest(answer)
@@ -1152,7 +1186,18 @@ def reply() -> str | None:
     return last
 
 
-def _answer(words: str) -> str:
+def history(ids=(), most: int = 16) -> str:
+    """The chat so far for her answer: the last lines without the texts of his she's answering now (they come as his new
+    text), a quiet note of hers in it as hers (F79), each once."""
+    ids = set(i for i in ids if i)
+    recent = [m for m in thread(last=most + len(ids)) if m.get("id") not in ids][-most:]
+    if not ids and recent and recent[-1].get("from") == "me":  # called without ids: his newest is the new text, as before
+        recent = recent[:-1]
+    return "\n".join(f"{'Her' if m['from'] == 'agent' else 'Him'} ({time.strftime('%d %b %H:%M', time.localtime(m['at']))}): "
+                     f"{'(a note for yourself, never sent to him) ' if m.get('quiet') else ''}{m['text']}" for m in recent)
+
+
+def _answer(words: str, ids=()) -> str:
     if os.environ.get("HQ_DIRECT_DRY") == "1":
         return f"Got it: {words[:80]}"
     import asyncio
@@ -1168,9 +1213,7 @@ def _answer(words: str) -> str:
     pol.pending = [tuple(p) for p in st.get("pending") or []]
     if pol.pending:
         pol.answer(words)  # his yes (or no) to what she asked last time
-    recent = thread(last=16)[:-1]
-    history = "\n".join(f"{'Her' if m['from'] == 'agent' else 'Him'} ({time.strftime('%d %b %H:%M', time.localtime(m['at']))}): "
-                        f"{m['text']}" for m in recent)
+    history_ = history(ids)
     rules = (_text_rules() + _agents.persona(a, user()).replace("on this call", "on this chat")
              .replace("call rules", "chat rules"))
     if os.environ.get("HQ_DIRECT_COACHING") == "1":  # H225: the coaching line, a thread with her only for life coaching
@@ -1197,7 +1240,7 @@ def _answer(words: str) -> str:
         quick_context=quick_context.build(_config.FOLDER, context=ctx) if ctx != "all" else None,
         resume=resume)
     b = _brain.ClaudeBrain(model=a["model"], system_prompt="", cwd=_config.FOLDER, options=opts)
-    prompt = (f"The chat so far, newest last:\n{history}\n\n" if history else "") + f"His new text:\n{words}"
+    prompt = (f"The chat so far, newest last:\n{history_}\n\n" if history_ else "") + f"His new text:\n{words}"
     try:  # H298: what he may be answering: a held change's question can still be in a batch
         sys.path.insert(0, str(ROOT / "routine"))
         import cycles
@@ -1462,6 +1505,15 @@ if __name__ == "__main__":
             del args[i:i + 2]
         m = text(args[1], args[2] if len(args) > 2 else "", item, once)
         print(json.dumps(m, ensure_ascii=False))
+    elif cmd == "note" and len(args) >= 3:  # F79: a note for her on her own line, never pushed (her slips are hers)
+        item, once = "", ""
+        for flag in ("--item", "--once"):
+            if flag in args:
+                i = args.index(flag)
+                v = args[i + 1] if i + 1 < len(args) else ""
+                del args[i:i + 2]
+                item, once = (v, once) if flag == "--item" else (item, v)
+        print(json.dumps(note(args[1], args[2], item, once), ensure_ascii=False))
     elif cmd == "ring" and len(args) >= 2 and args[1].isdigit():
         print(json.dumps(ring(int(args[1])), ensure_ascii=False))
     elif cmd == "team" and len(args) >= 2:  # H266: Moneypenny texts him on her own line, without waiting for a call

@@ -17,7 +17,8 @@ One folder per extension, with an `extension.json` (only `name` and `what` are n
      "routines": {"alerts": {"run": "alerts.py", "every": 3600, "what": "..."}},
      "texts":    {"alert": "what the text is for, the way she should write it"},
      "uses":     ["routine/mail-check.md"],
-     "keywords": ["Apple Mail"]}
+     "keywords": ["Apple Mail"],
+     "flows":    "flows"}
 
 and, when it has them, `call.md` (extra rules for calls), `text.md` (extra rules for the texts) and `mail.md` (extra
 steps for the mail check). HQ reads them at its fixed points:
@@ -25,8 +26,10 @@ steps for the mail check). HQ reads them at its fixed points:
     texts        direct_line._text_rules(), every text          rule("text")
     kinds of texts  direct_line.compose_prompt(), HQ's own first   text_kind(why)
     mail check   tick.start_mail(), its {EXTENSIONS} step       mail_steps()
+                 also on a quiet hour (step 3's {QUIET})   quiet_step()
     scripts      a call, a text or the mail check runs one       run EXT SCRIPT [ARGS]
     routines     tick.py every minute, each at its own `every`  routines()
+    its flows    the nightly run (happy flow 472), on a copy     flows()
 HQ's version leads: an extension never replaces one of HQ's own text kinds, files or rules; where both say something,
 HQ's counts.
 
@@ -46,12 +49,14 @@ their Claude: EXTENSIONS.md.
     python3 app/extensions.py check [--from V --to V] [FILE...]   the clash check by hand (FILE: what changed)
     python3 app/extensions.py after-update        the check, once per update (tick.py and update.py)
     python3 app/extensions.py clash [chat|team|ok]  the last check; or talk it through, send it to the team, or it's fine
+    python3 app/extensions.py flows [EXT]         their own test flows, each on a throwaway workspace (exit 1 when one fails)
     python3 app/extensions.py init                the folder with its README, when there's none
 
 Tests: HQ_EXTENSIONS_FOLDER (the extensions folder itself), HQ_EXTENSIONS_STATE (the routines' state file),
 HQ_EXTENSIONS_CHECK (the check's file), HQ_EXTENSIONS_DRY=1 (clash chat and team only say what they'd do).
 [Claude's choices: the folder's place and the file names; a routine runs at most once a minute and at most ten
-minutes; a script at most two minutes; the check reads an extension's own files up to 200 KB each.]
+minutes; a script at most two minutes; the check reads an extension's own files up to 200 KB each; one of its own flows at
+most two minutes, run from a throwaway copy of HQ with its own workspace, memory and home folder.]
 """
 from __future__ import annotations
 
@@ -72,6 +77,7 @@ RULE_FILES = {"call": "call.md", "text": "text.md", "mail": "mail.md"}
 RUNNERS = {".py": [sys.executable], ".sh": ["/bin/sh"]}
 ROUTINE_MAX = 600
 SCRIPT_MAX = 120
+FLOW_MAX = 120  # one of an extension's own flows (gap 3) [Claude's choice]
 READ_MAX = 200_000
 README = """# Your extensions
 
@@ -146,6 +152,17 @@ def _named(d, kind: str, ext: Path, problems: list[str]) -> dict:
     return out
 
 
+def _flows(where, ext: Path, problems: list[str]) -> list[str]:
+    """Gap 3: an extension's own test flows, from the folder `flows` names inside it: each .py or .sh file in it, A to Z."""
+    if not where:
+        return []
+    f = (ext / str(where)).resolve()
+    if not isinstance(where, str) or (f != ext.resolve() and ext.resolve() not in f.parents) or not f.is_dir():
+        problems.append("its flows folder isn't there")
+        return []
+    return [str(x) for x in sorted(f.iterdir()) if x.is_file() and x.suffix in (".py", ".sh") and not x.name.startswith((".", "_"))]
+
+
 def all_() -> list[dict]:
     """Every extension in the folder, A to Z by folder, each with what's wrong with it (`problems`)."""
     f = folder()
@@ -166,6 +183,7 @@ def all_() -> list[dict]:
             problems.append("it doesn't say in a line what it does")
         e["scripts"] = _named(spec.get("scripts"), "scripts", d, problems)
         e["routines"] = _named(spec.get("routines"), "routines", d, problems)
+        e["flows"] = _flows(spec.get("flows"), d, problems)
         e["texts"] = {str(k): str(v) for k, v in (spec.get("texts") or {}).items()} if isinstance(spec.get("texts"), dict) else {}
         for kind, name in RULE_FILES.items():
             try:
@@ -232,7 +250,23 @@ def mail_steps() -> str:
                          + "\n".join("   " + ln for ln in e["mail"].splitlines())
                          + ("\n   Its scripts you may run, each as exactly one Bash command:\n" + "\n".join("   " + s for s in sc)
                             if sc else ""))
-    return "\n".join(parts) if parts else "(no extensions add steps)"
+    if not parts:
+        return "(no extensions add steps)"
+    return "\n".join(parts) + ("\n   These steps run on a quiet hour too (step 3 says how), and an extension's step never moves the marker:"
+                               " that's Gmail's.")
+
+
+QUIET_STOP = "If nothing is newer than the marker, stop: change nothing, commit nothing."
+QUIET_EXTENSIONS = ("If nothing is newer than the marker, HQ's own work stops here for this hour: skip steps 4, 4b, 5 and 6, and leave "
+                    "the marker as it is. Their own extensions' steps still run on a quiet hour: go straight to step 6b and do what it "
+                    "says, writing what it finds into inbox.md the way step 4 says; then step 7 only if inbox.md changed.")
+
+
+def quiet_step() -> str:
+    """H235, gap 1: the last words of the mail check's step 3, for an hour with nothing newer than the marker in Gmail. With no
+    extension that adds a mail step it stops as it always did; with one, only the extensions' step 6b runs (an Apple Mail
+    extension's mail doesn't wait for a Gmail mail to come in), and none of HQ's own steps."""
+    return QUIET_EXTENSIONS if any(e.get("mail") for e in on()) else QUIET_STOP
 
 
 def mail_tools() -> list[str]:
@@ -275,6 +309,116 @@ def run(ext_id: str, name: str, args: list[str]) -> int:
     except subprocess.TimeoutExpired:
         print(f"{name} ran over {SCRIPT_MAX} seconds and was stopped.", file=sys.stderr)
         return 124
+
+
+# ---- their own flows (gap 3) --------------------------------------------------------------------------------
+
+def _hq_files() -> list[str]:
+    """HQ's own files (what git has and what isn't ignored), never the workspace: what a copy of HQ for a flow holds."""
+    try:
+        r = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-co", "--exclude-standard"], capture_output=True, text=True, timeout=60)
+        files = [f for f in r.stdout.splitlines() if f] if r.returncode == 0 else []
+    except (OSError, subprocess.TimeoutExpired):
+        files = []
+    if not files:  # a copy that came as a download, without git
+        skip = {"workspace", ".git", ".venv", "models", "scratch", ".status", "local"}
+        files = [str(p.relative_to(ROOT)) for p in ROOT.rglob("*") if p.is_file() and p.relative_to(ROOT).parts[0] not in skip]
+    return [f for f in files if not f.startswith(("workspace/", ".venv/")) and f != "workspace"]
+
+
+def _flow_hq(e: dict, tmp: Path, files: list[str]) -> tuple[Path, Path, Path]:
+    """Gap 3: a throwaway HQ for one of an extension's flows: a copy of HQ's own files whose workspace is a real folder made
+    from HQ's blank template (never a link to the real one), with a copy of this extension in its HQ/extensions. So a flow
+    runs its scripts the usual way, and nothing it writes, inside HQ or in the workspace, reaches the real ones."""
+    import shutil
+    hq = tmp / "HQ"
+    for rel in files:
+        src = ROOT / rel
+        if src.is_file() and not src.is_symlink():
+            dst = hq / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+    if (ROOT / ".venv").is_dir():
+        (hq / ".venv").symlink_to((ROOT / ".venv").resolve())  # Python's packages only, read as they are
+    ws = hq / "workspace"
+    shutil.copytree(ROOT / "template", ws, ignore=shutil.ignore_patterns(".git"))
+    mine = ws / "HQ" / "extensions" / e["id"]
+    shutil.copytree(e["dir"], mine, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+    return hq, ws, mine
+
+
+def _flow_env(t: Path, hq: Path, ws: Path, mine: Path) -> dict:
+    """Nothing of the real HQ's own settings (no HQ_ variable at all, HQ_REAL_* included), and every place HQ or the person's
+    computer keeps things inside the throwaway folder: HQ's memory (HQ_SUPPORT), the home folder, the status files. PWD is
+    the flow's own folder (it starts there) and OLDPWD goes, so neither names a real place. A flow never texts anyone."""
+    home = t / "home"
+    for sub in ("tmp", "status", "support", "home", "home/.local/state", "home/.config"):
+        (t / sub).mkdir(parents=True, exist_ok=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("HQ_", "XDG_")) and k != "OLDPWD"}
+    env.update({"PWD": str(mine), "HOME": str(home), "XDG_STATE_HOME": str(home / ".local/state"), "XDG_CONFIG_HOME": str(home / ".config"),
+                "HQ_ROOT": str(hq), "HQ_WORKSPACE": str(ws), "HQ_FOLDER": str(ws), "HQ_EXTENSION": str(mine),
+                "HQ_EXTENSIONS_FOLDER": str(ws / "HQ" / "extensions"), "HQ_ROADMAP": str(ws / "HQ" / "roadmap.md"),
+                "HQ_SUPPORT": str(t / "support"), "HQ_STATUS_DIR": str(t / "status"),
+                "HQ_EXTENSIONS_STATE": str(t / "state.json"), "HQ_EXTENSIONS_CHECK": str(t / "check.json"),
+                "HQ_UNDER_TEST": "1", "HQ_FLOW_TMP": str(t / "tmp"), "HQ_TEXT": f"{sys.executable} -c pass"})
+    return env
+
+
+def _end_group(pid: int) -> None:
+    """Gap 3: the flow ran in a process group of its own; whatever of it is still there (a background child, a hung step) goes."""
+    import signal
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
+def flows(only: str | None = None) -> list[dict]:
+    """Every extension's own test flows that's on (or only that one), each run from a throwaway copy of HQ (_flow_hq) in a
+    process group of its own, at most FLOW_MAX seconds: one result each, {"ext", "name", "flow", "ok", "exit", "said"}. A
+    flow passes when it exits 0. Used by the nightly run (happy flow 472) and by `extensions.py flows`."""
+    import tempfile
+    out, files = [], None
+    for e in on():
+        if only and e["id"] != only:
+            continue
+        for path in e["flows"]:
+            rel = os.path.relpath(path, e["dir"])
+            files = files if files is not None else _hq_files()
+            with tempfile.TemporaryDirectory(prefix=f"hq-ext-{e['id']}-") as t:
+                t = Path(t)
+                hq, ws, mine = _flow_hq(e, t, files)
+                log = t / "out.log"
+                code = None
+                try:
+                    with open(log, "w") as f:
+                        p = subprocess.Popen(_cmd(str(mine / rel)), cwd=str(mine), env=_flow_env(t, hq, ws, mine), stdin=subprocess.DEVNULL,
+                                             stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
+                    try:
+                        code = p.wait(timeout=FLOW_MAX)
+                    except subprocess.TimeoutExpired:
+                        _end_group(p.pid)
+                        p.wait()
+                        code = 124
+                    _end_group(p.pid)  # a background child it left behind goes too
+                    said = log.read_text(errors="replace").strip()
+                    if code == 124:
+                        said = f"ran over {FLOW_MAX} seconds and was stopped"
+                except OSError as x:
+                    code, said = 126, f"couldn't start: {x}"
+            last = " ".join(said.splitlines()[-1:])[:300]
+            out.append({"ext": e["id"], "name": e["name"], "flow": rel, "ok": code == 0, "exit": code, "said": last})
+    return out
+
+
+def flows_words(results: list[dict]) -> str:
+    if not results:
+        return "No extension has flows of its own."
+    lines = []
+    for r in results:
+        lines.append(f"{'PASS' if r['ok'] else 'FAIL'} {r['name']} ({r['ext']}): {r['flow']}"
+                     + ("" if r["ok"] else f" exit {r['exit']}" + (f": {r['said']}" if r["said"] else "")))
+    return "\n".join(lines)
 
 
 # ---- the routines -------------------------------------------------------------------------------------------
@@ -570,6 +714,8 @@ def summary() -> str:
         for k, label in (("scripts", "scripts"), ("routines", "routines"), ("texts", "kinds of texts")):
             if e[k]:
                 bits.append(f"  {label}: " + ", ".join(e[k]))
+        if e.get("flows"):
+            bits.append("  its own flows: " + ", ".join(os.path.relpath(f, e["dir"]) for f in e["flows"]))
         for k in RULE_FILES:
             if e.get(k):
                 bits.append(f"  adds to the {'mail check' if k == 'mail' else k + ' rules'}")
@@ -612,6 +758,10 @@ def main(argv: list[str]) -> int:
         else:
             c = clash()
             print(json.dumps({**c, "words": clash_words(c)}, ensure_ascii=False))
+    elif cmd == "flows":
+        res = flows(argv[1] if len(argv) > 1 else None)
+        print(flows_words(res))
+        return 1 if any(not r["ok"] for r in res) else 0
     elif cmd == "init":
         print(init())
     else:

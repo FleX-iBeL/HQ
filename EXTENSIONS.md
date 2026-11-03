@@ -16,6 +16,8 @@ HQ/extensions/
     text.md            extra rules for the agent's texts (optional)
     mail.md            extra steps for the hourly mail check (optional)
     read_mail.py       its own scripts and routines (any number)
+    flows/             its own test flows (optional)
+      reads_a_mail.py
 ```
 
 `extension.json`, with only `name` and `what` needed:
@@ -35,7 +37,8 @@ HQ/extensions/
     "job-alert": "A new job alert came in that fits what they look for (the facts say which). One short line, what and where."
   },
   "uses": ["routine/mail-check.md"],
-  "keywords": ["Apple Mail"]
+  "keywords": ["Apple Mail"],
+  "flows": "flows"
 }
 ```
 
@@ -46,6 +49,9 @@ HQ/extensions/
 - **texts**: your own kinds of texts from the agent. A script or routine sends one with `$HQ_TEXT <kind> "<facts>"` (the environment gives it), the agent writes it in her own words from what the kind says it's for. HQ's own kinds come first: a kind with the same name as one of HQ's is never used.
 - **uses**: HQ's files this extension relies on (paths inside HQ). The check after an update also finds them by itself when the extension's own files mention them, so this is for what it can't see.
 - **keywords**: words that would show up in HQ's changelog if HQ started doing the same thing; the name counts too.
+- **flows**: the folder inside the extension that holds its own test flows. Each `.py` or `.sh` file in it is one flow, run A to Z: it passes when it exits 0, anything else fails, and its last line of output says why. HQ runs them every night with its own flows (happy flow 472), so a change in HQ that breaks your extension shows the next morning, named as your extension's (`FAILED - the extension Apple Mail (apple-mail): its flow flows/reads_a_mail.py failed …`), never as HQ's. A failure there is fixed in the extension's own folder, never in HQ's files. `python3 app/extensions.py flows` runs them by hand (`flows apple-mail` only that one's).
+
+Each flow runs from a throwaway copy of HQ: HQ's own files copied into a folder of its own, whose workspace is a new folder made from HQ's blank template (never a link to your real one) with a copy of the extension in its `HQ/extensions/`. So it can run the extension's own scripts the usual way (`extensions.py run`). It gets `HQ_ROOT` (that copy), `HQ_WORKSPACE` (its workspace), `HQ_EXTENSION` (the extension's copy), `HQ_FLOW_TMP` (a scratch folder of its own) and `HQ_UNDER_TEST=1`; HQ's memory (`HQ_SUPPORT`), the home folder (`HOME`) and the status files point into the throwaway folder too, no other setting of your HQ comes along, and `HQ_TEXT` there sends nothing. All of it is deleted when the flow ends. Each flow runs in a process group of its own and may take at most two minutes: then it's stopped, and whatever it started in its group (a background child too) is stopped with it, also when it ends by itself. What isn't stopped: a flow that writes to another place on the computer by its full path, or starts something outside its group. So write only inside its workspace, `HQ_FLOW_TMP` or `HOME`, and make up what it needs (a made-up mail, a made-up calendar): never anyone's real things.
 
 Scripts and routines run in their own folder, with `HQ_ROOT` (HQ), `HQ_WORKSPACE` (the workspace), `HQ_EXTENSION` (their folder) and `HQ_TEXT` set. `.py` runs with Python, `.sh` with sh, anything else as it is. Keep what they write inside the workspace.
 
@@ -58,9 +64,10 @@ Scripts and routines run in their own folder, with `HQ_ROOT` (HQ), `HQ_WORKSPACE
 | The call rules | at every call start | each extension's `call.md` and its scripts |
 | The text rules | at every text | `text.md` and its scripts |
 | Kinds of texts | when the agent texts | `texts`, after HQ's own |
-| The mail check | every run | `mail.md`, its scripts with `"mail": true` |
+| The mail check | every run, also an hour with no new mail in Gmail (then only the extensions' step runs, none of HQ's own) | `mail.md`, its scripts with `"mail": true` |
 | Routines | every minute, each at its own `every` | `routines` |
 | Scripts | when a call, text or the mail check runs one | `scripts` |
+| Its own flows | every night, with HQ's own flows (happy flow 472), and by hand with `extensions.py flows` | `flows` |
 
 HQ's own rules and hard limits always come first: an extension can't make the mail check send or change mail, or a call skip asking for a yes.
 
@@ -87,6 +94,6 @@ Before extensions existed, some HQs had their own connectors built straight into
 4. Steps added to HQ's mail check go into the extension's `mail.md`, written as a step; the commands they ran become `scripts` with `"mail": true`.
 5. Job types or kinds of texts added to HQ's code become `texts`; something that ran on a timer becomes a `routine`.
 6. Put HQ's own files back as the release has them: `git -C <HQ> status` should show nothing changed outside `local/`.
-7. Check it: `python3 app/extensions.py` (no problems), `python3 app/extensions.py mail` and `rule call` read right, a script runs with `run`, and one mail check or call uses it. Then tell the person in a sentence or two what moved and that updates won't break it any more.
+7. Check it: `python3 app/extensions.py` (no problems), `python3 app/extensions.py mail` and `rule call` read right, a script runs with `run`, and one mail check or call uses it. Tests that were added to HQ's own happy flows for it move into the extension's `flows` folder, one file each, and `python3 app/extensions.py flows` passes. Then tell the person in a sentence or two what moved and that updates won't break it any more.
 
 Parts that stand in for HQ's own on a computer that isn't a Mac (the Terminal window, starting at login) stay in `local/`, as INSTALL.md says. Extensions are for what's added on top.

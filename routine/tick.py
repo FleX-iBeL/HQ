@@ -669,6 +669,29 @@ def mail_ext_text():
         return "(no extensions add steps)"
 
 
+def mail_instructions(text=None):
+    """The hourly mail check's instructions as its run gets them: routine/mail-check.md (or the text given, an older version for a
+    test) filled in for this workspace. H125: with Donna's open mail watches in it, and the one command that keeps a match for her to text."""
+    return ((open(os.path.join(HERE, "mail-check.md")).read() if text is None else text).replace("{WORKSPACE}", FOLDER)
+            .replace("{WATCHES}", mail_watches()).replace("{PINGS}", os.path.join(JV, "routine", "pings.py"))
+            .replace("{SORTING}", mail_sort_text()).replace("{MAILSORT}", os.path.join(JV, "routine", "mailsort.py"))
+            .replace("{QUIET}", mail_quiet_text()).replace("{EXTENSIONS}", mail_ext_text()).replace("{SEARCHES}", mailguard.search_text())
+            .replace("{MAILGUARD}", os.path.join(JV, "routine", "mailguard.py")))
+
+
+def mail_quiet_text():
+    """H235, gap 1: what the mail check does on a quiet hour (nothing newer than the marker in Gmail). Without an extension's mail
+    step it stops as before; with one, only that step runs."""
+    try:
+        return _ext().quiet_step()
+    except Exception as e:
+        log(f"extensions: {e!r}")
+        return _QUIET_STOP
+
+
+_QUIET_STOP = "If nothing is newer than the marker, stop: change nothing, commit nothing."
+
+
 def extensions_minute():
     """H235: their own extensions' routines that are due, started in the background; and once per finished update,
     the local check whether anything they added might clash with it. On the main HQ only for the routines (the
@@ -926,12 +949,7 @@ def start_mail():
         clear(os.path.join(MAIL_RUNS, old))
     # The instructions with this workspace's own path in them.
     instructions = os.path.join(RUN, "mail-check.md")
-    # H125: with Donna's open mail watches in it, and the one command that keeps a match for her to text.
-    open(instructions, "w").write(open(os.path.join(HERE, "mail-check.md")).read().replace("{WORKSPACE}", FOLDER)
-                                  .replace("{WATCHES}", mail_watches()).replace("{PINGS}", os.path.join(JV, "routine", "pings.py"))
-                                  .replace("{SORTING}", mail_sort_text()).replace("{MAILSORT}", os.path.join(JV, "routine", "mailsort.py"))
-                                  .replace("{EXTENSIONS}", mail_ext_text()).replace("{SEARCHES}", mailguard.search_text())
-                                  .replace("{MAILGUARD}", os.path.join(JV, "routine", "mailguard.py")))
+    open(instructions, "w").write(mail_instructions())
     open(cmd, "w").write(mail_script_tmux(instructions, run_file) if LINUX_WINDOWS else f"""#!/bin/zsh
 # The hourly mail check, started by the HQ routine (phase L, L8). Hidden: opened in the
 # background, minimized to the Dock, and the window closes itself when it's done (L7).
@@ -1469,7 +1487,9 @@ def mistakes_minute():
         if got:
             log(f"the ledger: {len(got)} new")
         cycles.write_scores(log=log)
-        routines.good("mistakes", "The ledger is up to date", every=300)
+        no = mistakes.reading().get("calls_not_read") or []  # F97: a transcript it couldn't read is said, and tried again next pass
+        routines.good("mistakes", "The ledger is up to date" + (f"; {len(no)} transcript{'' if len(no) == 1 else 's'} couldn't be read, "
+                                                               "tried again each pass" if no else ""), every=300)
     except Exception as e:
         log(f"the ledger: {e!r}")
         routines.bad("mistakes", f"The ledger's pass failed: {e!r}", every=300)
@@ -1598,6 +1618,13 @@ def direct_watch():
                 log("direct line: the Friday report on the estimates")
         except Exception as e:
             log(f"the Friday estimates report: {e!r}")
+        try:  # F79: a job past its latest end goes to Moneypenny once, a repeat she raises with him (only the main)
+            import misses
+            got = misses.sweep()
+            if got["told"] or got["kept"] or got["started"]:
+                log(f"estimate misses: told {len(got['told'])}, kept {len(got['kept'])}" + (", raising the repeat" if got["started"] else ""))
+        except Exception as e:
+            log(f"the estimate misses: {e!r}")
         def weather_():
             import weather
             if weather.start():
