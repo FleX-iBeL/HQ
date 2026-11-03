@@ -580,7 +580,7 @@ def on_the_record(old_main: str, tag: str, v: str) -> list[str]:
     shas = out("log", "--format=%H", f"{old_main}..{tag}").split()
     ids = {}
     for sha in shas:
-        for label in qa.subject_labels(out("log", "-1", "--format=%s", sha)):
+        for label in qa.commit_labels(str(ROOT), sha, out("log", "-1", "--format=%s", sha)):  # F119: a listed commit counts for its row
             ids.setdefault(trail.resolve(label), sha)
     try:
         for name in os.listdir(proof.folder()):

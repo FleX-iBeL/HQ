@@ -20939,6 +20939,7 @@ R.is_main = lambda: True
 nightly.RUNNING = sys.argv[3]
 qa.BEFORE_GATE = json.loads(os.environ.get('F112_LIST') or '{}')
 qa.MERGES_PASSED = json.loads(os.environ.get('F112_MERGES') or '{}')
+qa.COMMITS_FOR = json.loads(os.environ.get('F112_COMMITS') or '{}')
 told, pushes = [], []
 qa.tell = lambda *a, **k: told.append(a)
 real = R.to_nightly
@@ -21168,6 +21169,74 @@ print('COUNTS', json.dumps({'told': len(told), 'pushes': len(pushes)}))
                     subj = _sp.run(["git", "-C", str(ROOT), "log", "-1", "--format=%s", c], capture_output=True, text=True).stdout
                     need(label in _qa.subject_labels(subj), f"{c} isn't {label}'s: {subj[:80]}")
         return "a merge passes on what it brought and is held by what it brought, a version merged back passes, a row out in a version is said, F66 is named held, the list can't wave one through"
+
+    async def flow336(self) -> str:
+        """F119, no Claude: the gate's list of commits that belong to a row their subject doesn't name (qa.COMMITS_FOR). A listed commit counts for
+        its row: held for that row ("no QA yet") until it passes, then it goes, named as taken. Nothing else rides on the entry: listed for other
+        files, with another fingerprint, a second commit with the same subject, or the same files changed differently, it's a commit naming no item,
+        held, saying it isn't what the list names. The real list holds what its commits change, and f6de1a4 counts for F119."""
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        import qa as _qa
+        passed = "| ✅ | F9812 A row | What's wrong. | QA passed (job 5, 30 October 2026 10:00): tried it. | |\n"
+        rows = "| ⬜ | F9811 A row | What's wrong. | | |\n" + passed
+        h = self._f112_hq("c", rows=rows)
+        hq, g, work = h["hq"], h["g"], h["work"]
+
+        def hold(tip="dev"):
+            out, _, _ = h["rel"]("hold", tip)
+            return json.loads(out.split("HOLD ", 1)[1].splitlines()[0]), out.split("WORDS ", 1)[1].splitlines()[0]
+        before = work("F9812", "a passed one first")
+        quiet = work("", "Small list: the things a friend hits", "app/startsize.py")
+        files = sorted(_qa.changed_files(str(hq), quiet))
+        need(files == ["CHANGELOG.md", "app/startsize.py"], f"what the commit changes: {files}")
+        fp = _qa.commit_diff(str(hq), quiet, files)
+        listed = lambda **k: json.dumps({quiet[:7]: {"row": "F9811", "files": files, "diff": fp, **k}})
+        o, w = hold()
+        need(not o["all"] and o["to"] == before and o["held"][0]["label"] == quiet[:7] and "names no item" in o["held"][0]["why"],
+             f"an unlisted commit naming nothing: {o}")
+        seen = ["unlisted, it names no item"]
+        h["env"]["F112_COMMITS"] = listed()
+        o, w = hold()
+        need(not o["all"] and o["to"] == before and o["held"] == [{"label": "F9811", "why": "no QA yet"}] and "F9811 (no QA yet)" in w,
+             f"a listed commit isn't held for its row: {o} {w}")
+        seen.append("listed, it's held for its row until that row's QA")
+        road = h["road"].read_text()
+        h["road"].write_text(road.replace("| ⬜ | F9811 A row | What's wrong. | | |",
+                                          "| ✅ | F9811 A row | What's wrong. | QA passed (job 6, 3 November 2026 10:00): tried it. | |"))
+        o, w = hold()
+        need(o["all"] and not o["held"] and "F9811" in o["taken"], f"a listed commit whose row passed doesn't go: {o}")
+        seen.append("then it goes, for its row")
+        for why, entry in (("other files", listed(files=["app/startsize.py"])), ("another fingerprint", listed(diff="0" * 16))):
+            h["env"]["F112_COMMITS"] = entry
+            o, w = hold()
+            need(not o["all"] and o["held"][0]["label"] == quiet[:7] and "names no item" in o["held"][0]["why"]
+                 and "aren't what the list names" in o["held"][0]["why"], f"a commit listed with {why} went: {o}")
+        h["env"]["F112_COMMITS"] = listed()
+        # The same files, changed differently, under the same subject: the entry is by commit and by change, so it doesn't ride along.
+        g("checkout", "-q", "-b", "other", before)
+        other = work("", "Small list: the things a friend hits", "app/startsize.py")
+        (hq / "app/startsize.py").write_text("something else = 2\n")
+        g("commit", "-q", "--amend", "-a", "--no-edit")
+        other = g("rev-parse", "HEAD")
+        o, w = hold("other")
+        need(not o["all"] and o["held"][0]["label"] == other[:7] and "names no item" in o["held"][0]["why"], f"a second commit rode on the entry: {o}")
+        h["env"]["F112_COMMITS"] = json.dumps({other[:7]: {"row": "F9811", "files": files, "diff": fp}})
+        o, w = hold("other")
+        need(not o["all"] and "aren't what the list names" in o["held"][0]["why"], f"another change rode on the first one's fingerprint: {o}")
+        seen.append("listed for other files, another fingerprint, or another commit, it isn't covered")
+        g("checkout", "-q", "dev")
+        # The real list: each entry's row, files and fingerprint stand, and are its commit's whole change.
+        for c, d in _qa.COMMITS_FOR.items():
+            need(d.get("row") and d.get("files") and d.get("diff"), f"{c} is listed without its row, files or fingerprint: {d}")
+            if _sp.run(["git", "-C", str(ROOT), "cat-file", "-e", f"{c}^{{commit}}"], capture_output=True).returncode == 0:
+                got = _qa.changed_files(str(ROOT), c)
+                need(sorted(got) == sorted(d["files"]) and _qa.commit_diff(str(ROOT), c, got) == d["diff"], f"{c} isn't what the list names: {got}")
+                need(_qa.commit_labels(str(ROOT), c, "") == [d["row"]], f"{c} doesn't count for {d['row']}")
+        f6 = _qa.COMMITS_FOR.get("f6de1a4") or {}
+        need(f6.get("row") == "F119", f"f6de1a4 isn't listed for F119: {f6}")
+        seen.append("the real list holds what its commits change, f6de1a4 for F119")
+        return "; ".join(seen)
 
     async def flow331(self) -> str:
         """F112, no Claude: a release on a copy to a bare repo, each refusal and the happy path. The night counts for the commit it ran on: no night, a
@@ -36858,6 +36927,7 @@ FLOWS = {
     333: ("F112: back to a version with no forward of its own, once the release after it wrote that down; its own update brings HQ forward", False, "flow333"),
     334: ("F112: the history read holds what read clean, so a release's privacy check finishes; a hit is never held", False, "flow334"),
     335: ("F112: the installer's last step fits Linux: the set, the limit, and the fix line names the right system", False, "flow335"),
+    336: ("F119: a commit listed for a row its subject doesn't name counts for that row and waits for its QA; one with other changes isn't covered", False, "flow336"),
     340: ("F116: a store the page can't read shows red with which one, never none so far or all working; a broken incident log kept aside", False, "flow340"),
     341: ("F116: waiting for you is worked out: only when nothing runs and something is truly his (a parked job, a question, a door)", False, "flow341"),
     342: ("F116: Donna's watch, reminders, weather, news, calendar and coaching each have a line; a throw goes red, on the page too", False, "flow342"),

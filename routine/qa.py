@@ -21,6 +21,8 @@ How it goes:
   subject ("H283: ..."). A commit for a row in Phase F or H without "QA passed" stops the walk: main gets the work
   before it, the rest stays on dev and nightly, and the morning text names what was held and why (hold()). F112: a merge
   commit is what it brings, and BEFORE_GATE is the one list of rows from before the gate, each said or named held.
+  F119: COMMITS_FOR names, by hand, a commit whose subject names no row but that belongs to one, with exactly what it
+  changes; it then counts for that row and waits for that row's QA like any commit naming it.
   A commit without a row (a version, a nightly test fix, a merge) or for a row elsewhere (maintenance) goes along.
 
 F71 (28 October 2026): QA jobs since 27 October mostly took one or two minutes, and their write-ups said what was
@@ -462,6 +464,49 @@ def merge_passed(root: str, sha: str, own: list[str], text: str) -> tuple[str | 
     return entry.get("with") or "", ""
 
 
+# F119: commits that belong to a row their subject doesn't name. Written by hand, next to MERGES_PASSED: the commit, the row it's for, and exactly
+# what it changes against its first parent: every file and a fingerprint of that change. A listed commit counts for its row and is held until that
+# row's QA passes, like any commit naming it; one whose changes are anything else isn't covered, and is held as a commit naming no item.
+COMMITS_FOR = {
+    "f6de1a4": {"row": "F119", "files": ["CHANGELOG.md", "app/happy_flows.py", "app/startsize.py", "install/install.py", "routine/datachange.py",
+                                         "routine/datachanges/002-briefing-for-a-workspace-without-switches.py", "routine/update.py"],
+                "diff": "2f6d811ba798a249"},
+}
+
+
+def changed_files(root: str, sha: str) -> list[str]:
+    """The files a commit changes against its first parent."""
+    r = subprocess.run(["git", "-C", str(root), "show", "--first-parent", "--format=", "--name-only", sha], text=True, capture_output=True)
+    return [f for f in r.stdout.splitlines() if f.strip()] if r.returncode == 0 else []
+
+
+def commit_diff(root: str, sha: str, files: list[str]) -> str | None:
+    """F119: a fingerprint of what a commit changes in these files against its first parent; None when git can't tell."""
+    import hashlib
+    r = subprocess.run(["git", "-C", str(root), "diff", f"{sha}^1", sha, "--", *sorted(files)], text=True, capture_output=True)
+    return hashlib.sha256(r.stdout.encode("utf8")).hexdigest()[:16] if r.returncode == 0 else None
+
+
+def listed_row(root: str, sha: str) -> tuple[str | None, str]:
+    """F119: (the row COMMITS_FOR gives this commit, or None; why it isn't covered, when it's listed). Only on exactly what the list names."""
+    k, entry = next(((k, v) for k, v in COMMITS_FOR.items() if sha.startswith(k)), (None, None))
+    if not entry:
+        return None, ""
+    files = changed_files(root, sha)
+    if sorted(files) != sorted(entry["files"]) or commit_diff(root, sha, files) != entry["diff"]:
+        return None, f"; it's listed for {entry['row']}, but its changes aren't what the list names"
+    return entry["row"], ""
+
+
+def commit_labels(root: str, sha: str, subject: str) -> list[str]:
+    """F119: the rows a commit is for: named at the start of its subject, else the one COMMITS_FOR gives it."""
+    named = subject_labels(subject)
+    if named:
+        return named
+    row, _ = listed_row(root, sha)
+    return [row] if row else []
+
+
 def brought(root: str, base: str, sha: str) -> list[tuple[str, str]]:
     """F112: what a merge commit brings: (sha, subject) of the commits behind its other parents that the line didn't have yet, and that
     aren't in the release already. Empty for anything else, and for a merge that brings nothing new (a version merged back)."""
@@ -536,7 +581,7 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
                 elif fix and not pending:
                     pending = (sha, fix)
         for s, subj in parts:
-            named = [l for l in subject_labels(subj) if l in all_rows]
+            named = [l for l in commit_labels(root, s, subj) if l in all_rows]
             for l in named:
                 if all_rows[l][1] not in GATED:
                     continue
@@ -552,7 +597,7 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
                 if not any(b[0] == l for b in bad):
                     bad.append((l, said, s))
             if not named and proof_on() and not only_free_files(root, s):  # F101: nothing goes out that no item asked for
-                nameless.append((s, f"this commit names no item: {subj[:70]}"))
+                nameless.append((s, f"this commit names no item: {subj[:70]}" + listed_row(root, s)[1]))
         was_stopped = stop
         stop = stop or bool(bad or nameless)
         if stop and pending and not was_stopped:
