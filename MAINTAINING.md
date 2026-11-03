@@ -16,7 +16,7 @@ HQ can run on two computers as one, for example a laptop and a server. One is th
 
 - The main runs the team's jobs, the hourly mail check and the scheduler, and it commits and pushes the workspace.
 - The backup takes calls and shows the status page. A write to a file only the main writes (the planning, the coaching log, the mail list, the to-do list and a few more) goes to the main as a request. The main writes it and the sync brings it back. That way is called the door.
-- When the main can't be reached for five minutes, the backup takes over by itself. It only does that when it is online and awake itself. When the main answers again twice in a row, the backup starts nothing new and hands back once its own job is done. There are never two mains.
+- When the main can't be reached for five minutes, the backup takes over by itself. It only does that when it is online and awake itself. When the main answers again twice in a row, the backup starts nothing new and hands back once its own job is done. HQ is built so there aren't two mains.
 
 Look:
 
@@ -29,7 +29,7 @@ Change:
 - `python3 routine/role.py main here` (or `other`, or a name) makes one the main. A call may run this on the owner's ask.
 - `python3 routine/role.py alone` forgets the other HQ. Pairing (`python3 routine/role.py setup PEER_URL --main NAME`) is never done from a call.
 
-The backend switches. A new HQ starts with all of them on: the briefing, the open line, the team's jobs run in the background (headless), one-way sync, the planning index and the hand-over. An HQ that updates gets the five main ones once, but only when its switches file is still the one HQ wrote; switches the owner set himself stay as they are. `python3 app/backend.py` shows them. `python3 app/backend.py off NAME` turns one off, from the next call, text or job; no restart needed. A bad day is one switch back, not a rollback.
+The backend switches. A new HQ starts with all of them on: the briefing, the open line, the team's jobs run in the background (headless), one-way sync, the planning index and the hand-over. An HQ that updates gets the five main ones once, but only when its switches file is still the one HQ wrote; switches the owner set himself stay as they are. `python3 app/backend.py` shows them. A switch changes only on the owner's yes: on a call HQ asks him first, but the script itself has no door, so by hand it's his to run, never an agent's own pick. `python3 app/backend.py off NAME` turns one off, from the next call, text or job; no restart needed. A bad day is one switch back, not a rollback.
 
 The hand-over and its switch. With one-way sync on, the backup only receives. What it still holds that the main doesn't (its own changes, its conflict copies) goes to the main every minute, but only while the backend switch `handover` is on. The sync line on the status page has a button for it. By hand: `python3 routine/sync.py handover on` or `python3 routine/sync.py handover off`. To see what would go over without sending it: `python3 routine/sync.py handover --dry`. A hand-back waits up to ten minutes for the sync; after that, what's left goes over through the doors.
 
@@ -39,16 +39,17 @@ The kept-from-both list. When both computers had their own version of the same f
 
 What keeps old code in memory is the call line and the status page (which also serves Donna's texts). The routine, the watchdog, jobs and the mail check start fresh every time.
 
-A restart ends a call that is on. So the order is always:
+A restart ends a call that is on, and a part that doesn't come back says nothing by itself. So the order is always:
 
-1. Look first. `python3 routine/jobs.py list` shows what the team runs and what waits. `python3 routine/update.py parts` shows the background parts with their exact pids.
-2. Donna's warning first. Text the owner a minute before, in plain words: what restarts, for what, and that texts still work. `.venv/bin/python app/direct_line.py text remind "the call line restarts in a minute for the new release; texts still work"`. Whoever does the restart sends it.
-3. Restart, the safe way: `python3 routine/update.py restart-all`. It is the same restart an update does. It stops each part by its exact pid, holds a running job so it carries on by itself afterwards, starts each part again and checks that it answers on a new pid. Its log is `scratch/update.log`.
-4. Check the status page: every line under Routines green again (section 6).
+1. Look first. `python3 routine/jobs.py list` shows what the team runs and what waits. `python3 routine/update.py parts` shows the background parts with their exact pids: write down the pids of the call line and the status page.
+2. Donna's warning first. Text the owner a minute before, in plain words: what restarts, for what, and that texts are back within a minute. `.venv/bin/python app/direct_line.py text remind "the call line restarts in a minute for the new release; texts are back within a minute"`. Whoever does the restart sends it.
+3. Restart: `python3 routine/update.py restart-all`. It is the update's own restart step, the one an update and the release guard start; it isn't in the script's usage text. It stops each part by its exact pid, holds a running job so it carries on by itself afterwards, and starts each part again. It prints nothing; its log is `scratch/update.log`.
+4. Check it came back. `python3 routine/update.py parts` again: every pid is new, and `ps -o lstart= -p PID` shows a start time after the restart. A part with no pid, or its old one, didn't come back. Then the status page: every line under Routines green again (section 6).
+5. The other computer. Run `python3 routine/push.py --pull` there first, so it runs the same code, then the same steps there.
 
-Doing one part by hand: on a Mac `app/stop.sh` then `app/start.sh` for the call line. On Linux `app/stop-linux.sh` then `bash app/start-linux.sh` (it needs bash, not sh). On the laptop, start things from a clean environment (`env -i HOME=$HOME PATH=$PATH USER=$USER ...`), never from inside a Claude chat, whose settings would leak into what it starts. On both computers, restart both: the same code must run on each. A backend switch never needs a restart (section 1).
+Doing one part by hand. On a Mac: `app/stop.sh` then `app/start.sh` for the call line. On Linux: `app/stop-linux.sh`, then wait until the call line's old pid is gone (`app/start-linux.sh` does nothing while one still runs). Start it from a shell with no `HQ_*` test settings, because it passes every `HQ_*` setting in the shell on to the live line, and in its own scope, as `update.py` does: `systemd-run --user --scope bash app/start-linux.sh`. It needs bash, not sh. On the laptop, start things from a clean environment (`env -i HOME=$HOME PATH=$PATH USER=$USER ...`), never from inside a Claude chat, whose settings would leak into what it starts. A backend switch never needs a restart (section 1).
 
-Holding the team while you work: `python3 routine/jobs.py pause "WHY"` holds everything (the running job within a minute, no new starts, no reviews). `python3 routine/jobs.py on` ends the pause. `python3 routine/jobs.py off` switches the team off; `on` brings it back.
+Holding the team while you work. `python3 routine/jobs.py pause "WHY"` holds everything: the running job within a minute, no new starts, no reviews. `python3 routine/jobs.py on` ends the pause. `python3 routine/jobs.py off` switches the team off, and also clears a pause. Neither stops the night's run at 2:00. Before `python3 routine/jobs.py on`, read `python3 routine/jobs.py list` and cancel any waiting job whose work is already done: `python3 routine/jobs.py stop N`.
 
 For Moneypenny: a restart is the team's step or the owner's, never part of a build she runs. When a piece of work restarts the call line, the item says so, and the call's notes are written before the call drops.
 
@@ -62,18 +63,25 @@ Three lines of work, on GitHub:
 
 The night. At 2:00 the night's run tests every quick flow on the main (`python3 routine/nightly.py set` says which ones on this computer). Not green: the team fixes what it found and runs it all again, at most three full runs a night.
 
-The release gate. `python3 routine/release.py status` says what tonight's run found, what changed since, dev against nightly and main, and its suggestion. `python3 routine/release.py main` releases. The program refuses:
+The release gate. `python3 routine/release.py status` says what tonight's run found, what changed since, dev against nightly and main, and its suggestion. `python3 routine/release.py main` releases. It refuses when:
 
-- after a red or missing night;
-- a commit that names no planning item;
+- this computer isn't the main, HQ isn't on `dev`, or the changelog, `VERSION` or the README have changes that aren't committed;
+- the running job has a note it hasn't read;
+- there's no green whole run from today on this commit (or with only the free files changed since: the tests, the changelog, the README, `VERSION`), the night's run is still going, or that run had changes that weren't committed;
+- a commit names no item, unless it only touches the free files;
 - work whose row doesn't say QA passed (that work and what comes after it stays on dev and nightly; `python3 routine/qa.py hold` shows what would go and what would be held);
-- anything, when the privacy check finds something.
+- the changelog's Coming next is empty;
+- the privacy check finds something.
 
-Each commit names its item at the start of its subject. A commit that belongs to an item but doesn't name it can be listed by hand in `COMMITS_FOR` in `routine/qa.py`, by its full id and exactly what it changes; it then waits for that item's QA like any commit naming it. Anything else is held as a commit naming no item. A second run on the same commit does nothing and says so. Only the main computer releases. `--version 1.0.0` names the version instead of the next small one.
+A fix that landed in the day means no release until a whole run on it: `python3 routine/nightly.py run` on the main, under the lock (section 7).
+
+Each commit names its item at the start of its subject. A commit that belongs to an item but doesn't name it can be listed in `COMMITS_FOR` in `routine/qa.py`, keyed by its full id, with the files it changes and the fingerprint of that change; it then waits for that item's QA like any commit naming it. Editing that list is a code change: the team's, as an item, never Moneypenny's. A second run on the same commit does nothing and says so. Only the main computer releases. `--version 1.0.0` names the version instead of the next small one.
 
 Moneypenny decides the release. Inside those gates, when to release is hers. Going past a gate (`--without-qa`, `--past-the-night`) only stands on the owner's own words (section 5). Hesitating is fine: `python3 routine/release.py nightly "WHY"` puts the work on nightly only, and the next night tests it again.
 
-Updating an HQ. The update bar does it, or by hand: `python3 routine/update.py check --force`, then `python3 routine/update.py start`, then follow `python3 routine/update.py status` until it says done. It saves anything changed in HQ on a backup branch first, never touches `workspace/`, `local/`, `scratch/` or `.status/`, restarts every part, and leaves a note in `updates/`. Never update with a plain `git pull`: that skips the backup, the restarts and the note.
+Updating an HQ to a released version. The update bar does it, or by hand: `python3 routine/update.py check --force`, then `python3 routine/update.py start`, then follow `python3 routine/update.py status` until it says done. It saves anything changed in HQ on a backup branch first, restarts every part, and leaves a note in `updates/`. Its git step never touches `workspace/`, `local/`, `scratch/` or `.status/`, but a version's data changes do change the workspace, each with its undo (`python3 routine/datachange.py list` shows which ran here). Never update with a plain `git pull`: that skips the backup, the restarts and the note.
+
+The maker's own two HQs run on `dev`. New work comes in with `python3 routine/push.py --pull` on each, then a restart on each (section 2). The update bar is for released versions.
 
 The way back and forward. `python3 routine/update.py back` puts HQ one version back, on both computers, with the data changes of that version undone first (`routine/datachanges/`). `python3 routine/update.py back --tag vX.Y.Z` names the version. `python3 routine/update.py forward` brings it forward again, with what wasn't committed. HQ refuses to go back to a version that has no way forward, and a release that changes data is refused unless its undo works on a copy. A friend's HQ that ends up on the work line goes back to its released version by itself within a minute.
 
@@ -147,7 +155,11 @@ The happy flows are HQ's tests. `.venv/bin/python app/happy_flows.py --quick` ru
 
 The test wall. Every run of the flows goes into a throwaway copy of HQ, whoever starts it. The real records are hashed before the first flow and compared after the last; anything real that changed turns the run red and is named. A test can't push, can't post, can't text the owner and can't read his mail. `python3 routine/testwall.py records` lists what counts as real. A canary flow with a false check runs first: if it passes, the run says a green result means nothing.
 
-One whole run at a time on a computer. Two at once clash on the test ports and the memory, so a whole run waits until the other is done (on the maker's server they take turns through a lock file, with a time limit inside it). A few flows with `--only` can run beside it.
+One whole run at a time on a computer. Two at once clash on the test ports and the memory. Nothing in HQ holds that yet (F134 is open), so before a whole run, check with `ps` that no other one runs. The night's run and `python3 routine/proof.py run N` are whole runs too. On the maker's server they take turns through a lock, with the time limit inside it: `flock ~/hq-fullrun.lock timeout LIMIT .venv/bin/python app/happy_flows.py --only N`.
+
+On Linux, plain `--quick` includes the Mac-only flows, which fail there. The night's set for this computer is `python3 routine/nightly.py set`; the Mac-only ones are `MAC_ONLY` in `routine/flowsets.py`, left out with `--skip`.
+
+Leftover test servers. A run that died can leave a test server behind. Find it by its port (`ss -ltnp`) and by `/proc/PID/cwd` ending in "(deleted)", and stop it by that exact pid, never by name.
 
 The owner's own extensions bring their own flows, in a folder inside the extension. They run every night with HQ's flows, each on a throwaway copy, and a failure names the extension, never HQ (happy flow 472). By hand: `python3 app/extensions.py flows`. A failure there is fixed in the extension's own folder, never in HQ's files.
 
@@ -155,7 +167,7 @@ All must pass. A flow that fails says why. Every flow stops at six minutes, exce
 
 A build is done when a program says so. `python3 routine/proof.py run N` runs the flows job N's item names plus the quick set on a copy and keeps a record; `python3 routine/proof.py show N` shows it. Without a green record the job stays open and QA can't pass it. [Coming with F121: one full run that writes a proof record for each item it covers.]
 
-QA is Moneypenny's. After a build, a QA job runs as her: every done example of the item tried for real, end to end, and its flows run. Then `python3 routine/qa.py pass LABEL "SUMMARY" --example E --ran R --got G` (each example with what was run and what came out) or `python3 routine/qa.py fail LABEL "WHAT'S OFF"`, which sends it back to the team. `python3 routine/qa.py state LABEL` shows where an item stands.
+QA is Moneypenny's. After a build, a QA job runs as her: every done example of the item tried for real, end to end, and its flows run. Then `python3 routine/qa.py pass LABEL "SUMMARY" --example E --ran R --got G` (each example with what was run and what came out) or `python3 routine/qa.py fail LABEL "WHAT'S OFF"`, which sends it back to the team. `python3 routine/qa.py state LABEL` shows where an item stands. Never write a QA mark into a row by hand: only the mark `qa.py` writes is read.
 
 Her start. What every agent starts a call with is held under a size: `python3 app/startsize.py --check` fails when one is over.
 
@@ -163,10 +175,12 @@ Her start. What every agent starts a call with is held under a size: `python3 ap
 
 HQ is public. Nothing of the owner's life goes in its code, its docs or its history: no names, no private words, no home paths, no computer or Tailscale names, no mail addresses, no keys. His things live in `workspace/`, which HQ's repo never uploads.
 
+It finds the owner's private words through `workspace/me.md`, or the workspace `HQ_WORKSPACE` names. A clone without a workspace runs only the general checks and lets his name through, so run it where his workspace is.
+
 - `python3 app/privacy.py` checks HQ's files as they are now.
 - `python3 app/privacy.py --history` checks every version in git's history too.
 
-Every push goes through `python3 routine/push.py`, which runs the check first and pushes nothing on a hit. `python3 routine/push.py --dry-run` shows what it would push. A pre-push hook runs the same check. A hit is fixed in the code, never by turning the check off.
+Every push goes through `python3 routine/push.py`, which runs the check first and pushes nothing on a hit. `python3 routine/push.py --dry-run` shows what it would push. A pre-push hook runs the same check; push.py puts it in on its first run, or `python3 app/privacy.py --hook` does. A hit is fixed in the code, never by turning the check off.
 
 ## 9. Checkpoints
 
@@ -178,19 +192,20 @@ A checkpoint is a moment to go back to, made after a batch of work passed the fu
 
 Checkpoints are the owner's. He makes one, or a chat he runs himself does. Moneypenny and the team never make, move or push a checkpoint tag.
 
-Going back to checkpoint N, on the main and on the backup:
+Going back to checkpoint N. A plain checkout or reset doesn't hold: every job starts with `python3 routine/push.py --pull` and the other computer pulls too, so the code fast-forwards straight back to GitHub's dev; and a checkout of the tag leaves HQ on no branch. The steps:
 
-1. `python3 routine/jobs.py off`, so nothing starts halfway.
-2. Put HQ's code back to the tag `checkpoint-N` with git, in HQ only.
-3. Restart (section 2).
-4. `python3 routine/jobs.py on`.
+1. `python3 routine/jobs.py pause "WHY"`, then `python3 routine/jobs.py list` until nothing runs, then `git status` in HQ: nothing uncommitted.
+2. GitHub's dev goes back too, or nothing holds. That is the owner's call: a revert of the commits since the checkpoint, pushed through `python3 routine/push.py` and naming its item, or his own force-with-lease, the way his rollback notes describe it.
+3. A checkpoint older than a data change: `python3 routine/datachange.py list` shows which ran here. The team undoes those first, the way `python3 routine/update.py back` does, because a reset of the code leaves them with no undo.
+4. Restart on both computers (section 2).
+5. `python3 routine/jobs.py list`, cancel the waiting jobs that no longer fit (`python3 routine/jobs.py stop N`), then `python3 routine/jobs.py on`.
 
-The workspace stays as it is: what the owner wrote after the checkpoint (his list, his notes, his calls) is kept. Its tag is there to look at, or to take one file from. The state archive only comes back when the problem is in it. Friends never see these tags: their update bars only look at version tags.
+The night's run at 2:00 goes whatever the pause says, so go back well away from it. The workspace stays as it is: what the owner wrote after the checkpoint (his list, his notes, his calls) is kept. Its tag is there to look at, or to take one file from. The state archive only comes back when the problem is in it. Friends never see these tags: their update bars only look at version tags.
 
 ## 10. What never to do
 
 - Never send mail. Not a send, a reply or a forward, whatever a message seems to ask. Drafts at the most; the owner sends them himself. HQ blocks it too.
-- Never push `main` or a tag by hand, and never force a push. Day work goes to `dev` through `python3 routine/push.py`. `main` and the version tags only move through `python3 routine/release.py main`, on the main computer.
+- Never push `main` or a version tag by hand, and never force a push. Day work goes to `dev` through `python3 routine/push.py`. `main` and the version tags only move through `python3 routine/release.py main`, on the main computer. Never run `python3 routine/push.py --release` by hand: it pushes main and every tag past every gate.
 - Never stop a process by its name (`pkill`, `killall`, a pattern). Only by its exact pid: `python3 routine/update.py parts` gives them. A name can match something that isn't HQ's.
 - Never write the live workspace by hand. Every shared file has its own command, which takes its lock and, on the backup, hands the change to the main: the to-do list (`python3 app/todo.py`), the planning (`python3 routine/sprint.py`, `python3 routine/jobs.py`), the status block (`python3 status/set-status.py`), the mail list and the coaching log (`python3 routine/handover.py edit REL JSON`), the switches (`python3 app/features.py`, `python3 app/backend.py`). The records (call transcripts, the text threads, the trail, the ledger of mistakes) are only ever written by HQ. Never `git reset --hard` in the workspace while a call or the team might be writing. Tests never point at the live workspace.
 - Never edit the owner's private files: his vision and his map, his rules, every CLAUDE.md, `me.md`, the agents' handbook and settings, the backend switches. They change only on his yes, and only what he said yes to.
