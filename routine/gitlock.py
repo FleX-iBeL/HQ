@@ -87,7 +87,7 @@ def push():
         _tell(True, f"The workspace can't reach GitHub: {(f.stderr or first).strip()[:200]}")
         return f.returncode
     m = _quiet("merge", "-q", "--no-edit", f"origin/{branch}")
-    if m.returncode:
+    if m.returncode and not main_wins(branch):
         _quiet("merge", "--abort")
         _tell(True, f"GitHub has work that doesn't merge with this: {(m.stdout + m.stderr).strip()[:200]}")
         return m.returncode
@@ -97,6 +97,69 @@ def push():
         return r.returncode
     _tell(False)
     return 0
+
+
+def main_wins(branch):
+    """F115: a repo conflict settles itself, main wins with the other side kept. Only the main commits, so this
+    computer's side of each clashing file stays; GitHub's own lines of it go into the list he sees (settle.py), and the
+    merge is finished and pushed. A file one side removed keeps the side that has it. False (nothing changed) when it
+    can't: then the merge is taken back and the incident says so, as before."""
+    try:
+        import settle
+    except ImportError:
+        return False
+    names = [n for n in _quiet("diff", "--name-only", "--diff-filter=U").stdout.splitlines() if n]
+    if not names:
+        return False
+    kept = []
+    for rel in names:
+        ours = subprocess.run(["git", "show", f":2:{rel}"], cwd=FOLDER, capture_output=True)
+        theirs = subprocess.run(["git", "show", f":3:{rel}"], cwd=FOLDER, capture_output=True)
+        if ours.returncode and theirs.returncode:
+            return False
+        if ours.returncode:  # removed here, changed there: the one that has it stays
+            open(os.path.join(FOLDER, rel), "wb").write(theirs.stdout)
+        else:
+            open(os.path.join(FOLDER, rel), "wb").write(ours.stdout)
+            if theirs.returncode == 0:
+                try:
+                    a, b = ours.stdout.decode("utf8"), theirs.stdout.decode("utf8")
+                except UnicodeDecodeError:
+                    a = b = None
+                if a is not None:
+                    new, extra, _ = settle.decide(rel, a, b, "GitHub")
+                    if new is not None:  # a log of lines: every line of both
+                        open(os.path.join(FOLDER, rel), "w", encoding="utf8").write(new)
+                    # F115 (the check's finding 1): every line of GitHub's side that isn't in the file now is kept word
+                    # for word, whichever way the rule went (the main's side only removing lines included)
+                    now_have = set((new if new is not None else a).splitlines())
+                    gone = [l for l in b.splitlines() if l.strip() and l not in now_have]
+                    if gone and not extra:
+                        extra = ["[only on GitHub:]", *gone]
+                    if extra:
+                        settle.keep(rel, extra, "GitHub", "A repo conflict: both sides changed this file. This computer's "
+                                    "version stayed (main wins); here is every difference of GitHub's side, word for "
+                                    "word.", folder=FOLDER)
+                        kept.append(rel)
+                else:
+                    stem, ext = os.path.splitext(rel)
+                    side = f"{stem} (from GitHub){ext}"
+                    open(os.path.join(FOLDER, side), "wb").write(theirs.stdout)
+                    _quiet("add", "--", side)
+                    settle.keep(rel, [], "GitHub", f"A repo conflict on a file that isn't text: this computer's stayed, "
+                                f"GitHub's is next to it as {os.path.basename(side)}.", folder=FOLDER)
+                    kept.append(rel)
+        if _quiet("add", "--", rel).returncode:
+            return False
+    if kept:
+        _quiet("add", "--", settle.KEPT)
+    c = _quiet("commit", "-q", "--no-edit", "-m", f"Merge GitHub: main wins on {', '.join(names)[:200]}", "-m",
+               "The other side's own lines are kept in " + settle.KEPT + " (F115).", "-m", COAUTHOR)
+    if c.returncode:
+        return False
+    print(f"gitlock: a repo conflict in {', '.join(names)[:200]} settled itself: this computer's version stayed"
+          + (f", GitHub's own lines kept for him to look at" if kept else ""), file=sys.stderr)
+    return True
 
 
 def _with_keys(files):
@@ -114,6 +177,46 @@ def _with_keys(files):
     return out
 
 
+def hand_over(files, role):
+    """F115: a chat's commit on the backup with one-way sync: the files don't go over with the sync, so each goes to
+    the main through the door (settle.py), which writes and commits it. Says plainly what happened."""
+    import base64, hashlib, json
+    if not files:
+        sys.exit("gitlock: name the files to commit")
+    me, sent, waiting, refused, said = role.my_name(), [], [], [], []
+    for rel in files:
+        p = os.path.join(FOLDER, rel)
+        payload = {"from": me}
+        if not os.path.exists(p):
+            payload["deleted"] = True
+            key = "deleted"
+        else:
+            raw = open(p, "rb").read()
+            try:
+                payload["text"] = raw.decode("utf8")
+            except UnicodeDecodeError:
+                payload["b64"] = base64.b64encode(raw).decode()
+            key = hashlib.sha1(raw).hexdigest()
+        hid = "settle-" + hashlib.sha1(f"workspace|{rel}|{key}".encode()).hexdigest()[:24]
+        import settle
+        code, out, err, how = settle.send(role, ["file", "workspace", rel], payload, hid)
+        (sent if how == "main" and not code else waiting if how != "main" else refused).append(rel)
+        if how == "main" and not code:
+            said.append(" ".join(out.split()))
+    if sent:
+        # F115 (the check's finding 7): what the main did with each, in its own words: written and committed there, or
+        # its version kept and this one's differences in the list
+        print(f"This HQ is the backup: handed {len(sent)} file{'s' * (len(sent) != 1)} to the main one. It said: "
+              + " ".join(said))
+    if waiting:
+        print(f"The main one can't be reached right now: {', '.join(waiting)[:200]} stay{'s' * (len(waiting) == 1)} on "
+              "this computer and go to the main by themselves at the next look once it answers.")
+    if refused:
+        print(f"The main one didn't take {', '.join(refused)[:200]}; they stay on this computer.", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv):
     if not argv or argv[0] not in ("commit", "run", "push"):
         sys.exit(__doc__)
@@ -123,6 +226,8 @@ def main(argv):
         except ImportError:
             role = None
         if role and role.is_backup():
+            if role.one_way():
+                return hand_over(argv[2:], role)
             print("This HQ is the backup now: only the main one commits. Nothing was committed; the files go over with the sync.")
             return 0
     lock = hold()

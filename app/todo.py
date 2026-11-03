@@ -19,7 +19,7 @@ column the other list doesn't have goes into its Notes), and writes one line in 
     python3 app/todo.py untick "ITEM"           groceries: from the ticked-off list back onto the list
     python3 app/todo.py order "ITEM" N          to place N in its own list (1 is the top)
     python3 app/todo.py rename "ITEM" "NEW"     a new name, the rest of its row kept
-    python3 app/todo.py undo                    puts back the last change made here, if nothing changed since
+    python3 app/todo.py undo [--by WHO]         puts back WHO's last change (F115: his own; others' since stay), or the newest
     python3 app/todo.py blocks [DAYS]           the calendar blocks coming up (14 days), each with its id, to plan into
     python3 app/todo.py plan "ITEM" "BLOCK"     H243: the item is planned in that calendar block (linked by hand)
     python3 app/todo.py unplan "ITEM"           the link taken off
@@ -381,19 +381,73 @@ def _insert_log(lines: list[str], line: str) -> list[str]:
 
 
 def _write(p: Path, before: str, lines: list[str], what: str, swept: list | None = None,
-           links_before: dict | None = None) -> None:
+           links_before: dict | None = None, by: str = "", links_after: dict | None = None) -> None:
     text = "\n".join(lines) + ("\n" if before.endswith("\n") else "")
     tmp = hqlock.tmp(p)
     tmp.write_text(text, encoding="utf8")
     os.replace(tmp, p)
     try:
+        # F115: one undo per whoever made the change (his taps "in the app", each agent, each call), so his undo
+        # takes back his own last change, never an agent's that came after it.
+        slots = _undo_slots()
+        slots[by or ""] = {"file": str(p), "before": before, "after": text, "after_sha": hashlib.sha1(text.encode()).hexdigest(),
+                           "what": what, "seq": max([int(v.get("seq") or 0) for v in slots.values()] + [0]) + 1} \
+            | ({"swept": swept} if swept else {}) \
+            | ({"links_before": links_before, "links_after": json.loads(json.dumps(links_after))}
+               if links_before is not None and links_after is not None else
+               {"links_before": links_before} if links_before is not None else {})
         u = _undo_file()
         u.parent.mkdir(parents=True, exist_ok=True)
-        u.write_text(json.dumps({"file": str(p), "before": before, "after_sha": hashlib.sha1(text.encode()).hexdigest(),
-                                 "what": what} | ({"swept": swept} if swept else {})
-                                | ({"links_before": links_before} if links_before is not None else {})), encoding="utf8")
+        t = u.with_name(f"{u.name}.{os.getpid()}.tmp")
+        t.write_text(json.dumps({"slots": slots}), encoding="utf8")
+        os.replace(t, u)
     except OSError:
         pass
+
+
+def _undo_slots() -> dict:
+    try:
+        d = json.loads(_undo_file().read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return {}
+    if isinstance(d, dict) and isinstance(d.get("slots"), dict):
+        return d["slots"]
+    return {"": d} if isinstance(d, dict) and d.get("file") else {}  # the one slot from before F115
+
+
+def _reverse(after: list[str], before: list[str], current: list[str]) -> list[str] | None:
+    """F115: take one change (before -> after) back out of the list as it is now, keeping whatever came after it
+    elsewhere in the file. None when something else changed right where that change was (then it can't be undone)."""
+    import difflib
+    amap = {}
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, after, current, autojunk=False).get_opcodes():
+        if tag == "equal":
+            for k in range(i2 - i1):
+                amap[i1 + k] = j1 + k
+    drop, put = set(), {}  # lines of now to take out; lines to put back, before a line of now (by its index)
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, after, before, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        if i2 > i1:  # lines the change wrote: each must still be there as it wrote them
+            if not all(k in amap for k in range(i1, i2)):
+                return None
+            drop.update(amap[k] for k in range(i1, i2))
+            at = amap[i1]
+        elif i1 > 0 and (i1 - 1) in amap:  # lines the change took out: back after the line before them
+            at = amap[i1 - 1] + 1
+        elif i1 < len(after) and i1 in amap:
+            at = amap[i1]
+        elif i1 == 0:
+            at = 0
+        else:
+            return None
+        put.setdefault(at, []).extend(before[j1:j2])
+    out = []
+    for i in range(len(current) + 1):
+        out += put.get(i, [])
+        if i < len(current) and i not in drop:
+            out.append(current[i])
+    return out
 
 
 def _by(by: str) -> str:
@@ -407,7 +461,9 @@ def _move(p: Path, want_item: str, to: dict | str, at_value: str = "", note: str
         doc = parse(before)
         src, it = find_item(doc, want_item)
         dst = find_list(doc, to) if isinstance(to, str) else to
-        dst = next(x for x in doc["lists"] if x["head"] == dst["head"])
+        # F115: found again in the list as it is now, by its key: a row another writer added above it since the
+        # first read moved its line, and a tick then failed with a 500 (1 in 60 on the checklist re-run)
+        dst = next((x for x in doc["lists"] if x["key"] == dst["key"]), None) or find_list(doc, dst["key"])
         if dst["head"] == src["head"]:
             return {"ok": True, "said": f"{it['title']} is already on {_list_label(dst)}.", "id": it["id"]}
         r = it["row"]
@@ -474,7 +530,7 @@ def _move(p: Path, want_item: str, to: dict | str, at_value: str = "", note: str
                 cleared, records, unsure = [], [], []
             for c in reversed(cleared):
                 lines = _insert_log(lines, f"- {stamp}: {it['title']}: cleared with it: {c}{_by(by)}.")
-        _write(p, before, lines, f"{it['title']}: {what}", records)
+        _write(p, before, lines, f"{it['title']}: {what}", records, by=by)
     out = {"ok": True, "said": f"{it['title']}: {what}.", "id": it["id"], "list": dst["key"]}
     if again:
         out["said"] += f" It comes back on {_list_label(src)} for {_say_date(again)}."
@@ -534,7 +590,7 @@ def add(lst_want: str, title: str, notes: str = "", deadline: str = "", type_: s
         lines.insert(dst["table"][1], _row_line(cells))
         stamp = _now().strftime("%Y-%m-%d %H:%M")
         lines = _insert_log(lines, f"- {stamp}: added {title} to {_list_label(dst)}{_by(by)}.")
-        _write(p, before, lines, f"added {title}")
+        _write(p, before, lines, f"added {title}", by=by)
     return {"ok": True, "said": f"Added {title} to {_list_label(dst)}.", "list": dst["key"]}
 
 
@@ -544,7 +600,7 @@ def _add_many(dst: dict, titles: list[str], notes: str, deadline: str, type_: st
     with _lock:
         before = p.read_text(encoding="utf8")
         doc = parse(before)
-        dst = next(x for x in doc["lists"] if x["head"] == dst["head"])
+        dst = next((x for x in doc["lists"] if x["key"] == dst["key"]), None) or find_list(doc, dst["key"])  # F115
         on = {it["title"].lower() for it in dst["items"]}
         off = next((x for x in doc["lists"] if x["kind"] == "grocoff"), None) if dst["kind"] == "groceries" else None
         back = {it["title"].lower(): it for it in (off["items"] if off else [])}
@@ -585,7 +641,7 @@ def _add_many(dst: dict, titles: list[str], notes: str, deadline: str, type_: st
         bits = ([f"added {', '.join(added)}"] if added else []) + ([f"back on: {', '.join(again)}"] if again else [])
         what = "; ".join(bits)
         lines = _insert_log(lines, f"- {stamp}: {what} ({_list_label(dst)}){_by(by)}.")
-        _write(p, before, lines, what)
+        _write(p, before, lines, what, by=by)
     said = f"{what[0].upper()}{what[1:]} ({_list_label(dst)})." + (f" Already there: {', '.join(had)}." if had else "")
     return {"ok": True, "said": said, "list": dst["key"], "count": len(rows)}
 
@@ -688,7 +744,7 @@ def order(item: str, place: int, by: str = "", p: Path | None = None) -> dict:
         stamp = _now().strftime("%Y-%m-%d %H:%M")
         what = f"to place {n} of {len(items)} on {_list_label(lst)}"
         lines = _insert_log(lines, f"- {stamp}: {it['title']}: {what}{_by(by)}.")
-        _write(p, before, lines, f"{it['title']}: {what}")
+        _write(p, before, lines, f"{it['title']}: {what}", by=by)
     return {"ok": True, "said": f"{it['title']}: {what}.", "id": it["id"], "list": lst["key"]}
 
 
@@ -725,7 +781,7 @@ def rename(item: str, title: str, by: str = "", p: Path | None = None) -> dict:
         if _norm(old) in links["links"]:  # H243: the link goes with the new name
             moved = json.loads(json.dumps(links))
             links["links"][_norm(new)] = {**links["links"].pop(_norm(old)), "item": new}
-        _write(p, before, lines, f"{old}: renamed to {new}", links_before=moved)
+        _write(p, before, lines, f"{old}: renamed to {new}", links_before=moved, links_after=links, by=by)
         if moved is not None:
             _save_links(links)
         nid = next((x["id"] for l in parse("\n".join(lines))["lists"] if l["head"] == lst["head"]
@@ -928,7 +984,7 @@ def repeat(item: str, rule: str, by: str = "", p: Path | None = None) -> dict:
         stamp = _now().strftime("%Y-%m-%d %H:%M")
         what = f"repeats {words}" if words else "doesn't repeat any more"
         lines = _insert_log(lines, f"- {stamp}: {it['title']}: {what} ({_list_label(lst)}){_by(by)}.")
-        _write(p, before, lines, f"{it['title']}: {what}")
+        _write(p, before, lines, f"{it['title']}: {what}", by=by)
     said = f"{it['title']}: {what}."
     if first:
         said += f" The first one is {_say_date(first.isoformat())}."
@@ -939,26 +995,56 @@ def repeat(item: str, rule: str, by: str = "", p: Path | None = None) -> dict:
 
 
 
-def undo() -> dict:
-    """The last change made through here, put back, only when the file is still as that change left it."""
+def undo(by: str | None = None) -> dict:
+    """The last change made through here by `by` (his taps are "in the app"), put back. F115: also when someone else
+    changed the list since, elsewhere in it: only that change is taken out, theirs stays. Without `by`, the newest
+    change of anyone, as before."""
     with _lock:
-        try:
-            u = json.loads(_undo_file().read_text(encoding="utf8"))
-        except (OSError, ValueError):
+        slots = _undo_slots()
+        if by is None:
+            key = max(slots, key=lambda k: slots[k].get("seq") or 0, default=None)  # the newest of anyone's
+        else:
+            key = by if by in slots else None
+        if key is None:
             return {"ok": False, "said": "Nothing to undo."}
+        u = slots[key]
         p = Path(u["file"])
         try:
             now_text = p.read_text(encoding="utf8")
         except OSError:
             return {"ok": False, "said": "The list isn't there."}
-        if hashlib.sha1(now_text.encode()).hexdigest() != u.get("after_sha"):
-            return {"ok": False, "said": "The list changed since, so it can't be undone from here."}
+        exact = hashlib.sha1(now_text.encode()).hexdigest() == u.get("after_sha")
+        if exact:
+            back = u["before"]
+        else:
+            new = _reverse(u["after"].splitlines(), u["before"].splitlines(), now_text.splitlines()) \
+                if isinstance(u.get("after"), str) else None
+            if new is None:
+                return {"ok": False, "said": "The list changed right there since, so it can't be undone from here."}
+            back = "\n".join(new) + ("\n" if now_text.endswith("\n") else "")
         tmp = hqlock.tmp(p)
-        tmp.write_text(u["before"], encoding="utf8")
+        tmp.write_text(back, encoding="utf8")
         os.replace(tmp, p)
         if isinstance(u.get("links_before"), dict):  # H243
-            _save_links(u["links_before"])
-        _undo_file().unlink(missing_ok=True)
+            if exact or not isinstance(u.get("links_after"), dict):
+                _save_links(u["links_before"])
+            else:  # only the links this change made, back as they were
+                cur = _links()
+                was, aft = u["links_before"].get("links") or {}, u["links_after"].get("links") or {}
+                for k in set(was) | set(aft):
+                    if was.get(k) != aft.get(k):
+                        if k in was:
+                            cur.setdefault("links", {})[k] = was[k]
+                        else:
+                            cur.get("links", {}).pop(k, None)
+                _save_links(cur)
+        slots.pop(key, None)
+        try:
+            t = _undo_file().with_name(f"{_undo_file().name}.{os.getpid()}.tmp")
+            t.write_text(json.dumps({"slots": slots}), encoding="utf8")
+            os.replace(t, _undo_file())
+        except OSError:
+            pass
     back = 0
     if u.get("swept"):
         try:
@@ -1157,7 +1243,7 @@ def plan(item: str, block: str, by: str = "", p: Path | None = None) -> dict:
         stamp = _now().strftime("%Y-%m-%d %H:%M")
         what = f"planned in {e.get('title', 'a block')} ({when})"
         lines = _insert_log(list(doc["lines"]), f"- {stamp}: {it['title']}: {what}{_by(by)}.")
-        _write(p, before, lines, f"{it['title']}: {what}", links_before=was)
+        _write(p, before, lines, f"{it['title']}: {what}", links_before=was, links_after=links, by=by)
         _save_links(links)
     return {"ok": True, "said": f"{it['title']}: {what}.", "id": it["id"], "list": lst["key"]}
 
@@ -1176,7 +1262,7 @@ def unplan(item: str, by: str = "", p: Path | None = None) -> dict:
         stamp = _now().strftime("%Y-%m-%d %H:%M")
         what = f"no longer planned in {ln.get('title') or 'its block'}"
         lines = _insert_log(list(doc["lines"]), f"- {stamp}: {it['title']}: {what}{_by(by)}.")
-        _write(p, before, lines, f"{it['title']}: {what}", links_before=was)
+        _write(p, before, lines, f"{it['title']}: {what}", links_before=was, links_after=links, by=by)
         _save_links(links)
     return {"ok": True, "said": f"{it['title']}: {what}.", "id": it["id"], "list": lst["key"]}
 
@@ -1326,7 +1412,7 @@ def main(argv: list[str]) -> int:
         elif cmd == "rename" and len(args) >= 3:
             print(rename(args[1], args[2], by=by)["said"])
         elif cmd == "undo":
-            print(undo()["said"])
+            print(undo(by or None)["said"])
         elif cmd == "blocks":
             print(blocks_text(int(args[1]) if len(args) > 1 and args[1].isdigit() else 14))
         elif cmd == "plan" and len(args) >= 3:

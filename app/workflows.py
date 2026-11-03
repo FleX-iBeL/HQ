@@ -88,7 +88,9 @@ def turned_on(folder: Path) -> list[str]:
 def _save(folder: Path, on: list[str]) -> None:
     p = folder / STATE
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"on": on}, indent=2) + "\n", encoding="utf8")
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps({"on": on}, indent=2) + "\n", encoding="utf8")
+    os.replace(tmp, p)
 
 
 def _add_where(folder: Path, w: dict) -> bool:
@@ -110,10 +112,32 @@ def _add_where(folder: Path, w: dict) -> bool:
     return True
 
 
+def _handed(folder: Path, args: list[str]):
+    """F115: on the backup the main switches a workflow (role.door): its answer, or None when this one writes it."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+    import role
+    h = role.door(folder / STATE, "workflows", args)
+    return None if h is None else role.door_said(h, "The workflow")
+
+
+def _locked(folder: Path):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+    import hqlock  # F115: one switch at a time across processes
+    return hqlock.locked(folder / STATE)
+
+
 def turn_on(folder: Path, wid: str, base: Path = SHIPPED) -> str:
     w = find(wid, base)
     if not w:
         return f"No workflow {wid}. There are: {', '.join(x['id'] for x in shipped(base)) or 'none'}."
+    h = _handed(folder, ["on", wid])
+    if h is not None:
+        return h
+    with _locked(folder):
+        return _turn_on(folder, wid, w)
+
+
+def _turn_on(folder: Path, wid: str, w: dict) -> str:
     said = []
     mine = folder / w["file"]
     if not mine.exists():
@@ -130,6 +154,14 @@ def turn_on(folder: Path, wid: str, base: Path = SHIPPED) -> str:
 
 
 def turn_off(folder: Path, wid: str) -> str:
+    h = _handed(folder, ["off", wid])
+    if h is not None:
+        return h
+    with _locked(folder):
+        return _turn_off(folder, wid)
+
+
+def _turn_off(folder: Path, wid: str) -> str:
     on = turned_on(folder)
     if wid not in on:
         return f"{wid} wasn't on."

@@ -4,6 +4,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- What you hand over is picked up the same day: every agent now looks at her own list three times a day inside her hours (morning, midday and evening), and each new request on it becomes her next step, once, however often she looks. A request after her evening look waits for the morning. If her share of the usage has no room, the look waits for the next one and her ledger says so and how much it needed. How many looks a day is one setting per agent, and a change counts from the next day; a new agent gets three (H308).
 - Donna's chat has a switch at the top to Moneypenny's chat, with her earlier texts in it, and one tap brings you back. Texting her there reaches her and she answers there. Without Moneypenny on your HQ the switch doesn't show (H300).
 
 - The estimates come from what jobs like it really took. The planning, the status page and the start check give a piece of work the time and usage of the finished jobs most like it, a latest end where 9 in 10 of those landed, and how many jobs it rests on; with too few like it, it says so and stays a rough number. Replayed on every finished job, 9 in 10 now land by their latest end, up from about 8 in 10 (F79).

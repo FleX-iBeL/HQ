@@ -20,6 +20,7 @@ times from the note. Only the page adds and clears notes; Google Calendar is nev
 
     python3 app/appt_notes.py          every appointment with notes, in plain lines (what a call reads)
     python3 app/appt_notes.py json     the same as JSON
+    python3 app/appt_notes.py add ID TEXT | clear ID NOTE   (F115: what the backup's page hands to the main)
 """
 from __future__ import annotations
 
@@ -56,7 +57,7 @@ def _read() -> dict:
 def _write(s: dict) -> None:
     p = notes_file()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(s, indent=1, ensure_ascii=False) + "\n", encoding="utf8")
     os.replace(tmp, p)
 
@@ -89,14 +90,35 @@ def attach(events: list[dict]) -> list[dict]:
             for e in events]
 
 
+def _handed(args: list[str]):
+    """F115: on the backup the main writes the notes (role.door): None when this computer writes them, else the main's
+    answer (code, out, err, how)."""
+    sys.path.insert(0, str(HERE.parent / "routine"))
+    import role
+    return role.door(notes_file(), "appt_notes", args)
+
+
+def _locked():
+    sys.path.insert(0, str(HERE.parent / "routine"))
+    import hqlock  # F115: across processes too (the page, the main running a handed note)
+    return hqlock.locked(notes_file())
+
+
 def add(eid: str, text: str, now: float | None = None) -> dict:
     """A note on the appointment eid (its id or mark id). KeyError when there's no such appointment, ValueError when
     the text is empty."""
     text = "\n".join(l.rstrip() for l in str(text).replace("\r", "").strip().splitlines())[:MAX_TEXT].strip()
     if not text:
         raise ValueError("nothing to add")
+    h = _handed(["add", eid, text])
+    if h is not None:
+        if h[0] == 1 and "no such" in (h[1] + h[2]):
+            raise KeyError("no such appointment")
+        if h[0]:
+            raise ValueError(" ".join((h[1] + h[2]).split()) or "the main didn't take it")
+        return {"items": [], "handed": h[3]}
     t = now or time.time()
-    with _lock:
+    with _lock, _locked():
         s = _read()
         by = _index()
         key = _key(eid, by)
@@ -119,7 +141,10 @@ def add(eid: str, text: str, now: float | None = None) -> dict:
 
 def clear(eid: str, note_id: str) -> bool:
     """Clears one note; the appointment's entry goes when its last note does."""
-    with _lock:
+    h = _handed(["clear", eid, note_id])
+    if h is not None:
+        return h[0] == 0
+    with _lock, _locked():
         s = _read()
         key = _key(eid)
         n = s["notes"].get(key) or s["notes"].get(eid)
@@ -178,6 +203,21 @@ if __name__ == "__main__":
         print(text())
     elif args[0] == "json":
         print(json.dumps(listing(), ensure_ascii=False, indent=1))
+    elif args[0] == "add" and len(args) >= 3:  # F115: what the backup hands to the main (the page's tap there)
+        try:
+            add(args[1], " ".join(args[2:]))
+            print("Note added.")
+        except KeyError:
+            print("no such appointment")
+            sys.exit(1)
+        except ValueError as e:
+            print(str(e))
+            sys.exit(1)
+    elif args[0] == "clear" and len(args) == 3:
+        if not clear(args[1], args[2]):
+            print("no such note")
+            sys.exit(1)
+        print("Note cleared.")
     else:
         print(__doc__)
         sys.exit(2)

@@ -227,7 +227,7 @@ their own system (how they prioritise, at the top of the file) and say which, in
 let go, move it there. Use the list's commands, so every change keeps its columns and gets its line in the list's \
 log: python3 "{HQ}/app/todo.py" (the list in a few lines, each item with its id), add LIST "WHAT" [--notes "their \
 words"] [--deadline "…"] [--type active|passive] [--for "who"], done ITEM ["note"], letgo ITEM "why", move ITEM LIST, \
-undo; a grocery that's bought is tick ITEM (onto the groceries' own ticked-off list, not done), and untick ITEM puts \
+undo --by the same (your own last change); a grocery that's bought is tick ITEM (onto the groceries' own ticked-off list, not done), and untick ITEM puts \
 it back; order ITEM N puts it at place N in its own list (1 is the top), rename ITEM "NEW NAME" gives it a new name \
 and keeps the rest of its row (H231); plan ITEM BLOCK links it by hand to a block in the calendar (H243: blocks lists the blocks coming up with their ids; BLOCK is that id, or a few words of the block's title with a day and a time), one block can hold several items, and unplan ITEM takes the link off; never by title by itself, only when {user} says which block (on Friday mornings the week is planned this way); repeat ITEM "RULE" makes it come back by itself when it's ticked off (H245: every week, every month on the 26th, every quarter, every year, or every month, the Friday before the 26th; done then brings it back on its own list with the next date as its deadline, the answer says when; let go stops it; repeat ITEM off takes it off), when {user} says something keeps coming back, like a tax return or the rent; the list shows each planned item's block with its time now; several at once in one add give one item each (one per line, or commas on the groceries); add --by "<who you are>, on a call" (or "in the chat"). LIST is a number, a few words of a list's name, or \
 important urgent, important not urgent, urgent, neither, wishlist, groceries; ITEM is an id or a few words of it. A \
@@ -730,14 +730,14 @@ CYCLES_RULE = """- Your own cycles (H298): you run your own cycle by yourself (a
 headless, inside a box and your share of the usage; your ledger is HQ/ledger/<your id>.md in the workspace). When \
 {user} gives you an order on this call or in this chat, write it in your ledger so your runner picks it up, in his \
 words, without asking again: "start x", "do x from your next session" is python3 "{HQ}/routine/cycles.py" order <your id> \
-start "his words" (add --now when he says now: a small step runs at once; after her hours it says it waits for the morning, and then tell him that); "stop y", "drop y", "leave y" is order \
+start "his words" (her next look at her list, three a day by default, turns it into a step: the same day, or the next morning when it comes after her evening look; add --now when he says now: a small step runs at once; after her hours it says it waits for the morning, and then tell him that); "stop y", "drop y", "leave y" is order \
 <your id> stop "his words" (it goes to you in a small step in his words: you stop what he means and tell him); his yes to a calendar change you held is \
 yes <your id> "his words" <its number when he named it or it's plain which>, his words exactly as he said or typed them on this call or in this chat today, never your own, and they name the change or answer your question about it (F114: anything else is refused), never a guess: with no number and several waiting your own step reads his words; his no, in any words, to a change you held is no <your id> "his words" <its number when plain>: it's closed, nobody gets anything, and what opens with no is a no even when the question was to remove something and he says forget it; a go, in any words, on something you said you'd try once more is order <your id> start "his words"; "from now on …" is \
 order <your id> standing "his words" (written into your own section of the handbook: his saying it is his yes). An \
 order for another agent goes to her id the same way ("tell Pepper to …"). The settings ("Donna gets four points a \
-week", "no steps after nine", "two texts a day"): python3 "{HQ}/routine/cycles.py" set <id> <weekly|daily|hours|batches|texts|session_at|session_minutes|session_turns|step_minutes|step_turns|steps_a_day|own_calendars|on> <value>; \
+week", "no steps after nine", "two texts a day"): python3 "{HQ}/routine/cycles.py" set <id> <weekly|daily|hours|batches|texts|session_at|session_minutes|session_turns|step_minutes|step_turns|steps_a_day|looks_a_day|own_calendars|on> <value>; \
 python3 "{HQ}/routine/cycles.py" shows what runs and each one's share used this week; friday shows the Friday screen \
-(three lines per agent); ledger <id> her ledger. Say it as he would ("that's in my next session", "stopped"), never the command."""
+(three lines per agent); ledger <id> her ledger. Say it as he would ("I'll pick that up at my next look", for another agent "she'll pick it up at her next look", "stopped"), never the command."""
 
 
 def cycles_rule() -> str:

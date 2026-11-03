@@ -16568,15 +16568,12 @@ print("OK")
         (ws / "HQ/fine.md").write_text("the main's words\n")
         os.utime(ws / "HQ/fine.md", (old, old))
         minute()
-        need(any(i["key"] == "workspace-push" and not i.get("back") for i in inc()), f"no incident for a clash: {inc()}")
-        need("the main's words" in (ws / "HQ/fine.md").read_text() and not (ws / ".git/MERGE_HEAD").exists(), "the merge wasn't taken back")
-        # settled by hand: the next look pushes what was left, and the incident closes
-        g("fetch", "-q", "origin")
-        g("merge", "-q", "-X", "ours", "--no-edit", "origin/main")
-        minute()
-        need("the main's words" in on_github("HQ/fine.md").stdout, "what was left unpushed wasn't pushed")
-        need(not any(i["key"] == "workspace-push" and not i.get("back") for i in inc()), "the incident stays open")
-        return "a note on GitHub after its ten minutes, a key kept out, a refused push merged, a clash an incident, a late push"
+        # F115: a clash settles itself, main wins with the other side kept: no incident, nothing waits on him
+        need(not any(i["key"] == "workspace-push" and not i.get("back") for i in inc()), f"a clash opened an incident: {inc()}")
+        need("the main's words" in on_github("HQ/fine.md").stdout and not (ws / ".git/MERGE_HEAD").exists(),
+             "the main's words didn't win on GitHub, or the merge was left half done")
+        need("the chat's words" in on_github("HQ/kept-from-both.md").stdout, "the other side's words weren't kept in the list")
+        return "a note on GitHub after its ten minutes, a key kept out, a refused push merged, a clash settled itself main wins with the other's words kept"
 
     async def flow220(self) -> str:
         """F102, no Claude: two writers can't wipe each other. Two processes adding 150 notes at once lose none, with no errors
@@ -21110,6 +21107,794 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
         need(_t.time() - t < 30 and any("f3.txt" in h for h in o["hits"]), f"the second read: {o}")
         return "what read clean isn't read again, a stopped read goes on, a new version is read, a hit stays a hit, other words read it all"
 
+    # ---- F115: two computers don't lose or hide what he did ----------------------------------------------------------
+
+    def _f115_pair(self, tag, syncthing=False):
+        """F115: two throwaway HQs on this computer, A the main ("server") and B the backup ("laptop"): each its own copy of HQ's
+        code, its own workspace from the blank template, its own HQ memory and a stand-in for its status server (GET and POST
+        /api/role, POST /api/forward, run by its own role.py as server.mjs does), each on a loopback port of its own; one-way
+        sync on for both. P["cut"] = True cuts both stand-ins (no answer at all), as a broken line does. With syncthing, two
+        private Syncthings only talking to each other on loopback share the workspaces, A sending only and B receiving only.
+        Nothing of his: the template only. Returns a dict; P["stop"]() ends what it started, by exact pid."""
+        import subprocess as sp, http.server, threading, socket, xml.etree.ElementTree as ET
+        T = self.tmp / tag
+        T.mkdir()
+        files = sp.run(["git", "-C", str(ROOT), "ls-files", "-co", "--exclude-standard"], capture_output=True, text=True).stdout
+        files = "\n".join(l for l in files.splitlines() if l and not l.startswith(("workspace", ".venv")))
+        tar = sp.run(["tar", "-czf", "-", "-T", "-"], input=files.encode(), capture_output=True, cwd=str(ROOT),
+                     env={**os.environ, "COPYFILE_DISABLE": "1"})
+        need(tar.returncode == 0, f"couldn't pack HQ: {tar.stderr.decode()[:200]}")
+        P = {"T": T, "cut": False, "pids": [], "servers": []}
+
+        def free():
+            s = socket.socket()
+            s.bind(("127.0.0.1", 0))
+            n = s.getsockname()[1]
+            s.close()
+            return n
+        names = {"A": "server", "B": "laptop"}
+        ports = {"A": free(), "B": free()}
+        keep = ("HQ_UNDER_TEST", "HQ_NO_WALL", "HQ_REAL_ROADMAP", "HQ_REAL_SUPPORT")
+        for X in "AB":
+            hq = T / X / "HQ"
+            hq.mkdir(parents=True)
+            r = sp.run(["tar", "-xzf", "-", "-C", str(hq)], input=tar.stdout, capture_output=True)
+            need(r.returncode == 0, f"couldn't unpack HQ: {r.stderr.decode()[:200]}")
+            shutil.copytree(hq / "template", hq / "workspace")
+            (T / X / "state").mkdir()
+            env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_") or k in keep}
+            env.update({"HQ_UNDER_TEST": "1", "HQ_SUPPORT": str(T / X / "state"), "HQ_INCIDENTS_FILE": str(T / X / "incidents.json"),
+                        "HQ_ROLE_ONLINE": "1", "HQ_ROLE_RETRY": "0.1", "HQ_BACKEND_ONE_WAY_SYNC": "1", "HQ_SYNC_GIT": "0",
+                        "HQ_SYNC_QUIET": "0", "HQ_NO_PHONE": "1", "HQ_CLAUDE_CLI": "/bin/false", "HQ_DIRECT_PLAIN": "1",
+                        "HQ_TODO_SWEEP": "0", "HQ_SYNCTHING_HOME": str(T / X / "st"), "HQ_STATUS_PORT": str(free()),
+                        "HQ_PORT": str(free()), "HQ_UNIT": f"{tag}-{X.lower()}", "HQ_ROLE_WAKETIME": "1",
+                        "HQ_ROUTINES_FILE": str(T / X / "routines.json")})
+            P[X] = {"hq": hq, "ws": hq / "workspace", "state": T / X / "state", "env": env, "name": names[X], "port": ports[X]}
+        for X, Y in (("A", "B"), ("B", "A")):
+            (P[X]["state"] / "role.json").write_text(json.dumps({
+                "name": names[X], "peer": f"http://127.0.0.1:{ports[Y]}/", "peer_name": names[Y], "main": "server",
+                "chosen_at": 1, "takeover": 3}))
+        (P["A"]["state"] / "role-state.json").write_text(json.dumps({"acting": "main"}))
+        (P["B"]["state"] / "role-state.json").write_text(json.dumps({"acting": "backup"}))
+
+        def run(X, *args, input=None, timeout=150, env=None):
+            return sp.run([sys.executable, *map(str, args)], cwd=str(P[X]["hq"]), env={**P[X]["env"], **(env or {})},
+                          input=input, capture_output=True, text=True, timeout=timeout)
+
+        def py(X, code, input=None, env=None, timeout=150):
+            return run(X, "-c", "import sys, os, json; sys.path[:0] = ['app', 'routine']\n" + code, input=input, env=env,
+                       timeout=timeout)
+        P["run"], P["py"] = run, py
+
+        def stand_in(X):
+            class H(http.server.BaseHTTPRequestHandler):
+                def log_message(self, *a):
+                    pass
+
+                def _role(self, kind, body=""):
+                    if P["cut"] or len(body) > 100000:  # a broken line: no answer at all (server.mjs drops a body over 100,000)
+                        self.close_connection = True
+                        try:
+                            self.connection.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+                        return
+                    r = run(X, "routine/role.py", "serve", kind, input=body)
+                    out = (r.stdout.strip().splitlines() or ["null"])[-1].encode()
+                    self.send_response({3: 409, 2: 400}.get(r.returncode, 200))
+                    self.send_header("content-type", "application/json")
+                    self.send_header("content-length", str(len(out)))
+                    self.end_headers()
+                    self.wfile.write(out)
+
+                def do_GET(self):
+                    self._role("get")
+
+                def do_POST(self):
+                    body = self.rfile.read(int(self.headers.get("content-length") or 0)).decode()
+                    self._role("forward" if self.path.startswith("/api/forward") else "set", body)
+            srv = http.server.ThreadingHTTPServer(("127.0.0.1", ports[X]), H)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            P["servers"].append(srv)
+        stand_in("A")
+        stand_in("B")
+
+        def look(X):
+            """One look of the routine on X: the role first, then the sync (with its hand-over), as tick.py does."""
+            return py(X, "import role, sync, inspect, routines\nr = role.tick(log=print)\n"
+                         "kw = {'acting': r['acting']} if 'acting' in inspect.signature(sync.tick).parameters else {}\n"
+                         "sync.tick(main=r['acting'] == 'main' and not r.get('handing_back'), log=print, routines=routines, **kw)\n"
+                         "print('ACTING', role.acting())")
+        P["look"] = look
+
+        def stop():
+            for srv in P["servers"]:
+                srv.shutdown()
+                srv.server_close()
+            for pid in P["pids"]:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
+            time.sleep(1)
+            for pid in P["pids"]:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+        P["stop"] = stop
+        if not syncthing:
+            return P
+        need(shutil.which("syncthing"), "Syncthing isn't installed here")
+        try:
+            for X in "AB":
+                st = T / X / "st"
+                r = sp.run(["syncthing", "generate", f"--home={st}"], capture_output=True, text=True)
+                need(r.returncode == 0, f"couldn't make a throwaway Syncthing: {r.stderr[:200]}")
+                P[X]["gui"], P[X]["listen"] = free(), free()
+                t = ET.parse(st / "config.xml")
+                root = t.getroot()
+                root.find("gui").find("address").text = f"127.0.0.1:{P[X]['gui']}"
+                o = root.find("options")
+                for x in o.findall("listenAddress"):
+                    o.remove(x)
+                ET.SubElement(o, "listenAddress").text = f"tcp://127.0.0.1:{P[X]['listen']}"
+                for k, v in (("globalAnnounceEnabled", "false"), ("localAnnounceEnabled", "false"), ("relaysEnabled", "false"),
+                             ("natEnabled", "false"), ("urAccepted", "-1"), ("autoUpgradeIntervalH", "0"),
+                             ("startBrowser", "false"), ("crashReportingEnabled", "false")):
+                    x = o.find(k)
+                    if x is None:
+                        x = ET.SubElement(o, k)
+                    x.text = v
+                for f in root.findall("folder"):
+                    root.remove(f)
+                t.write(st / "config.xml")
+                P[X]["key"] = root.find("gui").findtext("apikey")
+                p = sp.Popen(["syncthing", "serve", f"--home={st}", "--no-browser"], stdout=open(T / X / "st.log", "w"),
+                             stderr=sp.STDOUT, env={**os.environ, "STNODEFAULTFOLDER": "1", "STNOUPGRADE": "1"})
+                P["pids"].append(p.pid)
+
+            def api(X, path, method="GET", body=None):
+                req = urllib.request.Request(f"http://127.0.0.1:{P[X]['gui']}{path}", method=method,
+                                             headers={"X-API-Key": P[X]["key"], "Content-Type": "application/json"},
+                                             data=None if body is None else json.dumps(body).encode())
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    raw = r.read()
+                return json.loads(raw) if raw.strip() else None
+            P["api"] = api
+
+            def wait(cond, secs, why):
+                end = time.time() + secs
+                while time.time() < end:
+                    try:
+                        if cond():
+                            return
+                    except Exception:
+                        pass
+                    time.sleep(1)
+                need(False, why)
+            P["wait"] = wait
+            wait(lambda: api("A", "/rest/system/status") and api("B", "/rest/system/status"), 40,
+                 "the throwaway Syncthings didn't start")
+            for X in "AB":
+                P[X]["id"] = api(X, "/rest/system/status")["myID"]
+            for X, Y in (("A", "B"), ("B", "A")):
+                api(X, f"/rest/config/devices/{P[Y]['id']}", "PUT",
+                    {"deviceID": P[Y]["id"], "name": names[Y], "addresses": [f"tcp://127.0.0.1:{P[Y]['listen']}"]})
+            wait(lambda: any(c.get("connected") for c in api("A", "/rest/system/connections")["connections"].values()), 60,
+                 "the throwaway Syncthings didn't connect")
+            for X, Y in (("A", "B"), ("B", "A")):
+                r = run(X, "routine/sync.py", "setup", names[Y], "--memory", "none")
+                need(r.returncode == 0, f"sync setup on {X} failed: {r.stdout[-200:]} {r.stderr[-200:]}")
+            run("A", "routine/sync.py", "direction", "main")
+            run("B", "routine/sync.py", "direction", "backup")
+
+            def in_sync():
+                for X in "AB":
+                    s_ = api(X, "/rest/db/status?folder=hq-workspace")
+                    if s_.get("state") != "idle" or s_.get("needFiles") or s_.get("needDeletes"):
+                        return False
+                c = api("A", f"/rest/db/completion?folder=hq-workspace&device={P['B']['id']}")
+                return float(c.get("completion") or 0) >= 100
+            P["in_sync"] = in_sync
+            wait(in_sync, 90, "the two workspaces didn't get in sync")
+
+            def pause(on):
+                for X, Y in (("A", "B"), ("B", "A")):
+                    api(X, f"/rest/config/devices/{P[Y]['id']}", "PATCH", {"paused": on})
+            P["pause"] = pause
+
+            def local(X="B"):
+                return int(api(X, "/rest/db/status?folder=hq-workspace").get("receiveOnlyTotalItems") or 0)
+            P["local"] = local
+        except BaseException:
+            stop()
+            raise
+        return P
+
+    @staticmethod
+    def _f115_files(ws):
+        """Every file of a workspace with its content's hash."""
+        import hashlib
+        out = {}
+        for p in sorted(Path(ws).rglob("*")):
+            if p.is_file() and ".stfolder" not in p.parts and p.name not in (".stignore",):
+                out[str(p.relative_to(ws))] = hashlib.sha1(p.read_bytes()).hexdigest()
+        return out
+
+    async def flow370(self) -> str:
+        """F115, no Claude: a tap on the backup lands on the main. A pair of throwaway HQs with one-way sync, B the backup: on B the
+        page's own writers (a feature switch, a kind's name, a note on an appointment and its tick, a workflow switched on, the
+        news setup, a stop line) and a chat's commit; B's workspace stays the same byte for byte and A writes every one. The same
+        hand-over sent twice runs once. With the main away a change is kept on B, said so, and lands at B's next look, once."""
+        P = await asyncio.to_thread(self._f115_pair, "f115-tap")
+        try:
+            A, B, run, py = P["A"], P["B"], P["run"], P["py"]
+            ev = {"looked": time.time(), "events": [{"id": "ev1", "title": "Haircut", "start": "2026-11-03T15:00:00+01:00",
+                                                     "end": "2026-11-03T16:00:00+01:00", "calendar": "Main"}]}
+            for X in (A, B):
+                (X["ws"] / "HQ/calendar.json").write_text(json.dumps(ev))
+            before = self._f115_files(B["ws"])
+            steps = [
+                ("a feature switch", "import features; from pathlib import Path\n"
+                 "print(features.switch('news', False, Path(os.environ['WS']), tapped=True))"),
+                ("a kind's name", "import kinds; kinds.rename('money', 'Earners'); print('ok')"),
+                ("a note on an appointment", "import appt_notes; appt_notes.add('ev1', 'arrived at four'); print('ok')"),
+                ("the appointment's tick", "import planning; planning.set_mark('ev1', 'done'); print('ok')"),
+                ("a workflow switched on", "import workflows; from pathlib import Path\n"
+                 "print(workflows.turn_on(Path(os.environ['WS']), 'map'))"),
+                ("the news setup", "import news; print(news.change(['topic', 'add', 'Science']))"),
+            ]
+            said = {}
+            for what, code in steps:
+                r = await asyncio.to_thread(py, "B", code, None, {"WS": str(B["ws"])})
+                need(r.returncode == 0, f"{what} on the backup failed: {r.stdout[-300:]} {r.stderr[-300:]}")
+                said[what] = r.stdout.strip()
+            r = await asyncio.to_thread(run, "B", "routine/usageline.py", "weekly", "fixed", "90")
+            need(r.returncode == 0, f"a stop line on the backup failed: {r.stdout[-200:]} {r.stderr[-200:]}")
+            r = await asyncio.to_thread(run, "B", "routine/usageline.py", "least", "20")  # F113's least line, set on the backup
+            need(r.returncode == 0, f"the least line on the backup failed: {r.stdout[-200:]} {r.stderr[-200:]}")
+            (B["ws"] / "HQ/chat-note.md").write_text("A chat on the laptop wrote this.\n")
+            before["HQ/chat-note.md"] = self._f115_files(B["ws"])["HQ/chat-note.md"]
+            r = await asyncio.to_thread(run, "B", "routine/gitlock.py", "commit", "A chat's note", "HQ/chat-note.md",
+                                        env={"HQ_WORKSPACE": str(B["ws"])})
+            need(r.returncode == 0 and "handed" in r.stdout, f"a chat's commit on the backup didn't hand its file over: {r.stdout[-300:]} {r.stderr[-200:]}")
+            changed = [k for k, v in self._f115_files(B["ws"]).items() if before.get(k) != v] + \
+                [k for k in before if not (B["ws"] / k).exists()]
+            need(not changed, f"the backup wrote synced files itself: {changed} (what it said: {said})")
+            a = lambda rel: (A["ws"] / rel).read_text() if (A["ws"] / rel).exists() else ""
+            need('"news"' in a("HQ/features.json"), f"the switch didn't land on the main: {a('HQ/features.json')!r}")
+            need("Earners" in a("HQ/calendar-kinds.json"), "the kind's name didn't land on the main")
+            need("arrived at four" in a("HQ/calendar-notes.json"), "the note didn't land on the main")
+            need('"done"' in a("HQ/calendar-marks.json"), "the tick didn't land on the main")
+            need("map" in a("HQ/workflows.json") and (A["ws"] / "map.md").exists(), "the workflow didn't land on the main")
+            need("Science" in a("HQ/news.json"), "the news setup didn't land on the main")
+            need("Weekly line: fixed at 90%" in a("HQ/roadmap.md"), "the stop line didn't land on the main")
+            need("**Team line at least: 20 points.**" in a("HQ/roadmap.md"), "the least line set on the backup didn't land on the main")
+            need(a("HQ/chat-note.md") == "A chat on the laptop wrote this.\n", "the chat's file didn't reach the main")
+            # F115 after the check, finding 7: a chat's commit says what the main did with it, also when it kept its own
+            (A["ws"] / "HQ/chat-note.md").write_text("The main's own version of the note.\n")
+            (B["ws"] / "HQ/chat-note.md").write_text("A chat on the laptop wrote this, changed.\n")
+            r = await asyncio.to_thread(run, "B", "routine/gitlock.py", "commit", "A chat's note again", "HQ/chat-note.md",
+                                        env={"HQ_WORKSPACE": str(B["ws"])})
+            need(r.returncode == 0 and "kept" in r.stdout and "writes and commits" not in r.stdout,
+                 f"a chat's commit the main kept in the list says it was written: {r.stdout[-300:]}")
+            need(a("HQ/chat-note.md") == "The main's own version of the note.\n" and
+                 "A chat on the laptop wrote this, changed." in a("HQ/kept-from-both.md"), "the chat's other version isn't in the list")
+            seq = lambda text, lines: any(text.splitlines()[i:i + len(lines)] == lines for i in range(len(text.splitlines())))
+            send = ("import role, settle, json, sys\n"
+                    "t = sys.stdin.read()\n"
+                    "r = settle.send(role, ['file', 'workspace', os.environ['REL']], {'text': t, 'from': 'laptop'}, 'settle-' + os.environ['HID'])\n"
+                    "print(json.dumps(r))")
+            hand = lambda rel, text, hid: py("B", send, text, {"REL": rel, "HID": hid})
+            # finding 2: the same file sent twice is settled against the main's file as it is now, not answered from memory
+            r = await asyncio.to_thread(hand, "HQ/twice.md", "a\nX\n", "f115-twice")
+            need(r.returncode == 0 and a("HQ/twice.md") == "a\nX\n", f"a new file didn't land: {r.stdout} {r.stderr[-300:]}")
+            (A["ws"] / "HQ/twice.md").write_text("a\n")  # the main clears X
+            r = await asyncio.to_thread(hand, "HQ/twice.md", "a\nX\n", "f115-twice")
+            kept_ = a("HQ/kept-from-both.md")
+            need(a("HQ/twice.md") == "a\n" and seq(kept_[kept_.find("HQ/twice.md"):], ["X"]),
+                 f"the same hand-over again was answered from memory: the laptop's X isn't kept ({r.stdout[-200:]})")
+            # finding 3: the main's file stays as it is, and every difference goes in the list word for word, as whole blocks
+            cases = [
+                ("HQ/moved.md", "## 2. Urgent\n\n| a |\n| b |\n\n## 7. Done\n\n| c |\n",
+                 "## 2. Urgent\n\n| a |\n\n## 7. Done\n\n| c |\n| b |\n", [["## 7. Done", "| b |"], ["## 2. Urgent", "| b |"]], "a moved row"),
+                ("HQ/deleted.md", "## L\n\n| a |\n| b |\n| c |\n", "## L\n\n| a |\n| c |\n", [["## L", "| b |"]], "a deleted row"),
+                ("HQ/record.json", json.dumps({"items": [{"id": 3, "text": "t", "done": False}]}, indent=1),
+                 json.dumps({"items": [{"id": 3, "text": "t two", "done": False}]}, indent=1),
+                 [["{", ' "id": 3,', ' "text": "t two",', ' "done": false', "}"]], "a JSON record"),
+                ("HQ/week.md", "## Monday\n- Ring Fit\n\n## Tuesday\n- Gym\n", "## Monday\n- Ring Fit\n\n## Tuesday\n- Gym\n- Ring Fit\n",
+                 [["## Tuesday", "- Ring Fit"]], "a line repeated under another heading"),
+                ("HQ/cleaned.md", "# Log\n\n## e2\nsecond\n", "# Log\n\n## e1\nfirst\nHIS LINE\n\n## e2\nsecond\n",
+                 [["## e1", "first", "HIS LINE"]], "a stale copy of what the main cleaned up, with a line of his"),
+            ]
+            for rel, mine, his, blocks_, what in cases:
+                (A["ws"] / rel).write_text(mine)
+                r = await asyncio.to_thread(hand, rel, his, "f115-" + rel.replace("/", "-"))
+                kept_ = a("HQ/kept-from-both.md")
+                part = kept_[kept_.find("· " + rel + " ·"):] if ("· " + rel + " ·") in kept_ else ""
+                need(r.returncode == 0 and a(rel) == mine, f"{what}: the main's file didn't stay as it was: {a(rel)!r} {r.stdout[-200:]}")
+                need(part and all(seq(part.split("\n## 20")[0], b_) for b_ in blocks_),
+                     f"{what}: the laptop's version isn't in the list as whole blocks, word for word: {part[:600]!r}")
+            need("removed there" in kept_[kept_.find("HQ/deleted.md"):], "a row removed on the laptop isn't named as removed")
+            # finding 5: a big file in parts is written only when every part is there, by count and the hash of the whole
+            import base64 as _b64, hashlib as _hl
+            data = json.dumps({"text": "".join(f"line {i} of a big file\n" for i in range(6000)), "from": "laptop"})
+            b = _b64.b64encode(data.encode()).decode()
+            chunks = [b[i:i + 45000] for i in range(0, len(b), 45000)]
+            need(len(chunks) >= 3, "the test file is too small for three parts")
+            code = ("import role, json, sys\nch = json.loads(sys.stdin.read())\n"
+                    "for i, c in enumerate(ch):\n    if i != 1:\n"
+                    "        role.hand('settle', ['part', 'f115-gap', str(i), str(len(ch))], keep=False, hid=f'f115-gap-p{i}', stdin=c)\n"
+                    "print(role.hand('settle', ['file', 'workspace', 'HQ/gap.md', '--parts', 'f115-gap'], keep=False, hid='f115-gap-a')[:2])\n"
+                    "print(role.hand('settle', ['file', 'workspace', 'HQ/gap.md', '--parts', 'f115-gap', str(len(ch)), os.environ['SHA']], keep=False, hid='f115-gap-b')[:2])")
+            r = await asyncio.to_thread(py, "B", code, json.dumps(chunks), {"SHA": _hl.sha256(b.encode()).hexdigest()})
+            need(not (A["ws"] / "HQ/gap.md").exists(), f"a file with a part missing was written: {r.stdout[-300:]} {r.stderr[-300:]}")
+            # the same hand-over twice (its answer lost, sent again): it runs once
+            code = ("import role\nfor i in range(2):\n    print(role.hand('todo', ['add', '1', 'Sent twice', '--by', 'in the app'], hid='f115-twice')[3])")
+            r = await asyncio.to_thread(py, "B", code)
+            need(r.returncode == 0 and r.stdout.split() == ["main", "main"], f"handing over twice didn't reach the main: {r.stdout} {r.stderr[-300:]}")
+            need(a("challenges.md").count("| Sent twice |") == 1, f"the same hand-over ran {a('challenges.md').count('| Sent twice |')} times")
+            # the main away: kept on the backup, said, and it lands at the next look, once
+            P["cut"] = True
+            r = await asyncio.to_thread(py, "B", "import kinds; kinds.rename('ceo', 'Steering'); print('ok')")
+            need(r.returncode == 0 and "Steering" not in a("HQ/calendar-kinds.json"), f"a change with the main away: {r.stdout} {r.stderr[-300:]}")
+            need("Steering" in (B["state"] / "role-pending.jsonl").read_text(), "the change wasn't kept for the main")
+            need(not (B["ws"] / "HQ/calendar-kinds.json").exists(), "the backup wrote it itself with the main away")
+            P["cut"] = False
+            r = await asyncio.to_thread(run, "B", "routine/role.py", "tick")
+            need("Steering" in a("HQ/calendar-kinds.json"), f"the kept change didn't land at the next look: {r.stdout[-200:]} {r.stderr[-200:]}")
+            need(not (B["state"] / "role-pending.jsonl").exists(), "the kept change is still waiting after it landed")
+            await asyncio.to_thread(run, "B", "routine/role.py", "tick")
+            need(a("HQ/calendar-kinds.json").count("Steering") == 1, "the kept change landed twice")
+            # F115 with F114 (the combined check of 3 November 2026): his words are checked on the backup, at its own door, and the
+            # main trusts only what the backup checked, fitting a yes to its own holds. A call on B: her question about the dentist,
+            # then his "ok yes"; a line naming the weekly line at 80; and a yes naming the lunch.
+            call = B["ws"] / f"HQ/calls/{time.strftime('%Y-%m-%d')}-0000.md"
+            call.parent.mkdir(parents=True, exist_ok=True)
+            call.write_text("# Call today, 00:00\n\nStarted 00:00:00 · agent Donna · brain opus\n\n"
+                            "- 00:00:05 **HQ:** Shall I move the dentist to Friday?\n- 00:00:20 **Me:** ok yes\n"
+                            "- 00:00:40 **Me:** yes, fix the weekly usage line at 80 for tonight\n"
+                            "- 00:01:00 **HQ:** And the lunch with Alice, shall I add it?\n- 00:01:10 **Me:** yes, add the lunch with Alice\n")
+            oncall = {"HQ_PROOF_ON": "1", "HQ_WORDS_FROM": str(call)}
+            A["env"]["HQ_PROOF_ON"] = "1"  # the main reads his real lines too, as on the real pair: the call is only on the laptop
+            # finding 1: on the backup, in a call, a stop line with no words of his is refused there, never handed over
+            r = await asyncio.to_thread(run, "B", "routine/usageline.py", "weekly", "fixed", "77", env=oncall)
+            need(r.returncode != 0 and "Weekly line: fixed at 77%" not in a("HQ/roadmap.md"),
+                 f"a stop line with no words of his, in a call on the backup, landed on the main: {r.stdout[-200:]} {r.stderr[-200:]}")
+            # finding 2: his real words from the laptop's call land on the main, which notes where they came from ...
+            r = await asyncio.to_thread(run, "B", "routine/usageline.py", "weekly", "fixed", "80", "--said",
+                                        "fix the weekly usage line at 80", env=oncall)
+            log_a = A["hq"] / "scratch/routine/routine.log"
+            need(r.returncode == 0 and "Weekly line: fixed at 80%" in a("HQ/roadmap.md"),
+                 f"his own words on the laptop's call were refused by the main: {r.stdout[-200:]} {r.stderr[-300:]}")
+            need(log_a.exists() and "checked on laptop" in log_a.read_text() and call.name in log_a.read_text(),
+                 "the main didn't note where the words of the handed switch came from")
+            # ... and a switch handed over with no words checked on the backup is refused there
+            r = await asyncio.to_thread(py, "B", "import role\nprint(role.hand('usageline', ['weekly', 'fixed', '70'])[:2])", None,
+                                        {"HQ_PROOF_ON": "1"})
+            need("Weekly line: fixed at 70%" not in a("HQ/roadmap.md"), f"a handed switch with no checked words landed: {r.stdout[-200:]}")
+            # finding 3: a hold on the main the backup hasn't seen yet; his "ok yes" to the dentist question doesn't open the lunch
+            r = await asyncio.to_thread(py, "A", "import cycles\nprint(cycles.hold('donna', 'f115-lunch', 'add \"Lunch with Alice\"', "
+                                        "'it has a guest'))")
+            need("asked" in r.stdout, f"couldn't hold a change on the main: {r.stdout[-200:]} {r.stderr[-300:]}")
+            held_ = lambda: py("A", "import cycles\nprint([h['what'] for h in cycles._agent_state(cycles._state(), 'donna')['holds']])").stdout
+            r = await asyncio.to_thread(run, "B", "routine/cycles.py", "yes", "donna", "ok yes", env=oncall)
+            need("Lunch with Alice" in await asyncio.to_thread(held_),
+                 f"a bare yes to another question opened the main's held lunch from a backup that hadn't seen it: {r.stdout[-300:]}")
+            r = await asyncio.to_thread(run, "B", "routine/cycles.py", "yes", "donna", "yes, add the lunch with Alice", env=oncall)
+            need("Lunch with Alice" not in await asyncio.to_thread(held_),
+                 f"his yes naming the lunch, on the laptop's call, didn't open it on the main: {r.stdout[-300:]} {r.stderr[-200:]}")
+        finally:
+            await asyncio.to_thread(P["stop"])
+        return ("on the backup a switch, a kind, a note and a tick on an appointment, a workflow, the news setup, a stop line and a chat's "
+                "commit all landed on the main, the backup's own files the same byte for byte; a commit the main kept says so; the same file "
+                "settled twice against the main as it is now; a moved row, a deleted row, a JSON record, a repeated line and a stale copy "
+                "of what the main cleaned up left the main's file as it was, every difference in the list word for word; a big file with "
+                "a part missing not written; a hand-over sent twice ran once; with the main away a change was kept, said, and landed once; "
+                "his words checked on the backup: no words in a call refused there, his words landed with where they came from noted, "
+                "unchecked words refused on the main, a bare yes to another question didn't open the main's hold, a yes naming it did")
+
+    async def flow371(self) -> str:
+        """F115, no Claude: what the laptop holds is settled, nothing of his lost. Two private Syncthings and two throwaway HQs, A
+        the main sending only, B the backup receiving only. On B what his laptop has today, in kind: a call transcript the main
+        doesn't have, a picture, a to-do row only added there, a file both changed (the main's stays, the laptop's own lines go in
+        the list he sees, named), a file removed there, a conflict copy that differs and one that differs in nothing. B's
+        looks (the routine's minute) hand it all over: none of it lost, no copy left there, nothing left not handed over, B the same as A. Again, and a
+        copy that comes back the same: nothing new in the list. A conflict copy on the main: main wins, no merge job."""
+        P = await asyncio.to_thread(self._f115_pair, "f115-settle", True)
+        try:
+            A, B, run, py, api, wait = P["A"], P["B"], P["run"], P["py"], P["api"], P["wait"]
+            wa, wb = A["ws"], B["ws"]
+            # as on the real pair: the hand-over's switch off (his workspace doesn't have it)
+            bj = json.loads((wa / "HQ/backend.json").read_text())
+            bj["on"] = [x for x in bj.get("on", []) if x != "handover"]
+            (wa / "HQ/backend.json").write_text(json.dumps(bj, indent=2) + "\n")
+            wait(lambda: (wb / "HQ/backend.json").read_text() == (wa / "HQ/backend.json").read_text(), 60,
+                 "the switch's file didn't reach the laptop")
+            # a file both change: the main first, while the sync is paused, then the laptop
+            P["pause"](True)
+            wait(lambda: not any(c.get("connected") for c in api("A", "/rest/system/connections")["connections"].values()), 30,
+                 "the pause didn't cut the sync")
+            (wa / "me.md").write_text((wa / "me.md").read_text() + "\nThe server's own line.\n")
+            (wb / "me.md").write_text((wb / "me.md").read_text() + "\nThe laptop's own line.\n")
+            call = "# Call 29 October 22:38\n\n" + "".join(f"He: line {i} of the call, as long as a real one gets.\n" for i in range(3000))
+            (wb / "HQ/calls").mkdir(exist_ok=True)
+            (wb / "HQ/calls/2026-10-29-2238.md").write_text(call)
+            pic = os.urandom(5000)
+            (wb / "HQ/screens").mkdir(exist_ok=True)
+            (wb / "HQ/screens/shot.png").write_bytes(pic)
+            todo_b = (wb / "challenges.md").read_text().replace("## 1. Important, not urgent\n", "## 1. Important, not urgent\n", 1)
+            (wb / "challenges.md").write_text(todo_b + "\n- 2026-10-30 10:00: a line only the laptop wrote.\n")
+            (wb / "vision.md").unlink()
+            rm = (wb / "rules.md").read_text()
+            (wb / "rules.sync-conflict-20261029-101010-ABCDEFG.md").write_text(rm)  # differs in nothing
+            clash = (wb / "inbox.md").read_text().replace("## To check", "## To check (as the laptop had it)", 1) + "\nA line only in the copy.\n"
+            (wb / "inbox.sync-conflict-20261030-111111-ABCDEFG.md").write_text(clash)
+            P["pause"](False)
+            wait(lambda: any(c.get("connected") for c in api("A", "/rest/system/connections")["connections"].values()), 60,
+                 "the sync didn't come back")
+            time.sleep(8)  # Syncthing settles what it can by itself first
+            P["api"]("B", "/rest/db/scan?folder=hq-workspace", "POST", {})
+            wait(lambda: P["local"]("B") > 0, 30, "the laptop shows nothing not handed over")
+            n_local = P["local"]("B")
+            copies = [p.name for p in wb.rglob("*") if ".sync-conflict-" in p.name]
+            # the switch off: the laptop's minute hands over nothing and says so; the dry run says what it would
+            r = await asyncio.to_thread(P["look"], "B")
+            line = json.loads((P["T"] / "B/routines.json").read_text()).get("sync", {})
+            need(not (wa / "HQ/calls/2026-10-29-2238.md").exists() and P["local"]("B") == n_local,
+                 f"with the switch off the laptop's minute handed things over: {r.stdout[-300:]}")
+            need(line.get("handover") == {"on": False} and "hand-over to the main is off" in line.get("text", ""),
+                 f"the sync line doesn't say the hand-over is off: {line}")
+            r = await asyncio.to_thread(run, "B", "routine/sync.py", "handover", "--dry")
+            need("HQ/calls/2026-10-29-2238.md" in r.stdout and not (wa / "HQ/calls/2026-10-29-2238.md").exists(),
+                 f"the dry run doesn't list the transcript, or handed it: {r.stdout[-300:]}")
+            for bad in (["OFF"], ["of"], ["on", "--dry"], ["--dry", "x"]):  # anything else refuses with a plain line, does nothing
+                r = await asyncio.to_thread(run, "B", "routine/sync.py", "handover", *bad)
+                need(r.returncode != 0 and "nothing was done" in r.stdout and not (wa / "HQ/calls/2026-10-29-2238.md").exists()
+                     and P["local"]("B") == n_local, f"sync.py handover {' '.join(bad)} didn't refuse plainly: {r.stdout[-200:]}")
+            r = await asyncio.to_thread(run, "B", "routine/sync.py", "handover", "on")
+            need(r.returncode == 0 and "handover" in json.loads((wa / "HQ/backend.json").read_text()).get("on", []),
+                 f"turning the switch on from the laptop didn't reach the main: {r.stdout[-300:]} {r.stderr[-200:]}")
+            wait(lambda: "handover" in (wb / "HQ/backend.json").read_text(), 60, "the switch didn't come back to the laptop")
+            said_ = []
+            for i in range(8):  # the routine's looks on B, a minute apart in life
+                r = await asyncio.to_thread(P["look"], "B")
+                said_.append(r.stdout)
+                need("ACTING backup" in r.stdout, f"B isn't the backup: {r.stdout[-300:]} {r.stderr[-300:]}")
+                time.sleep(3)
+                api("B", "/rest/db/scan?folder=hq-workspace", "POST", {})
+                if P["local"]("B") == 0 and not [p for p in wb.rglob("*") if ".sync-conflict-" in p.name]:
+                    break
+            looks = i + 1
+            r.stdout = "".join(said_)
+            wait(lambda: P["local"]("B") == 0 and not [p for p in wb.rglob("*") if ".sync-conflict-" in p.name], 30,
+                 f"something is still on the laptop after the hand-over: {P['local']('B')} not handed over "
+                 f"({[(x.get('name'), x.get('deleted')) for x in (api('B', '/rest/db/localchanged?folder=hq-workspace') or {}).get('files', [])][:8]}), copies "
+                 f"{[p.name for p in wb.rglob('*') if '.sync-conflict-' in p.name]}; it said: {r.stdout[-600:]} {r.stderr[-300:]}")
+            wait(P["in_sync"], 60, "the two didn't get in sync again")
+            kept = (wa / "HQ/kept-from-both.md").read_text() if (wa / "HQ/kept-from-both.md").exists() else ""
+            need((wa / "HQ/calls/2026-10-29-2238.md").read_text() == call, "the call transcript didn't reach the main whole")
+            need((wa / "HQ/screens/shot.png").read_bytes() == pic, "the picture didn't reach the main whole")
+            need("a line only the laptop wrote" not in (wa / "challenges.md").read_text() and "a line only the laptop wrote" in kept,
+                 "the to-do line only the laptop added isn't kept in the list (the main's file stays as it is)")
+            need("The server's own line." in (wa / "me.md").read_text() and "The laptop's own line." not in (wa / "me.md").read_text(),
+                 "the file both changed doesn't keep the main's")
+            need("The laptop's own line." in kept and "me.md" in kept, f"the laptop's own line isn't in the list: {kept[-500:]}")
+            need("A line only in the copy." in kept, "the conflict copy's own line isn't in the list")
+            need((wa / "vision.md").exists() and (wb / "vision.md").exists() and "vision.md" in kept,
+                 "the file removed on the laptop isn't kept on the main, back on the laptop and named")
+            need("rules.md" not in kept, "a copy that differs in nothing was put in the list")
+            same = self._f115_files(wa) == self._f115_files(wb)
+            need(same, "the laptop isn't the same as the main afterwards: " + str(sorted(set(self._f115_files(wa).items()) ^ set(self._f115_files(wb).items()))[:6]))
+            # again, and the same copy coming back: told once, nothing new
+            entries = kept.count("<!-- id: ")
+            (wb / "inbox.sync-conflict-20261030-111111-ABCDEFG.md").write_text(clash)
+            r = await asyncio.to_thread(P["look"], "B")
+            await asyncio.to_thread(P["look"], "B")
+            wait(lambda: not [p for p in wb.rglob("*") if ".sync-conflict-" in p.name], 40, "the copy that came back stayed")
+            time.sleep(3)
+            need((wa / "HQ/kept-from-both.md").read_text().count("<!-- id: ") == entries,
+                 "the same difference coming back was put in the list again")
+            # a conflict copy on the main: main wins, the other's lines in the list, no merge job
+            (wa / f"HQ/roadmap.sync-conflict-20261031-090909-{P['B']['id'][:7]}.md").write_text(
+                (wa / "HQ/roadmap.md").read_text().replace("**Usage limit: 70%.**", "**Usage limit: 75%.**", 1)
+                + "\n- A roadmap line from the laptop.\n")
+            r = await asyncio.to_thread(P["look"], "A")
+            need("ACTING main" in r.stdout, f"A isn't the main: {r.stdout[-300:]}")
+            need(not [p for p in wa.rglob("*") if ".sync-conflict-" in p.name], "the main's conflict copy is still there")
+            need("A roadmap line from the laptop." in (wa / "HQ/kept-from-both.md").read_text(), "the main's copy's own line isn't in the list")
+            need("Sync conflict" not in (wa / "HQ/roadmap.md").read_text() and "**Usage limit: 70%.**" in (wa / "HQ/roadmap.md").read_text(),
+                 "a merge job was queued, or the main's own roadmap didn't stay")
+        finally:
+            await asyncio.to_thread(P["stop"])
+        return (f"the laptop held {n_local} not handed over and {len(copies)} conflict copies: {looks} look(s) handed them all over "
+                f"(the transcript of {len(call) // 1000} KB in parts and the picture whole, the added line and the clash in the list with the main's file as it was, "
+                "with the switch off first nothing handed and said, the removed file kept and named, the copy that differed in nothing gone without an entry), none left and "
+                "both the same; again and a copy coming back the same added nothing; a copy on the main settled main wins, no merge job")
+
+    async def flow372(self) -> str:
+        """F115, no Claude: a repo conflict settles itself, main wins with the other side kept. A workspace repo, its throwaway
+        GitHub and another clone; both change the same line; the other pushes first; the main's commit then settles the clash
+        itself: its own line stays, GitHub's line goes in the list he sees, the merge is pushed, no incident, and the next commit
+        goes straight through."""
+        import subprocess as sp
+        T = self.tmp / "f115-repo"
+        T.mkdir()
+        G = lambda cwd, *a: sp.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], cwd=str(cwd),
+                                   capture_output=True, text=True)
+        G(T, "init", "-q", "--bare", "-b", "main", "origin.git")
+        ws = T / "ws"
+        shutil.copytree(ROOT / "template", ws)
+        (ws / "HQ/plan.md").write_text("# Plan\n\n- first\n- the shared line\n- last\n")
+        for a in (("init", "-q", "-b", "main"), ("add", "-A"), ("commit", "-q", "-m", "start"),
+                  ("remote", "add", "origin", str(T / "origin.git")), ("push", "-q", "-u", "origin", "main")):
+            need(G(ws, *a).returncode == 0, f"couldn't make the workspace repo ({a[0]})")
+        G(ws, "config", "user.name", "t")
+        G(ws, "config", "user.email", "t@example.invalid")
+        G(T, "clone", "-q", str(T / "origin.git"), "other")
+        (T / "other/HQ/plan.md").write_text("# Plan\n\n- first\n- the line as the laptop has it\n- last\n")
+        need(G(T / "other", "commit", "-q", "-am", "the other side").returncode == 0 and G(T / "other", "push", "-q").returncode == 0,
+             "the other side couldn't push")
+        (ws / "HQ/plan.md").write_text("# Plan\n\n- first\n- the line as the main has it\n- last\n")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_") or k in ("HQ_UNDER_TEST", "HQ_NO_WALL", "HQ_REAL_ROADMAP", "HQ_REAL_SUPPORT")}
+        env.update({"HQ_WORKSPACE": str(ws), "HQ_SUPPORT": str(T / "state"), "HQ_INCIDENTS_FILE": str(T / "incidents.json")})
+        r = await asyncio.to_thread(sp.run, [sys.executable, str(ROOT / "routine/gitlock.py"), "commit", "the main's change", "HQ/plan.md"],
+                                    capture_output=True, text=True, env=env, timeout=120)
+        inc = json.loads((T / "incidents.json").read_text()) if (T / "incidents.json").exists() else {}
+        open_ = [i for i in inc.get("incidents") or [] if i.get("key") == "workspace-push" and not i.get("back")]
+        need(r.returncode == 0 and not open_, f"the repo conflict didn't settle itself: rc {r.returncode}, {r.stdout[-200:]} {r.stderr[-300:]}, incidents {open_}")
+        G(T / "other", "pull", "-q")
+        plan = (T / "other/HQ/plan.md").read_text()
+        kept = (T / "other/HQ/kept-from-both.md").read_text() if (T / "other/HQ/kept-from-both.md").exists() else ""
+        need("the line as the main has it" in plan and "the line as the laptop has it" not in plan, f"GitHub doesn't have the main's line: {plan}")
+        need("the line as the laptop has it" in kept and "HQ/plan.md" in kept, f"the other side's line isn't kept in the list: {kept[-400:]}")
+        # F115 after the check, finding 1: the main's side only removed lines (its log cycle moved an entry out) while the
+        # other side added one under it: GitHub's line is kept, word for word
+        (ws / "coaching").mkdir(exist_ok=True)
+        (ws / "coaching/log.md").write_text("# Log\n\n## entry one\nfirst\n\n## entry two\nsecond\n")
+        need(sp.run([sys.executable, str(ROOT / "routine/gitlock.py"), "commit", "the log", "coaching/log.md"], capture_output=True,
+                    text=True, env=env, timeout=120).returncode == 0, "couldn't commit the log")
+        G(T / "other", "pull", "-q")
+        (T / "other/coaching/log.md").write_text("# Log\n\n## entry one\nfirst\nHIS NEW LINE from the laptop\n\n## entry two\nsecond\n")
+        need(G(T / "other", "commit", "-q", "-am", "his line").returncode == 0 and G(T / "other", "push", "-q").returncode == 0, "the other side couldn't push")
+        (ws / "coaching/log.md").write_text("# Log\n\n## entry two\nsecond\n")
+        r = await asyncio.to_thread(sp.run, [sys.executable, str(ROOT / "routine/gitlock.py"), "commit", "the log cycle", "coaching/log.md"],
+                                    capture_output=True, text=True, env=env, timeout=120)
+        G(T / "other", "pull", "-q")
+        kept = (T / "other/HQ/kept-from-both.md").read_text() if (T / "other/HQ/kept-from-both.md").exists() else ""
+        need(r.returncode == 0 and ("HIS NEW LINE from the laptop" in kept or "HIS NEW LINE" in (T / "other/coaching/log.md").read_text()),
+             f"GitHub's line under the entry the main removed is gone, neither in the file nor in the list: rc {r.returncode} {kept[-300:]}")
+        (ws / "HQ/plan.md").write_text((ws / "HQ/plan.md").read_text() + "- one more\n")
+        r = await asyncio.to_thread(sp.run, [sys.executable, str(ROOT / "routine/gitlock.py"), "commit", "the next one", "HQ/plan.md"],
+                                    capture_output=True, text=True, env=env, timeout=120)
+        st = G(ws, "status", "-sb").stdout.splitlines()[0]
+        need(r.returncode == 0 and "ahead" not in st and "behind" not in st, f"the next commit didn't go straight through: {r.returncode} {st} {r.stderr[-200:]}")
+        return ("both sides changed the same line, the other pushed first: the main's commit settled it itself (its line on GitHub, "
+                "the other's line in the list), no incident; a line GitHub added under an entry the main removed is kept word for word; "
+                "and the next commit went straight through")
+
+    async def flow373(self) -> str:
+        """F115, no Claude: both-main ends by itself. Two private Syncthings and two throwaway HQs, A ("server") the chosen main.
+        The line cut both ways (role lookups and the sync): B takes over, both act as main and both write. The line back: within
+        two looks A, main before the cut, is the only main; B's writes from the cut reach A (a file A didn't have whole, the
+        clashing list main wins with B's row in the list he sees), nothing left on B. A main whose routine is late stays main
+        (never no main at all). And a hand-back waits for the sync: B, main while A was away,
+        hands back only once what it wrote has reached A."""
+        P = await asyncio.to_thread(self._f115_pair, "f115-both", True)
+        try:
+            A, B, run, py, api, wait, look = P["A"], P["B"], P["run"], P["py"], P["api"], P["wait"], P["look"]
+            acting = lambda X: json.loads((P[X]["state"] / "role-state.json").read_text()).get("acting")
+            for X in "AB":
+                await asyncio.to_thread(look, X)
+            need(acting("A") == "main" and acting("B") == "backup", "A isn't the main and B the backup at the start")
+            # the cut, both ways
+            P["cut"] = True
+            P["pause"](True)
+            wait(lambda: not any(c.get("connected") for c in api("A", "/rest/system/connections")["connections"].values()), 30,
+                 "the pause didn't cut the sync")
+            for i in range(12):
+                await asyncio.to_thread(look, "A")
+                await asyncio.to_thread(look, "B")
+                if acting("B") == "main":
+                    break
+                time.sleep(1.5)
+            await asyncio.to_thread(look, "A")  # the minute after: A looks on, not seeing B
+            need(acting("A") == "main" and acting("B") == "main", f"the cut didn't make both main: A {acting('A')}, B {acting('B')}")
+            ra = await asyncio.to_thread(run, "A", "app/todo.py", "add", "1", "The server's row in the cut", "--by", "in the app")
+            rb = await asyncio.to_thread(run, "B", "app/todo.py", "add", "1", "The laptop's row in the cut", "--by", "in the app")
+            need(ra.returncode == 0 and rb.returncode == 0, f"writing in the cut failed: {ra.stdout[-200:]} {rb.stdout[-200:]}")
+            (B["ws"] / "HQ/calls").mkdir(exist_ok=True)
+            (B["ws"] / "HQ/calls/2026-11-02-0900.md").write_text("# A call on the laptop in the cut\n\nHe: hello.\n")
+            # the line back
+            P["cut"] = False
+            P["pause"](False)
+            looks = 0
+            for i in range(2):
+                await asyncio.to_thread(look, "A")
+                await asyncio.to_thread(look, "B")
+                looks = i + 1
+                if acting("A") == "main" and acting("B") == "backup":
+                    break
+            need(acting("A") == "main" and acting("B") == "backup", f"both-main didn't end within two looks: A {acting('A')}, B {acting('B')}")
+            wait(lambda: any(c.get("connected") for c in api("A", "/rest/system/connections")["connections"].values()), 60,
+                 "the sync didn't come back")
+            for i in range(20):
+                time.sleep(2)
+                api("B", "/rest/db/scan?folder=hq-workspace", "POST", {})
+                await asyncio.to_thread(look, "B")
+                if P["local"]("B") == 0 and not [p for p in B["ws"].rglob("*") if ".sync-conflict-" in p.name] and \
+                        (A["ws"] / "HQ/calls/2026-11-02-0900.md").exists():
+                    break
+            wa = A["ws"]
+            kept = (wa / "HQ/kept-from-both.md").read_text() if (wa / "HQ/kept-from-both.md").exists() else ""
+            todo_a = (wa / "challenges.md").read_text()
+            need("The server's row in the cut" in todo_a, "the main's own row from the cut is gone")
+            need("The laptop's row in the cut" in todo_a or "The laptop's row in the cut" in kept,
+                 f"the laptop's row from the cut didn't reach the main: {kept[-300:]}")
+            need((wa / "HQ/calls/2026-11-02-0900.md").exists(), "the laptop's call transcript from the cut didn't reach the main")
+            need(P["local"]("B") == 0 and not [p for p in B["ws"].rglob("*") if ".sync-conflict-" in p.name],
+                 f"something of the cut is still only on the laptop: {P['local']('B')}")
+            # F115 after the check, finding 4: a main whose routine hasn't looked for a while stays main (the other isn't main),
+            # so there's never a time with no main; its look keeps it main
+            s = json.loads((A["state"] / "role-state.json").read_text())
+            s.update({"acting": "main", "last_look": time.time() - 3600})
+            (A["state"] / "role-state.json").write_text(json.dumps(s))
+            r = await asyncio.to_thread(run, "A", "routine/role.py", "acting")
+            rb_ = await asyncio.to_thread(run, "B", "routine/role.py", "acting")
+            need(r.stdout.strip() == "main" and rb_.stdout.strip() == "backup",
+                 f"with the main's routine an hour late nobody is main: A {r.stdout.strip()}, B {rb_.stdout.strip()}")
+            await asyncio.to_thread(look, "A")
+            need(acting("A") == "main" and (await asyncio.to_thread(run, "A", "routine/role.py", "acting")).stdout.strip() == "main",
+                 "the chosen main didn't stay main at its look")
+            # the hand-back waits for the sync: A away (its line and its sync gone, its routine stopped), B takes over and writes
+            P["cut"] = True
+            P["pause"](True)
+            wait(lambda: not any(c.get("connected") for c in api("A", "/rest/system/connections")["connections"].values()), 30,
+                 "the pause didn't cut the sync")
+            for i in range(12):
+                await asyncio.to_thread(look, "B")
+                if acting("B") == "main":
+                    break
+                time.sleep(1.5)
+            need(acting("B") == "main", "B didn't take over with A away")
+            (B["ws"] / "HQ/written-while-away.md").write_text("B wrote this while A was away.\n")
+            P["cut"] = False  # A answers again, but its sync isn't up yet
+            woke = {"HQ_ROLE_WAKETIME": str(time.time())}
+            for i in range(3):
+                await asyncio.to_thread(py, "A", "import role, sync, inspect\nr = role.tick(log=print)\n"
+                                        "kw = {'acting': r['acting']} if 'acting' in inspect.signature(sync.tick).parameters else {}\n"
+                                        "sync.tick(main=r['acting'] == 'main' and not r.get('handing_back'), log=print, **kw)", None, woke)
+                await asyncio.to_thread(look, "B")
+            need(acting("B") == "main", "B handed back before what it wrote had reached A")
+            need(not (wa / "HQ/written-while-away.md").exists(), "the test is wrong: the file is on A already")
+            P["pause"](False)
+            for i in range(20):
+                time.sleep(2)
+                await asyncio.to_thread(py, "A", "import role, sync, inspect\nr = role.tick(log=print)\n"
+                                        "kw = {'acting': r['acting']} if 'acting' in inspect.signature(sync.tick).parameters else {}\n"
+                                        "sync.tick(main=r['acting'] == 'main' and not r.get('handing_back'), log=print, **kw)", None, woke)
+                await asyncio.to_thread(look, "B")
+                if acting("B") == "backup" and acting("A") == "main":
+                    break
+            need(acting("B") == "backup" and acting("A") == "main", f"the hand-back didn't happen once the sync was done: A {acting('A')}, B {acting('B')}")
+            need((wa / "HQ/written-while-away.md").exists(), "B handed back without its file reaching A")
+        finally:
+            await asyncio.to_thread(P["stop"])
+        return (f"in a cut both ways both were main and both wrote; {looks} look(s) after the line came back A was the only main, the "
+                "laptop's call and row from the cut reached it (the clash main wins, its row in the list), nothing left on the laptop; "
+                "a main an hour late stayed main, with the other the backup; a hand-back waited for the sync, then happened")
+
+    async def flow374(self) -> str:
+        """F115, no Claude: 60 switches at once lose none. Six processes, each its own feature, ten switches each, all at the same
+        moment on one features.json: after each of its own switches every process reads its own back, and at the end every one
+        is as its last switch left it."""
+        import subprocess as sp
+        T = self.tmp / "f115-switches"
+        (T / "ws/HQ").mkdir(parents=True)
+        go = T / "go"
+        code = r"""
+import sys, os, time, random, json
+sys.path[:0] = [sys.argv[1] + '/app', sys.argv[1] + '/routine']
+import features
+from pathlib import Path
+base, fid, go = Path(sys.argv[2]), sys.argv[3], sys.argv[4]
+while not os.path.exists(go):
+    time.sleep(0.005)
+lost = 0
+for r in range(10):
+    on = r % 2 == 1
+    features.switch(fid, on, base)
+    time.sleep(random.random() * 0.004)
+    lost += (fid in features.turned_off(base)) == on
+print(json.dumps({"lost": lost}))
+"""
+        ids = ["calendar", "todo", "texts", "travel", "news", "notes"]
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_") or k in ("HQ_UNDER_TEST", "HQ_NO_WALL", "HQ_REAL_ROADMAP", "HQ_REAL_SUPPORT")}
+        procs = [sp.Popen([sys.executable, "-c", code, str(ROOT), str(T / "ws"), i, str(go)], stdout=sp.PIPE, stderr=sp.PIPE,
+                          text=True, env=env) for i in ids]
+        await asyncio.sleep(1.5)
+        go.write_text("go")
+        outs = [await asyncio.to_thread(p.communicate, None, 120) for p in procs]
+        bad = [e[-300:] for (o, e), p in zip(outs, procs) if p.returncode]
+        need(not bad, f"a switching process failed: {bad[:2]}")
+        lost = sum(json.loads(o.strip().splitlines()[-1])["lost"] for o, _ in outs)
+        sys.path.insert(0, str(APP))
+        import features as _f
+        off = _f.turned_off(T / "ws")
+        need(lost == 0 and not [i for i in ids if i in off], f"{lost} of 60 switches were lost; off at the end: {off}")
+        return "six processes, ten switches each at the same moment: none of the 60 lost, every one as its last switch left it"
+
+    async def flow375(self) -> str:
+        """F115, no Claude: 60 ticks with two writers give no error. A to-do list with 30 groceries and 30 items; one process ticks
+        the groceries off and marks the items done, one by one, while two agents add rows above them all the time: every one of
+        the 60 answers, none fails, every grocery and item is where it was sent, and every agent's row is there."""
+        import subprocess as sp
+        T = self.tmp / "f115-ticks"
+        T.mkdir()
+        f = T / "challenges.md"
+        shutil.copy(ROOT / "template/challenges.md", f)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_") or k in ("HQ_UNDER_TEST", "HQ_NO_WALL", "HQ_REAL_ROADMAP", "HQ_REAL_SUPPORT")}
+        env.update({"HQ_TODO": str(f), "HQ_TODO_UNDO": str(T / "undo.json"), "HQ_TODO_SWEEP": "0", "HQ_FOLDER": str(T)})
+        head = "import sys, os, json, time\nsys.path[:0] = [sys.argv[1] + '/app', sys.argv[1] + '/routine']\nimport todo\n"
+        setup = head + ("todo.add('groceries', '\\n'.join(f'grocery {i}' for i in range(30)))\n"
+                        "todo.add('4', '\\n'.join(f'item {i}' for i in range(30)))\n")
+        r = await asyncio.to_thread(sp.run, [sys.executable, "-c", setup, str(ROOT)], env=env, capture_output=True, text=True, timeout=60)
+        need(r.returncode == 0, f"couldn't make the list: {r.stderr[-300:]}")
+        stop = T / "stop"
+        agent = head + ("n = 0\nwhile not os.path.exists(sys.argv[2]):\n"
+                        "    todo.add(['0', '1', '2'][n % 3], f'{sys.argv[3]} row {n}', by=sys.argv[3]); n += 1\nprint(n)\n")
+        ticker = head + ("errors = []\nfor i in range(30):\n"
+                         "    for how, it in (('tick', f'grocery {i}'), ('done', f'item {i}')):\n"
+                         "        try:\n            getattr(todo, how)(it, by='in the app')\n"
+                         "        except Exception as e:\n            errors.append(f'{how} {it}: {type(e).__name__}: {e}')\n"
+                         "print(json.dumps(errors))\n")
+        agents = [sp.Popen([sys.executable, "-c", agent, str(ROOT), str(stop), name], env=env, stdout=sp.PIPE, stderr=sp.PIPE, text=True)
+                  for name in ("Donna", "Pepper")]
+        await asyncio.sleep(1)
+        t = sp.Popen([sys.executable, "-c", ticker, str(ROOT)], env=env, stdout=sp.PIPE, stderr=sp.PIPE, text=True)
+        out, err = await asyncio.to_thread(t.communicate, None, 240)
+        stop.write_text("stop")
+        added = [int((await asyncio.to_thread(a.communicate, None, 60))[0].strip() or 0) for a in agents]
+        need(t.returncode == 0, f"the ticking process fell over: {err[-400:]}")
+        errors = json.loads(out.strip().splitlines()[-1])
+        need(not errors, f"{len(errors)} of 60 ticks failed beside the agents: {errors[:3]}")
+        sys.path.insert(0, str(APP))
+        import todo as _t
+        doc = _t.parse(f.read_text())
+        by = {l["kind"]: {i["title"] for i in l["items"]} for l in doc["lists"]}
+        need({f"grocery {i}" for i in range(30)} <= by.get("grocoff", set()) and {f"item {i}" for i in range(30)} <= by.get("done", set()),
+             "not every grocery and item is where it was sent")
+        rows = sum(1 for l in doc["lists"] for i in l["items"] if " row " in i["title"])
+        need(rows == sum(added), f"an agent's row was lost: {rows} of {sum(added)}")
+        return f"60 ticks and done marks beside two agents adding {sum(added)} rows: every one answered, none failed, nothing lost"
+
+    async def flow376(self) -> str:
+        """F115, no Claude: undo takes back his own last change. He adds an item in the app, an agent adds one after; his undo
+        takes back his, the agent's row and its log line stay. The agent's own undo takes back hers. On the backup the page's
+        undo goes to the main with who it's from."""
+        import subprocess as sp
+        T = self.tmp / "f115-undo"
+        T.mkdir()
+        f = T / "challenges.md"
+        shutil.copy(ROOT / "template/challenges.md", f)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_") or k in ("HQ_UNDER_TEST", "HQ_NO_WALL", "HQ_REAL_ROADMAP", "HQ_REAL_SUPPORT")}
+        env.update({"HQ_TODO": str(f), "HQ_TODO_UNDO": str(T / "undo.json"), "HQ_TODO_SWEEP": "0", "HQ_FOLDER": str(T)})
+        td = lambda *a: sp.run([sys.executable, str(APP / "todo.py"), *a], env=env, capture_output=True, text=True, timeout=60)
+        need(td("add", "1", "His own item", "--by", "in the app").returncode == 0, "his add failed")
+        need(td("add", "1", "The agent's item", "--by", "Donna, in the chat").returncode == 0, "the agent's add failed")
+        r = td("undo", "--by", "in the app")
+        t = f.read_text()
+        need(r.returncode == 0 and "His own item" not in t, f"his undo didn't take back his own change: {r.stdout.strip()}")
+        need("| The agent's item |" in t and "added The agent's item" in t, "his undo took the agent's row or its log line")
+        need("added His own item" not in t, "his change's log line stayed")
+        r = td("undo", "--by", "Donna, in the chat")
+        need("The agent's item" not in f.read_text(), f"the agent's own undo didn't take back hers: {r.stdout.strip()}")
+        need("Nothing to undo" in td("undo", "--by", "in the app").stdout, "undo took something back twice")
+        src = (APP / "bot.py").read_text()
+        need('_todo.undo, by)' in src and 'args + ["--by", by])' in src, "the page's undo doesn't say it's his")
+        return "his undo took back his own add, the agent's row and log line stayed; hers took back hers; nothing twice; the page's undo is his"
+
     # -- F114: the doors hold on calls and texts too ------------------------------------------------------------------------------
 
     def _f114_policy(self, ws, aid: str, state: Path | None = None):
@@ -22026,6 +22811,122 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
         return (f"his yes to her question fixes the weekly line at 95 and nothing else; {len(shorts)} lines with a short word in passing and "
                 f"{len(own)} lines of his that aren't that instruction open nothing; {len(acts) + 2} clear yeses with an action open, "
                 f"{len(holds)} held back don't")
+
+    def _h308(self, name: str, only: tuple = ("moneypenny",)):
+        """H308's flows: a throwaway workspace with the feature on (H298's fix round's), the steps on the planning, and the order lines in her ledger."""
+        b = self._hf(f"h308-{name}", only=only)
+        b.steps = lambda aid="moneypenny": re.findall(rf"^- Item (\d+) · [^\n]*Agent step: {aid} #\d+ \([^)]*\): (.*)$", b.rm(), re.M)
+        b.order_line = lambda words, aid="moneypenny": (re.search(rf'^- \S+ \S+ · start · "{re.escape(words)}" · (.*)$', b.led(aid), re.M) or [None, ""])[1]
+        b.tick = lambda at: b.py(f"out(cycles.tick(T({at!r})))")
+        b.give = lambda words, at, aid="moneypenny": b.py(f"out(cycles.order({aid!r}, 'start', {words!r}, False, T({at!r})))", extra={"HQ_DIRECT_AGENT": "pepper"})
+        return b
+
+    async def flow400(self) -> str:
+        """H308, no Claude: an order Pepper writes on Moneypenny's list at 10:00 is an item by her midday look the same day, and a later or a doubled look makes no second one."""
+        b = self._h308("midday")
+        b.tick(f"{b.thu} 09:00")  # her morning look: nothing on her list yet
+        w = "put the call line fix on the planning"
+        r = b.give(w, f"{b.thu} 10:00")
+        need("midday look" in r and "14:00" in r, f"the words back don't name her next look: {r}")
+        b.tick(f"{b.thu} 13:59")
+        need(not b.steps(), f"a step before her midday look: {b.steps()}")
+        b.tick(f"{b.thu} 14:00")
+        s = b.steps()
+        need(len(s) == 1 and s[0][1] == w, f"not a step by her midday look: {s} {b.led('moneypenny')[:600]}")
+        line = b.order_line(w)
+        need(line.startswith("planned") and f"item {s[0][0]}" in line and "midday look at 14:00" in line, f"the order doesn't carry its item's label: {line}")
+        for at in (f"{b.thu} 14:00", f"{b.thu} 14:05", f"{b.thu} 19:00"):
+            b.tick(at)
+        b.py(f"out(cycles._take_orders('moneypenny', cycles.agent_settings('moneypenny'), 'midday look at 14:00', '{b.thu} 14:00', T('{b.thu} 14:01'), None))")
+        need(len(b.steps()) == 1, f"a later or doubled look made a second item: {b.steps()}")
+        # its step held and sent back, and its record gone as the 30-day cut drops it: the order line still says it had an item
+        b.py("import ledger\nledger.set_order('moneypenny', 1, 'open', 'back for her next session: held while it ran')\nd = cycles._state()\ncycles._agent_state(d, 'moneypenny')['steps'] = {}\ncycles._save_state(d)")
+        b.tick(f"{b.fri} 09:00")
+        need(len(b.steps()) == 1 and b.order_line(w).startswith("open") and f"item {s[0][0]}, step #0" in b.order_line(w), f"sent back, it got a second item: {b.steps()} {b.order_line(w)}")
+        return f"10:00's order is item {s[0][0]} at her 14:00 look, the order says so, and three later looks and a doubled one make no second item"
+
+    async def flow401(self) -> str:
+        """H308, no Claude: an order written after her evening look waits for the night and is picked up at her next morning look."""
+        b = self._h308("evening")
+        old = (b.thu_at - timedelta(days=20)).strftime("%Y-%m-%d")
+        b.give("an order from before the looks", f"{old} 10:00")  # open on her list before the looks ever ran: it stays her bigger session's
+        b.tick(f"{b.thu} 19:00")  # her evening look has been
+        w = "check the night's QA marks"
+        r = b.give(w, f"{b.thu} 19:30")
+        need("morning look" in r and "09:00" in r, f"the words back don't name tomorrow's morning look: {r}")
+        for at in (f"{b.thu} 21:59", f"{b.fri} 07:00", f"{b.fri} 08:59"):
+            b.tick(at)
+        need(not b.steps(), f"picked up before her morning look: {b.steps()}")
+        b.tick(f"{b.fri} 09:00")
+        s = b.steps()
+        need(len(s) == 1 and s[0][1] == w and "morning look at 09:00" in b.order_line(w), f"not picked up the next morning: {s} {b.order_line(w)}")
+        need(b.order_line("an order from before the looks").startswith("open"), f"an order from before the looks went live was taken: {b.order_line('an order from before the looks')}")
+        return "19:30's order waits through the night and is a step at 9:00 the next morning"
+
+    async def flow402(self) -> str:
+        """H308, no Claude: two looks a day instead of three is one setting, and it takes effect the next day; today keeps its three."""
+        b = self._h308("two")
+        b.tick(f"{b.thu} 08:30")
+        r = b.cy("set", "moneypenny", "looks_a_day", "2")
+        need(r.returncode == 0 and "is now 2" in r.stdout and "tomorrow" in r.stdout, f"the setting: {r.stdout} {r.stderr[-300:]}")
+        need(json.loads((b.ws / "HQ/agents/cycles.json").read_text())["agents"]["moneypenny"]["looks_a_day"] == 2, "not written in her settings")
+        b.give("first", f"{b.thu} 10:00")
+        b.tick(f"{b.thu} 14:00")
+        need(len(b.steps()) == 1 and [x[1] for x in b.st("moneypenny")["looks_day"]["times"]] == ["09:00", "14:00", "19:00"], f"today's midday look didn't stay: {b.steps()} {b.st('moneypenny').get('looks_day')}")
+        b.tick(f"{b.fri} 08:30")
+        need(b.st("moneypenny")["looks_day"]["times"] == [["morning look", "09:00"], ["evening look", "19:00"]], f"tomorrow's looks: {b.st('moneypenny').get('looks_day')}")
+        b.give("second", f"{b.fri} 10:00")
+        b.tick(f"{b.fri} 14:00")
+        need(len(b.steps()) == 1, f"a midday look the day after the change: {b.steps()}")
+        b.tick(f"{b.fri} 19:00")
+        need(len(b.steps()) == 2 and b.steps()[1][1] == "second", f"her evening look: {b.steps()}")
+        return "set looks_a_day 2: Thursday keeps 9:00, 14:00 and 19:00, Friday has 9:00 and 19:00 and Friday's 10:00 order waits for 19:00"
+
+    async def flow403(self) -> str:
+        """H308, no Claude: a new agent from the template has three looks a day, and her list is picked up like the others'; the template names three for each of its own."""
+        tpl = json.loads((ROOT / "template/HQ/agents/cycles.json").read_text())
+        need(all(a.get("looks_a_day") == 3 for a in tpl["agents"].values()), f"the template's agents: {[(k, a.get('looks_a_day')) for k, a in tpl['agents'].items()]}")
+        b = self._h308("new", only=())
+        (b.ws / "HQ/agents/agents.json").write_text(json.dumps([{"id": "nova", "name": "Nova", "load": "quick"}]) + "\n")
+        r = b.cy("set", "nova", "on", "on")
+        need(r.returncode == 0, f"switching her on: {r.stdout} {r.stderr[-300:]}")
+        r = b.py("out(cycles.look_times(cycles.agent_settings('nova')))")
+        need(r == [["morning look", "09:00"], ["midday look", "14:00"], ["evening look", "19:00"]], f"the new agent's looks: {r}")
+        r = b.cy()
+        need("Nova" in r.stdout and "her list looked at 3 times a day (09:00, 14:00, 19:00)" in r.stdout, f"the words: {r.stdout[-600:]}")
+        b.tick(f"{b.thu} 09:00")
+        b.give("say hello to the team", f"{b.thu} 10:00", aid="nova")
+        b.tick(f"{b.thu} 14:00")
+        need(len(b.steps("nova")) == 1, f"the new agent's midday look: {b.steps('nova')} {b.led('nova')[:500]}")
+        # the switch off: no look is promised and nothing is written
+        (b.ws / "HQ/features.json").write_text('{"off": [], "maker": true}\n')
+        sp = Path(b.env["HQ_CYCLES_STATE"])
+        was = sp.read_text()
+        r = b.give("one more", f"{b.fri} 10:00", aid="nova")
+        need("looks at her list are off while the agents' switch is off" in r and " look (" not in r, f"the switch off, the words back: {r}")
+        need(sp.read_text() == was, "the switch off, the state was written")
+        return "the template's three agents and a new one, Nova, each have three looks (9:00, 14:00, 19:00), and Nova's 10:00 order is a step at 14:00"
+
+    async def flow404(self) -> str:
+        """H308, no Claude: a look over her share waits until the next look and says so in her ledger, with the room it needed; with room again the next look picks it up."""
+        rule = (ROOT / "app/config.py").read_text()
+        need("or the next morning when it comes after her evening look" in rule and "she'll pick it up at her next look" in rule, "the cycles rule's words on her looks")
+        b = self._h308("share")
+        r = b.cy("set", "moneypenny", "daily", "0")
+        need(r.returncode == 0, r.stdout + r.stderr)
+        b.tick(f"{b.thu} 09:00")
+        w = "look at the failing night"
+        b.give(w, f"{b.thu} 10:00")
+        b.tick(f"{b.thu} 14:00")
+        led = b.led("moneypenny")
+        need(not b.steps() and "midday look at 14:00 waits" in led and "waits: over her daily share" in led
+             and re.search(r"the room it needed: about [\d.]+ points, for 1 order on her list", led) and "her evening look (Thursday 19:00) looks again" in led,
+             f"over her share it didn't wait and say so: {b.steps()} {led[-700:]}")
+        need(b.order_line(w).startswith("open"), f"the order isn't kept open: {b.order_line(w)}")
+        b.cy("set", "moneypenny", "daily", "2")
+        b.tick(f"{b.thu} 19:00")
+        need(len(b.steps()) == 1 and "evening look at 19:00" in b.order_line(w), f"the next look with room: {b.steps()} {b.order_line(w)}")
+        return "at a share of 0 her midday look waits, her ledger says why and the room it needed and names 19:00; with room, 19:00 makes the step"
 
     async def flow393(self) -> str:
         """F114, the second check, no Claude: a number tied to no line opens nothing, and words that name no line move none. "Yes add it,
@@ -29456,8 +30357,11 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
             said = []
             left = sy.settle(sy.conflicts(), said.append)
             need(not same.exists() and not lock.exists(), f"a copy that needs no merge is still there: {said}")
-            need([c["copy"] for c in left] == [str(real)] and real.exists(), f"a real conflict wasn't left for its merge job: {left}")
-            real.unlink()
+            # F115: a real one is settled main wins: the file keeps the main's, the other's words go in the list, the copy goes
+            kept_ = ws / "HQ" / "kept-from-both.md"
+            need(not left and not real.exists() and (ws / "notes.md").read_text() == "one\n"
+                 and kept_.exists() and "two" in kept_.read_text(), f"a real conflict wasn't settled main wins: {left} {said}")
+            kept_.unlink()
             # call transcripts nobody committed: the main commits them after half an hour, a fresh one waits
             def g(*a, cwd=ws):
                 return subprocess.run(["git", *a], cwd=cwd, text=True, capture_output=True, check=True)
@@ -29866,8 +30770,14 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
                  "add didn't fill the list's own columns only")
             log = t.split("## Log")[1]
             need(log.index("added Book the dentist") < log.index("added Oat milk") < log.index("Sort the photos: let go"), "the log isn't newest first")
-            f.write_text(f.read_text() + "\n")
-            need(not td.undo()["ok"] and f.read_text().endswith("\n\n"), "undo ran over a change made since")
+            t0 = f.read_text()
+            f.write_text(t0.replace("| Book the dentist |", "| Book the dentist soon |", 1))  # someone changed that very row
+            need(not td.undo()["ok"] and "Book the dentist soon" in f.read_text(), "undo ran over a change made right there since")
+            f.write_text(t0 + "\n")  # F115: someone changed the list elsewhere since: only the add comes out, theirs stays
+            r_ = td.undo()
+            need(r_["ok"] and "Book the dentist" not in f.read_text() and f.read_text().endswith("\n\n"),
+                 f"undo didn't take back only its own change, keeping one made elsewhere since: {r_}")
+            f.write_text(t0 + "\n")
             try:
                 td.move("the", "4", p=f)
                 need(False, "an unclear item was moved")
@@ -34948,24 +35858,18 @@ st A PATCH /rest/config/devices/$IB '{"paused": false}' >/dev/null
 wait_for "ls '$WA' '$WB' | grep -q 'shared.sync-conflict-'" 60 || fail "no conflict copy came: $(ls "$WA" "$WB" | grep shared)"
 wait_for "[ \$(ls '$WA' | grep -c 'shared') -ge 2 ]" 30 || fail "the conflict copy didn't reach A"
 ra routine/sync.py conflicts | grep -q "shared.md" || fail "the conflict isn't listed"
-OUT=$(ra routine/sync.py tick); echo "$OUT" | grep -q '"queued": \[[0-9]' || fail "no merge job was queued: $OUT"
-grep -q "Sync conflict (H56.4)" "$WA/HQ/roadmap.md" || fail "the merge job isn't on the queue"
-ra routine/sync.py tick | grep -q '"queued": \[\]' || fail "a second look queued it again"
-[ "$(grep -c "Sync conflict (H56.4)" "$WA/HQ/roadmap.md")" = 1 ] || fail "the merge job was queued more than once"
-grep -q 'conflict cop' "$T/A/HQ/.status/routines.json" || fail "the sync line doesn't say there's a conflict"
-python3 -c "import json,sys; d=json.load(open(sys.argv[1])); i=[x for x in d['incidents'] if x['key']=='sync' and not x.get('back')]; assert i and i[0]['fixes'], d" "$T/A/HQ/.status/incidents.json" || fail "the conflict isn't in the incidents with its merge job"
-wait_for "ls '$WB' | grep -q 'shared.sync-conflict-'" 30 || fail "the conflict copy didn't reach B"
-rb routine/sync.py tick --backup | grep -q '"queued": \[\]' || fail "the backup queued a merge too"
-grep -q 'the main one merges it' "$T/B/HQ/.status/routines.json" || fail "the backup's line doesn't say the main merges it"
-echo "OK both changed the same note: both versions kept, the line and the incidents say so, one merge job queued on the main"
-
-# The merge (here by hand, as the job would): one file with both, the copy gone; then green.
-C=$(ls "$WA" | grep 'shared.sync-conflict-' | head -1)
-{ echo "the laptop's version"; echo "the server's version"; } > "$WA/shared.md"; rm -f "${WA:?}/${C:?}"
-wait_for "! ls '$WB' | grep -q 'shared.sync-conflict-' && grep -q \"server's\" '$WB/shared.md' && grep -q \"laptop's\" '$WB/shared.md'" 30 || fail "the merge didn't reach B"
-wait_for "ra routine/sync.py tick | grep -q '\"state\": \"ok\"'" 30 || fail "the line didn't go green after the merge: $(ra routine/sync.py tick)"
-python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert not [x for x in d['incidents'] if x['key']=='sync' and not x.get('back')]" "$T/A/HQ/.status/incidents.json" || fail "the incident didn't close"
-echo "OK once merged the copy is gone on both, the line is green and the incident closed"
+# F115: main wins. The main's version stays in the file, the other's goes in the list he sees, the copy goes; no merge job.
+SEEN="$(ls "$WA" | grep shared | tr '\n' ' ') A=${IA:0:7} B=${IB:0:7}"
+OUT=$(ra routine/sync.py tick); echo "$OUT" | grep -q '"queued": \[\]' || fail "a merge job was queued: $OUT"
+grep -q "Sync conflict (H56.4)" "$WA/HQ/roadmap.md" && fail "a merge job is on the queue"
+ls "$WA" | grep -q 'shared.sync-conflict-' && fail "the conflict copy is still on the main"
+[ "$(cat "$WA/shared.md")" = "the laptop's version" ] || fail "the main's version didn't stay: $(cat "$WA/shared.md") ($SEEN; $(grep -h settle "$T/A/HQ/scratch/routine/routine.log" 2>/dev/null | tail -3))"
+grep -q "the server's version" "$WA/HQ/kept-from-both.md" || fail "the other's version isn't kept in the list"
+wait_for "! ls '$WB' | grep -q 'shared.sync-conflict-' && grep -q \"laptop's\" '$WB/shared.md'" 60 || fail "the settled file didn't reach B"
+rb routine/sync.py tick --backup | grep -q '"queued": \[\]' || fail "the backup queued a merge"
+wait_for "ra routine/sync.py tick | grep -q '\"state\": \"ok\"'" 30 || fail "the line didn't go green after settling: $(ra routine/sync.py tick)"
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])) if __import__('os').path.exists(sys.argv[1]) else {'incidents': []}; assert not [x for x in d['incidents'] if x['key']=='sync' and not x.get('back')]" "$T/A/HQ/.status/incidents.json" || fail "an incident stayed open"
+echo "OK both changed the same note: main wins, the other's version kept in the list, the copy gone on both, no merge job, green"
 
 # An HQ that becomes main lines its git up with GitHub, keeping the files.
 cp "$WB/shared.md" "$T/keep.md"
@@ -35159,6 +36063,11 @@ echo "ALL OK"
 """
 
 FLOWS = {
+    400: ("H308: an order Pepper writes on Moneypenny's list at 10:00 is an item by her midday look, and a later or doubled look makes no second one", False, "flow400"),
+    401: ("H308: an order written after her evening look is picked up at her next morning look", False, "flow401"),
+    402: ("H308: two looks a day instead of three is one setting, from the next day", False, "flow402"),
+    403: ("H308: a new agent from the template has three looks a day", False, "flow403"),
+    404: ("H308: a look over her share waits until the next look and says so in her ledger, with the room it needed", False, "flow404"),
     410: ("H300: at the top of Donna's chat one tap opens Moneypenny's chat, her texts in it, his text answered there, and back; on a phone and a laptop; no switch without her line", False, "flow410"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
@@ -35291,7 +36200,7 @@ FLOWS = {
     63: ("H56.2: job windows and the mail check on Linux, in tmux: a throwaway job and mail check", False, "flow63"),
     64: ("F16: the call page fits the screen before, during and after a call; no scrolling into white space", False, "flow64"),
     65: ("H56.3: main and backup: two throwaway HQs hand the main role back and forth; alone, an HQ is simply main", False, "flow65"),
-    66: ("H56.4: the two-way sync: two private Syncthings, both ways, video left out, conflicts kept and merged, only the main commits", False, "flow66"),
+    66: ("H56.4: the two-way sync: two private Syncthings, both ways, video left out, conflicts settled main wins with the other kept (F115), only the main commits", False, "flow66"),
     67: ("F17: a test never changes the real job list, schedule or status block, nor uses the real pairing", False, "flow67"),
     68: ("H72: the hidden Yes: hold the greyed-out Send, slide onto Yes, let go sends Yes", False, "flow68"),
     69: ("H76, H77: each agent her own character on calls, HQ's defaults a workspace can change", False, "flow69"),
@@ -35457,7 +36366,7 @@ FLOWS = {
     228: ("F107: Ultra with no 5-hour window: the past stays Max 5x, estimates, planning, nights and page on the week with no 5-hour left, then back on Max 5x with all of it", False, "flow228"),
     227: ("F102: the status page never hangs on a slow script: the last answer at once, one run at a time", False, "flow227"),
     226: ("F100: his say-so for a daytime build: a job's process, the old variable and a made-up ticket refused, only the status page's own tap counts", False, "flow226"),
-    219: ("F102: a note written in the app is on GitHub after its ten minutes with no one naming it; a key stays out; a refused push merges; a clash is an incident", False, "flow219"),
+    219: ("F102: a note written in the app is on GitHub after its ten minutes with no one naming it; a key stays out; a refused push merges; a clash settles itself, main wins (F115)", False, "flow219"),
     218: ("F100: a headless job saves the stream's limits as they come and reads no status line; the routine holds it at the line", False, "flow218"),
     217: ("F100: near the reserve a team job is refused, his to turn; cycles before the team, a bug ahead of the features, three items in progress at most, five a night with each test run counted", False, "flow217"),
     216: ("F100: no build in the day without his say-so, kept with who and when; a held job doesn't restart at night unless planned", False, "flow216"),
@@ -35502,6 +36411,13 @@ FLOWS = {
     188: ("H298, piece 4: the ready check's mechanical fields: His words a quote found in a call, the notes or the log; My own additions left out, none, or with his yes and its date (F81); Sources that exist (a row, a rule, a dated call, a file); with the feature on an empty or false field refuses the Ready mark", False, "flow188"),
     187: ("H298, piece 3: the deterministic box on a headless run (minutes from a wall clock, turns from the stream): past either the run is ended, done on the queue, its note written; the cycle kinds cycle-<agent> and step-<agent>", False, "flow187"),
     186: ("H298, piece 2: the identity fix: the harvest after a call or text keeps only first-person lines about her own office life; a transcript full of his life yields nothing about him", False, "flow186"),
+    370: ("F115: a tap on the backup lands on the main: the page's switch, kind, note and tick, workflow, news setup, stop line and a chat's commit, the backup's files the same; a hand-over sent twice runs once; kept with the main away, landing once", False, "flow370"),
+    371: ("F115: what the laptop holds is settled, nothing of his lost: a transcript, a picture, an added line, a clash main wins with the laptop's words in the list, a removed file, conflict copies; none left on the laptop, both the same; told once; a copy on the main main wins, no merge job", False, "flow371"),
+    372: ("F115: a repo conflict settles itself: main wins, GitHub's line kept in the list, pushed, no incident, the next commit straight through", False, "flow372"),
+    373: ("F115: both-main ends by itself: a cut both ways, both write; within two looks the one main before the cut is the only main, the other's writes reach it; back from long ago no main before its look; a hand-back waits for the sync", False, "flow373"),
+    374: ("F115: 60 switches at once lose none", False, "flow374"),
+    375: ("F115: 60 ticks and done marks with two agents writing give no error, nothing lost", False, "flow375"),
+    376: ("F115: undo takes back his own last change, an agent's after it stays; hers takes back hers", False, "flow376"),
     185: ("H298, piece 1: the handbook under each agent's character behind the switch (in pieces, off by default): the template's blank handbook and cycle defaults, off loads nothing, on loads part one and her own section, Moneypenny's craft trimmed", False, "flow185"),
 }
 
@@ -35510,7 +36426,7 @@ FLOWS = {
 # history, which grows every day (217 s on 23 October, 360 s on 27 October), and checks all of it: it gets
 # twenty minutes instead of checking less. Its time is in the summary, next to its limit, so a climb shows.
 FLOW_LIMIT = 360
-FLOW_LIMITS = {44: 1200, 294: 420, 295: 14500, 300: 600, 301: 900, 302: 600, 303: 600}
+FLOW_LIMITS = {44: 1200, 294: 420, 295: 14500, 300: 600, 301: 900, 302: 600, 303: 600, 371: 600, 373: 600}  # F115: 371 and 373 run two Syncthings each
 
 
 def limit_of(n: int) -> int:

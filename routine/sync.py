@@ -35,6 +35,8 @@ usage (from the workspace):
                                                 device ID, or its name in this Syncthing); run on both computers
   python3 "routine/sync.py" remove              stop syncing (the folders leave Syncthing; the files stay)
   python3 "routine/sync.py" direction main|backup|two-way   the folders' direction on this computer (one-way sync)
+  python3 "routine/sync.py" handover [--dry]    F115, on the backup: what it holds that the main doesn't, to the main
+  python3 "routine/sync.py" handover on|off     F115: the switch that lets the routine do that every minute
 Used by HQ itself: tick [--main|--backup] (the routine, every minute), align (an HQ that just became main), json.
 For tests: HQ_SYNCTHING_HOME (Syncthing's config folder), HQ_SYNC_GIT=0 (no commits, no align).
 """
@@ -450,8 +452,255 @@ def settle(found, log):
                 continue
             except OSError as e:
                 log(f"sync: couldn't remove {c['copy']}: {e}")
+        # F115: main wins. The main's version stays in the file, the other's own lines go into the list he sees
+        # (settle.py), the copy goes; no merge job, nothing waits on him.
+        try:
+            import settle as _settle
+            if _settle.settle_copy(c, main_device(), config().get("peer_name") or "the other computer", log):
+                continue
+        except Exception as e:
+            log(f"sync: couldn't settle {c['copy']}: {e!r}")
         left.append(c)
     return left
+
+
+def main_device():
+    """F115: the Syncthing device id of the computer that is main now (this one's or the other's), or None."""
+    try:
+        import role
+        here = role.acting() == "main"
+    except Exception:
+        here = True
+    try:
+        return my_id() if here else config().get("peer")
+    except Exception:
+        return None
+
+
+# --- F115: what the backup holds that the main doesn't, handed over -------------------------------------------------
+
+QUIET = float(os.environ.get("HQ_SYNC_QUIET") or 600)  # a file changed here this recently is left for the next look (a call may still be writing it)
+SKIP = ("HQ/calendar.json",)  # the backup's own read of the calendar: the main reads Google itself
+HANDOVER_MOST = 20_000_000
+HANDED = os.path.join(SUPPORT, "sync-handed.json")  # F115: the hand-overs the main has settled (their ids), on this computer
+
+
+def unsent():
+    """F115: how many files the other computer still needs from this one (0 when it has all), None when it can't be
+    told (Syncthing not answering, the other not connected)."""
+    cfg = config()
+    try:
+        conns = api("/rest/system/connections")["connections"]
+        if not (conns.get(cfg["peer"]) or {}).get("connected"):
+            return None
+        n = 0
+        for f in cfg.get("folders", []):
+            c = api(f"/rest/db/completion?folder={f['id']}&device={cfg['peer']}")
+            if not isinstance(c, dict):
+                return None
+            n += int(c.get("needItems") or 0) + int(c.get("needDeletes") or 0)
+            if float(c.get("completion") or 0) < 100 and not n:
+                n = 1
+        return n
+    except Exception:
+        return None
+
+
+def local_changed(fid):
+    """The items this receive-only folder changed locally (Syncthing's own list): [{"name", "deleted"}]."""
+    out, page = [], 1
+    while True:
+        r = api(f"/rest/db/localchanged?folder={fid}&page={page}&perpage=500")
+        files = (r or {}).get("files") or [] if isinstance(r, dict) else []
+        out += [{"name": x.get("name", ""), "deleted": bool(x.get("deleted"))} for x in files if x.get("name")]
+        if len(files) < 500:
+            return out
+        page += 1
+
+
+def handover_on() -> bool:
+    """F115: the backup's every-minute hand-over runs only with its switch on (app/backend.py, `handover`): off on
+    the real pair until the dry run has been read with him, on in a fresh install's template. By hand
+    (`sync.py handover`) it runs whatever the switch says."""
+    try:
+        sys.path.insert(0, os.path.join(hqpaths.HQ, "app"))
+        import backend
+        return backend.on("handover")
+    except Exception:
+        return False
+
+
+def remote_need(fid, device):
+    """F115: what the other computer still needs of this folder from this one (Syncthing's view): after a cut both
+    ways, the versions this one wrote while it was main too, which the main's send-only folder never takes."""
+    out, page = [], 1
+    while True:
+        r = api(f"/rest/db/remoteneed?folder={fid}&device={device}&page={page}&perpage=500")
+        files = []
+        if isinstance(r, dict):
+            for k in ("files", "progress", "queued", "rest"):
+                files += r.get(k) or []
+        out += [{"name": x.get("name", ""), "deleted": bool(x.get("deleted")), "need": True} for x in files if x.get("name")]
+        if len(files) < 500:
+            return out
+        page += 1
+
+
+def handover(log=print, now=None, dry=False):
+    """F115, on the backup with one-way sync: everything this computer has that the main doesn't (its local changes
+    and its conflict copies) goes to the main through the door (settle.py file), each with an id (a second time does
+    nothing). The main writes what's new, takes what only adds, and keeps the other's own lines of a clash in the list
+    he sees. Once every local change of a folder is settled there, the folder takes the main's copy back (revert), so
+    no copy is left here. Returns {"handed", "kept_here", "failed", "reverted", "unreached"}."""
+    import base64, hashlib
+    import role
+    out = {"handed": [], "kept_here": [], "failed": [], "reverted": [], "unreached": False}
+    now = now or time.time()
+    me = role.my_name()
+    acked = _load(HANDED, {}) if not dry else {}
+    acked = {k: v for k, v in (acked if isinstance(acked, dict) else {}).items() if isinstance(v, dict) and "at" in v}
+    for f in config().get("folders", []):
+        try:
+            items = local_changed(f["id"])
+        except Exception as e:
+            log(f"sync: handover: couldn't read what changed here in {f['what']}: {e!r}")
+            out["failed"].append(f["what"])
+            continue
+        names = {x["name"] for x in items}
+        try:
+            for x in remote_need(f["id"], config()["peer"]):
+                if x["name"] not in names:
+                    items.append(x)
+                    names.add(x["name"])
+        except Exception as e:
+            log(f"sync: handover: couldn't read what the main still needs from here in {f['what']}: {e!r}")
+        for c in conflicts():  # a copy Syncthing doesn't count (made before the folder was receive-only) too
+            if c["folder"] == f["id"]:
+                rel = os.path.relpath(c["copy"], f["path"])
+                if rel not in names:
+                    items.append({"name": rel, "deleted": False})
+        whole = True
+        done = {}  # what was settled, as it was then: a change made after it stops the revert this round
+
+        def _st(full):  # what it holds (Syncthing may set a file's time to the main's when the content is the same)
+            try:
+                if os.path.isdir(full):
+                    return "dir"
+                with open(full, "rb") as fh:
+                    return hashlib.sha1(fh.read()).hexdigest()
+            except OSError:
+                return None
+        for it in sorted(items, key=lambda x: x["name"]):
+            rel = it["name"].replace(os.sep, "/")
+            full = os.path.join(f["path"], rel)
+            done[rel] = _st(full)
+            if rel in SKIP or rel.split("/")[0] in (".git", ".stfolder", ".stversions") or rel == ".stignore":
+                continue
+            base_rel = CONFLICT.sub("", rel)
+            if not it["deleted"] and os.path.isfile(full) and now - os.path.getmtime(full) < QUIET:
+                out["kept_here"].append(rel)
+                whole = False
+                continue
+            if os.path.isdir(full):
+                continue
+            payload = {"from": me}
+            if it["deleted"] or not os.path.exists(full):
+                if CONFLICT.search(rel) or (it.get("need") and not it["deleted"]):
+                    continue  # a copy already gone, or a version Syncthing has moved on from
+                payload["deleted"] = True
+                key = "deleted"
+            else:
+                try:
+                    raw = open(full, "rb").read()
+                except OSError as e:
+                    out["failed"].append(rel)
+                    whole = False
+                    log(f"sync: handover: couldn't read {rel}: {e}")
+                    continue
+                if len(raw) > HANDOVER_MOST:
+                    out["failed"].append(rel)
+                    whole = False
+                    log(f"sync: handover: {rel} is too big to hand over ({len(raw)} bytes); it stays here")
+                    continue
+                try:
+                    payload["text"] = raw.decode("utf8")
+                except UnicodeDecodeError:
+                    payload["b64"] = base64.b64encode(raw).decode()
+                key = hashlib.sha1(raw).hexdigest()
+            hid = "settle-" + hashlib.sha1(f"{f['what']}|{base_rel}|{key}".encode()).hexdigest()[:24]
+            if dry:
+                out["handed"].append(rel)
+                continue
+            try:  # F115 (the check's finding 2): remembered by its content and its file's own time and size, so a file
+                st_ = os.stat(full)  # that came back to bytes it had before (typed again) is sent again
+                ck = f"{hid}|{st_.st_mtime_ns}|{st_.st_size}"
+            except OSError:
+                ck = f"{hid}|gone"
+            if ck in acked:  # settled there already, as it is now: not sent again every minute
+                out["handed"].append(rel)
+                if CONFLICT.search(rel):
+                    try:
+                        os.remove(full)
+                        done[rel] = None
+                    except OSError:
+                        pass
+                continue
+            import settle as _settle
+            code, said, err, how = _settle.send(role, ["file", f["what"], base_rel], payload, hid)
+            if how != "main":
+                out["unreached"] = True
+                log(f"sync: handover: the main can't be reached; {rel} and the rest wait for the next look")
+                return out
+            if code:
+                out["failed"].append(rel)
+                whole = False
+                log(f"sync: handover: the main didn't take {rel}: {' '.join((said + err).split())[:200]}")
+                continue
+            out["handed"].append(rel)
+            acked[ck] = {"at": time.time(), "what": f["what"]}
+            _save(HANDED, {k: v for k, v in acked.items() if time.time() - v["at"] < 14 * 86400})
+            log(f"sync: handed {rel} to the main: {' '.join(said.split())[:200]}")
+            if CONFLICT.search(rel):
+                try:
+                    os.remove(full)
+                    done[rel] = None  # gone on purpose: settled on the main
+                except OSError:
+                    pass
+        if dry:
+            continue
+        if whole and any(x.get("need") for x in items):
+            # F115: what the main still needed from here is settled there now: its own versions go out as everyone's
+            # (Syncthing's override on its send-only folder), so this one takes them and nothing stays two ways
+            code, said, err, how = role.hand("settle", ["override", f["what"]], keep=False, timeout=60,
+                                             hid="override-" + hashlib.sha1(json.dumps(sorted(done.items()), default=str).encode()).hexdigest()[:24])
+            log(f"sync: handover: the main's {f['what']} goes out as everyone's again: {' '.join((said + err).split())[:160]}")
+        if whole and items:
+            try:
+                api(f"/rest/db/scan?folder={f['id']}", "POST", {}, timeout=60)  # what this look removed, seen first
+            except Exception:
+                pass
+            try:
+                again = local_changed(f["id"])
+                moved = [x["name"] for x in again if x["name"] not in SKIP and _st(os.path.join(f["path"], x["name"])) != "dir"
+                         and (x["name"] not in done or _st(os.path.join(f["path"], x["name"])) != done[x["name"]])]
+                if moved:
+                    log(f"sync: handover: {', '.join(moved)[:200]} changed here in {f['what']} meanwhile; it goes at the next look")
+                    continue
+            except Exception:
+                continue
+            try:
+                st = api(f"/rest/db/status?folder={f['id']}")
+                if isinstance(st, dict) and st.get("receiveOnlyTotalItems"):
+                    api(f"/rest/db/revert?folder={f['id']}", "POST", {})
+                    out["reverted"].append(f["what"])
+                    # F115: what this folder handed over is forgotten once the main's copy is back: from here on
+                    # everything in it is sent again as new
+                    acked = {k: v for k, v in acked.items() if v.get("what") != f["what"]}
+                    _save(HANDED, acked)
+                    log(f"sync: every change here in {f['what']} is with the main now; took the main's copy back")
+            except Exception as e:
+                log(f"sync: handover: revert {f['what']}: {e!r}")
+    return out
 
 
 def left_calls(now=None):
@@ -600,7 +849,7 @@ def judge(seen, found, state, main, peer, now=None):
         n = len(found)
         jobs = sorted({state.get("merges", {}).get(c["copy"]) for c in found} - {None})
         what = (f"merge job{'s' * (len(jobs) > 1)} {', '.join(map(str, jobs))} queued" if jobs and main
-                else "the main one merges it" if not main else "merge job not queued yet")
+                else "handing them to the main one" if not main else "merge job not queued yet")
         names = ", ".join(os.path.basename(c["file"]) for c in found[:3])
         return "waiting", f"{n} conflict cop{'ies' if n > 1 else 'y'} ({names}): {what}", f"{CONFLICT_WHY} {names} at once; both versions kept"
     if not seen["peer_up"]:
@@ -618,16 +867,27 @@ def judge(seen, found, state, main, peer, now=None):
     return "ok", f"In sync with {peer}: the workspace" + (" and Claude's memory" if len(seen["folders"]) > 1 else ""), ""
 
 
-def tick(main=True, log=print, routines=None, incidents=None):
-    """Every minute, from the routine, on both HQs. Returns the line it wrote (or None when no sync is set up)."""
+def tick(main=True, log=print, routines=None, incidents=None, acting=None):
+    """Every minute, from the routine, on both HQs. Returns the line it wrote (or None when no sync is set up).
+    F115: acting is the role now (the folders point its way; a main that is handing back keeps sending until its
+    hand-back, while `main` is off for the merges and commits)."""
     if not is_set():
         return None
     cfg = config()
     peer = cfg.get("peer_name") or "the other HQ"
     try:  # Fable, 27 October 2026: one-way sync, when its switch is on
-        tick_direction("main" if main else "backup", log)
+        tick_direction(acting if acting in ("main", "backup") else ("main" if main else "backup"), log)
     except Exception as e:
         log(f"sync: direction: {e!r}")
+    handed = None
+    switch_on = handover_on()
+    if not main and acting != "main" and one_way_on() and switch_on:
+        # F115: what this computer holds that the main doesn't goes over through the door, every look
+        try:
+            if any(f.get("local") for f in look().get("folders", [])) or conflicts() or (unsent() or 0) > 0:
+                handed = handover(log)
+        except Exception as e:
+            log(f"sync: handover: {e!r}")
     state = _load(STATE, {})
     seen = look()
     if seen.get("peer_up"):
@@ -649,9 +909,23 @@ def tick(main=True, log=print, routines=None, incidents=None):
             committed += commit_calls(log)
         except Exception as e:
             log(f"sync: call transcripts: {e!r}")
+    if handed and (handed["handed"] or handed["reverted"]):
+        seen, found = look(), conflicts()  # F115: what's left after the hand-over
     st, text, why = judge(seen, found, state, main, peer)
+    try:
+        import settle as _settle
+        n = _settle.recent(24, next((f["path"] for f in cfg["folders"] if f["what"] == "workspace"), None))
+        if n and st in ("ok", "running"):
+            text += f"; {n} difference{'s' * (n != 1)} from both computers kept for you to look at"
+    except Exception:
+        pass
+    sw = None
+    if not main and acting != "main" and one_way_on():  # F115: the backup's hand-over switch, on its line
+        sw = {"on": switch_on}
+        if not switch_on and (any(f.get("local") for f in seen.get("folders", [])) or found):
+            text += "; the hand-over to the main is off (sync.py handover on, or the switch here)"
     if routines:
-        routines.beat("sync", state=st, text=text, last=time.time(), next=time.time() + 60, every=60)
+        routines.beat("sync", state=st, text=text, last=time.time(), next=time.time() + 60, every=60, handover=sw)
     if incidents:
         if why:
             incidents.down("sync", why)
@@ -718,6 +992,17 @@ def main(argv):
         print("Changed: " + (", ".join(changed) if changed else "nothing (already so)"))
     elif cmd == "revert":
         print("Reverted: " + (", ".join(revert_local()) or "nothing"))
+    elif cmd == "handover" and len(argv) == 2 and argv[1] in ("on", "off"):
+        # F115: the switch of the every-minute hand-over (the workspace's backend switch, written by the main)
+        sys.path.insert(0, os.path.join(hqpaths.HQ, "app"))
+        import backend
+        print(backend.switch_said("handover", argv[1] == "on"))
+    elif cmd == "handover" and argv[1:] not in ([], ["--dry"]):  # F115: exactly on, off, --dry or nothing
+        print("sync.py handover takes on, off, --dry or nothing; nothing was done.")
+        return 2
+    elif cmd == "handover":  # F115: by hand, on the backup: what it holds goes to the main (--dry: only say what)
+        r = handover(dry="--dry" in argv)
+        print(json.dumps(r, indent=1))
     elif cmd == "tick":
         import incidents, routines
         r = tick(main="--backup" not in argv, routines=routines, incidents=incidents)

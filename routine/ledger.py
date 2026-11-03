@@ -38,6 +38,7 @@ ORDERS_HEAD = "## Orders"
 ORDER_KINDS = ("start", "stop", "standing")
 ORDER_STATES = ("open", "now", "planned", "done", "dropped")
 KEEP_SECTIONS = 400  # dated sections kept in the file; older ones go to <agent>-archive.md
+LOOK_LABEL = re.compile(r"^(?:item \d+, )?step #\d+, from her [^;]+")  # H308: an order a look made a step of; it keeps this for good
 _ORDER = re.compile(r"^- (\d{4}-\d\d-\d\d \d\d:\d\d) · (start|stop|standing) · \"(.*)\" · (open|now|planned|done|dropped)(?: · (.*))?$")
 _SECTION = re.compile(r"^## (.+)$", re.M)
 _DATED = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d) · (.*)$")
@@ -242,8 +243,11 @@ def set_order(agent_id: str, n: int, state: str, note_: str = "") -> bool:
             if m:
                 k += 1
                 if k == n:
-                    o = {"at": m.group(1), "kind": m.group(2), "words": m.group(3), "state": state,
-                         "note": " ".join(str(note_).split()) or (m.group(5) or "")}
+                    note = " ".join(str(note_).split()) or (m.group(5) or "")
+                    lab = LOOK_LABEL.match(m.group(5) or "")
+                    if lab and not note.startswith(lab.group(0)):  # H308: whatever happens to it later, its item's label stays
+                        note = f"{lab.group(0)}; {note}"
+                    o = {"at": m.group(1), "kind": m.group(2), "words": m.group(3), "state": state, "note": note}
                     lines[i] = _order_line(o)
                     _write(agent_id, t[:sec["start"]] + "\n".join(lines) + t[sec["end"]:])
                     return True

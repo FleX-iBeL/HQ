@@ -1711,6 +1711,18 @@
           if (x?.next && state !== 'down' && state !== 'off' && !(state === 'waiting' && x.next < now)) when.append(el('small', '', `Next ${clock(new Date(x.next * 1000))}`));
           row.title = (x?.about ?? about) + (state === 'down' && x?.detail?.length ? `\n\nWhat it said last:\n${[].concat(x.detail).join('\n')}` : '');  // H42
           row.append(el('i'), what, el('span', 'text', text), when);
+          if (key === 'sync' && x?.handover && !late) {  // F115: the backup's hand-over to the main, one tap on or off
+            const on = !!x.handover.on;
+            const sw = el('button', 'lidswitch', handoverBusy ? '…' : on ? 'Hand-over on: turn off' : 'Hand-over off: turn on');
+            sw.type = 'button';
+            sw.setAttribute('role', 'switch');
+            sw.setAttribute('aria-checked', on ? 'true' : 'false');
+            sw.disabled = handoverBusy;
+            sw.title = on ? 'Every minute this computer hands what it holds to the main' : 'This computer keeps what it holds until the hand-over is turned on';
+            sw.addEventListener('click', () => handoverFlip(on ? 'off' : 'on'));
+            row.querySelector('.text').append(document.createTextNode(' '), sw);
+            if (handoverSaid && handoverSaid.at > Date.now()) row.querySelector('.text').append(el('small', handoverSaid.ok ? 'soft' : 'lidsaid bad', ` ${handoverSaid.said}`));
+          }
           card.append(row);
         }
         const counts = (bad ? `${bad} not working` : busy || waiting ? `All working${busy ? ` · ${busy} running now` : ''}${waiting ? ` · ${waiting} waiting` : ''}` : 'All working')
@@ -2212,6 +2224,24 @@
         card.append(el('p', 'soft', x ? `Averages over the last minute, like Activity Monitor's totals · read ${clock(new Date(x.t * 1000))}` : 'Nothing written down yet; the routine reads these once a minute and keeps a day.'));
         fold.append(card);
         return fold;
+      }
+      // F115: the backup's hand-over switch, through the status server (routine/sync.py handover on|off).
+      let handoverBusy = false;
+      let handoverSaid = null;
+      async function handoverFlip(want) {
+        if (handoverBusy) return;
+        handoverBusy = true;
+        redraw();
+        try {
+          const r = await fetch('/api/handover', { method: 'POST', headers: { 'x-hq': 'handover', 'content-type': 'application/json' }, body: JSON.stringify({ want }) });
+          const out = await r.json().catch(() => ({ ok: false, said: `The status server said ${r.status}` }));
+          handoverSaid = { at: Date.now() + 15000, ok: !!out.ok, said: String(out.said ?? '').split('\n').join(' ') };
+        } catch {
+          handoverSaid = { at: Date.now() + 15000, ok: false, said: 'The status server is not answering.' };
+        } finally {
+          handoverBusy = false;
+          redraw();
+        }
       }
       // H191: the lid-closed sleep switch: one tap flips it on the laptop, through the status server.
       let lidBusy = false;

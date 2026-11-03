@@ -1702,8 +1702,10 @@ def tick():
     try:
         # H139: a main that is handing back (the chosen main answers again) queues no merge jobs and commits
         # nothing: the chosen main does, or both queue the same conflict copies.
+        # F115: the folders point the way the role is now (a main that waits to hand back keeps sending, so what it
+        # wrote reaches the other one before it steps down).
         sync.tick(main=r["acting"] == "main" and not r.get("handing_back"), log=log, routines=routines,
-                  incidents=incidents)
+                  incidents=incidents, acting=r["acting"])
     except Exception as e:
         log(f"sync: {e!r}")
     # H88: the heartbeats, on both: this computer is up and online, the other one answers. Alone: nothing.

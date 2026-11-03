@@ -20,6 +20,7 @@ what starts off ("default": "off": Driving, H230, which needs their own key); tu
 
     python3 app/features.py                 every switch, on or off
     python3 app/features.py on calendar     turn one on (a feature in pieces only after its QA passed, or --said "HIS WORDS": F104)
+                                            (on the backup it goes to the main, which writes it: F115)
     python3 app/features.py off calendar    turn one off
     python3 app/features.py pieces          the features still being built in pieces (F56, piece 2)
     python3 app/features.py ship ID         a feature in pieces goes on for everyone (by hand; qa.py does it itself)
@@ -349,10 +350,35 @@ def _keep_say_so(base: Path, fid: str, how: str) -> None:
     os.replace(tmp, p)
 
 
+def _door(base: Path, args: list[str]):
+    """F115: on the backup the main writes the switches (role.door); None when this computer writes them."""
+    sys.path.insert(0, str(ROOT / "routine"))
+    import role
+    return role.door(base / STATE, "features", args)
+
+
+def _locked(base: Path):
+    """F115: one switch at a time across processes (the page, a call, the main running a handed one): 12 switches at
+    once lost 24 of 60 on the checklist re-run."""
+    sys.path.insert(0, str(ROOT / "routine"))
+    import hqlock
+    return hqlock.locked(base / STATE)
+
+
 def switch(fid: str, on: bool, base: Path | None = None, said: str = "", tapped: bool = False) -> str:
     """F104: a feature in pieces goes on only after its QA passed, or on his own words (`said`, a line he said or typed) or his own
     tap in Settings (`tapped`), kept with the time."""
     base = base or folder()
+    h = _door(base, ["on" if on else "off", fid] + (["--said", said] if said else []) + (["--tapped"] if tapped else []))
+    if h is not None:
+        sys.path.insert(0, str(ROOT / "routine"))
+        import role
+        return role.door_said(h, "The switch")
+    with _locked(base):
+        return _switch(fid, on, base, said, tapped)
+
+
+def _switch(fid: str, on: bool, base: Path, said: str = "", tapped: bool = False) -> str:
     f = next((x for x in everything() if x["id"] == fid and not (x.get("in_pieces") and not maker(base))), None)
     if not f:
         return f"No switch {fid}. There are: {', '.join(i for i in ids() if is_on(i, base) or i in IDS)}."
@@ -419,14 +445,17 @@ def main(argv: list[str]) -> int:
     if argv[0] == "ship" and len(argv) == 2:
         print(ship(argv[1]))
         return 0
-    if argv[0] == "on" and len(argv) == 4 and argv[2] == "--said":
-        said = switch(argv[1], True, said=argv[3])
-        print(said)
-        return 2 if said.startswith("Refused") else 0
-    if argv[0] in ("on", "off") and len(argv) == 2:
-        said = switch(argv[1], argv[0] == "on")
-        print(said)
-        return 2 if said.startswith("Refused") else 0
+    if argv[0] in ("on", "off") and len(argv) >= 2:
+        rest, words, tapped = argv[2:], "", False
+        if "--tapped" in rest:  # F115: a tap in Settings on the backup, handed to the main, is still his tap
+            rest.remove("--tapped")
+            tapped = True
+        if len(rest) == 2 and rest[0] == "--said" and argv[0] == "on":
+            words, rest = rest[1], []
+        if not rest:
+            said = switch(argv[1], argv[0] == "on", said=words, tapped=tapped)
+            print(said)
+            return 2 if said.startswith("Refused") else 0
     print(__doc__)
     return 2
 
