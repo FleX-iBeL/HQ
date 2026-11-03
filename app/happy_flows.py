@@ -26233,13 +26233,15 @@ print("OK")
                 "step 2 it carries on at step 3 in its own chat and in a fresh one, 1 and 2 untouched; changed steps keep "
                 "the done ones; a crash rerun carries on at step 3; the held minutes don't count")
 
-    def _f79(self, tag, script, hist=None, rate=None):
+    def _f79(self, tag, script, hist=None, rate=None, wall=False):
         """F79: a made-up planning (_sprint_env), its estimates' folder holding made-up finished jobs (and a made-up rate),
         no looks, and a script run there; its last line as JSON."""
         import subprocess as sp
         rm, env = self._sprint_env(tag)
         env.update(HQ_LOOK="0", HQ_ROLE_HERE="1")
         env.pop("HQ_LOOK_FAKE", None)
+        if wall:  # F100's box on, for a step about it
+            env.pop("HQ_NO_WALL", None)
         d = Path(str(rm)[:-3] + "-estimates")
         d.mkdir(parents=True, exist_ok=True)
         if hist is not None:
@@ -26377,7 +26379,8 @@ print(json.dumps(out))
         """F79, no Claude: the live check holds a job to the latest end it was given when it started. Twelve made-up
         builds: job 960 starts (its measured estimate kept), writes its own guess (made again with it), and finishes in
         20 minutes; its finished line carries the latest it was given then, how sure it was, and the measured likely
-        time. The replay (measured.py replay) runs on the made-up records and says, at the start and on the planning,
+        time. Its box (F100) is set from that same measured latest end, and when its own guess of 600 minutes moves the
+        end later, the box grows with it: it's never boxed before its own latest end. The replay (measured.py replay) runs on the made-up records and says, at the start and on the planning,
         how many landed between half and double and by their latest end."""
         hist = self._f79_jobs([10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32], guess=3)
         for h in hist:
@@ -26388,15 +26391,23 @@ t = 'Build a small change to the status page button, flow 423'
 E.on_add(960, t)
 E.on_start(960, t)
 m0 = dict(E._load_state()['960'].get('m') or {})
-E.on_guess(960, 90, t)
+import wall
+job = {'n': 960, 'text': t}
+b0, w0 = wall.box_for(job), wall.estimate_of(job)
+E.on_guess(960, 600, t)
 m1 = dict(E._load_state()['960'].get('m') or {})
+b1 = wall.box_for(job)
 st = E._load_state()['960']['started']
 rec = E.on_done(960, t, at=st + 20 * 60)
 line = [h for h in E.history() if h.get('n') == 960][-1]
 r = subprocess.run(['python3', 'routine/measured.py', 'replay'], capture_output=True, text=True)
-print(json.dumps({'m0': m0, 'm1': m1, 'line': {k: line.get(k) for k in ('latest', 'm_est', 'sure', 'actual')}, 'replay': r.stdout, 'rc': r.returncode}))
-""", hist)
+print(json.dumps({'m0': m0, 'm1': m1, 'b0': b0, 'w0': w0, 'b1': b1, 'line': {k: line.get(k) for k in ('latest', 'm_est', 'sure', 'actual')}, 'replay': r.stdout, 'rc': r.returncode}))
+""", hist, wall=True)
         m0, m1, line = o["m0"], o["m1"], o["line"]
+        need(o["w0"] == [m0["est"], m0["latest"]] and o["b0"]["total"] >= m0["latest"],
+             f"F79: the box isn't set from the measured latest end: {o['w0']} / {m0}, box {o['b0']}")
+        need(m1["latest"] > o["b0"]["total"] and o["b1"]["total"] >= m1["latest"],
+             f"F79: a job can be boxed before its own latest end once its guess moved it: box {o['b1']} / {m1}")
         need(m0.get("sure", {}).get("ok") and m0.get("est") and m0["latest"] > m0["est"], f"F79: no measured estimate kept at the start: {m0}")
         need(m1["est"] > m0["est"] and m1.get("guess_used") == "guess", f"F79: the team's guess at the start isn't in the estimate it's held to: {m0} -> {m1}")
         need(line["latest"] == m1["latest"] and line["m_est"] == m1["est"] and (line.get("sure") or {}).get("ok") and line["actual"] == 20,
