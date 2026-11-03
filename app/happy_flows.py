@@ -20097,6 +20097,495 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
             p.terminate()
         return "a running helper stands on the page in one line, in words; finished, past its box or gone it doesn't"
 
+    async def flow444(self) -> str:
+        """F97, no Claude: what each second look really costs is kept, one line per look in a file of its own (as review.py keeps
+        reviews.jsonl): a stand-in for Claude that says yes for $0.0123 and one that fails at $0.05 give two lines, the failed one
+        marked, with their cost; the look the ledger itself makes (its second look's own call) writes one too; a look made for
+        another part (no name) isn't kept here; and the score prints the period's total, an older look left out."""
+        import subprocess as _sp
+        ws, env = self._ledger_env("f97a")
+        looks = self.tmp / "f97a-looks.jsonl"
+        fake = self.tmp / "f97a-model"
+        fake.write_text("#!/bin/sh\ncat > /dev/null\nif [ \"$F97_LOOK\" = fail ]; then echo '{\"is_error\": true, \"result\": \"over the budget\", "
+                        "\"total_cost_usd\": 0.05}'; else echo '{\"result\": \"yes\", \"total_cost_usd\": 0.0123}'; fi\n")
+        fake.chmod(0o755)
+        env.update({"HQ_MISTAKES_LOOKS": str(looks), "HQ_CLAUDE": str(fake), "HQ_MISTAKES_SCAN": str(self.tmp / "f97a-scan.json")})
+        code = """
+import json, os, sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import mistakes as M
+out = {'yes': M.ask(M.LOOK_SYSTEM, 'x', what='second look')}
+os.environ['F97_LOOK'] = 'fail'
+try:
+    M.ask(M.LOOK_SYSTEM, 'x', what='second look')
+    out['failed'] = ''
+except Exception as e:
+    out['failed'] = str(e)
+os.environ.pop('F97_LOOK')
+out['other'] = M.ask('another part', 'x')
+out['own'] = M._ask_model('you got that wrong', 'before')
+print(json.dumps(out))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0, f"F97: the looks didn't run: {r.stderr[-600:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["yes"] == "yes" and "over the budget" in o["failed"] and o["other"] == "yes" and o["own"] == "yes", f"F97: the looks: {o}")
+        rows = [json.loads(l) for l in looks.read_text().splitlines()] if looks.exists() else []
+        need(len(rows) == 3, f"F97: not one line per look of the ledger's (a look for another part kept, or one missing): {rows}")
+        need([d["cost"] for d in rows] == [0.0123, 0.05, 0.0123] and [bool(d.get("failed")) for d in rows] == [False, True, False]
+             and all(d["what"] == "second look" and d["model"] == "haiku" and isinstance(d["s"], (int, float)) for d in rows),
+             f"F97: a look's line lacks its cost, its failure or what it was: {rows}")
+        with open(looks, "a") as f:
+            f.write(json.dumps({"at": time.time() - 9 * 86400, "what": "second look", "model": "haiku", "cost": 1.0, "s": 1}) + "\n")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0 and "The second looks: 3, $0.0746 in all (1 failed)." in r.stdout, f"F97: the score doesn't print the week's total: {r.stdout}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score", "--json"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        t = json.loads(r.stdout)
+        need(t["looks"] == {"looks": 3, "failed": 1, "cost": 0.0746, "unknown": 0}, f"F97: the score's looks: {t.get('looks')}")
+        return "three looks of the ledger's kept with their cost, a failed one marked; another part's look not kept; the score says $0.0746 for the week, the older look left out"
+
+    async def flow445(self) -> str:
+        """F97, no Claude: the pass reads every transcript it hasn't read, not only the names after the newest it saw. A transcript
+        that reaches the main late with an older name, holding a clear correction, is on the ledger after the next pass, once; one
+        that can't be read (a link to nothing) is counted as not read with why, in the score and in her weekly score, and tried
+        again each pass until it can; a call still going is read again until it ends; a text that arrives with an older time is
+        read; two passes over the same transcript give one line."""
+        import subprocess as _sp
+        ws, env = self._ledger_env("f97b")
+        scan = self.tmp / "f97b-scan.json"
+        env.update({"HQ_MISTAKES_SCAN": str(scan), "HQ_MISTAKES_LOOKS": str(self.tmp / "f97b-looks.jsonl")})
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/app'); import me; from pathlib import Path; print(me.load(Path(sys.argv[2]))['name'] or 'Me')"
+        me = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=env).stdout.strip()
+        calls = ws / "HQ/calls"
+        calls.mkdir(parents=True, exist_ok=True)
+        led = ws / "HQ/mistakes.jsonl"
+        lines = lambda: [json.loads(l) for l in led.read_text().splitlines()] if led.exists() else []
+        sweep = lambda: _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "scan"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        def call(name, said, ended=True, agent="Moneypenny"):
+            (calls / name).write_text(f"# Call\n\nStarted 10:00:00 · agent {agent} · brain opus\n\n- 10:00:01 **{me}:** Hey there\n"
+                                      + "".join(f"- 10:0{i + 1}:00 **{me}:** {s}\n" for i, s in enumerate(said)) + ("\nEnded 10:30:00\n" if ended else ""))
+        r = sweep()
+        need(r.returncode == 0 and scan.exists(), f"F97: the first pass: {r.stdout} {r.stderr[-400:]}")
+        call("2026-10-31-1000.md", ["that's wrong, it was Friday"])
+        r = sweep()
+        need("1 new" in r.stdout and len(lines()) == 1, f"F97: a new call: {r.stdout} {lines()}")
+        call("2026-10-30-0900.md", ["not what I asked for at all"])  # it came late from the other computer: an older name than the newest read
+        r = sweep()
+        need("1 new" in r.stdout and len(lines()) == 2 and lines()[-1]["where"] == "HQ/calls/2026-10-30-0900.md" and lines()[-1]["agent"] == "moneypenny",
+             f"F97: a transcript with an older name that came late was skipped: {r.stdout} {lines()}")
+        r = sweep()
+        need("0 new" in r.stdout and len(lines()) == 2, f"F97: a second pass counted a line twice: {r.stdout} {lines()}")
+        broken = calls / "2026-10-31-1100.md"
+        broken.symlink_to(self.tmp / "f97b-nothing-here.md")
+        for tries in (1, 2):
+            sweep()
+            st = json.loads(scan.read_text())
+            need((st.get("unread") or {}).get(broken.name, {}).get("tries") == tries and "can't be opened" in st["unread"][broken.name]["why"],
+                 f"F97: a transcript that can't be read isn't kept as not read and tried again: {st.get('unread')}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score", "--days", "4000"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(f"couldn't read 1 call ({broken.name}: it can't be opened" in r.stdout and "Read 2 calls" in r.stdout, f"F97: the score doesn't say what it couldn't read: {r.stdout}")
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/routine'); sys.path.insert(0, sys.argv[1] + '/app')
+import agents, pokes
+from pathlib import Path
+a = next(x for x in agents.load(Path(sys.argv[2])) if x['id'] == 'moneypenny')
+s = pokes.score(a, days=4000, folder=Path(sys.argv[2]))
+print(json.dumps({'lines': s['lines'], 'read': s['pokes']['read'], 'corr': s['pokes']['corrections']}))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"F97: her weekly score: {r.stderr[-600:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["read"]["calls_not_read"] == [broken.name] and o["corr"] == 2
+             and any(l.startswith("what the ledger read: Read 2 calls") and "couldn't read 1 call" in l for l in o["lines"]),
+             f"F97: her score reads as if nothing were missing: {o}")
+        broken.unlink()
+        call(broken.name, ["you got that wrong again"])
+        r = sweep()
+        st = json.loads(scan.read_text())
+        need("1 new" in r.stdout and not st.get("unread") and broken.name in st["read"], f"F97: the transcript, once readable, wasn't read: {r.stdout} {st.get('unread')}")
+        live = "2026-10-31-1200.md"
+        call(live, ["this is a new rule"], ended=False)
+        r = sweep()
+        need("1 new" in r.stdout and live not in json.loads(scan.read_text())["read"], f"F97: a call still going: {r.stdout}")
+        call(live, ["this is a new rule", "that is not what I meant"], ended=True)
+        r = sweep()
+        st = json.loads(scan.read_text())
+        need("1 new" in r.stdout and live in st["read"] and len(lines()) == 5, f"F97: the rest of a call read before it ended: {r.stdout} {lines()[-2:]}")
+        team = ws / "HQ/team-line"
+        team.mkdir(parents=True, exist_ok=True)
+        with open(team / "thread.jsonl", "a") as f:  # a text from the other computer, with a time before the last pass
+            f.write(json.dumps({"at": 1000.0, "from": "me", "text": "you just say yes to everything", "id": "late1"}) + "\n")
+            f.write("{not a line\n")
+        r = sweep()
+        need("1 new" in r.stdout and lines()[-1]["where"] == "HQ/team-line" and lines()[-1]["kind"] == "say-yes", f"F97: a text with an older time: {r.stdout} {lines()[-1]}")
+        r = sweep()
+        need("0 new" in r.stdout and len(lines()) == 6, f"F97: a text counted twice: {r.stdout}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score", "--days", "40000", "--json"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        rd = json.loads(r.stdout)["reading"]
+        need(rd["calls_read"] == 4 and rd["calls_not_read"] == [] and rd["texts_read"] == 1 and rd["texts_not_read"] == 1, f"F97: what the score read: {rd}")
+        return "a late transcript with an older name read once; one that can't be read counted as not read in both scores and tried again; a call read again until it ends; a late text read; no line twice"
+
+    MISSES_HEAD = """
+import json, os, sys, time
+sys.path.insert(0, sys.argv[1] + '/routine'); sys.path.insert(0, sys.argv[1] + '/app')
+import misses as Ms, estimate as E, direct_line as dl
+def line(n, kind, est, late, act, i, ok=True, machine='t', about=''):
+    return {'n': n, 'kind': kind, 'est': est, 'm_est': est, 'latest': late, 'actual': act, 'done': 1790000000 + i * 600, 'how': 'seen',
+            'machine': machine, 'about': about or f'h9{n} on the hq roadmap: a made-up change', 'sure': {'ok': ok, 'jobs': 12, 'group': kind}}
+def _read(d):
+    p = os.path.join(d, 'thread.jsonl')
+    return [json.loads(l) for l in open(p)] if os.path.exists(p) else []
+def team():
+    return [m for m in _read(os.environ['HQ_TEAM_LINE_DIR']) if m['from'] == 'agent']
+def donna():
+    return _read(os.environ['HQ_DIRECT_DIR'])
+def ontime(n0, k=18, kind='qa'):
+    return [line(n0 + i, kind, 10, 20, 12, i) for i in range(k)]
+def fresh():
+    if os.path.exists(Ms.STATE):
+        os.remove(Ms.STATE)
+    Ms.sweep([])  # the first look here: nothing old is sent
+"""
+
+    def _misses(self, tag, script, more=None, ws_env=None):
+        """F79: a made-up workspace with her line and Donna's, the misses allowed and waited for, a script run there with the
+        helpers above; its last line as JSON."""
+        import subprocess as _sp
+        ws, env = ws_env or self._h298_ws(tag)
+        env.update({"HQ_MISSES": "1", "HQ_MISSES_SYNC": "1", "HQ_DIRECT_PLAIN": "1", "HQ_DIRECT_DRY": "1", "HQ_ASLEEP": "0",
+                    "HQ_MISSES_RETRY": "0", **(more or {})})
+        r = _sp.run([sys.executable, "-c", self.MISSES_HEAD + script, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
+        need(r.returncode == 0, f"F79: the misses didn't run: {r.stderr[-1500:]}")
+        return ws, env, json.loads(r.stdout.strip().splitlines()[-1])
+
+    async def flow446(self) -> str:
+        """F79, no Claude: a miss goes to Moneypenny, not to him. The main's minute (misses.sweep) puts one note on her own line for a
+        finished job past the latest end it started with: never pushed, not taken for an answer to his waiting text; which job, its
+        kind, its range and its real time; the same job again adds nothing. A repeat goes to him through her, a text on her line,
+        once it really went and at most once a day: two jobs of one kind in a row past it, or more than 1 in the last 20; one miss
+        alone, or a job on time, says nothing. A job closed for real (estimate.on_done) is told at the next minute. A test without
+        its own line and its word never tells anyone."""
+        _, env, o = self._misses("f79m", """
+fresh()
+with dl._Env(dl.team_env()):
+    dl.add('me', 'what is the team doing right now?')
+hist = ontime(700)
+out = {}
+hist.append(line(720, 'build', 20, 40, 30, 20)); out['ok'] = Ms.sweep(hist)
+hist.append(line(721, 'build', 20, 40, 55, 21, ok=False)); out['a'] = Ms.sweep(hist); out['a_again'] = Ms.sweep(hist)
+out['after_a'] = team()
+with dl._Env(dl.team_env()):
+    out['waiting'] = [m['text'] for m in dl.unanswered()]
+hist.append(line(722, 'build', 20, 40, 61, 22)); out['b'] = Ms.sweep(hist); out['b_state'] = Ms._load()
+hist.append(line(723, 'qa', 10, 20, 45, 23)); out['c'] = Ms.sweep(hist)
+out['after_c'] = team(); out['donna'] = donna()
+fresh()  # two of one kind in a row, the last 20 holding only one of them
+h2 = [line(800, 'research', 10, 20, 30, 0)] + ontime(801, 20)
+h2.append(line(830, 'research', 10, 20, 31, 30)); Ms.sweep(h2); out['row'] = Ms._load().get('raised_why')
+fresh()  # two of different kinds within the last 20
+h3 = ontime(900) + [line(950, 'release', 10, 20, 25, 18), line(951, 'research', 10, 20, 26, 19)]
+Ms.sweep(h3); out['bar'] = Ms._load().get('raised_why')
+fresh()
+st = E._load_state()
+st['960'] = {'est': 5, 'kind': 'build', 'started': int(time.time()) - 1800, 'm': {'est': 5, 'latest': 8, 'sure': {'ok': True, 'jobs': 9, 'group': 'build'}}}
+E._save_state(st)
+rec = E.on_done(960, 'H9960 on the hq roadmap: a made-up build')
+out['done'] = {k: rec.get(k) for k in ('m_est', 'latest', 'actual')}
+out['done_sweep'] = Ms.sweep()
+out['after_done'] = team()
+print(json.dumps(out))
+""")
+        need(o["ok"]["told"] == [] and o["ok"]["pending"] is None, f"F79: a job on time was told: {o['ok']}")
+        need(o["a"]["told"] == ["job 721"] and o["a"]["pending"] is None and o["a_again"]["told"] == [], f"F79: one miss: {o['a']} / again {o['a_again']}")
+        notes = o["after_a"]
+        need(len(notes) == 1 and notes[0].get("quiet") and notes[0]["why"] == "estimate-miss" and "job 721 (build) took 55 minutes" in notes[0]["text"]
+             and "about 20, at the latest 40" in notes[0]["text"], f"F79: her note on her line: {notes}")
+        need(o["waiting"] == ["what is the team doing right now?"], f"F79: her note was taken for an answer to his text: {o['waiting']}")
+        rw = o["b_state"].get("raised_why") or ""
+        need(o["b"]["started"] and o["b_state"].get("raised") and not o["b_state"].get("pending") and "two build jobs in a row" in rw and "2 of the last 20" in rw,
+             f"F79: the repeat isn't raised: {o['b']} {o['b_state']}")
+        need(o["c"]["told"] == ["job 723"] and not o["c"]["started"], f"F79: raised twice in a day: {o['c']}")
+        texts = o["after_c"]
+        need([m["why"] for m in texts] == ["estimate-miss", "estimate-miss", "estimate-misses", "estimate-miss"]
+             and [bool(m.get("quiet")) for m in texts] == [True, True, False, True] and "two build jobs in a row" in texts[2]["text"],
+             f"F79: what stands on her line: {[(m['why'], m.get('quiet')) for m in texts]}")
+        need([m for m in o["donna"]] == [], f"F79: a miss went to Donna's line: {o['donna']}")
+        need("two research jobs in a row" in (o["row"] or "") and "of the last 20" not in o["row"], f"F79: two of one kind in a row: {o['row']}")
+        need("2 of the last 20" in (o["bar"] or "") and "in a row" not in o["bar"], f"F79: the bar: {o['bar']}")
+        need(o["done"] == {"m_est": 5, "latest": 8, "actual": 30} and o["done_sweep"]["told"] == ["job 960"]
+             and any(m.get("quiet") and "job 960" in m["text"] for m in o["after_done"]), f"F79: a job closed for real isn't told: {o['done']} {o['done_sweep']}")
+        import subprocess as _sp
+        bare = {k: v for k, v in env.items() if k not in ("HQ_MISSES", "HQ_DIRECT_DIR")}
+        code = ("import json, sys; sys.path.insert(0, sys.argv[1] + '/routine'); import misses as Ms\n"
+                "h = {'n': 1, 'kind': 'build', 'est': 5, 'm_est': 5, 'latest': 8, 'actual': 90, 'done': 1790000000, 'how': 'seen', 'machine': 'u'}\n"
+                "print(json.dumps([Ms.sweep([h, dict(h, n=2)]), Ms._allowed()]))\n")
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=bare, cwd=str(ROOT), timeout=60)
+        got = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else None
+        need(got and got[0]["told"] == [] and not got[0]["started"] and got[1] is False, f"F79: a test without its own line told someone: {r.stdout} {r.stderr[-300:]}")
+        return "one quiet note per miss on her line, his waiting text still waiting; two builds in a row and 2 in 20 raised once that day; a job closed for real told at the next minute; nothing from a bare test"
+
+    async def flow448(self) -> str:
+        """F79, no Claude: once per job is the job, not its finished line. Job 721 closed twice, once on each computer (two lines,
+        two machines, two times): one note, and it counts once in the last 20, by its latest close, so one job alone trips neither
+        rule and nothing goes to him."""
+        _, _, o = self._misses("f79once", """
+fresh()
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20, machine='t'), line(721, 'build', 20, 40, 58, 21, machine='u')]
+out = {'one': Ms.sweep(hist), 'two': Ms.sweep(hist), 'team': team(), 'repeats': Ms.repeats(hist),
+       'last': [(h['n'], h['machine']) for h in Ms.last(hist)][-2:], 'count': len(Ms.last(hist)), 'state': Ms._load()}
+print(json.dumps(out))
+""")
+        need(o["one"]["told"] == ["job 721"] and o["two"]["told"] == [] and len(o["team"]) == 1, f"F79: one job closed twice gave {len(o['team'])} notes: {o['one']} {o['two']}")
+        need(o["repeats"] == [] and not o["one"]["started"] and not o["state"].get("pending"), f"F79: one job alone tripped a rule: {o['repeats']}")
+        need(o["count"] == 19 and o["last"][-1] == [721, "u"], f"F79: the job doesn't count once by its latest close: {o['count']} {o['last']}")
+        return "one job closed on both computers: one note, counted once by its latest close, no repeat"
+
+    async def flow449(self) -> str:
+        """F79, no Claude: two computers on one line. Each has its own state folder; the backup's minute tells nothing and raises
+        nothing, the main's tells each miss once and raises the repeat once; and a second main on the same line (a takeover with a
+        state of its own) adds no second note and no second text: the note's and the text's line ids are the job's and the day's."""
+        import shutil as _sh
+        ws, env = self._h298_ws("f79pair")
+        a, b, c = (self.tmp / f"f79pair-{x}" for x in "abc")
+        for d in (a, b, c):
+            d.mkdir()
+        sup = self.tmp / "f79pair-backup-support"
+        sup.mkdir()
+        (sup / "role.json").write_text(json.dumps({"peer": "the-main", "main": "the-main"}))
+        (sup / "role-state.json").write_text(json.dumps({"acting": "backup"}))
+        hist = ("hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20), line(722, 'build', 20, 40, 61, 21)]\n")
+        for d in (a, b, c):  # each one's first look, before the misses
+            self._misses("f79pair", "Ms.sweep([])\nprint(json.dumps(Ms._load()))\n", {"HQ_ESTIMATES": str(d)}, ws_env=(ws, dict(env)))
+        _, _, ob = self._misses("f79pair", hist + "print(json.dumps({'sweep': Ms.sweep(hist), 'main': Ms._main(), 'team': team()}))\n",
+                                {"HQ_ESTIMATES": str(b), "HQ_SUPPORT": str(sup)}, ws_env=(ws, dict(env)))
+        need(ob["main"] is False and ob["sweep"]["told"] == [] and not ob["sweep"]["started"] and ob["team"] == [], f"F79: the backup told or raised: {ob}")
+        _, _, oa = self._misses("f79pair", hist + "print(json.dumps({'sweep': Ms.sweep(hist), 'state': Ms._load(), 'team': team()}))\n",
+                                {"HQ_ESTIMATES": str(a)}, ws_env=(ws, dict(env)))
+        need(oa["sweep"]["told"] == ["job 721", "job 722"] and oa["state"].get("raised") and [m["why"] for m in oa["team"]] == ["estimate-miss", "estimate-miss", "estimate-misses"],
+             f"F79: the main: {oa['sweep']} {[m['why'] for m in oa['team']]}")
+        _, _, oc = self._misses("f79pair", hist + "print(json.dumps({'sweep': Ms.sweep(hist), 'state': Ms._load(), 'team': team()}))\n",
+                                {"HQ_ESTIMATES": str(c)}, ws_env=(ws, dict(env)))
+        need(oc["state"].get("raised") and [m["why"] for m in oc["team"]] == ["estimate-miss", "estimate-miss", "estimate-misses"],
+             f"F79: a second main on one line wrote again: {[m['why'] for m in oc['team']]}")
+        _sh.rmtree(sup, ignore_errors=True)
+        return "the backup's minute tells nothing; the main tells twice and raises once; a second main on the same line adds nothing"
+
+    async def flow450(self) -> str:
+        """F79, no Claude: nothing is marked done before it went. A note that can't be written isn't told and is written at the next
+        minute; a repeat whose text fails stays pending, is never marked raised, and goes at the next minute; the note carries its
+        row's id when the row is on the record, and the record has the step (F103)."""
+        ws, env = self._h298_ws("f79fail")
+        broken = self.tmp / "f79fail-a-file"
+        broken.write_text("not a folder")
+        _, _, o1 = self._misses("f79fail", """
+import trail
+fresh()
+item = trail.written('H9721', 'a made-up row', by='flow 450')
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20)]
+print(json.dumps({'sweep': Ms.sweep(hist), 'state': Ms._load(), 'item': item}))
+""", {"HQ_TEAM_LINE_DIR": str(broken / "team-line")}, ws_env=(ws, dict(env)))
+        need(o1["sweep"]["told"] == [] and "job 721" not in (o1["state"].get("told") or []), f"F79: a note that wasn't written counted as told: {o1}")
+        _, _, o2 = self._misses("f79fail", """
+import trail
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20), line(722, 'build', 20, 40, 61, 21)]
+started = []
+real = Ms._start_raise
+Ms._start_raise = lambda: started.append(1)
+one = Ms.sweep(hist)
+d = Ms._dl()
+send = d.text
+def fails(*a, **k):
+    raise OSError('the line fell over')
+d.text = fails
+try:
+    Ms.raise_pending(); said = 'went'
+except OSError as e:
+    said = str(e)
+after_fail = Ms._load()
+d.text = send
+Ms._start_raise = real
+two = Ms.sweep(hist)
+steps = [x for x in trail.lines() if x.get('step') == 'text']
+print(json.dumps({'one': one, 'said': said, 'after_fail': after_fail, 'two': two, 'state': Ms._load(), 'team': team(), 'steps': steps}))
+""", ws_env=(ws, dict(env)))
+        need(o2["one"]["told"] == ["job 721", "job 722"] and o2["one"]["started"], f"F79: the notes at the next minute: {o2['one']}")
+        need(o2["said"] == "the line fell over" and not o2["after_fail"].get("raised") and (o2["after_fail"].get("pending") or {}).get("why"),
+             f"F79: a failed repeat was marked raised or lost: {o2['said']} {o2['after_fail']}")
+        need(o2["two"]["started"] and o2["state"].get("raised") and not o2["state"].get("pending")
+             and [m["why"] for m in o2["team"]] == ["estimate-miss", "estimate-miss", "estimate-misses"], f"F79: the repeat didn't go the next minute: {o2['two']} {o2['state']}")
+        item = o1["item"]
+        need(o2["team"][0].get("item") == item and any(x.get("id") == item and x.get("why") == "estimate-miss" for x in o2["steps"]),
+             f"F79: the note doesn't carry its row's id, or the record has no step: {o2['team'][0]} {o2['steps']}")
+        return "a note not written is written at the next minute; a failed repeat stays pending and goes at the next; the note carries its row's id and the record its step"
+
+    async def flow451(self) -> str:
+        """F79, no Claude: with no line of hers (HQ_TEAM_LINE=0, as without Moneypenny on a friend's HQ) a miss is never written on
+        Donna's line, which he reads: it's kept in the misses' own file, told once. And the Mac app's inbox counts no quiet note
+        as unread and shows none as a notification."""
+        import subprocess as _sp
+        _, _, o = self._misses("f79off", """
+fresh()
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20)]
+print(json.dumps({'sweep': Ms.sweep(hist), 'again': Ms.sweep(hist), 'state': Ms._load(), 'donna': donna(),
+                  'note': dl.note('estimate-miss', 'made up', '', 'x1'), 'donna2': donna()}))
+""", {"HQ_TEAM_LINE": "0"})
+        need(o["sweep"]["kept"] == ["job 721"] and o["sweep"]["told"] == [] and o["again"]["kept"] == [] and o["donna"] == [] and o["donna2"] == []
+             and o["note"].get("skipped"), f"F79: with no line of hers a note went to Donna's: {o}")
+        need(len(o["state"].get("kept") or []) == 1 and "job 721" in o["state"]["kept"][0]["facts"], f"F79: the miss isn't kept: {o['state']}")
+        js = r"""
+const fs = require('fs');
+const src = fs.readFileSync('desktop/shell.html', 'utf8');
+const i = src.indexOf('inbox(d, seen, told, looking) {');
+const j = src.indexOf('\n    zoom(pct)', i);
+var $ = () => ({ textContent: '', title: '', classList: { toggle() {} } });
+var hq = { dragMap() {} };
+const o = eval('({' + src.slice(i, j).trim().replace(/,$/, '') + '})');
+const d = { agent: { name: 'M' }, messages: [{ from: 'agent', at: 10, text: 'hers' }, { from: 'agent', at: 20, text: 'a note', quiet: true }] };
+console.log(JSON.stringify(o.inbox(d, 1, 1, false)));
+"""
+        r = _sp.run(["node", "-e", js], capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+        need(r.returncode == 0, f"F79: the inbox check didn't run: {r.stderr[-500:]}")
+        ib = json.loads(r.stdout.strip().splitlines()[-1])
+        need(ib["unread"] == 1 and [n["text"] for n in ib["notify"]] == ["hers"], f"F79: the Mac app shows her quiet note to him: {ib}")
+        return "no line of hers: nothing on Donna's line, the miss kept in its own file once; the Mac app's inbox leaves quiet notes out"
+
+    async def flow452(self) -> str:
+        """F79, no Claude: a quiet note is honoured everywhere it's read. Her answer's history has the note once, as a note, and not
+        his text she's answering (it comes as his new text); her weekly score doesn't count the note as one of her texts; her chat
+        page shows it as a note and still says she's typing while his text waits."""
+        ws, env = self._h298_ws("f79quiet")
+        _, _, o = self._misses("f79quiet", """
+import pokes
+from pathlib import Path
+with dl._Env(dl.team_env()):
+    dl.add('agent', 'All four jobs are done.')
+    m = dl.add('me', 'what about the fifth one?')
+    dl.note('estimate-miss', 'Noted for myself: job 9 ran long.', '', 'miss-9')
+    waiting = dl.unanswered()
+    h = dl.history([x['id'] for x in waiting])
+tp = pokes.text_pokes('moneypenny', 0, time.time() + 60, Path(os.environ['HQ_WORKSPACE']))
+print(json.dumps({'waiting': [x['text'] for x in waiting], 'history': h, 'pokes': tp}))
+""", ws_env=(ws, env))
+        h = o["history"]
+        need(o["waiting"] == ["what about the fifth one?"], f"F79: his text isn't waiting: {o['waiting']}")
+        need(h.count("job 9 ran long") == 1 and "(a note for yourself" in h and "fifth one" not in h and "All four jobs" in h, f"F79: her answer's history: {h}")
+        need(o["pokes"]["acted"][1] == 1, f"F79: her score counts her note as one of her texts: {o['pokes']}")
+        page = (ROOT / "status" / "direct.html").read_text()
+        need("m.quiet ? ' quiet'" in page and ".filter((m) => !m.quiet).slice(-1)[0]" in page and ".m.quiet" in page,
+             "F79: her chat page doesn't show a quiet note as one, or lets it hide that she's typing")
+        return "her history has the note once and not his text twice; her score doesn't count the note; the page shows it as a note and keeps 'is typing'"
+
+    async def flow453(self) -> str:
+        """F79 and F97, no Claude: her words for a repeat can't invent an action: they say what repeated and that it's for him to
+        look at, an idea only as a proposal. And a transcript with no heading counts as not read only while it's fresh: left
+        untouched for a day, an empty stub is read and empty."""
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "app"))
+        import direct_line as _dl
+        k = _dl.KINDS["estimate-misses"]
+        need("what you're doing about it" not in k and "proposal" in k and "never say you're doing or fixing" in k, f"F79: her words for a repeat: {k}")
+        ws, env = self._ledger_env("f97stub")
+        scan = self.tmp / "f97stub-scan.json"
+        env.update({"HQ_MISTAKES_SCAN": str(scan)})
+        calls = ws / "HQ/calls"
+        calls.mkdir(parents=True, exist_ok=True)
+        sweep = lambda: _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "scan"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        sweep()
+        old, new = calls / "2026-10-29-0800.md", calls / "2026-10-29-0900.md"
+        old.write_text("")
+        new.write_text("")
+        t = time.time() - 2 * 86400
+        os.utime(old, (t, t))
+        sweep()
+        st = json.loads(scan.read_text())
+        need(old.name in st["read"] and old.name not in (st.get("unread") or {}) and new.name in (st.get("unread") or {}),
+             f"F97: an old empty stub isn't read, or a fresh one isn't kept as not read: {st.get('read')} {st.get('unread')}")
+        return "her words for a repeat say it's his to look at, an idea as a proposal; an empty stub left a day is read, a fresh one waits"
+
+    async def flow447(self) -> str:
+        """F79, no Claude: the Friday report reads what F79 built: each job of the week against the measured estimate and latest end
+        it started with (m_est and latest on its finished line), the bar of nine in ten by the latest end, how many were rough,
+        the jobs from before F79 said apart, per kind of work, and the last 20 held to the measured latest against at most 1 in
+        20. Her words for it say nine in ten too."""
+        import subprocess as _sp
+        rm = self.tmp / "roadmap-F79f.md"
+        rm.write_text("# HQ\n\n## The queue\n\n**Routine:** on\n")
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1"}
+        code = """
+import json, sys, time
+sys.path.insert(0, 'routine'); sys.path.insert(0, 'app')
+import estimate as E, direct_line as dl
+now = time.time()
+def line(n, kind, est, late, act, ok=True, about=''):
+    return {'n': n, 'kind': kind, 'est': 99, 'm_est': est, 'latest': late, 'actual': act, 'done': int(now) - 3600 * (n % 50), 'how': 'seen',
+            'machine': 't', 'about': about or f'h9{n} on the hq roadmap: a made-up change', 'sure': {'ok': ok, 'jobs': 12}}
+week = [line(i, 'qa', 10, 20, 12) for i in range(1, 8)] + [line(8, 'build', 20, 40, 39, ok=False), line(9, 'build', 20, 40, 55)]
+old = {'n': 10, 'kind': 'qa', 'est': 10, 'latest': 30, 'actual': 25, 'done': int(now) - 7200, 'how': 'seen', 'machine': 't'}
+gone = dict(line(11, 'qa', 10, 20, 15), done=int(now) - 9 * 86400)
+one = E.friday_report(hist=[gone] + week + [old], now=now)
+two = E.friday_report(hist=[gone] + week + [dict(line(12, 'research', 10, 20, 44), done=int(now) - 60)], now=now)
+twice = E.friday_report(hist=week[:7] + [dict(line(399, 'build', 20, 40, 55), done=int(now) - 900), dict(line(399, 'build', 20, 40, 58), done=int(now) - 300, machine='u')], now=now)
+print(json.dumps({'one': one, 'two': two, 'twice': twice, 'kind': dl.KINDS['estimates']}))
+"""
+        r = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0, f"F79: the Friday report didn't run: {r.stderr[-800:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        one, two = o["one"], o["two"]
+        need("9 of 10 jobs finished by the latest end they were given (90%)" in one and "below nine in ten" not in one, f"F79: the week by the latest end: {one}")
+        need("Past their latest end: build 1 of 2." in one and "1 had too few finished jobs like them" in one
+             and "1 started before the measured estimates" in one, f"F79: per kind, rough and from before: {one}")
+        need("The last 10 jobs held to the measured latest end: 1 past it (the bar is at most 1 in 20)." in one, f"F79: the last 20: {one}")
+        need("8 of 10 jobs finished by the latest end" in two and "below nine in ten" in two and "2 past it (the bar is at most 1 in 20, so it's broken)" in two
+             and "research 1 of 1" in two, f"F79: a week under the bar: {two}")
+        need("nine in ten" in o["kind"] and "eight in ten" not in o["kind"], f"F79: her words for the report still say eight in ten: {o['kind']}")
+        need("Past their latest end: build 1 of 1." in o["twice"] and "7 of 8 jobs" in o["twice"], f"F79: one job closed twice counts twice in the Friday report: {o['twice']}")
+        return "the week held to F79's latest end and nine in ten, per kind, rough and from before said apart, the last 20 against 1 in 20; her words say nine in ten"
+
+    async def flow454(self) -> str:
+        """F79, no Claude: the repeat's hold and tries follow the calendar day. Six failed starts on one day stop, and open the
+        incident estimate-misses (a red line); two days later a new repeat starts its tries over and goes, and the incident
+        closes. A repeat raised at 23:50 holds a new one at 23:55, not one at 00:10 the next day. Past 500 misses none is
+        told twice: the told jobs are kept by number, without a cap."""
+        _, _, o = self._misses("f79day", """
+import incidents
+starts = []
+Ms._start_raise = lambda: starts.append(1)
+day1 = time.mktime((2026, 9, 22, 12, 0, 0, 0, 0, -1))
+fresh()
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20), line(722, 'build', 20, 40, 61, 21)]
+for k in range(8):
+    Ms.sweep(hist, now=day1 + k * 60)
+out = {'day1': len(starts), 'day1_state': Ms._load(), 'down': bool(incidents.is_down('estimate-misses'))}
+hist.append(line(723, 'build', 20, 40, 70, 22))
+r = Ms.sweep(hist, now=day1 + 2 * 86400)
+out['day3'] = r
+Ms._start_raise = lambda: (starts.append(1), Ms.raise_pending())
+Ms.sweep(hist, now=day1 + 2 * 86400 + 60)
+out['day3_state'] = Ms._load(); out['back'] = not incidents.is_down('estimate-misses')
+fresh()  # the calendar day: raised at 23:50
+st = Ms._load(); st['raised'] = time.mktime((2026, 9, 22, 23, 50, 0, 0, 0, -1)); Ms._save(st)
+Ms._start_raise = lambda: starts.append('late')
+h2 = ontime(800) + [line(821, 'research', 10, 20, 31, 20), line(822, 'research', 10, 20, 33, 21)]
+out['2355'] = Ms.sweep(h2, now=time.mktime((2026, 9, 22, 23, 55, 0, 0, 0, -1)))['started']
+h2.append(line(823, 'research', 10, 20, 35, 22))
+out['0010'] = Ms.sweep(h2, now=time.mktime((2026, 9, 23, 0, 10, 0, 0, 0, -1)))['started']
+os.environ['HQ_TEAM_LINE'] = '0'  # no notes on a line: 510 misses kept in the file, fast
+fresh()
+h3 = [line(2000 + i, 'qa', 10, 20, 45, i) for i in range(510)]
+a = Ms.sweep(h3, now=day1); b = Ms.sweep(h3, now=day1 + 60)
+out['many'] = [len(a['kept']), len(b['kept']), len(Ms._load()['told'])]
+print(json.dumps(out))
+""")
+        p1 = o["day1_state"].get("pending") or {}
+        need(o["day1"] == 6 and p1.get("tries") == 6 and p1.get("id") == "misses-2026-09-22" and o["down"], f"F79: six failed starts don't stop or open the incident: {o['day1']} {p1} down {o['down']}")
+        p3 = o["day3"].get("pending") or {}
+        need(p3.get("id") == "misses-2026-09-24" and p3.get("tries") == 1 and o["day3"]["started"], f"F79: a new day's repeat inherits the old tries: {p3}")
+        need(o["day3_state"].get("raised") and not o["day3_state"].get("pending") and o["back"], f"F79: the new day's repeat didn't go, or the incident stays open: {o['day3_state']} back {o['back']}")
+        need(o["2355"] is False and o["0010"] is True, f"F79: the hold doesn't follow the calendar day: 23:55 {o['2355']}, 00:10 {o['0010']}")
+        need(o["many"] == [510, 0, 510], f"F79: past 500 misses the oldest are told again: {o['many']}")
+        return "six failed starts stop and open the incident; a new day's repeat starts over, goes, and closes it; the hold is the calendar day; 510 misses told once each"
+
     async def flow440(self) -> str:
         """The small list, no Claude: a fresh install's workspace from the template counts every data change this HQ has as run, so the first
         minute runs none on the brand-new folder and going back never undoes one it never had. An existing list is never written over."""
@@ -36631,6 +37120,17 @@ FLOWS = {
     441: ("The small list: a download says why it can't go back yet, never that there's no version before; made a git copy with one tag, one back is found", False, "flow441"),
     442: ("The small list: forward brings back what she hadn't committed when she went back, and says so; where it can't land it stays on its branch, named", False, "flow442"),
     443: ("The small list: a workspace without backend switches gets the briefing and every start is under the cap; the undo takes back only its own file; a Deep start is measured whole", False, "flow443"),
+    444: ("F97: each second look of the ledger is kept with what it cost, a failed one marked, another part's look left out, and the score prints the week's total", False, "flow444"),
+    445: ("F97: the pass reads every transcript it hasn't read: a late one with an older name once, one it can't read counted as not read in both scores and tried again, a call read until it ends, a late text", False, "flow445"),
+    446: ("F79: the main's minute puts one quiet note per missed job on her line; a repeat (two of a kind in a row, or more than 1 in 20) she raises with him once a day, once it went; a real close told; never from a bare test", False, "flow446"),
+    447: ("F79: the Friday report holds the week to the latest end each job started with and nine in ten, per kind, rough and older jobs apart, and the last 20 against 1 in 20", False, "flow447"),
+    448: ("F79: one job closed twice, on both computers, is one note and counts once in the last 20 by its latest close: alone it trips no rule", False, "flow448"),
+    449: ("F79: two computers on one line: the backup tells and raises nothing, the main once, a second main adds no note and no text", False, "flow449"),
+    450: ("F79: a note not written and a repeat whose text failed are never marked done, and go at the next minute; the note carries its row's id and the record its step", False, "flow450"),
+    451: ("F79: with no line of hers no note goes on Donna's line, it's kept in its own file; the Mac app counts no quiet note and shows none", False, "flow451"),
+    452: ("F79: a quiet note in her answer's history once and not his text twice, not counted as her text in her score, shown as a note on her page with is typing kept", False, "flow452"),
+    453: ("F79 and F97: her words for a repeat can't invent an action, an idea only as a proposal; an empty stub left a day is read and empty, a fresh one waits", False, "flow453"),
+    454: ("F79: six failed sends stop and open an incident, a new day's repeat starts over and closes it; the hold is the calendar day; past 500 misses none is told twice", False, "flow454"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),
