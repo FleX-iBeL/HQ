@@ -20357,6 +20357,107 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
         need(not any("HQ/backend.json".startswith(x) for x in _role.LOCAL_ON_BACKUP), "the switches' file stays local on the backup")
         return "a fresh install has all five on and counts the change as run; HQ's four earlier files get the five once and undo byte for byte; switches set by hand, or turned since, stay"
 
+    async def flow471(self) -> str:
+        """H235, gap 3, no Claude: an extension's own flows have a home. A made-up extensions folder: one extension declares a flows
+        folder with a flow that passes and one that fails (and a helper and a note that aren't flows), one is switched off with a flow
+        that would fail, one names a folder that isn't there. Each flow runs on a throwaway workspace from HQ's template with a copy of
+        the extension (its own script runs the usual way there, nothing reaches the real folder), the command says which passed and
+        which failed and why, and the nightly's flow (472) fails on it named as the extension's, then passes once its flows do."""
+        import subprocess as sp, importlib, shutil as _sh
+        base = self.tmp / "gap3"
+        if base.exists():
+            _sh.rmtree(base)
+        ext = base / "extensions"
+        keep = {k: os.environ.get(k) for k in ("HQ_EXTENSIONS_FOLDER", "HQ_EXTENSIONS_STATE", "HQ_EXTENSIONS_CHECK")}
+        os.environ.update({"HQ_EXTENSIONS_FOLDER": str(ext), "HQ_EXTENSIONS_STATE": str(base / "state.json"),
+                           "HQ_EXTENSIONS_CHECK": str(base / "check.json")})
+        d = ext / "demo-tested"
+        (d / "flows").mkdir(parents=True)
+        (d / "extension.json").write_text(json.dumps({"name": "Demo Tested", "what": "A made-up extension with flows of its own, for flow 471.",
+                                                     "scripts": {"hello": {"run": "hello.py", "what": "says where it runs"}}, "flows": "flows"}))
+        (d / "hello.py").write_text("import os\nprint('hello from', os.environ['HQ_EXTENSION'])\n")
+        (d / "flows" / "a_pass.py").write_text(
+            "import os, subprocess, sys\n"
+            "ws, me = os.environ['HQ_WORKSPACE'], os.environ['HQ_EXTENSION']\n"
+            "assert me.startswith(ws) and os.path.exists(os.path.join(ws, 'me.md')), 'not on a throwaway workspace from the template'\n"
+            "assert os.environ['HQ_ROADMAP'].startswith(ws) and os.environ['HQ_UNDER_TEST'] == '1' and os.path.isdir(os.environ['HQ_FLOW_TMP'])\n"
+            "r = subprocess.run([sys.executable, os.environ['HQ_ROOT'] + '/app/extensions.py', 'run', 'demo-tested', 'hello'], capture_output=True, text=True)\n"
+            "assert r.returncode == 0 and r.stdout.strip() == 'hello from ' + me, r.stdout + r.stderr\n"
+            "open(os.path.join(me, 'wrote-here'), 'w').write('x')\n"
+            "print('the made-up hello came back')\n")
+        (d / "flows" / "b_fail.sh").write_text("echo 'looking at the made-up inbox'\necho 'the made-up inbox had no mail'\nexit 3\n")
+        (d / "flows" / "_helper.py").write_text("raise SystemExit(9)\n")
+        (d / "flows" / "notes.txt").write_text("not a flow\n")
+        (ext / "off-tested" / "flows").mkdir(parents=True)
+        (ext / "off-tested" / "extension.json").write_text(json.dumps({"name": "Off Tested", "what": "Switched off.", "on": False, "flows": "flows"}))
+        (ext / "off-tested" / "flows" / "x.sh").write_text("exit 1\n")
+        (ext / "gone").mkdir()
+        (ext / "gone" / "extension.json").write_text(json.dumps({"name": "Gone", "what": "Its flows folder isn't there.", "flows": "nope"}))
+        sys.path.insert(0, str(APP))
+        try:
+            ex = importlib.reload(importlib.import_module("extensions"))
+            alls = {e["id"]: e for e in ex.all_()}
+            need([Path(f).name for f in alls["demo-tested"]["flows"]] == ["a_pass.py", "b_fail.sh"] and not alls["demo-tested"]["problems"],
+                 f"the flows aren't read from the folder it names: {alls['demo-tested']['flows']} {alls['demo-tested']['problems']}")
+            need("its flows folder isn't there" in alls["gone"]["problems"] and alls["gone"]["flows"] == [], f"a missing flows folder: {alls['gone']}")
+            res = await asyncio.to_thread(ex.flows)
+            got = {(r["ext"], r["flow"]): r for r in res}
+            need(set(got) == {("demo-tested", "flows/a_pass.py"), ("demo-tested", "flows/b_fail.sh")},
+                 f"the wrong flows ran (an off one, a helper or a note?): {sorted(got)}")
+            ok, bad = got[("demo-tested", "flows/a_pass.py")], got[("demo-tested", "flows/b_fail.sh")]
+            need(ok["ok"] and ok["exit"] == 0, f"the passing flow: {ok}")
+            need(not bad["ok"] and bad["exit"] == 3 and bad["said"] == "the made-up inbox had no mail", f"the failing flow: {bad}")
+            need(not (d / "wrote-here").exists(), "a flow wrote into the real extension's folder, not its copy")
+            r = sp.run([sys.executable, str(APP / "extensions.py"), "flows"], capture_output=True, text=True, env=os.environ, timeout=300)
+            need(r.returncode == 1 and "PASS Demo Tested (demo-tested): flows/a_pass.py" in r.stdout
+                 and "FAIL Demo Tested (demo-tested): flows/b_fail.sh exit 3: the made-up inbox had no mail" in r.stdout,
+                 f"the command doesn't say which passed and which failed: {r.stdout} {r.stderr[-300:]}")
+            r = sp.run([sys.executable, str(APP / "extensions.py"), "flows", "gone"], capture_output=True, text=True, env=os.environ, timeout=60)
+            need(r.returncode == 0 and "No extension has flows of its own" in r.stdout, f"only one extension's flows: {r.stdout}")
+            need("its own flows: flows/a_pass.py, flows/b_fail.sh" in ex.summary(), "the list doesn't show an extension's flows")
+            # The nightly's flow, on this folder: failed, named as the extension's, never HQ's; green once its flows are.
+            try:
+                await self.flow472()
+                need(False, "the nightly's flow passed with a failing extension flow")
+            except Failed as e:
+                said = str(e)
+            need("the extension Demo Tested (demo-tested): its flow flows/b_fail.sh failed (exit 3: the made-up inbox had no mail)" in said
+                 and "fix it there, never in HQ's files" in said and "the extension Gone (gone): its flows folder isn't there" in said
+                 and "a_pass" not in said and "Off Tested" not in said, f"the nightly's failure isn't named as the extension's: {said}")
+            (d / "flows" / "b_fail.sh").unlink()
+            _sh.rmtree(ext / "gone")
+            passed = await self.flow472()
+            need(passed == "1 flow of 1 extension passes", f"the nightly's flow once the extension's flows pass: {passed}")
+            need(not FLOWS[472][1] and str(472) not in __import__("flowsets").MAC_ONLY.split(","), "the nightly set doesn't run the extensions' flows")
+            doc = (ROOT / "EXTENSIONS.md").read_text()
+            need("**flows**" in doc and "happy flow 472" in doc and "extensions.py flows" in doc and "throwaway workspace" in doc,
+                 "EXTENSIONS.md doesn't say how an extension's flows work")
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        return "a passing and a failing flow of a made-up extension, each on its own copy; the off one and a helper not run, a missing folder named; the nightly's flow fails named as the extension's, then passes"
+
+    async def flow472(self) -> str:
+        """H235, gap 3, no Claude: their own extensions' flows, in the nightly set. Every extension that's on and names a flows folder
+        gets each of its flows run on a throwaway workspace (extensions.flows); one that fails fails this flow, named as the
+        extension's, in its own folder, never HQ's. No extension with flows of its own: nothing to run, and it passes."""
+        import importlib
+        sys.path.insert(0, str(APP))
+        ex = importlib.import_module("extensions")
+        gone = [e for e in ex.on() if "its flows folder isn't there" in e["problems"]]
+        res = await asyncio.to_thread(ex.flows)
+        bad = [r for r in res if not r["ok"]]
+        said = [f"the extension {r['name']} ({r['ext']}): its flow {r['flow']} failed (exit {r['exit']}" + (f": {r['said']})" if r["said"] else ")")
+                for r in bad] + [f"the extension {e['name']} ({e['id']}): its flows folder isn't there" for e in gone]
+        need(not said, lambda: "; ".join(said) + ". It's the extension's own, in HQ/extensions: fix it there, never in HQ's files")
+        if not res:
+            return "no extension has flows of its own"
+        n = len({r["ext"] for r in res})
+        return f"{len(res)} flow{'s' if len(res) != 1 else ''} of {n} extension{'s' if n != 1 else ''} pass{'es' if len(res) == 1 else ''}"
+
     async def flow241(self) -> str:
         """F106, no Claude: a call's start is under the size the design sets, for every agent, on a workspace filled with made-up work: a long
         to-do list, a long status block, many planning rows, a big handbook. No life file is loaded whole; nothing of the rules is lost: every
@@ -36624,6 +36725,8 @@ FLOWS = {
     442: ("The small list: forward brings back what she hadn't committed when she went back, and says so; where it can't land it stays on its branch, named", False, "flow442"),
     443: ("The small list: a workspace without backend switches gets the briefing and every start is under the cap; the undo takes back only its own file; a Deep start is measured whole", False, "flow443"),
     470: ("H301: the five backend switches on by default at the stable version: a fresh install has all five; an HQ that updates gets them once unless it set its own; the undo gives its file back", False, "flow470"),
+    471: ("H235, gap 3: an extension's own flows have a home: a made-up one with a passing and a failing flow, each on its own copy; the command and the nightly's flow name the failure as the extension's", False, "flow471"),
+    472: ("H235, gap 3: their own extensions' flows, every night: each flow of an extension that's on, on a throwaway workspace; a failure is named as the extension's, never HQ's", False, "flow472"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),
@@ -36982,7 +37085,7 @@ FLOWS = {
 # history, which grows every day (217 s on 23 October, 360 s on 27 October), and checks all of it: it gets
 # twenty minutes instead of checking less. Its time is in the summary, next to its limit, so a climb shows.
 FLOW_LIMIT = 360
-FLOW_LIMITS = {44: 1200, 294: 420, 295: 14500, 300: 600, 301: 900, 302: 600, 303: 600, 371: 600, 373: 600}  # F115: 371 and 373 run two Syncthings each
+FLOW_LIMITS = {44: 1200, 472: 1800, 294: 420, 295: 14500, 300: 600, 301: 900, 302: 600, 303: 600, 371: 600, 373: 600}  # F115: 371 and 373 run two Syncthings each; 472: every extension's own flows, two minutes each at most
 
 
 def limit_of(n: int) -> int:
