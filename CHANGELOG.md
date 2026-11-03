@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Donna's chat has a switch at the top to Moneypenny's chat, with her earlier texts in it, and one tap brings you back. Texting her there reaches her and she answers there. Without Moneypenny on your HQ the switch doesn't show (H300).
+
 - The team runs again in the first hours after a reset. Your usage reserve no longer pushes the team's stop line down to almost nothing at the start of a week (or below zero at the start of a 5-hour window): the team's line now stays at 15 points at the least, the agents' five under it, and from a line of 30 on the whole reserve is kept, as before. A job running across a 5-hour reset is no longer held for it. The status page draws that same line. A reset time that can't be read no longer counts as a fresh window. You can turn the 15 with usageline.py least N, and 0 keeps the whole reserve always (F113).
 
 - A release can really go out, and its gate tells the truth: it looks at what each commit brings, so a merge of finished work goes along; the night's test run starts by itself, also with the team off, and says which commit it ran on, and a release of anything newer is refused unless only tests changed. Running a release twice on the same commit does nothing the second time and says so.
