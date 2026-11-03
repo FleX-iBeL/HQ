@@ -4,6 +4,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- HQ's own tests on the second computer can no longer reach your real to-do list on the main one. A test that lost track of its own memory used that computer's real link to the main and added empty rows there; now any test that would use the real link is stopped, the tests that did it keep to their own folder, and a new test checks it (F137).
 - Items built and checked by hand get their proof from one test run: the quick set runs once on the commit, each item's own tests run after it, and every item with changes in that commit gets its own record, red only for what failed for it or for all. QA only passes an item on a run that holds all of its changes, and a run stopped by its time limit cleans up after itself (F121).
 - Your own extensions can bring their own tests. Put them in a folder inside the extension and name it under "flows" in its extension.json: HQ runs them every night together with its own checks, each on a throwaway copy so nothing touches your real files, and when one fails the morning's result names your extension, not HQ. You can also run them yourself with app/extensions.py flows. EXTENSIONS.md says how.
 - Steps you added to the mail check yourself (an extension's mail step, for example one that reads another mail app) now run every hour, also when nothing new came into Gmail. On such a quiet hour only your own step runs; HQ's own mail work still waits for new Gmail mail.

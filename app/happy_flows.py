@@ -23626,6 +23626,7 @@ print(json.dumps({"lost": lost}))
 """
         ids = ["calendar", "todo", "texts", "travel", "news", "notes"]
         env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_") or k in ("HQ_UNDER_TEST", "HQ_NO_WALL", "HQ_REAL_ROADMAP", "HQ_REAL_SUPPORT")}
+        env["HQ_SUPPORT"] = str(T / "support")  # F137: its own HQ memory, never this computer's real pairing
         procs = [sp.Popen([sys.executable, "-c", code, str(ROOT), str(T / "ws"), i, str(go)], stdout=sp.PIPE, stderr=sp.PIPE,
                           text=True, env=env) for i in ids]
         await asyncio.sleep(1.5)
@@ -23650,7 +23651,8 @@ print(json.dumps({"lost": lost}))
         f = T / "challenges.md"
         shutil.copy(ROOT / "template/challenges.md", f)
         env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_") or k in ("HQ_UNDER_TEST", "HQ_NO_WALL", "HQ_REAL_ROADMAP", "HQ_REAL_SUPPORT")}
-        env.update({"HQ_TODO": str(f), "HQ_TODO_UNDO": str(T / "undo.json"), "HQ_TODO_SWEEP": "0", "HQ_FOLDER": str(T)})
+        env.update({"HQ_TODO": str(f), "HQ_TODO_UNDO": str(T / "undo.json"), "HQ_TODO_SWEEP": "0", "HQ_FOLDER": str(T),
+                    "HQ_SUPPORT": str(T / "support")})  # F137: on its own, never this computer's real pairing
         head = "import sys, os, json, time\nsys.path[:0] = [sys.argv[1] + '/app', sys.argv[1] + '/routine']\nimport todo\n"
         setup = head + ("todo.add('groceries', '\\n'.join(f'grocery {i}' for i in range(30)))\n"
                         "todo.add('4', '\\n'.join(f'item {i}' for i in range(30)))\n")
@@ -23694,7 +23696,8 @@ print(json.dumps({"lost": lost}))
         f = T / "challenges.md"
         shutil.copy(ROOT / "template/challenges.md", f)
         env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_") or k in ("HQ_UNDER_TEST", "HQ_NO_WALL", "HQ_REAL_ROADMAP", "HQ_REAL_SUPPORT")}
-        env.update({"HQ_TODO": str(f), "HQ_TODO_UNDO": str(T / "undo.json"), "HQ_TODO_SWEEP": "0", "HQ_FOLDER": str(T)})
+        env.update({"HQ_TODO": str(f), "HQ_TODO_UNDO": str(T / "undo.json"), "HQ_TODO_SWEEP": "0", "HQ_FOLDER": str(T),
+                    "HQ_SUPPORT": str(T / "support")})  # F137: on its own; dropping it read the laptop's real pairing
         td = lambda *a: sp.run([sys.executable, str(APP / "todo.py"), *a], env=env, capture_output=True, text=True, timeout=60)
         need(td("add", "1", "His own item", "--by", "in the app").returncode == 0, "his add failed")
         need(td("add", "1", "The agent's item", "--by", "Donna, in the chat").returncode == 0, "the agent's add failed")
@@ -23709,6 +23712,76 @@ print(json.dumps({"lost": lost}))
         src = (APP / "bot.py").read_text()
         need('_todo.undo, by)' in src and 'args + ["--by", by])' in src, "the page's undo doesn't say it's his")
         return "his undo took back his own add, the agent's row and log line stayed; hers took back hers; nothing twice; the page's undo is his"
+
+    async def flow475(self) -> str:
+        """F137, no Claude: a test never hands a write to the real main. A stand-in for this computer's own HQ memory (where it
+        is in a home, paired as the backup with a main that listens on this computer), and HQ_REAL_SUPPORT naming a throwaway
+        as the wall has it, the way flow 376 ran on the laptop on 3 November: todo.py add, with HQ_SUPPORT on the stand-in and
+        with HQ_SUPPORT dropped, is refused the hand-over and written on the test's own list; nothing reaches the main, nothing
+        is kept for it. Outside a test the same stand-in reads as paired, so the refusal is the guard's."""
+        import socket
+        import subprocess as sp
+        T = self.tmp / "f137-real-pairing"
+        home = T / "home"
+        stand = home / ("Library/Application Support/HQ" if sys.platform == "darwin" else ".local/state/hq")
+        stand.mkdir(parents=True)
+        lst = socket.socket()
+        lst.bind(("127.0.0.1", 0))
+        lst.listen(8)
+        lst.setblocking(False)
+        port = lst.getsockname()[1]
+        pairing = json.dumps({"name": "laptop", "peer": f"https://127.0.0.1:{port}/", "peer_name": "server", "main": "server",
+                              "chosen_at": 1})
+        (stand / "role.json").write_text(pairing)
+        (stand / "role-state.json").write_text(json.dumps({"acting": "backup"}))
+        f = T / "challenges.md"
+        shutil.copy(ROOT / "template/challenges.md", f)
+        base = {k: v for k, v in os.environ.items() if (not k.startswith("HQ_") or k in ("HQ_UNDER_TEST", "HQ_NO_WALL", "HQ_REAL_ROADMAP"))
+                and k != "XDG_STATE_HOME"}
+        base.update({"HOME": str(home), "HQ_REAL_SUPPORT": str(T / "wall-support"), "HQ_TODO": str(f),
+                     "HQ_TODO_UNDO": str(T / "undo.json"), "HQ_TODO_SWEEP": "0", "HQ_FOLDER": str(T)})
+        probe = ("import sys, json; sys.path.insert(0, sys.argv[1]); import role, hqpaths\n"
+                 "h = role.hand('todo', ['add', '1', 'probe'])\n"
+                 "print(json.dumps([role._test_on_real_pairing(), bool(role.config()), role.acting(), h[0], h[3], 'F17' in h[2],"
+                 " hqpaths.real_support() == role.SUPPORT]))")
+        notes = []
+        for how, env in (("on the stand-in", {**base, "HQ_SUPPORT": str(stand)}), ("with HQ_SUPPORT dropped", base)):
+            try:
+                r = await asyncio.to_thread(sp.run, [sys.executable, "-c", probe, str(ROOT / "routine")], env=env,
+                                            capture_output=True, text=True, timeout=60)
+            except sp.TimeoutExpired:
+                raise Failed(f"{how}: a test's hand-over went to the stand-in's main and waited there (the guard let it through)")
+            got = json.loads((r.stdout.strip().splitlines() or ["null"])[-1] or "null")
+            need(got and got[:6] == [True, False, "main", 3, "alone", True],
+                 f"{how}: a test still reads or hands through the real pairing: {r.stdout[-300:]} {r.stderr[-300:]}")
+            need(got[6] is False, f"{how}: HQ_REAL_SUPPORT names the stand-in, so this doesn't try what broke: {got}")
+            row = f"F137 row {how}"
+            r = await asyncio.to_thread(sp.run, [sys.executable, str(APP / "todo.py"), "add", "1", row, "--by", "Donna, in the chat"],
+                                        env=env, capture_output=True, text=True, timeout=60)
+            need(r.returncode == 0 and f"| {row} |" in f.read_text(), f"{how}: the test's add didn't land on its own list: "
+                 f"{r.returncode} {r.stdout[-300:]} {r.stderr[-300:]}")
+            need("handed" not in r.stdout and "backup" not in r.stdout, f"{how}: the add says it went to the main: {r.stdout[-300:]}")
+            notes.append(how)
+        reached = 0
+        while True:
+            try:
+                c, _ = lst.accept()
+                c.close()
+                reached += 1
+            except (BlockingIOError, OSError):
+                break
+        lst.close()
+        need(reached == 0, f"the stand-in's main was reached {reached} times from a test")
+        need(not (stand / "role-pending.jsonl").exists(), "a test's request was kept to be handed to the main")
+        need((stand / "role.json").read_text() == pairing, "the stand-in's pairing was changed")
+        outside = {k: v for k, v in base.items() if k != "HQ_UNDER_TEST"}
+        r = await asyncio.to_thread(sp.run, [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import role; "
+                                             "print(bool(role.config()), role.acting())", str(ROOT / "routine")],
+                                    env=outside, capture_output=True, text=True, timeout=60)
+        need(r.stdout.split() == ["True", "backup"], f"outside a test the stand-in should read as paired: {r.stdout} {r.stderr[-200:]}")
+        return (f"a test on a stand-in of this computer's own HQ memory, paired as the backup ({' and '.join(notes)}), "
+                "with HQ_REAL_SUPPORT on a throwaway: no pairing read, the hand-over refused (F17), todo.py's add on its own list, "
+                "the main never reached, nothing kept; outside a test the same stand-in reads as paired")
 
     # -- F114: the doors hold on calls and texts too ------------------------------------------------------------------------------
 
@@ -38308,6 +38381,7 @@ FLOWS = {
     374: ("F115: 60 switches at once lose none", False, "flow374"),
     375: ("F115: 60 ticks and done marks with two agents writing give no error, nothing lost", False, "flow375"),
     376: ("F115: undo takes back his own last change, an agent's after it stays; hers takes back hers", False, "flow376"),
+    475: ("F137: a test never hands a write to the real main: on a stand-in of this computer's own HQ memory, paired, with HQ_REAL_SUPPORT on a throwaway, todo.py's add is refused the hand-over and stays on its own list; the main never reached", False, "flow475"),
     185: ("H298, piece 1: the handbook under each agent's character behind the switch (in pieces, off by default): the template's blank handbook and cycle defaults, off loads nothing, on loads part one and her own section, Moneypenny's craft trimmed", False, "flow185"),
 }
 

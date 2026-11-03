@@ -77,6 +77,26 @@ def real_support() -> str:
             os.environ["HQ_SUPPORT"] = saved
 
 
+def own_support_dirs() -> set:
+    """F137 (3 November 2026): where this computer's own HQ memory is when nothing points it elsewhere, worked out from
+    the account's home (its own and HOME's), never from HQ_SUPPORT or HQ_REAL_SUPPORT. A test that dropped HQ_SUPPORT on
+    the laptop read the real role.json there while HQ_REAL_SUPPORT named the wall's throwaway, so the check that compared
+    the two let three of its to-do rows through to the real main."""
+    homes = {os.path.expanduser("~")}
+    try:
+        import pwd
+        homes.add(pwd.getpwuid(os.getuid()).pw_dir)
+    except Exception:
+        pass
+    out = set()
+    for h in filter(None, homes):
+        out.add(os.path.realpath(os.path.join(h, "Library", "Application Support", "HQ") if IS_MAC
+                                 else os.path.join(h, ".local", "state", "hq")))
+    if not IS_MAC and os.environ.get("XDG_STATE_HOME"):
+        out.add(os.path.realpath(os.path.join(os.environ["XDG_STATE_HOME"], "hq")))
+    return out
+
+
 def guard_beside_roadmap(path: str) -> None:
     """F17, F104: stop when a test is about to write a file in the real workspace's own folder, next to its roadmap: a process can hold the real path
     from its import, or from a refused run that keeps a line before it's refused."""

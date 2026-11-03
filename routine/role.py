@@ -199,8 +199,13 @@ def _log(msg):
 
 def _test_on_real_pairing() -> bool:
     """A test (HQ_UNDER_TEST) whose HQ memory is this computer's real one, so it would read the real role.json:
-    only throwaway HQs with their own HQ_SUPPORT may pair under a test (flow 65)."""
-    return hqpaths.under_test() and os.path.realpath(SUPPORT) == hqpaths.real_support()
+    only throwaway HQs with their own HQ_SUPPORT may pair under a test (flow 65).
+    F137: whether this is the real memory is decided by the path itself (hqpaths.own_support_dirs), whatever
+    HQ_REAL_SUPPORT says; HQ_REAL_SUPPORT only adds one more place that counts as real (flow 67's stand-in)."""
+    if not hqpaths.under_test():
+        return False
+    here = os.path.realpath(SUPPORT)
+    return here == hqpaths.real_support() or here in hqpaths.own_support_dirs()
 
 
 def config() -> dict:
