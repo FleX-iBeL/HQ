@@ -23653,14 +23653,17 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
             b = banner()
             need(b["state"] == "WAITING" and starts(b["line"], "The routine"), f"the routine's own Waiting: {b}")
             at6 = datetime.now() - timedelta(minutes=60)
-            done6 = (at6 + timedelta(minutes=2)).strftime("%H:%M")
-            self._f116_road(site, "WAITING", f"- Job 6 · done {done6} on {at6:%Y-%m-%d} · agreed 2026-11-02 09:00 · a test build", ago=60, step="built, waiting for him to try it")
+            d6 = at6 + timedelta(minutes=2)  # the done mark's day and time from the same moment
+            self._f116_road(site, "WAITING", f"- Job 6 · done {d6:%H:%M} on {d6:%Y-%m-%d} · agreed 2026-11-02 09:00 · a test build", ago=60, step="built, waiting for him to try it")
             b = banner()
-            need(b["state"] == "WAITING" and starts(b["line"], "Job 6"), f"a job's Waiting: {b}")
+            if d6.date() == self._f116_at.date():
+                need(b["state"] == "WAITING" and starts(b["line"], "Job 6"), f"a job's Waiting: {b}")
+            else:  # the server's own edge: a job done just after midnight is never credited to a block written just before it
+                need(b["state"] == "WAITING" and starts(b["line"], "A chat"), f"a job done past midnight, its block from before: {b}")
             self._f116_road(site, "WAITING", "", ago=1, step="your answer")
             b = banner()
             need(b["state"] == "WAITING" and starts(b["line"], "A chat") and "1 minutes" not in b["line"]
-                 and (said("A chat")[0].startswith("A chat said on ") or re.search(r"\b(1 minute|2 minutes) ago", b["line"])), f"the wording, a minute on: {b}")
+                 and (b["line"].startswith("A chat said on ") or re.search(r"\b(1 minute|2 minutes) ago", b["line"])), f"the wording, a minute on: {b}")
             # The fourth check's 1: a done mark from another day, or one without its day, doesn't make a chat's Waiting a job's.
             mark = (at6 + timedelta(minutes=7)).strftime("%H:%M")
             self._f116_road(site, "WAITING", f"- Job 6 · done {mark} · agreed 2026-11-01 09:00 · an old build", ago=60, step="your answer on the plan")
