@@ -167,30 +167,22 @@ def _save_boxes(d) -> None:
 
 def estimate_of(job):
     """(the likely minutes, the latest end), with the guesses taken in; (None, None) when the job has no estimate. F79: the
-    measured ones (measured.py): the estimate a started job keeps, else the one it would start with now."""
+    measured ones (measured.py): the estimate a started job keeps, else the one it would start with now. A guess written
+    once the box is set changes neither (his words on MOST_TIMES: "in total it could get 4x it's initial estimate")."""
     import estimate as E
     n, text = job["n"], job.get("text", "")
     e = E.known(n)
     if not e.get("est"):
         return None, None
-    hist = E.all_history()
-    d = E.job_estimate(n, text, hist)
-    guess, _, fit = E.pick_guess(e, E.guess_fits(hist))
-    est = E.with_guess(d["est"], guess, fit)
-    lat = max(d["latest"], E.latest_of(est, d["kind"], hist))
     try:
-        import measured
-        m = own_estimate(n) or measured.apply({"est": est, "latest": lat}, d["kind"], E._about(text), e, hist, "start")
+        m = E.start_estimate(n, text)  # F79: the one the gate checked and the job starts with
         return m["est"], m["latest"]
     except Exception:
-        return est, lat
-
-
-def own_estimate(n):
-    """F79: the measured estimate job n keeps from its start, its own guess at its start in it ({"est", "latest", ...}), or None."""
-    import estimate as E
-    m = E.known(n).get("m")
-    return m if isinstance(m, dict) and m.get("est") and m.get("latest") else None
+        hist = E.all_history()
+        d = E.job_estimate(n, text, hist)
+        guess, _, fit = E.pick_guess(e, E.guess_fits(hist))
+        est = E.with_guess(d["est"], guess, fit)
+        return est, max(d["latest"], E.latest_of(est, d["kind"], hist))
 
 
 def latest_minutes(job):
@@ -214,11 +206,6 @@ def box_for(job) -> dict | None:
         _save_boxes(d)
     first, raised, used = rec["first_box"], rec.get("raised") or 1, rec.get("minutes") or 0
     cap = _cap(rec)
-    try:  # F79: never boxed before its own latest end, also when its own guess at its start moved that end later
-        own = math.ceil((own_estimate(job["n"]) or {}).get("latest") or 0)
-    except Exception:
-        own = 0
-    first, cap = max(first, own), max(cap, own)
     total = min(cap, first * raised)
     left = total - used
     if left < BOX_LEFT:  # a job carrying on always gets a little, but never past the most it can have

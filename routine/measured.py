@@ -52,6 +52,7 @@ ANY_LAST = 60      # with too few guesses in its group: a guess corrected by how
 Q_TOP = 0.9        # the latest end: where this share of the group's last jobs landed against their estimate
 WIDE = (1.3, 6.0)  # the latest end is at least and at most this many times the likely time
 Q_LOW = 0.1        # the usage range: from this share to Q_TOP of the kind's last jobs
+USE_MAX = 4        # a job's usage grows with its own likely time over its group's middle one, at most this many times
 KEYS = {"start": ("guess", "guess_call", "guess_look"), "add": ("guess_call", "guess_look")}
 
 
@@ -183,10 +184,11 @@ def time_of(kind, about, e, hist, moment="add"):
             "guess_used": used, "sure": {"ok": True, "jobs": min(len(grp), LAST), "group": name}}
 
 
-def cost_of(kind, hist, plan=None, keep=None):
+def cost_of(kind, hist, plan=None, keep=None, scale=1.0):
     """The usage of one job like it, at the plan's own rate (F107): {"five", "weekly", "how": "measured", "based",
     "plan", "tokens", "range", "five_range", "weekly_range"} and, apart, its latest {"five", "weekly"}; (None, None)
-    under SURE_MIN of its kind with tokens, or with no rate. keep: today's cost, for a line the plan has no rate for."""
+    under SURE_MIN of its kind with tokens, or with no rate. keep: today's cost, for a line the plan has no rate for.
+    scale: how much bigger than its group's middle job this one is (scale_of); the middle and the top grow with it."""
     import usagecost as U
     plan = plan or U.current_plan()
     model = U.load_rate(plan)
@@ -198,7 +200,11 @@ def cost_of(kind, hist, plan=None, keep=None):
     if len(toks) < SURE_MIN:
         return None, None
     mid, lo, hi = statistics.median(toks), _quant(toks, Q_LOW), _quant(toks, Q_TOP)
+    scale = min(USE_MAX, max(1.0, scale or 1.0))
+    mid, hi = mid * scale, hi * scale
     out = {"how": "measured", "based": len(toks), "plan": plan, "tokens": round(mid), "range": [round(lo), round(hi)]}
+    if scale > 1:
+        out["scale"] = round(scale, 2)
     late = {}
     for k in U.KEYS:
         r = model["rate"].get(k)
@@ -217,7 +223,7 @@ def apply(x, kind, about, e, hist, moment="add"):
     x["sure"] = m["sure"]
     if m["sure"]["ok"]:
         x["est"], x["latest"] = m["est"], m["latest"]
-        x["based"] = m["sure"]["jobs"]
+        x["based"], x["group_mid"] = m["sure"]["jobs"], m["alone"]
         x.pop("computed", None)
         x.pop("guess_used", None)
         if m["guess_used"] and m["alone"] != m["est"]:
@@ -233,15 +239,28 @@ def put(x, kind, about, e, hist, moment="add", text=""):
     """F79: the measured time (apply) and usage on x, next to each other: "cost", "cost_how", "cost_latest" and, when
     measured, "cost_range" and the whole "cost_detail". Under SURE_MIN of its kind with tokens: today's usage, made
     again from the time when that changed, its latest at the latest end. Returns x."""
-    import usagecost as U
     before = x.get("est")
     apply(x, kind, about, e, hist, moment)
-    c, late = cost_of(kind, hist, keep=x.get("cost"))
+    return cost_put(x, kind, hist, text, before)
+
+
+def scale_of(x):
+    """F79: a job bigger than its group's middle one uses more: its likely time over the group's middle likely time,
+    never under 1, at most USE_MAX. 1 when its time isn't measured (today's usage is per minute, so it follows already)."""
+    mid = x.get("group_mid")
+    return min(USE_MAX, max(1.0, x["est"] / mid)) if mid and x.get("est") else 1.0
+
+
+def cost_put(x, kind, hist, text="", before=None):
+    """F79: the usage half of put, on x that already has its time. before: its minutes before the time was made, so
+    today's per-minute usage is made again when they changed."""
+    import usagecost as U
+    c, late = cost_of(kind, hist, keep=x.get("cost"), scale=scale_of(x))
     if c:
         x["cost"], x["cost_how"], x["cost_latest"], x["cost_detail"] = {k: c[k] for k in U.KEYS}, "measured", late, c
         x["cost_range"] = {k: c[k + "_range"] for k in U.KEYS if c.get(k + "_range")}
     elif x.get("est"):
-        if x.get("cost") is None or x["est"] != before:
+        if x.get("cost") is None or (before is not None and x["est"] != before):
             t = U.cost_for(x["est"], text, kind, hist)
             x["cost"], x["cost_how"] = {k: t[k] for k in U.KEYS}, t["how"]
         if x.get("latest"):

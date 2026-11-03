@@ -701,10 +701,11 @@ def job_cost(n, text, hist=None, latest=False):
     hist = E.all_history() if hist is None else hist
     d = E.job_estimate(n, text, hist)
     c = cost_for(d["est"], text, d.get("kind"), hist)
-    try:  # F79: the same measured estimate the page and the planning show, so the gate holds what they say
+    try:  # F79: what the job will start with (its box takes the same), so the gate checks the latest end it's held to
         import measured
-        x = measured.put({"est": d["est"], "latest": d["latest"], "cost": {k: c[k] for k in KEYS}, "cost_how": c["how"]},
-                         d.get("kind"), E._about(text), E.known(n), hist, text=text)
+        m = E.start_estimate(n, text, hist)
+        x = measured.cost_put({**m, "cost": {k: c[k] for k in KEYS}, "cost_how": c["how"]}, d.get("kind"), hist, text,
+                              before=d["est"])
         if x.get("cost_detail"):
             c = dict(x["cost_detail"])
         elif x["est"] != d["est"]:

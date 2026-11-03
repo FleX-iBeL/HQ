@@ -1511,18 +1511,44 @@ def on_start(n, text=""):
         print(f"(the usage count couldn't start: {ex!r})", file=sys.stderr)
 
 
-def _measured_start(e, text):
-    """F79: the estimate a job starts with, built from what jobs like it really took (measured.py), with the guesses it
-    has by then: kept as e["m"] {"est", "latest", "sure", "based", "computed", "guess_used"}. Its latest goes on its
-    finished line, so the live check holds it to the latest it was given when it started."""
+def _start_from(e, text, hist=None):
+    """F79: the estimate a job starts with, from its line e (kind, size, guesses): today's number with its guesses,
+    then built from what jobs like it really took (measured.py, the start moment). {"est", "latest", "sure", "based",
+    "computed", "guess_used", "group_mid", "kind"}. The one place it's made: the gate, the box and the start take it."""
+    import measured
+    hist = all_history() if hist is None else hist
+    d = estimate_detail(text, hist, e.get("kind"), size=e.get("size"))
+    g, _, gf = pick_guess(e, guess_fits(hist))
+    est = with_guess(d["est"], g, gf)
+    x = measured.apply({"est": est, "latest": max(d["latest"], latest_of(est, d["kind"], hist))}, d["kind"], _about(text),
+                       e, hist, "start")
+    out = {k: x[k] for k in ("est", "latest", "sure", "based", "computed", "guess_used", "group_mid") if k in x}
+    return {**out, "kind": d["kind"]}
+
+
+def start_estimate(n, text, hist=None):
+    """F79: what job n starts with, or started with: the one it keeps from its start (e["m"]), else made now."""
+    e = known(n)
+    m = e.get("m")
+    if isinstance(m, dict) and m.get("est") and m.get("latest"):
+        return {**m, "kind": m.get("kind") or e.get("kind")}
+    return _start_from(e, text, hist)
+
+
+def _boxed(n):
+    """F79: has job n's box (F100) been set? From then on a guess changes nothing it's held to."""
     try:
-        import measured
-        hist = all_history()
-        g, _, gf = pick_guess(e, guess_fits(hist))
-        est = with_guess(e.get("est") or DEFAULT, g, gf)
-        x = measured.apply({"est": est, "latest": latest_of(est, e.get("kind"), hist)}, e.get("kind"), _about(text), e,
-                           hist, "start")
-        e["m"] = {k: x[k] for k in ("est", "latest", "sure", "based", "computed", "guess_used") if k in x}
+        import wall
+        return "first_box" in (wall._boxes().get(str(n)) or {})
+    except Exception:
+        return False
+
+
+def _measured_start(e, text):
+    """F79: the estimate a job starts with, kept as e["m"]. Its latest goes on its finished line, so the live check holds it
+    to the latest it was given when it started, the same one its box is set from."""
+    try:
+        e["m"] = _start_from(e, text)
     except Exception as ex:
         print(f"(F79: the measured estimate couldn't be made at the start: {ex!r})", file=sys.stderr)
 
@@ -1537,8 +1563,8 @@ def on_guess(n, minutes, text=""):
         st = _load_state()
     e = st[str(n)]
     e["guess"], e["guess_at"] = int(minutes), int(time.time())
-    if e.get("started"):
-        _measured_start(e, text)  # F79: its own guess at its start is in the latest it's held to
+    if e.get("started") and not _boxed(n):
+        _measured_start(e, text)  # F79: a guess before its box is set is in the latest it's held to; one after changes nothing
     st[str(n)] = e
     _save_state(st)
     return e
@@ -2333,11 +2359,12 @@ def plan(now=None):
         guess, gkey, gf = pick_guess(ke, gfits)  # H190: a waiting job's guesses are in its estimate from the start
         computed, est = est, with_guess(est, guess, gf)
         mx = {}
-        try:  # F79: built from what jobs like it really took, with its range and how sure it is
+        try:  # F79: what it will start with (the gate and its box take the same), from what jobs like it really took
             import measured
-            mx = measured.apply({"est": est, "latest": latest_of(est, kind, hist)}, kind, _about(j["text"]), ke, hist)
+            mx = start_estimate(j["n"], j["text"], hist)
+            est = mx["est"]
             if mx["sure"]["ok"]:
-                est, computed, gkey = mx["est"], mx.get("computed", mx["est"]), mx.get("guess_used") or gkey
+                computed, gkey = mx.get("computed", mx["est"]), mx.get("guess_used") or gkey
         except Exception as ex:
             print(f"(F79: the measured estimate couldn't be made for job {j['n']}: {ex!r})", file=sys.stderr)
         try:  # F78: a held job that carries on in its own chat counts what's left of it, as the gate does
@@ -2363,12 +2390,12 @@ def plan(now=None):
         crange = None
         if mx and not hl:  # F79: its latest end and its usage, measured
             lat = mx["latest"]
-            mc, ml = measured.cost_of(kind, hist, keep=cost) if cost else (None, None)
-            if mc:
-                cost, late = {**mc, "how": "measured"}, ml
-                crange = {k: mc[k + "_range"] for k in U.KEYS if mc.get(k + "_range")}
-            elif cost:
-                late = U.at_latest(cost, est, lat)
+            if cost:
+                y = measured.cost_put({"est": est, "latest": lat, "group_mid": mx.get("group_mid"),
+                                       "cost": {k: cost[k] for k in U.KEYS}, "cost_how": cost["how"]}, kind, hist, j["text"])
+                if y["cost_how"] == "measured":
+                    cost, crange = {**y["cost_detail"], "how": "measured"}, y.get("cost_range")
+                late = y["cost_latest"]
         if hl and cost:  # F78: what's left of it, at least a picked-up turn
             cost = {**cost, **hl["cost"], "how": "left"}
             lat, late = hl["latest"], dict(hl["cost_latest"])
