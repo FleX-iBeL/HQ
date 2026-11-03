@@ -17,7 +17,8 @@ told once and one repeat raised once, whatever closed it where:
     row's id when it's on the record (F103). Without her line (no Moneypenny, or HQ_TEAM_LINE=0, as on a friend's HQ) no note
     is written anywhere he reads: it's kept in this file only (misses.py shows it). It counts as told only once it's written.
   * a repeat goes to him through her, as a text on her line (estimate-misses), at most once a calendar day (the day of its
-    line id, so two computers and the hold agree), when either:
+    line id, so two computers and the hold agree), and at least GAP_S (12 hours, his pick) after the last one that really went,
+    when either:
       - the bar is broken: more than MOST of the last WINDOW counted jobs ran past their latest end (2 or more in 20), or
       - the same kind of work missed twice in a row: the last two counted jobs of one kind (measured.group) both ran past it.
     [Both rules are the builder's reading of "escalate if things repeat" next to "at most 1 miss in 20".]
@@ -55,6 +56,7 @@ MOST = 1
 INCIDENT = "estimate-misses"  # the red line when a repeat couldn't be sent after TRIES tries
 RETRY_S = int(os.environ.get("HQ_MISSES_RETRY") or 600)  # a repeat that didn't go is tried again after this
 TRIES = 6
+GAP_S = 12 * 3600  # his pick (3 November 2026): "every 12 hours i think is best": since the last repeat that really went
 KEPT_MOST = 50
 STATE = os.path.join(E.DIR, "estimate-misses.json")
 
@@ -184,6 +186,28 @@ def _raised_today(st: dict, now: float) -> bool:
     return bool(r) and raise_id(float(r)) == raise_id(now)
 
 
+def _line_raised() -> float:
+    """When the newest repeat stands on her line (Donna's, without hers): the text itself, which reaches the other computer
+    through the sync, so a new main after a takeover knows when the last one went though its own state doesn't. 0 for none."""
+    try:
+        dl = _dl()
+        if dl.line_for("estimate-misses") == "team" and not dl.on_team_line():
+            with dl._Env(dl.team_env()):
+                msgs = dl.thread()
+        else:
+            msgs = dl.thread()
+        return max((float(m.get("at") or 0) for m in msgs if m.get("why") == "estimate-misses" and not m.get("quiet")), default=0.0)
+    except Exception as e:
+        print(f"(her line couldn't be read for the last repeat: {e!r})", file=sys.stderr)
+        return 0.0
+
+
+def _gap_left(st: dict, now: float) -> bool:
+    """Less than GAP_S since the last repeat that really went: a pending one waits, and the wait isn't a try."""
+    r = st.get("raised")
+    return bool(r) and now - float(r) < GAP_S
+
+
 def _incident(down: bool, why: str = "") -> None:
     try:
         import incidents
@@ -245,6 +269,10 @@ def sweep(hist: list[dict] | None = None, now: float | None = None) -> dict:
             told.append(job_key(h))
         st["told"] = told  # every missed job by number, no cap: past any number of misses none is told twice
         why = repeats(hist) if new else []
+        if why or st.get("pending"):  # its own record of the last repeat, else the newest on her line (a takeover's empty state)
+            seen = _line_raised()
+            if seen > float(st.get("raised") or 0):
+                st["raised"] = seen
         if why and not _raised_today(st, now):
             p = st.get("pending") or {}
             same = p.get("id") == raise_id(now)  # today's repeat again: its tries go on; a new day's starts over
@@ -253,7 +281,7 @@ def sweep(hist: list[dict] | None = None, now: float | None = None) -> dict:
         p = st.get("pending")
         if p and _raised_today(st, now):
             st["pending"] = p = None  # it went meanwhile
-        start = bool(p) and now - float(p.get("last") or 0) >= RETRY_S and int(p.get("tries") or 0) < TRIES
+        start = bool(p) and not _gap_left(st, now) and now - float(p.get("last") or 0) >= RETRY_S and int(p.get("tries") or 0) < TRIES
         if start:
             p["tries"], p["last"] = int(p.get("tries") or 0) + 1, now
         gave_up = bool(p) and not start and int(p.get("tries") or 0) >= TRIES

@@ -20360,10 +20360,10 @@ hist.append(line(723, 'qa', 10, 20, 45, 23)); out['c'] = Ms.sweep(hist)
 out['after_c'] = team(); out['donna'] = donna()
 fresh()  # two of one kind in a row, the last 20 holding only one of them
 h2 = [line(800, 'research', 10, 20, 30, 0)] + ontime(801, 20)
-h2.append(line(830, 'research', 10, 20, 31, 30)); Ms.sweep(h2); out['row'] = Ms._load().get('raised_why')
+h2.append(line(830, 'research', 10, 20, 31, 30)); Ms.sweep(h2); out['row'] = ' '.join(Ms.repeats(h2))  # the rule it breaks (today's repeat already stands on her line)
 fresh()  # two of different kinds within the last 20
 h3 = ontime(900) + [line(950, 'release', 10, 20, 25, 18), line(951, 'research', 10, 20, 26, 19)]
-Ms.sweep(h3); out['bar'] = Ms._load().get('raised_why')
+Ms.sweep(h3); out['bar'] = ' '.join(Ms.repeats(h3))
 fresh()
 st = E._load_state()
 st['960'] = {'est': 5, 'kind': 'build', 'started': int(time.time()) - 1800, 'm': {'est': 5, 'latest': 8, 'sure': {'ok': True, 'jobs': 9, 'group': 'build'}}}
@@ -20422,7 +20422,9 @@ print(json.dumps(out))
     async def flow449(self) -> str:
         """F79, no Claude: two computers on one line. Each has its own state folder; the backup's minute tells nothing and raises
         nothing, the main's tells each miss once and raises the repeat once; and a second main on the same line (a takeover with a
-        state of its own) adds no second note and no second text: the note's and the text's line ids are the job's and the day's."""
+        state of its own) adds no second note and no second text: the note's and the text's line ids are the job's and the day's.
+        After a takeover the new main, its state empty, takes the last repeat's time from her line: the old main's at 23:58 holds
+        a repeat at 00:05 untried until 11:58."""
         import shutil as _sh
         ws, env = self._h298_ws("f79pair")
         a, b, c = (self.tmp / f"f79pair-{x}" for x in "abc")
@@ -20447,7 +20449,29 @@ print(json.dumps(out))
         need(oc["state"].get("raised") and [m["why"] for m in oc["team"]] == ["estimate-miss", "estimate-miss", "estimate-misses"],
              f"F79: a second main on one line wrote again: {[m['why'] for m in oc['team']]}")
         _sh.rmtree(sup, ignore_errors=True)
-        return "the backup's minute tells nothing; the main tells twice and raises once; a second main on the same line adds nothing"
+        # the takeover: the old main raised at 23:58 (its text reached this one's line through the sync); the new main starts at
+        # 00:00 with an empty state and a repeat comes at 00:05: it waits for the 12 hours, untried, and goes at 11:58
+        tws, tenv = self._h298_ws("f79takeover")
+        (tws / "HQ/team-line").mkdir(parents=True, exist_ok=True)
+        old_at = time.mktime((2026, 11, 3, 23, 58, 0, 0, 0, -1))
+        (tws / "HQ/team-line/thread.jsonl").write_text(json.dumps({"at": old_at, "from": "agent", "why": "estimate-misses", "id": "misses-2026-11-03",
+                                                                   "text": "The estimates keep slipping: two builds in a row."}) + "\n")
+        _, _, ot = self._misses("f79takeover", """
+starts = []
+Ms._start_raise = lambda: starts.append(1)
+at = lambda d, h, m: time.mktime((2026, 11, d, h, m, 0, 0, 0, -1))
+Ms.sweep([], now=at(4, 0, 0))  # the new main's first look, its state empty
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20), line(722, 'build', 20, 40, 61, 21)]
+out = {}
+for k, t in (('0005', at(4, 0, 5)), ('1157', at(4, 11, 57)), ('1158', at(4, 11, 58))):
+    w = Ms.sweep(hist, now=t)
+    out[k] = [w['started'], (w['pending'] or {}).get('tries')]
+out['starts'] = len(starts)
+print(json.dumps(out))
+""", ws_env=(tws, tenv))
+        need(ot["0005"] == [False, 0] and ot["1157"] == [False, 0] and ot["1158"] == [True, 1] and ot["starts"] == 1,
+             f"F79: after a takeover the 12 hours since the old main's repeat are skipped: {ot}")
+        return "the backup's minute tells nothing; the main tells twice and raises once; a second main on the same line adds nothing; after a takeover the new main waits the 12 hours from the old one's repeat"
 
     async def flow450(self) -> str:
         """F79, no Claude: nothing is marked done before it went. A note that can't be written isn't told and is written at the next
@@ -20623,7 +20647,8 @@ print(json.dumps({'one': one, 'two': two, 'twice': twice, 'kind': dl.KINDS['esti
     async def flow454(self) -> str:
         """F79, no Claude: the repeat's hold and tries follow the calendar day. Six failed starts on one day stop, and open the
         incident estimate-misses (a red line); two days later a new repeat starts its tries over and goes, and the incident
-        closes. A repeat raised at 23:50 holds a new one at 23:55, not one at 00:10 the next day. Past 500 misses none is
+        closes. A repeat raised at 23:58 holds a new one at 23:59 by the calendar day, and one at 00:01 the next day by his 12 hours: it waits
+        as pending, untried, and goes at 11:58. Past 500 misses none is
         told twice: the told jobs are kept by number, without a cap."""
         _, _, o = self._misses("f79day", """
 import incidents
@@ -20641,13 +20666,20 @@ out['day3'] = r
 Ms._start_raise = lambda: (starts.append(1), Ms.raise_pending())
 Ms.sweep(hist, now=day1 + 2 * 86400 + 60)
 out['day3_state'] = Ms._load(); out['back'] = not incidents.is_down('estimate-misses')
-fresh()  # the calendar day: raised at 23:50
-st = Ms._load(); st['raised'] = time.mktime((2026, 9, 22, 23, 50, 0, 0, 0, -1)); Ms._save(st)
+fresh()  # the calendar day and his 12 hours: raised at 23:58
+open(os.path.join(os.environ['HQ_TEAM_LINE_DIR'], 'thread.jsonl'), 'w').close()  # a line without the repeat just sent above
+st = Ms._load(); st['raised'] = time.mktime((2026, 9, 22, 23, 58, 0, 0, 0, -1)); Ms._save(st)
 Ms._start_raise = lambda: starts.append('late')
+at = lambda d, h, m: time.mktime((2026, 9, d, h, m, 0, 0, 0, -1))
 h2 = ontime(800) + [line(821, 'research', 10, 20, 31, 20), line(822, 'research', 10, 20, 33, 21)]
-out['2355'] = Ms.sweep(h2, now=time.mktime((2026, 9, 22, 23, 55, 0, 0, 0, -1)))['started']
+out['2359'] = Ms.sweep(h2, now=at(22, 23, 59))['started']
 h2.append(line(823, 'research', 10, 20, 35, 22))
-out['0010'] = Ms.sweep(h2, now=time.mktime((2026, 9, 23, 0, 10, 0, 0, 0, -1)))['started']
+w = Ms.sweep(h2, now=at(23, 0, 1))
+out['0001'] = [w['started'], (w['pending'] or {}).get('id'), (w['pending'] or {}).get('tries')]
+w = Ms.sweep(h2, now=at(23, 11, 57))
+out['1157'] = [w['started'], (w['pending'] or {}).get('tries')]
+w = Ms.sweep(h2, now=at(23, 11, 58))
+out['1158'] = [w['started'], (w['pending'] or {}).get('tries')]
 os.environ['HQ_TEAM_LINE'] = '0'  # no notes on a line: 510 misses kept in the file, fast
 fresh()
 h3 = [line(2000 + i, 'qa', 10, 20, 45, i) for i in range(510)]
@@ -20660,9 +20692,10 @@ print(json.dumps(out))
         p3 = o["day3"].get("pending") or {}
         need(p3.get("id") == "misses-2026-09-24" and p3.get("tries") == 1 and o["day3"]["started"], f"F79: a new day's repeat inherits the old tries: {p3}")
         need(o["day3_state"].get("raised") and not o["day3_state"].get("pending") and o["back"], f"F79: the new day's repeat didn't go, or the incident stays open: {o['day3_state']} back {o['back']}")
-        need(o["2355"] is False and o["0010"] is True, f"F79: the hold doesn't follow the calendar day: 23:55 {o['2355']}, 00:10 {o['0010']}")
+        need(o["2359"] is False and o["0001"] == [False, "misses-2026-09-23", 0] and o["1157"] == [False, 0] and o["1158"] == [True, 1],
+             f"F79: a repeat raised at 23:58 doesn't hold the next until 11:58, or the wait counts as a try: 23:59 {o['2359']}, 00:01 {o['0001']}, 11:57 {o['1157']}, 11:58 {o['1158']}")
         need(o["many"] == [510, 0, 510], f"F79: past 500 misses the oldest are told again: {o['many']}")
-        return "six failed starts stop and open the incident; a new day's repeat starts over, goes, and closes it; the hold is the calendar day; 510 misses told once each"
+        return "six failed starts stop and open the incident; a new day's repeat starts over, goes, and closes it; raised at 23:58, the next waits untried until 11:58; 510 misses told once each"
 
     async def flow440(self) -> str:
         """The small list, no Claude: a fresh install's workspace from the template counts every data change this HQ has as run, so the first
@@ -37540,7 +37573,7 @@ FLOWS = {
     451: ("F79: with no line of hers no note goes on Donna's line, it's kept in its own file; the Mac app counts no quiet note and shows none", False, "flow451"),
     452: ("F79: a quiet note in her answer's history once and not his text twice, not counted as her text in her score, shown as a note on her page with is typing kept", False, "flow452"),
     453: ("F79 and F97: her words for a repeat can't invent an action, an idea only as a proposal; an empty stub left a day is read and empty, a fresh one waits", False, "flow453"),
-    454: ("F79: six failed sends stop and open an incident, a new day's repeat starts over and closes it; the hold is the calendar day; past 500 misses none is told twice", False, "flow454"),
+    454: ("F79: six failed sends stop and open an incident, a new day's repeat starts over and closes it; a repeat waits 12 hours after the last, untried; past 500 misses none is told twice", False, "flow454"),
     470: ("H301: the five backend switches on by default at the stable version: a fresh install has all five; an HQ that updates gets them once unless it set its own; the undo gives its file back", False, "flow470"),
     471: ("H235, gap 3: an extension's own flows have a home: a made-up one with a passing and a failing flow, each on its own copy; the command and the nightly's flow name the failure as the extension's", False, "flow471"),
     472: ("H235, gap 3: their own extensions' flows, every night: each flow of an extension that's on, on a throwaway workspace; a failure is named as the extension's, never HQ's", False, "flow472"),
