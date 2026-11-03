@@ -824,8 +824,10 @@ KINDS = {
                        "accepted (at most 1 job in 20 past it), or the same kind twice in a row (the facts say which jobs, their "
                        "range and real time, and which rule it broke). Each single slip was yours to handle, and he didn't hear "
                        "about it; this is the repeat, so you raise it. Two or three short sentences: what keeps slipping in "
-                       "everyday words, how often against the bar, and what you're doing about it or the one thing you need "
-                       "from him. Numbers are fine here, he plans with them.",
+                       "everyday words, how often against the bar, and that it's for him to look at. Nothing is being done "
+                       "about it yet unless the facts say so, so never say you're doing or fixing something; if you have an "
+                       "idea, say it plainly as a proposal for him to say yes or no to (\"I'd suggest ...\"). Numbers are "
+                       "fine here, he plans with them.",
     "team": "Something you, as head of the team, want him to know without waiting for a call: a decision you need "
             "from him, a heads-up, what you found (the facts say it). A short text in your own words; when you need "
             "a decision, end with the one question, plainly.",
@@ -1064,13 +1066,15 @@ def note(why: str, facts: str, item: str = "", once: str = "") -> dict:
     """F79, his words of 1 November 2026: "i dont want to hear it when it slips, moneypenny needs to know". A note on her own line
     for her, never pushed to his phone: written as it is (no Claude), it stands in her thread, so she has it when she answers
     there, and the line's reply doesn't take it for an answer to him. once: the line's id, so the same note stands there once."""
-    if once and any(m.get("id") == once for m in thread()):
-        return {"id": once, "already": True}
-    if not on_team_line() and line_for(why) == "team":
+    if not on_team_line():
+        if line_for(why) != "team":  # no line of hers (no Moneypenny, HQ_TEAM_LINE=0): never on Donna's, which he reads
+            return {"skipped": "no team line"}
         with _Env(team_env()):
             m = note(why, facts, item, once)
         m["line"] = "team"
         return m
+    if once and any(m.get("id") == once for m in thread()):
+        return {"id": once, "already": True}
     msg = add("agent", facts, why, item, once, quiet=True)
     _on_record(item, why, "noted for her", msg.get("id", ""))
     return msg
@@ -1171,7 +1175,7 @@ def reply() -> str | None:
             if not mine:
                 break
             words = "\n".join(m["text"] for m in mine)
-            answer = _answer(words)
+            answer = _answer(words, [m.get("id") for m in mine])
             msg = add("agent", answer, "reply")
             push(answer)
             _harvest(answer)
@@ -1182,7 +1186,18 @@ def reply() -> str | None:
     return last
 
 
-def _answer(words: str) -> str:
+def history(ids=(), most: int = 16) -> str:
+    """The chat so far for her answer: the last lines without the texts of his she's answering now (they come as his new
+    text), a quiet note of hers in it as hers (F79), each once."""
+    ids = set(i for i in ids if i)
+    recent = [m for m in thread(last=most + len(ids)) if m.get("id") not in ids][-most:]
+    if not ids and recent and recent[-1].get("from") == "me":  # called without ids: his newest is the new text, as before
+        recent = recent[:-1]
+    return "\n".join(f"{'Her' if m['from'] == 'agent' else 'Him'} ({time.strftime('%d %b %H:%M', time.localtime(m['at']))}): "
+                     f"{'(a note for yourself, never sent to him) ' if m.get('quiet') else ''}{m['text']}" for m in recent)
+
+
+def _answer(words: str, ids=()) -> str:
     if os.environ.get("HQ_DIRECT_DRY") == "1":
         return f"Got it: {words[:80]}"
     import asyncio
@@ -1198,9 +1213,7 @@ def _answer(words: str) -> str:
     pol.pending = [tuple(p) for p in st.get("pending") or []]
     if pol.pending:
         pol.answer(words)  # his yes (or no) to what she asked last time
-    recent = thread(last=16)[:-1]
-    history = "\n".join(f"{'Her' if m['from'] == 'agent' else 'Him'} ({time.strftime('%d %b %H:%M', time.localtime(m['at']))}): "
-                        f"{m['text']}" for m in recent)
+    history_ = history(ids)
     rules = (_text_rules() + _agents.persona(a, user()).replace("on this call", "on this chat")
              .replace("call rules", "chat rules"))
     if os.environ.get("HQ_DIRECT_COACHING") == "1":  # H225: the coaching line, a thread with her only for life coaching
@@ -1227,7 +1240,7 @@ def _answer(words: str) -> str:
         quick_context=quick_context.build(_config.FOLDER, context=ctx) if ctx != "all" else None,
         resume=resume)
     b = _brain.ClaudeBrain(model=a["model"], system_prompt="", cwd=_config.FOLDER, options=opts)
-    prompt = (f"The chat so far, newest last:\n{history}\n\n" if history else "") + f"His new text:\n{words}"
+    prompt = (f"The chat so far, newest last:\n{history_}\n\n" if history_ else "") + f"His new text:\n{words}"
     try:  # H298: what he may be answering: a held change's question can still be in a batch
         sys.path.insert(0, str(ROOT / "routine"))
         import cycles

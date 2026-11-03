@@ -6,24 +6,36 @@ decisions, and escalate if things repeat and she can't fix it herself". The pick
 widen the latest, a miss goes to Moneypenny, at most 1 miss in 20".
 
 A miss: a finished job that ran past the latest end it was given when it started (the `latest` of its finished line, F79's
-measured one; a line without F79's measured estimate, `m_est`, is from before the fix and isn't counted). It's told to her once
-per job, as a note on her own line that isn't pushed to his phone (direct_line.py note estimate-miss): which job, the kind of
-work, its range (likely to latest), its real time, how sure the estimate was.
+measured one; a line without F79's measured estimate, `m_est`, is from before the fix and isn't counted). A job is its number
+on the shared queue, whichever computer closed it and however often: counted once, by its latest close (last()).
 
-A repeat goes to him through her, as a text on her line (estimate-misses), at most once a day (REPEAT_GAP), when either:
-  * the bar is broken: more than MOST of the last WINDOW counted jobs ran past their latest end (2 or more in 20), or
-  * the same kind of work missed twice in a row: the last two counted jobs of one kind (measured.group) both ran past it.
-[Both rules are the builder's reading of "escalate if things repeat" next to "at most 1 miss in 20".]
+Only the main does this, every minute from the routine (tick.py, sweep()), over both computers' finished jobs, so one job is
+told once and one repeat raised once, whatever closed it where:
+
+  * a miss is told to her once per job, as a note on her own line that isn't pushed to his phone (direct_line.py note
+    estimate-miss): which job, the kind of work, its range (likely to latest), its real time, how sure the estimate was; its
+    row's id when it's on the record (F103). Without her line (no Moneypenny, or HQ_TEAM_LINE=0, as on a friend's HQ) no note
+    is written anywhere he reads: it's kept in this file only (misses.py shows it). It counts as told only once it's written.
+  * a repeat goes to him through her, as a text on her line (estimate-misses), at most once a day (REPEAT_GAP), when either:
+      - the bar is broken: more than MOST of the last WINDOW counted jobs ran past their latest end (2 or more in 20), or
+      - the same kind of work missed twice in a row: the last two counted jobs of one kind (measured.group) both ran past it.
+    [Both rules are the builder's reading of "escalate if things repeat" next to "at most 1 miss in 20".]
+    It's sent by a run of its own (her words go through Claude), and counts as raised only once the text stands in her thread;
+    until then it waits as pending and is tried again every RETRY_S, at most TRIES times. The text's line id is the day's, so
+    even two computers on one line give one text.
 
 Never from a test, unless it says so (HQ_MISSES=1) and gave its own line (HQ_DIRECT_DIR); HQ_MISSES_SYNC=1 waits for the text.
 
-    python3 routine/misses.py            the misses so far, the last 20 counted jobs, and whether it repeats now
+    python3 routine/misses.py            the misses so far, the last 20 counted jobs, whether it repeats now, what's kept
+    python3 routine/misses.py raise      send the pending repeat (the routine starts it; it marks it raised once it went)
 Standard library only.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -37,14 +49,17 @@ import estimate as E  # noqa: E402
 
 WINDOW = 20  # his bar: at most 1 miss in 20
 MOST = 1
-REPEAT_GAP = 86400  # an escalation at most once a day; a miss after that, while it still repeats, raises it again [the builder's]
+REPEAT_GAP = 86400  # a repeat raised at most once a day; a miss after that, while it still repeats, raises it again [the builder's]
+RETRY_S = int(os.environ.get("HQ_MISSES_RETRY") or 600)  # a repeat that didn't go is tried again after this
+TRIES = 6
+KEPT_MOST = 50
 STATE = os.path.join(E.DIR, "estimate-misses.json")
 
 
 def counted(h: dict) -> bool:
     """A finished job held to F79's latest end: its line carries the measured estimate it started with."""
     return isinstance(h, dict) and isinstance(h.get("m_est"), (int, float)) and isinstance(h.get("latest"), (int, float)) \
-        and isinstance(h.get("actual"), (int, float))
+        and isinstance(h.get("actual"), (int, float)) and h["actual"] > 0 and h.get("n") is not None
 
 
 def is_miss(h: dict) -> bool:
@@ -56,8 +71,9 @@ def kind_of(h: dict) -> str:
     return measured.group(h.get("kind"), h.get("about") or "")
 
 
-def key(h: dict) -> str:
-    return f"{h.get('machine') or ''}|{h.get('n')}|{h.get('done')}"
+def job_key(h: dict) -> str:
+    """The job itself: its number on the shared queue, the same on both computers and on a second close."""
+    return f"job {h.get('n')}"
 
 
 def _sure(h: dict) -> str:
@@ -77,8 +93,14 @@ def facts(h: dict) -> str:
 
 
 def last(hist: list[dict]) -> list[dict]:
-    """The counted finished jobs, oldest first, by when they finished."""
-    return sorted((h for h in hist if counted(h)), key=lambda h: h.get("done") or 0)
+    """The counted finished jobs, each once (its latest close, whichever computer), oldest first by when they finished."""
+    by: dict = {}
+    for h in hist:
+        if counted(h):
+            k = job_key(h)
+            if k not in by or (h.get("done") or 0) >= (by[k].get("done") or 0):
+                by[k] = h
+    return sorted(by.values(), key=lambda h: h.get("done") or 0)
 
 
 def repeats(hist: list[dict]) -> list[str]:
@@ -122,52 +144,133 @@ def _allowed() -> bool:
     return os.environ.get("HQ_MISSES") == "1" and bool(os.environ.get("HQ_DIRECT_DIR"))
 
 
-def _send(args: list[str]) -> list[str] | None:
-    """direct_line.py with these arguments, detached (the queue's lock is held while a job is closed), or waited for in a test."""
+def _main() -> bool:
+    """Only the main tells and raises: one place decides, whichever computer closed the job."""
+    try:
+        import role
+        return role.acting() == "main"
+    except Exception:
+        return True
+
+
+def _dl():
+    sys.path.insert(0, os.path.join(ROOT, "app"))
+    import direct_line
+    return direct_line
+
+
+def _item_of(h: dict) -> str:
+    """The id of the row a job was for, when the row is on the record already (never a new id made here)."""
+    m = re.match(r"\s*(?:qa of\s+)?([fh]\d+)\b", (h.get("about") or "").lower())
+    if not m:
+        return ""
+    try:
+        import trail
+        return trail.of(m.group(1).upper()) or ""
+    except Exception:
+        return ""
+
+
+def raise_id(now: float) -> str:
+    return "misses-" + time.strftime("%Y-%m-%d", time.localtime(now))
+
+
+def _start_raise() -> None:
     py = os.path.join(ROOT, ".venv", "bin", "python")
-    cmd = [py if os.path.exists(py) else sys.executable, os.path.join(ROOT, "app", "direct_line.py"), *args]
+    cmd = [py if os.path.exists(py) else sys.executable, os.path.abspath(__file__), "raise"]
     try:
         if os.environ.get("HQ_MISSES_SYNC") == "1":
-            subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=120)
+            subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=180)
         else:
             os.makedirs(os.path.join(ROOT, "scratch"), exist_ok=True)
             log = open(os.path.join(ROOT, "scratch", "direct-line.log"), "a")
             subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
     except (OSError, subprocess.SubprocessError) as e:
-        print(f"(the estimate's miss couldn't be told: {e!r})", file=sys.stderr)
-        return None
-    return cmd
+        print(f"(the repeat couldn't be started: {e!r})", file=sys.stderr)
 
 
-def check(rec: dict, hist: list[dict] | None = None, now: float | None = None) -> dict | None:
-    """A job just finished (estimate.on_done): a miss is told to her once, and a repeat raised with him through her, at most once a
-    day. {"miss", "repeat"} of what was told, or None."""
-    if not is_miss(rec) or not _allowed():
-        return None
+def sweep(hist: list[dict] | None = None, now: float | None = None) -> dict:
+    """The routine's minute on the main: every counted miss not told yet gets its note; a repeat waits as pending until its
+    text went. {"told": [job keys], "kept": [...], "pending": ..., "started": bool}."""
+    out = {"told": [], "kept": [], "pending": None, "started": False}
+    if not _allowed() or not _main():
+        return out
     now = time.time() if now is None else now
+    hist = E.all_history() if hist is None else hist
+    jobs = last(hist)
     with hqlock.locked(STATE):
         st = _load()
+        if not st:  # the first look here (a new main, a takeover): what's already past counts as told, nothing old is sent
+            st = {"told": [job_key(h) for h in jobs if is_miss(h)], "since": now}
+            _save(st)
+            return out
         told = list(st.get("told") or [])
-        k = key(rec)
-        if k in told:
-            return None
-        hist = E.all_history() if hist is None else hist
-        if not any(key(h) == k for h in hist):
-            hist = hist + [rec]
-        out = {"miss": facts(rec), "repeat": None}
-        _send(["note", "estimate-miss", out["miss"], "--once", "miss-" + k.replace("|", "-")])
-        told.append(k)
+        new = [h for h in jobs if is_miss(h) and job_key(h) not in told]
+        dl = _dl() if new else None
+        for h in new:
+            words = facts(h)
+            if dl.line_for("estimate-miss") != "team":  # no line of hers: nowhere he reads, only here
+                st.setdefault("kept", []).append({"at": round(now), "job": job_key(h), "facts": words})
+                st["kept"] = st["kept"][-KEPT_MOST:]
+                out["kept"].append(job_key(h))
+            else:
+                try:
+                    m = dl.note("estimate-miss", words, _item_of(h), "miss-" + str(h.get("n")))
+                except Exception as e:
+                    print(f"(the note on job {h.get('n')} couldn't be written: {e!r})", file=sys.stderr)
+                    continue  # not told: tried again the next minute
+                if not m.get("id"):
+                    continue
+                out["told"].append(job_key(h))
+            told.append(job_key(h))
         st["told"] = told[-500:]
-        why = repeats(hist)
+        why = repeats(hist) if new else []
         if why and now - float(st.get("raised") or 0) >= REPEAT_GAP:
-            out["repeat"] = " ".join(why)
-            _send(["text", "estimate-misses", out["repeat"]])
-            st["raised"], st["raised_why"] = now, out["repeat"]
+            p = st.get("pending") or {}
+            st["pending"] = {"why": " ".join(why), "id": raise_id(now), "tries": int(p.get("tries") or 0), "last": float(p.get("last") or 0)}
+        p = st.get("pending")
+        if p and now - float(st.get("raised") or 0) < REPEAT_GAP:
+            st["pending"] = p = None  # it went meanwhile
+        start = bool(p) and now - float(p.get("last") or 0) >= RETRY_S and int(p.get("tries") or 0) < TRIES
+        if start:
+            p["tries"], p["last"] = int(p.get("tries") or 0) + 1, now
+        out["pending"] = p
         _save(st)
+    if start:
+        _start_raise()
+        out["started"] = True
     return out
 
 
+def raise_pending() -> str:
+    """The run of its own: the pending repeat as her text on her line; raised only when it stands there."""
+    lock = open(STATE + ".raise", "a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return "another run is sending it"
+    try:
+        with hqlock.locked(STATE):
+            p = (_load().get("pending") or {})
+        if not p.get("why"):
+            return "nothing pending"
+        m = _dl().text("estimate-misses", p["why"], "", p.get("id") or "")
+        if not (m.get("id") or m.get("held")):
+            return f"it didn't go: {m}"
+        with hqlock.locked(STATE):
+            st = _load()
+            st["raised"], st["raised_why"], st["pending"] = time.time(), p["why"], None
+            _save(st)
+        return "raised"
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
 def main(argv: list[str]) -> int:
+    if argv[:1] == ["raise"]:
+        print(raise_pending())
+        return 0
     hist = E.all_history()
     jobs = last(hist)
     window = jobs[-WINDOW:]
@@ -181,6 +284,10 @@ def main(argv: list[str]) -> int:
     st = _load()
     if st.get("raised"):
         print(f"Last raised with him: {time.strftime('%Y-%m-%d %H:%M', time.localtime(st['raised']))}.")
+    if st.get("pending"):
+        print(f"Waiting to go to him (tried {st['pending'].get('tries')} times): {st['pending'].get('why')}")
+    for k in (st.get("kept") or [])[-10:]:
+        print(f"Kept here, with no line of hers: {k['facts']}")
     return 0
 
 

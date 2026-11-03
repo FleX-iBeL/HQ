@@ -20226,96 +20226,282 @@ print(json.dumps({'lines': s['lines'], 'read': s['pokes']['read'], 'corr': s['po
         need(rd["calls_read"] == 4 and rd["calls_not_read"] == [] and rd["texts_read"] == 1 and rd["texts_not_read"] == 1, f"F97: what the score read: {rd}")
         return "a late transcript with an older name read once; one that can't be read counted as not read in both scores and tried again; a call read again until it ends; a late text read; no line twice"
 
-    async def flow446(self) -> str:
-        """F79, no Claude: a miss goes to Moneypenny, not to him. A finished job past the latest end it started with puts one note on
-        her own line, never pushed and not taken for an answer to his waiting text: which job, its kind, its range and its real time;
-        the same job again adds nothing. A repeat goes to him through her, a text on her line, at most once a day: two jobs of one
-        kind in a row past it, or more than 1 in the last 20; one miss alone, or a job on time, says nothing. A test without its own
-        line and its word never tells anyone. A job closed for real (estimate.on_done) goes the same way."""
-        import subprocess as _sp
-        ws, env = self._h298_ws("f79m")
-        env.update({"HQ_MISSES": "1", "HQ_MISSES_SYNC": "1", "HQ_DIRECT_PLAIN": "1", "HQ_DIRECT_DRY": "1", "HQ_ASLEEP": "0"})
-        code = """
+    MISSES_HEAD = """
 import json, os, sys, time
 sys.path.insert(0, sys.argv[1] + '/routine'); sys.path.insert(0, sys.argv[1] + '/app')
 import misses as Ms, estimate as E, direct_line as dl
-def line(n, kind, est, late, act, i, ok=True):
+def line(n, kind, est, late, act, i, ok=True, machine='t', about=''):
     return {'n': n, 'kind': kind, 'est': est, 'm_est': est, 'latest': late, 'actual': act, 'done': 1790000000 + i * 600, 'how': 'seen',
-            'machine': 't', 'about': f'h9{n} on the hq roadmap: a made-up change', 'sure': {'ok': ok, 'jobs': 12, 'group': kind}}
-def team():
-    p = os.path.join(os.environ['HQ_TEAM_LINE_DIR'], 'thread.jsonl')
+            'machine': machine, 'about': about or f'h9{n} on the hq roadmap: a made-up change', 'sure': {'ok': ok, 'jobs': 12, 'group': kind}}
+def _read(d):
+    p = os.path.join(d, 'thread.jsonl')
     return [json.loads(l) for l in open(p)] if os.path.exists(p) else []
+def team():
+    return [m for m in _read(os.environ['HQ_TEAM_LINE_DIR']) if m['from'] == 'agent']
+def donna():
+    return _read(os.environ['HQ_DIRECT_DIR'])
+def ontime(n0, k=18, kind='qa'):
+    return [line(n0 + i, kind, 10, 20, 12, i) for i in range(k)]
 def fresh():
     if os.path.exists(Ms.STATE):
         os.remove(Ms.STATE)
+    Ms.sweep([])  # the first look here: nothing old is sent
+"""
+
+    def _misses(self, tag, script, more=None, ws_env=None):
+        """F79: a made-up workspace with her line and Donna's, the misses allowed and waited for, a script run there with the
+        helpers above; its last line as JSON."""
+        import subprocess as _sp
+        ws, env = ws_env or self._h298_ws(tag)
+        env.update({"HQ_MISSES": "1", "HQ_MISSES_SYNC": "1", "HQ_DIRECT_PLAIN": "1", "HQ_DIRECT_DRY": "1", "HQ_ASLEEP": "0",
+                    "HQ_MISSES_RETRY": "0", **(more or {})})
+        r = _sp.run([sys.executable, "-c", self.MISSES_HEAD + script, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
+        need(r.returncode == 0, f"F79: the misses didn't run: {r.stderr[-1500:]}")
+        return ws, env, json.loads(r.stdout.strip().splitlines()[-1])
+
+    async def flow446(self) -> str:
+        """F79, no Claude: a miss goes to Moneypenny, not to him. The main's minute (misses.sweep) puts one note on her own line for a
+        finished job past the latest end it started with: never pushed, not taken for an answer to his waiting text; which job, its
+        kind, its range and its real time; the same job again adds nothing. A repeat goes to him through her, a text on her line,
+        once it really went and at most once a day: two jobs of one kind in a row past it, or more than 1 in the last 20; one miss
+        alone, or a job on time, says nothing. A job closed for real (estimate.on_done) is told at the next minute. A test without
+        its own line and its word never tells anyone."""
+        _, env, o = self._misses("f79m", """
+fresh()
 with dl._Env(dl.team_env()):
     dl.add('me', 'what is the team doing right now?')
-hist = [line(700 + i, 'qa', 10, 20, 12, i) for i in range(18)]
+hist = ontime(700)
 out = {}
-ok = line(720, 'build', 20, 40, 30, 20); hist.append(ok)
-out['ok'] = Ms.check(ok, hist)
-a = line(721, 'build', 20, 40, 55, 21, ok=False); hist.append(a)
-out['a'] = Ms.check(a, hist)
-out['a_again'] = Ms.check(a, hist)
+hist.append(line(720, 'build', 20, 40, 30, 20)); out['ok'] = Ms.sweep(hist)
+hist.append(line(721, 'build', 20, 40, 55, 21, ok=False)); out['a'] = Ms.sweep(hist); out['a_again'] = Ms.sweep(hist)
 out['after_a'] = team()
 with dl._Env(dl.team_env()):
     out['waiting'] = [m['text'] for m in dl.unanswered()]
-b = line(722, 'build', 20, 40, 61, 22); hist.append(b)
-out['b'] = Ms.check(b, hist)
-c = line(723, 'qa', 10, 20, 45, 23); hist.append(c)
-out['c'] = Ms.check(c, hist)
-out['after_c'] = team()
-out['donna'] = dl.thread()
+hist.append(line(722, 'build', 20, 40, 61, 22)); out['b'] = Ms.sweep(hist); out['b_state'] = Ms._load()
+hist.append(line(723, 'qa', 10, 20, 45, 23)); out['c'] = Ms.sweep(hist)
+out['after_c'] = team(); out['donna'] = donna()
 fresh()  # two of one kind in a row, the last 20 holding only one of them
-h2 = [line(800, 'research', 10, 20, 30, 0)] + [line(801 + i, 'qa', 10, 20, 12, 1 + i) for i in range(20)]
-r2 = line(830, 'research', 10, 20, 31, 30); h2.append(r2)
-out['row'] = Ms.check(r2, h2)
+h2 = [line(800, 'research', 10, 20, 30, 0)] + ontime(801, 20)
+h2.append(line(830, 'research', 10, 20, 31, 30)); Ms.sweep(h2); out['row'] = Ms._load().get('raised_why')
 fresh()  # two of different kinds within the last 20
-h3 = [line(900 + i, 'qa', 10, 20, 12, i) for i in range(18)] + [line(950, 'release', 10, 20, 25, 18)]
-r3 = line(951, 'research', 10, 20, 26, 19); h3.append(r3)
-out['bar'] = Ms.check(r3, h3)
+h3 = ontime(900) + [line(950, 'release', 10, 20, 25, 18), line(951, 'research', 10, 20, 26, 19)]
+Ms.sweep(h3); out['bar'] = Ms._load().get('raised_why')
 fresh()
 st = E._load_state()
 st['960'] = {'est': 5, 'kind': 'build', 'started': int(time.time()) - 1800, 'm': {'est': 5, 'latest': 8, 'sure': {'ok': True, 'jobs': 9, 'group': 'build'}}}
 E._save_state(st)
 rec = E.on_done(960, 'H9960 on the hq roadmap: a made-up build')
 out['done'] = {k: rec.get(k) for k in ('m_est', 'latest', 'actual')}
+out['done_sweep'] = Ms.sweep()
 out['after_done'] = team()
 print(json.dumps(out))
-"""
-        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
-        need(r.returncode == 0, f"F79: the misses didn't run: {r.stderr[-1200:]}")
-        o = json.loads(r.stdout.strip().splitlines()[-1])
-        need(o["ok"] is None, f"F79: a job on time was told: {o['ok']}")
-        need(o["a"] and o["a"]["repeat"] is None and o["a_again"] is None, f"F79: one miss: {o['a']} / again {o['a_again']}")
-        notes = [m for m in o["after_a"] if m["from"] == "agent"]
+""")
+        need(o["ok"]["told"] == [] and o["ok"]["pending"] is None, f"F79: a job on time was told: {o['ok']}")
+        need(o["a"]["told"] == ["job 721"] and o["a"]["pending"] is None and o["a_again"]["told"] == [], f"F79: one miss: {o['a']} / again {o['a_again']}")
+        notes = o["after_a"]
         need(len(notes) == 1 and notes[0].get("quiet") and notes[0]["why"] == "estimate-miss" and "job 721 (build) took 55 minutes" in notes[0]["text"]
              and "about 20, at the latest 40" in notes[0]["text"], f"F79: her note on her line: {notes}")
         need(o["waiting"] == ["what is the team doing right now?"], f"F79: her note was taken for an answer to his text: {o['waiting']}")
-        need(o["b"] and o["b"]["repeat"] and "two build jobs in a row" in o["b"]["repeat"] and "2 of the last 20" in o["b"]["repeat"],
-             f"F79: the repeat isn't raised: {o['b']}")
-        need(o["c"] and o["c"]["repeat"] is None, f"F79: raised twice in a day: {o['c']}")
-        texts = [m for m in o["after_c"] if m["from"] == "agent"]
+        rw = o["b_state"].get("raised_why") or ""
+        need(o["b"]["started"] and o["b_state"].get("raised") and not o["b_state"].get("pending") and "two build jobs in a row" in rw and "2 of the last 20" in rw,
+             f"F79: the repeat isn't raised: {o['b']} {o['b_state']}")
+        need(o["c"]["told"] == ["job 723"] and not o["c"]["started"], f"F79: raised twice in a day: {o['c']}")
+        texts = o["after_c"]
         need([m["why"] for m in texts] == ["estimate-miss", "estimate-miss", "estimate-misses", "estimate-miss"]
              and [bool(m.get("quiet")) for m in texts] == [True, True, False, True] and "two build jobs in a row" in texts[2]["text"],
              f"F79: what stands on her line: {[(m['why'], m.get('quiet')) for m in texts]}")
-        need(not o["donna"], f"F79: a miss went to Donna's line: {o['donna']}")
-        need(o["row"] and o["row"]["repeat"] and "two research jobs in a row" in o["row"]["repeat"] and "of the last 20" not in o["row"]["repeat"],
-             f"F79: two of one kind in a row: {o['row']}")
-        need(o["bar"] and o["bar"]["repeat"] and "2 of the last 20" in o["bar"]["repeat"] and "in a row" not in o["bar"]["repeat"], f"F79: the bar: {o['bar']}")
-        need(o["done"] == {"m_est": 5, "latest": 8, "actual": 30} and any(m.get("quiet") and "job 960" in m["text"] for m in o["after_done"]),
-             f"F79: a job closed for real isn't told: {o['done']} {[m['text'][:60] for m in o['after_done']]}")
+        need([m for m in o["donna"]] == [], f"F79: a miss went to Donna's line: {o['donna']}")
+        need("two research jobs in a row" in (o["row"] or "") and "of the last 20" not in o["row"], f"F79: two of one kind in a row: {o['row']}")
+        need("2 of the last 20" in (o["bar"] or "") and "in a row" not in o["bar"], f"F79: the bar: {o['bar']}")
+        need(o["done"] == {"m_est": 5, "latest": 8, "actual": 30} and o["done_sweep"]["told"] == ["job 960"]
+             and any(m.get("quiet") and "job 960" in m["text"] for m in o["after_done"]), f"F79: a job closed for real isn't told: {o['done']} {o['done_sweep']}")
+        import subprocess as _sp
         bare = {k: v for k, v in env.items() if k not in ("HQ_MISSES", "HQ_DIRECT_DIR")}
-        code = """
-import json, sys
-sys.path.insert(0, sys.argv[1] + '/routine')
-import misses as Ms
-h = {'n': 1, 'kind': 'build', 'est': 5, 'm_est': 5, 'latest': 8, 'actual': 90, 'done': 1790000000, 'how': 'seen', 'machine': 'u'}
-print(json.dumps([Ms.check(h, [h]), Ms._allowed()]))
-"""
+        code = ("import json, sys; sys.path.insert(0, sys.argv[1] + '/routine'); import misses as Ms\n"
+                "h = {'n': 1, 'kind': 'build', 'est': 5, 'm_est': 5, 'latest': 8, 'actual': 90, 'done': 1790000000, 'how': 'seen', 'machine': 'u'}\n"
+                "print(json.dumps([Ms.sweep([h, dict(h, n=2)]), Ms._allowed()]))\n")
         r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=bare, cwd=str(ROOT), timeout=60)
-        need(r.returncode == 0 and json.loads(r.stdout.strip().splitlines()[-1]) == [None, False], f"F79: a test without its own line told someone: {r.stdout} {r.stderr[-300:]}")
-        return "one quiet note per miss on her line, his waiting text still waiting; two builds in a row and 2 in 20 raised once that day; a job closed for real told too; nothing from a bare test"
+        got = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else None
+        need(got and got[0]["told"] == [] and not got[0]["started"] and got[1] is False, f"F79: a test without its own line told someone: {r.stdout} {r.stderr[-300:]}")
+        return "one quiet note per miss on her line, his waiting text still waiting; two builds in a row and 2 in 20 raised once that day; a job closed for real told at the next minute; nothing from a bare test"
+
+    async def flow448(self) -> str:
+        """F79, no Claude: once per job is the job, not its finished line. Job 721 closed twice, once on each computer (two lines,
+        two machines, two times): one note, and it counts once in the last 20, by its latest close, so one job alone trips neither
+        rule and nothing goes to him."""
+        _, _, o = self._misses("f79once", """
+fresh()
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20, machine='t'), line(721, 'build', 20, 40, 58, 21, machine='u')]
+out = {'one': Ms.sweep(hist), 'two': Ms.sweep(hist), 'team': team(), 'repeats': Ms.repeats(hist),
+       'last': [(h['n'], h['machine']) for h in Ms.last(hist)][-2:], 'count': len(Ms.last(hist)), 'state': Ms._load()}
+print(json.dumps(out))
+""")
+        need(o["one"]["told"] == ["job 721"] and o["two"]["told"] == [] and len(o["team"]) == 1, f"F79: one job closed twice gave {len(o['team'])} notes: {o['one']} {o['two']}")
+        need(o["repeats"] == [] and not o["one"]["started"] and not o["state"].get("pending"), f"F79: one job alone tripped a rule: {o['repeats']}")
+        need(o["count"] == 19 and o["last"][-1] == [721, "u"], f"F79: the job doesn't count once by its latest close: {o['count']} {o['last']}")
+        return "one job closed on both computers: one note, counted once by its latest close, no repeat"
+
+    async def flow449(self) -> str:
+        """F79, no Claude: two computers on one line. Each has its own state folder; the backup's minute tells nothing and raises
+        nothing, the main's tells each miss once and raises the repeat once; and a second main on the same line (a takeover with a
+        state of its own) adds no second note and no second text: the note's and the text's line ids are the job's and the day's."""
+        import shutil as _sh
+        ws, env = self._h298_ws("f79pair")
+        a, b, c = (self.tmp / f"f79pair-{x}" for x in "abc")
+        for d in (a, b, c):
+            d.mkdir()
+        sup = self.tmp / "f79pair-backup-support"
+        sup.mkdir()
+        (sup / "role.json").write_text(json.dumps({"peer": "the-main", "main": "the-main"}))
+        (sup / "role-state.json").write_text(json.dumps({"acting": "backup"}))
+        hist = ("hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20), line(722, 'build', 20, 40, 61, 21)]\n")
+        for d in (a, b, c):  # each one's first look, before the misses
+            self._misses("f79pair", "Ms.sweep([])\nprint(json.dumps(Ms._load()))\n", {"HQ_ESTIMATES": str(d)}, ws_env=(ws, dict(env)))
+        _, _, ob = self._misses("f79pair", hist + "print(json.dumps({'sweep': Ms.sweep(hist), 'main': Ms._main(), 'team': team()}))\n",
+                                {"HQ_ESTIMATES": str(b), "HQ_SUPPORT": str(sup)}, ws_env=(ws, dict(env)))
+        need(ob["main"] is False and ob["sweep"]["told"] == [] and not ob["sweep"]["started"] and ob["team"] == [], f"F79: the backup told or raised: {ob}")
+        _, _, oa = self._misses("f79pair", hist + "print(json.dumps({'sweep': Ms.sweep(hist), 'state': Ms._load(), 'team': team()}))\n",
+                                {"HQ_ESTIMATES": str(a)}, ws_env=(ws, dict(env)))
+        need(oa["sweep"]["told"] == ["job 721", "job 722"] and oa["state"].get("raised") and [m["why"] for m in oa["team"]] == ["estimate-miss", "estimate-miss", "estimate-misses"],
+             f"F79: the main: {oa['sweep']} {[m['why'] for m in oa['team']]}")
+        _, _, oc = self._misses("f79pair", hist + "print(json.dumps({'sweep': Ms.sweep(hist), 'state': Ms._load(), 'team': team()}))\n",
+                                {"HQ_ESTIMATES": str(c)}, ws_env=(ws, dict(env)))
+        need(oc["state"].get("raised") and [m["why"] for m in oc["team"]] == ["estimate-miss", "estimate-miss", "estimate-misses"],
+             f"F79: a second main on one line wrote again: {[m['why'] for m in oc['team']]}")
+        _sh.rmtree(sup, ignore_errors=True)
+        return "the backup's minute tells nothing; the main tells twice and raises once; a second main on the same line adds nothing"
+
+    async def flow450(self) -> str:
+        """F79, no Claude: nothing is marked done before it went. A note that can't be written isn't told and is written at the next
+        minute; a repeat whose text fails stays pending, is never marked raised, and goes at the next minute; the note carries its
+        row's id when the row is on the record, and the record has the step (F103)."""
+        ws, env = self._h298_ws("f79fail")
+        broken = self.tmp / "f79fail-a-file"
+        broken.write_text("not a folder")
+        _, _, o1 = self._misses("f79fail", """
+import trail
+fresh()
+item = trail.written('H9721', 'a made-up row', by='flow 450')
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20)]
+print(json.dumps({'sweep': Ms.sweep(hist), 'state': Ms._load(), 'item': item}))
+""", {"HQ_TEAM_LINE_DIR": str(broken / "team-line")}, ws_env=(ws, dict(env)))
+        need(o1["sweep"]["told"] == [] and "job 721" not in (o1["state"].get("told") or []), f"F79: a note that wasn't written counted as told: {o1}")
+        _, _, o2 = self._misses("f79fail", """
+import trail
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20), line(722, 'build', 20, 40, 61, 21)]
+started = []
+real = Ms._start_raise
+Ms._start_raise = lambda: started.append(1)
+one = Ms.sweep(hist)
+d = Ms._dl()
+send = d.text
+def fails(*a, **k):
+    raise OSError('the line fell over')
+d.text = fails
+try:
+    Ms.raise_pending(); said = 'went'
+except OSError as e:
+    said = str(e)
+after_fail = Ms._load()
+d.text = send
+Ms._start_raise = real
+two = Ms.sweep(hist)
+steps = [x for x in trail.lines() if x.get('step') == 'text']
+print(json.dumps({'one': one, 'said': said, 'after_fail': after_fail, 'two': two, 'state': Ms._load(), 'team': team(), 'steps': steps}))
+""", ws_env=(ws, dict(env)))
+        need(o2["one"]["told"] == ["job 721", "job 722"] and o2["one"]["started"], f"F79: the notes at the next minute: {o2['one']}")
+        need(o2["said"] == "the line fell over" and not o2["after_fail"].get("raised") and (o2["after_fail"].get("pending") or {}).get("why"),
+             f"F79: a failed repeat was marked raised or lost: {o2['said']} {o2['after_fail']}")
+        need(o2["two"]["started"] and o2["state"].get("raised") and not o2["state"].get("pending")
+             and [m["why"] for m in o2["team"]] == ["estimate-miss", "estimate-miss", "estimate-misses"], f"F79: the repeat didn't go the next minute: {o2['two']} {o2['state']}")
+        item = o1["item"]
+        need(o2["team"][0].get("item") == item and any(x.get("id") == item and x.get("why") == "estimate-miss" for x in o2["steps"]),
+             f"F79: the note doesn't carry its row's id, or the record has no step: {o2['team'][0]} {o2['steps']}")
+        return "a note not written is written at the next minute; a failed repeat stays pending and goes at the next; the note carries its row's id and the record its step"
+
+    async def flow451(self) -> str:
+        """F79, no Claude: with no line of hers (HQ_TEAM_LINE=0, as without Moneypenny on a friend's HQ) a miss is never written on
+        Donna's line, which he reads: it's kept in the misses' own file, told once. And the Mac app's inbox counts no quiet note
+        as unread and shows none as a notification."""
+        import subprocess as _sp
+        _, _, o = self._misses("f79off", """
+fresh()
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20)]
+print(json.dumps({'sweep': Ms.sweep(hist), 'again': Ms.sweep(hist), 'state': Ms._load(), 'donna': donna(),
+                  'note': dl.note('estimate-miss', 'made up', '', 'x1'), 'donna2': donna()}))
+""", {"HQ_TEAM_LINE": "0"})
+        need(o["sweep"]["kept"] == ["job 721"] and o["sweep"]["told"] == [] and o["again"]["kept"] == [] and o["donna"] == [] and o["donna2"] == []
+             and o["note"].get("skipped"), f"F79: with no line of hers a note went to Donna's: {o}")
+        need(len(o["state"].get("kept") or []) == 1 and "job 721" in o["state"]["kept"][0]["facts"], f"F79: the miss isn't kept: {o['state']}")
+        js = r"""
+const fs = require('fs');
+const src = fs.readFileSync('desktop/shell.html', 'utf8');
+const i = src.indexOf('inbox(d, seen, told, looking) {');
+const j = src.indexOf('\n    zoom(pct)', i);
+var $ = () => ({ textContent: '', title: '', classList: { toggle() {} } });
+var hq = { dragMap() {} };
+const o = eval('({' + src.slice(i, j).trim().replace(/,$/, '') + '})');
+const d = { agent: { name: 'M' }, messages: [{ from: 'agent', at: 10, text: 'hers' }, { from: 'agent', at: 20, text: 'a note', quiet: true }] };
+console.log(JSON.stringify(o.inbox(d, 1, 1, false)));
+"""
+        r = _sp.run(["node", "-e", js], capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+        need(r.returncode == 0, f"F79: the inbox check didn't run: {r.stderr[-500:]}")
+        ib = json.loads(r.stdout.strip().splitlines()[-1])
+        need(ib["unread"] == 1 and [n["text"] for n in ib["notify"]] == ["hers"], f"F79: the Mac app shows her quiet note to him: {ib}")
+        return "no line of hers: nothing on Donna's line, the miss kept in its own file once; the Mac app's inbox leaves quiet notes out"
+
+    async def flow452(self) -> str:
+        """F79, no Claude: a quiet note is honoured everywhere it's read. Her answer's history has the note once, as a note, and not
+        his text she's answering (it comes as his new text); her weekly score doesn't count the note as one of her texts; her chat
+        page shows it as a note and still says she's typing while his text waits."""
+        ws, env = self._h298_ws("f79quiet")
+        _, _, o = self._misses("f79quiet", """
+import pokes
+from pathlib import Path
+with dl._Env(dl.team_env()):
+    dl.add('agent', 'All four jobs are done.')
+    m = dl.add('me', 'what about the fifth one?')
+    dl.note('estimate-miss', 'Noted for myself: job 9 ran long.', '', 'miss-9')
+    waiting = dl.unanswered()
+    h = dl.history([x['id'] for x in waiting])
+tp = pokes.text_pokes('moneypenny', 0, time.time() + 60, Path(os.environ['HQ_WORKSPACE']))
+print(json.dumps({'waiting': [x['text'] for x in waiting], 'history': h, 'pokes': tp}))
+""", ws_env=(ws, env))
+        h = o["history"]
+        need(o["waiting"] == ["what about the fifth one?"], f"F79: his text isn't waiting: {o['waiting']}")
+        need(h.count("job 9 ran long") == 1 and "(a note for yourself" in h and "fifth one" not in h and "All four jobs" in h, f"F79: her answer's history: {h}")
+        need(o["pokes"]["acted"][1] == 1, f"F79: her score counts her note as one of her texts: {o['pokes']}")
+        page = (ROOT / "status" / "direct.html").read_text()
+        need("m.quiet ? ' quiet'" in page and ".filter((m) => !m.quiet).slice(-1)[0]" in page and ".m.quiet" in page,
+             "F79: her chat page doesn't show a quiet note as one, or lets it hide that she's typing")
+        return "her history has the note once and not his text twice; her score doesn't count the note; the page shows it as a note and keeps 'is typing'"
+
+    async def flow453(self) -> str:
+        """F79 and F97, no Claude: her words for a repeat can't invent an action: they say what repeated and that it's for him to
+        look at, an idea only as a proposal. And a transcript with no heading counts as not read only while it's fresh: left
+        untouched for a day, an empty stub is read and empty."""
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "app"))
+        import direct_line as _dl
+        k = _dl.KINDS["estimate-misses"]
+        need("what you're doing about it" not in k and "proposal" in k and "never say you're doing or fixing" in k, f"F79: her words for a repeat: {k}")
+        ws, env = self._ledger_env("f97stub")
+        scan = self.tmp / "f97stub-scan.json"
+        env.update({"HQ_MISTAKES_SCAN": str(scan)})
+        calls = ws / "HQ/calls"
+        calls.mkdir(parents=True, exist_ok=True)
+        sweep = lambda: _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "scan"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        sweep()
+        old, new = calls / "2026-10-29-0800.md", calls / "2026-10-29-0900.md"
+        old.write_text("")
+        new.write_text("")
+        t = time.time() - 2 * 86400
+        os.utime(old, (t, t))
+        sweep()
+        st = json.loads(scan.read_text())
+        need(old.name in st["read"] and old.name not in (st.get("unread") or {}) and new.name in (st.get("unread") or {}),
+             f"F97: an old empty stub isn't read, or a fresh one isn't kept as not read: {st.get('read')} {st.get('unread')}")
+        return "her words for a repeat say it's his to look at, an idea as a proposal; an empty stub left a day is read, a fresh one waits"
 
     async def flow447(self) -> str:
         """F79, no Claude: the Friday report reads what F79 built: each job of the week against the measured estimate and latest end
@@ -36761,8 +36947,14 @@ FLOWS = {
     443: ("The small list: a workspace without backend switches gets the briefing and every start is under the cap; the undo takes back only its own file; a Deep start is measured whole", False, "flow443"),
     444: ("F97: each second look of the ledger is kept with what it cost, a failed one marked, another part's look left out, and the score prints the week's total", False, "flow444"),
     445: ("F97: the pass reads every transcript it hasn't read: a late one with an older name once, one it can't read counted as not read in both scores and tried again, a call read until it ends, a late text", False, "flow445"),
-    446: ("F79: a miss goes to Moneypenny as a quiet note on her line, once per job; a repeat (two of a kind in a row, or more than 1 in 20) she raises with him once a day; never from a bare test", False, "flow446"),
+    446: ("F79: the main's minute puts one quiet note per missed job on her line; a repeat (two of a kind in a row, or more than 1 in 20) she raises with him once a day, once it went; a real close told; never from a bare test", False, "flow446"),
     447: ("F79: the Friday report holds the week to the latest end each job started with and nine in ten, per kind, rough and older jobs apart, and the last 20 against 1 in 20", False, "flow447"),
+    448: ("F79: one job closed twice, on both computers, is one note and counts once in the last 20 by its latest close: alone it trips no rule", False, "flow448"),
+    449: ("F79: two computers on one line: the backup tells and raises nothing, the main once, a second main adds no note and no text", False, "flow449"),
+    450: ("F79: a note not written and a repeat whose text failed are never marked done, and go at the next minute; the note carries its row's id and the record its step", False, "flow450"),
+    451: ("F79: with no line of hers no note goes on Donna's line, it's kept in its own file; the Mac app counts no quiet note and shows none", False, "flow451"),
+    452: ("F79: a quiet note in her answer's history once and not his text twice, not counted as her text in her score, shown as a note on her page with is typing kept", False, "flow452"),
+    453: ("F79 and F97: her words for a repeat can't invent an action, an idea only as a proposal; an empty stub left a day is read and empty, a fresh one waits", False, "flow453"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),

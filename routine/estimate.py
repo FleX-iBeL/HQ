@@ -2079,11 +2079,6 @@ def on_done(n, text="", started_hhmm=None, at=None):
             usagecost.learn()
         except Exception as ex:
             print(f"(the usage rate couldn't be learned: {ex!r})", file=sys.stderr)
-    try:  # F79: past the latest end it started with: Moneypenny is told, once; a repeat she raises with him
-        import misses
-        misses.check(rec)
-    except Exception as ex:
-        print(f"(the estimate's miss couldn't be checked: {ex!r})", file=sys.stderr)
     return rec
 
 

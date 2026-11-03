@@ -202,6 +202,12 @@ def read_call(p: str, base=None) -> tuple[list[dict] | None, str, bool]:
         return None, f"it can't be opened ({e.strerror or type(e).__name__})", False
     first = next((l for l in text.splitlines() if l.strip()), "")
     if not first.startswith("# "):
+        try:
+            old = time.time() - os.path.getmtime(p) >= OPEN_DAYS * 86400
+        except OSError:
+            old = False
+        if old and not any(_LINE.match(l) for l in text.splitlines()):
+            return [], "", True  # F97: a stub nobody wrote into for a day: read, and nothing in it
         return None, "it isn't in a transcript's shape (no heading)", False
     return _his_lines(p, text, base), "", bool(_ENDED.search(text))
 

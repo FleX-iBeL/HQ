@@ -89,7 +89,7 @@ def text_pokes(agent_id: str, since: float, until: float, folder: Path | None = 
                 his += 1
                 if _STATUS.search(m["text"]):
                     status += 1
-            elif m.get("from") == "agent":
+            elif m.get("from") == "agent" and not m.get("quiet"):  # F79: a note for her own eyes isn't a text to him
                 hers_all += 1
                 nxt = next((x for x in msgs[i + 1:] if x.get("from") == "me"), None)
                 if nxt and float(nxt.get("at") or 0) - at <= ACTED_HOURS * 3600:

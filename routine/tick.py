@@ -1600,6 +1600,13 @@ def direct_watch():
                 log("direct line: the Friday report on the estimates")
         except Exception as e:
             log(f"the Friday estimates report: {e!r}")
+        try:  # F79: a job past its latest end goes to Moneypenny once, a repeat she raises with him (only the main)
+            import misses
+            got = misses.sweep()
+            if got["told"] or got["kept"] or got["started"]:
+                log(f"estimate misses: told {len(got['told'])}, kept {len(got['kept'])}" + (", raising the repeat" if got["started"] else ""))
+        except Exception as e:
+            log(f"the estimate misses: {e!r}")
         def weather_():
             import weather
             if weather.start():
