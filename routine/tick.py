@@ -197,13 +197,14 @@ def open_window(cmd: str, name: str = "") -> None:
         subprocess.run(own or ["/usr/bin/open", "-g", "-a", "Terminal", cmd], check=True)
         return
     sess = hqpaths.session(name)
-    subprocess.run([TMUX, "kill-session", "-t", "=" + sess], capture_output=True)  # an old one by that name
-    envs = [x for k, v in os.environ.items() if k == "PATH" or k.startswith("HQ_") for x in ("-e", f"{k}={v}")]
+    te = hqpaths.tmux_env()  # F138: the server TMUX_TMPDIR names (a copy's own), never the one of a pane this runs in
+    subprocess.run([TMUX, "kill-session", "-t", "=" + sess], capture_output=True, env=te)  # an old one by that name
+    envs = [x for k, v in os.environ.items() if k == "PATH" or k.startswith("HQ_") or k == "TMUX_TMPDIR" for x in ("-e", f"{k}={v}")]
     tm = [TMUX, "new-session", "-d", "-s", sess, "-x", "200", "-y", "50", *envs, "/bin/bash", cmd]
     scope = ["systemd-run", "--user", "--scope", "--quiet", f"--unit={sess}-{int(time.time())}-{os.getpid()}"]
-    r = subprocess.run(scope + tm, capture_output=True, text=True) if os.environ.get("XDG_RUNTIME_DIR") else None
-    if r is None or (r.returncode and not subprocess.run([TMUX, "has-session", "-t", "=" + sess], capture_output=True).returncode == 0):
-        r = subprocess.run(tm, capture_output=True, text=True)  # no systemd scope here: tmux on its own
+    r = subprocess.run(scope + tm, capture_output=True, text=True, env=te) if os.environ.get("XDG_RUNTIME_DIR") else None
+    if r is None or (r.returncode and not subprocess.run([TMUX, "has-session", "-t", "=" + sess], capture_output=True, env=te).returncode == 0):
+        r = subprocess.run(tm, capture_output=True, text=True, env=te)  # no systemd scope here: tmux on its own
     if r.returncode:
         raise RuntimeError(f"tmux couldn't open {sess}: {(r.stderr or r.stdout).strip()[:200]}")
 
@@ -1181,13 +1182,19 @@ def watchdog_check():
             who, fix = "macOS", "routine/install-watchdog.sh"
         else:
             # H56.1: on Linux the watchdog is a systemd timer; starting its service runs one check now,
-            # and starting the timer puts it back on its five minutes.
-            r = subprocess.run(["systemctl", "--user", "start", hqpaths.unit("watchdog.timer"), hqpaths.unit("watchdog.service")],
+            # and starting the timer puts it back on its five minutes. F138: only this HQ's own units (HQ_UNIT), and only when
+            # they're installed: a copy (the chain check) has none, so it asks nothing of systemd and says so.
+            timer = hqpaths.unit("watchdog.timer")
+            if not os.path.exists(os.path.join(os.path.expanduser("~/.config/systemd/user"), timer)):
+                incidents.fix("watchdog", f"No watchdog of its own here ({timer} isn't installed); nothing to start")
+                log(f"watchdog: {timer} isn't installed here; nothing asked of systemd")
+                return
+            r = subprocess.run(["systemctl", "--user", "start", timer, hqpaths.unit("watchdog.service")],
                                capture_output=True, text=True)
             who, fix = "systemd", "routine/install-linux.sh"
         incidents.fix("watchdog", f"Asked {who} to run it again" if r.returncode == 0
                       else f"Couldn't start it ({(r.stderr or r.stdout).strip()[:80]}); run {fix}")
-        log(f"watchdog: asked {who} to run it again")
+        log(f"watchdog: asked {who} to run it again" if r.returncode == 0 else f"watchdog: {who} couldn't start it")
 
 
 def jobs_line(q):
@@ -1874,6 +1881,10 @@ def tick():
         if (down or not alive(pid)) and time.time() - s.get("started", 0) > 90:
             # H62: the Mac went down while it ran: the job runs again from the top of the line.
             if down and crash.recover(job, s, jobs, incidents, status, log, boot=down):
+                clear()
+                quiet.clear_request()
+                return
+            if crash.window_closed(job, s, jobs, incidents, status, log, RUN):  # F138: ended from outside, as a crash would
                 clear()
                 quiet.clear_request()
                 return

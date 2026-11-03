@@ -275,6 +275,18 @@ def ssh_host() -> str:
     return os.environ.get("HQ_SSH_HOST") or host_name()
 
 
+PANE_VARS = ("TMUX", "TMUX_PANE")
+
+
+def tmux_env(base: dict | None = None, **extra) -> dict:
+    """F138: the environment for a tmux command that must reach the server TMUX_TMPDIR names (or the default one), never the
+    server of the pane it's called from. Inside a pane tmux takes its socket from $TMUX before TMUX_TMPDIR, so a test run's
+    `kill-server` from inside a job's pane ended the job's own server, and the job with it (3 November 2026, job 497)."""
+    env = {k: v for k, v in (os.environ if base is None else base).items() if k not in PANE_VARS}
+    env.update(extra)
+    return env
+
+
 def watch_cmd(name: str) -> str:
     """H56.2: the one line that watches a job's tmux session from the laptop."""
     return f"ssh -t {ssh_host()} tmux attach -t {session(name)}"

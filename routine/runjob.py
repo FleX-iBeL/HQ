@@ -389,6 +389,16 @@ def main(argv: list[str]) -> int:
                                   "tools": tools, "refused": refused, "uses": uses, "session": session,
                                   "ended_by": "signal" if ended_by_signal["sig"] else ("box" if boxed["why"] else "itself")})
         sig = ended_by_signal["sig"]
+        if sig == signal.SIGHUP and (_state(n).startswith("running") or _state(n).startswith("stop asked")) and not box["round"] and not box["agent"]:
+            # F138: its window closed under it, nothing of the routine's asked it to stop: a note, so the routine
+            # brings it back the crash's way (crash.window_closed) instead of leaving it ended without a done mark
+            try:
+                with open(os.path.join(RUN, f"job-{n}.hup"), "w") as f:
+                    json.dump({"at": time.time(), "signal": int(sig), "pid": os.getpid()}, f)
+            except OSError:
+                pass
+            _log(lg, f"job {n}: its window closed under it (signal {sig}); nothing marked, the routine runs it again")
+            return 0
         if sig:
             _log(lg, f"job {n}: ended by the routine (signal {sig}); nothing marked")
             return 0
