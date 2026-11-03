@@ -23433,6 +23433,7 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
         mark = {"BUILDING": "🔨", "WAITING": "⏸", "DONE": "✅", "STOPPED": "⚠️"}.get(state, "🔨")
         words = "WAITING FOR YOU" if state == "WAITING" else state
         updated = "2026-10-01" if ago is None else (datetime.now() - timedelta(minutes=ago)).strftime("%Y-%m-%d %H:%M")
+        self._f116_at = None if ago is None else datetime.strptime(updated, "%Y-%m-%d %H:%M")
         site_roadmap(site).write_text(self.F116_ROADMAP.format(mark=mark, state=words, queue=queue, extra=extra, updated=updated, step=step), encoding="utf8")
 
     @staticmethod
@@ -23601,6 +23602,25 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
 
         def banner():
             return self._f116_page(base)["truth"]["banner"]
+
+        months = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+
+        def said(who: str, words: str = "") -> tuple:
+            """F119: how the page says when the block was written (status/server.mjs, whenSaid): "<who> said at HH:MM, <words>," on
+            its own day, "<who> said on D Month at HH:MM," when it was written on another day. A block written three hours ago at
+            1:00 is from yesterday, so the flow works out which, and holds at any hour. In the first minutes after midnight both."""
+            at, now = self._f116_at, datetime.now()
+            today = f"{who} said at {at:%H:%M}, " + (f"{words}," if words else "")
+            other = f"{who} said on {at.day} {months[at.month - 1]} at {at:%H:%M},"
+            if now - timedelta(minutes=2) < now.replace(hour=0, minute=0, second=0, microsecond=0) <= now:
+                return (today, other)
+            return (today,) if at.date() == now.date() else (other,)
+
+        def starts(line: str, who: str, words: str = "") -> bool:
+            return any(line.startswith(x) for x in said(who, words))
+
+        def has(text: str, who: str, words: str = "") -> bool:
+            return any(x in text for x in said(who, words))
         try:
             # The second check's repro first: a block saying Testing, written 35 minutes ago, nothing on the queue.
             self._f116_road(site, "TESTING", "", ago=35)
@@ -23624,48 +23644,48 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
             # The third check's B: a chat's Waiting, two hours old, is trusted as written, saying who and when.
             self._f116_road(site, "WAITING", "", ago=120, step="him to try the mic on the phone")
             b = banner()
-            need(b["state"] == "WAITING" and b["line"].startswith("A chat said at ") and "2 hours ago" in b["line"]
+            need(b["state"] == "WAITING" and starts(b["line"], "A chat", "2 hours ago")
                  and "it's waiting for you: him to try the mic on the phone" in b["line"], f"a chat's Waiting, two hours old: {b}")
             dom = await self._f116_dom(base)
-            need('data-state="WAITING"' in dom and "A chat said at " in dom, "the page doesn't draw a chat's Waiting as waiting, saying who")
+            need('data-state="WAITING"' in dom and has(dom, "A chat", "2 hours ago"), "the page doesn't draw a chat's Waiting as waiting, saying who")
             # The routine's own Waiting, and a job's.
             self._f116_road(site, "WAITING", "", ago=90, step="Job 7 isn't running (ended 10:00 without a done mark); nothing runs now")
             b = banner()
-            need(b["state"] == "WAITING" and b["line"].startswith("The routine said at "), f"the routine's own Waiting: {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "The routine"), f"the routine's own Waiting: {b}")
             at6 = datetime.now() - timedelta(minutes=60)
             done6 = (at6 + timedelta(minutes=2)).strftime("%H:%M")
             self._f116_road(site, "WAITING", f"- Job 6 · done {done6} on {at6:%Y-%m-%d} · agreed 2026-11-02 09:00 · a test build", ago=60, step="built, waiting for him to try it")
             b = banner()
-            if at6.date() == datetime.now().date():
-                need(b["state"] == "WAITING" and b["line"].startswith("Job 6 said at "), f"a job's Waiting: {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "Job 6"), f"a job's Waiting: {b}")
             self._f116_road(site, "WAITING", "", ago=1, step="your answer")
             b = banner()
-            need(b["state"] == "WAITING" and re.search(r"\b(1 minute|2 minutes) ago", b["line"]) and "1 minutes" not in b["line"], f"the wording, a minute on: {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "A chat") and "1 minutes" not in b["line"]
+                 and (said("A chat")[0].startswith("A chat said on ") or re.search(r"\b(1 minute|2 minutes) ago", b["line"])), f"the wording, a minute on: {b}")
             # The fourth check's 1: a done mark from another day, or one without its day, doesn't make a chat's Waiting a job's.
             mark = (at6 + timedelta(minutes=7)).strftime("%H:%M")
             self._f116_road(site, "WAITING", f"- Job 6 · done {mark} · agreed 2026-11-01 09:00 · an old build", ago=60, step="your answer on the plan")
             b = banner()
-            need(b["state"] == "WAITING" and b["line"].startswith("A chat said at "), f"a chat's Waiting, an old done mark without its day at a fitting time: {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "A chat"), f"a chat's Waiting, an old done mark without its day at a fitting time: {b}")
             yesterday = (at6 - timedelta(days=1)).strftime("%Y-%m-%d")
             self._f116_road(site, "WAITING", f"- Job 6 · done {mark} on {yesterday} · agreed 2026-11-01 09:00 · an old build", ago=60, step="your answer on the plan")
             b = banner()
-            need(b["state"] == "WAITING" and b["line"].startswith("A chat said at "), f"a chat's Waiting, a job done yesterday at a fitting time: {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "A chat"), f"a chat's Waiting, a job done yesterday at a fitting time: {b}")
             self._f116_road(site, "WAITING", f"- Job 6 · done {mark} · agreed 2026-11-01 09:00 · an old build", ago=60, step="Job 6 · built, waiting for him to try it")
             b = banner()
-            need(b["state"] == "WAITING" and b["line"].startswith("Job 6 said at "), f"a Waiting whose Now line names job 6: {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "Job 6"), f"a Waiting whose Now line names job 6: {b}")
             seen.append("a job's Waiting only by its own Now line or a done mark of that day")
             # The fourth check's 2: an old chat Waiting doesn't hide a held job or the routine off; it's named on a second line.
             self._f116_road(site, "WAITING", "- Job 8 · held: usage over the line · agreed 2026-11-02 09:00 · a test job", ago=180, step="your answer")
             b = banner()
-            need(b["state"] == "STOPPED" and "Job 8 held" in b["line"] and "and a chat said at " in b.get("also", "") and "3 hours ago" in b.get("also", ""),
+            need(b["state"] == "STOPPED" and "Job 8 held" in b["line"] and has(b.get("also", ""), "and a chat", "3 hours ago"),
                  f"a held job under a chat's Waiting from 3 hours ago: {b}")
             dom = await self._f116_dom(base)
-            need('data-state="STOPPED"' in dom and "And a chat said at " in dom, "the page doesn't draw the held job as stopped with the chat's Waiting under it")
+            need('data-state="STOPPED"' in dom and has(dom, "And a chat", "3 hours ago"), "the page doesn't draw the held job as stopped with the chat's Waiting under it")
             self._f116_road(site, "WAITING", "", ago=180, step="your answer")
             road = site_roadmap(site)
             road.write_text(road.read_text(encoding="utf8").replace("**Routine:** on", "**Routine:** off"), encoding="utf8")
             b = banner()
-            need(b["state"] == "STOPPED" and "routine is off" in b["line"] and "and a chat said at " in b.get("also", ""), f"the routine off under a chat's Waiting: {b}")
+            need(b["state"] == "STOPPED" and "routine is off" in b["line"] and has(b.get("also", ""), "and a chat"), f"the routine off under a chat's Waiting: {b}")
             seen.append("a held job or the routine off comes before a Waiting")
             # The fourth check's 3: a build that waits only for the night is said calmly, in yellow; the usage line stays red.
             self._f116_road(site, "DONE", "- Job 8 · ready · agreed 2026-11-02 09:00 · a test build", ago=20, step="all done")
@@ -23755,7 +23775,7 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
             need(b["state"] == "DONE", f"a Done from five hours ago: still Done, nothing newer replaced it: {b}")
             self._f116_road(site, "WAITING", "", ago=5)
             b = banner()
-            need(b["state"] == "WAITING" and b["line"].startswith("A chat said at "), f"a fresh waiting with nothing his: shown as {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "A chat"), f"a fresh waiting with nothing his: shown as {b}")
             seen.append("Done only from a block that says Done")
         finally:
             self._f116_stop(proc)
