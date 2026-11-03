@@ -16705,16 +16705,29 @@ class Connector:
         self.n += 1
         mid = format(((t * 1000 + 3847) << 20) | self.n, "x")
         tid = thread or mid
-        self.threads.setdefault(tid, []).append({"id": mid, "threadId": tid, "t": t, "subject": subject or f"mail {self.n}"})
+        # F110: what Gmail's split words read (made up per mail): in the inbox, unread, an attachment, its size in K
+        self.threads.setdefault(tid, []).append({"id": mid, "threadId": tid, "t": t, "subject": subject or f"mail {self.n}",
+                                                 "inbox": self.n % 3 != 0, "unread": self.n % 2 == 0, "attach": self.n % 7 == 0,
+                                                 "size": 2 + (self.n * 37) % 300, "cat": "primary"})
         return tid
     def _midnight(self, day):
         return calendar.timegm(time.strptime(day, "%Y/%m/%d")) + self.zone * HOUR
+    def _fits(self, m, tok):
+        w, neg = tok.lstrip("-"), tok.startswith("-")
+        if w == "in:inbox": v = m["inbox"]
+        elif w == "is:unread": v = m["unread"]
+        elif w == "has:attachment": v = m["attach"]
+        elif re.fullmatch(r"larger:\d+K", w): v = m["size"] > int(w[7:-1])
+        elif w.startswith("category:"): v = m["cat"] == w[9:]
+        else: raise KeyError(tok)
+        return v != neg
     def search(self, q):
         if re.search(r"(after|before):\d{6,}", q):
             return {}
         a, b = re.search(r"after:(\S+)", q), re.search(r"before:(\S+)", q)
         lo, hi = self._midnight(a.group(1)), self._midnight(b.group(1)) if b else 10 ** 12
-        found = [t for t, ms in self.threads.items() if any(lo <= m["t"] < hi for m in ms)]
+        words = [w for w in q.split() if not w.startswith(("after:", "before:"))]
+        found = [t for t, ms in self.threads.items() if any(lo <= m["t"] < hi and all(self._fits(m, w) for w in words) for m in ms)]
         random.Random(q).shuffle(found)
         return {"resultCountEstimate": str(len(found)), "threads": [
             {"id": t, "messageCount": len(self.threads[t]), "messages": [{k: m[k] for k in ("id", "threadId", "subject")} for m in self.threads[t][:5]]}
@@ -16735,11 +16748,15 @@ def run(conn):
     cmd = re.search(r"`python3 (\S+) newer ID ID ID`", prompt).group(1)
     need(qs and all(re.fullmatch(r"after:\d{4}/\d\d/\d\d( before:\d{4}/\d\d/\d\d)?", q) for q in qs), f"the searches: {qs}")
     need(f"Bash(python3 {cmd} newer:*)" in tick.mail_tools()[0], "the run may not use the command it's told to")
-    answers, ids = {}, []
-    for q in qs:
-        for t in conn.search(q).get("threads", []):
+    answers, ids, todo = {}, [], list(qs)
+    while todo:  # F110: every search reported, and what it gives to split made too, as the instructions say
+        q = todo.pop(0)
+        got = conn.search(q).get("threads", [])
+        for t in got:
             answers[t["id"]] = t
             ids += [m["id"] for m in t["messages"]]
+        told = subprocess.run([sys.executable, cmd, "reach", str(len(got)), q], capture_output=True, text=True).stdout
+        todo += re.findall(r"^- `([^`]+)`", told, re.M)
     r = subprocess.run([sys.executable, cmd, "newer", *ids], capture_output=True, text=True)
     need(r.returncode == 0, r.stderr[-300:])
     said["newer"] = r.stdout.strip()
@@ -16857,6 +16874,208 @@ print("OK")
         need("{SEARCHES}" in mc and "internalDate" in mc and "after:YYYY/MM/DD" in tpl and "internalDate" in tpl, "the words don't search by date and compare each mail's own time")
         need("['mailmarker'" in (ROOT / "status/index.html").read_text(), "the status page has no line for it")
         return "70 mails over 5 days all found by date, older ones left, a quiet run says so, the marker moves, 24 hours still opens an incident Donna gets"
+
+    async def flow400(self) -> str:
+        """F110, no Claude: a day with more than 50 threads is read in full, and one that can't be is said by Donna to him and to
+        Moneypenny, once. A stand-in connector shaped like the real one (50 threads at most, no page token, no total, not in date
+        order, nothing for an epoch query) that also reads Gmail's split words. Only the model's reading is stood in: the searches
+        and the commands come from the routine's real start, what was reached from the real reach command, the end of the run
+        from the routine and the guard. 300 threads in one day: all found, the marker moves. 120 alike in one day that no word
+        splits: an incident for Moneypenny, the marker held before that day while the later mail is still written down, Donna
+        texts once and it's in Moneypenny's ledger and at her start; a second run adds no incident, no text and no line twice, and
+        the stuck-marker incident stays quiet; a run that stops halfway moves nothing; once he's archived and read some, the next
+        run reads it all, the incident closes and the marker moves. A split that answers less than the search it splits, or a
+        search not reported, isn't reached. While he sleeps the text waits for the morning."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env("mailreach", hour=14)
+        child = r'''
+import calendar, json, os, random, re, subprocess, sys, time
+from pathlib import Path
+ROOT = sys.argv[1]
+sys.path.insert(0, ROOT + "/routine"); sys.path.insert(0, ROOT + "/app")
+import tick, mailguard as M, routines, incidents, direct_line, ledger
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+need(hasattr(M, "reach") and "reach N" in open(ROOT + "/routine/mail-check.md").read(), "the run has no way to say what it reached")
+DAY, HOUR = 86400, 3600
+now = int(time.time())
+tick.open_window = lambda *a, **k: None
+tick.log = lambda m: None
+class Connector:
+    """Shaped like the real one, and it reads the split words; an unknown word fails the flow."""
+    def __init__(self, zone=8):
+        self.zone, self.threads, self.n = zone, {}, 0
+    def mail(self, t, subject, inbox=True, unread=True, attach=False, size=12, cat="primary"):
+        self.n += 1
+        mid = format(((t * 1000 + 3847) << 20) | self.n, "x")
+        self.threads[mid] = [{"id": mid, "threadId": mid, "t": t, "subject": subject, "inbox": inbox, "unread": unread,
+                              "attach": attach, "size": size, "cat": cat}]
+        return self.threads[mid][0]
+    def _midnight(self, day):
+        return calendar.timegm(time.strptime(day, "%Y/%m/%d")) - self.zone * HOUR
+    def _fits(self, m, tok):
+        w, neg = tok.lstrip("-"), tok.startswith("-")
+        if w == "in:inbox": v = m["inbox"]
+        elif w == "is:unread": v = m["unread"]
+        elif w == "has:attachment": v = m["attach"]
+        elif re.fullmatch(r"larger:\d+K", w): v = m["size"] > int(w[7:-1])
+        elif w.startswith("category:"): v = m["cat"] == w[9:]
+        else: need(False, f"a search word the stand-in doesn't know: {tok}")
+        return v != neg
+    def search(self, q):
+        if re.search(r"(after|before):\d{6,}", q):
+            return {}
+        a, b = re.search(r"after:(\S+)", q), re.search(r"before:(\S+)", q)
+        lo, hi = self._midnight(a.group(1)), self._midnight(b.group(1)) if b else 10 ** 12
+        words = [w for w in q.split() if not w.startswith(("after:", "before:"))]
+        found = [t for t, ms in self.threads.items() if any(lo <= m["t"] < hi and all(self._fits(m, w) for w in words) for m in ms)]
+        random.Random(q).shuffle(found)
+        return {"threads": [{"id": t, "messageCount": 1, "messages": [{"id": t, "threadId": t, "subject": self.threads[t][0]["subject"]}]}
+                            for t in found[:50]]} if found else {}
+    def get_thread(self, tid):
+        return {"id": tid, "messages": [{"id": m["id"], "subject": m["subject"], "internalDate": str(m["t"] * 1000)} for m in self.threads[tid]]}
+inbox = M.path()
+def marker_is(t):
+    text = re.sub(r"^Marker:.*$", f"Marker: {t} (a date)", open(inbox).read(), flags=re.M)
+    open(inbox, "w").write(text)
+mk = lambda: M.marker(open(inbox).read())
+said = {}
+def run(conn, stop_after=None):
+    """One run: the routine's real start, the stand-in reader doing what it was given, the routine's real end. stop_after: the
+    run dies after that many searches (no exit line)."""
+    tick.start_mail()
+    prompt = open(os.path.join(os.environ["HQ_JOB_RUN"], "mail-check.md")).read()
+    qs = re.findall(r"^   - `(after:[^`]*)`", prompt, re.M)
+    newer = re.search(r"`python3 (\S+) newer ID ID ID`", prompt).group(1)
+    reach = re.search(r'`python3 (\S+) reach N "QUERY"`', prompt).group(1)
+    need(f"Bash(python3 {reach} reach:*)" in tick.mail_tools()[0], "the run may not use the reach command it's told to")
+    answers, ids, todo, made = {}, [], list(qs), 0
+    while todo and (stop_after is None or made < stop_after):
+        q = todo.pop(0)
+        made += 1
+        got = conn.search(q).get("threads", [])
+        for t in got:
+            answers[t["id"]] = t
+            ids += [m["id"] for m in t["messages"]]
+        r = subprocess.run([sys.executable, reach, "reach", str(len(got)), q], capture_output=True, text=True)
+        need(r.returncode == 0, r.stderr[-300:])
+        todo += re.findall(r"^- `([^`]+)`", r.stdout, re.M)
+    said["searches"], said["planned"] = made, len(qs)
+    r = subprocess.run([sys.executable, newer, "newer", *ids], capture_output=True, text=True)
+    maybe = set(r.stdout.split())
+    was = mk()
+    new = [m for t, a in answers.items() if maybe & {x["id"] for x in a["messages"]}
+           for m in conn.get_thread(t)["messages"] if int(m["internalDate"]) // 1000 > was]
+    text = open(inbox).read()
+    fresh = [m for m in new if f"· {m['subject']} ·" not in text]  # the check's own rule: what's written down isn't written twice
+    if new:
+        text = re.sub(r"^Marker:.*$", f"Marker: {max(int(m['internalDate']) // 1000 for m in new)} (a date)", text, flags=re.M)
+        open(inbox, "w").write(text.rstrip("\n") + "\n" + "".join(f"- x · y · {m['subject']} · z · [Gmail](x)\n" for m in fresh))
+    end = "--- exit 0\n" if stop_after is None else ""
+    open(os.path.join(os.environ["HQ_JOB_RUN"], "mail.log"), "w").write(f"--- 2026-11-03 10:00:00\nAdded {len(fresh)} mails.\n{end}")
+    json.dump({"pid": None, "started": time.time() - 200}, open(tick.MAIL_STATE, "w"))
+    tick.clear(tick.MAIL_PID)
+    need(tick.mail_running() is False, "the run didn't end")
+    need(not incidents.is_down("maillist"), f"the guard refused the run: {incidents.is_down('maillist')}")
+    return new, fresh
+reach_inc = lambda: incidents.is_down("mailreach")
+all_reach = lambda: [i for i in incidents.read()["incidents"] if i["key"] == "mailreach"]
+c = Connector()
+# 1. 300 threads in one day (the connector's own day), each with its own made-up traits: all of them found.
+day = (now // DAY - 3) * DAY - 8 * HOUR  # a midnight where the stand-in counts its dates
+marker_is(day - 2 * HOUR)
+rnd = random.Random(110)
+for i in range(300):
+    c.mail(day + HOUR + i * 200, f"heavy {i}", inbox=rnd.random() < 0.7, unread=rnd.random() < 0.5, attach=rnd.random() < 0.1,
+           size=int(2 ** rnd.uniform(1, 9)), cat=rnd.choice(["primary", "promotions", "updates", "social"]))
+q_day = "after:" + time.strftime("%Y/%m/%d", time.gmtime(day + 8 * HOUR)) + " before:" + time.strftime("%Y/%m/%d", time.gmtime(day + 8 * HOUR + DAY))
+need(len(c.search(q_day)["threads"]) == 50, "the stand-in doesn't stop at 50 like the real connector")
+new, fresh = run(c)
+got = {m["subject"] for m in new}
+need(got == {f"heavy {i}" for i in range(300)}, f"300 in one day: {300 - len(got & {f'heavy {i}' for i in range(300)})} not found ({said})")
+need(said["searches"] > said["planned"], f"nothing was split: {said}")
+need(mk() == day + HOUR + 299 * 200 and not reach_inc(), f"the marker didn't move to the newest, or an incident: {mk()} {reach_inc()}")
+need(routines.read().get("mailreach", {}).get("state") == "ok", "the line isn't green")
+# 2. A day that can't be read in full: 120 alike that no word splits, and later mail after it.
+got_texts = []
+donna = lambda: direct_line.watch(None, main=True, spawn=lambda w, f: got_texts.append((w, f)))
+donna()  # her first look takes stock
+held_day = day + DAY
+for i in range(120):
+    c.mail(held_day + HOUR + i * 60, f"alike {i}", cat="updates", size=10)
+for i in range(5):
+    c.mail(held_day + DAY + HOUR + i * 600, f"later {i}")
+start = mk()
+new, fresh = run(c)
+inc = reach_inc()
+need(inc and inc.get("to") == "moneypenny" and "couldn't read all the mail" in inc["why"], f"no incident for Moneypenny: {inc}")
+need(start <= mk() < held_day, f"the marker isn't held before that day: {start} {mk()} {held_day}")
+need({f"later {i}" for i in range(5)} <= {m["subject"] for m in fresh}, "the later mail wasn't written down")
+need(routines.read()["mailreach"]["state"] == "down", "the line isn't red")
+data = incidents.read()
+for i in data["incidents"]:
+    i["down"] -= direct_line.DOWN_AFTER + 1
+incidents._write(data)
+donna()
+downs = [f for w, f in got_texts if w == "down" and "mailreach" in f]
+need(len(downs) == 1 and "Moneypenny" in downs[0], f"Donna didn't text him, naming Moneypenny: {got_texts}")
+need("Escalated by Donna" in ledger.text("moneypenny") and "couldn't read all the mail" in ledger.text("moneypenny"),
+     "it isn't in Moneypenny's ledger")
+import quick_context
+need("Passed on to you by Donna" in quick_context._planning(Path(os.environ["HQ_WORKSPACE"])), "it isn't at Moneypenny's start")
+# 3. The next run: the same day again, read again; no second incident, no second text, no line twice.
+before_lines = open(inbox).read()
+new, fresh = run(c)
+need(reach_inc() and len(all_reach()) == 1, f"a second incident: {all_reach()}")
+need(not any(m["subject"].startswith("later") for m in fresh), "a line written twice")
+text = open(inbox).read()
+need(all(text.count(f"· alike {i} ·") <= 1 for i in range(120)) and all(text.count(f"· later {i} ·") == 1 for i in range(5)), "a line twice")
+need(start <= mk() < held_day, "the second run moved the marker past the day")
+donna()
+need(len([f for w, f in got_texts if w == "down" and "mailreach" in f]) == 1, f"a second text: {got_texts}")
+need(ledger.text("moneypenny").count("Escalated by Donna") == 1, "a second escalation in her ledger")
+# the stuck-marker incident stays quiet about the same cause: a good run now, a marker over 24 hours old
+need(now - mk() > M.STUCK_S, "the held marker isn't a day old in this flow")
+open(M._ok_file(), "w").write(str(now))
+M.minute(True, incidents, routines, now)
+need(not incidents.is_down("mailmarker"), f"the stuck marker opened for the same cause: {incidents.is_down('mailmarker')}")
+# 4. A run that dies halfway, after it saw the later mail, moves nothing: the marker stays, the incident stays the one.
+held = mk()
+run(c, stop_after=5)
+need(mk() == held and len(all_reach()) == 1 and reach_inc(), f"a run that stopped halfway moved something: {mk()} {held} {all_reach()}")
+# 5. He archived and read some: the day splits now; the next good run reads all of it, closes it, the marker moves on.
+for k, t in enumerate(sorted((t for t, ms in c.threads.items() if ms[0]["subject"].startswith("alike")), key=lambda t: c.threads[t][0]["t"])):
+    if k < 40:
+        c.threads[t][0]["inbox"] = False
+    elif k < 80:
+        c.threads[t][0]["unread"] = False
+new, fresh = run(c)
+text = open(inbox).read()
+need(not reach_inc() and all_reach()[-1].get("back"), f"reading it all didn't close it: {all_reach()}")
+need(mk() == held_day + DAY + HOUR + 4 * 600, f"the marker didn't move on: {mk()}")
+need(all(text.count(f"· alike {i} ·") == 1 for i in range(120)), "the alike day isn't all written down, once")
+need(routines.read()["mailreach"]["state"] == "ok", "the line isn't green again")
+donna()
+need(any(w == "back" and "mailreach" in f for w, f in got_texts), f"Donna didn't say it's back: {got_texts}")
+need("Passed on to you by Donna" not in quick_context._planning(Path(os.environ["HQ_WORKSPACE"])), "a closed one stays at her start")
+# 6. What isn't reached: a search not reported, a split that answers less than the search it splits.
+r = "after:2030/03/10 before:2030/03/11"
+need(M.reached([r], {}) and "wasn't reported" in M.reached([r], {})[0][1], "an unreported search counts as reached")
+broke = {r: 50, r + " in:inbox": 10, r + " -in:inbox": 0}
+need(M.reached([r], broke) and "fewer threads" in M.reached([r], broke)[0][1], "a broken split word counts as reached")
+need(M.reached([r], {r: 12}) == [], "a search under 50 isn't reached")
+# 7. While he sleeps the text waits for the morning; it isn't one that can't wait.
+os.environ["HQ_ASLEEP"], os.environ["HQ_DIRECT_DRY"] = "1", "1"
+need(direct_line.can_wait("down", downs[0]) and direct_line.text("down", downs[0]).get("held"), "it wakes him at night")
+print("OK")
+'''
+        r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=180)
+        need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-900:])
+        mc = (ROOT / "routine/mail-check.md").read_text()
+        need("with `in:inbox` and with `-in:inbox` added" not in mc and "reach N" in mc, "the instructions still split by hand")
+        need("['mailreach'" in (ROOT / "status/index.html").read_text(), "the status page has no line for it")
+        return "300 in one day all read; a day no word splits: one incident, one text from Donna to him and Moneypenny, held marker, no line twice, read in full later"
 
     async def flow222(self) -> str:
         """F102, no Claude: failures turn red. Through the routine's real minute: a reviewer that throws, or a review that doesn't run,
@@ -35203,6 +35422,7 @@ FLOWS = {
     224: ("F102: a key is masked in every transcript line, the push key lives in HQ's own folder at 600", False, "flow224"),
     223: ("F102: one night rule: a text that can wait sends nothing and one summary at waking; what can't wait goes", False, "flow223"),
     222: ("F102: a failing reviewer, cycle, briefing, QA or release turns red with an incident within the minute; a broken lines file shows red", False, "flow222"),
+    400: ("F110: a day over 50 threads read in full by splitting the search (300 in one day all found); a day that can't be: one incident, one text from Donna to him and Moneypenny, the marker held, no line twice; read in full later, closed", False, "flow400"),
     240: ("F109: the mail check searches by date and counts only mail newer than the marker, against a stand-in connector that answers nothing to an epoch query; a marker standing still for 24 hours opens an incident Donna gets", False, "flow240"),
     221: ("F102: a mail run that moves the marker back or drops a very important line is put back with an incident; red after 2 hours between 8:00 and midnight", False, "flow221"),
     220: ("F102: two processes adding 150 notes lose none; one lock across processes for the to-do list, the notes, the games, the coaching file and the mail list", False, "flow220"),

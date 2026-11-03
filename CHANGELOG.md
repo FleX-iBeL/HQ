@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- A busy mail day no longer loses mail: when a day has more than one search can show, the mail check splits it until it has read all of it, and a program checks that it did. If a day still can't be read in full, it's read again every hour until it is, nothing gets written down twice, and Donna texts you once (in the morning if you're asleep) and passes it on to Moneypenny (F110).
+
 - Donna's chat has a switch at the top to Moneypenny's chat, with her earlier texts in it, and one tap brings you back. Texting her there reaches her and she answers there. Without Moneypenny on your HQ the switch doesn't show (H300).
 
 - The team runs again in the first hours after a reset. Your usage reserve no longer pushes the team's stop line down to almost nothing at the start of a week (or below zero at the start of a 5-hour window): the team's line now stays at 15 points at the least, the agents' five under it, and from a line of 30 on the whole reserve is kept, as before. A job running across a 5-hour reset is no longer held for it. The status page draws that same line. A reset time that can't be read no longer counts as a fresh window. You can turn the 15 with usageline.py least N, and 0 keeps the whole reserve always (F113).
