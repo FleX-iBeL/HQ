@@ -28086,6 +28086,206 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
                 else:
                     os.environ[k] = v
 
+    async def flow410(self) -> str:
+        """H300, no Claude: a switch at the top of Donna's chat to Moneypenny's and back. A copy of the chat page on a
+        throwaway status server, in a headless browser at a phone's size (in the sheet, dark) and a laptop's: in Donna's
+        chat the switch sits at the top, inside the screen, naming Moneypenny; one tap opens her chat with her earlier
+        text in it, the sheet and the theme kept; a text sent there shows in her chat, lands in her thread (not Donna's)
+        and she answers there (canned, HQ_DIRECT_DRY); there the switch names Donna and one tap brings back Donna's
+        chat with Donna's earlier text and without his text to her. On an HQ without her line (HQ_TEAM_LINE=0) the
+        switch doesn't show, in Donna's chat or on ?line=team."""
+        import html as html_lib
+        import urllib.parse
+        import urllib.request
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found to run the chat page in")
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        site = self.tmp / "h300"
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        for name in ("app", "routine", "workspace", "desktop", "template", ".venv"):
+            if (ROOT / name).exists():
+                (site / name).symlink_to(os.path.realpath(ROOT / name))
+        (site / ".status").mkdir()
+        (site / "scratch").mkdir()
+        d = site / "lines"
+        (d / "line").mkdir(parents=True)
+        (d / "team-line").mkdir()
+        now = time.time()
+        DONNA_SAID, HER_SAID, SENT = "Donna's earlier text: the laundry is done.", "Moneypenny's earlier text: item 12 is through QA.", "Anything stuck tonight?"
+        (d / "line/thread.jsonl").write_text(json.dumps({"at": now - 600, "from": "agent", "text": DONNA_SAID, "why": "hello"}) + "\n")
+        (d / "team-line/thread.jsonl").write_text(json.dumps({"at": now - 300, "from": "agent", "text": HER_SAID, "why": "jobs"}) + "\n")
+        page = site / "status/direct.html"
+        # her picture comes from the call line on this computer (7860): the copy never asks the real one
+        html = page.read_text().replace("'http://127.0.0.1:7860'", "''")
+        harness = r"""
+<script>
+(async () => {
+  const q = new URLSearchParams(location.search), mode = q.get('h300run');
+  if (window.top !== window || !mode) return;
+  const out = { steps: [] }, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const f = document.createElement('iframe');
+  f.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;border:0;z-index:99;background:#fff';
+  document.body.append(f);
+  const D = () => f.contentDocument;
+  const open = (go) => new Promise((r) => { f.onload = () => r(); go(); });
+  const until = async (fn, n = 60) => { for (let i = 0; i < n; i++) { try { if (fn()) return true; } catch {} await wait(250); } return false; };
+  const bubbles = () => [...D().querySelectorAll('#list .m')].map((m) => (m.classList.contains('me') ? 'me:' : 'her:')
+    + [...m.childNodes].filter((c) => !(c.classList && c.classList.contains('at'))).map((c) => c.textContent).join(''));
+  const who = () => D().getElementById('who').textContent;
+  const sw = () => D().getElementById('swap');
+  const look = () => {
+    const s = sw(), w = f.contentWindow.innerWidth;
+    if (!s) return { there: false };
+    const r = s.getBoundingClientRect(), h = D().querySelector('header').getBoundingClientRect();
+    return { there: true, shown: !s.hidden && r.width > 0, text: s.textContent, inside: r.left >= 0 && r.right <= w && r.top >= h.top && r.bottom <= h.bottom,
+      top: Math.round(r.top), fits: D().querySelector('header').scrollWidth <= D().querySelector('header').clientWidth + 1 && D().documentElement.scrollWidth <= w + 1 };
+  };
+  const step = (k, v) => { out[k] = v; out.steps.push(k); };
+  try {
+    if (mode === 'none') {
+      await open(() => { f.src = '/direct'; });
+      step('donnaLoaded', await until(() => bubbles().length > 0));
+      await wait(3000);
+      step('donnaSwap', look());
+      await open(() => { f.src = '/direct?line=team'; });
+      step('teamLoaded', await until(() => bubbles().length > 0));
+      await wait(3000);
+      step('teamSwap', look());
+    } else {
+      await open(() => { f.src = mode === 'phone' ? '/direct?sheet&theme=dark' : '/direct'; });
+      step('donnaReady', await until(() => bubbles().length > 0 && sw() && !sw().hidden));
+      step('donnaWho', who());
+      step('donnaBubbles', bubbles());
+      step('donnaSwap', look());
+      await open(() => sw().click());
+      step('teamReady', await until(() => who() === 'Moneypenny' && bubbles().length > 0 && sw() && !sw().hidden));
+      step('teamUrl', f.contentWindow.location.search);
+      step('teamBubbles', bubbles());
+      step('teamSwap', look());
+      if (mode === 'phone') {
+        D().getElementById('in').value = q.get('send');
+        D().getElementById('f').requestSubmit();
+        step('sentShown', await until(() => bubbles().includes('me:' + q.get('send'))));
+      }
+      await open(() => sw().click());
+      step('backReady', await until(() => who() === 'Donna' && bubbles().length > 0 && sw() && !sw().hidden));
+      step('backUrl', f.contentWindow.location.search);
+      step('backBubbles', bubbles());
+      step('backSwap', look());
+    }
+  } catch (e) { out.error = String(e); }
+  const pre = document.createElement('pre'); pre.id = 'h300'; pre.textContent = 'H300RESULT ' + JSON.stringify(out) + ' END';
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        page.write_text(html.replace("</body>", harness + "</body>", 1))
+
+        def serve(extra):
+            port = _free_port()
+            env = {**os.environ, "HQ_STATUS_PORT": str(port), "HQ_FIX_DRY": "1", "HQ_DIRECT_DIR": str(d / "line"),
+                   "HQ_DIRECT_LOCAL": str(d / "local.json"), "HQ_DIRECT_DRY": "1", "HQ_ASLEEP": "0", **extra}
+            for k in ("HQ_TEAM_LINE_DIR", "HQ_DIRECT_PUSH_DIR", "HQ_DIRECT_AGENT", "HQ_DIRECT_TEAM", "HQ_DIRECT_PUSH_TO"):
+                env.pop(k, None)
+            if "HQ_TEAM_LINE" not in extra:
+                env.pop("HQ_TEAM_LINE", None)
+            return subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], cwd=site, env=env,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL), f"http://127.0.0.1:{port}"
+
+        def get(base, path):
+            with urllib.request.urlopen(base + path, timeout=60) as r:
+                return json.loads(r.read().decode())
+
+        async def up(base):
+            for _ in range(80):
+                try:
+                    await asyncio.to_thread(get, base, "/direct.json")
+                    return
+                except Exception:
+                    await asyncio.sleep(0.25)
+            need(False, "the throwaway status server didn't start")
+
+        async def browse(base, mode, size):
+            url = base + f"/direct?h300run={mode}&send={urllib.parse.quote(SENT)}"
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / ('h300-' + mode)}", f"--window-size={size}",
+                                              "--virtual-time-budget=40000", "--dump-dom", url], timeout=150)
+            m = re.search(r'<pre id="h300">H300RESULT (.*?) END</pre>', r.stdout, re.S)
+            need(m, f"the chat page test ({mode}) didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = json.loads(html_lib.unescape(m.group(1)))
+            say(f"   {mode}: {json.dumps(res)[:500]}")
+            need(res.get("donnaReady", True) or "error" not in res, f"{mode}: Donna's chat has no switch to Moneypenny at the top")
+            need("error" not in res, f"the chat page test ({mode}) broke: {res.get('error')}")
+            return res
+
+
+        def check_swap(res, key, name, size):
+            s = res.get(key) or {}
+            need(s.get("there") and s.get("shown"), f"{size}: no switch at the top of the chat ({key}: {s})")
+            need(s.get("text") == "⇄ " + name, f"{size}: the switch says {s.get('text')!r}, not {name}")
+            need(s.get("inside") and s.get("top", 999) < 80, f"{size}: the switch isn't at the top inside the screen: {s}")
+            need(s.get("fits"), f"{size}: the chat is wider than the screen with the switch: {s}")
+
+        srv, base = serve({})
+        try:
+            await up(base)
+            # the phone: Donna's chat in the sheet, dark; to her chat, a text to her, and back
+            ph = await browse(base, "phone", "390,844")
+            need(ph.get("donnaReady"), f"phone: Donna's chat has no switch to Moneypenny: {ph.get('donnaSwap')}")
+            need(ph["donnaWho"] == "Donna" and "her:" + DONNA_SAID in ph["donnaBubbles"], f"phone: Donna's chat isn't hers: {ph['donnaBubbles']}")
+            check_swap(ph, "donnaSwap", "Moneypenny", "phone")
+            need(ph.get("teamReady"), "phone: one tap didn't open Moneypenny's chat")
+            need("her:" + HER_SAID in ph["teamBubbles"] and "her:" + DONNA_SAID not in ph["teamBubbles"],
+                 f"phone: her chat doesn't have her earlier texts: {ph['teamBubbles']}")
+            tq = urllib.parse.parse_qs(ph["teamUrl"].lstrip("?"), keep_blank_values=True)
+            need(tq.get("line") == ["team"] and "sheet" in tq and tq.get("theme") == ["dark"], f"phone: her chat lost the sheet or the theme: {ph['teamUrl']}")
+            check_swap(ph, "teamSwap", "Donna", "phone")
+            need(ph.get("sentShown"), "phone: the text sent in her chat doesn't show there")
+            need(ph.get("backReady") and "her:" + DONNA_SAID in ph["backBubbles"] and "me:" + SENT not in ph["backBubbles"],
+                 f"phone: one tap didn't bring back Donna's chat: {ph.get('backBubbles')}")
+            bq = urllib.parse.parse_qs(ph["backUrl"].lstrip("?"), keep_blank_values=True)
+            need("line" not in bq and "sheet" in bq and bq.get("theme") == ["dark"], f"phone: back in Donna's chat on {ph['backUrl']}")
+            check_swap(ph, "backSwap", "Moneypenny", "phone")
+            # the text reached her, not Donna, and she answers on her line
+            th = []
+            for _ in range(200):
+                th = (await asyncio.to_thread(get, base, "/direct.json?line=team"))["messages"]
+                if th and th[-1]["from"] == "agent" and SENT in th[-1]["text"]:
+                    break
+                await asyncio.sleep(0.25)
+            need(any(x["from"] == "me" and x["text"] == SENT for x in th) and th[-1]["from"] == "agent" and SENT in th[-1]["text"],
+                 f"her answer isn't on her line: {th[-2:]}")
+            need(all(x["text"] != SENT for x in (await asyncio.to_thread(get, base, "/direct.json"))["messages"]), "his text to her landed in Donna's chat")
+            answer = th[-1]["text"]
+            # the laptop: Donna's chat, to hers (her answer there), and back
+            lp = await browse(base, "laptop", "1280,800")
+            need(lp.get("donnaReady"), f"laptop: Donna's chat has no switch to Moneypenny: {lp.get('donnaSwap')}")
+            check_swap(lp, "donnaSwap", "Moneypenny", "laptop")
+            need(lp.get("teamReady") and lp["teamUrl"] == "?line=team", f"laptop: one tap didn't open her chat: {lp.get('teamUrl')}")
+            need(lp["teamBubbles"][-2:] == ["me:" + SENT, "her:" + answer] and "her:" + HER_SAID in lp["teamBubbles"],
+                 f"laptop: her chat doesn't show the text and her answer: {lp['teamBubbles'][-3:]}")
+            check_swap(lp, "teamSwap", "Donna", "laptop")
+            need(lp.get("backReady") and lp["backUrl"] == "" and "her:" + DONNA_SAID in lp["backBubbles"], f"laptop: not back in Donna's chat: {lp.get('backUrl')}")
+        finally:
+            srv.terminate()
+            srv.wait(timeout=5)
+        # an HQ without her line: no switch, in Donna's chat or on ?line=team
+        srv, base = serve({"HQ_TEAM_LINE": "0"})
+        try:
+            await up(base)
+            j = await asyncio.to_thread(get, base, "/direct.json?line=team")
+            need(j["line"] == "direct", f"without her line, ?line=team says {j['line']}")
+            no = await browse(base, "none", "390,844")
+            need(no.get("donnaLoaded") and no.get("teamLoaded"), f"without her line the chat didn't load: {no}")
+            for k in ("donnaSwap", "teamSwap"):
+                need(not no[k].get("shown"), f"without her line the switch shows ({k}): {no[k]}")
+        finally:
+            srv.terminate()
+            srv.wait(timeout=5)
+        return "phone and laptop: one tap from Donna's chat to Moneypenny's (her texts there, his text answered there) and back; no switch without her line"
+
     async def flow182(self) -> str:
         """F77, no Claude: the automatic review of new or changed planning rows, with a stand-in reviewer (HQ_REVIEW_FAKE:
         a row whose ask holds "HOLE: …" is flagged with that finding, the rest pass; "fail" never answers) and a made-up
@@ -35653,6 +35853,7 @@ FLOWS = {
     402: ("H308: two looks a day instead of three is one setting, from the next day", False, "flow402"),
     403: ("H308: a new agent from the template has three looks a day", False, "flow403"),
     404: ("H308: a look over her share waits until the next look and says so in her ledger, with the room it needed", False, "flow404"),
+    410: ("H300: at the top of Donna's chat one tap opens Moneypenny's chat, her texts in it, his text answered there, and back; on a phone and a laptop; no switch without her line", False, "flow410"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),
